@@ -2,7 +2,7 @@
   "llm": {
     "default": "openai",
     "openai": {
-      "apiKey": "sk-57adfc8bbb77441ebe10f4a023c6d684",
+      "apiKey": "",
       "baseUrl": "https://api.deepseek.com",
       "model": "deepseek-v4-flash"
     },

@@ -32,6 +32,7 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
             title={message.toolResult?.name ?? "tool"}
             type="result"
             isError={message.toolResult?.isError}
+            defaultCollapsed={!!message.dbId}
           >
             <pre className="tool-output">
               {message.toolResult?.output ?? message.content}
@@ -58,6 +59,7 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
                   key={i}
                   title={tc.name}
                   type="call"
+                  defaultCollapsed={!!message.dbId}
                 >
                   {hasInput && (
                     <pre className="tool-input">{inputStr}</pre>
@@ -101,14 +103,16 @@ function CollapsibleToolCard({
   title,
   type,
   isError,
+  defaultCollapsed = false,
   children,
 }: {
   title: string;
   type: "call" | "result";
   isError?: boolean;
+  defaultCollapsed?: boolean;
   children: React.ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState(type === "result");
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const hasContent = React.Children.count(children) > 0;
 
   return (
@@ -116,12 +120,10 @@ function CollapsibleToolCard({
       className={`tool-card ${type} ${isError ? "error" : ""} ${collapsed ? "collapsed" : ""}`}
     >
       <div
-        className={`tool-card-header ${type === "result" ? "clickable" : ""}`}
-        onClick={type === "result" ? () => setCollapsed((v) => !v) : undefined}
+        className="tool-card-header clickable"
+        onClick={() => setCollapsed((v) => !v)}
       >
-        {type === "result" && (
-          <span className="tool-card-chevron">{collapsed ? "▶" : "▼"}</span>
-        )}
+        <span className="tool-card-chevron">{collapsed ? "▶" : "▼"}</span>
         <span className="tool-card-icon">
           {type === "call" ? "⚙" : isError ? "✕" : "✓"}
         </span>

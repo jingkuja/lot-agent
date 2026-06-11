@@ -55,7 +55,7 @@ export function createConversationRoutes(service: AgentService): Hono {
               toolCalls.map((tc) => ({
                 id: tc.tool_call_id,
                 name: tc.tool_name,
-                arguments: tc.tool_input,
+                input: tc.tool_input,
               }))
             )
           : m.tool_calls,
