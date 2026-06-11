@@ -1,0 +1,19 @@
+{
+  "name": "lot-agent",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n core,server,web -c blue,green,magenta \"npm run dev -w @lot-agent/core\" \"npm run dev -w @lot-agent/server\" \"npm run dev -w @lot-agent/web\"",
+    "dev:server": "npm run dev -w @lot-agent/server",
+    "dev:web": "npm run dev -w @lot-agent/web",
+    "build": "npm run build --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "concurrently": "^9.0.0",
+    "typescript": "^5.7.0"
+  }
+}
