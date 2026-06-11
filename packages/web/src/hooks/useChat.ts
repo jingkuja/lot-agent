@@ -47,7 +47,6 @@ export function useChat(
     (content: string) => {
       if (!conversationId || !content.trim() || isStreaming) return;
 
-      // Add user message optimistically to UI
       const userMsgId = `user-${Date.now()}`;
       const userMsg: DisplayMessage = {
         id: userMsgId,
@@ -62,6 +61,9 @@ export function useChat(
         content: "",
         isStreaming: true,
       };
+
+      // Accumulate tool calls for the current assistant message
+      let pendingToolCalls: { name: string; input: unknown }[] = [];
 
       setIsStreaming(true);
 
@@ -78,16 +80,23 @@ export function useChat(
         }
 
         if (event.type === "tool_call") {
-          const toolMsg: DisplayMessage = {
-            id: `tool-call-${Date.now()}-${event.name}`,
-            role: "tool",
-            content: "",
-            toolCalls: [{ name: event.name ?? "", input: event.input }],
+          // Accumulate tool calls on the assistant message
+          pendingToolCalls.push({
+            name: event.name ?? "",
+            input: event.input,
+          });
+          assistantMsg = {
+            ...assistantMsg,
+            toolCalls: [...pendingToolCalls],
           };
-          setMessages((prev) => [...prev, toolMsg]);
+          setMessages((prev) => {
+            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+            return [...filtered, assistantMsg];
+          });
         }
 
         if (event.type === "tool_result") {
+          // Show tool result as a separate collapsible card
           const resultMsg: DisplayMessage = {
             id: `tool-result-${Date.now()}-${event.name}`,
             role: "tool",
@@ -99,17 +108,29 @@ export function useChat(
             },
           };
           setMessages((prev) => [...prev, resultMsg]);
+
+          // Reset for next LLM iteration (new assistant message)
+          assistantMsg = {
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            content: "",
+            isStreaming: true,
+          };
+          pendingToolCalls = [];
         }
 
         if (event.type === "done" || event.type === "stream_end") {
           assistantMsg = { ...assistantMsg, isStreaming: false };
           setMessages((prev) => {
             const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            return [...filtered, assistantMsg];
+            // Only add if it has content or tool calls
+            if (assistantMsg.content || assistantMsg.toolCalls?.length) {
+              return [...filtered, assistantMsg];
+            }
+            return filtered;
           });
           setIsStreaming(false);
 
-          // Reload from DB to get correct IDs and avoid duplicates
           if (event.type === "stream_end" && conversationId) {
             loadMessages(conversationId);
             onStreamEndRef.current?.();
@@ -133,7 +154,6 @@ export function useChat(
     [conversationId, isStreaming, loadMessages]
   );
 
-  // Regenerate: delete last user message + everything after, re-send
   const regenerate = useCallback(async () => {
     if (isStreaming || !conversationId) return;
 
@@ -143,18 +163,15 @@ export function useChat(
 
     const lastUserContent = lastUserMsg.content;
 
-    // Delete last user message + everything after from DB
     try {
       await api.regenerate(conversationId, lastUserMsg.dbId);
     } catch (error) {
       console.warn("Regenerate cleanup failed:", error);
     }
 
-    // Remove from last user message onwards in UI
     const lastUserIdx = messages.lastIndexOf(lastUserMsg);
     setMessages((prev) => prev.slice(0, lastUserIdx));
 
-    // Re-send (will be added to UI by streamMessage, then reloaded from DB)
     streamMessage(lastUserContent);
   }, [messages, isStreaming, conversationId, streamMessage]);
 
