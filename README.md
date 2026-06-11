@@ -2,6 +2,9 @@
 
 A self-hosted AI agent with multi-LLM support, tool calling, skills, MCP integration, and autonomous task execution.
 
+用 vibecoding 搭建一个基本的 agent 系统，用来学习，实验最新的 agent知识
+
+
 ## Features
 
 - **Multi-LLM**: OpenAI and Anthropic with unified streaming interface
