@@ -6,6 +6,7 @@ import type {
 } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { ContextManager, type ContextManagerConfig } from "../context/index.js";
+import type { AgentMemoryStore } from "../memory/index.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
@@ -28,6 +29,7 @@ export interface AgentContext {
   llm: LLMProvider;
   toolRegistry: ToolRegistry;
   toolContext: ToolContext;
+  memory?: AgentMemoryStore;
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -50,10 +52,30 @@ export class Agent {
     context: AgentContext,
     history: Message[] = []
   ): AsyncIterable<AgentEvent> {
+    // Clear ephemeral memory at the start of each run
+    context.memory?.clearEphemeral();
+
     // Build system prompt parts
     const systemParts = [this.config.systemPrompt];
     if (this.config.dynamicPromptParts?.length) {
       systemParts.push(...this.config.dynamicPromptParts);
+    }
+
+    // Inject memory into system prompt
+    if (context.memory) {
+      const memoryPrompt = context.memory.formatForPrompt();
+      if (memoryPrompt) {
+        systemParts.push(memoryPrompt);
+      }
+
+      // Also load user memory (async)
+      const userEntries = await context.memory.listUserMemory();
+      if (userEntries.length > 0) {
+        const userMem = userEntries
+          .map((e) => `- ${e.key}: ${e.value}`)
+          .join("\n");
+        systemParts.push(`[User Memory]\n${userMem}`);
+      }
     }
 
     const tools = context.toolRegistry.toLLMTools();

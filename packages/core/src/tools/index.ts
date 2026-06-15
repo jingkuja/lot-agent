@@ -9,3 +9,4 @@ export {
   webSearchTool,
   registerBuiltinTools,
 } from "./builtins.js";
+export { createMemoryTools } from "./memory-tools.js";

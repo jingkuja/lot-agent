@@ -3,12 +3,15 @@ import {
   Agent,
   ToolRegistry,
   registerBuiltinTools,
+  createMemoryTools,
   createLLMProvider,
   TraceManager,
   ConsoleSink,
   SkillLoader,
   MCPClientManager,
   loadMCPConfig,
+  AgentMemoryStore,
+  PgMemoryAdapter,
 } from "@lot-agent/core";
 import type {
   AgentEvent,
@@ -39,6 +42,7 @@ export class AgentService {
   readonly toolRegistry: ToolRegistry;
   readonly skillLoader: SkillLoader;
   readonly mcpManager: MCPClientManager;
+  readonly memory: AgentMemoryStore;
   private llmConfig: LLMConfig;
   private agentConfig: Partial<AgentConfig>;
   private mcpConfigPath: string;
@@ -51,6 +55,7 @@ export class AgentService {
     this.traceManager.addSink(new ConsoleSink());
     this.toolRegistry = new ToolRegistry();
     this.skillLoader = new SkillLoader();
+    this.memory = new AgentMemoryStore();
     this.mcpManager = new MCPClientManager();
     this.llmConfig = config.llm;
     this.agentConfig = config.agent;
@@ -62,7 +67,20 @@ export class AgentService {
     // Initialize database (runs migration)
     await this.db.init();
 
+    // Initialize persistent user memory
+    const pgAdapter = new PgMemoryAdapter(this.db.pool);
+    await pgAdapter.init();
+    this.memory = new AgentMemoryStore({
+      persistent: pgAdapter,
+      userId: "default", // single-user mode for now
+    });
+
     registerBuiltinTools(this.toolRegistry);
+
+    // Register memory tools
+    for (const tool of createMemoryTools(this.memory)) {
+      this.toolRegistry.register(tool);
+    }
 
     // Load skills
     await this.skillLoader.loadFromDirectory(this.skillsDir);
@@ -198,6 +216,7 @@ export class AgentService {
       llm,
       toolRegistry: this.toolRegistry,
       toolContext: { workingDirectory: process.cwd() },
+      memory: this.memory,
     };
 
     let assistantContent = "";

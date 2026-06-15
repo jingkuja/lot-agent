@@ -88,7 +88,7 @@ const DEFAULT_CONFIG: DBConfig = {
 };
 
 export class DB {
-  private pool: pg.Pool;
+  readonly pool: pg.Pool;
 
   constructor(config?: Partial<DBConfig>) {
     const cfg = { ...DEFAULT_CONFIG, ...config };
