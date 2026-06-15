@@ -5,6 +5,7 @@ import type {
   ToolContext,
 } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
+import { ContextManager, type ContextManagerConfig } from "../context/index.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
@@ -18,6 +19,7 @@ export interface AgentConfig {
   maxIterations: number;
   systemPrompt: string;
   dynamicPromptParts?: string[];
+  contextConfig?: ContextManagerConfig;
 }
 
 export interface AgentContext {
@@ -33,9 +35,11 @@ const DEFAULT_CONFIG: AgentConfig = {
 
 export class Agent {
   private config: AgentConfig;
+  private contextManager: ContextManager;
 
   constructor(config: Partial<AgentConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.contextManager = new ContextManager(this.config.contextConfig);
   }
 
   async *run(
@@ -43,30 +47,33 @@ export class Agent {
     context: AgentContext,
     history: Message[] = []
   ): AsyncIterable<AgentEvent> {
-    const messages: Message[] = [];
-
-    // Build system prompt
+    // Build system prompt parts
     const systemParts = [this.config.systemPrompt];
     if (this.config.dynamicPromptParts?.length) {
       systemParts.push(...this.config.dynamicPromptParts);
     }
-    messages.push({ role: "system", content: systemParts.join("\n\n") });
-
-    // Add conversation history
-    messages.push(...history);
-
-    // Add current user message
-    messages.push({ role: "user", content: userMessage });
 
     const tools = context.toolRegistry.toLLMTools();
     let iterations = 0;
     let totalTokens = 0;
+
+    // Working message log (accumulates during this run)
+    const workingHistory: Message[] = [...history];
 
     while (iterations < this.config.maxIterations) {
       iterations++;
       let hasToolCalls = false;
       let assistantContent = "";
       const toolCalls: ToolCall[] = [];
+
+      // Assemble messages with context management (budget + sliding window + summary)
+      const messages = await this.contextManager.assemble(
+        systemParts,
+        undefined, // memory — could be wired to a memory store
+        workingHistory,
+        { role: "user", content: userMessage },
+        context.llm  // use same LLM as compressor for summaries
+      );
 
       // Stream LLM response
       for await (const chunk of context.llm.chat(messages, tools)) {
@@ -91,11 +98,12 @@ export class Agent {
       }
 
       // Record assistant message with tool calls
-      messages.push({
+      const assistantMsg: Message = {
         role: "assistant",
         content: assistantContent || "",
         toolCalls,
-      });
+      };
+      workingHistory.push(assistantMsg);
 
       // Execute all tool calls
       for (const tc of toolCalls) {
@@ -119,8 +127,8 @@ export class Agent {
           isError: result.isError ?? false,
         };
 
-        // Add tool result to messages
-        messages.push({
+        // Add tool result to working history
+        workingHistory.push({
           role: "tool",
           content: result.content,
           toolCallId: tc.id,

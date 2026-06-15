@@ -139,13 +139,37 @@ export class AgentService {
 
     // Load conversation history
     const stored = await this.db.getMessages(conversationId);
-    const history: Message[] = stored
-      .filter((m) => m.role !== "user" || m.id !== userMsgId)
-      .map((m) => ({
+    const filtered = stored.filter(
+      (m) => m.role !== "user" || m.id !== userMsgId
+    );
+
+    // Collect all tool_call_ids that are referenced by assistant messages
+    const validToolCallIds = new Set<string>();
+    for (const m of filtered) {
+      if (m.role === "assistant" && m.tool_calls) {
+        try {
+          const calls = JSON.parse(m.tool_calls) as { id: string }[];
+          for (const tc of calls) {
+            if (tc.id) validToolCallIds.add(tc.id);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+    }
+
+    // Filter out orphan tool messages (no matching assistant tool_call)
+    const history: Message[] = [];
+    for (const m of filtered) {
+      if (m.role === "tool" && m.tool_call_id) {
+        if (!validToolCallIds.has(m.tool_call_id)) continue; // orphan — skip
+      }
+      history.push({
         role: m.role as Message["role"],
         content: m.content,
         toolCallId: m.tool_call_id ?? undefined,
-      }));
+      });
+    }
 
     // Match skills
     const matchedSkills = this.skillLoader.match(userMessage);
@@ -154,9 +178,14 @@ export class AgentService {
     );
 
     const llm = this.getLLMProvider();
+    const agentConfig = this.agentConfig as Record<string, unknown>;
+    const contextConfig = agentConfig.context as import("@lot-agent/core").ContextManagerConfig | undefined;
     const agent = new Agent({
       ...this.agentConfig,
       dynamicPromptParts: dynamicParts,
+      contextConfig: contextConfig
+        ? { ...contextConfig, compressor: llm }
+        : undefined,
     });
 
     // Create trace
