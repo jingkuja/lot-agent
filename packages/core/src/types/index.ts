@@ -44,10 +44,40 @@ export interface LLMProvider {
   chat(messages: Message[], tools?: LLMTool[]): AsyncIterable<ChatChunk>;
 }
 
+/** Error classification for tools */
+export type ToolErrorKind =
+  | "timeout"     // Execution exceeded time limit
+  | "network"     // Network/IO error (retryable)
+  | "not_found"   // Resource not found (non-retryable)
+  | "permission"  // Permission denied (non-retryable)
+  | "validation"  // Invalid input (non-retryable)
+  | "unknown";    // Unclassified
+
 /** Tool execution result */
 export interface ToolResult {
   content: string;
   isError?: boolean;
+  errorKind?: ToolErrorKind;
+  /** Suggested retry delay in ms (for retryable errors) */
+  retryAfterMs?: number;
+}
+
+/** Retry configuration */
+export interface RetryConfig {
+  /** Max retry attempts. Default: 2 */
+  maxRetries: number;
+  /** Base delay between retries in ms. Default: 1000 */
+  baseDelayMs: number;
+  /** Only retry these error kinds. Default: ['timeout', 'network'] */
+  retryableKinds: ToolErrorKind[];
+}
+
+/** Per-tool execution config */
+export interface ToolExecConfig {
+  /** Timeout in ms. Default: 30000 */
+  timeoutMs: number;
+  /** Retry configuration */
+  retry: RetryConfig;
 }
 
 /** Context passed to tool execution */
@@ -60,5 +90,17 @@ export interface Tool {
   name: string;
   description: string;
   parameters: JSONSchema;
+  /** Per-tool execution config overrides */
+  execConfig?: Partial<ToolExecConfig>;
   execute(input: unknown, context: ToolContext): Promise<ToolResult>;
 }
+
+/** Default tool execution config */
+export const DEFAULT_TOOL_EXEC_CONFIG: ToolExecConfig = {
+  timeoutMs: 30_000,
+  retry: {
+    maxRetries: 2,
+    baseDelayMs: 1_000,
+    retryableKinds: ["timeout", "network"],
+  },
+};

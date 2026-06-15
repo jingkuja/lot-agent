@@ -2,11 +2,19 @@ import { readFile, writeFile, readdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
-import type { Tool, ToolContext, ToolResult } from "../types/index.js";
+import type { Tool, ToolContext, ToolResult, ToolErrorKind } from "../types/index.js";
 
 const execFileAsync = promisify(execFile);
 
 const MAX_OUTPUT_LENGTH = 50_000;
+
+function classifyFsError(error: unknown): { message: string; kind: ToolErrorKind } {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string }).code ?? "";
+  if (code === "ENOENT") return { message, kind: "not_found" };
+  if (code === "EACCES" || code === "EPERM") return { message, kind: "permission" };
+  return { message, kind: "unknown" };
+}
 
 function truncate(text: string): string {
   if (text.length <= MAX_OUTPUT_LENGTH) return text;
@@ -44,6 +52,7 @@ export const readFileTool: Tool = {
       return {
         content: `Failed to read file: ${error instanceof Error ? error.message : error}`,
         isError: true,
+        errorKind: classifyFsError(error).kind,
       };
     }
   },
@@ -76,6 +85,7 @@ export const writeFileTool: Tool = {
       return {
         content: `Failed to write file: ${error instanceof Error ? error.message : error}`,
         isError: true,
+        errorKind: classifyFsError(error).kind,
       };
     }
   },
@@ -110,6 +120,7 @@ export const listFilesTool: Tool = {
       return {
         content: `Failed to list files: ${error instanceof Error ? error.message : error}`,
         isError: true,
+        errorKind: classifyFsError(error).kind,
       };
     }
   },
@@ -264,6 +275,10 @@ export const webFetchTool: Tool = {
   name: "web_fetch",
   description:
     "Fetch a URL and return its text content. Useful for reading web pages, APIs, or documents.",
+  execConfig: {
+    timeoutMs: 20_000,
+    retry: { maxRetries: 2, baseDelayMs: 2000, retryableKinds: ["timeout", "network"] },
+  },
   parameters: {
     type: "object",
     properties: {
@@ -334,6 +349,10 @@ export const webSearchTool: Tool = {
   name: "web_search",
   description:
     "Search the web using DuckDuckGo. Returns a list of search results with titles, URLs, and snippets.",
+  execConfig: {
+    timeoutMs: 20_000,
+    retry: { maxRetries: 2, baseDelayMs: 2000, retryableKinds: ["timeout", "network"] },
+  },
   parameters: {
     type: "object",
     properties: {

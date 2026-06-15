@@ -17,6 +17,8 @@ export type AgentEvent =
 
 export interface AgentConfig {
   maxIterations: number;
+  /** Wall-clock timeout for the entire agent run in ms. Default: 300000 (5 min) */
+  maxRunTimeMs: number;
   systemPrompt: string;
   dynamicPromptParts?: string[];
   contextConfig?: ContextManagerConfig;
@@ -30,6 +32,7 @@ export interface AgentContext {
 
 const DEFAULT_CONFIG: AgentConfig = {
   maxIterations: 20,
+  maxRunTimeMs: 300_000, // 5 minutes
   systemPrompt: "You are a helpful AI assistant.",
 };
 
@@ -59,8 +62,19 @@ export class Agent {
 
     // Working message log (accumulates during this run)
     const workingHistory: Message[] = [...history];
+    const runStartTime = Date.now();
 
     while (iterations < this.config.maxIterations) {
+      // Wall-clock timeout check
+      if (Date.now() - runStartTime > this.config.maxRunTimeMs) {
+        yield {
+          type: "error",
+          message: `Agent run timed out after ${Math.round(this.config.maxRunTimeMs / 1000)}s`,
+        };
+        yield { type: "done", iterations, totalTokens };
+        return;
+      }
+
       iterations++;
       let hasToolCalls = false;
       let assistantContent = "";
