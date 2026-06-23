@@ -83,7 +83,8 @@ const DEFAULT_CONFIG: DBConfig = {
   host: "localhost",
   port: 5432,
   user: "postgres",
-  password: "rag123456",
+  // No default password — must be supplied via config
+  password: "",
   database: "lot",
 };
 

@@ -1,9 +1,15 @@
 node_modules/
 dist/
 *.tsbuildinfo
+data/*.db
+data/*.db-shm
+data/*.db-wal
+packages/*/dist/
+packages/*/data/
 .env
 .env.local
+config/default.json
+config/*.tmp
+.DS_Store
 *.db
 *.log
-.DS_Store
-config/default.json

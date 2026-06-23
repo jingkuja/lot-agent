@@ -74,13 +74,13 @@ Open http://localhost:5173 in your browser.
 lot-agent/
 ├── packages/
 │   ├── core/          # Agent engine, LLM clients, tools, skills, MCP, logger
-│   ├── server/        # Hono HTTP API + SQLite
+│   ├── server/        # Hono HTTP API + PostgreSQL
 │   └── web/           # React chat UI
 ├── skills/            # Markdown skill files
 ├── config/            # Configuration files
 │   ├── default.json   # Main config (LLM, agent, server)
 │   └── mcp-servers.json
-└── data/              # SQLite database (auto-created)
+└── data/              # Runtime data (gitignored)
 ```
 
 ## Adding Skills

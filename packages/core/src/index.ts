@@ -7,3 +7,4 @@ export * from "./skills/index.js";
 export * from "./mcp/index.js";
 export * from "./context/index.js";
 export * from "./memory/index.js";
+export * from "./config/schema.js";
