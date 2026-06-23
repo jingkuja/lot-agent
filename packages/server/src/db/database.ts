@@ -85,6 +85,21 @@ export interface StoredTask {
   updated_at: string;
 }
 
+export interface StoredAsset {
+  id: string;
+  task_id: string | null;
+  user_id: string;
+  type: string;
+  storage_key: string;
+  url: string;
+  mime: string;
+  size_bytes: number;
+  width: number | null;
+  height: number | null;
+  duration_sec: number | null;
+  created_at: string;
+}
+
 export interface DBConfig {
   host: string;
   port: number;
@@ -295,6 +310,28 @@ export class DB {
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks (user_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS assets (
+          id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+          task_id      UUID         REFERENCES tasks(id) ON DELETE SET NULL,
+          user_id      VARCHAR(100) NOT NULL DEFAULT 'default',
+          type         VARCHAR(20)  NOT NULL,
+          storage_key  VARCHAR(500) NOT NULL,
+          url          TEXT         NOT NULL,
+          mime         VARCHAR(100) NOT NULL,
+          size_bytes   INTEGER      NOT NULL DEFAULT 0,
+          width        INTEGER,
+          height       INTEGER,
+          duration_sec NUMERIC,
+          created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_assets_task ON assets (task_id);
+        CREATE INDEX IF NOT EXISTS idx_assets_user ON assets (user_id, created_at DESC);
       `);
 
       await client.query("COMMIT");
@@ -589,6 +626,48 @@ export class DB {
       [traceId]
     );
     return rows;
+  }
+
+  // ── Assets ──
+
+  async createAsset(a: {
+    id: string;
+    taskId?: string | null;
+    userId: string;
+    type: string;
+    storageKey: string;
+    url: string;
+    mime: string;
+    sizeBytes: number;
+    width?: number | null;
+    height?: number | null;
+    durationSec?: number | null;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        a.id,
+        a.taskId ?? null,
+        a.userId,
+        a.type,
+        a.storageKey,
+        a.url,
+        a.mime,
+        a.sizeBytes,
+        a.width ?? null,
+        a.height ?? null,
+        a.durationSec ?? null,
+      ]
+    );
+  }
+
+  async getAsset(id: string): Promise<StoredAsset | null> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM assets WHERE id = $1",
+      [id]
+    );
+    return rows[0] ?? null;
   }
 
   async close(): Promise<void> {

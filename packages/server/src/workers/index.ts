@@ -1,7 +1,16 @@
+import { randomUUID } from "node:crypto";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
-import { StubImageProvider, StubVideoProvider } from "@lot-agent/core";
+import { StubImageProvider, StubVideoProvider, LocalStorage } from "@lot-agent/core";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Worker file is at dist/workers/index.js → repo root is 3 levels up (same as server ROOT)
+const ROOT = resolve(__dirname, "../../..");
+const ASSETS_DIR = resolve(ROOT, "data/assets");
+const storage = new LocalStorage(ASSETS_DIR);
 
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
@@ -22,24 +31,59 @@ async function main() {
 
   // Register image.generate handler
   queue.process("image.generate", async (job) => {
+    const prompt = (job.input as Record<string, unknown>).prompt as string ?? "";
     await queue.updateProgress(job.id, 25);
-    const r = await new StubImageProvider().generate({
-      prompt: (job.input as Record<string, unknown>).prompt as string ?? "",
-    });
+    const r = await new StubImageProvider().generate({ prompt });
     await queue.updateProgress(job.id, 75);
-    return { imageUrl: r.images[0].url };
+    const assetId = randomUUID();
+    const key = `${assetId}.png`;
+    const placeholder = Buffer.from(
+      JSON.stringify({ stub: "image", prompt, sourceUrl: r.images[0].url })
+    );
+    const { url } = await storage.put({ key, body: placeholder, contentType: "image/png" });
+    await db.createAsset({
+      id: assetId,
+      taskId: job.id,
+      userId: "default",
+      type: "image",
+      storageKey: key,
+      url,
+      mime: "image/png",
+      sizeBytes: placeholder.byteLength,
+    });
+    await queue.updateProgress(job.id, 100);
+    return { assetIds: [assetId], url };
   });
 
   // Register video.generate handler
   queue.process("video.generate", async (job) => {
-    await queue.updateProgress(job.id, 25);
     const input = job.input as Record<string, unknown>;
+    const prompt = input.prompt as string ?? "";
+    await queue.updateProgress(job.id, 25);
     const r = await new StubVideoProvider().generate({
-      prompt: input.prompt as string ?? "",
+      prompt,
       durationSec: input.durationSec as number | undefined,
     });
     await queue.updateProgress(job.id, 75);
-    return { videoUrl: r.videoUrl, durationSec: r.durationSec };
+    const assetId = randomUUID();
+    const key = `${assetId}.mp4`;
+    const placeholder = Buffer.from(
+      JSON.stringify({ stub: "video", prompt, sourceUrl: r.videoUrl })
+    );
+    const { url } = await storage.put({ key, body: placeholder, contentType: "video/mp4" });
+    await db.createAsset({
+      id: assetId,
+      taskId: job.id,
+      userId: "default",
+      type: "video",
+      storageKey: key,
+      url,
+      mime: "video/mp4",
+      sizeBytes: placeholder.byteLength,
+      durationSec: r.durationSec,
+    });
+    await queue.updateProgress(job.id, 100);
+    return { assetIds: [assetId], url, durationSec: r.durationSec };
   });
 
   console.log("Worker started, listening for jobs");

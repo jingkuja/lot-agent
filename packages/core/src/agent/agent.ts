@@ -14,7 +14,8 @@ export type AgentEvent =
   | { type: "tool_call"; id: string; name: string; input: unknown }
   | { type: "tool_result"; name: string; output: string; isError: boolean }
   | { type: "done"; iterations: number; totalTokens: number }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "artifact"; assetId: string; url: string; mediaType: string };
 
 export interface AgentConfig {
   maxIterations: number;

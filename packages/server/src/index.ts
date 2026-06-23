@@ -13,11 +13,21 @@ import { createRatingRoutes } from "./routes/ratings.js";
 import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
+import { createAssetRoutes } from "./routes/assets.js";
 import type { LLMConfig } from "@lot-agent/core";
 import { AppConfigSchema } from "@lot-agent/core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
+const ASSETS_DIR = resolve(ROOT, "data/assets");
+
+function guessMime(name: string): string {
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".mp4")) return "video/mp4";
+  if (name.endsWith(".mp3")) return "audio/mpeg";
+  return "application/octet-stream";
+}
 
 async function loadConfig(): Promise<ServiceConfig> {
   const configPath = resolve(ROOT, "config/default.json");
@@ -86,6 +96,20 @@ async function main() {
   app.route("/api/memory", createMemoryRoutes(service));
   app.route("/api/agents", createAgentRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
+  app.route("/api/assets", createAssetRoutes(service));
+
+  app.get("/static/assets/:filename", async (c) => {
+    const filename = c.req.param("filename");
+    if (filename.includes("/") || filename.includes("..")) {
+      return c.text("bad request", 400);
+    }
+    try {
+      const buf = await readFile(resolve(ASSETS_DIR, filename));
+      return c.body(buf, 200, { "Content-Type": guessMime(filename) });
+    } catch {
+      return c.text("not found", 404);
+    }
+  });
 
   const port = Number(process.env.PORT) || 3000;
 

@@ -12,3 +12,4 @@ export * from "./agents/index.js";
 export * from "./models/index.js";
 export * from "./providers/index.js";
 export * from "./jobs/index.js";
+export * from "./storage/index.js";
