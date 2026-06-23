@@ -7,8 +7,9 @@ import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { StubImageProvider, StubVideoProvider, LocalStorage } from "@lot-agent/core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Worker file is at dist/workers/index.js → repo root is 3 levels up (same as server ROOT)
-const ROOT = resolve(__dirname, "../../..");
+// Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
+// (one deeper than server's index.js, which sits at {src,dist}/index.js).
+const ROOT = resolve(__dirname, "../../../..");
 const ASSETS_DIR = resolve(ROOT, "data/assets");
 const storage = new LocalStorage(ASSETS_DIR);
 
