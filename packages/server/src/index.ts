@@ -11,6 +11,7 @@ import { createSkillRoutes } from "./routes/skills.js";
 import { createTraceRoutes } from "./routes/traces.js";
 import { createRatingRoutes } from "./routes/ratings.js";
 import { createMemoryRoutes } from "./routes/memory.js";
+import { createAgentRoutes } from "./routes/agents.js";
 import type { LLMConfig } from "@lot-agent/core";
 import { AppConfigSchema } from "@lot-agent/core";
 
@@ -81,6 +82,7 @@ async function main() {
   app.route("/api/traces", createTraceRoutes(service));
   app.route("/api/ratings", createRatingRoutes(service));
   app.route("/api/memory", createMemoryRoutes(service));
+  app.route("/api/agents", createAgentRoutes(service));
 
   const port = Number(process.env.PORT) || 3000;
 

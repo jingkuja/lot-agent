@@ -6,6 +6,7 @@ export interface Conversation {
   model: string | null;
   provider: string | null;
   system_prompt: string | null;
+  agent_id: string;
   status: string;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -122,11 +123,17 @@ export class DB {
           model       VARCHAR(100),
           provider    VARCHAR(50),
           system_prompt TEXT,
+          agent_id    VARCHAR(50) NOT NULL DEFAULT 'general',
           status      VARCHAR(20) NOT NULL DEFAULT 'active',
           metadata    JSONB       NOT NULL DEFAULT '{}',
           created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
           updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
         );
+      `);
+
+      // Idempotent migration: add agent_id to existing databases
+      await client.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS agent_id VARCHAR(50) NOT NULL DEFAULT 'general';
       `);
 
       await client.query(`
@@ -273,15 +280,24 @@ export class DB {
     id: string,
     title: string,
     model?: string,
-    provider?: string
+    provider?: string,
+    agentId?: string
   ): Promise<Conversation> {
     const { rows } = await this.pool.query(
-      `INSERT INTO conversations (id, title, model, provider)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO conversations (id, title, model, provider, agent_id)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [id, title, model ?? null, provider ?? null]
+      [id, title, model ?? null, provider ?? null, agentId ?? "general"]
     );
     return rows[0];
+  }
+
+  async getConversationAgentId(id: string): Promise<string> {
+    const { rows } = await this.pool.query(
+      "SELECT agent_id FROM conversations WHERE id = $1",
+      [id]
+    );
+    return rows[0]?.agent_id ?? "general";
   }
 
   async getConversation(id: string): Promise<Conversation | null> {

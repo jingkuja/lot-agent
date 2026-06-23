@@ -24,8 +24,11 @@ export class ToolRegistry {
     return [...this.tools.values()];
   }
 
-  toLLMTools(): LLMTool[] {
-    return this.getAll().map((t) => ({
+  toLLMTools(names?: string[]): LLMTool[] {
+    const tools = names !== undefined
+      ? this.getAll().filter((t) => names.includes(t.name))
+      : this.getAll();
+    return tools.map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,

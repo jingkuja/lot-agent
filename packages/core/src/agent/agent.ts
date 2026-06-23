@@ -23,6 +23,8 @@ export interface AgentConfig {
   systemPrompt: string;
   dynamicPromptParts?: string[];
   contextConfig?: ContextManagerConfig;
+  /** Optional whitelist of tool names this agent is allowed to use. Undefined = all tools. */
+  allowedToolNames?: string[];
 }
 
 export interface AgentContext {
@@ -78,7 +80,7 @@ export class Agent {
       }
     }
 
-    const tools = context.toolRegistry.toLLMTools();
+    const tools = context.toolRegistry.toLLMTools(this.config.allowedToolNames);
     let iterations = 0;
     let totalTokens = 0;
 

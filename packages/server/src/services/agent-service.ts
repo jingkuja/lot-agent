@@ -12,6 +12,10 @@ import {
   loadMCPConfig,
   AgentMemoryStore,
   PgMemoryAdapter,
+  InMemoryAgentRegistry,
+  copywritingDefinition,
+  imageDefinition,
+  videoDefinition,
 } from "@lot-agent/core";
 import type {
   AgentEvent,
@@ -19,6 +23,7 @@ import type {
   AgentContext,
   Message,
   LLMConfig,
+  AgentDefinition,
 } from "@lot-agent/core";
 import { DB } from "../db/database.js";
 
@@ -43,6 +48,7 @@ export class AgentService {
   readonly skillLoader: SkillLoader;
   readonly mcpManager: MCPClientManager;
   readonly memory: AgentMemoryStore;
+  readonly agentRegistry: InMemoryAgentRegistry;
   private llmConfig: LLMConfig;
   private agentConfig: Partial<AgentConfig>;
   private mcpConfigPath: string;
@@ -57,6 +63,7 @@ export class AgentService {
     this.skillLoader = new SkillLoader();
     this.memory = new AgentMemoryStore();
     this.mcpManager = new MCPClientManager();
+    this.agentRegistry = new InMemoryAgentRegistry();
     this.llmConfig = config.llm;
     this.agentConfig = config.agent;
     this.mcpConfigPath = config.mcpConfigPath;
@@ -103,6 +110,26 @@ export class AgentService {
     }
 
     console.log(`Registered ${this.toolRegistry.getAll().length} tools`);
+
+    // Register agent definitions after all tools are loaded
+    const defaultModelId =
+      this.llmConfig.default === "openai"
+        ? this.llmConfig.openai.model
+        : this.llmConfig.anthropic.model;
+
+    const generalDef: AgentDefinition = {
+      id: "general",
+      name: "通用助手",
+      type: "general",
+      description: "通用任务助手",
+      systemPrompt: this.agentConfig.systemPrompt ?? "You are a helpful AI assistant.",
+      toolNames: this.toolRegistry.getAll().map((t) => t.name),
+      defaultModelId,
+    };
+    this.agentRegistry.register(generalDef);
+    this.agentRegistry.register(copywritingDefinition);
+    this.agentRegistry.register(imageDefinition);
+    this.agentRegistry.register(videoDefinition);
   }
 
   private getLLMProvider(): import("@lot-agent/core").LLMProvider {
@@ -149,8 +176,12 @@ export class AgentService {
 
   async *streamAgentResponse(
     conversationId: string,
-    userMessage: string
+    userMessage: string,
+    agentId?: string
   ): AsyncIterable<AgentEvent> {
+    const def =
+      this.agentRegistry.get(agentId ?? "general") ??
+      this.agentRegistry.get("general")!;
     // Save user message
     const userMsgId = randomUUID();
     await this.db.addMessage(userMsgId, conversationId, "user", userMessage);
@@ -200,6 +231,8 @@ export class AgentService {
     const contextConfig = agentConfig.context as import("@lot-agent/core").ContextManagerConfig | undefined;
     const agent = new Agent({
       ...this.agentConfig,
+      systemPrompt: def.systemPrompt,
+      allowedToolNames: def.toolNames,
       dynamicPromptParts: dynamicParts,
       contextConfig: contextConfig
         ? { ...contextConfig, compressor: llm }

@@ -13,7 +13,7 @@ export function createConversationRoutes(service: AgentService): Hono {
 
   // Create conversation
   app.post("/", async (c) => {
-    const body = await c.req.json<{ title?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ title?: string; agentId?: string }>().catch(() => ({}));
     const id = randomUUID();
     const title = body.title ?? "New Chat";
     const model =
@@ -21,7 +21,8 @@ export function createConversationRoutes(service: AgentService): Hono {
         ? service["llmConfig"].openai.model
         : service["llmConfig"].anthropic.model;
     const provider = service["llmConfig"].default;
-    const conversation = await service.db.createConversation(id, title, model, provider);
+    const agentId = body.agentId ?? "general";
+    const conversation = await service.db.createConversation(id, title, model, provider, agentId);
     return c.json(conversation, 201);
   });
 
@@ -110,9 +111,11 @@ export function createConversationRoutes(service: AgentService): Hono {
         };
 
         try {
+          const resolvedAgentId = await service.db.getConversationAgentId(id);
           for await (const event of service.streamAgentResponse(
             id,
-            body.content
+            body.content,
+            resolvedAgentId
           )) {
             send(event);
           }
