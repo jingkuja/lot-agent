@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   Agent,
   ToolRegistry,
@@ -26,7 +25,6 @@ import type {
   AgentEvent,
   AgentConfig,
   AgentContext,
-  Message,
   LLMConfig,
   LLMProvider,
   AgentDefinition,
@@ -40,6 +38,8 @@ import { SessionStore } from "../auth/session-store.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { UsageMeter } from "../billing/meter.js";
+import { MessageRepository } from "./message-repository.js";
+import { TraceRecorder } from "./trace-recorder.js";
 
 export interface ServiceConfig {
   llm: LLMConfig;
@@ -79,6 +79,8 @@ export class AgentService {
   private skillsDir: string;
   private llmProvider: LLMProvider | null = null;
   private bullmqQueue: BullmqJobQueue | null = null;
+  private messageRepo!: MessageRepository;
+  private traceRecorderFactory!: () => TraceRecorder;
 
   constructor(config: ServiceConfig) {
     this.db = new DB(config.db);
@@ -153,6 +155,16 @@ export class AgentService {
     // Initialize usage meter
     this.usageMeter = new UsageMeter(this.db, (id) => this.modelRegistry.getConfig(id));
 
+    // Initialize service-layer collaborators
+    this.messageRepo = new MessageRepository(this.db);
+    const traceModel =
+      this.llmConfig.default === "openai"
+        ? this.llmConfig.openai.model
+        : this.llmConfig.anthropic.model;
+    const traceProvider = this.llmConfig.default;
+    this.traceRecorderFactory = () =>
+      new TraceRecorder(this.traceManager, this.db, traceModel, traceProvider);
+
     // Register agent definitions after all tools are loaded
     const defaultModelId =
       this.llmConfig.default === "openai"
@@ -225,45 +237,15 @@ export class AgentService {
     const def =
       this.agentRegistry.get(agentId ?? "general") ??
       this.agentRegistry.get("general")!;
-    // Save user message
-    const userMsgId = randomUUID();
-    await this.db.addMessage(userMsgId, conversationId, "user", userMessage);
 
-    // Load conversation history
-    const stored = await this.db.getMessages(conversationId);
-    const filtered = stored.filter(
-      (m) => m.role !== "user" || m.id !== userMsgId
+    // ── Persist user message, load history (orphan tool messages filtered) ──
+    const userMsgId = await this.messageRepo.saveUserMessage(
+      conversationId,
+      userMessage
     );
+    const history = await this.messageRepo.loadHistory(conversationId, userMsgId);
 
-    // Collect all tool_call_ids that are referenced by assistant messages
-    const validToolCallIds = new Set<string>();
-    for (const m of filtered) {
-      if (m.role === "assistant" && m.tool_calls) {
-        try {
-          const calls = JSON.parse(m.tool_calls) as { id: string }[];
-          for (const tc of calls) {
-            if (tc.id) validToolCallIds.add(tc.id);
-          }
-        } catch {
-          // ignore parse errors
-        }
-      }
-    }
-
-    // Filter out orphan tool messages (no matching assistant tool_call)
-    const history: Message[] = [];
-    for (const m of filtered) {
-      if (m.role === "tool" && m.tool_call_id) {
-        if (!validToolCallIds.has(m.tool_call_id)) continue; // orphan — skip
-      }
-      history.push({
-        role: m.role as Message["role"],
-        content: m.content,
-        toolCallId: m.tool_call_id ?? undefined,
-      });
-    }
-
-    // Match skills
+    // ── Match skills, build agent ──
     const matchedSkills = this.skillLoader.match(userMessage);
     const dynamicParts = matchedSkills.map(
       (s) => `[Skill: ${s.name}]\n${s.content}`
@@ -282,11 +264,9 @@ export class AgentService {
         : undefined,
     });
 
-    // Create trace
-    const trace = this.traceManager.startTrace(
-      conversationId,
-      this.llmConfig.default
-    );
+    // ── Start trace ──
+    const recorder = this.traceRecorderFactory();
+    recorder.start(conversationId, this.llmConfig.default);
 
     // Fresh per-request memory store — ephemeral/session state is request-scoped,
     // so concurrent users/sessions never clobber each other.
@@ -307,33 +287,18 @@ export class AgentService {
     let totalTokens = 0;
     let inputTokens = 0;
     let outputTokens = 0;
-    let hasError = false;
-    let llmSpanId: string | undefined;
-    let toolSpanId: string | undefined;
-    let requestStart = Date.now();
+    let lastErrorMessage: string | undefined;
 
     try {
       for await (const event of agent.run(userMessage, context, history)) {
         if (event.type === "text") {
-          if (!llmSpanId) {
-            llmSpanId = this.traceManager.startSpan(trace.id, "llm.chat").id;
-          }
+          recorder.startLlmSpan();
           assistantContent += event.content;
         }
 
         if (event.type === "tool_call") {
-          if (llmSpanId) {
-            this.traceManager.endSpan(llmSpanId);
-            llmSpanId = undefined;
-          }
-
-          toolSpanId = this.traceManager.startSpan(
-            trace.id,
-            "tool.execute",
-            undefined,
-            { toolName: event.name }
-          ).id;
-
+          recorder.endLlmSpan();
+          recorder.startToolSpan(event.name);
           currentToolCalls.push({
             id: event.id,
             name: event.name,
@@ -342,43 +307,23 @@ export class AgentService {
         }
 
         if (event.type === "tool_result") {
-          if (toolSpanId) {
-            this.traceManager.endSpan(toolSpanId, event.isError ? "error" : "ok");
-            toolSpanId = undefined;
-          }
+          recorder.endToolSpan(event.isError ? "error" : "ok");
 
           const matchingCall = currentToolCalls.find(
             (tc) => tc.name === event.name
           );
 
           if (currentToolCalls.length > 0) {
-            // Save assistant message with tool calls
-            const assistantMsgId = randomUUID();
-            await this.db.addMessage(
-              assistantMsgId,
+            // Save assistant message with tool calls, then the tool result
+            await this.messageRepo.saveAssistantWithToolCalls(
               conversationId,
-              "assistant",
               assistantContent || "",
-              { toolCallId: undefined }
+              currentToolCalls
             );
-
-            // Save tool call records
-            for (const tc of currentToolCalls) {
-              await this.db.addToolCall(
-                assistantMsgId,
-                tc.id,
-                tc.name,
-                tc.arguments
-              );
-            }
-
-            // Save tool result
-            await this.db.addMessage(
-              randomUUID(),
+            await this.messageRepo.saveToolResult(
               conversationId,
-              "tool",
-              event.output,
-              { toolCallId: matchingCall?.id }
+              matchingCall?.id,
+              event.output
             );
 
             assistantContent = "";
@@ -393,69 +338,21 @@ export class AgentService {
         }
 
         if (event.type === "error") {
-          hasError = true;
+          lastErrorMessage = event.message;
         }
 
         yield event;
       }
     } finally {
-      if (llmSpanId) this.traceManager.endSpan(llmSpanId);
-      if (toolSpanId) this.traceManager.endSpan(toolSpanId);
-
       // Save final assistant message
-      if (assistantContent || currentToolCalls.length > 0) {
-        const assistantMsgId = randomUUID();
-        await this.db.addMessage(
-          assistantMsgId,
-          conversationId,
-          "assistant",
-          assistantContent || ""
-        );
-        for (const tc of currentToolCalls) {
-          await this.db.addToolCall(
-            assistantMsgId,
-            tc.id,
-            tc.name,
-            tc.arguments
-          );
-        }
-      }
+      await this.messageRepo.saveFinalAssistant(
+        conversationId,
+        assistantContent || "",
+        currentToolCalls
+      );
 
-      // Save trace
-      const latencyMs = Date.now() - requestStart;
-      trace.metadata.totalTokens = totalTokens;
-      if (hasError) {
-        (trace.metadata as Record<string, unknown>).status = "error";
-      }
-      this.traceManager.endTrace(trace.id);
-
-      await this.db.addTrace({
-        id: trace.id,
-        conversation_id: conversationId,
-        model: this.llmConfig.default === "openai"
-          ? this.llmConfig.openai.model
-          : this.llmConfig.anthropic.model,
-        provider: this.llmConfig.default,
-        total_tokens: totalTokens,
-        total_latency_ms: latencyMs,
-        status: hasError ? "error" : "ok",
-        error_message: hasError ? "Max iterations reached" : undefined,
-        metadata: trace.metadata as Record<string, unknown>,
-      });
-
-      for (const span of trace.spans) {
-        await this.db.addSpan({
-          id: span.id,
-          trace_id: trace.id,
-          parent_span_id: span.parentSpanId,
-          name: span.name,
-          status: span.status,
-          attributes: span.attributes,
-          events: span.events,
-          start_time: new Date(span.startTime).toISOString(),
-          end_time: span.endTime ? new Date(span.endTime).toISOString() : undefined,
-        });
-      }
+      // Finish trace + spans (with the ACTUAL error message, if any)
+      await recorder.finish({ totalTokens, errorMessage: lastErrorMessage });
 
       // Record usage (non-fatal)
       if (inputTokens + outputTokens > 0) {
@@ -466,7 +363,7 @@ export class AgentService {
             modelId: def.defaultModelId,
             usage: { inputCount: inputTokens, outputCount: outputTokens },
           });
-          trace.metadata.totalCost = cost;
+          recorder.traceObject.metadata.totalCost = cost;
         } catch (err) {
           console.warn("[UsageMeter] Failed to record usage:", err);
         }

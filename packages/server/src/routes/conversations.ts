@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import type { AgentService } from "../services/agent-service.js";
+import { agentEventToSse } from "../services/sse-adapter.js";
 
 type Variables = { userId: string };
 
@@ -129,14 +130,13 @@ export function createConversationRoutes(service: AgentService): Hono {
         };
 
         try {
-          const resolvedAgentId = await service.db.getConversationAgentId(id);
           for await (const event of service.streamAgentResponse(
             id,
             body.content,
-            resolvedAgentId,
+            conversation.agent_id,
             userId
           )) {
-            send(event);
+            send(agentEventToSse(event));
           }
           send({ type: "stream_end" });
         } catch (error) {
