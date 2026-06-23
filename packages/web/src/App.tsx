@@ -1,91 +1,111 @@
-import { useEffect, useCallback, useRef } from "react";
-import { Sidebar } from "./components/Sidebar.js";
-import { ChatPanel } from "./components/ChatPanel.js";
-import { StatusBar } from "./components/StatusBar.js";
-import { useConversations } from "./hooks/useConversations.js";
-import { useChat } from "./hooks/useChat.js";
+import { useEffect, useState, useCallback } from "react";
+import { Login } from "./components/Login.js";
+import { Home } from "./pages/Home.js";
+import { Workspace } from "./pages/Workspace.js";
+import { api, getToken, clearToken, type User, type Agent } from "./api/client.js";
 import "./App.css";
 
+type View = "loading" | "login" | "home" | "workspace";
+
 export default function App() {
-  const {
-    conversations,
-    activeId,
-    setActiveId,
-    create,
-    remove,
-    loading,
-    refresh,
-  } = useConversations();
+  const [view, setView] = useState<View>("loading");
+  const [user, setUser] = useState<User | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
-  // When stream ends, wait for async title generation then refresh list
-  const handleStreamEnd = useCallback(() => {
-    setTimeout(() => refresh(), 1500);
-  }, [refresh]);
-
-  const { messages, send, stop, isStreaming, loadMessages, clear, regenerate } =
-    useChat(activeId, handleStreamEnd);
-
-  const didInit = useRef(false);
-
-  // After initial load: pick the latest existing conversation, or create one
+  // On mount: validate token if present
   useEffect(() => {
-    if (loading || didInit.current) return;
-    didInit.current = true;
-
-    if (conversations.length > 0) {
-      const latest = conversations[0];
-      setActiveId(latest.id);
-      loadMessages(latest.id);
-    } else {
-      create().then((conv) => {
-        loadMessages(conv.id);
-      });
+    const token = getToken();
+    if (!token) {
+      setView("login");
+      return;
     }
-  }, [loading, conversations, setActiveId, create, loadMessages]);
+    api.me()
+      .then((u) => {
+        setUser(u);
+        setView("home");
+      })
+      .catch(() => {
+        clearToken();
+        setView("login");
+      });
+  }, []);
 
-  const handleSelect = useCallback(
-    (id: string) => {
-      setActiveId(id);
-      clear();
-      loadMessages(id);
-    },
-    [setActiveId, loadMessages, clear]
-  );
+  // Listen for 401 unauthorized events
+  useEffect(() => {
+    const handler = () => {
+      setUser(null);
+      setSelectedAgent(null);
+      setView("login");
+    };
+    window.addEventListener("lot:unauthorized", handler);
+    return () => window.removeEventListener("lot:unauthorized", handler);
+  }, []);
 
-  const handleCreate = useCallback(async () => {
-    const conv = await create();
-    clear();
-    loadMessages(conv.id);
-  }, [create, loadMessages, clear]);
+  const handleLogin = useCallback((u: User) => {
+    setUser(u);
+    setView("home");
+  }, []);
 
-  const handleDelete = useCallback(
-    (id: string) => {
-      remove(id);
-      if (id === activeId) clear();
-    },
-    [remove, activeId, clear]
-  );
+  const handlePick = useCallback((agent: Agent) => {
+    setSelectedAgent(agent);
+    setView("workspace");
+  }, []);
 
-  return (
-    <div className="app">
-      <Sidebar
-        conversations={conversations}
-        activeId={activeId}
-        onSelect={handleSelect}
-        onCreate={handleCreate}
-        onDelete={handleDelete}
-      />
-      <div className="main-content">
-        <ChatPanel
-          messages={messages}
-          onSend={send}
-          onStop={stop}
-          isStreaming={isStreaming}
-          activeConversationId={activeId}
-          onRegenerate={regenerate}
-        />
-        <StatusBar isStreaming={isStreaming} />
+  const handleBack = useCallback(() => {
+    setSelectedAgent(null);
+    setView("home");
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch {
+      // ignore logout errors
+    }
+    clearToken();
+    setUser(null);
+    setSelectedAgent(null);
+    setView("login");
+  }, []);
+
+  if (view === "loading") {
+    return (
+      <div className="app-loading">
+        <span>加载中...</span>
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (view === "login") {
+    return <Login onLogin={handleLogin} />;
+  }
+
+  if (view === "home" && user) {
+    return (
+      <div className="app">
+        <div className="app-home-header">
+          <span className="app-home-brand">Lot Agent</span>
+          <div className="app-home-user">
+            <span>{user.email}</span>
+            <button className="btn-logout" onClick={handleLogout}>退出</button>
+          </div>
+        </div>
+        <Home onPick={handlePick} />
+      </div>
+    );
+  }
+
+  if (view === "workspace" && user && selectedAgent) {
+    return (
+      <Workspace
+        initialAgent={selectedAgent}
+        user={user}
+        onBack={handleBack}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  // Fallback: back to login
+  return <Login onLogin={handleLogin} />;
 }

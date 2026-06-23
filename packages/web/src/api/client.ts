@@ -24,7 +24,7 @@ export interface Rating {
 }
 
 export interface AgentEvent {
-  type: "text" | "tool_call" | "tool_result" | "done" | "error" | "stream_end";
+  type: "text" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact";
   id?: string;
   content?: string;
   name?: string;
@@ -33,16 +33,91 @@ export interface AgentEvent {
   isError?: boolean;
   iterations?: number;
   totalTokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
   message?: string;
+  // artifact variant
+  assetId?: string;
+  url?: string;
+  mediaType?: string;
 }
 
+export interface Agent {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  defaultModelId: string;
+  toolNames: string[];
+  inputSchema?: unknown;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export interface TaskStatus {
+  id: string;
+  status: "pending" | "running" | "done" | "failed";
+  progress: number;
+  output?: {
+    assetIds?: string[];
+    url?: string;
+    [key: string]: unknown;
+  };
+  error?: string;
+}
+
+export interface AssetMeta {
+  id: string;
+  filename: string;
+  mediaType: string;
+  size: number;
+  created_at: string;
+}
+
+// ── Token management ──────────────────────────────────────────────────────────
+const TOKEN_KEY = "lot_token";
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+// ── HTTP helpers ──────────────────────────────────────────────────────────────
 const BASE = "/api";
 
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const { headers: callerHeaders, ...restInit } = init ?? {};
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
+    ...restInit,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(callerHeaders as Record<string, string> | undefined),
+    },
   });
+
+  if (res.status === 401) {
+    clearToken();
+    window.dispatchEvent(new Event("lot:unauthorized"));
+    throw new Error("Unauthorized");
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error ?? res.statusText);
@@ -51,12 +126,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // ── Auth ────────────────────────────────────────────────────────────────────
+  login: (email: string, name?: string) =>
+    request<{ token: string; user: User }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, name }),
+    }),
+
+  logout: () =>
+    request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+
+  me: () => request<User>("/auth/me"),
+
+  // ── Agents ──────────────────────────────────────────────────────────────────
+  listAgents: () => request<Agent[]>("/agents"),
+
+  // ── Conversations ───────────────────────────────────────────────────────────
   listConversations: () => request<Conversation[]>("/conversations"),
 
-  createConversation: (title?: string) =>
+  createConversation: (title?: string, agentId?: string) =>
     request<Conversation>("/conversations", {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, agentId }),
     }),
 
   getConversation: (id: string) =>
@@ -86,11 +177,21 @@ export const api = {
           `${BASE}/conversations/${conversationId}/messages`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...authHeaders(),
+            },
             body: JSON.stringify({ content }),
             signal: controller.signal,
           }
         );
+
+        if (res.status === 401) {
+          clearToken();
+          window.dispatchEvent(new Event("lot:unauthorized"));
+          onEvent({ type: "error", message: "Unauthorized" });
+          return;
+        }
 
         if (!res.ok || !res.body) {
           onEvent({ type: "error", message: "Request failed" });
@@ -133,7 +234,19 @@ export const api = {
     return controller;
   },
 
-  // Ratings
+  // ── Tasks ───────────────────────────────────────────────────────────────────
+  createTask: (type: "image.generate" | "video.generate", input: unknown) =>
+    request<{ jobId: string }>("/tasks", {
+      method: "POST",
+      body: JSON.stringify({ type, input }),
+    }),
+
+  getTask: (id: string) => request<TaskStatus>(`/tasks/${id}`),
+
+  // ── Assets ──────────────────────────────────────────────────────────────────
+  getAsset: (id: string) => request<AssetMeta>(`/assets/${id}`),
+
+  // ── Ratings ─────────────────────────────────────────────────────────────────
   setRating: (messageId: string, rating: number, feedback?: string) =>
     request<Rating>(`/ratings/${messageId}`, {
       method: "POST",

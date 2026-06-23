@@ -1,19 +1,24 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import type { AgentService } from "../services/agent-service.js";
+import { agentEventToSse } from "../services/sse-adapter.js";
+
+type Variables = { userId: string };
 
 export function createConversationRoutes(service: AgentService): Hono {
-  const app = new Hono();
+  const app = new Hono<{ Variables: Variables }>();
 
-  // List conversations
+  // List conversations — scoped to current user
   app.get("/", async (c) => {
-    const conversations = await service.db.listConversations();
+    const userId = c.get("userId");
+    const conversations = await service.db.listConversations(userId);
     return c.json(conversations);
   });
 
-  // Create conversation
+  // Create conversation — owned by current user
   app.post("/", async (c) => {
-    const body = await c.req.json<{ title?: string }>().catch(() => ({}));
+    const userId = c.get("userId");
+    const body = await c.req.json<{ title?: string; agentId?: string }>().catch(() => ({}));
     const id = randomUUID();
     const title = body.title ?? "New Chat";
     const model =
@@ -21,15 +26,19 @@ export function createConversationRoutes(service: AgentService): Hono {
         ? service["llmConfig"].openai.model
         : service["llmConfig"].anthropic.model;
     const provider = service["llmConfig"].default;
-    const conversation = await service.db.createConversation(id, title, model, provider);
+    const agentId = body.agentId ?? "general";
+    const conversation = await service.db.createConversation(id, title, model, provider, agentId, userId);
     return c.json(conversation, 201);
   });
 
-  // Get conversation with messages
+  // Get conversation with messages — ownership check
   app.get("/:id", async (c) => {
+    const userId = c.get("userId");
     const id = c.req.param("id");
     const conversation = await service.db.getConversation(id);
     if (!conversation) return c.json({ error: "Not found" }, 404);
+    if (conversation.user_id !== userId) return c.json({ error: "Not found" }, 404);
+
     const messages = await service.db.getMessages(id);
     const ratings = await service.db.getRatingsForConversation(id);
     const toolCallsMap = await service.db.getToolCallsForConversation(id);
@@ -66,19 +75,27 @@ export function createConversationRoutes(service: AgentService): Hono {
     return c.json({ ...conversation, messages: enriched });
   });
 
-  // Delete conversation (soft delete)
+  // Delete conversation (soft delete) — ownership check
   app.delete("/:id", async (c) => {
+    const userId = c.get("userId");
     const id = c.req.param("id");
+    const conversation = await service.db.getConversation(id);
+    if (!conversation || conversation.user_id !== userId) {
+      return c.json({ error: "Not found" }, 404);
+    }
     const deleted = await service.db.deleteConversation(id);
     if (!deleted) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
   });
 
-  // Regenerate: delete messages after a given message (used before re-sending)
+  // Regenerate: delete messages after a given message — ownership check
   app.post("/:id/regenerate", async (c) => {
+    const userId = c.get("userId");
     const id = c.req.param("id");
     const conversation = await service.db.getConversation(id);
-    if (!conversation) return c.json({ error: "Not found" }, 404);
+    if (!conversation || conversation.user_id !== userId) {
+      return c.json({ error: "Not found" }, 404);
+    }
 
     const body = await c.req.json<{ afterMessageId: string }>();
     if (!body.afterMessageId) {
@@ -89,11 +106,14 @@ export function createConversationRoutes(service: AgentService): Hono {
     return c.json({ ok: true });
   });
 
-  // Send message — returns SSE stream
+  // Send message — returns SSE stream, ownership check
   app.post("/:id/messages", async (c) => {
+    const userId = c.get("userId");
     const id = c.req.param("id");
     const conversation = await service.db.getConversation(id);
-    if (!conversation) return c.json({ error: "Not found" }, 404);
+    if (!conversation || conversation.user_id !== userId) {
+      return c.json({ error: "Not found" }, 404);
+    }
 
     const body = await c.req.json<{ content: string }>();
     if (!body.content) {
@@ -112,9 +132,11 @@ export function createConversationRoutes(service: AgentService): Hono {
         try {
           for await (const event of service.streamAgentResponse(
             id,
-            body.content
+            body.content,
+            conversation.agent_id,
+            userId
           )) {
-            send(event);
+            send(agentEventToSse(event));
           }
           send({ type: "stream_end" });
         } catch (error) {

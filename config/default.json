@@ -2,7 +2,7 @@
   "llm": {
     "default": "openai",
     "openai": {
-      "apiKey": "1",
+      "apiKey": "",
       "baseUrl": "https://api.deepseek.com",
       "model": "deepseek-v4-flash"
     },
@@ -11,18 +11,24 @@
       "model": "claude-sonnet-4-20250514"
     }
   },
+  "models": [
+    { "id": "deepseek-v4-flash", "type": "llm", "provider": "openai", "billingUnit": "token", "inputPrice": 0.001, "outputPrice": 0.002, "unitPrice": 0, "enabled": true },
+    { "id": "claude-sonnet-4-20250514", "type": "llm", "provider": "anthropic", "billingUnit": "token", "inputPrice": 0.024, "outputPrice": 0.12, "unitPrice": 0, "enabled": true },
+    { "id": "wanx-standard", "type": "image", "provider": "wanx", "billingUnit": "image", "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.04, "enabled": true },
+    { "id": "kling-standard", "type": "video", "provider": "kling", "billingUnit": "second", "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.5, "enabled": true }
+  ],
   "agent": {
     "maxIterations": 20,
     "systemPrompt": "You are a capable AI assistant with access to tools. You MUST use the available tools to complete tasks — do not guess or make up information you can verify.\n\nAvailable tools:\n- web_fetch: Fetch and read any URL (web pages, APIs, documents)\n- web_search: Search the web for current information\n- read_file: Read local files\n- write_file: Write local files\n- list_files: List directory contents\n- search_files: Search file contents\n- execute_command: Run shell commands\n\nWhen the user asks about current events, prices, or any real-time information, ALWAYS use web_search or web_fetch to find the answer. Never say you cannot access the internet.",
     "context": {
       "budget": {
-        "total": 60000,
-        "systemPrompt": 4000,
-        "memory": 2000,
-        "retrieval": 10000,
-        "toolOutput": 8000,
-        "history": 20000,
-        "generation": 16000
+        "total": 460000,
+        "systemPrompt": 8000,
+        "memory": 12000,
+        "retrieval": 20000,
+        "toolOutput": 15000,
+        "history": 40000,
+        "generation": 46000
       },
       "maxRawRounds": 15
     }
