@@ -33,6 +33,7 @@ import type {
 import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
+import { UsageMeter } from "../billing/meter.js";
 
 export interface ServiceConfig {
   llm: LLMConfig;
@@ -59,6 +60,7 @@ export class AgentService {
   readonly agentRegistry: InMemoryAgentRegistry;
   readonly modelRegistry: InMemoryModelRegistry;
   jobQueue!: JobQueue;
+  usageMeter!: UsageMeter;
   private llmConfig: LLMConfig;
   private configModels: ModelConfig[];
   private agentConfig: Partial<AgentConfig>;
@@ -132,6 +134,9 @@ export class AgentService {
 
     // Populate model registry with all configured models
     populateModelRegistry(this.modelRegistry, this.configModels, this.llmConfig);
+
+    // Initialize usage meter
+    this.usageMeter = new UsageMeter(this.db, (id) => this.modelRegistry.getConfig(id));
 
     // Register agent definitions after all tools are loaded
     const defaultModelId =
@@ -277,6 +282,8 @@ export class AgentService {
     let assistantContent = "";
     let currentToolCalls: { id: string; name: string; arguments: unknown }[] = [];
     let totalTokens = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
     let hasError = false;
     let llmSpanId: string | undefined;
     let toolSpanId: string | undefined;
@@ -358,6 +365,8 @@ export class AgentService {
 
         if (event.type === "done") {
           totalTokens = event.totalTokens;
+          inputTokens = event.inputTokens;
+          outputTokens = event.outputTokens;
         }
 
         if (event.type === "error") {
@@ -423,6 +432,21 @@ export class AgentService {
           start_time: new Date(span.startTime).toISOString(),
           end_time: span.endTime ? new Date(span.endTime).toISOString() : undefined,
         });
+      }
+
+      // Record usage (non-fatal)
+      if (inputTokens + outputTokens > 0) {
+        try {
+          const cost = await this.usageMeter.record({
+            userId: "default",
+            taskId: null,
+            modelId: def.defaultModelId,
+            usage: { inputCount: inputTokens, outputCount: outputTokens },
+          });
+          trace.metadata.totalCost = cost;
+        } catch (err) {
+          console.warn("[UsageMeter] Failed to record usage:", err);
+        }
       }
 
       // Generate title from first user message (async, non-blocking)

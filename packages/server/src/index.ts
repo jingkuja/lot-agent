@@ -14,6 +14,7 @@ import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
 import { createAssetRoutes } from "./routes/assets.js";
+import { createUsageRoutes } from "./routes/usage.js";
 import type { LLMConfig } from "@lot-agent/core";
 import { AppConfigSchema } from "@lot-agent/core";
 
@@ -97,6 +98,22 @@ async function main() {
   app.route("/api/agents", createAgentRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
+  app.route("/api/usage", createUsageRoutes(service));
+  // /api/balance alias → same balance logic
+  app.get("/api/balance", async (c) => {
+    const [bal, dailySpend, monthlySpend] = await Promise.all([
+      service.db.ensureUserBalance("default"),
+      service.db.getDailySpend("default"),
+      service.db.getMonthlySpend("default"),
+    ]);
+    return c.json({
+      balance: bal.balance,
+      daily_limit: bal.daily_limit,
+      monthly_limit: bal.monthly_limit,
+      dailySpend,
+      monthlySpend,
+    });
+  });
 
   app.get("/static/assets/:filename", async (c) => {
     const filename = c.req.param("filename");

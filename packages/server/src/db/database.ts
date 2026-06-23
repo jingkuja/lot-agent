@@ -100,6 +100,27 @@ export interface StoredAsset {
   created_at: string;
 }
 
+export interface StoredUsageLog {
+  id: string;
+  user_id: string;
+  task_id: string | null;
+  model_id: string;
+  model_type: string;
+  input_count: number;
+  output_count: number;
+  total_cost: number;
+  created_at: string;
+}
+
+export interface UserBalance {
+  user_id: string;
+  balance: number;
+  daily_limit: number | null;
+  monthly_limit: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DBConfig {
   host: string;
   port: number;
@@ -332,6 +353,36 @@ export class DB {
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_assets_task ON assets (task_id);
         CREATE INDEX IF NOT EXISTS idx_assets_user ON assets (user_id, created_at DESC);
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS usage_logs (
+          id           UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id      VARCHAR(100)  NOT NULL DEFAULT 'default',
+          task_id      UUID,
+          model_id     VARCHAR(100)  NOT NULL,
+          model_type   VARCHAR(20)   NOT NULL,
+          input_count  INTEGER       NOT NULL DEFAULT 0,
+          output_count INTEGER       NOT NULL DEFAULT 0,
+          total_cost   NUMERIC(12,6) NOT NULL DEFAULT 0,
+          created_at   TIMESTAMPTZ   NOT NULL DEFAULT now()
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_logs (user_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_usage_model_type ON usage_logs (model_type);
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_balance (
+          user_id       VARCHAR(100)  PRIMARY KEY,
+          balance       NUMERIC(12,4) NOT NULL DEFAULT 0,
+          daily_limit   NUMERIC(12,4),
+          monthly_limit NUMERIC(12,4),
+          created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
+          updated_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
+        );
       `);
 
       await client.query("COMMIT");
@@ -672,6 +723,109 @@ export class DB {
 
   async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  // ── Usage Logs ──
+
+  async writeUsageLog(u: {
+    userId: string;
+    taskId?: string | null;
+    modelId: string;
+    modelType: string;
+    inputCount: number;
+    outputCount: number;
+    totalCost: number;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO usage_logs (user_id, task_id, model_id, model_type, input_count, output_count, total_cost)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        u.userId,
+        u.taskId ?? null,
+        u.modelId,
+        u.modelType,
+        u.inputCount,
+        u.outputCount,
+        u.totalCost,
+      ]
+    );
+  }
+
+  async getUsageLogs(userId: string, limit = 100): Promise<StoredUsageLog[]> {
+    const { rows } = await this.pool.query(
+      `SELECT id, user_id, task_id, model_id, model_type, input_count, output_count,
+              total_cost::float8 AS total_cost, created_at
+       FROM usage_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [userId, limit]
+    );
+    return rows.map((r) => ({
+      ...r,
+      total_cost: Number(r.total_cost),
+    }));
+  }
+
+  async getUsageSummary(
+    userId: string,
+    by: "model_type" | "model" | "day"
+  ): Promise<Array<{ key: string; total_cost: number; count: number }>> {
+    let groupExpr: string;
+    let keyExpr: string;
+    if (by === "model_type") {
+      groupExpr = "model_type";
+      keyExpr = "model_type";
+    } else if (by === "model") {
+      groupExpr = "model_id";
+      keyExpr = "model_id";
+    } else {
+      groupExpr = "date_trunc('day', created_at)::date";
+      keyExpr = "date_trunc('day', created_at)::date::text";
+    }
+    const { rows } = await this.pool.query(
+      `SELECT ${keyExpr} AS key, COALESCE(SUM(total_cost), 0) AS total_cost, COUNT(*) AS count
+       FROM usage_logs WHERE user_id = $1 GROUP BY ${groupExpr} ORDER BY total_cost DESC`,
+      [userId]
+    );
+    return rows.map((r) => ({
+      key: String(r.key),
+      total_cost: Number(r.total_cost),
+      count: Number(r.count),
+    }));
+  }
+
+  async ensureUserBalance(userId: string): Promise<UserBalance> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO user_balance (user_id) VALUES ($1)
+       ON CONFLICT (user_id) DO UPDATE SET updated_at = now()
+       RETURNING *`,
+      [userId]
+    );
+    const r = rows[0];
+    return {
+      user_id: r.user_id,
+      balance: Number(r.balance),
+      daily_limit: r.daily_limit != null ? Number(r.daily_limit) : null,
+      monthly_limit: r.monthly_limit != null ? Number(r.monthly_limit) : null,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+    };
+  }
+
+  async getDailySpend(userId: string): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT COALESCE(SUM(total_cost), 0) AS total
+       FROM usage_logs WHERE user_id = $1 AND created_at >= date_trunc('day', now())`,
+      [userId]
+    );
+    return Number(rows[0].total);
+  }
+
+  async getMonthlySpend(userId: string): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT COALESCE(SUM(total_cost), 0) AS total
+       FROM usage_logs WHERE user_id = $1 AND created_at >= date_trunc('month', now())`,
+      [userId]
+    );
+    return Number(rows[0].total);
   }
 
   // ── Tasks ──

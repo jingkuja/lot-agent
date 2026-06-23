@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { StubImageProvider, StubVideoProvider, LocalStorage } from "@lot-agent/core";
+import type { ModelConfig } from "@lot-agent/core";
+import { UsageMeter } from "../billing/meter.js";
+import { GenCache, genCacheKey } from "../billing/gen-cache.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
@@ -30,8 +34,24 @@ async function main() {
   const conn = createRedisConnection(process.env.REDIS_URL);
   const queue = new BullmqJobQueue(db, conn);
 
+  // Load model pricing from config
+  const configPath = resolve(ROOT, "config/default.json");
+  const rawConfig = JSON.parse(await readFile(configPath, "utf-8")) as { models?: ModelConfig[] };
+  const models: ModelConfig[] = rawConfig.models ?? [];
+  const modelMap = new Map(models.map((m) => [m.id, m]));
+
+  const meter = new UsageMeter(db, (id) => modelMap.get(id));
+  const cache = new GenCache(conn);
+
   // Register image.generate handler
   queue.process("image.generate", async (job) => {
+    const cacheKey = genCacheKey("image.generate", job.input);
+    const cached = await cache.get<{ assetIds: string[]; url: string }>(cacheKey);
+    if (cached) {
+      await queue.updateProgress(job.id, 100);
+      return cached;
+    }
+
     const prompt = (job.input as Record<string, unknown>).prompt as string ?? "";
     await queue.updateProgress(job.id, 25);
     const r = await new StubImageProvider().generate({ prompt });
@@ -52,12 +72,22 @@ async function main() {
       mime: "image/png",
       sizeBytes: placeholder.byteLength,
     });
+    await meter.record({ userId: "default", taskId: job.id, modelId: "wanx-standard", usage: { inputCount: 0, outputCount: 1 } });
+    const result = { assetIds: [assetId], url };
+    await cache.set(cacheKey, result);
     await queue.updateProgress(job.id, 100);
-    return { assetIds: [assetId], url };
+    return result;
   });
 
   // Register video.generate handler
   queue.process("video.generate", async (job) => {
+    const cacheKey = genCacheKey("video.generate", job.input);
+    const cached = await cache.get<{ assetIds: string[]; url: string; durationSec: number }>(cacheKey);
+    if (cached) {
+      await queue.updateProgress(job.id, 100);
+      return cached;
+    }
+
     const input = job.input as Record<string, unknown>;
     const prompt = input.prompt as string ?? "";
     await queue.updateProgress(job.id, 25);
@@ -83,8 +113,11 @@ async function main() {
       sizeBytes: placeholder.byteLength,
       durationSec: r.durationSec,
     });
+    await meter.record({ userId: "default", taskId: job.id, modelId: "kling-standard", usage: { inputCount: 0, outputCount: r.durationSec } });
+    const result = { assetIds: [assetId], url, durationSec: r.durationSec };
+    await cache.set(cacheKey, result);
     await queue.updateProgress(job.id, 100);
-    return { assetIds: [assetId], url, durationSec: r.durationSec };
+    return result;
   });
 
   console.log("Worker started, listening for jobs");

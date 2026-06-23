@@ -6,7 +6,8 @@
     "dev": "node --import tsx/esm src/index.ts",
     "dev:worker": "node --import tsx/esm src/workers/index.ts",
     "build": "tsup",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "dependencies": {
     "@lot-agent/core": "*",
@@ -20,6 +21,7 @@
     "@types/pg": "^8.0.0",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
   }
 }

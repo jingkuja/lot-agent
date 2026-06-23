@@ -13,7 +13,7 @@ export type AgentEvent =
   | { type: "text"; content: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
   | { type: "tool_result"; name: string; output: string; isError: boolean }
-  | { type: "done"; iterations: number; totalTokens: number }
+  | { type: "done"; iterations: number; totalTokens: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string }
   | { type: "artifact"; assetId: string; url: string; mediaType: string };
 
@@ -84,6 +84,8 @@ export class Agent {
     const tools = context.toolRegistry.toLLMTools(this.config.allowedToolNames);
     let iterations = 0;
     let totalTokens = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     // Working message log (accumulates during this run)
     const workingHistory: Message[] = [...history];
@@ -96,7 +98,7 @@ export class Agent {
           type: "error",
           message: `Agent run timed out after ${Math.round(this.config.maxRunTimeMs / 1000)}s`,
         };
-        yield { type: "done", iterations, totalTokens };
+        yield { type: "done", iterations, totalTokens, inputTokens, outputTokens };
         return;
       }
 
@@ -127,12 +129,14 @@ export class Agent {
         if (chunk.type === "done" && chunk.usage) {
           totalTokens +=
             chunk.usage.promptTokens + chunk.usage.completionTokens;
+          inputTokens += chunk.usage.promptTokens;
+          outputTokens += chunk.usage.completionTokens;
         }
       }
 
       // If no tool calls, agent is done
       if (!hasToolCalls) {
-        yield { type: "done", iterations, totalTokens };
+        yield { type: "done", iterations, totalTokens, inputTokens, outputTokens };
         return;
       }
 
@@ -180,6 +184,6 @@ export class Agent {
       type: "error",
       message: `Reached maximum iterations (${this.config.maxIterations})`,
     };
-    yield { type: "done", iterations, totalTokens };
+    yield { type: "done", iterations, totalTokens, inputTokens, outputTokens };
   }
 }
