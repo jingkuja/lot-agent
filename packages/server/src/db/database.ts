@@ -7,6 +7,7 @@ export interface Conversation {
   provider: string | null;
   system_prompt: string | null;
   agent_id: string;
+  user_id: string;
   status: string;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -109,6 +110,13 @@ export interface StoredUsageLog {
   input_count: number;
   output_count: number;
   total_cost: number;
+  created_at: string;
+}
+
+export interface StoredUser {
+  id: string;
+  email: string;
+  name: string | null;
   created_at: string;
 }
 
@@ -385,8 +393,79 @@ export class DB {
         );
       `);
 
+      // ── Users & Sessions (P6) ──
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+          email      VARCHAR(255) UNIQUE NOT NULL,
+          name       VARCHAR(255),
+          created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+        );
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id      UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token        VARCHAR(128) UNIQUE NOT NULL,
+          created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+          expires_at   TIMESTAMPTZ  NOT NULL,
+          last_seen_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token);
+        CREATE INDEX IF NOT EXISTS idx_sessions_user  ON sessions (user_id);
+      `);
+
+      await client.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id VARCHAR(100) NOT NULL DEFAULT 'default';
+      `);
+
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations (user_id, updated_at DESC);
+      `);
+
+      // Seed stable dev user
+      await client.query(`
+        INSERT INTO users (email, name) VALUES ('seed@local', 'Seed User')
+          ON CONFLICT (email) DO NOTHING;
+      `);
+
       await client.query("COMMIT");
+
+      // Backfill legacy 'default' rows to the seed user (idempotent, outside transaction)
+      const { rows: seedRows } = await this.pool.query(
+        "SELECT id FROM users WHERE email = 'seed@local'"
+      );
+      if (seedRows.length > 0) {
+        const seedId = seedRows[0].id as string;
+        await this.pool.query(
+          "UPDATE conversations SET user_id = $1 WHERE user_id = 'default'",
+          [seedId]
+        );
+        await this.pool.query(
+          "UPDATE tasks SET user_id = $1 WHERE user_id = 'default'",
+          [seedId]
+        );
+        await this.pool.query(
+          "UPDATE assets SET user_id = $1 WHERE user_id = 'default'",
+          [seedId]
+        );
+        await this.pool.query(
+          "UPDATE usage_logs SET user_id = $1 WHERE user_id = 'default'",
+          [seedId]
+        );
+        await this.pool.query(
+          "INSERT INTO user_balance (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
+          [seedId]
+        );
+      }
+
       console.log("Database migration complete");
+      return;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -402,13 +481,14 @@ export class DB {
     title: string,
     model?: string,
     provider?: string,
-    agentId?: string
+    agentId?: string,
+    userId?: string
   ): Promise<Conversation> {
     const { rows } = await this.pool.query(
-      `INSERT INTO conversations (id, title, model, provider, agent_id)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO conversations (id, title, model, provider, agent_id, user_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [id, title, model ?? null, provider ?? null, agentId ?? "general"]
+      [id, title, model ?? null, provider ?? null, agentId ?? "general", userId ?? "default"]
     );
     return rows[0];
   }
@@ -429,7 +509,14 @@ export class DB {
     return rows[0] ?? null;
   }
 
-  async listConversations(): Promise<Conversation[]> {
+  async listConversations(userId?: string): Promise<Conversation[]> {
+    if (userId) {
+      const { rows } = await this.pool.query(
+        "SELECT * FROM conversations WHERE status = 'active' AND user_id = $1 ORDER BY updated_at DESC",
+        [userId]
+      );
+      return rows;
+    }
     const { rows } = await this.pool.query(
       "SELECT * FROM conversations WHERE status = 'active' ORDER BY updated_at DESC"
     );
@@ -719,6 +806,54 @@ export class DB {
       [id]
     );
     return rows[0] ?? null;
+  }
+
+  // ── Users ──
+
+  async upsertUserByEmail(email: string, name?: string): Promise<StoredUser> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO users (email, name) VALUES ($1, $2)
+       ON CONFLICT (email) DO UPDATE SET name = COALESCE($2, users.name)
+       RETURNING *`,
+      [email, name ?? null]
+    );
+    return rows[0];
+  }
+
+  async getUserById(id: string): Promise<StoredUser | null> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM users WHERE id = $1",
+      [id]
+    );
+    return rows[0] ?? null;
+  }
+
+  // ── Sessions ──
+
+  async createSession(userId: string, token: string, expiresAt: Date): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO sessions (user_id, token, expires_at) VALUES ($1, $2, $3)`,
+      [userId, token, expiresAt.toISOString()]
+    );
+  }
+
+  async getSessionByToken(token: string): Promise<{ user_id: string; expires_at: string } | null> {
+    const { rows } = await this.pool.query(
+      "SELECT user_id, expires_at FROM sessions WHERE token = $1",
+      [token]
+    );
+    return rows[0] ?? null;
+  }
+
+  async touchSession(token: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE sessions SET last_seen_at = now() WHERE token = $1",
+      [token]
+    );
+  }
+
+  async deleteSession(token: string): Promise<void> {
+    await this.pool.query("DELETE FROM sessions WHERE token = $1", [token]);
   }
 
   async close(): Promise<void> {

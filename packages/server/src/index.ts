@@ -6,6 +6,8 @@ import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentService, type ServiceConfig } from "./services/agent-service.js";
+import { createAuthMiddleware } from "./auth/middleware.js";
+import { createAuthRoutes } from "./routes/auth.js";
 import { createConversationRoutes } from "./routes/conversations.js";
 import { createSkillRoutes } from "./routes/skills.js";
 import { createTraceRoutes } from "./routes/traces.js";
@@ -84,12 +86,34 @@ async function main() {
   const service = new AgentService(serviceConfig);
   await service.init();
 
-  const app = new Hono();
+  const app = new Hono<{ Variables: { userId: string } }>();
 
   app.use("*", logger());
-  app.use("*", cors());
+  app.use("*", cors({
+    origin: (process.env.CORS_ORIGIN ?? "http://localhost:5173").split(","),
+    credentials: true,
+  }));
 
+  // Public routes
   app.get("/health", (c) => c.json({ status: "ok" }));
+
+  // Auth routes — PUBLIC (no bearer token required)
+  app.route("/api/auth", createAuthRoutes(service));
+
+  // Auth guard for all other /api/* routes
+  const authMw = createAuthMiddleware(service.sessions);
+  app.use("/api/conversations/*", authMw);
+  app.use("/api/skills/*", authMw);
+  app.use("/api/traces/*", authMw);
+  app.use("/api/ratings/*", authMw);
+  app.use("/api/memory/*", authMw);
+  app.use("/api/agents/*", authMw);
+  app.use("/api/tasks/*", authMw);
+  app.use("/api/assets/*", authMw);
+  app.use("/api/usage/*", authMw);
+  app.use("/api/balance", authMw);
+
+  // Protected API routes
   app.route("/api/conversations", createConversationRoutes(service));
   app.route("/api/skills", createSkillRoutes(service));
   app.route("/api/traces", createTraceRoutes(service));
@@ -99,12 +123,14 @@ async function main() {
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/usage", createUsageRoutes(service));
-  // /api/balance alias → same balance logic
+
+  // /api/balance alias → same balance logic, user-scoped
   app.get("/api/balance", async (c) => {
+    const userId = c.get("userId");
     const [bal, dailySpend, monthlySpend] = await Promise.all([
-      service.db.ensureUserBalance("default"),
-      service.db.getDailySpend("default"),
-      service.db.getMonthlySpend("default"),
+      service.db.ensureUserBalance(userId),
+      service.db.getDailySpend(userId),
+      service.db.getMonthlySpend(userId),
     ]);
     return c.json({
       balance: bal.balance,

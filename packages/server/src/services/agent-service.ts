@@ -31,6 +31,7 @@ import type {
   JobQueue,
 } from "@lot-agent/core";
 import { DB } from "../db/database.js";
+import { SessionStore } from "../auth/session-store.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { UsageMeter } from "../billing/meter.js";
@@ -56,9 +57,12 @@ export class AgentService {
   readonly toolRegistry: ToolRegistry;
   readonly skillLoader: SkillLoader;
   readonly mcpManager: MCPClientManager;
-  readonly memory: AgentMemoryStore;
   readonly agentRegistry: InMemoryAgentRegistry;
   readonly modelRegistry: InMemoryModelRegistry;
+  /** Persistent memory adapter — kept for per-request AgentMemoryStore construction */
+  pgAdapter!: import("@lot-agent/core").PgMemoryAdapter;
+  /** Session store for multi-user auth */
+  sessions!: SessionStore;
   jobQueue!: JobQueue;
   usageMeter!: UsageMeter;
   private llmConfig: LLMConfig;
@@ -75,7 +79,6 @@ export class AgentService {
     this.traceManager.addSink(new ConsoleSink());
     this.toolRegistry = new ToolRegistry();
     this.skillLoader = new SkillLoader();
-    this.memory = new AgentMemoryStore();
     this.mcpManager = new MCPClientManager();
     this.agentRegistry = new InMemoryAgentRegistry();
     this.modelRegistry = new InMemoryModelRegistry();
@@ -95,18 +98,18 @@ export class AgentService {
     this.bullmqQueue = new BullmqJobQueue(this.db, conn);
     this.jobQueue = this.bullmqQueue;
 
-    // Initialize persistent user memory
+    // Initialize persistent user memory adapter (shared; per-request stores created in streamAgentResponse)
     const pgAdapter = new PgMemoryAdapter(this.db.pool);
     await pgAdapter.init();
-    this.memory = new AgentMemoryStore({
-      persistent: pgAdapter,
-      userId: "default", // single-user mode for now
-    });
+    this.pgAdapter = pgAdapter;
+
+    // Initialize session store
+    this.sessions = new SessionStore(this.db);
 
     registerBuiltinTools(this.toolRegistry);
 
-    // Register memory tools
-    for (const tool of createMemoryTools(this.memory)) {
+    // Register memory tools — no closure capture; each tool reads context.memory at call time
+    for (const tool of createMemoryTools()) {
       this.toolRegistry.register(tool);
     }
 
@@ -204,7 +207,8 @@ export class AgentService {
   async *streamAgentResponse(
     conversationId: string,
     userMessage: string,
-    agentId?: string
+    agentId?: string,
+    userId?: string
   ): AsyncIterable<AgentEvent> {
     const def =
       this.agentRegistry.get(agentId ?? "general") ??
@@ -272,11 +276,18 @@ export class AgentService {
       this.llmConfig.default
     );
 
+    // Fresh per-request memory store — ephemeral/session state is request-scoped,
+    // so concurrent users/sessions never clobber each other.
+    const memory = new AgentMemoryStore({
+      persistent: this.pgAdapter,
+      userId: userId ?? "default",
+    });
+
     const context: AgentContext = {
       llm,
       toolRegistry: this.toolRegistry,
-      toolContext: { workingDirectory: process.cwd() },
-      memory: this.memory,
+      toolContext: { workingDirectory: process.cwd(), memory },
+      memory,
     };
 
     let assistantContent = "";
@@ -438,7 +449,7 @@ export class AgentService {
       if (inputTokens + outputTokens > 0) {
         try {
           const cost = await this.usageMeter.record({
-            userId: "default",
+            userId: userId ?? "default",
             taskId: null,
             modelId: def.defaultModelId,
             usage: { inputCount: inputTokens, outputCount: outputTokens },

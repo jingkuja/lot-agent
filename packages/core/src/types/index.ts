@@ -83,6 +83,7 @@ export interface ToolExecConfig {
 /** Context passed to tool execution */
 export interface ToolContext {
   workingDirectory: string;
+  memory?: import("../memory/store.js").AgentMemoryStore;
 }
 
 /** Tool definition */

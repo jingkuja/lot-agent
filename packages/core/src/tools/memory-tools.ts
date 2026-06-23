@@ -1,11 +1,10 @@
-import type { Tool, ToolResult } from "../types/index.js";
-import type { AgentMemoryStore } from "../memory/index.js";
+import type { Tool, ToolResult, ToolContext } from "../types/index.js";
 
 /**
- * Create memory tools bound to a specific memory store.
- * Call this after creating the AgentMemoryStore.
+ * Create memory tools that use per-request memory from context.
+ * Each tool reads `context.memory` at call time — no closure capture.
  */
-export function createMemoryTools(memory: AgentMemoryStore): Tool[] {
+export function createMemoryTools(): Tool[] {
   const memoryRead: Tool = {
     name: "memory_read",
     description:
@@ -25,7 +24,9 @@ export function createMemoryTools(memory: AgentMemoryStore): Tool[] {
       },
       required: ["tier", "key"],
     },
-    async execute(input): Promise<ToolResult> {
+    async execute(input, context: ToolContext): Promise<ToolResult> {
+      const memory = context.memory;
+      if (!memory) return { content: "Memory not available", isError: true };
       const { tier, key } = input as { tier: string; key: string };
       if (tier === "user") {
         const value = await memory.getUserMemory(key);
@@ -65,7 +66,9 @@ export function createMemoryTools(memory: AgentMemoryStore): Tool[] {
       },
       required: ["tier", "key", "value"],
     },
-    async execute(input): Promise<ToolResult> {
+    async execute(input, context: ToolContext): Promise<ToolResult> {
+      const memory = context.memory;
+      if (!memory) return { content: "Memory not available", isError: true };
       const { tier, key, value } = input as {
         tier: string;
         key: string;
@@ -95,7 +98,9 @@ export function createMemoryTools(memory: AgentMemoryStore): Tool[] {
       },
       required: ["tier"],
     },
-    async execute(input): Promise<ToolResult> {
+    async execute(input, context: ToolContext): Promise<ToolResult> {
+      const memory = context.memory;
+      if (!memory) return { content: "Memory not available", isError: true };
       const { tier } = input as { tier: string };
       if (tier === "user") {
         const entries = await memory.listUserMemory();
