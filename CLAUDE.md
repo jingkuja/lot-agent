@@ -46,9 +46,10 @@ in the gitignored `config/local.json`.
 core/                                server/                              web/
   agent/        ReAct loop engine      services/                            pages/Home, Workspace
   agents/       AgentRegistry +          agent-service.ts (orchestrator)    components/* (chat, preview,
-                definitions(copy/img/    message-repository.ts (persist)                gallery, task-progress, login)
+                definitions(copy/img/    message-repository.ts (persist)                gallery, task-progress, login, theme-toggle)
                 video/general)           trace-recorder.ts (spans+trace)    api/client.ts (token + SSE)
-  models/       ModelRegistry+pricing    sse-adapter.ts (AgentEvent→SSE)    hooks/useChat, useConversations
+  models/       ModelRegistry+pricing    sse-adapter.ts (AgentEvent→SSE)    hooks/useChat/useConversations/useTheme
+                                                                            lib/theme.ts (light/dark + persist)
   providers/    image/video/tts/review  routes/  (one file per resource)
                 (interfaces + stubs)     auth/  session-store + middleware
   publish/      PlatformConnector(stub)  jobs/  bullmq-queue + redis
@@ -115,6 +116,11 @@ Tables: `users`, `sessions`, `conversations`, `messages`, `message_tool_calls`, 
 - **No secrets in git**: keys empty in `config/default.json`, injected via env. Do not commit real keys.
 - Stub providers (`Stub*Provider`, `Keyword*`, `Stub*Connector`) prove the pipeline — replace with real
   vendor integrations in the business phase, behind the existing interfaces.
+- **Web theming**: all colors are CSS variables in `web/src/App.css`; `:root` is the **light** (default)
+  palette, `[data-theme="dark"]` overrides it. A pre-paint script in `index.html` sets `data-theme` from
+  `localStorage` (key `lot:theme`) before first render to avoid flash; `ThemeToggle` + `useTheme` flip it
+  at runtime. Use the existing `var(--*)` tokens (incl. `--overlay-raise/sink`, `--code-*-bg`) for new UI —
+  never hardcode hex/`rgba`, or light mode breaks.
 
 ## Status / not-yet-done
 
