@@ -7,9 +7,11 @@ import type { DisplayMessage } from "../hooks/useChat.js";
 interface MessageBubbleProps {
   message: DisplayMessage;
   onRegenerate?: () => void;
+  /** Click an assistant reply to open it in the preview panel. */
+  onSelectForPreview?: (content: string) => void;
 }
 
-export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
+export function MessageBubble({ message, onRegenerate, onSelectForPreview }: MessageBubbleProps) {
   if (message.role === "user") {
     return (
       <div className="message-wrapper message-user">
@@ -70,8 +72,16 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
           </div>
         )}
 
-        {/* Message content */}
-        <div className="message-content markdown-body">
+        {/* Message content — click to open in preview */}
+        {(() => {
+          const canPreview =
+            !!onSelectForPreview && !!message.content && !message.isStreaming;
+          return (
+        <div
+          className={`message-content markdown-body${canPreview ? " clickable" : ""}`}
+          onClick={canPreview ? () => onSelectForPreview!(message.content) : undefined}
+          title={canPreview ? "点击预览" : undefined}
+        >
           {message.content ? (
             <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
           ) : message.isStreaming ? (
@@ -81,6 +91,8 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
           )}
           {message.isStreaming && <span className="cursor-blink" />}
         </div>
+          );
+        })()}
 
         {/* Action buttons */}
         {!message.isStreaming && message.content && (

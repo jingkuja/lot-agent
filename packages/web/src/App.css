@@ -5,29 +5,29 @@
 }
 
 :root {
-  /* Light theme - AI Studio style */
-  --bg: #f7f7f8;
-  --bg-sidebar: #ffffff;
-  --bg-card: #ffffff;
-  --bg-user-msg: #111111;
+  /* Dark theme — Seedance-style */
+  --bg: #0b0b0d;
+  --bg-sidebar: #111114;
+  --bg-card: #18181c;
+  --bg-user-msg: #2a2a32;
   --bg-assistant-msg: transparent;
-  --bg-input: #ffffff;
-  --bg-hover: #f0f0f0;
-  --bg-active: #e8e8ed;
-  --bg-tool: #f4f4f8;
+  --bg-input: #1a1a1f;
+  --bg-hover: #1e1e24;
+  --bg-active: #26262e;
+  --bg-tool: #141418;
 
-  --text: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --text-muted: #aeaeb2;
+  --text: #ededf2;
+  --text-secondary: #a6a6b2;
+  --text-muted: #6c6c78;
   --text-user: #ffffff;
-  --text-on-accent: #ffffff;
+  --text-on-accent: #052228;
 
-  --border: #e5e5ea;
-  --border-input: #d2d2d7;
+  --border: #26262e;
+  --border-input: #34343e;
 
-  --accent: #0071e3;
-  --accent-hover: #0077ed;
-  --error: #ff3b30;
+  --accent: #22d3ee;
+  --accent-hover: #38dbf0;
+  --error: #ff5a52;
   --success: #34c759;
 
   --radius-sm: 8px;
@@ -374,31 +374,52 @@ html, body, #root {
   background: var(--bg-input);
   border: 1px solid var(--border-input);
   border-radius: var(--radius-xl);
-  padding: 12px 16px;
+  padding: 16px 18px 12px;
   display: flex;
-  align-items: flex-end;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   box-shadow: var(--shadow-md);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .input-box:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--shadow-md), 0 0 0 3px rgba(0,113,227,0.12);
+  box-shadow: var(--shadow-md), 0 0 0 3px rgba(34,211,238,0.14);
 }
 
 .input-box textarea {
-  flex: 1;
+  width: 100%;
+  min-height: 52px;
   background: transparent;
   border: none;
   outline: none;
   color: var(--text);
-  font-size: 15px;
+  font-size: 16px;
   font-family: inherit;
   resize: none;
-  line-height: 1.5;
-  max-height: 200px;
+  line-height: 1.6;
+  max-height: 320px;
   padding: 0;
+}
+
+/* Input bottom toolbar: agent switcher (left) + send (right) */
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.input-toolbar-left {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.input-toolbar-left::-webkit-scrollbar { height: 0; }
+
+.input-toolbar-right {
+  flex-shrink: 0;
 }
 
 .input-box textarea::placeholder {
@@ -423,8 +444,8 @@ html, body, #root {
 }
 
 .btn-send {
-  background: var(--bg-user-msg);
-  color: var(--text-user);
+  background: var(--accent);
+  color: var(--text-on-accent);
 }
 
 .btn-send:disabled {
@@ -434,7 +455,7 @@ html, body, #root {
 }
 
 .btn-send:hover:not(:disabled) {
-  background: #333;
+  background: var(--accent-hover);
   transform: scale(1.05);
 }
 
@@ -950,17 +971,24 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--border);
   min-width: 0;
 }
 
 .workspace-right {
-  width: 360px;
-  min-width: 280px;
+  width: 380px;
+  min-width: 300px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+
+.workspace-brand {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 /* ── Preview Panel ── */
@@ -1222,4 +1250,125 @@ html, body, #root {
 .status-user {
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+/* ── Agent Switcher (input bottom-left) ── */
+.agent-switcher {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.agent-pill {
+  background: var(--bg-active);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  padding: 5px 13px;
+  font-size: 12.5px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.agent-pill:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.agent-pill.active {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.agent-pill:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Centered empty state (new conversation) ── */
+.chat-panel--empty {
+  justify-content: center;
+}
+
+.chat-empty-hero {
+  margin: auto;
+  width: 100%;
+  max-width: 760px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.chat-empty-logo {
+  width: 80px;
+  height: 80px;
+  border-radius: 24px;
+  background: conic-gradient(from 210deg, #8b5cf6, #22d3ee, #34d399, #6366f1, #8b5cf6);
+  box-shadow: 0 0 60px rgba(34, 211, 238, 0.22);
+}
+
+.chat-empty-title {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.chat-empty-desc {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+  text-align: center;
+  max-width: 560px;
+}
+
+.input-area--centered {
+  width: 100%;
+  max-width: 100%;
+  padding: 10px 0 0;
+  margin: 0;
+}
+
+/* ── Clickable assistant reply (opens preview) ── */
+.message-content.clickable {
+  cursor: pointer;
+  padding: 8px 12px;
+  margin: -8px -12px;
+  border-radius: 10px;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+
+.message-content.clickable:hover {
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* ── Preview header (close button) ── */
+.preview-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 6px;
+  transition: all 0.12s;
+}
+
+.preview-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
 }
