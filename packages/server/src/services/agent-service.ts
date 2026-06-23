@@ -16,6 +16,8 @@ import {
   copywritingDefinition,
   imageDefinition,
   videoDefinition,
+  InMemoryModelRegistry,
+  populateModelRegistry,
 } from "@lot-agent/core";
 import type {
   AgentEvent,
@@ -23,12 +25,15 @@ import type {
   AgentContext,
   Message,
   LLMConfig,
+  LLMProvider,
   AgentDefinition,
+  ModelConfig,
 } from "@lot-agent/core";
 import { DB } from "../db/database.js";
 
 export interface ServiceConfig {
   llm: LLMConfig;
+  models: ModelConfig[];
   agent: Partial<AgentConfig>;
   mcpConfigPath: string;
   skillsDir: string;
@@ -49,11 +54,13 @@ export class AgentService {
   readonly mcpManager: MCPClientManager;
   readonly memory: AgentMemoryStore;
   readonly agentRegistry: InMemoryAgentRegistry;
+  readonly modelRegistry: InMemoryModelRegistry;
   private llmConfig: LLMConfig;
+  private configModels: ModelConfig[];
   private agentConfig: Partial<AgentConfig>;
   private mcpConfigPath: string;
   private skillsDir: string;
-  private llmProvider: import("@lot-agent/core").LLMProvider | null = null;
+  private llmProvider: LLMProvider | null = null;
 
   constructor(config: ServiceConfig) {
     this.db = new DB(config.db);
@@ -64,7 +71,9 @@ export class AgentService {
     this.memory = new AgentMemoryStore();
     this.mcpManager = new MCPClientManager();
     this.agentRegistry = new InMemoryAgentRegistry();
+    this.modelRegistry = new InMemoryModelRegistry();
     this.llmConfig = config.llm;
+    this.configModels = config.models;
     this.agentConfig = config.agent;
     this.mcpConfigPath = config.mcpConfigPath;
     this.skillsDir = config.skillsDir;
@@ -110,6 +119,9 @@ export class AgentService {
     }
 
     console.log(`Registered ${this.toolRegistry.getAll().length} tools`);
+
+    // Populate model registry with all configured models
+    populateModelRegistry(this.modelRegistry, this.configModels, this.llmConfig);
 
     // Register agent definitions after all tools are loaded
     const defaultModelId =
@@ -226,7 +238,7 @@ export class AgentService {
       (s) => `[Skill: ${s.name}]\n${s.content}`
     );
 
-    const llm = this.getLLMProvider();
+    const llm = this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider();
     const agentConfig = this.agentConfig as Record<string, unknown>;
     const contextConfig = agentConfig.context as import("@lot-agent/core").ContextManagerConfig | undefined;
     const agent = new Agent({

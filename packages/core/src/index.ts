@@ -9,3 +9,5 @@ export * from "./context/index.js";
 export * from "./memory/index.js";
 export * from "./config/schema.js";
 export * from "./agents/index.js";
+export * from "./models/index.js";
+export * from "./providers/index.js";

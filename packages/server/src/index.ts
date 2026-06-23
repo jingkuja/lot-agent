@@ -48,6 +48,7 @@ async function loadConfig(): Promise<ServiceConfig> {
 
   return {
     llm,
+    models: config.models ?? [],
     agent: config.agent as ServiceConfig["agent"],
     mcpConfigPath: resolve(ROOT, "config/mcp-servers.json"),
     skillsDir: resolve(ROOT, "skills"),
