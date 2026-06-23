@@ -28,8 +28,11 @@ import type {
   LLMProvider,
   AgentDefinition,
   ModelConfig,
+  JobQueue,
 } from "@lot-agent/core";
 import { DB } from "../db/database.js";
+import { createRedisConnection } from "../jobs/redis.js";
+import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 
 export interface ServiceConfig {
   llm: LLMConfig;
@@ -55,12 +58,14 @@ export class AgentService {
   readonly memory: AgentMemoryStore;
   readonly agentRegistry: InMemoryAgentRegistry;
   readonly modelRegistry: InMemoryModelRegistry;
+  jobQueue!: JobQueue;
   private llmConfig: LLMConfig;
   private configModels: ModelConfig[];
   private agentConfig: Partial<AgentConfig>;
   private mcpConfigPath: string;
   private skillsDir: string;
   private llmProvider: LLMProvider | null = null;
+  private bullmqQueue: BullmqJobQueue | null = null;
 
   constructor(config: ServiceConfig) {
     this.db = new DB(config.db);
@@ -82,6 +87,11 @@ export class AgentService {
   async init(): Promise<void> {
     // Initialize database (runs migration)
     await this.db.init();
+
+    // Initialize job queue (server enqueues; separate Worker process consumes)
+    const conn = createRedisConnection(process.env.REDIS_URL);
+    this.bullmqQueue = new BullmqJobQueue(this.db, conn);
+    this.jobQueue = this.bullmqQueue;
 
     // Initialize persistent user memory
     const pgAdapter = new PgMemoryAdapter(this.db.pool);
@@ -422,6 +432,9 @@ export class AgentService {
 
   async shutdown(): Promise<void> {
     await this.mcpManager.disconnectAll();
+    if (this.bullmqQueue) {
+      await this.bullmqQueue.close();
+    }
     await this.db.close();
   }
 }

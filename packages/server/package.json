@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --import tsx/esm src/index.ts",
+    "dev:worker": "node --import tsx/esm src/workers/index.ts",
     "build": "tsup",
     "clean": "rm -rf dist"
   },
@@ -11,7 +12,9 @@
     "@lot-agent/core": "*",
     "hono": "^4.0.0",
     "@hono/node-server": "^1.0.0",
-    "pg": "^8.0.0"
+    "pg": "^8.0.0",
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.0.0"
   },
   "devDependencies": {
     "@types/pg": "^8.0.0",

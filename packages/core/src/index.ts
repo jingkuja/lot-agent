@@ -11,3 +11,4 @@ export * from "./config/schema.js";
 export * from "./agents/index.js";
 export * from "./models/index.js";
 export * from "./providers/index.js";
+export * from "./jobs/index.js";

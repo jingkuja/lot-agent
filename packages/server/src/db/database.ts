@@ -72,6 +72,19 @@ export interface StoredSpan {
   duration_ms: number | null;
 }
 
+export interface StoredTask {
+  id: string;
+  type: string;
+  status: string;
+  progress: number;
+  input: unknown;
+  output: unknown | null;
+  error: string | null;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DBConfig {
   host: string;
   port: number;
@@ -262,6 +275,26 @@ export class DB {
               EXECUTE FUNCTION update_conversation_timestamp();
           END IF;
         END $$;
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS tasks (
+          id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+          type        VARCHAR(50)  NOT NULL,
+          status      VARCHAR(20)  NOT NULL DEFAULT 'pending',
+          progress    SMALLINT     NOT NULL DEFAULT 0,
+          input       JSONB        NOT NULL DEFAULT '{}',
+          output      JSONB,
+          error       TEXT,
+          user_id     VARCHAR(100) NOT NULL DEFAULT 'default',
+          created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+          updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks (user_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);
       `);
 
       await client.query("COMMIT");
@@ -560,5 +593,58 @@ export class DB {
 
   async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  // ── Tasks ──
+
+  async createTask(
+    id: string,
+    type: string,
+    input: unknown,
+    userId: string
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO tasks (id, type, input, user_id)
+       VALUES ($1, $2, $3, $4)`,
+      [id, type, JSON.stringify(input), userId]
+    );
+  }
+
+  async getTask(id: string): Promise<StoredTask | null> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM tasks WHERE id = $1",
+      [id]
+    );
+    return rows[0] ?? null;
+  }
+
+  async updateTaskStatus(id: string, status: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2",
+      [status, id]
+    );
+  }
+
+  async updateTaskProgress(id: string, progress: number): Promise<void> {
+    await this.pool.query(
+      "UPDATE tasks SET progress = $1, updated_at = now() WHERE id = $2",
+      [progress, id]
+    );
+  }
+
+  async setTaskResult(id: string, output: unknown): Promise<void> {
+    await this.pool.query(
+      `UPDATE tasks SET output = $1, status = 'succeeded', progress = 100, updated_at = now()
+       WHERE id = $2`,
+      [JSON.stringify(output), id]
+    );
+  }
+
+  async setTaskError(id: string, error: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE tasks SET error = $1, status = 'failed', updated_at = now()
+       WHERE id = $2`,
+      [error, id]
+    );
   }
 }
