@@ -129,6 +129,35 @@ export interface UserBalance {
   updated_at: string;
 }
 
+export interface StoredReviewLog {
+  id: string;
+  user_id: string;
+  task_id: string | null;
+  content_type: string;
+  verdict: string;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface StoredPlatformAccount {
+  id: string;
+  user_id: string;
+  platform: string;
+  access_token: string;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface StoredPublishRecord {
+  id: string;
+  user_id: string;
+  platform: string;
+  title: string | null;
+  status: string;
+  published_url: string | null;
+  created_at: string;
+}
+
 export interface DBConfig {
   host: string;
   port: number;
@@ -432,6 +461,52 @@ export class DB {
       await client.query(`
         INSERT INTO users (email, name) VALUES ('seed@local', 'Seed User')
           ON CONFLICT (email) DO NOTHING;
+      `);
+
+      // ── P7: Review & Publish tables ──
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS review_logs (
+          id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id      VARCHAR(100) NOT NULL,
+          task_id      UUID,
+          content_type VARCHAR(20)  NOT NULL,
+          verdict      VARCHAR(20)  NOT NULL,
+          detail       JSONB        NOT NULL DEFAULT '{}',
+          created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_review_user ON review_logs (user_id, created_at DESC);
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS platform_accounts (
+          id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id      VARCHAR(100) NOT NULL,
+          platform     VARCHAR(50)  NOT NULL,
+          access_token TEXT         NOT NULL,
+          expires_at   TIMESTAMPTZ,
+          created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+          UNIQUE (user_id, platform)
+        );
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS publish_records (
+          id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id       VARCHAR(100) NOT NULL,
+          platform      VARCHAR(50)  NOT NULL,
+          title         TEXT,
+          status        VARCHAR(20)  NOT NULL DEFAULT 'published',
+          published_url TEXT,
+          created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_publish_user ON publish_records (user_id, created_at DESC);
       `);
 
       await client.query("COMMIT");
@@ -854,6 +929,72 @@ export class DB {
 
   async deleteSession(token: string): Promise<void> {
     await this.pool.query("DELETE FROM sessions WHERE token = $1", [token]);
+  }
+
+  // ── Review Logs ──
+
+  async writeReviewLog(r: {
+    userId: string;
+    taskId?: string | null;
+    contentType: string;
+    verdict: string;
+    detail: Record<string, unknown>;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO review_logs (user_id, task_id, content_type, verdict, detail)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [r.userId, r.taskId ?? null, r.contentType, r.verdict, JSON.stringify(r.detail)]
+    );
+  }
+
+  // ── Platform Accounts ──
+
+  async upsertPlatformAccount(a: {
+    userId: string;
+    platform: string;
+    accessToken: string;
+    expiresAt?: Date | null;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO platform_accounts (user_id, platform, access_token, expires_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, platform) DO UPDATE SET access_token = EXCLUDED.access_token, expires_at = EXCLUDED.expires_at`,
+      [a.userId, a.platform, a.accessToken, a.expiresAt ?? null]
+    );
+  }
+
+  async getPlatformAccount(userId: string, platform: string): Promise<StoredPlatformAccount | null> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM platform_accounts WHERE user_id = $1 AND platform = $2",
+      [userId, platform]
+    );
+    return rows[0] ?? null;
+  }
+
+  // ── Publish Records ──
+
+  async createPublishRecord(p: {
+    userId: string;
+    platform: string;
+    title: string;
+    status: string;
+    publishedUrl: string;
+  }): Promise<StoredPublishRecord> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO publish_records (user_id, platform, title, status, published_url)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [p.userId, p.platform, p.title, p.status, p.publishedUrl]
+    );
+    return rows[0];
+  }
+
+  async getPublishRecords(userId: string, limit = 100): Promise<StoredPublishRecord[]> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM publish_records WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [userId, limit]
+    );
+    return rows;
   }
 
   async close(): Promise<void> {

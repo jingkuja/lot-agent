@@ -17,6 +17,7 @@ import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
 import { createAssetRoutes } from "./routes/assets.js";
 import { createUsageRoutes } from "./routes/usage.js";
+import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import type { LLMConfig } from "@lot-agent/core";
 import { AppConfigSchema } from "@lot-agent/core";
 
@@ -112,6 +113,8 @@ async function main() {
   app.use("/api/assets/*", authMw);
   app.use("/api/usage/*", authMw);
   app.use("/api/balance", authMw);
+  app.use("/api/platform/*", authMw);
+  app.use("/api/publish/*", authMw);
 
   // Protected API routes
   app.route("/api/conversations", createConversationRoutes(service));
@@ -123,6 +126,8 @@ async function main() {
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/usage", createUsageRoutes(service));
+  app.route("/api/platform", createPlatformRoutes(service));
+  app.route("/api/publish", createPublishRoutes(service));
 
   // /api/balance alias → same balance logic, user-scoped
   app.get("/api/balance", async (c) => {

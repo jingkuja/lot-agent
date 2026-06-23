@@ -14,3 +14,4 @@ export * from "./providers/index.js";
 export * from "./jobs/index.js";
 export * from "./storage/index.js";
 export * from "./billing/index.js";
+export * from "./publish/index.js";

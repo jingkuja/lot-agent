@@ -18,6 +18,9 @@ import {
   videoDefinition,
   InMemoryModelRegistry,
   populateModelRegistry,
+  KeywordReviewProvider,
+  XiaohongshuConnector,
+  WechatMpConnector,
 } from "@lot-agent/core";
 import type {
   AgentEvent,
@@ -29,6 +32,8 @@ import type {
   AgentDefinition,
   ModelConfig,
   JobQueue,
+  ReviewProvider,
+  PlatformConnector,
 } from "@lot-agent/core";
 import { DB } from "../db/database.js";
 import { SessionStore } from "../auth/session-store.js";
@@ -59,6 +64,8 @@ export class AgentService {
   readonly mcpManager: MCPClientManager;
   readonly agentRegistry: InMemoryAgentRegistry;
   readonly modelRegistry: InMemoryModelRegistry;
+  readonly reviewProvider: ReviewProvider;
+  readonly connectors: Map<string, PlatformConnector>;
   /** Persistent memory adapter — kept for per-request AgentMemoryStore construction */
   pgAdapter!: import("@lot-agent/core").PgMemoryAdapter;
   /** Session store for multi-user auth */
@@ -82,6 +89,11 @@ export class AgentService {
     this.mcpManager = new MCPClientManager();
     this.agentRegistry = new InMemoryAgentRegistry();
     this.modelRegistry = new InMemoryModelRegistry();
+    this.reviewProvider = new KeywordReviewProvider();
+    this.connectors = new Map([
+      ["xiaohongshu", new XiaohongshuConnector()],
+      ["wechat_mp", new WechatMpConnector()],
+    ]);
     this.llmConfig = config.llm;
     this.configModels = config.models;
     this.agentConfig = config.agent;
