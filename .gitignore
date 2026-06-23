@@ -4,6 +4,8 @@ dist/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/assets
+data/localstorage
 packages/*/dist/
 packages/*/data/
 .env
