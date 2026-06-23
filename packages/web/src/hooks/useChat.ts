@@ -14,13 +14,16 @@ export interface DisplayMessage {
 
 export function useChat(
   conversationId: string | null,
-  onStreamEnd?: () => void
+  onStreamEnd?: () => void,
+  conversationIdRef?: React.RefObject<string | null>
 ) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const onStreamEndRef = useRef(onStreamEnd);
   onStreamEndRef.current = onStreamEnd;
+  // Allow caller to inject a ref so send() reads the latest id synchronously.
+  const cidRef = conversationIdRef ?? { current: conversationId };
 
   const loadMessages = useCallback(async (convId: string) => {
     const data = await api.getConversation(convId);
@@ -45,7 +48,8 @@ export function useChat(
 
   const streamMessage = useCallback(
     (content: string) => {
-      if (!conversationId || !content.trim() || isStreaming) return;
+      const cid = cidRef.current;
+      if (!cid || !content.trim() || isStreaming) return;
 
       const userMsgId = `user-${Date.now()}`;
       const userMsg: DisplayMessage = {
@@ -67,7 +71,7 @@ export function useChat(
 
       setIsStreaming(true);
 
-      abortRef.current = api.sendMessage(conversationId, content, (event) => {
+      abortRef.current = api.sendMessage(cid, content, (event) => {
         if (event.type === "text" && event.content) {
           assistantMsg = {
             ...assistantMsg,
@@ -131,8 +135,8 @@ export function useChat(
           });
           setIsStreaming(false);
 
-          if (event.type === "stream_end" && conversationId) {
-            loadMessages(conversationId);
+          if (event.type === "stream_end" && cid) {
+            loadMessages(cid);
             onStreamEndRef.current?.();
           }
         }

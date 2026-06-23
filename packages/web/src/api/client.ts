@@ -1,6 +1,7 @@
 export interface Conversation {
   id: string;
   title: string;
+  agent_id: string;
   created_at: string;
   updated_at: string;
 }

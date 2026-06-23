@@ -16,7 +16,6 @@ interface WorkspaceProps {
 }
 
 export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
-  // General agent is always first in the switcher.
   const orderedAgents = useMemo(() => {
     const general = agents.find((a) => a.type === "general" || a.id === "general");
     if (!general) return agents;
@@ -27,20 +26,23 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   const [activeAgentId, setActiveAgentId] = useState(defaultAgentId);
   const activeAgent = orderedAgents.find((a) => a.id === activeAgentId) ?? null;
 
+  // newAgentId: page-only "new chat" state. No server conversation exists yet.
+  // null = viewing a real conversation; string = pending new chat for that agent.
+  const [newAgentId, setNewAgentId] = useState<string | null>(null);
+
   const { conversations, activeId, setActiveId, remove, loading, refresh } =
     useConversations();
   const [artifacts] = useState<Artifact[]>([]);
-  // Preview is hidden by default; set to a string when a reply is clicked.
   const [previewContent, setPreviewContent] = useState<string | null>(null);
 
   const handleStreamEnd = useCallback(() => {
     setTimeout(() => refresh(), 1500);
   }, [refresh]);
 
+  const activeIdRef = useRef(activeId);
   const { messages, send, stop, isStreaming, loadMessages, clear, regenerate } =
-    useChat(activeId, handleStreamEnd);
+    useChat(activeId, handleStreamEnd, activeIdRef);
 
-  // Reset preview when the conversation changes.
   const prevActiveId = useRef<string | null>(null);
   useEffect(() => {
     if (activeId !== prevActiveId.current) {
@@ -49,39 +51,48 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
     }
   }, [activeId]);
 
-  // Start a fresh conversation bound to a given agent (centers the empty input).
-  const startConversationForAgent = useCallback(
-    async (agentId: string) => {
-      const conv = await api.createConversation(undefined, agentId);
-      setActiveAgentId(agentId);
-      setActiveId(conv.id);
-      clear();
-      loadMessages(conv.id);
-      setPreviewContent(null);
-      refresh();
-    },
-    [setActiveId, loadMessages, clear, refresh]
-  );
+  // Keep useChat's conversationId ref in sync.
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
-  // On mount: enter the general agent directly with an empty conversation.
+  // On mount: open the most recent conversation, or enter new-chat mode.
   const didInit = useRef(false);
   useEffect(() => {
     if (loading || didInit.current) return;
     didInit.current = true;
-    startConversationForAgent(defaultAgentId);
-  }, [loading, defaultAgentId, startConversationForAgent]);
+    if (conversations.length > 0) {
+      const latest = conversations[0];
+      setActiveAgentId(latest.agent_id || defaultAgentId);
+      setActiveId(latest.id);
+      clear();
+      loadMessages(latest.id);
+    } else {
+      setNewAgentId(defaultAgentId);
+    }
+  }, [loading, conversations, defaultAgentId, setActiveId, clear, loadMessages]);
 
   const handleSwitchAgent = useCallback(
     (agentId: string) => {
-      // Re-clicking the active agent on an empty conversation is a no-op.
-      if (agentId === activeAgentId && messages.length === 0) return;
-      startConversationForAgent(agentId);
+      if (agentId === activeAgentId && !newAgentId && messages.length === 0) return;
+      if (newAgentId) {
+        // Already in new-chat mode — just switch the agent.
+        setNewAgentId(agentId);
+        setActiveAgentId(agentId);
+        return;
+      }
+      // Enter new-chat mode for the new agent.
+      setNewAgentId(agentId);
+      setActiveAgentId(agentId);
+      setActiveId(null);
+      clear();
+      setPreviewContent(null);
     },
-    [activeAgentId, messages.length, startConversationForAgent]
+    [activeAgentId, newAgentId, messages.length, setActiveId, clear]
   );
 
   const handleSelect = useCallback(
     (id: string) => {
+      if (id === "__new__") return; // already in new-chat mode
+      setNewAgentId(null);
       setActiveId(id);
       clear();
       loadMessages(id);
@@ -91,9 +102,29 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   );
 
   const handleCreate = useCallback(() => {
-    // New chat keeps the current agent.
-    startConversationForAgent(activeAgentId);
-  }, [startConversationForAgent, activeAgentId]);
+    if (newAgentId) return; // already in new-chat mode
+    setNewAgentId(activeAgentId);
+    setActiveId(null);
+    clear();
+    setPreviewContent(null);
+  }, [newAgentId, activeAgentId, setActiveId, clear]);
+
+  // Send wrapper: creates the server conversation on first message if needed.
+  const doSend = useCallback(
+    async (content: string) => {
+      if (newAgentId) {
+        const conv = await api.createConversation(undefined, newAgentId);
+        activeIdRef.current = conv.id; // sync ref before send reads it
+        setActiveId(conv.id);
+        setNewAgentId(null);
+        refresh();
+        send(content);
+        return;
+      }
+      send(content);
+    },
+    [newAgentId, setActiveId, refresh, send]
+  );
 
   const handleDelete = useCallback(
     (id: string) => {
@@ -102,6 +133,15 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
     },
     [remove, activeId, clear]
   );
+
+  // Sidebar list: prepend virtual "New Chat" entry when in new-chat mode.
+  const sidebarConversations = useMemo(() => {
+    if (!newAgentId) return conversations;
+    return [
+      { id: "__new__", title: "New Chat", agent_id: newAgentId, created_at: "", updated_at: "" },
+      ...conversations,
+    ];
+  }, [newAgentId, conversations]);
 
   const switcher = (
     <AgentSwitcher
@@ -122,8 +162,8 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
           )}
         </div>
         <Sidebar
-          conversations={conversations}
-          activeId={activeId}
+          conversations={sidebarConversations}
+          activeId={newAgentId ? "__new__" : activeId}
           onSelect={handleSelect}
           onCreate={handleCreate}
           onDelete={handleDelete}
@@ -134,7 +174,7 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
         <div className="workspace-chat">
           <ChatPanel
             messages={messages}
-            onSend={send}
+            onSend={doSend}
             onStop={stop}
             isStreaming={isStreaming}
             activeConversationId={activeId}
