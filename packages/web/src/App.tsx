@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Login } from "./components/Login.js";
 import { Workspace } from "./pages/Workspace.js";
+import { ThemeToggle } from "./components/ThemeToggle.js";
 import { api, getToken, clearToken, type User, type Agent } from "./api/client.js";
 import "./App.css";
 
@@ -63,21 +64,23 @@ export default function App() {
     setView("login");
   }, []);
 
+  let content;
   if (view === "loading") {
-    return (
+    content = (
       <div className="app-loading">
         <span>加载中...</span>
       </div>
     );
+  } else if (view === "ready" && user) {
+    content = <Workspace agents={agents} user={user} onLogout={handleLogout} />;
+  } else {
+    content = <Login onLogin={handleLogin} />;
   }
 
-  if (view === "login") {
-    return <Login onLogin={handleLogin} />;
-  }
-
-  if (view === "ready" && user) {
-    return <Workspace agents={agents} user={user} onLogout={handleLogout} />;
-  }
-
-  return <Login onLogin={handleLogin} />;
+  return (
+    <>
+      {content}
+      <ThemeToggle />
+    </>
+  );
 }

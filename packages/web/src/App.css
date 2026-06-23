@@ -5,6 +5,48 @@
 }
 
 :root {
+  /* Light theme — default (matches the lavender-gray reference) */
+  --bg: #f0f0f5;
+  --bg-sidebar: #e8e8f0;
+  --bg-card: #ffffff;
+  --bg-user-msg: #e6e4f7;
+  --bg-assistant-msg: transparent;
+  --bg-input: #ffffff;
+  --bg-hover: #ececf3;
+  --bg-active: #e2e0f0;
+  --bg-tool: #f5f5fa;
+
+  --text: #1a1a22;
+  --text-secondary: #5a5a68;
+  --text-muted: #8a8a96;
+  --text-user: #1a1a22;
+  --text-on-accent: #ffffff;
+
+  --border: #e2e2ec;
+  --border-input: #d4d4e0;
+
+  --accent: #6d5cf0;
+  --accent-hover: #7d6ff5;
+  --error: #e0342a;
+  --success: #2faa55;
+
+  /* Elevation overlays (theme-aware so light/dark both read correctly) */
+  --overlay-raise: rgba(0,0,0,0.04);
+  --overlay-sink: rgba(0,0,0,0.03);
+  --code-inline-bg: rgba(109,92,240,0.10);
+  --code-block-bg: #f5f5fa;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 14px rgba(0,0,0,0.10);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.14);
+}
+
+[data-theme="dark"] {
   /* Dark theme — Seedance-style */
   --bg: #0b0b0d;
   --bg-sidebar: #111114;
@@ -30,10 +72,10 @@
   --error: #ff5a52;
   --success: #34c759;
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  --overlay-raise: rgba(255,255,255,0.04);
+  --overlay-sink: rgba(0,0,0,0.22);
+  --code-inline-bg: rgba(255,255,255,0.08);
+  --code-block-bg: rgba(0,0,0,0.35);
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
@@ -311,7 +353,7 @@ html, body, #root {
 }
 
 .tool-card-header.clickable:hover {
-  background: rgba(255,255,255,0.03);
+  background: var(--overlay-raise);
 }
 
 .tool-card-chevron {
@@ -349,7 +391,7 @@ html, body, #root {
 }
 
 .tool-input, .tool-output {
-  background: rgba(0,0,0,0.03);
+  background: var(--overlay-sink);
   border-radius: var(--radius-sm);
   padding: 10px 14px;
   font-family: "SF Mono", Monaco, Consolas, monospace;
@@ -539,7 +581,7 @@ html, body, #root {
 }
 
 .markdown-body code {
-  background: rgba(255,255,255,0.08);
+  background: var(--code-inline-bg);
   border-radius: 4px;
   padding: 2px 6px;
   font-family: "SF Mono", Monaco, Consolas, monospace;
@@ -547,7 +589,7 @@ html, body, #root {
 }
 
 .markdown-body pre {
-  background: rgba(0,0,0,0.35);
+  background: var(--code-block-bg);
   border-radius: 8px;
   padding: 14px 16px;
   overflow-x: auto;
@@ -582,7 +624,7 @@ html, body, #root {
 }
 
 .markdown-body th {
-  background: rgba(255,255,255,0.04);
+  background: var(--overlay-raise);
   font-weight: 600;
 }
 
@@ -632,7 +674,7 @@ html, body, #root {
 
 .action-btn:hover {
   color: var(--text);
-  background: rgba(255,255,255,0.06);
+  background: var(--bg-hover);
   border-color: var(--border);
 }
 
@@ -1371,4 +1413,82 @@ html, body, #root {
 .preview-close:hover {
   color: var(--text);
   background: var(--bg-hover);
+}
+
+/* ===== Theme toggle (floating, top-right) ===== */
+.theme-toggle {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+}
+
+.theme-toggle-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.theme-toggle-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.theme-toggle-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.theme-menu {
+  position: absolute;
+  top: 48px;
+  right: 0;
+  min-width: 132px;
+  padding: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.theme-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 0.9rem;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.theme-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.theme-menu-item.active {
+  color: var(--accent);
+}
+
+.theme-menu-item svg {
+  width: 15px;
+  height: 15px;
 }
