@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { Message } from "@lot-agent/core";
+import type { Message, ContentPart } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
+import type { AttachmentRef } from "./attachment-extractor.js";
 
 /**
  * Handles all message/tool_call DB persistence during a chat turn.
@@ -11,9 +12,15 @@ export class MessageRepository {
   constructor(private readonly db: DB) {}
 
   /** Insert the user message and return its generated id. */
-  async saveUserMessage(conversationId: string, userMessage: string): Promise<string> {
+  async saveUserMessage(
+    conversationId: string,
+    userMessage: string,
+    attachments?: AttachmentRef[]
+  ): Promise<string> {
     const userMsgId = randomUUID();
-    await this.db.addMessage(userMsgId, conversationId, "user", userMessage);
+    await this.db.addMessage(userMsgId, conversationId, "user", userMessage, {
+      metadata: attachments?.length ? { attachments } : {},
+    });
     return userMsgId;
   }
 
@@ -22,7 +29,11 @@ export class MessageRepository {
    * and drop orphan tool messages whose tool_call_id has no matching assistant tool_call.
    * Returns history as Message[] (role/content/toolCallId).
    */
-  async loadHistory(conversationId: string, excludeMessageId: string): Promise<Message[]> {
+  async loadHistory(
+    conversationId: string,
+    excludeMessageId: string,
+    materialize?: (atts: AttachmentRef[]) => Promise<ContentPart[]>
+  ): Promise<Message[]> {
     const stored = await this.db.getMessages(conversationId);
     const filtered = stored.filter(
       (m) => m.role !== "user" || m.id !== excludeMessageId
@@ -49,9 +60,23 @@ export class MessageRepository {
       if (m.role === "tool" && m.tool_call_id) {
         if (!validToolCallIds.has(m.tool_call_id)) continue; // orphan — skip
       }
+      let content: Message["content"] = m.content;
+      // Re-materialize a user message's attachments so later turns still see
+      // the uploaded image/document content.
+      if (m.role === "user" && materialize) {
+        const meta = typeof m.metadata === "string" ? JSON.parse(m.metadata) : m.metadata;
+        const atts = (meta?.attachments ?? []) as AttachmentRef[];
+        if (atts.length) {
+          const parts = await materialize(atts);
+          content = [
+            ...(m.content ? [{ type: "text" as const, text: m.content }] : []),
+            ...parts,
+          ];
+        }
+      }
       history.push({
         role: m.role as Message["role"],
-        content: m.content,
+        content,
         toolCallId: m.tool_call_id ?? undefined,
       });
     }

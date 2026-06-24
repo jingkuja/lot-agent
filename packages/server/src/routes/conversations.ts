@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
+import type { AttachmentRef } from "../services/attachment-extractor.js";
 
 type Variables = { userId: string };
 
@@ -115,9 +116,9 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "Not found" }, 404);
     }
 
-    const body = await c.req.json<{ content: string }>();
-    if (!body.content) {
-      return c.json({ error: "content is required" }, 400);
+    const body = await c.req.json<{ content: string; attachments?: AttachmentRef[] }>();
+    if (!body.content && !(body.attachments && body.attachments.length)) {
+      return c.json({ error: "content or attachments required" }, 400);
     }
 
     const encoder = new TextEncoder();
@@ -137,16 +138,17 @@ export function createConversationRoutes(service: AgentService): Hono {
         try {
           for await (const event of service.streamAgentResponse(
             id,
-            body.content,
+            body.content ?? "",
             conversation.agent_id,
-            userId
+            userId,
+            body.attachments
           )) {
             send(agentEventToSse(event));
           }
           // Summarize + persist the conversation title (first message only) and
           // push it to the client so the sidebar updates live, no refresh.
           try {
-            const title = await service.generateTitle(id, body.content);
+            const title = await service.generateTitle(id, body.content ?? "");
             if (title) send({ type: "title", title });
           } catch {
             // title generation is best-effort

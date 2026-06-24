@@ -35,7 +35,9 @@ import type {
   JobQueue,
   ReviewProvider,
   PlatformConnector,
+  ContentPart,
 } from "@lot-agent/core";
+import { extractAttachment, type AttachmentRef } from "./attachment-extractor.js";
 import { DB } from "../db/database.js";
 import { SessionStore } from "../auth/session-store.js";
 import { createRedisConnection } from "../jobs/redis.js";
@@ -286,7 +288,8 @@ export class AgentService {
     conversationId: string,
     userMessage: string,
     agentId?: string,
-    userId?: string
+    userId?: string,
+    attachments?: AttachmentRef[]
   ): AsyncIterable<AgentEvent> {
     const def =
       this.agentRegistry.get(agentId ?? "general") ??
@@ -295,9 +298,16 @@ export class AgentService {
     // ── Persist user message, load history (orphan tool messages filtered) ──
     const userMsgId = await this.messageRepo.saveUserMessage(
       conversationId,
-      userMessage
+      userMessage,
+      attachments
     );
-    const history = await this.messageRepo.loadHistory(conversationId, userMsgId);
+    const materialize = (atts: AttachmentRef[]) =>
+      Promise.all(atts.map((a) => extractAttachment(a, this.uploadStorage)));
+    const history = await this.messageRepo.loadHistory(
+      conversationId,
+      userMsgId,
+      materialize
+    );
 
     // ── Match skills, build agent ──
     const matchedSkills = this.skillLoader.match(userMessage);
@@ -343,8 +353,19 @@ export class AgentService {
     let outputTokens = 0;
     let lastErrorMessage: string | undefined;
 
+    // Build this turn's user input — text plus materialized attachment parts
+    // (images as data-url ContentParts, documents as injected text).
+    let runInput: string | ContentPart[] = userMessage;
+    if (attachments?.length) {
+      const parts = await materialize(attachments);
+      runInput = [
+        ...(userMessage ? [{ type: "text" as const, text: userMessage }] : []),
+        ...parts,
+      ];
+    }
+
     try {
-      for await (const event of agent.run(userMessage, context, history)) {
+      for await (const event of agent.run(runInput, context, history)) {
         if (event.type === "text") {
           recorder.startLlmSpan();
           assistantContent += event.content;
