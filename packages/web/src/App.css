@@ -393,18 +393,31 @@ html, body, #root {
 /* ── Tool Messages ── */
 .message-tool {
   background: transparent;
+  /* Tool result sits right under the assistant turn that called it — keep the
+     call → reply → result sequence reading as one compact unit. */
+  padding: 6px 0;
+}
+
+/* Collapse the gap below an assistant turn that ends in a tool call, and above
+   the assistant continuation that follows a tool result. */
+.message-assistant:has(.tool-calls-section) {
+  padding-bottom: 8px;
+}
+
+.message-tool + .message-assistant {
+  padding-top: 10px;
 }
 
 /* ── Collapsible Tool Cards ── */
 .tool-calls-section {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .tool-card {
   background: var(--bg-tool);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  margin: 6px 0;
+  margin: 4px 0;
   overflow: hidden;
   font-size: 13px;
 }

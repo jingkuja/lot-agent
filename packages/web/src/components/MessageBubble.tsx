@@ -113,8 +113,12 @@ export function MessageBubble({ message, onRegenerate, onSelectForPreview }: Mes
           </div>
         )}
 
-        {/* Action buttons */}
-        {!message.isStreaming && message.content && (
+        {/* Action buttons — skip intermediate tool-calling turns; those
+            actions belong to the final answer, not a turn that ends in a tool
+            call (keeps the call → reply → result sequence reading as one unit). */}
+        {!message.isStreaming &&
+          message.content &&
+          !(message.toolCalls && message.toolCalls.length > 0) && (
           <MessageActions
             content={message.content}
             role="assistant"
