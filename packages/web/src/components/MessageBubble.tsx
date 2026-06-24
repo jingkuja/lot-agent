@@ -47,6 +47,10 @@ export function MessageBubble({ message, onRegenerate, onSelectForPreview }: Mes
   }
 
   // Assistant message
+  // A streaming message that already carries tool calls is in the
+  // tool-execution phase (the model finished its text turn and we're waiting
+  // for the tool result) — show a tool-running hint instead of a text caret.
+  const executingTools = !!message.isStreaming && !!message.toolCalls?.length;
   return (
     <div className="message-wrapper message-assistant">
       <div className="message-wrapper-inner">
@@ -86,9 +90,11 @@ export function MessageBubble({ message, onRegenerate, onSelectForPreview }: Mes
           {message.content ? (
             <>
               <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
-              {message.isStreaming && <span className="cursor-blink" />}
+              {message.isStreaming && !executingTools && (
+                <span className="cursor-blink" />
+              )}
             </>
-          ) : message.isStreaming ? (
+          ) : message.isStreaming && !executingTools ? (
             <TypingDots />
           ) : (
             ""
@@ -96,6 +102,16 @@ export function MessageBubble({ message, onRegenerate, onSelectForPreview }: Mes
         </div>
           );
         })()}
+
+        {/* Tool execution hint — replaces the text caret while a tool runs */}
+        {executingTools && (
+          <div className="tool-running" role="status">
+            <TypingDots />
+            <span className="tool-running-label">
+              正在执行工具 {message.toolCalls![message.toolCalls!.length - 1].name}…
+            </span>
+          </div>
+        )}
 
         {/* Action buttons */}
         {!message.isStreaming && message.content && (

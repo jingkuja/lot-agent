@@ -168,7 +168,7 @@ export const api = {
   sendMessage: (
     conversationId: string,
     content: string,
-    onEvent: (event: AgentEvent) => void
+    onEvent: (event: AgentEvent) => void | Promise<void>
   ): AbortController => {
     const controller = new AbortController();
 
@@ -213,12 +213,15 @@ export const api = {
 
           for (const line of lines) {
             if (line.startsWith("data: ")) {
+              let event: AgentEvent | undefined;
               try {
-                const event = JSON.parse(line.slice(6)) as AgentEvent;
-                onEvent(event);
+                event = JSON.parse(line.slice(6)) as AgentEvent;
               } catch {
                 // skip malformed lines
               }
+              // Awaited so the handler can pace rendering (e.g. hold the
+              // "tool executing" state briefly) while preserving event order.
+              if (event) await onEvent(event);
             }
           }
         }

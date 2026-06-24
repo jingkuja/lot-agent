@@ -377,6 +377,19 @@ html, body, #root {
   40% { transform: translateY(-5px); opacity: 1; }
 }
 
+/* Tool execution hint shown while a tool call is running */
+.tool-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+}
+
+.tool-running-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 /* ── Tool Messages ── */
 .message-tool {
   background: transparent;

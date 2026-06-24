@@ -33,7 +33,12 @@ produce a real downloadable file.
 - `format`: one of `docx` (Word, default), `pdf`, `md`, `html`.
 
 Pick the format the user asked for. If they don't specify, default to `docx`.
-The tool returns a download link (`/static/assets/...`) — relay that link to the user.
+The tool returns a download link (`/static/documents/...`) — relay that link to the user.
+
+**Call `generate_document` exactly once** with the complete content. Do not call it
+repeatedly to "build up" the document — assemble the full Markdown first, then make a
+single call. Once it returns a download link, the document is done: give the link to the
+user, do not generate it again.
 
 ## Behaviour notes
 

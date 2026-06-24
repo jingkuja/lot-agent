@@ -71,7 +71,7 @@ export function useChat(
 
       setIsStreaming(true);
 
-      abortRef.current = api.sendMessage(cid, content, (event) => {
+      abortRef.current = api.sendMessage(cid, content, async (event) => {
         if (event.type === "text" && event.content) {
           assistantMsg = {
             ...assistantMsg,
@@ -97,6 +97,10 @@ export function useChat(
             const filtered = prev.filter((m) => m.id !== assistantMsg.id);
             return [...filtered, assistantMsg];
           });
+          // Hold the "executing tool" state briefly so calling → executing →
+          // result reads as distinct steps. This overlaps a slow tool's real
+          // runtime (no added latency) and only pads fast/batched results.
+          await new Promise((r) => setTimeout(r, 500));
         }
 
         if (event.type === "tool_result") {
