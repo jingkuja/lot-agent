@@ -24,6 +24,9 @@ import { AppConfigSchema } from "@lot-agent/core";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
 const ASSETS_DIR = resolve(ROOT, "data/assets");
+// Skill-generated documents live in their own store, separate from the
+// image/video material in data/assets.
+const DOCS_DIR = resolve(ROOT, "data/documents");
 
 function guessMime(name: string): string {
   if (name.endsWith(".png")) return "image/png";
@@ -159,6 +162,19 @@ async function main() {
     }
     try {
       const buf = await readFile(resolve(ASSETS_DIR, filename));
+      return c.body(buf, 200, { "Content-Type": guessMime(filename) });
+    } catch {
+      return c.text("not found", 404);
+    }
+  });
+
+  app.get("/static/documents/:filename", async (c) => {
+    const filename = c.req.param("filename");
+    if (filename.includes("/") || filename.includes("..")) {
+      return c.text("bad request", 400);
+    }
+    try {
+      const buf = await readFile(resolve(DOCS_DIR, filename));
       return c.body(buf, 200, { "Content-Type": guessMime(filename) });
     } catch {
       return c.text("not found", 404);
