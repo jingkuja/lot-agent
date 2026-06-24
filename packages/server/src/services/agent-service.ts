@@ -89,6 +89,8 @@ export class AgentService {
   sessions!: SessionStore;
   jobQueue!: JobQueue;
   usageMeter!: UsageMeter;
+  /** Storage for user-uploaded files, served at /static/uploads (separate from generated assets). */
+  uploadStorage!: LocalStorage;
   private llmConfig: LLMConfig;
   private configModels: ModelConfig[];
   private agentConfig: Partial<AgentConfig>;
@@ -150,6 +152,10 @@ export class AgentService {
     // from data/assets, which is reserved for image/video generation material.
     // Stays usable even though execute_command is disabled on the box.
     const root = dirname(this.skillsDir);
+
+    // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
+    this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), "/static/uploads");
+
     this.toolRegistry.register(
       createDocTool({
         storage: new LocalStorage(resolve(root, "data/documents"), "/static/documents"),
