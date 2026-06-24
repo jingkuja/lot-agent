@@ -37,7 +37,9 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const handleStreamEnd = useCallback(() => {
-    setTimeout(() => refresh(), 1500);
+    // The server finalizes the auto-generated title before emitting stream_end,
+    // so refresh right away to pull in the summarized conversation title.
+    refresh();
   }, [refresh]);
 
   const activeIdRef = useRef(activeId);
@@ -133,16 +135,23 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   const handleDelete = useCallback(
     (id: string) => {
       remove(id);
-      if (id === activeId) clear();
+      if (id === activeId) {
+        // Deleting the open conversation drops us into new-chat mode (rather
+        // than a dead empty state), so the input can create + send a new
+        // conversation instead of silently doing nothing.
+        clear();
+        setPreviewContent(null);
+        setNewAgentId(activeAgentId);
+      }
     },
-    [remove, activeId, clear]
+    [remove, activeId, clear, activeAgentId]
   );
 
-  // Sidebar list: prepend virtual "New Chat" entry when in new-chat mode.
+  // Sidebar list: prepend a virtual "新对话" entry when in new-chat mode.
   const sidebarConversations = useMemo(() => {
     if (!newAgentId) return conversations;
     return [
-      { id: "__new__", title: "New Chat", agent_id: newAgentId, created_at: "", updated_at: "" },
+      { id: "__new__", title: "新对话", agent_id: newAgentId, created_at: "", updated_at: "" },
       ...conversations,
     ];
   }, [newAgentId, conversations]);

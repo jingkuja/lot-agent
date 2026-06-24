@@ -205,7 +205,7 @@ export class DB {
       await client.query(`
         CREATE TABLE IF NOT EXISTS conversations (
           id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-          title       VARCHAR(500) NOT NULL DEFAULT 'New Chat',
+          title       VARCHAR(500) NOT NULL DEFAULT '新对话',
           model       VARCHAR(100),
           provider    VARCHAR(50),
           system_prompt TEXT,

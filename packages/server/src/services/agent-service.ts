@@ -235,7 +235,10 @@ export class AgentService {
   ): Promise<void> {
     try {
       const conversation = await this.db.getConversation(conversationId);
-      if (!conversation || conversation.title !== "New Chat") return;
+      // Only (re)title conversations still on a default placeholder title.
+      const isDefaultTitle =
+        conversation?.title === "新对话" || conversation?.title === "New Chat";
+      if (!conversation || !isDefaultTitle) return;
 
       // Count user messages — only generate title on first user message
       const messages = await this.db.getMessages(conversationId);
@@ -248,7 +251,7 @@ export class AgentService {
         {
           role: "system",
           content:
-            'Generate a short title (max 30 chars) for this conversation based on the user message. Reply with ONLY the title, no quotes, no punctuation at the end.',
+            'Generate a short title (max 30 chars) for this conversation based on the user message, in the same language as the user. Reply with ONLY the title, no quotes, no punctuation at the end.',
         },
         { role: "user", content: userMessage },
       ])) {
@@ -405,8 +408,10 @@ export class AgentService {
         }
       }
 
-      // Generate title from first user message (async, non-blocking)
-      this.generateTitle(conversationId, userMessage);
+      // Generate the title from the first user message and await it, so the
+      // DB title is updated before the route emits `stream_end` — the client
+      // refreshes on that event and picks up the summarized title immediately.
+      await this.generateTitle(conversationId, userMessage);
     }
   }
 

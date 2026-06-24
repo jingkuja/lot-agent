@@ -20,7 +20,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     const userId = c.get("userId");
     const body = await c.req.json<{ title?: string; agentId?: string }>().catch(() => ({}));
     const id = randomUUID();
-    const title = body.title ?? "New Chat";
+    const title = body.title ?? "新对话";
     const model =
       service["llmConfig"].default === "openai"
         ? service["llmConfig"].openai.model
