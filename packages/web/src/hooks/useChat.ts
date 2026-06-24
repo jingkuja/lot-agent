@@ -15,13 +15,16 @@ export interface DisplayMessage {
 export function useChat(
   conversationId: string | null,
   onStreamEnd?: () => void,
-  conversationIdRef?: React.RefObject<string | null>
+  conversationIdRef?: React.RefObject<string | null>,
+  onTitle?: (conversationId: string, title: string) => void
 ) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const onStreamEndRef = useRef(onStreamEnd);
   onStreamEndRef.current = onStreamEnd;
+  const onTitleRef = useRef(onTitle);
+  onTitleRef.current = onTitle;
   // Allow caller to inject a ref so send() reads the latest id synchronously.
   const cidRef = conversationIdRef ?? { current: conversationId };
 
@@ -133,6 +136,12 @@ export function useChat(
             isStreaming: true,
           };
           pendingToolCalls = [];
+        }
+
+        if (event.type === "title" && event.title) {
+          // Live sidebar title update — no refresh needed.
+          const tcid = cidRef.current;
+          if (tcid) onTitleRef.current?.(tcid, event.title);
         }
 
         if (event.type === "done" || event.type === "stream_end") {

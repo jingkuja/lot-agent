@@ -229,21 +229,27 @@ export class AgentService {
     return this.llmProvider;
   }
 
-  private async generateTitle(
+  /**
+   * Summarize a title for a conversation from its first user message, persist
+   * it, and return it (or null if no title was generated — e.g. not the first
+   * message, or the conversation was already retitled). The caller emits the
+   * returned title to the client so the sidebar updates live.
+   */
+  async generateTitle(
     conversationId: string,
     userMessage: string
-  ): Promise<void> {
+  ): Promise<string | null> {
     try {
       const conversation = await this.db.getConversation(conversationId);
       // Only (re)title conversations still on a default placeholder title.
       const isDefaultTitle =
         conversation?.title === "新对话" || conversation?.title === "New Chat";
-      if (!conversation || !isDefaultTitle) return;
+      if (!conversation || !isDefaultTitle) return null;
 
       // Count user messages — only generate title on first user message
       const messages = await this.db.getMessages(conversationId);
       const userMsgCount = messages.filter((m) => m.role === "user").length;
-      if (userMsgCount > 1) return;
+      if (userMsgCount > 1) return null;
 
       const llm = this.getLLMProvider();
       let title = "";
@@ -261,9 +267,12 @@ export class AgentService {
       title = title.trim().replace(/^["']|["']$/g, "").slice(0, 50);
       if (title) {
         await this.db.updateConversationTitle(conversationId, title);
+        return title;
       }
+      return null;
     } catch (error) {
       console.warn("Failed to generate title:", error);
+      return null;
     }
   }
 
@@ -408,11 +417,9 @@ export class AgentService {
         }
       }
 
-      // Generate the title from the first user message and await it, so the
-      // DB title is updated before the route emits `stream_end` — the client
-      // refreshes on that event and picks up the summarized title immediately.
-      await this.generateTitle(conversationId, userMessage);
     }
+    // Title generation is driven by the route after the stream completes, so it
+    // can emit the result as a `title` SSE event (live sidebar update).
   }
 
   async shutdown(): Promise<void> {

@@ -25,7 +25,7 @@ export interface Rating {
 }
 
 export interface AgentEvent {
-  type: "text" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact";
+  type: "text" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact" | "title";
   id?: string;
   content?: string;
   name?: string;
@@ -41,6 +41,8 @@ export interface AgentEvent {
   assetId?: string;
   url?: string;
   mediaType?: string;
+  // title variant
+  title?: string;
 }
 
 export interface Agent {

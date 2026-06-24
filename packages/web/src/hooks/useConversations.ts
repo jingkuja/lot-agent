@@ -31,6 +31,14 @@ export function useConversations() {
     return conv;
   }, []);
 
+  // In-place title update (e.g. live auto-generated title from the stream),
+  // without refetching the whole list.
+  const updateTitle = useCallback((id: string, title: string) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, title } : c))
+    );
+  }, []);
+
   const remove = useCallback(
     async (id: string) => {
       await api.deleteConversation(id);
@@ -40,5 +48,5 @@ export function useConversations() {
     [activeId]
   );
 
-  return { conversations, activeId, setActiveId, create, remove, loading, refresh };
+  return { conversations, activeId, setActiveId, create, remove, loading, refresh, updateTitle };
 }

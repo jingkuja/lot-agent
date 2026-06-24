@@ -30,7 +30,7 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   // null = viewing a real conversation; string = pending new chat for that agent.
   const [newAgentId, setNewAgentId] = useState<string | null>(null);
 
-  const { conversations, activeId, setActiveId, remove, loading, refresh } =
+  const { conversations, activeId, setActiveId, remove, loading, refresh, updateTitle } =
     useConversations();
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
@@ -44,7 +44,7 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
 
   const activeIdRef = useRef(activeId);
   const { messages, send, stop, isStreaming, loadMessages, clear, regenerate } =
-    useChat(activeId, handleStreamEnd, activeIdRef);
+    useChat(activeId, handleStreamEnd, activeIdRef, updateTitle);
 
   const prevActiveId = useRef<string | null>(null);
   useEffect(() => {
