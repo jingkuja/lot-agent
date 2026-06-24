@@ -5,6 +5,7 @@ import type {
   ToolUseBlock,
   TextBlockParam,
   ToolUseBlockParam,
+  ImageBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
 import type { Message, ChatChunk, LLMTool, LLMProvider } from "../types/index.js";
 
@@ -132,14 +133,31 @@ export class AnthropicProvider implements LLMProvider {
   }
 }
 
-function toAnthropicMessage(msg: Message): MessageParam {
+export function toAnthropicMessage(msg: Message): MessageParam {
   if (msg.role === "user") {
     if (typeof msg.content === "string") {
       return { role: "user", content: msg.content };
     }
-    const content: TextBlockParam[] = msg.content
-      .filter((p) => p.type === "text")
-      .map((p) => ({ type: "text", text: p.text ?? "" }));
+    const content: Array<TextBlockParam | ImageBlockParam> = msg.content.map(
+      (p) => {
+        if (p.type === "image" && p.image) {
+          const m = /^data:([^;]+);base64,(.*)$/.exec(p.image.url);
+          if (m) {
+            return {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: m[1] as ImageBlockParam["source"]["media_type"],
+                data: m[2],
+              },
+            };
+          }
+          // 非 data URL（兜底）：当作文本提示，避免直接丢弃
+          return { type: "text", text: `[图片: ${p.image.url}]` };
+        }
+        return { type: "text", text: p.text ?? "" };
+      }
+    );
     return { role: "user", content };
   }
 

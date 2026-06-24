@@ -99,7 +99,7 @@ export class OpenAIProvider implements LLMProvider {
   }
 }
 
-function toOpenAIMessage(msg: Message): OpenAI.ChatCompletionMessageParam {
+export function toOpenAIMessage(msg: Message): OpenAI.ChatCompletionMessageParam {
   if (msg.role === "system") {
     return { role: "system", content: String(msg.content) };
   }
