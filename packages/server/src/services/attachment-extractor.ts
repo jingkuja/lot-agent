@@ -1,5 +1,5 @@
 import mammoth from "mammoth";
-import pdfParse from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 import type { ContentPart, ObjectStorage } from "@lot-agent/core";
 
 export const MAX_DOC_CHARS = 30000;
@@ -36,7 +36,12 @@ export async function extractAttachment(
   let text: string | null = null;
   try {
     if (att.mime === "application/pdf") {
-      text = (await pdfParse(bytes)).text;
+      const parser = new PDFParse({ data: new Uint8Array(bytes) });
+      try {
+        text = (await parser.getText()).text;
+      } finally {
+        await parser.destroy();
+      }
     } else if (
       att.mime ===
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
