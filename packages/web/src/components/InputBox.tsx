@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 
 interface InputBoxProps {
-  onSend: (content: string) => void;
+  onSend: (content: string, files: File[]) => void;
   onStop: () => void;
   disabled: boolean;
   /** Bottom-left content (e.g. the agent switcher). */
@@ -9,6 +9,10 @@ interface InputBoxProps {
   placeholder?: string;
   autoFocus?: boolean;
 }
+
+const MAX_FILES = 5;
+const ACCEPT =
+  "image/jpeg,image/png,image/webp,image/gif,.txt,.md,.csv,.json,application/pdf,.docx";
 
 export function InputBox({
   onSend,
@@ -19,17 +23,36 @@ export function InputBox({
   autoFocus,
 }: InputBoxProps) {
   const [value, setValue] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = useCallback((picked: FileList | null) => {
+    if (!picked) return;
+    setFiles((prev) => {
+      const next = [...prev];
+      for (const f of Array.from(picked)) {
+        if (next.length >= MAX_FILES) break;
+        next.push(f);
+      }
+      return next;
+    });
+  }, []);
+
+  const removeFile = useCallback((idx: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
+    if ((!trimmed && files.length === 0) || disabled) return;
+    onSend(trimmed, files);
     setValue("");
+    setFiles([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, disabled, onSend]);
+  }, [value, files, disabled, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -51,6 +74,28 @@ export function InputBox({
 
   return (
     <div className="input-box">
+      {files.length > 0 && (
+        <div className="input-attachments">
+          {files.map((f, i) => (
+            <div className="attachment-chip" key={i}>
+              {f.type.startsWith("image/") ? (
+                <img className="attachment-thumb" src={URL.createObjectURL(f)} alt={f.name} />
+              ) : (
+                <span className="attachment-doc-icon" aria-hidden>📄</span>
+              )}
+              <span className="attachment-name" title={f.name}>{f.name}</span>
+              <button
+                className="attachment-remove"
+                onClick={() => removeFile(i)}
+                title="移除"
+                type="button"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         value={value}
@@ -69,6 +114,29 @@ export function InputBox({
       <div className="input-toolbar">
         <div className="input-toolbar-left">{leftSlot}</div>
         <div className="input-toolbar-right">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ACCEPT}
+            style={{ display: "none" }}
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="btn-upload"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || files.length >= MAX_FILES}
+            title="上传文件"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
           {disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">
               <svg viewBox="0 0 24 24" fill="currentColor">
@@ -79,7 +147,7 @@ export function InputBox({
             <button
               onClick={handleSend}
               className="btn-send"
-              disabled={!value.trim()}
+              disabled={!value.trim() && files.length === 0}
               title="发送"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

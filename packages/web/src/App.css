@@ -552,6 +552,9 @@ html, body, #root {
 
 .input-toolbar-right {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .input-box textarea::placeholder {
@@ -604,6 +607,76 @@ html, body, #root {
 .btn-send svg, .btn-stop svg {
   width: 18px;
   height: 18px;
+}
+
+/* ── Upload button + attachment chips ── */
+.btn-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.btn-upload:hover:not(:disabled) {
+  background: var(--overlay-raise);
+  color: var(--text);
+}
+.btn-upload:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.btn-upload svg {
+  width: 20px;
+  height: 20px;
+}
+
+.input-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 8px 0;
+}
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tool);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.attachment-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+.attachment-remove:hover {
+  color: var(--text);
 }
 
 /* ── Status Bar ── */
