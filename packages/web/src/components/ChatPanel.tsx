@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox } from "./InputBox.js";
+import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { Agent } from "../api/client.js";
 
@@ -31,9 +32,18 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // While streaming, the assistant bubble only enters the list once its first
+  // text/tool_call arrives. Until then (and in the gap after a tool result,
+  // before the model's next turn) the latest message is the user's prompt or a
+  // tool result — show a typing indicator so the user knows the request was
+  // accepted and a reply is on the way.
+  const last = messages[messages.length - 1];
+  const awaitingResponse =
+    isStreaming && (!last || last.role === "user" || last.role === "tool");
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, awaitingResponse]);
 
   // Only show regenerate on the last completed assistant message
   const lastAssistantIdx = [...messages]
@@ -83,6 +93,13 @@ export function ChatPanel({
             onSelectForPreview={onSelectForPreview}
           />
         ))}
+        {awaitingResponse && (
+          <div className="message-wrapper message-assistant">
+            <div className="message-wrapper-inner">
+              <TypingDots />
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       <div className="input-area">{inputEl}</div>

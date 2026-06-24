@@ -2,6 +2,7 @@ import React, { useState, useCallback } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../api/client.js";
+import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 
 interface MessageBubbleProps {
@@ -83,13 +84,15 @@ export function MessageBubble({ message, onRegenerate, onSelectForPreview }: Mes
           title={canPreview ? "点击预览" : undefined}
         >
           {message.content ? (
-            <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+            <>
+              <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+              {message.isStreaming && <span className="cursor-blink" />}
+            </>
           ) : message.isStreaming ? (
-            "Thinking..."
+            <TypingDots />
           ) : (
             ""
           )}
-          {message.isStreaming && <span className="cursor-blink" />}
         </div>
           );
         })()}
