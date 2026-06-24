@@ -27,6 +27,15 @@ export class OpenAIProvider implements LLMProvider {
     const oaiMessages = messages.map(toOpenAIMessage);
     const oaiTools = tools?.map(toOpenAITool);
 
+    const debug = ["1", "true", "yes"].includes(
+      (process.env.DEBUG_LLM ?? "").toLowerCase()
+    );
+    if (debug) {
+      console.error(
+        `[DEBUG_LLM] request model=${this.model} messages=${oaiMessages.length} tools=${oaiTools?.length ?? 0}`
+      );
+    }
+
     const stream = await this.client.chat.completions.create({
       model: this.model,
       messages: oaiMessages,
@@ -42,6 +51,10 @@ export class OpenAIProvider implements LLMProvider {
     >();
 
     for await (const chunk of stream) {
+      // Dump the raw API delta so you can see exactly what the model returns
+      // (e.g. reasoning_content vs content). Enable with DEBUG_LLM=1.
+      if (debug) console.error("[DEBUG_LLM] chunk", JSON.stringify(chunk.choices[0]));
+
       const delta = chunk.choices[0]?.delta;
       if (!delta) continue;
 
