@@ -6,6 +6,7 @@ data/*.db-shm
 data/*.db-wal
 data/assets
 data/documents
+data/uploads
 data/localstorage
 data/skills-env
 data/tmp
