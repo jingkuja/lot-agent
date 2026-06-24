@@ -14,6 +14,7 @@ export interface StoredMessage {
   tool_calls: string | null;
   tool_call_id: string | null;
   rating?: number | null;
+  metadata?: string | Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -79,6 +80,15 @@ export interface AssetMeta {
   mediaType: string;
   size: number;
   created_at: string;
+}
+
+export interface UploadedAttachment {
+  assetId: string;
+  filename: string;
+  mime: string;
+  size: number;
+  url: string;
+  kind: "image" | "doc";
 }
 
 // ── Token management ──────────────────────────────────────────────────────────
@@ -167,10 +177,31 @@ export const api = {
       body: JSON.stringify({ afterMessageId }),
     }),
 
+  uploadFile: async (file: File): Promise<UploadedAttachment> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${BASE}/uploads`, {
+      method: "POST",
+      headers: { ...authHeaders() }, // 不要手动设 Content-Type，浏览器自动带 boundary
+      body: fd,
+    });
+    if (res.status === 401) {
+      clearToken();
+      window.dispatchEvent(new Event("lot:unauthorized"));
+      throw new Error("Unauthorized");
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error ?? res.statusText);
+    }
+    return res.json();
+  },
+
   sendMessage: (
     conversationId: string,
     content: string,
-    onEvent: (event: AgentEvent) => void | Promise<void>
+    onEvent: (event: AgentEvent) => void | Promise<void>,
+    attachments?: UploadedAttachment[]
   ): AbortController => {
     const controller = new AbortController();
 
@@ -184,7 +215,7 @@ export const api = {
               "Content-Type": "application/json",
               ...authHeaders(),
             },
-            body: JSON.stringify({ content }),
+            body: JSON.stringify({ content, attachments }),
             signal: controller.signal,
           }
         );
