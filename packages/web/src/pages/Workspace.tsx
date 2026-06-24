@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState, useMemo } from "react";
 import { Sidebar } from "../components/Sidebar.js";
 import { ChatPanel } from "../components/ChatPanel.js";
-import { StatusBar } from "../components/StatusBar.js";
+import { BrandHeader } from "../components/BrandHeader.js";
 import { PreviewPanel } from "../components/PreviewPanel.js";
 import { ArtifactGallery, type Artifact } from "../components/ArtifactGallery.js";
 import { AgentSwitcher } from "../components/AgentSwitcher.js";
@@ -34,6 +34,7 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
     useConversations();
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const handleStreamEnd = useCallback(() => {
     setTimeout(() => refresh(), 1500);
@@ -92,13 +93,16 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   const handleSelect = useCallback(
     (id: string) => {
       if (id === "__new__") return; // already in new-chat mode
+      // A conversation is bound to one agent — sync the switcher to it.
+      const conv = conversations.find((c) => c.id === id);
+      if (conv) setActiveAgentId(conv.agent_id || defaultAgentId);
       setNewAgentId(null);
       setActiveId(id);
       clear();
       loadMessages(id);
       setPreviewContent(null);
     },
-    [setActiveId, loadMessages, clear]
+    [conversations, defaultAgentId, setActiveId, loadMessages, clear]
   );
 
   const handleCreate = useCallback(() => {
@@ -154,23 +158,33 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
 
   return (
     <div className="workspace">
-      <div className="workspace-sidebar">
-        <div className="workspace-back">
-          <span className="workspace-brand">Lot Agent</span>
-          {activeAgent && (
-            <span className="workspace-agent-label">{activeAgent.name}</span>
-          )}
-        </div>
+      <div className={`workspace-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+        <BrandHeader
+          user={user}
+          onLogout={onLogout}
+          onCreate={handleCreate}
+          onCollapse={() => setSidebarCollapsed(true)}
+        />
         <Sidebar
           conversations={sidebarConversations}
+          agents={orderedAgents}
           activeId={newAgentId ? "__new__" : activeId}
           onSelect={handleSelect}
-          onCreate={handleCreate}
           onDelete={handleDelete}
         />
       </div>
 
       <div className="workspace-main">
+        {sidebarCollapsed && (
+          <button
+            className="sidebar-expand"
+            onClick={() => setSidebarCollapsed(false)}
+            title="展开侧栏"
+            aria-label="展开侧栏"
+          >
+            ›
+          </button>
+        )}
         <div className="workspace-chat">
           <ChatPanel
             messages={messages}
@@ -183,7 +197,6 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
             onSelectForPreview={setPreviewContent}
             agent={activeAgent}
           />
-          <StatusBar isStreaming={isStreaming} user={user} onLogout={onLogout} />
         </div>
 
         {previewContent !== null && (

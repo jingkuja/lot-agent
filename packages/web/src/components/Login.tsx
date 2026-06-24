@@ -30,8 +30,8 @@ export function Login({ onLogin }: LoginProps) {
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1 className="login-title">Lot Agent</h1>
-        <p className="login-subtitle">AI 内容创作平台</p>
+        <h1 className="login-title">智算AI</h1>
+        <p className="login-subtitle">AI 大模型聚合平台</p>
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="login-field">
             <label htmlFor="login-email">邮箱</label>

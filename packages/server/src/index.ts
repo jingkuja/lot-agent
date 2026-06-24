@@ -30,6 +30,12 @@ function guessMime(name: string): string {
   if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
   if (name.endsWith(".mp4")) return "video/mp4";
   if (name.endsWith(".mp3")) return "audio/mpeg";
+  if (name.endsWith(".docx"))
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".md")) return "text/markdown; charset=utf-8";
+  if (name.endsWith(".html")) return "text/html; charset=utf-8";
+  if (name.endsWith(".txt")) return "text/plain; charset=utf-8";
   return "application/octet-stream";
 }
 

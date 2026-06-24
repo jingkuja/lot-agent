@@ -20,7 +20,10 @@ import {
   KeywordReviewProvider,
   XiaohongshuConnector,
   WechatMpConnector,
+  LocalStorage,
 } from "@lot-agent/core";
+import { dirname, resolve } from "node:path";
+import { createDocTool } from "../tools/doc-tool.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -40,6 +43,20 @@ import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { UsageMeter } from "../billing/meter.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
+
+/**
+ * Builtin tools that touch the host filesystem / shell. On the deployed
+ * BS-architecture box these are kept registered (so they can be re-enabled by
+ * editing this set) but are NOT exposed to the agent. Only the web tools (and
+ * the doc-generation tool, which runs a sandboxed Python script) stay loaded.
+ */
+const DISABLED_HOST_TOOLS = new Set([
+  "read_file",
+  "write_file",
+  "list_files",
+  "search_files",
+  "execute_command",
+]);
 
 export interface ServiceConfig {
   llm: LLMConfig;
@@ -127,6 +144,20 @@ export class AgentService {
       this.toolRegistry.register(tool);
     }
 
+    // Register the document-generation tool. It runs a sandboxed Python script
+    // (shared venv under data/skills-env) and persists output as an asset, so
+    // it stays usable even though execute_command is disabled on the box.
+    const root = dirname(this.skillsDir);
+    this.toolRegistry.register(
+      createDocTool({
+        storage: new LocalStorage(resolve(root, "data/assets")),
+        db: this.db,
+        venvDir: resolve(root, "data/skills-env"),
+        scriptPath: resolve(this.skillsDir, "scripts/gen_doc.py"),
+        tmpDir: resolve(root, "data/tmp"),
+      })
+    );
+
     // Load skills
     await this.skillLoader.loadFromDirectory(this.skillsDir);
     console.log(`Loaded ${this.skillLoader.getSkills().length} skills`);
@@ -177,7 +208,10 @@ export class AgentService {
       type: "general",
       description: "通用任务助手",
       systemPrompt: this.agentConfig.systemPrompt ?? "You are a helpful AI assistant.",
-      toolNames: this.toolRegistry.getAll().map((t) => t.name),
+      toolNames: this.toolRegistry
+        .getAll()
+        .map((t) => t.name)
+        .filter((name) => !DISABLED_HOST_TOOLS.has(name)),
       defaultModelId,
     };
     this.agentRegistry.register(generalDef);
@@ -278,7 +312,7 @@ export class AgentService {
     const context: AgentContext = {
       llm,
       toolRegistry: this.toolRegistry,
-      toolContext: { workingDirectory: process.cwd(), memory },
+      toolContext: { workingDirectory: process.cwd(), memory, userId: userId ?? "default" },
       memory,
     };
 

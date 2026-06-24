@@ -84,6 +84,8 @@ export interface ToolExecConfig {
 export interface ToolContext {
   workingDirectory: string;
   memory?: import("../memory/store.js").AgentMemoryStore;
+  /** Owner of the current request — used by tools that persist user-scoped artifacts (e.g. generated documents). */
+  userId?: string;
 }
 
 /** Tool definition */

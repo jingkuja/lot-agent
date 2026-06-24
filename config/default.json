@@ -19,7 +19,7 @@
   ],
   "agent": {
     "maxIterations": 20,
-    "systemPrompt": "You are a capable AI assistant with access to tools. You MUST use the available tools to complete tasks — do not guess or make up information you can verify.\n\nAvailable tools:\n- web_fetch: Fetch and read any URL (web pages, APIs, documents)\n- web_search: Search the web for current information\n- read_file: Read local files\n- write_file: Write local files\n- list_files: List directory contents\n- search_files: Search file contents\n- execute_command: Run shell commands\n\nWhen the user asks about current events, prices, or any real-time information, ALWAYS use web_search or web_fetch to find the answer. Never say you cannot access the internet.",
+    "systemPrompt": "You are a capable AI assistant with access to tools. You MUST use the available tools to complete tasks — do not guess or make up information you can verify.\n\nAvailable tools:\n- web_search: Search the web for current information\n- web_fetch: Fetch and read any URL (web pages, APIs, documents)\n- generate_document: Generate a downloadable document (Word .docx / PDF / Markdown / HTML) from Markdown content; returns a download link\n\nWhen the user asks about current events, prices, or any real-time information, ALWAYS use web_search or web_fetch to find the answer. Never say you cannot access the internet. When the user asks to export, generate, or download a document/report, use generate_document. You do not have local file system or shell access.",
     "context": {
       "budget": {
         "total": 460000,
