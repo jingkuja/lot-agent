@@ -148,7 +148,11 @@ export function createConversationRoutes(service: AgentService): Hono {
           // Summarize + persist the conversation title (first message only) and
           // push it to the client so the sidebar updates live, no refresh.
           try {
-            const title = await service.generateTitle(id, body.content ?? "");
+            const title = await service.generateTitle(
+              id,
+              body.content ?? "",
+              body.attachments
+            );
             if (title) send({ type: "title", title });
           } catch {
             // title generation is best-effort

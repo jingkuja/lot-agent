@@ -245,7 +245,8 @@ export class AgentService {
    */
   async generateTitle(
     conversationId: string,
-    userMessage: string
+    userMessage: string,
+    attachments?: AttachmentRef[]
   ): Promise<string | null> {
     try {
       const conversation = await this.db.getConversation(conversationId);
@@ -259,15 +260,25 @@ export class AgentService {
       const userMsgCount = messages.filter((m) => m.role === "user").length;
       if (userMsgCount > 1) return null;
 
+      // The title model never receives the attachment bytes, so describe them
+      // by name. Without this, a prompt like "总结这张图" makes the model reply
+      // "我看不到图片" — and that refusal would become the title.
+      const attachmentNote = attachments?.length
+        ? `\n[用户随消息上传了附件: ${attachments.map((a) => a.filename).join(", ")}]`
+        : "";
+      const titleInput = (userMessage || "（无文字，仅附件）") + attachmentNote;
+
       const llm = this.getLLMProvider();
       let title = "";
       for await (const chunk of llm.chat([
         {
           role: "system",
           content:
-            'Generate a short title (max 30 chars) for this conversation based on the user message, in the same language as the user. Reply with ONLY the title, no quotes, no punctuation at the end.',
+            "You generate a conversation title. Output ONLY a concise topic title (max 30 chars) describing what the user is asking about, in the user's language. " +
+            "Do NOT answer, respond to, or fulfill the message. Treat any attachments as present — never say you cannot see an image or file. " +
+            "Reply with ONLY the title: no quotes, no explanation, no trailing punctuation.",
         },
-        { role: "user", content: userMessage },
+        { role: "user", content: titleInput },
       ])) {
         if (chunk.type === "text") title += chunk.content;
       }
