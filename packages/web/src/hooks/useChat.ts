@@ -100,6 +100,9 @@ export function useChat(
         }
 
         if (event.type === "tool_result") {
+          // The assistant message that issued this tool call is now done —
+          // finalize it so its (empty) bubble stops showing the typing dots.
+          const finishedAssistantId = assistantMsg.id;
           // Show tool result as a separate collapsible card
           const resultMsg: DisplayMessage = {
             id: `tool-result-${Date.now()}-${event.name}`,
@@ -111,7 +114,12 @@ export function useChat(
               isError: event.isError ?? false,
             },
           };
-          setMessages((prev) => [...prev, resultMsg]);
+          setMessages((prev) => [
+            ...prev.map((m) =>
+              m.id === finishedAssistantId ? { ...m, isStreaming: false } : m
+            ),
+            resultMsg,
+          ]);
 
           // Reset for next LLM iteration (new assistant message)
           assistantMsg = {

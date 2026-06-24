@@ -129,6 +129,11 @@ export function createConversationRoutes(service: AgentService): Hono {
           );
         };
 
+        // Open the stream immediately with an SSE comment so the client (and
+        // any reverse proxy) flushes the connection before the first token,
+        // rather than holding everything until the response completes.
+        controller.enqueue(encoder.encode(": open\n\n"));
+
         try {
           for await (const event of service.streamAgentResponse(
             id,
@@ -155,6 +160,9 @@ export function createConversationRoutes(service: AgentService): Hono {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        // Disable proxy buffering (nginx & friends) so SSE tokens are
+        // forwarded as they arrive instead of being held until the end.
+        "X-Accel-Buffering": "no",
       },
     });
   });
