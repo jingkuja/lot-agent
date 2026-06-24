@@ -1,4 +1,4 @@
-import { mkdir, writeFile, unlink } from "node:fs/promises";
+import { mkdir, writeFile, unlink, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ObjectStorage, PutObjectInput } from "./types.js";
 
@@ -17,6 +17,10 @@ export class LocalStorage implements ObjectStorage {
 
   getUrl(key: string): string {
     return `${this.urlPrefix}/${key}`;
+  }
+
+  async get(key: string): Promise<Buffer> {
+    return readFile(resolve(this.rootDir, key));
   }
 
   async delete(key: string): Promise<void> {

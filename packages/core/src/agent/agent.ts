@@ -1,5 +1,6 @@
 import type {
   Message,
+  ContentPart,
   LLMProvider,
   ToolCall,
   ToolContext,
@@ -64,7 +65,7 @@ export class Agent {
   }
 
   async *run(
-    userMessage: string,
+    userMessage: string | ContentPart[],
     context: AgentContext,
     history: Message[] = []
   ): AsyncIterable<AgentEvent> {
