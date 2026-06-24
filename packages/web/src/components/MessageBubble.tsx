@@ -17,7 +17,27 @@ export function MessageBubble({ message, onRegenerate, onSelectForPreview }: Mes
     return (
       <div className="message-wrapper message-user">
         <div className="message-wrapper-inner">
-          <div className="message-content">{message.content}</div>
+          {message.content && <div className="message-content">{message.content}</div>}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="message-attachments">
+              {message.attachments.map((a, i) => (
+                <a
+                  className="attachment-chip"
+                  key={i}
+                  href={a.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {a.kind === "image" ? (
+                    <img className="attachment-thumb" src={a.url} alt={a.filename} />
+                  ) : (
+                    <span className="attachment-doc-icon" aria-hidden>📄</span>
+                  )}
+                  <span className="attachment-name" title={a.filename}>{a.filename}</span>
+                </a>
+              ))}
+            </div>
+          )}
           <div className="message-actions-row message-actions-right">
             <MessageActions content={message.content} role="user" />
           </div>

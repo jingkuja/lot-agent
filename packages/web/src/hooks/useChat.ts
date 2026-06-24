@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { api } from "../api/client.js";
+import { api, type UploadedAttachment } from "../api/client.js";
 
 export interface DisplayMessage {
   id: string;
@@ -10,6 +10,7 @@ export interface DisplayMessage {
   toolResult?: { name: string; output: string; isError: boolean };
   isStreaming?: boolean;
   rating?: number | null;
+  attachments?: UploadedAttachment[];
 }
 
 export function useChat(
@@ -33,11 +34,17 @@ export function useChat(
     const display: DisplayMessage[] = data.messages.map((m) => {
       const role = m.role as DisplayMessage["role"];
       const toolName = (m as { tool_name?: string | null }).tool_name;
+      const meta = m.metadata;
+      const parsedMeta = typeof meta === "string" ? JSON.parse(meta) : meta;
       return {
         id: m.id,
         dbId: m.id,
         role,
         content: m.content,
+        attachments:
+          role === "user"
+            ? (parsedMeta?.attachments as UploadedAttachment[] | undefined)
+            : undefined,
         toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
         toolResult:
           role === "tool"
@@ -50,31 +57,45 @@ export function useChat(
   }, []);
 
   const streamMessage = useCallback(
-    (content: string) => {
+    (content: string, files: File[] = []) => {
       const cid = cidRef.current;
-      if (!cid || !content.trim() || isStreaming) return;
-
-      const userMsgId = `user-${Date.now()}`;
-      const userMsg: DisplayMessage = {
-        id: userMsgId,
-        role: "user",
-        content,
-      };
-      setMessages((prev) => [...prev, userMsg]);
-
-      let assistantMsg: DisplayMessage = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content: "",
-        isStreaming: true,
-      };
-
-      // Accumulate tool calls for the current assistant message
-      let pendingToolCalls: { name: string; input: unknown }[] = [];
+      if (!cid || (!content.trim() && files.length === 0) || isStreaming) return;
 
       setIsStreaming(true);
 
-      abortRef.current = api.sendMessage(cid, content, async (event) => {
+      (async () => {
+        // Upload any attached files first, then send the message with their refs.
+        let uploaded: UploadedAttachment[] = [];
+        try {
+          uploaded = await Promise.all(files.map((f) => api.uploadFile(f)));
+        } catch (e) {
+          setIsStreaming(false);
+          window.alert(
+            `文件上传失败：${e instanceof Error ? e.message : String(e)}`
+          );
+          return;
+        }
+
+        const userMsgId = `user-${Date.now()}`;
+        const userMsg: DisplayMessage = {
+          id: userMsgId,
+          role: "user",
+          content,
+          attachments: uploaded,
+        };
+        setMessages((prev) => [...prev, userMsg]);
+
+        let assistantMsg: DisplayMessage = {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: "",
+          isStreaming: true,
+        };
+
+        // Accumulate tool calls for the current assistant message
+        let pendingToolCalls: { name: string; input: unknown }[] = [];
+
+        abortRef.current = api.sendMessage(cid, content, async (event) => {
         if (event.type === "text" && event.content) {
           assistantMsg = {
             ...assistantMsg,
@@ -174,7 +195,8 @@ export function useChat(
           });
           setIsStreaming(false);
         }
-      });
+      }, uploaded);
+      })();
     },
     [conversationId, isStreaming, loadMessages]
   );

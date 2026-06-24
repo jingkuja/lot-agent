@@ -117,17 +117,17 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
 
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
-    async (content: string) => {
+    async (content: string, files: File[] = []) => {
       if (newAgentId) {
         const conv = await api.createConversation(undefined, newAgentId);
         activeIdRef.current = conv.id; // sync ref before send reads it
         setActiveId(conv.id);
         setNewAgentId(null);
         refresh();
-        send(content);
+        send(content, files);
         return;
       }
-      send(content);
+      send(content, files);
     },
     [newAgentId, setActiveId, refresh, send]
   );

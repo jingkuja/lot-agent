@@ -679,6 +679,17 @@ html, body, #root {
   color: var(--text);
 }
 
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.message-attachments .attachment-chip {
+  text-decoration: none;
+}
+
 /* ── Status Bar ── */
 .status-bar {
   padding: 6px 24px;

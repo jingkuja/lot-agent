@@ -7,7 +7,7 @@ import type { Agent } from "../api/client.js";
 
 interface ChatPanelProps {
   messages: DisplayMessage[];
-  onSend: (content: string) => void;
+  onSend: (content: string, files: File[]) => void;
   onStop: () => void;
   isStreaming: boolean;
   activeConversationId: string | null;
