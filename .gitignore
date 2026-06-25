@@ -8,7 +8,6 @@ data/assets
 data/documents
 data/uploads
 data/localstorage
-data/skills-env
 data/tmp
 packages/*/dist/
 packages/*/data/

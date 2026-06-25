@@ -148,10 +148,10 @@ export class AgentService {
       this.toolRegistry.register(tool);
     }
 
-    // Register the document-generation tool. It runs a sandboxed Python script
-    // (shared venv under data/skills-env) and persists output to its own
-    // storage (data/documents, served at /static/documents) — kept separate
-    // from data/assets, which is reserved for image/video generation material.
+    // Register the document-generation tool. It generates documents in-process
+    // (no Python runtime) and persists output to its own storage
+    // (data/documents, served at /static/documents) — kept separate from
+    // data/assets, which is reserved for image/video generation material.
     // Stays usable even though execute_command is disabled on the box.
     const root = dirname(this.skillsDir);
 
@@ -162,9 +162,7 @@ export class AgentService {
       createDocTool({
         storage: new LocalStorage(resolve(root, "data/documents"), "/static/documents"),
         db: this.db,
-        venvDir: resolve(root, "data/skills-env"),
-        scriptPath: resolve(this.skillsDir, "scripts/gen_doc.py"),
-        tmpDir: resolve(root, "data/tmp"),
+        fontPath: resolve(root, "assets/fonts/NotoSansSC-Regular.otf"),
       })
     );
 

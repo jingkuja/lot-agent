@@ -42,21 +42,14 @@ user, do not generate it again.
 
 ## Behaviour notes
 
-- Generation runs a Python script in a shared virtualenv on the server.
-- If the library required for the requested format is **not installed**, the tool
-  automatically **degrades to Markdown** and tells you so — pass that note along to the
-  user instead of retrying in a loop.
+- Generation runs entirely in-process in Node (no Python runtime/venv).
+- `docx` is produced with the `docx` package, `pdf` with `pdfkit`, and `md`/`html`
+  are plain string builders.
 
-## skills_env — Python dependencies
+## Dependencies
 
-The server lazily creates a shared virtualenv at `data/skills-env` on first use and installs
-the packages below. To set it up manually (e.g. when preparing the box offline):
-
-```bash
-python3 -m venv data/skills-env
-data/skills-env/bin/pip install python-docx reportlab
-```
-
-- `python-docx` → Word `.docx` generation
-- `reportlab`   → `.pdf` generation
-- `md` and `html` need **no third-party packages** (Python standard library only).
+- `docx` (npm) → Word `.docx` generation
+- `pdfkit` (npm) → `.pdf` generation
+- PDF embeds a bundled CJK font at `assets/fonts/NotoSansSC-Regular.otf` so Chinese
+  renders correctly. If that font is missing, `pdf` degrades to Markdown.
+- `md` and `html` need no extra packages.
