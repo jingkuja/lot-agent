@@ -40,4 +40,12 @@ describe("LocalStorage", () => {
     const storage = new LocalStorage(dir);
     await expect(storage.delete("nonexistent.png")).resolves.toBeUndefined();
   });
+
+  it("get() reads back what put() wrote", async () => {
+    dir = await mkdtemp(join(tmpdir(), "ls-test-"));
+    const storage = new LocalStorage(dir);
+    await storage.put({ key: "a.txt", body: Buffer.from("hello"), contentType: "text/plain" });
+    const buf = await storage.get("a.txt");
+    expect(buf.toString("utf8")).toBe("hello");
+  });
 });

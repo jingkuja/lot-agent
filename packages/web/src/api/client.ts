@@ -1,6 +1,7 @@
 export interface Conversation {
   id: string;
   title: string;
+  agent_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -13,6 +14,7 @@ export interface StoredMessage {
   tool_calls: string | null;
   tool_call_id: string | null;
   rating?: number | null;
+  metadata?: string | Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -24,7 +26,7 @@ export interface Rating {
 }
 
 export interface AgentEvent {
-  type: "text" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact";
+  type: "text" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact" | "title";
   id?: string;
   content?: string;
   name?: string;
@@ -40,6 +42,8 @@ export interface AgentEvent {
   assetId?: string;
   url?: string;
   mediaType?: string;
+  // title variant
+  title?: string;
 }
 
 export interface Agent {
@@ -76,6 +80,15 @@ export interface AssetMeta {
   mediaType: string;
   size: number;
   created_at: string;
+}
+
+export interface UploadedAttachment {
+  assetId: string;
+  filename: string;
+  mime: string;
+  size: number;
+  url: string;
+  kind: "image" | "doc";
 }
 
 // ── Token management ──────────────────────────────────────────────────────────
@@ -164,13 +177,36 @@ export const api = {
       body: JSON.stringify({ afterMessageId }),
     }),
 
+  uploadFile: async (file: File, signal?: AbortSignal): Promise<UploadedAttachment> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${BASE}/uploads`, {
+      method: "POST",
+      headers: { ...authHeaders() }, // 不要手动设 Content-Type，浏览器自动带 boundary
+      body: fd,
+      signal,
+    });
+    if (res.status === 401) {
+      clearToken();
+      window.dispatchEvent(new Event("lot:unauthorized"));
+      throw new Error("Unauthorized");
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error ?? res.statusText);
+    }
+    return res.json();
+  },
+
   sendMessage: (
     conversationId: string,
     content: string,
-    onEvent: (event: AgentEvent) => void
+    onEvent: (event: AgentEvent) => void | Promise<void>,
+    attachments?: UploadedAttachment[],
+    // Caller may pass its own controller so a single Stop aborts both the
+    // file-upload phase and the SSE stream.
+    controller: AbortController = new AbortController()
   ): AbortController => {
-    const controller = new AbortController();
-
     (async () => {
       try {
         const res = await fetch(
@@ -181,7 +217,7 @@ export const api = {
               "Content-Type": "application/json",
               ...authHeaders(),
             },
-            body: JSON.stringify({ content }),
+            body: JSON.stringify({ content, attachments }),
             signal: controller.signal,
           }
         );
@@ -212,12 +248,15 @@ export const api = {
 
           for (const line of lines) {
             if (line.startsWith("data: ")) {
+              let event: AgentEvent | undefined;
               try {
-                const event = JSON.parse(line.slice(6)) as AgentEvent;
-                onEvent(event);
+                event = JSON.parse(line.slice(6)) as AgentEvent;
               } catch {
                 // skip malformed lines
               }
+              // Awaited so the handler can pace rendering (e.g. hold the
+              // "tool executing" state briefly) while preserving event order.
+              if (event) await onEvent(event);
             }
           }
         }

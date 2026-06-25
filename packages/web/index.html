@@ -3,7 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lot Agent</title>
+    <title>智算AI</title>
+    <script>
+      // Set the theme before first paint to avoid a flash. Mirrors src/lib/theme.ts.
+      (function () {
+        try {
+          var t = localStorage.getItem("lot:theme");
+          document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

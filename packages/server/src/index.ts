@@ -16,6 +16,7 @@ import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
 import { createAssetRoutes } from "./routes/assets.js";
+import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import type { LLMConfig } from "@lot-agent/core";
@@ -24,12 +25,23 @@ import { AppConfigSchema } from "@lot-agent/core";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
 const ASSETS_DIR = resolve(ROOT, "data/assets");
+// Skill-generated documents live in their own store, separate from the
+// image/video material in data/assets.
+const DOCS_DIR = resolve(ROOT, "data/documents");
+// User-uploaded files, served at /static/uploads.
+const UPLOADS_DIR = resolve(ROOT, "data/uploads");
 
 function guessMime(name: string): string {
   if (name.endsWith(".png")) return "image/png";
   if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
   if (name.endsWith(".mp4")) return "video/mp4";
   if (name.endsWith(".mp3")) return "audio/mpeg";
+  if (name.endsWith(".docx"))
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".md")) return "text/markdown; charset=utf-8";
+  if (name.endsWith(".html")) return "text/html; charset=utf-8";
+  if (name.endsWith(".txt")) return "text/plain; charset=utf-8";
   return "application/octet-stream";
 }
 
@@ -111,6 +123,7 @@ async function main() {
   app.use("/api/agents/*", authMw);
   app.use("/api/tasks/*", authMw);
   app.use("/api/assets/*", authMw);
+  app.use("/api/uploads/*", authMw);
   app.use("/api/usage/*", authMw);
   app.use("/api/balance", authMw);
   app.use("/api/platform/*", authMw);
@@ -125,6 +138,7 @@ async function main() {
   app.route("/api/agents", createAgentRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
+  app.route("/api/uploads", createUploadRoutes(service));
   app.route("/api/usage", createUsageRoutes(service));
   app.route("/api/platform", createPlatformRoutes(service));
   app.route("/api/publish", createPublishRoutes(service));
@@ -154,6 +168,42 @@ async function main() {
     try {
       const buf = await readFile(resolve(ASSETS_DIR, filename));
       return c.body(buf, 200, { "Content-Type": guessMime(filename) });
+    } catch {
+      return c.text("not found", 404);
+    }
+  });
+
+  app.get("/static/documents/:filename", async (c) => {
+    const filename = c.req.param("filename");
+    if (filename.includes("/") || filename.includes("..")) {
+      return c.text("bad request", 400);
+    }
+    try {
+      const buf = await readFile(resolve(DOCS_DIR, filename));
+      return c.body(buf, 200, { "Content-Type": guessMime(filename) });
+    } catch {
+      return c.text("not found", 404);
+    }
+  });
+
+  app.get("/static/uploads/:filename", async (c) => {
+    const filename = c.req.param("filename");
+    if (filename.includes("/") || filename.includes("..")) {
+      return c.text("bad request", 400);
+    }
+    try {
+      const buf = await readFile(resolve(UPLOADS_DIR, filename));
+      const mime = guessMime(filename);
+      // User-controlled uploads: only let known-safe types render inline, and
+      // always send nosniff so e.g. an "evil.html" can't be sniffed/rendered as
+      // HTML and execute JS in our origin (stored XSS). Everything else is
+      // forced to download as an opaque attachment.
+      const safeInline = mime.startsWith("image/") || mime === "application/pdf";
+      return c.body(buf, 200, {
+        "Content-Type": safeInline ? mime : "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": safeInline ? "inline" : "attachment",
+      });
     } catch {
       return c.text("not found", 404);
     }

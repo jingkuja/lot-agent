@@ -2,19 +2,42 @@ import React, { useState, useCallback } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../api/client.js";
+import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
   onRegenerate?: () => void;
+  /** Click an assistant reply to open it in the preview panel. */
+  onSelectForPreview?: (content: string) => void;
 }
 
-export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
+export function MessageBubble({ message, onRegenerate, onSelectForPreview }: MessageBubbleProps) {
   if (message.role === "user") {
     return (
       <div className="message-wrapper message-user">
         <div className="message-wrapper-inner">
-          <div className="message-content">{message.content}</div>
+          {message.content && <div className="message-content">{message.content}</div>}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="message-attachments">
+              {message.attachments.map((a, i) => (
+                <a
+                  className="attachment-chip"
+                  key={i}
+                  href={a.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {a.kind === "image" ? (
+                    <img className="attachment-thumb" src={a.url} alt={a.filename} />
+                  ) : (
+                    <span className="attachment-doc-icon" aria-hidden>📄</span>
+                  )}
+                  <span className="attachment-name" title={a.filename}>{a.filename}</span>
+                </a>
+              ))}
+            </div>
+          )}
           <div className="message-actions-row message-actions-right">
             <MessageActions content={message.content} role="user" />
           </div>
@@ -44,6 +67,10 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
   }
 
   // Assistant message
+  // A streaming message that already carries tool calls is in the
+  // tool-execution phase (the model finished its text turn and we're waiting
+  // for the tool result) — show a tool-running hint instead of a text caret.
+  const executingTools = !!message.isStreaming && !!message.toolCalls?.length;
   return (
     <div className="message-wrapper message-assistant">
       <div className="message-wrapper-inner">
@@ -70,20 +97,48 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
           </div>
         )}
 
-        {/* Message content */}
-        <div className="message-content markdown-body">
+        {/* Message content — click to open in preview */}
+        {(() => {
+          const canPreview =
+            !!onSelectForPreview && !!message.content && !message.isStreaming;
+          return (
+        <div
+          className={`message-content markdown-body${canPreview ? " clickable" : ""}`}
+          onClick={canPreview ? () => onSelectForPreview!(message.content) : undefined}
+          title={canPreview ? "点击预览" : undefined}
+        >
           {message.content ? (
-            <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
-          ) : message.isStreaming ? (
-            "Thinking..."
+            <>
+              <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+              {message.isStreaming && !executingTools && (
+                <span className="cursor-blink" />
+              )}
+            </>
+          ) : message.isStreaming && !executingTools ? (
+            <TypingDots />
           ) : (
             ""
           )}
-          {message.isStreaming && <span className="cursor-blink" />}
         </div>
+          );
+        })()}
 
-        {/* Action buttons */}
-        {!message.isStreaming && message.content && (
+        {/* Tool execution hint — replaces the text caret while a tool runs */}
+        {executingTools && (
+          <div className="tool-running" role="status">
+            <TypingDots />
+            <span className="tool-running-label">
+              正在执行工具 {message.toolCalls![message.toolCalls!.length - 1].name}…
+            </span>
+          </div>
+        )}
+
+        {/* Action buttons — skip intermediate tool-calling turns; those
+            actions belong to the final answer, not a turn that ends in a tool
+            call (keeps the call → reply → result sequence reading as one unit). */}
+        {!message.isStreaming &&
+          message.content &&
+          !(message.toolCalls && message.toolCalls.length > 0) && (
           <MessageActions
             content={message.content}
             role="assistant"

@@ -1,8 +1,10 @@
 import type {
   Message,
+  ContentPart,
   LLMProvider,
   ToolCall,
   ToolContext,
+  ToolResult,
 } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { ContextManager, type ContextManagerConfig } from "../context/index.js";
@@ -41,6 +43,18 @@ const DEFAULT_CONFIG: AgentConfig = {
   systemPrompt: "You are a helpful AI assistant.",
 };
 
+/** Order-independent JSON serialization, so {a,b} and {b,a} dedup the same. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const keys = Object.keys(value as Record<string, unknown>).sort();
+  return `{${keys
+    .map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`)
+    .join(",")}}`;
+}
+
 export class Agent {
   private config: AgentConfig;
   private contextManager: ContextManager;
@@ -51,7 +65,7 @@ export class Agent {
   }
 
   async *run(
-    userMessage: string,
+    userMessage: string | ContentPart[],
     context: AgentContext,
     history: Message[] = []
   ): AsyncIterable<AgentEvent> {
@@ -90,6 +104,13 @@ export class Agent {
     // Working message log (accumulates during this run)
     const workingHistory: Message[] = [...history];
     const runStartTime = Date.now();
+
+    // Dedup successful tool calls within this run: a model that re-issues an
+    // identical call (same name + args) reuses the prior result instead of
+    // re-executing — prevents wasteful repeats (e.g. generating the same
+    // document multiple times). Failed calls are NOT cached, so the model can
+    // still retry after a transient failure (e.g. web_search timing out).
+    const successfulCalls = new Map<string, ToolResult>();
 
     while (iterations < this.config.maxIterations) {
       // Wall-clock timeout check
@@ -157,11 +178,24 @@ export class Agent {
           input: tc.arguments,
         };
 
-        const result = await context.toolRegistry.execute(
-          tc.name,
-          tc.arguments,
-          context.toolContext
-        );
+        const dedupKey = `${tc.name}:${stableStringify(tc.arguments)}`;
+        let result: ToolResult;
+        const cached = successfulCalls.get(dedupKey);
+        if (cached) {
+          // Identical call already succeeded this run — reuse it instead of
+          // re-running, and tell the model so it stops repeating.
+          result = {
+            content: `[skipped duplicate call: an identical ${tc.name} call already succeeded earlier in this turn — reusing that result. Do not call it again.]\n\n${cached.content}`,
+            isError: false,
+          };
+        } else {
+          result = await context.toolRegistry.execute(
+            tc.name,
+            tc.arguments,
+            context.toolContext
+          );
+          if (!result.isError) successfulCalls.set(dedupKey, result);
+        }
 
         yield {
           type: "tool_result",

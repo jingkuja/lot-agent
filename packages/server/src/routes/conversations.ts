@@ -2,8 +2,12 @@ import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
+import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 
 type Variables = { userId: string };
+
+/** Server-side cap (the InputBox MAX_FILES=5 is only a client hint). */
+const MAX_ATTACHMENTS = 5;
 
 export function createConversationRoutes(service: AgentService): Hono {
   const app = new Hono<{ Variables: Variables }>();
@@ -20,7 +24,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     const userId = c.get("userId");
     const body = await c.req.json<{ title?: string; agentId?: string }>().catch(() => ({}));
     const id = randomUUID();
-    const title = body.title ?? "New Chat";
+    const title = body.title ?? "新对话";
     const model =
       service["llmConfig"].default === "openai"
         ? service["llmConfig"].openai.model
@@ -115,9 +119,34 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "Not found" }, 404);
     }
 
-    const body = await c.req.json<{ content: string }>();
-    if (!body.content) {
-      return c.json({ error: "content is required" }, 400);
+    const body = await c.req.json<{ content: string; attachments?: AttachmentRef[] }>();
+    if (!body.content && !(body.attachments && body.attachments.length)) {
+      return c.json({ error: "content or attachments required" }, 400);
+    }
+
+    // Validate + canonicalize attachments against the caller's OWN assets.
+    // The client-supplied url/mime/size are untrusted: a forged url enables
+    // path traversal (#1) and referencing another user's assetId leaks their
+    // file (IDOR, #2). Re-derive every field from the asset row keyed by the
+    // owned assetId so the rest of the pipeline only sees trusted values.
+    const rawAttachments = body.attachments ?? [];
+    if (rawAttachments.length > MAX_ATTACHMENTS) {
+      return c.json({ error: `too many attachments (max ${MAX_ATTACHMENTS})` }, 400);
+    }
+    const attachments: AttachmentRef[] = [];
+    for (const a of rawAttachments) {
+      const asset = a.assetId ? await service.db.getAsset(a.assetId) : null;
+      if (!asset || asset.user_id !== userId) {
+        return c.json({ error: "attachment not found" }, 404);
+      }
+      attachments.push({
+        assetId: asset.id,
+        filename: a.filename, // display-only, not used for file access
+        mime: asset.mime,
+        size: asset.size_bytes,
+        url: asset.url,
+        kind: attachmentKind(asset.mime),
+      });
     }
 
     const encoder = new TextEncoder();
@@ -129,14 +158,32 @@ export function createConversationRoutes(service: AgentService): Hono {
           );
         };
 
+        // Open the stream immediately with an SSE comment so the client (and
+        // any reverse proxy) flushes the connection before the first token,
+        // rather than holding everything until the response completes.
+        controller.enqueue(encoder.encode(": open\n\n"));
+
         try {
           for await (const event of service.streamAgentResponse(
             id,
-            body.content,
+            body.content ?? "",
             conversation.agent_id,
-            userId
+            userId,
+            attachments
           )) {
             send(agentEventToSse(event));
+          }
+          // Summarize + persist the conversation title (first message only) and
+          // push it to the client so the sidebar updates live, no refresh.
+          try {
+            const title = await service.generateTitle(
+              id,
+              body.content ?? "",
+              attachments
+            );
+            if (title) send({ type: "title", title });
+          } catch {
+            // title generation is best-effort
           }
           send({ type: "stream_end" });
         } catch (error) {
@@ -155,6 +202,9 @@ export function createConversationRoutes(service: AgentService): Hono {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        // Disable proxy buffering (nginx & friends) so SSE tokens are
+        // forwarded as they arrive instead of being held until the end.
+        "X-Accel-Buffering": "no",
       },
     });
   });

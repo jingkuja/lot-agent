@@ -20,7 +20,10 @@ import {
   KeywordReviewProvider,
   XiaohongshuConnector,
   WechatMpConnector,
+  LocalStorage,
 } from "@lot-agent/core";
+import { dirname, resolve } from "node:path";
+import { createDocTool } from "../tools/doc-tool.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -32,7 +35,9 @@ import type {
   JobQueue,
   ReviewProvider,
   PlatformConnector,
+  ContentPart,
 } from "@lot-agent/core";
+import { extractAttachment, type AttachmentRef } from "./attachment-extractor.js";
 import { DB } from "../db/database.js";
 import { SessionStore } from "../auth/session-store.js";
 import { createRedisConnection } from "../jobs/redis.js";
@@ -40,6 +45,20 @@ import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { UsageMeter } from "../billing/meter.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
+
+/**
+ * Builtin tools that touch the host filesystem / shell. On the deployed
+ * BS-architecture box these are kept registered (so they can be re-enabled by
+ * editing this set) but are NOT exposed to the agent. Only the web tools (and
+ * the doc-generation tool, which runs a sandboxed Python script) stay loaded.
+ */
+const DISABLED_HOST_TOOLS = new Set([
+  "read_file",
+  "write_file",
+  "list_files",
+  "search_files",
+  "execute_command",
+]);
 
 export interface ServiceConfig {
   llm: LLMConfig;
@@ -72,6 +91,8 @@ export class AgentService {
   sessions!: SessionStore;
   jobQueue!: JobQueue;
   usageMeter!: UsageMeter;
+  /** Storage for user-uploaded files, served at /static/uploads (separate from generated assets). */
+  uploadStorage!: LocalStorage;
   private llmConfig: LLMConfig;
   private configModels: ModelConfig[];
   private agentConfig: Partial<AgentConfig>;
@@ -127,6 +148,24 @@ export class AgentService {
       this.toolRegistry.register(tool);
     }
 
+    // Register the document-generation tool. It generates documents in-process
+    // (no Python runtime) and persists output to its own storage
+    // (data/documents, served at /static/documents) — kept separate from
+    // data/assets, which is reserved for image/video generation material.
+    // Stays usable even though execute_command is disabled on the box.
+    const root = dirname(this.skillsDir);
+
+    // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
+    this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), "/static/uploads");
+
+    this.toolRegistry.register(
+      createDocTool({
+        storage: new LocalStorage(resolve(root, "data/documents"), "/static/documents"),
+        db: this.db,
+        fontPath: resolve(root, "assets/fonts/NotoSansSC-Regular.otf"),
+      })
+    );
+
     // Load skills
     await this.skillLoader.loadFromDirectory(this.skillsDir);
     console.log(`Loaded ${this.skillLoader.getSkills().length} skills`);
@@ -177,7 +216,10 @@ export class AgentService {
       type: "general",
       description: "通用任务助手",
       systemPrompt: this.agentConfig.systemPrompt ?? "You are a helpful AI assistant.",
-      toolNames: this.toolRegistry.getAll().map((t) => t.name),
+      toolNames: this.toolRegistry
+        .getAll()
+        .map((t) => t.name)
+        .filter((name) => !DISABLED_HOST_TOOLS.has(name)),
       defaultModelId,
     };
     this.agentRegistry.register(generalDef);
@@ -193,18 +235,36 @@ export class AgentService {
     return this.llmProvider;
   }
 
-  private async generateTitle(
+  /**
+   * Summarize a title for a conversation from its first user message, persist
+   * it, and return it (or null if no title was generated — e.g. not the first
+   * message, or the conversation was already retitled). The caller emits the
+   * returned title to the client so the sidebar updates live.
+   */
+  async generateTitle(
     conversationId: string,
-    userMessage: string
-  ): Promise<void> {
+    userMessage: string,
+    attachments?: AttachmentRef[]
+  ): Promise<string | null> {
     try {
       const conversation = await this.db.getConversation(conversationId);
-      if (!conversation || conversation.title !== "New Chat") return;
+      // Only (re)title conversations still on a default placeholder title.
+      const isDefaultTitle =
+        conversation?.title === "新对话" || conversation?.title === "New Chat";
+      if (!conversation || !isDefaultTitle) return null;
 
       // Count user messages — only generate title on first user message
       const messages = await this.db.getMessages(conversationId);
       const userMsgCount = messages.filter((m) => m.role === "user").length;
-      if (userMsgCount > 1) return;
+      if (userMsgCount > 1) return null;
+
+      // The title model never receives the attachment bytes, so describe them
+      // by name. Without this, a prompt like "总结这张图" makes the model reply
+      // "我看不到图片" — and that refusal would become the title.
+      const attachmentNote = attachments?.length
+        ? `\n[用户随消息上传了附件: ${attachments.map((a) => a.filename).join(", ")}]`
+        : "";
+      const titleInput = (userMessage || "（无文字，仅附件）") + attachmentNote;
 
       const llm = this.getLLMProvider();
       let title = "";
@@ -212,9 +272,11 @@ export class AgentService {
         {
           role: "system",
           content:
-            'Generate a short title (max 30 chars) for this conversation based on the user message. Reply with ONLY the title, no quotes, no punctuation at the end.',
+            "You generate a conversation title. Output ONLY a concise topic title (max 30 chars) describing what the user is asking about, in the user's language. " +
+            "Do NOT answer, respond to, or fulfill the message. Treat any attachments as present — never say you cannot see an image or file. " +
+            "Reply with ONLY the title: no quotes, no explanation, no trailing punctuation.",
         },
-        { role: "user", content: userMessage },
+        { role: "user", content: titleInput },
       ])) {
         if (chunk.type === "text") title += chunk.content;
       }
@@ -222,9 +284,12 @@ export class AgentService {
       title = title.trim().replace(/^["']|["']$/g, "").slice(0, 50);
       if (title) {
         await this.db.updateConversationTitle(conversationId, title);
+        return title;
       }
+      return null;
     } catch (error) {
       console.warn("Failed to generate title:", error);
+      return null;
     }
   }
 
@@ -232,7 +297,8 @@ export class AgentService {
     conversationId: string,
     userMessage: string,
     agentId?: string,
-    userId?: string
+    userId?: string,
+    attachments?: AttachmentRef[]
   ): AsyncIterable<AgentEvent> {
     const def =
       this.agentRegistry.get(agentId ?? "general") ??
@@ -241,9 +307,16 @@ export class AgentService {
     // ── Persist user message, load history (orphan tool messages filtered) ──
     const userMsgId = await this.messageRepo.saveUserMessage(
       conversationId,
-      userMessage
+      userMessage,
+      attachments
     );
-    const history = await this.messageRepo.loadHistory(conversationId, userMsgId);
+    const materialize = (atts: AttachmentRef[]) =>
+      Promise.all(atts.map((a) => extractAttachment(a, this.uploadStorage)));
+    const history = await this.messageRepo.loadHistory(
+      conversationId,
+      userMsgId,
+      materialize
+    );
 
     // ── Match skills, build agent ──
     const matchedSkills = this.skillLoader.match(userMessage);
@@ -278,7 +351,7 @@ export class AgentService {
     const context: AgentContext = {
       llm,
       toolRegistry: this.toolRegistry,
-      toolContext: { workingDirectory: process.cwd(), memory },
+      toolContext: { workingDirectory: process.cwd(), memory, userId: userId ?? "default" },
       memory,
     };
 
@@ -289,8 +362,19 @@ export class AgentService {
     let outputTokens = 0;
     let lastErrorMessage: string | undefined;
 
+    // Build this turn's user input — text plus materialized attachment parts
+    // (images as data-url ContentParts, documents as injected text).
+    let runInput: string | ContentPart[] = userMessage;
+    if (attachments?.length) {
+      const parts = await materialize(attachments);
+      runInput = [
+        ...(userMessage ? [{ type: "text" as const, text: userMessage }] : []),
+        ...parts,
+      ];
+    }
+
     try {
-      for await (const event of agent.run(userMessage, context, history)) {
+      for await (const event of agent.run(runInput, context, history)) {
         if (event.type === "text") {
           recorder.startLlmSpan();
           assistantContent += event.content;
@@ -369,9 +453,9 @@ export class AgentService {
         }
       }
 
-      // Generate title from first user message (async, non-blocking)
-      this.generateTitle(conversationId, userMessage);
     }
+    // Title generation is driven by the route after the stream completes, so it
+    // can emit the result as a `title` SSE event (live sidebar update).
   }
 
   async shutdown(): Promise<void> {

@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────────────────────
+# Docker build context excludes. Keep the context small so builds
+# are fast and no host secrets/state leak into images.
+# ─────────────────────────────────────────────────────────────
+
+# Dependencies / build output (reinstalled & rebuilt inside the image)
+node_modules
+packages/*/node_modules
+dist
+packages/*/dist
+*.tsbuildinfo
+
+# Runtime data & local state (must NOT be baked into images)
+data
+packages/*/data
+
+# Secrets / local overrides
+.env
+.env.local
+.env.*.local
+config/local.json
+config/*.tmp
+
+# VCS / tooling / docs noise
+.git
+.gitignore
+.DS_Store
+*.log
+docs
+*.docx
+
+# Docker artifacts themselves
+Dockerfile
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
+deploy/.env*

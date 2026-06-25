@@ -5,7 +5,10 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/assets
+data/documents
+data/uploads
 data/localstorage
+data/tmp
 packages/*/dist/
 packages/*/data/
 .env
