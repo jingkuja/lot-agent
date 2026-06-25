@@ -2,9 +2,12 @@ import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
-import type { AttachmentRef } from "../services/attachment-extractor.js";
+import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 
 type Variables = { userId: string };
+
+/** Server-side cap (the InputBox MAX_FILES=5 is only a client hint). */
+const MAX_ATTACHMENTS = 5;
 
 export function createConversationRoutes(service: AgentService): Hono {
   const app = new Hono<{ Variables: Variables }>();
@@ -121,6 +124,31 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "content or attachments required" }, 400);
     }
 
+    // Validate + canonicalize attachments against the caller's OWN assets.
+    // The client-supplied url/mime/size are untrusted: a forged url enables
+    // path traversal (#1) and referencing another user's assetId leaks their
+    // file (IDOR, #2). Re-derive every field from the asset row keyed by the
+    // owned assetId so the rest of the pipeline only sees trusted values.
+    const rawAttachments = body.attachments ?? [];
+    if (rawAttachments.length > MAX_ATTACHMENTS) {
+      return c.json({ error: `too many attachments (max ${MAX_ATTACHMENTS})` }, 400);
+    }
+    const attachments: AttachmentRef[] = [];
+    for (const a of rawAttachments) {
+      const asset = a.assetId ? await service.db.getAsset(a.assetId) : null;
+      if (!asset || asset.user_id !== userId) {
+        return c.json({ error: "attachment not found" }, 404);
+      }
+      attachments.push({
+        assetId: asset.id,
+        filename: a.filename, // display-only, not used for file access
+        mime: asset.mime,
+        size: asset.size_bytes,
+        url: asset.url,
+        kind: attachmentKind(asset.mime),
+      });
+    }
+
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -141,7 +169,7 @@ export function createConversationRoutes(service: AgentService): Hono {
             body.content ?? "",
             conversation.agent_id,
             userId,
-            body.attachments
+            attachments
           )) {
             send(agentEventToSse(event));
           }
@@ -151,7 +179,7 @@ export function createConversationRoutes(service: AgentService): Hono {
             const title = await service.generateTitle(
               id,
               body.content ?? "",
-              body.attachments
+              attachments
             );
             if (title) send({ type: "title", title });
           } catch {

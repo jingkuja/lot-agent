@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 interface InputBoxProps {
   onSend: (content: string, files: File[]) => void;
@@ -27,20 +27,47 @@ export function InputBox({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // One object URL per image file, created once when the file is picked and
+  // revoked on remove/send/unmount. Kept in a ref (not state) and created in
+  // the event handler — never inline in JSX (would leak a blob URL per render)
+  // and never in a render/effect path (StrictMode double-invokes those).
+  const urlsRef = useRef<Map<File, string>>(new Map());
+  const revokeAll = useCallback(() => {
+    for (const url of urlsRef.current.values()) URL.revokeObjectURL(url);
+    urlsRef.current.clear();
+  }, []);
+  useEffect(() => revokeAll, [revokeAll]);
+
   const addFiles = useCallback((picked: FileList | null) => {
     if (!picked) return;
+    const incoming = Array.from(picked);
     setFiles((prev) => {
       const next = [...prev];
-      for (const f of Array.from(picked)) {
+      for (const f of incoming) {
         if (next.length >= MAX_FILES) break;
         next.push(f);
       }
       return next;
     });
+    // Create preview URLs outside the state updater (which StrictMode may run
+    // twice). Extra URLs for files dropped by the cap are cleared on unmount.
+    for (const f of incoming) {
+      if (f.type.startsWith("image/") && !urlsRef.current.has(f)) {
+        urlsRef.current.set(f, URL.createObjectURL(f));
+      }
+    }
   }, []);
 
   const removeFile = useCallback((idx: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== idx));
+    setFiles((prev) => {
+      const f = prev[idx];
+      const url = f && urlsRef.current.get(f);
+      if (f && url) {
+        URL.revokeObjectURL(url);
+        urlsRef.current.delete(f);
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
   }, []);
 
   const handleSend = useCallback(() => {
@@ -49,10 +76,11 @@ export function InputBox({
     onSend(trimmed, files);
     setValue("");
     setFiles([]);
+    revokeAll();
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, files, disabled, onSend]);
+  }, [value, files, disabled, onSend, revokeAll]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -78,8 +106,8 @@ export function InputBox({
         <div className="input-attachments">
           {files.map((f, i) => (
             <div className="attachment-chip" key={i}>
-              {f.type.startsWith("image/") ? (
-                <img className="attachment-thumb" src={URL.createObjectURL(f)} alt={f.name} />
+              {f.type.startsWith("image/") && urlsRef.current.get(f) ? (
+                <img className="attachment-thumb" src={urlsRef.current.get(f)} alt={f.name} />
               ) : (
                 <span className="attachment-doc-icon" aria-hidden>📄</span>
               )}

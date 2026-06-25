@@ -19,6 +19,15 @@ export function attachmentKind(mime: string): "image" | "doc" {
   return IMAGE_MIMES.has(mime) ? "image" : "doc";
 }
 
+/**
+ * Upload storage keys are flat `uuid.ext` names. Reject anything with a path
+ * separator or `..` so a crafted `url` can't escape the uploads root via
+ * `storage.get(resolve(root, key))` (path traversal).
+ */
+export function isSafeUploadKey(key: string): boolean {
+  return key.length > 0 && !key.includes("/") && !key.includes("\\") && !key.includes("..");
+}
+
 /** 把附件转成发给模型的 ContentPart；图片→base64 data URL，文档→解析文本，失败降级。 */
 export async function extractAttachment(
   att: AttachmentRef,
@@ -26,7 +35,17 @@ export async function extractAttachment(
 ): Promise<ContentPart> {
   // storage key = url 去掉静态前缀（/static/uploads/）
   const key = att.url.replace(/^\/static\/uploads\//, "");
-  const bytes = await storage.get(key);
+  if (!isSafeUploadKey(key)) {
+    return { type: "text", text: `[附件 ${att.filename} 无法访问，已忽略内容]` };
+  }
+  // A missing/unreadable file (e.g. deleted upload) must degrade gracefully —
+  // never reject, or it would abort the whole conversation turn.
+  let bytes: Buffer;
+  try {
+    bytes = await storage.get(key);
+  } catch {
+    return { type: "text", text: `[附件 ${att.filename} 无法读取，已忽略内容]` };
+  }
 
   if (attachmentKind(att.mime) === "image") {
     const b64 = bytes.toString("base64");

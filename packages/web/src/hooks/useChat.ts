@@ -57,23 +57,39 @@ export function useChat(
   }, []);
 
   const streamMessage = useCallback(
-    (content: string, files: File[] = []) => {
+    (content: string, files: File[] = [], preUploaded?: UploadedAttachment[]) => {
       const cid = cidRef.current;
-      if (!cid || (!content.trim() && files.length === 0) || isStreaming) return;
+      if (
+        !cid ||
+        (!content.trim() && files.length === 0 && !preUploaded?.length) ||
+        isStreaming
+      )
+        return;
 
       setIsStreaming(true);
 
+      // One controller for the whole turn so Stop can abort an in-flight upload
+      // (set BEFORE uploads start), not just the SSE stream.
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       (async () => {
         // Upload any attached files first, then send the message with their refs.
-        let uploaded: UploadedAttachment[] = [];
-        try {
-          uploaded = await Promise.all(files.map((f) => api.uploadFile(f)));
-        } catch (e) {
-          setIsStreaming(false);
-          window.alert(
-            `文件上传失败：${e instanceof Error ? e.message : String(e)}`
-          );
-          return;
+        // When regenerating we already have the uploaded refs — reuse them.
+        let uploaded: UploadedAttachment[] = preUploaded ?? [];
+        if (!preUploaded) {
+          try {
+            uploaded = await Promise.all(
+              files.map((f) => api.uploadFile(f, controller.signal))
+            );
+          } catch (e) {
+            setIsStreaming(false);
+            if (controller.signal.aborted) return; // user pressed Stop — silent
+            window.alert(
+              `文件上传失败：${e instanceof Error ? e.message : String(e)}`
+            );
+            return;
+          }
         }
 
         const userMsgId = `user-${Date.now()}`;
@@ -95,7 +111,7 @@ export function useChat(
         // Accumulate tool calls for the current assistant message
         let pendingToolCalls: { name: string; input: unknown }[] = [];
 
-        abortRef.current = api.sendMessage(cid, content, async (event) => {
+        api.sendMessage(cid, content, async (event) => {
         if (event.type === "text" && event.content) {
           assistantMsg = {
             ...assistantMsg,
@@ -121,10 +137,9 @@ export function useChat(
             const filtered = prev.filter((m) => m.id !== assistantMsg.id);
             return [...filtered, assistantMsg];
           });
-          // Hold the "executing tool" state briefly so calling → executing →
-          // result reads as distinct steps. This overlaps a slow tool's real
-          // runtime (no added latency) and only pads fast/batched results.
-          await new Promise((r) => setTimeout(r, 500));
+          // The "executing tool" state stays visible until tool_result arrives,
+          // so no artificial delay is needed. Blocking here would stall the
+          // awaited SSE read loop and add real latency per tool call.
         }
 
         if (event.type === "tool_result") {
@@ -195,7 +210,7 @@ export function useChat(
           });
           setIsStreaming(false);
         }
-      }, uploaded);
+      }, uploaded, controller);
       })();
     },
     [conversationId, isStreaming, loadMessages]
@@ -209,6 +224,9 @@ export function useChat(
     if (!lastUserMsg?.dbId) return;
 
     const lastUserContent = lastUserMsg.content;
+    // Preserve the original message's attachments so regenerating a message
+    // that carried a file doesn't silently drop the document/image content.
+    const lastUserAttachments = lastUserMsg.attachments;
 
     try {
       await api.regenerate(conversationId, lastUserMsg.dbId);
@@ -219,7 +237,7 @@ export function useChat(
     const lastUserIdx = messages.lastIndexOf(lastUserMsg);
     setMessages((prev) => prev.slice(0, lastUserIdx));
 
-    streamMessage(lastUserContent);
+    streamMessage(lastUserContent, [], lastUserAttachments);
   }, [messages, isStreaming, conversationId, streamMessage]);
 
   const stop = useCallback(() => {

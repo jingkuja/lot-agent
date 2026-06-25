@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { extractAttachment, attachmentKind, MAX_DOC_CHARS } from "./attachment-extractor.js";
+import {
+  extractAttachment,
+  attachmentKind,
+  isSafeUploadKey,
+  MAX_DOC_CHARS,
+} from "./attachment-extractor.js";
 import type { ObjectStorage } from "@lot-agent/core";
 import type { AttachmentRef } from "./attachment-extractor.js";
 
@@ -45,5 +50,47 @@ describe("extractAttachment", () => {
     const s = fakeStorage(Buffer.from("zzz"));
     const part = await extractAttachment({ ...base, filename: "a.bin", mime: "application/octet-stream" }, s);
     expect(part).toEqual({ type: "text", text: "[附件 a.bin 无法解析，已忽略内容]" });
+  });
+
+  it("rejects path-traversal urls without reading from storage", async () => {
+    let read = false;
+    const s: ObjectStorage = {
+      put: async () => ({ url: "" }),
+      getUrl: () => "",
+      delete: async () => {},
+      get: async () => {
+        read = true;
+        return Buffer.from("secret");
+      },
+    };
+    const part = await extractAttachment(
+      { ...base, filename: "x", mime: "text/plain", url: "/static/uploads/../../../etc/passwd" },
+      s
+    );
+    expect(read).toBe(false);
+    expect(part).toEqual({ type: "text", text: "[附件 x 无法访问，已忽略内容]" });
+  });
+
+  it("degrades gracefully when the stored file is missing", async () => {
+    const s: ObjectStorage = {
+      put: async () => ({ url: "" }),
+      getUrl: () => "",
+      delete: async () => {},
+      get: async () => {
+        throw new Error("ENOENT");
+      },
+    };
+    const part = await extractAttachment({ ...base, filename: "gone.txt", mime: "text/plain" }, s);
+    expect(part).toEqual({ type: "text", text: "[附件 gone.txt 无法读取，已忽略内容]" });
+  });
+});
+
+describe("isSafeUploadKey", () => {
+  it("accepts flat uuid.ext keys and rejects traversal/separators", () => {
+    expect(isSafeUploadKey("a1b2.png")).toBe(true);
+    expect(isSafeUploadKey("../etc/passwd")).toBe(false);
+    expect(isSafeUploadKey("sub/dir.png")).toBe(false);
+    expect(isSafeUploadKey("a\\b.png")).toBe(false);
+    expect(isSafeUploadKey("")).toBe(false);
   });
 });

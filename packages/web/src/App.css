@@ -45,6 +45,9 @@
   /* Brand header (智算AI card) */
   --brand-grad-from: #2563eb;  --brand-grad-to: #06b6d4;
   --brand-card-from: rgba(99,102,241,0.10);  --brand-card-to: rgba(34,211,238,0.06);
+  /* Empty-chat logo orb — references theme tokens so it adapts in both modes. */
+  --logo-grad: conic-gradient(from 210deg, var(--brand-grad-from), var(--accent), var(--brand-grad-to), var(--accent-hover), var(--brand-grad-from));
+  --logo-glow: 0 0 60px rgba(37, 99, 235, 0.18);
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -94,6 +97,7 @@
 
   --brand-grad-from: #60a5fa;  --brand-grad-to: #22d3ee;
   --brand-card-from: rgba(96,165,250,0.12);  --brand-card-to: rgba(34,211,238,0.05);
+  --logo-glow: 0 0 60px rgba(34, 211, 238, 0.22);
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
@@ -1631,8 +1635,8 @@ html, body, #root {
   width: 80px;
   height: 80px;
   border-radius: 24px;
-  background: conic-gradient(from 210deg, #8b5cf6, #22d3ee, #34d399, #6366f1, #8b5cf6);
-  box-shadow: 0 0 60px rgba(34, 211, 238, 0.22);
+  background: var(--logo-grad);
+  box-shadow: var(--logo-glow);
 }
 
 .chat-empty-title {

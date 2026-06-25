@@ -193,7 +193,17 @@ async function main() {
     }
     try {
       const buf = await readFile(resolve(UPLOADS_DIR, filename));
-      return c.body(buf, 200, { "Content-Type": guessMime(filename) });
+      const mime = guessMime(filename);
+      // User-controlled uploads: only let known-safe types render inline, and
+      // always send nosniff so e.g. an "evil.html" can't be sniffed/rendered as
+      // HTML and execute JS in our origin (stored XSS). Everything else is
+      // forced to download as an opaque attachment.
+      const safeInline = mime.startsWith("image/") || mime === "application/pdf";
+      return c.body(buf, 200, {
+        "Content-Type": safeInline ? mime : "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": safeInline ? "inline" : "attachment",
+      });
     } catch {
       return c.text("not found", 404);
     }

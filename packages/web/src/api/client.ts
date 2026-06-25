@@ -177,13 +177,14 @@ export const api = {
       body: JSON.stringify({ afterMessageId }),
     }),
 
-  uploadFile: async (file: File): Promise<UploadedAttachment> => {
+  uploadFile: async (file: File, signal?: AbortSignal): Promise<UploadedAttachment> => {
     const fd = new FormData();
     fd.append("file", file);
     const res = await fetch(`${BASE}/uploads`, {
       method: "POST",
       headers: { ...authHeaders() }, // 不要手动设 Content-Type，浏览器自动带 boundary
       body: fd,
+      signal,
     });
     if (res.status === 401) {
       clearToken();
@@ -201,10 +202,11 @@ export const api = {
     conversationId: string,
     content: string,
     onEvent: (event: AgentEvent) => void | Promise<void>,
-    attachments?: UploadedAttachment[]
+    attachments?: UploadedAttachment[],
+    // Caller may pass its own controller so a single Stop aborts both the
+    // file-upload phase and the SSE stream.
+    controller: AbortController = new AbortController()
   ): AbortController => {
-    const controller = new AbortController();
-
     (async () => {
       try {
         const res = await fetch(
