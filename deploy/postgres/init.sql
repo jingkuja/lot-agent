@@ -1,0 +1,23 @@
+-- ─────────────────────────────────────────────────────────────
+-- Lot Agent — PostgreSQL initialization.
+--
+-- Runs ONCE, only on first boot of an empty data volume, via the official
+-- postgres image's /docker-entrypoint-initdb.d hook. It executes inside the
+-- database named by POSTGRES_DB (see docker-compose / .env → PG_DATABASE),
+-- so no `\connect` / database name is needed here.
+--
+-- TABLES ARE NOT CREATED HERE ON PURPOSE.
+-- The application owns its schema: packages/server/src/db/database.ts `migrate()`
+-- runs idempotent `CREATE TABLE IF NOT EXISTS` + `ALTER ... ADD COLUMN IF NOT
+-- EXISTS` on every startup. Keeping the schema in one place (the code) avoids
+-- drift between a hand-written SQL dump and what the app actually expects.
+--
+-- This file is for things the app cannot do for itself (extensions, etc.).
+-- The database itself is created by the postgres image from POSTGRES_DB, and
+-- the timezone is pinned to UTC via the container command in docker-compose.yml.
+-- ─────────────────────────────────────────────────────────────
+
+-- pgcrypto provides gen_random_uuid() and crypto helpers. Not required by the
+-- current code (UUIDs are generated in Node); enabled here as a safe default
+-- for future server-side column defaults. Harmless if unused.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
