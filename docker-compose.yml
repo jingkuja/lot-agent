@@ -74,10 +74,9 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
 
   server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: lot-agent-app:latest
+    # Image built separately from `Dockerfile` (see docs/deployment.md):
+    #   docker build -t lot-agent-app:1.0 -f Dockerfile .
+    image: lot-agent-app:1.0
     restart: unless-stopped
     environment:
       <<: *app-env
@@ -95,11 +94,8 @@ services:
     #   - "3000:3000"
 
   worker:
-    # Same image as `server`; built once, reused here.
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: lot-agent-app:latest
+    # Same image as `server` (one build, two roles via ROLE).
+    image: lot-agent-app:1.0
     restart: unless-stopped
     environment:
       <<: *app-env
@@ -118,10 +114,9 @@ services:
         condition: service_healthy
 
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile.web
-    image: lot-agent-web:latest
+    # Image built separately from `Dockerfile.web` (see docs/deployment.md):
+    #   docker build -t lot-agent-web:1.0 -f Dockerfile.web .
+    image: lot-agent-web:1.0
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-80}:80"
