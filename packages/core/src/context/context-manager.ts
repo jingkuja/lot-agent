@@ -93,7 +93,7 @@ export class ContextManager {
     systemParts: string[],
     memory: string | undefined,
     history: Message[],
-    currentMessage: Message,
+    currentMessage?: Message,
     compressor?: LLMProvider
   ): Promise<Message[]> {
     const result: Message[] = [];
@@ -128,8 +128,9 @@ export class ContextManager {
     );
     result.push(...recentHistory);
 
-    // 4. Current user message
-    result.push(currentMessage);
+    // 4. Current user message (optional — callers that keep it in `history`
+    //    omit it to avoid duplicating the turn).
+    if (currentMessage) result.push(currentMessage);
 
     return result;
   }

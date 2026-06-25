@@ -39,9 +39,19 @@ export interface LLMTool {
   parameters: JSONSchema;
 }
 
+/** Options for a single LLM chat call */
+export interface ChatOptions {
+  /** Aborts the in-flight request (run timeout or client disconnect). */
+  signal?: AbortSignal;
+}
+
 /** Unified LLM provider interface */
 export interface LLMProvider {
-  chat(messages: Message[], tools?: LLMTool[]): AsyncIterable<ChatChunk>;
+  chat(
+    messages: Message[],
+    tools?: LLMTool[],
+    opts?: ChatOptions
+  ): AsyncIterable<ChatChunk>;
 }
 
 /** Error classification for tools */
@@ -86,6 +96,8 @@ export interface ToolContext {
   memory?: import("../memory/store.js").AgentMemoryStore;
   /** Owner of the current request — used by tools that persist user-scoped artifacts (e.g. generated documents). */
   userId?: string;
+  /** Aborts long-running tool work when the run times out or the client disconnects. */
+  signal?: AbortSignal;
 }
 
 /** Tool definition */
@@ -95,6 +107,13 @@ export interface Tool {
   parameters: JSONSchema;
   /** Per-tool execution config overrides */
   execConfig?: Partial<ToolExecConfig>;
+  /**
+   * When true, an identical call (same name + args) that already succeeded in
+   * the current run is reused instead of re-executed. Only safe for pure /
+   * idempotent reads whose result cannot change due to other actions in the
+   * run (e.g. web fetches). Defaults to false — most tools must re-run.
+   */
+  cacheable?: boolean;
   execute(input: unknown, context: ToolContext): Promise<ToolResult>;
 }
 

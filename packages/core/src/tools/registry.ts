@@ -42,7 +42,8 @@ export class ToolRegistry {
   async execute(
     name: string,
     input: unknown,
-    context: ToolContext
+    context: ToolContext,
+    opts: { signal?: AbortSignal } = {}
   ): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
@@ -56,7 +57,12 @@ export class ToolRegistry {
     // Merge default config with per-tool overrides
     const config = this.mergeConfig(tool);
 
-    return this.executeWithRetry(tool, input, context, config);
+    // Expose the run signal to the tool itself, so signal-aware tools can abort.
+    const execContext: ToolContext = opts.signal
+      ? { ...context, signal: opts.signal }
+      : context;
+
+    return this.executeWithRetry(tool, input, execContext, config, opts.signal);
   }
 
   private mergeConfig(tool: Tool): ToolExecConfig {
@@ -80,18 +86,30 @@ export class ToolRegistry {
     tool: Tool,
     input: unknown,
     context: ToolContext,
-    config: ToolExecConfig
+    config: ToolExecConfig,
+    signal?: AbortSignal
   ): Promise<ToolResult> {
     let lastResult: ToolResult | null = null;
 
     for (let attempt = 0; attempt <= config.retry.maxRetries; attempt++) {
+      if (signal?.aborted) return abortedResult(tool.name);
+
       // Execute with timeout
-      const result = await this.executeWithTimeout(tool, input, context, config.timeoutMs);
+      const result = await this.executeWithTimeout(
+        tool,
+        input,
+        context,
+        config.timeoutMs,
+        signal
+      );
 
       // Success — return immediately
       if (!result.isError) return result;
 
       lastResult = result;
+
+      // Don't retry once the run is aborting.
+      if (signal?.aborted) return result;
 
       // Check if retryable
       const kind = result.errorKind ?? "unknown";
@@ -115,15 +133,20 @@ export class ToolRegistry {
     tool: Tool,
     input: unknown,
     context: ToolContext,
-    timeoutMs: number
+    timeoutMs: number,
+    signal?: AbortSignal
   ): Promise<ToolResult> {
+    const races: Promise<ToolResult>[] = [
+      tool.execute(input, context),
+      timeout(timeoutMs),
+    ];
+    // Stop waiting on a tool that ignores the signal the moment the run aborts;
+    // its work is discarded so the loop can wind down promptly.
+    if (signal) races.push(abortRace(signal));
     try {
-      const result = await Promise.race([
-        tool.execute(input, context),
-        timeout(timeoutMs),
-      ]);
-      return result;
+      return await Promise.race(races);
     } catch (error) {
+      if (error instanceof AbortError) return abortedResult(tool.name);
       if (error instanceof TimeoutError) {
         return {
           content: `Tool '${tool.name}' timed out after ${timeoutMs}ms`,
@@ -188,6 +211,33 @@ class TimeoutError extends Error {
     super(`Timeout after ${ms}ms`);
     this.name = "TimeoutError";
   }
+}
+
+class AbortError extends Error {
+  constructor() {
+    super("Aborted");
+    this.name = "AbortError";
+  }
+}
+
+function abortedResult(toolName: string): ToolResult {
+  return {
+    content: `Tool '${toolName}' aborted`,
+    isError: true,
+    errorKind: "unknown",
+  };
+}
+
+function abortRace(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => {
+    if (signal.aborted) {
+      reject(new AbortError());
+      return;
+    }
+    signal.addEventListener("abort", () => reject(new AbortError()), {
+      once: true,
+    });
+  });
 }
 
 function timeout(ms: number): Promise<never> {

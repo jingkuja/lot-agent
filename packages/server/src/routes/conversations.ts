@@ -169,7 +169,8 @@ export function createConversationRoutes(service: AgentService): Hono {
             body.content ?? "",
             conversation.agent_id,
             userId,
-            attachments
+            attachments,
+            c.req.raw.signal
           )) {
             send(agentEventToSse(event));
           }

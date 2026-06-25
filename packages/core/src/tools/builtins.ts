@@ -275,6 +275,9 @@ export const webFetchTool: Tool = {
   name: "web_fetch",
   description:
     "Fetch a URL and return its text content. Useful for reading web pages, APIs, or documents.",
+  // Pure external read — the same URL within a run yields the same content, so
+  // an identical repeat call is reused instead of re-fetched.
+  cacheable: true,
   execConfig: {
     timeoutMs: 20_000,
     retry: { maxRetries: 2, baseDelayMs: 2000, retryableKinds: ["timeout", "network"] },
@@ -349,6 +352,8 @@ export const webSearchTool: Tool = {
   name: "web_search",
   description:
     "Search the web using DuckDuckGo. Returns a list of search results with titles, URLs, and snippets.",
+  // Pure external read — repeating the same query in a run reuses the result.
+  cacheable: true,
   execConfig: {
     timeoutMs: 20_000,
     retry: { maxRetries: 2, baseDelayMs: 2000, retryableKinds: ["timeout", "network"] },

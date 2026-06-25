@@ -298,7 +298,8 @@ export class AgentService {
     userMessage: string,
     agentId?: string,
     userId?: string,
-    attachments?: AttachmentRef[]
+    attachments?: AttachmentRef[],
+    signal?: AbortSignal
   ): AsyncIterable<AgentEvent> {
     const def =
       this.agentRegistry.get(agentId ?? "general") ??
@@ -374,7 +375,7 @@ export class AgentService {
     }
 
     try {
-      for await (const event of agent.run(runInput, context, history)) {
+      for await (const event of agent.run(runInput, context, history, { signal })) {
         if (event.type === "text") {
           recorder.startLlmSpan();
           assistantContent += event.content;
