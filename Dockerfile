@@ -42,6 +42,8 @@ COPY --from=builder /app/packages/core/dist packages/core/dist
 COPY --from=builder /app/packages/server/dist packages/server/dist
 COPY config config
 COPY skills skills
+# Static assets read at runtime (e.g. the CJK font embedded into generated PDFs).
+COPY assets assets
 
 # Runtime data dir (assets/documents/uploads). Mounted as a named volume in
 # compose; chown so the unprivileged `node` user can write to the empty volume.

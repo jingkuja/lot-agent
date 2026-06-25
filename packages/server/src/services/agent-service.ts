@@ -24,6 +24,7 @@ import {
 } from "@lot-agent/core";
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
+import { staticPrefix } from "../util/public-base.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -156,11 +157,11 @@ export class AgentService {
     const root = dirname(this.skillsDir);
 
     // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
-    this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), "/static/uploads");
+    this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), staticPrefix("/static/uploads"));
 
     this.toolRegistry.register(
       createDocTool({
-        storage: new LocalStorage(resolve(root, "data/documents"), "/static/documents"),
+        storage: new LocalStorage(resolve(root, "data/documents"), staticPrefix("/static/documents")),
         db: this.db,
         fontPath: resolve(root, "assets/fonts/NotoSansSC-Regular.otf"),
       })

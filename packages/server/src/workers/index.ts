@@ -9,13 +9,14 @@ import { StubImageProvider, StubVideoProvider, LocalStorage } from "@lot-agent/c
 import type { ModelConfig } from "@lot-agent/core";
 import { UsageMeter } from "../billing/meter.js";
 import { GenCache, genCacheKey } from "../billing/gen-cache.js";
+import { staticPrefix } from "../util/public-base.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
 // (one deeper than server's index.js, which sits at {src,dist}/index.js).
 const ROOT = resolve(__dirname, "../../../..");
 const ASSETS_DIR = resolve(ROOT, "data/assets");
-const storage = new LocalStorage(ASSETS_DIR);
+const storage = new LocalStorage(ASSETS_DIR, staticPrefix("/static/assets"));
 
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
