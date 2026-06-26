@@ -5,6 +5,9 @@
  *   User      — PostgreSQL, permanent (user preferences, historical summaries)
  */
 
+import type { SessionMemoryBackend } from "./session-backend.js";
+export type { SessionMemoryBackend } from "./session-backend.js";
+
 export type MemoryTier = "ephemeral" | "session" | "user";
 
 export interface MemoryEntry {
@@ -107,10 +110,40 @@ export class AgentMemoryStore implements MemoryStore {
   private session = new InMemoryTier();
   private persistent?: PersistentMemoryAdapter;
   private userId?: string;
+  private sessionBackend?: SessionMemoryBackend;
+  private conversationId?: string;
 
-  constructor(opts?: { persistent?: PersistentMemoryAdapter; userId?: string }) {
+  constructor(opts?: {
+    persistent?: PersistentMemoryAdapter;
+    userId?: string;
+    sessionBackend?: SessionMemoryBackend;
+    conversationId?: string;
+  }) {
     this.persistent = opts?.persistent;
     this.userId = opts?.userId;
+    this.sessionBackend = opts?.sessionBackend;
+    this.conversationId = opts?.conversationId;
+  }
+
+  /** Best-effort write-through of the whole session tier to the backend. */
+  private flushSession(): void {
+    if (!this.sessionBackend || !this.conversationId) return;
+    const entries = this.session
+      .dump()
+      .map((e) => ({ ...e, tier: "session" as const }));
+    this.sessionBackend.save(this.conversationId, entries).catch(() => {});
+  }
+
+  /** Load persisted session memory for this conversation into the in-memory tier. */
+  async hydrate(): Promise<void> {
+    if (!this.sessionBackend || !this.conversationId) return;
+    const entries = await this.sessionBackend.load(this.conversationId);
+    const now = Date.now();
+    for (const e of entries) {
+      if (e.expiresAt && now > e.expiresAt) continue;
+      const ttl = e.expiresAt ? e.expiresAt - now : SESSION_TTL_MS;
+      this.session.set(e.key, e.value, e.meta, ttl);
+    }
   }
 
   get(tier: MemoryTier, key: string): string | undefined {
@@ -132,6 +165,7 @@ export class AgentMemoryStore implements MemoryStore {
         break;
       case "session":
         this.session.set(key, value, undefined, ttlMs ?? SESSION_TTL_MS);
+        this.flushSession();
         break;
       case "user":
         // Fire-and-forget for sync API; use async methods for guaranteed persistence
@@ -149,6 +183,7 @@ export class AgentMemoryStore implements MemoryStore {
         break;
       case "session":
         this.session.delete(key);
+        this.flushSession();
         break;
       case "user":
         if (this.persistent && this.userId) {
@@ -225,6 +260,11 @@ export class AgentMemoryStore implements MemoryStore {
   async setUserMemory(key: string, value: string, meta?: Record<string, unknown>): Promise<void> {
     if (!this.persistent || !this.userId) return;
     await this.persistent.set(this.userId, key, value, meta);
+  }
+
+  async deleteUserMemory(key: string): Promise<void> {
+    if (!this.persistent || !this.userId) return;
+    await this.persistent.delete(this.userId, key);
   }
 
   async listUserMemory(): Promise<MemoryEntry[]> {
