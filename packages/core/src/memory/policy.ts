@@ -15,6 +15,9 @@ export function hasMemoryTools(names?: string[]): boolean {
   return names.some((n) => MEMORY_TOOL_NAMES.includes(n));
 }
 
+// NOTE: injection is gated off via hasMemoryTools() — no agent currently
+// whitelists the memory tools, so this prompt is not injected. Kept for
+// re-enablement.
 /** Strategy block injected into the system prompt for memory-capable agents. */
 export const MEMORY_POLICY_PROMPT = `[记忆使用策略]
 你有三层记忆，通过 memory_read / memory_write / memory_list / memory_delete 工具访问：

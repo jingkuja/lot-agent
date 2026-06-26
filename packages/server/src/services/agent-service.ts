@@ -362,6 +362,7 @@ export class AgentService {
     };
 
     let assistantContent = "";
+    let producedAssistantText = "";
     let currentToolCalls: { id: string; name: string; arguments: unknown }[] = [];
     let totalTokens = 0;
     let inputTokens = 0;
@@ -384,6 +385,7 @@ export class AgentService {
         if (event.type === "text") {
           recorder.startLlmSpan();
           assistantContent += event.content;
+          producedAssistantText += event.content;
         }
 
         if (event.type === "tool_call") {
@@ -443,9 +445,14 @@ export class AgentService {
 
       // Fire-and-forget: extract durable user memory from this turn in the
       // background worker — never blocks the stream, never shows in the chat.
-      this.jobQueue
-        .enqueue("memory.extract", { conversationId }, userId ?? "default")
-        .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
+      // Only extract memory from turns that produced a real assistant reply —
+      // empty/tool-only/errored turns would otherwise re-extract a stale turn
+      // and create a junk task row.
+      if (producedAssistantText.trim()) {
+        this.jobQueue
+          .enqueue("memory.extract", { conversationId }, userId ?? "default")
+          .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
+      }
 
       // Finish trace + spans (with the ACTUAL error message, if any)
       await recorder.finish({ totalTokens, errorMessage: lastErrorMessage });

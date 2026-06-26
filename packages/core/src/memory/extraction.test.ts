@@ -90,4 +90,17 @@ describe("applyExtraction", () => {
     });
     expect(set).toHaveBeenCalledTimes(2);
   });
+
+  it("continues after a delete failure", async () => {
+    const del = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValue(undefined);
+    const adapter: PersistentMemoryAdapter = {
+      get: async () => undefined,
+      set: async () => {},
+      delete: del,
+      list: async () => [],
+      search: async () => [],
+    };
+    await applyExtraction(adapter, "u1", { upserts: [], deletes: ["a", "b"] });
+    expect(del).toHaveBeenCalledTimes(2);
+  });
 });
