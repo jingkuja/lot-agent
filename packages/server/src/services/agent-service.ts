@@ -41,8 +41,9 @@ import type {
 import { extractAttachment, type AttachmentRef } from "./attachment-extractor.js";
 import { DB } from "../db/database.js";
 import { SessionStore } from "../auth/session-store.js";
-import { createRedisConnection } from "../jobs/redis.js";
+import { createRedisConnection, getRedis } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
+import { RedisSessionBackend } from "../memory/redis-session-backend.js";
 import { UsageMeter } from "../billing/meter.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
@@ -88,6 +89,8 @@ export class AgentService {
   readonly connectors: Map<string, PlatformConnector>;
   /** Persistent memory adapter — kept for per-request AgentMemoryStore construction */
   pgAdapter!: import("@lot-agent/core").PgMemoryAdapter;
+  /** Redis-backed session memory backend — shared; per-request stores reference it */
+  sessionBackend!: RedisSessionBackend;
   /** Session store for multi-user auth */
   sessions!: SessionStore;
   jobQueue!: JobQueue;
@@ -138,6 +141,9 @@ export class AgentService {
     const pgAdapter = new PgMemoryAdapter(this.db.pool);
     await pgAdapter.init();
     this.pgAdapter = pgAdapter;
+
+    // Session memory backend (Redis, per-conversation, 20min TTL)
+    this.sessionBackend = new RedisSessionBackend(getRedis());
 
     // Initialize session store
     this.sessions = new SessionStore(this.db);
@@ -348,7 +354,11 @@ export class AgentService {
     const memory = new AgentMemoryStore({
       persistent: this.pgAdapter,
       userId: userId ?? "default",
+      sessionBackend: this.sessionBackend,
+      conversationId,
     });
+    // Load this conversation's persisted session memory before the run
+    await memory.hydrate();
 
     const context: AgentContext = {
       llm,

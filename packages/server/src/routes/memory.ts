@@ -54,11 +54,16 @@ export function createMemoryRoutes(service: AgentService): Hono {
     return c.json({ ok: true });
   });
 
-  // Get session memory (read-only)
-  app.get("/session/dump", (c) => {
-    const memory = getMemory(c.get("userId"));
-    const entries = memory.dump("session");
-    return c.json(entries);
+  // Get session memory for a conversation (read-only)
+  app.get("/session/dump", async (c) => {
+    const conversationId = c.req.query("conversationId");
+    if (!conversationId) return c.json([]);
+    const memory = new AgentMemoryStore({
+      sessionBackend: service.sessionBackend,
+      conversationId,
+    });
+    await memory.hydrate();
+    return c.json(memory.dump("session"));
   });
 
   return app;
