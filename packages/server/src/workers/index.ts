@@ -7,6 +7,15 @@ import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { StubImageProvider, StubVideoProvider, LocalStorage } from "@lot-agent/core";
 import type { ModelConfig } from "@lot-agent/core";
+import {
+  createLLMProvider,
+  PgMemoryAdapter,
+  buildExtractionMessages,
+  parseExtraction,
+  applyExtraction,
+} from "@lot-agent/core";
+import { loadLlmConfig } from "../config.js";
+import { lastTurn } from "../memory/last-turn.js";
 import { UsageMeter } from "../billing/meter.js";
 import { GenCache, genCacheKey } from "../billing/gen-cache.js";
 import { staticPrefix } from "../util/public-base.js";
@@ -43,6 +52,14 @@ async function main() {
 
   const meter = new UsageMeter(db, (id) => modelMap.get(id));
   const cache = new GenCache(conn);
+
+  // Background memory extraction deps
+  const llmConfig = await loadLlmConfig(ROOT);
+  const extractLlm = createLLMProvider(llmConfig);
+  const memAdapter = new PgMemoryAdapter(db.pool);
+  await memAdapter.init();
+  const extractModelId =
+    llmConfig.default === "openai" ? llmConfig.openai.model : llmConfig.anthropic.model;
 
   // Register image.generate handler
   queue.process("image.generate", async (job) => {
@@ -119,6 +136,52 @@ async function main() {
     await cache.set(cacheKey, result);
     await queue.updateProgress(job.id, 100);
     return result;
+  });
+
+  // Register memory.extract handler — runs a cheap LLM to pull durable user
+  // facts/preferences from the latest turn and persist them. Best-effort.
+  queue.process("memory.extract", async (job) => {
+    const { conversationId } = job.input as { conversationId: string };
+    const userId = job.userId;
+
+    const messages = await db.getMessages(conversationId);
+    const turn = lastTurn(messages);
+    if (!turn) {
+      await queue.updateProgress(job.id, 100);
+      return { upserts: 0, deletes: 0 };
+    }
+
+    const existing = await memAdapter.list(userId);
+
+    let raw = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    for await (const chunk of extractLlm.chat(buildExtractionMessages(turn, existing))) {
+      if (chunk.type === "text") raw += chunk.content ?? "";
+      if (chunk.type === "done" && chunk.usage) {
+        inputTokens = chunk.usage.promptTokens;
+        outputTokens = chunk.usage.completionTokens;
+      }
+    }
+
+    const ext = parseExtraction(raw);
+    await applyExtraction(memAdapter, userId, ext);
+
+    if (inputTokens + outputTokens > 0) {
+      try {
+        await meter.record({
+          userId,
+          taskId: job.id,
+          modelId: extractModelId,
+          usage: { inputCount: inputTokens, outputCount: outputTokens },
+        });
+      } catch (err) {
+        console.warn("[memory.extract] meter failed:", err);
+      }
+    }
+
+    await queue.updateProgress(job.id, 100);
+    return { upserts: ext.upserts.length, deletes: ext.deletes.length };
   });
 
   console.log("Worker started, listening for jobs");

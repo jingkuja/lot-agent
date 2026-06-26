@@ -441,6 +441,12 @@ export class AgentService {
         currentToolCalls
       );
 
+      // Fire-and-forget: extract durable user memory from this turn in the
+      // background worker — never blocks the stream, never shows in the chat.
+      this.jobQueue
+        .enqueue("memory.extract", { conversationId }, userId ?? "default")
+        .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
+
       // Finish trace + spans (with the ACTUAL error message, if any)
       await recorder.finish({ totalTokens, errorMessage: lastErrorMessage });
 
