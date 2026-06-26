@@ -2,7 +2,6 @@ import {
   Agent,
   ToolRegistry,
   registerBuiltinTools,
-  createMemoryTools,
   createLLMProvider,
   TraceManager,
   ConsoleSink,
@@ -149,11 +148,6 @@ export class AgentService {
     this.sessions = new SessionStore(this.db);
 
     registerBuiltinTools(this.toolRegistry);
-
-    // Register memory tools — no closure capture; each tool reads context.memory at call time
-    for (const tool of createMemoryTools()) {
-      this.toolRegistry.register(tool);
-    }
 
     // Register the document-generation tool. It generates documents in-process
     // (no Python runtime) and persists output to its own storage
