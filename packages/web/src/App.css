@@ -641,6 +641,87 @@ html, body, #root {
   height: 20px;
 }
 
+/* ── Upload hover tooltip (supported file types) ── */
+.upload-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.upload-tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(6px) scale(0.96);
+  transform-origin: bottom center;
+  min-width: 240px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow-lg), 0 0 0 3px var(--overlay-raise);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
+  z-index: 50;
+}
+.upload-wrap:hover .upload-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+/* little pointer arrow */
+.upload-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  border-top-color: var(--accent);
+}
+.upload-tooltip-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.upload-tooltip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.upload-tooltip-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.upload-tooltip-tag {
+  flex-shrink: 0;
+  min-width: 36px;
+  text-align: center;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--overlay-raise);
+  border: 1px solid var(--border);
+}
+.upload-tooltip-exts {
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+.upload-tooltip-hint {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .input-attachments {
   display: flex;
   flex-wrap: wrap;

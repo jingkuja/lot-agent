@@ -12,7 +12,15 @@ interface InputBoxProps {
 
 const MAX_FILES = 5;
 const ACCEPT =
-  "image/jpeg,image/png,image/webp,image/gif,.txt,.md,.csv,.json,application/pdf,.docx";
+  "image/jpeg,image/png,image/webp,image/gif,.txt,.md,.csv,.json,application/pdf,.docx,.xlsx,.xls";
+
+/** 上传按钮悬停提示中展示的受支持文件类型。 */
+const SUPPORTED_TYPES: { label: string; exts: string }[] = [
+  { label: "图片", exts: "JPG / PNG / WebP / GIF" },
+  { label: "文档", exts: "PDF / Word(docx)" },
+  { label: "表格", exts: "Excel(xlsx/xls) / CSV" },
+  { label: "文本", exts: "TXT / Markdown / JSON" },
+];
 
 export function InputBox({
   onSend,
@@ -153,18 +161,32 @@ export function InputBox({
               e.target.value = "";
             }}
           />
-          <button
-            type="button"
-            className="btn-upload"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled || files.length >= MAX_FILES}
-            title="上传文件"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
+          <div className="upload-wrap">
+            <button
+              type="button"
+              className="btn-upload"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || files.length >= MAX_FILES}
+              aria-label="上传文件"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+            <div className="upload-tooltip" role="tooltip">
+              <div className="upload-tooltip-title">📎 支持上传的文件</div>
+              <ul className="upload-tooltip-list">
+                {SUPPORTED_TYPES.map((t) => (
+                  <li key={t.label}>
+                    <span className="upload-tooltip-tag">{t.label}</span>
+                    <span className="upload-tooltip-exts">{t.exts}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="upload-tooltip-hint">最多 {MAX_FILES} 个文件</div>
+            </div>
+          </div>
           {disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">
               <svg viewBox="0 0 24 24" fill="currentColor">

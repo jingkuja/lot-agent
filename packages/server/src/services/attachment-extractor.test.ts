@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as XLSX from "xlsx";
 import {
   extractAttachment,
   attachmentKind,
@@ -44,6 +45,26 @@ describe("extractAttachment", () => {
     const part = await extractAttachment({ ...base, filename: "big.txt", mime: "text/plain" }, s);
     expect(part.type).toBe("text");
     expect((part.text as string).includes("[内容过长已截断]")).toBe(true);
+  });
+
+  it("parses an Excel workbook into CSV text per sheet", async () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([["名称", "数量"], ["苹果", 3]]);
+    XLSX.utils.book_append_sheet(wb, ws, "库存");
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    const s = fakeStorage(buf);
+    const part = await extractAttachment(
+      {
+        ...base,
+        filename: "data.xlsx",
+        mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+      s
+    );
+    expect(part.type).toBe("text");
+    expect(part.text as string).toContain("工作表: 库存");
+    expect(part.text as string).toContain("名称,数量");
+    expect(part.text as string).toContain("苹果,3");
   });
 
   it("degrades gracefully on unsupported type", async () => {

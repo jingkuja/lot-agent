@@ -1,8 +1,25 @@
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
+import * as XLSX from "xlsx";
 import type { ContentPart, ObjectStorage } from "@lot-agent/core";
 
 export const MAX_DOC_CHARS = 30000;
+
+const EXCEL_MIMES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+]);
+
+/** 把 Excel 工作簿转成纯文本：每个工作表渲染为 CSV，便于模型阅读。 */
+function excelToText(bytes: Buffer): string {
+  const wb = XLSX.read(bytes, { type: "buffer" });
+  const parts: string[] = [];
+  for (const name of wb.SheetNames) {
+    const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]);
+    parts.push(`### 工作表: ${name}\n${csv}`);
+  }
+  return parts.join("\n\n");
+}
 
 export interface AttachmentRef {
   assetId: string;
@@ -66,6 +83,8 @@ export async function extractAttachment(
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
       text = (await mammoth.extractRawText({ buffer: bytes })).value;
+    } else if (EXCEL_MIMES.has(att.mime)) {
+      text = excelToText(bytes);
     } else if (att.mime.startsWith("text/") || att.mime === "application/json") {
       text = bytes.toString("utf8");
     }
