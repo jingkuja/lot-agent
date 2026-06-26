@@ -110,6 +110,12 @@ export function InputBox({
 
   return (
     <div className="input-box">
+      {files.some((f) => f.type.startsWith("image/")) && (
+        <div className="input-modal-hint" role="note">
+          <span aria-hidden>🖼️</span>
+          图片需所选模型支持多模态（视觉）能力才能识别
+        </div>
+      )}
       {files.length > 0 && (
         <div className="input-attachments">
           {files.map((f, i) => (
