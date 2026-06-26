@@ -9,6 +9,7 @@ import type {
 import { ToolRegistry } from "../tools/registry.js";
 import { ContextManager, type ContextManagerConfig } from "../context/index.js";
 import type { AgentMemoryStore } from "../memory/index.js";
+import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
@@ -100,6 +101,11 @@ export class Agent {
     const systemParts = [this.config.systemPrompt];
     if (this.config.dynamicPromptParts?.length) {
       systemParts.push(...this.config.dynamicPromptParts);
+    }
+
+    // Inject memory usage policy when this agent can use memory tools
+    if (context.memory && hasMemoryTools(this.config.allowedToolNames)) {
+      systemParts.push(MEMORY_POLICY_PROMPT);
     }
 
     // Inject memory into system prompt

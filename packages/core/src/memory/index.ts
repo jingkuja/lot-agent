@@ -7,3 +7,4 @@ export {
 } from "./store.js";
 export { PgMemoryAdapter } from "./pg-adapter.js";
 export type { SessionMemoryBackend } from "./session-backend.js";
+export { MEMORY_POLICY_PROMPT, hasMemoryTools } from "./policy.js";
