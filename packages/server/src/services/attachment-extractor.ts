@@ -50,8 +50,13 @@ export async function extractAttachment(
   att: AttachmentRef,
   storage: ObjectStorage
 ): Promise<ContentPart> {
-  // storage key = url 去掉静态前缀（/static/uploads/）
-  const key = att.url.replace(/^\/static\/uploads\//, "");
+  // storage key = url 去掉静态前缀（/static/uploads/）。
+  // url 可能是站内相对路径（/static/uploads/<id>.<ext>），也可能是绝对地址
+  // （设置 PUBLIC_BASE_URL 后：http://<box-ip>:3000/static/uploads/<id>.<ext>），
+  // 取最后一个前缀之后的部分，两种形式都能拿到扁平的 key。
+  const marker = "/static/uploads/";
+  const idx = att.url.lastIndexOf(marker);
+  const key = idx >= 0 ? att.url.slice(idx + marker.length) : att.url;
   if (!isSafeUploadKey(key)) {
     return { type: "text", text: `[附件 ${att.filename} 无法访问，已忽略内容]` };
   }

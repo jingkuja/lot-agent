@@ -73,6 +73,17 @@ describe("extractAttachment", () => {
     expect(part).toEqual({ type: "text", text: "[附件 a.bin 无法解析，已忽略内容]" });
   });
 
+  it("strips an absolute PUBLIC_BASE_URL prefix from the upload url", async () => {
+    // When PUBLIC_BASE_URL is set (compute box), upload urls are absolute, e.g.
+    // http://<box-ip>:3000/static/uploads/<id>.<ext>. The key must still resolve.
+    const s = fakeStorage(Buffer.from("hello"));
+    const part = await extractAttachment(
+      { ...base, filename: "n.txt", mime: "text/plain", url: "http://1.2.3.4:3000/static/uploads/abc.txt" },
+      s
+    );
+    expect(part).toEqual({ type: "text", text: "[附件: n.txt]\nhello\n[/附件: n.txt]" });
+  });
+
   it("rejects path-traversal urls without reading from storage", async () => {
     let read = false;
     const s: ObjectStorage = {
