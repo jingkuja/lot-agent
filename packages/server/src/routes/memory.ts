@@ -50,7 +50,7 @@ export function createMemoryRoutes(service: AgentService): Hono {
   app.delete("/:key", async (c) => {
     const memory = getMemory(c.get("userId"));
     const key = c.req.param("key");
-    await memory.delete("user", key);
+    await memory.deleteUserMemory(key);
     return c.json({ ok: true });
   });
 
@@ -58,6 +58,9 @@ export function createMemoryRoutes(service: AgentService): Hono {
   app.get("/session/dump", async (c) => {
     const conversationId = c.req.query("conversationId");
     if (!conversationId) return c.json([]);
+    const userId = c.get("userId");
+    const conversation = await service.db.getConversation(conversationId);
+    if (!conversation || conversation.user_id !== userId) return c.json({ error: "Not found" }, 404);
     const memory = new AgentMemoryStore({
       sessionBackend: service.sessionBackend,
       conversationId,

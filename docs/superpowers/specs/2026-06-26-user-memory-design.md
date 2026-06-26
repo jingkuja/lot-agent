@@ -102,6 +102,6 @@ export interface SessionMemoryBackend {
 
 ## 风险 / 取舍
 
-- write-through best-effort：run 中途 crash 可能丢未 save 的 session 写。对 20 分钟会话状态可接受；换取不引入同步阻塞。
+- write-through best-effort：run 中途 crash 可能丢未 save 的 session 写。对 20 分钟会话状态可接受；换取不引入同步阻塞。同一 conversationId 的并发请求（多 session per account 场景）对 session blob 做整层覆盖写，后写者会丢弃先写者在同一轮写入的新 key——属于 last-writer-wins 竞态，接受为 best-effort 取舍（session 为短暂状态，影响有限）。
 - 策略块每请求注入增加 token：已 gate 在「含记忆工具」的 agent，且仅 general 当前带记忆工具。必要成本。
 - session 整层一个 key 序列化：会话内 session 条目量小，开销可忽略。
