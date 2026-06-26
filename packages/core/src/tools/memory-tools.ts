@@ -121,5 +121,37 @@ export function createMemoryTools(): Tool[] {
     },
   };
 
-  return [memoryRead, memoryWrite, memoryList];
+  const memoryDelete: Tool = {
+    name: "memory_delete",
+    description:
+      "Delete a value from memory by key. Use when a stored fact is outdated, corrected by the user, or no longer relevant.",
+    parameters: {
+      type: "object",
+      properties: {
+        tier: {
+          type: "string",
+          enum: ["ephemeral", "session", "user"],
+          description: "Memory tier to delete from",
+        },
+        key: {
+          type: "string",
+          description: "The memory key to delete",
+        },
+      },
+      required: ["tier", "key"],
+    },
+    async execute(input, context: ToolContext): Promise<ToolResult> {
+      const memory = context.memory;
+      if (!memory) return { content: "Memory not available", isError: true };
+      const { tier, key } = input as { tier: string; key: string };
+      if (tier === "user") {
+        await memory.deleteUserMemory(key);
+        return { content: `Deleted from user memory: ${key}` };
+      }
+      memory.delete(tier as "ephemeral" | "session", key);
+      return { content: `Deleted from ${tier} memory: ${key}` };
+    },
+  };
+
+  return [memoryRead, memoryWrite, memoryList, memoryDelete];
 }
