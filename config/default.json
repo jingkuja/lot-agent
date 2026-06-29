@@ -20,6 +20,7 @@
   "generation": {
     "baseUrl": "https://tokenhub.todoucloud.com/v1",
     "mock": true,
+    "adapter": "happyhorse",
     "image": { "model": "happyhorse-1.0-t2i", "modelId": "wanx-standard" },
     "video": { "model": "happyhorse-1.0-t2v", "modelId": "kling-standard" }
   },
