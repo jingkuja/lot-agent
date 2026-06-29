@@ -7,7 +7,13 @@ import type {
   ToolUseBlockParam,
   ImageBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
-import type { Message, ChatChunk, LLMTool, LLMProvider } from "../types/index.js";
+import type {
+  Message,
+  ChatChunk,
+  ChatOptions,
+  LLMTool,
+  LLMProvider,
+} from "../types/index.js";
 
 export interface AnthropicProviderConfig {
   apiKey: string;
@@ -23,7 +29,11 @@ export class AnthropicProvider implements LLMProvider {
     this.model = config.model;
   }
 
-  async *chat(messages: Message[], tools?: LLMTool[]): AsyncIterable<ChatChunk> {
+  async *chat(
+    messages: Message[],
+    tools?: LLMTool[],
+    opts?: ChatOptions
+  ): AsyncIterable<ChatChunk> {
     // Anthropic requires system prompt as a separate parameter
     const systemMessages: string[] = [];
     const chatMessages: MessageParam[] = [];
@@ -38,13 +48,16 @@ export class AnthropicProvider implements LLMProvider {
 
     const anthropicTools = tools?.map(toAnthropicTool);
 
-    const stream = this.client.messages.stream({
-      model: this.model,
-      max_tokens: 8192,
-      system: systemMessages.join("\n\n") || undefined,
-      messages: chatMessages,
-      tools: anthropicTools,
-    });
+    const stream = this.client.messages.stream(
+      {
+        model: this.model,
+        max_tokens: 8192,
+        system: systemMessages.join("\n\n") || undefined,
+        messages: chatMessages,
+        tools: anthropicTools,
+      },
+      { signal: opts?.signal }
+    );
 
     // Buffer for accumulating tool use blocks
     const toolBuffers = new Map<

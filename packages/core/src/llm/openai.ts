@@ -3,7 +3,13 @@ import type {
   ChatCompletionMessageToolCall,
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
-import type { Message, ChatChunk, LLMTool, LLMProvider } from "../types/index.js";
+import type {
+  Message,
+  ChatChunk,
+  ChatOptions,
+  LLMTool,
+  LLMProvider,
+} from "../types/index.js";
 
 export interface OpenAIProviderConfig {
   apiKey: string;
@@ -23,7 +29,11 @@ export class OpenAIProvider implements LLMProvider {
     this.model = config.model;
   }
 
-  async *chat(messages: Message[], tools?: LLMTool[]): AsyncIterable<ChatChunk> {
+  async *chat(
+    messages: Message[],
+    tools?: LLMTool[],
+    opts?: ChatOptions
+  ): AsyncIterable<ChatChunk> {
     const oaiMessages = messages.map(toOpenAIMessage);
     const oaiTools = tools?.map(toOpenAITool);
 
@@ -36,13 +46,16 @@ export class OpenAIProvider implements LLMProvider {
       );
     }
 
-    const stream = await this.client.chat.completions.create({
-      model: this.model,
-      messages: oaiMessages,
-      tools: oaiTools,
-      tool_choice: oaiTools?.length ? "auto" : undefined,
-      stream: true,
-    });
+    const stream = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        messages: oaiMessages,
+        tools: oaiTools,
+        tool_choice: oaiTools?.length ? "auto" : undefined,
+        stream: true,
+      },
+      { signal: opts?.signal }
+    );
 
     // Buffer for accumulating tool call arguments
     const toolCallBuffers = new Map<

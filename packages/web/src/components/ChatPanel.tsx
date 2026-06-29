@@ -1,19 +1,20 @@
 import { useEffect, useRef } from "react";
 import { MessageBubble } from "./MessageBubble.js";
-import { InputBox } from "./InputBox.js";
+import { InputBox, type InputMode } from "./InputBox.js";
+import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { Agent } from "../api/client.js";
 
 interface ChatPanelProps {
   messages: DisplayMessage[];
-  onSend: (content: string, files: File[]) => void;
+  onSend: (content: string, files: File[], settings?: ImageSettings | VideoSettings) => void;
   onStop: () => void;
   isStreaming: boolean;
   activeConversationId: string | null;
   onRegenerate?: () => void;
-  /** Bottom-left content of the input box (agent switcher). */
-  inputLeftSlot?: React.ReactNode;
+  /** Content rendered directly above the input box (agent switcher). */
+  inputAbove?: React.ReactNode;
   /** Called when an assistant reply is clicked, to open the preview. */
   onSelectForPreview?: (content: string) => void;
   /** Current agent (for the empty-state hero). */
@@ -26,7 +27,7 @@ export function ChatPanel({
   onStop,
   isStreaming,
   onRegenerate,
-  inputLeftSlot,
+  inputAbove,
   onSelectForPreview,
   agent,
 }: ChatPanelProps) {
@@ -53,15 +54,22 @@ export function ChatPanel({
     lastAssistantIdx >= 0 ? [...messages].reverse()[lastAssistantIdx].id : null;
 
   const isEmpty = messages.length === 0;
+  const agentKind = agent?.type || agent?.id;
+  const mode: InputMode =
+    agentKind === "image" ? "image" : agentKind === "video" ? "video" : "default";
 
   const inputEl = (
-    <InputBox
-      onSend={onSend}
-      onStop={onStop}
-      disabled={isStreaming}
-      leftSlot={inputLeftSlot}
-      autoFocus={isEmpty}
-    />
+    <>
+      {inputAbove && <div className="input-switcher">{inputAbove}</div>}
+      <InputBox
+        onSend={onSend}
+        onStop={onStop}
+        disabled={isStreaming}
+        autoFocus={isEmpty}
+        mode={mode}
+        placeholder={mode !== "default" ? "请输入内容" : undefined}
+      />
+    </>
   );
 
   // Empty conversation: center the (enlarged) input in the page.

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { AgentService, type ServiceConfig } from "./services/agent-service.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
-import { createConversationRoutes } from "./routes/conversations.js";
+import { createConversationRoutes, createGenerationRoutes } from "./routes/conversations.js";
 import { createSkillRoutes } from "./routes/skills.js";
 import { createTraceRoutes } from "./routes/traces.js";
 import { createRatingRoutes } from "./routes/ratings.js";
@@ -19,8 +19,8 @@ import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
-import type { LLMConfig } from "@lot-agent/core";
 import { AppConfigSchema } from "@lot-agent/core";
+import { loadLlmConfig } from "./config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
@@ -46,29 +46,10 @@ function guessMime(name: string): string {
 }
 
 async function loadConfig(): Promise<ServiceConfig> {
+  const llm = await loadLlmConfig(ROOT);
+
   const configPath = resolve(ROOT, "config/default.json");
-  const raw = await readFile(configPath, "utf-8");
-  const rawConfig = JSON.parse(raw);
-
-  // Apply environment variable overrides before validation
-  const llmRaw = rawConfig.llm ?? {};
-  const openaiRaw = llmRaw.openai ?? {};
-  const anthropicRaw = llmRaw.anthropic ?? {};
-
-  if (process.env.OPENAI_API_KEY) openaiRaw.apiKey = process.env.OPENAI_API_KEY;
-  if (process.env.OPENAI_BASE_URL) openaiRaw.baseUrl = process.env.OPENAI_BASE_URL;
-  if (process.env.OPENAI_MODEL) openaiRaw.model = process.env.OPENAI_MODEL;
-  if (process.env.ANTHROPIC_API_KEY) anthropicRaw.apiKey = process.env.ANTHROPIC_API_KEY;
-  if (process.env.ANTHROPIC_MODEL) anthropicRaw.model = process.env.ANTHROPIC_MODEL;
-  if (process.env.LLM_DEFAULT) llmRaw.default = process.env.LLM_DEFAULT;
-
-  llmRaw.openai = openaiRaw;
-  llmRaw.anthropic = anthropicRaw;
-  rawConfig.llm = llmRaw;
-
-  // Validate merged config with zod schema
-  const config = AppConfigSchema.parse(rawConfig);
-  const llm = config.llm as LLMConfig;
+  const config = AppConfigSchema.parse(JSON.parse(await readFile(configPath, "utf-8")));
 
   const pgPassword = process.env.PG_PASSWORD;
   if (!pgPassword) throw new Error("PG_PASSWORD is required");
@@ -131,6 +112,7 @@ async function main() {
 
   // Protected API routes
   app.route("/api/conversations", createConversationRoutes(service));
+  app.route("/api/conversations", createGenerationRoutes(service));
   app.route("/api/skills", createSkillRoutes(service));
   app.route("/api/traces", createTraceRoutes(service));
   app.route("/api/ratings", createRatingRoutes(service));

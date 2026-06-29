@@ -20,7 +20,7 @@ export function TaskProgress({ jobId }: TaskProgressProps) {
         const status = await api.getTask(jobId);
         if (!active) return;
         setTask(status);
-        if (status.status === "done" || status.status === "failed") {
+        if (status.status === "succeeded" || status.status === "failed") {
           if (timerRef.current) clearInterval(timerRef.current);
         }
       } catch (err) {
@@ -47,7 +47,7 @@ export function TaskProgress({ jobId }: TaskProgressProps) {
     return <div className="task-progress">加载任务中...</div>;
   }
 
-  const isTerminal = task.status === "done" || task.status === "failed";
+  const isTerminal = task.status === "succeeded" || task.status === "failed";
   const progress = Math.min(100, Math.max(0, task.progress ?? 0));
 
   return (
@@ -55,7 +55,7 @@ export function TaskProgress({ jobId }: TaskProgressProps) {
       <div className="task-progress-label">
         {task.status === "pending" && "等待中..."}
         {task.status === "running" && `处理中 ${progress}%`}
-        {task.status === "done" && "完成"}
+        {task.status === "succeeded" && "完成"}
         {task.status === "failed" && `失败: ${task.error ?? ""}`}
       </div>
       {!isTerminal && (
@@ -66,7 +66,7 @@ export function TaskProgress({ jobId }: TaskProgressProps) {
           />
         </div>
       )}
-      {task.status === "done" && task.output?.url && (
+      {task.status === "succeeded" && task.output?.url && (
         <a
           className="task-progress-link"
           href={task.output.url}

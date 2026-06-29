@@ -1,8 +1,25 @@
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
+import * as XLSX from "xlsx";
 import type { ContentPart, ObjectStorage } from "@lot-agent/core";
 
 export const MAX_DOC_CHARS = 30000;
+
+const EXCEL_MIMES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+]);
+
+/** 把 Excel 工作簿转成纯文本：每个工作表渲染为 CSV，便于模型阅读。 */
+function excelToText(bytes: Buffer): string {
+  const wb = XLSX.read(bytes, { type: "buffer" });
+  const parts: string[] = [];
+  for (const name of wb.SheetNames) {
+    const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]);
+    parts.push(`### 工作表: ${name}\n${csv}`);
+  }
+  return parts.join("\n\n");
+}
 
 export interface AttachmentRef {
   assetId: string;
@@ -33,8 +50,13 @@ export async function extractAttachment(
   att: AttachmentRef,
   storage: ObjectStorage
 ): Promise<ContentPart> {
-  // storage key = url 去掉静态前缀（/static/uploads/）
-  const key = att.url.replace(/^\/static\/uploads\//, "");
+  // storage key = url 去掉静态前缀（/static/uploads/）。
+  // url 可能是站内相对路径（/static/uploads/<id>.<ext>），也可能是绝对地址
+  // （设置 PUBLIC_BASE_URL 后：http://<box-ip>:3000/static/uploads/<id>.<ext>），
+  // 取最后一个前缀之后的部分，两种形式都能拿到扁平的 key。
+  const marker = "/static/uploads/";
+  const idx = att.url.lastIndexOf(marker);
+  const key = idx >= 0 ? att.url.slice(idx + marker.length) : att.url;
   if (!isSafeUploadKey(key)) {
     return { type: "text", text: `[附件 ${att.filename} 无法访问，已忽略内容]` };
   }
@@ -66,6 +88,8 @@ export async function extractAttachment(
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
       text = (await mammoth.extractRawText({ buffer: bytes })).value;
+    } else if (EXCEL_MIMES.has(att.mime)) {
+      text = excelToText(bytes);
     } else if (att.mime.startsWith("text/") || att.mime === "application/json") {
       text = bytes.toString("utf8");
     }

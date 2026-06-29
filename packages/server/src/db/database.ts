@@ -645,6 +645,17 @@ export class DB {
     );
   }
 
+  /** Patch a generation message's status + metadata (used by the worker). */
+  async updateMessageGeneration(
+    messageId: string,
+    patch: { status: string; metadata: Record<string, unknown> }
+  ): Promise<void> {
+    await this.pool.query(
+      "UPDATE messages SET status = $1, metadata = $2 WHERE id = $3",
+      [patch.status, JSON.stringify(patch.metadata), messageId]
+    );
+  }
+
   async getMessages(conversationId: string): Promise<StoredMessage[]> {
     const { rows } = await this.pool.query(
       "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",

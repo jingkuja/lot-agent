@@ -2,7 +2,6 @@ import {
   Agent,
   ToolRegistry,
   registerBuiltinTools,
-  createMemoryTools,
   createLLMProvider,
   TraceManager,
   ConsoleSink,
@@ -24,6 +23,7 @@ import {
 } from "@lot-agent/core";
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
+import { staticPrefix } from "../util/public-base.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -40,8 +40,9 @@ import type {
 import { extractAttachment, type AttachmentRef } from "./attachment-extractor.js";
 import { DB } from "../db/database.js";
 import { SessionStore } from "../auth/session-store.js";
-import { createRedisConnection } from "../jobs/redis.js";
+import { createRedisConnection, getRedis } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
+import { RedisSessionBackend } from "../memory/redis-session-backend.js";
 import { UsageMeter } from "../billing/meter.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
@@ -87,6 +88,8 @@ export class AgentService {
   readonly connectors: Map<string, PlatformConnector>;
   /** Persistent memory adapter — kept for per-request AgentMemoryStore construction */
   pgAdapter!: import("@lot-agent/core").PgMemoryAdapter;
+  /** Redis-backed session memory backend — shared; per-request stores reference it */
+  sessionBackend!: RedisSessionBackend;
   /** Session store for multi-user auth */
   sessions!: SessionStore;
   jobQueue!: JobQueue;
@@ -138,15 +141,13 @@ export class AgentService {
     await pgAdapter.init();
     this.pgAdapter = pgAdapter;
 
+    // Session memory backend (Redis, per-conversation, 20min TTL)
+    this.sessionBackend = new RedisSessionBackend(getRedis());
+
     // Initialize session store
     this.sessions = new SessionStore(this.db);
 
     registerBuiltinTools(this.toolRegistry);
-
-    // Register memory tools — no closure capture; each tool reads context.memory at call time
-    for (const tool of createMemoryTools()) {
-      this.toolRegistry.register(tool);
-    }
 
     // Register the document-generation tool. It generates documents in-process
     // (no Python runtime) and persists output to its own storage
@@ -156,11 +157,11 @@ export class AgentService {
     const root = dirname(this.skillsDir);
 
     // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
-    this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), "/static/uploads");
+    this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), staticPrefix("/static/uploads"));
 
     this.toolRegistry.register(
       createDocTool({
-        storage: new LocalStorage(resolve(root, "data/documents"), "/static/documents"),
+        storage: new LocalStorage(resolve(root, "data/documents"), staticPrefix("/static/documents")),
         db: this.db,
         fontPath: resolve(root, "assets/fonts/NotoSansSC-Regular.otf"),
       })
@@ -298,7 +299,8 @@ export class AgentService {
     userMessage: string,
     agentId?: string,
     userId?: string,
-    attachments?: AttachmentRef[]
+    attachments?: AttachmentRef[],
+    signal?: AbortSignal
   ): AsyncIterable<AgentEvent> {
     const def =
       this.agentRegistry.get(agentId ?? "general") ??
@@ -346,7 +348,11 @@ export class AgentService {
     const memory = new AgentMemoryStore({
       persistent: this.pgAdapter,
       userId: userId ?? "default",
+      sessionBackend: this.sessionBackend,
+      conversationId,
     });
+    // Load this conversation's persisted session memory before the run
+    await memory.hydrate();
 
     const context: AgentContext = {
       llm,
@@ -356,6 +362,7 @@ export class AgentService {
     };
 
     let assistantContent = "";
+    let producedAssistantText = "";
     let currentToolCalls: { id: string; name: string; arguments: unknown }[] = [];
     let totalTokens = 0;
     let inputTokens = 0;
@@ -374,10 +381,11 @@ export class AgentService {
     }
 
     try {
-      for await (const event of agent.run(runInput, context, history)) {
+      for await (const event of agent.run(runInput, context, history, { signal })) {
         if (event.type === "text") {
           recorder.startLlmSpan();
           assistantContent += event.content;
+          producedAssistantText += event.content;
         }
 
         if (event.type === "tool_call") {
@@ -434,6 +442,17 @@ export class AgentService {
         assistantContent || "",
         currentToolCalls
       );
+
+      // Fire-and-forget: extract durable user memory from this turn in the
+      // background worker — never blocks the stream, never shows in the chat.
+      // Only extract memory from turns that produced a real assistant reply —
+      // empty/tool-only/errored turns would otherwise re-extract a stale turn
+      // and create a junk task row.
+      if (producedAssistantText.trim()) {
+        this.jobQueue
+          .enqueue("memory.extract", { conversationId }, userId ?? "default")
+          .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
+      }
 
       // Finish trace + spans (with the ACTUAL error message, if any)
       await recorder.finish({ totalTokens, errorMessage: lastErrorMessage });

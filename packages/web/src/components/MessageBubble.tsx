@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { api } from "../api/client.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
+import { GenerationCard } from "./GenerationCard.js";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
@@ -13,6 +14,16 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ message, onRegenerate, onSelectForPreview }: MessageBubbleProps) {
+  if (message.generation) {
+    return (
+      <div className="message-wrapper message-assistant">
+        <div className="message-wrapper-inner">
+          <GenerationCard generation={message.generation} />
+        </div>
+      </div>
+    );
+  }
+
   if (message.role === "user") {
     return (
       <div className="message-wrapper message-user">
