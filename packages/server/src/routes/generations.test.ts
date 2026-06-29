@@ -56,4 +56,20 @@ describe("POST /conversations/:id/generations", () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it("threads media (reference images) into the enqueued input", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", settings: { size: "1024x1024" }, media: [{ type: "reference_image", url: "/static/assets/x.png" }] }),
+    });
+    expect(res.status).toBe(202);
+    await res.json();
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({ media: [{ type: "reference_image", url: "/static/assets/x.png" }], size: "1024x1024" }),
+      "u1"
+    );
+  });
 });

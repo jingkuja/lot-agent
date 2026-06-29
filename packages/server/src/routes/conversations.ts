@@ -227,7 +227,7 @@ export function createGenerationRoutes(service: AgentService) {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown> };
+    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown>; media?: { type: string; url: string }[] };
     try {
       body = await c.req.json();
     } catch {
@@ -239,6 +239,7 @@ export function createGenerationRoutes(service: AgentService) {
       return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
     }
     const settings = body.settings ?? {};
+    const media = Array.isArray(body.media) ? body.media : undefined;
     const type = mediaType === "image" ? "image.generate" : "video.generate";
 
     // Quota pre-check (mirrors the /tasks route).
@@ -266,7 +267,7 @@ export function createGenerationRoutes(service: AgentService) {
     // Enqueue.
     const taskId = await service.jobQueue.enqueue(
       type,
-      { prompt, conversationId, assistantMessageId, ...settings },
+      { prompt, conversationId, assistantMessageId, ...settings, ...(media ? { media } : {}) },
       userId
     );
 
