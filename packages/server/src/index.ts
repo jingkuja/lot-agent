@@ -34,6 +34,9 @@ const UPLOADS_DIR = resolve(ROOT, "data/uploads");
 function guessMime(name: string): string {
   if (name.endsWith(".png")) return "image/png";
   if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".svg")) return "image/svg+xml";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".gif")) return "image/gif";
   if (name.endsWith(".mp4")) return "video/mp4";
   if (name.endsWith(".mp3")) return "audio/mpeg";
   if (name.endsWith(".docx"))
