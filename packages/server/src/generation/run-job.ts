@@ -39,8 +39,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     settings: { size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio },
   };
   const sleep = deps.sleep ?? realSleep;
-  const pollIntervalMs = deps.pollIntervalMs ?? 1500;
-  const maxWaitMs = deps.maxWaitMs ?? 5 * 60 * 1000;
+  const pollIntervalMs = deps.pollIntervalMs ?? 3000;
+  const maxWaitMs = deps.maxWaitMs ?? 15 * 60 * 1000;
 
   const setMsg = async (status: string, extra: Record<string, unknown>) => {
     if (assistantMessageId) {

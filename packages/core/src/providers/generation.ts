@@ -37,7 +37,9 @@ function parseSize(size?: string): [number, number] {
 /** First vendor: tokenhub "happyhorse" async create→poll format. */
 export class HappyhorseAdapter implements VendorAdapter {
   createPath(mediaType: MediaType): string {
-    return `/${mediaType}/generation`;
+    // Create is plural ("/video/generations"); poll is also plural
+    // ("/videos/{id}"). Verified against the live tokenhub API.
+    return `/${mediaType}/generations`;
   }
   pollPath(mediaType: MediaType, taskId: string): string {
     return `/${mediaType === "image" ? "images" : "videos"}/${taskId}`;

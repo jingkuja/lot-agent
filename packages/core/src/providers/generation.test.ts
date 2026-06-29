@@ -9,8 +9,8 @@ import {
 describe("HappyhorseAdapter", () => {
   const a = new HappyhorseAdapter();
   it("builds create/poll paths (singular create, plural poll)", () => {
-    expect(a.createPath("image")).toBe("/image/generation");
-    expect(a.createPath("video")).toBe("/video/generation");
+    expect(a.createPath("image")).toBe("/image/generations");
+    expect(a.createPath("video")).toBe("/video/generations");
     expect(a.pollPath("image", "t1")).toBe("/images/t1");
     expect(a.pollPath("video", "t1")).toBe("/videos/t1");
   });
@@ -45,7 +45,7 @@ describe("HttpGenerationProvider", () => {
     const r = await p.create({ mediaType: "video", prompt: "hi" });
     expect(r).toEqual({ taskId: "task_1", status: "queued", progress: 0 });
     const [url, init] = (fetchMock.mock.calls[0] as [string, RequestInit]);
-    expect(url).toBe("https://api/v1/video/generation");
+    expect(url).toBe("https://api/v1/video/generations");
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer k");
     expect(JSON.parse(init.body as string)).toMatchObject({ model: "vm", prompt: "hi" });
