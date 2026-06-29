@@ -277,7 +277,7 @@ export const api = {
   // ── Generation (image/video via conversation) ────────────────────────────
   generate: (
     conversationId: string,
-    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown }
+    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown; media?: { type: "reference_image"; url: string }[] }
   ) =>
     request<{
       userMessage: { id: string; role: "user"; content: string };

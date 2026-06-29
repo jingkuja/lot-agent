@@ -227,7 +227,7 @@ export function createGenerationRoutes(service: AgentService) {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown> };
+    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown>; media?: { type: string; url: string }[] };
     try {
       body = await c.req.json();
     } catch {
@@ -239,6 +239,7 @@ export function createGenerationRoutes(service: AgentService) {
       return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
     }
     const settings = body.settings ?? {};
+    const media = Array.isArray(body.media) ? body.media : undefined;
     const type = mediaType === "image" ? "image.generate" : "video.generate";
 
     // Quota pre-check (mirrors the /tasks route).
@@ -253,22 +254,24 @@ export function createGenerationRoutes(service: AgentService) {
     const userMessageId = randomUUID();
     await service.db.addMessage(userMessageId, conversationId, "user", prompt);
 
-    // Persist pending assistant generation message.
+    // Persist pending assistant generation message (status forced to
+    // 'generating'; the DB column defaults to 'completed').
     const assistantMessageId = randomUUID();
-    const metadata = { kind: "generation", mediaType, prompt, settings, status: "generating" };
+    const baseMeta = { kind: "generation", mediaType, prompt, settings };
     await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
-      metadata,
+      metadata: { ...baseMeta, status: "generating" },
       model: modelId,
     });
-    // The DB default status is 'completed'; force it to 'generating'.
-    await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
 
-    // Enqueue.
+    // Enqueue, then record the taskId on the message so a client that reloads
+    // mid-generation can re-poll the task to resume progress / completion.
     const taskId = await service.jobQueue.enqueue(
       type,
-      { prompt, conversationId, assistantMessageId, ...settings },
+      { prompt, conversationId, assistantMessageId, ...settings, ...(media ? { media } : {}) },
       userId
     );
+    const metadata = { ...baseMeta, status: "generating", taskId };
+    await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
 
     return c.json(
       {

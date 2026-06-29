@@ -2,8 +2,6 @@ import type { ModelRegistry, ModelConfig } from "./types.js";
 import type { LLMConfig } from "../llm/factory.js";
 import { OpenAIProvider } from "../llm/openai.js";
 import { AnthropicProvider } from "../llm/anthropic.js";
-import { MockImageProvider } from "../providers/image.js";
-import { MockVideoProvider } from "../providers/video.js";
 import { StubTTSProvider } from "../providers/tts.js";
 
 /** Populate a ModelRegistry from config.models, wiring provider factories per type. */
@@ -22,8 +20,6 @@ export function populateModelRegistry(
         // default/openai-compatible (deepseek etc.)
         return new OpenAIProvider({ apiKey: llmConfig.openai.apiKey, baseUrl: llmConfig.openai.baseUrl, model: m.id });
       }
-      if (m.type === "image") return new MockImageProvider();
-      if (m.type === "video") return new MockVideoProvider();
       if (m.type === "tts") return new StubTTSProvider();
       throw new Error(`No provider factory for model type: ${m.type}`);
     });
