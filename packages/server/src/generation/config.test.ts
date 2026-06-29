@@ -6,6 +6,7 @@ const base: GenerationConfig = {
   baseUrl: "https://api/v1",
   apiKey: "",
   mock: true,
+  adapter: "happyhorse",
   image: { model: "i", modelId: "wanx-standard" },
   video: { model: "v", modelId: "kling-standard" },
 };
