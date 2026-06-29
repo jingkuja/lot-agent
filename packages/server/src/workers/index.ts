@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
@@ -15,10 +14,11 @@ import {
   applyExtraction,
 } from "@lot-agent/core";
 import { loadLlmConfig } from "../config.js";
-import { loadGenerationConfig, makeImageProvider, makeVideoProvider } from "../generation/config.js";
+import { loadGenerationConfig, makeGenerationProvider } from "../generation/config.js";
+import { runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { lastTurn } from "../memory/last-turn.js";
 import { UsageMeter } from "../billing/meter.js";
-import { GenCache, genCacheKey } from "../billing/gen-cache.js";
+import { GenCache } from "../billing/gen-cache.js";
 import { staticPrefix } from "../util/public-base.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -55,8 +55,7 @@ async function main() {
   const cache = new GenCache(conn);
 
   const genConfig = await loadGenerationConfig(ROOT);
-  const imageProvider = makeImageProvider(genConfig);
-  const videoProvider = makeVideoProvider(genConfig);
+  const generationProvider = makeGenerationProvider(genConfig);
 
   /** Resolve a provider url (http(s) or data:) to bytes + mime. */
   async function urlToBytes(url: string): Promise<{ body: Buffer; mime: string }> {
@@ -75,6 +74,19 @@ async function main() {
   const extFor = (mime: string) =>
     mime.includes("svg") ? "svg" : mime.includes("mp4") ? "mp4" : mime.includes("png") ? "png" : mime.split("/")[1] ?? "bin";
 
+  const genDeps = (mediaType: "image" | "video"): RunJobDeps => ({
+    provider: generationProvider,
+    storage,
+    db,
+    meter,
+    cache,
+    updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
+    urlToBytes,
+    extFor,
+    modelId: mediaType === "image" ? genConfig.image.modelId : genConfig.video.modelId,
+    vendorModel: mediaType === "image" ? genConfig.image.model : genConfig.video.model,
+  });
+
   // Background memory extraction deps
   const llmConfig = await loadLlmConfig(ROOT);
   const extractLlm = createLLMProvider(llmConfig);
@@ -83,134 +95,8 @@ async function main() {
   const extractModelId =
     llmConfig.default === "openai" ? llmConfig.openai.model : llmConfig.anthropic.model;
 
-  // Register image.generate handler
-  queue.process("image.generate", async (job) => {
-    const input = job.input as Record<string, unknown>;
-    const prompt = (input.prompt as string) ?? "";
-    const assistantMessageId = input.assistantMessageId as string | undefined;
-    const baseMeta = {
-      kind: "generation",
-      mediaType: "image",
-      prompt,
-      settings: { size: input.size, n: input.n },
-    };
-    try {
-      const cacheKey = genCacheKey("image.generate", { prompt, size: input.size, n: input.n, model: genConfig.image.model });
-      const cached = await cache.get<{ assetIds: string[]; assets: { url: string; mime: string }[] }>(cacheKey);
-      if (!cached) await queue.updateProgress(job.id, 25);
-
-      const result =
-        cached ??
-        (await (async () => {
-          const r = await imageProvider.generate({
-            prompt,
-            size: input.size as string | undefined,
-            n: input.n as number | undefined,
-          });
-          await queue.updateProgress(job.id, 70);
-          const assets: { url: string; mime: string }[] = [];
-          const assetIds: string[] = [];
-          for (const d of r.data) {
-            const { body, mime } = await urlToBytes(d.url);
-            const assetId = randomUUID();
-            const key = `${assetId}.${extFor(mime)}`;
-            const { url } = await storage.put({ key, body, contentType: mime });
-            await db.createAsset({
-              id: assetId, taskId: job.id, userId: job.userId, type: "image",
-              storageKey: key, url, mime, sizeBytes: body.byteLength,
-            });
-            assets.push({ url, mime });
-            assetIds.push(assetId);
-          }
-          await meter.record({
-            userId: job.userId, taskId: job.id, modelId: genConfig.image.modelId,
-            usage: { inputCount: 0, outputCount: r.data.length },
-          });
-          const out = { assetIds, assets };
-          await cache.set(cacheKey, out);
-          return out;
-        })());
-
-      if (assistantMessageId) {
-        await db.updateMessageGeneration(assistantMessageId, {
-          status: "completed",
-          metadata: { ...baseMeta, status: "completed", assets: result.assets },
-        });
-      }
-      await queue.updateProgress(job.id, 100);
-      return result;
-    } catch (err) {
-      if (assistantMessageId) {
-        await db.updateMessageGeneration(assistantMessageId, {
-          status: "failed",
-          metadata: { ...baseMeta, status: "failed", error: err instanceof Error ? err.message : String(err) },
-        });
-      }
-      throw err;
-    }
-  });
-
-  // Register video.generate handler
-  queue.process("video.generate", async (job) => {
-    const input = job.input as Record<string, unknown>;
-    const prompt = (input.prompt as string) ?? "";
-    const assistantMessageId = input.assistantMessageId as string | undefined;
-    const baseMeta = {
-      kind: "generation",
-      mediaType: "video",
-      prompt,
-      settings: { size: input.size, durationSec: input.durationSec, ratio: input.ratio },
-    };
-    try {
-      const cacheKey = genCacheKey("video.generate", { prompt, size: input.size, durationSec: input.durationSec, ratio: input.ratio, model: genConfig.video.model });
-      const cached = await cache.get<{ assetIds: string[]; assets: { url: string; mime: string; durationSec: number }[] }>(cacheKey);
-      if (!cached) await queue.updateProgress(job.id, 25);
-
-      const result =
-        cached ??
-        (await (async () => {
-          const r = await videoProvider.generate({
-            prompt,
-            size: input.size as string | undefined,
-            durationSec: input.durationSec as number | undefined,
-            ratio: input.ratio as string | undefined,
-          });
-          await queue.updateProgress(job.id, 70);
-          const { body, mime } = await urlToBytes(r.data[0].url);
-          const assetId = randomUUID();
-          const key = `${assetId}.${extFor(mime)}`;
-          const { url } = await storage.put({ key, body, contentType: mime });
-          await db.createAsset({
-            id: assetId, taskId: job.id, userId: job.userId, type: "video",
-            storageKey: key, url, mime, sizeBytes: body.byteLength, durationSec: r.durationSec,
-          });
-          await meter.record({
-            userId: job.userId, taskId: job.id, modelId: genConfig.video.modelId,
-            usage: { inputCount: 0, outputCount: r.durationSec },
-          });
-          const out = { assetIds: [assetId], assets: [{ url, mime, durationSec: r.durationSec }] };
-          await cache.set(cacheKey, out);
-          return out;
-        })());
-
-      if (assistantMessageId) {
-        await db.updateMessageGeneration(assistantMessageId, {
-          status: "completed",
-          metadata: { ...baseMeta, status: "completed", assets: result.assets },
-        });
-      }
-      await queue.updateProgress(job.id, 100);
-      return result;
-    } catch (err) {
-      if (assistantMessageId) {
-        await db.updateMessageGeneration(assistantMessageId, {
-          status: "failed",
-          metadata: { ...baseMeta, status: "failed", error: err instanceof Error ? err.message : String(err) },
-        });
-      }
-      throw err;
-    }
-  });
+  queue.process("image.generate", (job) => runGenerationJob(genDeps("image"), { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, "image"));
+  queue.process("video.generate", (job) => runGenerationJob(genDeps("video"), { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, "video"));
 
   // Register memory.extract handler — runs a cheap LLM to pull durable user
   // facts/preferences from the latest turn and persist them. Best-effort.
