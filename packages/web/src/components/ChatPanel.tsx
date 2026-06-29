@@ -1,13 +1,14 @@
 import { useEffect, useRef } from "react";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputMode } from "./InputBox.js";
+import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { Agent } from "../api/client.js";
 
 interface ChatPanelProps {
   messages: DisplayMessage[];
-  onSend: (content: string, files: File[]) => void;
+  onSend: (content: string, files: File[], settings?: ImageSettings | VideoSettings) => void;
   onStop: () => void;
   isStreaming: boolean;
   activeConversationId: string | null;

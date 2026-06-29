@@ -37,6 +37,9 @@ export const VIDEO_QUALITIES: Quality[] = [
 
 export const VIDEO_DURATIONS = ["5秒", "10秒"];
 
+export interface ImageSettings { size: string; n: number }
+export interface VideoSettings { size: string; durationSec: number; ratio: string; quality: string }
+
 interface Dim {
   width: number;
   height: number;
@@ -154,11 +157,21 @@ function ResolutionInput({
 }
 
 /* ── 图像生成：比例 + 分辨率 ── */
-export function ImageSettingsPicker({ disabled }: { disabled?: boolean }) {
+export function ImageSettingsPicker({
+  disabled,
+  onChange,
+}: {
+  disabled?: boolean;
+  onChange?: (s: ImageSettings) => void;
+}) {
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
   const [ratio, setRatio] = useState<Ratio>(IMAGE_RATIOS[0]); // 16:9
   const [dim, setDim] = useState<Dim>(deriveResolution(16, 9, 1536));
+
+  useEffect(() => {
+    onChange?.({ size: `${dim.width}x${dim.height}`, n: 1 });
+  }, [dim, onChange]);
 
   const pickRatio = (r: Ratio) => {
     setRatio(r);
@@ -204,13 +217,28 @@ export function ImageSettingsPicker({ disabled }: { disabled?: boolean }) {
 }
 
 /* ── 视频生成：质量 + 比例 + 分辨率 + 时长 ── */
-export function VideoSettingsPicker({ disabled }: { disabled?: boolean }) {
+export function VideoSettingsPicker({
+  disabled,
+  onChange,
+}: {
+  disabled?: boolean;
+  onChange?: (s: VideoSettings) => void;
+}) {
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
   const [quality, setQuality] = useState<Quality>(VIDEO_QUALITIES[0]);
   const [ratio, setRatio] = useState<Ratio>(VIDEO_RATIOS[0]); // 16:9
   const [dim, setDim] = useState<Dim>(deriveResolution(16, 9, 480));
   const [duration, setDuration] = useState(VIDEO_DURATIONS[0]);
+
+  useEffect(() => {
+    onChange?.({
+      size: `${dim.width}x${dim.height}`,
+      durationSec: Number(duration.replace(/[^0-9]/g, "")) || 5,
+      ratio: ratio.label,
+      quality: quality.short,
+    });
+  }, [dim, duration, ratio, quality, onChange]);
 
   const pickQuality = (q: Quality) => {
     setQuality(q);

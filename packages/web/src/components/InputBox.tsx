@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { ImageSettingsPicker, VideoSettingsPicker } from "./MediaSettings.js";
+import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成。 */
 export type InputMode = "default" | "image" | "video";
 
 interface InputBoxProps {
-  onSend: (content: string, files: File[]) => void;
+  onSend: (content: string, files: File[], settings?: ImageSettings | VideoSettings) => void;
   onStop: () => void;
   disabled: boolean;
   placeholder?: string;
@@ -45,6 +45,8 @@ export function InputBox({
   // revoked on remove/send/unmount. Kept in a ref (not state) and created in
   // the event handler — never inline in JSX (would leak a blob URL per render)
   // and never in a render/effect path (StrictMode double-invokes those).
+  const settingsRef = useRef<ImageSettings | VideoSettings | undefined>(undefined);
+
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
     for (const url of urlsRef.current.values()) URL.revokeObjectURL(url);
@@ -87,14 +89,12 @@ export function InputBox({
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     if ((!trimmed && files.length === 0) || disabled) return;
-    onSend(trimmed, files);
+    onSend(trimmed, files, mediaMode ? settingsRef.current : undefined);
     setValue("");
     setFiles([]);
     revokeAll();
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-  }, [value, files, disabled, onSend, revokeAll]);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  }, [value, files, disabled, onSend, revokeAll, mediaMode]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -218,8 +218,12 @@ export function InputBox({
               </div>
             </div>
           )}
-          {mode === "image" && <ImageSettingsPicker disabled={disabled} />}
-          {mode === "video" && <VideoSettingsPicker disabled={disabled} />}
+          {mode === "image" && (
+            <ImageSettingsPicker disabled={disabled} onChange={(s) => (settingsRef.current = s)} />
+          )}
+          {mode === "video" && (
+            <VideoSettingsPicker disabled={disabled} onChange={(s) => (settingsRef.current = s)} />
+          )}
           {disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">
               <svg viewBox="0 0 24 24" fill="currentColor">
