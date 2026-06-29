@@ -1,13 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { ImageSettingsPicker, VideoSettingsPicker } from "./MediaSettings.js";
+
+/** 输入框形态：普通对话 / 图像生成 / 视频生成。 */
+export type InputMode = "default" | "image" | "video";
 
 interface InputBoxProps {
   onSend: (content: string, files: File[]) => void;
   onStop: () => void;
   disabled: boolean;
-  /** Bottom-left content (e.g. the agent switcher). */
-  leftSlot?: React.ReactNode;
   placeholder?: string;
   autoFocus?: boolean;
+  /** 图像/视频生成 Agent：换「参考图」上传 + 对应的设置选择器。 */
+  mode?: InputMode;
 }
 
 const MAX_FILES = 5;
@@ -26,12 +30,14 @@ export function InputBox({
   onSend,
   onStop,
   disabled,
-  leftSlot,
   placeholder,
   autoFocus,
+  mode = "default",
 }: InputBoxProps) {
   const [value, setValue] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
+  const mediaMode = mode === "image" || mode === "video";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -154,45 +160,66 @@ export function InputBox({
         autoFocus={autoFocus}
       />
       <div className="input-toolbar">
-        <div className="input-toolbar-left">{leftSlot}</div>
-        <div className="input-toolbar-right">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPT}
-            style={{ display: "none" }}
-            onChange={(e) => {
-              addFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <div className="upload-wrap">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={mediaMode ? "image/*" : ACCEPT}
+          style={{ display: "none" }}
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <div className="input-toolbar-left">
+          {mediaMode && (
             <button
               type="button"
-              className="btn-upload"
+              className="btn-reference"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled || files.length >= MAX_FILES}
-              aria-label="上传文件"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="14" height="14" rx="2.5" />
+                <circle cx="8" cy="8" r="1.4" />
+                <path d="m17 13-4-4-7 7" />
+                <path d="M18.5 16.5v5M16 19h5" />
               </svg>
+              参考图
             </button>
-            <div className="upload-tooltip" role="tooltip">
-              <div className="upload-tooltip-title">📎 支持上传的文件</div>
-              <ul className="upload-tooltip-list">
-                {SUPPORTED_TYPES.map((t) => (
-                  <li key={t.label}>
-                    <span className="upload-tooltip-tag">{t.label}</span>
-                    <span className="upload-tooltip-exts">{t.exts}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="upload-tooltip-hint">最多 {MAX_FILES} 个文件</div>
+          )}
+        </div>
+        <div className="input-toolbar-right">
+          {!mediaMode && (
+            <div className="upload-wrap">
+              <button
+                type="button"
+                className="btn-upload"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || files.length >= MAX_FILES}
+                aria-label="上传文件"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+              <div className="upload-tooltip" role="tooltip">
+                <div className="upload-tooltip-title">📎 支持上传的文件</div>
+                <ul className="upload-tooltip-list">
+                  {SUPPORTED_TYPES.map((t) => (
+                    <li key={t.label}>
+                      <span className="upload-tooltip-tag">{t.label}</span>
+                      <span className="upload-tooltip-exts">{t.exts}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="upload-tooltip-hint">最多 {MAX_FILES} 个文件</div>
+              </div>
             </div>
-          </div>
+          )}
+          {mode === "image" && <ImageSettingsPicker disabled={disabled} />}
+          {mode === "video" && <VideoSettingsPicker disabled={disabled} />}
           {disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">
               <svg viewBox="0 0 24 24" fill="currentColor">
@@ -202,7 +229,7 @@ export function InputBox({
           ) : (
             <button
               onClick={handleSend}
-              className="btn-send"
+              className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
               disabled={!value.trim() && files.length === 0}
               title="发送"
             >

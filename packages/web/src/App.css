@@ -42,6 +42,14 @@
   --tag-image-fg:   #7c3aed;  --tag-image-bg:   rgba(124,58,237,0.12);
   --tag-video-fg:   #d97706;  --tag-video-bg:   rgba(217,119,6,0.13);
 
+  /* Agent switcher: colored icon badges + violet→blue gradient accent border.
+     White glyph reads on every badge, so it is theme-independent. */
+  --icon-on-grad: #ffffff;
+  --agent-icon-general: linear-gradient(135deg, #8b5cf6, #6d5cf0);
+  --agent-icon-image:   linear-gradient(135deg, #6d5cf0, #3b82f6);
+  --agent-icon-video:   linear-gradient(135deg, #10b981, #22c55e);
+  --accent-grad: linear-gradient(135deg, #8b5cf6, #3b82f6);
+
   /* Brand header (智算AI card) */
   --brand-grad-from: #2563eb;  --brand-grad-to: #06b6d4;
   --brand-card-from: rgba(99,102,241,0.10);  --brand-card-to: rgba(34,211,238,0.06);
@@ -94,6 +102,12 @@
   --tag-copy-fg:    #6ea8ff;  --tag-copy-bg:    rgba(110,168,255,0.15);
   --tag-image-fg:   #b794ff;  --tag-image-bg:   rgba(183,148,255,0.15);
   --tag-video-fg:   #f0b35e;  --tag-video-bg:   rgba(240,179,94,0.15);
+
+  --icon-on-grad: #ffffff;
+  --agent-icon-general: linear-gradient(135deg, #a78bfa, #8b7bf5);
+  --agent-icon-image:   linear-gradient(135deg, #8b7bf5, #60a5fa);
+  --agent-icon-video:   linear-gradient(135deg, #34d399, #4ade80);
+  --accent-grad: linear-gradient(135deg, #a78bfa, #60a5fa);
 
   --brand-grad-from: #60a5fa;  --brand-grad-to: #22d3ee;
   --brand-card-from: rgba(96,165,250,0.12);  --brand-card-to: rgba(34,211,238,0.05);
@@ -507,20 +521,24 @@ html, body, #root {
 }
 
 .input-box {
-  background: var(--bg-input);
-  border: 1px solid var(--border-input);
+  /* Violet→blue gradient border via a double background: the inner solid layer
+     is clipped to padding-box, the gradient to border-box, leaving only the
+     transparent 1.5px border showing the gradient. */
+  border: 1.5px solid transparent;
   border-radius: var(--radius-xl);
+  background:
+    linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
+    var(--accent-grad) border-box;
   padding: 16px 18px 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   box-shadow: var(--shadow-md);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: box-shadow 0.2s;
 }
 
 .input-box:focus-within {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-md), 0 0 0 3px rgba(34,211,238,0.14);
+  box-shadow: var(--shadow-md), 0 0 0 3px rgba(124,92,246,0.16);
 }
 
 .input-box textarea {
@@ -538,7 +556,8 @@ html, body, #root {
   padding: 0;
 }
 
-/* Input bottom toolbar: agent switcher (left) + send (right) */
+/* Input bottom toolbar: left controls (image mode) + right controls/send.
+   In default mode the left group is empty, so the right group sits flush right. */
 .input-toolbar {
   display: flex;
   align-items: center;
@@ -548,17 +567,231 @@ html, body, #root {
 
 .input-toolbar-left {
   display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  overflow-x: auto;
 }
-
-.input-toolbar-left::-webkit-scrollbar { height: 0; }
 
 .input-toolbar-right {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 「参考图」上传按钮（图像生成模式） */
+.btn-reference {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.12s, color 0.12s, box-shadow 0.12s;
+}
+.btn-reference:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-input);
+  box-shadow: var(--shadow-md);
+}
+.btn-reference:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn-reference svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* 渐变发送按钮（图像生成模式） */
+.btn-send--grad:not(:disabled) {
+  background: var(--accent-grad);
+  color: var(--icon-on-grad);
+}
+.btn-send--grad:not(:disabled):hover {
+  filter: brightness(1.05);
+}
+
+/* ── 图像/视频设置选择器（比例 · 分辨率 · 质量 · 时长） ── */
+.media-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.media-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 11px 0 13px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.media-trigger:hover:not(:disabled) {
+  border-color: var(--border-input);
+  box-shadow: var(--shadow-md);
+}
+.media-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.media-trigger-label {
+  line-height: 1;
+}
+.media-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+.media-timer,
+.media-resbar {
+  width: 16px;
+  height: 16px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* The little bordered rectangle that represents an aspect ratio. */
+.ratio-glyph {
+  display: block;
+  border: 1.6px solid currentColor;
+  border-radius: 3px;
+}
+
+.media-popup {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  width: 380px;
+  max-width: min(380px, 88vw);
+  padding: 18px;
+  border-radius: 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  z-index: 60;
+}
+.media-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 16px 0 9px;
+}
+.media-section-title:first-child {
+  margin-top: 0;
+}
+
+/* Segmented control track shared by ratio / quality / duration rows. */
+.seg-track {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 13px;
+  background: var(--bg-tool);
+}
+.seg {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+.seg:hover {
+  color: var(--text);
+}
+.seg.active {
+  background: var(--bg-card);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+/* Stacked variant (image ratios): glyph above label. */
+.seg--stack {
+  flex-direction: column;
+  gap: 9px;
+  height: auto;
+  padding: 13px 6px;
+}
+.seg .media-timer {
+  width: 17px;
+  height: 17px;
+  color: inherit;
+}
+
+/* W ─🔗─ H resolution inputs. */
+.res-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.res-field {
+  flex: 1 1 0;
+  /* Allow the field to shrink below the number input's intrinsic width so the
+     W/H row never overflows the popup. */
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 16px;
+  border-radius: 13px;
+  background: var(--bg-tool);
+}
+.res-key {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.res-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.res-input::-webkit-outer-spin-button,
+.res-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.res-link {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+.res-link svg {
+  width: 18px;
+  height: 18px;
 }
 
 .input-box textarea::placeholder {
@@ -1670,40 +1903,79 @@ html, body, #root {
 }
 
 /* ── Agent Switcher (input bottom-left) ── */
+/* Agent switcher: card pills with colored icon badges, rendered above the
+   input box (.input-switcher wraps it for spacing). */
+.input-switcher {
+  display: flex;
+  margin-bottom: 12px;
+}
+
 .agent-switcher {
   display: flex;
-  gap: 6px;
-  flex-wrap: nowrap;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .agent-pill {
-  background: var(--bg-active);
-  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
   border-radius: 999px;
-  color: var(--text-secondary);
-  padding: 5px 13px;
-  font-size: 12.5px;
+  color: var(--text);
+  padding: 5px 13px 5px 6px;
+  font-size: 13px;
+  font-weight: 500;
   font-family: inherit;
   white-space: nowrap;
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
-  transition: all 0.12s;
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
 }
 
 .agent-pill:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--bg-hover);
+  border-color: var(--border-input);
+  box-shadow: var(--shadow-md);
 }
 
+/* Active pill: violet→blue gradient border (same double-background trick as the
+   input box) so the card face stays solid. */
 .agent-pill.active {
-  color: var(--text-on-accent);
-  background: var(--accent);
-  border-color: var(--accent);
-  font-weight: 600;
+  border-color: transparent;
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    var(--accent-grad) border-box;
+  box-shadow: var(--shadow-md);
 }
 
 .agent-pill:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: default;
+}
+
+.agent-pill-icon {
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-on-grad);
+  flex-shrink: 0;
+}
+
+.agent-pill-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.agent-pill-icon--general { background: var(--agent-icon-general); }
+.agent-pill-icon--image   { background: var(--agent-icon-image); }
+.agent-pill-icon--video   { background: var(--agent-icon-video); }
+
+.agent-pill-label {
+  line-height: 1;
 }
 
 /* ── Centered empty state (new conversation) ── */

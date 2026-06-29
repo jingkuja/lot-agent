@@ -156,9 +156,16 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
     ];
   }, [newAgentId, conversations]);
 
+  // 暂时屏蔽「文案创作」Agent（业务尚未实现），仅在切换器中隐藏；
+  // 定义仍在服务端注册，便于后续直接恢复。
+  const switcherAgents = useMemo(
+    () => orderedAgents.filter((a) => a.id !== "copywriting" && a.type !== "copywriting"),
+    [orderedAgents]
+  );
+
   const switcher = (
     <AgentSwitcher
-      agents={orderedAgents}
+      agents={switcherAgents}
       activeId={activeAgentId}
       onSwitch={handleSwitchAgent}
       disabled={isStreaming}
@@ -202,7 +209,7 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
             isStreaming={isStreaming}
             activeConversationId={activeId}
             onRegenerate={regenerate}
-            inputLeftSlot={switcher}
+            inputAbove={switcher}
             onSelectForPreview={setPreviewContent}
             agent={activeAgent}
           />
