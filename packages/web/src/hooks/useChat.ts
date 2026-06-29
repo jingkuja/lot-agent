@@ -40,6 +40,63 @@ export function useChat(
   // Allow caller to inject a ref so send() reads the latest id synchronously.
   const cidRef = conversationIdRef ?? { current: conversationId };
 
+  // Poll a generation task until it terminates, patching the message by id with
+  // live progress, then the final assets/failure. Shared by a fresh send and by
+  // resuming an in-flight generation after a conversation (re)load. The caller
+  // owns the cancellation `token` (stored in genPollRef) so switching away stops it.
+  const pollGeneration = useCallback(
+    (taskId: string, messageId: string, mediaType: "image" | "video", token: { cancelled: boolean }) => {
+      let failures = 0;
+      const poll = async () => {
+        if (token.cancelled) return;
+        try {
+          const t = await api.getTask(taskId);
+          failures = 0;
+          if (token.cancelled) return;
+          if (t.status === "succeeded" || t.status === "failed") {
+            const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === messageId
+                  ? { ...m, generation: { mediaType, status: t.status === "succeeded" ? "completed" : "failed", progress: 100, assets: out?.assets, error: t.error, taskId } }
+                  : m
+              )
+            );
+            if (genPollRef.current === token) genPollRef.current = null;
+            setIsStreaming(false);
+            onStreamEndRef.current?.();
+            return;
+          }
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === messageId && m.generation
+                ? { ...m, generation: { ...m.generation, status: "generating", progress: t.progress } }
+                : m
+            )
+          );
+        } catch {
+          failures += 1;
+          if (failures >= 15) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === messageId
+                  ? { ...m, generation: { mediaType, status: "failed", error: "生成状态获取失败", taskId } }
+                  : m
+              )
+            );
+            if (genPollRef.current === token) genPollRef.current = null;
+            setIsStreaming(false);
+            onStreamEndRef.current?.();
+            return;
+          }
+        }
+        if (!token.cancelled) setTimeout(poll, 1000);
+      };
+      poll();
+    },
+    []
+  );
+
   const loadMessages = useCallback(async (convId: string) => {
     const data = await api.getConversation(convId);
     const display: DisplayMessage[] = data.messages.map((m) => {
@@ -54,6 +111,7 @@ export function useChat(
               status: (parsedMeta.status ?? "generating") as GenerationView["status"],
               assets: parsedMeta.assets,
               error: parsedMeta.error,
+              taskId: parsedMeta.taskId as string | undefined,
             }
           : undefined;
       return {
@@ -75,7 +133,23 @@ export function useChat(
       };
     });
     setMessages(display);
-  }, []);
+
+    // Resume polling for any generation still marked "generating" (e.g. the
+    // user reloaded or reopened the conversation before it finished). The
+    // message carries its taskId, so we re-query the task to pick up current
+    // progress / completion. At most one is expected in flight; poll the latest.
+    const pending = display.filter(
+      (m) => m.generation?.status === "generating" && m.generation.taskId
+    );
+    const last = pending[pending.length - 1];
+    if (last?.generation?.taskId) {
+      if (genPollRef.current) genPollRef.current.cancelled = true;
+      const token = { cancelled: false };
+      genPollRef.current = token;
+      setIsStreaming(true);
+      pollGeneration(last.generation.taskId, last.id, last.generation.mediaType, token);
+    }
+  }, [pollGeneration]);
 
   const streamMessage = useCallback(
     (content: string, files: File[] = [], preUploaded?: UploadedAttachment[]) => {
@@ -287,54 +361,7 @@ export function useChat(
             generation: { mediaType, status: "generating", progress: 0, taskId: res.taskId },
           };
           setMessages((prev) => [...prev, userMsg, genMsg]);
-
-          let failures = 0;
-          const poll = async () => {
-            if (token.cancelled) return;
-            try {
-              const t = await api.getTask(res.taskId);
-              failures = 0;
-              if (token.cancelled) return;
-              if (t.status === "succeeded" || t.status === "failed") {
-                const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === genMsg.id
-                      ? { ...m, generation: { mediaType, status: t.status === "succeeded" ? "completed" : "failed", progress: 100, assets: out?.assets, error: t.error, taskId: res.taskId } }
-                      : m
-                  )
-                );
-                if (genPollRef.current === token) genPollRef.current = null;
-                setIsStreaming(false);
-                onStreamEndRef.current?.();
-                return;
-              }
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === genMsg.id && m.generation
-                    ? { ...m, generation: { ...m.generation, status: "generating", progress: t.progress } }
-                    : m
-                )
-              );
-            } catch {
-              failures += 1;
-              if (failures >= 15) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === genMsg.id
-                      ? { ...m, generation: { mediaType, status: "failed", error: "生成状态获取失败", taskId: res.taskId } }
-                      : m
-                  )
-                );
-                if (genPollRef.current === token) genPollRef.current = null;
-                setIsStreaming(false);
-                onStreamEndRef.current?.();
-                return;
-              }
-            }
-            if (!token.cancelled) setTimeout(poll, 1000);
-          };
-          poll();
+          pollGeneration(res.taskId, genMsg.id, mediaType, token);
         } catch (e) {
           if (genPollRef.current === token) genPollRef.current = null;
           setIsStreaming(false);
@@ -342,7 +369,7 @@ export function useChat(
         }
       })();
     },
-    [isStreaming]
+    [isStreaming, pollGeneration]
   );
 
   const stop = useCallback(() => {
@@ -352,7 +379,10 @@ export function useChat(
   }, []);
 
   const clear = useCallback(() => {
+    // Cancel any in-flight generation poll and drop the streaming lock so a
+    // resumed poll in the next conversation doesn't leave the input disabled.
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
+    setIsStreaming(false);
     setMessages([]);
   }, []);
 

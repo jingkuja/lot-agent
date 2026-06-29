@@ -254,22 +254,24 @@ export function createGenerationRoutes(service: AgentService) {
     const userMessageId = randomUUID();
     await service.db.addMessage(userMessageId, conversationId, "user", prompt);
 
-    // Persist pending assistant generation message.
+    // Persist pending assistant generation message (status forced to
+    // 'generating'; the DB column defaults to 'completed').
     const assistantMessageId = randomUUID();
-    const metadata = { kind: "generation", mediaType, prompt, settings, status: "generating" };
+    const baseMeta = { kind: "generation", mediaType, prompt, settings };
     await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
-      metadata,
+      metadata: { ...baseMeta, status: "generating" },
       model: modelId,
     });
-    // The DB default status is 'completed'; force it to 'generating'.
-    await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
 
-    // Enqueue.
+    // Enqueue, then record the taskId on the message so a client that reloads
+    // mid-generation can re-poll the task to resume progress / completion.
     const taskId = await service.jobQueue.enqueue(
       type,
       { prompt, conversationId, assistantMessageId, ...settings, ...(media ? { media } : {}) },
       userId
     );
+    const metadata = { ...baseMeta, status: "generating", taskId };
+    await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
 
     return c.json(
       {
