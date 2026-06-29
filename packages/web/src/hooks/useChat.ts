@@ -1,6 +1,14 @@
 import { useState, useCallback, useRef } from "react";
 import { api, type UploadedAttachment } from "../api/client.js";
 
+export interface GenerationView {
+  mediaType: "image" | "video";
+  status: "generating" | "completed" | "failed";
+  assets?: { url: string; mime: string; durationSec?: number }[];
+  error?: string;
+  taskId?: string;
+}
+
 export interface DisplayMessage {
   id: string;
   dbId?: string;
@@ -11,6 +19,7 @@ export interface DisplayMessage {
   isStreaming?: boolean;
   rating?: number | null;
   attachments?: UploadedAttachment[];
+  generation?: GenerationView;
 }
 
 export function useChat(
@@ -36,6 +45,15 @@ export function useChat(
       const toolName = (m as { tool_name?: string | null }).tool_name;
       const meta = m.metadata;
       const parsedMeta = typeof meta === "string" ? JSON.parse(meta) : meta;
+      const gen =
+        role === "assistant" && parsedMeta?.kind === "generation"
+          ? {
+              mediaType: parsedMeta.mediaType as "image" | "video",
+              status: (parsedMeta.status ?? "generating") as GenerationView["status"],
+              assets: parsedMeta.assets,
+              error: parsedMeta.error,
+            }
+          : undefined;
       return {
         id: m.id,
         dbId: m.id,
@@ -51,6 +69,7 @@ export function useChat(
             ? { name: toolName ?? "tool", output: m.content, isError: false }
             : undefined,
         rating: m.rating ?? null,
+        generation: gen,
       };
     });
     setMessages(display);
@@ -240,6 +259,66 @@ export function useChat(
     streamMessage(lastUserContent, [], lastUserAttachments);
   }, [messages, isStreaming, conversationId, streamMessage]);
 
+  const generateMedia = useCallback(
+    (prompt: string, mediaType: "image" | "video", settings?: unknown) => {
+      const cid = cidRef.current;
+      if (!cid || !prompt.trim() || isStreaming) return;
+      setIsStreaming(true);
+
+      (async () => {
+        try {
+          const res = await api.generate(cid, { prompt, mediaType, settings });
+          const userMsg: DisplayMessage = { id: res.userMessage.id, dbId: res.userMessage.id, role: "user", content: prompt };
+          const genMsg: DisplayMessage = {
+            id: res.assistantMessage.id,
+            dbId: res.assistantMessage.id,
+            role: "assistant",
+            content: "",
+            generation: { mediaType, status: "generating", taskId: res.taskId },
+          };
+          setMessages((prev) => [...prev, userMsg, genMsg]);
+
+          // Poll the task until terminal, then patch the generation message.
+          const poll = async () => {
+            try {
+              const t = await api.getTask(res.taskId);
+              if (t.status === "succeeded" || t.status === "failed") {
+                const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === genMsg.id
+                      ? {
+                          ...m,
+                          generation: {
+                            mediaType,
+                            status: t.status === "succeeded" ? "completed" : "failed",
+                            assets: out?.assets,
+                            error: t.error,
+                            taskId: res.taskId,
+                          },
+                        }
+                      : m
+                  )
+                );
+                setIsStreaming(false);
+                onStreamEndRef.current?.();
+                return;
+              }
+            } catch {
+              /* keep polling */
+            }
+            setTimeout(poll, 1000);
+          };
+          poll();
+        } catch (e) {
+          setIsStreaming(false);
+          window.alert(`生成请求失败：${e instanceof Error ? e.message : String(e)}`);
+        }
+      })();
+    },
+    [isStreaming]
+  );
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
     setIsStreaming(false);
@@ -257,5 +336,6 @@ export function useChat(
     loadMessages,
     clear,
     regenerate,
+    generateMedia,
   };
 }

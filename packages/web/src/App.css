@@ -49,6 +49,8 @@
   --agent-icon-image:   linear-gradient(135deg, #6d5cf0, #3b82f6);
   --agent-icon-video:   linear-gradient(135deg, #10b981, #22c55e);
   --accent-grad: linear-gradient(135deg, #8b5cf6, #3b82f6);
+  --gen-card-from: rgba(167,139,250,0.16);
+  --gen-card-to: rgba(96,165,250,0.12);
 
   /* Brand header (智算AI card) */
   --brand-grad-from: #2563eb;  --brand-grad-to: #06b6d4;
@@ -108,6 +110,8 @@
   --agent-icon-image:   linear-gradient(135deg, #8b7bf5, #60a5fa);
   --agent-icon-video:   linear-gradient(135deg, #34d399, #4ade80);
   --accent-grad: linear-gradient(135deg, #a78bfa, #60a5fa);
+  --gen-card-from: rgba(167,139,250,0.16);
+  --gen-card-to: rgba(96,165,250,0.12);
 
   --brand-grad-from: #60a5fa;  --brand-grad-to: #22d3ee;
   --brand-card-from: rgba(96,165,250,0.12);  --brand-card-to: rgba(34,211,238,0.05);
@@ -2138,4 +2142,31 @@ html, body, #root {
 .theme-menu-item svg {
   width: 15px;
   height: 15px;
+}
+
+/* ── 生成结果卡片 ── */
+.gen-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: min(520px, 100%);
+  aspect-ratio: 16 / 9;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--gen-card-from), var(--gen-card-to));
+  color: var(--accent);
+}
+.gen-card.image { aspect-ratio: 16 / 10; }
+.gen-card-icon { width: 40px; height: 40px; }
+.gen-card-label { font-size: 16px; font-weight: 600; color: var(--accent); }
+.gen-card--failed { color: var(--accent); opacity: 0.92; }
+.gen-card--loading .gen-card-icon { animation: gen-pulse 1.4s ease-in-out infinite; }
+@keyframes gen-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.gen-card-assets { display: flex; flex-wrap: wrap; gap: 10px; }
+.gen-asset {
+  max-width: min(520px, 100%);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
 }

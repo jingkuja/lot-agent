@@ -64,10 +64,11 @@ export interface User {
 
 export interface TaskStatus {
   id: string;
-  status: "pending" | "running" | "done" | "failed";
+  status: "pending" | "running" | "done" | "succeeded" | "failed";
   progress: number;
   output?: {
     assetIds?: string[];
+    assets?: { url: string; mime: string; durationSec?: number }[];
     url?: string;
     [key: string]: unknown;
   };
@@ -272,6 +273,25 @@ export const api = {
 
     return controller;
   },
+
+  // ── Generation (image/video via conversation) ────────────────────────────
+  generate: (
+    conversationId: string,
+    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown }
+  ) =>
+    request<{
+      userMessage: { id: string; role: "user"; content: string };
+      assistantMessage: {
+        id: string;
+        role: "assistant";
+        status: string;
+        metadata: { mediaType: "image" | "video"; status: string; assets?: { url: string; mime: string; durationSec?: number }[]; error?: string };
+      };
+      taskId: string;
+    }>(`/conversations/${conversationId}/generations`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // ── Tasks ───────────────────────────────────────────────────────────────────
   createTask: (type: "image.generate" | "video.generate", input: unknown) =>

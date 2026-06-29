@@ -43,7 +43,7 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   }, [refresh]);
 
   const activeIdRef = useRef(activeId);
-  const { messages, send, stop, isStreaming, loadMessages, clear, regenerate } =
+  const { messages, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia } =
     useChat(activeId, handleStreamEnd, activeIdRef, updateTitle);
 
   const prevActiveId = useRef<string | null>(null);
@@ -117,19 +117,27 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
 
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
-    async (content: string, files: File[] = []) => {
+    async (content: string, files: File[] = [], settings?: unknown) => {
+      const kind = activeAgent?.type || activeAgent?.id;
+      const dispatch = () => {
+        if (kind === "image" || kind === "video") {
+          generateMedia(content, kind as "image" | "video", settings);
+        } else {
+          send(content, files);
+        }
+      };
       if (newAgentId) {
         const conv = await api.createConversation(undefined, newAgentId);
-        activeIdRef.current = conv.id; // sync ref before send reads it
+        activeIdRef.current = conv.id;
         setActiveId(conv.id);
         setNewAgentId(null);
         refresh();
-        send(content, files);
+        dispatch();
         return;
       }
-      send(content, files);
+      dispatch();
     },
-    [newAgentId, setActiveId, refresh, send]
+    [newAgentId, setActiveId, refresh, send, generateMedia, activeAgent]
   );
 
   const handleDelete = useCallback(
