@@ -121,7 +121,7 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
       const kind = activeAgent?.type || activeAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
-          generateMedia(content, kind as "image" | "video", settings);
+          generateMedia(content, kind as "image" | "video", settings, files);
         } else {
           send(content, files);
         }

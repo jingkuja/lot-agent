@@ -4,6 +4,7 @@ import { api, type UploadedAttachment } from "../api/client.js";
 export interface GenerationView {
   mediaType: "image" | "video";
   status: "generating" | "completed" | "failed";
+  progress?: number;
   assets?: { url: string; mime: string; durationSec?: number }[];
   error?: string;
   taskId?: string;
@@ -261,28 +262,32 @@ export function useChat(
   }, [messages, isStreaming, conversationId, streamMessage]);
 
   const generateMedia = useCallback(
-    (prompt: string, mediaType: "image" | "video", settings?: unknown) => {
+    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: File[] = []) => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || isStreaming) return;
       setIsStreaming(true);
+
       if (genPollRef.current) genPollRef.current.cancelled = true;
       const token = { cancelled: false };
       genPollRef.current = token;
 
       (async () => {
         try {
-          const res = await api.generate(cid, { prompt, mediaType, settings });
+          const imgs = files.filter((f) => f.type.startsWith("image/"));
+          const uploaded = imgs.length ? await Promise.all(imgs.map((f) => api.uploadFile(f))) : [];
+          const media = uploaded.map((u) => ({ type: "reference_image" as const, url: u.url }));
+
+          const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined });
           const userMsg: DisplayMessage = { id: res.userMessage.id, dbId: res.userMessage.id, role: "user", content: prompt };
           const genMsg: DisplayMessage = {
             id: res.assistantMessage.id,
             dbId: res.assistantMessage.id,
             role: "assistant",
             content: "",
-            generation: { mediaType, status: "generating", taskId: res.taskId },
+            generation: { mediaType, status: "generating", progress: 0, taskId: res.taskId },
           };
           setMessages((prev) => [...prev, userMsg, genMsg]);
 
-          // Poll the task until terminal, then patch the generation message.
           let failures = 0;
           const poll = async () => {
             if (token.cancelled) return;
@@ -295,16 +300,7 @@ export function useChat(
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === genMsg.id
-                      ? {
-                          ...m,
-                          generation: {
-                            mediaType,
-                            status: t.status === "succeeded" ? "completed" : "failed",
-                            assets: out?.assets,
-                            error: t.error,
-                            taskId: res.taskId,
-                          },
-                        }
+                      ? { ...m, generation: { mediaType, status: t.status === "succeeded" ? "completed" : "failed", progress: 100, assets: out?.assets, error: t.error, taskId: res.taskId } }
                       : m
                   )
                 );
@@ -313,6 +309,13 @@ export function useChat(
                 onStreamEndRef.current?.();
                 return;
               }
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === genMsg.id && m.generation
+                    ? { ...m, generation: { ...m.generation, status: "generating", progress: t.progress } }
+                    : m
+                )
+              );
             } catch {
               failures += 1;
               if (failures >= 15) {
@@ -333,6 +336,7 @@ export function useChat(
           };
           poll();
         } catch (e) {
+          if (genPollRef.current === token) genPollRef.current = null;
           setIsStreaming(false);
           window.alert(`生成请求失败：${e instanceof Error ? e.message : String(e)}`);
         }
