@@ -212,3 +212,73 @@ export function createConversationRoutes(service: AgentService): Hono {
 
   return app;
 }
+
+type GenVariables = { userId: string };
+
+export function createGenerationRoutes(service: AgentService) {
+  const app = new Hono<{ Variables: GenVariables }>();
+
+  app.post("/:id/generations", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+
+    const conv = await service.db.getConversation(conversationId);
+    if (!conv || (conv as { user_id?: string }).user_id !== userId) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
+
+    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown> };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const prompt = (body.prompt ?? "").trim();
+    const mediaType = body.mediaType;
+    if (!prompt || (mediaType !== "image" && mediaType !== "video")) {
+      return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
+    }
+    const settings = body.settings ?? {};
+    const type = mediaType === "image" ? "image.generate" : "video.generate";
+
+    // Quota pre-check (mirrors the /tasks route).
+    const modelId = mediaType === "image" ? "wanx-standard" : "kling-standard";
+    const unit = service.modelRegistry.getConfig(modelId)?.unitPrice ?? 0;
+    const durationSec = Number(settings.durationSec ?? 5);
+    const estimatedCost = mediaType === "image" ? unit * Number(settings.n ?? 1) : unit * durationSec;
+    const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
+    if (!quota.ok) return c.json({ error: quota.reason, estimatedCost }, 402);
+
+    // Persist user message.
+    const userMessageId = randomUUID();
+    await service.db.addMessage(userMessageId, conversationId, "user", prompt);
+
+    // Persist pending assistant generation message.
+    const assistantMessageId = randomUUID();
+    const metadata = { kind: "generation", mediaType, prompt, settings, status: "generating" };
+    await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
+      metadata,
+      model: modelId,
+    });
+    // The DB default status is 'completed'; force it to 'generating'.
+    await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
+
+    // Enqueue.
+    const taskId = await service.jobQueue.enqueue(
+      type,
+      { prompt, conversationId, assistantMessageId, ...settings },
+      userId
+    );
+
+    return c.json(
+      {
+        userMessage: { id: userMessageId, role: "user", content: prompt },
+        assistantMessage: { id: assistantMessageId, role: "assistant", status: "generating", metadata },
+        taskId,
+      },
+      202
+    );
+  });
+
+  return app;
+}

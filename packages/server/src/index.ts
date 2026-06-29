@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { AgentService, type ServiceConfig } from "./services/agent-service.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
-import { createConversationRoutes } from "./routes/conversations.js";
+import { createConversationRoutes, createGenerationRoutes } from "./routes/conversations.js";
 import { createSkillRoutes } from "./routes/skills.js";
 import { createTraceRoutes } from "./routes/traces.js";
 import { createRatingRoutes } from "./routes/ratings.js";
@@ -112,6 +112,7 @@ async function main() {
 
   // Protected API routes
   app.route("/api/conversations", createConversationRoutes(service));
+  app.route("/api/conversations", createGenerationRoutes(service));
   app.route("/api/skills", createSkillRoutes(service));
   app.route("/api/traces", createTraceRoutes(service));
   app.route("/api/ratings", createRatingRoutes(service));
