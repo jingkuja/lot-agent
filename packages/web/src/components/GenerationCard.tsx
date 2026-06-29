@@ -40,7 +40,7 @@ export function GenerationCard({ generation }: { generation: GenerationView }) {
     );
   }
 
-  const failed = status === "failed";
+  const failed = status === "failed" || status === "completed";
   return (
     <div className={`gen-card ${mediaType} ${failed ? "gen-card--failed" : "gen-card--loading"}`} title={error ?? undefined}>
       <MediaIcon mediaType={mediaType} />

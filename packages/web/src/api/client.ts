@@ -64,7 +64,7 @@ export interface User {
 
 export interface TaskStatus {
   id: string;
-  status: "pending" | "running" | "done" | "succeeded" | "failed";
+  status: "pending" | "running" | "succeeded" | "failed";
   progress: number;
   output?: {
     assetIds?: string[];

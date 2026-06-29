@@ -325,6 +325,7 @@ export function useChat(
                 );
                 if (genPollRef.current === token) genPollRef.current = null;
                 setIsStreaming(false);
+                onStreamEndRef.current?.();
                 return;
               }
             }

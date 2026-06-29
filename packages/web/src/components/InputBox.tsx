@@ -46,6 +46,7 @@ export function InputBox({
   // the event handler — never inline in JSX (would leak a blob URL per render)
   // and never in a render/effect path (StrictMode double-invokes those).
   const settingsRef = useRef<ImageSettings | VideoSettings | undefined>(undefined);
+  const handleSettingsChange = useCallback((s: ImageSettings | VideoSettings) => { settingsRef.current = s; }, []);
 
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
@@ -219,10 +220,10 @@ export function InputBox({
             </div>
           )}
           {mode === "image" && (
-            <ImageSettingsPicker disabled={disabled} onChange={(s) => (settingsRef.current = s)} />
+            <ImageSettingsPicker disabled={disabled} onChange={handleSettingsChange} />
           )}
           {mode === "video" && (
-            <VideoSettingsPicker disabled={disabled} onChange={(s) => (settingsRef.current = s)} />
+            <VideoSettingsPicker disabled={disabled} onChange={handleSettingsChange} />
           )}
           {disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">

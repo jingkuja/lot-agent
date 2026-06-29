@@ -95,7 +95,7 @@ async function main() {
       settings: { size: input.size, n: input.n },
     };
     try {
-      const cacheKey = genCacheKey("image.generate", job.input);
+      const cacheKey = genCacheKey("image.generate", { prompt, size: input.size, n: input.n, model: genConfig.image.model });
       const cached = await cache.get<{ assetIds: string[]; assets: { url: string; mime: string }[] }>(cacheKey);
       if (!cached) await queue.updateProgress(job.id, 25);
 
@@ -162,7 +162,7 @@ async function main() {
       settings: { size: input.size, durationSec: input.durationSec, ratio: input.ratio },
     };
     try {
-      const cacheKey = genCacheKey("video.generate", job.input);
+      const cacheKey = genCacheKey("video.generate", { prompt, size: input.size, durationSec: input.durationSec, ratio: input.ratio, model: genConfig.video.model });
       const cached = await cache.get<{ assetIds: string[]; assets: { url: string; mime: string; durationSec: number }[] }>(cacheKey);
       if (!cached) await queue.updateProgress(job.id, 25);
 
