@@ -48,6 +48,7 @@ export class HappyhorseAdapter implements VendorAdapter {
     if (req.durationSec != null) body.duration = req.durationSec;
     if (req.ratio) body.ratio = req.ratio;
     if (req.media && req.media.length > 0) body.media = req.media;
+    // `n` and `quality` are part of GenerationRequest but not sent — the Happyhorse API does not accept them.
     return body;
   }
   parseCreate(json: unknown): CreateResult {

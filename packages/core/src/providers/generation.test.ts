@@ -64,6 +64,11 @@ describe("HttpGenerationProvider", () => {
     const p = new HttpGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseAdapter(), imageModel: "im", videoModel: "vm" });
     await expect(p.create({ mediaType: "image", prompt: "x" })).rejects.toThrow(/500/);
   });
+  it("poll throws on non-ok", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 502, text: async () => "bad" })) as unknown as typeof fetch);
+    const p = new HttpGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseAdapter(), imageModel: "im", videoModel: "vm" });
+    await expect(p.poll("t1", "image")).rejects.toThrow(/502/);
+  });
 });
 
 describe("MockGenerationProvider", () => {
@@ -89,6 +94,12 @@ describe("MockGenerationProvider", () => {
     t = 600;
     const r = await p.poll(c.taskId, "video");
     expect(r.status).toBe("failed");
+  });
+  it("returns failed for an unknown task id", async () => {
+    const p = new MockGenerationProvider(1000, () => 0);
+    const r = await p.poll("does-not-exist", "image");
+    expect(r.status).toBe("failed");
+    expect(r.error).toBeTruthy();
   });
 });
 
