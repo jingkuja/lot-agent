@@ -31,6 +31,7 @@ export function useChat(
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const genPollRef = useRef<{ cancelled: boolean } | null>(null);
   const onStreamEndRef = useRef(onStreamEnd);
   onStreamEndRef.current = onStreamEnd;
   const onTitleRef = useRef(onTitle);
@@ -264,6 +265,9 @@ export function useChat(
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || isStreaming) return;
       setIsStreaming(true);
+      if (genPollRef.current) genPollRef.current.cancelled = true;
+      const token = { cancelled: false };
+      genPollRef.current = token;
 
       (async () => {
         try {
@@ -279,9 +283,13 @@ export function useChat(
           setMessages((prev) => [...prev, userMsg, genMsg]);
 
           // Poll the task until terminal, then patch the generation message.
+          let failures = 0;
           const poll = async () => {
+            if (token.cancelled) return;
             try {
               const t = await api.getTask(res.taskId);
+              failures = 0;
+              if (token.cancelled) return;
               if (t.status === "succeeded" || t.status === "failed") {
                 const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
                 setMessages((prev) =>
@@ -300,14 +308,27 @@ export function useChat(
                       : m
                   )
                 );
+                if (genPollRef.current === token) genPollRef.current = null;
                 setIsStreaming(false);
                 onStreamEndRef.current?.();
                 return;
               }
             } catch {
-              /* keep polling */
+              failures += 1;
+              if (failures >= 15) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === genMsg.id
+                      ? { ...m, generation: { mediaType, status: "failed", error: "生成状态获取失败", taskId: res.taskId } }
+                      : m
+                  )
+                );
+                if (genPollRef.current === token) genPollRef.current = null;
+                setIsStreaming(false);
+                return;
+              }
             }
-            setTimeout(poll, 1000);
+            if (!token.cancelled) setTimeout(poll, 1000);
           };
           poll();
         } catch (e) {
@@ -321,10 +342,12 @@ export function useChat(
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
+    if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
     setIsStreaming(false);
   }, []);
 
   const clear = useCallback(() => {
+    if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
     setMessages([]);
   }, []);
 
