@@ -70,6 +70,16 @@ export function useConversations() {
     return conv;
   }, []);
 
+  // Optimistically surface a just-created conversation in the sidebar. The
+  // server list filters out 0-message conversations, so a brand-new chat would
+  // otherwise be invisible until its first reply persists; this bridges the gap
+  // (a later refresh reconciles it, or drops it if the send never lands).
+  const addLocal = useCallback((conv: Conversation) => {
+    setConversations((prev) =>
+      prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev]
+    );
+  }, []);
+
   // In-place title update (e.g. live auto-generated title from the stream),
   // without refetching the whole list.
   const updateTitle = useCallback((id: string, title: string) => {
@@ -92,6 +102,7 @@ export function useConversations() {
     activeId,
     setActiveId,
     create,
+    addLocal,
     remove,
     loading,
     loadingMore,

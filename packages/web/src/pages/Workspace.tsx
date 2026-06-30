@@ -35,12 +35,12 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
     activeId,
     setActiveId,
     remove,
-    loading,
     loadingMore,
     hasMore,
     loadMore,
     refresh,
     updateTitle,
+    addLocal,
   } = useConversations();
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
@@ -67,21 +67,14 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   // Keep useChat's conversationId ref in sync.
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
-  // On mount: open the most recent conversation, or enter new-chat mode.
+  // On mount: always land on a fresh new-chat window (greeting), regardless of
+  // history. Past conversations stay in the sidebar and open when selected.
   const didInit = useRef(false);
   useEffect(() => {
-    if (loading || didInit.current) return;
+    if (didInit.current) return;
     didInit.current = true;
-    if (conversations.length > 0) {
-      const latest = conversations[0];
-      setActiveAgentId(latest.agent_id || defaultAgentId);
-      setActiveId(latest.id);
-      clear();
-      loadMessages(latest.id);
-    } else {
-      setNewAgentId(defaultAgentId);
-    }
-  }, [loading, conversations, defaultAgentId, setActiveId, clear, loadMessages]);
+    setNewAgentId(defaultAgentId);
+  }, [defaultAgentId]);
 
   const handleSwitchAgent = useCallback(
     (agentId: string) => {
@@ -141,13 +134,16 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
         activeIdRef.current = conv.id;
         setActiveId(conv.id);
         setNewAgentId(null);
-        refresh();
+        // The server list omits 0-message conversations, so optimistically
+        // surface this one in the sidebar instead of refreshing (which wouldn't
+        // return it yet). stream_end triggers a real refresh once it has content.
+        addLocal(conv);
         dispatch();
         return;
       }
       dispatch();
     },
-    [newAgentId, setActiveId, refresh, send, generateMedia, activeAgent]
+    [newAgentId, setActiveId, addLocal, send, generateMedia, activeAgent]
   );
 
   const handleDelete = useCallback(
@@ -238,6 +234,7 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
                 : undefined
             }
             agent={activeAgent}
+            userName={user.name}
           />
         </div>
 

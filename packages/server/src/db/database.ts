@@ -607,6 +607,13 @@ export class DB {
 
     const params: unknown[] = [];
     const where: string[] = ["status = 'active'"];
+    // Exclude empty shells (0-message conversations, e.g. a chat that was
+    // created but whose first send never persisted, or seed rows). They render
+    // identically to a brand-new chat, so surfacing one as the "latest"
+    // conversation makes the workspace look like it always opens a new chat.
+    where.push(
+      "EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id)"
+    );
     if (userId) {
       params.push(userId);
       where.push(`user_id = $${params.length}`);
