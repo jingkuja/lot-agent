@@ -78,7 +78,7 @@ export function ChatPanel({
       <div className="chat-panel chat-panel--empty">
         <div className="chat-empty-hero">
           <div className="chat-empty-logo" aria-hidden />
-          <h1 className="chat-empty-title">{agent?.name ?? "智算AI"}</h1>
+          <h1 className="chat-empty-title">{agent?.name ?? "借势智算"}</h1>
           {agent?.description && (
             <p className="chat-empty-desc">{agent.description}</p>
           )}

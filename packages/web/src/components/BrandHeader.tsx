@@ -44,8 +44,8 @@ export function BrandHeader({ user, onLogout, onCreate, onCollapse }: BrandHeade
         </span>
 
         <div className="brand-meta">
-          <span className="brand-title">智算AI</span>
-          <span className="brand-subtitle">万能智能体</span>
+          <span className="brand-title">借势智算</span>
+          <span className="brand-subtitle">AI盒子智能体</span>
         </div>
 
         <button

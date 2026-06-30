@@ -156,7 +156,10 @@ export const api = {
   listAgents: () => request<Agent[]>("/agents"),
 
   // ── Conversations ───────────────────────────────────────────────────────────
-  listConversations: () => request<Conversation[]>("/conversations"),
+  listConversations: (limit: number, cursor?: string) =>
+    request<{ items: Conversation[]; nextCursor: string | null }>(
+      `/conversations?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
 
   createConversation: (title?: string, agentId?: string) =>
     request<Conversation>("/conversations", {

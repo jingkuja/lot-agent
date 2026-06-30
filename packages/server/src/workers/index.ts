@@ -40,7 +40,11 @@ async function main() {
     database: process.env.PG_DATABASE ?? "lot",
   });
 
-  await db.init();
+  // The worker intentionally does NOT run migrations: schema is owned and
+  // migrated by the server process (see DB.migrate / agent-service.ts). The
+  // worker just uses the pool created in the DB constructor, so the two
+  // processes stay independent at startup — no duplicate, no concurrent DDL,
+  // no dependency on the server having migrated first.
 
   const conn = createRedisConnection(process.env.REDIS_URL);
   const queue = new BullmqJobQueue(db, conn);

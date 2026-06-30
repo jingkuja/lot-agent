@@ -30,8 +30,18 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   // null = viewing a real conversation; string = pending new chat for that agent.
   const [newAgentId, setNewAgentId] = useState<string | null>(null);
 
-  const { conversations, activeId, setActiveId, remove, loading, refresh, updateTitle } =
-    useConversations();
+  const {
+    conversations,
+    activeId,
+    setActiveId,
+    remove,
+    loading,
+    loadingMore,
+    hasMore,
+    loadMore,
+    refresh,
+    updateTitle,
+  } = useConversations();
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -195,6 +205,9 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
           activeId={newAgentId ? "__new__" : activeId}
           onSelect={handleSelect}
           onDelete={handleDelete}
+          onLoadMore={loadMore}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
         />
       </div>
 

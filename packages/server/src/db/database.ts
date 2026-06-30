@@ -193,11 +193,14 @@ export class DB {
     });
   }
 
-  async init(): Promise<void> {
-    await this.migrate();
-  }
-
-  private async migrate(): Promise<void> {
+  /**
+   * Run idempotent schema migrations. Owned by the SERVER process ONLY — the
+   * worker must not call this (see workers/index.ts). Keeping a single migration
+   * owner avoids two containers issuing concurrent DDL on startup, and means a
+   * worker never depends on / waits for the server to finish migrating: it just
+   * uses the pool created in the constructor.
+   */
+  async migrate(): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -592,17 +595,41 @@ export class DB {
     return rows[0] ?? null;
   }
 
-  async listConversations(userId?: string): Promise<Conversation[]> {
+  async listConversations(
+    userId?: string,
+    opts?: { limit?: number; cursorId?: string }
+  ): Promise<Conversation[]> {
+    // Keyset pagination over (updated_at DESC, id DESC). Omitting `limit`
+    // returns the full list (back-compat for non-paginated callers); the id
+    // tiebreaker keeps the order stable across pages.
+    const hasPaging = opts?.limit != null;
+    const limit = Math.min(Math.max(Math.trunc(opts?.limit ?? 0), 1), 100);
+
+    const params: unknown[] = [];
+    const where: string[] = ["status = 'active'"];
     if (userId) {
-      const { rows } = await this.pool.query(
-        "SELECT * FROM conversations WHERE status = 'active' AND user_id = $1 ORDER BY updated_at DESC",
-        [userId]
-      );
-      return rows;
+      params.push(userId);
+      where.push(`user_id = $${params.length}`);
     }
-    const { rows } = await this.pool.query(
-      "SELECT * FROM conversations WHERE status = 'active' ORDER BY updated_at DESC"
-    );
+    if (hasPaging && opts?.cursorId) {
+      params.push(opts.cursorId);
+      // The subquery reads the cursor row's exact stored timestamp, so the
+      // cursor never loses precision the way a client-supplied timestamp would.
+      // A deleted cursor row yields NULL → an empty page (self-heals on refresh).
+      where.push(
+        `(updated_at, id) < (SELECT updated_at, id FROM conversations WHERE id = $${params.length})`
+      );
+    }
+
+    let sql = `SELECT * FROM conversations WHERE ${where.join(
+      " AND "
+    )} ORDER BY updated_at DESC, id DESC`;
+    if (hasPaging) {
+      params.push(limit);
+      sql += ` LIMIT $${params.length}`;
+    }
+
+    const { rows } = await this.pool.query(sql, params);
     return rows;
   }
 

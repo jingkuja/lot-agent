@@ -128,8 +128,9 @@ export class AgentService {
   }
 
   async init(): Promise<void> {
-    // Initialize database (runs migration)
-    await this.db.init();
+    // Server owns schema migration; the worker process does not migrate
+    // (see workers/index.ts) so DDL runs exactly once, from here.
+    await this.db.migrate();
 
     // Initialize job queue (server enqueues; separate Worker process consumes)
     const conn = createRedisConnection(process.env.REDIS_URL);
