@@ -1528,8 +1528,25 @@ html, body, #root {
 .brand-header {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 12px 10px;
+  gap: 18px;
+  /* The whole header IS the raised card: it encloses both the logo row and the
+     account/new-chat row, inset from the sunken sidebar's edges. */
+  margin: 10px 10px 16px;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(140deg, var(--brand-card-from), var(--brand-card-to)), var(--bg-card);
+  box-shadow: var(--neu-raise);
+  flex-shrink: 0;
+}
+
+/* Section label above the conversation list, with a clear gap separating it
+   from the brand card above. */
+.sidebar-section-label {
+  padding: 6px 18px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -1537,12 +1554,8 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px;
-  border-radius: var(--radius-lg);
-  /* Raised control-panel header on a tinted base — sits clearly above the
-     sunken sidebar. */
-  background: linear-gradient(140deg, var(--brand-card-from), var(--brand-card-to)), var(--bg-card);
-  box-shadow: var(--neu-raise);
+  /* Plain inner row — the visual card lives on .brand-header now. */
+  padding: 0;
 }
 
 .brand-logo {
@@ -1611,7 +1624,7 @@ html, body, #root {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 4px;
+  padding: 0;
 }
 
 .brand-account {
