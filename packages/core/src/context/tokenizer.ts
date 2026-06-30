@@ -1,6 +1,6 @@
 /**
  * Lightweight token estimator.
- * Uses a character-based heuristic (1 token ≈ 3.5 chars for Chinese, 4 chars for English).
+ * Uses a character-based heuristic (1 token per CJK char, ~3.5 chars/token otherwise).
  * Good enough for budget management without pulling in tiktoken.
  */
 
