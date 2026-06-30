@@ -98,6 +98,19 @@ export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationPr
   });
 }
 
+/**
+ * Whether the provider built from `cfg` reports meaningful intermediate progress
+ * (i.e. the UI should show a percentage). Mirrors the branching in
+ * `makeImageProvider`/`makeVideoProvider`: the mock providers ramp progress, the
+ * async create→poll providers report real progress, but the synchronous
+ * `chat-completions` provider jumps straight to 100 — for it the UI shows a plain
+ * "生成中……" instead of a fake percentage.
+ */
+export function mediaSupportsProgress(cfg: MediaGenerationConfig): boolean {
+  if (cfg.mock || !cfg.apiKey) return true; // mock ramps progress
+  return cfg.adapter !== "chat-completions";
+}
+
 export function makeVideoProvider(cfg: MediaGenerationConfig): VideoGenerationProvider {
   if (cfg.mock || !cfg.apiKey) return new MockVideoGenerationProvider();
   return new HttpVideoGenerationProvider({

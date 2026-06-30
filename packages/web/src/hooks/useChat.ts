@@ -5,6 +5,10 @@ export interface GenerationView {
   mediaType: "image" | "video";
   status: "generating" | "completed" | "failed";
   progress?: number;
+  /** Whether the provider reports intermediate progress. When false (e.g. the
+   * synchronous chat-completions image provider) the UI shows a plain "生成中……"
+   * with no percentage. */
+  supportsProgress?: boolean;
   assets?: { url: string; mime: string; durationSec?: number }[];
   error?: string;
   taskId?: string;
@@ -118,6 +122,7 @@ export function useChat(
           ? {
               mediaType: parsedMeta.mediaType as "image" | "video",
               status: (parsedMeta.status ?? "generating") as GenerationView["status"],
+              supportsProgress: parsedMeta.supportsProgress as boolean | undefined,
               assets: parsedMeta.assets,
               error: parsedMeta.error,
               taskId: parsedMeta.taskId as string | undefined,
@@ -388,7 +393,7 @@ export function useChat(
                   ...m,
                   id: res.assistantMessage.id,
                   dbId: res.assistantMessage.id,
-                  generation: { mediaType, status: "generating", progress: 0, taskId: res.taskId },
+                  generation: { mediaType, status: "generating", progress: 0, supportsProgress: res.assistantMessage.metadata?.supportsProgress, taskId: res.taskId },
                 };
               return m;
             })

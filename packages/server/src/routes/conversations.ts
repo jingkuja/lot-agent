@@ -275,7 +275,8 @@ export function createGenerationRoutes(service: AgentService) {
     // Persist pending assistant generation message (status forced to
     // 'generating'; the DB column defaults to 'completed').
     const assistantMessageId = randomUUID();
-    const baseMeta = { kind: "generation", mediaType, prompt, settings };
+    const supportsProgress = service.generationSupportsProgress[mediaType];
+    const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress };
     await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
       metadata: { ...baseMeta, status: "generating" },
       model: modelId,

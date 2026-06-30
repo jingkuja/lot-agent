@@ -115,6 +115,13 @@ function ResBarIcon() {
 }
 
 /* ── 图像生成：仅比例（分辨率由比例固定推导，后端自动对应最小分辨率） ── */
+
+// Remembered for the page session. The input box is unmounted/remounted when the
+// conversation switches between its empty (hero) and message-list layouts (e.g.
+// on the first send), which would otherwise reset the picker to its default. Keep
+// the last-chosen ratio in module scope so a selection made before sending stays.
+let lastImageRatioLabel = "1:1";
+
 export function ImageSettingsPicker({
   disabled,
   onChange,
@@ -124,11 +131,18 @@ export function ImageSettingsPicker({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
-  const [ratio, setRatio] = useState<ImageRatio>(IMAGE_RATIOS[2]); // 1:1 默认
+  const [ratio, setRatio] = useState<ImageRatio>(
+    () => IMAGE_RATIOS.find((r) => r.label === lastImageRatioLabel) ?? IMAGE_RATIOS[2] // 1:1 默认
+  );
 
   useEffect(() => {
     onChange?.({ size: ratio.size, n: 1 });
   }, [ratio, onChange]);
+
+  const pickRatio = (r: ImageRatio) => {
+    lastImageRatioLabel = r.label;
+    setRatio(r);
+  };
 
   return (
     <div className="media-picker" ref={wrapRef}>
@@ -154,7 +168,7 @@ export function ImageSettingsPicker({
                 key={r.label}
                 type="button"
                 className={`seg seg--stack ${r.label === ratio.label ? "active" : ""}`}
-                onClick={() => setRatio(r)}
+                onClick={() => pickRatio(r)}
               >
                 <RatioGlyph w={r.w} h={r.h} size={20} />
                 <span>{r.label}</span>
@@ -168,6 +182,15 @@ export function ImageSettingsPicker({
 }
 
 /* ── 视频生成：质量 + 比例 + 分辨率 + 时长 ── */
+
+// Session-remembered video selection — same remount survival as the image picker
+// (see lastImageRatioLabel).
+const lastVideo = {
+  quality: VIDEO_QUALITIES[0].short,
+  ratio: VIDEO_RATIOS[0].label,
+  duration: VIDEO_DURATIONS[0],
+};
+
 export function VideoSettingsPicker({
   disabled,
   onChange,
@@ -177,10 +200,16 @@ export function VideoSettingsPicker({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
-  const [quality, setQuality] = useState<Quality>(VIDEO_QUALITIES[0]);
-  const [ratio, setRatio] = useState<Ratio>(VIDEO_RATIOS[0]); // 16:9
-  const [dim, setDim] = useState<Dim>(deriveResolution(16, 9, 480));
-  const [duration, setDuration] = useState(VIDEO_DURATIONS[0]);
+  const [quality, setQuality] = useState<Quality>(
+    () => VIDEO_QUALITIES.find((q) => q.short === lastVideo.quality) ?? VIDEO_QUALITIES[0]
+  );
+  const [ratio, setRatio] = useState<Ratio>(
+    () => VIDEO_RATIOS.find((r) => r.label === lastVideo.ratio) ?? VIDEO_RATIOS[0] // 16:9
+  );
+  const [duration, setDuration] = useState(
+    () => (VIDEO_DURATIONS.includes(lastVideo.duration) ? lastVideo.duration : VIDEO_DURATIONS[0])
+  );
+  const [dim, setDim] = useState<Dim>(() => deriveResolution(ratio.w, ratio.h, quality.edge));
 
   useEffect(() => {
     onChange?.({
@@ -192,12 +221,18 @@ export function VideoSettingsPicker({
   }, [dim, duration, ratio, quality, onChange]);
 
   const pickQuality = (q: Quality) => {
+    lastVideo.quality = q.short;
     setQuality(q);
     setDim(deriveResolution(ratio.w, ratio.h, q.edge));
   };
   const pickRatio = (r: Ratio) => {
+    lastVideo.ratio = r.label;
     setRatio(r);
     setDim(deriveResolution(r.w, r.h, quality.edge));
+  };
+  const pickDuration = (d: string) => {
+    lastVideo.duration = d;
+    setDuration(d);
   };
 
   return (
@@ -255,7 +290,7 @@ export function VideoSettingsPicker({
                 key={d}
                 type="button"
                 className={`seg ${d === duration ? "active" : ""}`}
-                onClick={() => setDuration(d)}
+                onClick={() => pickDuration(d)}
               >
                 <TimerIcon />
                 <span>{d}</span>

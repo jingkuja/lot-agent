@@ -15,6 +15,7 @@ function fakeService() {
     },
     usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) },
     modelRegistry: { getConfig: vi.fn(() => ({ unitPrice: 0.04 })) },
+    generationSupportsProgress: { image: false, video: true },
     jobQueue: { enqueue: vi.fn(async () => "task-1") },
     generateTitle: vi.fn(async () => "菊花特写"),
   } as any;
@@ -40,6 +41,9 @@ describe("POST /conversations/:id/generations", () => {
     expect(body.taskId).toBe("task-1");
     expect(body.userMessage.content).toBe("菊花");
     expect(body.assistantMessage.status).toBe("generating");
+    // The synchronous image provider reports no progress, so the metadata tells
+    // the client not to show a percentage.
+    expect(body.assistantMessage.metadata.supportsProgress).toBe(false);
     expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
       "image.generate",
       expect.objectContaining({ prompt: "菊花", conversationId: "c1", assistantMessageId: body.assistantMessage.id, size: "1024x1024" }),
