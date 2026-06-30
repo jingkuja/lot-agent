@@ -16,6 +16,7 @@ function fakeService() {
     usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) },
     modelRegistry: { getConfig: vi.fn(() => ({ unitPrice: 0.04 })) },
     jobQueue: { enqueue: vi.fn(async () => "task-1") },
+    generateTitle: vi.fn(async () => "菊花特写"),
   } as any;
 }
 
@@ -45,6 +46,19 @@ describe("POST /conversations/:id/generations", () => {
       "u1"
     );
     expect(service.messages).toHaveLength(2);
+  });
+
+  it("auto-generates the conversation title from the prompt", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", settings: { n: 1 } }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", []);
+    expect(body.title).toBe("菊花特写");
   });
 
   it("404s when the conversation belongs to another user", async () => {

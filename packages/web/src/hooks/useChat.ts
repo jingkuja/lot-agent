@@ -361,6 +361,7 @@ export function useChat(
             generation: { mediaType, status: "generating", progress: 0, taskId: res.taskId },
           };
           setMessages((prev) => [...prev, userMsg, genMsg]);
+          if (res.title) onTitleRef.current?.(cid, res.title);
           pollGeneration(res.taskId, genMsg.id, mediaType, token);
         } catch (e) {
           if (genPollRef.current === token) genPollRef.current = null;

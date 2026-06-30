@@ -273,11 +273,22 @@ export function createGenerationRoutes(service: AgentService) {
     const metadata = { ...baseMeta, status: "generating", taskId };
     await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
 
+    // Auto-title the conversation from the prompt (first message only, gated
+    // inside generateTitle). The chat SSE path does this too; without it,
+    // image/video conversations stay stuck on the "新对话" placeholder.
+    let title: string | null = null;
+    try {
+      title = await service.generateTitle(conversationId, prompt, []);
+    } catch {
+      // title generation is best-effort
+    }
+
     return c.json(
       {
         userMessage: { id: userMessageId, role: "user", content: prompt },
         assistantMessage: { id: assistantMessageId, role: "assistant", status: "generating", metadata },
         taskId,
+        ...(title ? { title } : {}),
       },
       202
     );

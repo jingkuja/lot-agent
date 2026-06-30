@@ -288,6 +288,7 @@ export const api = {
         metadata: { mediaType: "image" | "video"; status: string; assets?: { url: string; mime: string; durationSec?: number }[]; error?: string };
       };
       taskId: string;
+      title?: string;
     }>(`/conversations/${conversationId}/generations`, {
       method: "POST",
       body: JSON.stringify(body),
