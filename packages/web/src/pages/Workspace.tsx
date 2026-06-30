@@ -231,7 +231,12 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
             activeConversationId={activeId}
             onRegenerate={regenerate}
             inputAbove={switcher}
-            onSelectForPreview={setPreviewContent}
+            // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
+            onSelectForPreview={
+              activeAgent?.type === "copywriting" || activeAgent?.id === "copywriting"
+                ? setPreviewContent
+                : undefined
+            }
             agent={activeAgent}
           />
         </div>

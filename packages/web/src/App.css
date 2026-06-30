@@ -2092,8 +2092,14 @@ html, body, #root {
   background: var(--bg-card);
   color: var(--text-secondary);
   box-shadow: var(--shadow-md);
-  cursor: pointer;
+  cursor: grab;
+  /* Let pointer drag own the gesture instead of the browser scrolling/zooming. */
+  touch-action: none;
   transition: color 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.theme-toggle-btn:active {
+  cursor: grabbing;
 }
 
 .theme-toggle-btn:hover {
