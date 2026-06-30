@@ -30,7 +30,7 @@ export function createTaskRoutes(service: AgentService) {
     // Quota pre-check: estimate cost based on model unitPrice
     let estimatedCost = 0;
     if (type === "image.generate") {
-      const modelId = "wanx-standard";
+      const modelId = "gpt-image-2-token";
       estimatedCost = (service.modelRegistry.getConfig(modelId)?.unitPrice ?? 0) * 1;
     } else if (type === "video.generate") {
       const modelId = "kling-standard";

@@ -16,7 +16,7 @@ export interface CreateResult { taskId: string; status: string; progress: number
 export interface PollResult { status: string; progress: number; url?: string; error?: string }
 
 export function parseSize(size?: string): [number, number] {
-  const m = /^(\d+)x(\d+)$/.exec(size ?? "");
+  const m = /^(\d+)[x*](\d+)$/.exec(size ?? "");
   return m ? [Number(m[1]), Number(m[2])] : [1024, 1024];
 }
 

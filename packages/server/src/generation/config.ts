@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  ChatCompletionsImageProvider,
   HttpImageGenerationProvider,
   MockImageGenerationProvider,
   pickImageAdapter,
@@ -82,6 +83,13 @@ export async function loadGenerationConfig(rootDir: string): Promise<GenerationC
  * mock when running in mock mode or when no API key is configured. */
 export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationProvider {
   if (cfg.mock || !cfg.apiKey) return new MockImageGenerationProvider();
+  if (cfg.adapter === "chat-completions") {
+    return new ChatCompletionsImageProvider({
+      baseUrl: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+      model: cfg.model,
+    });
+  }
   return new HttpImageGenerationProvider({
     baseUrl: cfg.baseUrl,
     apiKey: cfg.apiKey,

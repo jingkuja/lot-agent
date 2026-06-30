@@ -6,13 +6,20 @@ export interface Ratio {
   h: number;
 }
 
-/** 图像生成比例选项（与参考设计一致）。 */
-export const IMAGE_RATIOS: Ratio[] = [
-  { label: "16:9", w: 16, h: 9 },
-  { label: "4:3", w: 4, h: 3 },
-  { label: "1:1", w: 1, h: 1 },
-  { label: "3:4", w: 3, h: 4 },
-  { label: "9:16", w: 9, h: 16 },
+/** 图像比例选项。每个比例对应一个固定分辨率（该比例下接口支持的最小分辨率），
+ * 由后端的 gpt-image-2-token 接口直接消费。注意：接口只接受 `WxH` 格式
+ * （`*` 会被判为不合法的 size），故这里用 `x` 分隔。 */
+export interface ImageRatio extends Ratio {
+  /** 该比例对应的固定分辨率，如 "2048x2048"。 */
+  size: string;
+}
+
+export const IMAGE_RATIOS: ImageRatio[] = [
+  { label: "16:9", w: 16, h: 9, size: "2688x1536" },
+  { label: "4:3", w: 4, h: 3, size: "2368x1728" },
+  { label: "1:1", w: 1, h: 1, size: "2048x2048" },
+  { label: "3:4", w: 3, h: 4, size: "1728x2368" },
+  { label: "9:16", w: 9, h: 16, size: "1536x2688" },
 ];
 
 /** 视频生成比例选项。 */
@@ -107,56 +114,7 @@ function ResBarIcon() {
   );
 }
 
-/** W ─🔗─ H 分辨率输入（比例锁定，编辑一侧自动推导另一侧）。 */
-function ResolutionInput({
-  dim,
-  ratio,
-  onChange,
-}: {
-  dim: Dim;
-  ratio: Ratio;
-  onChange: (d: Dim) => void;
-}) {
-  return (
-    <div className="res-row">
-      <label className="res-field">
-        <span className="res-key">W</span>
-        <input
-          className="res-input"
-          type="number"
-          min={1}
-          value={dim.width}
-          onChange={(e) => {
-            const w = Number(e.target.value) || 0;
-            onChange({ width: w, height: Math.round((w * ratio.h) / ratio.w) });
-          }}
-        />
-      </label>
-      <span className="res-link" aria-hidden>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M9 12h6" />
-          <path d="M10 8H8a4 4 0 0 0 0 8h2" />
-          <path d="M14 8h2a4 4 0 0 1 0 8h-2" />
-        </svg>
-      </span>
-      <label className="res-field">
-        <span className="res-key">H</span>
-        <input
-          className="res-input"
-          type="number"
-          min={1}
-          value={dim.height}
-          onChange={(e) => {
-            const h = Number(e.target.value) || 0;
-            onChange({ width: Math.round((h * ratio.w) / ratio.h), height: h });
-          }}
-        />
-      </label>
-    </div>
-  );
-}
-
-/* ── 图像生成：比例 + 分辨率 ── */
+/* ── 图像生成：仅比例（分辨率由比例固定推导，后端自动对应最小分辨率） ── */
 export function ImageSettingsPicker({
   disabled,
   onChange,
@@ -166,17 +124,11 @@ export function ImageSettingsPicker({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
-  const [ratio, setRatio] = useState<Ratio>(IMAGE_RATIOS[0]); // 16:9
-  const [dim, setDim] = useState<Dim>(deriveResolution(16, 9, 1536));
+  const [ratio, setRatio] = useState<ImageRatio>(IMAGE_RATIOS[2]); // 1:1 默认
 
   useEffect(() => {
-    onChange?.({ size: `${dim.width}x${dim.height}`, n: 1 });
-  }, [dim, onChange]);
-
-  const pickRatio = (r: Ratio) => {
-    setRatio(r);
-    setDim(deriveResolution(r.w, r.h, 1536));
-  };
+    onChange?.({ size: ratio.size, n: 1 });
+  }, [ratio, onChange]);
 
   return (
     <div className="media-picker" ref={wrapRef}>
@@ -187,7 +139,7 @@ export function ImageSettingsPicker({
         disabled={disabled}
         aria-haspopup="true"
         aria-expanded={open}
-        title="图片比例 / 分辨率"
+        title="图片比例"
       >
         <RatioGlyph w={ratio.w} h={ratio.h} size={14} />
         <span className="media-trigger-label">{ratio.label}</span>
@@ -202,14 +154,13 @@ export function ImageSettingsPicker({
                 key={r.label}
                 type="button"
                 className={`seg seg--stack ${r.label === ratio.label ? "active" : ""}`}
-                onClick={() => pickRatio(r)}
+                onClick={() => setRatio(r)}
               >
                 <RatioGlyph w={r.w} h={r.h} size={20} />
                 <span>{r.label}</span>
               </button>
             ))}
           </div>
-          <ResolutionInput dim={dim} ratio={ratio} onChange={setDim} />
         </div>
       )}
     </div>
