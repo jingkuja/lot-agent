@@ -297,7 +297,6 @@ export function VideoSettingsPicker({
               </button>
             ))}
           </div>
-          <ResolutionInput dim={dim} ratio={ratio} onChange={setDim} />
           <div className="media-section-title">视频时长</div>
           <div className="seg-track">
             {VIDEO_DURATIONS.map((d) => (

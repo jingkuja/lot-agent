@@ -354,6 +354,22 @@ export function useChat(
       const token = { cancelled: false };
       genPollRef.current = token;
 
+      // Optimistically render the user message + a "生成中" bubble immediately —
+      // before the reference-image upload and create request resolve — so the
+      // user sees "图片/视频生成中" right away instead of a stuck input box.
+      // The placeholders are reconciled with server ids once /generations returns
+      // (or flipped to "failed" if the request errors).
+      const tempUserId = `user-${Date.now()}`;
+      const tempGenId = `assistant-${Date.now()}`;
+      const userMsg: DisplayMessage = { id: tempUserId, role: "user", content: prompt };
+      const genMsg: DisplayMessage = {
+        id: tempGenId,
+        role: "assistant",
+        content: "",
+        generation: { mediaType, status: "generating", progress: 0 },
+      };
+      setMessages((prev) => [...prev, userMsg, genMsg]);
+
       (async () => {
         try {
           const imgs = files.filter((f) => f.type.startsWith("image/"));
@@ -361,32 +377,37 @@ export function useChat(
           const media = uploaded.map((u) => ({ type: "reference_image" as const, url: u.url }));
 
           const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined });
-          const userMsg: DisplayMessage = { id: res.userMessage.id, dbId: res.userMessage.id, role: "user", content: prompt };
-          const genMsg: DisplayMessage = {
-            id: res.assistantMessage.id,
-            dbId: res.assistantMessage.id,
-            role: "assistant",
-            content: "",
-            generation: { mediaType, status: "generating", progress: 0, taskId: res.taskId },
-          };
-          setMessages((prev) => [...prev, userMsg, genMsg]);
+          if (token.cancelled) return;
+          // Reconcile the optimistic placeholders with the server-assigned ids
+          // + vendor taskId, keeping the bubble in its "generating" state.
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id === tempUserId) return { ...m, id: res.userMessage.id, dbId: res.userMessage.id };
+              if (m.id === tempGenId)
+                return {
+                  ...m,
+                  id: res.assistantMessage.id,
+                  dbId: res.assistantMessage.id,
+                  generation: { mediaType, status: "generating", progress: 0, taskId: res.taskId },
+                };
+              return m;
+            })
+          );
           if (res.title) onTitleRef.current?.(cid, res.title);
-          pollGeneration(res.taskId, genMsg.id, mediaType, token);
+          pollGeneration(res.taskId, res.assistantMessage.id, mediaType, token);
         } catch (e) {
           if (genPollRef.current === token) genPollRef.current = null;
           setIsStreaming(false);
-          // The create request itself failed (non-2xx / network). Show it as a
-          // failed generation bubble inline rather than only alerting, so the
-          // attempt and its error stay visible like a poll failure does.
+          // The create request itself failed (non-2xx / network). Flip the
+          // optimistic bubble to "failed" so the attempt + error stay visible.
           const msg = e instanceof Error ? e.message : String(e);
-          const userMsg: DisplayMessage = { id: `user-${Date.now()}`, role: "user", content: prompt };
-          const genMsg: DisplayMessage = {
-            id: `assistant-${Date.now()}`,
-            role: "assistant",
-            content: "",
-            generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` },
-          };
-          setMessages((prev) => [...prev, userMsg, genMsg]);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempGenId
+                ? { ...m, generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` } }
+                : m
+            )
+          );
         }
       })();
     },
