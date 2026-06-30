@@ -81,6 +81,7 @@ export interface StoredTask {
   input: unknown;
   output: unknown | null;
   error: string | null;
+  vendor_task_id: string | null;
   user_id: string;
   created_at: string;
   updated_at: string;
@@ -363,6 +364,13 @@ export class DB {
           created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
           updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
         );
+      `);
+
+      // The vendor's own async task id (e.g. tokenhub "task_x6a2k…"), persisted
+      // after create so a restarted worker can resume polling rather than
+      // re-creating the generation. Distinct from our local tasks.id.
+      await client.query(`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS vendor_task_id TEXT;
       `);
 
       await client.query(`
@@ -1142,6 +1150,21 @@ export class DB {
     await this.pool.query(
       "UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2",
       [status, id]
+    );
+  }
+
+  async getTaskVendorId(id: string): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      "SELECT vendor_task_id FROM tasks WHERE id = $1",
+      [id]
+    );
+    return rows[0]?.vendor_task_id ?? null;
+  }
+
+  async setTaskVendorId(id: string, vendorTaskId: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE tasks SET vendor_task_id = $1, updated_at = now() WHERE id = $2",
+      [vendorTaskId, id]
     );
   }
 

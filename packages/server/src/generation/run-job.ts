@@ -8,6 +8,9 @@ export interface RunJobDeps {
   db: {
     createAsset(a: Record<string, unknown>): Promise<void>;
     updateMessageGeneration(id: string, patch: { status: string; metadata: Record<string, unknown> }): Promise<void>;
+    /** The vendor's own task id, persisted so a restarted worker can resume polling. */
+    getTaskVendorId(id: string): Promise<string | null | undefined>;
+    setTaskVendorId(id: string, vendorTaskId: string): Promise<void>;
   };
   meter: { record(r: Record<string, unknown>): Promise<unknown> };
   cache: { get(k: string): Promise<unknown>; set(k: string, v: unknown): Promise<void> };
@@ -60,24 +63,33 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       return cached;
     }
 
-    const created = await deps.provider.create({
-      mediaType, prompt,
-      size: input.size as string | undefined,
-      n: input.n as number | undefined,
-      durationSec: input.durationSec as number | undefined,
-      ratio: input.ratio as string | undefined,
-      media,
-    });
+    // Resume support: if this job already created a vendor task on a previous
+    // run (worker crash / BullMQ stall-recovery re-delivers the same job),
+    // reuse the persisted vendor task id and keep polling instead of paying to
+    // create a duplicate generation.
+    let vendorTaskId = await deps.db.getTaskVendorId(job.id);
+    if (!vendorTaskId) {
+      const created = await deps.provider.create({
+        mediaType, prompt,
+        size: input.size as string | undefined,
+        n: input.n as number | undefined,
+        durationSec: input.durationSec as number | undefined,
+        ratio: input.ratio as string | undefined,
+        media,
+      });
+      vendorTaskId = created.taskId;
+      await deps.db.setTaskVendorId(job.id, vendorTaskId);
+    }
 
     const start = Date.now();
-    let p = await deps.provider.poll(created.taskId, mediaType);
+    let p = await deps.provider.poll(vendorTaskId, mediaType);
     for (;;) {
       await deps.updateProgress(job.id, p.progress);
       if (p.status === "completed") break;
       if (p.status === "failed") throw new Error(p.error ?? "generation failed");
       if (Date.now() - start > maxWaitMs) throw new Error("generation timed out");
       await sleep(pollIntervalMs);
-      p = await deps.provider.poll(created.taskId, mediaType);
+      p = await deps.provider.poll(vendorTaskId, mediaType);
     }
     if (!p.url) throw new Error("generation completed without a url");
 
