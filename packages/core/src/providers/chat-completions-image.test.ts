@@ -63,6 +63,42 @@ describe("ChatCompletionsImageProvider", () => {
     });
   });
 
+  it("create sends reference images as an OpenAI content array (images then text)", async () => {
+    const fetchMock = vi.fn(async () => okResponse("![image](https://x/y.png)"));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const p = new ChatCompletionsImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "m" });
+    await p.create({
+      prompt: "题写一首七言绝句",
+      media: [
+        { type: "reference_image", url: "https://ref/a.webp" },
+        { type: "reference_image", url: "https://ref/b.webp" },
+      ],
+    });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { image: "https://ref/a.webp" },
+          { image: "https://ref/b.webp" },
+          { text: "题写一首七言绝句" },
+        ],
+      },
+    ]);
+    expect(body.prompt).toBe("题写一首七言绝句");
+  });
+
+  it("create keeps content as a plain string when there are no reference images", async () => {
+    const fetchMock = vi.fn(async () => okResponse("![image](https://x/y.png)"));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const p = new ChatCompletionsImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "m" });
+    await p.create({ prompt: "生成一只猫", media: [] });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.messages).toEqual([{ role: "user", content: "生成一只猫" }]);
+  });
+
   it("poll returns the extracted url as a completed result", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => okResponse("![image](https://x/cat.png)")) as unknown as typeof fetch);
     const p = new ChatCompletionsImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "m" });

@@ -36,9 +36,16 @@ export class ChatCompletionsImageProvider implements ImageGenerationProvider {
   async create(req: ImageGenerationRequest): Promise<CreateResult> {
     const { baseUrl, apiKey } = this.opts;
     const model = req.model ?? this.opts.model;
+    // With reference images, send the OpenAI multimodal content array
+    // (`[{ image }, ..., { text }]` — images first, then the prompt); otherwise
+    // keep the plain-string content the endpoint accepts for text-only prompts.
+    const messageContent =
+      req.media && req.media.length > 0
+        ? [...req.media.map((m) => ({ image: m.url })), { text: req.prompt }]
+        : req.prompt;
     const body: Record<string, unknown> = {
       model,
-      messages: [{ role: "user", content: req.prompt }],
+      messages: [{ role: "user", content: messageContent }],
       prompt: req.prompt,
     };
     if (req.size) body.size = req.size;
