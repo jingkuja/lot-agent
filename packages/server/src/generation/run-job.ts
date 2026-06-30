@@ -1,9 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
-import type { GenerationProvider, MediaType, ReferenceMedia } from "@lot-agent/core";
+import type { CreateResult, MediaType, PollResult, ReferenceMedia } from "@lot-agent/core";
+
+/**
+ * Media-neutral view of a generation provider. Both `ImageGenerationProvider`
+ * and `VideoGenerationProvider` are structurally assignable to this — the job
+ * runner stays generic over either while each provider's own surface carries no
+ * `mediaType` parameter. The request accepts the union of media-specific fields
+ * (image: size/n, video: durationSec/ratio); each adapter ignores what it doesn't use.
+ */
+export interface JobGenerationProvider {
+  create(req: {
+    prompt: string;
+    model?: string;
+    size?: string;
+    n?: number;
+    durationSec?: number;
+    ratio?: string;
+    quality?: string;
+    media?: ReferenceMedia[];
+  }): Promise<CreateResult>;
+  poll(taskId: string): Promise<PollResult>;
+}
 
 export interface RunJobDeps {
-  provider: GenerationProvider;
+  provider: JobGenerationProvider;
   storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }> };
   db: {
     createAsset(a: Record<string, unknown>): Promise<void>;
@@ -70,7 +91,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     let vendorTaskId = await deps.db.getTaskVendorId(job.id);
     if (!vendorTaskId) {
       const created = await deps.provider.create({
-        mediaType, prompt,
+        prompt,
         size: input.size as string | undefined,
         n: input.n as number | undefined,
         durationSec: input.durationSec as number | undefined,
@@ -82,14 +103,14 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     }
 
     const start = Date.now();
-    let p = await deps.provider.poll(vendorTaskId, mediaType);
+    let p = await deps.provider.poll(vendorTaskId);
     for (;;) {
       await deps.updateProgress(job.id, p.progress);
       if (p.status === "completed") break;
       if (p.status === "failed") throw new Error(p.error ?? "generation failed");
       if (Date.now() - start > maxWaitMs) throw new Error("generation timed out");
       await sleep(pollIntervalMs);
-      p = await deps.provider.poll(vendorTaskId, mediaType);
+      p = await deps.provider.poll(vendorTaskId);
     }
     if (!p.url) throw new Error("generation completed without a url");
 

@@ -1,8 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { runGenerationJob, type RunJobDeps } from "./run-job.js";
-import type { GenerationProvider } from "@lot-agent/core";
+import { runGenerationJob, type RunJobDeps, type JobGenerationProvider } from "./run-job.js";
 
-function fakeDeps(provider: GenerationProvider, over: Partial<RunJobDeps> = {}): { deps: RunJobDeps; calls: any } {
+function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {}): { deps: RunJobDeps; calls: any } {
   const calls: any = { progress: [], asset: null, message: [], metered: false, cacheSet: null, vendorIdSet: null };
   const deps: RunJobDeps = {
     provider,
@@ -31,7 +30,7 @@ const job = { id: "job1", userId: "u1", input: { prompt: "菊花", assistantMess
 
 describe("runGenerationJob", () => {
   it("creates, polls to completion, stores asset, relays progress, marks message completed", async () => {
-    const provider: GenerationProvider = {
+    const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
       poll: vi.fn()
         .mockResolvedValueOnce({ status: "processing", progress: 40 })
@@ -47,7 +46,7 @@ describe("runGenerationJob", () => {
   });
 
   it("marks message failed and rethrows when poll returns failed", async () => {
-    const provider: GenerationProvider = {
+    const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
       poll: vi.fn(async () => ({ status: "failed", progress: 50, error: "boom" })),
     };
@@ -57,7 +56,7 @@ describe("runGenerationJob", () => {
   });
 
   it("persists the vendor task id after create, then polls with it", async () => {
-    const provider: GenerationProvider = {
+    const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "vendor_abc", status: "queued", progress: 0 })),
       poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
     };
@@ -65,11 +64,11 @@ describe("runGenerationJob", () => {
     await runGenerationJob(deps, job, "image");
     expect(deps.db.setTaskVendorId).toHaveBeenCalledWith("job1", "vendor_abc");
     expect(calls.vendorIdSet).toBe("vendor_abc");
-    expect(provider.poll).toHaveBeenCalledWith("vendor_abc", "image");
+    expect(provider.poll).toHaveBeenCalledWith("vendor_abc");
   });
 
   it("resumes polling with the stored vendor task id without re-creating", async () => {
-    const provider: GenerationProvider = {
+    const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "should_not_be_used", status: "queued", progress: 0 })),
       poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
     };
@@ -78,11 +77,11 @@ describe("runGenerationJob", () => {
     await runGenerationJob(deps, job, "image");
     expect(provider.create).not.toHaveBeenCalled();
     expect(deps.db.setTaskVendorId).not.toHaveBeenCalled();
-    expect(provider.poll).toHaveBeenCalledWith("vendor_existing", "image");
+    expect(provider.poll).toHaveBeenCalledWith("vendor_existing");
   });
 
   it("uses cache hit without creating/polling", async () => {
-    const provider: GenerationProvider = { create: vi.fn(), poll: vi.fn() };
+    const provider: JobGenerationProvider = { create: vi.fn(), poll: vi.fn() };
     const cached = { assetIds: ["a"], assets: [{ url: "/static/assets/a.svg", mime: "image/svg+xml" }] };
     const { deps, calls } = fakeDeps(provider, { cache: { get: vi.fn(async () => cached), set: vi.fn() } });
     const out = await runGenerationJob(deps, job, "image");

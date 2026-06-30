@@ -14,7 +14,7 @@ import {
   applyExtraction,
 } from "@lot-agent/core";
 import { loadLlmConfig } from "../config.js";
-import { loadGenerationConfig, makeGenerationProvider } from "../generation/config.js";
+import { loadGenerationConfig, makeImageProvider, makeVideoProvider } from "../generation/config.js";
 import { runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { lastTurn } from "../memory/last-turn.js";
 import { UsageMeter } from "../billing/meter.js";
@@ -55,7 +55,8 @@ async function main() {
   const cache = new GenCache(conn);
 
   const genConfig = await loadGenerationConfig(ROOT);
-  const generationProvider = makeGenerationProvider(genConfig);
+  const imageProvider = makeImageProvider(genConfig.image);
+  const videoProvider = makeVideoProvider(genConfig.video);
 
   /** Resolve a provider url (http(s) or data:) to bytes + mime. */
   async function urlToBytes(url: string): Promise<{ body: Buffer; mime: string }> {
@@ -75,7 +76,7 @@ async function main() {
     mime.includes("svg") ? "svg" : mime.includes("mp4") ? "mp4" : mime.includes("png") ? "png" : mime.split("/")[1] ?? "bin";
 
   const genDeps = (mediaType: "image" | "video"): RunJobDeps => ({
-    provider: generationProvider,
+    provider: mediaType === "image" ? imageProvider : videoProvider,
     storage,
     db,
     meter,
