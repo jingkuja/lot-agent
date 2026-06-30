@@ -25,13 +25,13 @@ export interface TokenBudget {
 }
 
 const DEFAULT_BUDGET: TokenBudget = {
-  systemPrompt: 8_000,
+  systemPrompt: 8_0000,
   memory: 4_000,
   retrieval: 60_000,
   toolOutput: 20_000,
   history: 30_000,
   generation: 0, // computed
-  total: 200_000,
+  total: 280_000,
 };
 
 /** Absolute lower bound for history so it never collapses to nothing. */
