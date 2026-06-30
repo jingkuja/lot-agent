@@ -67,6 +67,16 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 14px rgba(0,0,0,0.10);
   --shadow-lg: 0 8px 30px rgba(0,0,0,0.14);
+
+  /* Soft-neumorphism depth tokens: raise = lifts off the surface, sink = inset
+     channel, pop = accent-glow for the primary/active element. Light palette. */
+  --neu-raise: 0 6px 16px rgba(31,33,58,0.10), 0 1px 0 rgba(255,255,255,0.9) inset, 0 -2px 6px rgba(255,255,255,0.55) inset;
+  --neu-raise-sm: 0 3px 8px rgba(31,33,58,0.10), 0 1px 0 rgba(255,255,255,0.8) inset;
+  --neu-sink: inset 0 2px 6px rgba(31,33,58,0.10), inset 0 -1px 0 rgba(255,255,255,0.6);
+  --neu-pop: 0 10px 24px rgba(109,92,240,0.24), 0 1px 0 rgba(255,255,255,0.4) inset;
+  /* Per-zone surfaces: sidebar reads as a sunken panel, chat as the open canvas. */
+  --zone-sidebar-bg: linear-gradient(180deg, #edecf6, #e6e6f0);
+  --zone-chat-bg: radial-gradient(120% 80% at 70% -10%, rgba(139,92,246,0.08), transparent 60%), var(--bg-card);
 }
 
 [data-theme="dark"] {
@@ -120,6 +130,14 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
   --shadow-lg: 0 8px 30px rgba(0,0,0,0.12);
+
+  /* Soft-neumorphism depth tokens — dark palette (deeper shadows, faint top highlight). */
+  --neu-raise: 0 8px 22px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.05) inset, 0 -2px 6px rgba(0,0,0,0.3) inset;
+  --neu-raise-sm: 0 4px 12px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.04) inset;
+  --neu-sink: inset 0 2px 8px rgba(0,0,0,0.5), inset 0 -1px 0 rgba(255,255,255,0.03);
+  --neu-pop: 0 10px 26px rgba(34,211,238,0.28), 0 1px 0 rgba(255,255,255,0.06) inset;
+  --zone-sidebar-bg: linear-gradient(180deg, #131318, #0e0e12);
+  --zone-chat-bg: radial-gradient(120% 80% at 70% -10%, rgba(34,211,238,0.08), transparent 60%), var(--bg-card);
 }
 
 html, body, #root {
@@ -168,18 +186,19 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 30px;
-  padding: 0 12px;
-  background: linear-gradient(135deg, var(--brand-card-from), var(--brand-card-to));
-  border: 1px solid var(--border);
-  color: var(--accent);
+  height: 32px;
+  padding: 0 15px;
+  background: var(--accent-grad);
+  border: none;
+  color: var(--text-on-accent);
   border-radius: 999px;
   cursor: pointer;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
-  transition: all 0.15s;
+  box-shadow: var(--neu-pop);
+  transition: transform 0.14s ease, filter 0.14s ease;
 }
 
 .btn-new-icon {
@@ -187,8 +206,11 @@ html, body, #root {
 }
 
 .btn-new:hover {
-  border-color: var(--accent);
-  filter: brightness(1.03);
+  filter: brightness(1.05);
+}
+
+.btn-new:active {
+  transform: translateY(1px) scale(0.97);
 }
 
 .sidebar-list {
@@ -217,21 +239,24 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  border-radius: 14px;
   cursor: pointer;
-  margin-bottom: 2px;
-  transition: background 0.12s;
+  margin-bottom: 8px;
+  /* Each conversation is a raised pebble lifting out of the sunken sidebar. */
+  background: var(--bg-card);
+  box-shadow: var(--neu-raise-sm);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
 }
 
 /* Per-conversation agent tag (color keyed by agent type) */
 .agent-tag {
   flex-shrink: 0;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1;
-  padding: 3px 6px;
-  border-radius: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
   letter-spacing: 0.02em;
   color: var(--tag-general-fg);
   background: var(--tag-general-bg);
@@ -241,8 +266,12 @@ html, body, #root {
 .agent-tag--image   { color: var(--tag-image-fg);   background: var(--tag-image-bg); }
 .agent-tag--video   { color: var(--tag-video-fg);   background: var(--tag-video-bg); }
 
-.sidebar-item:hover { background: var(--bg-hover); }
-.sidebar-item.active { background: var(--bg-active); }
+.sidebar-item:hover { transform: translateY(-2px); box-shadow: var(--neu-raise); }
+.sidebar-item.active {
+  /* Active pebble: brand-tinted face, accent-glow lift, and an accent edge bar. */
+  background: linear-gradient(135deg, rgba(139,92,246,0.16), rgba(59,130,246,0.10)), var(--bg-card);
+  box-shadow: var(--neu-pop), inset 4px 0 0 0 var(--accent);
+}
 
 .sidebar-item-title {
   font-size: 14px;
@@ -355,6 +384,9 @@ html, body, #root {
   background: var(--bg-user-msg);
   color: var(--text-user);
   border-radius: var(--radius-lg);
+  /* Trimmed top-right corner + soft lift makes it read as a floating chat card. */
+  border-top-right-radius: 6px;
+  box-shadow: var(--neu-raise-sm);
   padding: 12px 20px;
   font-size: 15px;
   line-height: 1.6;
@@ -551,12 +583,12 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--neu-raise);
   transition: box-shadow 0.2s;
 }
 
 .input-box:focus-within {
-  box-shadow: var(--shadow-md), 0 0 0 3px rgba(124,92,246,0.16);
+  box-shadow: var(--neu-raise), 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .input-box textarea {
@@ -836,17 +868,23 @@ html, body, #root {
 .btn-send {
   background: var(--accent);
   color: var(--text-on-accent);
+  box-shadow: var(--neu-pop);
 }
 
 .btn-send:disabled {
   background: var(--bg-active);
   color: var(--text-muted);
   cursor: default;
+  box-shadow: none;
 }
 
 .btn-send:hover:not(:disabled) {
   background: var(--accent-hover);
   transform: scale(1.05);
+}
+
+.btn-send:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .btn-stop {
@@ -1467,24 +1505,31 @@ html, body, #root {
   display: flex;
   height: 100vh;
   overflow: hidden;
+  /* Padded canvas + gap turns the sidebar and chat into separated floating
+     panels — the primary device for making the zones read as distinct. */
+  gap: 14px;
+  padding: 14px;
+  background: var(--bg);
 }
 
 .workspace-sidebar {
   display: flex;
   flex-direction: column;
-  width: 280px;
-  min-width: 280px;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
+  width: 288px;
+  min-width: 288px;
+  /* Sunken panel: the sidebar recedes so the brand card and conversation
+     pebbles inside it visibly lift out. */
+  background: var(--zone-sidebar-bg);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--neu-sink);
   overflow: hidden;
 }
 
 .brand-header {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 10px 8px;
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  padding: 12px 12px 10px;
   flex-shrink: 0;
 }
 
@@ -1492,10 +1537,12 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--brand-card-from), var(--brand-card-to));
-  border: 1px solid var(--border);
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  /* Raised control-panel header on a tinted base — sits clearly above the
+     sunken sidebar. */
+  background: linear-gradient(140deg, var(--brand-card-from), var(--brand-card-to)), var(--bg-card);
+  box-shadow: var(--neu-raise);
 }
 
 .brand-logo {
@@ -1591,6 +1638,7 @@ html, body, #root {
   width: 0;
   min-width: 0;
   border-right: none;
+  box-shadow: none;
 }
 
 .sidebar-expand {
@@ -1625,11 +1673,14 @@ html, body, #root {
   width: 100%;
   min-width: 0;
   border-right: none;
+  /* Let the sunken zone background show through. */
+  background: transparent;
 }
 
 .workspace-main {
   flex: 1;
   display: flex;
+  gap: 14px;
   overflow: hidden;
   position: relative;
 }
@@ -1640,6 +1691,11 @@ html, body, #root {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  /* Open, lifted canvas with a faint brand-tinted glow — the lightest, most
+     prominent zone, clearly distinct from the sunken sidebar. */
+  background: var(--zone-chat-bg);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--neu-raise);
 }
 
 .workspace-right {
@@ -1648,8 +1704,9 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg);
-  border-left: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--neu-raise);
 }
 
 .workspace-brand {
@@ -1944,17 +2001,22 @@ html, body, #root {
   color: var(--text);
   padding: 5px 13px 5px 6px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
   white-space: nowrap;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--neu-raise-sm);
   cursor: pointer;
-  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+  transition: border-color 0.12s, box-shadow 0.14s, transform 0.14s;
 }
 
 .agent-pill:hover:not(:disabled) {
   border-color: var(--border-input);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+  box-shadow: var(--neu-raise);
+}
+
+.agent-pill:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
 }
 
 /* Active pill: violet→blue gradient border (same double-background trick as the
@@ -1964,7 +2026,7 @@ html, body, #root {
   background:
     linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
     var(--accent-grad) border-box;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--neu-pop);
 }
 
 .agent-pill:disabled {
