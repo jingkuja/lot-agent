@@ -3,7 +3,7 @@ import { estimateTokens } from "./tokenizer.js";
 
 /** Token budget allocation (in tokens) */
 export interface TokenBudget {
-  /** System prompt + skills. Default: 8K */
+  /** System prompt + skills. Default: 80K */
   systemPrompt: number;
   /** Summary of older conversation. Default: 4K */
   memory: number;
