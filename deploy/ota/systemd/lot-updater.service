@@ -1,0 +1,13 @@
+# OTA updater：单次「检查→更新→健康→回滚→上报」。由 lot-updater.timer 触发；
+# 也可手动 `systemctl start lot-updater.service` 立即跑一次（应急/经 frp SSH）。
+[Unit]
+Description=Lot Agent OTA updater (one-shot check & update)
+Requires=docker.service
+After=docker.service network-online.target lot-agent.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/lot-agent/box.env
+ExecStart=/opt/lot-agent/ota/update-run.sh
+TimeoutStartSec=2400
