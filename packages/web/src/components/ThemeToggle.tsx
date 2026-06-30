@@ -11,7 +11,12 @@ const OPTIONS: { value: Theme; label: string }[] = [
 const DRAG_THRESHOLD = 4;
 /** Keep the button at least this far from the viewport edges. */
 const EDGE_MARGIN = 8;
+/** Approx. menu box used to decide which way it should open. */
+const MENU_W = 144;
+const MENU_H = 96;
 const POS_KEY = "lot:theme-toggle-pos";
+
+type Placement = { h: "left" | "right"; v: "up" | "down" };
 
 type Pos = { left: number; top: number };
 
@@ -39,6 +44,9 @@ export function ThemeToggle() {
   const [open, setOpen] = useState(false);
   // null = default (CSS top/right anchor); once dragged, an explicit left/top.
   const [pos, setPos] = useState<Pos | null>(() => loadPos());
+  // Which way the menu opens; recomputed each time it's opened so it never
+  // spills off-screen after the button is dragged to an edge.
+  const [placement, setPlacement] = useState<Placement>({ h: "right", v: "down" });
   const ref = useRef<HTMLDivElement>(null);
 
   // Per-drag scratch: pointer start, grab offset within the button, whether it
@@ -131,7 +139,20 @@ export function ThemeToggle() {
       draggedRef.current = false; // this click ended a drag — ignore it
       return;
     }
-    setOpen((v) => !v);
+    setOpen((v) => {
+      // About to open: pick the open direction with the most room so the menu
+      // never runs off the left/bottom edge.
+      if (!v) {
+        const r = ref.current?.getBoundingClientRect();
+        if (r) {
+          setPlacement({
+            h: r.right - MENU_W < EDGE_MARGIN ? "left" : "right",
+            v: r.bottom + MENU_H > window.innerHeight - EDGE_MARGIN ? "up" : "down",
+          });
+        }
+      }
+      return !v;
+    });
   }, []);
 
   const choose = (value: Theme) => {
@@ -177,7 +198,10 @@ export function ThemeToggle() {
       </button>
 
       {open && (
-        <div className="theme-menu" role="menu">
+        <div
+          className={`theme-menu theme-menu--${placement.h} theme-menu--${placement.v}`}
+          role="menu"
+        >
           {OPTIONS.map((opt) => (
             <button
               key={opt.value}

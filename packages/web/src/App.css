@@ -2115,8 +2115,6 @@ html, body, #root {
 
 .theme-menu {
   position: absolute;
-  top: 48px;
-  right: 0;
   min-width: 132px;
   padding: 6px;
   background: var(--bg-card);
@@ -2127,6 +2125,13 @@ html, body, #root {
   flex-direction: column;
   gap: 2px;
 }
+
+/* Open direction — flipped at runtime so the menu stays on-screen wherever the
+   (draggable) button sits. */
+.theme-menu--right { right: 0; left: auto; }
+.theme-menu--left { left: 0; right: auto; }
+.theme-menu--down { top: 48px; bottom: auto; }
+.theme-menu--up { bottom: 48px; top: auto; }
 
 .theme-menu-item {
   display: flex;
