@@ -58,7 +58,7 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      {conversations.length > 0 && <div className="sidebar-section-label">最近会话</div>}
+      {conversations.length > 0 && <div className="sidebar-section-label">最近对话</div>}
       <div className="sidebar-list" onScroll={handleScroll}>
         {conversations.map((conv) => {
           const tag = tagFor(conv.agent_id);
