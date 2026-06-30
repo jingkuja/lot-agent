@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>借势智算 · 首页样图（柔性卡片 / 新拟态）</title>
+<style>
+  /* ============================================================
+     设计样图 —— 复用项目真实 CSS 变量（与 web/src/App.css 一致），
+     额外新增「新拟态」立体阴影 token（见 设计.md），浅/深主题均可用。
+     ============================================================ */
+  :root {
+    --bg: #f0f0f5;
+    --bg-sidebar: #e8e8f0;
+    --bg-card: #ffffff;
+    --bg-user-msg: #e6e4f7;
+    --bg-input: #ffffff;
+    --bg-hover: #ececf3;
+    --bg-active: #e2e0f0;
+    --bg-tool: #f5f5fa;
+
+    --text: #1a1a22;
+    --text-secondary: #5a5a68;
+    --text-muted: #8a8a96;
+    --text-on-accent: #ffffff;
+
+    --border: #e2e2ec;
+    --border-input: #d4d4e0;
+
+    --accent: #6d5cf0;
+    --accent-hover: #7d6ff5;
+    --success: #2faa55;
+
+    --tag-general-fg: #6b7280;  --tag-general-bg: rgba(107,114,128,0.12);
+    --tag-image-fg:   #7c3aed;  --tag-image-bg:   rgba(124,58,237,0.12);
+    --tag-video-fg:   #d97706;  --tag-video-bg:   rgba(217,119,6,0.13);
+
+    --agent-icon-general: linear-gradient(135deg, #8b5cf6, #6d5cf0);
+    --agent-icon-image:   linear-gradient(135deg, #6d5cf0, #3b82f6);
+    --agent-icon-video:   linear-gradient(135deg, #10b981, #22c55e);
+    --accent-grad: linear-gradient(135deg, #8b5cf6, #3b82f6);
+
+    --brand-card-from: rgba(99,102,241,0.10);  --brand-card-to: rgba(34,211,238,0.06);
+    --logo-grad: conic-gradient(from 210deg, #2563eb, var(--accent), #06b6d4, var(--accent-hover), #2563eb);
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 18px;
+    --radius-xl: 24px;
+
+    /* —— 新增：新拟态立体阴影 token（浅色） —— */
+    --neu-raise: 0 6px 16px rgba(31,33,58,0.10), 0 1px 0 rgba(255,255,255,0.9) inset, 0 -2px 6px rgba(255,255,255,0.6) inset;
+    --neu-raise-sm: 0 3px 8px rgba(31,33,58,0.10), 0 1px 0 rgba(255,255,255,0.8) inset;
+    --neu-sink: inset 0 2px 6px rgba(31,33,58,0.10), inset 0 -1px 0 rgba(255,255,255,0.6);
+    --neu-pop: 0 10px 24px rgba(109,92,240,0.22), 0 1px 0 rgba(255,255,255,0.4) inset;
+    --zone-chat-bg: radial-gradient(120% 80% at 70% -10%, rgba(139,92,246,0.08), transparent 60%), var(--bg);
+    --zone-sidebar-bg: linear-gradient(180deg, #edecf6, #e6e6f0);
+  }
+
+  [data-theme="dark"] {
+    --bg: #0b0b0d;
+    --bg-sidebar: #111114;
+    --bg-card: #18181c;
+    --bg-user-msg: #2a2a32;
+    --bg-input: #1a1a1f;
+    --bg-hover: #1e1e24;
+    --bg-active: #26262e;
+    --bg-tool: #141418;
+
+    --text: #ededf2;
+    --text-secondary: #a6a6b2;
+    --text-muted: #6c6c78;
+    --text-on-accent: #052228;
+
+    --border: #26262e;
+    --border-input: #34343e;
+
+    --accent: #22d3ee;
+    --accent-hover: #38dbf0;
+    --success: #34c759;
+
+    --tag-general-fg: #9aa0ad;  --tag-general-bg: rgba(154,160,173,0.15);
+    --tag-image-fg:   #b794ff;  --tag-image-bg:   rgba(183,148,255,0.15);
+    --tag-video-fg:   #f0b35e;  --tag-video-bg:   rgba(240,179,94,0.15);
+
+    --agent-icon-general: linear-gradient(135deg, #a78bfa, #8b7bf5);
+    --agent-icon-image:   linear-gradient(135deg, #8b7bf5, #60a5fa);
+    --agent-icon-video:   linear-gradient(135deg, #34d399, #4ade80);
+    --accent-grad: linear-gradient(135deg, #a78bfa, #60a5fa);
+
+    --brand-card-from: rgba(96,165,250,0.12);  --brand-card-to: rgba(34,211,238,0.05);
+
+    --neu-raise: 0 8px 22px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.05) inset, 0 -2px 6px rgba(0,0,0,0.3) inset;
+    --neu-raise-sm: 0 4px 12px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.04) inset;
+    --neu-sink: inset 0 2px 8px rgba(0,0,0,0.5), inset 0 -1px 0 rgba(255,255,255,0.03);
+    --neu-pop: 0 10px 26px rgba(34,211,238,0.28), 0 1px 0 rgba(255,255,255,0.06) inset;
+    --zone-chat-bg: radial-gradient(120% 80% at 70% -10%, rgba(34,211,238,0.08), transparent 60%), var(--bg);
+    --zone-sidebar-bg: linear-gradient(180deg, #131318, #0e0e12);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* —— 主题切换浮钮 —— */
+  .theme-toggle {
+    position: fixed; top: 18px; right: 18px; z-index: 50;
+    border: none; cursor: pointer; padding: 10px 16px; border-radius: 999px;
+    background: var(--bg-card); color: var(--text); font-size: 13px; font-weight: 600;
+    box-shadow: var(--neu-raise-sm); transition: transform .15s ease;
+  }
+  .theme-toggle:active { transform: scale(0.95); }
+
+  /* ============================================================
+     WORKSPACE 布局：侧栏（下沉区） + 主区（聊天）
+     ============================================================ */
+  .workspace { display: flex; height: 100vh; padding: 14px; gap: 14px; }
+
+  /* —— 侧栏：整体作为一个柔和的下沉容器 —— */
+  .workspace-sidebar {
+    width: 290px; flex-shrink: 0;
+    display: flex; flex-direction: column; gap: 14px;
+    background: var(--zone-sidebar-bg);
+    border-radius: var(--radius-xl);
+    padding: 14px;
+    box-shadow: var(--neu-sink);
+  }
+
+  /* —— 区域 1：品牌卡（明显浮起） —— */
+  .brand-card {
+    background: linear-gradient(140deg, var(--brand-card-from), var(--brand-card-to)), var(--bg-card);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    box-shadow: var(--neu-raise);
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .brand-top { display: flex; align-items: center; gap: 12px; }
+  .brand-logo {
+    width: 46px; height: 46px; border-radius: 14px;
+    background: var(--logo-grad);
+    display: grid; place-items: center;
+    color: #fff; font-weight: 800; font-size: 20px;
+    box-shadow: 0 6px 18px rgba(37,99,235,0.35), 0 0 0 4px rgba(255,255,255,0.18) inset;
+  }
+  .brand-meta { display: flex; flex-direction: column; }
+  .brand-title { font-size: 16px; font-weight: 800; letter-spacing: .5px; }
+  .brand-subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .brand-collapse {
+    margin-left: auto; width: 28px; height: 28px; border-radius: 9px; border: none;
+    background: var(--bg-hover); color: var(--text-secondary); cursor: pointer; font-size: 15px;
+    box-shadow: var(--neu-raise-sm);
+  }
+  .brand-actions { display: flex; align-items: center; gap: 8px; }
+  .brand-account { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .brand-email { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn-logout {
+    align-self: flex-start; margin-top: 2px; font-size: 11px; color: var(--text-muted);
+    background: none; border: none; cursor: pointer; padding: 0;
+  }
+  .btn-new {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 16px; border: none; border-radius: 999px; cursor: pointer;
+    background: var(--accent-grad); color: var(--text-on-accent); font-weight: 700; font-size: 13px;
+    box-shadow: var(--neu-pop); transition: transform .14s ease;
+  }
+  .btn-new:active { transform: translateY(1px) scale(0.98); }
+
+  /* —— 区域 2：会话列表（在下沉侧栏内，进一步用浮起 pill 区分） —— */
+  .list-label { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--text-muted); padding: 2px 6px; text-transform: uppercase; }
+  .conv-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; padding: 2px; }
+  .conv-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 12px; border-radius: 14px; cursor: pointer;
+    background: var(--bg-card); box-shadow: var(--neu-raise-sm);
+    transition: transform .14s ease, box-shadow .14s ease;
+  }
+  .conv-item:hover { transform: translateY(-2px); box-shadow: var(--neu-raise); }
+  .conv-item.active {
+    background: linear-gradient(135deg, rgba(139,92,246,0.16), rgba(59,130,246,0.10)), var(--bg-card);
+    box-shadow: var(--neu-pop);
+  }
+  .conv-item.active::before {
+    content: ""; width: 4px; align-self: stretch; border-radius: 999px; margin: 2px 0;
+    background: var(--accent-grad);
+  }
+  .conv-icon {
+    width: 30px; height: 30px; border-radius: 10px; flex-shrink: 0;
+    display: grid; place-items: center; color: #fff; font-size: 14px;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.18);
+  }
+  .conv-icon.general { background: var(--agent-icon-general); }
+  .conv-icon.image   { background: var(--agent-icon-image); }
+  .conv-icon.video   { background: var(--agent-icon-video); }
+  .conv-body { min-width: 0; flex: 1; }
+  .conv-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .tag {
+    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; flex-shrink: 0;
+  }
+  .tag.general { color: var(--tag-general-fg); background: var(--tag-general-bg); }
+  .tag.image   { color: var(--tag-image-fg);   background: var(--tag-image-bg); }
+  .tag.video   { color: var(--tag-video-fg);   background: var(--tag-video-bg); }
+
+  /* ============================================================
+     区域 3：聊天主区（最开阔、最亮，背景与侧栏明显不同）
+     ============================================================ */
+  .workspace-main {
+    flex: 1; display: flex; flex-direction: column;
+    background: var(--zone-chat-bg);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--neu-raise);
+    overflow: hidden;
+  }
+  .chat-scroll { flex: 1; overflow-y: auto; padding: 28px 32px; display: flex; flex-direction: column; gap: 20px; }
+
+  .msg-row { display: flex; gap: 12px; max-width: 78%; animation: rise .35s ease both; }
+  .msg-row.user { align-self: flex-end; flex-direction: row-reverse; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .avatar {
+    width: 36px; height: 36px; border-radius: 12px; flex-shrink: 0;
+    display: grid; place-items: center; color: #fff; font-size: 15px; font-weight: 700;
+    box-shadow: var(--neu-raise-sm);
+  }
+  .avatar.bot { background: var(--agent-icon-general); }
+  .avatar.me  { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+
+  .bubble {
+    padding: 14px 16px; border-radius: var(--radius-lg); font-size: 14px; line-height: 1.65;
+  }
+  .bubble.assistant {
+    background: var(--bg-card); color: var(--text);
+    box-shadow: var(--neu-raise); border-top-left-radius: 6px;
+  }
+  .bubble.user {
+    background: linear-gradient(135deg, var(--bg-user-msg), color-mix(in srgb, var(--accent) 14%, var(--bg-user-msg)));
+    color: var(--text); box-shadow: var(--neu-raise-sm); border-top-right-radius: 6px;
+  }
+  .bubble h4 { font-size: 14px; margin-bottom: 6px; }
+  .bubble p { margin: 4px 0; }
+  .gen-card {
+    margin-top: 12px; display: flex; gap: 12px; align-items: center;
+    padding: 12px; border-radius: var(--radius-md);
+    background: linear-gradient(135deg, rgba(167,139,250,0.16), rgba(96,165,250,0.12));
+    box-shadow: var(--neu-raise-sm);
+  }
+  .gen-thumb { width: 76px; height: 76px; border-radius: 12px; background: var(--agent-icon-image); box-shadow: 0 4px 10px rgba(0,0,0,0.2); flex-shrink: 0; }
+  .gen-meta { font-size: 12px; color: var(--text-secondary); }
+  .gen-meta b { color: var(--text); font-size: 13px; }
+
+  /* —— 区域 4：Agent 切换器 + 输入区（底部浮起面板） —— */
+  .composer {
+    margin: 0 18px 18px; padding: 14px;
+    background: var(--bg-card); border-radius: var(--radius-xl);
+    box-shadow: var(--neu-raise);
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .switcher {
+    align-self: flex-start; display: inline-flex; gap: 4px; padding: 4px;
+    background: var(--bg-tool); border-radius: 999px; box-shadow: var(--neu-sink);
+  }
+  .seg {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 15px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    color: var(--text-secondary); cursor: pointer; border: none; background: none;
+    transition: transform .14s ease;
+  }
+  .seg .dot { width: 16px; height: 16px; border-radius: 6px; }
+  .seg.general .dot { background: var(--agent-icon-general); }
+  .seg.image .dot   { background: var(--agent-icon-image); }
+  .seg.video .dot   { background: var(--agent-icon-video); }
+  .seg.active { color: var(--text); background: var(--bg-card); box-shadow: var(--neu-raise-sm); }
+  .seg:active { transform: scale(0.96); }
+
+  .input-capsule {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 6px 6px 18px; border-radius: 999px;
+    background: var(--bg-input); box-shadow: var(--neu-sink);
+    border: 1.5px solid transparent; transition: border-color .2s ease, box-shadow .2s ease;
+  }
+  .input-capsule:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    box-shadow: var(--neu-sink), 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .input-capsule input {
+    flex: 1; border: none; background: none; outline: none;
+    font-size: 14px; color: var(--text); padding: 12px 0;
+  }
+  .input-capsule input::placeholder { color: var(--text-muted); }
+  .btn-attach {
+    width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--bg-hover); color: var(--text-secondary); font-size: 18px;
+    box-shadow: var(--neu-raise-sm);
+  }
+  .btn-send {
+    width: 46px; height: 46px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--accent-grad); color: var(--text-on-accent); font-size: 18px;
+    box-shadow: var(--neu-pop); transition: transform .14s ease;
+  }
+  .btn-send:active { transform: scale(0.92); }
+
+  .hint { text-align: center; font-size: 11px; color: var(--text-muted); padding-bottom: 4px; }
+</style>
+</head>
+<body>
+  <button class="theme-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? '' : 'dark'">🌗 切换主题</button>
+
+  <div class="workspace">
+    <!-- ===== 侧栏（下沉容器） ===== -->
+    <aside class="workspace-sidebar">
+
+      <!-- 区域 1：品牌卡（浮起） -->
+      <div class="brand-card">
+        <div class="brand-top">
+          <div class="brand-logo">A</div>
+          <div class="brand-meta">
+            <span class="brand-title">借势智算</span>
+            <span class="brand-subtitle">AI 盒子智能体</span>
+          </div>
+          <button class="brand-collapse">‹</button>
+        </div>
+        <div class="brand-actions">
+          <div class="brand-account">
+            <span class="brand-email">jingkuja85@gmail.com</span>
+            <button class="btn-logout">退出登录</button>
+          </div>
+          <button class="btn-new">＋ 新会话</button>
+        </div>
+      </div>
+
+      <!-- 区域 2：会话列表（浮起 pill） -->
+      <div class="list-label">最近会话</div>
+      <div class="conv-list">
+        <div class="conv-item active">
+          <div class="conv-icon general">✦</div>
+          <div class="conv-body">
+            <div class="conv-title">小红书种草文案策划</div>
+            <div class="conv-sub">刚刚 · 12 条消息</div>
+          </div>
+          <span class="tag general">通用</span>
+        </div>
+        <div class="conv-item">
+          <div class="conv-icon image">❖</div>
+          <div class="conv-body">
+            <div class="conv-title">新品海报主视觉生成</div>
+            <div class="conv-sub">2 小时前</div>
+          </div>
+          <span class="tag image">图片</span>
+        </div>
+        <div class="conv-item">
+          <div class="conv-icon video">▶</div>
+          <div class="conv-body">
+            <div class="conv-title">15 秒产品短视频脚本</div>
+            <div class="conv-sub">昨天</div>
+          </div>
+          <span class="tag video">视频</span>
+        </div>
+        <div class="conv-item">
+          <div class="conv-icon general">✦</div>
+          <div class="conv-body">
+            <div class="conv-title">品牌 slogan 头脑风暴</div>
+            <div class="conv-sub">3 天前</div>
+          </div>
+          <span class="tag general">通用</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== 主区：聊天 ===== -->
+    <main class="workspace-main">
+      <div class="chat-scroll">
+
+        <div class="msg-row">
+          <div class="avatar bot">A</div>
+          <div class="bubble assistant">
+            <h4>你好，我是借势智算 ✨</h4>
+            <p>我可以帮你完成 <b>文案创作、图片生成、短视频脚本</b>，并一键送审与发布到平台。先从一句需求开始吧～</p>
+          </div>
+        </div>
+
+        <div class="msg-row user">
+          <div class="avatar me">我</div>
+          <div class="bubble user">
+            帮我给新款香薰蜡烛写一条小红书种草文案，并配一张氛围感主图。
+          </div>
+        </div>
+
+        <div class="msg-row">
+          <div class="avatar bot">A</div>
+          <div class="bubble assistant">
+            <p>没问题！这是为你准备的文案与主视觉草图 👇</p>
+            <div class="gen-card">
+              <div class="gen-thumb"></div>
+              <div class="gen-meta">
+                <b>暖光氛围主图.png</b><br />
+                1024×1024 · 通义万相（占位）<br />
+                点击查看大图 / 重新生成
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 区域 4：切换器 + 输入区 -->
+      <div class="composer">
+        <div class="switcher">
+          <button class="seg general active"><span class="dot"></span>通用</button>
+          <button class="seg image"><span class="dot"></span>图片</button>
+          <button class="seg video"><span class="dot"></span>视频</button>
+        </div>
+        <div class="input-capsule">
+          <button class="btn-attach">＋</button>
+          <input placeholder="输入你的创作需求，按 Enter 发送…" />
+          <button class="btn-send">↑</button>
+        </div>
+        <div class="hint">内容由 AI 生成，发布前请人工审核 · 每次生成会计入用量</div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
