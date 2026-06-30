@@ -164,24 +164,31 @@ html, body, #root {
 }
 
 .btn-new {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: var(--bg);
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  background: linear-gradient(135deg, var(--brand-card-from), var(--brand-card-to));
   border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: var(--radius-sm);
+  color: var(--accent);
+  border-radius: 999px;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1;
+  white-space: nowrap;
   transition: all 0.15s;
 }
 
+.btn-new-icon {
+  flex-shrink: 0;
+}
+
 .btn-new:hover {
-  background: var(--bg-hover);
-  border-color: var(--text-muted);
+  border-color: var(--accent);
+  filter: brightness(1.03);
 }
 
 .sidebar-list {

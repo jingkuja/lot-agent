@@ -72,7 +72,11 @@ export function BrandHeader({ user, onLogout, onCreate, onCollapse }: BrandHeade
           )}
         </div>
         <button className="btn-new" onClick={onCreate} title="新建对话">
-          +
+          <svg className="btn-new-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M12 8.5v7M8.5 12h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+          新会话
         </button>
       </div>
     </div>
