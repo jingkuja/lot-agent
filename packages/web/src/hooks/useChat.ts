@@ -51,8 +51,17 @@ export function useChat(
         if (token.cancelled) return;
         try {
           const t = await api.getTask(taskId);
-          failures = 0;
           if (token.cancelled) return;
+          // Guard against a malformed/unexpected response body (wrong shape,
+          // an error object served with 200, a proxy HTML page, etc.). Without
+          // this, an unknown `status` falls through to the progress branch and
+          // the loop polls forever instead of ever terminating. Route it through
+          // the failure budget so persistent bad responses fail the generation.
+          const known = ["pending", "running", "succeeded", "failed"];
+          if (!t || !known.includes(t.status)) {
+            throw new Error("任务状态返回格式异常");
+          }
+          failures = 0;
           if (t.status === "succeeded" || t.status === "failed") {
             const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
             setMessages((prev) =>
@@ -366,7 +375,18 @@ export function useChat(
         } catch (e) {
           if (genPollRef.current === token) genPollRef.current = null;
           setIsStreaming(false);
-          window.alert(`生成请求失败：${e instanceof Error ? e.message : String(e)}`);
+          // The create request itself failed (non-2xx / network). Show it as a
+          // failed generation bubble inline rather than only alerting, so the
+          // attempt and its error stay visible like a poll failure does.
+          const msg = e instanceof Error ? e.message : String(e);
+          const userMsg: DisplayMessage = { id: `user-${Date.now()}`, role: "user", content: prompt };
+          const genMsg: DisplayMessage = {
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            content: "",
+            generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` },
+          };
+          setMessages((prev) => [...prev, userMsg, genMsg]);
         }
       })();
     },
