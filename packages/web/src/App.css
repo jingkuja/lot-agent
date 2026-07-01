@@ -2399,3 +2399,113 @@ html, body, #root {
 .model-row-name { font-size: 13px; font-weight: 500; }
 .model-row-desc { font-size: 12px; color: var(--text-muted); }
 .model-empty { padding: 12px; color: var(--text-muted); font-size: 13px; text-align: center; }
+
+/* ── Agent Switcher (above input) ── */
+/* Card pills with colored icon badges, rendered above the input box
+   (.input-switcher wraps it for spacing). */
+.input-switcher {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.agent-switcher {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  padding: 5px 13px 5px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+  box-shadow: var(--neu-raise-sm);
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.14s, transform 0.14s;
+}
+
+.agent-pill:hover:not(:disabled) {
+  border-color: var(--border-input);
+  transform: translateY(-2px);
+  box-shadow: var(--neu-raise);
+}
+
+.agent-pill:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Active pill: violet→blue gradient border (same double-background trick as the
+   input box) so the card face stays solid. */
+.agent-pill.active {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    var(--accent-grad) border-box;
+  box-shadow: var(--neu-pop);
+}
+
+.agent-pill:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.agent-pill-icon {
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-on-grad);
+  flex-shrink: 0;
+}
+
+.agent-pill-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.agent-pill-icon--general { background: var(--agent-icon-general); }
+.agent-pill-icon--image   { background: var(--agent-icon-image); }
+.agent-pill-icon--video   { background: var(--agent-icon-video); }
+
+.agent-pill-label {
+  line-height: 1;
+}
+
+.agent-more-wrap { position: relative; display: inline-flex; }
+.agent-overflow-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 160px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: var(--shadow-lg);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-overflow-item {
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+}
+.agent-overflow-item:hover { background: var(--bg-hover); }
+.agent-overflow-item.active { color: var(--accent); font-weight: 600; }
