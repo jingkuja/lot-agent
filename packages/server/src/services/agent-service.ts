@@ -28,7 +28,7 @@ import { createDocTool } from "../tools/doc-tool.js";
 import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
-import type { ModelCatalogConfig } from "../models/catalog.js";
+import { resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import type {
   AgentEvent,
@@ -38,6 +38,7 @@ import type {
   LLMProvider,
   AgentDefinition,
   ModelConfig,
+  ModelType,
   JobQueue,
   ReviewProvider,
   PlatformConnector,
@@ -75,6 +76,19 @@ export function resolveConversationModel(
   agentDefault: string
 ): string {
   return explicit ?? conversationModelId ?? agentDefault;
+}
+
+/** Synthesize a ModelConfig (for the UsageMeter) for a dynamically-discovered
+ * model id that isn't in the static config, using the catalog's pricing table
+ * with per-type default fallback. */
+export function catalogModelConfig(
+  cfg: ModelCatalogConfig,
+  id: string,
+  type: ModelType
+): ModelConfig {
+  const p = resolvePricing(cfg, id, type);
+  const billingUnit = type === "llm" ? "token" : type === "video" ? "second" : "image";
+  return { id, type, provider: "", billingUnit, ...p, enabled: true };
 }
 
 export interface ServiceConfig {
@@ -246,7 +260,11 @@ export class AgentService {
     populateModelRegistry(this.modelRegistry, this.configModels, this.llmConfig);
 
     // Initialize usage meter
-    this.usageMeter = new UsageMeter(this.db, (id) => this.modelRegistry.getConfig(id));
+    // Dynamically-discovered LLM models aren't in the static registry; fall back
+    // to the catalog's pricing so their chat usage is still metered.
+    this.usageMeter = new UsageMeter(this.db, (id) =>
+      this.modelRegistry.getConfig(id) ?? catalogModelConfig(this.modelCatalog, id, "llm")
+    );
 
     // Initialize service-layer collaborators
     this.messageRepo = new MessageRepository(this.db);
