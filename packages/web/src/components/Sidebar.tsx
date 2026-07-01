@@ -1,6 +1,7 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Agent, Conversation } from "../api/client.js";
 import { SidebarAgentTabs } from "./SidebarAgentTabs.js";
+import { shouldAutoLoadMore } from "../lib/auto-page.js";
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -45,6 +46,28 @@ export function Sidebar({
     [onLoadMore, hasMore, loadingMore]
   );
 
+  // When the list is filtered per agent, the visible rows can be too few to
+  // overflow the container — leaving no scrollbar and thus no way for
+  // handleScroll to fire loadMore, which strands rows on later pages. After each
+  // render, if more pages exist and the current content isn't scrollable, fetch
+  // the next page. This repeats (deps below re-run it once loadingMore settles or
+  // the filtered list changes) until content overflows or pages run out.
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || !onLoadMore) return;
+    if (
+      shouldAutoLoadMore({
+        hasMore,
+        loadingMore,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+      })
+    ) {
+      onLoadMore();
+    }
+  }, [conversations, hasMore, loadingMore, onLoadMore]);
+
   return (
     <aside className="sidebar">
       <SidebarAgentTabs
@@ -63,7 +86,7 @@ export function Sidebar({
           新对话
         </button>
       </div>
-      <div className="sidebar-list" onScroll={handleScroll}>
+      <div className="sidebar-list" ref={listRef} onScroll={handleScroll}>
         {conversations.map((conv) => (
           <div
             key={conv.id}
