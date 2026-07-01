@@ -27,6 +27,7 @@ import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
 import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress } from "../generation/config.js";
+import { TokenhubClient } from "../tokenhub/client.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -97,6 +98,9 @@ export class AgentService {
   sessions!: SessionStore;
   jobQueue!: JobQueue;
   usageMeter!: UsageMeter;
+  /** External token/model platform client (login + model catalog). */
+  readonly tokenhub: TokenhubClient;
+  readonly tokenhubBaseUrl: string;
   /** Whether each media type's configured provider reports intermediate progress
    * (drives whether the UI shows a generation percentage). */
   generationSupportsProgress: { image: boolean; video: boolean } = { image: true, video: true };
@@ -131,6 +135,9 @@ export class AgentService {
     this.agentConfig = config.agent;
     this.mcpConfigPath = config.mcpConfigPath;
     this.skillsDir = config.skillsDir;
+    this.tokenhubBaseUrl =
+      process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market";
+    this.tokenhub = new TokenhubClient(this.tokenhubBaseUrl);
   }
 
   async init(): Promise<void> {

@@ -1,9 +1,12 @@
 import { Hono } from "hono";
 import type { AgentService } from "../services/agent-service.js";
 import { generateRsaKeypair } from "../auth/rsa.js";
+import { toPublicUser } from "../db/user-sanitize.js";
 
 // Ephemeral per-process keypair used to decrypt login passwords.
 const keypair = generateRsaKeypair();
+
+const LOGIN_FAIL = "登录失败，请稍后再试或者联系管理员";
 
 export function createAuthRoutes(service: AgentService): Hono {
   const app = new Hono();
@@ -11,21 +14,32 @@ export function createAuthRoutes(service: AgentService): Hono {
   // GET /public-key — public; browser fetches this to encrypt the password.
   app.get("/public-key", (c) => c.json({ publicKey: keypair.publicKeyPem }));
 
-  // POST /login — public, no auth required
+  // POST /login — public. RSA-encrypted password → tokenhub → local session.
   app.post("/login", async (c) => {
-    let body: { email?: string; name?: string };
+    let body: { username?: string; encryptedPassword?: string };
     try {
       body = await c.req.json();
     } catch {
       return c.json({ error: "Invalid JSON body" }, 400);
     }
-    const { email, name } = body;
-    if (!email) {
-      return c.json({ error: "email is required" }, 400);
+    const { username, encryptedPassword } = body;
+    if (!username || !encryptedPassword) {
+      return c.json({ error: LOGIN_FAIL }, 401);
     }
-    const user = await service.db.upsertUserByEmail(email, name);
-    const token = await service.sessions.createSession(user.id);
-    return c.json({ token, user });
+    try {
+      const password = keypair.decrypt(encryptedPassword);
+      const result = await service.tokenhub.login(username, password);
+      const user = await service.db.upsertUserByExternalId({
+        externalUserId: result.userId,
+        username: result.name,
+        apiKey: result.apiKey,
+      });
+      const token = await service.sessions.createSession(user.id);
+      return c.json({ token, user: toPublicUser(user) });
+    } catch {
+      // Any failure — decrypt, tokenhub network/auth — is collapsed to one message.
+      return c.json({ error: LOGIN_FAIL }, 401);
+    }
   });
 
   // POST /logout — best-effort, no auth check needed
@@ -55,7 +69,7 @@ export function createAuthRoutes(service: AgentService): Hono {
     if (!user) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    return c.json(user);
+    return c.json(toPublicUser(user));
   });
 
   return app;
