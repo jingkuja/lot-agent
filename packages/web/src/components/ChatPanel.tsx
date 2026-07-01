@@ -17,6 +17,8 @@ interface ChatPanelProps {
   onSelectForPreview?: (content: string) => void;
   /** Current agent (for the empty-state hero). */
   agent?: Agent | null;
+  /** Content rendered directly above the input box (agent switcher). */
+  inputAbove?: React.ReactNode;
   /** Current user's name (for the empty-state greeting). */
   userName?: string;
   /** Per-user model catalog (llm/image/video) for the model picker. */
@@ -42,6 +44,7 @@ export function ChatPanel({
   onRegenerate,
   onSelectForPreview,
   agent,
+  inputAbove,
   userName,
   modelCatalog,
   selectedModel,
@@ -83,6 +86,7 @@ export function ChatPanel({
 
   const inputEl = (
     <>
+      {inputAbove && <div className="input-switcher">{inputAbove}</div>}
       <InputBox
         onSend={onSend}
         onStop={onStop}

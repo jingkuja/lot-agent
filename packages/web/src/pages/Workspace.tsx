@@ -5,6 +5,7 @@ import { BrandHeader } from "../components/BrandHeader.js";
 import { PreviewPanel } from "../components/PreviewPanel.js";
 import { ArtifactGallery, type Artifact } from "../components/ArtifactGallery.js";
 import { AgentCenterModal } from "../components/AgentCenterModal.js";
+import { AgentSwitcher } from "../components/AgentSwitcher.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
@@ -18,7 +19,7 @@ interface WorkspaceProps {
 }
 
 export function Workspace({ user, onLogout }: WorkspaceProps) {
-  const { agents, installed, install, uninstall } = useAgents(true);
+  const { agents, installed, install, uninstall, promote } = useAgents(true);
 
   // 已安装 agents;general 恒第一(仅用于 Sidebar 标签映射等需要全序的场景)。
   const orderedAgents = useMemo(() => {
@@ -29,7 +30,6 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
 
   const defaultAgentId = orderedAgents[0]?.id ?? GENERAL_ID;
   const [activeAgentId, setActiveAgentId] = useState(defaultAgentId);
-  const activeAgent = agents.find((a) => a.id === activeAgentId) ?? null;
 
   // newAgentId: page-only "new chat" state. No server conversation exists yet.
   // null = viewing a real conversation; string = pending new chat for that agent.
@@ -47,6 +47,15 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     updateTitle,
     addLocal,
   } = useConversations();
+
+  // The agent of the chat currently on screen (drives the panel/input/model),
+  // decoupled from activeAgentId which only highlights the tab + filters the list.
+  const openAgentId =
+    newAgentId ??
+    conversations.find((c) => c.id === activeId)?.agent_id ??
+    defaultAgentId;
+  const openAgent = agents.find((a) => a.id === openAgentId) ?? null;
+
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -91,21 +100,25 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
 
   const handleSwitchAgent = useCallback(
     (agentId: string) => {
-      if (agentId === activeAgentId && !newAgentId && messages.length === 0) return;
       if (newAgentId) {
-        // Already in new-chat mode — just switch the agent.
+        // Empty/new-chat hero: nothing committed — retarget the pending chat.
         setNewAgentId(agentId);
         setActiveAgentId(agentId);
         return;
       }
-      // Enter new-chat mode for the new agent.
-      setNewAgentId(agentId);
+      // A real conversation is open: only re-highlight + filter the sidebar.
+      // Do NOT touch activeId / messages / preview — the chat stays on screen.
       setActiveAgentId(agentId);
-      setActiveId(null);
-      clear();
-      setPreviewContent(null);
     },
-    [activeAgentId, newAgentId, messages.length, setActiveId, clear]
+    [newAgentId]
+  );
+
+  const handlePickOverflow = useCallback(
+    async (agentId: string) => {
+      await promote(agentId); // 移到子 Agent 首位,持久化 sortOrder
+      handleSwitchAgent(agentId);
+    },
+    [promote, handleSwitchAgent]
   );
 
   const handleSelect = useCallback(
@@ -125,16 +138,19 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
 
   const handleCreate = useCallback(() => {
     if (newAgentId) return; // already in new-chat mode
-    setNewAgentId(activeAgentId);
+    // New chat uses the open conversation's agent (not the highlighted tab);
+    // highlight + filter follow it.
+    setNewAgentId(openAgentId);
+    setActiveAgentId(openAgentId);
     setActiveId(null);
     clear();
     setPreviewContent(null);
-  }, [newAgentId, activeAgentId, setActiveId, clear]);
+  }, [newAgentId, openAgentId, setActiveId, clear]);
 
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
     async (content: string, files: File[] = [], settings?: unknown) => {
-      const kind = activeAgent?.type || activeAgent?.id;
+      const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
           generateMedia(content, kind as "image" | "video", settings, files, selectedModel ?? undefined);
@@ -156,7 +172,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       }
       dispatch();
     },
-    [newAgentId, setActiveId, addLocal, send, generateMedia, activeAgent, selectedModel]
+    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModel]
   );
 
   const handleDelete = useCallback(
@@ -259,11 +275,20 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             onRegenerate={regenerate}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
             onSelectForPreview={
-              activeAgent?.type === "copywriting" || activeAgent?.id === "copywriting"
+              openAgent?.type === "copywriting" || openAgent?.id === "copywriting"
                 ? setPreviewContent
                 : undefined
             }
-            agent={activeAgent}
+            agent={openAgent}
+            inputAbove={
+              <AgentSwitcher
+                agents={installed}
+                activeId={activeAgentId}
+                onSwitch={handleSwitchAgent}
+                onPickOverflow={handlePickOverflow}
+                disabled={isStreaming}
+              />
+            }
             userName={user.name}
             modelCatalog={modelCatalog}
             selectedModel={selectedModel}
