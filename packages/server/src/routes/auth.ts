@@ -1,8 +1,15 @@
 import { Hono } from "hono";
 import type { AgentService } from "../services/agent-service.js";
+import { generateRsaKeypair } from "../auth/rsa.js";
+
+// Ephemeral per-process keypair used to decrypt login passwords.
+const keypair = generateRsaKeypair();
 
 export function createAuthRoutes(service: AgentService): Hono {
   const app = new Hono();
+
+  // GET /public-key — public; browser fetches this to encrypt the password.
+  app.get("/public-key", (c) => c.json({ publicKey: keypair.publicKeyPem }));
 
   // POST /login — public, no auth required
   app.post("/login", async (c) => {
