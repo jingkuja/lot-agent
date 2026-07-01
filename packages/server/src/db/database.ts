@@ -1,4 +1,10 @@
 import pg from "pg";
+import {
+  DEFAULT_INSTALLED_AGENT_IDS,
+  GENERAL_AGENT_ID,
+  nextSortOrder,
+  promotedSortOrder,
+} from "../agents/install-order.js";
 
 export interface Conversation {
   id: string;
@@ -518,6 +524,19 @@ export class DB {
 
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_publish_user ON publish_records (user_id, created_at DESC);
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_agents (
+          user_id      VARCHAR(100)     NOT NULL,
+          agent_id     VARCHAR(64)      NOT NULL,
+          sort_order   DOUBLE PRECISION NOT NULL DEFAULT 0,
+          installed_at TIMESTAMPTZ      NOT NULL DEFAULT now(),
+          PRIMARY KEY (user_id, agent_id)
+        );
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_user_agents_user ON user_agents (user_id, sort_order);
       `);
 
       await client.query("COMMIT");
@@ -1155,6 +1174,73 @@ export class DB {
       [userId]
     );
     return Number(rows[0].total);
+  }
+
+  // ── User agents (Agent 中心) ──
+
+  async getUserAgents(userId: string): Promise<Map<string, number>> {
+    const read = async () =>
+      (
+        await this.pool.query(
+          `SELECT agent_id, sort_order FROM user_agents
+           WHERE user_id = $1 ORDER BY sort_order ASC`,
+          [userId]
+        )
+      ).rows;
+
+    let rows = await read();
+    if (rows.length === 0) {
+      // 懒播种默认安装集(general/image/video),sort_order 按数组下标。
+      for (let i = 0; i < DEFAULT_INSTALLED_AGENT_IDS.length; i++) {
+        await this.pool.query(
+          `INSERT INTO user_agents (user_id, agent_id, sort_order) VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, agent_id) DO NOTHING`,
+          [userId, DEFAULT_INSTALLED_AGENT_IDS[i], i]
+        );
+      }
+      rows = await read();
+    }
+    return new Map(rows.map((r) => [r.agent_id as string, Number(r.sort_order)]));
+  }
+
+  async installUserAgent(userId: string, agentId: string): Promise<void> {
+    const { rows } = await this.pool.query(
+      `SELECT sort_order FROM user_agents WHERE user_id = $1`,
+      [userId]
+    );
+    const order = nextSortOrder(rows.map((r) => Number(r.sort_order)));
+    await this.pool.query(
+      `INSERT INTO user_agents (user_id, agent_id, sort_order) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, agent_id) DO NOTHING`,
+      [userId, agentId, order]
+    );
+  }
+
+  async uninstallUserAgent(userId: string, agentId: string): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM user_agents WHERE user_id = $1 AND agent_id = $2`,
+      [userId, agentId]
+    );
+  }
+
+  async promoteUserAgent(userId: string, agentId: string): Promise<void> {
+    const { rows } = await this.pool.query(
+      `SELECT sort_order FROM user_agents WHERE user_id = $1 AND agent_id <> $2`,
+      [userId, GENERAL_AGENT_ID]
+    );
+    const order = promotedSortOrder(rows.map((r) => Number(r.sort_order)));
+    await this.pool.query(
+      `UPDATE user_agents SET sort_order = $3 WHERE user_id = $1 AND agent_id = $2`,
+      [userId, agentId, order]
+    );
+  }
+
+  async isUserAgentInstalled(userId: string, agentId: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM user_agents WHERE user_id = $1 AND agent_id = $2`,
+      [userId, agentId]
+    );
+    return rows.length > 0;
   }
 
   // ── Tasks ──
