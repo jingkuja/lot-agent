@@ -2316,3 +2316,33 @@ html, body, #root {
   box-shadow: var(--shadow-md);
 }
 .gen-asset-download svg { width: 15px; height: 15px; }
+
+/* ── Agent overflow (更多) popover ─────────────────────────────────────── */
+.agent-more-wrap { position: relative; display: inline-flex; }
+.agent-overflow-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 160px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: var(--shadow-lg);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-overflow-item {
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+}
+.agent-overflow-item:hover { background: var(--bg-hover); }
+.agent-overflow-item.active { color: var(--accent); font-weight: 600; }
