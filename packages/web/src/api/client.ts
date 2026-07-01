@@ -54,6 +54,9 @@ export interface Agent {
   defaultModelId: string;
   toolNames: string[];
   inputSchema?: unknown;
+  category?: string;
+  installed?: boolean;
+  sortOrder?: number | null;
 }
 
 export interface User {
@@ -154,6 +157,12 @@ export const api = {
 
   // ── Agents ──────────────────────────────────────────────────────────────────
   listAgents: () => request<Agent[]>("/agents"),
+  installAgent: (id: string) =>
+    request<{ ok: true }>(`/agents/${id}/install`, { method: "POST" }),
+  uninstallAgent: (id: string) =>
+    request<{ ok: true }>(`/agents/${id}/install`, { method: "DELETE" }),
+  promoteAgent: (id: string) =>
+    request<{ ok: true }>(`/agents/${id}/promote`, { method: "POST" }),
 
   // ── Conversations ───────────────────────────────────────────────────────────
   listConversations: (limit: number, cursor?: string) =>
