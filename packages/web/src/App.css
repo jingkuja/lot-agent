@@ -2401,3 +2401,22 @@ html, body, #root {
   transition: border-color 0.12s, color 0.12s;
 }
 .brand-agent-center-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Model picker (bottom-right of the input box) ── */
+.model-popup { min-width: 260px; max-width: 320px; }
+.model-search {
+  width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--overlay-sink); color: var(--text); font-size: 13px;
+}
+.model-list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.model-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 10px; border-radius: 8px; background: transparent; border: none;
+  cursor: pointer; text-align: left; color: var(--text);
+}
+.model-row:hover { background: var(--overlay-raise); }
+.model-row.active { background: var(--overlay-raise); }
+.model-row-name { font-size: 13px; font-weight: 500; }
+.model-row-desc { font-size: 12px; color: var(--text-muted); }
+.model-empty { padding: 12px; color: var(--text-muted); font-size: 13px; text-align: center; }
