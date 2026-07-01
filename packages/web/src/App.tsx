@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Login } from "./components/Login.js";
 import { Workspace } from "./pages/Workspace.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
-import { api, getToken, clearToken, type User, type Agent } from "./api/client.js";
+import { api, getToken, clearToken, type User } from "./api/client.js";
 import "./App.css";
 
 type View = "loading" | "login" | "ready";
@@ -10,16 +10,10 @@ type View = "loading" | "login" | "ready";
 export default function App() {
   const [view, setView] = useState<View>("loading");
   const [user, setUser] = useState<User | null>(null);
-  const [agents, setAgents] = useState<Agent[]>([]);
 
-  // Authenticated → load agents and go straight to the workspace (general agent).
+  // Authenticated → go straight to the workspace (agents managed inside Workspace).
   const enter = useCallback(async (u: User) => {
     setUser(u);
-    try {
-      setAgents(await api.listAgents());
-    } catch {
-      setAgents([]);
-    }
     setView("ready");
   }, []);
 
@@ -43,7 +37,6 @@ export default function App() {
   useEffect(() => {
     const handler = () => {
       setUser(null);
-      setAgents([]);
       setView("login");
     };
     window.addEventListener("lot:unauthorized", handler);
@@ -60,7 +53,6 @@ export default function App() {
     }
     clearToken();
     setUser(null);
-    setAgents([]);
     setView("login");
   }, []);
 
@@ -72,7 +64,7 @@ export default function App() {
       </div>
     );
   } else if (view === "ready" && user) {
-    content = <Workspace agents={agents} user={user} onLogout={handleLogout} />;
+    content = <Workspace user={user} onLogout={handleLogout} />;
   } else {
     content = <Login onLogin={handleLogin} />;
   }
