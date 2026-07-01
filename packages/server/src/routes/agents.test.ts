@@ -64,6 +64,11 @@ describe("agents routes", () => {
     expect(svc.db.uninstallUserAgent).toHaveBeenCalledWith("u1", "image");
   });
 
+  it("POST promote unknown id -> 404", async () => {
+    const res = await app(fakeService(new Map())).request("/agents/nope/promote", { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+
   it("POST promote not-installed -> 400", async () => {
     const res = await app(fakeService(new Map())).request("/agents/contract/promote", { method: "POST" });
     expect(res.status).toBe(400);
