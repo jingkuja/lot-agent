@@ -28,6 +28,7 @@ import { createDocTool } from "../tools/doc-tool.js";
 import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
+import type { ModelCatalogConfig } from "../models/catalog.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -68,6 +69,7 @@ const DISABLED_HOST_TOOLS = new Set([
 export interface ServiceConfig {
   llm: LLMConfig;
   models: ModelConfig[];
+  modelCatalog: ModelCatalogConfig;
   agent: Partial<AgentConfig>;
   mcpConfigPath: string;
   skillsDir: string;
@@ -101,6 +103,10 @@ export class AgentService {
   /** External token/model platform client (login + model catalog). */
   readonly tokenhub: TokenhubClient;
   readonly tokenhubBaseUrl: string;
+  /** Per-model provider/pricing config for the dynamic catalog. */
+  readonly modelCatalog: ModelCatalogConfig;
+  /** Shared Redis connection (also caches the per-user model catalog). */
+  redis!: import("ioredis").Redis;
   /** Whether each media type's configured provider reports intermediate progress
    * (drives whether the UI shows a generation percentage). */
   generationSupportsProgress: { image: boolean; video: boolean } = { image: true, video: true };
@@ -135,6 +141,7 @@ export class AgentService {
     this.agentConfig = config.agent;
     this.mcpConfigPath = config.mcpConfigPath;
     this.skillsDir = config.skillsDir;
+    this.modelCatalog = config.modelCatalog;
     this.tokenhubBaseUrl =
       process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market";
     this.tokenhub = new TokenhubClient(this.tokenhubBaseUrl);
@@ -147,6 +154,7 @@ export class AgentService {
 
     // Initialize job queue (server enqueues; separate Worker process consumes)
     const conn = createRedisConnection(process.env.REDIS_URL);
+    this.redis = conn;
     this.bullmqQueue = new BullmqJobQueue(this.db, conn);
     this.jobQueue = this.bullmqQueue;
 

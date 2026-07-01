@@ -15,6 +15,7 @@ import { createRatingRoutes } from "./routes/ratings.js";
 import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
+import { createModelRoutes } from "./routes/models.js";
 import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes } from "./routes/usage.js";
@@ -52,7 +53,11 @@ async function loadConfig(): Promise<ServiceConfig> {
   const llm = await loadLlmConfig(ROOT);
 
   const configPath = resolve(ROOT, "config/default.json");
-  const config = AppConfigSchema.parse(JSON.parse(await readFile(configPath, "utf-8")));
+  const raw = JSON.parse(await readFile(configPath, "utf-8"));
+  const config = AppConfigSchema.parse(raw);
+  // `modelCatalog` is read directly from the raw JSON (like `generation`) since
+  // AppConfigSchema strips unknown keys.
+  const modelCatalog = (raw as { modelCatalog: ServiceConfig["modelCatalog"] }).modelCatalog;
 
   const pgPassword = process.env.PG_PASSWORD;
   if (!pgPassword) throw new Error("PG_PASSWORD is required");
@@ -60,6 +65,7 @@ async function loadConfig(): Promise<ServiceConfig> {
   return {
     llm,
     models: config.models ?? [],
+    modelCatalog,
     agent: config.agent as ServiceConfig["agent"],
     mcpConfigPath: resolve(ROOT, "config/mcp-servers.json"),
     skillsDir: resolve(ROOT, "skills"),
@@ -106,6 +112,8 @@ async function main() {
   app.use("/api/memory/*", authMw);
   app.use("/api/agents", authMw);
   app.use("/api/agents/*", authMw);
+  app.use("/api/models", authMw);
+  app.use("/api/models/*", authMw);
   app.use("/api/tasks/*", authMw);
   app.use("/api/assets/*", authMw);
   app.use("/api/uploads/*", authMw);
@@ -122,6 +130,7 @@ async function main() {
   app.route("/api/ratings", createRatingRoutes(service));
   app.route("/api/memory", createMemoryRoutes(service));
   app.route("/api/agents", createAgentRoutes(service));
+  app.route("/api/models", createModelRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));
