@@ -61,8 +61,8 @@ export interface Agent {
 
 export interface User {
   id: string;
-  email: string;
   name: string;
+  username: string | null;
 }
 
 export interface TaskStatus {
@@ -144,10 +144,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   // ── Auth ────────────────────────────────────────────────────────────────────
-  login: (email: string, name?: string) =>
+  getPublicKey: () => request<{ publicKey: string }>("/auth/public-key"),
+
+  login: (username: string, encryptedPassword: string) =>
     request<{ token: string; user: User }>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, name }),
+      body: JSON.stringify({ username, encryptedPassword }),
     }),
 
   logout: () =>

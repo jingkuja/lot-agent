@@ -62,8 +62,8 @@ export function BrandHeader({ user, onLogout, onCreate, onCollapse, onOpenAgentC
       <div className="brand-actions">
         <div className="brand-account">
           {user && (
-            <span className="brand-email" title={user.email}>
-              {user.email}
+            <span className="brand-email" title={user.name ?? user.username ?? ""}>
+              {user.name ?? user.username ?? ""}
             </span>
           )}
           {user && onLogout && (
