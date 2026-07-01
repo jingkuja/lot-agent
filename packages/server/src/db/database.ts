@@ -122,9 +122,12 @@ export interface StoredUsageLog {
 
 export interface StoredUser {
   id: string;
-  email: string;
+  email: string | null;
   name: string | null;
   created_at: string;
+  external_user_id?: number | null;
+  username?: string | null;
+  api_key?: string | null;
 }
 
 export interface UserBalance {
@@ -448,6 +451,14 @@ export class DB {
           name       VARCHAR(255),
           created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
         );
+      `);
+
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS external_user_id BIGINT;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key TEXT;
+        ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external ON users (external_user_id);
       `);
 
       await client.query(`
@@ -973,6 +984,30 @@ export class DB {
       [id]
     );
     return rows[0] ?? null;
+  }
+
+  async upsertUserByExternalId(args: {
+    externalUserId: number;
+    username: string;
+    apiKey: string;
+  }): Promise<StoredUser> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO users (external_user_id, username, name, api_key, email)
+         VALUES ($1, $2, $2, $3, $4)
+       ON CONFLICT (external_user_id)
+         DO UPDATE SET username = $2, api_key = $3
+       RETURNING *`,
+      [args.externalUserId, args.username, args.apiKey, `${args.username}@tokenhub.local`]
+    );
+    return rows[0];
+  }
+
+  async getUserApiKey(userId: string): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      "SELECT api_key FROM users WHERE id = $1",
+      [userId]
+    );
+    return rows[0]?.api_key ?? null;
   }
 
   // ── Sessions ──
