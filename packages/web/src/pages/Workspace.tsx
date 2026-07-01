@@ -29,7 +29,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
 
   const defaultAgentId = orderedAgents[0]?.id ?? GENERAL_ID;
   const [activeAgentId, setActiveAgentId] = useState(defaultAgentId);
-  const activeAgent = orderedAgents.find((a) => a.id === activeAgentId) ?? null;
+  const activeAgent = agents.find((a) => a.id === activeAgentId) ?? null;
 
   // newAgentId: page-only "new chat" state. No server conversation exists yet.
   // null = viewing a real conversation; string = pending new chat for that agent.
@@ -234,7 +234,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
         />
         <Sidebar
           conversations={sidebarConversations}
-          agents={orderedAgents}
+          agents={agents}
           activeId={newAgentId ? "__new__" : activeId}
           onSelect={handleSelect}
           onDelete={handleDelete}
