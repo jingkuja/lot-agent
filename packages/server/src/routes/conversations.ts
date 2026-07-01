@@ -137,7 +137,7 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "Not found" }, 404);
     }
 
-    const body = await c.req.json<{ content: string; attachments?: AttachmentRef[] }>();
+    const body = await c.req.json<{ content: string; attachments?: AttachmentRef[]; modelId?: string }>();
     if (!body.content && !(body.attachments && body.attachments.length)) {
       return c.json({ error: "content or attachments required" }, 400);
     }
@@ -188,7 +188,8 @@ export function createConversationRoutes(service: AgentService): Hono {
             conversation.agent_id,
             userId,
             attachments,
-            c.req.raw.signal
+            c.req.raw.signal,
+            { modelId: body.modelId }
           )) {
             send(agentEventToSse(event));
           }

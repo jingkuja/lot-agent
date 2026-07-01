@@ -685,6 +685,14 @@ export class DB {
     );
   }
 
+  /** Persist the per-conversation selected model (reuses the `model` column). */
+  async setConversationModel(id: string, modelId: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE conversations SET model = $1 WHERE id = $2",
+      [modelId, id]
+    );
+  }
+
   // ── Messages ──
 
   async addMessage(

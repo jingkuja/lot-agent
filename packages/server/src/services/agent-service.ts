@@ -26,9 +26,10 @@ import {
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
 import { staticPrefix } from "../util/public-base.js";
-import { loadGenerationConfig, mediaSupportsProgress } from "../generation/config.js";
+import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
 import type { ModelCatalogConfig } from "../models/catalog.js";
+import { ProviderFactory } from "../models/provider-factory.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -65,6 +66,16 @@ const DISABLED_HOST_TOOLS = new Set([
   "search_files",
   "execute_command",
 ]);
+
+/** Which model a chat turn runs on: an explicit per-request pick wins, then the
+ * conversation's stored model, then the agent's configured default. */
+export function resolveConversationModel(
+  explicit: string | undefined,
+  conversationModelId: string | null | undefined,
+  agentDefault: string
+): string {
+  return explicit ?? conversationModelId ?? agentDefault;
+}
 
 export interface ServiceConfig {
   llm: LLMConfig;
@@ -107,6 +118,10 @@ export class AgentService {
   readonly modelCatalog: ModelCatalogConfig;
   /** Shared Redis connection (also caches the per-user model catalog). */
   redis!: import("ioredis").Redis;
+  /** Resolved image/video generation config (base url/adapter per media type). */
+  generationConfig!: GenerationConfig;
+  /** Builds per-user LLM/image/video providers bound to a caller's api_key. */
+  providerFactory!: ProviderFactory;
   /** Whether each media type's configured provider reports intermediate progress
    * (drives whether the UI shows a generation percentage). */
   generationSupportsProgress: { image: boolean; video: boolean } = { image: true, video: true };
@@ -181,10 +196,18 @@ export class AgentService {
     // Resolve per-media-type progress capability from the generation config so
     // the generation route can tell the client whether to show a percentage.
     const genConfig = await loadGenerationConfig(root);
+    this.generationConfig = genConfig;
     this.generationSupportsProgress = {
       image: mediaSupportsProgress(genConfig.image),
       video: mediaSupportsProgress(genConfig.video),
     };
+    // Per-user provider factory: model calls use the caller's tokenhub api_key.
+    this.providerFactory = new ProviderFactory({
+      catalog: this.modelCatalog,
+      llmBaseUrl: this.llmConfig.openai.baseUrl ?? this.tokenhubBaseUrl,
+      imageBase: genConfig.image,
+      videoBase: genConfig.video,
+    });
 
     // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
     this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), staticPrefix("/static/uploads"));
@@ -332,7 +355,8 @@ export class AgentService {
     agentId?: string,
     userId?: string,
     attachments?: AttachmentRef[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    opts?: { modelId?: string }
   ): AsyncIterable<AgentEvent> {
     const def =
       this.agentRegistry.get(agentId ?? "general") ??
@@ -358,7 +382,21 @@ export class AgentService {
       (s) => `[Skill: ${s.name}]\n${s.content}`
     );
 
-    const llm = this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider();
+    // Resolve the model for this turn (explicit pick > stored > agent default),
+    // persist an explicit pick, and build the LLM with the caller's tokenhub key.
+    // Falls back to the shared registry provider when the user has no api_key
+    // (e.g. local/dev without tokenhub) so the chat path still runs.
+    const conversation = await this.db.getConversation(conversationId);
+    if (opts?.modelId) await this.db.setConversationModel(conversationId, opts.modelId);
+    const modelId = resolveConversationModel(
+      opts?.modelId,
+      conversation?.model,
+      def.defaultModelId
+    );
+    const apiKey = userId ? await this.db.getUserApiKey(userId) : null;
+    const llm = apiKey
+      ? this.providerFactory.llm(modelId, apiKey)
+      : (this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider());
     const agentConfig = this.agentConfig as Record<string, unknown>;
     const contextConfig = agentConfig.context as import("@lot-agent/core").ContextManagerConfig | undefined;
     const agent = new Agent({
