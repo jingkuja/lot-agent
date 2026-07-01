@@ -4,7 +4,6 @@ import { ChatPanel } from "../components/ChatPanel.js";
 import { BrandHeader } from "../components/BrandHeader.js";
 import { PreviewPanel } from "../components/PreviewPanel.js";
 import { ArtifactGallery, type Artifact } from "../components/ArtifactGallery.js";
-import { AgentSwitcher } from "../components/AgentSwitcher.js";
 import { AgentCenterModal } from "../components/AgentCenterModal.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
@@ -19,7 +18,7 @@ interface WorkspaceProps {
 }
 
 export function Workspace({ user, onLogout }: WorkspaceProps) {
-  const { agents, installed, install, uninstall, promote } = useAgents(true);
+  const { agents, installed, install, uninstall } = useAgents(true);
 
   // 已安装 agents;general 恒第一(仅用于 Sidebar 标签映射等需要全序的场景)。
   const orderedAgents = useMemo(() => {
@@ -107,14 +106,6 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       setPreviewContent(null);
     },
     [activeAgentId, newAgentId, messages.length, setActiveId, clear]
-  );
-
-  const handlePickOverflow = useCallback(
-    async (agentId: string) => {
-      await promote(agentId);   // 移到子 Agent 首位(整体第二位),持久化
-      handleSwitchAgent(agentId);
-    },
-    [promote, handleSwitchAgent]
   );
 
   const handleSelect = useCallback(
@@ -211,24 +202,16 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     [uninstall, activeAgentId, setActiveId, clear]
   );
 
-  // Sidebar list: prepend a virtual "新对话" entry when in new-chat mode.
+  // Sidebar list: filtered to the active agent; prepend a virtual "新对话" entry
+  // when in new-chat mode (its agent_id equals activeAgentId, so it passes the filter).
   const sidebarConversations = useMemo(() => {
-    if (!newAgentId) return conversations;
+    const filtered = conversations.filter((c) => c.agent_id === activeAgentId);
+    if (!newAgentId) return filtered;
     return [
       { id: "__new__", title: "新对话", agent_id: newAgentId, created_at: "", updated_at: "" },
-      ...conversations,
+      ...filtered,
     ];
-  }, [newAgentId, conversations]);
-
-  const switcher = (
-    <AgentSwitcher
-      agents={installed}
-      activeId={activeAgentId}
-      onSwitch={handleSwitchAgent}
-      onPickOverflow={handlePickOverflow}
-      disabled={isStreaming}
-    />
-  );
+  }, [newAgentId, conversations, activeAgentId]);
 
   return (
     <div className="workspace">
@@ -241,7 +224,10 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
         />
         <Sidebar
           conversations={sidebarConversations}
-          agents={agents}
+          installedAgents={installed}
+          activeAgentId={activeAgentId}
+          onSwitchAgent={handleSwitchAgent}
+          switchDisabled={isStreaming}
           activeId={newAgentId ? "__new__" : activeId}
           onSelect={handleSelect}
           onDelete={handleDelete}
@@ -271,7 +257,6 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             isStreaming={isStreaming}
             activeConversationId={activeId}
             onRegenerate={regenerate}
-            inputAbove={switcher}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
             onSelectForPreview={
               activeAgent?.type === "copywriting" || activeAgent?.id === "copywriting"

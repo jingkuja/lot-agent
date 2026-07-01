@@ -13,8 +13,6 @@ interface ChatPanelProps {
   isStreaming: boolean;
   activeConversationId: string | null;
   onRegenerate?: () => void;
-  /** Content rendered directly above the input box (agent switcher). */
-  inputAbove?: React.ReactNode;
   /** Called when an assistant reply is clicked, to open the preview. */
   onSelectForPreview?: (content: string) => void;
   /** Current agent (for the empty-state hero). */
@@ -42,7 +40,6 @@ export function ChatPanel({
   onStop,
   isStreaming,
   onRegenerate,
-  inputAbove,
   onSelectForPreview,
   agent,
   userName,
@@ -86,7 +83,6 @@ export function ChatPanel({
 
   const inputEl = (
     <>
-      {inputAbove && <div className="input-switcher">{inputAbove}</div>}
       <InputBox
         onSend={onSend}
         onStop={onStop}
