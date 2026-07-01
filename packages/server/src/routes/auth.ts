@@ -7,6 +7,7 @@ import { toPublicUser } from "../db/user-sanitize.js";
 const keypair = generateRsaKeypair();
 
 const LOGIN_FAIL = "登录失败，请稍后再试或者联系管理员";
+const NO_API_KEY = "请前往中转站创建 api-key";
 
 export function createAuthRoutes(service: AgentService): Hono {
   const app = new Hono();
@@ -29,6 +30,12 @@ export function createAuthRoutes(service: AgentService): Hono {
     try {
       const password = keypair.decrypt(encryptedPassword);
       const result = await service.tokenhub.login(username, password);
+      // Credentials were valid but the account has no model-calling key yet.
+      // Surface a distinct, actionable message (400, not the generic 401) so the
+      // client can show it instead of collapsing it to "登录失败".
+      if (!result.apiKey) {
+        return c.json({ error: NO_API_KEY }, 400);
+      }
       const user = await service.db.upsertUserByExternalId({
         externalUserId: result.userId,
         username: result.name,

@@ -44,6 +44,23 @@ describe("auth login", () => {
     expect(svc.tokenhub.login).toHaveBeenCalledWith("138", "pw");
   });
 
+  it("fails with a create-api-key message when tokenhub returns an empty api_key", async () => {
+    const svc = fakeService();
+    (svc.tokenhub.login as ReturnType<typeof vi.fn>).mockResolvedValue({
+      userId: 2, name: "138", apiKey: "",
+    });
+    const app = createAuthRoutes(svc);
+    const encryptedPassword = await encryptFor(app, "pw");
+    const res = await app.request("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "138", encryptedPassword }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("请前往中转站创建 api-key");
+    expect(svc.db.upsertUserByExternalId).not.toHaveBeenCalled();
+  });
+
   it("returns generic 401 when tokenhub login fails", async () => {
     const svc = fakeService();
     (svc.tokenhub.login as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("tokenhub_login_failed"));
