@@ -2,6 +2,14 @@ export const GENERAL_ID = "general";
 
 export const AGENT_TAB_WINDOW = 2;
 
+export const MAX_VISIBLE_SUBAGENTS = 6;
+
+export interface SplitAgents<T> {
+  general: T | null;
+  visible: T[];
+  overflow: T[];
+}
+
 export interface AgentTabView<T> {
   general: T | null;
   visible: T[];
@@ -40,5 +48,22 @@ export function windowSubAgents<T extends { id: string; sortOrder?: number | nul
     windowStart: start,
     canPrev: start > 0,
     canNext: start + AGENT_TAB_WINDOW < subs.length,
+  };
+}
+
+/** 传入已安装 agents:抽出 general,子 Agent 按 sortOrder 升序(null 最后),
+ *  前 MAX_VISIBLE_SUBAGENTS 个可见,其余进溢出。 */
+export function splitInstalledAgents<T extends { id: string; sortOrder?: number | null }>(
+  installed: T[]
+): SplitAgents<T> {
+  const general = installed.find((a) => a.id === GENERAL_ID) ?? null;
+  const rank = (a: T) => (a.sortOrder == null ? Number.POSITIVE_INFINITY : a.sortOrder);
+  const subs = installed
+    .filter((a) => a.id !== GENERAL_ID)
+    .sort((a, b) => rank(a) - rank(b));
+  return {
+    general,
+    visible: subs.slice(0, MAX_VISIBLE_SUBAGENTS),
+    overflow: subs.slice(MAX_VISIBLE_SUBAGENTS),
   };
 }
