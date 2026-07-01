@@ -104,6 +104,7 @@ async function main() {
   app.use("/api/traces/*", authMw);
   app.use("/api/ratings/*", authMw);
   app.use("/api/memory/*", authMw);
+  app.use("/api/agents", authMw);
   app.use("/api/agents/*", authMw);
   app.use("/api/tasks/*", authMw);
   app.use("/api/assets/*", authMw);
