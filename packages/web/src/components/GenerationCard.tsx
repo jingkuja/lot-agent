@@ -84,7 +84,9 @@ export function GenerationCard({ generation }: { generation: GenerationView }) {
   const failed = status === "failed" || status === "completed";
   const label = failed
     ? LABELS[mediaType].fail
-    : `${mediaType === "video" ? "视频" : "图片"}生成中 ${generation.progress ?? 0}%`;
+    : generation.supportsProgress
+      ? `${mediaType === "video" ? "视频" : "图片"}生成中 ${generation.progress ?? 0}%`
+      : LABELS[mediaType].loading;
   return (
     <div className={`gen-card ${mediaType} ${failed ? "gen-card--failed" : "gen-card--loading"}`} title={error ?? undefined}>
       <MediaIcon mediaType={mediaType} />

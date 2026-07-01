@@ -12,11 +12,29 @@ const MAX_ATTACHMENTS = 5;
 export function createConversationRoutes(service: AgentService): Hono {
   const app = new Hono<{ Variables: Variables }>();
 
-  // List conversations — scoped to current user
+  // List conversations — scoped to current user, keyset-paginated (latest
+  // first) over updated_at. ?limit=20&cursor=<id> ; the cursor is the id of the
+  // last row from the previous page. Omitting limit returns the full list
+  // (back-compat).
   app.get("/", async (c) => {
     const userId = c.get("userId");
-    const conversations = await service.db.listConversations(userId);
-    return c.json(conversations);
+    const limitRaw = c.req.query("limit");
+    if (limitRaw == null) {
+      const conversations = await service.db.listConversations(userId);
+      return c.json(conversations);
+    }
+    const limit = Number(limitRaw);
+    if (!Number.isFinite(limit)) {
+      return c.json({ error: "limit must be a number" }, 400);
+    }
+    const clamped = Math.min(Math.max(Math.trunc(limit), 1), 100);
+    const cursorId = c.req.query("cursor") || undefined;
+    const items = await service.db.listConversations(userId, { limit: clamped, cursorId });
+    // nextCursor: id of the last row when a full page came back (more may
+    // exist); null once a short page signals the end.
+    const nextCursor =
+      items.length === clamped ? (items[items.length - 1] as { id: string }).id : null;
+    return c.json({ items, nextCursor });
   });
 
   // Create conversation — owned by current user
@@ -243,7 +261,7 @@ export function createGenerationRoutes(service: AgentService) {
     const type = mediaType === "image" ? "image.generate" : "video.generate";
 
     // Quota pre-check (mirrors the /tasks route).
-    const modelId = mediaType === "image" ? "wanx-standard" : "kling-standard";
+    const modelId = mediaType === "image" ? "gpt-image-2-token" : "kling-standard";
     const unit = service.modelRegistry.getConfig(modelId)?.unitPrice ?? 0;
     const durationSec = Number(settings.durationSec ?? 5);
     const estimatedCost = mediaType === "image" ? unit * Number(settings.n ?? 1) : unit * durationSec;
@@ -257,7 +275,8 @@ export function createGenerationRoutes(service: AgentService) {
     // Persist pending assistant generation message (status forced to
     // 'generating'; the DB column defaults to 'completed').
     const assistantMessageId = randomUUID();
-    const baseMeta = { kind: "generation", mediaType, prompt, settings };
+    const supportsProgress = service.generationSupportsProgress[mediaType];
+    const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress };
     await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
       metadata: { ...baseMeta, status: "generating" },
       model: modelId,
@@ -273,11 +292,22 @@ export function createGenerationRoutes(service: AgentService) {
     const metadata = { ...baseMeta, status: "generating", taskId };
     await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
 
+    // Auto-title the conversation from the prompt (first message only, gated
+    // inside generateTitle). The chat SSE path does this too; without it,
+    // image/video conversations stay stuck on the "新对话" placeholder.
+    let title: string | null = null;
+    try {
+      title = await service.generateTitle(conversationId, prompt, []);
+    } catch {
+      // title generation is best-effort
+    }
+
     return c.json(
       {
         userMessage: { id: userMessageId, role: "user", content: prompt },
         assistantMessage: { id: assistantMessageId, role: "assistant", status: "generating", metadata },
         taskId,
+        ...(title ? { title } : {}),
       },
       202
     );

@@ -54,6 +54,9 @@ export interface Agent {
   defaultModelId: string;
   toolNames: string[];
   inputSchema?: unknown;
+  category?: string;
+  installed?: boolean;
+  sortOrder?: number | null;
 }
 
 export interface User {
@@ -154,9 +157,18 @@ export const api = {
 
   // ── Agents ──────────────────────────────────────────────────────────────────
   listAgents: () => request<Agent[]>("/agents"),
+  installAgent: (id: string) =>
+    request<{ ok: true }>(`/agents/${id}/install`, { method: "POST" }),
+  uninstallAgent: (id: string) =>
+    request<{ ok: true }>(`/agents/${id}/install`, { method: "DELETE" }),
+  promoteAgent: (id: string) =>
+    request<{ ok: true }>(`/agents/${id}/promote`, { method: "POST" }),
 
   // ── Conversations ───────────────────────────────────────────────────────────
-  listConversations: () => request<Conversation[]>("/conversations"),
+  listConversations: (limit: number, cursor?: string) =>
+    request<{ items: Conversation[]; nextCursor: string | null }>(
+      `/conversations?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
 
   createConversation: (title?: string, agentId?: string) =>
     request<Conversation>("/conversations", {
@@ -285,9 +297,10 @@ export const api = {
         id: string;
         role: "assistant";
         status: string;
-        metadata: { mediaType: "image" | "video"; status: string; assets?: { url: string; mime: string; durationSec?: number }[]; error?: string };
+        metadata: { mediaType: "image" | "video"; status: string; supportsProgress?: boolean; assets?: { url: string; mime: string; durationSec?: number }[]; error?: string };
       };
       taskId: string;
+      title?: string;
     }>(`/conversations/${conversationId}/generations`, {
       method: "POST",
       body: JSON.stringify(body),

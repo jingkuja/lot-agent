@@ -1,11 +1,15 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
 import type { Agent } from "../api/client.js";
+import { splitInstalledAgents } from "../lib/agent-order.js";
+import { AgentOverflowPopover } from "./AgentOverflowPopover.js";
 
 interface AgentSwitcherProps {
-  /** Agents in display order (general is always first — caller guarantees). */
+  /** 已安装 agents(含 general);组件内部负责排序/截断。 */
   agents: Agent[];
   activeId: string;
   onSwitch: (agentId: string) => void;
+  onPickOverflow: (agentId: string) => void;
   disabled?: boolean;
 }
 
@@ -29,6 +33,18 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M10 9.5v5l4-2.5z" fill="currentColor" stroke="none" />
     </svg>
   ),
+  ppt: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="13" rx="2" />
+      <path d="M8 21h8M12 17v4" />
+    </svg>
+  ),
+  contract: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" />
+      <path d="M14 2v6h6M9 13l2 2 4-4" />
+    </svg>
+  ),
 };
 
 function kindOf(a: Agent): string {
@@ -36,27 +52,54 @@ function kindOf(a: Agent): string {
   return key in ICONS ? key : "general";
 }
 
-export function AgentSwitcher({ agents, activeId, onSwitch, disabled }: AgentSwitcherProps) {
+export function AgentSwitcher({ agents, activeId, onSwitch, onPickOverflow, disabled }: AgentSwitcherProps) {
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const { general, visible, overflow } = splitInstalledAgents(agents);
+  const pills = general ? [general, ...visible] : visible;
+
+  const renderPill = (a: Agent) => {
+    const kind = kindOf(a);
+    return (
+      <button
+        key={a.id}
+        type="button"
+        className={`agent-pill ${a.id === activeId ? "active" : ""}`}
+        onClick={() => onSwitch(a.id)}
+        disabled={disabled}
+        title={a.description}
+      >
+        <span className={`agent-pill-icon agent-pill-icon--${kind}`} aria-hidden>
+          {ICONS[kind]}
+        </span>
+        <span className="agent-pill-label">{a.name}</span>
+      </button>
+    );
+  };
+
   return (
     <div className="agent-switcher">
-      {agents.map((a) => {
-        const kind = kindOf(a);
-        return (
+      {pills.map(renderPill)}
+      {overflow.length > 0 && (
+        <div className="agent-more-wrap">
           <button
-            key={a.id}
             type="button"
-            className={`agent-pill ${a.id === activeId ? "active" : ""}`}
-            onClick={() => onSwitch(a.id)}
+            className="agent-pill agent-more"
+            onClick={() => setOverflowOpen((v) => !v)}
             disabled={disabled}
-            title={a.description}
+            title="更多已安装 Agent"
           >
-            <span className={`agent-pill-icon agent-pill-icon--${kind}`} aria-hidden>
-              {ICONS[kind]}
-            </span>
-            <span className="agent-pill-label">{a.name}</span>
+            <span className="agent-pill-label">更多</span>
           </button>
-        );
-      })}
+          {overflowOpen && (
+            <AgentOverflowPopover
+              agents={overflow}
+              activeId={activeId}
+              onPick={(id) => { setOverflowOpen(false); onPickOverflow(id); }}
+              onClose={() => setOverflowOpen(false)}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

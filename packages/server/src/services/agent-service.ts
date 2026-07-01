@@ -14,6 +14,8 @@ import {
   copywritingDefinition,
   imageDefinition,
   videoDefinition,
+  pptDefinition,
+  contractDefinition,
   InMemoryModelRegistry,
   populateModelRegistry,
   KeywordReviewProvider,
@@ -24,6 +26,7 @@ import {
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
 import { staticPrefix } from "../util/public-base.js";
+import { loadGenerationConfig, mediaSupportsProgress } from "../generation/config.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -94,6 +97,9 @@ export class AgentService {
   sessions!: SessionStore;
   jobQueue!: JobQueue;
   usageMeter!: UsageMeter;
+  /** Whether each media type's configured provider reports intermediate progress
+   * (drives whether the UI shows a generation percentage). */
+  generationSupportsProgress: { image: boolean; video: boolean } = { image: true, video: true };
   /** Storage for user-uploaded files, served at /static/uploads (separate from generated assets). */
   uploadStorage!: LocalStorage;
   private llmConfig: LLMConfig;
@@ -128,8 +134,9 @@ export class AgentService {
   }
 
   async init(): Promise<void> {
-    // Initialize database (runs migration)
-    await this.db.init();
+    // Server owns schema migration; the worker process does not migrate
+    // (see workers/index.ts) so DDL runs exactly once, from here.
+    await this.db.migrate();
 
     // Initialize job queue (server enqueues; separate Worker process consumes)
     const conn = createRedisConnection(process.env.REDIS_URL);
@@ -155,6 +162,14 @@ export class AgentService {
     // data/assets, which is reserved for image/video generation material.
     // Stays usable even though execute_command is disabled on the box.
     const root = dirname(this.skillsDir);
+
+    // Resolve per-media-type progress capability from the generation config so
+    // the generation route can tell the client whether to show a percentage.
+    const genConfig = await loadGenerationConfig(root);
+    this.generationSupportsProgress = {
+      image: mediaSupportsProgress(genConfig.image),
+      video: mediaSupportsProgress(genConfig.video),
+    };
 
     // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
     this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), staticPrefix("/static/uploads"));
@@ -227,6 +242,8 @@ export class AgentService {
     this.agentRegistry.register(copywritingDefinition);
     this.agentRegistry.register(imageDefinition);
     this.agentRegistry.register(videoDefinition);
+    this.agentRegistry.register(pptDefinition);
+    this.agentRegistry.register(contractDefinition);
   }
 
   private getLLMProvider(): import("@lot-agent/core").LLMProvider {

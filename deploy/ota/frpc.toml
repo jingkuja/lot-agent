@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────
+# frp 客户端配置（frp ≥ 0.52 TOML 格式）。
+# 复制为 /opt/lot-agent/ota/frpc.toml，由 frpc.service 加载。
+# 作用：建立到你方 frps 的反向隧道，供你方经隧道 SSH 进盒子排错/兜底。
+# 仅排错用途，不参与更新主流程。
+# ─────────────────────────────────────────────────────────────
+
+serverAddr = "frps.example.com"
+serverPort = 7000
+
+# 与 frps 共享的鉴权 token（仅你的盒子能建隧道）
+auth.method = "token"
+auth.token = "REPLACE_FRP_TOKEN"
+
+# 断线自动重连
+loginFailExit = false
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+
+# ── SSH 反向隧道：你方 `ssh -p 60022 user@frps.example.com` 即进本盒子 ──
+# remotePort 一盒一号（如 box-0001→60022, box-0002→60122…）避免冲突
+[[proxies]]
+name = "box-0001-ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 60022
+
+# ── （可选）web 直达，便于现场调试盒子内 UI ──
+[[proxies]]
+name = "box-0001-web"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 80
+remotePort = 60080

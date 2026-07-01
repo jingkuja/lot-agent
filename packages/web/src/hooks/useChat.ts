@@ -5,6 +5,10 @@ export interface GenerationView {
   mediaType: "image" | "video";
   status: "generating" | "completed" | "failed";
   progress?: number;
+  /** Whether the provider reports intermediate progress. When false (e.g. the
+   * synchronous chat-completions image provider) the UI shows a plain "生成中……"
+   * with no percentage. */
+  supportsProgress?: boolean;
   assets?: { url: string; mime: string; durationSec?: number }[];
   error?: string;
   taskId?: string;
@@ -51,8 +55,17 @@ export function useChat(
         if (token.cancelled) return;
         try {
           const t = await api.getTask(taskId);
-          failures = 0;
           if (token.cancelled) return;
+          // Guard against a malformed/unexpected response body (wrong shape,
+          // an error object served with 200, a proxy HTML page, etc.). Without
+          // this, an unknown `status` falls through to the progress branch and
+          // the loop polls forever instead of ever terminating. Route it through
+          // the failure budget so persistent bad responses fail the generation.
+          const known = ["pending", "running", "succeeded", "failed"];
+          if (!t || !known.includes(t.status)) {
+            throw new Error("任务状态返回格式异常");
+          }
+          failures = 0;
           if (t.status === "succeeded" || t.status === "failed") {
             const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
             setMessages((prev) =>
@@ -109,6 +122,7 @@ export function useChat(
           ? {
               mediaType: parsedMeta.mediaType as "image" | "video",
               status: (parsedMeta.status ?? "generating") as GenerationView["status"],
+              supportsProgress: parsedMeta.supportsProgress as boolean | undefined,
               assets: parsedMeta.assets,
               error: parsedMeta.error,
               taskId: parsedMeta.taskId as string | undefined,
@@ -345,6 +359,22 @@ export function useChat(
       const token = { cancelled: false };
       genPollRef.current = token;
 
+      // Optimistically render the user message + a "生成中" bubble immediately —
+      // before the reference-image upload and create request resolve — so the
+      // user sees "图片/视频生成中" right away instead of a stuck input box.
+      // The placeholders are reconciled with server ids once /generations returns
+      // (or flipped to "failed" if the request errors).
+      const tempUserId = `user-${Date.now()}`;
+      const tempGenId = `assistant-${Date.now()}`;
+      const userMsg: DisplayMessage = { id: tempUserId, role: "user", content: prompt };
+      const genMsg: DisplayMessage = {
+        id: tempGenId,
+        role: "assistant",
+        content: "",
+        generation: { mediaType, status: "generating", progress: 0 },
+      };
+      setMessages((prev) => [...prev, userMsg, genMsg]);
+
       (async () => {
         try {
           const imgs = files.filter((f) => f.type.startsWith("image/"));
@@ -352,20 +382,37 @@ export function useChat(
           const media = uploaded.map((u) => ({ type: "reference_image" as const, url: u.url }));
 
           const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined });
-          const userMsg: DisplayMessage = { id: res.userMessage.id, dbId: res.userMessage.id, role: "user", content: prompt };
-          const genMsg: DisplayMessage = {
-            id: res.assistantMessage.id,
-            dbId: res.assistantMessage.id,
-            role: "assistant",
-            content: "",
-            generation: { mediaType, status: "generating", progress: 0, taskId: res.taskId },
-          };
-          setMessages((prev) => [...prev, userMsg, genMsg]);
-          pollGeneration(res.taskId, genMsg.id, mediaType, token);
+          if (token.cancelled) return;
+          // Reconcile the optimistic placeholders with the server-assigned ids
+          // + vendor taskId, keeping the bubble in its "generating" state.
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id === tempUserId) return { ...m, id: res.userMessage.id, dbId: res.userMessage.id };
+              if (m.id === tempGenId)
+                return {
+                  ...m,
+                  id: res.assistantMessage.id,
+                  dbId: res.assistantMessage.id,
+                  generation: { mediaType, status: "generating", progress: 0, supportsProgress: res.assistantMessage.metadata?.supportsProgress, taskId: res.taskId },
+                };
+              return m;
+            })
+          );
+          if (res.title) onTitleRef.current?.(cid, res.title);
+          pollGeneration(res.taskId, res.assistantMessage.id, mediaType, token);
         } catch (e) {
           if (genPollRef.current === token) genPollRef.current = null;
           setIsStreaming(false);
-          window.alert(`生成请求失败：${e instanceof Error ? e.message : String(e)}`);
+          // The create request itself failed (non-2xx / network). Flip the
+          // optimistic bubble to "failed" so the attempt + error stay visible.
+          const msg = e instanceof Error ? e.message : String(e);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempGenId
+                ? { ...m, generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` } }
+                : m
+            )
+          );
         }
       })();
     },

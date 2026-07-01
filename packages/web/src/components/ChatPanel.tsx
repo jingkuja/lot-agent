@@ -19,6 +19,16 @@ interface ChatPanelProps {
   onSelectForPreview?: (content: string) => void;
   /** Current agent (for the empty-state hero). */
   agent?: Agent | null;
+  /** Current user's name (for the empty-state greeting). */
+  userName?: string;
+}
+
+/** 按本地时间返回问候语：早上好 / 下午好 / 晚上好。 */
+function timeGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "早上好";
+  if (h < 18) return "下午好";
+  return "晚上好";
 }
 
 export function ChatPanel({
@@ -30,6 +40,7 @@ export function ChatPanel({
   inputAbove,
   onSelectForPreview,
   agent,
+  userName,
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -77,8 +88,11 @@ export function ChatPanel({
     return (
       <div className="chat-panel chat-panel--empty">
         <div className="chat-empty-hero">
-          <div className="chat-empty-logo" aria-hidden />
-          <h1 className="chat-empty-title">{agent?.name ?? "智算AI"}</h1>
+          <p className="chat-empty-greeting">
+            {timeGreeting()}
+            {userName ? `，${userName}` : ""}
+          </p>
+          <h1 className="chat-empty-title">{agent?.name ?? "借势智算"}</h1>
           {agent?.description && (
             <p className="chat-empty-desc">{agent.description}</p>
           )}

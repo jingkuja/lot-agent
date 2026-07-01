@@ -33,6 +33,13 @@ x-app-env: &app-env
   OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4-flash}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
+  # Image/video generation (tokenhub). WITHOUT a key the providers fall back to
+  # the in-memory Stub/Mock (placeholder output) — both server and worker need
+  # it. IMAGE_GEN_API_KEY / VIDEO_GEN_API_KEY override TOKENHUB_API_KEY per media
+  # type (leave empty to share the one key).
+  TOKENHUB_API_KEY: ${TOKENHUB_API_KEY:-}
+  IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
+  VIDEO_GEN_API_KEY: ${VIDEO_GEN_API_KEY:-}
   CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
   # Absolute base for static file URLs (assets/documents/uploads). Leave empty
   # for same-origin access; set to the box address so generated download links

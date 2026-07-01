@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { Agent, Conversation } from "../api/client.js";
 
 interface SidebarProps {
@@ -7,7 +7,13 @@ interface SidebarProps {
   activeId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
 }
+
+/** Trigger loadMore when the scroll position is within this many px of bottom. */
+const LOAD_MORE_THRESHOLD = 80;
 
 /** Short label + CSS modifier per agent type, for the per-conversation tag. */
 const TAG_BY_TYPE: Record<string, { label: string; mod: string }> = {
@@ -23,7 +29,20 @@ export function Sidebar({
   activeId,
   onSelect,
   onDelete,
+  onLoadMore,
+  hasMore = false,
+  loadingMore = false,
 }: SidebarProps) {
+  const handleScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      if (!onLoadMore || !hasMore || loadingMore) return;
+      const el = e.currentTarget;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight <= LOAD_MORE_THRESHOLD) {
+        onLoadMore();
+      }
+    },
+    [onLoadMore, hasMore, loadingMore]
+  );
   // Map an agent_id to its tag (label + color modifier). Falls back to the
   // agent's own name when the type is unknown, then to a neutral "通用".
   const tagFor = useMemo(() => {
@@ -39,7 +58,8 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-list">
+      {conversations.length > 0 && <div className="sidebar-section-label">最近对话</div>}
+      <div className="sidebar-list" onScroll={handleScroll}>
         {conversations.map((conv) => {
           const tag = tagFor(conv.agent_id);
           return (
@@ -62,6 +82,7 @@ export function Sidebar({
             </div>
           );
         })}
+        {loadingMore && <div className="sidebar-loading-more">加载中…</div>}
       </div>
     </aside>
   );

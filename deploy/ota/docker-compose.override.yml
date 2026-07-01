@@ -1,0 +1,13 @@
+# ─────────────────────────────────────────────────────────────
+# 镜像 tag 参数化 override —— 复制到 compose 目录(/opt/lot-agent)与
+# docker-compose.yml 同级，docker compose 会自动合并。
+# 让 app 镜像 tag 由 .env 的 APP_TAG / WEB_TAG 驱动；updater 改这两行
+# 即完成切版/回滚（data 容器 postgres/redis 不在此，保持不动）。
+# ─────────────────────────────────────────────────────────────
+services:
+  server:
+    image: lot-agent-app:${APP_TAG:-1.0}
+  worker:
+    image: lot-agent-app:${APP_TAG:-1.0}
+  web:
+    image: lot-agent-web:${WEB_TAG:-1.0}

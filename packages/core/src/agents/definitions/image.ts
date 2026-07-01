@@ -4,6 +4,7 @@ export const imageDefinition: AgentDefinition = {
   id: "image",
   name: "图片生成",
   type: "image",
+  category: "创作",
   description: "文字描述生成配图/封面/海报",
   systemPrompt: "（占位）图片生成 Agent，后续接入图像生成能力。",
   toolNames: [],

@@ -5,36 +5,53 @@ import { BrandHeader } from "../components/BrandHeader.js";
 import { PreviewPanel } from "../components/PreviewPanel.js";
 import { ArtifactGallery, type Artifact } from "../components/ArtifactGallery.js";
 import { AgentSwitcher } from "../components/AgentSwitcher.js";
+import { AgentCenterModal } from "../components/AgentCenterModal.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
-import { api, type Agent, type User } from "../api/client.js";
+import { useAgents } from "../hooks/useAgents.js";
+import { api, type User } from "../api/client.js";
+import { GENERAL_ID } from "../lib/agent-order.js";
 
 interface WorkspaceProps {
-  agents: Agent[];
   user: User;
   onLogout: () => void;
 }
 
-export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
-  const orderedAgents = useMemo(() => {
-    const general = agents.find((a) => a.type === "general" || a.id === "general");
-    if (!general) return agents;
-    return [general, ...agents.filter((a) => a !== general)];
-  }, [agents]);
+export function Workspace({ user, onLogout }: WorkspaceProps) {
+  const { agents, installed, install, uninstall, promote } = useAgents(true);
 
-  const defaultAgentId = orderedAgents[0]?.id ?? "general";
+  // 已安装 agents;general 恒第一(仅用于 Sidebar 标签映射等需要全序的场景)。
+  const orderedAgents = useMemo(() => {
+    const general = installed.find((a) => a.type === "general" || a.id === GENERAL_ID);
+    if (!general) return installed;
+    return [general, ...installed.filter((a) => a !== general)];
+  }, [installed]);
+
+  const defaultAgentId = orderedAgents[0]?.id ?? GENERAL_ID;
   const [activeAgentId, setActiveAgentId] = useState(defaultAgentId);
-  const activeAgent = orderedAgents.find((a) => a.id === activeAgentId) ?? null;
+  const activeAgent = agents.find((a) => a.id === activeAgentId) ?? null;
 
   // newAgentId: page-only "new chat" state. No server conversation exists yet.
   // null = viewing a real conversation; string = pending new chat for that agent.
   const [newAgentId, setNewAgentId] = useState<string | null>(null);
 
-  const { conversations, activeId, setActiveId, remove, loading, refresh, updateTitle } =
-    useConversations();
+  const {
+    conversations,
+    activeId,
+    setActiveId,
+    remove,
+    loadingMore,
+    hasMore,
+    loadMore,
+    refresh,
+    updateTitle,
+    addLocal,
+  } = useConversations();
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [centerOpen, setCenterOpen] = useState(false);
+  const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
 
   const handleStreamEnd = useCallback(() => {
     // The server finalizes the auto-generated title before emitting stream_end,
@@ -57,21 +74,14 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
   // Keep useChat's conversationId ref in sync.
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
-  // On mount: open the most recent conversation, or enter new-chat mode.
+  // On mount: always land on a fresh new-chat window (greeting), regardless of
+  // history. Past conversations stay in the sidebar and open when selected.
   const didInit = useRef(false);
   useEffect(() => {
-    if (loading || didInit.current) return;
+    if (didInit.current) return;
     didInit.current = true;
-    if (conversations.length > 0) {
-      const latest = conversations[0];
-      setActiveAgentId(latest.agent_id || defaultAgentId);
-      setActiveId(latest.id);
-      clear();
-      loadMessages(latest.id);
-    } else {
-      setNewAgentId(defaultAgentId);
-    }
-  }, [loading, conversations, defaultAgentId, setActiveId, clear, loadMessages]);
+    setNewAgentId(defaultAgentId);
+  }, [defaultAgentId]);
 
   const handleSwitchAgent = useCallback(
     (agentId: string) => {
@@ -90,6 +100,14 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
       setPreviewContent(null);
     },
     [activeAgentId, newAgentId, messages.length, setActiveId, clear]
+  );
+
+  const handlePickOverflow = useCallback(
+    async (agentId: string) => {
+      await promote(agentId);   // 移到子 Agent 首位(整体第二位),持久化
+      handleSwitchAgent(agentId);
+    },
+    [promote, handleSwitchAgent]
   );
 
   const handleSelect = useCallback(
@@ -131,13 +149,16 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
         activeIdRef.current = conv.id;
         setActiveId(conv.id);
         setNewAgentId(null);
-        refresh();
+        // The server list omits 0-message conversations, so optimistically
+        // surface this one in the sidebar instead of refreshing (which wouldn't
+        // return it yet). stream_end triggers a real refresh once it has content.
+        addLocal(conv);
         dispatch();
         return;
       }
       dispatch();
     },
-    [newAgentId, setActiveId, refresh, send, generateMedia, activeAgent]
+    [newAgentId, setActiveId, addLocal, send, generateMedia, activeAgent]
   );
 
   const handleDelete = useCallback(
@@ -155,6 +176,34 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
     [remove, activeId, clear, activeAgentId]
   );
 
+  const handleInstall = useCallback(
+    async (id: string) => {
+      setBusyAgentId(id);
+      try { await install(id); } finally { setBusyAgentId(null); }
+    },
+    [install]
+  );
+
+  const handleUninstall = useCallback(
+    async (id: string) => {
+      setBusyAgentId(id);
+      try {
+        await uninstall(id);
+        // 卸载当前激活的 Agent → 回落通用并进入新会话态
+        if (id === activeAgentId) {
+          setActiveAgentId(GENERAL_ID);
+          setNewAgentId(GENERAL_ID);
+          setActiveId(null);
+          clear();
+          setPreviewContent(null);
+        }
+      } finally {
+        setBusyAgentId(null);
+      }
+    },
+    [uninstall, activeAgentId, setActiveId, clear]
+  );
+
   // Sidebar list: prepend a virtual "新对话" entry when in new-chat mode.
   const sidebarConversations = useMemo(() => {
     if (!newAgentId) return conversations;
@@ -164,18 +213,12 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
     ];
   }, [newAgentId, conversations]);
 
-  // 暂时屏蔽「文案创作」Agent（业务尚未实现），仅在切换器中隐藏；
-  // 定义仍在服务端注册，便于后续直接恢复。
-  const switcherAgents = useMemo(
-    () => orderedAgents.filter((a) => a.id !== "copywriting" && a.type !== "copywriting"),
-    [orderedAgents]
-  );
-
   const switcher = (
     <AgentSwitcher
-      agents={switcherAgents}
+      agents={installed}
       activeId={activeAgentId}
       onSwitch={handleSwitchAgent}
+      onPickOverflow={handlePickOverflow}
       disabled={isStreaming}
     />
   );
@@ -188,13 +231,17 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
           onLogout={onLogout}
           onCreate={handleCreate}
           onCollapse={() => setSidebarCollapsed(true)}
+          onOpenAgentCenter={() => setCenterOpen(true)}
         />
         <Sidebar
           conversations={sidebarConversations}
-          agents={orderedAgents}
+          agents={agents}
           activeId={newAgentId ? "__new__" : activeId}
           onSelect={handleSelect}
           onDelete={handleDelete}
+          onLoadMore={loadMore}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
         />
       </div>
 
@@ -218,8 +265,14 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
             activeConversationId={activeId}
             onRegenerate={regenerate}
             inputAbove={switcher}
-            onSelectForPreview={setPreviewContent}
+            // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
+            onSelectForPreview={
+              activeAgent?.type === "copywriting" || activeAgent?.id === "copywriting"
+                ? setPreviewContent
+                : undefined
+            }
             agent={activeAgent}
+            userName={user.name}
           />
         </div>
 
@@ -233,6 +286,15 @@ export function Workspace({ agents, user, onLogout }: WorkspaceProps) {
           </div>
         )}
       </div>
+      {centerOpen && (
+        <AgentCenterModal
+          agents={agents}
+          onInstall={handleInstall}
+          onUninstall={handleUninstall}
+          onClose={() => setCenterOpen(false)}
+          busyId={busyAgentId}
+        />
+      )}
     </div>
   );
 }

@@ -198,7 +198,8 @@ export class Agent {
           undefined, // memory — could be wired to a memory store
           workingHistory,
           undefined, // user message already lives in workingHistory
-          context.llm // use same LLM as compressor for summaries
+          context.llm, // use same LLM as compressor for summaries
+          { signal } // honor run timeout / client disconnect during summarization
         );
 
         // Stream LLM response — surface any failure as an event so the run

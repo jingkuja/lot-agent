@@ -1,0 +1,13 @@
+# 每 ~5 分钟触发一次 updater：手动标记(update_now)≤5min 拾取；落在午夜窗口的
+# 那次触发执行定时版本更新。开机后 3min 也跑一次。
+[Unit]
+Description=Run Lot Agent OTA updater periodically
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

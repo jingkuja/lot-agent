@@ -52,7 +52,7 @@
   --gen-card-from: rgba(167,139,250,0.16);
   --gen-card-to: rgba(96,165,250,0.12);
 
-  /* Brand header (智算AI card) */
+  /* Brand header (借势智算 card) */
   --brand-grad-from: #2563eb;  --brand-grad-to: #06b6d4;
   --brand-card-from: rgba(99,102,241,0.10);  --brand-card-to: rgba(34,211,238,0.06);
   /* Empty-chat logo orb — references theme tokens so it adapts in both modes. */
@@ -67,6 +67,16 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 14px rgba(0,0,0,0.10);
   --shadow-lg: 0 8px 30px rgba(0,0,0,0.14);
+
+  /* Soft-neumorphism depth tokens: raise = lifts off the surface, sink = inset
+     channel, pop = accent-glow for the primary/active element. Light palette. */
+  --neu-raise: 0 6px 16px rgba(31,33,58,0.10), 0 1px 0 rgba(255,255,255,0.9) inset, 0 -2px 6px rgba(255,255,255,0.55) inset;
+  --neu-raise-sm: 0 3px 8px rgba(31,33,58,0.10), 0 1px 0 rgba(255,255,255,0.8) inset;
+  --neu-sink: inset 0 2px 6px rgba(31,33,58,0.10), inset 0 -1px 0 rgba(255,255,255,0.6);
+  --neu-pop: 0 10px 24px rgba(109,92,240,0.24), 0 1px 0 rgba(255,255,255,0.4) inset;
+  /* Per-zone surfaces: sidebar reads as a sunken panel, chat as the open canvas. */
+  --zone-sidebar-bg: linear-gradient(180deg, #edecf6, #e6e6f0);
+  --zone-chat-bg: radial-gradient(120% 80% at 70% -10%, rgba(139,92,246,0.08), transparent 60%), var(--bg-card);
 }
 
 [data-theme="dark"] {
@@ -120,6 +130,14 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
   --shadow-lg: 0 8px 30px rgba(0,0,0,0.12);
+
+  /* Soft-neumorphism depth tokens — dark palette (deeper shadows, faint top highlight). */
+  --neu-raise: 0 8px 22px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.05) inset, 0 -2px 6px rgba(0,0,0,0.3) inset;
+  --neu-raise-sm: 0 4px 12px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.04) inset;
+  --neu-sink: inset 0 2px 8px rgba(0,0,0,0.5), inset 0 -1px 0 rgba(255,255,255,0.03);
+  --neu-pop: 0 10px 26px rgba(34,211,238,0.28), 0 1px 0 rgba(255,255,255,0.06) inset;
+  --zone-sidebar-bg: linear-gradient(180deg, #131318, #0e0e12);
+  --zone-chat-bg: radial-gradient(120% 80% at 70% -10%, rgba(34,211,238,0.08), transparent 60%), var(--bg-card);
 }
 
 html, body, #root {
@@ -164,24 +182,35 @@ html, body, #root {
 }
 
 .btn-new {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: var(--radius-sm);
+  gap: 5px;
+  height: 32px;
+  padding: 0 15px;
+  background: var(--accent-grad);
+  border: none;
+  color: var(--text-on-accent);
+  border-radius: 999px;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 13px;
+  font-weight: 700;
   line-height: 1;
-  transition: all 0.15s;
+  white-space: nowrap;
+  box-shadow: var(--neu-pop);
+  transition: transform 0.14s ease, filter 0.14s ease;
+}
+
+.btn-new-icon {
+  flex-shrink: 0;
 }
 
 .btn-new:hover {
-  background: var(--bg-hover);
-  border-color: var(--text-muted);
+  filter: brightness(1.05);
+}
+
+.btn-new:active {
+  transform: translateY(1px) scale(0.97);
 }
 
 .sidebar-list {
@@ -199,25 +228,35 @@ html, body, #root {
   border-radius: 4px;
 }
 
+.sidebar-loading-more {
+  text-align: center;
+  padding: 10px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .sidebar-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  padding: 13px 14px;
+  border-radius: 16px;
   cursor: pointer;
-  margin-bottom: 2px;
-  transition: background 0.12s;
+  margin-bottom: 10px;
+  /* Each conversation is a raised pebble lifting out of the sunken sidebar. */
+  background: var(--bg-card);
+  box-shadow: var(--neu-raise-sm);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
 }
 
 /* Per-conversation agent tag (color keyed by agent type) */
 .agent-tag {
   flex-shrink: 0;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1;
-  padding: 3px 6px;
-  border-radius: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
   letter-spacing: 0.02em;
   color: var(--tag-general-fg);
   background: var(--tag-general-bg);
@@ -227,8 +266,12 @@ html, body, #root {
 .agent-tag--image   { color: var(--tag-image-fg);   background: var(--tag-image-bg); }
 .agent-tag--video   { color: var(--tag-video-fg);   background: var(--tag-video-bg); }
 
-.sidebar-item:hover { background: var(--bg-hover); }
-.sidebar-item.active { background: var(--bg-active); }
+.sidebar-item:hover { transform: translateY(-2px); box-shadow: var(--neu-raise); }
+.sidebar-item.active {
+  /* Active pebble: brand-tinted face, accent-glow lift, and an accent edge bar. */
+  background: linear-gradient(135deg, rgba(139,92,246,0.16), rgba(59,130,246,0.10)), var(--bg-card);
+  box-shadow: var(--neu-pop), inset 4px 0 0 0 var(--accent);
+}
 
 .sidebar-item-title {
   font-size: 14px;
@@ -341,6 +384,9 @@ html, body, #root {
   background: var(--bg-user-msg);
   color: var(--text-user);
   border-radius: var(--radius-lg);
+  /* Trimmed top-right corner + soft lift makes it read as a floating chat card. */
+  border-top-right-radius: 6px;
+  box-shadow: var(--neu-raise-sm);
   padding: 12px 20px;
   font-size: 15px;
   line-height: 1.6;
@@ -537,12 +583,12 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--neu-raise);
   transition: box-shadow 0.2s;
 }
 
 .input-box:focus-within {
-  box-shadow: var(--shadow-md), 0 0 0 3px rgba(124,92,246,0.16);
+  box-shadow: var(--neu-raise), 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .input-box textarea {
@@ -822,17 +868,23 @@ html, body, #root {
 .btn-send {
   background: var(--accent);
   color: var(--text-on-accent);
+  box-shadow: var(--neu-pop);
 }
 
 .btn-send:disabled {
   background: var(--bg-active);
   color: var(--text-muted);
   cursor: default;
+  box-shadow: none;
 }
 
 .btn-send:hover:not(:disabled) {
   background: var(--accent-hover);
   transform: scale(1.05);
+}
+
+.btn-send:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .btn-stop {
@@ -1453,24 +1505,49 @@ html, body, #root {
   display: flex;
   height: 100vh;
   overflow: hidden;
+  /* Padded canvas + gap turns the sidebar and chat into separated floating
+     panels — the primary device for making the zones read as distinct. */
+  gap: 14px;
+  padding: 14px;
+  background: var(--bg);
 }
 
 .workspace-sidebar {
   display: flex;
   flex-direction: column;
-  width: 280px;
-  min-width: 280px;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
+  width: 288px;
+  min-width: 288px;
+  /* Sunken panel: the sidebar recedes so the brand card and conversation
+     pebbles inside it visibly lift out. */
+  background: var(--zone-sidebar-bg);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--neu-sink);
   overflow: hidden;
 }
 
 .brand-header {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 10px 8px;
-  border-bottom: 1px solid var(--border);
+  gap: 18px;
+  /* The whole header IS the raised card: it encloses both the logo row and the
+     account/new-chat row, inset from the sunken sidebar's edges. */
+  margin: 10px 10px 12px;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(140deg, var(--brand-card-from), var(--brand-card-to)), var(--bg-card);
+  box-shadow: var(--neu-raise);
+  flex-shrink: 0;
+}
+
+/* Section label above the conversation list, with a clear gap separating it
+   from the brand card above. */
+.sidebar-section-label {
+  padding: 0 18px 6px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  opacity: 0.7;
   flex-shrink: 0;
 }
 
@@ -1478,10 +1555,8 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--brand-card-from), var(--brand-card-to));
-  border: 1px solid var(--border);
+  /* Plain inner row — the visual card lives on .brand-header now. */
+  padding: 0;
 }
 
 .brand-logo {
@@ -1550,7 +1625,7 @@ html, body, #root {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 4px;
+  padding: 0;
 }
 
 .brand-account {
@@ -1577,6 +1652,7 @@ html, body, #root {
   width: 0;
   min-width: 0;
   border-right: none;
+  box-shadow: none;
 }
 
 .sidebar-expand {
@@ -1611,11 +1687,14 @@ html, body, #root {
   width: 100%;
   min-width: 0;
   border-right: none;
+  /* Let the sunken zone background show through. */
+  background: transparent;
 }
 
 .workspace-main {
   flex: 1;
   display: flex;
+  gap: 14px;
   overflow: hidden;
   position: relative;
 }
@@ -1626,6 +1705,11 @@ html, body, #root {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  /* Open, lifted canvas with a faint brand-tinted glow — the lightest, most
+     prominent zone, clearly distinct from the sunken sidebar. */
+  background: var(--zone-chat-bg);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--neu-raise);
 }
 
 .workspace-right {
@@ -1634,8 +1718,9 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg);
-  border-left: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--neu-raise);
 }
 
 .workspace-brand {
@@ -1930,17 +2015,22 @@ html, body, #root {
   color: var(--text);
   padding: 5px 13px 5px 6px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
   white-space: nowrap;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--neu-raise-sm);
   cursor: pointer;
-  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+  transition: border-color 0.12s, box-shadow 0.14s, transform 0.14s;
 }
 
 .agent-pill:hover:not(:disabled) {
   border-color: var(--border-input);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+  box-shadow: var(--neu-raise);
+}
+
+.agent-pill:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
 }
 
 /* Active pill: violet→blue gradient border (same double-background trick as the
@@ -1950,7 +2040,7 @@ html, body, #root {
   background:
     linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
     var(--accent-grad) border-box;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--neu-pop);
 }
 
 .agent-pill:disabled {
@@ -1998,12 +2088,17 @@ html, body, #root {
   gap: 14px;
 }
 
-.chat-empty-logo {
-  width: 80px;
-  height: 80px;
-  border-radius: 24px;
+.chat-empty-greeting {
+  font-family: "ui-rounded", "Yuanti SC", "Hiragino Sans GB", "PingFang SC",
+    "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
   background: var(--logo-grad);
-  box-shadow: var(--logo-glow);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .chat-empty-title {
@@ -2085,8 +2180,14 @@ html, body, #root {
   background: var(--bg-card);
   color: var(--text-secondary);
   box-shadow: var(--shadow-md);
-  cursor: pointer;
+  cursor: grab;
+  /* Let pointer drag own the gesture instead of the browser scrolling/zooming. */
+  touch-action: none;
   transition: color 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.theme-toggle-btn:active {
+  cursor: grabbing;
 }
 
 .theme-toggle-btn:hover {
@@ -2102,8 +2203,6 @@ html, body, #root {
 
 .theme-menu {
   position: absolute;
-  top: 48px;
-  right: 0;
   min-width: 132px;
   padding: 6px;
   background: var(--bg-card);
@@ -2114,6 +2213,13 @@ html, body, #root {
   flex-direction: column;
   gap: 2px;
 }
+
+/* Open direction — flipped at runtime so the menu stays on-screen wherever the
+   (draggable) button sits. */
+.theme-menu--right { right: 0; left: auto; }
+.theme-menu--left { left: 0; right: auto; }
+.theme-menu--down { top: 48px; bottom: auto; }
+.theme-menu--up { bottom: 48px; top: auto; }
 
 .theme-menu-item {
   display: flex;
@@ -2210,3 +2316,88 @@ html, body, #root {
   box-shadow: var(--shadow-md);
 }
 .gen-asset-download svg { width: 15px; height: 15px; }
+
+/* ── Agent overflow (更多) popover ─────────────────────────────────────── */
+.agent-more-wrap { position: relative; display: inline-flex; }
+.agent-overflow-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 160px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: var(--shadow-lg);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-overflow-item {
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+}
+.agent-overflow-item:hover { background: var(--bg-hover); }
+
+/* ── Agent 中心 marketplace modal ─────────────────────────────────── */
+.agent-center-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.agent-center-modal {
+  width: min(920px, 100%); max-height: 82vh; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--bg-card); color: var(--text);
+  border: 1px solid var(--border); border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+}
+.agent-center-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; border-bottom: 1px solid var(--border);
+}
+.agent-center-title { font-size: 18px; font-weight: 700; }
+.agent-center-close {
+  border: none; background: transparent; color: var(--text-muted);
+  font-size: 22px; line-height: 1; cursor: pointer;
+}
+.agent-center-body { overflow-y: auto; padding: 18px 22px; }
+.agent-center-group { margin-bottom: 20px; }
+.agent-center-group-label { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; }
+.agent-center-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px;
+}
+.agent-card {
+  border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+  background: var(--bg-tool); display: flex; flex-direction: column; gap: 8px;
+}
+.agent-card-name { font-size: 15px; font-weight: 600; color: var(--text); }
+.agent-card-desc { font-size: 13px; color: var(--text-muted); flex: 1; }
+.agent-card-footer { display: flex; justify-content: flex-end; }
+.agent-card-btn {
+  padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  background: var(--accent); color: var(--text-on-accent);
+  border: 1px solid var(--accent); font-size: 13px;
+}
+.agent-card-btn.installed { background: transparent; color: var(--text-muted); border-color: var(--border); }
+.agent-card-btn:disabled { opacity: 0.6; cursor: default; }
+.agent-overflow-item.active { color: var(--accent); font-weight: 600; }
+
+/* Agent 中心 entry — sits at the bottom of the brand-header card. */
+.brand-agent-center-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--overlay-raise); color: var(--text);
+  cursor: pointer; font-size: 14px;
+  transition: border-color 0.12s, color 0.12s;
+}
+.brand-agent-center-btn:hover { border-color: var(--accent); color: var(--accent); }

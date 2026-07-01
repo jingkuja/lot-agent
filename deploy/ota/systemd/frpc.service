@@ -1,0 +1,17 @@
+# frp 客户端：到你方 frps 的反向隧道。原生二进制、Restart=always、开机自启。
+# 刻意放在 Docker 之外：即使整个 Docker 栈挂了，隧道仍在 → 你还能 SSH 进盒子救场。
+[Unit]
+Description=frp client (reverse tunnel to ops server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frpc -c /opt/lot-agent/ota/frpc.toml
+Restart=always
+RestartSec=5
+# 网络抖动下持续重连
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,10 @@
 import pg from "pg";
+import {
+  DEFAULT_INSTALLED_AGENT_IDS,
+  GENERAL_AGENT_ID,
+  nextSortOrder,
+  promotedSortOrder,
+} from "../agents/install-order.js";
 
 export interface Conversation {
   id: string;
@@ -81,6 +87,7 @@ export interface StoredTask {
   input: unknown;
   output: unknown | null;
   error: string | null;
+  vendor_task_id: string | null;
   user_id: string;
   created_at: string;
   updated_at: string;
@@ -192,11 +199,14 @@ export class DB {
     });
   }
 
-  async init(): Promise<void> {
-    await this.migrate();
-  }
-
-  private async migrate(): Promise<void> {
+  /**
+   * Run idempotent schema migrations. Owned by the SERVER process ONLY — the
+   * worker must not call this (see workers/index.ts). Keeping a single migration
+   * owner avoids two containers issuing concurrent DDL on startup, and means a
+   * worker never depends on / waits for the server to finish migrating: it just
+   * uses the pool created in the constructor.
+   */
+  async migrate(): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -365,6 +375,13 @@ export class DB {
         );
       `);
 
+      // The vendor's own async task id (e.g. tokenhub "task_x6a2k…"), persisted
+      // after create so a restarted worker can resume polling rather than
+      // re-creating the generation. Distinct from our local tasks.id.
+      await client.query(`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS vendor_task_id TEXT;
+      `);
+
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks (user_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);
@@ -509,6 +526,19 @@ export class DB {
         CREATE INDEX IF NOT EXISTS idx_publish_user ON publish_records (user_id, created_at DESC);
       `);
 
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_agents (
+          user_id      VARCHAR(100)     NOT NULL,
+          agent_id     VARCHAR(64)      NOT NULL,
+          sort_order   DOUBLE PRECISION NOT NULL DEFAULT 0,
+          installed_at TIMESTAMPTZ      NOT NULL DEFAULT now(),
+          PRIMARY KEY (user_id, agent_id)
+        );
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_user_agents_user ON user_agents (user_id, sort_order);
+      `);
+
       await client.query("COMMIT");
 
       // Backfill legacy 'default' rows to the seed user (idempotent, outside transaction)
@@ -584,17 +614,48 @@ export class DB {
     return rows[0] ?? null;
   }
 
-  async listConversations(userId?: string): Promise<Conversation[]> {
-    if (userId) {
-      const { rows } = await this.pool.query(
-        "SELECT * FROM conversations WHERE status = 'active' AND user_id = $1 ORDER BY updated_at DESC",
-        [userId]
-      );
-      return rows;
-    }
-    const { rows } = await this.pool.query(
-      "SELECT * FROM conversations WHERE status = 'active' ORDER BY updated_at DESC"
+  async listConversations(
+    userId?: string,
+    opts?: { limit?: number; cursorId?: string }
+  ): Promise<Conversation[]> {
+    // Keyset pagination over (updated_at DESC, id DESC). Omitting `limit`
+    // returns the full list (back-compat for non-paginated callers); the id
+    // tiebreaker keeps the order stable across pages.
+    const hasPaging = opts?.limit != null;
+    const limit = Math.min(Math.max(Math.trunc(opts?.limit ?? 0), 1), 100);
+
+    const params: unknown[] = [];
+    const where: string[] = ["status = 'active'"];
+    // Exclude empty shells (0-message conversations, e.g. a chat that was
+    // created but whose first send never persisted, or seed rows). They render
+    // identically to a brand-new chat, so surfacing one as the "latest"
+    // conversation makes the workspace look like it always opens a new chat.
+    where.push(
+      "EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id)"
     );
+    if (userId) {
+      params.push(userId);
+      where.push(`user_id = $${params.length}`);
+    }
+    if (hasPaging && opts?.cursorId) {
+      params.push(opts.cursorId);
+      // The subquery reads the cursor row's exact stored timestamp, so the
+      // cursor never loses precision the way a client-supplied timestamp would.
+      // A deleted cursor row yields NULL → an empty page (self-heals on refresh).
+      where.push(
+        `(updated_at, id) < (SELECT updated_at, id FROM conversations WHERE id = $${params.length})`
+      );
+    }
+
+    let sql = `SELECT * FROM conversations WHERE ${where.join(
+      " AND "
+    )} ORDER BY updated_at DESC, id DESC`;
+    if (hasPaging) {
+      params.push(limit);
+      sql += ` LIMIT $${params.length}`;
+    }
+
+    const { rows } = await this.pool.query(sql, params);
     return rows;
   }
 
@@ -1115,6 +1176,73 @@ export class DB {
     return Number(rows[0].total);
   }
 
+  // ── User agents (Agent 中心) ──
+
+  async getUserAgents(userId: string): Promise<Map<string, number>> {
+    const read = async () =>
+      (
+        await this.pool.query(
+          `SELECT agent_id, sort_order FROM user_agents
+           WHERE user_id = $1 ORDER BY sort_order ASC`,
+          [userId]
+        )
+      ).rows;
+
+    let rows = await read();
+    if (rows.length === 0) {
+      // 懒播种默认安装集(general/image/video),sort_order 按数组下标。
+      for (let i = 0; i < DEFAULT_INSTALLED_AGENT_IDS.length; i++) {
+        await this.pool.query(
+          `INSERT INTO user_agents (user_id, agent_id, sort_order) VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, agent_id) DO NOTHING`,
+          [userId, DEFAULT_INSTALLED_AGENT_IDS[i], i]
+        );
+      }
+      rows = await read();
+    }
+    return new Map(rows.map((r) => [r.agent_id as string, Number(r.sort_order)]));
+  }
+
+  async installUserAgent(userId: string, agentId: string): Promise<void> {
+    const { rows } = await this.pool.query(
+      `SELECT sort_order FROM user_agents WHERE user_id = $1`,
+      [userId]
+    );
+    const order = nextSortOrder(rows.map((r) => Number(r.sort_order)));
+    await this.pool.query(
+      `INSERT INTO user_agents (user_id, agent_id, sort_order) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, agent_id) DO NOTHING`,
+      [userId, agentId, order]
+    );
+  }
+
+  async uninstallUserAgent(userId: string, agentId: string): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM user_agents WHERE user_id = $1 AND agent_id = $2`,
+      [userId, agentId]
+    );
+  }
+
+  async promoteUserAgent(userId: string, agentId: string): Promise<void> {
+    const { rows } = await this.pool.query(
+      `SELECT sort_order FROM user_agents WHERE user_id = $1 AND agent_id <> $2`,
+      [userId, GENERAL_AGENT_ID]
+    );
+    const order = promotedSortOrder(rows.map((r) => Number(r.sort_order)));
+    await this.pool.query(
+      `UPDATE user_agents SET sort_order = $3 WHERE user_id = $1 AND agent_id = $2`,
+      [userId, agentId, order]
+    );
+  }
+
+  async isUserAgentInstalled(userId: string, agentId: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM user_agents WHERE user_id = $1 AND agent_id = $2`,
+      [userId, agentId]
+    );
+    return rows.length > 0;
+  }
+
   // ── Tasks ──
 
   async createTask(
@@ -1142,6 +1270,21 @@ export class DB {
     await this.pool.query(
       "UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2",
       [status, id]
+    );
+  }
+
+  async getTaskVendorId(id: string): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      "SELECT vendor_task_id FROM tasks WHERE id = $1",
+      [id]
+    );
+    return rows[0]?.vendor_task_id ?? null;
+  }
+
+  async setTaskVendorId(id: string, vendorTaskId: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE tasks SET vendor_task_id = $1, updated_at = now() WHERE id = $2",
+      [vendorTaskId, id]
     );
   }
 
