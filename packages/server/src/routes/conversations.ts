@@ -246,7 +246,7 @@ export function createGenerationRoutes(service: AgentService) {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown>; media?: { type: string; url: string }[] };
+    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown>; media?: { type: string; url: string }[]; model?: string };
     try {
       body = await c.req.json();
     } catch {
@@ -285,9 +285,17 @@ export function createGenerationRoutes(service: AgentService) {
 
     // Enqueue, then record the taskId on the message so a client that reloads
     // mid-generation can re-poll the task to resume progress / completion.
+    const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
     const taskId = await service.jobQueue.enqueue(
       type,
-      { prompt, conversationId, assistantMessageId, ...settings, ...(media ? { media } : {}) },
+      {
+        prompt,
+        conversationId,
+        assistantMessageId,
+        ...settings,
+        ...(media ? { media } : {}),
+        ...(selectedModel ? { modelId: selectedModel } : {}),
+      },
       userId
     );
     const metadata = { ...baseMeta, status: "generating", taskId };
