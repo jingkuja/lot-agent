@@ -1565,6 +1565,94 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+/* ── Sidebar agent tabs (通用 pinned + windowed sub-agents + < > arrows) ── */
+.sidebar-agent-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 4px 12px 10px;
+}
+
+.agent-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  box-shadow: var(--neu-raise-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.14s, transform 0.14s;
+}
+
+.agent-tab:hover:not(:disabled) {
+  border-color: var(--border-input);
+  transform: translateY(-2px);
+  box-shadow: var(--neu-raise);
+}
+.agent-tab:active:not(:disabled) { transform: translateY(0) scale(0.97); }
+
+.agent-tab.active {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    var(--accent-grad) border-box;
+  box-shadow: var(--neu-pop);
+}
+.agent-tab:disabled { opacity: 0.55; cursor: default; }
+
+.agent-tab-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-on-grad);
+  flex-shrink: 0;
+}
+.agent-tab-icon svg { width: 15px; height: 15px; }
+.agent-tab-icon--general  { background: var(--agent-icon-general); }
+.agent-tab-icon--image    { background: var(--agent-icon-image); }
+.agent-tab-icon--video    { background: var(--agent-icon-video); }
+.agent-tab-icon--ppt      { background: var(--agent-icon-general); }
+.agent-tab-icon--contract { background: var(--agent-icon-general); }
+
+.agent-tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.agent-tab-arrow {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.agent-tab-arrow:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.agent-tab-arrow:disabled { opacity: 0.4; cursor: default; }
+
 .brand-card {
   display: flex;
   align-items: center;
