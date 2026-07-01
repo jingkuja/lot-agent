@@ -5,12 +5,13 @@ interface BrandHeaderProps {
   onLogout?: () => void;
   onCreate: () => void;
   onCollapse: () => void;
+  onOpenAgentCenter: () => void;
 }
 
 /** Top-left brand card: cloud logo + product name + tagline, a collapse
  *  toggle, and a single action row (account + new-chat) — replaces both the
  *  old footer status bar and the sidebar's "对话" header row. */
-export function BrandHeader({ user, onLogout, onCreate, onCollapse }: BrandHeaderProps) {
+export function BrandHeader({ user, onLogout, onCreate, onCollapse, onOpenAgentCenter }: BrandHeaderProps) {
   return (
     <div className="brand-header">
       <div className="brand-card">
@@ -79,6 +80,16 @@ export function BrandHeader({ user, onLogout, onCreate, onCollapse }: BrandHeade
           新会话
         </button>
       </div>
+
+      <button className="brand-agent-center-btn" onClick={onOpenAgentCenter} title="Agent 中心">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="3" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5" />
+          <rect x="3" y="14" width="7" height="7" rx="1.5" />
+          <path d="M17.5 14v7M14 17.5h7" />
+        </svg>
+        Agent 中心
+      </button>
     </div>
   );
 }

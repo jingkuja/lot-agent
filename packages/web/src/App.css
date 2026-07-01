@@ -2391,11 +2391,13 @@ html, body, #root {
 .agent-card-btn:disabled { opacity: 0.6; cursor: default; }
 .agent-overflow-item.active { color: var(--accent); font-weight: 600; }
 
-.sidebar-agent-center-btn {
-  display: flex; align-items: center; gap: 8px;
-  margin: 8px 12px; padding: 10px 12px;
+/* Agent 中心 entry — sits at the bottom of the brand-header card. */
+.brand-agent-center-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 12px;
   border: 1px solid var(--border); border-radius: 10px;
   background: var(--overlay-raise); color: var(--text);
   cursor: pointer; font-size: 14px;
+  transition: border-color 0.12s, color 0.12s;
 }
-.sidebar-agent-center-btn:hover { border-color: var(--accent); color: var(--accent); }
+.brand-agent-center-btn:hover { border-color: var(--accent); color: var(--accent); }

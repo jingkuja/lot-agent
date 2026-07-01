@@ -7,9 +7,9 @@ import {
 } from "./install-order.js";
 
 describe("install-order", () => {
-  it("default set installs general/image/video with general first", () => {
-    expect(DEFAULT_INSTALLED_AGENT_IDS).toEqual(["general", "image", "video"]);
-    expect(DEFAULT_INSTALLED_AGENT_IDS[0]).toBe(GENERAL_AGENT_ID);
+  it("default set installs image/video only (general is a base capability, never seeded)", () => {
+    expect(DEFAULT_INSTALLED_AGENT_IDS).toEqual(["image", "video"]);
+    expect(DEFAULT_INSTALLED_AGENT_IDS).not.toContain(GENERAL_AGENT_ID);
   });
 
   it("nextSortOrder appends after current max", () => {

@@ -1,7 +1,8 @@
-/** 新用户默认安装的 Agent(general 必须第一)。 */
-export const DEFAULT_INSTALLED_AGENT_IDS = ["general", "image", "video"] as const;
+/** 新用户默认安装的子 Agent。通用是基础能力,对每个登录用户始终可用,
+ *  由路由强制标记为已安装,不入库绑定,因此不在此列表中。 */
+export const DEFAULT_INSTALLED_AGENT_IDS = ["image", "video"] as const;
 
-/** 永远已安装、不可卸载、恒排第一的通用 Agent id。 */
+/** 永远已安装、不可卸载、恒排第一的通用 Agent id(不入库、不进 Agent 中心)。 */
 export const GENERAL_AGENT_ID = "general";
 
 /** 追加安装时的 sort_order:排到当前最大之后。 */

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Agent } from "../api/client.js";
+import { GENERAL_ID } from "../lib/agent-order.js";
 
 interface Props {
   agents: Agent[];
@@ -14,6 +15,7 @@ export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busy
   const groups = useMemo(() => {
     const m = new Map<string, Agent[]>();
     for (const a of agents) {
+      if (a.id === GENERAL_ID) continue; // 通用是基础能力,不在市场展示
       const key = a.category ?? "其他";
       (m.get(key) ?? m.set(key, []).get(key)!).push(a);
     }

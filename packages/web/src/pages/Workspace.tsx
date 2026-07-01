@@ -231,6 +231,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           onLogout={onLogout}
           onCreate={handleCreate}
           onCollapse={() => setSidebarCollapsed(true)}
+          onOpenAgentCenter={() => setCenterOpen(true)}
         />
         <Sidebar
           conversations={sidebarConversations}
@@ -242,15 +243,6 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           hasMore={hasMore}
           loadingMore={loadingMore}
         />
-        <button className="sidebar-agent-center-btn" onClick={() => setCenterOpen(true)}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden={true}>
-            <rect x="3" y="3" width="7" height="7" rx="1.5" />
-            <rect x="14" y="3" width="7" height="7" rx="1.5" />
-            <rect x="3" y="14" width="7" height="7" rx="1.5" />
-            <path d="M17.5 14v7M14 17.5h7" />
-          </svg>
-          Agent 中心
-        </button>
       </div>
 
       <div className="workspace-main">
