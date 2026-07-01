@@ -236,7 +236,6 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
         <BrandHeader
           user={user}
           onLogout={onLogout}
-          onCreate={handleCreate}
           onCollapse={() => setSidebarCollapsed(true)}
           onOpenAgentCenter={() => setCenterOpen(true)}
         />
@@ -246,6 +245,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           activeId={newAgentId ? "__new__" : activeId}
           onSelect={handleSelect}
           onDelete={handleDelete}
+          onCreate={handleCreate}
           onLoadMore={loadMore}
           hasMore={hasMore}
           loadingMore={loadingMore}

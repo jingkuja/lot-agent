@@ -3,15 +3,14 @@ import type { User } from "../api/client.js";
 interface BrandHeaderProps {
   user?: User;
   onLogout?: () => void;
-  onCreate: () => void;
   onCollapse: () => void;
   onOpenAgentCenter: () => void;
 }
 
 /** Top-left brand card: cloud logo + product name + tagline, a collapse
- *  toggle, and a single action row (account + new-chat) — replaces both the
- *  old footer status bar and the sidebar's "对话" header row. */
-export function BrandHeader({ user, onLogout, onCreate, onCollapse, onOpenAgentCenter }: BrandHeaderProps) {
+ *  toggle, and the account block (username on top, 退出 on its own line).
+ *  The new-chat button lives in the sidebar's 最近对话 header. */
+export function BrandHeader({ user, onLogout, onCollapse, onOpenAgentCenter }: BrandHeaderProps) {
   return (
     <div className="brand-header">
       <div className="brand-card">
@@ -72,13 +71,6 @@ export function BrandHeader({ user, onLogout, onCreate, onCollapse, onOpenAgentC
             </button>
           )}
         </div>
-        <button className="btn-new" onClick={onCreate} title="新建对话">
-          <svg className="btn-new-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden>
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M12 8.5v7M8.5 12h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
-          新会话
-        </button>
       </div>
 
       <button className="brand-agent-center-btn" onClick={onOpenAgentCenter} title="Agent 中心">

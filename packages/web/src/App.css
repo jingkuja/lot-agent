@@ -1541,8 +1541,22 @@ html, body, #root {
 
 /* Section label above the conversation list, with a clear gap separating it
    from the brand card above. */
+.sidebar-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+
+.sidebar-recent-header .btn-new {
+  margin-left: auto;
+  height: 30px;
+  padding: 0 13px;
+}
+
 .sidebar-section-label {
-  padding: 0 18px 6px;
+  padding: 0 6px 0;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.1em;
@@ -1630,8 +1644,9 @@ html, body, #root {
 
 .brand-account {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   min-width: 0;
 }
 

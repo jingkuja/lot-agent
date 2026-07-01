@@ -41,11 +41,11 @@ export function Login({ onLogin }: LoginProps) {
         <p className="login-subtitle">AI 大模型聚合平台</p>
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="login-field">
-            <label htmlFor="login-username">手机号</label>
+            <label htmlFor="login-username">用户名</label>
             <input
               id="login-username"
               type="text"
-              placeholder="手机号"
+              placeholder="用户名（手机号或账号）"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required

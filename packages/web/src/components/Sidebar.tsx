@@ -7,6 +7,7 @@ interface SidebarProps {
   activeId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onCreate: () => void;
   onLoadMore?: () => void;
   hasMore?: boolean;
   loadingMore?: boolean;
@@ -29,6 +30,7 @@ export function Sidebar({
   activeId,
   onSelect,
   onDelete,
+  onCreate,
   onLoadMore,
   hasMore = false,
   loadingMore = false,
@@ -58,7 +60,16 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      {conversations.length > 0 && <div className="sidebar-section-label">最近对话</div>}
+      <div className="sidebar-recent-header">
+        {conversations.length > 0 && <span className="sidebar-section-label">最近对话</span>}
+        <button className="btn-new" onClick={onCreate} title="新建对话">
+          <svg className="btn-new-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M12 8.5v7M8.5 12h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+          新会话
+        </button>
+      </div>
       <div className="sidebar-list" onScroll={handleScroll}>
         {conversations.map((conv) => {
           const tag = tagFor(conv.agent_id);
