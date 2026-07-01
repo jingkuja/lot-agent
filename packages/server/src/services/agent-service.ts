@@ -14,6 +14,8 @@ import {
   copywritingDefinition,
   imageDefinition,
   videoDefinition,
+  pptDefinition,
+  contractDefinition,
   InMemoryModelRegistry,
   populateModelRegistry,
   KeywordReviewProvider,
@@ -240,6 +242,8 @@ export class AgentService {
     this.agentRegistry.register(copywritingDefinition);
     this.agentRegistry.register(imageDefinition);
     this.agentRegistry.register(videoDefinition);
+    this.agentRegistry.register(pptDefinition);
+    this.agentRegistry.register(contractDefinition);
   }
 
   private getLLMProvider(): import("@lot-agent/core").LLMProvider {
