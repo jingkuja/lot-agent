@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
+import { ModelPicker } from "./ModelPicker.js";
+import type { CatalogModel } from "../lib/model-filter.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成。 */
 export type InputMode = "default" | "image" | "video";
@@ -12,6 +14,11 @@ interface InputBoxProps {
   autoFocus?: boolean;
   /** 图像/视频生成 Agent：换「参考图」上传 + 对应的设置选择器。 */
   mode?: InputMode;
+  /** 当前 agent 类型可用的模型列表（右下角选择器）。 */
+  models?: CatalogModel[];
+  /** 当前选中的模型 id（null = 用会话/agent 默认）。 */
+  selectedModel?: string | null;
+  onModelChange?: (id: string) => void;
 }
 
 const MAX_FILES = 5;
@@ -33,6 +40,9 @@ export function InputBox({
   placeholder,
   autoFocus,
   mode = "default",
+  models = [],
+  selectedModel = null,
+  onModelChange,
 }: InputBoxProps) {
   const [value, setValue] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -218,6 +228,14 @@ export function InputBox({
                 <div className="upload-tooltip-hint">最多 {MAX_FILES} 个文件</div>
               </div>
             </div>
+          )}
+          {models.length > 0 && onModelChange && (
+            <ModelPicker
+              models={models}
+              value={selectedModel}
+              onChange={onModelChange}
+              disabled={disabled}
+            />
           )}
           {mode === "image" && (
             <ImageSettingsPicker disabled={disabled} onChange={handleSettingsChange} />

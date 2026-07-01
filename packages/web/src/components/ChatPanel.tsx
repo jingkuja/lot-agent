@@ -4,7 +4,7 @@ import { InputBox, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
-import type { Agent } from "../api/client.js";
+import type { Agent, CatalogModel } from "../api/client.js";
 
 interface ChatPanelProps {
   messages: DisplayMessage[];
@@ -21,6 +21,11 @@ interface ChatPanelProps {
   agent?: Agent | null;
   /** Current user's name (for the empty-state greeting). */
   userName?: string;
+  /** Per-user model catalog (llm/image/video) for the model picker. */
+  modelCatalog?: { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] };
+  /** Currently selected model id for this conversation (null = agent default). */
+  selectedModel?: string | null;
+  onModelChange?: (id: string) => void;
 }
 
 /** 按本地时间返回问候语：早上好 / 下午好 / 晚上好。 */
@@ -41,6 +46,9 @@ export function ChatPanel({
   onSelectForPreview,
   agent,
   userName,
+  modelCatalog,
+  selectedModel,
+  onModelChange,
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -69,6 +77,13 @@ export function ChatPanel({
   const mode: InputMode =
     agentKind === "image" ? "image" : agentKind === "video" ? "video" : "default";
 
+  const modelList =
+    mode === "image"
+      ? modelCatalog?.image
+      : mode === "video"
+        ? modelCatalog?.video
+        : modelCatalog?.llm;
+
   const inputEl = (
     <>
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
@@ -79,6 +94,9 @@ export function ChatPanel({
         autoFocus={isEmpty}
         mode={mode}
         placeholder={mode !== "default" ? "请输入内容" : undefined}
+        models={modelList ?? []}
+        selectedModel={selectedModel ?? null}
+        onModelChange={onModelChange}
       />
     </>
   );

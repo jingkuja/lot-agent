@@ -9,6 +9,7 @@ import { AgentCenterModal } from "../components/AgentCenterModal.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
+import { useModels } from "../hooks/useModels.js";
 import { api, type User } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
 
@@ -60,8 +61,14 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
   }, [refresh]);
 
   const activeIdRef = useRef(activeId);
-  const { messages, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia } =
+  const { messages, conversationModel, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia } =
     useChat(activeId, handleStreamEnd, activeIdRef, updateTitle);
+
+  // Per-user model catalog + the model selected for the current conversation.
+  const { models: modelCatalog } = useModels();
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  // Seed the picker from the loaded conversation's stored model.
+  useEffect(() => { setSelectedModel(conversationModel); }, [conversationModel]);
 
   const prevActiveId = useRef<string | null>(null);
   useEffect(() => {
@@ -139,9 +146,9 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       const kind = activeAgent?.type || activeAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
-          generateMedia(content, kind as "image" | "video", settings, files);
+          generateMedia(content, kind as "image" | "video", settings, files, selectedModel ?? undefined);
         } else {
-          send(content, files);
+          send(content, files, undefined, selectedModel ?? undefined);
         }
       };
       if (newAgentId) {
@@ -158,7 +165,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       }
       dispatch();
     },
-    [newAgentId, setActiveId, addLocal, send, generateMedia, activeAgent]
+    [newAgentId, setActiveId, addLocal, send, generateMedia, activeAgent, selectedModel]
   );
 
   const handleDelete = useCallback(
@@ -273,6 +280,9 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             }
             agent={activeAgent}
             userName={user.name}
+            modelCatalog={modelCatalog}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
           />
         </div>
 

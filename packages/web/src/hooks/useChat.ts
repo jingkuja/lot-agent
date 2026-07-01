@@ -34,6 +34,7 @@ export function useChat(
   onTitle?: (conversationId: string, title: string) => void
 ) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [conversationModel, setConversationModel] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const genPollRef = useRef<{ cancelled: boolean } | null>(null);
@@ -112,6 +113,7 @@ export function useChat(
 
   const loadMessages = useCallback(async (convId: string) => {
     const data = await api.getConversation(convId);
+    setConversationModel((data as { model?: string | null }).model ?? null);
     const display: DisplayMessage[] = data.messages.map((m) => {
       const role = m.role as DisplayMessage["role"];
       const toolName = (m as { tool_name?: string | null }).tool_name;
@@ -166,7 +168,7 @@ export function useChat(
   }, [pollGeneration]);
 
   const streamMessage = useCallback(
-    (content: string, files: File[] = [], preUploaded?: UploadedAttachment[]) => {
+    (content: string, files: File[] = [], preUploaded?: UploadedAttachment[], modelId?: string) => {
       const cid = cidRef.current;
       if (
         !cid ||
@@ -319,7 +321,7 @@ export function useChat(
           });
           setIsStreaming(false);
         }
-      }, uploaded, controller);
+      }, uploaded, controller, modelId);
       })();
     },
     [conversationId, isStreaming, loadMessages]
@@ -350,7 +352,7 @@ export function useChat(
   }, [messages, isStreaming, conversationId, streamMessage]);
 
   const generateMedia = useCallback(
-    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: File[] = []) => {
+    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: File[] = [], modelId?: string) => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || isStreaming) return;
       setIsStreaming(true);
@@ -381,7 +383,7 @@ export function useChat(
           const uploaded = imgs.length ? await Promise.all(imgs.map((f) => api.uploadFile(f))) : [];
           const media = uploaded.map((u) => ({ type: "reference_image" as const, url: u.url }));
 
-          const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined });
+          const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined, model: modelId });
           if (token.cancelled) return;
           // Reconcile the optimistic placeholders with the server-assigned ids
           // + vendor taskId, keeping the bubble in its "generating" state.
@@ -431,10 +433,12 @@ export function useChat(
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
     setIsStreaming(false);
     setMessages([]);
+    setConversationModel(null);
   }, []);
 
   return {
     messages,
+    conversationModel,
     send: streamMessage,
     stop,
     isStreaming,

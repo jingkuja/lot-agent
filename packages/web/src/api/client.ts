@@ -1,7 +1,11 @@
+import type { CatalogModel } from "../lib/model-filter.js";
+export type { CatalogModel };
+
 export interface Conversation {
   id: string;
   title: string;
   agent_id: string;
+  model?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -157,6 +161,10 @@ export const api = {
 
   me: () => request<User>("/auth/me"),
 
+  // ── Models (per-user dynamic catalog) ─────────────────────────────────────────
+  listModels: () =>
+    request<{ llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] }>("/models"),
+
   // ── Agents ──────────────────────────────────────────────────────────────────
   listAgents: () => request<Agent[]>("/agents"),
   installAgent: (id: string) =>
@@ -220,7 +228,8 @@ export const api = {
     attachments?: UploadedAttachment[],
     // Caller may pass its own controller so a single Stop aborts both the
     // file-upload phase and the SSE stream.
-    controller: AbortController = new AbortController()
+    controller: AbortController = new AbortController(),
+    modelId?: string
   ): AbortController => {
     (async () => {
       try {
@@ -232,7 +241,7 @@ export const api = {
               "Content-Type": "application/json",
               ...authHeaders(),
             },
-            body: JSON.stringify({ content, attachments }),
+            body: JSON.stringify({ content, attachments, modelId }),
             signal: controller.signal,
           }
         );
@@ -291,7 +300,7 @@ export const api = {
   // ── Generation (image/video via conversation) ────────────────────────────
   generate: (
     conversationId: string,
-    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown; media?: { type: "reference_image"; url: string }[] }
+    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown; media?: { type: "reference_image"; url: string }[]; model?: string }
   ) =>
     request<{
       userMessage: { id: string; role: "user"; content: string };
