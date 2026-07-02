@@ -1050,6 +1050,21 @@ html, body, #root {
 .attachment-remove:hover {
   color: var(--text);
 }
+.attachment-slot-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+}
+.badge-template {
+  color: var(--tag-image-fg);
+  background: var(--tag-image-bg);
+}
+.badge-content {
+  color: var(--tag-copy-fg);
+  background: var(--tag-copy-bg);
+}
 
 .message-attachments {
   display: flex;

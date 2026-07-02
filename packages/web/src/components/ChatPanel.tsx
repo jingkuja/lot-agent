@@ -75,7 +75,13 @@ export function ChatPanel({
   const isEmpty = messages.length === 0;
   const agentKind = agent?.type || agent?.id;
   const mode: InputMode =
-    agentKind === "image" ? "image" : agentKind === "video" ? "video" : "default";
+    agentKind === "image"
+      ? "image"
+      : agentKind === "video"
+        ? "video"
+        : agentKind === "ppt"
+          ? "ppt"
+          : "default";
 
   const modelList =
     mode === "image"
@@ -93,7 +99,13 @@ export function ChatPanel({
         disabled={isStreaming}
         autoFocus={isEmpty}
         mode={mode}
-        placeholder={mode !== "default" ? "请输入内容" : undefined}
+        placeholder={
+          mode === "ppt"
+            ? "描述要制作的 PPT，可上传模版与内容文件"
+            : mode !== "default"
+              ? "请输入内容"
+              : undefined
+        }
         models={modelList ?? []}
         selectedModel={selectedModel ?? null}
         onModelChange={onModelChange}

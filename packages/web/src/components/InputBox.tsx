@@ -4,8 +4,8 @@ import { ModelPicker } from "./ModelPicker.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
 
-/** 输入框形态：普通对话 / 图像生成 / 视频生成。 */
-export type InputMode = "default" | "image" | "video";
+/** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作。 */
+export type InputMode = "default" | "image" | "video" | "ppt";
 
 interface InputBoxProps {
   onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings) => void;
@@ -25,6 +25,9 @@ interface InputBoxProps {
 const MAX_FILES = 5;
 const ACCEPT =
   "image/jpeg,image/png,image/webp,image/gif,.txt,.md,.csv,.json,application/pdf,.docx,.xlsx,.xls";
+/** ppt 模式内容文件的可选类型（不含图片；旧 pptx 可作素材）。 */
+const ACCEPT_CONTENT =
+  ".txt,.md,.csv,.json,application/pdf,.docx,.xlsx,.xls,.pptx";
 
 /** 上传按钮悬停提示中展示的受支持文件类型。 */
 const SUPPORTED_TYPES: { label: string; exts: string }[] = [
@@ -49,6 +52,9 @@ export function InputBox({
   const [files, setFiles] = useState<File[]>([]);
   // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
   const mediaMode = mode === "image" || mode === "video";
+  const pptMode = mode === "ppt";
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const templateInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,13 +106,21 @@ export function InputBox({
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if ((!trimmed && files.length === 0) || disabled) return;
-    onSend(trimmed, files.map((f) => ({ file: f })), mediaMode ? settingsRef.current : undefined);
+    const hasFiles = files.length > 0 || !!templateFile;
+    if ((!trimmed && !hasFiles) || disabled) return;
+    const picked: PickedFile[] = pptMode
+      ? [
+          ...(templateFile ? [{ file: templateFile, slot: "ppt_template" as const }] : []),
+          ...files.map((f) => ({ file: f, slot: "content" as const })),
+        ]
+      : files.map((f) => ({ file: f }));
+    onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined);
     setValue("");
     setFiles([]);
+    setTemplateFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, files, disabled, onSend, revokeAll, mediaMode]);
+  }, [value, files, templateFile, disabled, onSend, revokeAll, mediaMode, pptMode]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -134,10 +148,18 @@ export function InputBox({
           图片需所选模型支持多模态（视觉）能力才能识别
         </div>
       )}
-      {files.length > 0 && (
+      {(files.length > 0 || templateFile) && (
         <div className="input-attachments">
+          {templateFile && (
+            <div className="attachment-chip" key="__template">
+              <span className="attachment-slot-badge badge-template">模版</span>
+              <span className="attachment-name" title={templateFile.name}>{templateFile.name}</span>
+              <button className="attachment-remove" onClick={() => setTemplateFile(null)} title="移除" type="button">✕</button>
+            </div>
+          )}
           {files.map((f, i) => (
             <div className="attachment-chip" key={i}>
+              {pptMode && <span className="attachment-slot-badge badge-content">内容</span>}
               {f.type.startsWith("image/") && urlsRef.current.get(f) ? (
                 <img className="attachment-thumb" src={urlsRef.current.get(f)} alt={f.name} />
               ) : (
@@ -176,10 +198,21 @@ export function InputBox({
           ref={fileInputRef}
           type="file"
           multiple
-          accept={mediaMode ? "image/*" : ACCEPT}
+          accept={mediaMode ? "image/*" : pptMode ? ACCEPT_CONTENT : ACCEPT}
           style={{ display: "none" }}
           onChange={(e) => {
             addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={templateInputRef}
+          type="file"
+          accept=".pptx"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) setTemplateFile(f); // 重复选择 = 替换
             e.target.value = "";
           }}
         />
@@ -200,9 +233,37 @@ export function InputBox({
               参考图
             </button>
           )}
+          {pptMode && (
+            <>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => templateInputRef.current?.click()}
+                disabled={disabled}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="13" rx="2" />
+                  <path d="M8 21h8M12 17v4" />
+                </svg>
+                PPT 模版
+              </button>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || files.length >= MAX_FILES}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                </svg>
+                内容文件
+              </button>
+            </>
+          )}
         </div>
         <div className="input-toolbar-right">
-          {!mediaMode && (
+          {!mediaMode && !pptMode && (
             <div className="upload-wrap">
               <button
                 type="button"
@@ -254,7 +315,7 @@ export function InputBox({
             <button
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={!value.trim() && files.length === 0}
+              disabled={!value.trim() && files.length === 0 && !templateFile}
               title="发送"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
