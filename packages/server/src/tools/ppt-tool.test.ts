@@ -64,6 +64,16 @@ describe("generate_ppt tool", () => {
     expect(r.content).toContain("模版解析失败，已使用默认样式");
   });
 
+  it("notes the degradation when the template bytes are corrupt", async () => {
+    const deps = makeDeps();
+    deps.db.getAsset = vi.fn(async () => ({ id: "a1", user_id: "u1", storage_key: "a1.pptx" }));
+    deps.uploadStorage.get = vi.fn(async () => Buffer.from("not a zip at all"));
+    const tool = createPptTool(deps);
+    const r = await tool.execute({ ...validInput, templateAssetId: "a1" }, ctx);
+    expect(r.isError).toBeFalsy();
+    expect(r.content).toContain("模版解析失败，已使用默认样式");
+  });
+
   it("uses the owner's template when present", async () => {
     const deps = makeDeps();
     const zip = new JSZip();

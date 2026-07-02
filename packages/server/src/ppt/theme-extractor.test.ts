@@ -47,15 +47,17 @@ describe("extractTheme", () => {
     expect(theme.slideHeightIn).toBeCloseTo(7.5, 2);
   });
 
-  it("falls back to DEFAULT_THEME on a corrupt file", async () => {
+  // 降级路径必须返回 DEFAULT_THEME 本体（toBe，同一引用）——
+  // generate_ppt 靠引用相等识别静默降级并在结果里注明。
+  it("falls back to DEFAULT_THEME (same reference) on a corrupt file", async () => {
     const theme = await extractTheme(Buffer.from("not a zip at all"));
-    expect(theme).toEqual(DEFAULT_THEME);
+    expect(theme).toBe(DEFAULT_THEME);
   });
 
-  it("falls back to DEFAULT_THEME when theme1.xml is missing", async () => {
+  it("falls back to DEFAULT_THEME (same reference) when theme1.xml is missing", async () => {
     const zip = new JSZip();
     zip.file("hello.txt", "hi");
     const theme = await extractTheme(await zip.generateAsync({ type: "nodebuffer" }));
-    expect(theme).toEqual(DEFAULT_THEME);
+    expect(theme).toBe(DEFAULT_THEME);
   });
 });

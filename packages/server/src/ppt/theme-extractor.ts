@@ -41,7 +41,11 @@ function fontOf(xml: string, which: "majorFont" | "minorFont"): string | null {
   return m?.[1] ?? null;
 }
 
-/** 解析上传的 .pptx 模版；任何失败（坏 zip、缺文件、结构异常）降级默认主题。 */
+/**
+ * 解析上传的 .pptx 模版；任何失败（坏 zip、缺文件、结构异常）降级默认主题。
+ * 契约：降级路径返回 DEFAULT_THEME 本体（同一引用），成功路径返回新对象——
+ * 调用方（generate_ppt）靠引用相等识别降级并在结果里注明。
+ */
 export async function extractTheme(bytes: Buffer): Promise<PptTheme> {
   try {
     const zip = await JSZip.loadAsync(bytes);

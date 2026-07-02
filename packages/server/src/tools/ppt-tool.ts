@@ -92,7 +92,10 @@ export function createPptTool(deps: PptToolDeps): Tool {
           const asset = await db.getAsset(templateAssetId);
           if (!asset || asset.user_id !== userId) throw new Error("template not found");
           const bytes = await uploadStorage.get(asset.storage_key);
+          // extractTheme 从不抛错：坏 zip/缺 theme1.xml 时返回 DEFAULT_THEME
+          // 本体（同一引用）。据此识别静默降级，把注明补进结果。
           theme = await extractTheme(bytes);
+          if (theme === DEFAULT_THEME) throw new Error("template parse failed");
         } catch {
           themeNote = "\n注意：模版解析失败，已使用默认样式。";
         }
