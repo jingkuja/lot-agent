@@ -26,8 +26,8 @@ export interface TokenBudget {
 
 const DEFAULT_BUDGET: TokenBudget = {
   systemPrompt: 8_0000,
-  memory: 4_000,
-  retrieval: 60_000,
+  memory: 14_000,
+  retrieval: 50_000,
   toolOutput: 20_000,
   history: 30_000,
   generation: 0, // computed
