@@ -3,39 +3,54 @@ import { estimateTokens } from "./tokenizer.js";
 
 /** Token budget allocation (in tokens) */
 export interface TokenBudget {
-  /** System prompt + skills. Default: 80K */
+  /** System prompt + skills. Default: 16K */
   systemPrompt: number;
   /** Summary of older conversation. Default: 4K */
   memory: number;
-  /** Retrieved documents. Default: 60K */
+  /** Retrieved documents. Default: 20K */
   retrieval: number;
   /** Tool outputs in recent messages. Default: 20K */
   toolOutput: number;
   /**
-   * Minimum reserved for recent conversation history. Default: 30K.
+   * Minimum reserved for recent conversation history. Default: 44K.
    * History is **elastic**: it expands to absorb whatever the window leaves
    * free (e.g. when there is no retrieval), and only shrinks toward this floor
    * when the other blocks are large.
    */
   history: number;
-  /** Reserved for generation. Default: remaining */
+  /** Reserved for generation. 0 or omitted → derived from the leftover. */
   generation: number;
-  /** Total window size */
+  /**
+   * Total window size. Default: 120K — conservative enough for every model
+   * currently wired up (Claude 200K, DeepSeek-class ~128K).
+   */
   total: number;
 }
 
 const DEFAULT_BUDGET: TokenBudget = {
-  systemPrompt: 8_0000,
-  memory: 14_000,
-  retrieval: 50_000,
+  systemPrompt: 16_000,
+  memory: 4_000,
+  retrieval: 20_000,
   toolOutput: 20_000,
-  history: 30_000,
-  generation: 0, // computed
-  total: 280_000,
+  history: 44_000,
+  generation: 0, // derived: total − the blocks above (16K with these defaults)
+  total: 120_000,
 };
 
 /** Absolute lower bound for history so it never collapses to nothing. */
 const MIN_HISTORY = 2_000;
+
+/**
+ * When compaction triggers, fold rounds until the kept tail is at or below
+ * this fraction of the history budget (a low watermark). The resulting
+ * headroom keeps the summary boundary — and thus the cached summary text and
+ * the provider's prefix cache — stable while new rounds accumulate, instead
+ * of moving the boundary (and re-summarizing) on every iteration.
+ */
+const COMPACT_RATIO = 0.6;
+
+/** Cap on any single message's contribution to the summarization input. */
+const SUMMARY_INPUT_MAX_CHARS = 4_000;
 
 export interface ContextManagerConfig {
   budget?: Partial<TokenBudget>;
@@ -43,10 +58,16 @@ export interface ContextManagerConfig {
   maxRawRounds?: number;
   /** Compressor LLM (optional, uses same provider if omitted) */
   compressor?: LLMProvider;
+  /**
+   * Rolling summary carried over from a previous request (persisted by the
+   * caller, e.g. in the conversation row) so an unchanged prefix is never
+   * re-summarized across requests. Invalid/stale state is ignored.
+   */
+  initialSummary?: SummaryState;
 }
 
-/** Cached rolling summary covering the leading `count` messages of the run. */
-interface SummaryState {
+/** Rolling summary covering the leading `count` messages of the history. */
+export interface SummaryState {
   /** Number of leading history messages folded into `text`. */
   count: number;
   text: string;
@@ -66,10 +87,10 @@ export class ContextManager {
 
   constructor(config: ContextManagerConfig = {}) {
     this.budget = { ...DEFAULT_BUDGET, ...config.budget };
-    // Reserve generation from the window. Honor an explicit value; otherwise
-    // derive the leftover, clamped so it never goes negative when the
-    // configured sub-budgets over-subscribe the total.
-    if (config.budget?.generation === undefined) {
+    // Reserve generation from the window. Honor an explicit positive value;
+    // 0 or omitted means "derive the leftover", clamped so it never goes
+    // negative when the configured sub-budgets over-subscribe the total.
+    if (!config.budget?.generation) {
       this.budget.generation = Math.max(
         0,
         this.budget.total -
@@ -82,10 +103,18 @@ export class ContextManager {
     }
     this.maxRawRounds = config.maxRawRounds ?? 20;
     this.compressor = config.compressor;
+    if (config.initialSummary && config.initialSummary.count > 0) {
+      this.summaryState = { ...config.initialSummary };
+    }
   }
 
   getBudget(): TokenBudget {
     return { ...this.budget };
+  }
+
+  /** Current rolling-summary state, for the caller to persist across requests. */
+  getSummaryState(): SummaryState | undefined {
+    return this.summaryState ? { ...this.summaryState } : undefined;
   }
 
   /**
@@ -158,9 +187,7 @@ export class ContextManager {
     let systemTokens = estimateTokens(systemContent);
     if (systemTokens > this.budget.systemPrompt) {
       // Truncate system prompt if too long
-      const truncated =
-        systemContent.slice(0, charsForTokens(this.budget.systemPrompt)) +
-        "\n...(truncated)";
+      const truncated = truncateToTokens(systemContent, this.budget.systemPrompt);
       result.push({ role: "system", content: truncated });
       systemTokens = estimateTokens(truncated);
     } else {
@@ -172,9 +199,7 @@ export class ContextManager {
     if (memory) {
       let memText = memory;
       if (estimateTokens(memText) > this.budget.memory) {
-        memText =
-          memText.slice(0, charsForTokens(this.budget.memory)) +
-          "\n...(truncated)";
+        memText = truncateToTokens(memText, this.budget.memory);
       }
       const content = `[Conversation Summary]\n${memText}`;
       memoryTokens = estimateTokens(content);
@@ -199,11 +224,15 @@ export class ContextManager {
   }
 
   /**
-   * Trim history to `budget` tokens using a sliding window + rolling summary.
-   * - If history fits, return as-is.
-   * - Otherwise fold the oldest whole rounds into a rolling summary until the
-   *   remainder fits (summary is cached/extended across iterations).
-   * - If still too long (or no compressor), truncate tool outputs.
+   * Trim history to `budget` tokens, cheapest strategy first:
+   * 1. If history fits, return as-is.
+   * 2. Elide tool outputs in all but the most recent round (zero-cost, no LLM
+   *    call) — old tool outputs are the lowest-value, highest-volume content.
+   * 3. Reuse the cached rolling summary while [summary + tail] still fits
+   *    (sticky boundary). Otherwise fold whole rounds into the summary down to
+   *    a low watermark (`COMPACT_RATIO`) so the boundary then stays put.
+   * 4. Last resort (or no compressor): `truncateToFit` hard-guarantees the
+   *    budget via per-message truncation and round dropping.
    */
   private async trimHistory(
     history: Message[],
@@ -216,17 +245,47 @@ export class ContextManager {
       return history;
     }
 
-    const rounds = this.splitIntoRounds(history);
+    // Cheap pass: elide tool outputs outside the most recent round.
+    const working = this.truncateOldToolOutputs(history);
+    if (this.countTotalTokens(working) <= budget) {
+      return working;
+    }
+
+    const rounds = this.splitIntoRounds(working);
 
     // Need a compressor to summarize; without one, fall back to truncation.
     if (compressor && rounds.length > 1) {
-      // Peel whole rounds off the front until the kept tail fits, always
-      // keeping at least the most recent round verbatim. Honor `maxRawRounds`
-      // as an upper bound on how many raw rounds we keep.
+      const maxKept = Math.max(1, this.maxRawRounds);
+
+      // Sticky boundary: while the cached summary plus the tail behind it
+      // still fits, reuse it verbatim — no LLM call, stable prefix.
+      const cached = this.summaryState;
+      if (
+        cached &&
+        cached.count > 0 &&
+        cached.count < working.length &&
+        working[cached.count].role === "user" // still a round boundary
+      ) {
+        const tail = working.slice(cached.count);
+        const candidate: Message[] = [
+          { role: "system", content: `[Earlier Context]\n${cached.text}` },
+          ...tail,
+        ];
+        if (
+          this.countTotalTokens(candidate) <= budget &&
+          this.splitIntoRounds(tail).length <= maxKept
+        ) {
+          return candidate;
+        }
+      }
+
+      // Advance the boundary: peel whole rounds off the front until the kept
+      // tail is at or below the low watermark (keeping at least the most
+      // recent round verbatim), so later growth reuses the cached summary.
+      const target = Math.max(MIN_HISTORY, budget * COMPACT_RATIO);
       let keepFrom = 0;
       const fits = (from: number) =>
-        this.countTotalTokens(rounds.slice(from).flat()) <= budget;
-      const maxKept = Math.max(1, this.maxRawRounds);
+        this.countTotalTokens(rounds.slice(from).flat()) <= target;
       while (
         keepFrom < rounds.length - 1 &&
         (!fits(keepFrom) || rounds.length - keepFrom > maxKept)
@@ -239,7 +298,7 @@ export class ContextManager {
         // never split a user/assistant/tool group and orphan a tool result).
         const summarizedCount = rounds.slice(0, keepFrom).flat().length;
         const summary = await this.rollingSummary(
-          history,
+          working,
           summarizedCount,
           compressor,
           signal
@@ -249,14 +308,31 @@ export class ContextManager {
           ...rounds.slice(keepFrom).flat(),
         ];
         if (this.countTotalTokens(result) > budget) {
-          return this.truncateToolOutputs(result, budget);
+          return this.truncateToFit(result, budget);
         }
         return result;
       }
     }
 
-    // No compressor (or a single huge round) — truncate tool outputs.
-    return this.truncateToolOutputs(history, budget);
+    // No compressor (or a single huge round) — hard truncation.
+    return this.truncateToFit(working, budget);
+  }
+
+  /**
+   * Elide tool outputs in every round except the most recent one (whose
+   * outputs the in-flight ReAct turn may still need). Zero LLM cost.
+   */
+  private truncateOldToolOutputs(history: Message[]): Message[] {
+    const rounds = this.splitIntoRounds(history);
+    if (rounds.length <= 1) return history;
+    const lastRoundStart = history.length - rounds[rounds.length - 1].length;
+    const maxToolTokens = Math.max(120, this.budget.toolOutput / 4);
+    return history.map((m, i) => {
+      if (i >= lastRoundStart || m.role !== "tool" || typeof m.content !== "string") {
+        return m;
+      }
+      return { ...m, content: headTailTokens(m.content, maxToolTokens) };
+    });
   }
 
   /**
@@ -326,7 +402,9 @@ export class ContextManager {
         const tools = m.toolCalls
           ? ` [tool_calls: ${m.toolCalls.map((c) => c.name).join(", ")}]`
           : "";
-        return `${m.role}: ${content}${tools}`;
+        // Cap each message's contribution so one huge message doesn't make
+        // the summarization call itself expensive.
+        return `${m.role}: ${headTail(content, SUMMARY_INPUT_MAX_CHARS)}${tools}`;
       })
       .join("\n");
 
@@ -354,43 +432,90 @@ export class ContextManager {
   }
 
   /**
-   * Truncate tool outputs (and, as a last resort, assistant text) to fit
-   * `budget`. Keeps the head **and** tail of each tool output, and never
-   * removes `toolCalls` — dropping them would orphan the paired tool result
-   * and make providers reject the request.
+   * Hard-guarantee `budget` via successive truncation passes: tool outputs,
+   * then oversized user messages, then assistant prose, then dropping the
+   * oldest whole rounds, then an equal per-message squeeze. Keeps the head
+   * **and** tail of truncated bodies, and never removes `toolCalls` —
+   * dropping them would orphan the paired tool result and make providers
+   * reject the request.
    */
-  private truncateToolOutputs(messages: Message[], budget: number): Message[] {
+  private truncateToFit(messages: Message[], budget: number): Message[] {
     let totalTokens = this.countTotalTokens(messages);
     if (totalTokens <= budget) return messages;
 
-    const result = messages.map((m) => ({ ...m }));
-    // Per-output cap derived from the tool-output budget (head+tail kept).
-    const maxToolChars = Math.max(400, charsForTokens(this.budget.toolOutput) / 4);
+    let result = messages.map((m) => ({ ...m }));
+    // Per-message token cap derived from the tool-output budget (head+tail kept).
+    const maxToolTokens = Math.max(120, this.budget.toolOutput / 4);
 
-    // Work backwards, truncating the largest savings first: tool messages.
-    for (let i = result.length - 1; i >= 0; i--) {
-      if (totalTokens <= budget) break;
+    // Pass 1: tool outputs — the largest savings — newest first.
+    for (let i = result.length - 1; i >= 0 && totalTokens > budget; i--) {
       const msg = result[i];
       if (msg.role === "tool" && typeof msg.content === "string") {
         const before = this.countMessageTokens(msg);
-        msg.content = headTail(msg.content, maxToolChars);
+        msg.content = headTailTokens(msg.content, maxToolTokens);
         totalTokens -= before - this.countMessageTokens(msg);
       }
     }
 
-    // Still over budget — shorten verbose assistant prose, but KEEP toolCalls.
+    // Pass 2: oversized user messages (e.g. pasted documents), oldest first.
+    for (let i = 0; i < result.length && totalTokens > budget; i++) {
+      const msg = result[i];
+      if (msg.role === "user" && typeof msg.content === "string") {
+        const before = this.countMessageTokens(msg);
+        msg.content = headTailTokens(msg.content, maxToolTokens);
+        totalTokens -= before - this.countMessageTokens(msg);
+      }
+    }
+
+    // Pass 3: verbose assistant prose, but KEEP toolCalls.
+    for (let i = result.length - 1; i >= 0 && totalTokens > budget; i--) {
+      const msg = result[i];
+      if (
+        msg.role === "assistant" &&
+        typeof msg.content === "string" &&
+        msg.content.length > 200
+      ) {
+        const before = this.countMessageTokens(msg);
+        msg.content = msg.content.slice(0, 200) + "...(truncated)";
+        totalTokens -= before - this.countMessageTokens(msg);
+      }
+    }
+
+    // Pass 4: drop the oldest whole rounds (round-aligned so no tool result
+    // is orphaned), keeping leading system notes and at least the newest round.
     if (totalTokens > budget) {
-      for (let i = result.length - 1; i >= 0; i--) {
-        if (totalTokens <= budget) break;
-        const msg = result[i];
-        if (
-          msg.role === "assistant" &&
-          typeof msg.content === "string" &&
-          msg.content.length > 200
-        ) {
-          const before = this.countMessageTokens(msg);
-          msg.content = msg.content.slice(0, 200) + "...(truncated)";
-          totalTokens -= before - this.countMessageTokens(msg);
+      let lead = 0;
+      while (lead < result.length && result[lead].role === "system") lead++;
+      const leading = result.slice(0, lead);
+      const rounds = this.splitIntoRounds(result.slice(lead));
+      const note: Message = {
+        role: "system",
+        content: "[Earlier messages dropped to fit the context window]",
+      };
+      const noteTokens = this.countMessageTokens(note);
+      let drop = 0;
+      while (drop < rounds.length - 1 && totalTokens + noteTokens > budget) {
+        totalTokens -= this.countTotalTokens(rounds[drop]);
+        drop++;
+      }
+      if (drop > 0) {
+        result = [...leading, note, ...rounds.slice(drop).flat()];
+        totalTokens = this.countTotalTokens(result);
+      }
+    }
+
+    // Pass 5: a single round can still be over — squeeze every text body to
+    // an equal per-message share.
+    if (totalTokens > budget) {
+      const share = Math.max(50, Math.floor(budget / result.length) - 8);
+      for (const msg of result) {
+        if (typeof msg.content === "string" && msg.content) {
+          const ratio =
+            msg.content.length / Math.max(1, estimateTokens(msg.content));
+          msg.content = headTail(
+            msg.content,
+            Math.max(40, Math.floor(share * ratio))
+          );
         }
       }
     }
@@ -399,9 +524,31 @@ export class ContextManager {
   }
 }
 
-/** Approximate char budget for a token budget (inverse of the estimator). */
-function charsForTokens(tokens: number): number {
-  return Math.floor(tokens * 3.5);
+/**
+ * Truncate `text` so its estimated tokens fit `maxTokens`, appending a marker.
+ * Char budget is derived from the text's own chars-per-token density (CJK ≈ 1
+ * char/token, ASCII ≈ 3.5), then tightened until the estimate actually fits.
+ */
+function truncateToTokens(text: string, maxTokens: number): string {
+  const contentBudget = Math.max(1, maxTokens - 8); // leave room for the marker
+  if (estimateTokens(text) <= contentBudget) return text;
+  const ratio = text.length / Math.max(1, estimateTokens(text));
+  let chars = Math.floor(contentBudget * ratio);
+  let cut = text.slice(0, chars);
+  while (chars > 1 && estimateTokens(cut) > contentBudget) {
+    chars = Math.floor(chars * 0.9);
+    cut = text.slice(0, chars);
+  }
+  return cut + "\n...(truncated)";
+}
+
+/**
+ * Head+tail elision bounded by a token budget: the char cap is derived from
+ * the text's own chars-per-token density (CJK ≈ 1, ASCII ≈ 3.5).
+ */
+function headTailTokens(text: string, maxTokens: number): string {
+  const ratio = text.length / Math.max(1, estimateTokens(text));
+  return headTail(text, Math.max(400, Math.floor(maxTokens * ratio)));
 }
 
 /** Keep the head and tail of a long string, eliding the middle. */

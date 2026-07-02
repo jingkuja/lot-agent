@@ -678,6 +678,17 @@ export class DB {
     return (rowCount ?? 0) > 0;
   }
 
+  /** Shallow-merge keys into a conversation's metadata JSONB. */
+  async mergeConversationMetadata(
+    id: string,
+    patch: Record<string, unknown>
+  ): Promise<void> {
+    await this.pool.query(
+      "UPDATE conversations SET metadata = metadata || $1::jsonb WHERE id = $2",
+      [JSON.stringify(patch), id]
+    );
+  }
+
   async updateConversationTitle(id: string, title: string): Promise<void> {
     await this.pool.query(
       "UPDATE conversations SET title = $1 WHERE id = $2",

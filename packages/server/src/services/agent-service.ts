@@ -79,6 +79,28 @@ export function defaultLlmModelId(cfg: LLMConfig): string {
 
 /** Which model a chat turn runs on: an explicit per-request pick wins, then the
  * conversation's stored model, then the agent's configured default. */
+/**
+ * Read the persisted rolling-summary state from a conversation's metadata.
+ * Returns undefined for missing/malformed state (the ContextManager then
+ * summarizes from scratch).
+ */
+export function readPersistedSummary(
+  metadata: unknown
+): import("@lot-agent/core").SummaryState | undefined {
+  const s = (metadata as { contextSummary?: unknown } | null | undefined)
+    ?.contextSummary as { count?: unknown; text?: unknown } | null | undefined;
+  if (
+    s &&
+    typeof s.count === "number" &&
+    s.count > 0 &&
+    typeof s.text === "string" &&
+    s.text.length > 0
+  ) {
+    return { count: s.count, text: s.text };
+  }
+  return undefined;
+}
+
 export function resolveConversationModel(
   explicit: string | undefined,
   conversationModelId: string | null | undefined,
@@ -462,13 +484,16 @@ export class AgentService {
       : (this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider());
     const agentConfig = this.agentConfig as Record<string, unknown>;
     const contextConfig = agentConfig.context as import("@lot-agent/core").ContextManagerConfig | undefined;
+    // Seed the rolling summary persisted on the conversation so an unchanged
+    // history prefix is never re-summarized across requests.
+    const persistedSummary = readPersistedSummary(conversation?.metadata);
     const agent = new Agent({
       ...this.agentConfig,
       systemPrompt: def.systemPrompt,
       allowedToolNames: def.toolNames,
       dynamicPromptParts: dynamicParts,
       contextConfig: contextConfig
-        ? { ...contextConfig, compressor: llm }
+        ? { ...contextConfig, compressor: llm, initialSummary: persistedSummary }
         : undefined,
     });
 
@@ -585,6 +610,22 @@ export class AgentService {
         this.jobQueue
           .enqueue("memory.extract", { conversationId }, userId ?? "default")
           .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
+      }
+
+      // Persist the rolling summary when this run extended it (non-fatal)
+      const summaryState = agent.getContextSummaryState();
+      if (
+        summaryState &&
+        (summaryState.count !== persistedSummary?.count ||
+          summaryState.text !== persistedSummary?.text)
+      ) {
+        try {
+          await this.db.mergeConversationMetadata(conversationId, {
+            contextSummary: summaryState,
+          });
+        } catch (err) {
+          console.warn("[ContextSummary] Failed to persist:", err);
+        }
       }
 
       // Finish trace + spans (with the ACTUAL error message, if any)

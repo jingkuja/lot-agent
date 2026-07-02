@@ -7,7 +7,11 @@ import type {
   ToolResult,
 } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { ContextManager, type ContextManagerConfig } from "../context/index.js";
+import {
+  ContextManager,
+  type ContextManagerConfig,
+  type SummaryState,
+} from "../context/index.js";
 import type { AgentMemoryStore } from "../memory/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
@@ -87,6 +91,11 @@ export class Agent {
   constructor(config: Partial<AgentConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.contextManager = new ContextManager(this.config.contextConfig);
+  }
+
+  /** Rolling-summary state after a run, for the caller to persist. */
+  getContextSummaryState(): SummaryState | undefined {
+    return this.contextManager.getSummaryState();
   }
 
   async *run(
