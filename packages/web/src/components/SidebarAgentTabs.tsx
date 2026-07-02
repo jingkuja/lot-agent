@@ -49,16 +49,17 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
   const nudge = (dir: 1 | -1) => {
     const el = stripRef.current;
     if (!el) return;
-    el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
+    // 翻一整页(正好两个子标签),配合 scroll-snap 落在下一组起点。
+    el.scrollBy({ left: dir * el.clientWidth, behavior: "smooth" });
   };
 
-  const renderTab = (a: Agent) => {
+  const renderTab = (a: Agent, pinned = false) => {
     const kind = agentIconKind(a);
     return (
       <button
         key={a.id}
         type="button"
-        className={`agent-tab ${a.id === activeId ? "active" : ""}`}
+        className={`agent-tab ${pinned ? "agent-tab--general" : ""} ${a.id === activeId ? "active" : ""}`}
         onClick={() => onSwitch(a.id)}
         disabled={disabled}
         title={a.description}
@@ -73,7 +74,7 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
 
   return (
     <div className="sidebar-agent-tabs">
-      {general && renderTab(general)}
+      {general && renderTab(general, true)}
       {overflowing && (
         <button
           type="button"
@@ -91,7 +92,7 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
         ref={stripRef}
         onScroll={syncScrollState}
       >
-        {subs.map(renderTab)}
+        {subs.map((a) => renderTab(a))}
       </div>
       {overflowing && (
         <button

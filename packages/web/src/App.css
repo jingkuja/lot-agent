@@ -48,6 +48,8 @@
   --agent-icon-general: linear-gradient(135deg, #8b5cf6, #6d5cf0);
   --agent-icon-image:   linear-gradient(135deg, #6d5cf0, #3b82f6);
   --agent-icon-video:   linear-gradient(135deg, #10b981, #22c55e);
+  --agent-icon-ppt:      linear-gradient(135deg, #f59e0b, #f97316);
+  --agent-icon-contract: linear-gradient(135deg, #64748b, #475569);
   --accent-grad: linear-gradient(135deg, #8b5cf6, #3b82f6);
   --gen-card-from: rgba(167,139,250,0.16);
   --gen-card-to: rgba(96,165,250,0.12);
@@ -119,6 +121,8 @@
   --agent-icon-general: linear-gradient(135deg, #a78bfa, #8b7bf5);
   --agent-icon-image:   linear-gradient(135deg, #8b7bf5, #60a5fa);
   --agent-icon-video:   linear-gradient(135deg, #34d399, #4ade80);
+  --agent-icon-ppt:      linear-gradient(135deg, #fbbf24, #fb923c);
+  --agent-icon-contract: linear-gradient(135deg, #94a3b8, #64748b);
   --accent-grad: linear-gradient(135deg, #a78bfa, #60a5fa);
   --gen-card-from: rgba(167,139,250,0.16);
   --gen-card-to: rgba(96,165,250,0.12);
@@ -1564,6 +1568,8 @@ html, body, #root {
   gap: 6px;
   overflow-x: auto;
   scrollbar-width: none;
+  /* 滚动落点对齐到每组标签起点,配合子标签的半宽实现「一次两个」翻页 */
+  scroll-snap-type: x mandatory;
   /* 给 hover 的 translateY(-2px) 留出空间,避免被滚动容器裁剪 */
   padding: 4px 2px;
   margin: -4px -2px;
@@ -1611,6 +1617,23 @@ html, body, #root {
 }
 .agent-tab:disabled { opacity: 0.55; cursor: default; }
 
+/* 通用(General)固定在左侧:图标+文字横排的紧凑按钮,占位随内容,给右侧滚动区腾空间。 */
+.agent-tab--general {
+  flex: 0 0 auto;
+  flex-direction: row;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+/* 滚动区内的子标签固定为半宽:任意时刻正好露出两个,翻页切到下一组。
+   两个 calc(50% - 3px) + 一个 6px 间距 = 100% 可视宽度。 */
+.agent-tab-strip .agent-tab {
+  flex: 0 0 calc(50% - 3px);
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
 .agent-tab-icon {
   width: 26px;
   height: 26px;
@@ -1625,8 +1648,8 @@ html, body, #root {
 .agent-tab-icon--general  { background: var(--agent-icon-general); }
 .agent-tab-icon--image    { background: var(--agent-icon-image); }
 .agent-tab-icon--video    { background: var(--agent-icon-video); }
-.agent-tab-icon--ppt      { background: var(--agent-icon-general); }
-.agent-tab-icon--contract { background: var(--agent-icon-general); }
+.agent-tab-icon--ppt      { background: var(--agent-icon-ppt); }
+.agent-tab-icon--contract { background: var(--agent-icon-contract); }
 
 .agent-tab-label {
   max-width: 100%;
@@ -2494,6 +2517,8 @@ html, body, #root {
 .agent-pill-icon--general { background: var(--agent-icon-general); }
 .agent-pill-icon--image   { background: var(--agent-icon-image); }
 .agent-pill-icon--video   { background: var(--agent-icon-video); }
+.agent-pill-icon--ppt      { background: var(--agent-icon-ppt); }
+.agent-pill-icon--contract { background: var(--agent-icon-contract); }
 
 .agent-pill-label {
   line-height: 1;
