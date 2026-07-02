@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import { pptDefinition, contractDefinition, imageDefinition } from "./index.js";
 
 describe("agent definitions", () => {
-  it("ppt is an office stub agent", () => {
+  it("ppt is a real office agent with ask_user + generate_ppt", () => {
     expect(pptDefinition.id).toBe("ppt");
     expect(pptDefinition.type).toBe("ppt");
     expect(pptDefinition.category).toBe("办公");
-    expect(pptDefinition.toolNames).toEqual([]);
+    expect(pptDefinition.toolNames).toEqual(["ask_user", "generate_ppt"]);
+    expect(pptDefinition.systemPrompt).toContain("templateAssetId");
+    expect(pptDefinition.systemPrompt).not.toContain("占位");
   });
 
   it("contract is a review stub agent", () => {
