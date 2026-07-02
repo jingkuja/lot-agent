@@ -90,6 +90,14 @@ export interface AssetMeta {
   created_at: string;
 }
 
+export type AttachmentSlot = "ppt_template" | "content";
+
+/** 输入框选中的文件 + 它在消息里的角色（PPT 模版 / 内容素材）。 */
+export interface PickedFile {
+  file: File;
+  slot?: AttachmentSlot;
+}
+
 export interface UploadedAttachment {
   assetId: string;
   filename: string;
@@ -97,6 +105,7 @@ export interface UploadedAttachment {
   size: number;
   url: string;
   kind: "image" | "doc";
+  slot?: AttachmentSlot;
 }
 
 // ── Token management ──────────────────────────────────────────────────────────

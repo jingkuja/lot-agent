@@ -10,7 +10,7 @@ import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
 import { useModels } from "../hooks/useModels.js";
-import { api, type User } from "../api/client.js";
+import { api, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind } from "../lib/model-defaults.js";
 
@@ -176,7 +176,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
 
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
-    async (content: string, files: File[] = [], settings?: unknown) => {
+    async (content: string, files: PickedFile[] = [], settings?: unknown) => {
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {

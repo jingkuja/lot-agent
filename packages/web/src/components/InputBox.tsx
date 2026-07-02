@@ -2,12 +2,13 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
 import { ModelPicker } from "./ModelPicker.js";
 import type { CatalogModel } from "../lib/model-filter.js";
+import type { PickedFile } from "../api/client.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成。 */
 export type InputMode = "default" | "image" | "video";
 
 interface InputBoxProps {
-  onSend: (content: string, files: File[], settings?: ImageSettings | VideoSettings) => void;
+  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings) => void;
   onStop: () => void;
   disabled: boolean;
   placeholder?: string;
@@ -100,7 +101,7 @@ export function InputBox({
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     if ((!trimmed && files.length === 0) || disabled) return;
-    onSend(trimmed, files, mediaMode ? settingsRef.current : undefined);
+    onSend(trimmed, files.map((f) => ({ file: f })), mediaMode ? settingsRef.current : undefined);
     setValue("");
     setFiles([]);
     revokeAll();

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { api, type UploadedAttachment } from "../api/client.js";
+import { api, type UploadedAttachment, type PickedFile } from "../api/client.js";
 
 export interface GenerationView {
   mediaType: "image" | "video";
@@ -178,7 +178,7 @@ export function useChat(
   }, [pollGeneration]);
 
   const streamMessage = useCallback(
-    (content: string, files: File[] = [], preUploaded?: UploadedAttachment[], modelId?: string) => {
+    (content: string, files: PickedFile[] = [], preUploaded?: UploadedAttachment[], modelId?: string) => {
       const cid = cidRef.current;
       if (
         !cid ||
@@ -206,7 +206,10 @@ export function useChat(
         if (!preUploaded) {
           try {
             uploaded = await Promise.all(
-              files.map((f) => api.uploadFile(f, controller.signal))
+              files.map(async (f) => {
+                const u = await api.uploadFile(f.file, controller.signal);
+                return f.slot ? { ...u, slot: f.slot } : u;
+              })
             );
           } catch (e) {
             streamsRef.current.delete(cid);
@@ -379,7 +382,7 @@ export function useChat(
   }, [messages, isStreaming, conversationId, streamMessage]);
 
   const generateMedia = useCallback(
-    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: File[] = [], modelId?: string) => {
+    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [], modelId?: string) => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || isStreaming) return;
       setIsStreaming(true);
@@ -406,8 +409,8 @@ export function useChat(
 
       (async () => {
         try {
-          const imgs = files.filter((f) => f.type.startsWith("image/"));
-          const uploaded = imgs.length ? await Promise.all(imgs.map((f) => api.uploadFile(f))) : [];
+          const imgs = files.filter((f) => f.file.type.startsWith("image/"));
+          const uploaded = imgs.length ? await Promise.all(imgs.map((f) => api.uploadFile(f.file))) : [];
           const media = uploaded.map((u) => ({ type: "reference_image" as const, url: u.url }));
 
           const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined, model: modelId });
