@@ -1557,9 +1557,27 @@ html, body, #root {
   padding: 4px 12px 10px;
 }
 
-.agent-tab {
+.agent-tab-strip {
   flex: 1 1 0;
   min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* 给 hover 的 translateY(-2px) 留出空间,避免被滚动容器裁剪 */
+  padding: 4px 2px;
+  margin: -4px -2px;
+}
+.agent-tab-strip::-webkit-scrollbar { display: none; }
+/* mask 渐隐只在真的溢出时启用;mask 的颜色只取 alpha 通道,#000 不是渲染色,不影响主题 */
+.agent-tab-strip.is-overflowing {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+}
+
+.agent-tab {
+  flex: 1 0 auto;
+  min-width: 76px;
   display: flex;
   flex-direction: column;
   align-items: center;
