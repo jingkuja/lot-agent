@@ -204,4 +204,73 @@ describe("Agent.run", () => {
     );
     expect(reuse).toBeDefined();
   });
+
+  it("ends the run after a successful endsTurn tool without re-calling the LLM", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "ask_user",
+      description: "ask",
+      parameters: { type: "object", properties: {} },
+      endsTurn: true,
+      execute: async () => ({ content: "[waiting]" }),
+    });
+    const llm = scriptedLLM([
+      toolCallChunks("t1", "ask_user", { question: "几页？" }),
+      textChunks("SHOULD NOT HAPPEN"),
+    ]);
+    const events = await collect(
+      new Agent().run("做个PPT", makeContext(llm, registry))
+    );
+    expect(events.map((e) => e.type)).toEqual(["tool_call", "tool_result", "done"]);
+    expect(llm.calls.length).toBe(1); // 没有第二次 LLM 调用
+  });
+
+  it("skips remaining batched tool calls after an endsTurn tool", async () => {
+    const registry = new ToolRegistry();
+    let otherRan = false;
+    registry.register({
+      name: "ask_user",
+      description: "ask",
+      parameters: { type: "object", properties: {} },
+      endsTurn: true,
+      execute: async () => ({ content: "[waiting]" }),
+    });
+    registry.register({
+      name: "other",
+      description: "other",
+      parameters: { type: "object", properties: {} },
+      execute: async () => {
+        otherRan = true;
+        return { content: "ran" };
+      },
+    });
+    const llm = scriptedLLM([
+      [
+        { type: "tool_call", toolCall: { id: "t1", name: "ask_user", arguments: {} } },
+        { type: "tool_call", toolCall: { id: "t2", name: "other", arguments: {} } },
+        { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
+      ],
+    ]);
+    await collect(new Agent().run("hi", makeContext(llm, registry)));
+    expect(otherRan).toBe(false);
+  });
+
+  it("does NOT end the turn when the endsTurn tool errors", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "ask_user",
+      description: "ask",
+      parameters: { type: "object", properties: {} },
+      endsTurn: true,
+      execute: async () => ({ content: "missing question", isError: true, errorKind: "validation" }),
+    });
+    const llm = scriptedLLM([
+      toolCallChunks("t1", "ask_user", {}),
+      textChunks("recovered"),
+    ]);
+    const events = await collect(new Agent().run("hi", makeContext(llm, registry)));
+    // 错误结果不结束回合——模型拿到错误后第二轮继续输出文本
+    expect(llm.calls.length).toBe(2);
+    expect(events.some((e) => e.type === "text" && e.content === "recovered")).toBe(true);
+  });
 });

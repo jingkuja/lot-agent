@@ -291,6 +291,14 @@ export class Agent {
             content: result.content,
             toolCallId: tc.id,
           });
+
+          // An endsTurn tool that succeeded hands control back to the user
+          // (e.g. ask_user). Stop the run here — remaining batched calls are
+          // skipped; the model re-plans after the user's reply next turn.
+          if (!result.isError && context.toolRegistry.get(tc.name)?.endsTurn) {
+            yield done();
+            return;
+          }
         }
       }
 

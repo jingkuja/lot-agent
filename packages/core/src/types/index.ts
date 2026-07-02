@@ -114,6 +114,12 @@ export interface Tool {
    * run (e.g. web fetches). Defaults to false — most tools must re-run.
    */
   cacheable?: boolean;
+  /**
+   * When true, a SUCCESSFUL execution of this tool ends the current agent
+   * run (the turn is handed back to the user, e.g. ask_user). Remaining
+   * batched tool calls are skipped; an isError result does NOT end the turn.
+   */
+  endsTurn?: boolean;
   execute(input: unknown, context: ToolContext): Promise<ToolResult>;
 }
 
