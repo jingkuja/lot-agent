@@ -70,8 +70,24 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
   }, [refresh]);
 
   const activeIdRef = useRef(activeId);
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+
+  // 标题总结完成 = 该对话已真实落库。若它仍是打开的对话，把侧边栏 tab 同步到
+  // 它的 agent 类型,使列表显示并高亮当前对话(与点击历史对话的行为一致)。
+  const handleTitle = useCallback(
+    (conversationId: string, title: string) => {
+      updateTitle(conversationId, title);
+      if (conversationId === activeIdRef.current) {
+        const conv = conversationsRef.current.find((c) => c.id === conversationId);
+        if (conv) setActiveAgentId(conv.agent_id || defaultAgentId);
+      }
+    },
+    [updateTitle, defaultAgentId]
+  );
+
   const { messages, conversationModel, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia } =
-    useChat(activeId, handleStreamEnd, activeIdRef, updateTitle);
+    useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
 
   // Per-user model catalog + per-group (llm/image/video) selected models.
   const { models: modelCatalog } = useModels();
@@ -117,6 +133,9 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
   const handleStartNewChat = useCallback(
     (agentId: string) => {
       setNewAgentId(agentId);
+      // Sync the ref BEFORE the next render so in-flight stream events stop
+      // rendering into the (now empty) new-chat view immediately.
+      activeIdRef.current = null;
       setActiveId(null);
       clear();
       setPreviewContent(null);
@@ -139,6 +158,9 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       const conv = conversations.find((c) => c.id === id);
       if (conv) setActiveAgentId(conv.agent_id || defaultAgentId);
       setNewAgentId(null);
+      // Sync the ref BEFORE loadMessages: its stale-response guard and the
+      // stream-event scoping both compare against activeIdRef synchronously.
+      activeIdRef.current = id;
       setActiveId(id);
       clear();
       loadMessages(id);
@@ -187,6 +209,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
         // Deleting the open conversation drops us into new-chat mode (rather
         // than a dead empty state), so the input can create + send a new
         // conversation instead of silently doing nothing.
+        activeIdRef.current = null;
         clear();
         setPreviewContent(null);
         setNewAgentId(activeAgentId);
@@ -212,6 +235,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
         if (id === activeAgentId) {
           setActiveAgentId(GENERAL_ID);
           setNewAgentId(GENERAL_ID);
+          activeIdRef.current = null;
           setActiveId(null);
           clear();
           setPreviewContent(null);

@@ -12,19 +12,25 @@ export function useConversations() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const hasMore = nextCursor !== null;
   const initialized = useRef(false);
+  // Monotonic id of the latest refresh. Concurrent streams can end close
+  // together and fire overlapping refreshes; a stale response resolving last
+  // would overwrite newer data (e.g. revert a just-summarized title).
+  const refreshSeq = useRef(0);
 
   // Refresh from the top. Keeps however many pages are already loaded (so a
   // post-stream refresh doesn't collapse the list back to one page) by
   // refetching max(loaded, PAGE_SIZE) rows in a single keyset page.
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeq.current;
     setLoading(true);
     try {
       const count = Math.min(Math.max(conversations.length, PAGE_SIZE), 100);
       const { items, nextCursor } = await api.listConversations(count);
+      if (seq !== refreshSeq.current) return; // superseded by a newer refresh
       setConversations(items);
       setNextCursor(nextCursor);
     } finally {
-      setLoading(false);
+      if (seq === refreshSeq.current) setLoading(false);
     }
   }, [conversations.length]);
 

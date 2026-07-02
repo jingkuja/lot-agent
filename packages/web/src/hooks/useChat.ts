@@ -36,7 +36,11 @@ export function useChat(
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [conversationModel, setConversationModel] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  // One live SSE stream per conversation id. Switching away must NOT kill the
+  // stream (the reply still persists server-side) — but its events may only
+  // touch the view while its conversation is the one on screen, otherwise a
+  // concurrent chat bleeds its reply into whatever conversation is displayed.
+  const streamsRef = useRef<Map<string, AbortController>>(new Map());
   const genPollRef = useRef<{ cancelled: boolean } | null>(null);
   const onStreamEndRef = useRef(onStreamEnd);
   onStreamEndRef.current = onStreamEnd;
@@ -113,6 +117,12 @@ export function useChat(
 
   const loadMessages = useCallback(async (convId: string) => {
     const data = await api.getConversation(convId);
+    // The user may have switched again while this fetch was in flight — a
+    // stale response must not overwrite the conversation now on screen.
+    if (cidRef.current !== convId) return;
+    // Re-entering a conversation whose stream is still live re-disables the
+    // input; its stream events re-attach to the view on the next chunk.
+    setIsStreaming(streamsRef.current.has(convId));
     setConversationModel((data as { model?: string | null }).model ?? null);
     const display: DisplayMessage[] = data.messages.map((m) => {
       const role = m.role as DisplayMessage["role"];
@@ -173,7 +183,8 @@ export function useChat(
       if (
         !cid ||
         (!content.trim() && files.length === 0 && !preUploaded?.length) ||
-        isStreaming
+        isStreaming ||
+        streamsRef.current.has(cid)
       )
         return;
 
@@ -182,7 +193,11 @@ export function useChat(
       // One controller for the whole turn so Stop can abort an in-flight upload
       // (set BEFORE uploads start), not just the SSE stream.
       const controller = new AbortController();
-      abortRef.current = controller;
+      streamsRef.current.set(cid, controller);
+      // True while this stream's conversation is still the one on screen.
+      // Every view mutation below is gated on it; the stream itself keeps
+      // running (and persisting) even when the user switches away.
+      const isCurrent = () => cidRef.current === cid;
 
       (async () => {
         // Upload any attached files first, then send the message with their refs.
@@ -194,7 +209,8 @@ export function useChat(
               files.map((f) => api.uploadFile(f, controller.signal))
             );
           } catch (e) {
-            setIsStreaming(false);
+            streamsRef.current.delete(cid);
+            if (isCurrent()) setIsStreaming(false);
             if (controller.signal.aborted) return; // user pressed Stop — silent
             window.alert(
               `文件上传失败：${e instanceof Error ? e.message : String(e)}`
@@ -210,7 +226,7 @@ export function useChat(
           content,
           attachments: uploaded,
         };
-        setMessages((prev) => [...prev, userMsg]);
+        if (isCurrent()) setMessages((prev) => [...prev, userMsg]);
 
         let assistantMsg: DisplayMessage = {
           id: `assistant-${Date.now()}`,
@@ -228,10 +244,11 @@ export function useChat(
             ...assistantMsg,
             content: assistantMsg.content + event.content,
           };
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            return [...filtered, assistantMsg];
-          });
+          if (isCurrent())
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              return [...filtered, assistantMsg];
+            });
         }
 
         if (event.type === "tool_call") {
@@ -244,10 +261,11 @@ export function useChat(
             ...assistantMsg,
             toolCalls: [...pendingToolCalls],
           };
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            return [...filtered, assistantMsg];
-          });
+          if (isCurrent())
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              return [...filtered, assistantMsg];
+            });
           // The "executing tool" state stays visible until tool_result arrives,
           // so no artificial delay is needed. Blocking here would stall the
           // awaited SSE read loop and add real latency per tool call.
@@ -268,12 +286,13 @@ export function useChat(
               isError: event.isError ?? false,
             },
           };
-          setMessages((prev) => [
-            ...prev.map((m) =>
-              m.id === finishedAssistantId ? { ...m, isStreaming: false } : m
-            ),
-            resultMsg,
-          ]);
+          if (isCurrent())
+            setMessages((prev) => [
+              ...prev.map((m) =>
+                m.id === finishedAssistantId ? { ...m, isStreaming: false } : m
+              ),
+              resultMsg,
+            ]);
 
           // Reset for next LLM iteration (new assistant message)
           assistantMsg = {
@@ -286,40 +305,48 @@ export function useChat(
         }
 
         if (event.type === "title" && event.title) {
-          // Live sidebar title update — no refresh needed.
-          const tcid = cidRef.current;
-          if (tcid) onTitleRef.current?.(tcid, event.title);
+          // Live sidebar title update — keyed by THIS stream's conversation,
+          // not whatever conversation happens to be on screen when it lands.
+          onTitleRef.current?.(cid, event.title);
         }
 
         if (event.type === "done" || event.type === "stream_end") {
           assistantMsg = { ...assistantMsg, isStreaming: false };
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            // Only add if it has content or tool calls
-            if (assistantMsg.content || assistantMsg.toolCalls?.length) {
-              return [...filtered, assistantMsg];
-            }
-            return filtered;
-          });
-          setIsStreaming(false);
+          if (isCurrent()) {
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              // Only add if it has content or tool calls
+              if (assistantMsg.content || assistantMsg.toolCalls?.length) {
+                return [...filtered, assistantMsg];
+              }
+              return filtered;
+            });
+            setIsStreaming(false);
+          }
 
-          if (event.type === "stream_end" && cid) {
-            loadMessages(cid);
+          if (event.type === "stream_end") {
+            streamsRef.current.delete(cid);
+            if (isCurrent()) loadMessages(cid);
+            // Sidebar refresh runs regardless — the finished conversation's
+            // title/order must update even while another one is on screen.
             onStreamEndRef.current?.();
           }
         }
 
         if (event.type === "error") {
+          streamsRef.current.delete(cid);
           assistantMsg = {
             ...assistantMsg,
             content: assistantMsg.content + `\n\n[Error: ${event.message}]`,
             isStreaming: false,
           };
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            return [...filtered, assistantMsg];
-          });
-          setIsStreaming(false);
+          if (isCurrent()) {
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              return [...filtered, assistantMsg];
+            });
+            setIsStreaming(false);
+          }
         }
       }, uploaded, controller, modelId);
       })();
@@ -422,7 +449,13 @@ export function useChat(
   );
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    // Stop only the conversation on screen — a concurrent stream in another
+    // conversation keeps running.
+    const cid = cidRef.current;
+    if (cid) {
+      streamsRef.current.get(cid)?.abort();
+      streamsRef.current.delete(cid);
+    }
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
     setIsStreaming(false);
   }, []);
