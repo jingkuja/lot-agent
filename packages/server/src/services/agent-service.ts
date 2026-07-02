@@ -25,6 +25,7 @@ import {
 } from "@lot-agent/core";
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
+import { createPptTool } from "../tools/ppt-tool.js";
 import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
@@ -239,6 +240,15 @@ export class AgentService {
         storage: new LocalStorage(resolve(root, "data/documents"), staticPrefix("/static/documents")),
         db: this.db,
         fontPath: resolve(root, "assets/fonts/NotoSansSC-Regular.otf"),
+      })
+    );
+
+    // PPT 生成工具：产出写 documents 仓，模版从用户上传仓读取。
+    this.toolRegistry.register(
+      createPptTool({
+        storage: new LocalStorage(resolve(root, "data/documents"), staticPrefix("/static/documents")),
+        uploadStorage: this.uploadStorage,
+        db: this.db,
       })
     );
 
