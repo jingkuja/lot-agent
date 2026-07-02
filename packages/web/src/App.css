@@ -1549,7 +1549,7 @@ html, body, #root {
   flex-shrink: 0;
 }
 
-/* ── Sidebar agent tabs (通用 pinned + windowed sub-agents + < > arrows) ── */
+/* ── Sidebar agent tabs (通用 pinned + scrollable sub-agent strip + ‹ › nudge arrows) ── */
 .sidebar-agent-tabs {
   display: flex;
   align-items: stretch;
