@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import type { Tool, ToolContext, ToolResult, ToolErrorKind } from "../types/index.js";
+import { askUserTool } from "./ask-user.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -456,4 +457,5 @@ export function registerBuiltinTools(registry: {
   registry.register(searchFilesTool);
   registry.register(webFetchTool);
   registry.register(webSearchTool);
+  registry.register(askUserTool);
 }

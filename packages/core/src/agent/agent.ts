@@ -10,6 +10,7 @@ import { ToolRegistry } from "../tools/registry.js";
 import { ContextManager, type ContextManagerConfig } from "../context/index.js";
 import type { AgentMemoryStore } from "../memory/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
+import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
@@ -106,6 +107,14 @@ export class Agent {
     // Inject memory usage policy when this agent can use memory tools
     if (context.memory && hasMemoryTools(this.config.allowedToolNames)) {
       systemParts.push(MEMORY_POLICY_PROMPT);
+    }
+
+    // Inject the ask-user policy when this agent can use the ask_user tool
+    if (
+      context.toolRegistry.get("ask_user") &&
+      hasAskUserTool(this.config.allowedToolNames)
+    ) {
+      systemParts.push(ASK_USER_POLICY_PROMPT);
     }
 
     // Inject memory into system prompt
