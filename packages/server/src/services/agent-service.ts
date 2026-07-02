@@ -318,7 +318,8 @@ export class AgentService {
   async generateTitle(
     conversationId: string,
     userMessage: string,
-    attachments?: AttachmentRef[]
+    attachments?: AttachmentRef[],
+    opts?: { userId?: string; modelId?: string }
   ): Promise<string | null> {
     try {
       const conversation = await this.db.getConversation(conversationId);
@@ -340,7 +341,18 @@ export class AgentService {
         : "";
       const titleInput = (userMessage || "（无文字，仅附件）") + attachmentNote;
 
-      const llm = this.getLLMProvider();
+      // Title runs on the same model as the chat turn: explicit pick > the
+      // conversation's stored model > env default — with the same apiKey /
+      // provider fallback chain as streamAgentResponse.
+      const modelId = resolveConversationModel(
+        opts?.modelId,
+        conversation.model,
+        this.llmConfig.default
+      );
+      const apiKey = opts?.userId ? await this.db.getUserApiKey(opts.userId) : null;
+      const llm = apiKey
+        ? this.providerFactory.llm(modelId, apiKey)
+        : this.getLLMProvider();
       let title = "";
       for await (const chunk of llm.chat([
         {
