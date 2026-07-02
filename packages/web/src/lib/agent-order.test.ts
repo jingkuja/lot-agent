@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { windowSubAgents, AGENT_TAB_WINDOW, splitInstalledAgents, MAX_VISIBLE_SUBAGENTS } from "./agent-order.js";
+import { windowSubAgents, AGENT_TAB_WINDOW, splitInstalledAgents, MAX_VISIBLE_SUBAGENTS, sortedSubAgents } from "./agent-order.js";
 
 const mk = (id: string, sortOrder: number | null = 0) => ({ id, sortOrder });
 
@@ -76,5 +76,21 @@ describe("splitInstalledAgents", () => {
     expect(r.general).toBeNull();
     expect(r.visible.map((a) => a.id)).toEqual(["a", "b"]);
     expect(r.overflow).toEqual([]);
+  });
+});
+
+describe("sortedSubAgents", () => {
+  it("excludes general and sorts by sortOrder ascending", () => {
+    const r = sortedSubAgents([mk("general", 0), mk("b", 2), mk("a", 1)]);
+    expect(r.map((a) => a.id)).toEqual(["a", "b"]);
+  });
+
+  it("puts null sortOrder last", () => {
+    const r = sortedSubAgents([mk("x", null), mk("y", 5)]);
+    expect(r.map((a) => a.id)).toEqual(["y", "x"]);
+  });
+
+  it("returns empty for general-only input", () => {
+    expect(sortedSubAgents([mk("general", 0)])).toEqual([]);
   });
 });

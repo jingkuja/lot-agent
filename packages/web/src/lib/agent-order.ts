@@ -4,6 +4,16 @@ export const AGENT_TAB_WINDOW = 2;
 
 export const MAX_VISIBLE_SUBAGENTS = 6;
 
+/** 子 Agent(排除 general)按 sortOrder 升序,null 最后。 */
+export function sortedSubAgents<T extends { id: string; sortOrder?: number | null }>(
+  installed: T[]
+): T[] {
+  const rank = (a: T) => (a.sortOrder == null ? Number.POSITIVE_INFINITY : a.sortOrder);
+  return installed
+    .filter((a) => a.id !== GENERAL_ID)
+    .sort((a, b) => rank(a) - rank(b));
+}
+
 export interface SplitAgents<T> {
   general: T | null;
   visible: T[];
@@ -27,10 +37,7 @@ export function windowSubAgents<T extends { id: string; sortOrder?: number | nul
   activeId: string,
 ): AgentTabView<T> {
   const general = installed.find((a) => a.id === GENERAL_ID) ?? null;
-  const rank = (a: T) => (a.sortOrder == null ? Number.POSITIVE_INFINITY : a.sortOrder);
-  const subs = installed
-    .filter((a) => a.id !== GENERAL_ID)
-    .sort((a, b) => rank(a) - rank(b));
+  const subs = sortedSubAgents(installed);
 
   const maxStart = Math.max(0, subs.length - AGENT_TAB_WINDOW);
   let start = Math.min(Math.max(windowStart, 0), maxStart);
@@ -57,10 +64,7 @@ export function splitInstalledAgents<T extends { id: string; sortOrder?: number 
   installed: T[]
 ): SplitAgents<T> {
   const general = installed.find((a) => a.id === GENERAL_ID) ?? null;
-  const rank = (a: T) => (a.sortOrder == null ? Number.POSITIVE_INFINITY : a.sortOrder);
-  const subs = installed
-    .filter((a) => a.id !== GENERAL_ID)
-    .sort((a, b) => rank(a) - rank(b));
+  const subs = sortedSubAgents(installed);
   return {
     general,
     visible: subs.slice(0, MAX_VISIBLE_SUBAGENTS),
