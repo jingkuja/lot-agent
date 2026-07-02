@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import {
   extractAttachment,
   attachmentKind,
@@ -114,6 +115,53 @@ describe("extractAttachment", () => {
     };
     const part = await extractAttachment({ ...base, filename: "gone.txt", mime: "text/plain" }, s);
     expect(part).toEqual({ type: "text", text: "[附件 gone.txt 无法读取，已忽略内容]" });
+  });
+});
+
+const PPTX_MIME =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+describe("extractAttachment: ppt slots", () => {
+  it("turns a ppt_template attachment into a marker without reading storage", async () => {
+    const storage = { get: vi.fn() } as any;
+    const part = await extractAttachment(
+      {
+        assetId: "tpl-1", filename: "公司模版.pptx", mime: PPTX_MIME,
+        size: 10, url: "/static/uploads/tpl-1.pptx", kind: "doc",
+        slot: "ppt_template",
+      },
+      storage
+    );
+    expect(part).toEqual({
+      type: "text",
+      text: "[PPT模版已上传: 公司模版.pptx (templateAssetId: tpl-1)]",
+    });
+    expect(storage.get).not.toHaveBeenCalled();
+  });
+
+  it("extracts per-slide text from a pptx content file", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "ppt/slides/slide1.xml",
+      `<p:sld xmlns:a="x"><a:t>标题一</a:t><a:t>要点A</a:t></p:sld>`
+    );
+    zip.file(
+      "ppt/slides/slide2.xml",
+      `<p:sld xmlns:a="x"><a:t>标题二</a:t></p:sld>`
+    );
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const storage = { get: vi.fn(async () => bytes) } as any;
+    const part = await extractAttachment(
+      {
+        assetId: "c1", filename: "旧稿.pptx", mime: PPTX_MIME,
+        size: bytes.length, url: "/static/uploads/c1.pptx", kind: "doc",
+      },
+      storage
+    );
+    expect(part.type).toBe("text");
+    expect(part.text).toContain("标题一");
+    expect(part.text).toContain("要点A");
+    expect(part.text).toContain("标题二");
   });
 });
 

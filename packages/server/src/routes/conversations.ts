@@ -164,6 +164,7 @@ export function createConversationRoutes(service: AgentService): Hono {
         size: asset.size_bytes,
         url: asset.url,
         kind: attachmentKind(asset.mime),
+        slot: a.slot === "ppt_template" || a.slot === "content" ? a.slot : undefined,
       });
     }
 

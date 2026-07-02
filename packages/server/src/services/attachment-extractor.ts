@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import type { ContentPart, ObjectStorage } from "@lot-agent/core";
 
 export const MAX_DOC_CHARS = 30000;
@@ -9,6 +10,9 @@ const EXCEL_MIMES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel",
 ]);
+
+const PPTX_MIME =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 /** 把 Excel 工作簿转成纯文本：每个工作表渲染为 CSV，便于模型阅读。 */
 function excelToText(bytes: Buffer): string {
@@ -21,6 +25,24 @@ function excelToText(bytes: Buffer): string {
   return parts.join("\n\n");
 }
 
+/** 抽出 pptx 各页的可读文本（旧 PPT 作为内容素材时用）。 */
+async function pptxToText(bytes: Buffer): Promise<string> {
+  const zip = await JSZip.loadAsync(bytes);
+  const names = Object.keys(zip.files)
+    .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .sort((a, b) => Number(a.match(/(\d+)/)![1]) - Number(b.match(/(\d+)/)![1]));
+  const pages: string[] = [];
+  for (const n of names) {
+    const xml = await zip.file(n)!.async("string");
+    const texts = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)]
+      .map((m) => m[1])
+      .filter(Boolean);
+    const num = n.match(/(\d+)/)![1];
+    if (texts.length) pages.push(`### 第${num}页\n${texts.join("\n")}`);
+  }
+  return pages.join("\n\n");
+}
+
 export interface AttachmentRef {
   assetId: string;
   filename: string;
@@ -28,6 +50,8 @@ export interface AttachmentRef {
   size: number;
   url: string;
   kind: "image" | "doc";
+  /** PPT Agent 的附件角色：模版（只传引用，不进正文）或撰写素材。 */
+  slot?: "ppt_template" | "content";
 }
 
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -50,6 +74,15 @@ export async function extractAttachment(
   att: AttachmentRef,
   storage: ObjectStorage
 ): Promise<ContentPart> {
+  // PPT 模版是渲染素材而非阅读材料：只给模型一个引用标记，
+  // 字节由 generate_ppt 工具凭 templateAssetId 自行读取。
+  if (att.slot === "ppt_template") {
+    return {
+      type: "text",
+      text: `[PPT模版已上传: ${att.filename} (templateAssetId: ${att.assetId})]`,
+    };
+  }
+
   // storage key = url 去掉静态前缀（/static/uploads/）。
   // url 可能是站内相对路径（/static/uploads/<id>.<ext>），也可能是绝对地址
   // （设置 PUBLIC_BASE_URL 后：http://<box-ip>:3000/static/uploads/<id>.<ext>），
@@ -90,6 +123,8 @@ export async function extractAttachment(
       text = (await mammoth.extractRawText({ buffer: bytes })).value;
     } else if (EXCEL_MIMES.has(att.mime)) {
       text = excelToText(bytes);
+    } else if (att.mime === PPTX_MIME) {
+      text = await pptxToText(bytes);
     } else if (att.mime.startsWith("text/") || att.mime === "application/json") {
       text = bytes.toString("utf8");
     }
