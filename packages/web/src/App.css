@@ -1066,6 +1066,63 @@ html, body, #root {
   background: var(--tag-copy-bg);
 }
 
+/* ── ask_user 提问卡片 ── */
+.ask-user-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 6px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tool);
+}
+.ask-user-card.answered { opacity: 0.75; }
+.ask-user-question {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ask-user-options {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.ask-user-option {
+  padding: 6px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.ask-user-option:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ask-user-option:disabled { cursor: default; }
+.ask-user-option.chosen {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.ask-user-free {
+  padding: 8px 12px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.ask-user-free:focus { border-color: var(--accent); }
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;

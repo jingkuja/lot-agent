@@ -5,15 +5,29 @@ import { api } from "../api/client.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import { GenerationCard } from "./GenerationCard.js";
+import { AskUserCard } from "./AskUserCard.js";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
   onRegenerate?: () => void;
   /** Click an assistant reply to open it in the preview panel. */
   onSelectForPreview?: (content: string) => void;
+  /** 点选 ask_user 卡片选项时把该文本作为消息发送。 */
+  onQuickReply?: (text: string) => void;
+  /** 该 ask_user 提问已得到的回答（其后第一条 user 消息内容）。 */
+  askAnswer?: string;
+  /** 该 ask_user 提问是否仍在等待回答。 */
+  askInteractive?: boolean;
 }
 
-export function MessageBubble({ message, onRegenerate, onSelectForPreview }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  onRegenerate,
+  onSelectForPreview,
+  onQuickReply,
+  askAnswer,
+  askInteractive,
+}: MessageBubbleProps) {
   if (message.generation) {
     return (
       <div className="message-wrapper message-assistant">
@@ -58,6 +72,9 @@ export function MessageBubble({ message, onRegenerate, onSelectForPreview }: Mes
   }
 
   if (message.role === "tool") {
+    // ask_user's placeholder result isn't worth showing — the question card
+    // above (in the assistant message) already conveys the state.
+    if (message.toolResult?.name === "ask_user") return null;
     // Tool result message — rendered as a collapsible card
     return (
       <div className="message-wrapper message-tool">
@@ -89,6 +106,17 @@ export function MessageBubble({ message, onRegenerate, onSelectForPreview }: Mes
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="tool-calls-section">
             {message.toolCalls.map((tc, i) => {
+              if (tc.name === "ask_user") {
+                return (
+                  <AskUserCard
+                    key={i}
+                    input={tc.input}
+                    interactive={!!askInteractive}
+                    answer={askAnswer}
+                    onReply={onQuickReply}
+                  />
+                );
+              }
               const inputStr = JSON.stringify(tc.input, null, 2) ?? "";
               const hasInput =
                 inputStr && inputStr !== "{}" && inputStr !== "null";

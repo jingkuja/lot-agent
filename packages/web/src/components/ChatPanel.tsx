@@ -135,16 +135,27 @@ export function ChatPanel({
   return (
     <div className="chat-panel">
       <div className="chat-messages">
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            onRegenerate={
-              msg.id === lastAssistantId && !isStreaming ? onRegenerate : undefined
-            }
-            onSelectForPreview={onSelectForPreview}
-          />
-        ))}
+        {messages.map((msg, i) => {
+          const hasAsk =
+            msg.role === "assistant" &&
+            !!msg.toolCalls?.some((tc) => tc.name === "ask_user");
+          const askAnswer = hasAsk
+            ? messages.slice(i + 1).find((m) => m.role === "user")?.content
+            : undefined;
+          return (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              onRegenerate={
+                msg.id === lastAssistantId && !isStreaming ? onRegenerate : undefined
+              }
+              onSelectForPreview={onSelectForPreview}
+              onQuickReply={(text) => onSend(text, [])}
+              askAnswer={askAnswer}
+              askInteractive={hasAsk && askAnswer === undefined && !isStreaming}
+            />
+          );
+        })}
         {awaitingResponse && (
           <div className="message-wrapper message-assistant">
             <div className="message-wrapper-inner">
