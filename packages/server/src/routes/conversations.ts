@@ -308,7 +308,7 @@ export function createGenerationRoutes(service: AgentService) {
     let title: string | null = null;
     try {
       // 只传 userId:本回合的模型是图片/视频模型,做不了文字总结,
-      // 让 generateTitle 回落到会话已存的 LLM 或 env 默认。
+      // 让 generateTitle 回落到模型目录第一个 LLM(无目录时才用 env 默认)。
       title = await service.generateTitle(conversationId, prompt, [], { userId });
     } catch {
       // title generation is best-effort

@@ -28,7 +28,7 @@ import { createDocTool } from "../tools/doc-tool.js";
 import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
-import { resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
+import { enrichCatalog, resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import type {
   AgentEvent,
@@ -67,6 +67,14 @@ const DISABLED_HOST_TOOLS = new Set([
   "search_files",
   "execute_command",
 ]);
+
+/** How long a user's tokenhub model catalog stays cached in Redis. */
+const MODEL_CATALOG_TTL_SEC = 300;
+
+/** The env/config default chat model id (`llm.<default>.model`). */
+export function defaultLlmModelId(cfg: LLMConfig): string {
+  return cfg.default === "openai" ? cfg.openai.model : cfg.anthropic.model;
+}
 
 /** Which model a chat turn runs on: an explicit per-request pick wins, then the
  * conversation's stored model, then the agent's configured default. */
@@ -268,19 +276,13 @@ export class AgentService {
 
     // Initialize service-layer collaborators
     this.messageRepo = new MessageRepository(this.db);
-    const traceModel =
-      this.llmConfig.default === "openai"
-        ? this.llmConfig.openai.model
-        : this.llmConfig.anthropic.model;
+    const traceModel = defaultLlmModelId(this.llmConfig);
     const traceProvider = this.llmConfig.default;
     this.traceRecorderFactory = () =>
       new TraceRecorder(this.traceManager, this.db, traceModel, traceProvider);
 
     // Register agent definitions after all tools are loaded
-    const defaultModelId =
-      this.llmConfig.default === "openai"
-        ? this.llmConfig.openai.model
-        : this.llmConfig.anthropic.model;
+    const defaultModelId = defaultLlmModelId(this.llmConfig);
 
     const generalDef: AgentDefinition = {
       id: "general",
@@ -307,6 +309,25 @@ export class AgentService {
       this.llmProvider = createLLMProvider(this.llmConfig);
     }
     return this.llmProvider;
+  }
+
+  /**
+   * The caller's available models (tokenhub, enriched with provider + pricing),
+   * cached in Redis per user — the single source behind both GET /api/models
+   * and title-model resolution, so "the first model of the catalog" means the
+   * same thing everywhere. Returns null when there's no apiKey and no cache.
+   */
+  async getUserModelCatalog(
+    userId: string,
+    apiKey: string | null
+  ): Promise<ReturnType<typeof enrichCatalog> | null> {
+    const cacheKey = `models:${userId}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) return JSON.parse(cached) as ReturnType<typeof enrichCatalog>;
+    if (!apiKey) return null;
+    const enriched = enrichCatalog(this.modelCatalog, await this.tokenhub.listModels(apiKey));
+    await this.redis.set(cacheKey, JSON.stringify(enriched), "EX", MODEL_CATALOG_TTL_SEC);
+    return enriched;
   }
 
   /**
@@ -341,17 +362,19 @@ export class AgentService {
         : "";
       const titleInput = (userMessage || "（无文字，仅附件）") + attachmentNote;
 
-      // Title runs on the same model as the chat turn: explicit pick > the
-      // conversation's stored model > env default — with the same apiKey /
-      // provider fallback chain as streamAgentResponse.
-      const modelId = resolveConversationModel(
-        opts?.modelId,
-        conversation.model,
-        this.llmConfig.default
-      );
+      // 标题模型:显式回合模型 > 用户模型目录第一个 LLM > env 默认 LLM。
+      // 故意不回落到 conversation.model:会话创建时它被种成 env 默认模型,
+      // 若在这里采用,图片/视频会话和目录未加载就发出的首条消息(进页面竞态)
+      // 的标题都会跑到 env 模型上,而不是和对话一致的目录第一名。
       const apiKey = opts?.userId ? await this.db.getUserApiKey(opts.userId) : null;
+      let modelId = opts?.modelId ?? null;
+      if (!modelId && opts?.userId && apiKey) {
+        modelId = await this.getUserModelCatalog(opts.userId, apiKey)
+          .then((catalog) => catalog?.llm[0]?.id ?? null)
+          .catch(() => null);
+      }
       const llm = apiKey
-        ? this.providerFactory.llm(modelId, apiKey)
+        ? this.providerFactory.llm(modelId ?? defaultLlmModelId(this.llmConfig), apiKey)
         : this.getLLMProvider();
       let title = "";
       for await (const chunk of llm.chat([

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { createModelRoutes } from "./models.js";
+import { AgentService } from "../services/agent-service.js";
 
 function svc(cacheHit: string | null) {
   return {
@@ -16,6 +17,7 @@ function svc(cacheHit: string | null) {
         video: { inputPrice: 0, outputPrice: 0, unitPrice: 0 },
       },
     },
+    getUserModelCatalog: AgentService.prototype.getUserModelCatalog,
   } as unknown as import("../services/agent-service.js").AgentService;
 }
 
