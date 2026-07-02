@@ -12,6 +12,7 @@ import { useAgents } from "../hooks/useAgents.js";
 import { useModels } from "../hooks/useModels.js";
 import { api, type User } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
+import { EMPTY_SELECTED, fillModelDefaults, groupForKind } from "../lib/model-defaults.js";
 
 interface WorkspaceProps {
   user: User;
@@ -72,11 +73,20 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
   const { messages, conversationModel, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia } =
     useChat(activeId, handleStreamEnd, activeIdRef, updateTitle);
 
-  // Per-user model catalog + the model selected for the current conversation.
+  // Per-user model catalog + per-group (llm/image/video) selected models.
   const { models: modelCatalog } = useModels();
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  // Seed the picker from the loaded conversation's stored model.
-  useEffect(() => { setSelectedModel(conversationModel); }, [conversationModel]);
+  const [selectedModels, setSelectedModels] = useState(EMPTY_SELECTED);
+  // Catalog loaded → 各组默认选中接口返回的第一个模型(已选过的槽位不动)。
+  useEffect(() => {
+    setSelectedModels((prev) => fillModelDefaults(prev, modelCatalog));
+  }, [modelCatalog]);
+  // 进入会话:已存模型优先;无存储(新会话)回落到 llm 组第一个。
+  useEffect(() => {
+    setSelectedModels((prev) => ({
+      ...prev,
+      llm: conversationModel ?? modelCatalog.llm[0]?.id ?? null,
+    }));
+  }, [conversationModel, modelCatalog]);
 
   const prevActiveId = useRef<string | null>(null);
   useEffect(() => {
@@ -148,9 +158,9 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
-          generateMedia(content, kind as "image" | "video", settings, files, selectedModel ?? undefined);
+          generateMedia(content, kind as "image" | "video", settings, files, selectedModels[kind as "image" | "video"] ?? undefined);
         } else {
-          send(content, files, undefined, selectedModel ?? undefined);
+          send(content, files, undefined, selectedModels.llm ?? undefined);
         }
       };
       if (newAgentId) {
@@ -167,7 +177,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       }
       dispatch();
     },
-    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModel]
+    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels]
   );
 
   const handleDelete = useCallback(
@@ -224,6 +234,13 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       ...filtered,
     ];
   }, [newAgentId, conversations, activeAgentId]);
+
+  // 当前 hero Agent 对应的模型分组;切组时各组各自记住上次的选择。
+  const modelGroup = groupForKind(openAgent?.type || openAgent?.id);
+  const handleModelChange = useCallback(
+    (id: string) => setSelectedModels((prev) => ({ ...prev, [modelGroup]: id })),
+    [modelGroup]
+  );
 
   return (
     <div className="workspace">
@@ -287,8 +304,8 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             }
             userName={user.name}
             modelCatalog={modelCatalog}
-            selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
+            selectedModel={selectedModels[modelGroup]}
+            onModelChange={handleModelChange}
           />
         </div>
 

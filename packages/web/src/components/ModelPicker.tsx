@@ -32,7 +32,8 @@ export function ModelPicker({
     };
   }, [open]);
 
-  const current = value ?? models[0]?.id ?? "选择模型";
+  const isEmpty = models.length === 0;
+  const current = isEmpty ? "默认" : value ?? models[0]?.id ?? "选择模型";
   const filtered = filterModels(models, query);
 
   return (
@@ -53,30 +54,37 @@ export function ModelPicker({
       </button>
       {open && (
         <div className="media-popup model-popup">
-          <input
-            className="model-search"
-            autoFocus
-            placeholder="输入字母快速筛选…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <div className="model-list">
-            {filtered.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className={`model-row ${m.id === value ? "active" : ""}`}
-                onClick={() => {
-                  onChange(m.id);
-                  setOpen(false);
-                }}
-              >
-                <span className="model-row-name">{m.label ?? m.id}</span>
-                {m.description && <span className="model-row-desc">{m.description}</span>}
-              </button>
-            ))}
-            {filtered.length === 0 && <div className="model-empty">无匹配模型</div>}
-          </div>
+          {isEmpty ? (
+            /* 目录为空:仅一行灰色提示,不可选;沿用 model-empty 样式 */
+            <div className="model-empty">无更多模型，请联系管理员</div>
+          ) : (
+            <>
+              <input
+                className="model-search"
+                autoFocus
+                placeholder="输入字母快速筛选…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <div className="model-list">
+                {filtered.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className={`model-row ${m.id === value ? "active" : ""}`}
+                    onClick={() => {
+                      onChange(m.id);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="model-row-name">{m.label ?? m.id}</span>
+                    {m.description && <span className="model-row-desc">{m.description}</span>}
+                  </button>
+                ))}
+                {filtered.length === 0 && <div className="model-empty">无匹配模型</div>}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

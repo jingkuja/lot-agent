@@ -229,7 +229,7 @@ export function InputBox({
               </div>
             </div>
           )}
-          {models.length > 0 && onModelChange && (
+          {onModelChange && (
             <ModelPicker
               models={models}
               value={selectedModel}
