@@ -98,27 +98,28 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     setNewAgentId(defaultAgentId);
   }, [defaultAgentId]);
 
-  const handleSwitchAgent = useCallback(
+  // 侧边栏 tab:纯筛选历史列表,任何状态下都不碰当前对话 / hero。
+  const handleFilterAgent = useCallback((agentId: string) => {
+    setActiveAgentId(agentId);
+  }, []);
+
+  // 输入框上方 pill:无条件开一个该 Agent 的新对话;侧边栏筛选不动。
+  const handleStartNewChat = useCallback(
     (agentId: string) => {
-      if (newAgentId) {
-        // Empty/new-chat hero: nothing committed — retarget the pending chat.
-        setNewAgentId(agentId);
-        setActiveAgentId(agentId);
-        return;
-      }
-      // A real conversation is open: only re-highlight + filter the sidebar.
-      // Do NOT touch activeId / messages / preview — the chat stays on screen.
-      setActiveAgentId(agentId);
+      setNewAgentId(agentId);
+      setActiveId(null);
+      clear();
+      setPreviewContent(null);
     },
-    [newAgentId]
+    [setActiveId, clear]
   );
 
   const handlePickOverflow = useCallback(
     async (agentId: string) => {
       await promote(agentId); // 移到子 Agent 首位,持久化 sortOrder
-      handleSwitchAgent(agentId);
+      handleStartNewChat(agentId);
     },
-    [promote, handleSwitchAgent]
+    [promote, handleStartNewChat]
   );
 
   const handleSelect = useCallback(
@@ -136,16 +137,10 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     [conversations, defaultAgentId, setActiveId, loadMessages, clear]
   );
 
+  // 新对话按钮:永远开默认(通用)Agent 的新对话。
   const handleCreate = useCallback(() => {
-    if (newAgentId) return; // already in new-chat mode
-    // New chat uses the open conversation's agent (not the highlighted tab);
-    // highlight + filter follow it.
-    setNewAgentId(openAgentId);
-    setActiveAgentId(openAgentId);
-    setActiveId(null);
-    clear();
-    setPreviewContent(null);
-  }, [newAgentId, openAgentId, setActiveId, clear]);
+    handleStartNewChat(defaultAgentId);
+  }, [handleStartNewChat, defaultAgentId]);
 
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
@@ -219,7 +214,8 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
   );
 
   // Sidebar list: filtered to the active agent; prepend a virtual "新对话" entry
-  // when in new-chat mode (its agent_id equals activeAgentId, so it passes the filter).
+  // when in new-chat mode (prepended unconditionally — the hero's agent may
+  // differ from the sidebar filter now that pills don't move the filter).
   const sidebarConversations = useMemo(() => {
     const filtered = conversations.filter((c) => c.agent_id === activeAgentId);
     if (!newAgentId) return filtered;
@@ -242,7 +238,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           conversations={sidebarConversations}
           installedAgents={installed}
           activeAgentId={activeAgentId}
-          onSwitchAgent={handleSwitchAgent}
+          onSwitchAgent={handleFilterAgent}
           switchDisabled={isStreaming}
           activeId={newAgentId ? "__new__" : activeId}
           onSelect={handleSelect}
@@ -283,8 +279,8 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             inputAbove={
               <AgentSwitcher
                 agents={installed}
-                activeId={activeAgentId}
-                onSwitch={handleSwitchAgent}
+                activeId={openAgentId}
+                onSwitch={handleStartNewChat}
                 onPickOverflow={handlePickOverflow}
                 disabled={isStreaming}
               />
