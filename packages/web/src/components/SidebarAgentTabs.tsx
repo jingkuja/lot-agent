@@ -62,12 +62,13 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
         className={`agent-tab ${pinned ? "agent-tab--general" : ""} ${a.id === activeId ? "active" : ""}`}
         onClick={() => onSwitch(a.id)}
         disabled={disabled}
-        title={a.description}
+        title={pinned ? a.name : a.description}
+        aria-label={pinned ? a.name : undefined}
       >
         <span className={`agent-tab-icon agent-tab-icon--${kind}`} aria-hidden>
           {AGENT_ICONS[kind]}
         </span>
-        <span className="agent-tab-label">{a.name}</span>
+        {!pinned && <span className="agent-tab-label">{a.name}</span>}
       </button>
     );
   };

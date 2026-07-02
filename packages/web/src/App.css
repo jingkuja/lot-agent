@@ -1617,22 +1617,35 @@ html, body, #root {
 }
 .agent-tab:disabled { opacity: 0.55; cursor: default; }
 
-/* 通用(General)固定在左侧:图标+文字横排的紧凑按钮,占位随内容,给右侧滚动区腾空间。 */
+/* 通用(General)固定在左侧:仅图标、居中的方形按钮,稍大以突出主入口。 */
 .agent-tab--general {
   flex: 0 0 auto;
-  flex-direction: row;
   min-width: 0;
-  gap: 6px;
-  padding: 8px 12px;
+  justify-content: center;
+  padding: 8px 16px;
 }
+.agent-tab--general .agent-tab-icon {
+  width: 30px;
+  height: 30px;
+}
+.agent-tab--general .agent-tab-icon svg { width: 18px; height: 18px; }
 
 /* 滚动区内的子标签固定为半宽:任意时刻正好露出两个,翻页切到下一组。
-   两个 calc(50% - 3px) + 一个 6px 间距 = 100% 可视宽度。 */
+   两个 calc(50% - 3px) + 一个 6px 间距 = 100% 可视宽度。
+   图标与文字整体等比缩小,视觉上从属于通用主入口。 */
 .agent-tab-strip .agent-tab {
   flex: 0 0 calc(50% - 3px);
   min-width: 0;
   scroll-snap-align: start;
+  padding: 6px 4px;
+  gap: 3px;
+  font-size: 11px;
 }
+.agent-tab-strip .agent-tab-icon {
+  width: 22px;
+  height: 22px;
+}
+.agent-tab-strip .agent-tab-icon svg { width: 13px; height: 13px; }
 
 .agent-tab-icon {
   width: 26px;
