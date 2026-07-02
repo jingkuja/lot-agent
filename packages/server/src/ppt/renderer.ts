@@ -1,5 +1,15 @@
-import PptxGenJS from "pptxgenjs";
+import { createRequire } from "node:module";
 import type { PptTheme } from "./theme-extractor.js";
+
+// pptxgenjs ships a dual CJS/ESM package.json "exports" map. Under tsx's dev
+// loader (used by `npm run dev`), a plain `import PptxGenJS from "pptxgenjs"`
+// resolves through a path that trips Node's ERR_REQUIRE_CYCLE_MODULE — the
+// loader ends up synchronously require()-ing the ESM build mid-evaluation.
+// Forcing a genuine CJS require via createRequire sidesteps that resolution
+// path entirely (it loads dist/pptxgen.cjs.js directly, no cycle). Works
+// identically under plain `node` (production/tsup build).
+const require = createRequire(import.meta.url);
+const PptxGenJS: typeof import("pptxgenjs").default = require("pptxgenjs");
 
 export interface PptSlide {
   layout: "cover" | "section" | "content";
