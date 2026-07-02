@@ -47,4 +47,20 @@ describe("POST /uploads", () => {
     expect(json.assetId).toBeTruthy();
     expect(service.created.length).toBe(1);
   });
+
+  it("accepts a pptx template upload as doc", async () => {
+    const service = makeService();
+    const app = appFor(service);
+    const res = await app.request("/", {
+      method: "POST",
+      body: fileBody(
+        "tpl.pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        new Uint8Array([80, 75])
+      ),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.kind).toBe("doc");
+  });
 });
