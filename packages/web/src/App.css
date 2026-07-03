@@ -466,7 +466,8 @@ html, body, #root {
 
 /* ── Collapsible Tool Cards ── */
 .tool-calls-section {
-  margin-bottom: 6px;
+  /* Sits below the assistant text it belongs to (chronological order). */
+  margin-top: 6px;
 }
 
 .tool-card {

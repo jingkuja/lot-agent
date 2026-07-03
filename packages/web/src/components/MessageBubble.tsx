@@ -102,7 +102,36 @@ export function MessageBubble({
   return (
     <div className="message-wrapper message-assistant">
       <div className="message-wrapper-inner">
-        {/* Tool call cards */}
+        {/* Message content — click to open in preview */}
+        {(() => {
+          const canPreview =
+            !!onSelectForPreview && !!message.content && !message.isStreaming;
+          return (
+        <div
+          className={`message-content markdown-body${canPreview ? " clickable" : ""}`}
+          onClick={canPreview ? () => onSelectForPreview!(message.content) : undefined}
+          title={canPreview ? "点击预览" : undefined}
+        >
+          {message.content ? (
+            <>
+              <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+              {message.isStreaming && !executingTools && (
+                <span className="cursor-blink" />
+              )}
+            </>
+          ) : message.isStreaming && !executingTools ? (
+            <TypingDots />
+          ) : (
+            ""
+          )}
+        </div>
+          );
+        })()}
+
+        {/* Tool call cards — after the text: the model streams its prose
+            (e.g. the outline to confirm) first and calls the tool at the end
+            of the turn, so an ask_user card must sit BELOW the content it is
+            asking about. */}
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="tool-calls-section">
             {message.toolCalls.map((tc, i) => {
@@ -135,32 +164,6 @@ export function MessageBubble({
             })}
           </div>
         )}
-
-        {/* Message content — click to open in preview */}
-        {(() => {
-          const canPreview =
-            !!onSelectForPreview && !!message.content && !message.isStreaming;
-          return (
-        <div
-          className={`message-content markdown-body${canPreview ? " clickable" : ""}`}
-          onClick={canPreview ? () => onSelectForPreview!(message.content) : undefined}
-          title={canPreview ? "点击预览" : undefined}
-        >
-          {message.content ? (
-            <>
-              <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
-              {message.isStreaming && !executingTools && (
-                <span className="cursor-blink" />
-              )}
-            </>
-          ) : message.isStreaming && !executingTools ? (
-            <TypingDots />
-          ) : (
-            ""
-          )}
-        </div>
-          );
-        })()}
 
         {/* Tool execution hint — replaces the text caret while a tool runs */}
         {executingTools && (
