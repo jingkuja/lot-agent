@@ -1,5 +1,8 @@
 import JSZip from "jszip";
 
+export type OverlayMode = "dark" | "light" | "none";
+export interface SlideBackground { image: Buffer; ext: "png" | "jpeg"; overlay: OverlayMode }
+
 /** PPT 模版里提取出的可复用样式（颜色为 6 位 hex、无 # 前缀）。 */
 export interface PptTheme {
   colors: {
@@ -13,6 +16,12 @@ export interface PptTheme {
   slideHeightIn: number;
   /** 装饰语言：几何圆 / 斜切色块 / 细网格 / 无装饰。 */
   decor: "circles" | "slant" | "grid" | "minimal";
+  /** 整页背景图（按版式角色配置），可选。 */
+  backgrounds?: {
+    cover?: SlideBackground;
+    section?: SlideBackground;
+    body?: SlideBackground;
+  };
 }
 
 export const DEFAULT_THEME: PptTheme = {

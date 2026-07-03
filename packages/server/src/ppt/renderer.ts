@@ -49,6 +49,7 @@ export async function renderPptx(outline: PptOutline, theme: PptTheme): Promise<
       W: theme.slideWidthIn, H: theme.slideHeightIn, theme,
       index: i, total: outline.slides.length, presTitle: outline.title,
       agendaItems: sectionTitles,
+      layout: s.layout,
     };
     (BUILDERS[s.layout] ?? BUILDERS.content)(slide, s, ctx);
   });

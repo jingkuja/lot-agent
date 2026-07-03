@@ -1,4 +1,5 @@
 import type { PptTheme } from "../theme-extractor.js";
+import type { PptLayout } from "../renderer.js";
 
 export type PptxSlide = any;
 
@@ -13,6 +14,7 @@ export interface BuildCtx {
   presTitle: string;
   /** 供 agenda 版式：缺省 items 时用后续 section 标题填充。 */
   agendaItems?: string[];
+  layout: PptLayout;
 }
 
 /** 把 hex 调暗 amount（0-1）。 */
@@ -48,6 +50,33 @@ export function drawDecor(slide: PptxSlide, ctx: BuildCtx): void {
       slide.addShape("line", { x: 0, y: (H / 4) * i, w: W, h: 0, line: { color: c.dk2, width: 0.5, transparency: 92 } });
     }
   }
+}
+
+export function bgRoleFor(layout: PptLayout): "cover" | "section" | "body" {
+  if (layout === "cover" || layout === "closing") return "cover";
+  if (layout === "section") return "section";
+  return "body";
+}
+
+/** 若主题为该版式配了背景图：贴整页图 + 遮罩，返回 true（否则不动 slide.background）。 */
+export function applyBackground(slide: PptxSlide, ctx: BuildCtx): boolean {
+  const bg = ctx.theme.backgrounds?.[bgRoleFor(ctx.layout)];
+  if (!bg) return false;
+  const b64 = bg.image.toString("base64");
+  const mime = bg.ext === "jpeg" ? "image/jpeg" : "image/png";
+  slide.background = { data: `data:${mime};base64,${b64}` };
+  if (bg.overlay !== "none") {
+    const dark = bg.overlay === "dark";
+    slide.addShape("rect", { x: 0, y: 0, w: ctx.W, h: ctx.H, fill: { color: dark ? "000000" : "FFFFFF", transparency: dark ? 45 : 25 }, line: { type: "none" } });
+  }
+  return true;
+}
+
+/** 文字色：贴了深遮罩（或无 overlay 的背景）→ 白字；浅遮罩/无背景 → 主题深色。 */
+export function inkColors(ctx: BuildCtx): { title: string; body: string; onBg: boolean } {
+  const bg = ctx.theme.backgrounds?.[bgRoleFor(ctx.layout)];
+  if (bg && bg.overlay !== "light") return { title: "FFFFFF", body: "F0F0F5", onBg: true };
+  return { title: ctx.c.dk1, body: ctx.c.dk2, onBg: !!bg };
 }
 
 /** 内容类版式底部：细分隔线 + 演示标题 + 页码。 */

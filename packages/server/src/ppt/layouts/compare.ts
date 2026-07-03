@@ -1,10 +1,12 @@
 import type { PptSlide, PptColumn } from "../renderer.js";
-import { type BuildCtx, type PptxSlide, accentAt, drawFooter } from "./ctx.js";
+import { type BuildCtx, type PptxSlide, accentAt, drawFooter, applyBackground, inkColors } from "./ctx.js";
 
 export function buildCompare(slide: PptxSlide, s: PptSlide, ctx: BuildCtx): void {
   const { c, f, W, H } = ctx;
-  slide.background = { color: c.lt2 };
-  slide.addText(s.title, { x: W * 0.06, y: H * 0.08, w: W * 0.88, h: H * 0.12, fontFace: f.major, fontSize: 28, bold: true, color: c.dk1 });
+  const hasBg = applyBackground(slide, ctx);
+  if (!hasBg) slide.background = { color: c.lt2 };
+  const ink = inkColors(ctx);
+  slide.addText(s.title, { x: W * 0.06, y: H * 0.08, w: W * 0.88, h: H * 0.12, fontFace: f.major, fontSize: 28, bold: true, color: ink.title });
   const colW = W * 0.42;
   const col = (column: PptColumn, x: number, accentIdx: number) => {
     const accent = accentAt(c, accentIdx);
