@@ -10,6 +10,11 @@ describe("ask_user tool", () => {
     expect(askUserTool.endsTurn).toBe(true);
   });
 
+  it("declares a multiSelect parameter for multi-answer questions", () => {
+    const props = askUserTool.parameters.properties as Record<string, unknown>;
+    expect(props.multiSelect).toBeDefined();
+  });
+
   it("returns the waiting placeholder on a valid question", async () => {
     const r = await askUserTool.execute(
       { question: "PPT 大约需要几页？", options: ["8 页", "12 页"] },

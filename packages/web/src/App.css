@@ -1085,6 +1085,14 @@ html, body, #root {
   font-weight: 600;
   color: var(--text);
 }
+/* 问题正文支持 Markdown：长确认内容（列表/表格）按正常字重排版，
+   只保留首行提问的加粗感。 */
+.ask-user-question ol,
+.ask-user-question ul,
+.ask-user-question table,
+.ask-user-question blockquote {
+  font-weight: 400;
+}
 .ask-user-options {
   display: flex;
   flex-direction: column;
@@ -1123,6 +1131,23 @@ html, body, #root {
   outline: none;
 }
 .ask-user-free:focus { border-color: var(--accent); }
+.ask-user-submit {
+  align-self: flex-start;
+  padding: 6px 18px;
+  border: 1.5px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.ask-user-submit:hover:not(:disabled) { opacity: 0.88; }
+.ask-user-submit:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 
 .message-attachments {
   display: flex;
