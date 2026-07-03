@@ -11,6 +11,8 @@ export interface BuildCtx {
   index: number;   // 0-based
   total: number;
   presTitle: string;
+  /** 供 agenda 版式：缺省 items 时用后续 section 标题填充。 */
+  agendaItems?: string[];
 }
 
 /** 把 hex 调暗 amount（0-1）。 */

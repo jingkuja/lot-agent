@@ -39,6 +39,8 @@ export async function renderPptx(outline: PptOutline, theme: PptTheme): Promise<
   pptx.defineLayout({ name: "THEME", width: theme.slideWidthIn, height: theme.slideHeightIn });
   pptx.layout = "THEME";
 
+  const sectionTitles = outline.slides.filter((x) => x.layout === "section").map((x) => x.title);
+
   outline.slides.forEach((s, i) => {
     const slide = pptx.addSlide();
     if (s.notes) slide.addNotes(s.notes);
@@ -46,6 +48,7 @@ export async function renderPptx(outline: PptOutline, theme: PptTheme): Promise<
       c: theme.colors, f: theme.fonts,
       W: theme.slideWidthIn, H: theme.slideHeightIn, theme,
       index: i, total: outline.slides.length, presTitle: outline.title,
+      agendaItems: sectionTitles,
     };
     (BUILDERS[s.layout] ?? BUILDERS.content)(slide, s, ctx);
   });
