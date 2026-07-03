@@ -26,6 +26,7 @@ import {
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
 import { createPptTool } from "../tools/ppt-tool.js";
+import { proposeOutlineTool } from "../tools/propose-outline-tool.js";
 import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
@@ -273,6 +274,7 @@ export class AgentService {
         db: this.db,
       })
     );
+    this.toolRegistry.register(proposeOutlineTool);
 
     // Load skills
     await this.skillLoader.loadFromDirectory(this.skillsDir);
