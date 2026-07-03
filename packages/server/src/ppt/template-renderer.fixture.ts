@@ -140,3 +140,24 @@ export async function buildTemplatePptx(): Promise<Buffer> {
   return zip.generateAsync({ type: "nodebuffer" });
 }
 
+/**
+ * 测试专用变体：和 `buildTemplatePptx` 结构相同（含母版媒体图，用于验证克隆
+ * 保留了媒体文件），但母版背景用纯色实色填充（非白）而非图片填充——
+ * `templateHasReusableDesign` 判定为"有可复用设计"，但 `extractBackgrounds`
+ * 提不到任何背景图（`<p:bg>` 里没有 `<a:blip>`）。用于在 generate_ppt 的完整
+ * 降级链里单独触发"克隆"分支（区别于"模版背景图提取成功"分支）。
+ */
+export async function buildTemplatePptxNoExtractableBg(): Promise<Buffer> {
+  const bytes = await buildTemplatePptx();
+  const zip = await JSZip.loadAsync(bytes);
+  const masterXml = await zip.file("ppt/slideMasters/slideMaster1.xml")!.async("string");
+  zip.file(
+    "ppt/slideMasters/slideMaster1.xml",
+    masterXml.replace(
+      "<p:bg><p:bgPr><a:blipFill><a:blip r:embed=\"rId10\"/></a:blipFill></p:bgPr></p:bg>",
+      '<p:bg><p:bgPr><a:solidFill><a:srgbClr val="1F2937"/></a:solidFill></p:bgPr></p:bg>'
+    )
+  );
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+

@@ -3,8 +3,11 @@ import type { Tool, ToolResult, ObjectStorage } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 import {
   extractTheme,
+  extractBackgrounds,
   DEFAULT_THEME,
   type PptTheme,
+  type SlideBackground,
+  type OverlayMode,
 } from "../ppt/theme-extractor.js";
 import { renderPptx, type PptSlide } from "../ppt/renderer.js";
 import { validateSlides } from "../ppt/validation.js";
@@ -23,6 +26,45 @@ interface PptToolDeps {
   /** 用户上传文件的存储（读取模版字节） */
   uploadStorage: ObjectStorage;
   db: DB;
+}
+
+/** 克隆路径只认 cover/section/content；把富版式文本化降级，避免 slideXml 丢内容。 */
+function degradeForClone(slides: PptSlide[]): PptSlide[] {
+  return slides.map((s) => {
+    switch (s.layout) {
+      case "stats":
+      case "keypoints":
+        return {
+          layout: "content",
+          title: s.title,
+          bullets: (s.items ?? []).map((it) =>
+            it.value
+              ? `${it.label}：${it.value}${it.desc ? `（${it.desc}）` : ""}`
+              : `${it.label}${it.desc ? `：${it.desc}` : ""}`
+          ),
+        };
+      case "timeline":
+        return {
+          layout: "content",
+          title: s.title,
+          bullets: (s.items ?? []).map((it, i) => `${i + 1}. ${it.label}${it.desc ? `：${it.desc}` : ""}`),
+        };
+      case "compare":
+        return {
+          layout: "content",
+          title: s.title,
+          bullets: [`【${s.left?.title}】`, ...(s.left?.bullets ?? []), `【${s.right?.title}】`, ...(s.right?.bullets ?? [])],
+        };
+      case "quote":
+        return { layout: "section", title: s.quote?.text ?? s.title, subtitle: s.quote?.author };
+      case "agenda":
+        return { layout: "content", title: s.title, bullets: (s.items ?? []).map((it) => it.label) };
+      case "closing":
+        return { layout: "section", title: s.title, subtitle: s.subtitle };
+      default:
+        return s;
+    }
+  });
 }
 
 /**
@@ -78,12 +120,31 @@ export function createPptTool(deps: PptToolDeps): Tool {
             required: ["layout", "title"],
           },
         },
+        backgrounds: {
+          type: "array",
+          description: "用户上传的背景图（见 [PPT背景图已上传…] 标记）。role 缺省按序 cover/body/section。",
+          items: {
+            type: "object",
+            properties: {
+              assetId: { type: "string" },
+              role: { type: "string", enum: ["cover", "body", "section"] },
+              overlay: { type: "string", enum: ["dark", "light", "none"] },
+            },
+            required: ["assetId"],
+          },
+        },
       },
       required: ["title", "slides"],
     },
     async execute(input, context): Promise<ToolResult> {
-      const { title = "", templateAssetId, themePreset, slides } =
-        (input as { title?: string; templateAssetId?: string; themePreset?: string; slides?: PptSlide[] }) ?? {};
+      const { title = "", templateAssetId, themePreset, slides, backgrounds } =
+        (input as {
+          title?: string;
+          templateAssetId?: string;
+          themePreset?: string;
+          slides?: PptSlide[];
+          backgrounds?: { assetId?: string; role?: "cover" | "body" | "section"; overlay?: OverlayMode }[];
+        }) ?? {};
 
       const validationError = validateSlides(slides);
       if (validationError) {
@@ -92,16 +153,56 @@ export function createPptTool(deps: PptToolDeps): Tool {
 
       const userId = context.userId ?? "default";
 
-      // 模版处理按"设计放在哪里"分流：
-      //  · 富模版（背景/装饰在母版/版式上，可复用）→ 克隆套版，继承背景与母版样式；
-      //  · 空白版式型（设计逐页画在幻灯片上，版式是空白 Office 版式）→ 克隆只会
-      //    得到白板 + 母版默认巨大字号，反而更难看，所以改为提取其配色/字体，
-      //    喂给内置的精美渲染器；
-      //  · 坏 zip / 解析失败 → 默认样式。逐级注明。
-      let buffer: Buffer | null = null;
       let theme: PptTheme = getPreset(themePreset) ?? DEFAULT_THEME;
+
+      // 上传背景图：读字节 → SlideBackground，按 role 装配（缺省按序 cover/body/section）
+      const ROLE_ORDER: ("cover" | "body" | "section")[] = ["cover", "body", "section"];
+      const uploadedBg: NonNullable<PptTheme["backgrounds"]> = {};
+      let ignoredBg = 0;
+      if (Array.isArray(backgrounds) && backgrounds.length) {
+        for (let i = 0; i < backgrounds.length; i++) {
+          const spec = backgrounds[i] as { assetId?: string; role?: "cover" | "body" | "section"; overlay?: OverlayMode };
+          const role = spec.role ?? ROLE_ORDER[i] ?? "body";
+          try {
+            const asset = await db.getAsset(spec.assetId ?? "");
+            if (!asset || asset.user_id !== userId) throw new Error("bg not found");
+            const bytes = await uploadStorage.get(asset.storage_key);
+            const ext: "png" | "jpeg" = /jpe?g$/i.test(asset.mime ?? "") ? "jpeg" : "png";
+            const bg: SlideBackground = { image: bytes, ext, overlay: spec.overlay ?? "dark" };
+            uploadedBg[role] = bg;
+            if (backgrounds.length === 1 && !spec.role) { uploadedBg.body = bg; uploadedBg.cover = bg; }
+          } catch { ignoredBg++; }
+        }
+      }
+      const hasUploadedBg = !!(uploadedBg.cover || uploadedBg.body || uploadedBg.section);
+
+      // 模版处理按"设计放在哪里"分流，降级链自上而下命中即止：
+      //  1. 上传背景图 → ThemePack 渲染（配色仍可用模版提取/preset 作基准）；
+      //  2. 模版背景图提取成功 → ThemePack 渲染（全版式）；
+      //  3. 提不到背景但模版"有可复用设计"（富模版：背景/装饰在母版/版式上）→
+      //     克隆套版，继承背景与母版样式（新版式先降级映射为 content/section）；
+      //  4. 空白版式型（设计逐页画在幻灯片上，版式是空白 Office 版式）→ 克隆只会
+      //     得到白板 + 母版默认巨大字号，反而更难看，所以改为提取其配色/字体，
+      //     喂给内置的精美渲染器；
+      //  5. 坏 zip / 解析失败 / 无模版 → 默认样式（或 themePreset）。逐级注明。
+      let buffer: Buffer | null = null;
       let themeNote = "";
-      if (templateAssetId) {
+
+      if (hasUploadedBg) {
+        // 上传背景优先：配色仍可用模版提取作基准
+        if (templateAssetId) {
+          try {
+            const asset = await db.getAsset(templateAssetId);
+            if (asset && asset.user_id === userId) {
+              const bytes = await uploadStorage.get(asset.storage_key);
+              const extracted = await extractTheme(bytes);
+              if (extracted !== DEFAULT_THEME) theme = extracted;
+            }
+          } catch { /* 配色提取失败无所谓，用 preset/default */ }
+        }
+        theme = { ...theme, backgrounds: { ...theme.backgrounds, ...uploadedBg } };
+        themeNote = "\n已套用你上传的背景图。";
+      } else if (templateAssetId) {
         let bytes: Buffer | null = null;
         try {
           const asset = await db.getAsset(templateAssetId);
@@ -113,32 +214,40 @@ export function createPptTool(deps: PptToolDeps): Tool {
         if (bytes) {
           try {
             // 坏 zip 在此抛出 → 落到 catch 记"解析失败"
-            const rich = await templateHasReusableDesign(bytes);
-            if (rich) {
-              try {
-                buffer = await renderPptxFromTemplate({ title, slides: slides! }, bytes);
-                themeNote = "\n已套用上传模版的版式、背景与母版样式。";
-              } catch {
-                // 克隆意外失败：退到主题提取（extractTheme 从不抛错，坏 zip
-                // 返回 DEFAULT_THEME 本体，靠引用相等识别静默降级）。
+            const tplBg = await extractBackgrounds(bytes);
+            if (tplBg) {
+              const extracted = await extractTheme(bytes);
+              theme = { ...(extracted !== DEFAULT_THEME ? extracted : theme), backgrounds: tplBg };
+              themeNote = "\n已提取模版的背景图与配色套用到全部版式。";
+            } else {
+              const rich = await templateHasReusableDesign(bytes);
+              if (rich) {
+                try {
+                  buffer = await renderPptxFromTemplate({ title, slides: degradeForClone(slides!) }, bytes);
+                  themeNote = "\n已套用上传模版的版式、背景与母版样式。";
+                } catch {
+                  // 克隆意外失败：退到主题提取（extractTheme 从不抛错，坏 zip
+                  // 返回 DEFAULT_THEME 本体，靠引用相等识别静默降级）。
+                  theme = await extractTheme(bytes);
+                  themeNote =
+                    theme === DEFAULT_THEME
+                      ? "\n注意：模版解析失败，已使用默认样式。"
+                      : "\n注意：模版版式克隆失败，已退化为仅套用模版配色与字体。";
+                }
+              } else {
                 theme = await extractTheme(bytes);
                 themeNote =
                   theme === DEFAULT_THEME
-                    ? "\n注意：模版解析失败，已使用默认样式。"
-                    : "\n注意：模版版式克隆失败，已退化为仅套用模版配色与字体。";
+                    ? "\n注意：模版仅含空白版式，已使用默认样式。"
+                    : "\n模版为空白版式型，已提取其配色与字体套用到内置精美版式。";
               }
-            } else {
-              theme = await extractTheme(bytes);
-              themeNote =
-                theme === DEFAULT_THEME
-                  ? "\n注意：模版仅含空白版式，已使用默认样式。"
-                  : "\n模版为空白版式型，已提取其配色与字体套用到内置精美版式。";
             }
           } catch {
             themeNote = "\n注意：模版解析失败，已使用默认样式。";
           }
         }
       }
+      if (ignoredBg > 0) themeNote += `\n（有 ${ignoredBg} 张背景图无法读取，已忽略。）`;
 
       if (!buffer) {
         try {
