@@ -11,6 +11,8 @@ export interface PptTheme {
   /** 幻灯片尺寸（英寸） */
   slideWidthIn: number;
   slideHeightIn: number;
+  /** 装饰语言：几何圆 / 斜切色块 / 细网格 / 无装饰。 */
+  decor: "circles" | "slant" | "grid" | "minimal";
 }
 
 export const DEFAULT_THEME: PptTheme = {
@@ -22,6 +24,7 @@ export const DEFAULT_THEME: PptTheme = {
   fonts: { major: "Microsoft YaHei", minor: "Microsoft YaHei" },
   slideWidthIn: 13.333,
   slideHeightIn: 7.5,
+  decor: "circles",
 };
 
 const EMU_PER_INCH = 914400;
@@ -127,7 +130,7 @@ export async function extractTheme(bytes: Buffer): Promise<PptTheme> {
     }
 
     if (!extractedAny && !fontsDiffer && !sizeDiffers) return DEFAULT_THEME;
-    return { colors, fonts, slideWidthIn, slideHeightIn };
+    return { colors, fonts, slideWidthIn, slideHeightIn, decor: "circles" };
   } catch {
     return DEFAULT_THEME;
   }
