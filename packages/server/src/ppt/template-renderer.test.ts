@@ -1,8 +1,43 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
 import { buildTemplatePptx } from "./template-renderer.fixture.js";
-import { renderPptxFromTemplate } from "./template-renderer.js";
+import {
+  renderPptxFromTemplate,
+  templateHasReusableDesign,
+} from "./template-renderer.js";
 import type { PptOutline } from "./renderer.js";
+
+const NS =
+  'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+  'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+  'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
+
+/**
+ * "空白版式型"模版：母版背景是纯白 bg1、版式只有占位符没有任何设计——
+ * 设计都画在每页幻灯片上（这里省略）。克隆它只会得到白板，应判为"不值得克隆"。
+ */
+async function buildBlankLayoutTemplate(): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file(
+    "ppt/presentation.xml",
+    `<?xml version="1.0"?><p:presentation ${NS}><p:sldMasterIdLst><p:sldMasterId id="1" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`
+  );
+  // 母版背景 = schemeClr bg1（纯白），无背景图/形状
+  zip.file(
+    "ppt/slideMasters/slideMaster1.xml",
+    `<?xml version="1.0"?><p:sldMaster ${NS}><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree/></p:cSld></p:sldMaster>`
+  );
+  // 版式：title + obj，均无背景、无形状、无图片
+  zip.file(
+    "ppt/slideLayouts/slideLayout1.xml",
+    `<?xml version="1.0"?><p:sldLayout ${NS} type="title"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr/><p:nvPr><p:ph type="ctrTitle"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p/></p:txBody></p:sp></p:spTree></p:cSld></p:sldLayout>`
+  );
+  zip.file(
+    "ppt/slideLayouts/slideLayout2.xml",
+    `<?xml version="1.0"?><p:sldLayout ${NS} type="obj"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p/></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="b"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p/></p:txBody></p:sp></p:spTree></p:cSld></p:sldLayout>`
+  );
+  return zip.generateAsync({ type: "nodebuffer" });
+}
 
 const outline: PptOutline = {
   title: "季度汇报",
@@ -72,6 +107,35 @@ describe("renderPptxFromTemplate", () => {
   it("throws on non-zip bytes", async () => {
     await expect(
       renderPptxFromTemplate(outline, Buffer.from("definitely not a pptx"))
+    ).rejects.toThrow();
+  });
+
+  it("sets explicit legible font sizes on inserted text so it doesn't inherit the master's oversized defaults", async () => {
+    const out = await renderPptxFromTemplate(outline, await buildTemplatePptx());
+    const zip = await JSZip.loadAsync(out);
+    const cover = await zip.file("ppt/slides/slide1.xml")!.async("string");
+    const content = await zip.file("ppt/slides/slide3.xml")!.async("string");
+    // 封面标题、正文标题、正文项都带显式字号（百分点单位）
+    expect(cover).toMatch(/<a:rPr[^>]*\bsz="3200"/); // cover 标题 32pt
+    expect(content).toMatch(/<a:rPr[^>]*\bsz="2600"/); // content 标题 26pt
+    expect(content).toMatch(/<a:rPr[^>]*\bsz="1800"/); // 正文 18pt
+  });
+});
+
+describe("templateHasReusableDesign", () => {
+  it("returns true for a template whose master carries a background image", async () => {
+    expect(await templateHasReusableDesign(await buildTemplatePptx())).toBe(true);
+  });
+
+  it("returns false for a blank-layout template (design lives per-slide, cloning yields a white board)", async () => {
+    expect(await templateHasReusableDesign(await buildBlankLayoutTemplate())).toBe(
+      false
+    );
+  });
+
+  it("throws on non-zip bytes so callers can report a parse failure", async () => {
+    await expect(
+      templateHasReusableDesign(Buffer.from("definitely not a pptx"))
     ).rejects.toThrow();
   });
 });

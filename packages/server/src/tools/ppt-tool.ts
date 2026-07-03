@@ -7,7 +7,10 @@ import {
   type PptTheme,
 } from "../ppt/theme-extractor.js";
 import { renderPptx, type PptSlide } from "../ppt/renderer.js";
-import { renderPptxFromTemplate } from "../ppt/template-renderer.js";
+import {
+  renderPptxFromTemplate,
+  templateHasReusableDesign,
+} from "../ppt/template-renderer.js";
 
 const PPTX_MIME =
   "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -85,9 +88,12 @@ export function createPptTool(deps: PptToolDeps): Tool {
 
       const userId = context.userId ?? "default";
 
-      // 模版处理分两级：优先"模版克隆"（新幻灯片直接挂到模版自己的布局上，
-      // 背景图/母版样式/占位符版式全部继承）；克隆失败再退到"主题提取"
-      // （只套配色/字体）；两级都失败才用默认样式，并逐级注明。
+      // 模版处理按"设计放在哪里"分流：
+      //  · 富模版（背景/装饰在母版/版式上，可复用）→ 克隆套版，继承背景与母版样式；
+      //  · 空白版式型（设计逐页画在幻灯片上，版式是空白 Office 版式）→ 克隆只会
+      //    得到白板 + 母版默认巨大字号，反而更难看，所以改为提取其配色/字体，
+      //    喂给内置的精美渲染器；
+      //  · 坏 zip / 解析失败 → 默认样式。逐级注明。
       let buffer: Buffer | null = null;
       let theme: PptTheme = DEFAULT_THEME;
       let themeNote = "";
@@ -102,16 +108,30 @@ export function createPptTool(deps: PptToolDeps): Tool {
         }
         if (bytes) {
           try {
-            buffer = await renderPptxFromTemplate({ title, slides }, bytes);
-            themeNote = "\n已套用上传模版的版式、背景与母版样式。";
+            // 坏 zip 在此抛出 → 落到 catch 记"解析失败"
+            const rich = await templateHasReusableDesign(bytes);
+            if (rich) {
+              try {
+                buffer = await renderPptxFromTemplate({ title, slides }, bytes);
+                themeNote = "\n已套用上传模版的版式、背景与母版样式。";
+              } catch {
+                // 克隆意外失败：退到主题提取（extractTheme 从不抛错，坏 zip
+                // 返回 DEFAULT_THEME 本体，靠引用相等识别静默降级）。
+                theme = await extractTheme(bytes);
+                themeNote =
+                  theme === DEFAULT_THEME
+                    ? "\n注意：模版解析失败，已使用默认样式。"
+                    : "\n注意：模版版式克隆失败，已退化为仅套用模版配色与字体。";
+              }
+            } else {
+              theme = await extractTheme(bytes);
+              themeNote =
+                theme === DEFAULT_THEME
+                  ? "\n注意：模版仅含空白版式，已使用默认样式。"
+                  : "\n模版为空白版式型，已提取其配色与字体套用到内置精美版式。";
+            }
           } catch {
-            // extractTheme 从不抛错：坏 zip/缺 theme1.xml 时返回 DEFAULT_THEME
-            // 本体（同一引用）。据此识别静默降级，把注明补进结果。
-            theme = await extractTheme(bytes);
-            themeNote =
-              theme === DEFAULT_THEME
-                ? "\n注意：模版解析失败，已使用默认样式。"
-                : "\n注意：模版版式克隆失败，已退化为仅套用模版配色与字体。";
+            themeNote = "\n注意：模版解析失败，已使用默认样式。";
           }
         }
       }

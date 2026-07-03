@@ -29,7 +29,7 @@ x-app-env: &app-env
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
   LLM_DEFAULT: ${LLM_DEFAULT:-openai}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://tokenhub.todoucloud.com/v1}
   OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4-flash}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
@@ -40,6 +40,7 @@ x-app-env: &app-env
   TOKENHUB_API_KEY: ${TOKENHUB_API_KEY:-}
   IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
   VIDEO_GEN_API_KEY: ${VIDEO_GEN_API_KEY:-}
+  BIGMODEL_API_KEY: ${BIGMODEL_API_KEY:-}
   CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
   # Absolute base for static file URLs (assets/documents/uploads). Leave empty
   # for same-origin access; set to the box address so generated download links
