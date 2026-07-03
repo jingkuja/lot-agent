@@ -144,3 +144,58 @@ export async function extractTheme(bytes: Buffer): Promise<PptTheme> {
     return DEFAULT_THEME;
   }
 }
+
+function extOf(path: string): "png" | "jpeg" | null {
+  if (/\.png$/i.test(path)) return "png";
+  if (/\.jpe?g$/i.test(path)) return "jpeg";
+  return null;
+}
+
+/** 顺着一个部件的 _rels 找 <p:bg> 里 blip r:embed 指向的 media 图片字节。 */
+async function bgImageFrom(zip: JSZip, partPath: string): Promise<SlideBackground | null> {
+  const xml = await zip.file(partPath)?.async("string");
+  if (!xml) return null;
+  const bg = /<p:bg\b[\s\S]*?<\/p:bg>/i.exec(xml)?.[0];
+  if (!bg) return null;
+  const rid = /<a:blip[^>]*r:embed="([^"]+)"/i.exec(bg)?.[1];
+  if (!rid) return null;
+  const dir = partPath.slice(0, partPath.lastIndexOf("/"));
+  const relsPath = `${dir}/_rels/${partPath.slice(partPath.lastIndexOf("/") + 1)}.rels`;
+  const rels = await zip.file(relsPath)?.async("string");
+  if (!rels) return null;
+  const target = new RegExp(`<Relationship[^>]*Id="${rid}"[^>]*Target="([^"]+)"`, "i").exec(rels)?.[1];
+  if (!target) return null;
+  const resolved = target.replace(/^\.\.\//, "ppt/").replace(/^\//, "");
+  const mediaPath = resolved.startsWith("ppt/") ? resolved : `ppt/${resolved}`;
+  const ext = extOf(mediaPath);
+  if (!ext) return null;
+  const img = await zip.file(mediaPath)?.async("nodebuffer");
+  if (!img) return null;
+  return { image: img, ext, overlay: "dark" };
+}
+
+/**
+ * 从模版提背景图：母版/正文版式背景 → body，封面版式背景 → cover，章节版式 → section。
+ * 任何失败（坏 zip 等）返回 null；提不到任何背景也返回 null。
+ */
+export async function extractBackgrounds(bytes: Buffer): Promise<PptTheme["backgrounds"] | null> {
+  try {
+    const zip = await JSZip.loadAsync(bytes);
+    const out: NonNullable<PptTheme["backgrounds"]> = {};
+    const masters = Object.keys(zip.files).filter((p) => /^ppt\/slideMasters\/slideMaster\d+\.xml$/i.test(p));
+    for (const m of masters) {
+      const bg = await bgImageFrom(zip, m);
+      if (bg) { out.body = bg; break; }
+    }
+    const layouts = Object.keys(zip.files).filter((p) => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/i.test(p));
+    for (const l of layouts) {
+      const xml = await zip.file(l)!.async("string");
+      const kind = /<p:sldLayout\b[^>]*\btype="([^"]+)"/i.exec(xml)?.[1]?.toLowerCase();
+      if (kind === "title" && !out.cover) { const bg = await bgImageFrom(zip, l); if (bg) out.cover = bg; }
+      if ((kind === "sechead" || kind === "sectionhead") && !out.section) { const bg = await bgImageFrom(zip, l); if (bg) out.section = bg; }
+    }
+    return out.body || out.cover || out.section ? out : null;
+  } catch {
+    return null;
+  }
+}

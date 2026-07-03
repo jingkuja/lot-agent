@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { extractTheme, DEFAULT_THEME } from "./theme-extractor.js";
+import { extractTheme, extractBackgrounds, DEFAULT_THEME } from "./theme-extractor.js";
+import { buildTemplatePptx } from "./template-renderer.fixture.js";
 
 const THEME_XML = `<?xml version="1.0"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
@@ -59,5 +60,18 @@ describe("extractTheme", () => {
     zip.file("hello.txt", "hi");
     const theme = await extractTheme(await zip.generateAsync({ type: "nodebuffer" }));
     expect(theme).toBe(DEFAULT_THEME);
+  });
+});
+
+describe("extractBackgrounds", () => {
+  it("pulls the master background image as body role", async () => {
+    const bytes = await buildTemplatePptx();
+    const bg = await extractBackgrounds(bytes);
+    expect(bg).not.toBeNull();
+    expect(bg!.body?.ext).toBe("png");
+    expect(bg!.body?.image.length).toBeGreaterThan(0);
+  });
+  it("returns null on a bad zip", async () => {
+    expect(await extractBackgrounds(Buffer.from("not a zip"))).toBeNull();
   });
 });
