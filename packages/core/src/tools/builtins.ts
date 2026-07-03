@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile, writeFile, readdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -352,9 +353,8 @@ export const webFetchTool: Tool = {
 export const webSearchTool: Tool = {
   name: "web_search",
   description:
-    "Search the web using DuckDuckGo. Returns a list of search results with titles, URLs, and snippets.",
-  // Pure external read — repeating the same query in a run reuses the result.
-  cacheable: true,
+    "Search the web using 智谱 BigModel web search. Returns results with titles, URLs, content, and publish dates. Use content directly — only fall back to web_fetch when content is empty but a link is present.",
+  cacheable: false,
   execConfig: {
     timeoutMs: 20_000,
     retry: { maxRetries: 2, baseDelayMs: 2000, retryableKinds: ["timeout", "network"] },
@@ -364,76 +364,86 @@ export const webSearchTool: Tool = {
     properties: {
       query: {
         type: "string",
-        description: "The search query",
+        description: "The search query (max 70 characters)",
       },
       maxResults: {
         type: "number",
-        description: "Maximum number of results to return (default: 5)",
+        description: "Maximum number of results to return (default: 10)",
       },
     },
     required: ["query"],
   },
-  async execute(input): Promise<ToolResult> {
+  async execute(input, context): Promise<ToolResult> {
     const { query, maxResults = 5 } = input as {
       query: string;
       maxResults?: number;
     };
 
+    const searchQuery = query.slice(0, 70);
+    const requestId = randomUUID().replace(/-/g, "");
+    const userId = (context.userId ?? "default").slice(0, 64);
+
     try {
-      // Use DuckDuckGo HTML search (no API key needed)
-      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-      const res = await fetchWithTimeout(searchUrl, 15_000);
+      const res = await fetch("https://open.bigmodel.cn/api/paas/v4/web_search", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.BIGMODEL_API_KEY ?? ""}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          search_query: searchQuery,
+          search_engine: "search_pro",
+          search_intent: false,
+          count: maxResults,
+          search_recency_filter: "oneWeek",
+          request_id: requestId,
+          user_id: userId,
+        }),
+        signal: context.signal,
+      });
+
       if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
         return {
-          content: `Search failed: HTTP ${res.status}`,
+          content: `Search failed: HTTP ${res.status}${errBody ? ` - ${errBody.slice(0, 200)}` : ""}`,
           isError: true,
         };
       }
 
-      const html = await res.text();
+      const data = (await res.json()) as {
+        search_result?: {
+          content: string;
+          icon: string;
+          link: string;
+          media: string;
+          publish_date: string;
+          refer: string;
+          title: string;
+        }[];
+      };
 
-      // Parse results from DuckDuckGo HTML
-      const results: { title: string; url: string; snippet: string }[] = [];
-
-      // Match result blocks
-      const resultRegex =
-        /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
-
-      let match;
-      while ((match = resultRegex.exec(html)) !== null && results.length < maxResults) {
-        const url = match[1];
-        const title = htmlToText(match[2]);
-        const snippet = htmlToText(match[3]);
-        if (title && url) {
-          results.push({ title, url, snippet });
-        }
-      }
+      const results = data.search_result ?? [];
 
       if (results.length === 0) {
-        // Fallback: try simpler regex
-        const simpleRegex =
-          /<a[^>]+rel="nofollow"[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
-        while (
-          (match = simpleRegex.exec(html)) !== null &&
-          results.length < maxResults
-        ) {
-          const url = match[1];
-          const title = htmlToText(match[2]);
-          if (title && url && !url.includes("duckduckgo")) {
-            results.push({ title, url, snippet: "" });
-          }
-        }
-      }
-
-      if (results.length === 0) {
-        return { content: "No search results found for: " + query };
+        return { content: `No search results found for: ${query}` };
       }
 
       const formatted = results
-        .map(
-          (r, i) =>
-            `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`
-        )
+        .slice(0, maxResults)
+        .map((r, i) => {
+          const parts: string[] = [];
+          parts.push(`${i + 1}. ${r.title || "(no title)"}`);
+          if (r.link) parts.push(`   URL: ${r.link}`);
+          if (r.publish_date) parts.push(`   Date: ${r.publish_date}`);
+          if (r.content) {
+            parts.push(`   ${r.content}`);
+          } else if (r.link) {
+            parts.push(`   (content empty — use web_fetch to retrieve this page)`);
+          } else {
+            parts.push(`   (no content)`);
+          }
+          return parts.join("\n");
+        })
         .join("\n\n");
 
       return { content: formatted };
