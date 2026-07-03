@@ -90,9 +90,9 @@ export interface AssetMeta {
   created_at: string;
 }
 
-export type AttachmentSlot = "ppt_template" | "content";
+export type AttachmentSlot = "ppt_template" | "content" | "contract_old" | "contract_new";
 
-/** 输入框选中的文件 + 它在消息里的角色（PPT 模版 / 内容素材）。 */
+/** 输入框选中的文件 + 它在消息里的角色（PPT 模版 / 内容素材 / 新旧合同）。 */
 export interface PickedFile {
   file: File;
   slot?: AttachmentSlot;

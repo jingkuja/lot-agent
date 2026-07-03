@@ -81,7 +81,9 @@ export function ChatPanel({
         ? "video"
         : agentKind === "ppt"
           ? "ppt"
-          : "default";
+          : agentKind === "contract"
+            ? "contract"
+            : "default";
 
   const modelList =
     mode === "image"
@@ -102,9 +104,11 @@ export function ChatPanel({
         placeholder={
           mode === "ppt"
             ? "描述要制作的 PPT，可上传模版与内容文件"
-            : mode !== "default"
-              ? "请输入内容"
-              : undefined
+            : mode === "contract"
+              ? "上传旧版与新版合同，我来找出条款与主体差异"
+              : mode !== "default"
+                ? "请输入内容"
+                : undefined
         }
         models={modelList ?? []}
         selectedModel={selectedModel ?? null}

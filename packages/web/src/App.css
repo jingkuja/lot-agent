@@ -1066,6 +1066,14 @@ html, body, #root {
   color: var(--tag-copy-fg);
   background: var(--tag-copy-bg);
 }
+.badge-old {
+  color: var(--tag-general-fg);
+  background: var(--tag-general-bg);
+}
+.badge-new {
+  color: var(--tag-copy-fg);
+  background: var(--tag-copy-bg);
+}
 
 /* ── ask_user 提问卡片 ── */
 .ask-user-card {
