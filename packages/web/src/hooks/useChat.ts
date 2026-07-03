@@ -241,6 +241,15 @@ export function useChat(
         // Accumulate tool calls for the current assistant message
         let pendingToolCalls: { name: string; input: unknown }[] = [];
 
+        // stream_end ends the turn but the connection stays open for the tail
+        // (title generation). A new send may reuse this cid meanwhile, so tail
+        // handlers must not touch the map entry unless it is still ours.
+        let turnEnded = false;
+        const releaseStream = () => {
+          if (streamsRef.current.get(cid) === controller)
+            streamsRef.current.delete(cid);
+        };
+
         api.sendMessage(cid, content, async (event) => {
         if (event.type === "text" && event.content) {
           assistantMsg = {
@@ -328,7 +337,8 @@ export function useChat(
           }
 
           if (event.type === "stream_end") {
-            streamsRef.current.delete(cid);
+            turnEnded = true;
+            releaseStream();
             if (isCurrent()) loadMessages(cid);
             // Sidebar refresh runs regardless — the finished conversation's
             // title/order must update even while another one is on screen.
@@ -337,7 +347,10 @@ export function useChat(
         }
 
         if (event.type === "error") {
-          streamsRef.current.delete(cid);
+          // A failure in the tail (after stream_end) only concerns the
+          // best-effort title — the turn already ended cleanly on screen.
+          if (turnEnded) return;
+          releaseStream();
           assistantMsg = {
             ...assistantMsg,
             content: assistantMsg.content + `\n\n[Error: ${event.message}]`,

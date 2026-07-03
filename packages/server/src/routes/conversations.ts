@@ -194,8 +194,15 @@ export function createConversationRoutes(service: AgentService): Hono {
           )) {
             send(agentEventToSse(event));
           }
+          // End the turn BEFORE title generation: the client unlocks the
+          // conversation (input box, ask_user cards) on stream_end, and the
+          // title is a whole extra LLM round-trip — holding stream_end for it
+          // left the UI locked for seconds after the agent already finished.
+          send({ type: "stream_end" });
           // Summarize + persist the conversation title (first message only) and
-          // push it to the client so the sidebar updates live, no refresh.
+          // push it to the client so the sidebar updates live, no refresh. The
+          // client reads the SSE connection until it closes, so a title event
+          // after stream_end is still applied.
           try {
             const title = await service.generateTitle(
               id,
@@ -207,7 +214,6 @@ export function createConversationRoutes(service: AgentService): Hono {
           } catch {
             // title generation is best-effort
           }
-          send({ type: "stream_end" });
         } catch (error) {
           send({
             type: "error",

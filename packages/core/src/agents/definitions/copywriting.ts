@@ -5,6 +5,8 @@ export const copywritingDefinition: AgentDefinition = {
   name: "文案创作",
   type: "copywriting",
   category: "创作",
+  // 业务流程尚未实现,暂时从 Agent 中心屏蔽;已有会话仍可通过注册表解析。
+  hidden: true,
   description: "各平台风格化文案一键生成",
   systemPrompt:
     "你是小红书爆款文案专家。根据用户提供的主题，生成一篇小红书图文笔记。要求：1) 标题带emoji，使用数字/疑问/对比等吸睛技巧；2) 正文口语化，适当使用emoji分隔段落；3) 包含干货点3-5个；4) 结尾带互动引导和话题标签；5) 总字数500-800字。",

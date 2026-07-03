@@ -9,7 +9,10 @@ export function createAgentRoutes(service: AgentService): Hono<{ Variables: { us
     const userId = c.get("userId");
     const installed = await service.db.getUserAgents(userId); // 首次访问触发懒播种
     return c.json(
-      service.agentRegistry.list().map((d) => {
+      service.agentRegistry
+        .list()
+        .filter((d) => !d.hidden)
+        .map((d) => {
         const isInstalled = d.id === "general" ? true : installed.has(d.id);
         return {
           ...d,
@@ -23,7 +26,9 @@ export function createAgentRoutes(service: AgentService): Hono<{ Variables: { us
   app.post("/:id/install", async (c) => {
     const userId = c.get("userId");
     const id = c.req.param("id");
-    if (!service.agentRegistry.get(id)) return c.json({ error: "Unknown agent" }, 404);
+    const def = service.agentRegistry.get(id);
+    // 隐藏 Agent 对外等同不存在:列表不展示,也不可安装。
+    if (!def || def.hidden) return c.json({ error: "Unknown agent" }, 404);
     await service.db.installUserAgent(userId, id);
     return c.json({ ok: true });
   });
@@ -39,7 +44,8 @@ export function createAgentRoutes(service: AgentService): Hono<{ Variables: { us
   app.post("/:id/promote", async (c) => {
     const userId = c.get("userId");
     const id = c.req.param("id");
-    if (!service.agentRegistry.get(id)) return c.json({ error: "Unknown agent" }, 404);
+    const def = service.agentRegistry.get(id);
+    if (!def || def.hidden) return c.json({ error: "Unknown agent" }, 404);
     if (!(await service.db.isUserAgentInstalled(userId, id)))
       return c.json({ error: "Agent not installed" }, 400);
     await service.db.promoteUserAgent(userId, id);
