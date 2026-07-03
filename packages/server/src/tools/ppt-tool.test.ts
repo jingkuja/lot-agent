@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import JSZip from "jszip";
 import { createPptTool } from "./ppt-tool.js";
+import { buildTemplatePptx } from "../ppt/template-renderer.fixture.js";
 import type { ToolContext } from "@lot-agent/core";
 
 const ctx = { workingDirectory: "/tmp", userId: "u1" } as ToolContext;
@@ -72,6 +73,26 @@ describe("generate_ppt tool", () => {
     const r = await tool.execute({ ...validInput, templateAssetId: "a1" }, ctx);
     expect(r.isError).toBeFalsy();
     expect(r.content).toContain("模版解析失败，已使用默认样式");
+  });
+
+  it("clones a full template: output keeps its masters, layouts and media", async () => {
+    const deps = makeDeps();
+    let stored: Buffer | null = null;
+    deps.storage.put = vi.fn(async ({ key, body }: { key: string; body: Buffer }) => {
+      stored = body;
+      return { url: `/static/documents/${key}` };
+    });
+    deps.db.getAsset = vi.fn(async () => ({ id: "a1", user_id: "u1", storage_key: "a1.pptx" }));
+    deps.uploadStorage.get = vi.fn(async () => buildTemplatePptx());
+    const tool = createPptTool(deps);
+    const r = await tool.execute({ ...validInput, templateAssetId: "a1" }, ctx);
+    expect(r.isError).toBeFalsy();
+    expect(r.content).toContain("已套用上传模版的版式");
+    const zip = await JSZip.loadAsync(stored!);
+    expect(zip.file("ppt/media/image1.png")).not.toBeNull();
+    expect(zip.file("ppt/slideMasters/slideMaster1.xml")).not.toBeNull();
+    const s1 = await zip.file("ppt/slides/slide1.xml")!.async("string");
+    expect(s1).toContain("<a:t>年度总结</a:t>");
   });
 
   it("uses the owner's template when present", async () => {

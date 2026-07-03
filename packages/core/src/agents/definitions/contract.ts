@@ -21,7 +21,7 @@ export const contractDefinition: AgentDefinition = {
    - 内容变化：同一条款两版文本不同——逐条给出旧文摘录、新文摘录、变化影响说明。
 4. 有疑问就问。比对中遇到歧义（条款对应关系无法确认、正文疑似解析不全、是否只需关注某类条款等），用 ask_user 向用户确认，不要自行猜测。
 5. 输出结果。用结构化 markdown 呈现，依次四节：主体变更 / 新增条款 / 删除条款 / 内容变化；每条差异附一句风险提示。若正文含 [内容过长已截断] 标记，必须注明仅比对了截断前内容。
-6. 询问报告。结果给出后，用 ask_user 询问「是否生成对比报告」，options 固定为：["生成 Word 报告 (docx)", "生成 PDF 报告", "生成 Markdown 报告", "不需要"]。用户选择格式后调用 generate_document（format 对应 docx/pdf/md），content 为完整对比结果的 markdown，把返回的下载链接交给用户。
+6. 询问报告。结果给出后，用 ask_user 询问「是否生成对比报告」，options 固定为：["生成 Word 报告 (docx)", "生成 PDF 报告", "生成 Markdown 报告", "不需要"]。用户选择格式后调用 generate_document（format 对应 docx/pdf/md），content 为完整对比结果的 markdown（标题、列表、表格、加粗等 markdown 语法都会被转换为对应的文档格式，放心使用，不要为了"避免转换问题"而刻意写成纯文本）；可选传 accentColor（6 位 hex，不带 #）为报告选一个和内容基调相符的强调色，不确定就不传，使用默认蓝色。把返回的下载链接交给用户。
 
 规则：不向用户展示 assetId 等内部细节；某份合同解析失败或正文为空时如实转告并请求重新上传；不要在没有拿到两份正文前给出比对结论。`,
   toolNames: ["ask_user", "generate_document"],
