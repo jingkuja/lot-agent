@@ -165,6 +165,58 @@ describe("extractAttachment: ppt slots", () => {
   });
 });
 
+describe("extractAttachment: contract slots", () => {
+  const contractBase = {
+    assetId: "c-old", size: 10, kind: "doc" as const,
+  };
+
+  it("wraps contract_old text with 旧版合同 markers", async () => {
+    const storage = { get: vi.fn(async () => Buffer.from("第一条 甲方为A公司")) } as any;
+    const part = await extractAttachment(
+      {
+        ...contractBase, filename: "old.txt", mime: "text/plain",
+        url: "/static/uploads/c-old.txt", slot: "contract_old",
+      },
+      storage
+    );
+    expect(part).toEqual({
+      type: "text",
+      text: "[旧版合同: old.txt]\n第一条 甲方为A公司\n[/旧版合同: old.txt]",
+    });
+  });
+
+  it("wraps contract_new text with 新版合同 markers", async () => {
+    const storage = { get: vi.fn(async () => Buffer.from("第一条 甲方为B公司")) } as any;
+    const part = await extractAttachment(
+      {
+        ...contractBase, assetId: "c-new", filename: "new.txt", mime: "text/plain",
+        url: "/static/uploads/c-new.txt", slot: "contract_new",
+      },
+      storage
+    );
+    expect(part).toEqual({
+      type: "text",
+      text: "[新版合同: new.txt]\n第一条 甲方为B公司\n[/新版合同: new.txt]",
+    });
+  });
+
+  it("keeps the generic degradation copy when a contract file is unreadable", async () => {
+    const storage = {
+      get: vi.fn(async () => {
+        throw new Error("ENOENT");
+      }),
+    } as any;
+    const part = await extractAttachment(
+      {
+        ...contractBase, filename: "gone.pdf", mime: "application/pdf",
+        url: "/static/uploads/c-old.pdf", slot: "contract_old",
+      },
+      storage
+    );
+    expect(part).toEqual({ type: "text", text: "[附件 gone.pdf 无法读取，已忽略内容]" });
+  });
+});
+
 describe("isSafeUploadKey", () => {
   it("accepts flat uuid.ext keys and rejects traversal/separators", () => {
     expect(isSafeUploadKey("a1b2.png")).toBe(true);

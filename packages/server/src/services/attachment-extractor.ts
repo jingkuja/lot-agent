@@ -50,8 +50,8 @@ export interface AttachmentRef {
   size: number;
   url: string;
   kind: "image" | "doc";
-  /** PPT Agent 的附件角色：模版（只传引用，不进正文）或撰写素材。 */
-  slot?: "ppt_template" | "content";
+  /** 附件角色：PPT 模版（只传引用，不进正文）/ 撰写素材 / 合同对比的旧版与新版正文。 */
+  slot?: "ppt_template" | "content" | "contract_old" | "contract_new";
 }
 
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -140,5 +140,8 @@ export async function extractAttachment(
   if (body.length > MAX_DOC_CHARS) {
     body = body.slice(0, MAX_DOC_CHARS) + "\n…[内容过长已截断]";
   }
-  return { type: "text", text: `[附件: ${att.filename}]\n${body}\n[/附件: ${att.filename}]` };
+  // 合同对比 slot：用角色化标记包裹正文，让 LLM 分清哪份是旧版/新版。
+  const label =
+    att.slot === "contract_old" ? "旧版合同" : att.slot === "contract_new" ? "新版合同" : "附件";
+  return { type: "text", text: `[${label}: ${att.filename}]\n${body}\n[/${label}: ${att.filename}]` };
 }
