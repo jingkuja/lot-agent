@@ -9,6 +9,9 @@ type Variables = { userId: string };
 /** Server-side cap (the InputBox MAX_FILES=5 is only a client hint). */
 const MAX_ATTACHMENTS = 5;
 
+/** Attachment slots accepted from the client; anything else is dropped. */
+const VALID_SLOTS = new Set(["ppt_template", "ppt_background", "content", "contract_old", "contract_new"]);
+
 export function createConversationRoutes(service: AgentService): Hono {
   const app = new Hono<{ Variables: Variables }>();
 
@@ -164,7 +167,7 @@ export function createConversationRoutes(service: AgentService): Hono {
         size: asset.size_bytes,
         url: asset.url,
         kind: attachmentKind(asset.mime),
-        slot: a.slot === "ppt_template" || a.slot === "content" ? a.slot : undefined,
+        slot: a.slot && VALID_SLOTS.has(a.slot) ? a.slot : undefined,
       });
     }
 

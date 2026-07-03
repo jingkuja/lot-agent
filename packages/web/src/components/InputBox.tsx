@@ -57,9 +57,11 @@ export function InputBox({
   const pptMode = mode === "ppt";
   const contractMode = mode === "contract";
   const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [backgroundFiles, setBackgroundFiles] = useState<File[]>([]);
   const [oldContractFile, setOldContractFile] = useState<File | null>(null);
   const [newContractFile, setNewContractFile] = useState<File | null>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
+  const backgroundInputRef = useRef<HTMLInputElement>(null);
   const oldContractInputRef = useRef<HTMLInputElement>(null);
   const newContractInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -114,11 +116,12 @@ export function InputBox({
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     const hasFiles =
-      files.length > 0 || !!templateFile || !!oldContractFile || !!newContractFile;
+      files.length > 0 || !!templateFile || backgroundFiles.length > 0 || !!oldContractFile || !!newContractFile;
     if ((!trimmed && !hasFiles) || disabled) return;
     const picked: PickedFile[] = pptMode
       ? [
           ...(templateFile ? [{ file: templateFile, slot: "ppt_template" as const }] : []),
+          ...backgroundFiles.map((f) => ({ file: f, slot: "ppt_background" as const })),
           ...files.map((f) => ({ file: f, slot: "content" as const })),
         ]
       : contractMode
@@ -131,11 +134,12 @@ export function InputBox({
     setValue("");
     setFiles([]);
     setTemplateFile(null);
+    setBackgroundFiles([]);
     setOldContractFile(null);
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, files, templateFile, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, pptMode, contractMode]);
+  }, [value, files, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, pptMode, contractMode]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -163,7 +167,7 @@ export function InputBox({
           图片需所选模型支持多模态（视觉）能力才能识别
         </div>
       )}
-      {(files.length > 0 || templateFile || oldContractFile || newContractFile) && (
+      {(files.length > 0 || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
         <div className="input-attachments">
           {templateFile && (
             <div className="attachment-chip" key="__template">
@@ -172,6 +176,13 @@ export function InputBox({
               <button className="attachment-remove" onClick={() => setTemplateFile(null)} title="移除" type="button">✕</button>
             </div>
           )}
+          {backgroundFiles.map((f, i) => (
+            <div className="attachment-chip" key={`__bg${i}`}>
+              <span className="attachment-slot-badge badge-background">背景</span>
+              <span className="attachment-name" title={f.name}>{f.name}</span>
+              <button type="button" className="attachment-remove" onClick={() => setBackgroundFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+            </div>
+          ))}
           {oldContractFile && (
             <div className="attachment-chip" key="__contract_old">
               <span className="attachment-slot-badge badge-old">旧版</span>
@@ -246,6 +257,18 @@ export function InputBox({
           }}
         />
         <input
+          ref={backgroundInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            setBackgroundFiles((prev) => [...prev, ...picked].slice(0, 3));
+            e.target.value = "";
+          }}
+        />
+        <input
           ref={oldContractInputRef}
           type="file"
           accept={ACCEPT_CONTRACT}
@@ -297,6 +320,19 @@ export function InputBox({
                   <path d="M8 21h8M12 17v4" />
                 </svg>
                 PPT 模版
+              </button>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => backgroundInputRef.current?.click()}
+                disabled={disabled || backgroundFiles.length >= 3}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="m21 15-5-5L5 21" />
+                </svg>
+                背景图
               </button>
               <button
                 type="button"
@@ -396,7 +432,7 @@ export function InputBox({
             <button
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={!value.trim() && files.length === 0 && !templateFile && !oldContractFile && !newContractFile}
+              disabled={!value.trim() && files.length === 0 && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile}
               title="发送"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

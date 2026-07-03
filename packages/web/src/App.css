@@ -1074,6 +1074,10 @@ html, body, #root {
   color: var(--tag-copy-fg);
   background: var(--tag-copy-bg);
 }
+.badge-background {
+  color: var(--tag-video-fg);
+  background: var(--tag-video-bg);
+}
 
 /* ── ask_user 提问卡片 ── */
 .ask-user-card {

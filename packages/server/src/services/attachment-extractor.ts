@@ -50,8 +50,8 @@ export interface AttachmentRef {
   size: number;
   url: string;
   kind: "image" | "doc";
-  /** 附件角色：PPT 模版（只传引用，不进正文）/ 撰写素材 / 合同对比的旧版与新版正文。 */
-  slot?: "ppt_template" | "content" | "contract_old" | "contract_new";
+  /** 附件角色：PPT 模版 / PPT 背景图（只传引用，不进正文）/ 撰写素材 / 合同对比的旧版与新版正文。 */
+  slot?: "ppt_template" | "ppt_background" | "content" | "contract_old" | "contract_new";
 }
 
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -80,6 +80,14 @@ export async function extractAttachment(
     return {
       type: "text",
       text: `[PPT模版已上传: ${att.filename} (templateAssetId: ${att.assetId})]`,
+    };
+  }
+
+  // PPT 背景图同理：体积大且由 PPT 生成流水线单独消费，不进模型正文/上下文。
+  if (att.slot === "ppt_background") {
+    return {
+      type: "text",
+      text: `[PPT背景图已上传: ${att.filename} (backgroundAssetId: ${att.assetId})]`,
     };
   }
 

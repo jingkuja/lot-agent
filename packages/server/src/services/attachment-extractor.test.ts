@@ -165,6 +165,22 @@ describe("extractAttachment: ppt slots", () => {
   });
 });
 
+describe("ppt_background slot", () => {
+  it("emits a reference marker, not file content", async () => {
+    const storage = { get: vi.fn() } as any;
+    const att: AttachmentRef = {
+      assetId: "bg1", filename: "bg.png", mime: "image/png",
+      size: 1, url: "/static/uploads/bg1.png", kind: "image",
+      slot: "ppt_background",
+    };
+    const part = await extractAttachment(att, storage);
+    expect(part.type).toBe("text");
+    expect((part as any).text).toContain("PPT背景图已上传");
+    expect((part as any).text).toContain("backgroundAssetId: bg1");
+    expect(storage.get).not.toHaveBeenCalled();
+  });
+});
+
 describe("extractAttachment: contract slots", () => {
   const contractBase = {
     assetId: "c-old", size: 10, kind: "doc" as const,
