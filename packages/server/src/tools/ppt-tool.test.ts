@@ -109,3 +109,38 @@ describe("generate_ppt tool", () => {
     expect(deps.uploadStorage.get).toHaveBeenCalledWith("a1.pptx");
   });
 });
+
+// 极简内存桩：storage.put 返回固定 url，db.createAsset 记录一次
+function makeV2Deps() {
+  const puts: any[] = [];
+  const storage = { put: async (o: any) => { puts.push(o); return { url: `/static/documents/${o.key}` }; }, get: async () => Buffer.from(""), delete: async () => {} } as any;
+  const uploadStorage = { get: async () => { throw new Error("no template"); }, put: async () => ({ url: "" }), delete: async () => {} } as any;
+  const db = { getAsset: async () => null, createAsset: async () => {} } as any;
+  return { storage, uploadStorage, db, puts };
+}
+
+describe("generate_ppt", () => {
+  it("rejects invalid stats slide via validateSlides", async () => {
+    const { storage, uploadStorage, db } = makeV2Deps();
+    const tool = createPptTool({ storage, uploadStorage, db });
+    const r = await tool.execute({ title: "T", slides: [{ layout: "stats", title: "t", items: [{ label: "only" }] }] }, { userId: "u" } as any);
+    expect(r.isError).toBe(true);
+    expect(r.errorKind).toBe("validation");
+  });
+
+  it("renders a mixed deck with a theme preset", async () => {
+    const { storage, uploadStorage, db, puts } = makeV2Deps();
+    const tool = createPptTool({ storage, uploadStorage, db });
+    const r = await tool.execute({
+      title: "季度复盘", themePreset: "tech-dark",
+      slides: [
+        { layout: "cover", title: "季度复盘" },
+        { layout: "stats", title: "数据", items: [{ value: "65%", label: "增长" }, { value: "3x", label: "效率" }] },
+        { layout: "closing", title: "谢谢" },
+      ],
+    }, { userId: "u" } as any);
+    expect(r.isError).toBeFalsy();
+    expect(r.content).toContain("/static/documents/");
+    expect(puts).toHaveLength(1);
+  });
+});
