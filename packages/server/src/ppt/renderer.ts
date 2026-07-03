@@ -11,17 +11,24 @@ import type { PptTheme } from "./theme-extractor.js";
 const require = createRequire(import.meta.url);
 const PptxGenJS: typeof import("pptxgenjs").default = require("pptxgenjs");
 
+export type PptLayout =
+  | "cover" | "agenda" | "section" | "content" | "keypoints"
+  | "stats" | "compare" | "timeline" | "quote" | "closing";
+export interface PptItem { label: string; value?: string; desc?: string }
+export interface PptColumn { title: string; bullets: string[] }
+export interface PptQuote { text: string; author?: string }
 export interface PptSlide {
-  layout: "cover" | "section" | "content";
+  layout: PptLayout;
   title: string;
+  subtitle?: string;
   bullets?: string[];
+  items?: PptItem[];
+  left?: PptColumn;
+  right?: PptColumn;
+  quote?: PptQuote;
   notes?: string;
 }
-
-export interface PptOutline {
-  title: string;
-  slides: PptSlide[];
-}
+export interface PptOutline { title: string; slides: PptSlide[] }
 
 /** 把 hex 颜色调暗 amount（0-1），用于渐变终点或投影色。 */
 function darken(hex: string, amount: number): string {
