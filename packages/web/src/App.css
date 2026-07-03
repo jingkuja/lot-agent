@@ -1161,6 +1161,29 @@ html, body, #root {
   cursor: default;
 }
 
+.outline-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--overlay-raise);
+  padding: 14px 16px;
+  margin-top: 8px;
+}
+.outline-card.answered { opacity: 0.7; }
+.outline-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.outline-title { font-weight: 600; color: var(--text); }
+.outline-count { font-size: 12px; color: var(--text-muted); }
+.outline-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.outline-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--overlay-sink); }
+.outline-index { color: var(--text-muted); font-size: 12px; min-width: 18px; text-align: right; }
+.outline-layout { color: var(--accent); width: 18px; text-align: center; }
+.outline-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.outline-slide-title { color: var(--text); font-size: 14px; }
+.outline-slide-sum { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outline-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.outline-confirm { background: var(--accent); color: var(--text-on-accent); border: none; border-radius: 8px; padding: 7px 16px; cursor: pointer; font-size: 14px; }
+.outline-confirm:hover { filter: brightness(1.05); }
+.outline-hint, .outline-answered-note { font-size: 12px; color: var(--text-muted); }
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;

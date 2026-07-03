@@ -140,10 +140,11 @@ export function ChatPanel({
     <div className="chat-panel">
       <div className="chat-messages">
         {messages.map((msg, i) => {
-          const hasAsk =
+          const interactiveNames = ["ask_user", "propose_outline"];
+          const hasInteractive =
             msg.role === "assistant" &&
-            !!msg.toolCalls?.some((tc) => tc.name === "ask_user");
-          const askAnswer = hasAsk
+            !!msg.toolCalls?.some((tc) => interactiveNames.includes(tc.name));
+          const askAnswer = hasInteractive
             ? messages.slice(i + 1).find((m) => m.role === "user")?.content
             : undefined;
           return (
@@ -156,7 +157,7 @@ export function ChatPanel({
               onSelectForPreview={onSelectForPreview}
               onQuickReply={(text) => onSend(text, [])}
               askAnswer={askAnswer}
-              askInteractive={hasAsk && askAnswer === undefined && !isStreaming}
+              askInteractive={hasInteractive && askAnswer === undefined && !isStreaming}
             />
           );
         })}

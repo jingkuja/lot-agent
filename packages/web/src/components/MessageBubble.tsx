@@ -6,6 +6,7 @@ import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import { GenerationCard } from "./GenerationCard.js";
 import { AskUserCard } from "./AskUserCard.js";
+import { OutlineCard } from "./OutlineCard.js";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
@@ -75,6 +76,7 @@ export function MessageBubble({
     // ask_user's placeholder result isn't worth showing — the question card
     // above (in the assistant message) already conveys the state.
     if (message.toolResult?.name === "ask_user") return null;
+    if (message.toolResult?.name === "propose_outline") return null;
     // Tool result message — rendered as a collapsible card
     return (
       <div className="message-wrapper message-tool">
@@ -138,6 +140,17 @@ export function MessageBubble({
               if (tc.name === "ask_user") {
                 return (
                   <AskUserCard
+                    key={i}
+                    input={tc.input}
+                    interactive={!!askInteractive}
+                    answer={askAnswer}
+                    onReply={onQuickReply}
+                  />
+                );
+              }
+              if (tc.name === "propose_outline") {
+                return (
+                  <OutlineCard
                     key={i}
                     input={tc.input}
                     interactive={!!askInteractive}
