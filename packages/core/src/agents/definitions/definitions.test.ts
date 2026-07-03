@@ -6,7 +6,7 @@ describe("agent definitions", () => {
     expect(pptDefinition.id).toBe("ppt");
     expect(pptDefinition.type).toBe("ppt");
     expect(pptDefinition.category).toBe("办公");
-    expect(pptDefinition.toolNames).toEqual(["ask_user", "generate_ppt"]);
+    expect(pptDefinition.toolNames).toEqual(["ask_user", "propose_outline", "generate_ppt"]);
     expect(pptDefinition.systemPrompt).toContain("templateAssetId");
     expect(pptDefinition.systemPrompt).not.toContain("占位");
   });

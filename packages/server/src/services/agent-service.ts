@@ -462,7 +462,7 @@ export class AgentService {
     );
 
     // ── Match skills, build agent ──
-    const matchedSkills = this.skillLoader.match(userMessage);
+    const matchedSkills = this.skillLoader.match(userMessage, { agentId: def.id });
     const dynamicParts = matchedSkills.map(
       (s) => `[Skill: ${s.name}]\n${s.content}`
     );

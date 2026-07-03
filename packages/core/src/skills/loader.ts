@@ -6,12 +6,14 @@ export interface Skill {
   description: string;
   triggers: string[];
   content: string;
+  agents?: string[];
 }
 
 interface SkillFrontmatter {
   name: string;
   description: string;
   triggers: string[];
+  agents: string[];
 }
 
 function unquote(s: string): string {
@@ -40,6 +42,7 @@ function parseFrontmatter(raw: string): {
     name: "",
     description: "",
     triggers: [],
+    agents: [],
   };
 
   let currentKey = "";
@@ -53,19 +56,19 @@ function parseFrontmatter(raw: string): {
       currentKey = key;
       const trimmedValue = value.trim();
 
-      if (key === "triggers") {
-        frontmatter.triggers = [];
+      if (key === "triggers" || key === "agents") {
+        (frontmatter as unknown as Record<string, string[]>)[key] = [];
         // Inline value like `triggers: [a, b]`
         if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
-          frontmatter.triggers = trimmedValue
+          (frontmatter as unknown as Record<string, string[]>)[key] = trimmedValue
             .slice(1, -1)
             .split(",")
             .map((s) => unquote(s))
             .filter(Boolean);
         } else if (trimmedValue) {
-          frontmatter.triggers = [unquote(trimmedValue)];
+          (frontmatter as unknown as Record<string, string[]>)[key] = [unquote(trimmedValue)];
         }
-        // Otherwise triggers come on subsequent "- item" lines
+        // Otherwise list items come on subsequent "- item" lines
       } else {
         (frontmatter as unknown as Record<string, unknown>)[key] = unquote(trimmedValue);
       }
@@ -74,8 +77,10 @@ function parseFrontmatter(raw: string): {
 
     // List item line: "- item" (with any leading whitespace)
     const listMatch = line.match(/^\s+-\s+(.+)$/);
-    if (listMatch && currentKey === "triggers") {
-      frontmatter.triggers.push(unquote(listMatch[1]));
+    if (listMatch && (currentKey === "triggers" || currentKey === "agents")) {
+      (frontmatter as unknown as Record<string, string[]>)[currentKey].push(
+        unquote(listMatch[1])
+      );
     }
   }
 
@@ -115,15 +120,24 @@ export class SkillLoader {
       description: frontmatter.description,
       triggers: frontmatter.triggers,
       content: body,
+      agents: frontmatter.agents,
     };
   }
 
-  match(message: string, skills?: Skill[]): Skill[] {
-    const target = skills ?? this.skills;
+  match(message: string, opts?: { agentId?: string; skills?: Skill[] }): Skill[] {
+    const target = opts?.skills ?? this.skills;
     const lower = message.toLowerCase();
-    return target.filter((s) =>
-      s.triggers.some((t) => lower.includes(t.toLowerCase()))
-    );
+    const out: Skill[] = [];
+    for (const s of target) {
+      if (s.agents && s.agents.length > 0) {
+        // Agent-scoped skill: inject unconditionally for its declared agent(s),
+        // never for any other agent, regardless of trigger words.
+        if (opts?.agentId && s.agents.includes(opts.agentId)) out.push(s);
+      } else if (s.triggers.some((t) => lower.includes(t.toLowerCase()))) {
+        out.push(s);
+      }
+    }
+    return out;
   }
 
   getSkills(): Skill[] {
