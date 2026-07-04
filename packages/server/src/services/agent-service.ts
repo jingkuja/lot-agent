@@ -531,6 +531,7 @@ export class AgentService {
       systemPrompt: def.systemPrompt,
       allowedToolNames: def.toolNames,
       dynamicPromptParts: dynamicParts,
+      modelParams: def.modelParams,
       contextConfig: contextConfig
         ? { ...contextConfig, compressor: llm, initialSummary: persistedSummary }
         : undefined,
@@ -561,9 +562,11 @@ export class AgentService {
     let assistantContent = "";
     let producedAssistantText = "";
     let currentToolCalls: { id: string; name: string; arguments: unknown }[] = [];
+    let currentThinking = "";
     let totalTokens = 0;
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedPromptTokens = 0;
     let lastErrorMessage: string | undefined;
 
     // Build this turn's user input — text plus materialized attachment parts
@@ -579,6 +582,10 @@ export class AgentService {
 
     try {
       for await (const event of agent.run(runInput, context, history, { signal })) {
+        if (event.type === "thinking") {
+          currentThinking += event.content;
+        }
+
         if (event.type === "text") {
           recorder.startLlmSpan();
           assistantContent += event.content;
@@ -607,7 +614,8 @@ export class AgentService {
             await this.messageRepo.saveAssistantWithToolCalls(
               conversationId,
               assistantContent || "",
-              currentToolCalls
+              currentToolCalls,
+              currentThinking || undefined
             );
             await this.messageRepo.saveToolResult(
               conversationId,
@@ -617,6 +625,7 @@ export class AgentService {
 
             assistantContent = "";
             currentToolCalls = [];
+            currentThinking = "";
           }
         }
 
@@ -624,6 +633,7 @@ export class AgentService {
           totalTokens = event.totalTokens;
           inputTokens = event.inputTokens;
           outputTokens = event.outputTokens;
+          cachedPromptTokens = event.cachedPromptTokens;
         }
 
         if (event.type === "error") {
@@ -647,7 +657,8 @@ export class AgentService {
       await this.messageRepo.saveFinalAssistant(
         conversationId,
         finalContent,
-        currentToolCalls
+        currentToolCalls,
+        currentThinking || undefined
       );
 
       // Fire-and-forget: extract durable user memory from this turn in the
@@ -678,7 +689,7 @@ export class AgentService {
       }
 
       // Finish trace + spans (with the ACTUAL error message, if any)
-      await recorder.finish({ totalTokens, errorMessage: lastErrorMessage });
+      await recorder.finish({ totalTokens, cachedPromptTokens, errorMessage: lastErrorMessage });
 
       // Record usage (non-fatal)
       if (inputTokens + outputTokens > 0) {
