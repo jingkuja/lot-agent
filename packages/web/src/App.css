@@ -2254,6 +2254,10 @@ html, body, #root {
   color: var(--text);
 }
 
+.btn-key-settings { display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px; }
+.btn-key-settings:hover { color: var(--accent); }
+
 /* ── Status Bar user info ── */
 .status-right {
   display: flex;
