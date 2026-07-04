@@ -67,6 +67,7 @@ async function loadConfig(): Promise<ServiceConfig> {
     llm,
     models: config.models ?? [],
     modelCatalog,
+    debug: process.env.DEBUG === "1",
     agent: config.agent as ServiceConfig["agent"],
     mcpConfigPath: resolve(ROOT, "config/mcp-servers.json"),
     skillsDir: resolve(ROOT, "skills"),
@@ -90,6 +91,19 @@ async function main() {
   const service = new AgentService(serviceConfig);
   await service.init();
 
+  // Debug mode (DEBUG=1): seed a stable login-less user whose empty key set makes
+  // every provider resolution fall through to the env LLM. externalUserId 0 is
+  // reserved (real users get their id from tokenhub).
+  if (serviceConfig.debug) {
+    const debugUser = await service.db.upsertUserByExternalId({
+      externalUserId: 0,
+      username: "debug",
+      apiKeys: [],
+    });
+    service.debugUserId = debugUser.id;
+    console.warn("DEBUG=1: auth disabled, using env model/key. Do NOT use in production.");
+  }
+
   const app = new Hono<{ Variables: { userId: string } }>();
 
   app.use("*", logger());
@@ -105,7 +119,10 @@ async function main() {
   app.route("/api/auth", createAuthRoutes(service));
 
   // Auth guard for all other /api/* routes
-  const authMw = createAuthMiddleware(service.sessions);
+  const authMw = createAuthMiddleware(service.sessions, {
+    debug: serviceConfig.debug,
+    debugUserId: service.debugUserId,
+  });
   app.use("/api/conversations/*", authMw);
   app.use("/api/skills/*", authMw);
   app.use("/api/traces/*", authMw);

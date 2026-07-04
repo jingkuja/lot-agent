@@ -95,3 +95,32 @@ describe("auth login", () => {
     expect(svc.tokenhub.login).not.toHaveBeenCalled();
   });
 });
+
+describe("auth mode", () => {
+  it("reports debug off when the service is not in debug mode", async () => {
+    const svc = fakeService();
+    (svc as { debug: boolean }).debug = false;
+    const app = createAuthRoutes(svc);
+    const res = await app.request("/mode");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ debug: false, user: null });
+  });
+
+  it("returns the sanitized debug user when in debug mode", async () => {
+    const svc = fakeService();
+    (svc as { debug: boolean; debugUserId: string }).debug = true;
+    (svc as { debugUserId: string }).debugUserId = "u-debug";
+    (svc.db as { getUserById: ReturnType<typeof vi.fn> }).getUserById = vi
+      .fn()
+      .mockResolvedValue({
+        id: "u-debug", email: null, name: "debug", created_at: "t",
+        external_user_id: 0, username: "debug", api_key: null, api_keys: [],
+      });
+    const app = createAuthRoutes(svc);
+    const res = await app.request("/mode");
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.debug).toBe(true);
+    expect(json.user).toMatchObject({ id: "u-debug", username: "debug" });
+  });
+});

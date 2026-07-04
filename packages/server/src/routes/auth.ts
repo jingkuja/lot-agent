@@ -14,6 +14,16 @@ export function createAuthRoutes(service: AgentService): Hono {
   // GET /public-key — public; browser fetches this to encrypt the password.
   app.get("/public-key", (c) => c.json({ publicKey: keypair.publicKeyPem }));
 
+  // GET /mode — public. Lets the web decide whether to skip login before it has
+  // a token: in debug mode it returns the seeded debug user to enter directly.
+  app.get("/mode", async (c) => {
+    if (!service.debug || !service.debugUserId) {
+      return c.json({ debug: false, user: null });
+    }
+    const user = await service.db.getUserById(service.debugUserId);
+    return c.json({ debug: true, user: user ? toPublicUser(user) : null });
+  });
+
   // POST /login — public. RSA-encrypted password → tokenhub → local session.
   app.post("/login", async (c) => {
     let body: { username?: string; encryptedPassword?: string };

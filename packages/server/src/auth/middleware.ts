@@ -1,21 +1,38 @@
 import type { MiddlewareHandler } from "hono";
 import type { SessionStore } from "./session-store.js";
 
-export function createAuthMiddleware(sessions: SessionStore): MiddlewareHandler {
+/** Debug bypass: when enabled, any request that doesn't resolve to a real
+ * session is admitted as the fixed debug user instead of returning 401. This is
+ * a local-dev switch (`DEBUG=1`) and must never be enabled in a deployment. */
+export interface AuthMiddlewareOptions {
+  debug?: boolean;
+  debugUserId?: string;
+}
+
+export function createAuthMiddleware(
+  sessions: SessionStore,
+  opts: AuthMiddlewareOptions = {}
+): MiddlewareHandler {
+  const debugUserId = opts.debug ? opts.debugUserId : undefined;
   return async (c, next) => {
     const authHeader = c.req.header("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return c.json({ error: "Unauthorized" }, 401);
+    const token =
+      authHeader && authHeader.startsWith("Bearer ")
+        ? authHeader.slice("Bearer ".length).trim()
+        : "";
+    const s = token ? await sessions.resolve(token) : null;
+    if (s) {
+      c.set("userId", s.userId);
+      await next();
+      return;
     }
-    const token = authHeader.slice("Bearer ".length).trim();
-    if (!token) {
-      return c.json({ error: "Unauthorized" }, 401);
+    // No valid session. In debug mode fall back to the debug user so the app is
+    // usable without logging in; otherwise reject.
+    if (debugUserId) {
+      c.set("userId", debugUserId);
+      await next();
+      return;
     }
-    const s = await sessions.resolve(token);
-    if (!s) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-    c.set("userId", s.userId);
-    await next();
+    return c.json({ error: "Unauthorized" }, 401);
   };
 }

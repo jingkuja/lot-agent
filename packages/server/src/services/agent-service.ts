@@ -148,6 +148,8 @@ export interface ServiceConfig {
   agent: Partial<AgentConfig>;
   mcpConfigPath: string;
   skillsDir: string;
+  /** Local-dev debug mode (`DEBUG=1`): login-less, env-model-backed. */
+  debug?: boolean;
   db?: {
     host?: string;
     port?: number;
@@ -180,6 +182,10 @@ export class AgentService {
   readonly tokenhubBaseUrl: string;
   /** Per-model provider/pricing config for the dynamic catalog. */
   readonly modelCatalog: ModelCatalogConfig;
+  /** Local-dev debug mode: admits login-less callers and surfaces the env model. */
+  readonly debug: boolean;
+  /** Id of the seeded debug user (set in index.ts on startup when debug). */
+  debugUserId?: string;
   /** Shared Redis connection (also caches the per-user model catalog). */
   redis!: import("ioredis").Redis;
   /** Resolved image/video generation config (base url/adapter per media type). */
@@ -221,6 +227,7 @@ export class AgentService {
     this.mcpConfigPath = config.mcpConfigPath;
     this.skillsDir = config.skillsDir;
     this.modelCatalog = config.modelCatalog;
+    this.debug = config.debug ?? false;
     this.tokenhubBaseUrl =
       process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market";
     this.tokenhub = new TokenhubClient(this.tokenhubBaseUrl);
@@ -376,7 +383,19 @@ export class AgentService {
     const cacheKey = `models:${userId}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) return JSON.parse(cached) as ReturnType<typeof enrichCatalog>;
-    if (!apiKey) return null;
+    if (!apiKey) {
+      // Debug mode has no tokenhub key: surface the single env LLM so the model
+      // picker and the web send-guard work login-less. Not cached (cheap, and
+      // avoids staleness if env changes across restarts).
+      if (this.debug) {
+        return enrichCatalog(this.modelCatalog, {
+          llm: [defaultLlmModelId(this.llmConfig)],
+          image: [],
+          video: [],
+        });
+      }
+      return null;
+    }
     const enriched = enrichCatalog(this.modelCatalog, await this.tokenhub.listModels(apiKey));
     await this.redis.set(cacheKey, JSON.stringify(enriched), "EX", MODEL_CATALOG_TTL_SEC);
     return enriched;

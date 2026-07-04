@@ -17,11 +17,18 @@ export default function App() {
     setView("ready");
   }, []);
 
-  // On mount: validate an existing token if present.
+  // On mount: validate an existing token if present. With no token, check for
+  // debug mode (DEBUG=1) — if on, enter login-less as the debug user.
   useEffect(() => {
     const token = getToken();
     if (!token) {
-      setView("login");
+      api
+        .mode()
+        .then((m) => {
+          if (m.debug && m.user) enter(m.user);
+          else setView("login");
+        })
+        .catch(() => setView("login"));
       return;
     }
     api

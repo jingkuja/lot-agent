@@ -172,6 +172,9 @@ export const api = {
 
   me: () => request<User>("/auth/me"),
 
+  // Public: whether the server runs in login-less debug mode, and the debug user.
+  mode: () => request<{ debug: boolean; user: User | null }>("/auth/mode"),
+
   setActiveKey: (index: number) =>
     request<{ ok: boolean; activeKeyIndex: number }>("/keys/active", {
       method: "POST",

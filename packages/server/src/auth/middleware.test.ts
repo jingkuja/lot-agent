@@ -16,9 +16,9 @@ function makeFakeSessionStore(validToken: string, userId: string): SessionStore 
   } as unknown as SessionStore;
 }
 
-function buildApp(sessions: SessionStore) {
+function buildApp(sessions: SessionStore, opts?: { debug?: boolean; debugUserId?: string }) {
   const app = new Hono<{ Variables: { userId: string } }>();
-  app.use("*", createAuthMiddleware(sessions));
+  app.use("*", createAuthMiddleware(sessions, opts));
   app.get("/test", (c) => {
     return c.json({ userId: c.get("userId") });
   });
@@ -57,5 +57,40 @@ describe("createAuthMiddleware", () => {
       headers: { Authorization: "Basic abc" },
     });
     expect(res.status).toBe(401);
+  });
+
+  describe("debug mode", () => {
+    const debugApp = buildApp(sessions, { debug: true, debugUserId: "debug-user" });
+
+    it("admits requests with no token as the debug user", async () => {
+      const res = await debugApp.request("/test");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { userId: string };
+      expect(body.userId).toBe("debug-user");
+    });
+
+    it("admits requests with an invalid token as the debug user", async () => {
+      const res = await debugApp.request("/test", {
+        headers: { Authorization: "Bearer bad-token" },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { userId: string };
+      expect(body.userId).toBe("debug-user");
+    });
+
+    it("still prefers a real resolved session over the debug user", async () => {
+      const res = await debugApp.request("/test", {
+        headers: { Authorization: "Bearer good-token" },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { userId: string };
+      expect(body.userId).toBe("user-123");
+    });
+
+    it("does not bypass when debug is on but no debugUserId is provided", async () => {
+      const noIdApp = buildApp(sessions, { debug: true });
+      const res = await noIdApp.request("/test");
+      expect(res.status).toBe(401);
+    });
   });
 });
