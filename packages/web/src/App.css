@@ -2698,3 +2698,17 @@ html, body, #root {
 }
 .agent-overflow-item:hover { background: var(--bg-hover); }
 .agent-overflow-item.active { color: var(--accent); font-weight: 600; }
+
+/* ── Key Settings Modal ── */
+.key-settings-modal { width: min(420px, 92vw); }
+.key-settings-empty { color: var(--text-muted); font-size: 14px; padding: 12px 4px; }
+.key-list { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-direction: column; gap: 8px; }
+.key-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--overlay-raise);
+  color: var(--text); cursor: pointer; font-family: inherit; text-align: left; }
+.key-row:hover:not(:disabled) { border-color: var(--accent); }
+.key-row.active { border-color: var(--accent); }
+.key-row:disabled { opacity: 0.6; cursor: default; }
+.key-check { width: 16px; height: 16px; border: 1.5px solid var(--border); border-radius: 4px; flex: none; }
+.key-check.checked { background: var(--accent); border-color: var(--accent); }
+.key-mask { font-family: ui-monospace, monospace; letter-spacing: 0.5px; }
