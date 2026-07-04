@@ -1,5 +1,6 @@
 import type { Message, LLMProvider } from "../types/index.js";
 import { estimateTokens } from "./tokenizer.js";
+import { complete } from "../llm/complete.js";
 
 /** Token budget allocation (in tokens) */
 export interface TokenBudget {
@@ -417,18 +418,14 @@ export class ContextManager {
       ? `Existing note:\n${priorSummary}\n\nNew conversation to fold in:\n${conversationText}`
       : conversationText;
 
-    let summary = "";
-    for await (const chunk of compressor.chat(
+    return complete(
+      compressor,
       [
         { role: "system", content: system },
         { role: "user", content: userParts },
       ],
-      undefined,
       { signal }
-    )) {
-      if (chunk.type === "text") summary += chunk.content;
-    }
-    return summary;
+    );
   }
 
   /**
