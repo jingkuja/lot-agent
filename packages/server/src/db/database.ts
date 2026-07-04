@@ -128,6 +128,7 @@ export interface StoredUser {
   external_user_id?: number | null;
   username?: string | null;
   api_key?: string | null;
+  api_keys?: string[] | null;
 }
 
 export interface UserBalance {
@@ -457,6 +458,7 @@ export class DB {
         ALTER TABLE users ADD COLUMN IF NOT EXISTS external_user_id BIGINT;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
         ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key TEXT;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS api_keys JSONB;
         ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external ON users (external_user_id);
       `);
@@ -1008,15 +1010,16 @@ export class DB {
   async upsertUserByExternalId(args: {
     externalUserId: number;
     username: string;
-    apiKey: string;
+    apiKeys: string[];
   }): Promise<StoredUser> {
+    const active = args.apiKeys[0] ?? null;
     const { rows } = await this.pool.query(
-      `INSERT INTO users (external_user_id, username, name, api_key, email)
-         VALUES ($1, $2, $2, $3, $4)
+      `INSERT INTO users (external_user_id, username, name, api_key, api_keys, email)
+         VALUES ($1, $2, $2, $3, $4, $5)
        ON CONFLICT (external_user_id)
-         DO UPDATE SET username = $2, api_key = $3
+         DO UPDATE SET username = $2, api_key = $3, api_keys = $4
        RETURNING *`,
-      [args.externalUserId, args.username, args.apiKey, `${args.username}@tokenhub.local`]
+      [args.externalUserId, args.username, active, JSON.stringify(args.apiKeys), `${args.username}@tokenhub.local`]
     );
     return rows[0];
   }
@@ -1027,6 +1030,25 @@ export class DB {
       [userId]
     );
     return rows[0]?.api_key ?? null;
+  }
+
+  async getUserApiKeys(userId: string): Promise<string[]> {
+    const { rows } = await this.pool.query(
+      "SELECT api_keys FROM users WHERE id = $1",
+      [userId]
+    );
+    const keys = rows[0]?.api_keys;
+    return Array.isArray(keys) ? keys : [];
+  }
+
+  async setActiveApiKey(userId: string, index: number): Promise<string> {
+    const keys = await this.getUserApiKeys(userId);
+    if (!Number.isInteger(index) || index < 0 || index >= keys.length) {
+      throw new Error("index_out_of_range");
+    }
+    const active = keys[index];
+    await this.pool.query("UPDATE users SET api_key = $1 WHERE id = $2", [active, userId]);
+    return active;
   }
 
   // ── Sessions ──
