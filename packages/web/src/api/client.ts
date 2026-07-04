@@ -30,7 +30,7 @@ export interface Rating {
 }
 
 export interface AgentEvent {
-  type: "text" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact" | "title";
+  type: "text" | "thinking" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact" | "title";
   id?: string;
   content?: string;
   name?: string;
