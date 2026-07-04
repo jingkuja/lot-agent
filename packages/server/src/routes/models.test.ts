@@ -46,4 +46,18 @@ describe("GET /api/models", () => {
     expect(res.status).toBe(200);
     expect(service.tokenhub.listModels).not.toHaveBeenCalled();
   });
+
+  it("returns an empty catalog (200) when the user has no api key", async () => {
+    const service = {
+      redis: { get: vi.fn().mockResolvedValue(null), set: vi.fn() },
+      db: { getUserApiKey: vi.fn().mockResolvedValue(null) },
+      tokenhub: { listModels: vi.fn() },
+      getUserModelCatalog: AgentService.prototype.getUserModelCatalog,
+      modelCatalog: {} as never,
+    } as unknown as import("../services/agent-service.js").AgentService;
+    const res = await mount(service).request("/");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ llm: [], image: [], video: [] });
+    expect(service.tokenhub.listModels).not.toHaveBeenCalled();
+  });
 });

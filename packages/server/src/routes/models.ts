@@ -18,7 +18,7 @@ export function createModelRoutes(service: AgentService): Hono<{ Variables: Vari
     } catch {
       return c.json({ error: "模型加载失败" }, 502);
     }
-    if (!catalog) return c.json({ error: "no api key" }, 401);
+    if (!catalog) return c.json({ llm: [], image: [], video: [] });
     return c.json(catalog);
   });
 
