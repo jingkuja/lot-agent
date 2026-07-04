@@ -16,6 +16,7 @@ import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
 import { createModelRoutes } from "./routes/models.js";
+import { createKeyRoutes } from "./routes/keys.js";
 import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes } from "./routes/usage.js";
@@ -114,6 +115,7 @@ async function main() {
   app.use("/api/agents/*", authMw);
   app.use("/api/models", authMw);
   app.use("/api/models/*", authMw);
+  app.use("/api/keys/*", authMw);
   app.use("/api/tasks/*", authMw);
   app.use("/api/assets/*", authMw);
   app.use("/api/uploads/*", authMw);
@@ -131,6 +133,7 @@ async function main() {
   app.route("/api/memory", createMemoryRoutes(service));
   app.route("/api/agents", createAgentRoutes(service));
   app.route("/api/models", createModelRoutes(service));
+  app.route("/api/keys", createKeyRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));
