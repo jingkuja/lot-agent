@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, writeFile, readdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import type { Tool, ToolContext, ToolResult, ToolErrorKind } from "../types/index.js";
 import { askUserTool } from "./ask-user.js";
 import { assertPublicUrl } from "./net-guard.js";
@@ -31,6 +31,11 @@ function resolvePath(input: { path: string }, ctx: ToolContext): string {
   return resolve(ctx.workingDirectory, input.path);
 }
 
+/** True if `resolved` is the working directory or a path underneath it. */
+function isContained(resolved: string, workingDirectory: string): boolean {
+  return resolved === workingDirectory || resolved.startsWith(workingDirectory + sep);
+}
+
 export const readFileTool: Tool = {
   name: "read_file",
   description:
@@ -48,6 +53,13 @@ export const readFileTool: Tool = {
   async execute(input, context) {
     const { path } = input as { path: string };
     const fullPath = resolvePath({ path }, context);
+    if (!isContained(fullPath, context.workingDirectory)) {
+      return {
+        content: `Path escapes the working directory: ${path}`,
+        isError: true,
+        errorKind: "permission",
+      };
+    }
     try {
       const content = await readFile(fullPath, "utf-8");
       return { content: truncate(content) };
@@ -81,6 +93,13 @@ export const writeFileTool: Tool = {
   async execute(input, context) {
     const { path, content } = input as { path: string; content: string };
     const fullPath = resolvePath({ path }, context);
+    if (!isContained(fullPath, context.workingDirectory)) {
+      return {
+        content: `Path escapes the working directory: ${path}`,
+        isError: true,
+        errorKind: "permission",
+      };
+    }
     try {
       await writeFile(fullPath, content, "utf-8");
       return { content: `Successfully wrote ${content.length} chars to ${path}` };
@@ -112,6 +131,13 @@ export const listFilesTool: Tool = {
   async execute(input, context) {
     const { path = "." } = (input as { path?: string }) ?? {};
     const fullPath = resolvePath({ path }, context);
+    if (!isContained(fullPath, context.workingDirectory)) {
+      return {
+        content: `Path escapes the working directory: ${path}`,
+        isError: true,
+        errorKind: "permission",
+      };
+    }
     try {
       const entries = await readdir(fullPath, { withFileTypes: true });
       const lines = entries
@@ -202,6 +228,15 @@ export const searchFilesTool: Tool = {
       path?: string;
       extension?: string;
     };
+
+    const fullPath = resolvePath({ path }, context);
+    if (!isContained(fullPath, context.workingDirectory)) {
+      return {
+        content: `Path escapes the working directory: ${path}`,
+        isError: true,
+        errorKind: "permission",
+      };
+    }
 
     try {
       const { stdout } = await execFileAsync(
