@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mapOpenAIStream } from "./openai.js";
 import type { ChatChunk } from "../types/index.js";
 
@@ -86,5 +86,53 @@ describe("mapOpenAIStream", () => {
     const out = await collect(mapOpenAIStream(stream));
     const toolCall = out.find((c) => c.type === "tool_call");
     expect(toolCall?.toolCall).toEqual({ id: "call_1", name: "read_file", arguments: { path: "a.txt" } });
+  });
+});
+
+vi.mock("openai", () => {
+  class FakeAPIError extends Error {}
+  return {
+    default: class FakeOpenAI {
+      chat = {
+        completions: {
+          create: vi.fn(),
+        },
+      };
+      constructor(_config: unknown) {}
+    },
+    RateLimitError: FakeAPIError,
+    InternalServerError: FakeAPIError,
+    APIConnectionError: FakeAPIError,
+    APIConnectionTimeoutError: FakeAPIError,
+  };
+});
+
+describe("OpenAIProvider.chat retry", () => {
+  it("retries a RateLimitError raised before any chunk and succeeds on the next attempt", async () => {
+    const { OpenAIProvider } = await import("./openai.js");
+    const { RateLimitError } = (await import("openai")) as unknown as {
+      RateLimitError: new (msg?: string) => Error;
+    };
+    const provider = new OpenAIProvider({ apiKey: "x", model: "test-model" });
+    const create = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } })
+      .client.chat.completions.create;
+
+    let call = 0;
+    create.mockImplementation(async () => {
+      call++;
+      if (call === 1) throw new RateLimitError("rate limited");
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] };
+        },
+      };
+    });
+
+    const out: string[] = [];
+    for await (const chunk of provider.chat([{ role: "user", content: "hi" }])) {
+      if (chunk.type === "text" && chunk.content) out.push(chunk.content);
+    }
+    expect(call).toBe(2);
+    expect(out).toEqual(["ok"]);
   });
 });

@@ -1,4 +1,9 @@
-import OpenAI from "openai";
+import OpenAI, {
+  RateLimitError,
+  InternalServerError,
+  APIConnectionError,
+  APIConnectionTimeoutError,
+} from "openai";
 import type {
   ChatCompletionChunk,
   ChatCompletionMessageToolCall,
@@ -11,6 +16,7 @@ import type {
   LLMTool,
   LLMProvider,
 } from "../types/index.js";
+import { withLLMRetry } from "./retry.js";
 
 export interface OpenAIProviderConfig {
   apiKey: string;
@@ -72,8 +78,17 @@ export class OpenAIProvider implements LLMProvider {
         })()
       );
 
-    yield* createStream();
+    yield* withLLMRetry(createStream, { isRetryable: isOpenAIRetryable });
   }
+}
+
+function isOpenAIRetryable(err: unknown): boolean {
+  return (
+    err instanceof RateLimitError ||
+    err instanceof InternalServerError ||
+    err instanceof APIConnectionError ||
+    err instanceof APIConnectionTimeoutError
+  );
 }
 
 /**
