@@ -67,6 +67,8 @@ export interface User {
   id: string;
   name: string;
   username: string | null;
+  apiKeys: string[];
+  activeKeyIndex: number;
 }
 
 export interface TaskStatus {
@@ -169,6 +171,12 @@ export const api = {
     request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
 
   me: () => request<User>("/auth/me"),
+
+  setActiveKey: (index: number) =>
+    request<{ ok: boolean; activeKeyIndex: number }>("/keys/active", {
+      method: "POST",
+      body: JSON.stringify({ index }),
+    }),
 
   // ── Models (per-user dynamic catalog) ─────────────────────────────────────────
   listModels: () =>
