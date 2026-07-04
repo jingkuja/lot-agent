@@ -1,7 +1,7 @@
 export interface TokenhubLoginResult {
   userId: number;
   name: string;
-  apiKey: string;
+  apiKeys: string[];
 }
 export interface TokenhubModels {
   llm: string[];
@@ -25,12 +25,14 @@ export class TokenhubClient {
   ) {}
 
   async login(username: string, password: string): Promise<TokenhubLoginResult> {
-    const data = await this.post<{ user_id: number; name: string; api_key: string }>(
-      "/auth/login",
-      { username, password },
-      "tokenhub_login_failed"
-    );
-    return { userId: data.user_id, name: data.name, apiKey: data.api_key };
+    const data = await this.post<{
+      user_id: number;
+      name: string;
+      api_key?: string;
+      api_keys?: string[];
+    }>("/auth/login", { username, password }, "tokenhub_login_failed");
+    const apiKeys = data.api_keys ?? (data.api_key ? [data.api_key] : []);
+    return { userId: data.user_id, name: data.name, apiKeys };
   }
 
   async listModels(apiKey: string): Promise<TokenhubModels> {

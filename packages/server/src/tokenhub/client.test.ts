@@ -15,7 +15,7 @@ describe("TokenhubClient", () => {
     await expect(c.login("13881071870", "pw")).resolves.toEqual({
       userId: 2,
       name: "13881071870",
-      apiKey: "sk-X",
+      apiKeys: ["sk-X"],
     });
     const [url, init] = f.mock.calls[0];
     expect(url).toBe("https://h/api/agent-market/auth/login");
@@ -23,6 +23,28 @@ describe("TokenhubClient", () => {
       username: "13881071870",
       password: "pw",
     });
+  });
+
+  it("login maps api_keys array", async () => {
+    const f = vi.fn().mockResolvedValue(
+      ok({ user_id: 2, name: "138", api_key: "sk-A", api_keys: ["sk-A", "sk-B"], access_token: "sk-A" })
+    );
+    const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
+    await expect(c.login("138", "pw")).resolves.toEqual({
+      userId: 2, name: "138", apiKeys: ["sk-A", "sk-B"],
+    });
+  });
+
+  it("login falls back to [api_key] when api_keys absent", async () => {
+    const f = vi.fn().mockResolvedValue(ok({ user_id: 2, name: "138", api_key: "sk-A" }));
+    const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
+    await expect(c.login("138", "pw")).resolves.toEqual({ userId: 2, name: "138", apiKeys: ["sk-A"] });
+  });
+
+  it("login yields [] when neither api_keys nor api_key present", async () => {
+    const f = vi.fn().mockResolvedValue(ok({ user_id: 2, name: "138" }));
+    const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
+    await expect(c.login("138", "pw")).resolves.toEqual({ userId: 2, name: "138", apiKeys: [] });
   });
 
   it("login throws generic error on success:false", async () => {
