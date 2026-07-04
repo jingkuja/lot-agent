@@ -76,6 +76,7 @@ export class TraceRecorder {
    */
   async finish(params: {
     totalTokens: number;
+    cachedPromptTokens?: number;
     errorMessage?: string;
   }): Promise<void> {
     // Close any still-open spans
@@ -86,6 +87,10 @@ export class TraceRecorder {
     const latencyMs = Date.now() - this.requestStart;
 
     this.trace.metadata.totalTokens = params.totalTokens;
+    if (params.cachedPromptTokens !== undefined) {
+      (this.trace.metadata as Record<string, unknown>).cachedPromptTokens =
+        params.cachedPromptTokens;
+    }
     if (hasError) {
       (this.trace.metadata as Record<string, unknown>).status = "error";
     }
