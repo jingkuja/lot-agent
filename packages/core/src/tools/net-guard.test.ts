@@ -17,14 +17,26 @@ describe("isPrivateAddress", () => {
     expect(isPrivateAddress("172.32.0.1", 4)).toBe(false); // just outside 172.16/12
   });
 
+  it("flags 0.0.0.0/8 (routes to localhost on Linux)", () => {
+    expect(isPrivateAddress("0.0.0.0", 4)).toBe(true);
+    expect(isPrivateAddress("0.1.2.3", 4)).toBe(true);
+  });
+
   it("flags IPv6 loopback and unique-local/link-local ranges", () => {
     expect(isPrivateAddress("::1", 6)).toBe(true);
     expect(isPrivateAddress("fd00::1", 6)).toBe(true);
     expect(isPrivateAddress("fe80::1", 6)).toBe(true);
   });
 
-  it("does not flag a public IPv6 address", () => {
+  it("flags IPv4-mapped / IPv4-compatible IPv6 forms of private addresses", () => {
+    expect(isPrivateAddress("::ffff:127.0.0.1", 6)).toBe(true);
+    expect(isPrivateAddress("::ffff:169.254.169.254", 6)).toBe(true);
+    expect(isPrivateAddress("::127.0.0.1", 6)).toBe(true);
+  });
+
+  it("does not flag a public IPv6 address or a mapped public IPv4", () => {
     expect(isPrivateAddress("2001:4860:4860::8888", 6)).toBe(false);
+    expect(isPrivateAddress("::ffff:8.8.8.8", 6)).toBe(false);
   });
 });
 

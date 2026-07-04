@@ -70,21 +70,29 @@ export class AnthropicProvider implements LLMProvider {
           ]
         : chatMessages;
 
+    // Extended thinking: enabled only when `reasoning` is a positive token
+    // budget. Anthropic requires max_tokens > budget_tokens and rejects
+    // temperature/top_p alongside thinking, so those are omitted in that mode.
+    const reasoning = params?.reasoning;
+    const thinkingEnabled = typeof reasoning === "number" && reasoning > 0;
+    const maxTokens = params?.maxTokens ?? 8192;
+
+    const body: Parameters<typeof this.client.messages.stream>[0] = {
+      model: this.model,
+      max_tokens: thinkingEnabled ? Math.max(maxTokens, reasoning + 1024) : maxTokens,
+      system: systemBlocks.length ? systemBlocks : undefined,
+      messages: cachedMessages,
+      tools: anthropicTools,
+    };
+    if (thinkingEnabled) {
+      body.thinking = { type: "enabled", budget_tokens: reasoning };
+    } else {
+      if (params?.temperature !== undefined) body.temperature = params.temperature;
+      if (params?.topP !== undefined) body.top_p = params.topP;
+    }
+
     const createStream = () =>
-      mapAnthropicStream(
-        this.client.messages.stream(
-          {
-            model: this.model,
-            max_tokens: params?.maxTokens ?? 8192,
-            temperature: params?.temperature,
-            top_p: params?.topP,
-            system: systemBlocks.length ? systemBlocks : undefined,
-            messages: cachedMessages,
-            tools: anthropicTools,
-          },
-          { signal: opts?.signal }
-        )
-      );
+      mapAnthropicStream(this.client.messages.stream(body, { signal: opts?.signal }));
 
     yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable });
   }
@@ -118,8 +126,16 @@ export async function* mapAnthropicStream(
 
   for await (const event of events) {
     if (event.type === "message_start") {
-      promptTokens = event.message.usage.input_tokens;
-      cachedPromptTokens = event.message.usage.cache_read_input_tokens ?? 0;
+      // Anthropic splits total input across three buckets: `input_tokens` is
+      // ONLY the uncached remainder; cache reads and cache writes are reported
+      // separately. Bill the full input (all three) so enabling prompt caching
+      // never silently drops billed tokens — this mirrors OpenAI's
+      // `prompt_tokens`, which already includes cached tokens. `cachedPromptTokens`
+      // stays the cached subset, for observability only.
+      const u = event.message.usage;
+      cachedPromptTokens = u.cache_read_input_tokens ?? 0;
+      promptTokens =
+        u.input_tokens + cachedPromptTokens + (u.cache_creation_input_tokens ?? 0);
     }
 
     if (event.type === "content_block_start") {

@@ -335,6 +335,13 @@ async function fetchWithTimeout(
  * `MAX_REDIRECTS` manual redirects (a same-origin-looking redirect to an
  * internal address is the classic SSRF bypass — following redirects
  * automatically would skip the guard on the final, real destination).
+ *
+ * TODO(ssrf): this is check-then-fetch — `assertPublicUrl` and the subsequent
+ * `fetch` each resolve DNS independently, leaving a TOCTOU / DNS-rebinding
+ * window (a short-TTL attacker domain can answer the guard's lookup with a
+ * public IP and fetch's lookup with an internal one). Closing it requires
+ * resolving once and connecting to the validated IP (pin the address, or
+ * re-validate the socket's peer). Tracked separately from the E0/E1 pass.
  */
 async function fetchPublic(url: string, timeoutMs: number): Promise<Response> {
   let currentUrl = url;

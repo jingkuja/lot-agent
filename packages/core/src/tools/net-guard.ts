@@ -23,6 +23,7 @@ function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split(".").map(Number);
   if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
   const [a, b] = parts;
+  if (a === 0) return true; // 0.0.0.0/8 — 0.0.0.0 routes to localhost on Linux
   if (a === 10) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
@@ -36,6 +37,10 @@ function isPrivateIPv6(ip: string): boolean {
   if (lower === "::1") return true;
   if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7
   if (lower.startsWith("fe80")) return true; // link-local
+  // IPv4-mapped (::ffff:a.b.c.d) / IPv4-compatible (::a.b.c.d) embeddings —
+  // otherwise ::ffff:127.0.0.1 would sail past the checks above as "public".
+  const embeddedV4 = lower.match(/(?:^|:)((?:\d{1,3}\.){3}\d{1,3})$/);
+  if (embeddedV4 && isPrivateIPv4(embeddedV4[1])) return true;
   return false;
 }
 
