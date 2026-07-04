@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   MessageParam,
+  RawMessageStreamEvent,
   Tool,
   ToolUseBlock,
   TextBlockParam,
@@ -48,101 +49,112 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     const anthropicTools = tools?.map(toAnthropicTool);
+    const params = opts?.params;
 
-    const stream = this.client.messages.stream(
-      {
-        model: this.model,
-        max_tokens: 8192,
-        system: systemMessages.join("\n\n") || undefined,
-        messages: chatMessages,
-        tools: anthropicTools,
-      },
-      { signal: opts?.signal }
-    );
+    const createStream = () =>
+      mapAnthropicStream(
+        this.client.messages.stream(
+          {
+            model: this.model,
+            max_tokens: params?.maxTokens ?? 8192,
+            temperature: params?.temperature,
+            top_p: params?.topP,
+            system: systemMessages.join("\n\n") || undefined,
+            messages: chatMessages,
+            tools: anthropicTools,
+          },
+          { signal: opts?.signal }
+        )
+      );
 
-    // Buffer for accumulating tool use blocks
-    const toolBuffers = new Map<
-      string,
-      { id: string; name: string; input: string }
-    >();
+    yield* createStream();
+  }
+}
 
-    for await (const event of stream) {
-      if (event.type === "content_block_start") {
-        if (event.content_block.type === "tool_use") {
-          const block = event.content_block as ToolUseBlock;
-          toolBuffers.set(block.id, {
-            id: block.id,
-            name: block.name,
-            input: "",
-          });
-        }
+/**
+ * Consumes the raw Anthropic message-stream events and yields ChatChunks.
+ * Tool-use blocks are tracked by the event's `index` (not by guessing "the
+ * last one seen") so interleaved/multiple tool calls in one message route
+ * their `input_json_delta` fragments correctly. Usage accumulates across
+ * `message_start` (prompt + cached-prompt tokens) and `message_delta`
+ * (completion tokens), landing on the `done` chunk emitted at `message_stop`
+ * — previously `done` carried no usage at all.
+ */
+export async function* mapAnthropicStream(
+  events: AsyncIterable<RawMessageStreamEvent>
+): AsyncIterable<ChatChunk> {
+  const toolBuffers = new Map<number, { id: string; name: string; input: string }>();
+  let promptTokens = 0;
+  let cachedPromptTokens = 0;
+  let completionTokens = 0;
+
+  for await (const event of events) {
+    if (event.type === "message_start") {
+      promptTokens = event.message.usage.input_tokens;
+      cachedPromptTokens = event.message.usage.cache_read_input_tokens ?? 0;
+    }
+
+    if (event.type === "content_block_start") {
+      if (event.content_block.type === "tool_use") {
+        const block = event.content_block as ToolUseBlock;
+        toolBuffers.set(event.index, { id: block.id, name: block.name, input: "" });
       }
+    }
 
-      if (event.type === "content_block_delta") {
-        if (event.delta.type === "text_delta") {
-          yield { type: "text", content: event.delta.text };
-        }
-        if (event.delta.type === "input_json_delta") {
-          // Find the current tool being accumulated
-          const lastKey = [...toolBuffers.keys()].pop();
-          if (lastKey) {
-            const buf = toolBuffers.get(lastKey)!;
-            buf.input += event.delta.partial_json;
-          }
-        }
+    if (event.type === "content_block_delta") {
+      if (event.delta.type === "text_delta") {
+        yield { type: "text", content: event.delta.text };
       }
-
-      if (event.type === "content_block_stop") {
-        // Check if a tool block just finished
-        const lastKey = [...toolBuffers.keys()].pop();
-        if (lastKey) {
-          const buf = toolBuffers.get(lastKey)!;
-          // Only emit if this block hasn't been emitted yet
-          if (buf.input || buf.name) {
-            let parsedArgs: unknown;
-            try {
-              parsedArgs = JSON.parse(buf.input || "{}");
-            } catch {
-              parsedArgs = buf.input;
-            }
-            yield {
-              type: "tool_call",
-              toolCall: {
-                id: buf.id,
-                name: buf.name,
-                arguments: parsedArgs,
-              },
-            };
-            toolBuffers.delete(lastKey);
-          }
-        }
+      if (event.delta.type === "thinking_delta") {
+        yield { type: "thinking", content: event.delta.thinking };
       }
+      if (event.delta.type === "input_json_delta") {
+        const buf = toolBuffers.get(event.index);
+        if (buf) buf.input += event.delta.partial_json;
+      }
+    }
 
-      if (event.type === "message_stop") {
-        // Flush any remaining tool buffers
-        for (const buf of toolBuffers.values()) {
-          let parsedArgs: unknown;
-          try {
-            parsedArgs = JSON.parse(buf.input || "{}");
-          } catch {
-            parsedArgs = buf.input;
-          }
-          yield {
-            type: "tool_call",
-            toolCall: {
-              id: buf.id,
-              name: buf.name,
-              arguments: parsedArgs,
-            },
-          };
+    if (event.type === "content_block_stop") {
+      const buf = toolBuffers.get(event.index);
+      if (buf && (buf.input || buf.name)) {
+        let parsedArgs: unknown;
+        try {
+          parsedArgs = JSON.parse(buf.input || "{}");
+        } catch {
+          parsedArgs = buf.input;
         }
-        toolBuffers.clear();
-
         yield {
-          type: "done",
-          finishReason: "stop",
+          type: "tool_call",
+          toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
+        };
+        toolBuffers.delete(event.index);
+      }
+    }
+
+    if (event.type === "message_delta") {
+      completionTokens = event.usage.output_tokens;
+    }
+
+    if (event.type === "message_stop") {
+      for (const buf of toolBuffers.values()) {
+        let parsedArgs: unknown;
+        try {
+          parsedArgs = JSON.parse(buf.input || "{}");
+        } catch {
+          parsedArgs = buf.input;
+        }
+        yield {
+          type: "tool_call",
+          toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
         };
       }
+      toolBuffers.clear();
+
+      yield {
+        type: "done",
+        finishReason: "stop",
+        usage: { promptTokens, completionTokens, cachedPromptTokens },
+      };
     }
   }
 }
