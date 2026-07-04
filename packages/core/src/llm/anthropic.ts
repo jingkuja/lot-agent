@@ -6,6 +6,7 @@ import type {
   TextBlockParam,
   ToolUseBlockParam,
   ImageBlockParam,
+  Base64ImageSource,
 } from "@anthropic-ai/sdk/resources/messages";
 import type {
   Message,
@@ -160,7 +161,7 @@ export function toAnthropicMessage(msg: Message): MessageParam {
               type: "image",
               source: {
                 type: "base64",
-                media_type: m[1] as ImageBlockParam["source"]["media_type"],
+                media_type: m[1] as Base64ImageSource["media_type"],
                 data: m[2],
               },
             };
