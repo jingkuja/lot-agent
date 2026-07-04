@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { resolve } from "node:path";
 import type { Tool, ToolContext, ToolResult, ToolErrorKind } from "../types/index.js";
 import { askUserTool } from "./ask-user.js";
+import { assertPublicUrl } from "./net-guard.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -252,15 +253,26 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+const MAX_REDIRECTS = 3;
+
+function webFetchAllowHosts(): string[] {
+  return (process.env.WEB_FETCH_ALLOW_HOSTS ?? "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+}
+
 async function fetchWithTimeout(
   url: string,
-  timeoutMs: number
+  timeoutMs: number,
+  redirect: RequestRedirect = "follow"
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
+      redirect,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; LotAgent/0.1; +https://github.com/lot-agent)",
@@ -271,6 +283,31 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Fetches `url`, re-checking the SSRF guard on every hop of up to
+ * `MAX_REDIRECTS` manual redirects (a same-origin-looking redirect to an
+ * internal address is the classic SSRF bypass — following redirects
+ * automatically would skip the guard on the final, real destination).
+ */
+async function fetchPublic(url: string, timeoutMs: number): Promise<Response> {
+  let currentUrl = url;
+  const allowHosts = webFetchAllowHosts();
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicUrl(currentUrl, { allowHosts });
+    const res = await fetchWithTimeout(currentUrl, timeoutMs, "manual");
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      if (hop === MAX_REDIRECTS) {
+        throw new Error(`too many redirects (>${MAX_REDIRECTS})`);
+      }
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+    return res;
+  }
+  throw new Error("unreachable");
 }
 
 export const webFetchTool: Tool = {
@@ -309,7 +346,7 @@ export const webFetchTool: Tool = {
     }
 
     try {
-      const res = await fetchWithTimeout(url, 15_000);
+      const res = await fetchPublic(url, 15_000);
       if (!res.ok) {
         return {
           content: `HTTP ${res.status}: ${res.statusText}`,
