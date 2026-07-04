@@ -184,11 +184,21 @@ export const executeCommandTool: Tool = {
         cwd: context.workingDirectory,
         timeout: 30_000,
         maxBuffer: 1024 * 1024,
+        signal: context.signal,
       });
       const output = [stdout, stderr].filter(Boolean).join("\n");
       return { content: truncate(output) || "(no output)" };
     } catch (error: unknown) {
-      const err = error as { message?: string; stdout?: string; stderr?: string };
+      const err = error as {
+        message?: string;
+        stdout?: string;
+        stderr?: string;
+        name?: string;
+        code?: string;
+      };
+      if (err.name === "AbortError" || err.code === "ABORT_ERR") {
+        return { content: "Command aborted", isError: true, errorKind: "unknown" };
+      }
       return {
         content: truncate(
           `Command failed: ${err.message}\n${err.stdout ?? ""}\n${err.stderr ?? ""}`

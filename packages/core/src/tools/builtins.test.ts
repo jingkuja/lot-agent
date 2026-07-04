@@ -2,7 +2,13 @@ import { describe, it, expect } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { webFetchTool, readFileTool, writeFileTool, listFilesTool } from "./builtins.js";
+import {
+  webFetchTool,
+  readFileTool,
+  writeFileTool,
+  listFilesTool,
+  executeCommandTool,
+} from "./builtins.js";
 import type { ToolContext } from "../types/index.js";
 
 const ctx: ToolContext = { workingDirectory: process.cwd() };
@@ -66,5 +72,19 @@ describe("path containment", () => {
     expect(result.isError).toBe(true);
     expect(result.errorKind).toBe("permission");
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("execute_command cancellation", () => {
+  it("aborts a long-running command promptly when the signal fires", async () => {
+    const controller = new AbortController();
+    const cmdCtx: ToolContext = { workingDirectory: process.cwd(), signal: controller.signal };
+    const start = Date.now();
+    const promise = executeCommandTool.execute({ command: "sleep", args: ["5"] }, cmdCtx);
+    setTimeout(() => controller.abort(), 100);
+    const result = await promise;
+    const elapsed = Date.now() - start;
+    expect(result.isError).toBe(true);
+    expect(elapsed).toBeLessThan(2000); // aborted promptly, not after the full 5s sleep
   });
 });
