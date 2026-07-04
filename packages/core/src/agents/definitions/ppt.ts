@@ -11,6 +11,10 @@ export const pptDefinition: AgentDefinition = {
 红线：不编造 templateAssetId / backgroundAssetId；缺对应上传标记就不传该参数；不向用户暴露 assetId 等内部细节；每次产出前先用 propose_outline 让用户确认大纲。`,
   toolNames: ["ask_user", "propose_outline", "generate_ppt"],
   defaultModelId: "deepseek-v4-flash",
+  // generate_ppt emits a whole deck as one large tool-call JSON. Without an
+  // explicit cap the gateway's default (~4k) truncates it mid-argument, which
+  // surfaces as "incomplete/malformed tool_call arguments". Give it room.
+  modelParams: { maxTokens: 16000 },
   inputSchema: {
     type: "object",
     properties: {
