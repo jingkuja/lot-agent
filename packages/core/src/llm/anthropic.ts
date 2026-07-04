@@ -57,6 +57,19 @@ export class AnthropicProvider implements LLMProvider {
     const anthropicTools = tools?.map(toAnthropicTool);
     const params = opts?.params;
 
+    const systemText = systemMessages.join("\n\n");
+    const systemBlocks: TextBlockParam[] = systemText
+      ? [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }]
+      : [];
+
+    const cachedMessages =
+      chatMessages.length > 0
+        ? [
+            ...chatMessages.slice(0, -1),
+            withCacheControl(chatMessages[chatMessages.length - 1]),
+          ]
+        : chatMessages;
+
     const createStream = () =>
       mapAnthropicStream(
         this.client.messages.stream(
@@ -65,8 +78,8 @@ export class AnthropicProvider implements LLMProvider {
             max_tokens: params?.maxTokens ?? 8192,
             temperature: params?.temperature,
             top_p: params?.topP,
-            system: systemMessages.join("\n\n") || undefined,
-            messages: chatMessages,
+            system: systemBlocks.length ? systemBlocks : undefined,
+            messages: cachedMessages,
             tools: anthropicTools,
           },
           { signal: opts?.signal }
@@ -172,6 +185,35 @@ export async function* mapAnthropicStream(
       };
     }
   }
+}
+
+/**
+ * Attaches an ephemeral cache-control breakpoint: to the whole message when
+ * its content is a plain string (wrapped into a single text block), or to
+ * the LAST content block when it's already an array. Anthropic bills a
+ * cache-read of everything up to and including a breakpoint at a steep
+ * discount versus a fresh prompt, so this is placed on the system block
+ * (below) and the trailing edge of history — both stable, prefix-cached
+ * points per `ContextManager.assemble`'s structure.
+ */
+export function withCacheControl(message: MessageParam): MessageParam {
+  if (typeof message.content === "string") {
+    if (!message.content) return message; // nothing to cache-break on an empty message
+    return {
+      ...message,
+      content: [
+        { type: "text", text: message.content, cache_control: { type: "ephemeral" } },
+      ],
+    };
+  }
+  if (message.content.length === 0) return message;
+  const content = [...message.content];
+  const lastIndex = content.length - 1;
+  content[lastIndex] = {
+    ...content[lastIndex],
+    cache_control: { type: "ephemeral" },
+  } as (typeof content)[number];
+  return { ...message, content };
 }
 
 export function toAnthropicMessage(msg: Message): MessageParam {

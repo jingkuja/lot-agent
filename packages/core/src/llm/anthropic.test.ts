@@ -126,3 +126,34 @@ describe("AnthropicProvider.chat retry", () => {
     expect(out).toEqual(["ok"]);
   });
 });
+
+describe("withCacheControl", () => {
+  it("wraps a plain string message into a single cache-breakpointed text block", async () => {
+    const { withCacheControl } = await import("./anthropic.js");
+    const out = withCacheControl({ role: "user", content: "hello" });
+    expect(out.content).toEqual([
+      { type: "text", text: "hello", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("adds cache_control only to the last block of a multi-block message", async () => {
+    const { withCacheControl } = await import("./anthropic.js");
+    const out = withCacheControl({
+      role: "user",
+      content: [
+        { type: "text", text: "first" },
+        { type: "text", text: "second" },
+      ],
+    });
+    expect(out.content).toEqual([
+      { type: "text", text: "first" },
+      { type: "text", text: "second", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("leaves an empty-string message unchanged", async () => {
+    const { withCacheControl } = await import("./anthropic.js");
+    const msg = { role: "user" as const, content: "" };
+    expect(withCacheControl(msg)).toBe(msg);
+  });
+});
