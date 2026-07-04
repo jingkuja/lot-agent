@@ -23,11 +23,11 @@ describe("auth login", () => {
   it("decrypts, calls tokenhub, upserts, returns token + sanitized user", async () => {
     const svc = fakeService();
     (svc.tokenhub.login as ReturnType<typeof vi.fn>).mockResolvedValue({
-      userId: 2, name: "138", apiKey: "sk-SECRET",
+      userId: 2, name: "138", apiKeys: ["sk-SECRETSECRET"],
     });
     (svc.db.upsertUserByExternalId as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: "u1", email: null, name: "138", created_at: "t",
-      external_user_id: 2, username: "138", api_key: "sk-SECRET",
+      external_user_id: 2, username: "138", api_key: "sk-SECRETSECRET", api_keys: ["sk-SECRETSECRET"],
     });
     const app = createAuthRoutes(svc);
     const encryptedPassword = await encryptFor(app, "pw");
@@ -39,15 +39,22 @@ describe("auth login", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.token).toBe("tok-1");
-    expect(json.user).toEqual({ id: "u1", name: "138", username: "138" });
-    expect(JSON.stringify(json)).not.toContain("sk-SECRET");
+    expect(json.user).toEqual({
+      id: "u1", name: "138", username: "138",
+      apiKeys: ["sk-SEC***CRET"], activeKeyIndex: 0,
+    });
+    expect(JSON.stringify(json)).not.toContain("sk-SECRETSECRET");
     expect(svc.tokenhub.login).toHaveBeenCalledWith("138", "pw");
   });
 
-  it("fails with a create-api-key message when tokenhub returns an empty api_key", async () => {
+  it("allows login when the account has no api key (empty apiKeys)", async () => {
     const svc = fakeService();
     (svc.tokenhub.login as ReturnType<typeof vi.fn>).mockResolvedValue({
-      userId: 2, name: "138", apiKey: "",
+      userId: 2, name: "138", apiKeys: [],
+    });
+    (svc.db.upsertUserByExternalId as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "u1", email: null, name: "138", created_at: "t",
+      external_user_id: 2, username: "138", api_key: null, api_keys: [],
     });
     const app = createAuthRoutes(svc);
     const encryptedPassword = await encryptFor(app, "pw");
@@ -56,9 +63,10 @@ describe("auth login", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: "138", encryptedPassword }),
     });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("请前往中转站创建 api-key");
-    expect(svc.db.upsertUserByExternalId).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.token).toBe("tok-1");
+    expect(json.user).toMatchObject({ apiKeys: [], activeKeyIndex: -1 });
   });
 
   it("returns generic 401 when tokenhub login fails", async () => {
