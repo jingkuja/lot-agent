@@ -1041,6 +1041,8 @@ export class DB {
     return Array.isArray(keys) ? keys : [];
   }
 
+  /** Sets the single per-user active key (`users.api_key`); shared across all of that
+   * account's concurrent sessions, not per-session. */
   async setActiveApiKey(userId: string, index: number): Promise<string> {
     const keys = await this.getUserApiKeys(userId);
     if (!Number.isInteger(index) || index < 0 || index >= keys.length) {

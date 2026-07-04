@@ -22,8 +22,11 @@ export function createKeyRoutes(service: AgentService): Hono<{ Variables: Variab
     }
     try {
       await service.db.setActiveApiKey(userId, index);
-    } catch {
-      return c.json({ error: "无效的 key" }, 400);
+    } catch (err) {
+      if (err instanceof Error && err.message === "index_out_of_range") {
+        return c.json({ error: "无效的 key" }, 400);
+      }
+      return c.json({ error: "切换失败" }, 500);
     }
     await service.redis.del(`models:${userId}`);
     return c.json({ ok: true, activeKeyIndex: index });

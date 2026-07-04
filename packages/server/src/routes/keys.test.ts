@@ -35,6 +35,15 @@ describe("POST /api/keys/active", () => {
     expect((await res.json()).error).toBe("无效的 key");
   });
 
+  it("returns 500 when setActiveApiKey fails for a non-range reason", async () => {
+    const setActive = vi.fn().mockRejectedValue(new Error("db_down"));
+    const service = svc(setActive);
+    const res = await post(mount(service), { index: 1 });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "切换失败" });
+    expect(service.redis.del).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when index is missing/not a number", async () => {
     const setActive = vi.fn();
     const res = await post(mount(svc(setActive)), {});
