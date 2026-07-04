@@ -1,4 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, {
+  RateLimitError,
+  InternalServerError,
+  APIConnectionError,
+  APIConnectionTimeoutError,
+} from "@anthropic-ai/sdk";
+import { withLLMRetry } from "./retry.js";
 import type {
   MessageParam,
   RawMessageStreamEvent,
@@ -67,8 +73,17 @@ export class AnthropicProvider implements LLMProvider {
         )
       );
 
-    yield* createStream();
+    yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable });
   }
+}
+
+function isAnthropicRetryable(err: unknown): boolean {
+  return (
+    err instanceof RateLimitError ||
+    err instanceof InternalServerError ||
+    err instanceof APIConnectionError ||
+    err instanceof APIConnectionTimeoutError
+  );
 }
 
 /**

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mapAnthropicStream } from "./anthropic.js";
 import type { ChatChunk } from "../types/index.js";
 
@@ -68,5 +68,61 @@ describe("mapAnthropicStream", () => {
       type: "tool_call",
       toolCall: { id: "t1", name: "list_files", arguments: { path: "." } },
     });
+  });
+});
+
+vi.mock("@anthropic-ai/sdk", () => {
+  class FakeAPIError extends Error {}
+  return {
+    default: class FakeAnthropic {
+      messages = { stream: vi.fn() };
+      constructor(_config: unknown) {}
+    },
+    RateLimitError: FakeAPIError,
+    InternalServerError: FakeAPIError,
+    APIConnectionError: FakeAPIError,
+    APIConnectionTimeoutError: FakeAPIError,
+  };
+});
+
+describe("AnthropicProvider.chat retry", () => {
+  it("retries a RateLimitError raised before any chunk and succeeds on the next attempt", async () => {
+    const { AnthropicProvider } = await import("./anthropic.js");
+    const { RateLimitError } = (await import("@anthropic-ai/sdk")) as unknown as {
+      RateLimitError: new (msg?: string) => Error;
+    };
+    const provider = new AnthropicProvider({ apiKey: "x", model: "test-model" });
+    const streamFn = (provider as unknown as { client: { messages: { stream: ReturnType<typeof vi.fn> } } })
+      .client.messages.stream;
+
+    let call = 0;
+    streamFn.mockImplementation(() => {
+      call++;
+      if (call === 1) throw new RateLimitError("rate limited");
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "message_start",
+            message: { usage: { input_tokens: 1, cache_read_input_tokens: 0 } },
+          };
+          yield { type: "content_block_start", index: 0, content_block: { type: "text" } };
+          yield {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "ok" },
+          };
+          yield { type: "content_block_stop", index: 0 };
+          yield { type: "message_delta", delta: {}, usage: { output_tokens: 1 } };
+          yield { type: "message_stop" };
+        },
+      };
+    });
+
+    const out: string[] = [];
+    for await (const chunk of provider.chat([{ role: "user", content: "hi" }])) {
+      if (chunk.type === "text" && chunk.content) out.push(chunk.content);
+    }
+    expect(call).toBe(2);
+    expect(out).toEqual(["ok"]);
   });
 });
