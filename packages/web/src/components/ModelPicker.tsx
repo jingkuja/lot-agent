@@ -33,7 +33,7 @@ export function ModelPicker({
   }, [open]);
 
   const isEmpty = models.length === 0;
-  const current = isEmpty ? "默认" : value ?? models[0]?.id ?? "选择模型";
+  const current = isEmpty ? "暂无模型" : value ?? models[0]?.id ?? "选择模型";
   const filtered = filterModels(models, query);
 
   return (
@@ -56,7 +56,7 @@ export function ModelPicker({
         <div className="media-popup model-popup">
           {isEmpty ? (
             /* 目录为空:仅一行灰色提示,不可选;沿用 model-empty 样式 */
-            <div className="model-empty">无更多模型，请联系管理员</div>
+            <div className="model-empty">暂无模型，请前往订阅管理页面设置</div>
           ) : (
             <>
               <input
