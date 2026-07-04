@@ -102,6 +102,24 @@ export function readPersistedSummary(
   return undefined;
 }
 
+/**
+ * Fold a run's terminal error into the assistant message that gets persisted,
+ * mirroring the live "[Error: …]" the client appends. Without this the error
+ * lives only in client state and vanishes on the next `loadMessages` (the DB
+ * row never carried it) — so it should persist like any assistant message.
+ * A user-initiated cancellation is intentional, not a failure, so its error
+ * line is dropped.
+ */
+export function buildFinalAssistantContent(
+  content: string,
+  errorMessage: string | null | undefined,
+  cancelled: boolean
+): string {
+  if (!errorMessage || cancelled) return content;
+  const errLine = `[Error: ${errorMessage}]`;
+  return content ? `${content}\n\n${errLine}` : errLine;
+}
+
 export function resolveConversationModel(
   explicit: string | undefined,
   conversationModelId: string | null | undefined,
@@ -596,10 +614,20 @@ export class AgentService {
         yield event;
       }
     } finally {
-      // Save final assistant message
+      // Save final assistant message. When the run ended in an error, fold the
+      // error text into the persisted content so it survives reload /
+      // conversation-switch instead of flashing by (the client's live
+      // "[Error: …]" was previously wiped by the post-stream_end loadMessages,
+      // since the DB row never carried it). Cancellations are intentional and
+      // are not persisted as errors.
+      const finalContent = buildFinalAssistantContent(
+        assistantContent || "",
+        lastErrorMessage,
+        signal?.aborted ?? false
+      );
       await this.messageRepo.saveFinalAssistant(
         conversationId,
-        assistantContent || "",
+        finalContent,
         currentToolCalls
       );
 
