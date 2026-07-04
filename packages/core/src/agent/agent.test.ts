@@ -3,20 +3,31 @@ import { Agent, type AgentContext, type AgentEvent } from "./agent.js";
 import { ToolRegistry } from "../tools/registry.js";
 import type {
   ChatChunk,
+  ChatOptions,
   LLMProvider,
+  LLMTool,
   Message,
   Tool,
   ToolContext,
 } from "../types/index.js";
 
-/** LLM that replays a script of chunk-lists; one list per chat() call. Records the messages it received. */
-function scriptedLLM(script: ChatChunk[][]): LLMProvider & { calls: Message[][] } {
+/** LLM that replays a script of chunk-lists; one list per chat() call. Records the messages and opts it received. */
+function scriptedLLM(
+  script: ChatChunk[][]
+): LLMProvider & { calls: Message[][]; optsCalls: (ChatOptions | undefined)[] } {
   let i = 0;
   const calls: Message[][] = [];
+  const optsCalls: (ChatOptions | undefined)[] = [];
   return {
     calls,
-    async *chat(messages: Message[]): AsyncIterable<ChatChunk> {
+    optsCalls,
+    async *chat(
+      messages: Message[],
+      _tools?: LLMTool[],
+      opts?: ChatOptions
+    ): AsyncIterable<ChatChunk> {
       calls.push(messages);
+      optsCalls.push(opts);
       const chunks =
         script[i++] ?? [
           { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
@@ -272,5 +283,54 @@ describe("Agent.run", () => {
     // 错误结果不结束回合——模型拿到错误后第二轮继续输出文本
     expect(llm.calls.length).toBe(2);
     expect(events.some((e) => e.type === "text" && e.content === "recovered")).toBe(true);
+  });
+});
+
+describe("Agent.run — E1 additions", () => {
+  it("forwards thinking chunks as AgentEvents without adding them to workingHistory", async () => {
+    const llm = scriptedLLM([
+      [
+        { type: "thinking", content: "let me think..." },
+        { type: "text", content: "answer" },
+        { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
+      ],
+    ]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events).toContainEqual({ type: "thinking", content: "let me think..." });
+  });
+
+  it("accumulates cachedPromptTokens from usage into the done event", async () => {
+    const llm = scriptedLLM([
+      [
+        { type: "text", content: "hi" },
+        {
+          type: "done",
+          usage: { promptTokens: 10, completionTokens: 5, cachedPromptTokens: 4 },
+        },
+      ],
+    ]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    const done = events.find((e) => e.type === "done") as { cachedPromptTokens: number };
+    expect(done.cachedPromptTokens).toBe(4);
+  });
+
+  it("defaults cachedPromptTokens to 0 when usage omits it", async () => {
+    const llm = scriptedLLM([textChunks("hi")]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    const done = events.find((e) => e.type === "done") as { cachedPromptTokens: number };
+    expect(done.cachedPromptTokens).toBe(0);
+  });
+
+  it("passes AgentConfig.modelParams through to llm.chat", async () => {
+    const llm = scriptedLLM([textChunks("hi")]);
+    const agent = new Agent({
+      systemPrompt: "sys",
+      modelParams: { temperature: 0.2, maxTokens: 500 },
+    });
+    await collect(agent.run("hi", makeContext(llm)));
+    expect(llm.optsCalls[0]?.params).toEqual({ temperature: 0.2, maxTokens: 500 });
   });
 });

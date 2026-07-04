@@ -1,4 +1,5 @@
 import type {
+  ChatParams,
   Message,
   ContentPart,
   LLMProvider,
@@ -19,9 +20,17 @@ import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 /** Events emitted during agent execution */
 export type AgentEvent =
   | { type: "text"; content: string }
+  | { type: "thinking"; content: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
   | { type: "tool_result"; name: string; output: string; isError: boolean }
-  | { type: "done"; iterations: number; totalTokens: number; inputTokens: number; outputTokens: number }
+  | {
+      type: "done";
+      iterations: number;
+      totalTokens: number;
+      inputTokens: number;
+      outputTokens: number;
+      cachedPromptTokens: number;
+    }
   | { type: "error"; message: string }
   | { type: "artifact"; assetId: string; url: string; mediaType: string };
 
@@ -34,6 +43,7 @@ export interface AgentConfig {
   contextConfig?: ContextManagerConfig;
   /** Optional whitelist of tool names this agent is allowed to use. Undefined = all tools. */
   allowedToolNames?: string[];
+  modelParams?: ChatParams;
 }
 
 export interface AgentContext {
@@ -148,6 +158,7 @@ export class Agent {
     let totalTokens = 0;
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedPromptTokens = 0;
 
     // Working message log (accumulates during this run). The user message is
     // part of the conversation exactly once, in turn order — re-appending it
@@ -187,6 +198,7 @@ export class Agent {
       totalTokens,
       inputTokens,
       outputTokens,
+      cachedPromptTokens,
     });
     const abortError = (kind: "timeout" | "cancelled"): AgentEvent =>
       kind === "timeout"
@@ -224,7 +236,13 @@ export class Agent {
         // always terminates cleanly with a `done` (for billing/trace closure)
         // instead of throwing out of the generator.
         try {
-          for await (const chunk of context.llm.chat(messages, tools, { signal })) {
+          for await (const chunk of context.llm.chat(messages, tools, {
+            signal,
+            params: this.config.modelParams,
+          })) {
+            if (chunk.type === "thinking" && chunk.content) {
+              yield { type: "thinking", content: chunk.content };
+            }
             if (chunk.type === "text" && chunk.content) {
               assistantContent += chunk.content;
               yield { type: "text", content: chunk.content };
@@ -238,6 +256,7 @@ export class Agent {
                 chunk.usage.promptTokens + chunk.usage.completionTokens;
               inputTokens += chunk.usage.promptTokens;
               outputTokens += chunk.usage.completionTokens;
+              cachedPromptTokens += chunk.usage.cachedPromptTokens ?? 0;
             }
           }
         } catch (err) {
