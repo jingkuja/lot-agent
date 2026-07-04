@@ -310,7 +310,7 @@ function webFetchAllowHosts(): string[] {
 async function fetchWithTimeout(
   url: string,
   timeoutMs: number,
-  redirect: RequestRedirect = "follow"
+  redirect: "manual" | "follow" | "error" = "follow"
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
