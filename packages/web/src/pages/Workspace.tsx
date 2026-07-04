@@ -5,6 +5,7 @@ import { BrandHeader } from "../components/BrandHeader.js";
 import { PreviewPanel } from "../components/PreviewPanel.js";
 import { ArtifactGallery, type Artifact } from "../components/ArtifactGallery.js";
 import { AgentCenterModal } from "../components/AgentCenterModal.js";
+import { KeySettingsModal } from "../components/KeySettingsModal.js";
 import { AgentSwitcher } from "../components/AgentSwitcher.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
@@ -90,8 +91,29 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
 
   // Per-user model catalog + per-group (llm/image/video) selected models.
-  const { models: modelCatalog } = useModels();
+  const { models: modelCatalog, reload: reloadModels } = useModels();
   const [selectedModels, setSelectedModels] = useState(EMPTY_SELECTED);
+  const [activeKeyIndex, setActiveKeyIndex] = useState(user.activeKeyIndex);
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
+  const [keyBusy, setKeyBusy] = useState(false);
+
+  const handleSelectKey = useCallback(
+    async (index: number) => {
+      setKeyBusy(true);
+      try {
+        await api.setActiveKey(index);
+        setActiveKeyIndex(index);
+        setSelectedModels(EMPTY_SELECTED); // 丢弃旧 key 的选择，等新目录回填
+        reloadModels();
+        setKeyModalOpen(false);
+      } catch {
+        // 切换失败：保持原激活项；弹窗留开供重试
+      } finally {
+        setKeyBusy(false);
+      }
+    },
+    [reloadModels]
+  );
   // Catalog loaded → 各组默认选中接口返回的第一个模型(已选过的槽位不动)。
   useEffect(() => {
     setSelectedModels((prev) => fillModelDefaults(prev, modelCatalog));
@@ -274,6 +296,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           onLogout={onLogout}
           onCollapse={() => setSidebarCollapsed(true)}
           onOpenAgentCenter={() => setCenterOpen(true)}
+          onOpenKeySettings={() => setKeyModalOpen(true)}
         />
         <Sidebar
           conversations={sidebarConversations}
@@ -350,6 +373,15 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           onUninstall={handleUninstall}
           onClose={() => setCenterOpen(false)}
           busyId={busyAgentId}
+        />
+      )}
+      {keyModalOpen && (
+        <KeySettingsModal
+          keys={user.apiKeys}
+          activeIndex={activeKeyIndex}
+          busy={keyBusy}
+          onSelect={handleSelectKey}
+          onClose={() => setKeyModalOpen(false)}
         />
       )}
     </div>
