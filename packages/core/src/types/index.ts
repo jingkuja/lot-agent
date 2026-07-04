@@ -20,13 +20,28 @@ export interface Message {
   toolCalls?: ToolCall[];
 }
 
+/** Per-call model parameters. */
+export interface ChatParams {
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  /** Reserved for E3's structured-output work; unread by any provider today. */
+  responseSchema?: JSONSchema;
+  reasoning?: "off" | number;
+}
+
 /** Streamed chunk from LLM */
 export interface ChatChunk {
-  type: "text" | "tool_call" | "done";
+  type: "text" | "tool_call" | "done" | "thinking";
   content?: string;
   toolCall?: ToolCall;
   finishReason?: string;
-  usage?: { promptTokens: number; completionTokens: number };
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    /** Input tokens served from the provider's prompt cache, billed at a discount. */
+    cachedPromptTokens?: number;
+  };
 }
 
 /** JSON Schema type for tool parameters */
@@ -43,6 +58,7 @@ export interface LLMTool {
 export interface ChatOptions {
   /** Aborts the in-flight request (run timeout or client disconnect). */
   signal?: AbortSignal;
+  params?: ChatParams;
 }
 
 /** Unified LLM provider interface */
