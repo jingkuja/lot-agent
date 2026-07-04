@@ -51,6 +51,8 @@ export function InputBox({
   onModelChange,
 }: InputBoxProps) {
   const [value, setValue] = useState("");
+  const noModels = !!onModelChange && models.length === 0;
+  const [noModelNotice, setNoModelNotice] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
   const mediaMode = mode === "image" || mode === "video";
@@ -115,6 +117,10 @@ export function InputBox({
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
+    if (noModels) {
+      setNoModelNotice(true);
+      return;
+    }
     const hasFiles =
       files.length > 0 || !!templateFile || backgroundFiles.length > 0 || !!oldContractFile || !!newContractFile;
     if ((!trimmed && !hasFiles) || disabled) return;
@@ -139,7 +145,7 @@ export function InputBox({
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, files, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, pptMode, contractMode]);
+  }, [value, files, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, pptMode, contractMode, noModels]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -165,6 +171,12 @@ export function InputBox({
         <div className="input-modal-hint" role="note">
           <span aria-hidden>🖼️</span>
           图片需所选模型支持多模态（视觉）能力才能识别
+        </div>
+      )}
+      {noModelNotice && (
+        <div className="input-modal-hint" role="alert">
+          <span aria-hidden>⚠️</span>
+          暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
         </div>
       )}
       {(files.length > 0 || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
@@ -221,7 +233,7 @@ export function InputBox({
       <textarea
         ref={textareaRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => { setValue(e.target.value); if (noModelNotice) setNoModelNotice(false); }}
         onKeyDown={handleKeyDown}
         onInput={handleInput}
         placeholder={
