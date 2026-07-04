@@ -9,6 +9,8 @@ export function agentEventToSse(event: AgentEvent): Record<string, unknown> {
   switch (event.type) {
     case "text":
       return { type: "text", content: event.content };
+    case "thinking":
+      return { type: "thinking", content: event.content };
     case "tool_call":
       return { type: "tool_call", id: event.id, name: event.name, input: event.input };
     case "tool_result":
