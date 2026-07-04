@@ -135,4 +135,34 @@ describe("OpenAIProvider.chat retry", () => {
     expect(call).toBe(2);
     expect(out).toEqual(["ok"]);
   });
+
+  it("retries the vendor's malformed tool-call rejection (plain error) and succeeds", async () => {
+    const { OpenAIProvider } = await import("./openai.js");
+    const provider = new OpenAIProvider({ apiKey: "x", model: "test-model" });
+    const create = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } })
+      .client.chat.completions.create;
+
+    let call = 0;
+    create.mockImplementation(async () => {
+      call++;
+      // The exact class of error a gateway returns for truncated tool-call JSON
+      // is a plain 400-ish Error, not a typed SDK error — must still retry.
+      if (call === 1)
+        throw new Error(
+          "The model returned incomplete tool_call arguments. Function 'propose_outline' has malformed arguments. Please retry the request."
+        );
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] };
+        },
+      };
+    });
+
+    const out: string[] = [];
+    for await (const chunk of provider.chat([{ role: "user", content: "hi" }])) {
+      if (chunk.type === "text" && chunk.content) out.push(chunk.content);
+    }
+    expect(call).toBe(2);
+    expect(out).toEqual(["ok"]);
+  });
 });

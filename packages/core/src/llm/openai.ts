@@ -16,7 +16,7 @@ import type {
   LLMTool,
   LLMProvider,
 } from "../types/index.js";
-import { withLLMRetry } from "./retry.js";
+import { withLLMRetry, isMalformedToolCallError } from "./retry.js";
 
 export interface OpenAIProviderConfig {
   apiKey: string;
@@ -87,7 +87,10 @@ function isOpenAIRetryable(err: unknown): boolean {
     err instanceof RateLimitError ||
     err instanceof InternalServerError ||
     err instanceof APIConnectionError ||
-    err instanceof APIConnectionTimeoutError
+    err instanceof APIConnectionTimeoutError ||
+    // A 400-class rejection of truncated/garbled tool-call JSON — transient,
+    // so let the model regenerate instead of killing the turn.
+    isMalformedToolCallError(err)
   );
 }
 

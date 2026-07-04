@@ -11,6 +11,22 @@ export interface LLMRetryConfig {
   retryAfterMs?(err: unknown): number | undefined;
 }
 
+/**
+ * A tool-call turn that failed because the model emitted truncated or garbled
+ * tool-call arguments. Vendors reject these with a 400-class error that says
+ * things like "incomplete tool_call arguments" / "malformed arguments" and
+ * often literally "Please retry the request" — it's a sampling artifact, so a
+ * fresh generation usually produces valid JSON. Safe (and worthwhile) to redo,
+ * unlike a genuinely bad request (unknown model, oversized context, …).
+ */
+export function isMalformedToolCallError(err: unknown): boolean {
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const mentionsToolCall = m.includes("tool_call") || m.includes("tool call");
+  const isMalformed =
+    m.includes("malformed") || m.includes("incomplete") || m.includes("invalid");
+  return (mentionsToolCall && isMalformed) || m.includes("malformed arguments");
+}
+
 function defaultIsRetryable(err: unknown): boolean {
   const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
   return (
@@ -23,7 +39,8 @@ function defaultIsRetryable(err: unknown): boolean {
     message.includes("timeout") ||
     message.includes("econnreset") ||
     message.includes("econnrefused") ||
-    message.includes("network")
+    message.includes("network") ||
+    isMalformedToolCallError(err)
   );
 }
 
