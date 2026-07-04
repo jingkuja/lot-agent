@@ -104,6 +104,15 @@ export function MessageBubble({
   return (
     <div className="message-wrapper message-assistant">
       <div className="message-wrapper-inner">
+        {message.thinking && (
+          <CollapsibleToolCard
+            title="思考过程"
+            type="thinking"
+            defaultCollapsed={!!message.dbId}
+          >
+            <pre className="tool-output">{message.thinking}</pre>
+          </CollapsibleToolCard>
+        )}
         {/* Message content — click to open in preview */}
         {(() => {
           const canPreview =
@@ -217,7 +226,7 @@ function CollapsibleToolCard({
   children,
 }: {
   title: string;
-  type: "call" | "result";
+  type: "call" | "result" | "thinking";
   isError?: boolean;
   defaultCollapsed?: boolean;
   children: React.ReactNode;
@@ -235,11 +244,11 @@ function CollapsibleToolCard({
       >
         <span className="tool-card-chevron">{collapsed ? "▶" : "▼"}</span>
         <span className="tool-card-icon">
-          {type === "call" ? "⚙" : isError ? "✕" : "✓"}
+          {type === "call" ? "⚙" : type === "thinking" ? "💭" : isError ? "✕" : "✓"}
         </span>
         <span className="tool-card-title">{title}</span>
         <span className="tool-card-type">
-          {type === "call" ? "calling" : "result"}
+          {type === "call" ? "calling" : type === "thinking" ? "thinking" : "result"}
         </span>
       </div>
       {!collapsed && hasContent && (

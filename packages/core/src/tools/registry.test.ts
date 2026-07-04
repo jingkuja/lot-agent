@@ -46,3 +46,46 @@ describe("ToolRegistry.toLLMTools", () => {
     expect(result.map((t) => t.name)).toEqual(["read_file", "web_search"]);
   });
 });
+
+describe("ToolRegistry.execute — input validation", () => {
+  const schema = {
+    type: "object",
+    properties: { path: { type: "string" } },
+    required: ["path"],
+  };
+
+  it("rejects input missing a required field before calling execute", async () => {
+    const registry = new ToolRegistry();
+    let executed = false;
+    registry.register({
+      name: "read_file",
+      description: "reads a file",
+      parameters: schema,
+      execute: async () => {
+        executed = true;
+        return { content: "ok" };
+      },
+    });
+    const result = await registry.execute("read_file", {}, { workingDirectory: "/tmp" });
+    expect(result.isError).toBe(true);
+    expect(result.errorKind).toBe("validation");
+    expect(executed).toBe(false);
+  });
+
+  it("runs the tool when input is valid", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "read_file",
+      description: "reads a file",
+      parameters: schema,
+      execute: async () => ({ content: "ok" }),
+    });
+    const result = await registry.execute(
+      "read_file",
+      { path: "a.txt" },
+      { workingDirectory: "/tmp" }
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toBe("ok");
+  });
+});

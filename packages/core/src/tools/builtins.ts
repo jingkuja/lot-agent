@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { readFile, writeFile, readdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import type { Tool, ToolContext, ToolResult, ToolErrorKind } from "../types/index.js";
 import { askUserTool } from "./ask-user.js";
+import { assertPublicUrl } from "./net-guard.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +31,11 @@ function resolvePath(input: { path: string }, ctx: ToolContext): string {
   return resolve(ctx.workingDirectory, input.path);
 }
 
+/** True if `resolved` is the working directory or a path underneath it. */
+function isContained(resolved: string, workingDirectory: string): boolean {
+  return resolved === workingDirectory || resolved.startsWith(workingDirectory + sep);
+}
+
 export const readFileTool: Tool = {
   name: "read_file",
   description:
@@ -47,6 +53,13 @@ export const readFileTool: Tool = {
   async execute(input, context) {
     const { path } = input as { path: string };
     const fullPath = resolvePath({ path }, context);
+    if (!isContained(fullPath, context.workingDirectory)) {
+      return {
+        content: `Path escapes the working directory: ${path}`,
+        isError: true,
+        errorKind: "permission",
+      };
+    }
     try {
       const content = await readFile(fullPath, "utf-8");
       return { content: truncate(content) };
@@ -80,6 +93,13 @@ export const writeFileTool: Tool = {
   async execute(input, context) {
     const { path, content } = input as { path: string; content: string };
     const fullPath = resolvePath({ path }, context);
+    if (!isContained(fullPath, context.workingDirectory)) {
+      return {
+        content: `Path escapes the working directory: ${path}`,
+        isError: true,
+        errorKind: "permission",
+      };
+    }
     try {
       await writeFile(fullPath, content, "utf-8");
       return { content: `Successfully wrote ${content.length} chars to ${path}` };
@@ -111,6 +131,13 @@ export const listFilesTool: Tool = {
   async execute(input, context) {
     const { path = "." } = (input as { path?: string }) ?? {};
     const fullPath = resolvePath({ path }, context);
+    if (!isContained(fullPath, context.workingDirectory)) {
+      return {
+        content: `Path escapes the working directory: ${path}`,
+        isError: true,
+        errorKind: "permission",
+      };
+    }
     try {
       const entries = await readdir(fullPath, { withFileTypes: true });
       const lines = entries
@@ -157,11 +184,21 @@ export const executeCommandTool: Tool = {
         cwd: context.workingDirectory,
         timeout: 30_000,
         maxBuffer: 1024 * 1024,
+        signal: context.signal,
       });
       const output = [stdout, stderr].filter(Boolean).join("\n");
       return { content: truncate(output) || "(no output)" };
     } catch (error: unknown) {
-      const err = error as { message?: string; stdout?: string; stderr?: string };
+      const err = error as {
+        message?: string;
+        stdout?: string;
+        stderr?: string;
+        name?: string;
+        code?: string;
+      };
+      if (err.name === "AbortError" || err.code === "ABORT_ERR") {
+        return { content: "Command aborted", isError: true, errorKind: "unknown" };
+      }
       return {
         content: truncate(
           `Command failed: ${err.message}\n${err.stdout ?? ""}\n${err.stderr ?? ""}`
@@ -201,6 +238,15 @@ export const searchFilesTool: Tool = {
       path?: string;
       extension?: string;
     };
+
+    const fullPath = resolvePath({ path }, context);
+    if (!isContained(fullPath, context.workingDirectory)) {
+      return {
+        content: `Path escapes the working directory: ${path}`,
+        isError: true,
+        errorKind: "permission",
+      };
+    }
 
     try {
       const { stdout } = await execFileAsync(
@@ -252,15 +298,26 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+const MAX_REDIRECTS = 3;
+
+function webFetchAllowHosts(): string[] {
+  return (process.env.WEB_FETCH_ALLOW_HOSTS ?? "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+}
+
 async function fetchWithTimeout(
   url: string,
-  timeoutMs: number
+  timeoutMs: number,
+  redirect: "manual" | "follow" | "error" = "follow"
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
+      redirect,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; LotAgent/0.1; +https://github.com/lot-agent)",
@@ -271,6 +328,31 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Fetches `url`, re-checking the SSRF guard on every hop of up to
+ * `MAX_REDIRECTS` manual redirects (a same-origin-looking redirect to an
+ * internal address is the classic SSRF bypass — following redirects
+ * automatically would skip the guard on the final, real destination).
+ */
+async function fetchPublic(url: string, timeoutMs: number): Promise<Response> {
+  let currentUrl = url;
+  const allowHosts = webFetchAllowHosts();
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicUrl(currentUrl, { allowHosts });
+    const res = await fetchWithTimeout(currentUrl, timeoutMs, "manual");
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      if (hop === MAX_REDIRECTS) {
+        throw new Error(`too many redirects (>${MAX_REDIRECTS})`);
+      }
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+    return res;
+  }
+  throw new Error("unreachable");
 }
 
 export const webFetchTool: Tool = {
@@ -309,7 +391,7 @@ export const webFetchTool: Tool = {
     }
 
     try {
-      const res = await fetchWithTimeout(url, 15_000);
+      const res = await fetchPublic(url, 15_000);
       if (!res.ok) {
         return {
           content: `HTTP ${res.status}: ${res.statusText}`,

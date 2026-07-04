@@ -7,6 +7,7 @@ import type {
   ToolErrorKind,
 } from "../types/index.js";
 import { DEFAULT_TOOL_EXEC_CONFIG } from "../types/index.js";
+import { validateToolInput } from "./validate.js";
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
@@ -51,6 +52,15 @@ export class ToolRegistry {
         content: `Tool not found: ${name}`,
         isError: true,
         errorKind: "not_found",
+      };
+    }
+
+    const validationErrors = validateToolInput(tool.parameters, input);
+    if (validationErrors.length > 0) {
+      return {
+        content: `Invalid input for tool '${name}': ${validationErrors.join("; ")}`,
+        isError: true,
+        errorKind: "validation",
       };
     }
 

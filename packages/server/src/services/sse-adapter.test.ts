@@ -49,6 +49,7 @@ describe("agentEventToSse", () => {
         totalTokens: 10,
         inputTokens: 6,
         outputTokens: 4,
+        cachedPromptTokens: 0,
       })
     ).toEqual({
       type: "done",
@@ -56,6 +57,13 @@ describe("agentEventToSse", () => {
       totalTokens: 10,
       inputTokens: 6,
       outputTokens: 4,
+    });
+  });
+
+  it("maps thinking event", () => {
+    expect(agentEventToSse({ type: "thinking", content: "reasoning..." })).toEqual({
+      type: "thinking",
+      content: "reasoning...",
     });
   });
 

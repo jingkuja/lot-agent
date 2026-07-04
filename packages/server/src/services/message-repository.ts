@@ -90,7 +90,8 @@ export class MessageRepository {
   async saveAssistantWithToolCalls(
     conversationId: string,
     content: string,
-    toolCalls: { id: string; name: string; arguments: unknown }[]
+    toolCalls: { id: string; name: string; arguments: unknown }[],
+    thinking?: string
   ): Promise<string> {
     const assistantMsgId = randomUUID();
     await this.db.addMessage(
@@ -98,7 +99,7 @@ export class MessageRepository {
       conversationId,
       "assistant",
       content,
-      { toolCallId: undefined }
+      { toolCallId: undefined, metadata: thinking ? { thinking } : {} }
     );
     for (const tc of toolCalls) {
       await this.db.addToolCall(assistantMsgId, tc.id, tc.name, tc.arguments);
@@ -128,7 +129,8 @@ export class MessageRepository {
   async saveFinalAssistant(
     conversationId: string,
     content: string,
-    toolCalls: { id: string; name: string; arguments: unknown }[]
+    toolCalls: { id: string; name: string; arguments: unknown }[],
+    thinking?: string
   ): Promise<void> {
     if (!content && toolCalls.length === 0) return;
     const assistantMsgId = randomUUID();
@@ -136,7 +138,8 @@ export class MessageRepository {
       assistantMsgId,
       conversationId,
       "assistant",
-      content
+      content,
+      { metadata: thinking ? { thinking } : {} }
     );
     for (const tc of toolCalls) {
       await this.db.addToolCall(assistantMsgId, tc.id, tc.name, tc.arguments);

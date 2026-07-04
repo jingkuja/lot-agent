@@ -1,5 +1,11 @@
-import OpenAI from "openai";
+import OpenAI, {
+  RateLimitError,
+  InternalServerError,
+  APIConnectionError,
+  APIConnectionTimeoutError,
+} from "openai";
 import type {
+  ChatCompletionChunk,
   ChatCompletionMessageToolCall,
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
@@ -10,6 +16,7 @@ import type {
   LLMTool,
   LLMProvider,
 } from "../types/index.js";
+import { withLLMRetry } from "./retry.js";
 
 export interface OpenAIProviderConfig {
   apiKey: string;
@@ -46,82 +53,133 @@ export class OpenAIProvider implements LLMProvider {
       );
     }
 
-    const stream = await this.client.chat.completions.create(
-      {
-        model: this.model,
-        messages: oaiMessages,
-        tools: oaiTools,
-        tool_choice: oaiTools?.length ? "auto" : undefined,
-        stream: true,
-      },
-      { signal: opts?.signal }
-    );
+    const client = this.client;
+    const model = this.model;
+    const params = opts?.params;
 
-    // Buffer for accumulating tool call arguments
-    const toolCallBuffers = new Map<
-      number,
-      { id: string; name: string; arguments: string }
-    >();
+    const createStream = () =>
+      mapOpenAIStream(
+        (async function* () {
+          const stream = await client.chat.completions.create(
+            {
+              model,
+              messages: oaiMessages,
+              tools: oaiTools,
+              tool_choice: oaiTools?.length ? "auto" : undefined,
+              stream: true,
+              stream_options: { include_usage: true },
+              temperature: params?.temperature,
+              max_tokens: params?.maxTokens,
+              top_p: params?.topP,
+            },
+            { signal: opts?.signal }
+          );
+          yield* stream;
+        })()
+      );
 
-    for await (const chunk of stream) {
-      // Dump the raw API delta so you can see exactly what the model returns
-      // (e.g. reasoning_content vs content). Enable with DEBUG_LLM=1.
-      if (debug) console.error("[DEBUG_LLM] chunk", JSON.stringify(chunk.choices[0]));
+    yield* withLLMRetry(createStream, { isRetryable: isOpenAIRetryable });
+  }
+}
 
-      const delta = chunk.choices[0]?.delta;
-      if (!delta) continue;
+function isOpenAIRetryable(err: unknown): boolean {
+  return (
+    err instanceof RateLimitError ||
+    err instanceof InternalServerError ||
+    err instanceof APIConnectionError ||
+    err instanceof APIConnectionTimeoutError
+  );
+}
 
-      // Handle text content
-      if (delta.content) {
-        yield { type: "text", content: delta.content };
+/**
+ * Consumes the raw OpenAI-shaped chunk stream and yields ChatChunks. A
+ * usage-only trailing chunk (strict `stream_options.include_usage`
+ * compliance) has an EMPTY `choices` array — so `done` isn't emitted the
+ * moment `finish_reason` is seen; it waits for either a usage-bearing chunk
+ * (attached to the finish_reason chunk, e.g. DeepSeek, or trailing/separate,
+ * e.g. spec-compliant OpenAI) or the stream ending with no usage at all
+ * (a vendor that ignores `stream_options` entirely).
+ */
+export async function* mapOpenAIStream(
+  stream: AsyncIterable<ChatCompletionChunk>
+): AsyncIterable<ChatChunk> {
+  const debug = ["1", "true", "yes"].includes(
+    (process.env.DEBUG_LLM ?? "").toLowerCase()
+  );
+  const toolCallBuffers = new Map<
+    number,
+    { id: string; name: string; arguments: string }
+  >();
+  let finishReason: string | undefined;
+
+  function* flushToolCalls(): Generator<ChatChunk> {
+    for (const buf of toolCallBuffers.values()) {
+      let parsedArgs: unknown;
+      try {
+        parsedArgs = JSON.parse(buf.arguments);
+      } catch {
+        parsedArgs = buf.arguments;
       }
+      yield {
+        type: "tool_call",
+        toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
+      };
+    }
+    toolCallBuffers.clear();
+  }
 
-      // Handle tool calls
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const index = tc.index;
-          if (!toolCallBuffers.has(index)) {
-            toolCallBuffers.set(index, {
-              id: tc.id ?? "",
-              name: "",
-              arguments: "",
-            });
-          }
-          const buf = toolCallBuffers.get(index)!;
-          if (tc.id) buf.id = tc.id;
-          if (tc.function?.name) buf.name = tc.function.name;
-          if (tc.function?.arguments) buf.arguments += tc.function.arguments;
+  for await (const chunk of stream) {
+    if (debug) console.error("[DEBUG_LLM] chunk", JSON.stringify(chunk.choices[0]));
+
+    const delta = chunk.choices[0]?.delta as
+      | (ChatCompletionChunk.Choice["delta"] & { reasoning_content?: string })
+      | undefined;
+
+    if (delta?.reasoning_content) {
+      yield { type: "thinking", content: delta.reasoning_content };
+    }
+    if (delta?.content) {
+      yield { type: "text", content: delta.content };
+    }
+
+    if (delta?.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        const index = tc.index;
+        if (!toolCallBuffers.has(index)) {
+          toolCallBuffers.set(index, { id: tc.id ?? "", name: "", arguments: "" });
         }
-      }
-
-      // Handle finish
-      if (chunk.choices[0]?.finish_reason) {
-        // Flush buffered tool calls
-        for (const buf of toolCallBuffers.values()) {
-          let parsedArgs: unknown;
-          try {
-            parsedArgs = JSON.parse(buf.arguments);
-          } catch {
-            parsedArgs = buf.arguments;
-          }
-          yield {
-            type: "tool_call",
-            toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
-          };
-        }
-
-        yield {
-          type: "done",
-          finishReason: chunk.choices[0].finish_reason,
-          usage: chunk.usage
-            ? {
-                promptTokens: chunk.usage.prompt_tokens,
-                completionTokens: chunk.usage.completion_tokens,
-              }
-            : undefined,
-        };
+        const buf = toolCallBuffers.get(index)!;
+        if (tc.id) buf.id = tc.id;
+        if (tc.function?.name) buf.name = tc.function.name;
+        if (tc.function?.arguments) buf.arguments += tc.function.arguments;
       }
     }
+
+    if (chunk.choices[0]?.finish_reason) {
+      finishReason = chunk.choices[0].finish_reason;
+    }
+
+    if (finishReason && (chunk.usage || chunk.choices.length === 0)) {
+      yield* flushToolCalls();
+      yield {
+        type: "done",
+        finishReason,
+        usage: chunk.usage
+          ? {
+              promptTokens: chunk.usage.prompt_tokens,
+              completionTokens: chunk.usage.completion_tokens,
+            }
+          : undefined,
+      };
+      finishReason = undefined;
+    }
+  }
+
+  // Stream ended without a usage chunk ever arriving after finish_reason
+  // (vendor doesn't support stream_options.include_usage at all).
+  if (finishReason) {
+    yield* flushToolCalls();
+    yield { type: "done", finishReason };
   }
 }
 

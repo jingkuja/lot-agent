@@ -1,0 +1,159 @@
+import { describe, it, expect, vi } from "vitest";
+import { mapAnthropicStream } from "./anthropic.js";
+import type { ChatChunk } from "../types/index.js";
+
+async function collect(stream: AsyncIterable<ChatChunk>): Promise<ChatChunk[]> {
+  const out: ChatChunk[] = [];
+  for await (const c of stream) out.push(c);
+  return out;
+}
+
+function eventStream(events: unknown[]): AsyncIterable<any> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const e of events) yield e;
+    },
+  };
+}
+
+describe("mapAnthropicStream", () => {
+  it("accumulates usage from message_start + message_delta into the done chunk", async () => {
+    const events = eventStream([
+      { type: "message_start", message: { usage: { input_tokens: 100, cache_read_input_tokens: 20 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: {}, usage: { output_tokens: 8 } },
+      { type: "message_stop" },
+    ]);
+    const out = await collect(mapAnthropicStream(events));
+    expect(out).toContainEqual({ type: "text", content: "hi" });
+    const done = out.find((c) => c.type === "done");
+    expect(done?.usage).toEqual({ promptTokens: 100, completionTokens: 8, cachedPromptTokens: 20 });
+  });
+
+  it("maps thinking_delta to a thinking chunk", async () => {
+    const events = eventStream([
+      { type: "message_start", message: { usage: { input_tokens: 1, cache_read_input_tokens: 0 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "thinking" } },
+      { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "hmm..." } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: {}, usage: { output_tokens: 1 } },
+      { type: "message_stop" },
+    ]);
+    const out = await collect(mapAnthropicStream(events));
+    expect(out).toContainEqual({ type: "thinking", content: "hmm..." });
+  });
+
+  it("routes input_json_delta fragments to the correct tool_use block by index, even interleaved", async () => {
+    const events = eventStream([
+      { type: "message_start", message: { usage: { input_tokens: 1, cache_read_input_tokens: 0 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t0", name: "read_file" } },
+      { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "t1", name: "list_files" } },
+      { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"path"' } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":"a.txt"}' } },
+      { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: ':"."}' } },
+      { type: "content_block_stop", index: 0 },
+      { type: "content_block_stop", index: 1 },
+      { type: "message_delta", delta: {}, usage: { output_tokens: 1 } },
+      { type: "message_stop" },
+    ]);
+    const out = await collect(mapAnthropicStream(events));
+    const calls = out.filter((c) => c.type === "tool_call");
+    expect(calls).toContainEqual({
+      type: "tool_call",
+      toolCall: { id: "t0", name: "read_file", arguments: { path: "a.txt" } },
+    });
+    expect(calls).toContainEqual({
+      type: "tool_call",
+      toolCall: { id: "t1", name: "list_files", arguments: { path: "." } },
+    });
+  });
+});
+
+vi.mock("@anthropic-ai/sdk", () => {
+  class FakeAPIError extends Error {}
+  return {
+    default: class FakeAnthropic {
+      messages = { stream: vi.fn() };
+      constructor(_config: unknown) {}
+    },
+    RateLimitError: FakeAPIError,
+    InternalServerError: FakeAPIError,
+    APIConnectionError: FakeAPIError,
+    APIConnectionTimeoutError: FakeAPIError,
+  };
+});
+
+describe("AnthropicProvider.chat retry", () => {
+  it("retries a RateLimitError raised before any chunk and succeeds on the next attempt", async () => {
+    const { AnthropicProvider } = await import("./anthropic.js");
+    const { RateLimitError } = (await import("@anthropic-ai/sdk")) as unknown as {
+      RateLimitError: new (msg?: string) => Error;
+    };
+    const provider = new AnthropicProvider({ apiKey: "x", model: "test-model" });
+    const streamFn = (provider as unknown as { client: { messages: { stream: ReturnType<typeof vi.fn> } } })
+      .client.messages.stream;
+
+    let call = 0;
+    streamFn.mockImplementation(() => {
+      call++;
+      if (call === 1) throw new RateLimitError("rate limited");
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "message_start",
+            message: { usage: { input_tokens: 1, cache_read_input_tokens: 0 } },
+          };
+          yield { type: "content_block_start", index: 0, content_block: { type: "text" } };
+          yield {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "ok" },
+          };
+          yield { type: "content_block_stop", index: 0 };
+          yield { type: "message_delta", delta: {}, usage: { output_tokens: 1 } };
+          yield { type: "message_stop" };
+        },
+      };
+    });
+
+    const out: string[] = [];
+    for await (const chunk of provider.chat([{ role: "user", content: "hi" }])) {
+      if (chunk.type === "text" && chunk.content) out.push(chunk.content);
+    }
+    expect(call).toBe(2);
+    expect(out).toEqual(["ok"]);
+  });
+});
+
+describe("withCacheControl", () => {
+  it("wraps a plain string message into a single cache-breakpointed text block", async () => {
+    const { withCacheControl } = await import("./anthropic.js");
+    const out = withCacheControl({ role: "user", content: "hello" });
+    expect(out.content).toEqual([
+      { type: "text", text: "hello", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("adds cache_control only to the last block of a multi-block message", async () => {
+    const { withCacheControl } = await import("./anthropic.js");
+    const out = withCacheControl({
+      role: "user",
+      content: [
+        { type: "text", text: "first" },
+        { type: "text", text: "second" },
+      ],
+    });
+    expect(out.content).toEqual([
+      { type: "text", text: "first" },
+      { type: "text", text: "second", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("leaves an empty-string message unchanged", async () => {
+    const { withCacheControl } = await import("./anthropic.js");
+    const msg = { role: "user" as const, content: "" };
+    expect(withCacheControl(msg)).toBe(msg);
+  });
+});

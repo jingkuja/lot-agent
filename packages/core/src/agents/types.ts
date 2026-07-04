@@ -1,3 +1,5 @@
+import type { ChatParams } from "../types/index.js";
+
 export type AgentType = "general" | "copywriting" | "image" | "video" | "ppt" | "contract";
 
 export interface AgentDefinition {
@@ -11,6 +13,7 @@ export interface AgentDefinition {
   toolNames: string[];        // allowed tool whitelist; empty array = no tools
   defaultModelId: string;     // e.g. "deepseek-v4-flash" (matches a configured model id)
   inputSchema?: Record<string, unknown>;
+  modelParams?: ChatParams;
 }
 
 export interface AgentRegistry {

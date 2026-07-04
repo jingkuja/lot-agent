@@ -19,6 +19,7 @@ export interface DisplayMessage {
   dbId?: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  thinking?: string;
   toolCalls?: { name: string; input: unknown }[];
   toolResult?: { name: string; output: string; isError: boolean };
   isStreaming?: boolean;
@@ -145,6 +146,7 @@ export function useChat(
         dbId: m.id,
         role,
         content: m.content,
+        thinking: parsedMeta?.thinking as string | undefined,
         attachments:
           role === "user"
             ? (parsedMeta?.attachments as UploadedAttachment[] | undefined)
@@ -251,6 +253,18 @@ export function useChat(
         };
 
         api.sendMessage(cid, content, async (event) => {
+        if (event.type === "thinking" && event.content) {
+          assistantMsg = {
+            ...assistantMsg,
+            thinking: (assistantMsg.thinking ?? "") + event.content,
+          };
+          if (isCurrent())
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              return [...filtered, assistantMsg];
+            });
+        }
+
         if (event.type === "text" && event.content) {
           assistantMsg = {
             ...assistantMsg,

@@ -1,11 +1,19 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, {
+  RateLimitError,
+  InternalServerError,
+  APIConnectionError,
+  APIConnectionTimeoutError,
+} from "@anthropic-ai/sdk";
+import { withLLMRetry } from "./retry.js";
 import type {
   MessageParam,
+  RawMessageStreamEvent,
   Tool,
   ToolUseBlock,
   TextBlockParam,
   ToolUseBlockParam,
   ImageBlockParam,
+  Base64ImageSource,
 } from "@anthropic-ai/sdk/resources/messages";
 import type {
   Message,
@@ -47,103 +55,165 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     const anthropicTools = tools?.map(toAnthropicTool);
+    const params = opts?.params;
 
-    const stream = this.client.messages.stream(
-      {
-        model: this.model,
-        max_tokens: 8192,
-        system: systemMessages.join("\n\n") || undefined,
-        messages: chatMessages,
-        tools: anthropicTools,
-      },
-      { signal: opts?.signal }
-    );
+    const systemText = systemMessages.join("\n\n");
+    const systemBlocks: TextBlockParam[] = systemText
+      ? [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }]
+      : [];
 
-    // Buffer for accumulating tool use blocks
-    const toolBuffers = new Map<
-      string,
-      { id: string; name: string; input: string }
-    >();
+    const cachedMessages =
+      chatMessages.length > 0
+        ? [
+            ...chatMessages.slice(0, -1),
+            withCacheControl(chatMessages[chatMessages.length - 1]),
+          ]
+        : chatMessages;
 
-    for await (const event of stream) {
-      if (event.type === "content_block_start") {
-        if (event.content_block.type === "tool_use") {
-          const block = event.content_block as ToolUseBlock;
-          toolBuffers.set(block.id, {
-            id: block.id,
-            name: block.name,
-            input: "",
-          });
-        }
-      }
+    const createStream = () =>
+      mapAnthropicStream(
+        this.client.messages.stream(
+          {
+            model: this.model,
+            max_tokens: params?.maxTokens ?? 8192,
+            temperature: params?.temperature,
+            top_p: params?.topP,
+            system: systemBlocks.length ? systemBlocks : undefined,
+            messages: cachedMessages,
+            tools: anthropicTools,
+          },
+          { signal: opts?.signal }
+        )
+      );
 
-      if (event.type === "content_block_delta") {
-        if (event.delta.type === "text_delta") {
-          yield { type: "text", content: event.delta.text };
-        }
-        if (event.delta.type === "input_json_delta") {
-          // Find the current tool being accumulated
-          const lastKey = [...toolBuffers.keys()].pop();
-          if (lastKey) {
-            const buf = toolBuffers.get(lastKey)!;
-            buf.input += event.delta.partial_json;
-          }
-        }
-      }
+    yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable });
+  }
+}
 
-      if (event.type === "content_block_stop") {
-        // Check if a tool block just finished
-        const lastKey = [...toolBuffers.keys()].pop();
-        if (lastKey) {
-          const buf = toolBuffers.get(lastKey)!;
-          // Only emit if this block hasn't been emitted yet
-          if (buf.input || buf.name) {
-            let parsedArgs: unknown;
-            try {
-              parsedArgs = JSON.parse(buf.input || "{}");
-            } catch {
-              parsedArgs = buf.input;
-            }
-            yield {
-              type: "tool_call",
-              toolCall: {
-                id: buf.id,
-                name: buf.name,
-                arguments: parsedArgs,
-              },
-            };
-            toolBuffers.delete(lastKey);
-          }
-        }
-      }
+function isAnthropicRetryable(err: unknown): boolean {
+  return (
+    err instanceof RateLimitError ||
+    err instanceof InternalServerError ||
+    err instanceof APIConnectionError ||
+    err instanceof APIConnectionTimeoutError
+  );
+}
 
-      if (event.type === "message_stop") {
-        // Flush any remaining tool buffers
-        for (const buf of toolBuffers.values()) {
-          let parsedArgs: unknown;
-          try {
-            parsedArgs = JSON.parse(buf.input || "{}");
-          } catch {
-            parsedArgs = buf.input;
-          }
-          yield {
-            type: "tool_call",
-            toolCall: {
-              id: buf.id,
-              name: buf.name,
-              arguments: parsedArgs,
-            },
-          };
-        }
-        toolBuffers.clear();
+/**
+ * Consumes the raw Anthropic message-stream events and yields ChatChunks.
+ * Tool-use blocks are tracked by the event's `index` (not by guessing "the
+ * last one seen") so interleaved/multiple tool calls in one message route
+ * their `input_json_delta` fragments correctly. Usage accumulates across
+ * `message_start` (prompt + cached-prompt tokens) and `message_delta`
+ * (completion tokens), landing on the `done` chunk emitted at `message_stop`
+ * — previously `done` carried no usage at all.
+ */
+export async function* mapAnthropicStream(
+  events: AsyncIterable<RawMessageStreamEvent>
+): AsyncIterable<ChatChunk> {
+  const toolBuffers = new Map<number, { id: string; name: string; input: string }>();
+  let promptTokens = 0;
+  let cachedPromptTokens = 0;
+  let completionTokens = 0;
 
-        yield {
-          type: "done",
-          finishReason: "stop",
-        };
+  for await (const event of events) {
+    if (event.type === "message_start") {
+      promptTokens = event.message.usage.input_tokens;
+      cachedPromptTokens = event.message.usage.cache_read_input_tokens ?? 0;
+    }
+
+    if (event.type === "content_block_start") {
+      if (event.content_block.type === "tool_use") {
+        const block = event.content_block as ToolUseBlock;
+        toolBuffers.set(event.index, { id: block.id, name: block.name, input: "" });
       }
     }
+
+    if (event.type === "content_block_delta") {
+      if (event.delta.type === "text_delta") {
+        yield { type: "text", content: event.delta.text };
+      }
+      if (event.delta.type === "thinking_delta") {
+        yield { type: "thinking", content: event.delta.thinking };
+      }
+      if (event.delta.type === "input_json_delta") {
+        const buf = toolBuffers.get(event.index);
+        if (buf) buf.input += event.delta.partial_json;
+      }
+    }
+
+    if (event.type === "content_block_stop") {
+      const buf = toolBuffers.get(event.index);
+      if (buf && (buf.input || buf.name)) {
+        let parsedArgs: unknown;
+        try {
+          parsedArgs = JSON.parse(buf.input || "{}");
+        } catch {
+          parsedArgs = buf.input;
+        }
+        yield {
+          type: "tool_call",
+          toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
+        };
+        toolBuffers.delete(event.index);
+      }
+    }
+
+    if (event.type === "message_delta") {
+      completionTokens = event.usage.output_tokens;
+    }
+
+    if (event.type === "message_stop") {
+      for (const buf of toolBuffers.values()) {
+        let parsedArgs: unknown;
+        try {
+          parsedArgs = JSON.parse(buf.input || "{}");
+        } catch {
+          parsedArgs = buf.input;
+        }
+        yield {
+          type: "tool_call",
+          toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
+        };
+      }
+      toolBuffers.clear();
+
+      yield {
+        type: "done",
+        finishReason: "stop",
+        usage: { promptTokens, completionTokens, cachedPromptTokens },
+      };
+    }
   }
+}
+
+/**
+ * Attaches an ephemeral cache-control breakpoint: to the whole message when
+ * its content is a plain string (wrapped into a single text block), or to
+ * the LAST content block when it's already an array. Anthropic bills a
+ * cache-read of everything up to and including a breakpoint at a steep
+ * discount versus a fresh prompt, so this is placed on the system block
+ * (below) and the trailing edge of history — both stable, prefix-cached
+ * points per `ContextManager.assemble`'s structure.
+ */
+export function withCacheControl(message: MessageParam): MessageParam {
+  if (typeof message.content === "string") {
+    if (!message.content) return message; // nothing to cache-break on an empty message
+    return {
+      ...message,
+      content: [
+        { type: "text", text: message.content, cache_control: { type: "ephemeral" } },
+      ],
+    };
+  }
+  if (message.content.length === 0) return message;
+  const content = [...message.content];
+  const lastIndex = content.length - 1;
+  content[lastIndex] = {
+    ...content[lastIndex],
+    cache_control: { type: "ephemeral" },
+  } as (typeof content)[number];
+  return { ...message, content };
 }
 
 export function toAnthropicMessage(msg: Message): MessageParam {
@@ -160,7 +230,7 @@ export function toAnthropicMessage(msg: Message): MessageParam {
               type: "image",
               source: {
                 type: "base64",
-                media_type: m[1] as ImageBlockParam["source"]["media_type"],
+                media_type: m[1] as Base64ImageSource["media_type"],
                 data: m[2],
               },
             };
