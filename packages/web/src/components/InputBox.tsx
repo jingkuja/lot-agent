@@ -1,22 +1,35 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
+import { ModelPicker } from "./ModelPicker.js";
+import type { CatalogModel } from "../lib/model-filter.js";
+import type { PickedFile } from "../api/client.js";
 
-/** 输入框形态：普通对话 / 图像生成 / 视频生成。 */
-export type InputMode = "default" | "image" | "video";
+/** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
+export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
 
 interface InputBoxProps {
-  onSend: (content: string, files: File[], settings?: ImageSettings | VideoSettings) => void;
+  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings) => void;
   onStop: () => void;
   disabled: boolean;
   placeholder?: string;
   autoFocus?: boolean;
   /** 图像/视频生成 Agent：换「参考图」上传 + 对应的设置选择器。 */
   mode?: InputMode;
+  /** 当前 agent 类型可用的模型列表（右下角选择器）。 */
+  models?: CatalogModel[];
+  /** 当前选中的模型 id（null = 用会话/agent 默认）。 */
+  selectedModel?: string | null;
+  onModelChange?: (id: string) => void;
 }
 
 const MAX_FILES = 5;
 const ACCEPT =
   "image/jpeg,image/png,image/webp,image/gif,.txt,.md,.csv,.json,application/pdf,.docx,.xlsx,.xls";
+/** ppt 模式内容文件的可选类型（不含图片；旧 pptx 可作素材）。 */
+const ACCEPT_CONTENT =
+  ".txt,.md,.csv,.json,application/pdf,.docx,.xlsx,.xls,.pptx";
+/** contract 模式合同文件的可选类型（纯文档，不含图片/表格）。 */
+const ACCEPT_CONTRACT = ".txt,.md,application/pdf,.docx";
 
 /** 上传按钮悬停提示中展示的受支持文件类型。 */
 const SUPPORTED_TYPES: { label: string; exts: string }[] = [
@@ -33,11 +46,26 @@ export function InputBox({
   placeholder,
   autoFocus,
   mode = "default",
+  models = [],
+  selectedModel = null,
+  onModelChange,
 }: InputBoxProps) {
   const [value, setValue] = useState("");
+  const noModels = !!onModelChange && models.length === 0;
+  const [noModelNotice, setNoModelNotice] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
   const mediaMode = mode === "image" || mode === "video";
+  const pptMode = mode === "ppt";
+  const contractMode = mode === "contract";
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [backgroundFiles, setBackgroundFiles] = useState<File[]>([]);
+  const [oldContractFile, setOldContractFile] = useState<File | null>(null);
+  const [newContractFile, setNewContractFile] = useState<File | null>(null);
+  const templateInputRef = useRef<HTMLInputElement>(null);
+  const backgroundInputRef = useRef<HTMLInputElement>(null);
+  const oldContractInputRef = useRef<HTMLInputElement>(null);
+  const newContractInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -89,13 +117,35 @@ export function InputBox({
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if ((!trimmed && files.length === 0) || disabled) return;
-    onSend(trimmed, files, mediaMode ? settingsRef.current : undefined);
+    if (noModels) {
+      setNoModelNotice(true);
+      return;
+    }
+    const hasFiles =
+      files.length > 0 || !!templateFile || backgroundFiles.length > 0 || !!oldContractFile || !!newContractFile;
+    if ((!trimmed && !hasFiles) || disabled) return;
+    const picked: PickedFile[] = pptMode
+      ? [
+          ...(templateFile ? [{ file: templateFile, slot: "ppt_template" as const }] : []),
+          ...backgroundFiles.map((f) => ({ file: f, slot: "ppt_background" as const })),
+          ...files.map((f) => ({ file: f, slot: "content" as const })),
+        ]
+      : contractMode
+        ? [
+            ...(oldContractFile ? [{ file: oldContractFile, slot: "contract_old" as const }] : []),
+            ...(newContractFile ? [{ file: newContractFile, slot: "contract_new" as const }] : []),
+          ]
+        : files.map((f) => ({ file: f }));
+    onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined);
     setValue("");
     setFiles([]);
+    setTemplateFile(null);
+    setBackgroundFiles([]);
+    setOldContractFile(null);
+    setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, files, disabled, onSend, revokeAll, mediaMode]);
+  }, [value, files, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, pptMode, contractMode, noModels]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -123,10 +173,45 @@ export function InputBox({
           图片需所选模型支持多模态（视觉）能力才能识别
         </div>
       )}
-      {files.length > 0 && (
+      {noModelNotice && (
+        <div className="input-modal-hint" role="alert">
+          <span aria-hidden>⚠️</span>
+          暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
+        </div>
+      )}
+      {(files.length > 0 || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
         <div className="input-attachments">
+          {templateFile && (
+            <div className="attachment-chip" key="__template">
+              <span className="attachment-slot-badge badge-template">模版</span>
+              <span className="attachment-name" title={templateFile.name}>{templateFile.name}</span>
+              <button className="attachment-remove" onClick={() => setTemplateFile(null)} title="移除" type="button">✕</button>
+            </div>
+          )}
+          {backgroundFiles.map((f, i) => (
+            <div className="attachment-chip" key={`__bg${i}`}>
+              <span className="attachment-slot-badge badge-background">背景</span>
+              <span className="attachment-name" title={f.name}>{f.name}</span>
+              <button type="button" className="attachment-remove" onClick={() => setBackgroundFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+            </div>
+          ))}
+          {oldContractFile && (
+            <div className="attachment-chip" key="__contract_old">
+              <span className="attachment-slot-badge badge-old">旧版</span>
+              <span className="attachment-name" title={oldContractFile.name}>{oldContractFile.name}</span>
+              <button className="attachment-remove" onClick={() => setOldContractFile(null)} title="移除" type="button">✕</button>
+            </div>
+          )}
+          {newContractFile && (
+            <div className="attachment-chip" key="__contract_new">
+              <span className="attachment-slot-badge badge-new">新版</span>
+              <span className="attachment-name" title={newContractFile.name}>{newContractFile.name}</span>
+              <button className="attachment-remove" onClick={() => setNewContractFile(null)} title="移除" type="button">✕</button>
+            </div>
+          )}
           {files.map((f, i) => (
             <div className="attachment-chip" key={i}>
+              {pptMode && <span className="attachment-slot-badge badge-content">内容</span>}
               {f.type.startsWith("image/") && urlsRef.current.get(f) ? (
                 <img className="attachment-thumb" src={urlsRef.current.get(f)} alt={f.name} />
               ) : (
@@ -148,7 +233,7 @@ export function InputBox({
       <textarea
         ref={textareaRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => { setValue(e.target.value); if (noModelNotice) setNoModelNotice(false); }}
         onKeyDown={handleKeyDown}
         onInput={handleInput}
         placeholder={
@@ -165,10 +250,55 @@ export function InputBox({
           ref={fileInputRef}
           type="file"
           multiple
-          accept={mediaMode ? "image/*" : ACCEPT}
+          accept={mediaMode ? "image/*" : pptMode ? ACCEPT_CONTENT : ACCEPT}
           style={{ display: "none" }}
           onChange={(e) => {
             addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={templateInputRef}
+          type="file"
+          accept=".pptx"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) setTemplateFile(f); // 重复选择 = 替换
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={backgroundInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            setBackgroundFiles((prev) => [...prev, ...picked].slice(0, 3));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={oldContractInputRef}
+          type="file"
+          accept={ACCEPT_CONTRACT}
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) setOldContractFile(f); // 重复选择 = 替换
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={newContractInputRef}
+          type="file"
+          accept={ACCEPT_CONTRACT}
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) setNewContractFile(f); // 重复选择 = 替换
             e.target.value = "";
           }}
         />
@@ -189,9 +319,80 @@ export function InputBox({
               参考图
             </button>
           )}
+          {pptMode && (
+            <>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => templateInputRef.current?.click()}
+                disabled={disabled}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="13" rx="2" />
+                  <path d="M8 21h8M12 17v4" />
+                </svg>
+                PPT 模版
+              </button>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => backgroundInputRef.current?.click()}
+                disabled={disabled || backgroundFiles.length >= 3}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="m21 15-5-5L5 21" />
+                </svg>
+                背景图
+              </button>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || files.length >= MAX_FILES}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                </svg>
+                内容文件
+              </button>
+            </>
+          )}
+          {contractMode && (
+            <>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => oldContractInputRef.current?.click()}
+                disabled={disabled}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                  <path d="M9 15h6M9 11h6" />
+                </svg>
+                旧版合同
+              </button>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => newContractInputRef.current?.click()}
+                disabled={disabled}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                  <path d="M12 11v6M9 14h6" />
+                </svg>
+                新版合同
+              </button>
+            </>
+          )}
         </div>
         <div className="input-toolbar-right">
-          {!mediaMode && (
+          {!mediaMode && !pptMode && !contractMode && (
             <div className="upload-wrap">
               <button
                 type="button"
@@ -219,6 +420,14 @@ export function InputBox({
               </div>
             </div>
           )}
+          {onModelChange && (
+            <ModelPicker
+              models={models}
+              value={selectedModel}
+              onChange={onModelChange}
+              disabled={disabled}
+            />
+          )}
           {mode === "image" && (
             <ImageSettingsPicker disabled={disabled} onChange={handleSettingsChange} />
           )}
@@ -235,7 +444,7 @@ export function InputBox({
             <button
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={!value.trim() && files.length === 0}
+              disabled={!value.trim() && files.length === 0 && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile}
               title="发送"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

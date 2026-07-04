@@ -15,6 +15,8 @@ import { createRatingRoutes } from "./routes/ratings.js";
 import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
+import { createModelRoutes } from "./routes/models.js";
+import { createKeyRoutes } from "./routes/keys.js";
 import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes } from "./routes/usage.js";
@@ -52,7 +54,11 @@ async function loadConfig(): Promise<ServiceConfig> {
   const llm = await loadLlmConfig(ROOT);
 
   const configPath = resolve(ROOT, "config/default.json");
-  const config = AppConfigSchema.parse(JSON.parse(await readFile(configPath, "utf-8")));
+  const raw = JSON.parse(await readFile(configPath, "utf-8"));
+  const config = AppConfigSchema.parse(raw);
+  // `modelCatalog` is read directly from the raw JSON (like `generation`) since
+  // AppConfigSchema strips unknown keys.
+  const modelCatalog = (raw as { modelCatalog: ServiceConfig["modelCatalog"] }).modelCatalog;
 
   const pgPassword = process.env.PG_PASSWORD;
   if (!pgPassword) throw new Error("PG_PASSWORD is required");
@@ -60,6 +66,8 @@ async function loadConfig(): Promise<ServiceConfig> {
   return {
     llm,
     models: config.models ?? [],
+    modelCatalog,
+    debug: process.env.DEBUG === "1",
     agent: config.agent as ServiceConfig["agent"],
     mcpConfigPath: resolve(ROOT, "config/mcp-servers.json"),
     skillsDir: resolve(ROOT, "skills"),
@@ -83,6 +91,19 @@ async function main() {
   const service = new AgentService(serviceConfig);
   await service.init();
 
+  // Debug mode (DEBUG=1): seed a stable login-less user whose empty key set makes
+  // every provider resolution fall through to the env LLM. externalUserId 0 is
+  // reserved (real users get their id from tokenhub).
+  if (serviceConfig.debug) {
+    const debugUser = await service.db.upsertUserByExternalId({
+      externalUserId: 0,
+      username: "debug",
+      apiKeys: [],
+    });
+    service.debugUserId = debugUser.id;
+    console.warn("DEBUG=1: auth disabled, using env model/key. Do NOT use in production.");
+  }
+
   const app = new Hono<{ Variables: { userId: string } }>();
 
   app.use("*", logger());
@@ -98,7 +119,10 @@ async function main() {
   app.route("/api/auth", createAuthRoutes(service));
 
   // Auth guard for all other /api/* routes
-  const authMw = createAuthMiddleware(service.sessions);
+  const authMw = createAuthMiddleware(service.sessions, {
+    debug: serviceConfig.debug,
+    debugUserId: service.debugUserId,
+  });
   app.use("/api/conversations/*", authMw);
   app.use("/api/skills/*", authMw);
   app.use("/api/traces/*", authMw);
@@ -106,6 +130,9 @@ async function main() {
   app.use("/api/memory/*", authMw);
   app.use("/api/agents", authMw);
   app.use("/api/agents/*", authMw);
+  app.use("/api/models", authMw);
+  app.use("/api/models/*", authMw);
+  app.use("/api/keys/*", authMw);
   app.use("/api/tasks/*", authMw);
   app.use("/api/assets/*", authMw);
   app.use("/api/uploads/*", authMw);
@@ -122,6 +149,8 @@ async function main() {
   app.route("/api/ratings", createRatingRoutes(service));
   app.route("/api/memory", createMemoryRoutes(service));
   app.route("/api/agents", createAgentRoutes(service));
+  app.route("/api/models", createModelRoutes(service));
+  app.route("/api/keys", createKeyRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));

@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import {
   extractAttachment,
   attachmentKind,
@@ -114,6 +115,121 @@ describe("extractAttachment", () => {
     };
     const part = await extractAttachment({ ...base, filename: "gone.txt", mime: "text/plain" }, s);
     expect(part).toEqual({ type: "text", text: "[附件 gone.txt 无法读取，已忽略内容]" });
+  });
+});
+
+const PPTX_MIME =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+describe("extractAttachment: ppt slots", () => {
+  it("turns a ppt_template attachment into a marker without reading storage", async () => {
+    const storage = { get: vi.fn() } as any;
+    const part = await extractAttachment(
+      {
+        assetId: "tpl-1", filename: "公司模版.pptx", mime: PPTX_MIME,
+        size: 10, url: "/static/uploads/tpl-1.pptx", kind: "doc",
+        slot: "ppt_template",
+      },
+      storage
+    );
+    expect(part).toEqual({
+      type: "text",
+      text: "[PPT模版已上传: 公司模版.pptx (templateAssetId: tpl-1)]",
+    });
+    expect(storage.get).not.toHaveBeenCalled();
+  });
+
+  it("extracts per-slide text from a pptx content file", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "ppt/slides/slide1.xml",
+      `<p:sld xmlns:a="x"><a:t>标题一</a:t><a:t>要点A</a:t></p:sld>`
+    );
+    zip.file(
+      "ppt/slides/slide2.xml",
+      `<p:sld xmlns:a="x"><a:t>标题二</a:t></p:sld>`
+    );
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    const storage = { get: vi.fn(async () => bytes) } as any;
+    const part = await extractAttachment(
+      {
+        assetId: "c1", filename: "旧稿.pptx", mime: PPTX_MIME,
+        size: bytes.length, url: "/static/uploads/c1.pptx", kind: "doc",
+      },
+      storage
+    );
+    expect(part.type).toBe("text");
+    expect(part.text).toContain("标题一");
+    expect(part.text).toContain("要点A");
+    expect(part.text).toContain("标题二");
+  });
+});
+
+describe("ppt_background slot", () => {
+  it("emits a reference marker, not file content", async () => {
+    const storage = { get: vi.fn() } as any;
+    const att: AttachmentRef = {
+      assetId: "bg1", filename: "bg.png", mime: "image/png",
+      size: 1, url: "/static/uploads/bg1.png", kind: "image",
+      slot: "ppt_background",
+    };
+    const part = await extractAttachment(att, storage);
+    expect(part.type).toBe("text");
+    expect((part as any).text).toContain("PPT背景图已上传");
+    expect((part as any).text).toContain("backgroundAssetId: bg1");
+    expect(storage.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("extractAttachment: contract slots", () => {
+  const contractBase = {
+    assetId: "c-old", size: 10, kind: "doc" as const,
+  };
+
+  it("wraps contract_old text with 旧版合同 markers", async () => {
+    const storage = { get: vi.fn(async () => Buffer.from("第一条 甲方为A公司")) } as any;
+    const part = await extractAttachment(
+      {
+        ...contractBase, filename: "old.txt", mime: "text/plain",
+        url: "/static/uploads/c-old.txt", slot: "contract_old",
+      },
+      storage
+    );
+    expect(part).toEqual({
+      type: "text",
+      text: "[旧版合同: old.txt]\n第一条 甲方为A公司\n[/旧版合同: old.txt]",
+    });
+  });
+
+  it("wraps contract_new text with 新版合同 markers", async () => {
+    const storage = { get: vi.fn(async () => Buffer.from("第一条 甲方为B公司")) } as any;
+    const part = await extractAttachment(
+      {
+        ...contractBase, assetId: "c-new", filename: "new.txt", mime: "text/plain",
+        url: "/static/uploads/c-new.txt", slot: "contract_new",
+      },
+      storage
+    );
+    expect(part).toEqual({
+      type: "text",
+      text: "[新版合同: new.txt]\n第一条 甲方为B公司\n[/新版合同: new.txt]",
+    });
+  });
+
+  it("keeps the generic degradation copy when a contract file is unreadable", async () => {
+    const storage = {
+      get: vi.fn(async () => {
+        throw new Error("ENOENT");
+      }),
+    } as any;
+    const part = await extractAttachment(
+      {
+        ...contractBase, filename: "gone.pdf", mime: "application/pdf",
+        url: "/static/uploads/c-old.pdf", slot: "contract_old",
+      },
+      storage
+    );
+    expect(part).toEqual({ type: "text", text: "[附件 gone.pdf 无法读取，已忽略内容]" });
   });
 });
 

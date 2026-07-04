@@ -25,8 +25,13 @@ import {
 } from "@lot-agent/core";
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
+import { createPptTool } from "../tools/ppt-tool.js";
+import { proposeOutlineTool } from "../tools/propose-outline-tool.js";
 import { staticPrefix } from "../util/public-base.js";
-import { loadGenerationConfig, mediaSupportsProgress } from "../generation/config.js";
+import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
+import { TokenhubClient } from "../tokenhub/client.js";
+import { enrichCatalog, resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
+import { ProviderFactory } from "../models/provider-factory.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -35,6 +40,7 @@ import type {
   LLMProvider,
   AgentDefinition,
   ModelConfig,
+  ModelType,
   JobQueue,
   ReviewProvider,
   PlatformConnector,
@@ -64,12 +70,86 @@ const DISABLED_HOST_TOOLS = new Set([
   "execute_command",
 ]);
 
+/** How long a user's tokenhub model catalog stays cached in Redis. */
+const MODEL_CATALOG_TTL_SEC = 300;
+
+/** The env/config default chat model id (`llm.<default>.model`). */
+export function defaultLlmModelId(cfg: LLMConfig): string {
+  return cfg.default === "openai" ? cfg.openai.model : cfg.anthropic.model;
+}
+
+/** Which model a chat turn runs on: an explicit per-request pick wins, then the
+ * conversation's stored model, then the agent's configured default. */
+/**
+ * Read the persisted rolling-summary state from a conversation's metadata.
+ * Returns undefined for missing/malformed state (the ContextManager then
+ * summarizes from scratch).
+ */
+export function readPersistedSummary(
+  metadata: unknown
+): import("@lot-agent/core").SummaryState | undefined {
+  const s = (metadata as { contextSummary?: unknown } | null | undefined)
+    ?.contextSummary as { count?: unknown; text?: unknown } | null | undefined;
+  if (
+    s &&
+    typeof s.count === "number" &&
+    s.count > 0 &&
+    typeof s.text === "string" &&
+    s.text.length > 0
+  ) {
+    return { count: s.count, text: s.text };
+  }
+  return undefined;
+}
+
+/**
+ * Fold a run's terminal error into the assistant message that gets persisted,
+ * mirroring the live "[Error: …]" the client appends. Without this the error
+ * lives only in client state and vanishes on the next `loadMessages` (the DB
+ * row never carried it) — so it should persist like any assistant message.
+ * A user-initiated cancellation is intentional, not a failure, so its error
+ * line is dropped.
+ */
+export function buildFinalAssistantContent(
+  content: string,
+  errorMessage: string | null | undefined,
+  cancelled: boolean
+): string {
+  if (!errorMessage || cancelled) return content;
+  const errLine = `[Error: ${errorMessage}]`;
+  return content ? `${content}\n\n${errLine}` : errLine;
+}
+
+export function resolveConversationModel(
+  explicit: string | undefined,
+  conversationModelId: string | null | undefined,
+  agentDefault: string
+): string {
+  return explicit ?? conversationModelId ?? agentDefault;
+}
+
+/** Synthesize a ModelConfig (for the UsageMeter) for a dynamically-discovered
+ * model id that isn't in the static config, using the catalog's pricing table
+ * with per-type default fallback. */
+export function catalogModelConfig(
+  cfg: ModelCatalogConfig,
+  id: string,
+  type: ModelType
+): ModelConfig {
+  const p = resolvePricing(cfg, id, type);
+  const billingUnit = type === "llm" ? "token" : type === "video" ? "second" : "image";
+  return { id, type, provider: "", billingUnit, ...p, enabled: true };
+}
+
 export interface ServiceConfig {
   llm: LLMConfig;
   models: ModelConfig[];
+  modelCatalog: ModelCatalogConfig;
   agent: Partial<AgentConfig>;
   mcpConfigPath: string;
   skillsDir: string;
+  /** Local-dev debug mode (`DEBUG=1`): login-less, env-model-backed. */
+  debug?: boolean;
   db?: {
     host?: string;
     port?: number;
@@ -97,6 +177,21 @@ export class AgentService {
   sessions!: SessionStore;
   jobQueue!: JobQueue;
   usageMeter!: UsageMeter;
+  /** External token/model platform client (login + model catalog). */
+  readonly tokenhub: TokenhubClient;
+  readonly tokenhubBaseUrl: string;
+  /** Per-model provider/pricing config for the dynamic catalog. */
+  readonly modelCatalog: ModelCatalogConfig;
+  /** Local-dev debug mode: admits login-less callers and surfaces the env model. */
+  readonly debug: boolean;
+  /** Id of the seeded debug user (set in index.ts on startup when debug). */
+  debugUserId?: string;
+  /** Shared Redis connection (also caches the per-user model catalog). */
+  redis!: import("ioredis").Redis;
+  /** Resolved image/video generation config (base url/adapter per media type). */
+  generationConfig!: GenerationConfig;
+  /** Builds per-user LLM/image/video providers bound to a caller's api_key. */
+  providerFactory!: ProviderFactory;
   /** Whether each media type's configured provider reports intermediate progress
    * (drives whether the UI shows a generation percentage). */
   generationSupportsProgress: { image: boolean; video: boolean } = { image: true, video: true };
@@ -131,6 +226,11 @@ export class AgentService {
     this.agentConfig = config.agent;
     this.mcpConfigPath = config.mcpConfigPath;
     this.skillsDir = config.skillsDir;
+    this.modelCatalog = config.modelCatalog;
+    this.debug = config.debug ?? false;
+    this.tokenhubBaseUrl =
+      process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market";
+    this.tokenhub = new TokenhubClient(this.tokenhubBaseUrl);
   }
 
   async init(): Promise<void> {
@@ -140,6 +240,7 @@ export class AgentService {
 
     // Initialize job queue (server enqueues; separate Worker process consumes)
     const conn = createRedisConnection(process.env.REDIS_URL);
+    this.redis = conn;
     this.bullmqQueue = new BullmqJobQueue(this.db, conn);
     this.jobQueue = this.bullmqQueue;
 
@@ -166,10 +267,18 @@ export class AgentService {
     // Resolve per-media-type progress capability from the generation config so
     // the generation route can tell the client whether to show a percentage.
     const genConfig = await loadGenerationConfig(root);
+    this.generationConfig = genConfig;
     this.generationSupportsProgress = {
       image: mediaSupportsProgress(genConfig.image),
       video: mediaSupportsProgress(genConfig.video),
     };
+    // Per-user provider factory: model calls use the caller's tokenhub api_key.
+    this.providerFactory = new ProviderFactory({
+      catalog: this.modelCatalog,
+      llmBaseUrl: this.llmConfig.openai.baseUrl ?? this.tokenhubBaseUrl,
+      imageBase: genConfig.image,
+      videoBase: genConfig.video,
+    });
 
     // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
     this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), staticPrefix("/static/uploads"));
@@ -181,6 +290,16 @@ export class AgentService {
         fontPath: resolve(root, "assets/fonts/NotoSansSC-Regular.otf"),
       })
     );
+
+    // PPT 生成工具：产出写 documents 仓，模版从用户上传仓读取。
+    this.toolRegistry.register(
+      createPptTool({
+        storage: new LocalStorage(resolve(root, "data/documents"), staticPrefix("/static/documents")),
+        uploadStorage: this.uploadStorage,
+        db: this.db,
+      })
+    );
+    this.toolRegistry.register(proposeOutlineTool);
 
     // Load skills
     await this.skillLoader.loadFromDirectory(this.skillsDir);
@@ -208,23 +327,21 @@ export class AgentService {
     populateModelRegistry(this.modelRegistry, this.configModels, this.llmConfig);
 
     // Initialize usage meter
-    this.usageMeter = new UsageMeter(this.db, (id) => this.modelRegistry.getConfig(id));
+    // Dynamically-discovered LLM models aren't in the static registry; fall back
+    // to the catalog's pricing so their chat usage is still metered.
+    this.usageMeter = new UsageMeter(this.db, (id) =>
+      this.modelRegistry.getConfig(id) ?? catalogModelConfig(this.modelCatalog, id, "llm")
+    );
 
     // Initialize service-layer collaborators
     this.messageRepo = new MessageRepository(this.db);
-    const traceModel =
-      this.llmConfig.default === "openai"
-        ? this.llmConfig.openai.model
-        : this.llmConfig.anthropic.model;
+    const traceModel = defaultLlmModelId(this.llmConfig);
     const traceProvider = this.llmConfig.default;
     this.traceRecorderFactory = () =>
       new TraceRecorder(this.traceManager, this.db, traceModel, traceProvider);
 
     // Register agent definitions after all tools are loaded
-    const defaultModelId =
-      this.llmConfig.default === "openai"
-        ? this.llmConfig.openai.model
-        : this.llmConfig.anthropic.model;
+    const defaultModelId = defaultLlmModelId(this.llmConfig);
 
     const generalDef: AgentDefinition = {
       id: "general",
@@ -254,6 +371,37 @@ export class AgentService {
   }
 
   /**
+   * The caller's available models (tokenhub, enriched with provider + pricing),
+   * cached in Redis per user — the single source behind both GET /api/models
+   * and title-model resolution, so "the first model of the catalog" means the
+   * same thing everywhere. Returns null when there's no apiKey and no cache.
+   */
+  async getUserModelCatalog(
+    userId: string,
+    apiKey: string | null
+  ): Promise<ReturnType<typeof enrichCatalog> | null> {
+    const cacheKey = `models:${userId}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) return JSON.parse(cached) as ReturnType<typeof enrichCatalog>;
+    if (!apiKey) {
+      // Debug mode has no tokenhub key: surface the single env LLM so the model
+      // picker and the web send-guard work login-less. Not cached (cheap, and
+      // avoids staleness if env changes across restarts).
+      if (this.debug) {
+        return enrichCatalog(this.modelCatalog, {
+          llm: [defaultLlmModelId(this.llmConfig)],
+          image: [],
+          video: [],
+        });
+      }
+      return null;
+    }
+    const enriched = enrichCatalog(this.modelCatalog, await this.tokenhub.listModels(apiKey));
+    await this.redis.set(cacheKey, JSON.stringify(enriched), "EX", MODEL_CATALOG_TTL_SEC);
+    return enriched;
+  }
+
+  /**
    * Summarize a title for a conversation from its first user message, persist
    * it, and return it (or null if no title was generated — e.g. not the first
    * message, or the conversation was already retitled). The caller emits the
@@ -262,7 +410,8 @@ export class AgentService {
   async generateTitle(
     conversationId: string,
     userMessage: string,
-    attachments?: AttachmentRef[]
+    attachments?: AttachmentRef[],
+    opts?: { userId?: string; modelId?: string }
   ): Promise<string | null> {
     try {
       const conversation = await this.db.getConversation(conversationId);
@@ -284,7 +433,20 @@ export class AgentService {
         : "";
       const titleInput = (userMessage || "（无文字，仅附件）") + attachmentNote;
 
-      const llm = this.getLLMProvider();
+      // 标题模型:显式回合模型 > 用户模型目录第一个 LLM > env 默认 LLM。
+      // 故意不回落到 conversation.model:会话创建时它被种成 env 默认模型,
+      // 若在这里采用,图片/视频会话和目录未加载就发出的首条消息(进页面竞态)
+      // 的标题都会跑到 env 模型上,而不是和对话一致的目录第一名。
+      const apiKey = opts?.userId ? await this.db.getUserApiKey(opts.userId) : null;
+      let modelId = opts?.modelId ?? null;
+      if (!modelId && opts?.userId && apiKey) {
+        modelId = await this.getUserModelCatalog(opts.userId, apiKey)
+          .then((catalog) => catalog?.llm[0]?.id ?? null)
+          .catch(() => null);
+      }
+      const llm = apiKey
+        ? this.providerFactory.llm(modelId ?? defaultLlmModelId(this.llmConfig), apiKey)
+        : this.getLLMProvider();
       let title = "";
       for await (const chunk of llm.chat([
         {
@@ -317,7 +479,8 @@ export class AgentService {
     agentId?: string,
     userId?: string,
     attachments?: AttachmentRef[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    opts?: { modelId?: string }
   ): AsyncIterable<AgentEvent> {
     const def =
       this.agentRegistry.get(agentId ?? "general") ??
@@ -338,21 +501,38 @@ export class AgentService {
     );
 
     // ── Match skills, build agent ──
-    const matchedSkills = this.skillLoader.match(userMessage);
+    const matchedSkills = this.skillLoader.match(userMessage, { agentId: def.id });
     const dynamicParts = matchedSkills.map(
       (s) => `[Skill: ${s.name}]\n${s.content}`
     );
 
-    const llm = this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider();
+    // Resolve the model for this turn (explicit pick > stored > agent default),
+    // persist an explicit pick, and build the LLM with the caller's tokenhub key.
+    // Falls back to the shared registry provider when the user has no api_key
+    // (e.g. local/dev without tokenhub) so the chat path still runs.
+    const conversation = await this.db.getConversation(conversationId);
+    if (opts?.modelId) await this.db.setConversationModel(conversationId, opts.modelId);
+    const modelId = resolveConversationModel(
+      opts?.modelId,
+      conversation?.model,
+      def.defaultModelId
+    );
+    const apiKey = userId ? await this.db.getUserApiKey(userId) : null;
+    const llm = apiKey
+      ? this.providerFactory.llm(modelId, apiKey)
+      : (this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider());
     const agentConfig = this.agentConfig as Record<string, unknown>;
     const contextConfig = agentConfig.context as import("@lot-agent/core").ContextManagerConfig | undefined;
+    // Seed the rolling summary persisted on the conversation so an unchanged
+    // history prefix is never re-summarized across requests.
+    const persistedSummary = readPersistedSummary(conversation?.metadata);
     const agent = new Agent({
       ...this.agentConfig,
       systemPrompt: def.systemPrompt,
       allowedToolNames: def.toolNames,
       dynamicPromptParts: dynamicParts,
       contextConfig: contextConfig
-        ? { ...contextConfig, compressor: llm }
+        ? { ...contextConfig, compressor: llm, initialSummary: persistedSummary }
         : undefined,
     });
 
@@ -453,10 +633,20 @@ export class AgentService {
         yield event;
       }
     } finally {
-      // Save final assistant message
+      // Save final assistant message. When the run ended in an error, fold the
+      // error text into the persisted content so it survives reload /
+      // conversation-switch instead of flashing by (the client's live
+      // "[Error: …]" was previously wiped by the post-stream_end loadMessages,
+      // since the DB row never carried it). Cancellations are intentional and
+      // are not persisted as errors.
+      const finalContent = buildFinalAssistantContent(
+        assistantContent || "",
+        lastErrorMessage,
+        signal?.aborted ?? false
+      );
       await this.messageRepo.saveFinalAssistant(
         conversationId,
-        assistantContent || "",
+        finalContent,
         currentToolCalls
       );
 
@@ -469,6 +659,22 @@ export class AgentService {
         this.jobQueue
           .enqueue("memory.extract", { conversationId }, userId ?? "default")
           .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
+      }
+
+      // Persist the rolling summary when this run extended it (non-fatal)
+      const summaryState = agent.getContextSummaryState();
+      if (
+        summaryState &&
+        (summaryState.count !== persistedSummary?.count ||
+          summaryState.text !== persistedSummary?.text)
+      ) {
+        try {
+          await this.db.mergeConversationMetadata(conversationId, {
+            contextSummary: summaryState,
+          });
+        } catch (err) {
+          console.warn("[ContextSummary] Failed to persist:", err);
+        }
       }
 
       // Finish trace + spans (with the ACTUAL error message, if any)

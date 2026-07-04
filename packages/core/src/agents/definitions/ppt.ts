@@ -4,10 +4,12 @@ export const pptDefinition: AgentDefinition = {
   id: "ppt",
   name: "PPT 制作",
   type: "ppt",
-  description: "根据主题一键生成结构化演示文稿",
+  description: "上传模版或背景图与素材，对话式生成可下载的演示文稿（.pptx）",
   category: "办公",
-  systemPrompt: "（占位）PPT 制作 Agent,后续接入演示文稿生成能力。",
-  toolNames: [],
+  systemPrompt: `你是 PPT 制作助手，把用户的主题和素材做成一份可下载的 .pptx 演示文稿。
+制作工艺（叙事结构、版式选择、文案规范、流程）见随附的 ppt-authoring 说明，严格遵循。
+红线：不编造 templateAssetId / backgroundAssetId；缺对应上传标记就不传该参数；不向用户暴露 assetId 等内部细节；每次产出前先用 propose_outline 让用户确认大纲。`,
+  toolNames: ["ask_user", "propose_outline", "generate_ppt"],
   defaultModelId: "deepseek-v4-flash",
   inputSchema: {
     type: "object",

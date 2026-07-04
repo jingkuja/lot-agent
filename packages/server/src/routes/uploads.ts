@@ -13,6 +13,7 @@ const ALLOWED = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
 const MAX_IMAGE = 10 * 1024 * 1024;
 const MAX_DOC = 20 * 1024 * 1024;

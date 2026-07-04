@@ -9,6 +9,9 @@ type Variables = { userId: string };
 /** Server-side cap (the InputBox MAX_FILES=5 is only a client hint). */
 const MAX_ATTACHMENTS = 5;
 
+/** Attachment slots accepted from the client; anything else is dropped. */
+const VALID_SLOTS = new Set(["ppt_template", "ppt_background", "content", "contract_old", "contract_new"]);
+
 export function createConversationRoutes(service: AgentService): Hono {
   const app = new Hono<{ Variables: Variables }>();
 
@@ -137,7 +140,7 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "Not found" }, 404);
     }
 
-    const body = await c.req.json<{ content: string; attachments?: AttachmentRef[] }>();
+    const body = await c.req.json<{ content: string; attachments?: AttachmentRef[]; modelId?: string }>();
     if (!body.content && !(body.attachments && body.attachments.length)) {
       return c.json({ error: "content or attachments required" }, 400);
     }
@@ -164,6 +167,7 @@ export function createConversationRoutes(service: AgentService): Hono {
         size: asset.size_bytes,
         url: asset.url,
         kind: attachmentKind(asset.mime),
+        slot: a.slot && VALID_SLOTS.has(a.slot) ? a.slot : undefined,
       });
     }
 
@@ -188,23 +192,31 @@ export function createConversationRoutes(service: AgentService): Hono {
             conversation.agent_id,
             userId,
             attachments,
-            c.req.raw.signal
+            c.req.raw.signal,
+            { modelId: body.modelId }
           )) {
             send(agentEventToSse(event));
           }
+          // End the turn BEFORE title generation: the client unlocks the
+          // conversation (input box, ask_user cards) on stream_end, and the
+          // title is a whole extra LLM round-trip — holding stream_end for it
+          // left the UI locked for seconds after the agent already finished.
+          send({ type: "stream_end" });
           // Summarize + persist the conversation title (first message only) and
-          // push it to the client so the sidebar updates live, no refresh.
+          // push it to the client so the sidebar updates live, no refresh. The
+          // client reads the SSE connection until it closes, so a title event
+          // after stream_end is still applied.
           try {
             const title = await service.generateTitle(
               id,
               body.content ?? "",
-              attachments
+              attachments,
+              { userId, modelId: body.modelId }
             );
             if (title) send({ type: "title", title });
           } catch {
             // title generation is best-effort
           }
-          send({ type: "stream_end" });
         } catch (error) {
           send({
             type: "error",
@@ -245,7 +257,7 @@ export function createGenerationRoutes(service: AgentService) {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown>; media?: { type: string; url: string }[] };
+    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown>; media?: { type: string; url: string }[]; model?: string };
     try {
       body = await c.req.json();
     } catch {
@@ -284,9 +296,17 @@ export function createGenerationRoutes(service: AgentService) {
 
     // Enqueue, then record the taskId on the message so a client that reloads
     // mid-generation can re-poll the task to resume progress / completion.
+    const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
     const taskId = await service.jobQueue.enqueue(
       type,
-      { prompt, conversationId, assistantMessageId, ...settings, ...(media ? { media } : {}) },
+      {
+        prompt,
+        conversationId,
+        assistantMessageId,
+        ...settings,
+        ...(media ? { media } : {}),
+        ...(selectedModel ? { modelId: selectedModel } : {}),
+      },
       userId
     );
     const metadata = { ...baseMeta, status: "generating", taskId };
@@ -297,7 +317,9 @@ export function createGenerationRoutes(service: AgentService) {
     // image/video conversations stay stuck on the "新对话" placeholder.
     let title: string | null = null;
     try {
-      title = await service.generateTitle(conversationId, prompt, []);
+      // 只传 userId:本回合的模型是图片/视频模型,做不了文字总结,
+      // 让 generateTitle 回落到模型目录第一个 LLM(无目录时才用 env 默认)。
+      title = await service.generateTitle(conversationId, prompt, [], { userId });
     } catch {
       // title generation is best-effort
     }

@@ -3,15 +3,15 @@ import type { User } from "../api/client.js";
 interface BrandHeaderProps {
   user?: User;
   onLogout?: () => void;
-  onCreate: () => void;
+  onOpenKeySettings?: () => void;
   onCollapse: () => void;
   onOpenAgentCenter: () => void;
 }
 
 /** Top-left brand card: cloud logo + product name + tagline, a collapse
- *  toggle, and a single action row (account + new-chat) — replaces both the
- *  old footer status bar and the sidebar's "对话" header row. */
-export function BrandHeader({ user, onLogout, onCreate, onCollapse, onOpenAgentCenter }: BrandHeaderProps) {
+ *  toggle, and the account block (username on top, 退出 on its own line).
+ *  The new-chat button lives in the sidebar's 最近对话 header. */
+export function BrandHeader({ user, onLogout, onOpenKeySettings, onCollapse, onOpenAgentCenter }: BrandHeaderProps) {
   return (
     <div className="brand-header">
       <div className="brand-card">
@@ -62,9 +62,22 @@ export function BrandHeader({ user, onLogout, onCreate, onCollapse, onOpenAgentC
       <div className="brand-actions">
         <div className="brand-account">
           {user && (
-            <span className="brand-email" title={user.email}>
-              {user.email}
+            <span className="brand-email" title={user.name ?? user.username ?? ""}>
+              {user.name ?? user.username ?? ""}
             </span>
+          )}
+          {user && onOpenKeySettings && (
+            <button
+              className="btn-key-settings"
+              onClick={onOpenKeySettings}
+              title="API-Key 设置"
+              aria-label="API-Key 设置"
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
           )}
           {user && onLogout && (
             <button className="btn-logout" onClick={onLogout}>
@@ -72,13 +85,6 @@ export function BrandHeader({ user, onLogout, onCreate, onCollapse, onOpenAgentC
             </button>
           )}
         </div>
-        <button className="btn-new" onClick={onCreate} title="新建对话">
-          <svg className="btn-new-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden>
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M12 8.5v7M8.5 12h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
-          新会话
-        </button>
       </div>
 
       <button className="brand-agent-center-btn" onClick={onOpenAgentCenter} title="Agent 中心">

@@ -16,6 +16,9 @@ import {
 import { loadLlmConfig } from "../config.js";
 import { loadGenerationConfig, makeImageProvider, makeVideoProvider } from "../generation/config.js";
 import { runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
+import { ProviderFactory } from "../models/provider-factory.js";
+import type { ModelCatalogConfig } from "../models/catalog.js";
+import { pickGenModel } from "./gen-provider.js";
 import { lastTurn } from "../memory/last-turn.js";
 import { UsageMeter } from "../billing/meter.js";
 import { GenCache } from "../billing/gen-cache.js";
@@ -51,9 +54,13 @@ async function main() {
 
   // Load model pricing from config
   const configPath = resolve(ROOT, "config/default.json");
-  const rawConfig = JSON.parse(await readFile(configPath, "utf-8")) as { models?: ModelConfig[] };
+  const rawConfig = JSON.parse(await readFile(configPath, "utf-8")) as {
+    models?: ModelConfig[];
+    modelCatalog: ModelCatalogConfig;
+  };
   const models: ModelConfig[] = rawConfig.models ?? [];
   const modelMap = new Map(models.map((m) => [m.id, m]));
+  const modelCatalog = rawConfig.modelCatalog;
 
   const meter = new UsageMeter(db, (id) => modelMap.get(id));
   const cache = new GenCache(conn);
@@ -61,6 +68,13 @@ async function main() {
   const genConfig = await loadGenerationConfig(ROOT);
   const imageProvider = makeImageProvider(genConfig.image);
   const videoProvider = makeVideoProvider(genConfig.video);
+  // Per-user provider factory: generation calls use the owning user's api_key.
+  const providerFactory = new ProviderFactory({
+    catalog: modelCatalog,
+    llmBaseUrl: genConfig.image.baseUrl,
+    imageBase: genConfig.image,
+    videoBase: genConfig.video,
+  });
 
   /** Resolve a provider url (http(s) or data:) to bytes + mime. */
   async function urlToBytes(url: string): Promise<{ body: Buffer; mime: string }> {
@@ -79,18 +93,37 @@ async function main() {
   const extFor = (mime: string) =>
     mime.includes("svg") ? "svg" : mime.includes("mp4") ? "mp4" : mime.includes("png") ? "png" : mime.split("/")[1] ?? "bin";
 
-  const genDeps = (mediaType: "image" | "video"): RunJobDeps => ({
-    provider: mediaType === "image" ? imageProvider : videoProvider,
-    storage,
-    db,
-    meter,
-    cache,
-    updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
-    urlToBytes,
-    extFor,
-    modelId: mediaType === "image" ? genConfig.image.modelId : genConfig.video.modelId,
-    vendorModel: mediaType === "image" ? genConfig.image.model : genConfig.video.model,
-  });
+  // Build job deps per task: the provider is bound to the owning user's api_key
+  // and the task's selected model (falling back to the media type's configured
+  // default). Billing stays on the configured, statically-priced modelId; the
+  // selected model drives the actual generation and the per-model cache key.
+  const genDeps = async (
+    mediaType: "image" | "video",
+    job: { userId: string; input: Record<string, unknown> }
+  ): Promise<RunJobDeps> => {
+    const base = mediaType === "image" ? genConfig.image : genConfig.video;
+    const model = pickGenModel(mediaType, job.input, base.modelId);
+    const apiKey = (await db.getUserApiKey(job.userId)) ?? "";
+    const provider = apiKey
+      ? mediaType === "image"
+        ? providerFactory.image(model, apiKey)
+        : providerFactory.video(model, apiKey)
+      : mediaType === "image"
+        ? imageProvider
+        : videoProvider;
+    return {
+      provider,
+      storage,
+      db,
+      meter,
+      cache,
+      updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
+      urlToBytes,
+      extFor,
+      modelId: base.modelId,
+      vendorModel: model,
+    };
+  };
 
   // Background memory extraction deps
   const llmConfig = await loadLlmConfig(ROOT);
@@ -100,8 +133,14 @@ async function main() {
   const extractModelId =
     llmConfig.default === "openai" ? llmConfig.openai.model : llmConfig.anthropic.model;
 
-  queue.process("image.generate", (job) => runGenerationJob(genDeps("image"), { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, "image"));
-  queue.process("video.generate", (job) => runGenerationJob(genDeps("video"), { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, "video"));
+  queue.process("image.generate", async (job) => {
+    const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
+    return runGenerationJob(await genDeps("image", j), j, "image");
+  });
+  queue.process("video.generate", async (job) => {
+    const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
+    return runGenerationJob(await genDeps("video", j), j, "video");
+  });
 
   // Register memory.extract handler — runs a cheap LLM to pull durable user
   // facts/preferences from the latest turn and persist them. Best-effort.

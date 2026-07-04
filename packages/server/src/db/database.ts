@@ -122,9 +122,13 @@ export interface StoredUsageLog {
 
 export interface StoredUser {
   id: string;
-  email: string;
+  email: string | null;
   name: string | null;
   created_at: string;
+  external_user_id?: number | null;
+  username?: string | null;
+  api_key?: string | null;
+  api_keys?: string[] | null;
 }
 
 export interface UserBalance {
@@ -451,6 +455,15 @@ export class DB {
       `);
 
       await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS external_user_id BIGINT;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key TEXT;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS api_keys JSONB;
+        ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external ON users (external_user_id);
+      `);
+
+      await client.query(`
         CREATE TABLE IF NOT EXISTS sessions (
           id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
           user_id      UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -667,10 +680,29 @@ export class DB {
     return (rowCount ?? 0) > 0;
   }
 
+  /** Shallow-merge keys into a conversation's metadata JSONB. */
+  async mergeConversationMetadata(
+    id: string,
+    patch: Record<string, unknown>
+  ): Promise<void> {
+    await this.pool.query(
+      "UPDATE conversations SET metadata = metadata || $1::jsonb WHERE id = $2",
+      [JSON.stringify(patch), id]
+    );
+  }
+
   async updateConversationTitle(id: string, title: string): Promise<void> {
     await this.pool.query(
       "UPDATE conversations SET title = $1 WHERE id = $2",
       [title, id]
+    );
+  }
+
+  /** Persist the per-conversation selected model (reuses the `model` column). */
+  async setConversationModel(id: string, modelId: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE conversations SET model = $1 WHERE id = $2",
+      [modelId, id]
     );
   }
 
@@ -973,6 +1005,52 @@ export class DB {
       [id]
     );
     return rows[0] ?? null;
+  }
+
+  async upsertUserByExternalId(args: {
+    externalUserId: number;
+    username: string;
+    apiKeys: string[];
+  }): Promise<StoredUser> {
+    const active = args.apiKeys[0] ?? null;
+    const { rows } = await this.pool.query(
+      `INSERT INTO users (external_user_id, username, name, api_key, api_keys, email)
+         VALUES ($1, $2, $2, $3, $4, $5)
+       ON CONFLICT (external_user_id)
+         DO UPDATE SET username = $2, api_key = $3, api_keys = $4
+       RETURNING *`,
+      [args.externalUserId, args.username, active, JSON.stringify(args.apiKeys), `${args.username}@tokenhub.local`]
+    );
+    return rows[0];
+  }
+
+  async getUserApiKey(userId: string): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      "SELECT api_key FROM users WHERE id = $1",
+      [userId]
+    );
+    return rows[0]?.api_key ?? null;
+  }
+
+  async getUserApiKeys(userId: string): Promise<string[]> {
+    const { rows } = await this.pool.query(
+      "SELECT api_keys FROM users WHERE id = $1",
+      [userId]
+    );
+    const keys = rows[0]?.api_keys;
+    return Array.isArray(keys) ? keys : [];
+  }
+
+  /** Sets the single per-user active key (`users.api_key`); shared across all of that
+   * account's concurrent sessions, not per-session. */
+  async setActiveApiKey(userId: string, index: number): Promise<string> {
+    const keys = await this.getUserApiKeys(userId);
+    if (!Number.isInteger(index) || index < 0 || index >= keys.length) {
+      throw new Error("index_out_of_range");
+    }
+    const active = keys[index];
+    await this.pool.query("UPDATE users SET api_key = $1 WHERE id = $2", [active, userId]);
+    return active;
   }
 
   // ── Sessions ──

@@ -4,23 +4,28 @@ import { InputBox, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
-import type { Agent } from "../api/client.js";
+import type { Agent, CatalogModel, PickedFile } from "../api/client.js";
 
 interface ChatPanelProps {
   messages: DisplayMessage[];
-  onSend: (content: string, files: File[], settings?: ImageSettings | VideoSettings) => void;
+  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings) => void;
   onStop: () => void;
   isStreaming: boolean;
   activeConversationId: string | null;
   onRegenerate?: () => void;
-  /** Content rendered directly above the input box (agent switcher). */
-  inputAbove?: React.ReactNode;
   /** Called when an assistant reply is clicked, to open the preview. */
   onSelectForPreview?: (content: string) => void;
   /** Current agent (for the empty-state hero). */
   agent?: Agent | null;
+  /** Content rendered directly above the input box (agent switcher). */
+  inputAbove?: React.ReactNode;
   /** Current user's name (for the empty-state greeting). */
   userName?: string;
+  /** Per-user model catalog (llm/image/video) for the model picker. */
+  modelCatalog?: { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] };
+  /** Currently selected model id for this conversation (null = agent default). */
+  selectedModel?: string | null;
+  onModelChange?: (id: string) => void;
 }
 
 /** 按本地时间返回问候语：早上好 / 下午好 / 晚上好。 */
@@ -37,10 +42,13 @@ export function ChatPanel({
   onStop,
   isStreaming,
   onRegenerate,
-  inputAbove,
   onSelectForPreview,
   agent,
+  inputAbove,
   userName,
+  modelCatalog,
+  selectedModel,
+  onModelChange,
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -67,7 +75,22 @@ export function ChatPanel({
   const isEmpty = messages.length === 0;
   const agentKind = agent?.type || agent?.id;
   const mode: InputMode =
-    agentKind === "image" ? "image" : agentKind === "video" ? "video" : "default";
+    agentKind === "image"
+      ? "image"
+      : agentKind === "video"
+        ? "video"
+        : agentKind === "ppt"
+          ? "ppt"
+          : agentKind === "contract"
+            ? "contract"
+            : "default";
+
+  const modelList =
+    mode === "image"
+      ? modelCatalog?.image
+      : mode === "video"
+        ? modelCatalog?.video
+        : modelCatalog?.llm;
 
   const inputEl = (
     <>
@@ -78,7 +101,18 @@ export function ChatPanel({
         disabled={isStreaming}
         autoFocus={isEmpty}
         mode={mode}
-        placeholder={mode !== "default" ? "请输入内容" : undefined}
+        placeholder={
+          mode === "ppt"
+            ? "描述要制作的 PPT，可上传模版与内容文件"
+            : mode === "contract"
+              ? "上传旧版与新版合同，我来找出条款与主体差异"
+              : mode !== "default"
+                ? "请输入内容"
+                : undefined
+        }
+        models={modelList ?? []}
+        selectedModel={selectedModel ?? null}
+        onModelChange={onModelChange}
       />
     </>
   );
@@ -105,16 +139,28 @@ export function ChatPanel({
   return (
     <div className="chat-panel">
       <div className="chat-messages">
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            onRegenerate={
-              msg.id === lastAssistantId && !isStreaming ? onRegenerate : undefined
-            }
-            onSelectForPreview={onSelectForPreview}
-          />
-        ))}
+        {messages.map((msg, i) => {
+          const interactiveNames = ["ask_user", "propose_outline"];
+          const hasInteractive =
+            msg.role === "assistant" &&
+            !!msg.toolCalls?.some((tc) => interactiveNames.includes(tc.name));
+          const askAnswer = hasInteractive
+            ? messages.slice(i + 1).find((m) => m.role === "user")?.content
+            : undefined;
+          return (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              onRegenerate={
+                msg.id === lastAssistantId && !isStreaming ? onRegenerate : undefined
+              }
+              onSelectForPreview={onSelectForPreview}
+              onQuickReply={(text) => onSend(text, [])}
+              askAnswer={askAnswer}
+              askInteractive={hasInteractive && askAnswer === undefined && !isStreaming}
+            />
+          );
+        })}
         {awaitingResponse && (
           <div className="message-wrapper message-assistant">
             <div className="message-wrapper-inner">

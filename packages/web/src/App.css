@@ -48,6 +48,8 @@
   --agent-icon-general: linear-gradient(135deg, #8b5cf6, #6d5cf0);
   --agent-icon-image:   linear-gradient(135deg, #6d5cf0, #3b82f6);
   --agent-icon-video:   linear-gradient(135deg, #10b981, #22c55e);
+  --agent-icon-ppt:      linear-gradient(135deg, #f59e0b, #f97316);
+  --agent-icon-contract: linear-gradient(135deg, #64748b, #475569);
   --accent-grad: linear-gradient(135deg, #8b5cf6, #3b82f6);
   --gen-card-from: rgba(167,139,250,0.16);
   --gen-card-to: rgba(96,165,250,0.12);
@@ -119,6 +121,8 @@
   --agent-icon-general: linear-gradient(135deg, #a78bfa, #8b7bf5);
   --agent-icon-image:   linear-gradient(135deg, #8b7bf5, #60a5fa);
   --agent-icon-video:   linear-gradient(135deg, #34d399, #4ade80);
+  --agent-icon-ppt:      linear-gradient(135deg, #fbbf24, #fb923c);
+  --agent-icon-contract: linear-gradient(135deg, #94a3b8, #64748b);
   --accent-grad: linear-gradient(135deg, #a78bfa, #60a5fa);
   --gen-card-from: rgba(167,139,250,0.16);
   --gen-card-to: rgba(96,165,250,0.12);
@@ -249,22 +253,6 @@ html, body, #root {
   transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
 }
 
-/* Per-conversation agent tag (color keyed by agent type) */
-.agent-tag {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  padding: 3px 9px;
-  border-radius: 999px;
-  letter-spacing: 0.02em;
-  color: var(--tag-general-fg);
-  background: var(--tag-general-bg);
-}
-.agent-tag--general { color: var(--tag-general-fg); background: var(--tag-general-bg); }
-.agent-tag--copy    { color: var(--tag-copy-fg);    background: var(--tag-copy-bg); }
-.agent-tag--image   { color: var(--tag-image-fg);   background: var(--tag-image-bg); }
-.agent-tag--video   { color: var(--tag-video-fg);   background: var(--tag-video-bg); }
 
 .sidebar-item:hover { transform: translateY(-2px); box-shadow: var(--neu-raise); }
 .sidebar-item.active {
@@ -478,7 +466,8 @@ html, body, #root {
 
 /* ── Collapsible Tool Cards ── */
 .tool-calls-section {
-  margin-bottom: 6px;
+  /* Sits below the assistant text it belongs to (chronological order). */
+  margin-top: 6px;
 }
 
 .tool-card {
@@ -1062,6 +1051,138 @@ html, body, #root {
 .attachment-remove:hover {
   color: var(--text);
 }
+.attachment-slot-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+}
+.badge-template {
+  color: var(--tag-image-fg);
+  background: var(--tag-image-bg);
+}
+.badge-content {
+  color: var(--tag-copy-fg);
+  background: var(--tag-copy-bg);
+}
+.badge-old {
+  color: var(--tag-general-fg);
+  background: var(--tag-general-bg);
+}
+.badge-new {
+  color: var(--tag-copy-fg);
+  background: var(--tag-copy-bg);
+}
+.badge-background {
+  color: var(--tag-video-fg);
+  background: var(--tag-video-bg);
+}
+
+/* ── ask_user 提问卡片 ── */
+.ask-user-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 6px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tool);
+}
+.ask-user-card.answered { opacity: 0.75; }
+.ask-user-question {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+/* 问题正文支持 Markdown：长确认内容（列表/表格）按正常字重排版，
+   只保留首行提问的加粗感。 */
+.ask-user-question ol,
+.ask-user-question ul,
+.ask-user-question table,
+.ask-user-question blockquote {
+  font-weight: 400;
+}
+.ask-user-options {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.ask-user-option {
+  padding: 6px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.ask-user-option:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ask-user-option:disabled { cursor: default; }
+.ask-user-option.chosen {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.ask-user-free {
+  padding: 8px 12px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.ask-user-free:focus { border-color: var(--accent); }
+.ask-user-submit {
+  align-self: flex-start;
+  padding: 6px 18px;
+  border: 1.5px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.ask-user-submit:hover:not(:disabled) { opacity: 0.88; }
+.ask-user-submit:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.outline-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--overlay-raise);
+  padding: 14px 16px;
+  margin-top: 8px;
+}
+.outline-card.answered { opacity: 0.7; }
+.outline-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.outline-title { font-weight: 600; color: var(--text); }
+.outline-count { font-size: 12px; color: var(--text-muted); }
+.outline-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.outline-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--overlay-sink); }
+.outline-index { color: var(--text-muted); font-size: 12px; min-width: 18px; text-align: right; }
+.outline-layout { color: var(--accent); width: 18px; text-align: center; }
+.outline-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.outline-slide-title { color: var(--text); font-size: 14px; }
+.outline-slide-sum { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outline-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.outline-confirm { background: var(--accent); color: var(--text-on-accent); border: none; border-radius: 8px; padding: 7px 16px; cursor: pointer; font-size: 14px; }
+.outline-confirm:hover { filter: brightness(1.05); }
+.outline-hint, .outline-answered-note { font-size: 12px; color: var(--text-muted); }
 
 .message-attachments {
   display: flex;
@@ -1541,8 +1662,22 @@ html, body, #root {
 
 /* Section label above the conversation list, with a clear gap separating it
    from the brand card above. */
+.sidebar-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+
+.sidebar-recent-header .btn-new {
+  margin-left: auto;
+  height: 30px;
+  padding: 0 13px;
+}
+
 .sidebar-section-label {
-  padding: 0 18px 6px;
+  padding: 0 6px 0;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.1em;
@@ -1550,6 +1685,144 @@ html, body, #root {
   opacity: 0.7;
   flex-shrink: 0;
 }
+
+/* ── Sidebar agent tabs (通用 pinned + scrollable sub-agent strip + ‹ › nudge arrows) ── */
+.sidebar-agent-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 4px 12px 10px;
+}
+
+.agent-tab-strip {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* 滚动落点对齐到每组标签起点,配合子标签的半宽实现「一次两个」翻页 */
+  scroll-snap-type: x mandatory;
+  /* 给 hover 的 translateY(-2px) 留出空间,避免被滚动容器裁剪 */
+  padding: 4px 2px;
+  margin: -4px -2px;
+}
+.agent-tab-strip::-webkit-scrollbar { display: none; }
+/* mask 渐隐只在真的溢出时启用;mask 的颜色只取 alpha 通道,#000 不是渲染色,不影响主题 */
+.agent-tab-strip.is-overflowing {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+}
+
+.agent-tab {
+  flex: 1 0 auto;
+  min-width: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  box-shadow: var(--neu-raise-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.14s, transform 0.14s;
+}
+
+.agent-tab:hover:not(:disabled) {
+  border-color: var(--border-input);
+  transform: translateY(-2px);
+  box-shadow: var(--neu-raise);
+}
+.agent-tab:active:not(:disabled) { transform: translateY(0) scale(0.97); }
+
+.agent-tab.active {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    var(--accent-grad) border-box;
+  box-shadow: var(--neu-pop);
+}
+.agent-tab:disabled { opacity: 0.55; cursor: default; }
+
+/* 通用(General)固定在左侧:仅图标、居中的方形按钮,稍大以突出主入口。 */
+.agent-tab--general {
+  flex: 0 0 auto;
+  min-width: 0;
+  justify-content: center;
+  padding: 8px 16px;
+}
+.agent-tab--general .agent-tab-icon {
+  width: 30px;
+  height: 30px;
+}
+.agent-tab--general .agent-tab-icon svg { width: 18px; height: 18px; }
+
+/* 滚动区内的子标签固定为半宽:任意时刻正好露出两个,翻页切到下一组。
+   两个 calc(50% - 3px) + 一个 6px 间距 = 100% 可视宽度。
+   图标与文字整体等比缩小,视觉上从属于通用主入口。 */
+.agent-tab-strip .agent-tab {
+  flex: 0 0 calc(50% - 3px);
+  min-width: 0;
+  scroll-snap-align: start;
+  padding: 6px 4px;
+  gap: 3px;
+  font-size: 11px;
+}
+.agent-tab-strip .agent-tab-icon {
+  width: 22px;
+  height: 22px;
+}
+.agent-tab-strip .agent-tab-icon svg { width: 13px; height: 13px; }
+
+.agent-tab-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-on-grad);
+  flex-shrink: 0;
+}
+.agent-tab-icon svg { width: 15px; height: 15px; }
+.agent-tab-icon--general  { background: var(--agent-icon-general); }
+.agent-tab-icon--image    { background: var(--agent-icon-image); }
+.agent-tab-icon--video    { background: var(--agent-icon-video); }
+.agent-tab-icon--ppt      { background: var(--agent-icon-ppt); }
+.agent-tab-icon--contract { background: var(--agent-icon-contract); }
+
+.agent-tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.agent-tab-arrow {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.agent-tab-arrow:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.agent-tab-arrow:disabled { opacity: 0.4; cursor: default; }
 
 .brand-card {
   display: flex;
@@ -1631,7 +1904,9 @@ html, body, #root {
 .brand-account {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  width: 100%;
   min-width: 0;
 }
 
@@ -1979,6 +2254,10 @@ html, body, #root {
   color: var(--text);
 }
 
+.btn-key-settings { display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px; }
+.btn-key-settings:hover { color: var(--accent); }
+
 /* ── Status Bar user info ── */
 .status-right {
   display: flex;
@@ -1991,86 +2270,6 @@ html, body, #root {
   font-size: 11px;
 }
 
-/* ── Agent Switcher (input bottom-left) ── */
-/* Agent switcher: card pills with colored icon badges, rendered above the
-   input box (.input-switcher wraps it for spacing). */
-.input-switcher {
-  display: flex;
-  margin-bottom: 12px;
-}
-
-.agent-switcher {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.agent-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg-card);
-  border: 1.5px solid var(--border);
-  border-radius: 999px;
-  color: var(--text);
-  padding: 5px 13px 5px 6px;
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  white-space: nowrap;
-  box-shadow: var(--neu-raise-sm);
-  cursor: pointer;
-  transition: border-color 0.12s, box-shadow 0.14s, transform 0.14s;
-}
-
-.agent-pill:hover:not(:disabled) {
-  border-color: var(--border-input);
-  transform: translateY(-2px);
-  box-shadow: var(--neu-raise);
-}
-
-.agent-pill:active:not(:disabled) {
-  transform: translateY(0) scale(0.97);
-}
-
-/* Active pill: violet→blue gradient border (same double-background trick as the
-   input box) so the card face stays solid. */
-.agent-pill.active {
-  border-color: transparent;
-  background:
-    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
-    var(--accent-grad) border-box;
-  box-shadow: var(--neu-pop);
-}
-
-.agent-pill:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.agent-pill-icon {
-  width: 23px;
-  height: 23px;
-  border-radius: 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--icon-on-grad);
-  flex-shrink: 0;
-}
-
-.agent-pill-icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-.agent-pill-icon--general { background: var(--agent-icon-general); }
-.agent-pill-icon--image   { background: var(--agent-icon-image); }
-.agent-pill-icon--video   { background: var(--agent-icon-video); }
-
-.agent-pill-label {
-  line-height: 1;
-}
 
 /* ── Centered empty state (new conversation) ── */
 .chat-panel--empty {
@@ -2317,34 +2516,6 @@ html, body, #root {
 }
 .gen-asset-download svg { width: 15px; height: 15px; }
 
-/* ── Agent overflow (更多) popover ─────────────────────────────────────── */
-.agent-more-wrap { position: relative; display: inline-flex; }
-.agent-overflow-popover {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  min-width: 160px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 4px;
-  box-shadow: var(--shadow-lg);
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.agent-overflow-item {
-  text-align: left;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 14px;
-}
-.agent-overflow-item:hover { background: var(--bg-hover); }
 
 /* ── Agent 中心 marketplace modal ─────────────────────────────────── */
 .agent-center-overlay {
@@ -2389,7 +2560,6 @@ html, body, #root {
 }
 .agent-card-btn.installed { background: transparent; color: var(--text-muted); border-color: var(--border); }
 .agent-card-btn:disabled { opacity: 0.6; cursor: default; }
-.agent-overflow-item.active { color: var(--accent); font-weight: 600; }
 
 /* Agent 中心 entry — sits at the bottom of the brand-header card. */
 .brand-agent-center-btn {
@@ -2401,3 +2571,148 @@ html, body, #root {
   transition: border-color 0.12s, color 0.12s;
 }
 .brand-agent-center-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Model picker (bottom-right of the input box) ── */
+.model-popup { min-width: 260px; max-width: 320px; }
+.model-search {
+  width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--overlay-sink); color: var(--text); font-size: 13px;
+}
+.model-list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.model-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 10px; border-radius: 8px; background: transparent; border: none;
+  cursor: pointer; text-align: left; color: var(--text);
+}
+.model-row:hover { background: var(--overlay-raise); }
+.model-row.active { background: var(--overlay-raise); }
+.model-row-name { font-size: 13px; font-weight: 500; }
+.model-row-desc { font-size: 12px; color: var(--text-muted); }
+.model-empty { padding: 12px; color: var(--text-muted); font-size: 13px; text-align: center; }
+
+/* ── Agent Switcher (above input) ── */
+/* Card pills with colored icon badges, rendered above the input box
+   (.input-switcher wraps it for spacing). */
+.input-switcher {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.agent-switcher {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  padding: 5px 13px 5px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+  box-shadow: var(--neu-raise-sm);
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.14s, transform 0.14s;
+}
+
+.agent-pill:hover:not(:disabled) {
+  border-color: var(--border-input);
+  transform: translateY(-2px);
+  box-shadow: var(--neu-raise);
+}
+
+.agent-pill:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Active pill: violet→blue gradient border (same double-background trick as the
+   input box) so the card face stays solid. */
+.agent-pill.active {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    var(--accent-grad) border-box;
+  box-shadow: var(--neu-pop);
+}
+
+.agent-pill:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.agent-pill-icon {
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-on-grad);
+  flex-shrink: 0;
+}
+
+.agent-pill-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.agent-pill-icon--general { background: var(--agent-icon-general); }
+.agent-pill-icon--image   { background: var(--agent-icon-image); }
+.agent-pill-icon--video   { background: var(--agent-icon-video); }
+.agent-pill-icon--ppt      { background: var(--agent-icon-ppt); }
+.agent-pill-icon--contract { background: var(--agent-icon-contract); }
+
+.agent-pill-label {
+  line-height: 1;
+}
+
+.agent-more-wrap { position: relative; display: inline-flex; }
+.agent-overflow-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 160px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: var(--shadow-lg);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-overflow-item {
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+}
+.agent-overflow-item:hover { background: var(--bg-hover); }
+.agent-overflow-item.active { color: var(--accent); font-weight: 600; }
+
+/* ── Key Settings Modal ── */
+.key-settings-modal { width: min(420px, 92vw); }
+.key-settings-empty { color: var(--text-muted); font-size: 14px; padding: 12px 4px; }
+.key-list { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-direction: column; gap: 8px; }
+.key-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--overlay-raise);
+  color: var(--text); cursor: pointer; font-family: inherit; text-align: left; }
+.key-row:hover:not(:disabled) { border-color: var(--accent); }
+.key-row.active { border-color: var(--accent); }
+.key-row:disabled { opacity: 0.6; cursor: default; }
+.key-check { width: 16px; height: 16px; border: 1.5px solid var(--border); border-radius: 4px; flex: none; }
+.key-check.checked { background: var(--accent); border-color: var(--accent); }
+.key-mask { font-family: ui-monospace, monospace; letter-spacing: 0.5px; }

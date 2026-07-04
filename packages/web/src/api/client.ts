@@ -1,7 +1,11 @@
+import type { CatalogModel } from "../lib/model-filter.js";
+export type { CatalogModel };
+
 export interface Conversation {
   id: string;
   title: string;
   agent_id: string;
+  model?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -61,8 +65,10 @@ export interface Agent {
 
 export interface User {
   id: string;
-  email: string;
   name: string;
+  username: string | null;
+  apiKeys: string[];
+  activeKeyIndex: number;
 }
 
 export interface TaskStatus {
@@ -86,6 +92,14 @@ export interface AssetMeta {
   created_at: string;
 }
 
+export type AttachmentSlot = "ppt_template" | "ppt_background" | "content" | "contract_old" | "contract_new";
+
+/** 输入框选中的文件 + 它在消息里的角色（PPT 模版 / 内容素材 / 新旧合同）。 */
+export interface PickedFile {
+  file: File;
+  slot?: AttachmentSlot;
+}
+
 export interface UploadedAttachment {
   assetId: string;
   filename: string;
@@ -93,6 +107,7 @@ export interface UploadedAttachment {
   size: number;
   url: string;
   kind: "image" | "doc";
+  slot?: AttachmentSlot;
 }
 
 // ── Token management ──────────────────────────────────────────────────────────
@@ -144,16 +159,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   // ── Auth ────────────────────────────────────────────────────────────────────
-  login: (email: string, name?: string) =>
+  getPublicKey: () => request<{ publicKey: string }>("/auth/public-key"),
+
+  login: (username: string, encryptedPassword: string) =>
     request<{ token: string; user: User }>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, name }),
+      body: JSON.stringify({ username, encryptedPassword }),
     }),
 
   logout: () =>
     request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
 
   me: () => request<User>("/auth/me"),
+
+  // Public: whether the server runs in login-less debug mode, and the debug user.
+  mode: () => request<{ debug: boolean; user: User | null }>("/auth/mode"),
+
+  setActiveKey: (index: number) =>
+    request<{ ok: boolean; activeKeyIndex: number }>("/keys/active", {
+      method: "POST",
+      body: JSON.stringify({ index }),
+    }),
+
+  // ── Models (per-user dynamic catalog) ─────────────────────────────────────────
+  listModels: () =>
+    request<{ llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] }>("/models"),
 
   // ── Agents ──────────────────────────────────────────────────────────────────
   listAgents: () => request<Agent[]>("/agents"),
@@ -218,7 +248,8 @@ export const api = {
     attachments?: UploadedAttachment[],
     // Caller may pass its own controller so a single Stop aborts both the
     // file-upload phase and the SSE stream.
-    controller: AbortController = new AbortController()
+    controller: AbortController = new AbortController(),
+    modelId?: string
   ): AbortController => {
     (async () => {
       try {
@@ -230,7 +261,7 @@ export const api = {
               "Content-Type": "application/json",
               ...authHeaders(),
             },
-            body: JSON.stringify({ content, attachments }),
+            body: JSON.stringify({ content, attachments, modelId }),
             signal: controller.signal,
           }
         );
@@ -289,7 +320,7 @@ export const api = {
   // ── Generation (image/video via conversation) ────────────────────────────
   generate: (
     conversationId: string,
-    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown; media?: { type: "reference_image"; url: string }[] }
+    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown; media?: { type: "reference_image"; url: string }[]; model?: string }
   ) =>
     request<{
       userMessage: { id: string; role: "user"; content: string };

@@ -3,14 +3,16 @@ import { Hono } from "hono";
 import { createAgentRoutes } from "./agents.js";
 
 function fakeService(installed: Map<string, number>) {
+  const defs = [
+    { id: "general", name: "通用助手", type: "general", description: "", toolNames: [], defaultModelId: "m" },
+    { id: "image", name: "图片生成", type: "image", description: "", toolNames: [], defaultModelId: "m" },
+    { id: "contract", name: "合同审核", type: "contract", description: "", toolNames: [], defaultModelId: "m" },
+    { id: "copywriting", name: "文案创作", type: "copywriting", description: "", toolNames: [], defaultModelId: "m", hidden: true },
+  ];
   return {
     agentRegistry: {
-      list: () => [
-        { id: "general", name: "通用助手", type: "general", description: "", toolNames: [], defaultModelId: "m" },
-        { id: "image", name: "图片生成", type: "image", description: "", toolNames: [], defaultModelId: "m" },
-        { id: "contract", name: "合同审核", type: "contract", description: "", toolNames: [], defaultModelId: "m" },
-      ],
-      get: (id: string) => (["general", "image", "contract"].includes(id) ? { id } : undefined),
+      list: () => defs,
+      get: (id: string) => defs.find((d) => d.id === id),
     },
     db: {
       getUserAgents: vi.fn(async () => installed),
@@ -38,6 +40,22 @@ describe("agents routes", () => {
     expect(byId.general.installed).toBe(true);
     expect(byId.image).toMatchObject({ installed: true, sortOrder: 1 });
     expect(byId.contract).toMatchObject({ installed: false, sortOrder: null });
+  });
+
+  it("GET omits hidden agents (even if previously installed)", async () => {
+    const res = await app(fakeService(new Map([["copywriting", 2]]))).request("/agents");
+    const body = await res.json();
+    expect(body.map((a: any) => a.id)).not.toContain("copywriting");
+  });
+
+  it("POST install hidden agent -> 404", async () => {
+    const res = await app(fakeService(new Map())).request("/agents/copywriting/install", { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+
+  it("POST promote hidden agent -> 404", async () => {
+    const res = await app(fakeService(new Map([["copywriting", 2]]))).request("/agents/copywriting/promote", { method: "POST" });
+    expect(res.status).toBe(404);
   });
 
   it("POST install unknown id -> 404", async () => {

@@ -51,6 +51,12 @@ export function createDocTool(deps: DocToolDeps): Tool {
           enum: ["docx", "pdf", "md", "html"],
           description: "Output format (default: docx).",
         },
+        accentColor: {
+          type: "string",
+          description:
+            "Optional 6-digit hex accent color (no '#', e.g. \"1F4E79\") used for headings, " +
+            "table headers and rules in docx/pdf/html. Omit to use the default blue.",
+        },
       },
       required: ["content"],
     },
@@ -59,7 +65,13 @@ export function createDocTool(deps: DocToolDeps): Tool {
         title = "",
         content = "",
         format = "docx",
-      } = (input as { title?: string; content?: string; format?: string }) ?? {};
+        accentColor,
+      } = (input as {
+        title?: string;
+        content?: string;
+        format?: string;
+        accentColor?: string;
+      }) ?? {};
 
       if (!content.trim()) {
         return { content: "Cannot generate a document: `content` is empty.", isError: true };
@@ -72,7 +84,13 @@ export function createDocTool(deps: DocToolDeps): Tool {
       let buffer: Buffer;
       let actualFmt: DocFormat;
       try {
-        const result = await generateDocument({ title, content, format: requested, fontPath });
+        const result = await generateDocument({
+          title,
+          content,
+          format: requested,
+          fontPath,
+          accentColor,
+        });
         buffer = result.buffer;
         actualFmt = result.format;
       } catch (err) {

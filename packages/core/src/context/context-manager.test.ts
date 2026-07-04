@@ -49,12 +49,26 @@ function assistantMsg(tokens: number): Message {
   return { role: "assistant", content: textOfTokens(tokens) };
 }
 
+/** Build a CJK string of roughly `tokens` estimated tokens (1 char/token). */
+function cjkTextOfTokens(tokens: number): string {
+  return "中".repeat(tokens);
+}
+
 describe("ContextManager budget", () => {
   it("clamps generation to non-negative when sub-budgets exceed total", () => {
     const cm = new ContextManager({
       budget: { total: 10_000, systemPrompt: 8_000, retrieval: 60_000 },
     });
     expect(cm.getBudget().generation).toBeGreaterThanOrEqual(0);
+  });
+
+  it("treats an explicit generation: 0 as 'derive from leftover'", () => {
+    // config/default.json historically shipped generation: 0 — that must not
+    // disable the output reserve.
+    const cm = new ContextManager({
+      budget: { total: 120_000, generation: 0 },
+    });
+    expect(cm.getBudget().generation).toBeGreaterThan(0);
   });
 
   it("history budget is elastic: keeps history above the configured `history` floor when window is free", async () => {
@@ -79,6 +93,50 @@ describe("ContextManager budget", () => {
     );
     expect(memMsg).toBeDefined();
     expect(estimateTokens(String(memMsg!.content))).toBeLessThanOrEqual(1_200);
+  });
+});
+
+describe("ContextManager CJK truncation", () => {
+  // CJK text estimates at ~1 token/char (vs 3.5 chars/token for ASCII), so a
+  // char budget derived with the ASCII ratio would overshoot the token budget
+  // by ~3.5x.
+
+  it("truncates a CJK system prompt to the systemPrompt token budget", async () => {
+    const cm = new ContextManager({ budget: { systemPrompt: 1_000 } });
+    const out = await cm.assemble([cjkTextOfTokens(5_000)], undefined, []);
+    const sysMsg = out[0];
+    expect(sysMsg.role).toBe("system");
+    expect(estimateTokens(String(sysMsg.content))).toBeLessThanOrEqual(1_100);
+  });
+
+  it("truncates CJK memory to the memory token budget", async () => {
+    const cm = new ContextManager({ budget: { memory: 1_000 } });
+    const out = await cm.assemble([], cjkTextOfTokens(5_000), []);
+    const memMsg = out.find(
+      (m) => m.role === "system" && String(m.content).includes("Summary")
+    );
+    expect(memMsg).toBeDefined();
+    expect(estimateTokens(String(memMsg!.content))).toBeLessThanOrEqual(1_100);
+  });
+
+  it("truncates a CJK tool output near the per-output token cap", async () => {
+    // toolOutput budget 2_000 → per-output cap ~500 tokens. CJK content must
+    // land near that cap, not 3.5x over it.
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 2_000, toolOutput: 2_000 },
+    });
+    const history: Message[] = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: "calling",
+        toolCalls: [{ id: "t1", name: "x", arguments: {} }],
+      },
+      { role: "tool", toolCallId: "t1", content: cjkTextOfTokens(20_000) },
+    ];
+    const out = await cm.assemble([], undefined, history, undefined);
+    const toolMsg = out.find((m) => m.role === "tool");
+    expect(estimateTokens(String(toolMsg!.content))).toBeLessThanOrEqual(700);
   });
 });
 
@@ -130,6 +188,176 @@ describe("ContextManager truncation correctness", () => {
     const out = await cm.assemble([], undefined, history, undefined);
     const toolOut = out.find((m) => m.role === "tool");
     expect(String(toolOut!.content)).toContain(tail);
+  });
+});
+
+describe("ContextManager oversized-message safety", () => {
+  it("truncates an oversized single user message to fit the history budget", async () => {
+    // elastic history budget = 20K - 2K generation = 18K
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 2_000 },
+    });
+    const history: Message[] = [userMsg(50_000)];
+    const out = await cm.assemble([], undefined, history, undefined);
+    const kept = out.filter((m) => m.role !== "system");
+    expect(kept.length).toBe(1);
+    expect(cm.countTotalTokens(kept)).toBeLessThanOrEqual(18_000);
+    // head+tail elision, not a silent pass-through
+    expect(String(kept[0].content)).toContain("elided");
+  });
+
+  it("drops oldest rounds as a last resort so output always fits the budget", async () => {
+    // elastic history budget = 8K - 4K generation = 4K; per-output cap 200 tokens —
+    // 10 capped rounds still exceed 4K, forcing whole-round dropping.
+    const cm = new ContextManager({
+      budget: { total: 8_000, generation: 4_000, history: 2_000, toolOutput: 800 },
+    });
+    const history: Message[] = [];
+    for (let i = 0; i < 10; i++) {
+      history.push(
+        { role: "user", content: textOfTokens(300) },
+        {
+          role: "assistant",
+          content: "c",
+          toolCalls: [{ id: `t${i}`, name: "x", arguments: {} }],
+        },
+        { role: "tool", toolCallId: `t${i}`, content: textOfTokens(3_000) },
+        { role: "assistant", content: "done" }
+      );
+    }
+    const out = await cm.assemble([], undefined, history, undefined);
+    expect(cm.countTotalTokens(out)).toBeLessThanOrEqual(4_100);
+    // tool pairing must survive the round dropping
+    const openIds = new Set(
+      out.flatMap((m) =>
+        m.role === "assistant" && m.toolCalls ? m.toolCalls.map((c) => c.id) : []
+      )
+    );
+    for (const m of out) {
+      if (m.role === "tool" && m.toolCallId) {
+        expect(openIds.has(m.toolCallId)).toBe(true);
+      }
+    }
+    // the most recent round survives
+    expect(out[out.length - 1].role).toBe("assistant");
+  });
+});
+
+describe("ContextManager compression strategy", () => {
+  it("elides old tool outputs before resorting to the compressor", async () => {
+    // elastic budget 32K; the old round's 40K tool output alone overflows it,
+    // but cheap head+tail elision fixes that without an LLM call.
+    const cm = new ContextManager({
+      budget: { total: 40_000, generation: 8_000, history: 2_000, toolOutput: 4_000 },
+    });
+    const compressor = new FakeCompressor();
+    const history: Message[] = [
+      { role: "user", content: "round1" },
+      {
+        role: "assistant",
+        content: "c",
+        toolCalls: [{ id: "t1", name: "x", arguments: {} }],
+      },
+      { role: "tool", toolCallId: "t1", content: textOfTokens(40_000) },
+      { role: "assistant", content: "ok" },
+      { role: "user", content: "round2" },
+      {
+        role: "assistant",
+        content: "c",
+        toolCalls: [{ id: "t2", name: "x", arguments: {} }],
+      },
+      { role: "tool", toolCallId: "t2", content: "RECENT_TOOL_OUTPUT" },
+      { role: "assistant", content: "ok" },
+    ];
+    const out = await cm.assemble([], undefined, history, undefined, compressor);
+    expect(compressor.calls).toBe(0);
+    const tools = out.filter((m) => m.role === "tool");
+    expect(String(tools[0].content)).toContain("elided");
+    expect(String(tools[1].content)).toBe("RECENT_TOOL_OUTPUT");
+  });
+
+  it("compacts to a low watermark so the boundary stays put as history grows", async () => {
+    // elastic budget 16K; 8 rounds × ~2.5K overflow it.
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 4_000 },
+      maxRawRounds: 20,
+    });
+    const compressor = new FakeCompressor();
+    const base: Message[] = [];
+    for (let i = 0; i < 8; i++) base.push(userMsg(1_250), assistantMsg(1_250));
+    const first = await cm.assemble([], undefined, base, undefined, compressor);
+    const keptTokens = cm.countTotalTokens(
+      first.filter((m) => m.role !== "system")
+    );
+    // compacted to the ~60% watermark, not just barely under the 16K budget
+    expect(keptTokens).toBeLessThanOrEqual(9_600);
+    const callsAfterFirst = compressor.calls;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    // two full new rounds fit inside the headroom → no new summary call
+    const grown = [
+      ...base,
+      userMsg(1_250),
+      assistantMsg(1_250),
+      userMsg(1_250),
+      assistantMsg(1_250),
+    ];
+    await cm.assemble([], undefined, grown, undefined, compressor);
+    expect(compressor.calls).toBe(callsAfterFirst);
+  });
+
+  it("caps each message's contribution to the summarization input", async () => {
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 4_000 },
+    });
+    const compressor = new FakeCompressor();
+    const history: Message[] = [
+      userMsg(30_000), // ~105K chars — must not be fed to the compressor whole
+      assistantMsg(100),
+      userMsg(100),
+      assistantMsg(100),
+    ];
+    await cm.assemble([], undefined, history, undefined, compressor);
+    expect(compressor.calls).toBeGreaterThan(0);
+    expect(compressor.lastUserContent.length).toBeLessThanOrEqual(10_000);
+  });
+});
+
+describe("ContextManager summary persistence", () => {
+  it("exposes the rolling summary and reuses it across instances", async () => {
+    const budget = { total: 20_000, history: 2_000, generation: 4_000 };
+    const base: Message[] = [];
+    for (let i = 0; i < 8; i++) base.push(userMsg(1_250), assistantMsg(1_250));
+
+    const cm1 = new ContextManager({ budget });
+    const compressor1 = new FakeCompressor();
+    await cm1.assemble([], undefined, base, undefined, compressor1);
+    const state = cm1.getSummaryState();
+    expect(state).toBeDefined();
+    expect(state!.count).toBeGreaterThan(0);
+    expect(state!.text).toBe("SUMMARY");
+
+    // A fresh instance (next request) seeded with the persisted state must not
+    // re-summarize the unchanged prefix.
+    const cm2 = new ContextManager({ budget, initialSummary: state });
+    const compressor2 = new FakeCompressor();
+    const out = await cm2.assemble([], undefined, base, undefined, compressor2);
+    expect(compressor2.calls).toBe(0);
+    expect(out.some((m) => String(m.content).includes("SUMMARY"))).toBe(true);
+  });
+
+  it("ignores an invalid persisted summary state", async () => {
+    const budget = { total: 20_000, history: 2_000, generation: 4_000 };
+    const cm = new ContextManager({
+      budget,
+      initialSummary: { count: 999, text: "STALE" },
+    });
+    const compressor = new FakeCompressor();
+    const base: Message[] = [];
+    for (let i = 0; i < 8; i++) base.push(userMsg(1_250), assistantMsg(1_250));
+    const out = await cm.assemble([], undefined, base, undefined, compressor);
+    expect(compressor.calls).toBeGreaterThan(0); // re-summarized from scratch
+    expect(out.some((m) => String(m.content).includes("STALE"))).toBe(false);
   });
 });
 

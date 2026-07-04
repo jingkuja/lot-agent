@@ -61,7 +61,7 @@ describe("POST /conversations/:id/generations", () => {
     });
     expect(res.status).toBe(202);
     const body = await res.json();
-    expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", []);
+    expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], { userId: "u1" });
     expect(body.title).toBe("菊花特写");
   });
 

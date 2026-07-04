@@ -7,9 +7,14 @@ import type {
   ToolResult,
 } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { ContextManager, type ContextManagerConfig } from "../context/index.js";
+import {
+  ContextManager,
+  type ContextManagerConfig,
+  type SummaryState,
+} from "../context/index.js";
 import type { AgentMemoryStore } from "../memory/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
+import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
@@ -88,6 +93,11 @@ export class Agent {
     this.contextManager = new ContextManager(this.config.contextConfig);
   }
 
+  /** Rolling-summary state after a run, for the caller to persist. */
+  getContextSummaryState(): SummaryState | undefined {
+    return this.contextManager.getSummaryState();
+  }
+
   async *run(
     userMessage: string | ContentPart[],
     context: AgentContext,
@@ -106,6 +116,14 @@ export class Agent {
     // Inject memory usage policy when this agent can use memory tools
     if (context.memory && hasMemoryTools(this.config.allowedToolNames)) {
       systemParts.push(MEMORY_POLICY_PROMPT);
+    }
+
+    // Inject the ask-user policy when this agent can use the ask_user tool
+    if (
+      context.toolRegistry.get("ask_user") &&
+      hasAskUserTool(this.config.allowedToolNames)
+    ) {
+      systemParts.push(ASK_USER_POLICY_PROMPT);
     }
 
     // Inject memory into system prompt
@@ -291,6 +309,14 @@ export class Agent {
             content: result.content,
             toolCallId: tc.id,
           });
+
+          // An endsTurn tool that succeeded hands control back to the user
+          // (e.g. ask_user). Stop the run here — remaining batched calls are
+          // skipped; the model re-plans after the user's reply next turn.
+          if (!result.isError && context.toolRegistry.get(tc.name)?.endsTurn) {
+            yield done();
+            return;
+          }
         }
       }
 

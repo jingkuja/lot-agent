@@ -1,27 +1,34 @@
 import { useState } from "react";
 import { api, setToken, type User } from "../api/client.js";
+import { encryptPassword } from "../lib/rsa.js";
 
 interface LoginProps {
   onLogin: (user: User) => void;
 }
 
+const LOGIN_FAIL = "登录失败，请稍后再试或者联系管理员";
+
 export function Login({ onLogin }: LoginProps) {
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) return;
+    if (!username.trim() || !password) return;
     setError(null);
     setLoading(true);
     try {
-      const res = await api.login(email.trim(), name.trim() || undefined);
+      const { publicKey } = await api.getPublicKey();
+      const encrypted = await encryptPassword(publicKey, password);
+      const res = await api.login(username.trim(), encrypted);
       setToken(res.token);
       onLogin(res.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登录失败，请重试");
+      setError(
+        err instanceof Error && err.message !== "Unauthorized" ? err.message : LOGIN_FAIL
+      );
     } finally {
       setLoading(false);
     }
@@ -34,26 +41,27 @@ export function Login({ onLogin }: LoginProps) {
         <p className="login-subtitle">AI 大模型聚合平台</p>
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="login-field">
-            <label htmlFor="login-email">邮箱</label>
+            <label htmlFor="login-username">用户名</label>
             <input
-              id="login-email"
-              type="email"
-              placeholder="your@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              id="login-username"
+              type="text"
+              placeholder="用户名（手机号或账号）"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               required
               autoFocus
               disabled={loading}
             />
           </div>
           <div className="login-field">
-            <label htmlFor="login-name">名称（可选）</label>
+            <label htmlFor="login-password">密码</label>
             <input
-              id="login-name"
-              type="text"
-              placeholder="你的名字"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              id="login-password"
+              type="password"
+              placeholder="密码"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
               disabled={loading}
             />
           </div>
@@ -61,7 +69,7 @@ export function Login({ onLogin }: LoginProps) {
           <button
             type="submit"
             className="login-btn"
-            disabled={loading || !email.trim()}
+            disabled={loading || !username.trim() || !password}
           >
             {loading ? "登录中..." : "进入"}
           </button>

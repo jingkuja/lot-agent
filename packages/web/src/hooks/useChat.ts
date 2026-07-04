@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { api, type UploadedAttachment } from "../api/client.js";
+import { api, type UploadedAttachment, type PickedFile } from "../api/client.js";
 
 export interface GenerationView {
   mediaType: "image" | "video";
@@ -34,8 +34,13 @@ export function useChat(
   onTitle?: (conversationId: string, title: string) => void
 ) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [conversationModel, setConversationModel] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  // One live SSE stream per conversation id. Switching away must NOT kill the
+  // stream (the reply still persists server-side) — but its events may only
+  // touch the view while its conversation is the one on screen, otherwise a
+  // concurrent chat bleeds its reply into whatever conversation is displayed.
+  const streamsRef = useRef<Map<string, AbortController>>(new Map());
   const genPollRef = useRef<{ cancelled: boolean } | null>(null);
   const onStreamEndRef = useRef(onStreamEnd);
   onStreamEndRef.current = onStreamEnd;
@@ -112,6 +117,13 @@ export function useChat(
 
   const loadMessages = useCallback(async (convId: string) => {
     const data = await api.getConversation(convId);
+    // The user may have switched again while this fetch was in flight — a
+    // stale response must not overwrite the conversation now on screen.
+    if (cidRef.current !== convId) return;
+    // Re-entering a conversation whose stream is still live re-disables the
+    // input; its stream events re-attach to the view on the next chunk.
+    setIsStreaming(streamsRef.current.has(convId));
+    setConversationModel((data as { model?: string | null }).model ?? null);
     const display: DisplayMessage[] = data.messages.map((m) => {
       const role = m.role as DisplayMessage["role"];
       const toolName = (m as { tool_name?: string | null }).tool_name;
@@ -166,12 +178,13 @@ export function useChat(
   }, [pollGeneration]);
 
   const streamMessage = useCallback(
-    (content: string, files: File[] = [], preUploaded?: UploadedAttachment[]) => {
+    (content: string, files: PickedFile[] = [], preUploaded?: UploadedAttachment[], modelId?: string) => {
       const cid = cidRef.current;
       if (
         !cid ||
         (!content.trim() && files.length === 0 && !preUploaded?.length) ||
-        isStreaming
+        isStreaming ||
+        streamsRef.current.has(cid)
       )
         return;
 
@@ -180,7 +193,11 @@ export function useChat(
       // One controller for the whole turn so Stop can abort an in-flight upload
       // (set BEFORE uploads start), not just the SSE stream.
       const controller = new AbortController();
-      abortRef.current = controller;
+      streamsRef.current.set(cid, controller);
+      // True while this stream's conversation is still the one on screen.
+      // Every view mutation below is gated on it; the stream itself keeps
+      // running (and persisting) even when the user switches away.
+      const isCurrent = () => cidRef.current === cid;
 
       (async () => {
         // Upload any attached files first, then send the message with their refs.
@@ -189,10 +206,14 @@ export function useChat(
         if (!preUploaded) {
           try {
             uploaded = await Promise.all(
-              files.map((f) => api.uploadFile(f, controller.signal))
+              files.map(async (f) => {
+                const u = await api.uploadFile(f.file, controller.signal);
+                return f.slot ? { ...u, slot: f.slot } : u;
+              })
             );
           } catch (e) {
-            setIsStreaming(false);
+            streamsRef.current.delete(cid);
+            if (isCurrent()) setIsStreaming(false);
             if (controller.signal.aborted) return; // user pressed Stop — silent
             window.alert(
               `文件上传失败：${e instanceof Error ? e.message : String(e)}`
@@ -208,7 +229,7 @@ export function useChat(
           content,
           attachments: uploaded,
         };
-        setMessages((prev) => [...prev, userMsg]);
+        if (isCurrent()) setMessages((prev) => [...prev, userMsg]);
 
         let assistantMsg: DisplayMessage = {
           id: `assistant-${Date.now()}`,
@@ -220,16 +241,26 @@ export function useChat(
         // Accumulate tool calls for the current assistant message
         let pendingToolCalls: { name: string; input: unknown }[] = [];
 
+        // stream_end ends the turn but the connection stays open for the tail
+        // (title generation). A new send may reuse this cid meanwhile, so tail
+        // handlers must not touch the map entry unless it is still ours.
+        let turnEnded = false;
+        const releaseStream = () => {
+          if (streamsRef.current.get(cid) === controller)
+            streamsRef.current.delete(cid);
+        };
+
         api.sendMessage(cid, content, async (event) => {
         if (event.type === "text" && event.content) {
           assistantMsg = {
             ...assistantMsg,
             content: assistantMsg.content + event.content,
           };
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            return [...filtered, assistantMsg];
-          });
+          if (isCurrent())
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              return [...filtered, assistantMsg];
+            });
         }
 
         if (event.type === "tool_call") {
@@ -242,10 +273,11 @@ export function useChat(
             ...assistantMsg,
             toolCalls: [...pendingToolCalls],
           };
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            return [...filtered, assistantMsg];
-          });
+          if (isCurrent())
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              return [...filtered, assistantMsg];
+            });
           // The "executing tool" state stays visible until tool_result arrives,
           // so no artificial delay is needed. Blocking here would stall the
           // awaited SSE read loop and add real latency per tool call.
@@ -266,12 +298,13 @@ export function useChat(
               isError: event.isError ?? false,
             },
           };
-          setMessages((prev) => [
-            ...prev.map((m) =>
-              m.id === finishedAssistantId ? { ...m, isStreaming: false } : m
-            ),
-            resultMsg,
-          ]);
+          if (isCurrent())
+            setMessages((prev) => [
+              ...prev.map((m) =>
+                m.id === finishedAssistantId ? { ...m, isStreaming: false } : m
+              ),
+              resultMsg,
+            ]);
 
           // Reset for next LLM iteration (new assistant message)
           assistantMsg = {
@@ -284,42 +317,54 @@ export function useChat(
         }
 
         if (event.type === "title" && event.title) {
-          // Live sidebar title update — no refresh needed.
-          const tcid = cidRef.current;
-          if (tcid) onTitleRef.current?.(tcid, event.title);
+          // Live sidebar title update — keyed by THIS stream's conversation,
+          // not whatever conversation happens to be on screen when it lands.
+          onTitleRef.current?.(cid, event.title);
         }
 
         if (event.type === "done" || event.type === "stream_end") {
           assistantMsg = { ...assistantMsg, isStreaming: false };
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            // Only add if it has content or tool calls
-            if (assistantMsg.content || assistantMsg.toolCalls?.length) {
-              return [...filtered, assistantMsg];
-            }
-            return filtered;
-          });
-          setIsStreaming(false);
+          if (isCurrent()) {
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              // Only add if it has content or tool calls
+              if (assistantMsg.content || assistantMsg.toolCalls?.length) {
+                return [...filtered, assistantMsg];
+              }
+              return filtered;
+            });
+            setIsStreaming(false);
+          }
 
-          if (event.type === "stream_end" && cid) {
-            loadMessages(cid);
+          if (event.type === "stream_end") {
+            turnEnded = true;
+            releaseStream();
+            if (isCurrent()) loadMessages(cid);
+            // Sidebar refresh runs regardless — the finished conversation's
+            // title/order must update even while another one is on screen.
             onStreamEndRef.current?.();
           }
         }
 
         if (event.type === "error") {
+          // A failure in the tail (after stream_end) only concerns the
+          // best-effort title — the turn already ended cleanly on screen.
+          if (turnEnded) return;
+          releaseStream();
           assistantMsg = {
             ...assistantMsg,
             content: assistantMsg.content + `\n\n[Error: ${event.message}]`,
             isStreaming: false,
           };
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-            return [...filtered, assistantMsg];
-          });
-          setIsStreaming(false);
+          if (isCurrent()) {
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
+              return [...filtered, assistantMsg];
+            });
+            setIsStreaming(false);
+          }
         }
-      }, uploaded, controller);
+      }, uploaded, controller, modelId);
       })();
     },
     [conversationId, isStreaming, loadMessages]
@@ -350,7 +395,7 @@ export function useChat(
   }, [messages, isStreaming, conversationId, streamMessage]);
 
   const generateMedia = useCallback(
-    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: File[] = []) => {
+    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [], modelId?: string) => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || isStreaming) return;
       setIsStreaming(true);
@@ -377,11 +422,11 @@ export function useChat(
 
       (async () => {
         try {
-          const imgs = files.filter((f) => f.type.startsWith("image/"));
-          const uploaded = imgs.length ? await Promise.all(imgs.map((f) => api.uploadFile(f))) : [];
+          const imgs = files.filter((f) => f.file.type.startsWith("image/"));
+          const uploaded = imgs.length ? await Promise.all(imgs.map((f) => api.uploadFile(f.file))) : [];
           const media = uploaded.map((u) => ({ type: "reference_image" as const, url: u.url }));
 
-          const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined });
+          const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined, model: modelId });
           if (token.cancelled) return;
           // Reconcile the optimistic placeholders with the server-assigned ids
           // + vendor taskId, keeping the bubble in its "generating" state.
@@ -420,7 +465,13 @@ export function useChat(
   );
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    // Stop only the conversation on screen — a concurrent stream in another
+    // conversation keeps running.
+    const cid = cidRef.current;
+    if (cid) {
+      streamsRef.current.get(cid)?.abort();
+      streamsRef.current.delete(cid);
+    }
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
     setIsStreaming(false);
   }, []);
@@ -431,10 +482,12 @@ export function useChat(
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
     setIsStreaming(false);
     setMessages([]);
+    setConversationModel(null);
   }, []);
 
   return {
     messages,
+    conversationModel,
     send: streamMessage,
     stop,
     isStreaming,
