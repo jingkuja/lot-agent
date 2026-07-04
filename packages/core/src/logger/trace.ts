@@ -59,10 +59,20 @@ export class ConsoleSink implements TraceSink {
   }
 }
 
+export interface TraceManagerConfig {
+  /** Max traces kept in memory; oldest is evicted (FIFO) past this. Default: 200. */
+  maxTraces?: number;
+}
+
 export class TraceManager {
   private traces = new Map<string, Trace>();
   private spans = new Map<string, Span>();
   private sinks: TraceSink[] = [];
+  private maxTraces: number;
+
+  constructor(config: TraceManagerConfig = {}) {
+    this.maxTraces = config.maxTraces ?? 200;
+  }
 
   addSink(sink: TraceSink): void {
     this.sinks.push(sink);
@@ -77,7 +87,21 @@ export class TraceManager {
       metadata: { model, totalTokens: 0 },
     };
     this.traces.set(trace.id, trace);
+    this.evictIfNeeded();
     return trace;
+  }
+
+  /** FIFO-evict the oldest trace(s) and cascade-delete their spans. */
+  private evictIfNeeded(): void {
+    while (this.traces.size > this.maxTraces) {
+      const oldestId = this.traces.keys().next().value as string | undefined;
+      if (!oldestId) break;
+      const oldest = this.traces.get(oldestId);
+      this.traces.delete(oldestId);
+      if (oldest) {
+        for (const span of oldest.spans) this.spans.delete(span.id);
+      }
+    }
   }
 
   endTrace(traceId: string): void {
@@ -135,9 +159,12 @@ export class TraceManager {
   }
 
   getTraceForConversation(conversationId: string): Trace | undefined {
+    let latest: Trace | undefined;
+    // Map iteration is insertion order; keep overwriting so the last match
+    // (most recently started, among traces still held) wins.
     for (const trace of this.traces.values()) {
-      if (trace.conversationId === conversationId) return trace;
+      if (trace.conversationId === conversationId) latest = trace;
     }
-    return undefined;
+    return latest;
   }
 }
