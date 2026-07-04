@@ -57,3 +57,31 @@ describe("loadHistory materialize", () => {
     ]);
   });
 });
+
+describe("saveAssistantWithToolCalls thinking metadata", () => {
+  it("stores thinking text in metadata when provided", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    const id = await repo.saveAssistantWithToolCalls("c1", "answer", [], "reasoning trace");
+    const row = db.rows.find((r: any) => r.id === id);
+    expect(row.metadata.thinking).toBe("reasoning trace");
+  });
+
+  it("writes empty metadata when no thinking is given", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    const id = await repo.saveAssistantWithToolCalls("c1", "answer", []);
+    const row = db.rows.find((r: any) => r.id === id);
+    expect(row.metadata).toEqual({});
+  });
+});
+
+describe("saveFinalAssistant thinking metadata", () => {
+  it("stores thinking text in metadata when provided", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    await repo.saveFinalAssistant("c1", "final answer", [], "final reasoning");
+    const row = db.rows.find((r: any) => r.content === "final answer");
+    expect(row.metadata.thinking).toBe("final reasoning");
+  });
+});
