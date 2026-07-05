@@ -22,20 +22,20 @@ export interface TokenBudget {
   /** Reserved for generation. 0 or omitted → derived from the leftover. */
   generation: number;
   /**
-   * Total window size. Default: 120K — conservative enough for every model
-   * currently wired up (Claude 200K, DeepSeek-class ~128K).
+   * Total window size. Default: 200K — conservative enough for every model
+   * currently wired up (Claude 200K).
    */
   total: number;
 }
 
 const DEFAULT_BUDGET: TokenBudget = {
-  systemPrompt: 16_000,
-  memory: 4_000,
-  retrieval: 20_000,
+  systemPrompt: 26_000,
+  memory: 14_000,
+  retrieval: 40_000,
   toolOutput: 20_000,
   history: 44_000,
   generation: 0, // derived: total − the blocks above (16K with these defaults)
-  total: 120_000,
+  total: 200_000,
 };
 
 /** Absolute lower bound for history so it never collapses to nothing. */
