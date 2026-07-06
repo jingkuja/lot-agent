@@ -125,13 +125,17 @@ async function main() {
     };
   };
 
-  // Background memory extraction deps
+  // Background memory extraction deps. There's no shared/startup LLM here:
+  // each job builds its provider from the triggering turn's own modelId +
+  // the owning user's tokenhub key, same as chat/title generation — falling
+  // back to the env-configured LLM only when either is unavailable (e.g. a
+  // user without a tokenhub key, or an older queued job with no modelId).
   const llmConfig = await loadLlmConfig(ROOT);
-  const extractLlm = createLLMProvider(llmConfig);
+  const fallbackExtractLlm = createLLMProvider(llmConfig);
+  const fallbackExtractModelId =
+    llmConfig.default === "openai" ? llmConfig.openai.model : llmConfig.anthropic.model;
   const memAdapter = new PgMemoryAdapter(db.pool);
   await memAdapter.init();
-  const extractModelId =
-    llmConfig.default === "openai" ? llmConfig.openai.model : llmConfig.anthropic.model;
 
   queue.process("image.generate", async (job) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
@@ -145,7 +149,7 @@ async function main() {
   // Register memory.extract handler — runs a cheap LLM to pull durable user
   // facts/preferences from the latest turn and persist them. Best-effort.
   queue.process("memory.extract", async (job) => {
-    const { conversationId } = job.input as { conversationId: string };
+    const { conversationId, modelId } = job.input as { conversationId: string; modelId?: string };
     const userId = job.userId;
 
     const messages = await db.getMessages(conversationId);
@@ -156,6 +160,10 @@ async function main() {
     }
 
     const existing = await memAdapter.list(userId);
+
+    const apiKey = await db.getUserApiKey(userId);
+    const extractLlm = apiKey && modelId ? providerFactory.llm(modelId, apiKey) : fallbackExtractLlm;
+    const extractModelId = apiKey && modelId ? modelId : fallbackExtractModelId;
 
     let raw = "";
     let inputTokens = 0;

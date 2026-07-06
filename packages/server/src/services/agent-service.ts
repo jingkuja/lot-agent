@@ -665,10 +665,12 @@ export class AgentService {
       // background worker — never blocks the stream, never shows in the chat.
       // Only extract memory from turns that produced a real assistant reply —
       // empty/tool-only/errored turns would otherwise re-extract a stale turn
-      // and create a junk task row.
+      // and create a junk task row. Pass this turn's resolved modelId so the
+      // worker can extract with the same model + user tokenhub key that
+      // generated the turn, instead of a fixed env-configured model.
       if (producedAssistantText.trim()) {
         this.jobQueue
-          .enqueue("memory.extract", { conversationId }, userId ?? "default")
+          .enqueue("memory.extract", { conversationId, modelId }, userId ?? "default")
           .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
       }
 
