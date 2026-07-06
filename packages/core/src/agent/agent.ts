@@ -1,5 +1,6 @@
 import type {
   ChatParams,
+  JSONSchema,
   Message,
   ContentPart,
   LLMProvider,
@@ -8,6 +9,7 @@ import type {
   ToolResult,
 } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
+import { validateToolInput } from "../tools/validate.js";
 import {
   ContextManager,
   type ContextManagerConfig,
@@ -44,6 +46,13 @@ export interface AgentConfig {
   /** Optional whitelist of tool names this agent is allowed to use. Undefined = all tools. */
   allowedToolNames?: string[];
   modelParams?: ChatParams;
+  /**
+   * JSON Schema the final answer must satisfy. When set, it is pushed to the
+   * provider as `ChatParams.responseSchema` (constrained generation) AND the
+   * final text is JSON-parsed + shallow-validated at the end of the run; a
+   * violation surfaces as a structured `error` event (the run is not retried).
+   */
+  outputSchema?: JSONSchema;
 }
 
 export interface AgentContext {
@@ -82,6 +91,22 @@ const DEFAULT_CONFIG: AgentConfig = {
   systemPrompt: "You are a helpful AI assistant.",
 };
 
+/**
+ * Validate the final answer text against an outputSchema: JSON.parse then
+ * shallow schema check (reusing the tool-input validator). Returns an error
+ * message, or null when valid.
+ */
+function validateStructuredOutput(text: string, schema: JSONSchema): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return `Structured output is not valid JSON: ${text.slice(0, 200)}`;
+  }
+  const errors = validateToolInput(schema, parsed);
+  return errors.length ? `Structured output failed schema validation: ${errors.join("; ")}` : null;
+}
+
 /** Order-independent JSON serialization, so {a,b} and {b,a} dedup the same. */
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -100,6 +125,14 @@ export class Agent {
 
   constructor(config: Partial<AgentConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    // Push outputSchema down to the provider as a constrained-generation hint,
+    // unless the caller already set an explicit responseSchema.
+    if (this.config.outputSchema) {
+      this.config.modelParams = {
+        ...this.config.modelParams,
+        responseSchema: this.config.modelParams?.responseSchema ?? this.config.outputSchema,
+      };
+    }
     this.contextManager = new ContextManager(this.config.contextConfig);
   }
 
@@ -273,6 +306,13 @@ export class Agent {
 
         // If no tool calls, agent is done
         if (!hasToolCalls) {
+          // Structured output: validate the final answer against the schema.
+          // A violation is surfaced as an error event (not retried — the caller
+          // decides what to do), then the run closes cleanly with `done`.
+          if (this.config.outputSchema) {
+            const err = validateStructuredOutput(assistantContent, this.config.outputSchema);
+            if (err) yield { type: "error", message: err };
+          }
           yield done();
           return;
         }

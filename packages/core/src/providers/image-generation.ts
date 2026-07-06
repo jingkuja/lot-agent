@@ -61,10 +61,16 @@ export class HappyhorseImageAdapter implements ImageVendorAdapter {
     if (!status) {
       return { status: "failed", progress: 0, error: vendorErr ?? "generation poll returned no status" };
     }
+    // n>1 returns a `urls` array; single output keeps only `url` (compat).
+    const urls = Array.isArray(meta.urls)
+      ? (meta.urls.filter((u) => typeof u === "string") as string[])
+      : undefined;
+    const url = urls?.[0] ?? (typeof meta.url === "string" ? meta.url : undefined);
     return {
       status,
       progress: Number(j.progress ?? 0),
-      url: typeof meta.url === "string" ? meta.url : undefined,
+      url,
+      ...(urls && urls.length > 0 ? { urls } : {}),
       error: typeof j.error === "string" ? j.error : vendorErr,
     };
   }

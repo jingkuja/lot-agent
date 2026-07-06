@@ -539,6 +539,7 @@ export class AgentService {
       allowedToolNames: def.toolNames,
       dynamicPromptParts: dynamicParts,
       modelParams: def.modelParams,
+      outputSchema: def.outputSchema,
       contextConfig: contextConfig
         ? {
             ...contextConfig,

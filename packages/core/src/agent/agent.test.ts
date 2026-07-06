@@ -334,3 +334,35 @@ describe("Agent.run — E1 additions", () => {
     expect(llm.optsCalls[0]?.params).toEqual({ temperature: 0.2, maxTokens: 500 });
   });
 });
+
+describe("Agent outputSchema validation", () => {
+  const schema = { type: "object", properties: { title: { type: "string" } }, required: ["title"] };
+
+  it("yields an error when the final output is not valid JSON", async () => {
+    const llm = scriptedLLM([textChunks("not json at all")]);
+    const agent = new Agent({ systemPrompt: "sys", outputSchema: schema });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events.some((e) => e.type === "error")).toBe(true);
+  });
+
+  it("yields an error when JSON parses but violates the schema (missing required)", async () => {
+    const llm = scriptedLLM([textChunks('{"subtitle":"x"}')]);
+    const agent = new Agent({ systemPrompt: "sys", outputSchema: schema });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events.some((e) => e.type === "error")).toBe(true);
+  });
+
+  it("passes valid JSON output through without error", async () => {
+    const llm = scriptedLLM([textChunks('{"title":"ok"}')]);
+    const agent = new Agent({ systemPrompt: "sys", outputSchema: schema });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+
+  it("does nothing special when no outputSchema is configured", async () => {
+    const llm = scriptedLLM([textChunks("free text")]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+});

@@ -179,7 +179,10 @@ See `docs/deployment.md`; `deploy/ota/` holds the offline-box OTA update + frp s
 ## Status / not-yet-done
 
 Copywriting Agent is a hidden placeholder. Publish/review remain stubs (real OAuth publishing and
-cloud content review deferred). From `update-ext.md`, E0 (billing correctness + tool security) and
-most of E1 (retry, prompt caching, thinking, ChatParams) are landed; structured output
-(`responseSchema` is declared but unread), RAG/embedding, multi-Agent orchestration primitives,
-jobs v2 (cancel/priority/delay), S3 storage, and a formal migration runner are still open.
+cloud content review deferred). From `update-ext.md`, E0 (billing correctness + tool security),
+most of E1 (retry, prompt caching, thinking, ChatParams), E2 (model capabilities + cost estimation
++ enabled filtering), and E3 (multimodal `ContentPart`, structured output via `responseSchema`/
+`AgentDefinition.outputSchema`, multimodal `ReviewProvider`, ASR/Embedding stub interfaces, multi-image
+`PollResult.urls`) are landed. Still open: RAG retrieval wiring (E4 — Embedding interface exists, no
+VectorStore/Retriever yet), multi-Agent orchestration primitives (E5), jobs v2 (cancel/priority/delay),
+S3 storage, and a formal migration runner.

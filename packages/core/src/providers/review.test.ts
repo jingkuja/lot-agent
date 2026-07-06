@@ -23,3 +23,37 @@ describe("KeywordReviewProvider", () => {
     expect(result.reasons.length).toBeGreaterThan(0);
   });
 });
+
+describe("KeywordReviewProvider.review (multimodal)", () => {
+  it("rejects banned text via the unified review() entrypoint", async () => {
+    const provider = new KeywordReviewProvider();
+    const r = await provider.review({ kind: "text", text: "contains spam-test-word ok" });
+    expect(r.verdict).toBe("reject");
+    expect(r.reasons.length).toBeGreaterThan(0);
+  });
+
+  it("passes clean text via review()", async () => {
+    const provider = new KeywordReviewProvider();
+    const r = await provider.review({ kind: "text", text: "all clean here" });
+    expect(r.verdict).toBe("pass");
+  });
+
+  it("returns 'suspect' for image — the keyword stub can't inspect pixels", async () => {
+    const provider = new KeywordReviewProvider();
+    const r = await provider.review({ kind: "image", url: "https://x/a.png" });
+    expect(r.verdict).toBe("suspect");
+    expect(r.reasons.length).toBeGreaterThan(0);
+  });
+
+  it("returns 'suspect' for video", async () => {
+    const provider = new KeywordReviewProvider();
+    const r = await provider.review({ kind: "video", url: "https://x/a.mp4", scene: "publish" });
+    expect(r.verdict).toBe("suspect");
+  });
+
+  it("reviewText remains a working compat shell over review()", async () => {
+    const provider = new KeywordReviewProvider();
+    const r = await provider.reviewText("spam-test-word");
+    expect(r.verdict).toBe("reject");
+  });
+});

@@ -22,6 +22,7 @@ import type {
   LLMTool,
   LLMProvider,
 } from "../types/index.js";
+import { mediaPartPlaceholder } from "../types/index.js";
 
 export interface AnthropicProviderConfig {
   apiKey: string;
@@ -77,13 +78,25 @@ export class AnthropicProvider implements LLMProvider {
     const thinkingEnabled = typeof reasoning === "number" && reasoning > 0;
     const maxTokens = params?.maxTokens ?? 8192;
 
+    // Structured output: Anthropic has no `response_format`, so force a single
+    // synthetic tool whose input_schema is the requested schema and read its
+    // arguments back as the answer (see mapAnthropicStream's structured path).
+    const STRUCTURED_TOOL = "respond";
+    const structured = !!params?.responseSchema;
+    const apiTools: Tool[] | undefined = structured
+      ? [{ name: STRUCTURED_TOOL, description: "Return the final answer as JSON matching the schema.", input_schema: params!.responseSchema as Tool["input_schema"] }]
+      : anthropicTools;
+
     const body: Parameters<typeof this.client.messages.stream>[0] = {
       model: this.model,
       max_tokens: thinkingEnabled ? Math.max(maxTokens, reasoning + 1024) : maxTokens,
       system: systemBlocks.length ? systemBlocks : undefined,
       messages: cachedMessages,
-      tools: anthropicTools,
+      tools: apiTools,
     };
+    if (structured) {
+      body.tool_choice = { type: "tool", name: STRUCTURED_TOOL };
+    }
     if (thinkingEnabled) {
       body.thinking = { type: "enabled", budget_tokens: reasoning };
     } else {
@@ -92,7 +105,10 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     const createStream = () =>
-      mapAnthropicStream(this.client.messages.stream(body, { signal: opts?.signal }));
+      mapAnthropicStream(
+        this.client.messages.stream(body, { signal: opts?.signal }),
+        structured ? STRUCTURED_TOOL : undefined
+      );
 
     yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable });
   }
@@ -120,7 +136,14 @@ function isAnthropicRetryable(err: unknown): boolean {
  * — previously `done` carried no usage at all.
  */
 export async function* mapAnthropicStream(
-  events: AsyncIterable<RawMessageStreamEvent>
+  events: AsyncIterable<RawMessageStreamEvent>,
+  /**
+   * Name of the forced structured-output tool (see structured-output path in
+   * `chat`). When a tool_use block with this name completes, its accumulated
+   * JSON is emitted as a final `text` chunk — the answer — rather than a
+   * `tool_call` the Agent would try to execute.
+   */
+  structuredToolName?: string
 ): AsyncIterable<ChatChunk> {
   const toolBuffers = new Map<number, { id: string; name: string; input: string }>();
   let promptTokens = 0;
@@ -164,17 +187,23 @@ export async function* mapAnthropicStream(
     if (event.type === "content_block_stop") {
       const buf = toolBuffers.get(event.index);
       if (buf && (buf.input || buf.name)) {
-        let parsedArgs: unknown;
-        try {
-          parsedArgs = JSON.parse(buf.input || "{}");
-        } catch {
-          parsedArgs = buf.input;
+        if (structuredToolName && buf.name === structuredToolName) {
+          // Forced structured-output tool: surface its JSON as the final text.
+          yield { type: "text", content: buf.input || "{}" };
+          toolBuffers.delete(event.index);
+        } else {
+          let parsedArgs: unknown;
+          try {
+            parsedArgs = JSON.parse(buf.input || "{}");
+          } catch {
+            parsedArgs = buf.input;
+          }
+          yield {
+            type: "tool_call",
+            toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
+          };
+          toolBuffers.delete(event.index);
         }
-        yield {
-          type: "tool_call",
-          toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
-        };
-        toolBuffers.delete(event.index);
       }
     }
 
@@ -257,7 +286,9 @@ export function toAnthropicMessage(msg: Message): MessageParam {
           // 非 data URL（兜底）：当作文本提示，避免直接丢弃
           return { type: "text", text: `[图片: ${p.image.url}]` };
         }
-        return { type: "text", text: p.text ?? "" };
+        if (p.type === "text") return { type: "text", text: p.text ?? "" };
+        // video / audio / file — no native block; degrade to a text placeholder.
+        return { type: "text", text: mediaPartPlaceholder(p) };
       }
     );
     return { role: "user", content };

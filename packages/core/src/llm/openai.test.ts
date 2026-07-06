@@ -136,6 +136,39 @@ describe("OpenAIProvider.chat retry", () => {
     expect(out).toEqual(["ok"]);
   });
 
+  it("sends response_format json_schema when params.responseSchema is set", async () => {
+    const { OpenAIProvider } = await import("./openai.js");
+    const provider = new OpenAIProvider({ apiKey: "x", model: "m" });
+    const create = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } })
+      .client.chat.completions.create;
+    create.mockImplementation(async () => ({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ index: 0, delta: { content: "{}" }, finish_reason: "stop" }] };
+      },
+    }));
+    const schema = { type: "object", properties: { a: { type: "number" } }, required: ["a"] };
+    // drain
+    for await (const _ of provider.chat([{ role: "user", content: "hi" }], undefined, { params: { responseSchema: schema } })) void _;
+    const arg = create.mock.calls[0][0] as { response_format?: { type: string; json_schema: { schema: unknown } } };
+    expect(arg.response_format?.type).toBe("json_schema");
+    expect(arg.response_format?.json_schema.schema).toEqual(schema);
+  });
+
+  it("omits response_format when no responseSchema is set", async () => {
+    const { OpenAIProvider } = await import("./openai.js");
+    const provider = new OpenAIProvider({ apiKey: "x", model: "m" });
+    const create = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } })
+      .client.chat.completions.create;
+    create.mockImplementation(async () => ({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ index: 0, delta: { content: "hi" }, finish_reason: "stop" }] };
+      },
+    }));
+    for await (const _ of provider.chat([{ role: "user", content: "hi" }])) void _;
+    const arg = create.mock.calls[0][0] as { response_format?: unknown };
+    expect(arg.response_format).toBeUndefined();
+  });
+
   it("retries the vendor's malformed tool-call rejection (plain error) and succeeds", async () => {
     const { OpenAIProvider } = await import("./openai.js");
     const provider = new OpenAIProvider({ apiKey: "x", model: "test-model" });

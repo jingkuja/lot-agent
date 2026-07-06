@@ -13,7 +13,15 @@ import { placeholderSvgDataUrl } from "./placeholder.js";
 export type MediaType = "image" | "video";
 export interface ReferenceMedia { type: "reference_image"; url: string }
 export interface CreateResult { taskId: string; status: string; progress: number }
-export interface PollResult { status: string; progress: number; url?: string; error?: string }
+export interface PollResult {
+  status: string;
+  progress: number;
+  /** First (or only) artifact URL — compat position for single-output callers. */
+  url?: string;
+  /** All artifact URLs when the request produced multiple (image `n > 1`). */
+  urls?: string[];
+  error?: string;
+}
 
 export function parseSize(size?: string): [number, number] {
   const m = /^(\d+)[x*](\d+)$/.exec(size ?? "");
@@ -185,7 +193,8 @@ export class MockGenerationClient<Req extends { prompt: string; size?: string }>
     }
     if (pct >= 100) {
       const [w, h] = parseSize(t.req.size);
-      return { status: "completed", progress: 100, url: placeholderSvgDataUrl({ prompt: t.req.prompt, width: w, height: h, kind: this.kind }) };
+      const url = placeholderSvgDataUrl({ prompt: t.req.prompt, width: w, height: h, kind: this.kind });
+      return { status: "completed", progress: 100, url, urls: [url] };
     }
     return { status: "processing", progress: pct };
   }

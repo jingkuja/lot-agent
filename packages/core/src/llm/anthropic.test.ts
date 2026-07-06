@@ -241,3 +241,30 @@ describe("withCacheControl", () => {
     expect(withCacheControl(msg)).toBe(msg);
   });
 });
+
+describe("mapAnthropicStream structured output", () => {
+  it("unwraps the forced structured tool into a final text chunk (not a tool_call)", async () => {
+    const events = eventStream([
+      { type: "message_start", message: { usage: { input_tokens: 5 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t1", name: "respond" } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"a":1}' } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_stop" },
+    ]);
+    const out = await collect(mapAnthropicStream(events, "respond"));
+    expect(out.some((c) => c.type === "tool_call")).toBe(false);
+    const text = out.filter((c) => c.type === "text").map((c) => c.content).join("");
+    expect(text).toBe('{"a":1}');
+  });
+
+  it("leaves ordinary tools as tool_call chunks when no structured tool is set", async () => {
+    const events = eventStream([
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t1", name: "read_file" } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":"a"}' } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_stop" },
+    ]);
+    const out = await collect(mapAnthropicStream(events));
+    expect(out.some((c) => c.type === "tool_call" && c.toolCall?.name === "read_file")).toBe(true);
+  });
+});

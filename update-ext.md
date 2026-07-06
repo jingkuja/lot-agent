@@ -216,7 +216,7 @@ export interface ModelConfig { /* 现有字段 */ capabilities?: ModelCapabiliti
 
 **目标**：业务 Agent 的产物是**结构化**、**多模态**的，类型系统与审核链路先行铺路。
 
-- [ ] **ContentPart 扩展**：
+- [x] **ContentPart 扩展**：
   ```ts
   export interface ContentPart {
     type: "text" | "image" | "video" | "audio" | "file";
@@ -226,11 +226,11 @@ export interface ModelConfig { /* 现有字段 */ capabilities?: ModelCapabiliti
   }
   ```
   两个 LLM Provider 对不支持的 part 降级为文本占位（沿用 anthropic.ts 现有的兜底手法）。
-- [ ] **outputSchema**：`AgentDefinition` 增 `outputSchema?: JSONSchema`；装配时经
+- [x] **outputSchema**：`AgentDefinition` 增 `outputSchema?: JSONSchema`；装配时经
   `ChatParams.responseSchema` 下发 —— openai 走 `response_format: { type: "json_schema" }`，
   anthropic 走 tool-choice 强制单工具的等价实现；`Agent.run` 结束时若定义了 outputSchema，
   对最终文本做一次 JSON.parse + 校验，失败 yield 结构化 error（不重跑，交上层决策）。
-- [ ] **审核多模态化**：
+- [x] **审核多模态化**：
   ```ts
   export interface ReviewInput {
     kind: "text" | "image" | "video";
@@ -247,9 +247,9 @@ export interface ModelConfig { /* 现有字段 */ capabilities?: ModelCapabiliti
   ```
   `KeywordReviewProvider` 实现 text，image/video 返回 `suspect`（"stub 无法审图"）——
   逼着发布链路对非文本产物显式决策而非静默放行。保留 `reviewText` 为兼容薄壳,标 `@deprecated`。
-- [ ] **ASR / Embedding 接口**：`providers/asr.ts`（`transcribe(req) → { text, durationSec }`）、
+- [x] **ASR / Embedding 接口**：`providers/asr.ts`（`transcribe(req) → { text, durationSec }`）、
   `providers/embedding.ts`（`embed(texts: string[]) → number[][]`，E4 的地基）+ 各配 Stub。
-- [ ] **多图输出**：`PollResult` 增 `urls?: string[]`（保留 `url` 为首图兼容位）；
+- [x] **多图输出**：`PollResult` 增 `urls?: string[]`（保留 `url` 为首图兼容位）；
   Happyhorse 适配器与 Mock 同步填充。
 - [ ] **Commit**：`feat(core): multimodal content parts + structured output + multimodal review + asr/embedding interfaces`
 

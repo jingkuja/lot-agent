@@ -16,6 +16,7 @@ import type {
   LLMTool,
   LLMProvider,
 } from "../types/index.js";
+import { mediaPartPlaceholder } from "../types/index.js";
 import { withLLMRetry, isMalformedToolCallError } from "./retry.js";
 
 export interface OpenAIProviderConfig {
@@ -71,6 +72,17 @@ export class OpenAIProvider implements LLMProvider {
               temperature: params?.temperature,
               max_tokens: params?.maxTokens,
               top_p: params?.topP,
+              // Structured output: constrain generation to the JSON schema.
+              // `strict: false` so arbitrary user schemas (without the strict
+              // subset's additionalProperties/required rules) aren't rejected.
+              ...(params?.responseSchema
+                ? {
+                    response_format: {
+                      type: "json_schema" as const,
+                      json_schema: { name: "response", schema: params.responseSchema, strict: false },
+                    },
+                  }
+                : {}),
             },
             { signal: opts?.signal }
           );
@@ -196,14 +208,14 @@ export function toOpenAIMessage(msg: Message): OpenAI.ChatCompletionMessageParam
     }
     return {
       role: "user",
-      content: msg.content.map((p) =>
-        p.type === "text"
-          ? { type: "text" as const, text: p.text ?? "" }
-          : {
-              type: "image_url" as const,
-              image_url: { url: p.image?.url ?? "" },
-            }
-      ),
+      content: msg.content.map((p) => {
+        if (p.type === "text") return { type: "text" as const, text: p.text ?? "" };
+        if (p.type === "image") {
+          return { type: "image_url" as const, image_url: { url: p.image?.url ?? "" } };
+        }
+        // video / audio / file — no OpenAI content type for these; degrade to text.
+        return { type: "text" as const, text: mediaPartPlaceholder(p) };
+      }),
     };
   }
   if (msg.role === "assistant") {
