@@ -1,11 +1,12 @@
 # CLAUDE.md
 
-Guidance for working in this repo. Lot Agent is the **platform foundation** for a multi-Agent
-content-creation product (文案 / 图片 / 视频 → 审核 → 平台发布). It started as a single general
-AI agent and was upgraded (phases P0–P8, see `plan.md`) into a multi-Agent / multi-modal /
-metered / async platform base. **Business logic for the three content Agents is intentionally NOT
-implemented yet** — image/video generation, real model vendors, OAuth publishing, and content
-review are wired as pluggable interfaces with **stub** implementations.
+Guidance for working in this repo. Lot Agent is a multi-Agent content/office assistant product:
+one always-available **通用助手 (`general`)** plus installable **vertical sub-Agents** (图片生成 /
+视频生成 / PPT 制作 / 合同对比 / 文案[hidden]) managed through an in-app **Agent 中心**. Users log
+in through an external **tokenhub** account; all model calls (LLM / image / video) go through
+tokenhub's OpenAI-compatible endpoints and are billed to the **user's own api key**. The platform
+foundation phases are documented in `plan.md` (P0–P8) and `update-ext.md` (core extension E0–E6);
+consult them for history/roadmap, not current behavior.
 
 ## Stack
 
@@ -13,11 +14,13 @@ TypeScript monorepo using **npm workspaces** (not pnpm). Node ≥ 18, ESM.
 
 | Package | Name | Tech | Builds with |
 |---|---|---|---|
-| `packages/core` | `@lot-agent/core` | Agent engine + all reusable abstractions (pure-ish, no HTTP/DB) | tsup |
-| `packages/server` | `@lot-agent/server` | Hono HTTP API + PostgreSQL (`pg`) + BullMQ worker | tsup |
-| `packages/web` | `@lot-agent/web` | React 19 + Vite chat/workspace UI | vite |
+| `packages/core` | `@lot-agent/core` | Agent engine + reusable abstractions (no HTTP/DB deps) | tsup |
+| `packages/server` | `@lot-agent/server` | Hono HTTP API + PostgreSQL (`pg`) + BullMQ worker + doc/PPT tooling | tsup |
+| `packages/web` | `@lot-agent/web` | React 19 + Vite single-page Workspace UI | vite |
 
-External infra: **PostgreSQL** (business data) and **Redis** (BullMQ queue, gen-cache, progress pub/sub). Object storage is local-disk (`data/assets/`) behind an `ObjectStorage` interface.
+External infra: **PostgreSQL** (business data), **Redis** (BullMQ queue, model-catalog cache,
+gen-cache, session-tier memory, progress pub/sub), **tokenhub** (auth + model gateway). Object
+storage is local-disk (`data/assets|documents|uploads`) behind an `ObjectStorage` interface.
 
 ## Commands
 
@@ -31,100 +34,152 @@ npm run build      # all workspaces
 npm test           # vitest (root) — or: npm test -w @lot-agent/core | -w @lot-agent/server
 ```
 
-Tests use **Vitest**; test files are colocated as `*.test.ts`. Web dev proxies `/api` and `/static` to `http://localhost:3000` (see `packages/web/vite.config.ts`).
+Tests use **Vitest**, colocated as `*.test.ts`. Web dev proxies `/api` and `/static` to
+`http://localhost:3000` (`packages/web/vite.config.ts`).
 
-### Required env (secrets are env-driven; `config/default.json` holds non-secret structure)
+### Env (see `.env.example`; non-secret structure lives in `config/default.json`, personal overrides in gitignored `config/local.json`)
 
-`.env` (see `.env.example`): `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`,
-`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`, `PG_HOST/PG_PORT/PG_USER/PG_PASSWORD/PG_DATABASE`
-(server throws if `PG_PASSWORD` missing), `REDIS_URL`, `CORS_ORIGIN`. Personal config overrides go
-in the gitignored `config/local.json`.
+- `OPENAI_API_KEY/BASE_URL/MODEL`, `ANTHROPIC_*`, `LLM_DEFAULT` — env-configured **fallback** LLM
+  (used in DEBUG mode / when a user has no tokenhub key; normal chat uses the per-user key).
+- `TOKENHUB_API_KEY` (+ optional `IMAGE_GEN_API_KEY` / `VIDEO_GEN_API_KEY`) — image/video vendor key.
+- `BIGMODEL_API_KEY` — 智谱 web_search.
+- `PG_*` (server throws if `PG_PASSWORD` missing), `REDIS_URL`/`REDIS_PASSWORD`, `PORT`, `CORS_ORIGIN`.
+- `PUBLIC_BASE_URL` — absolute base for `/static/*` download links (deployed box).
+- `DEBUG=1` — skips login (seeded debug user, env LLM). Never in production. `DEBUG_LLM=1` logs raw payloads.
 
 ## Architecture
 
 ```
-core/                                server/                              web/
-  agent/        ReAct loop engine      services/                            pages/Home, Workspace
-  agents/       AgentRegistry +          agent-service.ts (orchestrator)    components/* (chat, preview,
-                definitions(copy/img/    message-repository.ts (persist)                gallery, task-progress, login, theme-toggle)
-                video/general)           trace-recorder.ts (spans+trace)    api/client.ts (token + SSE)
-  models/       ModelRegistry+pricing    sse-adapter.ts (AgentEvent→SSE)    hooks/useChat/useConversations/useTheme
-                                                                            lib/theme.ts (light/dark + persist)
-  providers/    image/video/tts/review  routes/  (one file per resource)
-                (interfaces + stubs)     auth/  session-store + middleware
-  publish/      PlatformConnector(stub)  jobs/  bullmq-queue + redis
-  jobs/         JobQueue + in-mem fake   billing/ meter + gen-cache
-  storage/      ObjectStorage + Local    workers/ index.ts (job consumer)
-  billing/      calcCost (pure)          db/database.ts (pg + inline migrate)
-  tools/ skills/ mcp/ context/ memory/ logger/ config/
+core/                                 server/                               web/
+  agent/     ReAct loop engine          services/                             pages/Workspace (single page)
+  agents/    AgentRegistry + defs         agent-service.ts (orchestrator)     components/ AgentSwitcher,
+             (copy/image/video/            attachment-extractor.ts (docx/pdf/            AgentCenterModal, ModelPicker,
+              ppt/contract; general          xlsx/pptx → text, 30K cap)                  GenerationCard, OutlineCard,
+              built in agent-service)       message-repository / sse-adapter/            AskUserCard, KeySettingsModal,
+  llm/       openai+anthropic providers,    trace-recorder                                InputBox(uploads), Sidebar…
+             withLLMRetry, complete(),    routes/   one file per resource      hooks/ useChat/useAgents/useModels/
+             prompt caching, thinking     auth/     session-store(PG)+rsa+mw          useConversations/useTheme
+  models/    ModelRegistry + pricing     models/   tokenhub catalog + ProviderFactory
+  providers/ image/video adapters        tokenhub/ client (login + model list)
+             (happyhorse, chat-          generation/ config loader + run-job
+              completions), review, tts  tools/    generate_document, generate_ppt, propose_outline
+  publish/   PlatformConnector (stub)    ppt/      renderer/themes/layouts/template-renderer
+  jobs/      JobQueue + in-mem fake      memory/   RedisSessionBackend, last-turn
+  storage/   ObjectStorage + Local       jobs/     bullmq-queue + redis
+  billing/   calcCost (pure)             billing/  meter + gen-cache
+  tools/     builtins + ask_user         workers/  index.ts (image/video job consumer)
+  skills/ mcp/ context/ memory/ logger/  db/       database.ts (pg + inline migrate)
 ```
 
-### Request flow (chat)
-`POST /api/conversations/:id/messages` (auth + ownership) → `AgentService.streamAgentResponse`
-builds an `Agent` from the conversation's `AgentDefinition` (system prompt + tool whitelist +
-model id), resolves the text provider from `ModelRegistry`, runs the ReAct loop, and yields
-`AgentEvent`s. `sse-adapter` maps each event to SSE; `message-repository` persists; `trace-recorder`
-records spans + the trace; usage is metered at the end. Memory is **per-request** (see Concurrency).
+### Auth flow (tokenhub)
+Browser fetches `GET /api/auth/public-key` (ephemeral per-process RSA keypair) → encrypts the
+password → `POST /api/auth/login` decrypts and forwards to tokenhub → on success upserts the user
+(`external_user_id`, `username`, `api_keys` JSONB) and mints a PG-backed session token. All other
+`/api/*` routes require the Bearer token (`authMw` sets `c.get("userId")`; cross-user access → 404).
+`POST /api/keys/active` switches the user's active api key and busts the model-catalog cache.
 
-### Async generation flow (image/video)
-`POST /api/tasks` (quota pre-check) → `BullmqJobQueue.enqueue` writes a `tasks` row + Redis job →
-the **worker process** (`workers/index.ts`) consumes it, checks the Redis gen-cache, calls a Stub
-provider, writes the artifact to `ObjectStorage`, registers an `assets` row, meters usage, caches
-the result. Clients poll `GET /api/tasks/:id`. Assets served at `/static/assets/:filename`.
+### Model resolution (per user, per request)
+`GET /api/models` → `getUserModelCatalog`: fetch the user's model list from tokenhub with their
+active key, enrich with `config/default.json`'s `modelCatalog` (providerMap → adapter, pricing),
+cache in Redis `models:{userId}` (TTL 300s). Chat builds an LLM provider **per request** via
+`ProviderFactory.llm(modelId, userApiKey)` (OpenAI-compatible; providers are never shared
+singletons because billing follows the caller's key). The conversation's selected model persists
+on the conversation row.
+
+### Chat flow
+`POST /api/conversations/:id/messages` (SSE) → `AgentService.streamAgentResponse` builds an
+`Agent` from the conversation's `AgentDefinition` (system prompt + tool whitelist + model params),
+runs the ReAct loop, yields `AgentEvent`s (incl. `thinking`) → `sse-adapter` maps to SSE;
+`message-repository` persists; `trace-recorder` records spans; usage is metered at the end.
+Attachments uploaded via `POST /api/uploads` are parsed by `attachment-extractor` and injected
+into the message as tagged text blocks. Titles are auto-generated on the first message.
+
+### In-conversation generation flow (image/video)
+`POST /api/conversations/:id/generations` (quota pre-check, 402) → persists a pending assistant
+message (`metadata.kind: "generation"`) → `BullmqJobQueue.enqueue` → the **worker process**
+consumes `image.generate` / `video.generate`, checks the Redis gen-cache, calls the real vendor
+adapter (`happyhorse` polling / `chat-completions`; `mock` flag in config), stores the artifact,
+meters usage. The web `GenerationCard` polls `GET /api/tasks/:id` (taskId is saved on the message
+so reloads can resume). Artifacts: `/static/assets/:filename`; docs `/static/documents/…`;
+uploads `/static/uploads/…`.
 
 ## Key concepts
 
-- **Agent registry** (`core/agents`): each Agent is an `AgentDefinition` (`id`, `systemPrompt`,
-  `toolNames` whitelist, `defaultModelId`, `inputSchema`). `general` = full tools + config prompt;
-  `copywriting`/`image`/`video` are placeholder definitions (no business logic). Tools are scoped
-  per Agent via `ToolRegistry.toLLMTools(names)` — e.g. `copywriting` cannot call `execute_command`.
-- **Model registry** (`core/models`): `ModelConfig` carries type (`llm|image|video|tts|asr|embedding|review`)
-  + pricing; `getProvider(id)` lazily builds the provider. Seeded from `config/default.json`'s `models`.
-- **Billing** (`core/billing/cost.ts` pure `calcCost` + `server/billing/meter.ts`): every model call
-  writes `usage_logs`; daily/monthly spend is **derived via SQL SUM** (no counter columns). Expensive
-  tasks are quota-checked (402). Redis `GenCache` returns cached generations **without re-billing**.
-- **Auth & concurrency (P6)**: multi-user with **multiple concurrent sessions per account**
-  (`sessions` table, Bearer token). Every `/api/*` route except `/api/auth/*` is behind `authMw`,
-  which sets `c.get("userId")`; resources are user-scoped with ownership checks (cross-user → 404).
-  **Memory is constructed fresh per request** (`AgentMemoryStore` per `streamAgentResponse`) and
-  memory tools read `context.memory` — never a shared singleton — so concurrent users/sessions
-  never clobber each other's ephemeral state.
-- **Review + publish (P7)**: `ReviewProvider` (keyword stub) runs **before** publish; `reject` →
-  403 and is still logged to `review_logs`. `PlatformConnector` stubs for `xiaohongshu`/`wechat_mp`.
+- **Agent system**: `AgentDefinition` (`id`, `type`, `category`, `hidden`, `systemPrompt`,
+  `toolNames` whitelist, `defaultModelId`, `modelParams`, `inputSchema`) in
+  `core/agents/definitions`. The `general` def is assembled at startup in `agent-service.ts` from
+  config prompt + all registered tools minus `DISABLED_HOST_TOOLS` (file/shell tools stay
+  registered but hidden on the deployed box — only web + document tools are exposed).
+  Install state lives in `user_agents` (per-user, `sort_order`, MRU promote); `general` is always
+  installed and not uninstallable; `image`+`video` are seeded on first access
+  (`server/agents/install-order.ts`); `hidden` defs (copywriting) are invisible/uninstallable.
+- **Interactive tools end the turn**: `ask_user` (core) and `propose_outline` (server) set
+  `endsTurn: true` — the loop stops and the web renders AskUserCard/OutlineCard for the user's
+  reply. Follow this pattern for any "wait for user input" tool.
+- **Office tooling (server/tools)**: `generate_document` (Markdown → docx/pdf/md/html via
+  docx/pdfkit/marked, returns a download link) and `generate_ppt` (pptxgenjs renderer with theme
+  presets, layout validation, and cloning/theme-extraction from a user-uploaded .pptx template —
+  see `server/ppt/`). The PPT Agent's craft knowledge lives in `skills/ppt-authoring.md`.
+- **Skills**: markdown files in root `skills/`, frontmatter supports `agents:` (scope a skill to
+  specific Agent ids) and `triggers:` (substring match on the user message).
+- **Memory**: session tier is Redis-backed per conversation (20-min TTL,
+  `server/memory/redis-session-backend.ts`); user tier is PG. Memory objects are constructed
+  per request — never a shared singleton — so concurrent sessions don't clobber each other.
+- **Billing**: `core/billing/cost.ts` pure `calcCost` + `server/billing/meter.ts`; every model
+  call writes `usage_logs`; spend is derived via SQL SUM (no counter columns). Dynamic tokenhub
+  models fall back to `modelCatalog` pricing. Expensive tasks quota-check (402); Redis `GenCache`
+  returns cached generations without re-billing.
+- **Core LLM layer (`core/llm`)**: OpenAI + Anthropic streaming providers with
+  `withLLMRetry` (retry before first chunk on 429/5xx), `complete()` non-streaming helper,
+  Anthropic prompt caching (system + last history message, `cachedPromptTokens` reported on
+  `done`), `thinking` events, strict usage accounting. `ChatParams`
+  (`temperature/maxTokens/topP/reasoning`) flows from `AgentDefinition.modelParams`.
+- **Tool safety (core/tools)**: file tools are sandboxed to the working directory; `web_fetch`
+  has an SSRF guard (incl. redirect hops); tool input is validated against its JSON schema before
+  execute; `execute_command` kills its subprocess on cancellation. Don't regress these.
+- **Review + publish**: still **stub** (`KeywordReviewProvider` gate before publish, reject → 403
+  + `review_logs`; `PlatformConnector` stubs for xiaohongshu/wechat_mp).
 
 ## Data layer
 
 PostgreSQL via `pg`. **Migrations are inline** in `db/database.ts` `migrate()` using
-`CREATE TABLE IF NOT EXISTS` + idempotent `ALTER ... ADD COLUMN IF NOT EXISTS` (no migration-runner).
-Tables: `users`, `sessions`, `conversations`, `messages`, `message_tool_calls`, `message_ratings`,
-`traces`, `spans`, `tasks`, `assets`, `usage_logs`, `user_balance`, `review_logs`,
-`platform_accounts`, `publish_records`. NUMERIC columns return strings from pg — convert with `Number()`.
+`CREATE TABLE IF NOT EXISTS` + idempotent `ALTER … ADD COLUMN IF NOT EXISTS` (no migration runner).
+Tables: `users` (tokenhub identity + `api_keys`), `sessions`, `conversations`, `messages`,
+`message_tool_calls`, `message_ratings`, `traces`, `spans`, `tasks`, `assets`, `usage_logs`,
+`user_balance`, `review_logs`, `platform_accounts`, `publish_records`, `user_agents`.
+NUMERIC columns return strings from pg — convert with `Number()`.
 
-## API surface (all `/api/*` need a Bearer token except `/api/auth/*`)
+## API surface (Bearer token required except `/api/auth/*` and `/health`)
 
-`auth/login|logout|me`, `agents`, `conversations` (+`/messages` SSE, `/regenerate`), `tasks`,
-`assets/:id` (+ `/static/assets/:filename`), `usage/{summary,logs,balance}`, `balance`,
-`platform/auth/:platform` + `platform/:platform/connect`, `publish` + `publish/records`,
-`skills`, `traces`, `ratings`, `memory`.
+`auth/{public-key,mode,login,logout,me}`, `agents` (+ `/:id/install`, `/:id/promote`),
+`models`, `keys/active`, `conversations` (+ `/messages` SSE, `/regenerate`, `/generations`),
+`uploads`, `tasks`, `assets/:id`, `usage/{summary,logs,balance}`, `balance`,
+`platform/…` + `publish` (stub), `skills`, `traces`, `ratings`, `memory`.
+Static: `/static/{assets,documents,uploads}/:filename`.
+
+## Deployment
+
+Single-box Docker Compose (`docker-compose.yml`): postgres, redis, server, worker (same image,
+`ROLE`-switched), web (nginx serving `web/dist`, proxying `/api` + `/static` with SSE unbuffered).
+See `docs/deployment.md`; `deploy/ota/` holds the offline-box OTA update + frp scripts.
 
 ## Conventions
 
 - **ESM imports use explicit `.js` suffixes** (e.g. `from "./registry.js"`), 2-space indent.
 - **TDD with Vitest** for new pure/logic units; tests colocated as `*.test.ts`.
-- **Interface-in-core, impl-in-server** when an abstraction needs DB/Redis (e.g. `JobQueue` interface
-  + `InMemoryJobQueue` in core; `BullmqJobQueue` in server). Keeps core free of `pg`/`ioredis`.
-- **No secrets in git**: keys empty in `config/default.json`, injected via env. Do not commit real keys.
-- Stub providers (`Stub*Provider`, `Keyword*`, `Stub*Connector`) prove the pipeline — replace with real
-  vendor integrations in the business phase, behind the existing interfaces.
-- **Web theming**: all colors are CSS variables in `web/src/App.css`; `:root` is the **light** (default)
-  palette, `[data-theme="dark"]` overrides it. A pre-paint script in `index.html` sets `data-theme` from
-  `localStorage` (key `lot:theme`) before first render to avoid flash; `ThemeToggle` + `useTheme` flip it
-  at runtime. Use the existing `var(--*)` tokens (incl. `--overlay-raise/sink`, `--code-*-bg`) for new UI —
-  never hardcode hex/`rgba`, or light mode breaks.
+- **Interface-in-core, impl-in-server** when an abstraction needs DB/Redis (e.g. `JobQueue` in
+  core, `BullmqJobQueue` in server). Core stays free of `pg`/`ioredis`/vendor SDKs.
+- **No secrets in git**: keys empty in `config/default.json`, injected via env.
+- **Error opacity for auth**: login failures (decrypt, tokenhub, network) collapse to one generic
+  message — don't leak causes to clients.
+- **Web theming**: all colors are CSS variables in `web/src/App.css`; `:root` = light,
+  `[data-theme="dark"]` overrides. A pre-paint script in `index.html` reads `localStorage`
+  (`lot:theme`) before first render. Use existing `var(--*)` tokens — never hardcode hex/`rgba`.
 
 ## Status / not-yet-done
 
-Business Agent flows (real copywriting/image/video generation), real model vendors (通义万相/可灵/
-DALL·E), real OAuth publishing, cloud content review (阿里云内容安全), `projects` table, Redis
-rate-limiting, and a formal migration runner are **deferred**. The chat SSE path needs an LLM API key
-to exercise end-to-end. See `plan.md` for the full phased plan and what each phase delivered.
+Copywriting Agent is a hidden placeholder. Publish/review remain stubs (real OAuth publishing and
+cloud content review deferred). From `update-ext.md`, E0 (billing correctness + tool security) and
+most of E1 (retry, prompt caching, thinking, ChatParams) are landed; structured output
+(`responseSchema` is declared but unread), RAG/embedding, multi-Agent orchestration primitives,
+jobs v2 (cancel/priority/delay), S3 storage, and a formal migration runner are still open.

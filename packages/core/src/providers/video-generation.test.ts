@@ -28,6 +28,18 @@ describe("HappyhorseVideoAdapter", () => {
     expect(a.isTerminal("failed")).toBe("failed");
     expect(a.isTerminal("processing")).toBe(null);
   });
+  it("parsePoll surfaces a vendor error envelope (HTTP 200, no status) as failed", () => {
+    // tokenhub returns errors as 200 with { code, message, data:null } and no
+    // status field — must become a failure carrying the human-readable message,
+    // not an empty status the client would coerce to "running" (infinite poll).
+    const r = a.parsePoll({
+      code: "fail_to_fetch_task",
+      message: '{"error":{"message":"Failed to create video generation task: {\\"error\\":{\\"message\\":\\"当前账号处未订购seedance2.0模型资费包，或资费包已到期，请先订购后才能使用\\",\\"type\\":\\"invalid_authentication_error\\"}}","type":"proxy_error"}}',
+      data: null,
+    });
+    expect(r.status).toBe("failed");
+    expect(r.error).toContain("未订购seedance2.0");
+  });
 });
 
 describe("HttpVideoGenerationProvider", () => {
@@ -50,6 +62,43 @@ describe("HttpVideoGenerationProvider", () => {
     const r = await p.poll("task_1");
     expect(r.status).toBe("completed");
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe("https://api/v1/videos/task_1");
+  });
+  it("create throws the clean vendor message when the endpoint returns HTTP 500", async () => {
+    // The real tokenhub /video/generations response for an unsubscribed model:
+    // HTTP 500 with a structured error envelope. The thrown error must be the
+    // human-readable message, not a raw-JSON dump.
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      text: async () =>
+        '{"code":"fail_to_fetch_task","message":"{\\"error\\":{\\"message\\":\\"Failed to create video generation task: {\\\\\\"error\\\\\\":{\\\\\\"message\\\\\\":\\\\\\"当前账号处未订购seedance2.0模型资费包，或资费包已到期，请先订购后才能使用\\\\\\",\\\\\\"type\\\\\\":\\\\\\"invalid_authentication_error\\\\\\"}}\\",\\"type\\":\\"proxy_error\\"}}","data":null}',
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "doubao-seedance-2.0" });
+    await expect(p.create({ prompt: "小猫睡觉" })).rejects.toThrow(/未订购seedance2\.0/);
+  });
+  it("create throws instead of returning an empty task id when a 200 body has no task_id", async () => {
+    // The real failure mode: /video/generations answers HTTP 200 with an error
+    // envelope and no task_id. Returning taskId:"" (status "queued") would make
+    // the job runner poll /videos/ forever; it must throw the vendor message.
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ code: "fail_to_fetch_task", message: '{"error":{"message":"当前账号处未订购seedance2.0模型资费包"}}', data: null }),
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "vm" });
+    await expect(p.create({ prompt: "小猫睡觉" })).rejects.toThrow(/未订购seedance2\.0/);
+  });
+  it("poll surfaces a 200 error envelope as failed instead of looping as 'running'", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ code: "fail_to_fetch_task", message: '{"error":{"message":"当前账号处未订购seedance2.0模型资费包"}}', data: null }),
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "vm" });
+    const r = await p.poll("task_1");
+    expect(r.status).toBe("failed");
+    expect(r.error).toContain("未订购seedance2.0");
   });
 });
 

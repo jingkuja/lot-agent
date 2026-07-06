@@ -1,6 +1,7 @@
 import {
   HttpGenerationClient,
   MockGenerationClient,
+  extractVendorError,
   type CreateResult,
   type PollResult,
   type ReferenceMedia,
@@ -55,11 +56,19 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
   parsePoll(json: unknown): PollResult {
     const j = (json ?? {}) as Record<string, unknown>;
     const meta = (j.metadata ?? {}) as Record<string, unknown>;
+    const status = String(j.status ?? "");
+    const vendorErr = extractVendorError(j);
+    // A statusless body is a vendor error envelope (HTTP 200 with { code,
+    // message }) — surface it as a failure with the real message rather than an
+    // empty status that would be read as "still running".
+    if (!status) {
+      return { status: "failed", progress: 0, error: vendorErr ?? "generation poll returned no status" };
+    }
     return {
-      status: String(j.status ?? ""),
+      status,
       progress: Number(j.progress ?? 0),
       url: typeof meta.url === "string" ? meta.url : undefined,
-      error: typeof j.error === "string" ? j.error : undefined,
+      error: typeof j.error === "string" ? j.error : vendorErr,
     };
   }
   isTerminal(status: string): "completed" | "failed" | null {

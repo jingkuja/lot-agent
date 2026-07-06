@@ -20,6 +20,43 @@ export function parseSize(size?: string): [number, number] {
   return m ? [Number(m[1]), Number(m[2])] : [1024, 1024];
 }
 
+/**
+ * Pull a human-readable error out of a vendor error envelope. tokenhub reports
+ * failures as HTTP 200 with `{ code, message, data:null }` and no `status`
+ * field; `message` is itself often a JSON-stringified nested error. Digs through
+ * up to a few nested `error.message` / `message` layers to the innermost text,
+ * falling back to `code`. Returns undefined for a normal (non-error) response.
+ */
+export function extractVendorError(j: Record<string, unknown>): string | undefined {
+  const nested = (j.error ?? {}) as Record<string, unknown>;
+  let msg =
+    (typeof j.message === "string" && j.message) ||
+    (typeof nested.message === "string" && nested.message) ||
+    undefined;
+  if (typeof msg === "string") {
+    // `message` is frequently a JSON string wrapping the real error — unwrap it.
+    let cur = msg;
+    for (let i = 0; i < 5; i++) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(cur) as Record<string, unknown>;
+      } catch {
+        break; // not JSON — `cur` is the leaf message
+      }
+      const inner = (parsed.error ?? {}) as Record<string, unknown>;
+      const next =
+        (typeof inner.message === "string" && inner.message) ||
+        (typeof parsed.message === "string" && parsed.message) ||
+        undefined;
+      if (!next) break;
+      cur = next;
+    }
+    msg = cur.trim();
+  }
+  const code = typeof j.code === "string" ? j.code : undefined;
+  return msg || code || undefined;
+}
+
 /** Vendor adapter shape; `Req` is the media-specific request type. */
 export interface VendorAdapter<Req> {
   createPath(): string;
@@ -37,6 +74,23 @@ export interface HttpGenerationOpts<Req> {
   model: string;
 }
 
+/**
+ * Turn a non-2xx generation response into an Error carrying the cleanest message
+ * available. tokenhub returns a structured error envelope even on 5xx (e.g. a
+ * 500 whose body is `{ code:"fail_to_fetch_task", message:"…未订购…资费包" }`), so
+ * dig the human-readable vendor message out of it instead of dumping raw JSON.
+ */
+async function responseError(res: { status: number; text(): Promise<string> }, ctx: string): Promise<Error> {
+  const body = await res.text();
+  let vendorMsg: string | undefined;
+  try {
+    vendorMsg = extractVendorError(JSON.parse(body) as Record<string, unknown>);
+  } catch {
+    // body wasn't JSON — fall back to the raw text below
+  }
+  return new Error(vendorMsg ?? `${ctx}: ${res.status} ${body}`);
+}
+
 /** Drives any `VendorAdapter<Req>` over HTTP (async create→poll). */
 export class HttpGenerationClient<Req extends { model?: string }> {
   constructor(protected opts: HttpGenerationOpts<Req>) {}
@@ -48,8 +102,19 @@ export class HttpGenerationClient<Req extends { model?: string }> {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(adapter.buildCreateBody(req, model)),
     });
-    if (!res.ok) throw new Error(`generation create failed: ${res.status} ${await res.text()}`);
-    return adapter.parseCreate(await res.json());
+    if (!res.ok) throw await responseError(res, "generation create failed");
+    const json = await res.json();
+    const created = adapter.parseCreate(json);
+    // A create response with no task id is a failure disguised as HTTP 200 — a
+    // vendor error envelope (`{ code, message, data:null }`) with no task_id/id.
+    // Without a task id there is nothing to poll, so surface it as an error
+    // carrying the vendor message instead of returning an empty id the job runner
+    // would poll (`/videos/`) until the max-wait timeout.
+    if (!created.taskId) {
+      const vendorMsg = extractVendorError((json ?? {}) as Record<string, unknown>);
+      throw new Error(vendorMsg ?? "generation create returned no task id");
+    }
+    return created;
   }
   async poll(taskId: string): Promise<PollResult> {
     const { adapter, baseUrl, apiKey } = this.opts;
@@ -57,10 +122,18 @@ export class HttpGenerationClient<Req extends { model?: string }> {
       method: "GET",
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    if (!res.ok) throw new Error(`generation poll failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) throw await responseError(res, "generation poll failed");
     const parsed = adapter.parsePoll(await res.json());
     const term = adapter.isTerminal(parsed.status);
-    return { ...parsed, status: term ?? "running" };
+    if (term) return { ...parsed, status: term };
+    // A missing status is a malformed/error response the adapter couldn't
+    // classify (e.g. a vendor error envelope served with HTTP 200) — treat it as
+    // a failure so the caller stops polling, instead of optimistically coercing
+    // it to "running", which would loop until the job's max-wait timeout.
+    if (!parsed.status) {
+      return { ...parsed, status: "failed", error: parsed.error ?? "generation poll returned no status" };
+    }
+    return { ...parsed, status: "running" };
   }
 }
 
