@@ -24,7 +24,29 @@ export function isMalformedToolCallError(err: unknown): boolean {
   const mentionsToolCall = m.includes("tool_call") || m.includes("tool call");
   const isMalformed =
     m.includes("malformed") || m.includes("incomplete") || m.includes("invalid");
-  return (mentionsToolCall && isMalformed) || m.includes("malformed arguments");
+  return (
+    (mentionsToolCall && isMalformed) ||
+    m.includes("malformed arguments") ||
+    isJsonDecodeError(m)
+  );
+}
+
+/**
+ * A Python `json.loads` decode error forwarded verbatim by the gateway
+ * (DeepSeek/tokenhub) when the model's generated tool-call arguments aren't
+ * valid JSON, e.g. `400 Expecting ',' delimiter: line 1 column 237 (char 236)`.
+ * The message carries no "tool_call"/"malformed" keyword, only the decoder's
+ * `line X column Y (char Z)` position signature plus an "Expecting …" /
+ * "Unterminated string" phrase. Require BOTH so a plain 400 bad request (unknown
+ * model, oversized context) is never mistaken for a retryable sampling artifact.
+ */
+function isJsonDecodeError(m: string): boolean {
+  if (!/line \d+ column \d+ \(char \d+\)/.test(m)) return false;
+  return (
+    m.includes("expecting") ||
+    m.includes("unterminated string") ||
+    m.includes("delimiter")
+  );
 }
 
 function defaultIsRetryable(err: unknown): boolean {

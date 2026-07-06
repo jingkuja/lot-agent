@@ -92,11 +92,31 @@ describe("isMalformedToolCallError", () => {
     expect(isMalformedToolCallError("malformed tool_call arguments")).toBe(true);
   });
 
+  it("matches the gateway's Python JSON-decoder rejection of tool-call args", () => {
+    // DeepSeek/tokenhub (Python backend) forwards json.loads' error verbatim when
+    // the model emits invalid JSON for a tool call — no "tool_call"/"malformed"
+    // keyword, just the decoder's position signature. Still a sampling artifact.
+    expect(
+      isMalformedToolCallError(new Error("400 Expecting ',' delimiter: line 1 column 237 (char 236)"))
+    ).toBe(true);
+    expect(
+      isMalformedToolCallError(
+        new Error("Expecting property name enclosed in double quotes: line 1 column 2 (char 1)")
+      )
+    ).toBe(true);
+    expect(
+      isMalformedToolCallError(new Error("Unterminated string starting at: line 1 column 40 (char 39)"))
+    ).toBe(true);
+  });
+
   it("does not match unrelated 400 bad requests", () => {
     expect(isMalformedToolCallError(new Error("400 bad request: invalid model"))).toBe(
       false
     );
     expect(isMalformedToolCallError(new Error("context length exceeded"))).toBe(false);
+    // A JSON-decoder keyword WITHOUT the position signature is not enough to
+    // assume a tool-call artifact (avoids retrying genuine client errors).
+    expect(isMalformedToolCallError(new Error("400 bad request: unexpected delimiter in path"))).toBe(false);
   });
 
   it("is retried by withLLMRetry as a custom predicate", async () => {
