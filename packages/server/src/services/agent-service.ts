@@ -18,6 +18,7 @@ import {
   contractDefinition,
   InMemoryModelRegistry,
   populateModelRegistry,
+  contextBudgetTotal,
   KeywordReviewProvider,
   XiaohongshuConnector,
   WechatMpConnector,
@@ -523,6 +524,12 @@ export class AgentService {
       : (this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider());
     const agentConfig = this.agentConfig as Record<string, unknown>;
     const contextConfig = agentConfig.context as import("@lot-agent/core").ContextManagerConfig | undefined;
+    // Size the context window to the chosen model instead of the hard-coded
+    // config default: a model that advertises a `contextWindow` drives its own
+    // total (10% safety margin); models without capabilities keep the configured
+    // budget. Registry models carry capabilities; dynamic catalog models don't.
+    const cap = this.modelRegistry.getConfig(modelId)?.capabilities;
+    const derivedTotal = cap?.contextWindow ? contextBudgetTotal(cap) : undefined;
     // Seed the rolling summary persisted on the conversation so an unchanged
     // history prefix is never re-summarized across requests.
     const persistedSummary = readPersistedSummary(conversation?.metadata);
@@ -533,7 +540,14 @@ export class AgentService {
       dynamicPromptParts: dynamicParts,
       modelParams: def.modelParams,
       contextConfig: contextConfig
-        ? { ...contextConfig, compressor: llm, initialSummary: persistedSummary }
+        ? {
+            ...contextConfig,
+            budget: derivedTotal
+              ? { ...contextConfig.budget, total: derivedTotal }
+              : contextConfig.budget,
+            compressor: llm,
+            initialSummary: persistedSummary,
+          }
         : undefined,
     });
 

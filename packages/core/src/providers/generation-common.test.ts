@@ -100,4 +100,52 @@ describe("HttpGenerationClient.poll", () => {
     const r = await c.poll("t1");
     expect(r.status).toBe("running");
   });
+
+  it("retries once on a network error (poll is an idempotent read)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: "processing" }) });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: passthrough, model: "m" });
+    const r = await c.poll("t1");
+    expect(r.status).toBe("running");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after one retry and surfaces the network error", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: passthrough, model: "m" });
+    await expect(c.poll("t1")).rejects.toThrow(/ECONNRESET/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes an abort signal to fetch (request timeout)", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ status: "processing" }) }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: passthrough, model: "m" });
+    await c.poll("t1");
+    const init = fetchMock.mock.calls[0][1] as { signal?: unknown };
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("HttpGenerationClient.create hardening", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const adapter: VendorAdapter<{ model?: string }> = {
+    createPath: () => "/create",
+    pollPath: (id) => `/poll/${id}`,
+    buildCreateBody: () => ({}),
+    parseCreate: () => ({ taskId: "t", status: "queued", progress: 0 }),
+    parsePoll: () => ({ status: "processing", progress: 0 }),
+    isTerminal: () => null,
+  };
+  it("does NOT retry a network error (create is not idempotent)", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter, model: "m" });
+    await expect(c.create({})).rejects.toThrow(/ECONNRESET/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -198,17 +198,17 @@ export interface ModelCapabilities {
 export interface ModelConfig { /* 现有字段 */ capabilities?: ModelCapabilities; }
 ```
 
-- [ ] `config/default.json` 的 `models` 段补 capabilities；`config/schema.ts` 同步校验。
-- [ ] **registry 尊重 enabled**：`list()` 默认过滤 `enabled: false`（加 `{ includeDisabled }` 逃生门）；
+- [x] `config/default.json` 的 `models` 段补 capabilities；`config/schema.ts` 同步校验。
+- [x] **registry 尊重 enabled**：`list()` 默认过滤 `enabled: false`（加 `{ includeDisabled }` 逃生门）；
   `getProvider` 对 disabled 返回 undefined。测试补齐。
-- [ ] **上下文预算联动**：server 装配 Agent 时按
+- [x] **上下文预算联动**：server 装配 Agent 时按
   `contextConfig.budget.total = capabilities.contextWindow ?? 120_000`（10% 安全边际）注入；
   core 侧 `ContextManager` 不改逻辑，只是不再被写死的 120K 绑架。
-- [ ] **成本预估**：`billing/cost.ts` 增
+- [x] **成本预估**：`billing/cost.ts` 增
   `estimateCost(model: ModelConfig, est: { inputCount?: number; outputCount?: number }): number`
   —— LLM 按估算 token、image 按张数、video 按秒数复用 `calcCost` 口径；server 的 402 预检与
   「费用预估展示」共用一个真源。TDD：三种类型各一条。
-- [ ] **生成 HTTP 客户端加固**：`HttpGenerationClient` 的 fetch 加 20s 超时 + AbortSignal 透传 +
+- [x] **生成 HTTP 客户端加固**：`HttpGenerationClient` 的 fetch 加 20s 超时 + AbortSignal 透传 +
   网络错误一次重试（poll 是幂等读，安全）。
 - [ ] **Commit**：`feat(core): model capabilities metadata + cost estimation + enabled filtering`
 

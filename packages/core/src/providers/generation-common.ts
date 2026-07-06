@@ -72,7 +72,12 @@ export interface HttpGenerationOpts<Req> {
   apiKey: string;
   adapter: VendorAdapter<Req>;
   model: string;
+  /** Per-request timeout. Default: 20s. */
+  timeoutMs?: number;
 }
+
+/** Default per-request timeout for generation HTTP calls. */
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 /**
  * Turn a non-2xx generation response into an Error carrying the cleanest message
@@ -94,14 +99,33 @@ async function responseError(res: { status: number; text(): Promise<string> }, c
 /** Drives any `VendorAdapter<Req>` over HTTP (async create→poll). */
 export class HttpGenerationClient<Req extends { model?: string }> {
   constructor(protected opts: HttpGenerationOpts<Req>) {}
+
+  /**
+   * fetch with a per-request timeout (AbortSignal), retrying only the network
+   * layer. `retries` is the number of *extra* attempts (poll passes 1 because a
+   * poll is an idempotent read; create passes 0 because it isn't). HTTP error
+   * responses are returned as-is for the caller to classify — only a thrown
+   * fetch (network failure / timeout) is retried.
+   */
+  private async request(url: string, init: RequestInit, retries: number): Promise<Response> {
+    const timeoutMs = this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      } catch (e) {
+        if (attempt >= retries) throw e;
+      }
+    }
+  }
+
   async create(req: Req): Promise<CreateResult> {
     const { adapter, baseUrl, apiKey } = this.opts;
     const model = req.model ?? this.opts.model;
-    const res = await fetch(`${baseUrl}${adapter.createPath()}`, {
+    const res = await this.request(`${baseUrl}${adapter.createPath()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(adapter.buildCreateBody(req, model)),
-    });
+    }, 0);
     if (!res.ok) throw await responseError(res, "generation create failed");
     const json = await res.json();
     const created = adapter.parseCreate(json);
@@ -118,10 +142,10 @@ export class HttpGenerationClient<Req extends { model?: string }> {
   }
   async poll(taskId: string): Promise<PollResult> {
     const { adapter, baseUrl, apiKey } = this.opts;
-    const res = await fetch(`${baseUrl}${adapter.pollPath(taskId)}`, {
+    const res = await this.request(`${baseUrl}${adapter.pollPath(taskId)}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    }, 1);
     if (!res.ok) throw await responseError(res, "generation poll failed");
     const parsed = adapter.parsePoll(await res.json());
     const term = adapter.isTerminal(parsed.status);

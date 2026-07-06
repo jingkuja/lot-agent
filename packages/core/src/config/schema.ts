@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+const ModelCapabilitiesSchema = z.object({
+  contextWindow: z.number().optional(),
+  maxOutputTokens: z.number().optional(),
+  vision: z.boolean().optional(),
+  toolUse: z.boolean().optional(),
+  reasoning: z.boolean().optional(),
+});
+
 const ModelConfigSchema = z.object({
   id: z.string(),
   type: z.enum(["llm", "image", "video", "tts", "asr", "embedding", "review"]),
@@ -9,6 +17,7 @@ const ModelConfigSchema = z.object({
   outputPrice: z.number(),
   unitPrice: z.number(),
   enabled: z.boolean(),
+  capabilities: ModelCapabilitiesSchema.optional(),
 });
 
 export const AppConfigSchema = z.object({
