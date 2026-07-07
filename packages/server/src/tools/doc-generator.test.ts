@@ -156,6 +156,36 @@ describe("generateDocument · pdf", () => {
     }
   });
 
+  it("does not emit blank trailing pages (footer must not overflow the page)", async () => {
+    // Content that fills a couple of pages; regression for the footer write
+    // pushing PDFKit past the bottom margin and appending a blank page each time.
+    const body: string[] = ["# 报告"];
+    for (let s = 1; s <= 6; s++) {
+      body.push(`## 第${s}节`);
+      body.push("正文段落，用于填充内容。".repeat(6));
+      body.push("- 要点一", "- 要点二", "- 要点三");
+    }
+    const { buffer } = await generateDocument({
+      title: "标题",
+      content: body.join("\n\n"),
+      format: "pdf",
+      fontPath: FONT,
+    });
+
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    try {
+      const parsed = await parser.getText();
+      const pages = parsed.pages ?? [];
+      // A blank page is one whose only text is the "n / m" footer.
+      const blanks = pages.filter((p: { text?: string }) =>
+        /^\d+\s*\/\s*\d+$/.test((p.text ?? "").replace(/\s+/g, " ").trim())
+      );
+      expect(blanks.length).toBe(0);
+    } finally {
+      await parser.destroy();
+    }
+  });
+
   it("degrades pdf to markdown when no font is provided", async () => {
     const { buffer, format } = await generateDocument({
       title: "T",

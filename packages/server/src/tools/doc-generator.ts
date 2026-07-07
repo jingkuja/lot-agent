@@ -618,10 +618,14 @@ function writePdf(title: string, content: string, fontPath: string, accent: stri
     }
     pdfBlocks(doc, marked.lexer(content), accent);
 
-    // page numbers footer
+    // page numbers footer — drawn in the bottom margin. Temporarily drop the
+    // page's bottom margin to 0 so PDFKit doesn't read the footer as content
+    // overflow and append a fresh (blank) page for every footer we write.
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
+      const savedBottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
       doc
         .fontSize(8.5)
         .fillColor("#999999")
@@ -630,6 +634,7 @@ function writePdf(title: string, content: string, fontPath: string, accent: stri
           align: "center",
           lineBreak: false,
         });
+      doc.page.margins.bottom = savedBottom;
     }
     doc.end();
   });
