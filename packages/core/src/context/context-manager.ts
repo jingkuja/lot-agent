@@ -446,8 +446,13 @@ export class ContextManager {
           ? ` [tool_calls: ${m.toolCalls.map((c) => c.name).join(", ")}]`
           : "";
         // Cap each message's contribution so one huge message doesn't make
-        // the summarization call itself expensive.
-        return `${m.role}: ${headTail(content, SUMMARY_INPUT_MAX_CHARS)}${tools}`;
+        // the summarization call itself expensive. Tool messages arrive here
+        // already head+tail-elided by truncateOldToolOutputs (bounded by the
+        // toolOutput budget) — re-eliding at this much smaller char cap would
+        // nest a second "...(elided)..." cut inside the first, compounding
+        // information loss for no cost benefit since the size is already safe.
+        const capped = m.role === "tool" ? content : headTail(content, SUMMARY_INPUT_MAX_CHARS);
+        return `${m.role}: ${capped}${tools}`;
       })
       .join("\n");
 

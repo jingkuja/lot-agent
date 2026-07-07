@@ -371,6 +371,33 @@ describe("ContextManager compression strategy", () => {
     expect(compressor.lastUserContent.length).toBeLessThanOrEqual(10_000);
   });
 
+  it("does not re-elide tool output already bounded by truncateOldToolOutputs", async () => {
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 4_000 },
+      maxRawRounds: 20,
+    });
+    const compressor = new FakeCompressor();
+    // ~1,715 tokens: under the toolOutput elision threshold (so it survives
+    // truncateOldToolOutputs untouched) but over SUMMARY_INPUT_MAX_CHARS
+    // (4,000 chars) — must not be elided a second time inside summarize().
+    const toolContent = "z".repeat(6_000);
+    const history: Message[] = [
+      { role: "user", content: "round0" },
+      {
+        role: "assistant",
+        content: "c",
+        toolCalls: [{ id: "t0", name: "x", arguments: {} }],
+      },
+      { role: "tool", toolCallId: "t0", content: toolContent },
+      { role: "assistant", content: "ok" },
+    ];
+    for (let i = 0; i < 8; i++) history.push(userMsg(1_250), assistantMsg(1_250));
+
+    await cm.assemble([], undefined, history, undefined, compressor);
+    expect(compressor.calls).toBeGreaterThan(0);
+    expect(compressor.lastUserContent).toContain(toolContent);
+  });
+
   it("degrades to hard truncation instead of throwing when the compressor call fails", async () => {
     const cm = new ContextManager({
       budget: { total: 20_000, history: 2_000, generation: 4_000 },
