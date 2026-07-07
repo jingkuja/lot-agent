@@ -89,18 +89,32 @@ export class ContextManager {
   constructor(config: ContextManagerConfig = {}) {
     this.budget = { ...DEFAULT_BUDGET, ...config.budget };
     // Reserve generation from the window. Honor an explicit positive value;
-    // 0 or omitted means "derive the leftover", clamped so it never goes
-    // negative when the configured sub-budgets over-subscribe the total.
+    // 0 or omitted means "derive the leftover".
     if (!config.budget?.generation) {
-      this.budget.generation = Math.max(
-        0,
-        this.budget.total -
-          this.budget.systemPrompt -
-          this.budget.memory -
-          this.budget.retrieval -
-          this.budget.toolOutput -
-          this.budget.history
-      );
+      const subSum =
+        this.budget.systemPrompt +
+        this.budget.memory +
+        this.budget.retrieval +
+        this.budget.toolOutput +
+        this.budget.history;
+      if (subSum < this.budget.total) {
+        // Room to spare — generation gets the leftover.
+        this.budget.generation = this.budget.total - subSum;
+      } else {
+        // The fixed sub-budgets over-subscribe the window (e.g. a 32K/120K
+        // model against defaults tuned for 200K). Reserve a 10% generation
+        // slice and scale the sub-budgets down proportionally to fit, so a
+        // small window still leaves room to answer instead of clamping
+        // generation to zero.
+        const genReserve = Math.floor(this.budget.total * 0.1);
+        const scale = (this.budget.total - genReserve) / subSum;
+        this.budget.systemPrompt = Math.floor(this.budget.systemPrompt * scale);
+        this.budget.memory = Math.floor(this.budget.memory * scale);
+        this.budget.retrieval = Math.floor(this.budget.retrieval * scale);
+        this.budget.toolOutput = Math.floor(this.budget.toolOutput * scale);
+        this.budget.history = Math.floor(this.budget.history * scale);
+        this.budget.generation = genReserve;
+      }
     }
     this.maxRawRounds = config.maxRawRounds ?? 20;
     this.compressor = config.compressor;

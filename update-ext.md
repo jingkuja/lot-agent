@@ -362,21 +362,24 @@ export interface JobControl { signal: AbortSignal; heartbeat(): void; }
     delete(key: string): Promise<void>;
   }
   ```
-  Local 实现补齐（putStream 用 pipeline 落盘）；`s3-storage.ts`（S3/OSS/MinIO 兼容，
-  `@aws-sdk/client-s3`）本期落地，config 切换。worker 下载生成产物改走流式直传。
-- [ ] **Publish v2**：`PublishInput` 增 `tags?: string[]; coverAssetId?: string; scheduleAt?: string;
-  idempotencyKey?: string`；`exchangeToken` 返回增 `refreshToken?`；接口增
-  `refreshToken(rt: string)` 与 `revoke(userId: string)`。Stub 同步；定时发布 = server 把
+- [x] **ObjectStorage v2 接口 + Local**：接口增 `putStream/exists/getUrl(opts)`。
+  Local 实现补齐（putStream 用 `stream/promises` 的 pipeline 落盘、`exists`、`getUrl` 忽略预签名）。
+  **仍待办**：`s3-storage.ts`（`@aws-sdk/client-s3` 属 vendor SDK，按惯例落 server；未安装依赖，暂缓）
+  与 worker 下载产物改流式直传（putStream 能力已就位，待生成流程改造接线）。
+- [x] **Publish v2**：`PublishInput` 增 `tags?/coverAssetId?/scheduleAt?/idempotencyKey?`；
+  `exchangeToken` 返回改 `TokenSet`（增 `refreshToken?`）；接口增
+  `refreshToken(rt)` 与 `revoke(userId)`。Stub 同步；定时发布 = server 把
   `scheduleAt` 换算成 jobs v2 的 `delayMs`，core 无新机制。
-- [ ] **MCP 硬化**：MCP 工具映射时带默认 `execConfig`（timeout 30s）并透传 `cacheable: false`；
-  连接超时后显式 `transport.close()`；`connect` 失败指数退避重连（上限 3 次）；
-  `MCPConfig` 增 `headers?: Record<string,string>`（远程 transport 鉴权）。
-- [ ] **Skills 改进**：`match` 结果去重 + `maxSkills`（默认 3）+ 注入前按 `estimateTokens`
-  预算截断（并入 systemPrompt 的 16K 预算内）。
-- [ ] **结构化日志**：`logger/log.ts` 极简分级 logger（debug/info/warn/error，JSON 行输出，
-  `LOG_LEVEL` env 控制），替换 core 里散落的 `console.warn/error`（skills/loader、DEBUG_LLM 等）。
-- [ ] **配置 schema 补全**：`AppConfigSchema` 校验 `models[].capabilities`、mcp servers
-  （对齐 `MCPConfig` 形状）、新增 `storage`（driver: local|s3 + 各自字段）段。
+- [x] **MCP 硬化**：MCP 工具映射带 `execConfig`（timeout 30s）+ `cacheable: false`；每次尝试用独立
+  transport，连接超时/失败显式 `transport.close()`；`connect` 走 `retryAsync` 指数退避（上限 3 次）；
+  `MCPConfig` 增 `headers?`（透传给 sse / streamable-http 的 requestInit）。
+- [x] **Skills 改进**：`match` 结果按 name 去重 + `maxSkills`（默认 3）+ 可选 `maxTokens` 按
+  `estimateTokens` 预算丢弃溢出技能。
+- [x] **结构化日志**：`logger/log.ts` 极简分级 logger（debug/info/warn/error，JSON 行输出，
+  `LOG_LEVEL` env 控制，child bindings，Error 字段展开），替换 `skills/loader` 与 openai `DEBUG_LLM`
+  的 `console.*`。
+- [x] **配置 schema 补全**：`AppConfigSchema` 校验 `models[].capabilities`（E2 已加）、mcp servers
+  （对齐 `MCPConfig` 形状，含 headers）、新增 `storage`（driver: local|s3 + 各自字段，缺省 local）段。
 - [ ] **Commit**：`feat(core): storage v2 + publish v2 + mcp hardening + structured logging + config schema completion`
 
 ---

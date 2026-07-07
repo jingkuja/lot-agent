@@ -4,6 +4,10 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Tool, ToolResult, ToolContext } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
+import { retryAsync } from "./retry.js";
+import { logger } from "../logger/log.js";
+
+const log = logger.child({ mod: "mcp" });
 
 export interface MCPConfig {
   id: string;
@@ -12,6 +16,8 @@ export interface MCPConfig {
   command?: string;
   args?: string[];
   url?: string;
+  /** Auth/custom headers for remote (sse / streamable-http) transports. */
+  headers?: Record<string, string>;
 }
 
 interface MCPServerEntry {
@@ -25,46 +31,74 @@ const CONNECT_TIMEOUT_MS = 30_000;
 export class MCPClientManager {
   private servers = new Map<string, MCPServerEntry>();
 
-  async connect(config: MCPConfig): Promise<void> {
-    let transport;
-
+  /** Build a fresh transport for one connect attempt (not reusable after failure). */
+  private buildTransport(config: MCPConfig) {
     if (config.transport === "stdio") {
       if (!config.command) {
         throw new Error(`MCP server ${config.id}: command is required for stdio`);
       }
-      transport = new StdioClientTransport({
-        command: config.command,
-        args: config.args,
-      });
-    } else if (config.transport === "sse") {
+      return new StdioClientTransport({ command: config.command, args: config.args });
+    }
+    if (config.transport === "sse") {
       if (!config.url) {
         throw new Error(`MCP server ${config.id}: url is required for sse`);
       }
-      transport = new SSEClientTransport(new URL(config.url));
-    } else if (config.transport === "streamable-http") {
+      return new SSEClientTransport(new URL(config.url), {
+        requestInit: config.headers ? { headers: config.headers } : undefined,
+      });
+    }
+    if (config.transport === "streamable-http") {
       if (!config.url) {
         throw new Error(`MCP server ${config.id}: url is required for streamable-http`);
       }
-      transport = new StreamableHTTPClientTransport(new URL(config.url));
-    } else {
-      throw new Error(`Unsupported transport: ${config.transport}`);
+      return new StreamableHTTPClientTransport(new URL(config.url), {
+        requestInit: config.headers ? { headers: config.headers } : undefined,
+      });
     }
+    throw new Error(`Unsupported transport: ${config.transport}`);
+  }
 
+  async connect(config: MCPConfig): Promise<void> {
     const client = new Client(
       { name: "lot-agent", version: "0.1.0" },
       { capabilities: {} }
     );
 
-    // Connect with timeout
-    await Promise.race([
-      client.connect(transport),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`MCP connect timeout (${CONNECT_TIMEOUT_MS}ms)`)),
-          CONNECT_TIMEOUT_MS
-        )
-      ),
-    ]);
+    // Connect with a per-attempt timeout, closing the transport on failure so
+    // a timed-out connection doesn't leak, and retrying with exponential
+    // backoff (up to 3 attempts).
+    await retryAsync(
+      async () => {
+        const transport = this.buildTransport(config);
+        try {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`MCP connect timeout (${CONNECT_TIMEOUT_MS}ms)`)),
+              CONNECT_TIMEOUT_MS
+            );
+          });
+          try {
+            await Promise.race([client.connect(transport), timeout]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        } catch (err) {
+          // Ensure the half-open transport is torn down before the next try.
+          await transport.close().catch(() => {});
+          throw err;
+        }
+      },
+      {
+        attempts: 3,
+        onRetry: (attempt, err) =>
+          log.warn("MCP connect failed, retrying", {
+            server: config.id,
+            attempt,
+            err: err as Error,
+          }),
+      }
+    );
 
     // Discover tools
     const { tools: mcpTools } = await client.listTools();
@@ -72,6 +106,10 @@ export class MCPClientManager {
       name: `${config.id}__${t.name}`,
       description: t.description ?? "",
       parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+      // Remote calls: bound each with a timeout; never dedup-cache (an MCP tool
+      // may have side effects and its result can change between calls).
+      execConfig: { timeoutMs: CONNECT_TIMEOUT_MS },
+      cacheable: false,
       execute: async (input: unknown, _ctx: ToolContext): Promise<ToolResult> => {
         try {
           const result = await client.callTool({

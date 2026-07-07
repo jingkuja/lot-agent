@@ -31,3 +31,36 @@ describe("SkillLoader.match agent scoping", () => {
     expect(l.match("ppt", { agentId: "general" })).toHaveLength(0);
   });
 });
+
+describe("SkillLoader.match caps and dedup", () => {
+  const mk = (name: string, trigger: string, content = "x") => ({
+    name,
+    description: "",
+    triggers: [trigger],
+    content,
+  });
+
+  it("caps the number of returned skills to maxSkills (default 3)", () => {
+    const l = loaderWith([mk("a", "go"), mk("b", "go"), mk("c", "go"), mk("d", "go")]);
+    expect(l.match("go")).toHaveLength(3);
+  });
+
+  it("respects an explicit maxSkills", () => {
+    const l = loaderWith([mk("a", "go"), mk("b", "go"), mk("c", "go")]);
+    expect(l.match("go", { maxSkills: 1 })).toHaveLength(1);
+  });
+
+  it("dedupes skills sharing the same name", () => {
+    const l = loaderWith([mk("dup", "go"), mk("dup", "go")]);
+    const r = l.match("go");
+    expect(r).toHaveLength(1);
+    expect(r[0].name).toBe("dup");
+  });
+
+  it("drops skills that overflow the token budget, keeping earlier matches", () => {
+    const big = "词".repeat(500); // ~500 tokens of CJK
+    const l = loaderWith([mk("a", "go", big), mk("b", "go", big)]);
+    const r = l.match("go", { maxTokens: 600 });
+    expect(r.map((s) => s.name)).toEqual(["a"]);
+  });
+});

@@ -61,4 +61,46 @@ describe("AppConfigSchema", () => {
       })
     ).toThrow();
   });
+
+  it("defaults storage to the local driver when omitted", () => {
+    const cfg = AppConfigSchema.parse(baseCfg);
+    expect(cfg.storage.driver).toBe("local");
+  });
+
+  it("parses an s3 storage block", () => {
+    const cfg = AppConfigSchema.parse({
+      ...baseCfg,
+      storage: { driver: "s3", s3: { bucket: "assets", region: "us-east-1" } },
+    });
+    expect(cfg.storage.driver).toBe("s3");
+    expect(cfg.storage.s3?.bucket).toBe("assets");
+  });
+
+  it("rejects an unknown storage driver", () => {
+    expect(() =>
+      AppConfigSchema.parse({ ...baseCfg, storage: { driver: "gcs" } })
+    ).toThrow();
+  });
+
+  it("validates a well-formed mcp server", () => {
+    const cfg = AppConfigSchema.parse({
+      ...baseCfg,
+      mcp: {
+        servers: [
+          { id: "fs", name: "Filesystem", transport: "stdio", command: "npx", args: ["-y", "x"] },
+          { id: "web", name: "Web", transport: "sse", url: "https://x", headers: { Authorization: "Bearer t" } },
+        ],
+      },
+    });
+    expect(cfg.mcp.servers).toHaveLength(2);
+  });
+
+  it("rejects an mcp server with an unknown transport", () => {
+    expect(() =>
+      AppConfigSchema.parse({
+        ...baseCfg,
+        mcp: { servers: [{ id: "x", name: "X", transport: "carrier-pigeon" }] },
+      })
+    ).toThrow();
+  });
 });

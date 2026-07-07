@@ -1,5 +1,12 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join, extname } from "node:path";
+import { logger } from "../logger/log.js";
+import { estimateTokens } from "../context/tokenizer.js";
+
+const log = logger.child({ mod: "skills" });
+
+/** Default cap on how many skills match() returns. */
+const DEFAULT_MAX_SKILLS = 3;
 
 export interface Skill {
   name: string;
@@ -100,14 +107,14 @@ export class SkillLoader {
           const skill = await this.loadFile(join(dir, entry));
           this.skills.push(skill);
         } catch (error) {
-          console.warn(`Failed to load skill ${entry}:`, error);
+          log.warn("failed to load skill", { file: entry, err: error as Error });
         }
       }
       if (this.skills.length === 0) {
-        console.warn(`No skills found in ${dir}`);
+        log.warn("no skills found", { dir });
       }
     } catch (error) {
-      console.warn(`Failed to read skills directory ${dir}:`, error);
+      log.warn("failed to read skills directory", { dir, err: error as Error });
     }
     return this.skills;
   }
@@ -124,18 +131,46 @@ export class SkillLoader {
     };
   }
 
-  match(message: string, opts?: { agentId?: string; skills?: Skill[] }): Skill[] {
+  /**
+   * Select skills to inject for a message. Agent-scoped skills always match
+   * their agent; unscoped skills match on trigger substrings. Results are
+   * deduped by name, capped to `maxSkills` (default 3), and — when `maxTokens`
+   * is set — greedily kept only while the cumulative content token estimate
+   * fits the budget (overflowing skills are dropped, earlier matches win).
+   */
+  match(
+    message: string,
+    opts?: { agentId?: string; skills?: Skill[]; maxSkills?: number; maxTokens?: number }
+  ): Skill[] {
     const target = opts?.skills ?? this.skills;
     const lower = message.toLowerCase();
+    const maxSkills = opts?.maxSkills ?? DEFAULT_MAX_SKILLS;
+
     const out: Skill[] = [];
+    const seen = new Set<string>();
+    let usedTokens = 0;
+
     for (const s of target) {
-      if (s.agents && s.agents.length > 0) {
-        // Agent-scoped skill: inject unconditionally for its declared agent(s),
-        // never for any other agent, regardless of trigger words.
-        if (opts?.agentId && s.agents.includes(opts.agentId)) out.push(s);
-      } else if (s.triggers.some((t) => lower.includes(t.toLowerCase()))) {
-        out.push(s);
+      if (out.length >= maxSkills) break;
+
+      const hit =
+        s.agents && s.agents.length > 0
+          ? // Agent-scoped: inject unconditionally for its declared agent(s),
+            // never for any other agent, regardless of trigger words.
+            !!opts?.agentId && s.agents.includes(opts.agentId)
+          : s.triggers.some((t) => lower.includes(t.toLowerCase()));
+      if (!hit) continue;
+
+      if (seen.has(s.name)) continue; // dedup by name
+
+      if (opts?.maxTokens !== undefined) {
+        const cost = estimateTokens(s.content);
+        if (usedTokens + cost > opts.maxTokens && out.length > 0) continue;
+        usedTokens += cost;
       }
+
+      seen.add(s.name);
+      out.push(s);
     }
     return out;
   }

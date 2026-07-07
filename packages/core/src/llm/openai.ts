@@ -18,6 +18,9 @@ import type {
 } from "../types/index.js";
 import { mediaPartPlaceholder } from "../types/index.js";
 import { withLLMRetry, isMalformedToolCallError } from "./retry.js";
+import { logger } from "../logger/log.js";
+
+const log = logger.child({ mod: "llm.openai" });
 
 export interface OpenAIProviderConfig {
   apiKey: string;
@@ -49,9 +52,11 @@ export class OpenAIProvider implements LLMProvider {
       (process.env.DEBUG_LLM ?? "").toLowerCase()
     );
     if (debug) {
-      console.error(
-        `[DEBUG_LLM] request model=${this.model} messages=${oaiMessages.length} tools=${oaiTools?.length ?? 0}`
-      );
+      log.debug("request", {
+        model: this.model,
+        messages: oaiMessages.length,
+        tools: oaiTools?.length ?? 0,
+      });
     }
 
     const client = this.client;
@@ -144,7 +149,7 @@ export async function* mapOpenAIStream(
   }
 
   for await (const chunk of stream) {
-    if (debug) console.error("[DEBUG_LLM] chunk", JSON.stringify(chunk.choices[0]));
+    if (debug) log.debug("chunk", { choice: chunk.choices[0] });
 
     const delta = chunk.choices[0]?.delta as
       | (ChatCompletionChunk.Choice["delta"] & { reasoning_content?: string })
