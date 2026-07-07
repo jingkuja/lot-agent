@@ -271,17 +271,18 @@ export interface Retriever {           // Embedding + VectorStore 的组合门�
 }
 ```
 
-- [ ] **接口 + InMemoryVectorStore**（余弦相似度，单测/开发用）落 core；pgvector 适配器落 server
-  （遵循 Interface-in-core / impl-in-server 惯例）。
-- [ ] **接线 ContextManager**：`AgentContext` 增 `retriever?: Retriever` 与
-  `retrievalNamespace?: string`；`Agent.run` 每轮 assemble 前用**当前用户消息**做一次
-  `retrieve`，格式化为 `[Retrieved Context]` 块经 assemble 的 `memory` 参数旁新增的
-  `retrieval` 参数传入（受 `budget.retrieval` 截断，逻辑同 memory 块）。无 retriever 时零开销，
-  完全向后兼容。
-- [ ] **记忆语义检索**：`AgentMemoryStore.searchUserMemory` 在配置了 Retriever 时优先走向量检索，
-  ILIKE 作为降级路径。
-- [ ] **注入上限**（1.3 工程项顺手做）：`formatForPrompt` 与 user memory 注入各加
-  条数（20）与字符（4K）上限，超限按 `updatedAt` 新者优先。
+- [x] **接口 + InMemoryVectorStore**（余弦相似度，单测/开发用）落 core（`retrieval/`：`types.ts`
+  的 `VectorDoc/VectorStore/Retriever`、`InMemoryVectorStore`、`EmbeddingRetriever` 门面）；
+  pgvector 适配器落 server（**仍待办**，遵循 Interface-in-core / impl-in-server 惯例）。
+- [x] **接线 ContextManager**：`AgentContext` 增 `retriever?: Retriever` 与
+  `retrievalNamespace?: string`；`Agent.run` 用**当前用户消息**做一次 `retrieve`（查询恒定，
+  循环内不重复），格式化为 `[Retrieved Context]` 块经 assemble 新增的 `opts.retrieval`
+  参数传入（受 `budget.retrieval` 截断，逻辑同 memory 块）。无 retriever 时零开销，
+  检索失败静默降级，完全向后兼容。
+- [x] **记忆语义检索**：`AgentMemoryStore.searchUserMemory` 在配置了 Retriever 时优先走向量检索，
+  ILIKE 作为降级路径（空结果/异常均回退）。
+- [x] **注入上限**（1.3 工程项顺手做）：`formatEntriesForPrompt`（`formatForPrompt` 与 user memory
+  注入共用）各加条数（20）与字符（4K）上限，超限按 `createdAt` 新者优先。
 - [ ] **Commit**：`feat(core): retrieval foundation (embedding + vector store + context wiring)`
 
 ### E5 — 多 Agent 编排原语 + 任务系统 v2

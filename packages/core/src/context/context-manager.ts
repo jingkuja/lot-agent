@@ -179,7 +179,7 @@ export class ContextManager {
     history: Message[],
     currentMessage?: Message,
     compressor?: LLMProvider,
-    opts?: { signal?: AbortSignal }
+    opts?: { signal?: AbortSignal; retrieval?: string }
   ): Promise<Message[]> {
     const result: Message[] = [];
 
@@ -207,8 +207,25 @@ export class ContextManager {
       result.push({ role: "system", content });
     }
 
+    // 2b. Retrieved context (stable within a turn, prefix-cache friendly) —
+    //     bounded by the retrieval budget, same treatment as the memory block.
+    let retrievalTokens = 0;
+    if (opts?.retrieval) {
+      let retText = opts.retrieval;
+      if (estimateTokens(retText) > this.budget.retrieval) {
+        retText = truncateToTokens(retText, this.budget.retrieval);
+      }
+      const content = `[Retrieved Context]\n${retText}`;
+      retrievalTokens = estimateTokens(content);
+      result.push({ role: "system", content });
+    }
+
     // 3. Recent history with elastic budget + rolling-summary compression.
-    const historyBudget = this.historyBudget(systemTokens, memoryTokens);
+    const historyBudget = this.historyBudget(
+      systemTokens,
+      memoryTokens,
+      retrievalTokens
+    );
     const recentHistory = await this.trimHistory(
       history,
       historyBudget,

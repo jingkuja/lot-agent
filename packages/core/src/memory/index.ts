@@ -1,5 +1,8 @@
 export {
   AgentMemoryStore,
+  formatEntriesForPrompt,
+  MEMORY_PROMPT_MAX_ENTRIES,
+  MEMORY_PROMPT_MAX_CHARS,
   type MemoryStore,
   type MemoryEntry,
   type MemoryTier,

@@ -366,3 +366,107 @@ describe("Agent outputSchema validation", () => {
     expect(events.some((e) => e.type === "error")).toBe(false);
   });
 });
+
+/** Retriever that records its calls and replays fixed docs. */
+function recordingRetriever(docs: Array<{ id: string; text: string }>) {
+  const calls: Array<{ namespace: string; query: string }> = [];
+  return {
+    calls,
+    async retrieve(namespace: string, query: string) {
+      calls.push({ namespace, query });
+      return docs;
+    },
+  };
+}
+
+describe("Agent.run user-memory injection cap", () => {
+  it("caps injected user memory to at most 20 lines", async () => {
+    const { AgentMemoryStore } = await import("../memory/store.js");
+    const entries = Array.from({ length: 30 }, (_, i) => ({
+      key: `k${i}`,
+      value: `v${i}`,
+      tier: "user" as const,
+      createdAt: i,
+    }));
+    const adapter = {
+      async get() { return undefined; },
+      async set() {},
+      async delete() {},
+      async list() { return entries; },
+      async search() { return []; },
+    };
+    const memory = new AgentMemoryStore({ persistent: adapter, userId: "u1" });
+    const llm = scriptedLLM([textChunks("answer")]);
+    const agent = new Agent({ systemPrompt: "sys" });
+
+    await collect(agent.run("hi", { ...makeContext(llm), memory }));
+
+    const systemText = llm.calls[0]
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .join("\n\n");
+    // Isolate the [User Memory] section (system parts are joined by "\n\n").
+    const section = systemText.split("[User Memory]")[1]?.split("\n\n")[0] ?? "";
+    const lines = section.split("\n").filter((l) => l.startsWith("- "));
+    expect(lines.length).toBe(20);
+  });
+});
+
+describe("Agent.run retrieval wiring", () => {
+  it("retrieves with the user message and injects a [Retrieved Context] block", async () => {
+    const llm = scriptedLLM([textChunks("answer")]);
+    const retriever = recordingRetriever([
+      { id: "1", text: "brand voice is playful" },
+    ]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const ctx: AgentContext = {
+      ...makeContext(llm),
+      retriever,
+      retrievalNamespace: "user:42:notes",
+    };
+
+    await collect(agent.run("what is our brand voice?", ctx));
+
+    expect(retriever.calls).toEqual([
+      { namespace: "user:42:notes", query: "what is our brand voice?" },
+    ]);
+    const systemText = llm.calls[0]
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .join("\n");
+    expect(systemText).toContain("[Retrieved Context]");
+    expect(systemText).toContain("brand voice is playful");
+  });
+
+  it("adds no retrieval block and does not retrieve when no retriever is configured", async () => {
+    const llm = scriptedLLM([textChunks("answer")]);
+    const agent = new Agent({ systemPrompt: "sys" });
+
+    await collect(agent.run("hi", makeContext(llm)));
+
+    const systemText = llm.calls[0]
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .join("\n");
+    expect(systemText).not.toContain("[Retrieved Context]");
+  });
+
+  it("skips retrieval when the retriever returns no docs", async () => {
+    const llm = scriptedLLM([textChunks("answer")]);
+    const retriever = recordingRetriever([]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const ctx: AgentContext = {
+      ...makeContext(llm),
+      retriever,
+      retrievalNamespace: "ns",
+    };
+
+    await collect(agent.run("hi", ctx));
+
+    const systemText = llm.calls[0]
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .join("\n");
+    expect(systemText).not.toContain("[Retrieved Context]");
+  });
+});

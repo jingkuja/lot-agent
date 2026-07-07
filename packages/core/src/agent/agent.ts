@@ -16,6 +16,8 @@ import {
   type SummaryState,
 } from "../context/index.js";
 import type { AgentMemoryStore } from "../memory/index.js";
+import { formatEntriesForPrompt } from "../memory/index.js";
+import type { Retriever } from "../retrieval/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 
@@ -60,6 +62,15 @@ export interface AgentContext {
   toolRegistry: ToolRegistry;
   toolContext: ToolContext;
   memory?: AgentMemoryStore;
+  /**
+   * Optional retrieval facade (E4). When set together with
+   * `retrievalNamespace`, the run retrieves documents for the user's message
+   * once and injects them as a `[Retrieved Context]` block. Absent → zero
+   * overhead, fully backward compatible.
+   */
+  retriever?: Retriever;
+  /** Namespace to retrieve from (e.g. `user:{id}:notes`). */
+  retrievalNamespace?: string;
 }
 
 export interface AgentRunOptions {
@@ -105,6 +116,16 @@ function validateStructuredOutput(text: string, schema: JSONSchema): string | nu
   }
   const errors = validateToolInput(schema, parsed);
   return errors.length ? `Structured output failed schema validation: ${errors.join("; ")}` : null;
+}
+
+/** Flatten a user message to its text for use as a retrieval query. */
+function messageQueryText(message: string | ContentPart[]): string {
+  if (typeof message === "string") return message;
+  return message
+    .map((p) => p.text ?? "")
+    .filter(Boolean)
+    .join(" ")
+    .trim();
 }
 
 /** Order-independent JSON serialization, so {a,b} and {b,a} dedup the same. */
@@ -176,13 +197,31 @@ export class Agent {
         systemParts.push(memoryPrompt);
       }
 
-      // Also load user memory (async)
+      // Also load user memory (async) — bounded like the other memory blocks.
       const userEntries = await context.memory.listUserMemory();
-      if (userEntries.length > 0) {
-        const userMem = userEntries
-          .map((e) => `- ${e.key}: ${e.value}`)
-          .join("\n");
+      const userMem = formatEntriesForPrompt(userEntries);
+      if (userMem) {
         systemParts.push(`[User Memory]\n${userMem}`);
+      }
+    }
+
+    // Retrieval (E4): fetch context for the user's message once — the query is
+    // the constant user message, so re-retrieving each ReAct iteration would
+    // only repeat work. Formatted into a stable `[Retrieved Context]` block and
+    // fed to every assemble() (bounded by budget.retrieval). Best-effort: a
+    // retriever failure must not abort the run.
+    let retrievalBlock: string | undefined;
+    if (context.retriever && context.retrievalNamespace) {
+      const query = messageQueryText(userMessage);
+      if (query) {
+        try {
+          const docs = await context.retriever.retrieve(context.retrievalNamespace, query);
+          if (docs.length > 0) {
+            retrievalBlock = docs.map((d) => `- ${d.text}`).join("\n");
+          }
+        } catch {
+          // swallow — retrieval is an enhancement, not a hard dependency
+        }
       }
     }
 
@@ -262,7 +301,7 @@ export class Agent {
           workingHistory,
           undefined, // user message already lives in workingHistory
           context.llm, // use same LLM as compressor for summaries
-          { signal } // honor run timeout / client disconnect during summarization
+          { signal, retrieval: retrievalBlock } // honor timeout + inject retrieved context
         );
 
         // Stream LLM response — surface any failure as an event so the run

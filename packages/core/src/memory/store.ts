@@ -6,9 +6,38 @@
  */
 
 import type { SessionMemoryBackend } from "./session-backend.js";
+import type { Retriever } from "../retrieval/index.js";
 export type { SessionMemoryBackend } from "./session-backend.js";
 
 export type MemoryTier = "ephemeral" | "session" | "user";
+
+/** Caps on memory injected into the prompt (avoid unbounded context growth). */
+export const MEMORY_PROMPT_MAX_ENTRIES = 20;
+export const MEMORY_PROMPT_MAX_CHARS = 4_000;
+
+/**
+ * Render memory entries as `- key: value` lines, newest first, bounded by
+ * entry count then total chars. Shared by session/ephemeral (formatForPrompt)
+ * and user-memory injection so both honor the same budget.
+ */
+export function formatEntriesForPrompt(
+  entries: MemoryEntry[],
+  maxEntries = MEMORY_PROMPT_MAX_ENTRIES,
+  maxChars = MEMORY_PROMPT_MAX_CHARS
+): string {
+  const ranked = [...entries]
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, maxEntries);
+  const lines: string[] = [];
+  let chars = 0;
+  for (const e of ranked) {
+    const line = `- ${e.key}: ${e.value}`;
+    if (lines.length > 0 && chars + line.length + 1 > maxChars) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  return lines.join("\n");
+}
 
 export interface MemoryEntry {
   key: string;
@@ -112,17 +141,25 @@ export class AgentMemoryStore implements MemoryStore {
   private userId?: string;
   private sessionBackend?: SessionMemoryBackend;
   private conversationId?: string;
+  private retriever?: Retriever;
+  private retrievalNamespace?: string;
 
   constructor(opts?: {
     persistent?: PersistentMemoryAdapter;
     userId?: string;
     sessionBackend?: SessionMemoryBackend;
     conversationId?: string;
+    /** Optional semantic retriever for user memory (E4); ILIKE is the fallback. */
+    retriever?: Retriever;
+    /** Namespace user memory is indexed under (e.g. `user:{id}:mem`). */
+    retrievalNamespace?: string;
   }) {
     this.persistent = opts?.persistent;
     this.userId = opts?.userId;
     this.sessionBackend = opts?.sessionBackend;
     this.conversationId = opts?.conversationId;
+    this.retriever = opts?.retriever;
+    this.retrievalNamespace = opts?.retrievalNamespace;
   }
 
   /** Best-effort write-through of the whole session tier to the backend. */
@@ -273,30 +310,49 @@ export class AgentMemoryStore implements MemoryStore {
   }
 
   async searchUserMemory(query: string): Promise<MemoryEntry[]> {
+    // Semantic path: when a retriever is configured, prefer vector search and
+    // map hits back to MemoryEntry. Empty result or failure → ILIKE fallback.
+    if (this.retriever && this.retrievalNamespace) {
+      try {
+        const docs = await this.retriever.retrieve(this.retrievalNamespace, query);
+        if (docs.length > 0) {
+          return docs.map((d) => ({
+            key: String(d.meta?.key ?? d.id),
+            value: d.text,
+            tier: "user" as const,
+            meta: d.meta,
+            createdAt:
+              typeof d.meta?.createdAt === "number" ? d.meta.createdAt : Date.now(),
+          }));
+        }
+      } catch {
+        // fall through to ILIKE
+      }
+    }
     if (!this.persistent || !this.userId) return [];
     return this.persistent.search(this.userId, query);
   }
 
-  /** Format all memory tiers into a prompt section */
+  /**
+   * Format all memory tiers into a prompt section. Each tier is bounded
+   * (newest first, entry-count then char cap) so a large memory can't bloat
+   * the context window.
+   */
   formatForPrompt(): string {
     const parts: string[] = [];
 
     // Session memory
-    const sessionEntries = this.dump("session");
-    if (sessionEntries.length > 0) {
+    const sessionBlock = formatEntriesForPrompt(this.dump("session"));
+    if (sessionBlock) {
       parts.push("[Session Memory]");
-      for (const e of sessionEntries) {
-        parts.push(`- ${e.key}: ${e.value}`);
-      }
+      parts.push(sessionBlock);
     }
 
     // Ephemeral memory (usually not in prompt, but available)
-    const ephemeralEntries = this.dump("ephemeral");
-    if (ephemeralEntries.length > 0) {
+    const ephemeralBlock = formatEntriesForPrompt(this.dump("ephemeral"));
+    if (ephemeralBlock) {
       parts.push("[Working Memory]");
-      for (const e of ephemeralEntries) {
-        parts.push(`- ${e.key}: ${e.value}`);
-      }
+      parts.push(ephemeralBlock);
     }
 
     return parts.join("\n");

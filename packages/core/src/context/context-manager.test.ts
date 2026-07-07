@@ -96,6 +96,46 @@ describe("ContextManager budget", () => {
   });
 });
 
+describe("ContextManager retrieval block", () => {
+  it("injects a [Retrieved Context] system block after the summary, before history", async () => {
+    const cm = new ContextManager();
+    const history: Message[] = [{ role: "user", content: "question" }];
+    const out = await cm.assemble([], "prior summary", history, undefined, undefined, {
+      retrieval: "fact: the sky is blue",
+    });
+
+    const retrievalIdx = out.findIndex(
+      (m) => m.role === "system" && String(m.content).includes("[Retrieved Context]")
+    );
+    const summaryIdx = out.findIndex(
+      (m) => m.role === "system" && String(m.content).includes("Summary")
+    );
+    const historyIdx = out.findIndex((m) => m.role === "user");
+
+    expect(retrievalIdx).toBeGreaterThan(summaryIdx);
+    expect(retrievalIdx).toBeLessThan(historyIdx);
+    expect(String(out[retrievalIdx].content)).toContain("the sky is blue");
+  });
+
+  it("truncates retrieval to the retrieval budget", async () => {
+    const cm = new ContextManager({ budget: { retrieval: 1_000 } });
+    const out = await cm.assemble([], undefined, [], undefined, undefined, {
+      retrieval: textOfTokens(5_000),
+    });
+    const retrieved = out.find(
+      (m) => m.role === "system" && String(m.content).includes("[Retrieved Context]")
+    );
+    expect(retrieved).toBeDefined();
+    expect(estimateTokens(String(retrieved!.content))).toBeLessThanOrEqual(1_200);
+  });
+
+  it("adds no block when no retrieval is supplied (backward compatible)", async () => {
+    const cm = new ContextManager();
+    const out = await cm.assemble([], undefined, [{ role: "user", content: "hi" }]);
+    expect(out.some((m) => String(m.content).includes("[Retrieved Context]"))).toBe(false);
+  });
+});
+
 describe("ContextManager CJK truncation", () => {
   // CJK text estimates at ~1 token/char (vs 3.5 chars/token for ASCII), so a
   // char budget derived with the ASCII ratio would overshoot the token budget
