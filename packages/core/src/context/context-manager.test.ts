@@ -37,6 +37,15 @@ class ThrowingCompressor implements LLMProvider {
   }
 }
 
+/** Compressor that simulates an LLM call failing (e.g. retries exhausted). */
+class FailingCompressor implements LLMProvider {
+  calls = 0;
+  async *chat(): AsyncIterable<ChatChunk> {
+    this.calls++;
+    throw new Error("503 upstream unavailable");
+  }
+}
+
 /** Build a string of roughly `tokens` estimated tokens (ASCII ≈ 3.5 chars/token). */
 function textOfTokens(tokens: number): string {
   return "x".repeat(Math.ceil(tokens * 3.5));
@@ -360,6 +369,45 @@ describe("ContextManager compression strategy", () => {
     await cm.assemble([], undefined, history, undefined, compressor);
     expect(compressor.calls).toBeGreaterThan(0);
     expect(compressor.lastUserContent.length).toBeLessThanOrEqual(10_000);
+  });
+
+  it("degrades to hard truncation instead of throwing when the compressor call fails", async () => {
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 4_000 },
+      maxRawRounds: 20,
+    });
+    const compressor = new FailingCompressor();
+    const base: Message[] = [];
+    for (let i = 0; i < 8; i++) base.push(userMsg(1_250), assistantMsg(1_250));
+
+    const out = await cm.assemble([], undefined, base, undefined, compressor);
+
+    expect(compressor.calls).toBeGreaterThan(0);
+    // No cached summary was produced — the failure must not be persisted as state.
+    expect(cm.getSummaryState()).toBeUndefined();
+    // Still within budget via truncation, and the most recent round survives.
+    expect(cm.countTotalTokens(out)).toBeLessThanOrEqual(
+      cm.getBudget().history + cm.getBudget().systemPrompt
+    );
+    expect(out[out.length - 1].role).toBe("assistant");
+  });
+
+  it("propagates a compressor failure caused by cancellation instead of degrading", async () => {
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 4_000 },
+      maxRawRounds: 20,
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const compressor = new FailingCompressor();
+    const base: Message[] = [];
+    for (let i = 0; i < 8; i++) base.push(userMsg(1_250), assistantMsg(1_250));
+
+    await expect(
+      cm.assemble([], undefined, base, undefined, compressor, {
+        signal: controller.signal,
+      })
+    ).rejects.toThrow();
   });
 });
 

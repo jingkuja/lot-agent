@@ -329,20 +329,31 @@ export class ContextManager {
         // Number of leading messages being summarized (round-aligned, so we
         // never split a user/assistant/tool group and orphan a tool result).
         const summarizedCount = rounds.slice(0, keepFrom).flat().length;
-        const summary = await this.rollingSummary(
-          working,
-          summarizedCount,
-          compressor,
-          signal
-        );
-        const result: Message[] = [
-          { role: "system", content: `[Earlier Context]\n${summary}` },
-          ...rounds.slice(keepFrom).flat(),
-        ];
-        if (this.countTotalTokens(result) > budget) {
-          return this.truncateToFit(result, budget);
+        try {
+          const summary = await this.rollingSummary(
+            working,
+            summarizedCount,
+            compressor,
+            signal
+          );
+          const result: Message[] = [
+            { role: "system", content: `[Earlier Context]\n${summary}` },
+            ...rounds.slice(keepFrom).flat(),
+          ];
+          if (this.countTotalTokens(result) > budget) {
+            return this.truncateToFit(result, budget);
+          }
+          return result;
+        } catch (err) {
+          // Cancellation must propagate so the caller's abort handling runs.
+          if (signal?.aborted) throw err;
+          // The compressor call failed even after the provider's own retry
+          // (bad key, context-length error, persistent outage, ...). Losing
+          // the summary would otherwise fail the whole turn even though hard
+          // truncation can still satisfy the budget with zero LLM cost —
+          // degrade to that instead of throwing out of assemble().
+          console.warn("[ContextManager] rolling summary failed, falling back to truncation:", err);
         }
-        return result;
       }
     }
 
