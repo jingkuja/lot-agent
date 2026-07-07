@@ -336,12 +336,15 @@ export interface JobControl { signal: AbortSignal; heartbeat(): void; }
 // JobRecord 增: attempts: number; stage?: string; status 增 "cancelled"
 ```
 
-- [ ] `InMemoryJobQueue` 补齐 v2 语义（delay 用 setTimeout、cancel、attempts）作契约测试基准；
-  `BullmqJobQueue`（server）映射到 BullMQ 原生 priority/delay/attempts/stalled 检测。
-- [ ] `agentAsTool` + `validatePipeline` TDD 落地；`general` Agent 定义**暂不**挂子 Agent 工具
-  （业务期按需开白名单），本期只交付原语与测试。
-- [ ] **工具并行执行**（顺手）：`Tool` 增 `parallelSafe?: boolean`（只读类工具标 true），
-  `Agent.run` 对同一批 toolCalls 中连续的 parallelSafe 段用 `Promise.all`，事件仍按原顺序 yield。
+- [x] `InMemoryJobQueue` 补齐 v2 语义（delay 用 setTimeout、cancel、attempts、idempotencyKey、
+  per-job `JobControl` signal/heartbeat）作契约测试基准；`BullmqJobQueue`（server）映射到 BullMQ 原生
+  priority/delay/attempts（job id = task id 供按 id 取消/去重）；stalled 走 BullMQ 内建锁续期。
+  `tasks` 表加 `attempts`/`stage` 两列（幂等 ALTER）+ `markTaskRunning`/`cancelTask`。
+- [x] `agentAsTool` + `validatePipeline`（重复 id / 悬空依赖 / 自依赖 / 环 / 各 kind 必填字段）TDD 落地；
+  `general` Agent 定义**暂不**挂子 Agent 工具（业务期按需开白名单），本期只交付原语与测试。
+- [x] **工具并行执行**（顺手）：`Tool` 增 `parallelSafe?: boolean`（只读类工具标 true），
+  `Agent.run` 对同一批 toolCalls 中连续的 parallelSafe 段用 `Promise.all`，事件仍按调用顺序 yield，
+  dedup/endsTurn 语义不变。
 - [ ] **Commit**：`feat(core): agent-as-tool + pipeline primitives; job queue v2 (cancel/delay/priority/attempts)`
 
 ### E6 — 存储 / 发布 / MCP / 可观测工程强化

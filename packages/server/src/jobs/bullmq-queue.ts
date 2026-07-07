@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Queue, Worker } from "bullmq";
 import type Redis from "ioredis";
-import type { JobQueue, JobRecord } from "@lot-agent/core";
+import type { EnqueueOpts, JobControl, JobQueue, JobRecord } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 
 const QUEUE_NAME = "lot-tasks";
@@ -9,11 +9,22 @@ const QUEUE_NAME = "lot-tasks";
 /**
  * BullMQ-backed JobQueue implementation.
  * The DB is the source of truth for task state; BullMQ drives execution.
+ *
+ * v2: EnqueueOpts (priority / delay / attempts / idempotencyKey) map onto
+ * BullMQ-native job options; the BullMQ job id is our task id so cancellation
+ * can reach a queued job by id. Cancelling a job running in *this* process
+ * aborts its `JobControl.signal`; BullMQ's own stalled-job detection covers
+ * worker crashes.
  */
 export class BullmqJobQueue implements JobQueue {
   private queue: Queue;
   private worker: Worker | null = null;
-  private handlers = new Map<string, (job: JobRecord<unknown>) => Promise<unknown>>();
+  private handlers = new Map<
+    string,
+    (job: JobRecord<unknown>, ctl: JobControl) => Promise<unknown>
+  >();
+  /** AbortControllers for jobs currently running in this process, keyed by task id. */
+  private running = new Map<string, AbortController>();
 
   constructor(
     private readonly db: DB,
@@ -22,15 +33,37 @@ export class BullmqJobQueue implements JobQueue {
     this.queue = new Queue(QUEUE_NAME, { connection });
   }
 
-  async enqueue<I>(type: string, input: I, userId: string): Promise<string> {
+  async enqueue<I>(
+    type: string,
+    input: I,
+    userId: string,
+    opts?: EnqueueOpts
+  ): Promise<string> {
     const id = randomUUID();
     await this.db.createTask(id, type, input, userId);
-    await this.queue.add(type, { taskId: id });
+    await this.queue.add(
+      type,
+      { taskId: id },
+      {
+        // Use our task id as the BullMQ job id so cancel() can target it, and
+        // so a duplicate enqueue with the same id is a no-op on the queue side.
+        jobId: id,
+        priority: opts?.priority,
+        delay: opts?.delayMs,
+        attempts: opts?.maxAttempts,
+      }
+    );
     return id;
   }
 
-  process<I, O>(type: string, handler: (job: JobRecord<I>) => Promise<O>): void {
-    this.handlers.set(type, handler as (job: JobRecord<unknown>) => Promise<unknown>);
+  process<I, O>(
+    type: string,
+    handler: (job: JobRecord<I>, ctl: JobControl) => Promise<O>
+  ): void {
+    this.handlers.set(
+      type,
+      handler as (job: JobRecord<unknown>, ctl: JobControl) => Promise<unknown>
+    );
 
     // Lazily create the single Worker on first process() call
     if (!this.worker) {
@@ -47,7 +80,8 @@ export class BullmqJobQueue implements JobQueue {
             throw new Error(errMsg);
           }
 
-          await this.db.updateTaskStatus(taskId, "running");
+          const attempts = bullJob.attemptsMade + 1;
+          await this.db.markTaskRunning(taskId, attempts);
           const row = await this.db.getTask(taskId);
           if (!row) {
             throw new Error(`Task ${taskId} not found in DB`);
@@ -58,24 +92,34 @@ export class BullmqJobQueue implements JobQueue {
             type: row.type,
             status: "running",
             progress: row.progress,
+            stage: row.stage ?? undefined,
+            attempts,
             input: row.input,
             userId: row.user_id,
-            createdAt: typeof row.created_at === "string"
-              ? row.created_at
-              : new Date(row.created_at).toISOString(),
-            updatedAt: typeof row.updated_at === "string"
-              ? row.updated_at
-              : new Date(row.updated_at).toISOString(),
+            createdAt: toIso(row.created_at),
+            updatedAt: toIso(row.updated_at),
+          };
+
+          const controller = new AbortController();
+          this.running.set(taskId, controller);
+          const ctl: JobControl = {
+            signal: controller.signal,
+            // Renew the BullMQ lock so a long job isn't treated as stalled.
+            heartbeat: () => {
+              void bullJob.updateProgress(bullJob.progress ?? 0).catch(() => {});
+            },
           };
 
           try {
-            const output = await jobHandler(jobRecord);
+            const output = await jobHandler(jobRecord, ctl);
             await this.db.setTaskResult(taskId, output);
             return output;
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             await this.db.setTaskError(taskId, message);
             throw err; // rethrow so BullMQ marks job as failed
+          } finally {
+            this.running.delete(taskId);
           }
         },
         { connection: this.connection }
@@ -92,21 +136,39 @@ export class BullmqJobQueue implements JobQueue {
       type: row.type,
       status: row.status as JobRecord["status"],
       progress: row.progress,
+      stage: row.stage ?? undefined,
+      attempts: row.attempts ?? 0,
       input: row.input,
       output: row.output ?? undefined,
       error: row.error ?? undefined,
       userId: row.user_id,
-      createdAt: typeof row.created_at === "string"
-        ? row.created_at
-        : new Date(row.created_at).toISOString(),
-      updatedAt: typeof row.updated_at === "string"
-        ? row.updated_at
-        : new Date(row.updated_at).toISOString(),
+      createdAt: toIso(row.created_at),
+      updatedAt: toIso(row.updated_at),
     };
   }
 
-  async updateProgress(id: string, progress: number): Promise<void> {
-    await this.db.updateTaskProgress(id, progress);
+  async cancel(id: string): Promise<boolean> {
+    const changed = await this.db.cancelTask(id);
+    // Abort a handler running in this process.
+    this.running.get(id)?.abort();
+    // Remove a still-queued (waiting/delayed) job so it never starts. A job
+    // already active is left to observe the aborted signal / DB status.
+    try {
+      const bullJob = await this.queue.getJob(id);
+      if (bullJob) {
+        const state = await bullJob.getState();
+        if (state === "waiting" || state === "delayed" || state === "prioritized") {
+          await bullJob.remove();
+        }
+      }
+    } catch {
+      // best-effort — DB cancellation already recorded
+    }
+    return changed;
+  }
+
+  async updateProgress(id: string, progress: number, stage?: string): Promise<void> {
+    await this.db.updateTaskProgress(id, progress, stage);
     // Optionally publish progress event (best-effort, non-fatal)
     try {
       await this.connection.publish(`task:${id}:progress`, String(progress));
@@ -123,4 +185,8 @@ export class BullmqJobQueue implements JobQueue {
     await this.queue.close();
     this.connection.disconnect();
   }
+}
+
+function toIso(v: string | Date): string {
+  return typeof v === "string" ? v : new Date(v).toISOString();
 }

@@ -89,3 +89,128 @@ describe("InMemoryJobQueue", () => {
     expect(r2!.status).toBe("succeeded"); // internal record unchanged
   });
 });
+
+describe("InMemoryJobQueue v2", () => {
+  let queue: InMemoryJobQueue;
+  beforeEach(() => {
+    queue = new InMemoryJobQueue();
+  });
+
+  it("delays execution by delayMs", async () => {
+    let ran = false;
+    queue.process("d", async () => {
+      ran = true;
+      return {};
+    });
+    await queue.enqueue("d", {}, "u", { delayMs: 40 });
+
+    await new Promise((r) => setTimeout(r, 5));
+    expect(ran).toBe(false); // not yet
+    await new Promise((r) => setTimeout(r, 60));
+    expect(ran).toBe(true);
+  });
+
+  it("cancels a pending (delayed) job before it runs", async () => {
+    let ran = false;
+    queue.process("d", async () => {
+      ran = true;
+      return {};
+    });
+    const id = await queue.enqueue("d", {}, "u", { delayMs: 50 });
+
+    const cancelled = await queue.cancel(id);
+    await new Promise((r) => setTimeout(r, 70));
+
+    expect(cancelled).toBe(true);
+    expect(ran).toBe(false);
+    expect((await queue.get(id))!.status).toBe("cancelled");
+  });
+
+  it("cancelling a running job aborts its signal and marks it cancelled", async () => {
+    let aborted = false;
+    queue.process("long", async (_job, ctl) => {
+      await new Promise<void>((resolve) => {
+        ctl.signal.addEventListener("abort", () => {
+          aborted = true;
+          resolve();
+        });
+      });
+      throw new Error("aborted");
+    });
+    const id = await queue.enqueue("long", {}, "u");
+    await new Promise((r) => setTimeout(r, 5)); // let it start
+
+    const cancelled = await queue.cancel(id);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(cancelled).toBe(true);
+    expect(aborted).toBe(true);
+    expect((await queue.get(id))!.status).toBe("cancelled");
+  });
+
+  it("retries a failing handler up to maxAttempts, then fails", async () => {
+    let attempts = 0;
+    queue.process("flaky", async () => {
+      attempts++;
+      throw new Error("boom");
+    });
+    const id = await queue.enqueue("flaky", {}, "u", { maxAttempts: 3 });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const rec = await queue.get(id);
+    expect(attempts).toBe(3);
+    expect(rec!.status).toBe("failed");
+    expect(rec!.attempts).toBe(3);
+  });
+
+  it("succeeds on a later attempt without exhausting retries", async () => {
+    let attempts = 0;
+    queue.process("recover", async () => {
+      attempts++;
+      if (attempts < 2) throw new Error("transient");
+      return { ok: true };
+    });
+    const id = await queue.enqueue("recover", {}, "u", { maxAttempts: 3 });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const rec = await queue.get(id);
+    expect(rec!.status).toBe("succeeded");
+    expect(rec!.attempts).toBe(2);
+  });
+
+  it("deduplicates by idempotencyKey: same id, runs once", async () => {
+    let runs = 0;
+    queue.process("once", async () => {
+      runs++;
+      return {};
+    });
+    const id1 = await queue.enqueue("once", {}, "u", { idempotencyKey: "k1" });
+    const id2 = await queue.enqueue("once", {}, "u", { idempotencyKey: "k1" });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(id1).toBe(id2);
+    expect(runs).toBe(1);
+  });
+
+  it("updateProgress records the stage label", async () => {
+    queue.process("slow", async () => {
+      await new Promise((r) => setTimeout(r, 10000));
+      return {};
+    });
+    const id = await queue.enqueue("slow", {}, "u");
+    await queue.updateProgress(id, 30, "rendering");
+
+    const rec = await queue.get(id);
+    expect(rec!.progress).toBe(30);
+    expect(rec!.stage).toBe("rendering");
+  });
+
+  it("cancel returns false for an unknown or already-finished job", async () => {
+    queue.process("echo", async () => ({}));
+    const id = await queue.enqueue("echo", {}, "u");
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(await queue.cancel("nope")).toBe(false);
+    expect(await queue.cancel(id)).toBe(false); // already succeeded
+  });
+});

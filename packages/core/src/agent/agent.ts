@@ -364,56 +364,87 @@ export class Agent {
         };
         workingHistory.push(assistantMsg);
 
-        // Execute all tool calls
-        for (const tc of toolCalls) {
-          yield {
-            type: "tool_call",
-            id: tc.id,
-            name: tc.name,
-            input: tc.arguments,
-          };
-
+        // Execute a single tool call, honoring the cacheable dedup cache.
+        const executeOne = async (tc: ToolCall): Promise<ToolResult> => {
           const cacheable = context.toolRegistry.get(tc.name)?.cacheable ?? false;
           const dedupKey = `${tc.name}:${stableStringify(tc.arguments)}`;
-          let result: ToolResult;
           const cached = cacheable ? successfulCalls.get(dedupKey) : undefined;
           if (cached) {
             // Identical cacheable call already succeeded this run — reuse it
             // instead of re-running, and tell the model so it stops repeating.
-            result = {
+            return {
               content: `[skipped duplicate call: an identical ${tc.name} call already succeeded earlier in this turn — reusing that result. Do not call it again.]\n\n${cached.content}`,
               isError: false,
             };
-          } else {
-            result = await context.toolRegistry.execute(
-              tc.name,
-              tc.arguments,
-              context.toolContext,
-              { signal }
-            );
-            if (cacheable && !result.isError) successfulCalls.set(dedupKey, result);
           }
+          const result = await context.toolRegistry.execute(
+            tc.name,
+            tc.arguments,
+            context.toolContext,
+            { signal }
+          );
+          if (cacheable && !result.isError) successfulCalls.set(dedupKey, result);
+          return result;
+        };
 
+        // Record a completed call's result: emit the event, append to history,
+        // and report whether it ends the turn. Order-preserving.
+        const recordResult = function* (
+          tc: ToolCall,
+          result: ToolResult
+        ): Generator<AgentEvent, boolean> {
           yield {
             type: "tool_result",
             name: tc.name,
             output: result.content,
             isError: result.isError ?? false,
           };
-
-          // Add tool result to working history
           workingHistory.push({
             role: "tool",
             content: result.content,
             toolCallId: tc.id,
           });
-
           // An endsTurn tool that succeeded hands control back to the user
-          // (e.g. ask_user). Stop the run here — remaining batched calls are
-          // skipped; the model re-plans after the user's reply next turn.
-          if (!result.isError && context.toolRegistry.get(tc.name)?.endsTurn) {
-            yield done();
-            return;
+          // (e.g. ask_user). Remaining batched calls are skipped; the model
+          // re-plans after the user's reply next turn.
+          return !result.isError && (context.toolRegistry.get(tc.name)?.endsTurn ?? false);
+        };
+
+        // Execute tool calls, batching consecutive parallel-safe (read-only)
+        // calls with Promise.all. Events still yield in call order.
+        let ci = 0;
+        while (ci < toolCalls.length) {
+          const parallelSafe = (tc: ToolCall) =>
+            context.toolRegistry.get(tc.name)?.parallelSafe ?? false;
+
+          if (parallelSafe(toolCalls[ci])) {
+            // Gather the run of consecutive parallel-safe calls.
+            const group: ToolCall[] = [];
+            while (ci < toolCalls.length && parallelSafe(toolCalls[ci])) {
+              group.push(toolCalls[ci]);
+              ci++;
+            }
+            for (const tc of group) {
+              yield { type: "tool_call", id: tc.id, name: tc.name, input: tc.arguments };
+            }
+            const results = await Promise.all(group.map(executeOne));
+            let ended = false;
+            for (let k = 0; k < group.length; k++) {
+              if (yield* recordResult(group[k], results[k])) ended = true;
+            }
+            if (ended) {
+              yield done();
+              return;
+            }
+          } else {
+            const tc = toolCalls[ci];
+            ci++;
+            yield { type: "tool_call", id: tc.id, name: tc.name, input: tc.arguments };
+            const result = await executeOne(tc);
+            if (yield* recordResult(tc, result)) {
+              yield done();
+              return;
+            }
           }
         }
       }

@@ -84,6 +84,8 @@ export interface StoredTask {
   type: string;
   status: string;
   progress: number;
+  stage: string | null;
+  attempts: number;
   input: unknown;
   output: unknown | null;
   error: string | null;
@@ -384,6 +386,12 @@ export class DB {
       // re-creating the generation. Distinct from our local tasks.id.
       await client.query(`
         ALTER TABLE tasks ADD COLUMN IF NOT EXISTS vendor_task_id TEXT;
+      `);
+
+      // Jobs v2: attempt counter (retry accounting) + human-readable stage label.
+      await client.query(`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attempts SMALLINT NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stage TEXT;
       `);
 
       await client.query(`
@@ -1351,6 +1359,23 @@ export class DB {
     );
   }
 
+  /** Mark a task running and record which attempt this is (jobs v2 retries). */
+  async markTaskRunning(id: string, attempts: number): Promise<void> {
+    await this.pool.query(
+      "UPDATE tasks SET status = 'running', attempts = $2, updated_at = now() WHERE id = $1",
+      [id, attempts]
+    );
+  }
+
+  /** Cancel a task if it hasn't already reached a terminal state. Returns whether a row changed. */
+  async cancelTask(id: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      "UPDATE tasks SET status = 'cancelled', updated_at = now() WHERE id = $1 AND status IN ('pending','running')",
+      [id]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
   async getTaskVendorId(id: string): Promise<string | null> {
     const { rows } = await this.pool.query(
       "SELECT vendor_task_id FROM tasks WHERE id = $1",
@@ -1366,11 +1391,18 @@ export class DB {
     );
   }
 
-  async updateTaskProgress(id: string, progress: number): Promise<void> {
-    await this.pool.query(
-      "UPDATE tasks SET progress = $1, updated_at = now() WHERE id = $2",
-      [progress, id]
-    );
+  async updateTaskProgress(id: string, progress: number, stage?: string): Promise<void> {
+    if (stage === undefined) {
+      await this.pool.query(
+        "UPDATE tasks SET progress = $1, updated_at = now() WHERE id = $2",
+        [progress, id]
+      );
+    } else {
+      await this.pool.query(
+        "UPDATE tasks SET progress = $1, stage = $3, updated_at = now() WHERE id = $2",
+        [progress, id, stage]
+      );
+    }
   }
 
   async setTaskResult(id: string, output: unknown): Promise<void> {

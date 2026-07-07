@@ -153,6 +153,13 @@ export interface Tool {
    * batched tool calls are skipped; an isError result does NOT end the turn.
    */
   endsTurn?: boolean;
+  /**
+   * When true, this tool is a read-only/side-effect-free operation that is safe
+   * to run concurrently with other parallel-safe tools in the same batch. The
+   * Agent executes consecutive parallel-safe calls together (events still yield
+   * in call order). Defaults to false — most tools run sequentially.
+   */
+  parallelSafe?: boolean;
   execute(input: unknown, context: ToolContext): Promise<ToolResult>;
 }
 

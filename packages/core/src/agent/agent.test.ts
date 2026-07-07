@@ -379,6 +379,60 @@ function recordingRetriever(docs: Array<{ id: string; text: string }>) {
   };
 }
 
+describe("Agent.run parallel tool execution", () => {
+  function concurrencyTool(name: string, parallelSafe: boolean, track: { active: number; max: number }): Tool {
+    return {
+      name,
+      description: name,
+      parameters: {},
+      parallelSafe,
+      async execute() {
+        track.active++;
+        track.max = Math.max(track.max, track.active);
+        await new Promise((r) => setTimeout(r, 20));
+        track.active--;
+        return { content: `${name}-done` };
+      },
+    };
+  }
+
+  function twoToolCall(t1: string, t2: string): ChatChunk[] {
+    return [
+      { type: "tool_call", toolCall: { id: "a", name: t1, arguments: {} } },
+      { type: "tool_call", toolCall: { id: "b", name: t2, arguments: {} } },
+      { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
+    ];
+  }
+
+  it("runs consecutive parallelSafe tool calls concurrently, results in order", async () => {
+    const track = { active: 0, max: 0 };
+    const registry = new ToolRegistry();
+    registry.register(concurrencyTool("p1", true, track));
+    registry.register(concurrencyTool("p2", true, track));
+    const llm = scriptedLLM([twoToolCall("p1", "p2"), textChunks("done")]);
+
+    const events = await collect(new Agent({ systemPrompt: "s" }).run("hi", makeContext(llm, registry)));
+
+    expect(track.max).toBe(2); // both in flight at once
+    const resultNames = events
+      .filter((e): e is Extract<AgentEvent, { type: "tool_result" }> => e.type === "tool_result")
+      .map((e) => e.name);
+    expect(resultNames).toEqual(["p1", "p2"]);
+  });
+
+  it("runs non-parallelSafe tool calls sequentially", async () => {
+    const track = { active: 0, max: 0 };
+    const registry = new ToolRegistry();
+    registry.register(concurrencyTool("s1", false, track));
+    registry.register(concurrencyTool("s2", false, track));
+    const llm = scriptedLLM([twoToolCall("s1", "s2"), textChunks("done")]);
+
+    await collect(new Agent({ systemPrompt: "s" }).run("hi", makeContext(llm, registry)));
+
+    expect(track.max).toBe(1); // never overlapped
+  });
+});
+
 describe("Agent.run user-memory injection cap", () => {
   it("caps injected user memory to at most 20 lines", async () => {
     const { AgentMemoryStore } = await import("../memory/store.js");
