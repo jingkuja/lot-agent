@@ -37,6 +37,15 @@ class ThrowingCompressor implements LLMProvider {
   }
 }
 
+/** Compressor that simulates an LLM call failing (e.g. retries exhausted). */
+class FailingCompressor implements LLMProvider {
+  calls = 0;
+  async *chat(): AsyncIterable<ChatChunk> {
+    this.calls++;
+    throw new Error("503 upstream unavailable");
+  }
+}
+
 /** Build a string of roughly `tokens` estimated tokens (ASCII ≈ 3.5 chars/token). */
 function textOfTokens(tokens: number): string {
   return "x".repeat(Math.ceil(tokens * 3.5));
@@ -93,6 +102,46 @@ describe("ContextManager budget", () => {
     );
     expect(memMsg).toBeDefined();
     expect(estimateTokens(String(memMsg!.content))).toBeLessThanOrEqual(1_200);
+  });
+});
+
+describe("ContextManager retrieval block", () => {
+  it("injects a [Retrieved Context] system block after the summary, before history", async () => {
+    const cm = new ContextManager();
+    const history: Message[] = [{ role: "user", content: "question" }];
+    const out = await cm.assemble([], "prior summary", history, undefined, undefined, {
+      retrieval: "fact: the sky is blue",
+    });
+
+    const retrievalIdx = out.findIndex(
+      (m) => m.role === "system" && String(m.content).includes("[Retrieved Context]")
+    );
+    const summaryIdx = out.findIndex(
+      (m) => m.role === "system" && String(m.content).includes("Summary")
+    );
+    const historyIdx = out.findIndex((m) => m.role === "user");
+
+    expect(retrievalIdx).toBeGreaterThan(summaryIdx);
+    expect(retrievalIdx).toBeLessThan(historyIdx);
+    expect(String(out[retrievalIdx].content)).toContain("the sky is blue");
+  });
+
+  it("truncates retrieval to the retrieval budget", async () => {
+    const cm = new ContextManager({ budget: { retrieval: 1_000 } });
+    const out = await cm.assemble([], undefined, [], undefined, undefined, {
+      retrieval: textOfTokens(5_000),
+    });
+    const retrieved = out.find(
+      (m) => m.role === "system" && String(m.content).includes("[Retrieved Context]")
+    );
+    expect(retrieved).toBeDefined();
+    expect(estimateTokens(String(retrieved!.content))).toBeLessThanOrEqual(1_200);
+  });
+
+  it("adds no block when no retrieval is supplied (backward compatible)", async () => {
+    const cm = new ContextManager();
+    const out = await cm.assemble([], undefined, [{ role: "user", content: "hi" }]);
+    expect(out.some((m) => String(m.content).includes("[Retrieved Context]"))).toBe(false);
   });
 });
 
@@ -320,6 +369,72 @@ describe("ContextManager compression strategy", () => {
     await cm.assemble([], undefined, history, undefined, compressor);
     expect(compressor.calls).toBeGreaterThan(0);
     expect(compressor.lastUserContent.length).toBeLessThanOrEqual(10_000);
+  });
+
+  it("does not re-elide tool output already bounded by truncateOldToolOutputs", async () => {
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 4_000 },
+      maxRawRounds: 20,
+    });
+    const compressor = new FakeCompressor();
+    // ~1,715 tokens: under the toolOutput elision threshold (so it survives
+    // truncateOldToolOutputs untouched) but over SUMMARY_INPUT_MAX_CHARS
+    // (4,000 chars) — must not be elided a second time inside summarize().
+    const toolContent = "z".repeat(6_000);
+    const history: Message[] = [
+      { role: "user", content: "round0" },
+      {
+        role: "assistant",
+        content: "c",
+        toolCalls: [{ id: "t0", name: "x", arguments: {} }],
+      },
+      { role: "tool", toolCallId: "t0", content: toolContent },
+      { role: "assistant", content: "ok" },
+    ];
+    for (let i = 0; i < 8; i++) history.push(userMsg(1_250), assistantMsg(1_250));
+
+    await cm.assemble([], undefined, history, undefined, compressor);
+    expect(compressor.calls).toBeGreaterThan(0);
+    expect(compressor.lastUserContent).toContain(toolContent);
+  });
+
+  it("degrades to hard truncation instead of throwing when the compressor call fails", async () => {
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 4_000 },
+      maxRawRounds: 20,
+    });
+    const compressor = new FailingCompressor();
+    const base: Message[] = [];
+    for (let i = 0; i < 8; i++) base.push(userMsg(1_250), assistantMsg(1_250));
+
+    const out = await cm.assemble([], undefined, base, undefined, compressor);
+
+    expect(compressor.calls).toBeGreaterThan(0);
+    // No cached summary was produced — the failure must not be persisted as state.
+    expect(cm.getSummaryState()).toBeUndefined();
+    // Still within budget via truncation, and the most recent round survives.
+    expect(cm.countTotalTokens(out)).toBeLessThanOrEqual(
+      cm.getBudget().history + cm.getBudget().systemPrompt
+    );
+    expect(out[out.length - 1].role).toBe("assistant");
+  });
+
+  it("propagates a compressor failure caused by cancellation instead of degrading", async () => {
+    const cm = new ContextManager({
+      budget: { total: 20_000, history: 2_000, generation: 4_000 },
+      maxRawRounds: 20,
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const compressor = new FailingCompressor();
+    const base: Message[] = [];
+    for (let i = 0; i < 8; i++) base.push(userMsg(1_250), assistantMsg(1_250));
+
+    await expect(
+      cm.assemble([], undefined, base, undefined, compressor, {
+        signal: controller.signal,
+      })
+    ).rejects.toThrow();
   });
 });
 

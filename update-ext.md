@@ -198,17 +198,17 @@ export interface ModelCapabilities {
 export interface ModelConfig { /* 现有字段 */ capabilities?: ModelCapabilities; }
 ```
 
-- [ ] `config/default.json` 的 `models` 段补 capabilities；`config/schema.ts` 同步校验。
-- [ ] **registry 尊重 enabled**：`list()` 默认过滤 `enabled: false`（加 `{ includeDisabled }` 逃生门）；
+- [x] `config/default.json` 的 `models` 段补 capabilities；`config/schema.ts` 同步校验。
+- [x] **registry 尊重 enabled**：`list()` 默认过滤 `enabled: false`（加 `{ includeDisabled }` 逃生门）；
   `getProvider` 对 disabled 返回 undefined。测试补齐。
-- [ ] **上下文预算联动**：server 装配 Agent 时按
+- [x] **上下文预算联动**：server 装配 Agent 时按
   `contextConfig.budget.total = capabilities.contextWindow ?? 120_000`（10% 安全边际）注入；
   core 侧 `ContextManager` 不改逻辑，只是不再被写死的 120K 绑架。
-- [ ] **成本预估**：`billing/cost.ts` 增
+- [x] **成本预估**：`billing/cost.ts` 增
   `estimateCost(model: ModelConfig, est: { inputCount?: number; outputCount?: number }): number`
   —— LLM 按估算 token、image 按张数、video 按秒数复用 `calcCost` 口径；server 的 402 预检与
   「费用预估展示」共用一个真源。TDD：三种类型各一条。
-- [ ] **生成 HTTP 客户端加固**：`HttpGenerationClient` 的 fetch 加 20s 超时 + AbortSignal 透传 +
+- [x] **生成 HTTP 客户端加固**：`HttpGenerationClient` 的 fetch 加 20s 超时 + AbortSignal 透传 +
   网络错误一次重试（poll 是幂等读，安全）。
 - [ ] **Commit**：`feat(core): model capabilities metadata + cost estimation + enabled filtering`
 
@@ -216,7 +216,7 @@ export interface ModelConfig { /* 现有字段 */ capabilities?: ModelCapabiliti
 
 **目标**：业务 Agent 的产物是**结构化**、**多模态**的，类型系统与审核链路先行铺路。
 
-- [ ] **ContentPart 扩展**：
+- [x] **ContentPart 扩展**：
   ```ts
   export interface ContentPart {
     type: "text" | "image" | "video" | "audio" | "file";
@@ -226,11 +226,11 @@ export interface ModelConfig { /* 现有字段 */ capabilities?: ModelCapabiliti
   }
   ```
   两个 LLM Provider 对不支持的 part 降级为文本占位（沿用 anthropic.ts 现有的兜底手法）。
-- [ ] **outputSchema**：`AgentDefinition` 增 `outputSchema?: JSONSchema`；装配时经
+- [x] **outputSchema**：`AgentDefinition` 增 `outputSchema?: JSONSchema`；装配时经
   `ChatParams.responseSchema` 下发 —— openai 走 `response_format: { type: "json_schema" }`，
   anthropic 走 tool-choice 强制单工具的等价实现；`Agent.run` 结束时若定义了 outputSchema，
   对最终文本做一次 JSON.parse + 校验，失败 yield 结构化 error（不重跑，交上层决策）。
-- [ ] **审核多模态化**：
+- [x] **审核多模态化**：
   ```ts
   export interface ReviewInput {
     kind: "text" | "image" | "video";
@@ -247,9 +247,9 @@ export interface ModelConfig { /* 现有字段 */ capabilities?: ModelCapabiliti
   ```
   `KeywordReviewProvider` 实现 text，image/video 返回 `suspect`（"stub 无法审图"）——
   逼着发布链路对非文本产物显式决策而非静默放行。保留 `reviewText` 为兼容薄壳,标 `@deprecated`。
-- [ ] **ASR / Embedding 接口**：`providers/asr.ts`（`transcribe(req) → { text, durationSec }`）、
+- [x] **ASR / Embedding 接口**：`providers/asr.ts`（`transcribe(req) → { text, durationSec }`）、
   `providers/embedding.ts`（`embed(texts: string[]) → number[][]`，E4 的地基）+ 各配 Stub。
-- [ ] **多图输出**：`PollResult` 增 `urls?: string[]`（保留 `url` 为首图兼容位）；
+- [x] **多图输出**：`PollResult` 增 `urls?: string[]`（保留 `url` 为首图兼容位）；
   Happyhorse 适配器与 Mock 同步填充。
 - [ ] **Commit**：`feat(core): multimodal content parts + structured output + multimodal review + asr/embedding interfaces`
 
@@ -271,17 +271,18 @@ export interface Retriever {           // Embedding + VectorStore 的组合门�
 }
 ```
 
-- [ ] **接口 + InMemoryVectorStore**（余弦相似度，单测/开发用）落 core；pgvector 适配器落 server
-  （遵循 Interface-in-core / impl-in-server 惯例）。
-- [ ] **接线 ContextManager**：`AgentContext` 增 `retriever?: Retriever` 与
-  `retrievalNamespace?: string`；`Agent.run` 每轮 assemble 前用**当前用户消息**做一次
-  `retrieve`，格式化为 `[Retrieved Context]` 块经 assemble 的 `memory` 参数旁新增的
-  `retrieval` 参数传入（受 `budget.retrieval` 截断，逻辑同 memory 块）。无 retriever 时零开销，
-  完全向后兼容。
-- [ ] **记忆语义检索**：`AgentMemoryStore.searchUserMemory` 在配置了 Retriever 时优先走向量检索，
-  ILIKE 作为降级路径。
-- [ ] **注入上限**（1.3 工程项顺手做）：`formatForPrompt` 与 user memory 注入各加
-  条数（20）与字符（4K）上限，超限按 `updatedAt` 新者优先。
+- [x] **接口 + InMemoryVectorStore**（余弦相似度，单测/开发用）落 core（`retrieval/`：`types.ts`
+  的 `VectorDoc/VectorStore/Retriever`、`InMemoryVectorStore`、`EmbeddingRetriever` 门面）；
+  pgvector 适配器落 server（**仍待办**，遵循 Interface-in-core / impl-in-server 惯例）。
+- [x] **接线 ContextManager**：`AgentContext` 增 `retriever?: Retriever` 与
+  `retrievalNamespace?: string`；`Agent.run` 用**当前用户消息**做一次 `retrieve`（查询恒定，
+  循环内不重复），格式化为 `[Retrieved Context]` 块经 assemble 新增的 `opts.retrieval`
+  参数传入（受 `budget.retrieval` 截断，逻辑同 memory 块）。无 retriever 时零开销，
+  检索失败静默降级，完全向后兼容。
+- [x] **记忆语义检索**：`AgentMemoryStore.searchUserMemory` 在配置了 Retriever 时优先走向量检索，
+  ILIKE 作为降级路径（空结果/异常均回退）。
+- [x] **注入上限**（1.3 工程项顺手做）：`formatEntriesForPrompt`（`formatForPrompt` 与 user memory
+  注入共用）各加条数（20）与字符（4K）上限，超限按 `createdAt` 新者优先。
 - [ ] **Commit**：`feat(core): retrieval foundation (embedding + vector store + context wiring)`
 
 ### E5 — 多 Agent 编排原语 + 任务系统 v2
@@ -335,12 +336,15 @@ export interface JobControl { signal: AbortSignal; heartbeat(): void; }
 // JobRecord 增: attempts: number; stage?: string; status 增 "cancelled"
 ```
 
-- [ ] `InMemoryJobQueue` 补齐 v2 语义（delay 用 setTimeout、cancel、attempts）作契约测试基准；
-  `BullmqJobQueue`（server）映射到 BullMQ 原生 priority/delay/attempts/stalled 检测。
-- [ ] `agentAsTool` + `validatePipeline` TDD 落地；`general` Agent 定义**暂不**挂子 Agent 工具
-  （业务期按需开白名单），本期只交付原语与测试。
-- [ ] **工具并行执行**（顺手）：`Tool` 增 `parallelSafe?: boolean`（只读类工具标 true），
-  `Agent.run` 对同一批 toolCalls 中连续的 parallelSafe 段用 `Promise.all`，事件仍按原顺序 yield。
+- [x] `InMemoryJobQueue` 补齐 v2 语义（delay 用 setTimeout、cancel、attempts、idempotencyKey、
+  per-job `JobControl` signal/heartbeat）作契约测试基准；`BullmqJobQueue`（server）映射到 BullMQ 原生
+  priority/delay/attempts（job id = task id 供按 id 取消/去重）；stalled 走 BullMQ 内建锁续期。
+  `tasks` 表加 `attempts`/`stage` 两列（幂等 ALTER）+ `markTaskRunning`/`cancelTask`。
+- [x] `agentAsTool` + `validatePipeline`（重复 id / 悬空依赖 / 自依赖 / 环 / 各 kind 必填字段）TDD 落地；
+  `general` Agent 定义**暂不**挂子 Agent 工具（业务期按需开白名单），本期只交付原语与测试。
+- [x] **工具并行执行**（顺手）：`Tool` 增 `parallelSafe?: boolean`（只读类工具标 true），
+  `Agent.run` 对同一批 toolCalls 中连续的 parallelSafe 段用 `Promise.all`，事件仍按调用顺序 yield，
+  dedup/endsTurn 语义不变。
 - [ ] **Commit**：`feat(core): agent-as-tool + pipeline primitives; job queue v2 (cancel/delay/priority/attempts)`
 
 ### E6 — 存储 / 发布 / MCP / 可观测工程强化
@@ -358,21 +362,24 @@ export interface JobControl { signal: AbortSignal; heartbeat(): void; }
     delete(key: string): Promise<void>;
   }
   ```
-  Local 实现补齐（putStream 用 pipeline 落盘）；`s3-storage.ts`（S3/OSS/MinIO 兼容，
-  `@aws-sdk/client-s3`）本期落地，config 切换。worker 下载生成产物改走流式直传。
-- [ ] **Publish v2**：`PublishInput` 增 `tags?: string[]; coverAssetId?: string; scheduleAt?: string;
-  idempotencyKey?: string`；`exchangeToken` 返回增 `refreshToken?`；接口增
-  `refreshToken(rt: string)` 与 `revoke(userId: string)`。Stub 同步；定时发布 = server 把
+- [x] **ObjectStorage v2 接口 + Local**：接口增 `putStream/exists/getUrl(opts)`。
+  Local 实现补齐（putStream 用 `stream/promises` 的 pipeline 落盘、`exists`、`getUrl` 忽略预签名）。
+  **仍待办**：`s3-storage.ts`（`@aws-sdk/client-s3` 属 vendor SDK，按惯例落 server；未安装依赖，暂缓）
+  与 worker 下载产物改流式直传（putStream 能力已就位，待生成流程改造接线）。
+- [x] **Publish v2**：`PublishInput` 增 `tags?/coverAssetId?/scheduleAt?/idempotencyKey?`；
+  `exchangeToken` 返回改 `TokenSet`（增 `refreshToken?`）；接口增
+  `refreshToken(rt)` 与 `revoke(userId)`。Stub 同步；定时发布 = server 把
   `scheduleAt` 换算成 jobs v2 的 `delayMs`，core 无新机制。
-- [ ] **MCP 硬化**：MCP 工具映射时带默认 `execConfig`（timeout 30s）并透传 `cacheable: false`；
-  连接超时后显式 `transport.close()`；`connect` 失败指数退避重连（上限 3 次）；
-  `MCPConfig` 增 `headers?: Record<string,string>`（远程 transport 鉴权）。
-- [ ] **Skills 改进**：`match` 结果去重 + `maxSkills`（默认 3）+ 注入前按 `estimateTokens`
-  预算截断（并入 systemPrompt 的 16K 预算内）。
-- [ ] **结构化日志**：`logger/log.ts` 极简分级 logger（debug/info/warn/error，JSON 行输出，
-  `LOG_LEVEL` env 控制），替换 core 里散落的 `console.warn/error`（skills/loader、DEBUG_LLM 等）。
-- [ ] **配置 schema 补全**：`AppConfigSchema` 校验 `models[].capabilities`、mcp servers
-  （对齐 `MCPConfig` 形状）、新增 `storage`（driver: local|s3 + 各自字段）段。
+- [x] **MCP 硬化**：MCP 工具映射带 `execConfig`（timeout 30s）+ `cacheable: false`；每次尝试用独立
+  transport，连接超时/失败显式 `transport.close()`；`connect` 走 `retryAsync` 指数退避（上限 3 次）；
+  `MCPConfig` 增 `headers?`（透传给 sse / streamable-http 的 requestInit）。
+- [x] **Skills 改进**：`match` 结果按 name 去重 + `maxSkills`（默认 3）+ 可选 `maxTokens` 按
+  `estimateTokens` 预算丢弃溢出技能。
+- [x] **结构化日志**：`logger/log.ts` 极简分级 logger（debug/info/warn/error，JSON 行输出，
+  `LOG_LEVEL` env 控制，child bindings，Error 字段展开），替换 `skills/loader` 与 openai `DEBUG_LLM`
+  的 `console.*`。
+- [x] **配置 schema 补全**：`AppConfigSchema` 校验 `models[].capabilities`（E2 已加）、mcp servers
+  （对齐 `MCPConfig` 形状，含 headers）、新增 `storage`（driver: local|s3 + 各自字段，缺省 local）段。
 - [ ] **Commit**：`feat(core): storage v2 + publish v2 + mcp hardening + structured logging + config schema completion`
 
 ---

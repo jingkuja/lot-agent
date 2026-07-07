@@ -16,7 +16,11 @@ import type {
   LLMTool,
   LLMProvider,
 } from "../types/index.js";
-import { withLLMRetry } from "./retry.js";
+import { mediaPartPlaceholder } from "../types/index.js";
+import { withLLMRetry, isMalformedToolCallError } from "./retry.js";
+import { logger } from "../logger/log.js";
+
+const log = logger.child({ mod: "llm.openai" });
 
 export interface OpenAIProviderConfig {
   apiKey: string;
@@ -48,9 +52,11 @@ export class OpenAIProvider implements LLMProvider {
       (process.env.DEBUG_LLM ?? "").toLowerCase()
     );
     if (debug) {
-      console.error(
-        `[DEBUG_LLM] request model=${this.model} messages=${oaiMessages.length} tools=${oaiTools?.length ?? 0}`
-      );
+      log.debug("request", {
+        model: this.model,
+        messages: oaiMessages.length,
+        tools: oaiTools?.length ?? 0,
+      });
     }
 
     const client = this.client;
@@ -71,6 +77,17 @@ export class OpenAIProvider implements LLMProvider {
               temperature: params?.temperature,
               max_tokens: params?.maxTokens,
               top_p: params?.topP,
+              // Structured output: constrain generation to the JSON schema.
+              // `strict: false` so arbitrary user schemas (without the strict
+              // subset's additionalProperties/required rules) aren't rejected.
+              ...(params?.responseSchema
+                ? {
+                    response_format: {
+                      type: "json_schema" as const,
+                      json_schema: { name: "response", schema: params.responseSchema, strict: false },
+                    },
+                  }
+                : {}),
             },
             { signal: opts?.signal }
           );
@@ -87,7 +104,10 @@ function isOpenAIRetryable(err: unknown): boolean {
     err instanceof RateLimitError ||
     err instanceof InternalServerError ||
     err instanceof APIConnectionError ||
-    err instanceof APIConnectionTimeoutError
+    err instanceof APIConnectionTimeoutError ||
+    // A 400-class rejection of truncated/garbled tool-call JSON — transient,
+    // so let the model regenerate instead of killing the turn.
+    isMalformedToolCallError(err)
   );
 }
 
@@ -129,7 +149,7 @@ export async function* mapOpenAIStream(
   }
 
   for await (const chunk of stream) {
-    if (debug) console.error("[DEBUG_LLM] chunk", JSON.stringify(chunk.choices[0]));
+    if (debug) log.debug("chunk", { choice: chunk.choices[0] });
 
     const delta = chunk.choices[0]?.delta as
       | (ChatCompletionChunk.Choice["delta"] & { reasoning_content?: string })
@@ -193,14 +213,14 @@ export function toOpenAIMessage(msg: Message): OpenAI.ChatCompletionMessageParam
     }
     return {
       role: "user",
-      content: msg.content.map((p) =>
-        p.type === "text"
-          ? { type: "text" as const, text: p.text ?? "" }
-          : {
-              type: "image_url" as const,
-              image_url: { url: p.image?.url ?? "" },
-            }
-      ),
+      content: msg.content.map((p) => {
+        if (p.type === "text") return { type: "text" as const, text: p.text ?? "" };
+        if (p.type === "image") {
+          return { type: "image_url" as const, image_url: { url: p.image?.url ?? "" } };
+        }
+        // video / audio / file — no OpenAI content type for these; degrade to text.
+        return { type: "text" as const, text: mediaPartPlaceholder(p) };
+      }),
     };
   }
   if (msg.role === "assistant") {

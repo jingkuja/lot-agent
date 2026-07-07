@@ -13,11 +13,56 @@ import { placeholderSvgDataUrl } from "./placeholder.js";
 export type MediaType = "image" | "video";
 export interface ReferenceMedia { type: "reference_image"; url: string }
 export interface CreateResult { taskId: string; status: string; progress: number }
-export interface PollResult { status: string; progress: number; url?: string; error?: string }
+export interface PollResult {
+  status: string;
+  progress: number;
+  /** First (or only) artifact URL — compat position for single-output callers. */
+  url?: string;
+  /** All artifact URLs when the request produced multiple (image `n > 1`). */
+  urls?: string[];
+  error?: string;
+}
 
 export function parseSize(size?: string): [number, number] {
   const m = /^(\d+)[x*](\d+)$/.exec(size ?? "");
   return m ? [Number(m[1]), Number(m[2])] : [1024, 1024];
+}
+
+/**
+ * Pull a human-readable error out of a vendor error envelope. tokenhub reports
+ * failures as HTTP 200 with `{ code, message, data:null }` and no `status`
+ * field; `message` is itself often a JSON-stringified nested error. Digs through
+ * up to a few nested `error.message` / `message` layers to the innermost text,
+ * falling back to `code`. Returns undefined for a normal (non-error) response.
+ */
+export function extractVendorError(j: Record<string, unknown>): string | undefined {
+  const nested = (j.error ?? {}) as Record<string, unknown>;
+  let msg =
+    (typeof j.message === "string" && j.message) ||
+    (typeof nested.message === "string" && nested.message) ||
+    undefined;
+  if (typeof msg === "string") {
+    // `message` is frequently a JSON string wrapping the real error — unwrap it.
+    let cur = msg;
+    for (let i = 0; i < 5; i++) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(cur) as Record<string, unknown>;
+      } catch {
+        break; // not JSON — `cur` is the leaf message
+      }
+      const inner = (parsed.error ?? {}) as Record<string, unknown>;
+      const next =
+        (typeof inner.message === "string" && inner.message) ||
+        (typeof parsed.message === "string" && parsed.message) ||
+        undefined;
+      if (!next) break;
+      cur = next;
+    }
+    msg = cur.trim();
+  }
+  const code = typeof j.code === "string" ? j.code : undefined;
+  return msg || code || undefined;
 }
 
 /** Vendor adapter shape; `Req` is the media-specific request type. */
@@ -35,32 +80,92 @@ export interface HttpGenerationOpts<Req> {
   apiKey: string;
   adapter: VendorAdapter<Req>;
   model: string;
+  /** Per-request timeout. Default: 20s. */
+  timeoutMs?: number;
+}
+
+/** Default per-request timeout for generation HTTP calls. */
+const DEFAULT_TIMEOUT_MS = 20_000;
+
+/**
+ * Turn a non-2xx generation response into an Error carrying the cleanest message
+ * available. tokenhub returns a structured error envelope even on 5xx (e.g. a
+ * 500 whose body is `{ code:"fail_to_fetch_task", message:"…未订购…资费包" }`), so
+ * dig the human-readable vendor message out of it instead of dumping raw JSON.
+ */
+async function responseError(res: { status: number; text(): Promise<string> }, ctx: string): Promise<Error> {
+  const body = await res.text();
+  let vendorMsg: string | undefined;
+  try {
+    vendorMsg = extractVendorError(JSON.parse(body) as Record<string, unknown>);
+  } catch {
+    // body wasn't JSON — fall back to the raw text below
+  }
+  return new Error(vendorMsg ?? `${ctx}: ${res.status} ${body}`);
 }
 
 /** Drives any `VendorAdapter<Req>` over HTTP (async create→poll). */
 export class HttpGenerationClient<Req extends { model?: string }> {
   constructor(protected opts: HttpGenerationOpts<Req>) {}
+
+  /**
+   * fetch with a per-request timeout (AbortSignal), retrying only the network
+   * layer. `retries` is the number of *extra* attempts (poll passes 1 because a
+   * poll is an idempotent read; create passes 0 because it isn't). HTTP error
+   * responses are returned as-is for the caller to classify — only a thrown
+   * fetch (network failure / timeout) is retried.
+   */
+  private async request(url: string, init: RequestInit, retries: number): Promise<Response> {
+    const timeoutMs = this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      } catch (e) {
+        if (attempt >= retries) throw e;
+      }
+    }
+  }
+
   async create(req: Req): Promise<CreateResult> {
     const { adapter, baseUrl, apiKey } = this.opts;
     const model = req.model ?? this.opts.model;
-    const res = await fetch(`${baseUrl}${adapter.createPath()}`, {
+    const res = await this.request(`${baseUrl}${adapter.createPath()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(adapter.buildCreateBody(req, model)),
-    });
-    if (!res.ok) throw new Error(`generation create failed: ${res.status} ${await res.text()}`);
-    return adapter.parseCreate(await res.json());
+    }, 0);
+    if (!res.ok) throw await responseError(res, "generation create failed");
+    const json = await res.json();
+    const created = adapter.parseCreate(json);
+    // A create response with no task id is a failure disguised as HTTP 200 — a
+    // vendor error envelope (`{ code, message, data:null }`) with no task_id/id.
+    // Without a task id there is nothing to poll, so surface it as an error
+    // carrying the vendor message instead of returning an empty id the job runner
+    // would poll (`/videos/`) until the max-wait timeout.
+    if (!created.taskId) {
+      const vendorMsg = extractVendorError((json ?? {}) as Record<string, unknown>);
+      throw new Error(vendorMsg ?? "generation create returned no task id");
+    }
+    return created;
   }
   async poll(taskId: string): Promise<PollResult> {
     const { adapter, baseUrl, apiKey } = this.opts;
-    const res = await fetch(`${baseUrl}${adapter.pollPath(taskId)}`, {
+    const res = await this.request(`${baseUrl}${adapter.pollPath(taskId)}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!res.ok) throw new Error(`generation poll failed: ${res.status} ${await res.text()}`);
+    }, 1);
+    if (!res.ok) throw await responseError(res, "generation poll failed");
     const parsed = adapter.parsePoll(await res.json());
     const term = adapter.isTerminal(parsed.status);
-    return { ...parsed, status: term ?? "running" };
+    if (term) return { ...parsed, status: term };
+    // A missing status is a malformed/error response the adapter couldn't
+    // classify (e.g. a vendor error envelope served with HTTP 200) — treat it as
+    // a failure so the caller stops polling, instead of optimistically coercing
+    // it to "running", which would loop until the job's max-wait timeout.
+    if (!parsed.status) {
+      return { ...parsed, status: "failed", error: parsed.error ?? "generation poll returned no status" };
+    }
+    return { ...parsed, status: "running" };
   }
 }
 
@@ -88,7 +193,8 @@ export class MockGenerationClient<Req extends { prompt: string; size?: string }>
     }
     if (pct >= 100) {
       const [w, h] = parseSize(t.req.size);
-      return { status: "completed", progress: 100, url: placeholderSvgDataUrl({ prompt: t.req.prompt, width: w, height: h, kind: this.kind }) };
+      const url = placeholderSvgDataUrl({ prompt: t.req.prompt, width: w, height: h, kind: this.kind });
+      return { status: "completed", progress: 100, url, urls: [url] };
     }
     return { status: "processing", progress: pct };
   }

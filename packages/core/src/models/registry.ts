@@ -1,4 +1,4 @@
-import type { ModelConfig, ModelRegistry, ModelType } from "./types.js";
+import type { ListModelsOptions, ModelConfig, ModelRegistry, ModelType } from "./types.js";
 
 export class InMemoryModelRegistry implements ModelRegistry {
   private configs = new Map<string, ModelConfig>();
@@ -16,13 +16,17 @@ export class InMemoryModelRegistry implements ModelRegistry {
     return this.configs.get(id);
   }
 
-  list(type?: ModelType): ModelConfig[] {
-    const all = Array.from(this.configs.values());
-    if (type === undefined) return all;
-    return all.filter((cfg) => cfg.type === type);
+  list(type?: ModelType, opts?: ListModelsOptions): ModelConfig[] {
+    return Array.from(this.configs.values()).filter(
+      (cfg) =>
+        (type === undefined || cfg.type === type) &&
+        (opts?.includeDisabled || cfg.enabled)
+    );
   }
 
   getProvider<T = unknown>(id: string): T | undefined {
+    // A disabled model is operationally offline — don't hand out its provider.
+    if (this.configs.get(id)?.enabled === false) return undefined;
     const factory = this.factories.get(id);
     if (!factory) return undefined;
 

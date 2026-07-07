@@ -4,4 +4,6 @@ export * from "./chat-completions-image.js";
 export * from "./video-generation.js";
 export * from "./placeholder.js";
 export * from "./tts.js";
+export * from "./asr.js";
+export * from "./embedding.js";
 export * from "./review.js";

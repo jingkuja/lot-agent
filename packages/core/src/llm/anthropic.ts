@@ -4,7 +4,7 @@ import Anthropic, {
   APIConnectionError,
   APIConnectionTimeoutError,
 } from "@anthropic-ai/sdk";
-import { withLLMRetry } from "./retry.js";
+import { withLLMRetry, isMalformedToolCallError } from "./retry.js";
 import type {
   MessageParam,
   RawMessageStreamEvent,
@@ -22,6 +22,7 @@ import type {
   LLMTool,
   LLMProvider,
 } from "../types/index.js";
+import { mediaPartPlaceholder } from "../types/index.js";
 
 export interface AnthropicProviderConfig {
   apiKey: string;
@@ -70,20 +71,43 @@ export class AnthropicProvider implements LLMProvider {
           ]
         : chatMessages;
 
+    // Extended thinking: enabled only when `reasoning` is a positive token
+    // budget. Anthropic requires max_tokens > budget_tokens and rejects
+    // temperature/top_p alongside thinking, so those are omitted in that mode.
+    const reasoning = params?.reasoning;
+    const thinkingEnabled = typeof reasoning === "number" && reasoning > 0;
+    const maxTokens = params?.maxTokens ?? 8192;
+
+    // Structured output: Anthropic has no `response_format`, so force a single
+    // synthetic tool whose input_schema is the requested schema and read its
+    // arguments back as the answer (see mapAnthropicStream's structured path).
+    const STRUCTURED_TOOL = "respond";
+    const structured = !!params?.responseSchema;
+    const apiTools: Tool[] | undefined = structured
+      ? [{ name: STRUCTURED_TOOL, description: "Return the final answer as JSON matching the schema.", input_schema: params!.responseSchema as Tool["input_schema"] }]
+      : anthropicTools;
+
+    const body: Parameters<typeof this.client.messages.stream>[0] = {
+      model: this.model,
+      max_tokens: thinkingEnabled ? Math.max(maxTokens, reasoning + 1024) : maxTokens,
+      system: systemBlocks.length ? systemBlocks : undefined,
+      messages: cachedMessages,
+      tools: apiTools,
+    };
+    if (structured) {
+      body.tool_choice = { type: "tool", name: STRUCTURED_TOOL };
+    }
+    if (thinkingEnabled) {
+      body.thinking = { type: "enabled", budget_tokens: reasoning };
+    } else {
+      if (params?.temperature !== undefined) body.temperature = params.temperature;
+      if (params?.topP !== undefined) body.top_p = params.topP;
+    }
+
     const createStream = () =>
       mapAnthropicStream(
-        this.client.messages.stream(
-          {
-            model: this.model,
-            max_tokens: params?.maxTokens ?? 8192,
-            temperature: params?.temperature,
-            top_p: params?.topP,
-            system: systemBlocks.length ? systemBlocks : undefined,
-            messages: cachedMessages,
-            tools: anthropicTools,
-          },
-          { signal: opts?.signal }
-        )
+        this.client.messages.stream(body, { signal: opts?.signal }),
+        structured ? STRUCTURED_TOOL : undefined
       );
 
     yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable });
@@ -95,7 +119,10 @@ function isAnthropicRetryable(err: unknown): boolean {
     err instanceof RateLimitError ||
     err instanceof InternalServerError ||
     err instanceof APIConnectionError ||
-    err instanceof APIConnectionTimeoutError
+    err instanceof APIConnectionTimeoutError ||
+    // A 400-class rejection of truncated/garbled tool-call JSON — transient,
+    // so let the model regenerate instead of killing the turn.
+    isMalformedToolCallError(err)
   );
 }
 
@@ -109,7 +136,14 @@ function isAnthropicRetryable(err: unknown): boolean {
  * — previously `done` carried no usage at all.
  */
 export async function* mapAnthropicStream(
-  events: AsyncIterable<RawMessageStreamEvent>
+  events: AsyncIterable<RawMessageStreamEvent>,
+  /**
+   * Name of the forced structured-output tool (see structured-output path in
+   * `chat`). When a tool_use block with this name completes, its accumulated
+   * JSON is emitted as a final `text` chunk — the answer — rather than a
+   * `tool_call` the Agent would try to execute.
+   */
+  structuredToolName?: string
 ): AsyncIterable<ChatChunk> {
   const toolBuffers = new Map<number, { id: string; name: string; input: string }>();
   let promptTokens = 0;
@@ -118,8 +152,16 @@ export async function* mapAnthropicStream(
 
   for await (const event of events) {
     if (event.type === "message_start") {
-      promptTokens = event.message.usage.input_tokens;
-      cachedPromptTokens = event.message.usage.cache_read_input_tokens ?? 0;
+      // Anthropic splits total input across three buckets: `input_tokens` is
+      // ONLY the uncached remainder; cache reads and cache writes are reported
+      // separately. Bill the full input (all three) so enabling prompt caching
+      // never silently drops billed tokens — this mirrors OpenAI's
+      // `prompt_tokens`, which already includes cached tokens. `cachedPromptTokens`
+      // stays the cached subset, for observability only.
+      const u = event.message.usage;
+      cachedPromptTokens = u.cache_read_input_tokens ?? 0;
+      promptTokens =
+        u.input_tokens + cachedPromptTokens + (u.cache_creation_input_tokens ?? 0);
     }
 
     if (event.type === "content_block_start") {
@@ -145,17 +187,23 @@ export async function* mapAnthropicStream(
     if (event.type === "content_block_stop") {
       const buf = toolBuffers.get(event.index);
       if (buf && (buf.input || buf.name)) {
-        let parsedArgs: unknown;
-        try {
-          parsedArgs = JSON.parse(buf.input || "{}");
-        } catch {
-          parsedArgs = buf.input;
+        if (structuredToolName && buf.name === structuredToolName) {
+          // Forced structured-output tool: surface its JSON as the final text.
+          yield { type: "text", content: buf.input || "{}" };
+          toolBuffers.delete(event.index);
+        } else {
+          let parsedArgs: unknown;
+          try {
+            parsedArgs = JSON.parse(buf.input || "{}");
+          } catch {
+            parsedArgs = buf.input;
+          }
+          yield {
+            type: "tool_call",
+            toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
+          };
+          toolBuffers.delete(event.index);
         }
-        yield {
-          type: "tool_call",
-          toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
-        };
-        toolBuffers.delete(event.index);
       }
     }
 
@@ -238,7 +286,9 @@ export function toAnthropicMessage(msg: Message): MessageParam {
           // 非 data URL（兜底）：当作文本提示，避免直接丢弃
           return { type: "text", text: `[图片: ${p.image.url}]` };
         }
-        return { type: "text", text: p.text ?? "" };
+        if (p.type === "text") return { type: "text", text: p.text ?? "" };
+        // video / audio / file — no native block; degrade to a text placeholder.
+        return { type: "text", text: mediaPartPlaceholder(p) };
       }
     );
     return { role: "user", content };

@@ -39,18 +39,27 @@ export class MessageRepository {
       (m) => m.role !== "user" || m.id !== excludeMessageId
     );
 
-    // Collect all tool_call_ids that are referenced by assistant messages
+    // Tool calls live in a side table (message_tool_calls), keyed by message id —
+    // NOT on the messages row. Load them so an assistant turn that issued tool
+    // calls is reconstructed WITH its `toolCalls`, and the paired tool result is
+    // kept (not dropped as an orphan). Without this, an endsTurn tool round
+    // (e.g. propose_outline → user confirms next request) loses its tool call and
+    // arguments entirely, so the model can't see what it already did and repeats.
+    const toolCallsByMessage = await this.db.getToolCallsForConversation(conversationId);
     const validToolCallIds = new Set<string>();
+    for (const calls of toolCallsByMessage.values()) {
+      for (const tc of calls) validToolCallIds.add(tc.tool_call_id);
+    }
+    // Which tool calls actually have a result message stored. An assistant
+    // tool_call with no result (e.g. the run aborted mid-execution) must NOT be
+    // reconstructed — the wire format requires every tool_call to be answered by
+    // a following tool message, and an unanswered one makes the API reject the
+    // whole request. So we only re-attach calls whose result is present, keeping
+    // assistant tool_calls and tool results strictly paired.
+    const answeredToolCallIds = new Set<string>();
     for (const m of filtered) {
-      if (m.role === "assistant" && m.tool_calls) {
-        try {
-          const calls = JSON.parse(m.tool_calls) as { id: string }[];
-          for (const tc of calls) {
-            if (tc.id) validToolCallIds.add(tc.id);
-          }
-        } catch {
-          // ignore parse errors
-        }
+      if (m.role === "tool" && m.tool_call_id && validToolCallIds.has(m.tool_call_id)) {
+        answeredToolCallIds.add(m.tool_call_id);
       }
     }
 
@@ -74,11 +83,24 @@ export class MessageRepository {
           ];
         }
       }
-      history.push({
+      const msg: Message = {
         role: m.role as Message["role"],
         content,
         toolCallId: m.tool_call_id ?? undefined,
-      });
+      };
+      if (m.role === "assistant") {
+        const calls = toolCallsByMessage
+          .get(m.id)
+          ?.filter((tc) => answeredToolCallIds.has(tc.tool_call_id));
+        if (calls?.length) {
+          msg.toolCalls = calls.map((tc) => ({
+            id: tc.tool_call_id,
+            name: tc.tool_name,
+            arguments: tc.tool_input,
+          }));
+        }
+      }
+      history.push(msg);
     }
     return history;
   }

@@ -1,5 +1,6 @@
 import type {
   ChatParams,
+  JSONSchema,
   Message,
   ContentPart,
   LLMProvider,
@@ -8,12 +9,15 @@ import type {
   ToolResult,
 } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
+import { validateToolInput } from "../tools/validate.js";
 import {
   ContextManager,
   type ContextManagerConfig,
   type SummaryState,
 } from "../context/index.js";
 import type { AgentMemoryStore } from "../memory/index.js";
+import { formatEntriesForPrompt } from "../memory/index.js";
+import type { Retriever } from "../retrieval/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 
@@ -44,6 +48,13 @@ export interface AgentConfig {
   /** Optional whitelist of tool names this agent is allowed to use. Undefined = all tools. */
   allowedToolNames?: string[];
   modelParams?: ChatParams;
+  /**
+   * JSON Schema the final answer must satisfy. When set, it is pushed to the
+   * provider as `ChatParams.responseSchema` (constrained generation) AND the
+   * final text is JSON-parsed + shallow-validated at the end of the run; a
+   * violation surfaces as a structured `error` event (the run is not retried).
+   */
+  outputSchema?: JSONSchema;
 }
 
 export interface AgentContext {
@@ -51,6 +62,15 @@ export interface AgentContext {
   toolRegistry: ToolRegistry;
   toolContext: ToolContext;
   memory?: AgentMemoryStore;
+  /**
+   * Optional retrieval facade (E4). When set together with
+   * `retrievalNamespace`, the run retrieves documents for the user's message
+   * once and injects them as a `[Retrieved Context]` block. Absent → zero
+   * overhead, fully backward compatible.
+   */
+  retriever?: Retriever;
+  /** Namespace to retrieve from (e.g. `user:{id}:notes`). */
+  retrievalNamespace?: string;
 }
 
 export interface AgentRunOptions {
@@ -82,6 +102,32 @@ const DEFAULT_CONFIG: AgentConfig = {
   systemPrompt: "You are a helpful AI assistant.",
 };
 
+/**
+ * Validate the final answer text against an outputSchema: JSON.parse then
+ * shallow schema check (reusing the tool-input validator). Returns an error
+ * message, or null when valid.
+ */
+function validateStructuredOutput(text: string, schema: JSONSchema): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return `Structured output is not valid JSON: ${text.slice(0, 200)}`;
+  }
+  const errors = validateToolInput(schema, parsed);
+  return errors.length ? `Structured output failed schema validation: ${errors.join("; ")}` : null;
+}
+
+/** Flatten a user message to its text for use as a retrieval query. */
+function messageQueryText(message: string | ContentPart[]): string {
+  if (typeof message === "string") return message;
+  return message
+    .map((p) => p.text ?? "")
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
 /** Order-independent JSON serialization, so {a,b} and {b,a} dedup the same. */
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -100,6 +146,14 @@ export class Agent {
 
   constructor(config: Partial<AgentConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    // Push outputSchema down to the provider as a constrained-generation hint,
+    // unless the caller already set an explicit responseSchema.
+    if (this.config.outputSchema) {
+      this.config.modelParams = {
+        ...this.config.modelParams,
+        responseSchema: this.config.modelParams?.responseSchema ?? this.config.outputSchema,
+      };
+    }
     this.contextManager = new ContextManager(this.config.contextConfig);
   }
 
@@ -143,13 +197,31 @@ export class Agent {
         systemParts.push(memoryPrompt);
       }
 
-      // Also load user memory (async)
+      // Also load user memory (async) — bounded like the other memory blocks.
       const userEntries = await context.memory.listUserMemory();
-      if (userEntries.length > 0) {
-        const userMem = userEntries
-          .map((e) => `- ${e.key}: ${e.value}`)
-          .join("\n");
+      const userMem = formatEntriesForPrompt(userEntries);
+      if (userMem) {
         systemParts.push(`[User Memory]\n${userMem}`);
+      }
+    }
+
+    // Retrieval (E4): fetch context for the user's message once — the query is
+    // the constant user message, so re-retrieving each ReAct iteration would
+    // only repeat work. Formatted into a stable `[Retrieved Context]` block and
+    // fed to every assemble() (bounded by budget.retrieval). Best-effort: a
+    // retriever failure must not abort the run.
+    let retrievalBlock: string | undefined;
+    if (context.retriever && context.retrievalNamespace) {
+      const query = messageQueryText(userMessage);
+      if (query) {
+        try {
+          const docs = await context.retriever.retrieve(context.retrievalNamespace, query);
+          if (docs.length > 0) {
+            retrievalBlock = docs.map((d) => `- ${d.text}`).join("\n");
+          }
+        } catch {
+          // swallow — retrieval is an enhancement, not a hard dependency
+        }
       }
     }
 
@@ -229,7 +301,7 @@ export class Agent {
           workingHistory,
           undefined, // user message already lives in workingHistory
           context.llm, // use same LLM as compressor for summaries
-          { signal } // honor run timeout / client disconnect during summarization
+          { signal, retrieval: retrievalBlock } // honor timeout + inject retrieved context
         );
 
         // Stream LLM response — surface any failure as an event so the run
@@ -273,6 +345,13 @@ export class Agent {
 
         // If no tool calls, agent is done
         if (!hasToolCalls) {
+          // Structured output: validate the final answer against the schema.
+          // A violation is surfaced as an error event (not retried — the caller
+          // decides what to do), then the run closes cleanly with `done`.
+          if (this.config.outputSchema) {
+            const err = validateStructuredOutput(assistantContent, this.config.outputSchema);
+            if (err) yield { type: "error", message: err };
+          }
           yield done();
           return;
         }
@@ -285,56 +364,87 @@ export class Agent {
         };
         workingHistory.push(assistantMsg);
 
-        // Execute all tool calls
-        for (const tc of toolCalls) {
-          yield {
-            type: "tool_call",
-            id: tc.id,
-            name: tc.name,
-            input: tc.arguments,
-          };
-
+        // Execute a single tool call, honoring the cacheable dedup cache.
+        const executeOne = async (tc: ToolCall): Promise<ToolResult> => {
           const cacheable = context.toolRegistry.get(tc.name)?.cacheable ?? false;
           const dedupKey = `${tc.name}:${stableStringify(tc.arguments)}`;
-          let result: ToolResult;
           const cached = cacheable ? successfulCalls.get(dedupKey) : undefined;
           if (cached) {
             // Identical cacheable call already succeeded this run — reuse it
             // instead of re-running, and tell the model so it stops repeating.
-            result = {
+            return {
               content: `[skipped duplicate call: an identical ${tc.name} call already succeeded earlier in this turn — reusing that result. Do not call it again.]\n\n${cached.content}`,
               isError: false,
             };
-          } else {
-            result = await context.toolRegistry.execute(
-              tc.name,
-              tc.arguments,
-              context.toolContext,
-              { signal }
-            );
-            if (cacheable && !result.isError) successfulCalls.set(dedupKey, result);
           }
+          const result = await context.toolRegistry.execute(
+            tc.name,
+            tc.arguments,
+            context.toolContext,
+            { signal }
+          );
+          if (cacheable && !result.isError) successfulCalls.set(dedupKey, result);
+          return result;
+        };
 
+        // Record a completed call's result: emit the event, append to history,
+        // and report whether it ends the turn. Order-preserving.
+        const recordResult = function* (
+          tc: ToolCall,
+          result: ToolResult
+        ): Generator<AgentEvent, boolean> {
           yield {
             type: "tool_result",
             name: tc.name,
             output: result.content,
             isError: result.isError ?? false,
           };
-
-          // Add tool result to working history
           workingHistory.push({
             role: "tool",
             content: result.content,
             toolCallId: tc.id,
           });
-
           // An endsTurn tool that succeeded hands control back to the user
-          // (e.g. ask_user). Stop the run here — remaining batched calls are
-          // skipped; the model re-plans after the user's reply next turn.
-          if (!result.isError && context.toolRegistry.get(tc.name)?.endsTurn) {
-            yield done();
-            return;
+          // (e.g. ask_user). Remaining batched calls are skipped; the model
+          // re-plans after the user's reply next turn.
+          return !result.isError && (context.toolRegistry.get(tc.name)?.endsTurn ?? false);
+        };
+
+        // Execute tool calls, batching consecutive parallel-safe (read-only)
+        // calls with Promise.all. Events still yield in call order.
+        let ci = 0;
+        while (ci < toolCalls.length) {
+          const parallelSafe = (tc: ToolCall) =>
+            context.toolRegistry.get(tc.name)?.parallelSafe ?? false;
+
+          if (parallelSafe(toolCalls[ci])) {
+            // Gather the run of consecutive parallel-safe calls.
+            const group: ToolCall[] = [];
+            while (ci < toolCalls.length && parallelSafe(toolCalls[ci])) {
+              group.push(toolCalls[ci]);
+              ci++;
+            }
+            for (const tc of group) {
+              yield { type: "tool_call", id: tc.id, name: tc.name, input: tc.arguments };
+            }
+            const results = await Promise.all(group.map(executeOne));
+            let ended = false;
+            for (let k = 0; k < group.length; k++) {
+              if (yield* recordResult(group[k], results[k])) ended = true;
+            }
+            if (ended) {
+              yield done();
+              return;
+            }
+          } else {
+            const tc = toolCalls[ci];
+            ci++;
+            yield { type: "tool_call", id: tc.id, name: tc.name, input: tc.arguments };
+            const result = await executeOne(tc);
+            if (yield* recordResult(tc, result)) {
+              yield done();
+              return;
+            }
           }
         }
       }

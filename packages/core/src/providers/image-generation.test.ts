@@ -31,6 +31,15 @@ describe("HappyhorseImageAdapter", () => {
     expect(a.isTerminal("completed")).toBe("completed");
     expect(a.isTerminal("processing")).toBe(null);
   });
+  it("parsePoll surfaces multiple images via urls, url = first (n>1)", () => {
+    const r = a.parsePoll({
+      status: "completed",
+      progress: 100,
+      metadata: { urls: ["https://x/1.png", "https://x/2.png"] },
+    });
+    expect(r.urls).toEqual(["https://x/1.png", "https://x/2.png"]);
+    expect(r.url).toBe("https://x/1.png");
+  });
 });
 
 describe("HttpImageGenerationProvider", () => {
@@ -78,6 +87,8 @@ describe("MockImageGenerationProvider", () => {
     const done = await p.poll(created.taskId);
     expect(done.status).toBe("completed");
     expect(done.url?.startsWith("data:image/svg+xml;base64,")).toBe(true);
+    // `urls` mirrors `url` so multi-image consumers have one place to read.
+    expect(done.urls).toEqual([done.url]);
   });
   it("returns failed for an unknown task id", async () => {
     const p = new MockImageGenerationProvider(1000, () => 0);

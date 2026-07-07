@@ -11,6 +11,7 @@ export * from "./config/schema.js";
 export * from "./agents/index.js";
 export * from "./models/index.js";
 export * from "./providers/index.js";
+export * from "./retrieval/index.js";
 export * from "./jobs/index.js";
 export * from "./storage/index.js";
 export * from "./billing/index.js";

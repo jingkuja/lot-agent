@@ -29,7 +29,34 @@ describe("mapAnthropicStream", () => {
     const out = await collect(mapAnthropicStream(events));
     expect(out).toContainEqual({ type: "text", content: "hi" });
     const done = out.find((c) => c.type === "done");
-    expect(done?.usage).toEqual({ promptTokens: 100, completionTokens: 8, cachedPromptTokens: 20 });
+    // promptTokens is the FULL input incl. cache-read (matching OpenAI's
+    // prompt_tokens semantics, so billing counts cached tokens at full price);
+    // cachedPromptTokens is the cached subset, for observability only.
+    expect(done?.usage).toEqual({ promptTokens: 120, completionTokens: 8, cachedPromptTokens: 20 });
+  });
+
+  it("folds cache_creation_input_tokens into the billed prompt token count", async () => {
+    const events = eventStream([
+      {
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 100,
+            cache_read_input_tokens: 20,
+            cache_creation_input_tokens: 30,
+          },
+        },
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: {}, usage: { output_tokens: 8 } },
+      { type: "message_stop" },
+    ]);
+    const out = await collect(mapAnthropicStream(events));
+    const done = out.find((c) => c.type === "done");
+    // 100 (uncached) + 20 (cache read) + 30 (cache write) = 150 billed input.
+    expect(done?.usage).toEqual({ promptTokens: 150, completionTokens: 8, cachedPromptTokens: 20 });
   });
 
   it("maps thinking_delta to a thinking chunk", async () => {
@@ -127,6 +154,63 @@ describe("AnthropicProvider.chat retry", () => {
   });
 });
 
+describe("AnthropicProvider.chat reasoning", () => {
+  function okStream() {
+    return {
+      async *[Symbol.asyncIterator]() {
+        yield { type: "message_start", message: { usage: { input_tokens: 1, cache_read_input_tokens: 0 } } };
+        yield { type: "message_delta", delta: {}, usage: { output_tokens: 1 } };
+        yield { type: "message_stop" };
+      },
+    };
+  }
+
+  async function drain(it: AsyncIterable<unknown>) {
+    for await (const _ of it) { /* consume */ }
+  }
+
+  it("enables extended thinking and drops temperature/top_p when reasoning is a positive budget", async () => {
+    const { AnthropicProvider } = await import("./anthropic.js");
+    const provider = new AnthropicProvider({ apiKey: "x", model: "test-model" });
+    const streamFn = (provider as unknown as { client: { messages: { stream: ReturnType<typeof vi.fn> } } })
+      .client.messages.stream;
+    streamFn.mockImplementation(() => okStream());
+
+    await drain(
+      provider.chat([{ role: "user", content: "hi" }], undefined, {
+        params: { reasoning: 2048, temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+      })
+    );
+
+    const body = streamFn.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 2048 });
+    // Anthropic rejects temperature/top_p alongside extended thinking.
+    expect(body.temperature).toBeUndefined();
+    expect(body.top_p).toBeUndefined();
+    // max_tokens must exceed the thinking budget.
+    expect(body.max_tokens as number).toBeGreaterThan(2048);
+  });
+
+  it("omits thinking and forwards temperature/top_p when reasoning is off", async () => {
+    const { AnthropicProvider } = await import("./anthropic.js");
+    const provider = new AnthropicProvider({ apiKey: "x", model: "test-model" });
+    const streamFn = (provider as unknown as { client: { messages: { stream: ReturnType<typeof vi.fn> } } })
+      .client.messages.stream;
+    streamFn.mockImplementation(() => okStream());
+
+    await drain(
+      provider.chat([{ role: "user", content: "hi" }], undefined, {
+        params: { reasoning: "off", temperature: 0.7, topP: 0.9 },
+      })
+    );
+
+    const body = streamFn.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.thinking).toBeUndefined();
+    expect(body.temperature).toBe(0.7);
+    expect(body.top_p).toBe(0.9);
+  });
+});
+
 describe("withCacheControl", () => {
   it("wraps a plain string message into a single cache-breakpointed text block", async () => {
     const { withCacheControl } = await import("./anthropic.js");
@@ -155,5 +239,32 @@ describe("withCacheControl", () => {
     const { withCacheControl } = await import("./anthropic.js");
     const msg = { role: "user" as const, content: "" };
     expect(withCacheControl(msg)).toBe(msg);
+  });
+});
+
+describe("mapAnthropicStream structured output", () => {
+  it("unwraps the forced structured tool into a final text chunk (not a tool_call)", async () => {
+    const events = eventStream([
+      { type: "message_start", message: { usage: { input_tokens: 5 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t1", name: "respond" } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"a":1}' } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_stop" },
+    ]);
+    const out = await collect(mapAnthropicStream(events, "respond"));
+    expect(out.some((c) => c.type === "tool_call")).toBe(false);
+    const text = out.filter((c) => c.type === "text").map((c) => c.content).join("");
+    expect(text).toBe('{"a":1}');
+  });
+
+  it("leaves ordinary tools as tool_call chunks when no structured tool is set", async () => {
+    const events = eventStream([
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t1", name: "read_file" } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":"a"}' } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_stop" },
+    ]);
+    const out = await collect(mapAnthropicStream(events));
+    expect(out.some((c) => c.type === "tool_call" && c.toolCall?.name === "read_file")).toBe(true);
   });
 });

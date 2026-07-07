@@ -1,8 +1,25 @@
 /** Content part for multimodal messages */
 export interface ContentPart {
-  type: "text" | "image";
+  type: "text" | "image" | "video" | "audio" | "file";
   text?: string;
   image?: { url: string; mediaType: string };
+  /** video / audio / file payload (image keeps its own `image` field). */
+  media?: { url: string; mediaType: string; durationSec?: number };
+}
+
+/**
+ * Text stand-in for a media part an LLM provider can't ingest natively — a
+ * provider degrades unsupported parts to this instead of dropping them, so the
+ * model at least knows a video/audio/file was referenced and where it lives.
+ */
+export function mediaPartPlaceholder(part: ContentPart): string {
+  const url = part.media?.url ?? part.image?.url ?? "";
+  const label =
+    part.type === "video" ? "视频" :
+    part.type === "audio" ? "音频" :
+    part.type === "file" ? "文件" :
+    part.type === "image" ? "图片" : "媒体";
+  return `[${label}: ${url}]`;
 }
 
 /** Tool call from LLM */
@@ -136,6 +153,13 @@ export interface Tool {
    * batched tool calls are skipped; an isError result does NOT end the turn.
    */
   endsTurn?: boolean;
+  /**
+   * When true, this tool is a read-only/side-effect-free operation that is safe
+   * to run concurrently with other parallel-safe tools in the same batch. The
+   * Agent executes consecutive parallel-safe calls together (events still yield
+   * in call order). Defaults to false — most tools run sequentially.
+   */
+  parallelSafe?: boolean;
   execute(input: unknown, context: ToolContext): Promise<ToolResult>;
 }
 

@@ -334,3 +334,193 @@ describe("Agent.run — E1 additions", () => {
     expect(llm.optsCalls[0]?.params).toEqual({ temperature: 0.2, maxTokens: 500 });
   });
 });
+
+describe("Agent outputSchema validation", () => {
+  const schema = { type: "object", properties: { title: { type: "string" } }, required: ["title"] };
+
+  it("yields an error when the final output is not valid JSON", async () => {
+    const llm = scriptedLLM([textChunks("not json at all")]);
+    const agent = new Agent({ systemPrompt: "sys", outputSchema: schema });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events.some((e) => e.type === "error")).toBe(true);
+  });
+
+  it("yields an error when JSON parses but violates the schema (missing required)", async () => {
+    const llm = scriptedLLM([textChunks('{"subtitle":"x"}')]);
+    const agent = new Agent({ systemPrompt: "sys", outputSchema: schema });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events.some((e) => e.type === "error")).toBe(true);
+  });
+
+  it("passes valid JSON output through without error", async () => {
+    const llm = scriptedLLM([textChunks('{"title":"ok"}')]);
+    const agent = new Agent({ systemPrompt: "sys", outputSchema: schema });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+
+  it("does nothing special when no outputSchema is configured", async () => {
+    const llm = scriptedLLM([textChunks("free text")]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const events = await collect(agent.run("hi", makeContext(llm)));
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+});
+
+/** Retriever that records its calls and replays fixed docs. */
+function recordingRetriever(docs: Array<{ id: string; text: string }>) {
+  const calls: Array<{ namespace: string; query: string }> = [];
+  return {
+    calls,
+    async retrieve(namespace: string, query: string) {
+      calls.push({ namespace, query });
+      return docs;
+    },
+  };
+}
+
+describe("Agent.run parallel tool execution", () => {
+  function concurrencyTool(name: string, parallelSafe: boolean, track: { active: number; max: number }): Tool {
+    return {
+      name,
+      description: name,
+      parameters: {},
+      parallelSafe,
+      async execute() {
+        track.active++;
+        track.max = Math.max(track.max, track.active);
+        await new Promise((r) => setTimeout(r, 20));
+        track.active--;
+        return { content: `${name}-done` };
+      },
+    };
+  }
+
+  function twoToolCall(t1: string, t2: string): ChatChunk[] {
+    return [
+      { type: "tool_call", toolCall: { id: "a", name: t1, arguments: {} } },
+      { type: "tool_call", toolCall: { id: "b", name: t2, arguments: {} } },
+      { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
+    ];
+  }
+
+  it("runs consecutive parallelSafe tool calls concurrently, results in order", async () => {
+    const track = { active: 0, max: 0 };
+    const registry = new ToolRegistry();
+    registry.register(concurrencyTool("p1", true, track));
+    registry.register(concurrencyTool("p2", true, track));
+    const llm = scriptedLLM([twoToolCall("p1", "p2"), textChunks("done")]);
+
+    const events = await collect(new Agent({ systemPrompt: "s" }).run("hi", makeContext(llm, registry)));
+
+    expect(track.max).toBe(2); // both in flight at once
+    const resultNames = events
+      .filter((e): e is Extract<AgentEvent, { type: "tool_result" }> => e.type === "tool_result")
+      .map((e) => e.name);
+    expect(resultNames).toEqual(["p1", "p2"]);
+  });
+
+  it("runs non-parallelSafe tool calls sequentially", async () => {
+    const track = { active: 0, max: 0 };
+    const registry = new ToolRegistry();
+    registry.register(concurrencyTool("s1", false, track));
+    registry.register(concurrencyTool("s2", false, track));
+    const llm = scriptedLLM([twoToolCall("s1", "s2"), textChunks("done")]);
+
+    await collect(new Agent({ systemPrompt: "s" }).run("hi", makeContext(llm, registry)));
+
+    expect(track.max).toBe(1); // never overlapped
+  });
+});
+
+describe("Agent.run user-memory injection cap", () => {
+  it("caps injected user memory to at most 20 lines", async () => {
+    const { AgentMemoryStore } = await import("../memory/store.js");
+    const entries = Array.from({ length: 30 }, (_, i) => ({
+      key: `k${i}`,
+      value: `v${i}`,
+      tier: "user" as const,
+      createdAt: i,
+    }));
+    const adapter = {
+      async get() { return undefined; },
+      async set() {},
+      async delete() {},
+      async list() { return entries; },
+      async search() { return []; },
+    };
+    const memory = new AgentMemoryStore({ persistent: adapter, userId: "u1" });
+    const llm = scriptedLLM([textChunks("answer")]);
+    const agent = new Agent({ systemPrompt: "sys" });
+
+    await collect(agent.run("hi", { ...makeContext(llm), memory }));
+
+    const systemText = llm.calls[0]
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .join("\n\n");
+    // Isolate the [User Memory] section (system parts are joined by "\n\n").
+    const section = systemText.split("[User Memory]")[1]?.split("\n\n")[0] ?? "";
+    const lines = section.split("\n").filter((l) => l.startsWith("- "));
+    expect(lines.length).toBe(20);
+  });
+});
+
+describe("Agent.run retrieval wiring", () => {
+  it("retrieves with the user message and injects a [Retrieved Context] block", async () => {
+    const llm = scriptedLLM([textChunks("answer")]);
+    const retriever = recordingRetriever([
+      { id: "1", text: "brand voice is playful" },
+    ]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const ctx: AgentContext = {
+      ...makeContext(llm),
+      retriever,
+      retrievalNamespace: "user:42:notes",
+    };
+
+    await collect(agent.run("what is our brand voice?", ctx));
+
+    expect(retriever.calls).toEqual([
+      { namespace: "user:42:notes", query: "what is our brand voice?" },
+    ]);
+    const systemText = llm.calls[0]
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .join("\n");
+    expect(systemText).toContain("[Retrieved Context]");
+    expect(systemText).toContain("brand voice is playful");
+  });
+
+  it("adds no retrieval block and does not retrieve when no retriever is configured", async () => {
+    const llm = scriptedLLM([textChunks("answer")]);
+    const agent = new Agent({ systemPrompt: "sys" });
+
+    await collect(agent.run("hi", makeContext(llm)));
+
+    const systemText = llm.calls[0]
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .join("\n");
+    expect(systemText).not.toContain("[Retrieved Context]");
+  });
+
+  it("skips retrieval when the retriever returns no docs", async () => {
+    const llm = scriptedLLM([textChunks("answer")]);
+    const retriever = recordingRetriever([]);
+    const agent = new Agent({ systemPrompt: "sys" });
+    const ctx: AgentContext = {
+      ...makeContext(llm),
+      retriever,
+      retrievalNamespace: "ns",
+    };
+
+    await collect(agent.run("hi", ctx));
+
+    const systemText = llm.calls[0]
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .join("\n");
+    expect(systemText).not.toContain("[Retrieved Context]");
+  });
+});

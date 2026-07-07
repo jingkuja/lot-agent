@@ -22,20 +22,20 @@ export interface TokenBudget {
   /** Reserved for generation. 0 or omitted → derived from the leftover. */
   generation: number;
   /**
-   * Total window size. Default: 120K — conservative enough for every model
-   * currently wired up (Claude 200K, DeepSeek-class ~128K).
+   * Total window size. Default: 200K — conservative enough for every model
+   * currently wired up (Claude 200K).
    */
   total: number;
 }
 
 const DEFAULT_BUDGET: TokenBudget = {
-  systemPrompt: 16_000,
-  memory: 4_000,
-  retrieval: 20_000,
+  systemPrompt: 26_000,
+  memory: 14_000,
+  retrieval: 40_000,
   toolOutput: 20_000,
   history: 44_000,
   generation: 0, // derived: total − the blocks above (16K with these defaults)
-  total: 120_000,
+  total: 200_000,
 };
 
 /** Absolute lower bound for history so it never collapses to nothing. */
@@ -89,18 +89,32 @@ export class ContextManager {
   constructor(config: ContextManagerConfig = {}) {
     this.budget = { ...DEFAULT_BUDGET, ...config.budget };
     // Reserve generation from the window. Honor an explicit positive value;
-    // 0 or omitted means "derive the leftover", clamped so it never goes
-    // negative when the configured sub-budgets over-subscribe the total.
+    // 0 or omitted means "derive the leftover".
     if (!config.budget?.generation) {
-      this.budget.generation = Math.max(
-        0,
-        this.budget.total -
-          this.budget.systemPrompt -
-          this.budget.memory -
-          this.budget.retrieval -
-          this.budget.toolOutput -
-          this.budget.history
-      );
+      const subSum =
+        this.budget.systemPrompt +
+        this.budget.memory +
+        this.budget.retrieval +
+        this.budget.toolOutput +
+        this.budget.history;
+      if (subSum < this.budget.total) {
+        // Room to spare — generation gets the leftover.
+        this.budget.generation = this.budget.total - subSum;
+      } else {
+        // The fixed sub-budgets over-subscribe the window (e.g. a 32K/120K
+        // model against defaults tuned for 200K). Reserve a 10% generation
+        // slice and scale the sub-budgets down proportionally to fit, so a
+        // small window still leaves room to answer instead of clamping
+        // generation to zero.
+        const genReserve = Math.floor(this.budget.total * 0.1);
+        const scale = (this.budget.total - genReserve) / subSum;
+        this.budget.systemPrompt = Math.floor(this.budget.systemPrompt * scale);
+        this.budget.memory = Math.floor(this.budget.memory * scale);
+        this.budget.retrieval = Math.floor(this.budget.retrieval * scale);
+        this.budget.toolOutput = Math.floor(this.budget.toolOutput * scale);
+        this.budget.history = Math.floor(this.budget.history * scale);
+        this.budget.generation = genReserve;
+      }
     }
     this.maxRawRounds = config.maxRawRounds ?? 20;
     this.compressor = config.compressor;
@@ -179,7 +193,7 @@ export class ContextManager {
     history: Message[],
     currentMessage?: Message,
     compressor?: LLMProvider,
-    opts?: { signal?: AbortSignal }
+    opts?: { signal?: AbortSignal; retrieval?: string }
   ): Promise<Message[]> {
     const result: Message[] = [];
 
@@ -207,8 +221,25 @@ export class ContextManager {
       result.push({ role: "system", content });
     }
 
+    // 2b. Retrieved context (stable within a turn, prefix-cache friendly) —
+    //     bounded by the retrieval budget, same treatment as the memory block.
+    let retrievalTokens = 0;
+    if (opts?.retrieval) {
+      let retText = opts.retrieval;
+      if (estimateTokens(retText) > this.budget.retrieval) {
+        retText = truncateToTokens(retText, this.budget.retrieval);
+      }
+      const content = `[Retrieved Context]\n${retText}`;
+      retrievalTokens = estimateTokens(content);
+      result.push({ role: "system", content });
+    }
+
     // 3. Recent history with elastic budget + rolling-summary compression.
-    const historyBudget = this.historyBudget(systemTokens, memoryTokens);
+    const historyBudget = this.historyBudget(
+      systemTokens,
+      memoryTokens,
+      retrievalTokens
+    );
     const recentHistory = await this.trimHistory(
       history,
       historyBudget,
@@ -298,20 +329,31 @@ export class ContextManager {
         // Number of leading messages being summarized (round-aligned, so we
         // never split a user/assistant/tool group and orphan a tool result).
         const summarizedCount = rounds.slice(0, keepFrom).flat().length;
-        const summary = await this.rollingSummary(
-          working,
-          summarizedCount,
-          compressor,
-          signal
-        );
-        const result: Message[] = [
-          { role: "system", content: `[Earlier Context]\n${summary}` },
-          ...rounds.slice(keepFrom).flat(),
-        ];
-        if (this.countTotalTokens(result) > budget) {
-          return this.truncateToFit(result, budget);
+        try {
+          const summary = await this.rollingSummary(
+            working,
+            summarizedCount,
+            compressor,
+            signal
+          );
+          const result: Message[] = [
+            { role: "system", content: `[Earlier Context]\n${summary}` },
+            ...rounds.slice(keepFrom).flat(),
+          ];
+          if (this.countTotalTokens(result) > budget) {
+            return this.truncateToFit(result, budget);
+          }
+          return result;
+        } catch (err) {
+          // Cancellation must propagate so the caller's abort handling runs.
+          if (signal?.aborted) throw err;
+          // The compressor call failed even after the provider's own retry
+          // (bad key, context-length error, persistent outage, ...). Losing
+          // the summary would otherwise fail the whole turn even though hard
+          // truncation can still satisfy the budget with zero LLM cost —
+          // degrade to that instead of throwing out of assemble().
+          console.warn("[ContextManager] rolling summary failed, falling back to truncation:", err);
         }
-        return result;
       }
     }
 
@@ -404,8 +446,13 @@ export class ContextManager {
           ? ` [tool_calls: ${m.toolCalls.map((c) => c.name).join(", ")}]`
           : "";
         // Cap each message's contribution so one huge message doesn't make
-        // the summarization call itself expensive.
-        return `${m.role}: ${headTail(content, SUMMARY_INPUT_MAX_CHARS)}${tools}`;
+        // the summarization call itself expensive. Tool messages arrive here
+        // already head+tail-elided by truncateOldToolOutputs (bounded by the
+        // toolOutput budget) — re-eliding at this much smaller char cap would
+        // nest a second "...(elided)..." cut inside the first, compounding
+        // information loss for no cost benefit since the size is already safe.
+        const capped = m.role === "tool" ? content : headTail(content, SUMMARY_INPUT_MAX_CHARS);
+        return `${m.role}: ${capped}${tools}`;
       })
       .join("\n");
 

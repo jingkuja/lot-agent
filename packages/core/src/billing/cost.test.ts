@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calcCost } from "./cost.js";
+import { calcCost, estimateCost } from "./cost.js";
 import type { ModelConfig } from "../models/types.js";
 
 const makeLLM = (overrides?: Partial<ModelConfig>): ModelConfig => ({
@@ -80,5 +80,36 @@ describe("calcCost", () => {
     const cost = calcCost(model, { inputCount: 2000, outputCount: 0 });
     // (2000*0.005 + 0*0) / 1000 = 10/1000 = 0.01
     expect(cost).toBeCloseTo(0.01, 6);
+  });
+});
+
+describe("estimateCost", () => {
+  it("estimates LLM cost from token counts (same basis as calcCost)", () => {
+    const model = makeLLM({ inputPrice: 0.001, outputPrice: 0.002 });
+    const cost = estimateCost(model, { inputCount: 1000, outputCount: 500 });
+    // (1000*0.001 + 500*0.002) / 1000 = 0.002
+    expect(cost).toBeCloseTo(0.002, 6);
+  });
+
+  it("estimates image cost from number of images", () => {
+    const model = makeImage({ unitPrice: 0.04 });
+    const cost = estimateCost(model, { outputCount: 3 });
+    // 3 * 0.04 = 0.12
+    expect(cost).toBeCloseTo(0.12, 6);
+  });
+
+  it("estimates video cost from number of seconds", () => {
+    const model = makeVideo({ unitPrice: 0.5 });
+    const cost = estimateCost(model, { outputCount: 10 });
+    // 10 * 0.5 = 5
+    expect(cost).toBeCloseTo(5, 6);
+  });
+
+  it("defaults missing input/output counts to 0", () => {
+    const llm = makeLLM();
+    expect(estimateCost(llm, {})).toBe(0);
+    const image = makeImage({ unitPrice: 0.04 });
+    // no outputCount → 0 images estimated
+    expect(estimateCost(image, {})).toBe(0);
   });
 });

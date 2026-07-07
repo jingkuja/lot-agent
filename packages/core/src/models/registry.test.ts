@@ -100,4 +100,37 @@ describe("InMemoryModelRegistry", () => {
     registry.register(imageModel, () => ({}));
     expect(registry.list()).toHaveLength(2);
   });
+
+  const disabledModel: ModelConfig = { ...imageModel, id: "wanx-legacy", enabled: false };
+
+  it("list() hides disabled models by default", () => {
+    registry.register(llmModel, () => ({}));
+    registry.register(disabledModel, () => ({}));
+    const ids = registry.list().map((m) => m.id);
+    expect(ids).toEqual(["deepseek-v4-flash"]);
+  });
+
+  it("list(type) hides disabled models of that type", () => {
+    registry.register(imageModel, () => ({}));
+    registry.register(disabledModel, () => ({}));
+    expect(registry.list("image")).toHaveLength(1);
+    expect(registry.list("image")[0].id).toBe("wanx-standard");
+  });
+
+  it("list(type, { includeDisabled: true }) is the escape hatch", () => {
+    registry.register(imageModel, () => ({}));
+    registry.register(disabledModel, () => ({}));
+    expect(registry.list("image", { includeDisabled: true })).toHaveLength(2);
+    expect(registry.list(undefined, { includeDisabled: true })).toHaveLength(2);
+  });
+
+  it("getProvider returns undefined for a disabled model", () => {
+    registry.register(disabledModel, () => ({ marker: true }));
+    expect(registry.getProvider("wanx-legacy")).toBeUndefined();
+  });
+
+  it("getConfig still returns disabled models (pricing lookups need them)", () => {
+    registry.register(disabledModel, () => ({}));
+    expect(registry.getConfig("wanx-legacy")?.enabled).toBe(false);
+  });
 });
