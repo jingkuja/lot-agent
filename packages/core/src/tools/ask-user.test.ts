@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { askUserTool, ASK_USER_WAITING, hasAskUserTool } from "./ask-user.js";
+import {
+  askUserTool,
+  ASK_USER_WAITING,
+  hasAskUserTool,
+  ASK_USER_POLICY_PROMPT,
+} from "./ask-user.js";
 import type { ToolContext } from "../types/index.js";
 
 const ctx = { workingDirectory: "/tmp" } as ToolContext;
@@ -28,6 +33,14 @@ describe("ask_user tool", () => {
     const r = await askUserTool.execute({ question: "  " }, ctx);
     expect(r.isError).toBe(true);
     expect(r.errorKind).toBe("validation");
+  });
+
+  it("policy prompt steers enumerable answers into options + multiSelect", () => {
+    expect(ASK_USER_POLICY_PROMPT).toContain("options");
+    expect(ASK_USER_POLICY_PROMPT).toContain("multiSelect");
+    // 必须显式禁止把候选项内联进 question（老提示词鼓励「换行列表呈现」是根因）
+    expect(ASK_USER_POLICY_PROMPT).not.toContain("换行列表呈现");
+    expect(ASK_USER_POLICY_PROMPT).toMatch(/禁止|不要把候选项写进 question/);
   });
 
   it("hasAskUserTool follows whitelist semantics", () => {

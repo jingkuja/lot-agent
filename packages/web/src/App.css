@@ -1143,6 +1143,15 @@ html, body, #root {
   outline: none;
 }
 .ask-user-free:focus { border-color: var(--accent); }
+/* 降级态：模型漏填 options 时，把自由输入框强调出来并配一行提示。 */
+.ask-user-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.ask-user-free.emphasized {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
 .ask-user-submit {
   align-self: flex-start;
   padding: 6px 18px;
