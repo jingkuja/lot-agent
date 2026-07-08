@@ -76,6 +76,14 @@ describe("formatSkillIndex", () => {
     // 索引只含元信息，不泄漏正文
     expect(block).not.toContain("DOC BODY");
   });
+
+  it("omits the dangling colon for a skill with an empty description", () => {
+    const block = formatSkillIndex([
+      { name: "bare", description: "", triggers: [], content: "X" },
+    ]);
+    expect(block).toContain("- bare");
+    expect(block).not.toContain("- bare:");
+  });
 });
 
 describe("buildSkillPromptParts", () => {

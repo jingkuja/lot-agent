@@ -33,6 +33,8 @@ export function createLoadSkillTool(loader: SkillLoader): Tool {
     parallelSafe: true,
     async execute(input): Promise<ToolResult> {
       const { name } = (input as LoadSkillInput) ?? {};
+      // The per-turn index gates discovery, not access: any loaded skill is
+      // loadable by name (the shared tool has no per-request agent scope).
       const skill = loader.getSkills().find((s) => s.name === name);
       if (!skill) {
         const available = loader
@@ -57,7 +59,7 @@ export function createLoadSkillTool(loader: SkillLoader): Tool {
  */
 export function formatSkillIndex(skills: Skill[]): string {
   if (skills.length === 0) return "";
-  const lines = skills.map((s) => `- ${s.name}: ${s.description}`);
+  const lines = skills.map((s) => (s.description ? `- ${s.name}: ${s.description}` : `- ${s.name}`));
   return (
     "[可用技能索引]\n" +
     "以下技能的完整内容尚未加载。当当前任务与某个技能相关时，" +
