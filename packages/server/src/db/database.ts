@@ -5,6 +5,7 @@ import {
   nextSortOrder,
   promotedSortOrder,
 } from "../agents/install-order.js";
+import { normalizeApiKeyEntries, type RawApiKeyEntry } from "../tokenhub/api-key-entry.js";
 
 export interface Conversation {
   id: string;
@@ -130,7 +131,7 @@ export interface StoredUser {
   external_user_id?: number | null;
   username?: string | null;
   api_key?: string | null;
-  api_keys?: string[] | null;
+  api_keys?: (RawApiKeyEntry | string)[] | null;
 }
 
 export interface UserBalance {
@@ -1018,9 +1019,9 @@ export class DB {
   async upsertUserByExternalId(args: {
     externalUserId: number;
     username: string;
-    apiKeys: string[];
+    apiKeys: RawApiKeyEntry[];
   }): Promise<StoredUser> {
-    const active = args.apiKeys[0] ?? null;
+    const active = args.apiKeys[0]?.apiKey ?? null;
     const { rows } = await this.pool.query(
       `INSERT INTO users (external_user_id, username, name, api_key, api_keys, email)
          VALUES ($1, $2, $2, $3, $4, $5)
@@ -1040,13 +1041,12 @@ export class DB {
     return rows[0]?.api_key ?? null;
   }
 
-  async getUserApiKeys(userId: string): Promise<string[]> {
+  async getUserApiKeys(userId: string): Promise<RawApiKeyEntry[]> {
     const { rows } = await this.pool.query(
       "SELECT api_keys FROM users WHERE id = $1",
       [userId]
     );
-    const keys = rows[0]?.api_keys;
-    return Array.isArray(keys) ? keys : [];
+    return normalizeApiKeyEntries(rows[0]?.api_keys);
   }
 
   /** Sets the single per-user active key (`users.api_key`); shared across all of that
@@ -1056,7 +1056,7 @@ export class DB {
     if (!Number.isInteger(index) || index < 0 || index >= keys.length) {
       throw new Error("index_out_of_range");
     }
-    const active = keys[index];
+    const active = keys[index].apiKey;
     await this.pool.query("UPDATE users SET api_key = $1 WHERE id = $2", [active, userId]);
     return active;
   }
