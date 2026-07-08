@@ -1,5 +1,7 @@
+import type { PublicApiKey } from "../api/client.js";
+
 interface KeySettingsModalProps {
-  keys: string[];
+  keys: PublicApiKey[];
   activeIndex: number;
   busy: boolean;
   onSelect: (index: number) => void;
@@ -7,7 +9,7 @@ interface KeySettingsModalProps {
 }
 
 /** API-Key 设置弹窗：单选一个激活 key（视觉为 checkbox 列表），选中即切换。
- *  keys 已是遮罩串；组件从不接触原始 key，仅按 index 回传选择。 */
+ *  key 已是遮罩串；组件从不接触原始 key，仅按 index 回传选择。 */
 export function KeySettingsModal({ keys, activeIndex, busy, onSelect, onClose }: KeySettingsModalProps) {
   return (
     <div className="agent-center-overlay" onClick={onClose}>
@@ -20,7 +22,7 @@ export function KeySettingsModal({ keys, activeIndex, busy, onSelect, onClose }:
           <p className="key-settings-empty">当前账号暂无可用 key，请前往订阅管理页面设置</p>
         ) : (
           <ul className="key-list">
-            {keys.map((masked, i) => (
+            {keys.map((k, i) => (
               <li key={i}>
                 <button
                   type="button"
@@ -29,7 +31,13 @@ export function KeySettingsModal({ keys, activeIndex, busy, onSelect, onClose }:
                   onClick={() => i !== activeIndex && onSelect(i)}
                 >
                   <span className={`key-check ${i === activeIndex ? "checked" : ""}`} aria-hidden />
-                  <span className="key-mask">{masked}</span>
+                  <span className="key-info">
+                    <span className="key-label">
+                      <span className="key-name">{k.name}</span>
+                      {k.group && <span className="key-group-badge">{k.group}</span>}
+                    </span>
+                    <span className="key-mask">{k.key}</span>
+                  </span>
                 </button>
               </li>
             ))}
