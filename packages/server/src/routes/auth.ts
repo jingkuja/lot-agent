@@ -52,6 +52,35 @@ export function createAuthRoutes(service: AgentService): Hono {
     }
   });
 
+  // POST /token-login — public. Exchanges a tokenhub-issued JWT (delivered via a
+  // `?token=` deep link) for a local session, so users linked in from tokenhub
+  // skip the manual login form.
+  app.post("/token-login", async (c) => {
+    let body: { token?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const token = body.token?.trim();
+    if (!token) {
+      return c.json({ error: LOGIN_FAIL }, 401);
+    }
+    try {
+      const result = await service.tokenhub.tokenLogin(token);
+      const user = await service.db.upsertUserByExternalId({
+        externalUserId: result.userId,
+        username: result.name,
+        apiKeys: result.apiKeys,
+      });
+      const sessionToken = await service.sessions.createSession(user.id);
+      return c.json({ token: sessionToken, user: toPublicUser(user) });
+    } catch {
+      // Same opacity as /login — any tokenhub/network failure collapses to one message.
+      return c.json({ error: LOGIN_FAIL }, 401);
+    }
+  });
+
   // POST /logout — best-effort, no auth check needed
   app.post("/logout", async (c) => {
     const authHeader = c.req.header("Authorization");

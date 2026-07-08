@@ -37,6 +37,17 @@ export class TokenhubClient {
     return { userId: data.user_id, name: data.name, apiKeys };
   }
 
+  async tokenLogin(token: string): Promise<TokenhubLoginResult> {
+    const data = await this.post<{
+      user_id: number;
+      name: string;
+      api_key?: string;
+      api_keys?: unknown[];
+    }>("/auth/token-login", { token }, "tokenhub_token_login_failed");
+    const apiKeys = normalizeApiKeyEntries(data.api_keys ?? (data.api_key ? [data.api_key] : []));
+    return { userId: data.user_id, name: data.name, apiKeys };
+  }
+
   async listModels(apiKey: string): Promise<TokenhubModels> {
     const data = await this.get<Partial<TokenhubModels>>(
       "/models",

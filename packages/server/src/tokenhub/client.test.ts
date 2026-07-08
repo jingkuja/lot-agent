@@ -83,6 +83,37 @@ describe("TokenhubClient", () => {
     await expect(c.login("u", "p")).rejects.toThrow("tokenhub_login_failed");
   });
 
+  it("tokenLogin maps a successful response and normalizes api_keys", async () => {
+    const f = vi.fn().mockResolvedValue(
+      ok({
+        user_id: 1,
+        name: "Root",
+        api_key: "sk-xxx",
+        api_keys: [{ api_key: "sk-xxx", name: "默认令牌", group: "default" }],
+        access_token: "sk-xxx",
+      })
+    );
+    const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
+    await expect(c.tokenLogin("jwt.abc.def")).resolves.toEqual({
+      userId: 1,
+      name: "Root",
+      apiKeys: [{ apiKey: "sk-xxx", name: "默认令牌", group: "default" }],
+    });
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("https://h/api/agent-market/auth/token-login");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ token: "jwt.abc.def" });
+  });
+
+  it("tokenLogin throws generic error on success:false", async () => {
+    const c = new TokenhubClient("https://h/api/agent-market", vi.fn().mockResolvedValue(fail()) as unknown as typeof fetch);
+    await expect(c.tokenLogin("bad")).rejects.toThrow("tokenhub_token_login_failed");
+  });
+
+  it("tokenLogin throws generic error on network failure", async () => {
+    const c = new TokenhubClient("https://h/api/agent-market", vi.fn().mockRejectedValue(new Error("ECONN")) as unknown as typeof fetch);
+    await expect(c.tokenLogin("t")).rejects.toThrow("tokenhub_token_login_failed");
+  });
+
   it("listModels returns the three buckets", async () => {
     const f = vi.fn().mockResolvedValue(ok({ llm: ["gpt-5.4"], image: ["gpt-image-2"], video: ["veo3.1"] }));
     const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);

@@ -173,6 +173,13 @@ export const api = {
       body: JSON.stringify({ username, encryptedPassword }),
     }),
 
+  // Public: exchange a tokenhub-issued JWT (from a `?token=` deep link) for a session.
+  tokenLogin: (token: string) =>
+    request<{ token: string; user: User }>("/auth/token-login", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
   logout: () =>
     request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
 

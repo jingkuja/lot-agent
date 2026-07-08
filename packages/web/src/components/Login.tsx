@@ -4,14 +4,16 @@ import { encryptPassword } from "../lib/rsa.js";
 
 interface LoginProps {
   onLogin: (user: User) => void;
+  /** Message to show on first render, e.g. after a failed `?token=` auto-login. */
+  initialError?: string | null;
 }
 
 const LOGIN_FAIL = "登录失败，请稍后再试或者联系管理员";
 
-export function Login({ onLogin }: LoginProps) {
+export function Login({ onLogin, initialError = null }: LoginProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
