@@ -23,11 +23,12 @@ describe("auth login", () => {
   it("decrypts, calls tokenhub, upserts, returns token + sanitized user", async () => {
     const svc = fakeService();
     (svc.tokenhub.login as ReturnType<typeof vi.fn>).mockResolvedValue({
-      userId: 2, name: "138", apiKeys: ["sk-SECRETSECRET"],
+      userId: 2, name: "138", apiKeys: [{ apiKey: "sk-SECRETSECRET", name: "开放API密钥" }],
     });
     (svc.db.upsertUserByExternalId as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: "u1", email: null, name: "138", created_at: "t",
-      external_user_id: 2, username: "138", api_key: "sk-SECRETSECRET", api_keys: ["sk-SECRETSECRET"],
+      external_user_id: 2, username: "138", api_key: "sk-SECRETSECRET",
+      api_keys: [{ apiKey: "sk-SECRETSECRET", name: "开放API密钥" }],
     });
     const app = createAuthRoutes(svc);
     const encryptedPassword = await encryptFor(app, "pw");
@@ -41,7 +42,7 @@ describe("auth login", () => {
     expect(json.token).toBe("tok-1");
     expect(json.user).toEqual({
       id: "u1", name: "138", username: "138",
-      apiKeys: ["sk-SEC***CRET"], activeKeyIndex: 0,
+      apiKeys: [{ key: "sk-SEC***CRET", name: "开放API密钥" }], activeKeyIndex: 0,
     });
     expect(JSON.stringify(json)).not.toContain("sk-SECRETSECRET");
     expect(svc.tokenhub.login).toHaveBeenCalledWith("138", "pw");

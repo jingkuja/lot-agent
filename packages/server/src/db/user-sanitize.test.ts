@@ -17,22 +17,44 @@ describe("maskKey", () => {
 });
 
 describe("toPublicUser", () => {
-  it("returns masked keys + active index, never the raw key or email", () => {
-    const u = { ...base, api_key: "sk-BBBBBBBBBBBBBB", api_keys: ["sk-AAAAAAAAAAAAAA", "sk-BBBBBBBBBBBBBB"] };
+  it("returns masked keys + name/group + active index, never the raw key or email", () => {
+    const u = {
+      ...base,
+      api_key: "sk-BBBBBBBBBBBBBB",
+      api_keys: [
+        { apiKey: "sk-AAAAAAAAAAAAAA", name: "开放API密钥", group: "" },
+        { apiKey: "sk-BBBBBBBBBBBBBB", name: "test", group: "agent2_demo" },
+      ],
+    };
     const pub = toPublicUser(u);
     expect(pub).toEqual({
       id: "u1", name: "138", username: "138",
-      apiKeys: ["sk-AAA***AAAA", "sk-BBB***BBBB"],
+      apiKeys: [
+        { key: "sk-AAA***AAAA", name: "开放API密钥" },
+        { key: "sk-BBB***BBBB", name: "test", group: "agent2_demo" },
+      ],
       activeKeyIndex: 1,
     });
     expect(JSON.stringify(pub)).not.toContain("sk-BBBBBBBBBBBBBB");
     expect(JSON.stringify(pub)).not.toContain("e@x");
   });
+
+  it("falls back to the masked key as name when tokenhub gave no name", () => {
+    const u = { ...base, api_key: "sk-AAAAAAAAAAAAAA", api_keys: [{ apiKey: "sk-AAAAAAAAAAAAAA" }] };
+    expect(toPublicUser(u).apiKeys).toEqual([{ key: "sk-AAA***AAAA", name: "sk-AAA***AAAA" }]);
+  });
+
+  it("handles legacy bare-string api_keys rows the same way", () => {
+    const u = { ...base, api_key: "sk-AAAAAAAAAAAAAA", api_keys: ["sk-AAAAAAAAAAAAAA"] };
+    expect(toPublicUser(u).apiKeys).toEqual([{ key: "sk-AAA***AAAA", name: "sk-AAA***AAAA" }]);
+  });
+
   it("activeKeyIndex is -1 when there is no key", () => {
     expect(toPublicUser(base)).toMatchObject({ apiKeys: [], activeKeyIndex: -1 });
   });
+
   it("activeKeyIndex is -1 when api_key is not in the list", () => {
-    const u = { ...base, api_key: "sk-ZZZZZZZZZZZZZZ", api_keys: ["sk-AAAAAAAAAAAAAA"] };
+    const u = { ...base, api_key: "sk-ZZZZZZZZZZZZZZ", api_keys: [{ apiKey: "sk-AAAAAAAAAAAAAA" }] };
     expect(toPublicUser(u).activeKeyIndex).toBe(-1);
   });
 });
