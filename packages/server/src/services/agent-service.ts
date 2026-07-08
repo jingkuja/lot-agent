@@ -6,6 +6,8 @@ import {
   TraceManager,
   ConsoleSink,
   SkillLoader,
+  createLoadSkillTool,
+  buildSkillPromptParts,
   MCPClientManager,
   loadMCPConfig,
   AgentMemoryStore,
@@ -310,6 +312,11 @@ export class AgentService {
     await this.skillLoader.loadFromDirectory(this.skillsDir);
     console.log(`Loaded ${this.skillLoader.getSkills().length} skills`);
 
+    // load_skill 按需加载工具：索引进 system prompt（见 streamAgentResponse），
+    // 正文由模型判断相关后调用本工具拉取。必须在 generalDef 组装前注册，
+    // general 的白名单取自「全部已注册工具 − DISABLED_HOST_TOOLS」。
+    this.toolRegistry.register(createLoadSkillTool(this.skillLoader));
+
     // Connect MCP servers (non-fatal if fails)
     try {
       const mcpConfigs = await loadMCPConfig(this.mcpConfigPath);
@@ -505,10 +512,12 @@ export class AgentService {
       materialize
     );
 
-    // ── Match skills, build agent ──
-    const matchedSkills = this.skillLoader.match(userMessage, { agentId: def.id });
-    const dynamicParts = matchedSkills.map(
-      (s) => `[Skill: ${s.name}]\n${s.content}`
+    // ── Skill prompt parts（强制注入 + trigger 预取 + 未注入技能的索引）──
+    const dynamicParts = buildSkillPromptParts(
+      this.skillLoader,
+      userMessage,
+      def.id,
+      def.toolNames
     );
 
     // Resolve the model for this turn (explicit pick > stored > agent default),
