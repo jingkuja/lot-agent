@@ -2725,8 +2725,8 @@ html, body, #root {
 .key-check { width: 16px; height: 16px; border: 1.5px solid var(--border); border-radius: 4px; flex: none; }
 .key-check.checked { background: var(--accent); border-color: var(--accent); }
 .key-info { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
-.key-label { display: flex; align-items: center; gap: 6px; }
-.key-name { font-weight: 600; }
+.key-label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.key-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .key-group-badge {
   padding: 1px 6px; border-radius: 999px; font-size: 11px; line-height: 16px;
   color: var(--tag-general-fg); background: var(--tag-general-bg);
