@@ -63,11 +63,17 @@ export interface Agent {
   sortOrder?: number | null;
 }
 
+export interface PublicApiKey {
+  key: string;
+  name: string;
+  group?: string;
+}
+
 export interface User {
   id: string;
   name: string;
   username: string | null;
-  apiKeys: string[];
+  apiKeys: PublicApiKey[];
   activeKeyIndex: number;
 }
 
