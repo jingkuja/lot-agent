@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Tool, ToolResult, ObjectStorage } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
+import { DOWNLOAD_RESULT_HINT } from "./artifact-result.js";
 import {
   extractTheme,
   extractBackgrounds,
@@ -276,7 +277,8 @@ export function createPptTool(deps: PptToolDeps): Tool {
       return {
         content:
           `已生成演示文稿「${title || key}」（${slides!.length} 页）。\n` +
-          `下载链接：${url}\nasset_id: ${id}${themeNote}`,
+          `下载链接：${url}\nasset_id: ${id}${themeNote}\n` +
+          DOWNLOAD_RESULT_HINT,
       };
     },
   };

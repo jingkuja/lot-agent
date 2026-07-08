@@ -7,6 +7,7 @@ import type { DisplayMessage } from "../hooks/useChat.js";
 import { GenerationCard } from "./GenerationCard.js";
 import { AskUserCard } from "./AskUserCard.js";
 import { OutlineCard } from "./OutlineCard.js";
+import { parseDownloadArtifact } from "../lib/download-artifact.js";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
@@ -77,6 +78,37 @@ export function MessageBubble({
     // above (in the assistant message) already conveys the state.
     if (message.toolResult?.name === "ask_user") return null;
     if (message.toolResult?.name === "propose_outline") return null;
+    // A document/PPT result: render a real download button from the tool's own
+    // (trustworthy) URL instead of the raw text — the model's prose link is
+    // unreliable, so we never surface it. See lib/download-artifact.
+    const artifact = parseDownloadArtifact(
+      message.toolResult?.name,
+      message.toolResult?.output,
+      message.toolResult?.isError
+    );
+    if (artifact) {
+      return (
+        <div className="message-wrapper message-tool">
+          <div className="message-wrapper-inner">
+            <div className="doc-download-card">
+              <span className="doc-download-icon" aria-hidden>📄</span>
+              <span className="doc-download-name" title={artifact.filename}>
+                {artifact.filename}
+              </span>
+              <a
+                className="gen-asset-download"
+                href={artifact.url}
+                download={artifact.filename}
+                target="_blank"
+                rel="noreferrer"
+              >
+                下载
+              </a>
+            </div>
+          </div>
+        </div>
+      );
+    }
     // Tool result message — rendered as a collapsible card
     return (
       <div className="message-wrapper message-tool">

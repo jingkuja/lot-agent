@@ -2525,6 +2525,32 @@ html, body, #root {
 }
 .gen-asset-download svg { width: 15px; height: 15px; }
 
+/* Download card for document/PPT tool results (generate_ppt / generate_document) */
+.doc-download-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, 100%);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+.doc-download-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+.doc-download-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 
 /* ── Agent 中心 marketplace modal ─────────────────────────────────── */
 .agent-center-overlay {
