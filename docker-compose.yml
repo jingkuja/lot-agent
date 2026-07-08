@@ -40,6 +40,10 @@ x-app-env: &app-env
   TOKENHUB_API_KEY: ${TOKENHUB_API_KEY:-}
   IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
   VIDEO_GEN_API_KEY: ${VIDEO_GEN_API_KEY:-}
+  # Shared secret proving this Agent (box) to new-api on URL token auto-login.
+  # Sent as `Authorization: Bearer` when exchanging ?token via /auth/token-login;
+  # if unset or mismatched, new-api replies 403 "invalid agent key". Keep secret.
+  NEW_API_AGENT_KEY: ${NEW_API_AGENT_KEY:-}
   BIGMODEL_API_KEY: ${BIGMODEL_API_KEY:-}
   CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
   # Absolute base for static file URLs (assets/documents/uploads). Leave empty

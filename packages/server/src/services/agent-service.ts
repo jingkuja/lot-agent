@@ -231,7 +231,11 @@ export class AgentService {
     this.debug = config.debug ?? false;
     this.tokenhubBaseUrl =
       process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market";
-    this.tokenhub = new TokenhubClient(this.tokenhubBaseUrl);
+    this.tokenhub = new TokenhubClient(
+      this.tokenhubBaseUrl,
+      undefined,
+      process.env.NEW_API_AGENT_KEY ?? ""
+    );
   }
 
   async init(): Promise<void> {

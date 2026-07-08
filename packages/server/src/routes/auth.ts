@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { logger } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { generateRsaKeypair } from "../auth/rsa.js";
 import { toPublicUser } from "../db/user-sanitize.js";
@@ -46,8 +47,9 @@ export function createAuthRoutes(service: AgentService): Hono {
       });
       const token = await service.sessions.createSession(user.id);
       return c.json({ token, user: toPublicUser(user) });
-    } catch {
-      // Any failure — decrypt, tokenhub network/auth — is collapsed to one message.
+    } catch (err) {
+      // Client sees one generic message; the cause is logged for operators.
+      logger.warn("login failed", { route: "login", err });
       return c.json({ error: LOGIN_FAIL }, 401);
     }
   });
@@ -75,8 +77,9 @@ export function createAuthRoutes(service: AgentService): Hono {
       });
       const sessionToken = await service.sessions.createSession(user.id);
       return c.json({ token: sessionToken, user: toPublicUser(user) });
-    } catch {
-      // Same opacity as /login — any tokenhub/network failure collapses to one message.
+    } catch (err) {
+      // Same opacity as /login — client sees one message; cause is logged.
+      logger.warn("token-login failed", { route: "token-login", err });
       return c.json({ error: LOGIN_FAIL }, 401);
     }
   });

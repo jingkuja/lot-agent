@@ -104,6 +104,25 @@ describe("TokenhubClient", () => {
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({ token: "jwt.abc.def" });
   });
 
+  it("tokenLogin sends the agent key as a Bearer header when configured", async () => {
+    const f = vi.fn().mockResolvedValue(ok({ user_id: 1, name: "Root", api_key: "sk-xxx" }));
+    const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch, "agent-secret");
+    await c.tokenLogin("jwt.abc.def");
+    const [, init] = f.mock.calls[0];
+    expect((init as RequestInit).headers).toMatchObject({
+      "Content-Type": "application/json",
+      Authorization: "Bearer agent-secret",
+    });
+  });
+
+  it("tokenLogin omits the Authorization header when no agent key is set", async () => {
+    const f = vi.fn().mockResolvedValue(ok({ user_id: 1, name: "Root", api_key: "sk-xxx" }));
+    const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
+    await c.tokenLogin("jwt.abc.def");
+    const [, init] = f.mock.calls[0];
+    expect((init as RequestInit).headers).not.toHaveProperty("Authorization");
+  });
+
   it("tokenLogin throws generic error on success:false", async () => {
     const c = new TokenhubClient("https://h/api/agent-market", vi.fn().mockResolvedValue(fail()) as unknown as typeof fetch);
     await expect(c.tokenLogin("bad")).rejects.toThrow("tokenhub_token_login_failed");
