@@ -20,6 +20,7 @@ import { formatEntriesForPrompt } from "../memory/index.js";
 import type { Retriever } from "../retrieval/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
+import { isMalformedToolCallError } from "../llm/retry.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
@@ -101,6 +102,49 @@ const DEFAULT_CONFIG: AgentConfig = {
   maxRunTimeMs: 600_000, // 5 minutes
   systemPrompt: "You are a helpful AI assistant.",
 };
+
+/**
+ * When a generation is rejected because the model emitted truncated/garbled
+ * tool-call JSON (a sampling artifact — see `isMalformedToolCallError`), retry
+ * the same generation this many times before giving up on a fresh sample. The
+ * provider's `withLLMRetry` only retries when *no* chunk streamed, so a turn
+ * that emits a preamble before the bad tool call escapes it and lands here.
+ */
+const MAX_GEN_RETRIES = 2;
+
+/**
+ * How many times a run may feed a malformed-tool-call failure back to the model
+ * for recovery (retry a smaller call / ask the user how to split the work)
+ * before surfacing a terminal error. Bounds a model that keeps producing
+ * malformed output so it can't loop.
+ */
+const MAX_MALFORMED_RECOVERIES = 1;
+
+/** Synthetic turn appended so the model recovers instead of the run dying. */
+const MALFORMED_RECOVERY_NOTE =
+  "[系统自动提示] 上一次工具调用的参数不完整或过长，已被网关拒绝，且多次自动重试仍失败。" +
+  "请不要重复完全相同的调用：如果可能是生成内容过多导致截断，请显著精简规模后重试；" +
+  "如果需要用户决定如何取舍或分批处理，请调用 ask_user 询问用户。";
+
+/** User-facing message when even the guided recovery keeps failing. */
+const MALFORMED_FALLBACK_MESSAGE =
+  "生成失败：模型多次返回不完整的结果（可能是内容过多被截断）。请稍后重试，或减少内容规模后再试。";
+
+/** Abortable delay used to back off between retried generations. */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    (timer as { unref?: () => void }).unref?.();
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true }
+    );
+  });
+}
 
 /**
  * Validate the final answer text against an outputSchema: JSON.parse then
@@ -231,6 +275,9 @@ export class Agent {
     let inputTokens = 0;
     let outputTokens = 0;
     let cachedPromptTokens = 0;
+    // How many times this run has fed a malformed-tool-call failure back to the
+    // model for recovery (bounded by MAX_MALFORMED_RECOVERIES).
+    let malformedRecoveries = 0;
 
     // Working message log (accumulates during this run). The user message is
     // part of the conversation exactly once, in turn order — re-appending it
@@ -292,7 +339,7 @@ export class Agent {
         iterations++;
         let hasToolCalls = false;
         let assistantContent = "";
-        const toolCalls: ToolCall[] = [];
+        let toolCalls: ToolCall[] = [];
 
         // Assemble messages with context management (budget + sliding window + summary)
         const messages = await this.contextManager.assemble(
@@ -306,39 +353,82 @@ export class Agent {
 
         // Stream LLM response — surface any failure as an event so the run
         // always terminates cleanly with a `done` (for billing/trace closure)
-        // instead of throwing out of the generator.
-        try {
-          for await (const chunk of context.llm.chat(messages, tools, {
-            signal,
-            params: this.config.modelParams,
-          })) {
-            if (chunk.type === "thinking" && chunk.content) {
-              yield { type: "thinking", content: chunk.content };
+        // instead of throwing out of the generator. A malformed/truncated
+        // tool-call rejection is a sampling artifact: retry the generation a
+        // couple times (a fresh sample usually parses) before giving up.
+        let streamError: unknown;
+        for (let genAttempt = 0; ; genAttempt++) {
+          // Reset per-attempt accumulators so a retry doesn't inherit partial
+          // output from the failed attempt.
+          hasToolCalls = false;
+          assistantContent = "";
+          toolCalls = [];
+          try {
+            for await (const chunk of context.llm.chat(messages, tools, {
+              signal,
+              params: this.config.modelParams,
+            })) {
+              if (chunk.type === "thinking" && chunk.content) {
+                yield { type: "thinking", content: chunk.content };
+              }
+              if (chunk.type === "text" && chunk.content) {
+                assistantContent += chunk.content;
+                yield { type: "text", content: chunk.content };
+              }
+              if (chunk.type === "tool_call" && chunk.toolCall) {
+                hasToolCalls = true;
+                toolCalls.push(chunk.toolCall);
+              }
+              if (chunk.type === "done" && chunk.usage) {
+                totalTokens +=
+                  chunk.usage.promptTokens + chunk.usage.completionTokens;
+                inputTokens += chunk.usage.promptTokens;
+                outputTokens += chunk.usage.completionTokens;
+                cachedPromptTokens += chunk.usage.cachedPromptTokens ?? 0;
+              }
             }
-            if (chunk.type === "text" && chunk.content) {
-              assistantContent += chunk.content;
-              yield { type: "text", content: chunk.content };
+            streamError = undefined;
+            break;
+          } catch (err) {
+            // Cancellation/timeout is terminal — never retry it as an artifact.
+            if (abortReason()) {
+              streamError = err;
+              break;
             }
-            if (chunk.type === "tool_call" && chunk.toolCall) {
-              hasToolCalls = true;
-              toolCalls.push(chunk.toolCall);
+            if (isMalformedToolCallError(err) && genAttempt < MAX_GEN_RETRIES) {
+              await delay(200 * (genAttempt + 1), signal);
+              continue;
             }
-            if (chunk.type === "done" && chunk.usage) {
-              totalTokens +=
-                chunk.usage.promptTokens + chunk.usage.completionTokens;
-              inputTokens += chunk.usage.promptTokens;
-              outputTokens += chunk.usage.completionTokens;
-              cachedPromptTokens += chunk.usage.cachedPromptTokens ?? 0;
-            }
+            streamError = err;
+            break;
           }
-        } catch (err) {
+        }
+
+        if (streamError !== undefined) {
           const kind = abortReason();
-          yield kind
-            ? abortError(kind)
-            : {
-                type: "error",
-                message: `LLM error: ${err instanceof Error ? err.message : String(err)}`,
-              };
+          if (kind) {
+            yield abortError(kind);
+            yield done();
+            return;
+          }
+          // A malformed tool-call that survived silent retries: don't kill the
+          // turn. Feed the failure back so the model recovers (retry a smaller
+          // call, or ask_user how to split the work) — bounded so a model that
+          // keeps producing malformed output can't loop forever.
+          if (
+            isMalformedToolCallError(streamError) &&
+            malformedRecoveries < MAX_MALFORMED_RECOVERIES
+          ) {
+            malformedRecoveries++;
+            workingHistory.push({ role: "user", content: MALFORMED_RECOVERY_NOTE });
+            continue;
+          }
+          yield {
+            type: "error",
+            message: isMalformedToolCallError(streamError)
+              ? MALFORMED_FALLBACK_MESSAGE
+              : `LLM error: ${streamError instanceof Error ? streamError.message : String(streamError)}`,
+          };
           yield done();
           return;
         }
