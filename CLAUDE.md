@@ -121,7 +121,11 @@ uploads `/static/uploads/…`.
   presets, layout validation, and cloning/theme-extraction from a user-uploaded .pptx template —
   see `server/ppt/`). The PPT Agent's craft knowledge lives in `skills/ppt-authoring.md`.
 - **Skills**: markdown files in root `skills/`, frontmatter supports `agents:` (scope a skill to
-  specific Agent ids) and `triggers:` (substring match on the user message).
+  specific Agent ids) and `triggers:` (substring match on the user message). Loading is hybrid:
+  `agents:` skills are force-injected for their Agent; trigger hits are a prefetch fast path;
+  everything else is exposed as a name+description index in the system prompt and loaded on
+  demand via the `load_skill` builtin tool (`core/skills/load-skill-tool.ts`,
+  `buildSkillPromptParts`). Vertical agents opt in by adding `"load_skill"` to `toolNames`.
 - **Memory**: session tier is Redis-backed per conversation (20-min TTL,
   `server/memory/redis-session-backend.ts`); user tier is PG. Memory objects are constructed
   per request — never a shared singleton — so concurrent sessions don't clobber each other.
