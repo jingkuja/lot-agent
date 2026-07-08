@@ -1,7 +1,9 @@
+import { normalizeApiKeyEntries, type RawApiKeyEntry } from "./api-key-entry.js";
+
 export interface TokenhubLoginResult {
   userId: number;
   name: string;
-  apiKeys: string[];
+  apiKeys: RawApiKeyEntry[];
 }
 export interface TokenhubModels {
   llm: string[];
@@ -29,9 +31,9 @@ export class TokenhubClient {
       user_id: number;
       name: string;
       api_key?: string;
-      api_keys?: string[];
+      api_keys?: unknown[];
     }>("/auth/login", { username, password }, "tokenhub_login_failed");
-    const apiKeys = data.api_keys ?? (data.api_key ? [data.api_key] : []);
+    const apiKeys = normalizeApiKeyEntries(data.api_keys ?? (data.api_key ? [data.api_key] : []));
     return { userId: data.user_id, name: data.name, apiKeys };
   }
 

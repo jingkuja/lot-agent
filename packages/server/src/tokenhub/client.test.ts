@@ -7,7 +7,7 @@ const fail = () =>
   ({ ok: true, json: async () => ({ data: null, success: false, message: "bad" }) }) as Response;
 
 describe("TokenhubClient", () => {
-  it("login maps a successful response", async () => {
+  it("login maps a successful response with only api_key", async () => {
     const f = vi.fn().mockResolvedValue(
       ok({ user_id: 2, name: "13881071870", api_key: "sk-X", access_token: "sk-X" })
     );
@@ -15,7 +15,7 @@ describe("TokenhubClient", () => {
     await expect(c.login("13881071870", "pw")).resolves.toEqual({
       userId: 2,
       name: "13881071870",
-      apiKeys: ["sk-X"],
+      apiKeys: [{ apiKey: "sk-X" }],
     });
     const [url, init] = f.mock.calls[0];
     expect(url).toBe("https://h/api/agent-market/auth/login");
@@ -25,20 +25,46 @@ describe("TokenhubClient", () => {
     });
   });
 
-  it("login maps api_keys array", async () => {
+  it("login maps bare-string api_keys array (legacy tokenhub shape)", async () => {
     const f = vi.fn().mockResolvedValue(
       ok({ user_id: 2, name: "138", api_key: "sk-A", api_keys: ["sk-A", "sk-B"], access_token: "sk-A" })
     );
     const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
     await expect(c.login("138", "pw")).resolves.toEqual({
-      userId: 2, name: "138", apiKeys: ["sk-A", "sk-B"],
+      userId: 2, name: "138", apiKeys: [{ apiKey: "sk-A" }, { apiKey: "sk-B" }],
     });
   });
 
-  it("login falls back to [api_key] when api_keys absent", async () => {
+  it("login maps api_keys objects with name/group", async () => {
+    const f = vi.fn().mockResolvedValue(
+      ok({
+        user_id: 2,
+        name: "138",
+        api_key: "sk-A",
+        api_keys: [
+          { api_key: "sk-A", name: "开放API密钥", group: "" },
+          { api_key: "sk-B", name: "test", group: "agent2_demo" },
+        ],
+        access_token: "sk-A",
+      })
+    );
+    const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
+    await expect(c.login("138", "pw")).resolves.toEqual({
+      userId: 2,
+      name: "138",
+      apiKeys: [
+        { apiKey: "sk-A", name: "开放API密钥" },
+        { apiKey: "sk-B", name: "test", group: "agent2_demo" },
+      ],
+    });
+  });
+
+  it("login falls back to [{apiKey}] when api_keys absent", async () => {
     const f = vi.fn().mockResolvedValue(ok({ user_id: 2, name: "138", api_key: "sk-A" }));
     const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
-    await expect(c.login("138", "pw")).resolves.toEqual({ userId: 2, name: "138", apiKeys: ["sk-A"] });
+    await expect(c.login("138", "pw")).resolves.toEqual({
+      userId: 2, name: "138", apiKeys: [{ apiKey: "sk-A" }],
+    });
   });
 
   it("login yields [] when neither api_keys nor api_key present", async () => {
