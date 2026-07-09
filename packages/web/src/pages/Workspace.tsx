@@ -13,7 +13,7 @@ import { useAgents } from "../hooks/useAgents.js";
 import { useModels } from "../hooks/useModels.js";
 import { api, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
-import { EMPTY_SELECTED, fillModelDefaults, groupForKind } from "../lib/model-defaults.js";
+import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveLlmSelection } from "../lib/model-defaults.js";
 
 interface WorkspaceProps {
   user: User;
@@ -118,11 +118,12 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
   useEffect(() => {
     setSelectedModels((prev) => fillModelDefaults(prev, modelCatalog));
   }, [modelCatalog]);
-  // 进入会话:已存模型优先;无存储(新会话)回落到 llm 组第一个。
+  // 进入会话:已存模型若仍在目录中则沿用,否则回落到 llm 组第一个(切 key / 订阅
+  // 变更后旧模型可能已不在新目录中,需校验避免选中失效模型)。
   useEffect(() => {
     setSelectedModels((prev) => ({
       ...prev,
-      llm: conversationModel ?? modelCatalog.llm[0]?.id ?? null,
+      llm: resolveLlmSelection(conversationModel, modelCatalog.llm),
     }));
   }, [conversationModel, modelCatalog]);
 

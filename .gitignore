@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.zcode/
 *.tsbuildinfo
 data/*.db
 data/*.db-shm
