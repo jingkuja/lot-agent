@@ -232,7 +232,7 @@ export class AgentService {
     this.modelCatalog = config.modelCatalog;
     this.debug = config.debug ?? false;
     this.tokenhubBaseUrl =
-      process.env.TOKENHUB_BASE_URL ?? "http://127.0.0.1:4000/api/agent-market";
+      process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market";
     this.tokenhub = new TokenhubClient(
       this.tokenhubBaseUrl,
       undefined,
