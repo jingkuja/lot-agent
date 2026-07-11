@@ -95,7 +95,7 @@ export class OpenAIProvider implements LLMProvider {
         })()
       );
 
-    yield* withLLMRetry(createStream, { isRetryable: isOpenAIRetryable });
+    yield* withLLMRetry(createStream, { isRetryable: isOpenAIRetryable, signal: opts?.signal });
   }
 }
 

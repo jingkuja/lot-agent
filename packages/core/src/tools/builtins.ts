@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile, readdir } from "node:fs/promises";
+import { readFile, writeFile, readdir, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve, sep } from "node:path";
+import { resolve, sep, dirname, basename } from "node:path";
 import type { Tool, ToolContext, ToolResult, ToolErrorKind } from "../types/index.js";
 import { askUserTool } from "./ask-user.js";
 import { assertPublicUrl } from "./net-guard.js";
@@ -36,6 +36,74 @@ function isContained(resolved: string, workingDirectory: string): boolean {
   return resolved === workingDirectory || resolved.startsWith(workingDirectory + sep);
 }
 
+/**
+ * Resolves `path` through any symlinks. `path` itself may not exist yet (e.g.
+ * a write_file target) — in that case, walks up to the nearest existing
+ * ancestor, resolves *that* through symlinks, and re-appends the missing
+ * suffix, since `fs.realpath` throws ENOENT on a non-existent path.
+ */
+async function resolveReal(path: string): Promise<string> {
+  let suffix = "";
+  let current = path;
+  for (;;) {
+    try {
+      const real = await realpath(current);
+      return suffix ? resolve(real, suffix) : real;
+    } catch (error) {
+      if ((error as { code?: string }).code !== "ENOENT") {
+        // Non-ENOENT (e.g. EACCES) — fall back to the unresolved path and let
+        // the actual fs operation surface the real error.
+        return path;
+      }
+      const parent = dirname(current);
+      if (parent === current) return path; // reached root without an existing ancestor
+      suffix = suffix ? `${basename(current)}${sep}${suffix}` : basename(current);
+      current = parent;
+    }
+  }
+}
+
+/**
+ * Symlink-aware containment check: resolves both the working directory and
+ * the target path through any symlinks before comparing, so a symlink that
+ * lives inside the working directory but points outside of it (or the
+ * working directory itself being reached via a symlink, e.g. macOS's
+ * `/tmp` -> `/private/tmp`) can't be used to escape the sandbox. Callers
+ * must also run the cheap string-based `isContained` first — this only
+ * catches symlink indirection, not `..` segments (already resolved by `resolve()`).
+ */
+async function assertContainedReal(resolved: string, workingDirectory: string): Promise<boolean> {
+  const [realWorkingDirectory, realResolved] = await Promise.all([
+    resolveReal(workingDirectory),
+    resolveReal(resolved),
+  ]);
+  return isContained(realResolved, realWorkingDirectory);
+}
+
+function escapeResult(path: string): ToolResult {
+  return {
+    content: `Path escapes the working directory: ${path}`,
+    isError: true,
+    errorKind: "permission",
+  };
+}
+
+/**
+ * Full containment check for a file tool: the cheap string check first (catches
+ * `..` segments without any I/O), then the symlink-aware realpath check (catches
+ * a symlink inside the working directory that points outside of it). Returns an
+ * error ToolResult when containment fails, `undefined` when the path is safe.
+ */
+async function checkContainment(
+  fullPath: string,
+  path: string,
+  workingDirectory: string
+): Promise<ToolResult | undefined> {
+  if (!isContained(fullPath, workingDirectory)) return escapeResult(path);
+  if (!(await assertContainedReal(fullPath, workingDirectory))) return escapeResult(path);
+  return undefined;
+}
+
 export const readFileTool: Tool = {
   name: "read_file",
   description:
@@ -53,13 +121,8 @@ export const readFileTool: Tool = {
   async execute(input, context) {
     const { path } = input as { path: string };
     const fullPath = resolvePath({ path }, context);
-    if (!isContained(fullPath, context.workingDirectory)) {
-      return {
-        content: `Path escapes the working directory: ${path}`,
-        isError: true,
-        errorKind: "permission",
-      };
-    }
+    const escape = await checkContainment(fullPath, path, context.workingDirectory);
+    if (escape) return escape;
     try {
       const content = await readFile(fullPath, "utf-8");
       return { content: truncate(content) };
@@ -93,13 +156,8 @@ export const writeFileTool: Tool = {
   async execute(input, context) {
     const { path, content } = input as { path: string; content: string };
     const fullPath = resolvePath({ path }, context);
-    if (!isContained(fullPath, context.workingDirectory)) {
-      return {
-        content: `Path escapes the working directory: ${path}`,
-        isError: true,
-        errorKind: "permission",
-      };
-    }
+    const escape = await checkContainment(fullPath, path, context.workingDirectory);
+    if (escape) return escape;
     try {
       await writeFile(fullPath, content, "utf-8");
       return { content: `Successfully wrote ${content.length} chars to ${path}` };
@@ -131,13 +189,8 @@ export const listFilesTool: Tool = {
   async execute(input, context) {
     const { path = "." } = (input as { path?: string }) ?? {};
     const fullPath = resolvePath({ path }, context);
-    if (!isContained(fullPath, context.workingDirectory)) {
-      return {
-        content: `Path escapes the working directory: ${path}`,
-        isError: true,
-        errorKind: "permission",
-      };
-    }
+    const escape = await checkContainment(fullPath, path, context.workingDirectory);
+    if (escape) return escape;
     try {
       const entries = await readdir(fullPath, { withFileTypes: true });
       const lines = entries
@@ -240,13 +293,8 @@ export const searchFilesTool: Tool = {
     };
 
     const fullPath = resolvePath({ path }, context);
-    if (!isContained(fullPath, context.workingDirectory)) {
-      return {
-        content: `Path escapes the working directory: ${path}`,
-        isError: true,
-        errorKind: "permission",
-      };
-    }
+    const escape = await checkContainment(fullPath, path, context.workingDirectory);
+    if (escape) return escape;
 
     try {
       const { stdout } = await execFileAsync(
@@ -255,6 +303,10 @@ export const searchFilesTool: Tool = {
           "-rn",
           "--include",
           extension ? `*${extension}` : "*",
+          // `--` stops option parsing: without it, a pattern starting with `-`
+          // (e.g. `-foo`) would be parsed by grep as a flag instead of the
+          // search text, and rejected as "invalid option".
+          "--",
           pattern,
           path,
         ],
@@ -307,13 +359,26 @@ function webFetchAllowHosts(): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Combines the per-call timeout with an optional external cancellation
+ * `signal` (the run's abort signal) into a single AbortController, mirroring
+ * `net-fetch.ts`'s `fetchPublicBinary` — so a run cancellation stops an
+ * in-flight web_fetch immediately instead of it running to completion (or
+ * the full timeout) regardless of the run having ended.
+ */
 async function fetchWithTimeout(
   url: string,
   timeoutMs: number,
-  redirect: "manual" | "follow" | "error" = "follow"
+  redirect: "manual" | "follow" | "error" = "follow",
+  externalSignal?: AbortSignal
 ): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(new Error("request timed out")), timeoutMs);
+  const onExternalAbort = () => controller.abort(externalSignal?.reason);
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort(externalSignal.reason);
+    else externalSignal.addEventListener("abort", onExternalAbort);
+  }
   try {
     const res = await fetch(url, {
       signal: controller.signal,
@@ -327,6 +392,7 @@ async function fetchWithTimeout(
     return res;
   } finally {
     clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -343,12 +409,13 @@ async function fetchWithTimeout(
  * resolving once and connecting to the validated IP (pin the address, or
  * re-validate the socket's peer). Tracked separately from the E0/E1 pass.
  */
-async function fetchPublic(url: string, timeoutMs: number): Promise<Response> {
+async function fetchPublic(url: string, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
   let currentUrl = url;
   const allowHosts = webFetchAllowHosts();
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (signal?.aborted) throw signal.reason ?? new Error("aborted");
     await assertPublicUrl(currentUrl, { allowHosts });
-    const res = await fetchWithTimeout(currentUrl, timeoutMs, "manual");
+    const res = await fetchWithTimeout(currentUrl, timeoutMs, "manual", signal);
     const location = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && location) {
       if (hop === MAX_REDIRECTS) {
@@ -387,7 +454,7 @@ export const webFetchTool: Tool = {
     },
     required: ["url"],
   },
-  async execute(input): Promise<ToolResult> {
+  async execute(input, context): Promise<ToolResult> {
     const { url, maxChars = 20000 } = input as {
       url: string;
       maxChars?: number;
@@ -397,8 +464,14 @@ export const webFetchTool: Tool = {
       return { content: "URL must start with http:// or https://", isError: true };
     }
 
+    // Consistent with execute_command/web_search: a run that's already
+    // cancelled by the time this tool starts must not fire any request at all.
+    if (context?.signal?.aborted) {
+      return { content: "Fetch aborted", isError: true };
+    }
+
     try {
-      const res = await fetchPublic(url, 15_000);
+      const res = await fetchPublic(url, 15_000, context?.signal);
       if (!res.ok) {
         return {
           content: `HTTP ${res.status}: ${res.statusText}`,

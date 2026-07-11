@@ -146,13 +146,12 @@ export class ToolRegistry {
     timeoutMs: number,
     signal?: AbortSignal
   ): Promise<ToolResult> {
-    const races: Promise<ToolResult>[] = [
-      tool.execute(input, context),
-      timeout(timeoutMs),
-    ];
+    const timeoutRace = timeout(timeoutMs);
     // Stop waiting on a tool that ignores the signal the moment the run aborts;
     // its work is discarded so the loop can wind down promptly.
-    if (signal) races.push(abortRace(signal));
+    const abortRaceHandle = signal ? abortRace(signal) : undefined;
+    const races: Promise<ToolResult>[] = [tool.execute(input, context), timeoutRace.promise];
+    if (abortRaceHandle) races.push(abortRaceHandle.promise);
     try {
       return await Promise.race(races);
     } catch (error) {
@@ -166,6 +165,13 @@ export class ToolRegistry {
         };
       }
       return this.classifyError(error, tool.name);
+    } finally {
+      // Whichever racer won, the losers' pending timer/listener must not
+      // outlive this call — otherwise every tool call leaves a live setTimeout
+      // hanging until timeoutMs (and, for the abort racer, a listener stuck on
+      // the run's shared AbortSignal for its whole lifetime).
+      timeoutRace.cancel();
+      abortRaceHandle?.cancel();
     }
   }
 
@@ -238,22 +244,39 @@ function abortedResult(toolName: string): ToolResult {
   };
 }
 
-function abortRace(signal: AbortSignal): Promise<never> {
-  return new Promise((_, reject) => {
+interface RaceHandle {
+  promise: Promise<never>;
+  /** Releases the timer/listener backing this racer — call once the race is settled. */
+  cancel(): void;
+}
+
+function abortRace(signal: AbortSignal): RaceHandle {
+  let onAbort: (() => void) | undefined;
+  const promise = new Promise<never>((_, reject) => {
     if (signal.aborted) {
       reject(new AbortError());
       return;
     }
-    signal.addEventListener("abort", () => reject(new AbortError()), {
-      once: true,
-    });
+    onAbort = () => reject(new AbortError());
+    signal.addEventListener("abort", onAbort, { once: true });
   });
+  return {
+    promise,
+    cancel: () => {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+    },
+  };
 }
 
-function timeout(ms: number): Promise<never> {
-  return new Promise((_, reject) =>
-    setTimeout(() => reject(new TimeoutError(ms)), ms)
-  );
+function timeout(ms: number): RaceHandle {
+  let timer: ReturnType<typeof setTimeout>;
+  const promise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError(ms)), ms);
+  });
+  return {
+    promise,
+    cancel: () => clearTimeout(timer),
+  };
 }
 
 function sleep(ms: number): Promise<void> {
