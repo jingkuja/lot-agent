@@ -113,6 +113,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   try {
     await assertNotCancelled();
     const cacheKey = genCacheKey(`${mediaType}.generate`, {
+      userId: job.userId,
       prompt, size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio,
       media: media?.map((m) => m.url), model: deps.vendorModel,
     });

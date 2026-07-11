@@ -179,4 +179,50 @@ describe("runGenerationJob", () => {
     expect(provider.create).not.toHaveBeenCalled();
     expect(calls.message.at(-1)).toMatchObject({ status: "completed" });
   });
+
+  it("hits the cache on a second run by the same user with identical input", async () => {
+    const store = new Map<string, unknown>();
+    const sharedCache = {
+      get: vi.fn(async (k: string) => (store.has(k) ? store.get(k) : null)),
+      set: vi.fn(async (k: string, v: unknown) => { store.set(k, v); }),
+    };
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const { deps: deps1 } = fakeDeps(provider, { cache: sharedCache });
+    await runGenerationJob(deps1, job, "image");
+    expect(provider.create).toHaveBeenCalledTimes(1);
+
+    const { deps: deps2 } = fakeDeps(provider, { cache: sharedCache });
+    await runGenerationJob(deps2, job, "image");
+    expect(provider.create).toHaveBeenCalledTimes(1); // still one — second run is a cache hit
+  });
+
+  it("does not leak a cache hit across different users with identical input", async () => {
+    const store = new Map<string, unknown>();
+    const sharedCache = {
+      get: vi.fn(async (k: string) => (store.has(k) ? store.get(k) : null)),
+      set: vi.fn(async (k: string, v: unknown) => { store.set(k, v); }),
+    };
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const jobA = { id: "jobA", userId: "userA", input: { prompt: "菊花", conversationId: "cA", assistantMessageId: "mA", size: "1024x1024" } };
+    const jobB = { id: "jobB", userId: "userB", input: { prompt: "菊花", conversationId: "cB", assistantMessageId: "mB", size: "1024x1024" } };
+
+    const { deps: depsA, calls: callsA } = fakeDeps(provider, { cache: sharedCache });
+    await runGenerationJob(depsA, jobA, "image");
+    expect(provider.create).toHaveBeenCalledTimes(1);
+    expect(callsA.asset.userId).toBe("userA");
+    expect(callsA.metered).toBe(true);
+
+    const { deps: depsB, calls: callsB } = fakeDeps(provider, { cache: sharedCache });
+    await runGenerationJob(depsB, jobB, "image");
+    // Different user, same prompt/params — must NOT be a cache hit.
+    expect(provider.create).toHaveBeenCalledTimes(2);
+    expect(callsB.asset.userId).toBe("userB");
+    expect(callsB.metered).toBe(true);
+  });
 });
