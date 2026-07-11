@@ -10,16 +10,17 @@ function fakeDb(rowCount: number) {
 }
 
 /**
- * #17: the boundary message's timestamp subquery must be scoped to the same
+ * #17: the boundary message's seq subquery must be scoped to the same
  * conversation — otherwise a messageId from a different conversation lets a
- * caller smuggle in that conversation's timing as the deletion boundary.
+ * caller smuggle in that conversation's ordering as the deletion boundary.
+ * (#20: the boundary itself moved from created_at to seq for stable ordering.)
  */
 describe("deleteMessagesFromAndAfter", () => {
   it("scopes the boundary subquery to the same conversation", async () => {
     const { db, query } = fakeDb(3);
     await db.deleteMessagesFromAndAfter("c1", "m1");
     const [sql, params] = query.mock.calls[0];
-    expect(sql).toMatch(/SELECT created_at FROM messages WHERE id = \$2 AND conversation_id = \$1/);
+    expect(sql).toMatch(/SELECT seq FROM messages WHERE id = \$2 AND conversation_id = \$1/);
     expect(params).toEqual(["c1", "m1"]);
   });
 

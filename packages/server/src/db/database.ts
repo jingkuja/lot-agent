@@ -36,6 +36,9 @@ export interface StoredMessage {
   status: string;
   metadata: Record<string, unknown>;
   created_at: string;
+  /** Conversation-scoped, monotonically increasing order key (report #20).
+   * BIGINT — pg returns it as a string, converted to number in getMessages. */
+  seq: number;
 }
 
 export interface StoredToolCall {
@@ -378,9 +381,20 @@ export class DB {
       status?: string;
     } = {}
   ): Promise<void> {
+    // seq is allocated atomically via the `alloc` CTE: the UPDATE takes a row
+    // lock on the owning conversation, so concurrent inserts into the same
+    // conversation serialize on that lock and each gets a distinct,
+    // gap-free-per-writer next_seq (report #20). If the conversation row
+    // doesn't exist, `alloc` returns zero rows and the INSERT...SELECT
+    // inserts zero rows — stricter than the previous behavior (which would
+    // have silently inserted an orphaned message), and acceptable since a
+    // conversation_id with no owning row is already a caller bug.
     await this.pool.query(
-      `INSERT INTO messages (id, conversation_id, role, content, tool_call_id, token_count, model, latency_ms, metadata, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `WITH alloc AS (
+         UPDATE conversations SET next_seq = next_seq + 1 WHERE id = $2 RETURNING next_seq
+       )
+       INSERT INTO messages (id, conversation_id, role, content, tool_call_id, token_count, model, latency_ms, metadata, status, seq)
+       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, alloc.next_seq FROM alloc`,
       [
         id,
         conversationId,
@@ -446,11 +460,17 @@ export class DB {
   }
 
   async getMessages(conversationId: string): Promise<StoredMessage[]> {
+    // NULLS FIRST is pure defense: every row should have a non-null seq after
+    // the 0002 migration's backfill + the atomic allocation in addMessage.
+    // created_at stays as the tiebreaker for defense-in-depth, not because
+    // seq can actually collide within a conversation (idx_messages_conv_seq
+    // enforces uniqueness).
     const { rows } = await this.pool.query(
-      "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+      "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY seq ASC NULLS FIRST, created_at ASC",
       [conversationId]
     );
-    return rows;
+    // seq is BIGINT — pg returns it as a string; convert so callers get a number.
+    return rows.map((r) => ({ ...r, seq: Number(r.seq) }));
   }
 
   async getToolCallsForConversation(conversationId: string): Promise<Map<string, StoredToolCall[]>> {
@@ -471,20 +491,23 @@ export class DB {
   }
 
   /**
-   * Delete the given message and all messages created after it, scoped to
+   * Delete the given message and all messages after it (by seq), scoped to
    * `conversationId`. The boundary subquery is ALSO scoped to
    * `conversationId` — otherwise a `messageId` from a different conversation
-   * would smuggle in that conversation's timestamp as the deletion boundary
+   * would smuggle in that conversation's seq as the deletion boundary
    * (deleting the caller's own messages based on someone else's message
-   * timing). Returns whether the boundary message existed in this
-   * conversation (it deletes itself too, so a hit is always >= 1 row).
+   * ordering). Uses `seq` rather than `created_at` (report #20) since seq is
+   * the stable, gap-free-per-conversation order key; created_at ties within
+   * the same conversation are exactly what seq exists to disambiguate.
+   * Returns whether the boundary message existed in this conversation (it
+   * deletes itself too, so a hit is always >= 1 row).
    */
   async deleteMessagesFromAndAfter(conversationId: string, messageId: string): Promise<boolean> {
     const { rowCount } = await this.pool.query(
       `DELETE FROM messages
        WHERE conversation_id = $1
-         AND created_at >= (
-           SELECT created_at FROM messages WHERE id = $2 AND conversation_id = $1
+         AND seq >= (
+           SELECT seq FROM messages WHERE id = $2 AND conversation_id = $1
          )`,
       [conversationId, messageId]
     );
