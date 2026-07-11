@@ -43,7 +43,9 @@ export interface RunJobDeps {
   meter: { record(r: Record<string, unknown>): Promise<unknown> };
   cache: { get(k: string): Promise<unknown>; set(k: string, v: unknown): Promise<void> };
   updateProgress(taskId: string, progress: number): Promise<void>;
-  urlToBytes(url: string): Promise<{ body: Buffer; mime: string }>;
+  /** `maxBytes` is expected to be bound by the caller (per media type); this
+   * only forwards the in-process abort signal through. */
+  urlToBytes(url: string, opts?: { signal?: AbortSignal }): Promise<{ body: Buffer; mime: string }>;
   extFor(mime: string): string;
   modelId: string;
   vendorModel: string;
@@ -152,7 +154,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     }
     if (!p.url) throw new Error("generation completed without a url");
 
-    const { body, mime } = await deps.urlToBytes(p.url);
+    const { body, mime } = await deps.urlToBytes(p.url, { signal: deps.signal });
     const assetId = randomUUID();
     const key = `${assetId}.${deps.extFor(mime)}`;
     const { url } = await deps.storage.put({ key, body, contentType: mime });

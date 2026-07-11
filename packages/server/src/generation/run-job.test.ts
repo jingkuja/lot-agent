@@ -16,7 +16,7 @@ function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {
     meter: { record: vi.fn(async () => { calls.metered = true; }) },
     cache: { get: vi.fn(async () => null), set: vi.fn(async (_k, v) => { calls.cacheSet = v; }) },
     updateProgress: vi.fn(async (_id, p) => { calls.progress.push(p); }),
-    urlToBytes: vi.fn(async () => ({ body: Buffer.from("x"), mime: "image/svg+xml" })),
+    urlToBytes: vi.fn(async (_url: string, _opts?: { signal?: AbortSignal }) => ({ body: Buffer.from("x"), mime: "image/svg+xml" })),
     extFor: () => "svg",
     modelId: "wanx-standard",
     vendorModel: "im",
@@ -157,6 +157,17 @@ describe("runGenerationJob", () => {
     await expect(runGenerationJob(deps, job, "image")).rejects.toBeInstanceOf(JobCancelledError);
     expect(calls.message.at(-1)).toMatchObject({ status: "cancelled" });
     expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("forwards the in-process abort signal through to urlToBytes on download", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://vendor.example/out.png" })),
+    };
+    const controller = new AbortController();
+    const { deps } = fakeDeps(provider, { signal: controller.signal });
+    await runGenerationJob(deps, job, "image");
+    expect(deps.urlToBytes).toHaveBeenCalledWith("https://vendor.example/out.png", { signal: controller.signal });
   });
 
   it("uses cache hit without creating/polling", async () => {

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
-import { LocalStorage } from "@lot-agent/core";
+import { LocalStorage, fetchPublicBinary } from "@lot-agent/core";
 import type { ModelConfig } from "@lot-agent/core";
 import {
   createLLMProvider,
@@ -30,6 +30,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../../..");
 const ASSETS_DIR = resolve(ROOT, "data/assets");
 const storage = new LocalStorage(ASSETS_DIR, staticPrefix("/static/assets"));
+
+// Vendor-returned generation URLs are untrusted input (parsed out of a model
+// response) — download them defensively: SSRF-guarded (incl. redirect hops),
+// time-boxed, and capped so a malicious/misbehaving vendor response can't
+// exhaust worker memory. Sizes are generous upper bounds, not typical output.
+const IMAGE_MAX_BYTES = 30 * 1024 * 1024; // 30MB
+const VIDEO_MAX_BYTES = 300 * 1024 * 1024; // 300MB
 
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
@@ -76,17 +83,33 @@ async function main() {
     videoBase: genConfig.video,
   });
 
-  /** Resolve a provider url (http(s) or data:) to bytes + mime. */
-  async function urlToBytes(url: string): Promise<{ body: Buffer; mime: string }> {
+  /**
+   * Resolve a provider url (http(s) or data:) to bytes + mime, enforcing
+   * `maxBytes` either way: `data:` URLs are decoded then length-checked (the
+   * decode itself is bounded by the base64 already being in memory as part
+   * of the vendor's poll response); http(s) URLs go through the SSRF-guarded,
+   * streaming `fetchPublicBinary` so an oversized/malicious response is
+   * aborted before it is fully buffered.
+   */
+  async function urlToBytes(
+    url: string,
+    maxBytes: number,
+    opts: { signal?: AbortSignal } = {}
+  ): Promise<{ body: Buffer; mime: string }> {
     if (url.startsWith("data:")) {
       const [head, b64] = url.slice(5).split(",", 2);
       const mime = head.split(";")[0] || "application/octet-stream";
-      return { body: Buffer.from(b64, "base64"), mime };
+      const body = Buffer.from(b64, "base64");
+      if (body.byteLength > maxBytes) {
+        throw new Error(`download exceeds maxBytes (${body.byteLength} > ${maxBytes})`);
+      }
+      return { body, mime };
     }
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`download failed: ${res.status}`);
-    const mime = res.headers.get("content-type") ?? "application/octet-stream";
-    return { body: Buffer.from(await res.arrayBuffer()), mime };
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`unsupported protocol: ${parsed.protocol}`);
+    }
+    return fetchPublicBinary(url, { maxBytes, signal: opts.signal });
   }
 
   /** Map a mime to a stored-file extension. */
@@ -103,6 +126,7 @@ async function main() {
     signal?: AbortSignal
   ): Promise<RunJobDeps> => {
     const base = mediaType === "image" ? genConfig.image : genConfig.video;
+    const maxBytes = mediaType === "image" ? IMAGE_MAX_BYTES : VIDEO_MAX_BYTES;
     const model = pickGenModel(mediaType, job.input, base.modelId);
     const apiKey = (await db.getUserApiKey(job.userId)) ?? "";
     const provider = apiKey
@@ -119,7 +143,7 @@ async function main() {
       meter,
       cache,
       updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
-      urlToBytes,
+      urlToBytes: (url, o) => urlToBytes(url, maxBytes, o),
       extFor,
       modelId: base.modelId,
       vendorModel: model,
