@@ -133,14 +133,18 @@ export class MessageRepository {
   async saveToolResult(
     conversationId: string,
     toolCallId: string | undefined,
-    output: string
+    output: string,
+    isError?: boolean
   ): Promise<void> {
     await this.db.addMessage(
       randomUUID(),
       conversationId,
       "tool",
       output,
-      { toolCallId }
+      // A failed call must stay recognizable after reload: the web renders
+      // interactive calls (propose_outline/ask_user) as confirmation cards
+      // and needs to skip the ones whose execution was rejected.
+      { toolCallId, metadata: isError ? { isError: true } : {} }
     );
   }
 

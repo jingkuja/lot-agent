@@ -1,32 +1,15 @@
-import { useState, useCallback, useRef } from "react";
+import { useReducer, useCallback, useRef } from "react";
 import { api, type UploadedAttachment, type PickedFile } from "../api/client.js";
+import {
+  chatReducer,
+  initialChatState,
+  type DisplayMessage,
+  type GenerationView,
+} from "./chat-reducer.js";
 
-export interface GenerationView {
-  mediaType: "image" | "video";
-  status: "generating" | "completed" | "failed" | "cancelled";
-  progress?: number;
-  /** Whether the provider reports intermediate progress. When false (e.g. the
-   * synchronous chat-completions image provider) the UI shows a plain "生成中……"
-   * with no percentage. */
-  supportsProgress?: boolean;
-  assets?: { url: string; mime: string; durationSec?: number }[];
-  error?: string;
-  taskId?: string;
-}
-
-export interface DisplayMessage {
-  id: string;
-  dbId?: string;
-  role: "user" | "assistant" | "tool";
-  content: string;
-  thinking?: string;
-  toolCalls?: { name: string; input: unknown }[];
-  toolResult?: { name: string; output: string; isError: boolean };
-  isStreaming?: boolean;
-  rating?: number | null;
-  attachments?: UploadedAttachment[];
-  generation?: GenerationView;
-}
+// The message/generation view models live with the reducer; components keep
+// importing them from here.
+export type { DisplayMessage, GenerationView } from "./chat-reducer.js";
 
 export function useChat(
   conversationId: string | null,
@@ -34,9 +17,10 @@ export function useChat(
   conversationIdRef?: React.RefObject<string | null>,
   onTitle?: (conversationId: string, title: string) => void
 ) {
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [conversationModel, setConversationModel] = useState<string | null>(null);
-  const [isStreaming, setIsStreaming] = useState(false);
+  // All view state lives in the pure reducer (chat-reducer.ts). This hook only
+  // translates async events (SSE, generation polling, user actions) into
+  // ChatActions and owns the IO side effects (streams, uploads, polling).
+  const [state, dispatch] = useReducer(chatReducer, initialChatState);
   // One live SSE stream per conversation id. Switching away must NOT kill the
   // stream (the reply still persists server-side) — but its events may only
   // touch the view while its conversation is the one on screen, otherwise a
@@ -76,37 +60,25 @@ export function useChat(
             const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
             const finalStatus =
               t.status === "succeeded" ? "completed" : t.status === "cancelled" ? "cancelled" : "failed";
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === messageId
-                  ? { ...m, generation: { mediaType, status: finalStatus, progress: 100, assets: out?.assets, error: t.error, taskId } }
-                  : m
-              )
-            );
+            dispatch({
+              type: "generation_finished",
+              messageId,
+              generation: { mediaType, status: finalStatus, progress: 100, assets: out?.assets, error: t.error, taskId },
+            });
             if (genPollRef.current === token) genPollRef.current = null;
-            setIsStreaming(false);
             onStreamEndRef.current?.();
             return;
           }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === messageId && m.generation
-                ? { ...m, generation: { ...m.generation, status: "generating", progress: t.progress } }
-                : m
-            )
-          );
+          dispatch({ type: "generation_progress", messageId, progress: t.progress });
         } catch {
           failures += 1;
           if (failures >= 15) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === messageId
-                  ? { ...m, generation: { mediaType, status: "failed", error: "生成状态获取失败", taskId } }
-                  : m
-              )
-            );
+            dispatch({
+              type: "generation_finished",
+              messageId,
+              generation: { mediaType, status: "failed", error: "生成状态获取失败", taskId },
+            });
             if (genPollRef.current === token) genPollRef.current = null;
-            setIsStreaming(false);
             onStreamEndRef.current?.();
             return;
           }
@@ -123,10 +95,6 @@ export function useChat(
     // The user may have switched again while this fetch was in flight — a
     // stale response must not overwrite the conversation now on screen.
     if (cidRef.current !== convId) return;
-    // Re-entering a conversation whose stream is still live re-disables the
-    // input; its stream events re-attach to the view on the next chunk.
-    setIsStreaming(streamsRef.current.has(convId));
-    setConversationModel((data as { model?: string | null }).model ?? null);
     const display: DisplayMessage[] = data.messages.map((m) => {
       const role = m.role as DisplayMessage["role"];
       const toolName = (m as { tool_name?: string | null }).tool_name;
@@ -156,13 +124,27 @@ export function useChat(
         toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
         toolResult:
           role === "tool"
-            ? { name: toolName ?? "tool", output: m.content, isError: false }
+            ? {
+                name: toolName ?? "tool",
+                output: m.content,
+                // Persisted by saveToolResult for failed calls; the UI needs it
+                // to keep rejected interactive calls (propose_outline/ask_user)
+                // from re-rendering as live confirmation cards after reload.
+                isError: parsedMeta?.isError === true,
+              }
             : undefined,
         rating: m.rating ?? null,
         generation: gen,
       };
     });
-    setMessages(display);
+    // Re-entering a conversation whose stream is still live re-disables the
+    // input; its stream events re-attach to the view on the next chunk.
+    dispatch({
+      type: "snapshot_loaded",
+      messages: display,
+      model: (data as { model?: string | null }).model ?? null,
+      isStreaming: streamsRef.current.has(convId),
+    });
 
     // Resume polling for any generation still marked "generating" (e.g. the
     // user reloaded or reopened the conversation before it finished). The
@@ -176,7 +158,7 @@ export function useChat(
       if (genPollRef.current) genPollRef.current.cancelled = true;
       const token = { cancelled: false };
       genPollRef.current = token;
-      setIsStreaming(true);
+      dispatch({ type: "stream_started" });
       pollGeneration(last.generation.taskId, last.id, last.generation.mediaType, token);
     }
   }, [pollGeneration]);
@@ -187,20 +169,20 @@ export function useChat(
       if (
         !cid ||
         (!content.trim() && files.length === 0 && !preUploaded?.length) ||
-        isStreaming ||
+        state.isStreaming ||
         streamsRef.current.has(cid)
       )
         return;
 
-      setIsStreaming(true);
+      dispatch({ type: "stream_started" });
 
       // One controller for the whole turn so Stop can abort an in-flight upload
       // (set BEFORE uploads start), not just the SSE stream.
       const controller = new AbortController();
       streamsRef.current.set(cid, controller);
       // True while this stream's conversation is still the one on screen.
-      // Every view mutation below is gated on it; the stream itself keeps
-      // running (and persisting) even when the user switches away.
+      // Every dispatch below is gated on it; the stream itself keeps running
+      // (and persisting) even when the user switches away.
       const isCurrent = () => cidRef.current === cid;
 
       (async () => {
@@ -217,7 +199,7 @@ export function useChat(
             );
           } catch (e) {
             streamsRef.current.delete(cid);
-            if (isCurrent()) setIsStreaming(false);
+            if (isCurrent()) dispatch({ type: "stream_stopped" });
             if (controller.signal.aborted) return; // user pressed Stop — silent
             window.alert(
               `文件上传失败：${e instanceof Error ? e.message : String(e)}`
@@ -226,23 +208,25 @@ export function useChat(
           }
         }
 
-        const userMsgId = `user-${Date.now()}`;
         const userMsg: DisplayMessage = {
-          id: userMsgId,
+          id: `user-${crypto.randomUUID()}`,
           role: "user",
           content,
           attachments: uploaded,
         };
-        if (isCurrent()) setMessages((prev) => [...prev, userMsg]);
+        if (isCurrent()) dispatch({ type: "user_appended", message: userMsg });
 
+        // The accumulating assistant message for the current LLM iteration.
+        // It deliberately lives here, NOT in the reducer: while this stream's
+        // conversation is off-screen no action is dispatched at all, and the
+        // full accumulated message re-attaches on the first event after the
+        // user switches back.
         let assistantMsg: DisplayMessage = {
-          id: `assistant-${Date.now()}`,
+          id: `assistant-${crypto.randomUUID()}`,
           role: "assistant",
           content: "",
           isStreaming: true,
         };
-
-        // Accumulate tool calls for the current assistant message
         let pendingToolCalls: { name: string; input: unknown }[] = [];
 
         // stream_end ends the turn but the connection stays open for the tail
@@ -260,11 +244,7 @@ export function useChat(
             ...assistantMsg,
             thinking: (assistantMsg.thinking ?? "") + event.content,
           };
-          if (isCurrent())
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              return [...filtered, assistantMsg];
-            });
+          if (isCurrent()) dispatch({ type: "assistant_upserted", message: assistantMsg });
         }
 
         if (event.type === "text" && event.content) {
@@ -272,15 +252,10 @@ export function useChat(
             ...assistantMsg,
             content: assistantMsg.content + event.content,
           };
-          if (isCurrent())
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              return [...filtered, assistantMsg];
-            });
+          if (isCurrent()) dispatch({ type: "assistant_upserted", message: assistantMsg });
         }
 
         if (event.type === "tool_call") {
-          // Accumulate tool calls on the assistant message
           pendingToolCalls.push({
             name: event.name ?? "",
             input: event.input,
@@ -289,11 +264,7 @@ export function useChat(
             ...assistantMsg,
             toolCalls: [...pendingToolCalls],
           };
-          if (isCurrent())
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              return [...filtered, assistantMsg];
-            });
+          if (isCurrent()) dispatch({ type: "assistant_upserted", message: assistantMsg });
           // The "executing tool" state stays visible until tool_result arrives,
           // so no artificial delay is needed. Blocking here would stall the
           // awaited SSE read loop and add real latency per tool call.
@@ -301,30 +272,20 @@ export function useChat(
 
         if (event.type === "tool_result") {
           // The assistant message that issued this tool call is now done —
-          // finalize it so its (empty) bubble stops showing the typing dots.
-          const finishedAssistantId = assistantMsg.id;
-          // Show tool result as a separate collapsible card
-          const resultMsg: DisplayMessage = {
-            id: `tool-result-${event.toolCallId ?? Date.now()}-${event.name}`,
-            role: "tool",
-            content: "",
-            toolResult: {
+          // the reducer finalizes it and shows the result as a separate card.
+          if (isCurrent())
+            dispatch({
+              type: "tool_result_appended",
+              assistantId: assistantMsg.id,
+              cardId: `tool-result-${event.toolCallId ?? crypto.randomUUID()}-${event.name}`,
               name: event.name ?? "",
               output: event.output ?? "",
               isError: event.isError ?? false,
-            },
-          };
-          if (isCurrent())
-            setMessages((prev) => [
-              ...prev.map((m) =>
-                m.id === finishedAssistantId ? { ...m, isStreaming: false } : m
-              ),
-              resultMsg,
-            ]);
+            });
 
           // Reset for next LLM iteration (new assistant message)
           assistantMsg = {
-            id: `assistant-${Date.now()}`,
+            id: `assistant-${crypto.randomUUID()}`,
             role: "assistant",
             content: "",
             isStreaming: true,
@@ -340,17 +301,7 @@ export function useChat(
 
         if (event.type === "done" || event.type === "stream_end") {
           assistantMsg = { ...assistantMsg, isStreaming: false };
-          if (isCurrent()) {
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              // Only add if it has content or tool calls
-              if (assistantMsg.content || assistantMsg.toolCalls?.length) {
-                return [...filtered, assistantMsg];
-              }
-              return filtered;
-            });
-            setIsStreaming(false);
-          }
+          if (isCurrent()) dispatch({ type: "turn_finalized", message: assistantMsg });
 
           if (event.type === "stream_end") {
             turnEnded = true;
@@ -372,24 +323,18 @@ export function useChat(
             content: assistantMsg.content + `\n\n[Error: ${event.message}]`,
             isStreaming: false,
           };
-          if (isCurrent()) {
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              return [...filtered, assistantMsg];
-            });
-            setIsStreaming(false);
-          }
+          if (isCurrent()) dispatch({ type: "turn_finalized", message: assistantMsg });
         }
       }, uploaded, controller, modelId);
       })();
     },
-    [conversationId, isStreaming, loadMessages]
+    [conversationId, state.isStreaming, loadMessages]
   );
 
   const regenerate = useCallback(async () => {
-    if (isStreaming || !conversationId) return;
+    if (state.isStreaming || !conversationId) return;
 
-    const reversed = [...messages].reverse();
+    const reversed = [...state.messages].reverse();
     const lastUserMsg = reversed.find((m) => m.role === "user" && m.dbId);
     if (!lastUserMsg?.dbId) return;
 
@@ -414,17 +359,16 @@ export function useChat(
       return;
     }
 
-    const lastUserIdx = messages.lastIndexOf(lastUserMsg);
-    setMessages((prev) => prev.slice(0, lastUserIdx));
+    dispatch({ type: "truncated_from", id: lastUserMsg.id });
 
     streamMessage(lastUserContent, [], lastUserAttachments);
-  }, [messages, isStreaming, conversationId, streamMessage]);
+  }, [state.messages, state.isStreaming, conversationId, streamMessage]);
 
   const generateMedia = useCallback(
     (prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [], modelId?: string) => {
       const cid = cidRef.current;
-      if (!cid || !prompt.trim() || isStreaming) return;
-      setIsStreaming(true);
+      if (!cid || !prompt.trim() || state.isStreaming) return;
+      dispatch({ type: "stream_started" });
 
       if (genPollRef.current) genPollRef.current.cancelled = true;
       const token = { cancelled: false };
@@ -435,16 +379,18 @@ export function useChat(
       // user sees "图片/视频生成中" right away instead of a stuck input box.
       // The placeholders are reconciled with server ids once /generations returns
       // (or flipped to "failed" if the request errors).
-      const tempUserId = `user-${Date.now()}`;
-      const tempGenId = `assistant-${Date.now()}`;
-      const userMsg: DisplayMessage = { id: tempUserId, role: "user", content: prompt };
-      const genMsg: DisplayMessage = {
-        id: tempGenId,
-        role: "assistant",
-        content: "",
-        generation: { mediaType, status: "generating", progress: 0 },
-      };
-      setMessages((prev) => [...prev, userMsg, genMsg]);
+      const tempUserId = `user-${crypto.randomUUID()}`;
+      const tempGenId = `assistant-${crypto.randomUUID()}`;
+      dispatch({
+        type: "generation_pair_appended",
+        userMessage: { id: tempUserId, role: "user", content: prompt },
+        genMessage: {
+          id: tempGenId,
+          role: "assistant",
+          content: "",
+          generation: { mediaType, status: "generating", progress: 0 },
+        },
+      });
 
       (async () => {
         try {
@@ -456,38 +402,36 @@ export function useChat(
           if (token.cancelled) return;
           // Reconcile the optimistic placeholders with the server-assigned ids
           // + vendor taskId, keeping the bubble in its "generating" state.
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id === tempUserId) return { ...m, id: res.userMessage.id, dbId: res.userMessage.id };
-              if (m.id === tempGenId)
-                return {
-                  ...m,
-                  id: res.assistantMessage.id,
-                  dbId: res.assistantMessage.id,
-                  generation: { mediaType, status: "generating", progress: 0, supportsProgress: res.assistantMessage.metadata?.supportsProgress, taskId: res.taskId },
-                };
-              return m;
-            })
-          );
+          dispatch({
+            type: "generation_ids_reconciled",
+            tempUserId,
+            userMessageId: res.userMessage.id,
+            tempGenId,
+            assistantMessageId: res.assistantMessage.id,
+            generation: {
+              mediaType,
+              status: "generating",
+              progress: 0,
+              supportsProgress: res.assistantMessage.metadata?.supportsProgress,
+              taskId: res.taskId,
+            },
+          });
           if (res.title) onTitleRef.current?.(cid, res.title);
           pollGeneration(res.taskId, res.assistantMessage.id, mediaType, token);
         } catch (e) {
           if (genPollRef.current === token) genPollRef.current = null;
-          setIsStreaming(false);
           // The create request itself failed (non-2xx / network). Flip the
           // optimistic bubble to "failed" so the attempt + error stay visible.
           const msg = e instanceof Error ? e.message : String(e);
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempGenId
-                ? { ...m, generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` } }
-                : m
-            )
-          );
+          dispatch({
+            type: "generation_finished",
+            messageId: tempGenId,
+            generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` },
+          });
         }
       })();
     },
-    [isStreaming, pollGeneration]
+    [state.isStreaming, pollGeneration]
   );
 
   const stop = useCallback(() => {
@@ -499,24 +443,22 @@ export function useChat(
       streamsRef.current.delete(cid);
     }
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
-    setIsStreaming(false);
+    dispatch({ type: "stream_stopped" });
   }, []);
 
   const clear = useCallback(() => {
     // Cancel any in-flight generation poll and drop the streaming lock so a
     // resumed poll in the next conversation doesn't leave the input disabled.
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
-    setIsStreaming(false);
-    setMessages([]);
-    setConversationModel(null);
+    dispatch({ type: "cleared" });
   }, []);
 
   return {
-    messages,
-    conversationModel,
+    messages: state.messages,
+    conversationModel: state.conversationModel,
     send: streamMessage,
     stop,
-    isStreaming,
+    isStreaming: state.isStreaming,
     loadMessages,
     clear,
     regenerate,

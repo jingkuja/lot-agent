@@ -692,7 +692,8 @@ export class AgentService {
           await this.messageRepo.saveToolResult(
             conversationId,
             event.toolCallId,
-            event.output
+            event.output,
+            event.isError
           );
         }
 

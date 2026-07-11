@@ -124,6 +124,24 @@ describe("loadHistory tool-call reconstruction", () => {
   });
 });
 
+describe("saveToolResult error flag", () => {
+  it("persists isError in metadata for a failed call", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    await repo.saveToolResult("c1", "call_1", "propose_outline 校验失败：第 22 页", true);
+    const row = db.rows.find((r: any) => r.tool_call_id === "call_1");
+    expect(row.metadata).toEqual({ isError: true });
+  });
+
+  it("writes empty metadata for a successful call", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    await repo.saveToolResult("c1", "call_1", "[大纲已展示给用户]");
+    const row = db.rows.find((r: any) => r.tool_call_id === "call_1");
+    expect(row.metadata).toEqual({});
+  });
+});
+
 describe("saveAssistantWithToolCalls thinking metadata", () => {
   it("stores thinking text in metadata when provided", async () => {
     const db = memDb();

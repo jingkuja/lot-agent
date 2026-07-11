@@ -412,7 +412,12 @@ conversation 增加 `active_run_id`、`run_version` 或同等字段；开始运�
 
 ### 11. 前端流状态 reducer 化
 
-> ⏳ **未做**：`useChat` 现约 525 行，仍是闭包变量 + `setMessages(prev => ...)`，无 reducer。
+> 🔶 **第一期已落地（最小路径）**：视图状态收敛为纯 reducer（`hooks/chat-reducer.ts`，
+> 14 种 `ChatAction` 覆盖流式 upsert、工具卡片、turn 终态、生成生命周期、快照/截断），
+> 事件序列→视图状态有 19 个单测；前端消息 ID 改用 `crypto.randomUUID()`（P2 #28 一并解决）。
+> 未做（第二期）：累积器仍在流闭包（保留"切回时下一 chunk 全量重挂"语义所需），移进 reducer
+> 需要按会话分 state（`Map<conversationId, ChatState>`）；`runId/eventId` 等服务端事件身份
+> （架构 #2）仍缺。
 
 513 行的 `useChat` 用闭包变量 + `setMessages(prev => ...)` 手工维护流状态，事件种类还在增加。将 title、text delta、tool、artifact、generation 和 terminal 事件统一交给纯 reducer（可单测事件序列 → 视图状态）；以 `runId/eventId/toolCallId` 作为身份，减少闭包状态、重复事件和 React key 碰撞，`isStreaming`/`genPoll`/`streams` 三份互相纠缠的状态自然归一。
 

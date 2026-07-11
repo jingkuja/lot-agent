@@ -20,6 +20,8 @@ interface MessageBubbleProps {
   askAnswer?: string;
   /** 该 ask_user 提问是否仍在等待回答。 */
   askInteractive?: boolean;
+  /** 本消息中执行失败的交互工具名（如未通过校验的 propose_outline），不渲染为卡片。 */
+  failedToolNames?: string[];
 }
 
 export function MessageBubble({
@@ -29,6 +31,7 @@ export function MessageBubble({
   onQuickReply,
   askAnswer,
   askInteractive,
+  failedToolNames,
 }: MessageBubbleProps) {
   if (message.generation) {
     return (
@@ -178,6 +181,18 @@ export function MessageBubble({
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="tool-calls-section">
             {message.toolCalls.map((tc, i) => {
+              // A rejected interactive call (e.g. propose_outline failing
+              // layout validation) was retried by the agent — rendering it as
+              // a live card would show two near-identical confirmation cards.
+              if (failedToolNames?.includes(tc.name)) {
+                return (
+                  <div key={i} className="interactive-failed-note">
+                    {tc.name === "propose_outline"
+                      ? "大纲未通过布局校验，已自动调整重试"
+                      : "提问未成功发出，已自动重试"}
+                  </div>
+                );
+              }
               if (tc.name === "ask_user") {
                 return (
                   <AskUserCard

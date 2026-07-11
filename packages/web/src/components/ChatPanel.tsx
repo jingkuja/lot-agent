@@ -5,6 +5,7 @@ import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { Agent, CatalogModel, PickedFile } from "../api/client.js";
+import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
 
 interface ChatPanelProps {
   messages: DisplayMessage[];
@@ -140,13 +141,16 @@ export function ChatPanel({
     <div className="chat-panel">
       <div className="chat-messages">
         {messages.map((msg, i) => {
-          const interactiveNames = ["ask_user", "propose_outline"];
           const hasInteractive =
             msg.role === "assistant" &&
-            !!msg.toolCalls?.some((tc) => interactiveNames.includes(tc.name));
+            !!msg.toolCalls?.some((tc) => INTERACTIVE_TOOL_NAMES.includes(tc.name));
           const askAnswer = hasInteractive
             ? messages.slice(i + 1).find((m) => m.role === "user")?.content
             : undefined;
+          // Interactive calls rejected by the tool itself (e.g. propose_outline
+          // failing layout validation before the agent retries) must not render
+          // as a second live confirmation card.
+          const failedTools = hasInteractive ? failedInteractiveNames(messages, i) : [];
           return (
             <MessageBubble
               key={msg.id}
@@ -158,6 +162,7 @@ export function ChatPanel({
               onQuickReply={(text) => onSend(text, [])}
               askAnswer={askAnswer}
               askInteractive={hasInteractive && askAnswer === undefined && !isStreaming}
+              failedToolNames={failedTools}
             />
           );
         })}
