@@ -75,6 +75,32 @@ describe("POST /conversations/:id/generations", () => {
     expect(res.status).toBe(404);
   });
 
+  it("ignores identity fields smuggled through settings — server values win", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        settings: {
+          n: 1,
+          assistantMessageId: "victim-message",
+          conversationId: "victim-conversation",
+          userId: "victim-user",
+        },
+      }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    const input = service.jobQueue.enqueue.mock.calls[0][1];
+    expect(input.assistantMessageId).toBe(body.assistantMessage.id);
+    expect(input.conversationId).toBe("c1");
+    expect(input.userId).toBeUndefined();
+    // The persisted metadata must not echo the forged identity fields either.
+    expect(body.assistantMessage.metadata.settings).toEqual({ n: 1 });
+  });
+
   it("threads media (reference images) into the enqueued input", async () => {
     const service = fakeService();
     const res = await app(service).request("/conversations/c1/generations", {

@@ -4,6 +4,7 @@ import { estimateCost } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
+import { pickGenerationSettings } from "../generation/input.js";
 
 type Variables = { userId: string };
 
@@ -269,7 +270,9 @@ export function createGenerationRoutes(service: AgentService) {
     if (!prompt || (mediaType !== "image" && mediaType !== "video")) {
       return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
     }
-    const settings = body.settings ?? {};
+    // Client settings pass a per-media whitelist so identity fields
+    // (conversationId/assistantMessageId/userId) can never ride along.
+    const settings = pickGenerationSettings(mediaType, body.settings);
     const media = Array.isArray(body.media) ? body.media : undefined;
     const type = mediaType === "image" ? "image.generate" : "video.generate";
 
@@ -298,20 +301,26 @@ export function createGenerationRoutes(service: AgentService) {
     // Enqueue, then record the taskId on the message so a client that reloads
     // mid-generation can re-poll the task to resume progress / completion.
     const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
+    // Identity fields are spread LAST: they are server-created and must win
+    // over anything a client could try to smuggle into the payload.
     const taskId = await service.jobQueue.enqueue(
       type,
       {
-        prompt,
-        conversationId,
-        assistantMessageId,
         ...settings,
         ...(media ? { media } : {}),
         ...(selectedModel ? { modelId: selectedModel } : {}),
+        prompt,
+        conversationId,
+        assistantMessageId,
       },
       userId
     );
     const metadata = { ...baseMeta, status: "generating", taskId };
-    await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
+    await service.db.updateMessageGeneration(
+      assistantMessageId,
+      { status: "generating", metadata },
+      { conversationId, userId }
+    );
 
     // Auto-title the conversation from the prompt (first message only, gated
     // inside generateTitle). The chat SSE path does this too; without it,

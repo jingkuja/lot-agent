@@ -26,7 +26,7 @@ function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {
   return { deps, calls };
 }
 
-const job = { id: "job1", userId: "u1", input: { prompt: "菊花", assistantMessageId: "m1", size: "1024x1024" } };
+const job = { id: "job1", userId: "u1", input: { prompt: "菊花", conversationId: "c1", assistantMessageId: "m1", size: "1024x1024" } };
 
 describe("runGenerationJob", () => {
   it("creates, polls to completion, stores asset, relays progress, marks message completed", async () => {
@@ -90,6 +90,32 @@ describe("runGenerationJob", () => {
     expect(provider.create).not.toHaveBeenCalled();
     expect(deps.db.setTaskVendorId).not.toHaveBeenCalled();
     expect(provider.poll).toHaveBeenCalledWith("vendor_existing");
+  });
+
+  it("scopes every message update to the job's conversation and user", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const { deps } = fakeDeps(provider);
+    await runGenerationJob(deps, job, "image");
+    expect(deps.db.updateMessageGeneration).toHaveBeenCalled();
+    for (const call of (deps.db.updateMessageGeneration as any).mock.calls) {
+      expect(call[2]).toEqual({ conversationId: "c1", userId: "u1" });
+    }
+  });
+
+  it("never updates a message when the input carries no server-set conversationId", async () => {
+    // A standalone /tasks job has no message; a forged assistantMessageId
+    // without the server-injected conversationId must not reach the DB.
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const { deps } = fakeDeps(provider);
+    const forged = { id: "job2", userId: "u1", input: { prompt: "菊花", assistantMessageId: "victim-message" } };
+    await runGenerationJob(deps, forged, "image");
+    expect(deps.db.updateMessageGeneration).not.toHaveBeenCalled();
   });
 
   it("uses cache hit without creating/polling", async () => {

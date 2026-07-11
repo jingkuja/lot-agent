@@ -56,6 +56,7 @@ import { createRedisConnection, getRedis } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { RedisSessionBackend } from "../memory/redis-session-backend.js";
 import { UsageMeter } from "../billing/meter.js";
+import { meterLLM } from "../billing/metered-llm.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
 
@@ -456,10 +457,14 @@ export class AgentService {
           .then((catalog) => catalog?.llm[0]?.id ?? null)
           .catch(() => null);
       }
+      const usedModelId = apiKey
+        ? modelId ?? defaultLlmModelId(this.llmConfig)
+        : defaultLlmModelId(this.llmConfig);
       const llm = apiKey
-        ? this.providerFactory.llm(modelId ?? defaultLlmModelId(this.llmConfig), apiKey)
+        ? this.providerFactory.llm(usedModelId, apiKey)
         : this.getLLMProvider();
       let title = "";
+      let usage: { promptTokens: number; completionTokens: number } | undefined;
       for await (const chunk of llm.chat([
         {
           role: "system",
@@ -471,6 +476,20 @@ export class AgentService {
         { role: "user", content: titleInput },
       ])) {
         if (chunk.type === "text") title += chunk.content;
+        if (chunk.type === "done" && chunk.usage) usage = chunk.usage;
+      }
+
+      // Title generation is a real LLM call — it must land in usage_logs like
+      // chat does, under the model that actually ran it. Non-fatal by design.
+      if (usage && usage.promptTokens + usage.completionTokens > 0) {
+        this.usageMeter
+          ?.record({
+            userId: opts?.userId ?? "default",
+            taskId: null,
+            modelId: usedModelId,
+            usage: { inputCount: usage.promptTokens, outputCount: usage.completionTokens },
+          })
+          .catch((err) => console.warn("[UsageMeter] title metering failed:", err));
       }
 
       title = title.trim().replace(/^["']|["']$/g, "").slice(0, 50);
@@ -559,7 +578,24 @@ export class AgentService {
             budget: derivedTotal
               ? { ...contextConfig.budget, total: derivedTotal }
               : contextConfig.budget,
-            compressor: llm,
+            // Compression drains its stream via complete(), outside the agent
+            // loop's token accounting — meter it here or it never hits
+            // usage_logs. Billed to this turn's resolved model.
+            compressor: meterLLM(llm, (usage) => {
+              this.usageMeter
+                .record({
+                  userId: userId ?? "default",
+                  taskId: null,
+                  modelId,
+                  usage: {
+                    inputCount: usage.promptTokens,
+                    outputCount: usage.completionTokens,
+                  },
+                })
+                .catch((err) =>
+                  console.warn("[UsageMeter] compression metering failed:", err)
+                );
+            }),
             initialSummary: persistedSummary,
           }
         : undefined,
@@ -633,28 +669,27 @@ export class AgentService {
         if (event.type === "tool_result") {
           recorder.endToolSpan(event.isError ? "error" : "ok");
 
-          const matchingCall = currentToolCalls.find(
-            (tc) => tc.name === event.name
-          );
-
+          // The first result of a batch flushes the assistant message with ALL
+          // of the batch's tool calls; later results of the same batch find the
+          // buffer already empty and only need their own row.
           if (currentToolCalls.length > 0) {
-            // Save assistant message with tool calls, then the tool result
             await this.messageRepo.saveAssistantWithToolCalls(
               conversationId,
               assistantContent || "",
               currentToolCalls,
               currentThinking || undefined
             );
-            await this.messageRepo.saveToolResult(
-              conversationId,
-              matchingCall?.id,
-              event.output
-            );
-
             assistantContent = "";
             currentToolCalls = [];
             currentThinking = "";
           }
+          // Persist every result under its own call id — pairing by name is
+          // ambiguous for same-name parallel calls and used to drop rows.
+          await this.messageRepo.saveToolResult(
+            conversationId,
+            event.toolCallId,
+            event.output
+          );
         }
 
         if (event.type === "done") {
@@ -727,7 +762,7 @@ export class AgentService {
           const cost = await this.usageMeter.record({
             userId: userId ?? "default",
             taskId: null,
-            modelId: def.defaultModelId,
+            modelId,
             usage: { inputCount: inputTokens, outputCount: outputTokens },
           });
           recorder.traceObject.metadata.totalCost = cost;

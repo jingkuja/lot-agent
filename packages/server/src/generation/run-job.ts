@@ -28,7 +28,11 @@ export interface RunJobDeps {
   storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }> };
   db: {
     createAsset(a: Record<string, unknown>): Promise<void>;
-    updateMessageGeneration(id: string, patch: { status: string; metadata: Record<string, unknown> }): Promise<void>;
+    updateMessageGeneration(
+      id: string,
+      patch: { status: string; metadata: Record<string, unknown> },
+      owner: { conversationId: string; userId: string }
+    ): Promise<void>;
     /** The vendor's own task id, persisted so a restarted worker can resume polling. */
     getTaskVendorId(id: string): Promise<string | null | undefined>;
     setTaskVendorId(id: string, vendorTaskId: string): Promise<void>;
@@ -55,6 +59,10 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   const input = job.input;
   const prompt = (input.prompt as string) ?? "";
   const assistantMessageId = input.assistantMessageId as string | undefined;
+  // Both id fields are server-injected by the generations route (the /tasks
+  // route strips them). Without the conversation id there is nothing to scope
+  // the update to, so no message write happens at all.
+  const conversationId = input.conversationId as string | undefined;
   const media = input.media as ReferenceMedia[] | undefined;
   const baseMeta = {
     kind: "generation",
@@ -67,8 +75,12 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   const maxWaitMs = deps.maxWaitMs ?? 15 * 60 * 1000;
 
   const setMsg = async (status: string, extra: Record<string, unknown>) => {
-    if (assistantMessageId) {
-      await deps.db.updateMessageGeneration(assistantMessageId, { status, metadata: { ...baseMeta, status, ...extra } });
+    if (assistantMessageId && conversationId) {
+      await deps.db.updateMessageGeneration(
+        assistantMessageId,
+        { status, metadata: { ...baseMeta, status, ...extra } },
+        { conversationId, userId: job.userId }
+      );
     }
   };
 

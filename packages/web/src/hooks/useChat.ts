@@ -303,7 +303,7 @@ export function useChat(
           const finishedAssistantId = assistantMsg.id;
           // Show tool result as a separate collapsible card
           const resultMsg: DisplayMessage = {
-            id: `tool-result-${Date.now()}-${event.name}`,
+            id: `tool-result-${event.toolCallId ?? Date.now()}-${event.name}`,
             role: "tool",
             content: "",
             toolResult: {

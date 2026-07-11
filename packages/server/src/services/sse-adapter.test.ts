@@ -25,16 +25,18 @@ describe("agentEventToSse", () => {
     });
   });
 
-  it("maps tool_result event", () => {
+  it("maps tool_result event with its toolCallId", () => {
     expect(
       agentEventToSse({
         type: "tool_result",
+        toolCallId: "t1",
         name: "read_file",
         output: "x",
         isError: false,
       })
     ).toEqual({
       type: "tool_result",
+      toolCallId: "t1",
       name: "read_file",
       output: "x",
       isError: false,

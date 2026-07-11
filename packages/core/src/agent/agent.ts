@@ -27,7 +27,7 @@ export type AgentEvent =
   | { type: "text"; content: string }
   | { type: "thinking"; content: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; name: string; output: string; isError: boolean }
+  | { type: "tool_result"; toolCallId: string; name: string; output: string; isError: boolean }
   | {
       type: "done";
       iterations: number;
@@ -485,6 +485,7 @@ export class Agent {
         ): Generator<AgentEvent, boolean> {
           yield {
             type: "tool_result",
+            toolCallId: tc.id,
             name: tc.name,
             output: result.content,
             isError: result.isError ?? false,

@@ -1,8 +1,27 @@
 import { Hono } from "hono";
 import { estimateCost } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
+import { pickGenerationSettings } from "../generation/input.js";
 
 const ALLOWED_TYPES = ["image.generate", "video.generate"] as const;
+
+/**
+ * Whitelist the client task input to business fields only. Identity fields
+ * (assistantMessageId/conversationId/userId) are server-owned — a forged
+ * assistantMessageId would let the worker overwrite another user's message.
+ * This standalone task API creates no message, so none of them belong here.
+ */
+export function sanitizeTaskInput(
+  type: (typeof ALLOWED_TYPES)[number],
+  raw: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const mediaType = type === "image.generate" ? "image" : "video";
+  const input: Record<string, unknown> = pickGenerationSettings(mediaType, raw);
+  if (typeof raw?.prompt === "string") input.prompt = raw.prompt;
+  if (typeof raw?.modelId === "string") input.modelId = raw.modelId;
+  if (Array.isArray(raw?.media)) input.media = raw.media;
+  return input;
+}
 
 type Variables = { userId: string };
 
@@ -28,6 +47,11 @@ export function createTaskRoutes(service: AgentService) {
       );
     }
 
+    const safeInput = sanitizeTaskInput(
+      type as (typeof ALLOWED_TYPES)[number],
+      input as Record<string, unknown> | undefined
+    );
+
     // Quota pre-check: estimate cost via the shared billing source of truth.
     let estimatedCost = 0;
     if (type === "image.generate") {
@@ -35,7 +59,7 @@ export function createTaskRoutes(service: AgentService) {
       estimatedCost = cfg ? estimateCost(cfg, { outputCount: 1 }) : 0;
     } else if (type === "video.generate") {
       const cfg = service.modelRegistry.getConfig("kling-standard");
-      const durationSec = (input as Record<string, unknown>)?.durationSec as number | undefined ?? 5;
+      const durationSec = (safeInput.durationSec as number | undefined) ?? 5;
       estimatedCost = cfg ? estimateCost(cfg, { outputCount: durationSec }) : 0;
     }
     const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
@@ -43,7 +67,7 @@ export function createTaskRoutes(service: AgentService) {
       return c.json({ error: quota.reason, estimatedCost }, 402);
     }
 
-    const jobId = await service.jobQueue.enqueue(type, input ?? {}, userId);
+    const jobId = await service.jobQueue.enqueue(type, safeInput, userId);
     return c.json({ jobId }, 202);
   });
 

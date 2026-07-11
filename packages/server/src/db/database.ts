@@ -747,14 +747,25 @@ export class DB {
     );
   }
 
-  /** Patch a generation message's status + metadata (used by the worker). */
+  /**
+   * Patch a generation message's status + metadata (used by the worker).
+   * The update is scoped to the owning conversation AND user: a message id
+   * alone is client-forgeable job input, so an id pointing at another user's
+   * message must update zero rows.
+   */
   async updateMessageGeneration(
     messageId: string,
-    patch: { status: string; metadata: Record<string, unknown> }
+    patch: { status: string; metadata: Record<string, unknown> },
+    owner: { conversationId: string; userId: string }
   ): Promise<void> {
     await this.pool.query(
-      "UPDATE messages SET status = $1, metadata = $2 WHERE id = $3",
-      [patch.status, JSON.stringify(patch.metadata), messageId]
+      `UPDATE messages m SET status = $1, metadata = $2
+       FROM conversations c
+       WHERE m.id = $3
+         AND m.conversation_id = $4
+         AND c.id = m.conversation_id
+         AND c.user_id = $5`,
+      [patch.status, JSON.stringify(patch.metadata), messageId, owner.conversationId, owner.userId]
     );
   }
 
@@ -829,6 +840,25 @@ export class DB {
       [messageId]
     );
     return rows;
+  }
+
+  /**
+   * Resolve a message's ownership chain (message → conversation → user).
+   * Returns null for an unknown message; used by routes to collapse
+   * cross-user access to 404.
+   */
+  async getMessageOwner(
+    messageId: string
+  ): Promise<{ conversationId: string; userId: string | null } | null> {
+    const { rows } = await this.pool.query(
+      `SELECT m.conversation_id, c.user_id
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.id = $1`,
+      [messageId]
+    );
+    if (!rows[0]) return null;
+    return { conversationId: rows[0].conversation_id, userId: rows[0].user_id ?? null };
   }
 
   // ── Ratings ──

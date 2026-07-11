@@ -16,6 +16,7 @@ export function agentEventToSse(event: AgentEvent): Record<string, unknown> {
     case "tool_result":
       return {
         type: "tool_result",
+        toolCallId: event.toolCallId,
         name: event.name,
         output: event.output,
         isError: event.isError,

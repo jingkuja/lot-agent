@@ -514,6 +514,20 @@ describe("Agent.run parallel tool execution", () => {
     expect(resultNames).toEqual(["p1", "p2"]);
   });
 
+  it("tags each tool_result with the toolCallId of its call, even for same-name parallel calls", async () => {
+    const track = { active: 0, max: 0 };
+    const registry = new ToolRegistry();
+    registry.register(concurrencyTool("p1", true, track));
+    const llm = scriptedLLM([twoToolCall("p1", "p1"), textChunks("done")]);
+
+    const events = await collect(new Agent({ systemPrompt: "s" }).run("hi", makeContext(llm, registry)));
+
+    const results = events.filter(
+      (e): e is Extract<AgentEvent, { type: "tool_result" }> => e.type === "tool_result"
+    );
+    expect(results.map((e) => e.toolCallId)).toEqual(["a", "b"]);
+  });
+
   it("runs non-parallelSafe tool calls sequentially", async () => {
     const track = { active: 0, max: 0 };
     const registry = new ToolRegistry();
