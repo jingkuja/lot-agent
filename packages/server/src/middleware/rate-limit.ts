@@ -46,8 +46,10 @@ export function clientIp(c: Context): string {
  * Fixed-window rate limit middleware: INCR the window counter, PEXPIRE it on
  * the first hit in the window, and reject with 429 once the count exceeds
  * `limit`. `Retry-After` is derived from PTTL (seconds, rounded up), falling
- * back to the full window when PTTL comes back unusable (e.g. -1/-2, or a
- * non-finite value from a flaky store).
+ * back to the full window when PTTL comes back unusable (-2 key missing, or a
+ * non-finite value from a flaky store). PTTL of -1 (key exists with no expiry,
+ * i.e. the first hit's PEXPIRE failed) re-arms the window so an over-limit key
+ * self-heals after windowMs instead of blocking forever.
  *
  * Rate limiting exists to blunt abuse, not to be a new single point of
  * failure: any store error (Redis down, timeout, ...) fails OPEN — the
@@ -66,6 +68,16 @@ export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
         let ttlMs: number;
         try {
           ttlMs = await store.pttl(key);
+          if (ttlMs === -1) {
+            // Key exists WITHOUT an expiry — the first hit's PEXPIRE must have
+            // failed. Left alone the counter never resets and this key would
+            // 429 forever (the opposite of fail-open), so re-arm the window
+            // here: worst case the block self-heals after one more windowMs.
+            // -2 (key missing, e.g. expired between INCR and PTTL) needs no
+            // repair and falls through to the windowMs fallback below.
+            await store.pexpire(key, windowMs);
+            ttlMs = windowMs;
+          }
         } catch {
           ttlMs = windowMs;
         }

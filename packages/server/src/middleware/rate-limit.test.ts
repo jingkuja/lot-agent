@@ -146,6 +146,60 @@ describe("rateLimit", () => {
     expect(afterExpiry.status).toBe(200);
   });
 
+  it("repairs a TTL-less key (pexpire failed on first hit) so the block self-heals after one window", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // pexpire throws exactly once — the first hit's window expiry is lost, so
+    // the key exists with no TTL and pttl reports -1 from then on.
+    const store = new FakeStore();
+    const origPexpire = store.pexpire.bind(store);
+    let pexpireFailed = false;
+    store.pexpire = async (key: string, ms: number) => {
+      if (!pexpireFailed) {
+        pexpireFailed = true;
+        throw new Error("redis blip");
+      }
+      return origPexpire(key, ms);
+    };
+    const app = buildApp(store);
+
+    // 1st hit: incr=1, pexpire throws → fail-open, but key now has no TTL.
+    expect((await app.request("/test", { method: "POST" })).status).toBe(200);
+    expect((await app.request("/test", { method: "POST" })).status).toBe(200);
+    expect(await store.pttl("rl:test:fixed-key")).toBe(-1);
+
+    // 3rd hit exceeds the limit: pttl is -1 → the middleware must re-arm the
+    // window (pexpire) instead of leaving the counter immortal.
+    const blocked = await app.request("/test", { method: "POST" });
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("60");
+    expect(store.pexpireCalls).toEqual([{ key: "rl:test:fixed-key", ms: 60_000 }]);
+
+    // One window later the repaired TTL fires and requests flow again —
+    // without the repair this key would 429 forever.
+    vi.advanceTimersByTime(60_001);
+    expect((await app.request("/test", { method: "POST" })).status).toBe(200);
+    warnSpy.mockRestore();
+  });
+
+  it("does not re-arm the window when pttl reports a missing key (-2)", async () => {
+    // -2 means the key does not exist (e.g. it expired between incr and pttl):
+    // there is nothing to repair, Retry-After just falls back to the window.
+    const pexpireCalls: { key: string; ms: number }[] = [];
+    const store: RateLimitStore = {
+      incr: async () => 3, // over the limit of 2
+      pexpire: async (key, ms) => {
+        pexpireCalls.push({ key, ms });
+        return 1;
+      },
+      pttl: async () => -2,
+    };
+    const app = buildApp(store);
+    const res = await app.request("/test", { method: "POST" });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("60");
+    expect(pexpireCalls).toEqual([]);
+  });
+
   it("fails open (passes through) and warns when the store throws", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const app = buildApp(new ThrowingStore());
