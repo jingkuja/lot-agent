@@ -8,13 +8,18 @@
 
 本报告按三部分组织：**现有实现的问题**、**架构设计优化**、**可以增加的功能**。问题按严重程度排序，并尽可能给出具体代码证据。
 
+> **修复进度（2026-07-11 更新）**：第 1～4 批（#1～#22 + migration runner + 会话并发控制）中，除
+> **#7、#10** 外均已修复并有对应回归测试；#22 采用"删除无消费者的 pub/sub"方案。#7、#10 及其余
+> 计费收敛工作统一移入 [四、计费 TODO List](#四计费-todo-list)。架构优化 12 项的实际落地状态见
+> 第二部分各项标注。P2（#23～#33）不在前四批范围内，状态未逐项复核。
+
 ---
 
 ## 一、现有实现的问题
 
 ### P0 —— 写越权 / 资损 / 数据完整性（建议立即处理）
 
-#### 1. 生成任务输入可覆盖服务端消息 ID，可能跨用户覆写消息 metadata
+#### 1. 【已修复】生成任务输入可覆盖服务端消息 ID，可能跨用户覆写消息 metadata
 
 生成入口没有把任务身份字段与用户输入严格隔离：
 
@@ -32,7 +37,7 @@
 3. worker 更新消息时执行带 task、conversation、user 关联条件的更新，而不是只按 message ID 更新。
 4. 增加"提交其他用户 message ID 不发生更新并返回 404"的回归测试。
 
-#### 2. 聊天计费记录的是 Agent 默认模型，不是本回合实际模型
+#### 2. 【已修复】聊天计费记录的是 Agent 默认模型，不是本回合实际模型
 
 `packages/server/src/services/agent-service.ts:727-733` 的用量上报使用 `def.defaultModelId`，但本回合真正使用的模型来自显式选择、会话存储或 Agent 默认值的解析结果（`agent-service.ts:529`）。
 
@@ -52,7 +57,7 @@ const cost = await this.usageMeter.record({
 
 同一函数里 `memory.extract` 入队时传的就是正确的 `modelId`（`agent-service.ts:701`），说明这是遗漏而非设计。
 
-#### 3. 模型调用计量不完整：标题生成和上下文压缩未纳入计费
+#### 3. 【已修复】模型调用计量不完整：标题生成和上下文压缩未纳入计费
 
 除主聊天和 memory extraction 外，至少还有两类实际 LLM 调用未形成完整计量：
 
@@ -61,7 +66,7 @@ const cost = await this.usageMeter.record({
 
 这意味着"所有昂贵模型调用都计量"的产品约束尚未真正成立。建议统一通过 metered provider 执行主对话、标题生成、上下文压缩和 memory extraction，并由 provider/run context 提供不可被调用点误填的实际 `modelId`。
 
-#### 4. `traces` 路由缺少属主校验，可跨用户读取运行信息
+#### 4. 【已修复】`traces` 路由缺少属主校验，可跨用户读取运行信息
 
 `packages/server/src/routes/traces.ts:8-21`：
 
@@ -73,13 +78,13 @@ const cost = await this.usageMeter.record({
 
 建议将普通用户查询强制限定为自己的 conversation，非属主统一返回 404；全站 trace 查询仅开放给管理员。
 
-#### 5. `ratings` 路由缺少消息属主校验
+#### 5. 【已修复】`ratings` 路由缺少消息属主校验
 
 `packages/server/src/routes/ratings.ts` 允许登录用户按任意 `messageId` 创建、读取和删除评分，但没有验证 message → conversation → user 的归属链。UUID 难枚举不能替代授权检查。
 
 建议将属主校验提炼为统一 helper，并为创建、读取、删除三个路径分别补跨用户 404 测试。
 
-#### 6. 并行工具调用只有第一个 `tool_result` 落库
+#### 6. 【已修复】并行工具调用只有第一个 `tool_result` 落库
 
 Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出对应的 `tool_result`（`packages/core/src/agent.ts:505-527`）。server 在收到第一个结果后保存全部 calls、保存一个 result，随后立即清空 `currentToolCalls`（`packages/server/src/services/agent-service.ts:640-657`），导致同批后续结果不再落库。
 
@@ -89,7 +94,7 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 建议让 `tool_result` 强制携带 call ID，服务端按 ID 逐项持久化，并补充"多个不同名工具"和"多个同名工具"两类并行回归测试。
 
-#### 7. 图片/视频的预检、执行与结算没有使用同一实际模型
+#### 7. 【未修复 → 计费 TODO】图片/视频的预检、执行与结算没有使用同一实际模型
 
 - `packages/server/src/routes/conversations.ts:271-280` 和 `packages/server/src/routes/tasks.ts:30-39` 使用固定模型（`"gpt-image-2-token"` / `"kling-standard"`）估价，用户实际提交的模型只被透传给 worker。
 - `packages/server/src/workers/index.ts:123` 与 `packages/server/src/generation/run-job.ts:120-125` 又按配置默认模型结算（worker 注释直言 "Billing stays on the configured, statically-priced modelId"）。
@@ -104,7 +109,7 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 建议对 image/video 建立独立 schema，约束模型类型、数量、时长、尺寸和比例；预估与结算调用同一个模型价格解析器；按实际成功产物数量创建资产并计量。
 
-#### 8. 生成任务无法形成可靠的取消闭环
+#### 8. 【已修复】生成任务无法形成可靠的取消闭环
 
 `packages/server/src/queue/bullmq-queue.ts:150-168` 的 `cancel()` 会 abort 当前进程 Map 中的 `JobControl.signal`，但：
 
@@ -117,7 +122,7 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 因此，现状不是"cancel API 已有但 UI 未接"，而是只有内部取消原语，缺少属主校验的 HTTP API、跨进程取消传播、I/O signal 接入和状态迁移守卫。
 
-#### 9. 生成消息 metadata 存在写覆盖竞态
+#### 9. 【已修复】生成消息 metadata 存在写覆盖竞态
 
 `packages/server/src/routes/conversations.ts:301-314` 先 enqueue，再整体写入 `{status: "generating", taskId}`。`packages/server/src/db/database.ts:751-759` 对 metadata 是整体替换。
 
@@ -125,7 +130,7 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 应将 task 行作为单一事实来源；如果保留 metadata 冗余，则使用 JSONB merge、版本/CAS 和单向状态迁移守卫。
 
-#### 10. 配额检查覆盖不全，而且"先查后调用"可并发超卖
+#### 10. 【未修复 → 计费 TODO】配额检查覆盖不全，而且"先查后调用"可并发超卖
 
 `checkQuota`（`meter.ts:37-61`）目前主要用于 image/video，聊天（含长上下文 + 高价模型，单回合可能比一张图贵得多）、标题、上下文压缩等昂贵调用没有统一配额入口。即使把所有调用包进简单的 `withQuota()`，多个并发请求仍可能同时读取旧消费值并全部通过。
 
@@ -140,7 +145,7 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 ### P1 —— 安全 / 可靠性 / 可运维性
 
-#### 11. 生成缓存跨用户共享，静态 URL 与资产归属不一致
+#### 11. 【已修复】生成缓存跨用户共享，静态 URL 与资产归属不一致
 
 `packages/server/src/generation/run-job.ts:76-85` 的缓存 key 不包含 user ID。用户 B 使用相同 prompt+参数命中用户 A 的缓存时：
 
@@ -151,7 +156,7 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 这既可能泄露包含参考图元素的结果，也会造成数据库归属和消息展示不一致。如果共享缓存是有意的成本优化，至少应将内容缓存与用户资产记录分离，并为命中用户创建自己的引用/资产记录；否则默认按用户隔离。
 
-#### 12. vendor 产物下载存在 SSRF、无界内存读取和不可取消问题
+#### 12. 【已修复】vendor 产物下载存在 SSRF、无界内存读取和不可取消问题
 
 `packages/server/src/workers/index.ts:79-89` 对 vendor 返回的 URL 直接执行 `fetch()`，并把响应整体读入 `arrayBuffer()`。当前缺少：
 
@@ -164,7 +169,7 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 生成图片 URL 可能来自模型文本解析，不能一律视为可信。建议复用 `web_fetch` 的地址校验策略，逐跳验证重定向，限制协议和响应大小，并通过流式管道写入存储。
 
-#### 13. `/static/*` 路由无鉴权，主动内容可在同源执行
+#### 13. 【已修复】`/static/*` 路由无鉴权，主动内容可在同源执行
 
 `packages/server/src/index.ts:178-225` 的静态路由仅依赖不可猜文件名。持有 URL 的任何人都可下载合同、文档或生成内容；URL 还可能进入聊天记录、日志和代理。
 
@@ -176,13 +181,13 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 当前 session token 存在 localStorage（`client.ts:120-132`），一旦同源脚本执行，token 可能被读取，因此文件源隔离尤为重要。
 
-#### 14. 静态文件全量读入内存且不支持 Range
+#### 14. 【已修复】静态文件全量读入内存且不支持 Range
 
 `packages/server/src/index.ts:184,197,210` 都使用 `readFile` 返回完整 Buffer。大文件并发下载会增加内存压力，视频也无法可靠拖动进度（无 `Accept-Ranges`）。
 
 建议改为流式响应，支持 `Range`、`Accept-Ranges`、`Content-Range`、合理缓存头，并对单次与并发带宽做限制。
 
-#### 15. API key、平台 access token 和 session token 明文存储
+#### 15. 【已修复】API key、平台 access token 和 session token 明文存储
 
 - `packages/server/src/db/database.ts:1026-1031` 涉及用户 tokenhub API key（`users.api_key` / `api_keys` JSONB），DB 泄露即等于用户计费 key 泄露；
 - `sessions.token` 保存原始 session token（`database.ts:476-484`）；
@@ -190,25 +195,25 @@ Agent 对 parallel-safe 工具会先发出一组 `tool_call`，再依次发出�
 
 建议 API key 与平台 access token 使用 envelope encryption（主密钥来自 KMS 或受控环境变量）；session token 只保存 SHA-256 等不可逆摘要，服务端对收到的 token 做相同哈希后查询。
 
-#### 16. session 只有固定过期，没有清理策略
+#### 16. 【已修复】session 只有固定过期，没有清理策略
 
 `packages/server/src/auth/session-store.ts:4,16-23` 采用 7 天硬过期并更新 `last_seen_at`，但过期行不会自动清理（表无限增长）。
 
 固定过期可能是有意的安全策略，不应直接判为缺陷；是否改为滑动续期需要产品与安全策略共同决定。明确需要补的是定期清理、用户主动登出/撤销、设备会话管理及异常会话审计。
 
-#### 17. `regenerate` 删除边界没有校验 message 属于目标 conversation
+#### 17. 【已修复】`regenerate` 删除边界没有校验 message 属于目标 conversation
 
 `packages/server/src/db/database.ts:786-794` 使用传入 message ID 的 `created_at` 作为 `>=` 删除边界，但没有验证该消息属于目标会话。路由虽然校验了会话属主（`conversations.ts:118-133`），却未验证消息归属。
 
 传入其他会话的消息 ID 时，会以对方消息的时间戳删除当前用户自己会话的消息——影响限于自身数据，但语义是错的。建议 SQL 同时约束 `message.id` 与 `conversation_id`，找不到时返回 404。
 
-#### 18. worker 与 server 的模型价格目录不一致
+#### 18. 【已修复】worker 与 server 的模型价格目录不一致
 
 worker 的 `UsageMeter` 只查询静态配置（`packages/server/src/workers/index.ts:65`），server 侧则支持动态 catalog 兜底（`agent-service.ts:344-346`）。memory extraction 使用动态 tokenhub 模型 ID 时，worker 可能把它视为 unknown model 并跳过计费（`unknown model, skipping billing`）。
 
 server 和 worker 应共享同一个 ModelCatalog / PricingResolver，并明确动态目录缓存的一致性和失效机制。
 
-#### 19. 工具执行的取消、超时和路径边界不统一
+#### 19. 【已修复】工具执行的取消、超时和路径边界不统一
 
 - `web_fetch` 忽略 `context.signal`（`builtins.ts:390` 的 execute 只解构 input；`fetchWithTimeout` 用私有 controller），run 取消后仍可能继续请求，与 `execute_command`/`web_search` 行为不一致。
 - `search_files` 的 grep 参数缺少 `--` 分隔（`builtins.ts:252-260`），`-` 开头的 pattern 可能被解释为选项。
@@ -218,7 +223,7 @@ server 和 worker 应共享同一个 ModelCatalog / PricingResolver，并明确�
 
 建议统一使用可组合、可清理的 signal/timeout helper；文件访问在最终打开目标前验证 realpath，并根据部署模式决定是否彻底禁用符号链接。
 
-#### 20. 同一会话的服务端并发无保护
+#### 20. 【已修复】同一会话的服务端并发无保护
 
 web 端只在单个页面实例中限制同会话单流（`useChat.ts:44,188-190`），但两个标签页或设备仍可同时发送。服务端没有会话级并发控制，`saveUserMessage`/`saveAssistantWithToolCalls` 可能交错写入；当前按 `created_at` 排序（`database.ts:761-766`）也无法保证同时间戳记录的稳定顺序。
 
@@ -230,13 +235,13 @@ web 端只在单个页面实例中限制同会话单流（`useChat.ts:44,188-190
 
 消息表应增加 conversation 内稳定 `seq`，并按 `(conversation_id, seq)` 排序。
 
-#### 21. 缺少请求频率和资源额度限制
+#### 21. 【已修复】缺少请求频率和资源额度限制
 
 login（RSA 解密 + tokenhub 转发）、uploads、消息发送、生成任务等路径没有完整 rate limit。上传还把 20MB body 整体读入内存（`uploads.ts:45` 的 `parseBody`）。
 
 建议按 IP、用户和接口成本分层限流；上传使用流式解析并限制并发、文件数、总字节与 MIME/magic bytes；昂贵调用同时受频率限制和额度 reservation 约束。
 
-#### 22. Redis 任务进度发布没有消费者
+#### 22. 【已修复·采用删除方案】Redis 任务进度发布没有消费者
 
 `packages/server/src/queue/bullmq-queue.ts:172-178` 发布 `task:{id}:progress`，但当前没有订阅端；web 用 1 秒间隔轮询 `GET /api/tasks/:id`（`useChat.ts:112`）。
 
@@ -272,6 +277,11 @@ Redis subscriber 必须使用独立连接，不能复用进入 subscriber 模式
 
 ### 1. 建立严格的任务命令边界
 
+> ✅ **已落地**：`generation/input.ts` 按媒体类型白名单挑选业务参数；身份字段
+> （`userId/conversationId/assistantMessageId/taskId`）由服务端注入，`/tasks` 路由会剥离客户端
+> 传入的同名字段；worker 写回消息走 `updateMessageGeneration`，带 conversation + user + 状态
+> 单向守卫（`database.ts`）。
+
 不要让通用 `input/settings` 同时承载用户业务参数和服务端身份字段。
 
 - image/video 分别定义 schema；
@@ -281,6 +291,9 @@ Redis subscriber 必须使用独立连接，不能复用进入 subscriber 模式
 - 所有写回都带属主与预期状态条件。
 
 ### 2. 给事件模型补上稳定身份
+
+> 🔶 **部分落地**：`tool_result` 已携带 `toolCallId`（`agent.ts:30`），服务端按 ID 配对持久化，
+> SSE 契约已加字段（#6 已修复）。`runId`/`seq`/`eventId`/`parentId` 未做。
 
 `tool_result` 必须携带 `toolCallId`（Agent 循环里 `recordResult` 拿得到 `tc.id`，`agent.ts:482-501`），服务端按 ID 配对持久化，SSE 契约同步加字段（前端向后兼容）。所有流式事件可进一步携带：
 
@@ -292,6 +305,11 @@ Redis subscriber 必须使用独立连接，不能复用进入 subscriber 模式
 增加 `seq` 只是断线续传（`Last-Event-ID`）的前提，不等于已经支持 replay。
 
 ### 3. 计费收敛为统一的 metered execution 管道
+
+> ⏳ **未收敛 → 计费 TODO**：已完成零件——`meterLLM` 包装器（compression 计量）、共享
+> `pricing-lookup`（server/worker 同一价格解析，#18）、chat/title/compression/memory 均按本回合
+> 实际 modelId 计量（#2/#3）。但统一执行器、原子额度 reservation、生成任务估价与结算同源
+> （#7/#10）未做，`modelId` 仍由各调用点手填。剩余工作见 [四、计费 TODO List](#四计费-todo-list)。
 
 现在计费散落在多个调用点，各自手填 `modelId`，已产生多个不一致 bug（#2、#3、#7、#18）。建议用一个统一执行器覆盖 chat、title、compression、memory、image 和 video：
 
@@ -306,6 +324,11 @@ Redis subscriber 必须使用独立连接，不能复用进入 subscriber 模式
 
 ### 4. 任务状态使用单一事实来源和显式状态机
 
+> 🔶 **大部分落地**：状态机守卫已实现——task 成功/失败/取消更新均带 `WHERE status IN (...)`，
+> 终态不可被覆盖；取消通过 DB task 行跨进程传播，run-job 在每个暂停点检查（#8/#9 已修复）。
+> 未收敛部分：`message.metadata` 仍冗余保存状态（靠单向守卫兜底），没有改成"只存 taskId、
+> 展示一律 join task 行"。
+
 问题 #8、#9 的共同根因是"task 行"和"message.metadata"两处冗余状态互相追赶。建议 task 表作为权威状态源，message metadata 只保存 `taskId`（一次写入不再更新），前端展示所需的状态/资产一律 join task 行（`GET /api/tasks/:id` 已经是前端的实际数据源）。状态迁移至少应定义：
 
 ```text
@@ -317,6 +340,9 @@ pending/running -> cancelling -> cancelled
 每次迁移使用 `WHERE status IN (...)` 或 version CAS，终态不可被后续写覆盖。取消信号通过 Redis/DB/BullMQ 可跨进程传播，并接入 create、poll、download、storage 等所有可中断 I/O。
 
 ### 5. 属主校验中间件化
+
+> 🔶 **部分落地**：traces / ratings / tasks（含 cancel）已补属主校验并统一 404（#4/#5 已修复，
+> 各带跨用户测试），但仍是各路由手写，未提炼 `requireOwnedXxx` 统一 helper，测试矩阵也未系统化。
 
 `getConversation → user_id !== userId → 404` 的模式已在多个路由手写，而 traces/ratings 忘写（#4、#5）。提炼统一的资源加载和授权 helper：
 
@@ -330,6 +356,9 @@ const task = await requireOwnedTask(ctx, taskId);
 
 ### 6. 拆分 `AgentService`
 
+> ⏳ **未做**：`agent-service.ts` 现约 790 行，`conversations.ts` 仍通过 `service["llmConfig"]`
+> 访问私有成员。
+
 751 行的 `AgentService` 同时承担 DB、Redis、BullMQ、SkillLoader、MCP、catalog、provider、usage、上传等职责，所有路由都拿整个 service 再挖字段（甚至 `service["llmConfig"]`）。可按限界拆为：
 
 - `ChatService`：run 编排、消息与标题；
@@ -341,11 +370,18 @@ const task = await requireOwnedTask(ctx, taskId);
 
 ### 7. 任务进度采用鉴权事件流，并保留轮询回退
 
+> ⏳ **未做（且前提已变化）**：#22 的修复选择了删除无消费者的 Redis 进度 publish，前端继续用
+> 轮询。此项从"利用已就位的基建"降级为可选的未来优化——若要做需重新引入发布端。
+
 Redis pub/sub 基建已就位（#22）。新增 `GET /api/tasks/:id/events` 前必须先校验 task 属主。鉴于当前 Bearer 鉴权，前端优先使用 fetch streaming SSE；若未来改为 HttpOnly Cookie，再考虑原生 EventSource。
 
 事件流需要 initial snapshot、心跳、完成事件和断线后的 DB 回退。Redis pub/sub 只提供实时通知，不提供历史 replay。落地后可消灭每任务每秒一次的 HTTP 轮询与死代码。
 
 ### 8. 静态资源统一走 ObjectStorage 与受控下载
+
+> 🔶 **部分落地**：本地静态路由已改为流式 + Range + 主动内容（HTML/SVG）attachment 隔离
+> （`static-files.ts`，#13/#14 已修复）。S3 实现、短时签名 URL / 带属主校验的下载 API、
+> 用户资产引用与内容对象分离未做。
 
 `ObjectStorage` 接口已存在。规划中的 S3 实现落地时，把 `/static/*` 换成短时签名 URL 或带 Bearer 的 `/api/files/:id` 流式下载（校验 asset 属主，支持 Range）。ObjectStorage 应支持：
 
@@ -360,9 +396,15 @@ Redis pub/sub 基建已就位（#22）。新增 `GET /api/tasks/:id/events` 前�
 
 ### 9. 引入正式 migration runner
 
+> ✅ **已落地**：`db/migrations/`（0001-baseline / 0002-message-seq / 0003-conversation-run-lease
+> + runner）已替换 `database.ts` 内联 `migrate()`。
+
 `packages/server/src/db/database.ts` 全文件超过 1400 行，其中 inline `migrate()` 约 386 行（`database.ts:216-602`），DDL/DML/backfill 混杂，`ALTER ... DROP NOT NULL` 这类不可 CREATE-IF-NOT-EXISTS 的语句只能靠幂等性硬扛。建议引入 `schema_migrations` + 顺序 migration 文件（如 `node-pg-migrate`）；DDL 与 backfill 分开执行，并为大表迁移设计锁和回滚策略。这也是 roadmap 已承认的欠账。
 
 ### 10. 会话并发采用租约/CAS，而不是长事务锁
+
+> ✅ **已落地**：conversation 运行租约 CAS，同会话并发发送返回 409（0003 迁移）；messages 增加
+> 会话内稳定 `seq` 并按其排序（0002 迁移）。#20 已修复。
 
 conversation 增加 `active_run_id`、`run_version` 或同等字段；开始运行时原子 claim，完成后按 fencing token release。需要支持排队时再引入队列，不支持时明确返回 409。
 
@@ -370,9 +412,15 @@ conversation 增加 `active_run_id`、`run_version` 或同等字段；开始运�
 
 ### 11. 前端流状态 reducer 化
 
+> ⏳ **未做**：`useChat` 现约 525 行，仍是闭包变量 + `setMessages(prev => ...)`，无 reducer。
+
 513 行的 `useChat` 用闭包变量 + `setMessages(prev => ...)` 手工维护流状态，事件种类还在增加。将 title、text delta、tool、artifact、generation 和 terminal 事件统一交给纯 reducer（可单测事件序列 → 视图状态）；以 `runId/eventId/toolCallId` 作为身份，减少闭包状态、重复事件和 React key 碰撞，`isStreaming`/`genPoll`/`streams` 三份互相纠缠的状态自然归一。
 
 ### 12. 密钥、会话与资源治理
+
+> 🔶 **大部分落地**：api key / access token 静态加密、session 只存哈希（#15）、关键 POST 端点
+> 分级限流 + 上传 Content-Length 预检（#21）、session 过期定期清理（#16）均已完成。
+> 未做：tasks / usage_logs / traces / assets 的保留与归档策略、管理员操作审计。
 
 - API key 和 platform access token 做静态加密（envelope encryption，密钥来自 env/KMS）；
 - session token 只存摘要（`sha256(token)`），验证时哈希比对；
@@ -430,18 +478,62 @@ conversation 增加 `active_run_id`、`run_version` 或同等字段；开始运�
 
 ---
 
+## 四、计费 TODO List
+
+计费相关的全部遗留工作集中于此（对应 **#7、#10** 和架构优化 **#3** 的未完成部分）。已完成的
+计费工作不在此列：#2/#3（chat/title/compression/memory 按实际模型计量）、#18（server/worker
+共享 `pricing-lookup`）、#11（gen-cache 按 userId 隔离，不再跨用户免计费复用）。
+
+### 生成任务估价 / 结算一致性（#7）
+
+- [ ] 预检（402 配额检查）不再使用固定的 `"gpt-image-2-token"` / `"kling-standard"`，而是解析
+      用户实际提交的模型（`routes/conversations.ts` / `routes/tasks.ts` 现仍硬编码）；
+- [ ] worker 结算改按实际执行的 vendor 模型计价，而不是配置默认模型（`workers/index.ts`）；
+- [ ] 用户提交的模型与其可用模型目录、媒体类型做统一校验（估价与记账用同一个模型解析函数，
+      建立在已有的共享 `pricing-lookup` 之上）；
+- [ ] `n`、`durationSec` 等参数补有限数 / 正数 / 上限校验（`generation/input.ts` 目前只做类型
+      白名单，不做数值范围校验），防止异常值绕过配额或产生错误成本；
+- [ ] 多图 `urls` 支持：`n > 1` 时保存全部产物并按实际成功产物数量创建资产与计量
+      （`providers/image-generation.ts` 已支持 `urls`，`run-job.ts` 仍只取单个 `url`）。
+
+### 原子额度账本（#10）
+
+- [ ] 调用前原子创建 reservation，成功后按实际 usage settlement，失败/取消 release；
+- [ ] reservation + settled amount 共同参与 daily/monthly limit 判断，消除"先查后调用"并发超卖；
+- [ ] 聊天（长上下文 + 高价模型）、标题、上下文压缩等昂贵 LLM 调用纳入统一配额入口
+      （目前 `checkQuota` 只覆盖 image/video）；
+- [ ] 明确 `user_balance.balance` 语义（实际余额 vs 限额配置）；短期不用则删除或标记未启用。
+
+### 统一 metered execution 管道（架构 #3 收尾）
+
+- [ ] 建立统一执行器覆盖 chat / title / compression / memory / image / video：模型解析 → 参数
+      校验 → 原子预留 → 调用并捕获实际 usage/产物数 → 结算或释放 → 记录 usage/trace；
+- [ ] `modelId` 由 provider/run context 提供，禁止各调用点手填（当前 #2/#3 修复后仍是各点手填
+      正确值，机制上未防错）。
+
+### 配套（功能向，可后置）
+
+- [ ] 用量与限额面板：限额更新 API、reservation 展示、按天/按模型消费图表（见三、功能 #1）。
+
+---
+
 ## 附：建议的修复顺序
 
-| 批次 | 内容 | 验收重点 |
-|---|---|---|
-| 第 1 批 | #1 任务输入写越权、#2/#3 计费身份与漏计、#4/#5 属主越权、#6 工具结果丢失 | 跨用户写/读均返回 404；所有 LLM 调用记录实际模型与 usage；并行同名工具可完整恢复历史 |
-| 第 2 批 | #7 生成参数/模型/多图计量、#8 取消闭环、#9 状态竞态、#10 原子配额 | 预估与结算使用同一模型解析；取消不可被成功覆盖；并发额度不超卖 |
-| 第 3 批 | #11 缓存与资产归属、#12 vendor 下载、#13/#14 文件安全与流式下载、#15 密钥治理、#21 限流 | 缓存不泄露用户内容；下载抗 SSRF/大响应；主动内容不在主应用源执行 |
-| 第 4 批 | #16～#22 可靠性与运维问题、正式 migration、会话并发控制 | 清理/归档可运行；同会话并发行为确定；Redis 进度能力有真实消费者或被删除 |
-| 持续 | 属主校验测试矩阵、计费一致性测试、状态机性质测试、安全回归 | 每类新资源默认具备属主、额度、取消、审计与保留策略 |
+| 批次 | 内容 | 验收重点 | 状态 |
+|---|---|---|---|
+| 第 1 批 | #1 任务输入写越权、#2/#3 计费身份与漏计、#4/#5 属主越权、#6 工具结果丢失 | 跨用户写/读均返回 404；所有 LLM 调用记录实际模型与 usage；并行同名工具可完整恢复历史 | ✅ 全部完成 |
+| 第 2 批 | #7 生成参数/模型/多图计量、#8 取消闭环、#9 状态竞态、#10 原子配额 | 预估与结算使用同一模型解析；取消不可被成功覆盖；并发额度不超卖 | 🔶 #8/#9 完成；#7/#10 → 计费 TODO |
+| 第 3 批 | #11 缓存与资产归属、#12 vendor 下载、#13/#14 文件安全与流式下载、#15 密钥治理、#21 限流 | 缓存不泄露用户内容；下载抗 SSRF/大响应；主动内容不在主应用源执行 | ✅ 全部完成 |
+| 第 4 批 | #16～#22 可靠性与运维问题、正式 migration、会话并发控制 | 清理/归档可运行；同会话并发行为确定；Redis 进度能力有真实消费者或被删除 | ✅ 全部完成（#22 采用删除方案；migration runner 与会话租约已落地） |
+| 持续 | 属主校验测试矩阵、计费一致性测试、状态机性质测试、安全回归 | 每类新资源默认具备属主、额度、取消、审计与保留策略 | ⏳ 进行中（各修复带回归测试；系统化矩阵未建立） |
 
 ## 最终判断
 
 项目当前的问题不是单个函数质量差，而是几项横切能力尚未形成统一机制：**身份字段可信边界、属主校验、计费、任务状态和事件身份**。优先把这些机制收敛，比逐个修补表面症状更能防止同类问题复发。
 
 其中应最先处理的是：生成任务跨用户写越权、实际模型计费错误、未计量 LLM 调用、traces/ratings 读越权，以及并行工具历史丢失。完成这些后，再推进生成状态机、原子配额、文件下载安全和产品功能建设。
+
+> **2026-07-11 更新**：上一段列出的最高优先项已全部完成；生成状态机、文件下载安全、密钥治理、
+> 限流、migration runner 与会话并发租约也已落地。当前剩余主线是**计费收敛**
+> （见 [四、计费 TODO List](#四计费-todo-list)），以及架构优化中标注 ⏳/🔶 的部分
+> （AgentService 拆分、事件身份补全、属主校验中间件化、前端 reducer 化、保留/审计策略）。
