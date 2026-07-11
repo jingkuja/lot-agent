@@ -24,6 +24,8 @@ import { createUsageRoutes } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { AppConfigSchema } from "@lot-agent/core";
 import { loadLlmConfig } from "./config.js";
+import { rateLimit, clientIp } from "./middleware/rate-limit.js";
+import { RedisRateLimitStore } from "./middleware/redis-rate-limit-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
@@ -90,6 +92,42 @@ async function main() {
 
   const app = new Hono<{ Variables: { userId: string } }>();
 
+  // ── Rate limiting (report.md #21) ──────────────────────────────────────
+  // Fixed-window counters on the shared Redis connection (same one used for
+  // the model-catalog cache / session memory — see agent-service.ts `init`).
+  // A single centralized table of limits so every endpoint's quota is
+  // reviewable at a glance; store failures fail OPEN (see rate-limit.ts).
+  const rateLimitStore = new RedisRateLimitStore(service.redis);
+  const RATE_LIMITS = {
+    // Login endpoints are unauthenticated (no userId yet) — keyed by IP.
+    // /login and /token-login share one bucket: both are password/token
+    // exchange attempts against the same abuse surface.
+    login: { prefix: "rl:login", limit: 10, windowMs: 5 * 60 * 1000 },
+    // Everything below is keyed by userId (post-authMw).
+    upload: { prefix: "rl:upload", limit: 30, windowMs: 60 * 1000 },
+    // Chat send + regenerate share one bucket: both trigger an LLM turn.
+    messages: { prefix: "rl:messages", limit: 30, windowMs: 60 * 1000 },
+    // In-conversation generation + the standalone task API share one bucket:
+    // both enqueue the same billed image/video jobs.
+    generation: { prefix: "rl:generation", limit: 10, windowMs: 60 * 1000 },
+  } as const;
+  const loginRateLimit = rateLimit({ store: rateLimitStore, keyFn: clientIp, ...RATE_LIMITS.login });
+  const uploadRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.upload,
+  });
+  const messagesRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.messages,
+  });
+  const generationRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.generation,
+  });
+
   app.use("*", logger());
   app.use("*", cors({
     origin: (process.env.CORS_ORIGIN ?? "http://localhost:5173").split(","),
@@ -99,7 +137,11 @@ async function main() {
   // Public routes
   app.get("/health", (c) => c.json({ status: "ok" }));
 
-  // Auth routes — PUBLIC (no bearer token required)
+  // Auth routes — PUBLIC (no bearer token required). Rate limit mounted on
+  // the exact POST paths (method+path match) BEFORE the route below, so it
+  // runs first in the chain without touching GET /public-key, /mode, /me.
+  app.on("POST", "/api/auth/login", loginRateLimit);
+  app.on("POST", "/api/auth/token-login", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
 
   // Auth guard for all other /api/* routes
@@ -124,6 +166,15 @@ async function main() {
   app.use("/api/balance", authMw);
   app.use("/api/platform/*", authMw);
   app.use("/api/publish/*", authMw);
+
+  // userId-keyed rate limits — registered after authMw (so `userId` is set)
+  // and before the route handlers below. Exact method+path so GET/SSE-poll
+  // traffic (model list, task polling, etc.) is never limited.
+  app.on("POST", "/api/uploads", uploadRateLimit);
+  app.on("POST", "/api/conversations/:id/messages", messagesRateLimit);
+  app.on("POST", "/api/conversations/:id/regenerate", messagesRateLimit);
+  app.on("POST", "/api/conversations/:id/generations", generationRateLimit);
+  app.on("POST", "/api/tasks", generationRateLimit);
 
   // Protected API routes
   app.route("/api/conversations", createConversationRoutes(service));

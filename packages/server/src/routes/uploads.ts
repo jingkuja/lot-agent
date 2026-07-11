@@ -17,12 +17,23 @@ const ALLOWED = new Set([
 ]);
 const MAX_IMAGE = 10 * 1024 * 1024;
 const MAX_DOC = 20 * 1024 * 1024;
+// `parseBody` buffers the whole multipart body into memory before we ever
+// see a per-file size — a Content-Length precheck rejects oversized requests
+// before that read happens. 21MB leaves ~1MB of multipart boundary/header
+// overhead above the largest allowed file (MAX_DOC, 20MB).
+const MAX_UPLOAD_BODY_BYTES = 21 * 1024 * 1024;
 
 export function createUploadRoutes(service: AgentService) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.post("/", async (c) => {
     const userId = c.get("userId");
+    // Header-only precheck — missing/unparseable Content-Length falls through
+    // to the per-file size checks below, which still apply after parseBody.
+    const contentLength = Number(c.req.header("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BODY_BYTES) {
+      return c.json({ error: "payload too large" }, 413);
+    }
     const body = await c.req.parseBody();
     const file = body["file"];
     if (!(file instanceof File)) {
