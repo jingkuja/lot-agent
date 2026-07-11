@@ -56,6 +56,7 @@ import { createRedisConnection, getRedis } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { RedisSessionBackend } from "../memory/redis-session-backend.js";
 import { UsageMeter } from "../billing/meter.js";
+import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { meterLLM } from "../billing/metered-llm.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
@@ -341,9 +342,12 @@ export class AgentService {
 
     // Initialize usage meter
     // Dynamically-discovered LLM models aren't in the static registry; fall back
-    // to the catalog's pricing so their chat usage is still metered.
-    this.usageMeter = new UsageMeter(this.db, (id) =>
-      this.modelRegistry.getConfig(id) ?? catalogModelConfig(this.modelCatalog, id, "llm")
+    // to the catalog's pricing so their chat usage is still metered. Shared
+    // with the worker's UsageMeter (see workers/index.ts) so both processes
+    // resolve a given dynamic model id to the same price (#18).
+    this.usageMeter = new UsageMeter(
+      this.db,
+      makePricingLookup((id) => this.modelRegistry.getConfig(id), this.modelCatalog)
     );
 
     // Initialize service-layer collaborators

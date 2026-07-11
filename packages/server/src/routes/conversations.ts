@@ -129,7 +129,8 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "afterMessageId is required" }, 400);
     }
 
-    await service.db.deleteMessagesFromAndAfter(id, body.afterMessageId);
+    const deleted = await service.db.deleteMessagesFromAndAfter(id, body.afterMessageId);
+    if (!deleted) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
   });
 

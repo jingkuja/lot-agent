@@ -77,6 +77,22 @@ async function main() {
   const service = new AgentService(serviceConfig);
   await service.init();
 
+  // Sessions hard-expire after 7 days (session-store.ts) but expired rows are
+  // never otherwise deleted (#16) — sweep once at startup, then hourly. Runs
+  // detached from the process lifecycle (`.unref()`) and never lets a sweep
+  // failure crash the server.
+  const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+  const sweepExpiredSessions = async () => {
+    try {
+      const deleted = await service.db.deleteExpiredSessions();
+      if (deleted > 0) console.log(`Cleaned up ${deleted} expired session(s)`);
+    } catch (err) {
+      console.warn("Session cleanup failed:", err);
+    }
+  };
+  void sweepExpiredSessions();
+  setInterval(sweepExpiredSessions, SESSION_CLEANUP_INTERVAL_MS).unref();
+
   // Debug mode (DEBUG=1): seed a stable login-less user whose empty key set makes
   // every provider resolution fall through to the env LLM. externalUserId 0 is
   // reserved (real users get their id from tokenhub).

@@ -885,14 +885,25 @@ export class DB {
     return map;
   }
 
-  async deleteMessagesFromAndAfter(conversationId: string, messageId: string): Promise<void> {
-    // Delete the given message and all messages created after it
-    await this.pool.query(
+  /**
+   * Delete the given message and all messages created after it, scoped to
+   * `conversationId`. The boundary subquery is ALSO scoped to
+   * `conversationId` — otherwise a `messageId` from a different conversation
+   * would smuggle in that conversation's timestamp as the deletion boundary
+   * (deleting the caller's own messages based on someone else's message
+   * timing). Returns whether the boundary message existed in this
+   * conversation (it deletes itself too, so a hit is always >= 1 row).
+   */
+  async deleteMessagesFromAndAfter(conversationId: string, messageId: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
       `DELETE FROM messages
        WHERE conversation_id = $1
-         AND created_at >= (SELECT created_at FROM messages WHERE id = $2)`,
+         AND created_at >= (
+           SELECT created_at FROM messages WHERE id = $2 AND conversation_id = $1
+         )`,
       [conversationId, messageId]
     );
+    return (rowCount ?? 0) > 0;
   }
 
   async getRatingsForConversation(conversationId: string): Promise<Map<string, number>> {
@@ -1222,6 +1233,18 @@ export class DB {
 
   async deleteSession(token: string): Promise<void> {
     await this.pool.query("DELETE FROM sessions WHERE token_hash = $1", [sha256Hex(token)]);
+  }
+
+  /**
+   * Sweep hard-expired session rows (#16). `SessionStore.resolve` already
+   * treats an expired row as invalid via `token_hash` lookup, so these rows
+   * are pure dead weight — nothing else reads them. Sliding renewal / device
+   * management are explicitly out of scope (product decision per the review
+   * report), this is cleanup only. Returns the number of rows removed.
+   */
+  async deleteExpiredSessions(): Promise<number> {
+    const { rowCount } = await this.pool.query("DELETE FROM sessions WHERE expires_at < now()");
+    return rowCount ?? 0;
   }
 
   // ── Review Logs ──

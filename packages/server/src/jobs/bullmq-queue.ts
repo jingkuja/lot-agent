@@ -171,13 +171,12 @@ export class BullmqJobQueue implements JobQueue {
   }
 
   async updateProgress(id: string, progress: number, stage?: string): Promise<void> {
+    // #22: this used to also `this.connection.publish(...)` a progress event,
+    // but nothing in the codebase ever subscribed to it — the web client
+    // polls GET /api/tasks/:id every second instead. An authenticated event
+    // stream is a real future feature, not this dead publish call, so it was
+    // removed rather than kept "just in case".
     await this.db.updateTaskProgress(id, progress, stage);
-    // Optionally publish progress event (best-effort, non-fatal)
-    try {
-      await this.connection.publish(`task:${id}:progress`, String(progress));
-    } catch {
-      // Ignore publish failures
-    }
   }
 
   async close(): Promise<void> {

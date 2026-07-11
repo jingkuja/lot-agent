@@ -21,6 +21,7 @@ import type { ModelCatalogConfig } from "../models/catalog.js";
 import { pickGenModel } from "./gen-provider.js";
 import { lastTurn } from "../memory/last-turn.js";
 import { UsageMeter } from "../billing/meter.js";
+import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { GenCache } from "../billing/gen-cache.js";
 import { staticPrefix } from "../util/public-base.js";
 
@@ -69,7 +70,11 @@ async function main() {
   const modelMap = new Map(models.map((m) => [m.id, m]));
   const modelCatalog = rawConfig.modelCatalog;
 
-  const meter = new UsageMeter(db, (id) => modelMap.get(id));
+  // Shares the same static-then-catalog pricing resolution as the server's
+  // chat path (agent-service.ts) — otherwise a dynamic tokenhub model id
+  // (e.g. memory.extract running on the triggering turn's model) is unknown
+  // to `modelMap` and its usage silently goes unmetered (#18).
+  const meter = new UsageMeter(db, makePricingLookup((id) => modelMap.get(id), modelCatalog));
   const cache = new GenCache(conn);
 
   const genConfig = await loadGenerationConfig(ROOT);
