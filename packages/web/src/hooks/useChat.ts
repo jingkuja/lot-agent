@@ -3,7 +3,7 @@ import { api, type UploadedAttachment, type PickedFile } from "../api/client.js"
 
 export interface GenerationView {
   mediaType: "image" | "video";
-  status: "generating" | "completed" | "failed";
+  status: "generating" | "completed" | "failed" | "cancelled";
   progress?: number;
   /** Whether the provider reports intermediate progress. When false (e.g. the
    * synchronous chat-completions image provider) the UI shows a plain "生成中……"
@@ -67,17 +67,19 @@ export function useChat(
           // this, an unknown `status` falls through to the progress branch and
           // the loop polls forever instead of ever terminating. Route it through
           // the failure budget so persistent bad responses fail the generation.
-          const known = ["pending", "running", "succeeded", "failed"];
+          const known = ["pending", "running", "succeeded", "failed", "cancelled"];
           if (!t || !known.includes(t.status)) {
             throw new Error("任务状态返回格式异常");
           }
           failures = 0;
-          if (t.status === "succeeded" || t.status === "failed") {
+          if (t.status === "succeeded" || t.status === "failed" || t.status === "cancelled") {
             const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
+            const finalStatus =
+              t.status === "succeeded" ? "completed" : t.status === "cancelled" ? "cancelled" : "failed";
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === messageId
-                  ? { ...m, generation: { mediaType, status: t.status === "succeeded" ? "completed" : "failed", progress: 100, assets: out?.assets, error: t.error, taskId } }
+                  ? { ...m, generation: { mediaType, status: finalStatus, progress: 100, assets: out?.assets, error: t.error, taskId } }
                   : m
               )
             );

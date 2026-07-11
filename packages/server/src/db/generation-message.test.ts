@@ -23,4 +23,44 @@ describe("updateMessageGeneration", () => {
     expect(JSON.parse(params[1] as string)).toMatchObject({ kind: "generation" });
     expect(params.slice(2)).toEqual(["m1", "c1", "u1"]);
   });
+
+  it("only transitions messages still 'generating' — terminal states are immutable", async () => {
+    // Cache-hit race (#9): the worker can complete a generation before the
+    // route's post-enqueue write lands. That write must not drag a completed/
+    // failed/cancelled message back to 'generating' and drop its assets.
+    const db = Object.create(DB.prototype) as DB;
+    const query = vi.fn(async () => ({ rows: [] }));
+    // @ts-expect-error inject a fake pool
+    db.pool = { query };
+    await db.updateMessageGeneration(
+      "m1",
+      { status: "generating", metadata: {} },
+      { conversationId: "c1", userId: "u1" }
+    );
+    const [sql] = query.mock.calls[0];
+    expect(sql).toMatch(/m\.status = 'generating'/);
+  });
+});
+
+describe("addMessage generation status", () => {
+  it("persists the caller-provided status column on insert", async () => {
+    const db = Object.create(DB.prototype) as DB;
+    const query = vi.fn(async () => ({ rows: [] }));
+    // @ts-expect-error inject a fake pool
+    db.pool = { query };
+    await db.addMessage("m1", "c1", "assistant", "", { status: "generating" });
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toMatch(/status/);
+    expect(params).toContain("generating");
+  });
+
+  it("defaults the status column to 'completed'", async () => {
+    const db = Object.create(DB.prototype) as DB;
+    const query = vi.fn(async () => ({ rows: [] }));
+    // @ts-expect-error inject a fake pool
+    db.pool = { query };
+    await db.addMessage("m1", "c1", "user", "hi");
+    const [, params] = query.mock.calls[0];
+    expect(params).toContain("completed");
+  });
 });

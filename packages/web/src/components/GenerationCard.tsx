@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { api } from "../api/client.js";
 import type { GenerationView } from "../hooks/useChat.js";
 
 const LABELS = {
-  image: { loading: "图片生成中……", fail: "图片生成失败" },
-  video: { loading: "视频生成中……", fail: "视频生成失败" },
+  image: { loading: "图片生成中……", fail: "图片生成失败", cancelled: "图片生成已取消" },
+  video: { loading: "视频生成中……", fail: "视频生成失败", cancelled: "视频生成已取消" },
 };
 
 type Asset = { url: string; mime: string; durationSec?: number };
@@ -69,7 +70,8 @@ function MediaIcon({ mediaType }: { mediaType: "image" | "video" }) {
 }
 
 export function GenerationCard({ generation }: { generation: GenerationView }) {
-  const { mediaType, status, assets, error } = generation;
+  const { mediaType, status, assets, error, taskId } = generation;
+  const [cancelRequested, setCancelRequested] = useState(false);
 
   if (status === "completed" && assets && assets.length > 0) {
     return (
@@ -81,16 +83,34 @@ export function GenerationCard({ generation }: { generation: GenerationView }) {
     );
   }
 
+  const cancelled = status === "cancelled";
   const failed = status === "failed" || status === "completed";
-  const label = failed
-    ? LABELS[mediaType].fail
-    : generation.supportsProgress
-      ? `${mediaType === "video" ? "视频" : "图片"}生成中 ${generation.progress ?? 0}%`
-      : LABELS[mediaType].loading;
+  const generating = !failed && !cancelled;
+  const label = cancelled
+    ? LABELS[mediaType].cancelled
+    : failed
+      ? LABELS[mediaType].fail
+      : generation.supportsProgress
+        ? `${mediaType === "video" ? "视频" : "图片"}生成中 ${generation.progress ?? 0}%`
+        : LABELS[mediaType].loading;
+
+  // Fire the cancel request; the ongoing task poll observes the terminal
+  // 'cancelled' status and finalizes the card, so no local state juggling.
+  const onCancel = () => {
+    if (!taskId || cancelRequested) return;
+    setCancelRequested(true);
+    api.cancelTask(taskId).catch(() => setCancelRequested(false));
+  };
+
   return (
-    <div className={`gen-card ${mediaType} ${failed ? "gen-card--failed" : "gen-card--loading"}`} title={error ?? undefined}>
+    <div className={`gen-card ${mediaType} ${generating ? "gen-card--loading" : "gen-card--failed"}`} title={error ?? undefined}>
       <MediaIcon mediaType={mediaType} />
       <div className="gen-card-label">{label}</div>
+      {generating && taskId && (
+        <button type="button" className="gen-card-cancel" onClick={onCancel} disabled={cancelRequested}>
+          {cancelRequested ? "取消中…" : "取消"}
+        </button>
+      )}
     </div>
   );
 }

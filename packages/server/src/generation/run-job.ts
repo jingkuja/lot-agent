@@ -36,6 +36,9 @@ export interface RunJobDeps {
     /** The vendor's own task id, persisted so a restarted worker can resume polling. */
     getTaskVendorId(id: string): Promise<string | null | undefined>;
     setTaskVendorId(id: string, vendorTaskId: string): Promise<void>;
+    /** Task-row status — the cross-process cancellation channel (server writes
+     * 'cancelled', this worker observes it between polls). */
+    getTaskStatus(id: string): Promise<string | null | undefined>;
   };
   meter: { record(r: Record<string, unknown>): Promise<unknown> };
   cache: { get(k: string): Promise<unknown>; set(k: string, v: unknown): Promise<void> };
@@ -44,9 +47,20 @@ export interface RunJobDeps {
   extFor(mime: string): string;
   modelId: string;
   vendorModel: string;
+  /** In-process abort (BullMQ JobControl.signal); DB status covers cross-process. */
+  signal?: AbortSignal;
   pollIntervalMs?: number;
   maxWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
+}
+
+/** Thrown when a job observes its own cancellation; the task row is already
+ * terminal, so the queue wrapper's guarded setTaskError becomes a no-op. */
+export class JobCancelledError extends Error {
+  constructor() {
+    super("generation cancelled");
+    this.name = "JobCancelledError";
+  }
 }
 
 interface JobLike { id: string; userId: string; input: Record<string, unknown> }
@@ -84,7 +98,18 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     }
   };
 
+  // Cancellation is observed at every pause point of the job: the in-process
+  // abort signal is instant, the task row covers a cancel issued from another
+  // process (the HTTP server). Checked before spending money at the vendor
+  // and between polls, so a cancelled job stops within one poll interval
+  // instead of running out the 15-minute budget.
+  const assertNotCancelled = async () => {
+    if (deps.signal?.aborted) throw new JobCancelledError();
+    if ((await deps.db.getTaskStatus(job.id)) === "cancelled") throw new JobCancelledError();
+  };
+
   try {
+    await assertNotCancelled();
     const cacheKey = genCacheKey(`${mediaType}.generate`, {
       prompt, size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio,
       media: media?.map((m) => m.url), model: deps.vendorModel,
@@ -121,6 +146,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       if (p.status === "completed") break;
       if (p.status === "failed") throw new Error(p.error ?? "generation failed");
       if (Date.now() - start > maxWaitMs) throw new Error("generation timed out");
+      await assertNotCancelled();
       await sleep(pollIntervalMs);
       p = await deps.provider.poll(vendorTaskId);
     }
@@ -140,7 +166,11 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     await deps.updateProgress(job.id, 100);
     return out;
   } catch (err) {
-    await setMsg("failed", { error: err instanceof Error ? err.message : String(err) });
+    if (err instanceof JobCancelledError) {
+      await setMsg("cancelled", {});
+    } else {
+      await setMsg("failed", { error: err instanceof Error ? err.message : String(err) });
+    }
     throw err;
   }
 }

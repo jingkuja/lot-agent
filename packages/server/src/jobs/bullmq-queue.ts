@@ -81,7 +81,10 @@ export class BullmqJobQueue implements JobQueue {
           }
 
           const attempts = bullJob.attemptsMade + 1;
-          await this.db.markTaskRunning(taskId, attempts);
+          // A false claim means the task reached a terminal state (typically
+          // cancelled while queued) before we got here — never run the handler.
+          const claimed = await this.db.markTaskRunning(taskId, attempts);
+          if (!claimed) return;
           const row = await this.db.getTask(taskId);
           if (!row) {
             throw new Error(`Task ${taskId} not found in DB`);

@@ -71,6 +71,33 @@ export function createTaskRoutes(service: AgentService) {
     return c.json({ jobId }, 202);
   });
 
+  // POST /:id/cancel — request cancellation, ownership check. The DB task row
+  // flips to 'cancelled' immediately (state-machine-guarded, so a slower
+  // worker's success/failure can't overwrite it); the worker observes the row
+  // between polls and stops. Terminal tasks report ok:false + current status.
+  app.post("/:id/cancel", async (c) => {
+    const userId = c.get("userId");
+    const id = c.req.param("id");
+    const job = await service.jobQueue.get(id);
+    if (!job || (job as unknown as { userId?: string }).userId !== userId) {
+      return c.json({ error: "Task not found" }, 404);
+    }
+    const changed = await service.jobQueue.cancel(id);
+    if (changed) {
+      // Reflect the cancel on the linked chat message right away (a job that
+      // never starts — cancelled while queued — has no worker to do it).
+      // Ids come from the task input, which only the server writes.
+      const input = job.input as { assistantMessageId?: string; conversationId?: string };
+      if (input?.assistantMessageId && input?.conversationId) {
+        await service.db.markMessageGenerationCancelled(input.assistantMessageId, {
+          conversationId: input.conversationId,
+          userId,
+        });
+      }
+    }
+    return c.json({ ok: changed, status: changed ? "cancelled" : job.status });
+  });
+
   // GET /:id — poll task status, ownership check
   app.get("/:id", async (c) => {
     const userId = c.get("userId");

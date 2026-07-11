@@ -728,11 +728,14 @@ export class DB {
       model?: string;
       latencyMs?: number;
       metadata?: Record<string, unknown>;
+      /** Row status; generation messages are born 'generating' so no separate
+       * status write (and its race window) is needed after insert. */
+      status?: string;
     } = {}
   ): Promise<void> {
     await this.pool.query(
-      `INSERT INTO messages (id, conversation_id, role, content, tool_call_id, token_count, model, latency_ms, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO messages (id, conversation_id, role, content, tool_call_id, token_count, model, latency_ms, metadata, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         id,
         conversationId,
@@ -743,6 +746,7 @@ export class DB {
         options.model ?? null,
         options.latencyMs ?? null,
         JSON.stringify(options.metadata ?? {}),
+        options.status ?? "completed",
       ]
     );
   }
@@ -758,14 +762,41 @@ export class DB {
     patch: { status: string; metadata: Record<string, unknown> },
     owner: { conversationId: string; userId: string }
   ): Promise<void> {
+    // `m.status = 'generating'` makes the transition one-way: once a worker
+    // has written completed/failed/cancelled, a slower writer (e.g. the
+    // route's post-enqueue taskId write racing a cache-hit completion) can't
+    // drag the message back to 'generating' and drop its assets.
     await this.pool.query(
       `UPDATE messages m SET status = $1, metadata = $2
        FROM conversations c
        WHERE m.id = $3
          AND m.conversation_id = $4
          AND c.id = m.conversation_id
-         AND c.user_id = $5`,
+         AND c.user_id = $5
+         AND m.status = 'generating'`,
       [patch.status, JSON.stringify(patch.metadata), messageId, owner.conversationId, owner.userId]
+    );
+  }
+
+  /**
+   * Flip a generation message to 'cancelled' without touching the rest of its
+   * metadata (prompt/settings keep rendering the card). Same ownership scope
+   * and one-way guard as updateMessageGeneration.
+   */
+  async markMessageGenerationCancelled(
+    messageId: string,
+    owner: { conversationId: string; userId: string }
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE messages m
+       SET status = 'cancelled', metadata = m.metadata || '{"status":"cancelled"}'::jsonb
+       FROM conversations c
+       WHERE m.id = $1
+         AND m.conversation_id = $2
+         AND c.id = m.conversation_id
+         AND c.user_id = $3
+         AND m.status = 'generating'`,
+      [messageId, owner.conversationId, owner.userId]
     );
   }
 
@@ -1389,12 +1420,29 @@ export class DB {
     );
   }
 
-  /** Mark a task running and record which attempt this is (jobs v2 retries). */
-  async markTaskRunning(id: string, attempts: number): Promise<void> {
-    await this.pool.query(
-      "UPDATE tasks SET status = 'running', attempts = $2, updated_at = now() WHERE id = $1",
+  /**
+   * Mark a task running and record which attempt this is (jobs v2 retries).
+   * Guarded so a cancelled/succeeded task can't be resurrected (a cancel can
+   * race the queue handing the job to a worker); 'failed' stays claimable for
+   * BullMQ retries. Returns whether the task was actually claimed — a false
+   * means the worker must skip execution.
+   */
+  async markTaskRunning(id: string, attempts: number): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE tasks SET status = 'running', attempts = $2, updated_at = now()
+       WHERE id = $1 AND status IN ('pending','running','failed')`,
       [id, attempts]
     );
+    return (rowCount ?? 0) > 0;
+  }
+
+  /** Current status of a task row (workers poll this to observe cross-process cancellation). */
+  async getTaskStatus(id: string): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      "SELECT status FROM tasks WHERE id = $1",
+      [id]
+    );
+    return rows[0]?.status ?? null;
   }
 
   /** Cancel a task if it hasn't already reached a terminal state. Returns whether a row changed. */
@@ -1435,10 +1483,12 @@ export class DB {
     }
   }
 
+  // Success/failure only apply to live tasks: 'cancelled' (and any other
+  // terminal state) must survive a slower worker finishing after the cancel.
   async setTaskResult(id: string, output: unknown): Promise<void> {
     await this.pool.query(
       `UPDATE tasks SET output = $1, status = 'succeeded', progress = 100, updated_at = now()
-       WHERE id = $2`,
+       WHERE id = $2 AND status IN ('pending','running')`,
       [JSON.stringify(output), id]
     );
   }
@@ -1446,7 +1496,7 @@ export class DB {
   async setTaskError(id: string, error: string): Promise<void> {
     await this.pool.query(
       `UPDATE tasks SET error = $1, status = 'failed', updated_at = now()
-       WHERE id = $2`,
+       WHERE id = $2 AND status IN ('pending','running')`,
       [error, id]
     );
   }

@@ -99,7 +99,8 @@ async function main() {
   // selected model drives the actual generation and the per-model cache key.
   const genDeps = async (
     mediaType: "image" | "video",
-    job: { userId: string; input: Record<string, unknown> }
+    job: { userId: string; input: Record<string, unknown> },
+    signal?: AbortSignal
   ): Promise<RunJobDeps> => {
     const base = mediaType === "image" ? genConfig.image : genConfig.video;
     const model = pickGenModel(mediaType, job.input, base.modelId);
@@ -122,6 +123,7 @@ async function main() {
       extFor,
       modelId: base.modelId,
       vendorModel: model,
+      signal,
     };
   };
 
@@ -137,13 +139,13 @@ async function main() {
   const memAdapter = new PgMemoryAdapter(db.pool);
   await memAdapter.init();
 
-  queue.process("image.generate", async (job) => {
+  queue.process("image.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
-    return runGenerationJob(await genDeps("image", j), j, "image");
+    return runGenerationJob(await genDeps("image", j, ctl.signal), j, "image");
   });
-  queue.process("video.generate", async (job) => {
+  queue.process("video.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
-    return runGenerationJob(await genDeps("video", j), j, "video");
+    return runGenerationJob(await genDeps("video", j, ctl.signal), j, "video");
   });
 
   // Register memory.extract handler — runs a cheap LLM to pull durable user

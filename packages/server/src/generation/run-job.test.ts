@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { runGenerationJob, type RunJobDeps, type JobGenerationProvider } from "./run-job.js";
+import { runGenerationJob, JobCancelledError, type RunJobDeps, type JobGenerationProvider } from "./run-job.js";
 
 function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {}): { deps: RunJobDeps; calls: any } {
   const calls: any = { progress: [], asset: null, message: [], metered: false, cacheSet: null, vendorIdSet: null };
@@ -11,6 +11,7 @@ function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {
       updateMessageGeneration: vi.fn(async (id, patch) => { calls.message.push({ id, ...patch }); }),
       getTaskVendorId: vi.fn(async () => null),
       setTaskVendorId: vi.fn(async (_id, v) => { calls.vendorIdSet = v; }),
+      getTaskStatus: vi.fn(async () => "running"),
     },
     meter: { record: vi.fn(async () => { calls.metered = true; }) },
     cache: { get: vi.fn(async () => null), set: vi.fn(async (_k, v) => { calls.cacheSet = v; }) },
@@ -116,6 +117,46 @@ describe("runGenerationJob", () => {
     const forged = { id: "job2", userId: "u1", input: { prompt: "菊花", assistantMessageId: "victim-message" } };
     await runGenerationJob(deps, forged, "image");
     expect(deps.db.updateMessageGeneration).not.toHaveBeenCalled();
+  });
+
+  it("stops polling and marks the message cancelled when the task row is cancelled", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "processing", progress: 10 })),
+    };
+    const { deps, calls } = fakeDeps(provider, { maxWaitMs: 200 });
+    // First status check sees the cancellation written by the server process.
+    deps.db.getTaskStatus = vi.fn(async () => "cancelled");
+    await expect(runGenerationJob(deps, job, "image")).rejects.toBeInstanceOf(JobCancelledError);
+    expect(calls.message.at(-1)).toMatchObject({ id: "m1", status: "cancelled" });
+    expect(calls.metered).toBe(false);
+  });
+
+  it("stops mid-poll once the task row flips to cancelled", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "processing", progress: 10 })),
+    };
+    const { deps, calls } = fakeDeps(provider, { maxWaitMs: 200 });
+    const statuses = ["running", "cancelled"];
+    deps.db.getTaskStatus = vi.fn(async () => statuses.shift() ?? "cancelled");
+    await expect(runGenerationJob(deps, job, "image")).rejects.toBeInstanceOf(JobCancelledError);
+    expect(calls.message.at(-1)).toMatchObject({ status: "cancelled" });
+    // Polling must not continue for the full 15-minute budget after cancel.
+    expect((provider.poll as any).mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  it("honors an in-process abort signal", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "processing", progress: 10 })),
+    };
+    const controller = new AbortController();
+    controller.abort();
+    const { deps, calls } = fakeDeps(provider, { signal: controller.signal, maxWaitMs: 200 });
+    await expect(runGenerationJob(deps, job, "image")).rejects.toBeInstanceOf(JobCancelledError);
+    expect(calls.message.at(-1)).toMatchObject({ status: "cancelled" });
+    expect(provider.create).not.toHaveBeenCalled();
   });
 
   it("uses cache hit without creating/polling", async () => {

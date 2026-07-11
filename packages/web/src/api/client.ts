@@ -81,7 +81,7 @@ export interface User {
 
 export interface TaskStatus {
   id: string;
-  status: "pending" | "running" | "succeeded" | "failed";
+  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
   progress: number;
   output?: {
     assetIds?: string[];
@@ -360,6 +360,9 @@ export const api = {
     }),
 
   getTask: (id: string) => request<TaskStatus>(`/tasks/${id}`),
+
+  cancelTask: (id: string) =>
+    request<{ ok: boolean; status: string }>(`/tasks/${id}/cancel`, { method: "POST" }),
 
   // ── Assets ──────────────────────────────────────────────────────────────────
   getAsset: (id: string) => request<AssetMeta>(`/assets/${id}`),
