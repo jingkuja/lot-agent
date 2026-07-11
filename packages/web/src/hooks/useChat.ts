@@ -401,7 +401,17 @@ export function useChat(
     try {
       await api.regenerate(conversationId, lastUserMsg.dbId);
     } catch (error) {
-      console.warn("Regenerate cleanup failed:", error);
+      // Bail out here — don't touch the view or resend. `api.regenerate`
+      // failing (e.g. the run-lease 409 when another tab/device is mid-turn
+      // on this conversation) means the server deleted nothing, so slicing
+      // messages locally and re-streaming would both show a UI missing
+      // messages that still exist server-side AND immediately hit its own
+      // 409. Same "surface it, don't invent new UI" pattern as the file-
+      // upload failure alert above.
+      window.alert(
+        `重新生成失败：${error instanceof Error ? error.message : String(error)}`
+      );
+      return;
     }
 
     const lastUserIdx = messages.lastIndexOf(lastUserMsg);

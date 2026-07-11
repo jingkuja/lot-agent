@@ -11,6 +11,17 @@ type Variables = { userId: string };
 /** Server-side cap (the InputBox MAX_FILES=5 is only a client hint). */
 const MAX_ATTACHMENTS = 5;
 
+/**
+ * Run-lease staleness window (report #20 concurrency half / architecture
+ * #10). Matches the Agent's `maxRunTimeMs` default (`core/agent/agent.ts`) —
+ * a lease only needs reclaiming when its holder process crashed/hung and
+ * never reached its `finally` release, so this should never fire in the
+ * ordinary "still running" case; it's purely a dead-holder fallback.
+ */
+const RUN_LEASE_STALE_MS = 600_000;
+
+const RUN_CONFLICT_MESSAGE = "对话正在处理另一条消息，请稍候再试";
+
 /** Attachment slots accepted from the client; anything else is dropped. */
 const VALID_SLOTS = new Set(["ppt_template", "ppt_background", "content", "contract_old", "contract_new"]);
 
@@ -129,9 +140,21 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "afterMessageId is required" }, 400);
     }
 
-    const deleted = await service.db.deleteMessagesFromAndAfter(id, body.afterMessageId);
-    if (!deleted) return c.json({ error: "Not found" }, 404);
-    return c.json({ ok: true });
+    // Deleting history out from under a turn that's currently being written
+    // (another tab/device mid-stream) would race that turn's own inserts —
+    // claim the same run lease messages/:id uses so the two can't overlap.
+    const runId = randomUUID();
+    const claimed = await service.db.claimConversationRun(id, runId, RUN_LEASE_STALE_MS);
+    if (!claimed) {
+      return c.json({ error: RUN_CONFLICT_MESSAGE }, 409);
+    }
+    try {
+      const deleted = await service.db.deleteMessagesFromAndAfter(id, body.afterMessageId);
+      if (!deleted) return c.json({ error: "Not found" }, 404);
+      return c.json({ ok: true });
+    } finally {
+      await service.db.releaseConversationRun(id, runId);
+    }
   });
 
   // Send message — returns SSE stream, ownership check
@@ -172,6 +195,19 @@ export function createConversationRoutes(service: AgentService): Hono {
         kind: attachmentKind(asset.mime),
         slot: a.slot && VALID_SLOTS.has(a.slot) ? a.slot : undefined,
       });
+    }
+
+    // Claim the run lease as the last step before starting the stream — every
+    // earlier `return` above is a plain validation failure that never touched
+    // the conversation, so it doesn't need to release anything. From here on,
+    // ANY exit path (normal finish, thrown error, or the client disconnecting
+    // mid-stream — `c.req.raw.signal` aborts and `service.streamAgentResponse`'s
+    // own `for await` unwinds, see agent-service.ts) unwinds through the
+    // `finally` below, which is the one place that releases the lease.
+    const runId = randomUUID();
+    const claimed = await service.db.claimConversationRun(id, runId, RUN_LEASE_STALE_MS);
+    if (!claimed) {
+      return c.json({ error: RUN_CONFLICT_MESSAGE }, 409);
     }
 
     const encoder = new TextEncoder();
@@ -226,6 +262,16 @@ export function createConversationRoutes(service: AgentService): Hono {
             message: error instanceof Error ? error.message : String(error),
           });
         } finally {
+          // Covers every exit from the try above: normal completion, the
+          // catch branch, and a client disconnect (the AbortSignal unwinds
+          // `service.streamAgentResponse`'s for-await, which propagates here
+          // the same way a thrown error would). This is the ONLY release call
+          // for this route — nothing above can return once the lease is claimed.
+          try {
+            await service.db.releaseConversationRun(id, runId);
+          } catch (err) {
+            console.warn("[run-lease] release failed:", err);
+          }
           controller.close();
         }
       },

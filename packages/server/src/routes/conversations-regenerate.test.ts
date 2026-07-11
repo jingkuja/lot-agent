@@ -14,6 +14,11 @@ function fakeService(opts: {
         owner == null ? null : { id: "c1", user_id: owner }
       ),
       deleteMessagesFromAndAfter: vi.fn(async () => opts.deleteResult ?? true),
+      // Run-lease CAS (report #20 concurrency half) — these tests aren't
+      // about the lease itself (see conversations-run-lease.test.ts), so
+      // default to "always claims, no-op release".
+      claimConversationRun: vi.fn(async () => true),
+      releaseConversationRun: vi.fn(async () => {}),
     },
   } as any;
 }

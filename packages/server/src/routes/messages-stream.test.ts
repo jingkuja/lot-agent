@@ -14,6 +14,11 @@ function fakeService(opts?: { titleDelayMs?: number }) {
   return {
     db: {
       getConversation: vi.fn(async () => ({ id: "c1", user_id: "u1", agent_id: "general" })),
+      // Run-lease CAS (report #20 concurrency half) — not the concern of
+      // these tests (see conversations-run-lease.test.ts), default to
+      // "always claims, no-op release".
+      claimConversationRun: vi.fn(async () => true),
+      releaseConversationRun: vi.fn(async () => {}),
     },
     streamAgentResponse: vi.fn(async function* () {
       yield { type: "text", content: "请选择" };

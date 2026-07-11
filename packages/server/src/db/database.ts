@@ -363,6 +363,49 @@ export class DB {
     );
   }
 
+  /**
+   * Atomic run-lease claim (report #20 concurrency half / architecture #10).
+   * Two tabs/devices sending into the same conversation at once must not both
+   * start a turn — this is a plain CAS, not a queue: a caller that loses the
+   * race gets `false` back and the route turns that into an immediate 409,
+   * it never waits/retries.
+   *
+   * Succeeds (claims the lease) when the conversation has no active run, OR
+   * its existing lease is older than `staleMs`. The staleness branch exists
+   * purely as a crash/hang fallback for a holder process that died mid-turn
+   * without reaching its `finally`/release — a live request never needs it,
+   * since nothing refreshes `run_started_at` mid-stream. Returns whether THIS
+   * call won the claim (`false` also covers an unknown conversationId).
+   */
+  async claimConversationRun(
+    conversationId: string,
+    runId: string,
+    staleMs: number
+  ): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE conversations
+       SET active_run_id = $2, run_started_at = now()
+       WHERE id = $1
+         AND (active_run_id IS NULL OR run_started_at < now() - make_interval(secs => $3::double precision / 1000.0))`,
+      [conversationId, runId, staleMs]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Fencing release: only clears the lease when it still belongs to `runId`.
+   * Without this check, a holder that hung long enough for its lease to go
+   * stale — and get reclaimed by a newer run — would clobber that newer run's
+   * ownership when it finally reaches its own (late) release.
+   */
+  async releaseConversationRun(conversationId: string, runId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversations SET active_run_id = NULL, run_started_at = NULL
+       WHERE id = $1 AND active_run_id = $2`,
+      [conversationId, runId]
+    );
+  }
+
   // ── Messages ──
 
   async addMessage(

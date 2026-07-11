@@ -288,7 +288,15 @@ export const api = {
           return;
         }
 
-        if (!res.ok || !res.body) {
+        if (!res.ok) {
+          // Surface the server's actual reason (e.g. the run-lease 409 —
+          // "对话正在处理另一条消息，请稍候再试") instead of a generic
+          // message, same pattern as `request()`/`uploadFile` above.
+          const err = await res.json().catch(() => ({ error: "Request failed" }));
+          onEvent({ type: "error", message: err.error ?? "Request failed" });
+          return;
+        }
+        if (!res.body) {
           onEvent({ type: "error", message: "Request failed" });
           return;
         }
