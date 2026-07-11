@@ -5,6 +5,7 @@ import { logger } from "hono/logger";
 import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { staticFileHandler } from "./static-files.js";
 import { AgentService, type ServiceConfig } from "./services/agent-service.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
@@ -32,23 +33,6 @@ const ASSETS_DIR = resolve(ROOT, "data/assets");
 const DOCS_DIR = resolve(ROOT, "data/documents");
 // User-uploaded files, served at /static/uploads.
 const UPLOADS_DIR = resolve(ROOT, "data/uploads");
-
-function guessMime(name: string): string {
-  if (name.endsWith(".png")) return "image/png";
-  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-  if (name.endsWith(".svg")) return "image/svg+xml";
-  if (name.endsWith(".webp")) return "image/webp";
-  if (name.endsWith(".gif")) return "image/gif";
-  if (name.endsWith(".mp4")) return "video/mp4";
-  if (name.endsWith(".mp3")) return "audio/mpeg";
-  if (name.endsWith(".docx"))
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  if (name.endsWith(".pdf")) return "application/pdf";
-  if (name.endsWith(".md")) return "text/markdown; charset=utf-8";
-  if (name.endsWith(".html")) return "text/html; charset=utf-8";
-  if (name.endsWith(".txt")) return "text/plain; charset=utf-8";
-  return "application/octet-stream";
-}
 
 async function loadConfig(): Promise<ServiceConfig> {
   const llm = await loadLlmConfig(ROOT);
@@ -175,54 +159,13 @@ async function main() {
     });
   });
 
-  app.get("/static/assets/:filename", async (c) => {
-    const filename = c.req.param("filename");
-    if (filename.includes("/") || filename.includes("..")) {
-      return c.text("bad request", 400);
-    }
-    try {
-      const buf = await readFile(resolve(ASSETS_DIR, filename));
-      return c.body(buf, 200, { "Content-Type": guessMime(filename) });
-    } catch {
-      return c.text("not found", 404);
-    }
-  });
-
-  app.get("/static/documents/:filename", async (c) => {
-    const filename = c.req.param("filename");
-    if (filename.includes("/") || filename.includes("..")) {
-      return c.text("bad request", 400);
-    }
-    try {
-      const buf = await readFile(resolve(DOCS_DIR, filename));
-      return c.body(buf, 200, { "Content-Type": guessMime(filename) });
-    } catch {
-      return c.text("not found", 404);
-    }
-  });
-
-  app.get("/static/uploads/:filename", async (c) => {
-    const filename = c.req.param("filename");
-    if (filename.includes("/") || filename.includes("..")) {
-      return c.text("bad request", 400);
-    }
-    try {
-      const buf = await readFile(resolve(UPLOADS_DIR, filename));
-      const mime = guessMime(filename);
-      // User-controlled uploads: only let known-safe types render inline, and
-      // always send nosniff so e.g. an "evil.html" can't be sniffed/rendered as
-      // HTML and execute JS in our origin (stored XSS). Everything else is
-      // forced to download as an opaque attachment.
-      const safeInline = mime.startsWith("image/") || mime === "application/pdf";
-      return c.body(buf, 200, {
-        "Content-Type": safeInline ? mime : "application/octet-stream",
-        "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": safeInline ? "inline" : "attachment",
-      });
-    } catch {
-      return c.text("not found", 404);
-    }
-  });
+  // Static file serving is centralized in static-files.ts: streamed bodies
+  // (Range support, no full-buffer reads) and a shared content policy that
+  // isolates active content (HTML, SVG) from same-origin inline rendering —
+  // see contentPolicy() for the whitelist rationale.
+  app.get("/static/assets/:filename", staticFileHandler(ASSETS_DIR));
+  app.get("/static/documents/:filename", staticFileHandler(DOCS_DIR));
+  app.get("/static/uploads/:filename", staticFileHandler(UPLOADS_DIR));
 
   const port = Number(process.env.PORT) || 3000;
 
