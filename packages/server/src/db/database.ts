@@ -6,6 +6,7 @@ import {
   promotedSortOrder,
 } from "../agents/install-order.js";
 import { normalizeApiKeyEntries, type RawApiKeyEntry } from "../tokenhub/api-key-entry.js";
+import { SecretBox, createSecretBox, sha256Hex } from "../auth/secret-box.js";
 
 export interface Conversation {
   id: string;
@@ -191,8 +192,17 @@ const DEFAULT_CONFIG: DBConfig = {
 
 export class DB {
   readonly pool: pg.Pool;
+  private readonly secretBox: SecretBox;
 
-  constructor(config?: Partial<DBConfig>) {
+  /**
+   * `secretBox` defaults to `createSecretBox()` (reads `SECRET_MASTER_KEY`
+   * from the environment) so both the server and worker process — which
+   * construct `DB` independently but share the same env — encrypt/decrypt
+   * consistently with zero extra wiring. Tests that don't care about
+   * encryption can pass an explicit passthrough `new SecretBox(undefined)`
+   * to avoid depending on env state.
+   */
+  constructor(config?: Partial<DBConfig>, secretBox: SecretBox = createSecretBox()) {
     const cfg = { ...DEFAULT_CONFIG, ...config };
     this.pool = new pg.Pool({
       host: cfg.host,
@@ -204,6 +214,23 @@ export class DB {
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
     });
+    this.secretBox = secretBox;
+  }
+
+  /** Decrypts a user row's `api_key` / `api_keys` in place (mutates and returns `row`).
+   * Single choke point so every read path (getUserById, upsertUserByExternalId, …)
+   * returns plaintext consistently. */
+  private openUserRow<T extends { api_key?: string | null; api_keys?: unknown }>(row: T): T {
+    if (row.api_key) {
+      row.api_key = this.secretBox.open(row.api_key) as T["api_key"];
+    }
+    if (Array.isArray(row.api_keys)) {
+      row.api_keys = normalizeApiKeyEntries(row.api_keys).map((e) => ({
+        ...e,
+        apiKey: this.secretBox.open(e.apiKey),
+      })) as T["api_keys"];
+    }
+    return row;
   }
 
   /**
@@ -488,6 +515,17 @@ export class DB {
         CREATE INDEX IF NOT EXISTS idx_sessions_user  ON sessions (user_id);
       `);
 
+      // Secret-at-rest hardening (report #15): sessions are looked up by a
+      // SHA-256 digest of the token from here on; the raw token itself is no
+      // longer persisted. `token` keeps its UNIQUE constraint (Postgres treats
+      // multiple NULLs as distinct, so backfilled rows co-exist fine) but
+      // drops NOT NULL so new rows can leave it NULL. Both statements are
+      // idempotent/re-runnable.
+      await client.query(`
+        ALTER TABLE sessions ALTER COLUMN token DROP NOT NULL;
+        ALTER TABLE sessions ADD COLUMN IF NOT EXISTS token_hash TEXT;
+      `);
+
       await client.query(`
         ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id VARCHAR(100) NOT NULL DEFAULT 'default';
       `);
@@ -590,6 +628,28 @@ export class DB {
           [seedId]
         );
       }
+
+      // Backfill: hash any still-plaintext session tokens into token_hash,
+      // then null out the plaintext column. Idempotent — a row is only
+      // selected while token_hash IS NULL, so a re-run touches zero rows.
+      // Hashing happens in Node (sha256Hex), not pgcrypto, since that
+      // extension isn't guaranteed available on every box.
+      const { rows: legacySessions } = await this.pool.query(
+        "SELECT id, token FROM sessions WHERE token_hash IS NULL AND token IS NOT NULL"
+      );
+      for (const row of legacySessions) {
+        await this.pool.query(
+          "UPDATE sessions SET token_hash = $1, token = NULL WHERE id = $2",
+          [sha256Hex(row.token as string), row.id]
+        );
+      }
+
+      // Created after the backfill so a pre-existing hash collision (should
+      // never happen — sha256 of a 32-byte random token) can't block startup
+      // before the backfill itself has a chance to run.
+      await this.pool.query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions (token_hash)"
+      );
 
       console.log("Database migration complete");
       return;
@@ -1074,7 +1134,7 @@ export class DB {
       "SELECT * FROM users WHERE id = $1",
       [id]
     );
-    return rows[0] ?? null;
+    return rows[0] ? this.openUserRow(rows[0]) : null;
   }
 
   async upsertUserByExternalId(args: {
@@ -1082,16 +1142,18 @@ export class DB {
     username: string;
     apiKeys: RawApiKeyEntry[];
   }): Promise<StoredUser> {
-    const active = args.apiKeys[0]?.apiKey ?? null;
+    const activePlain = args.apiKeys[0]?.apiKey ?? null;
+    const active = activePlain ? this.secretBox.seal(activePlain) : null;
+    const sealedKeys = args.apiKeys.map((k) => ({ ...k, apiKey: this.secretBox.seal(k.apiKey) }));
     const { rows } = await this.pool.query(
       `INSERT INTO users (external_user_id, username, name, api_key, api_keys, email)
          VALUES ($1, $2, $2, $3, $4, $5)
        ON CONFLICT (external_user_id)
          DO UPDATE SET username = $2, api_key = $3, api_keys = $4
        RETURNING *`,
-      [args.externalUserId, args.username, active, JSON.stringify(args.apiKeys), `${args.username}@tokenhub.local`]
+      [args.externalUserId, args.username, active, JSON.stringify(sealedKeys), `${args.username}@tokenhub.local`]
     );
-    return rows[0];
+    return this.openUserRow(rows[0]);
   }
 
   async getUserApiKey(userId: string): Promise<string | null> {
@@ -1099,7 +1161,8 @@ export class DB {
       "SELECT api_key FROM users WHERE id = $1",
       [userId]
     );
-    return rows[0]?.api_key ?? null;
+    const raw = rows[0]?.api_key ?? null;
+    return raw ? this.secretBox.open(raw) : null;
   }
 
   async getUserApiKeys(userId: string): Promise<RawApiKeyEntry[]> {
@@ -1107,47 +1170,58 @@ export class DB {
       "SELECT api_keys FROM users WHERE id = $1",
       [userId]
     );
-    return normalizeApiKeyEntries(rows[0]?.api_keys);
+    return normalizeApiKeyEntries(rows[0]?.api_keys).map((e) => ({
+      ...e,
+      apiKey: this.secretBox.open(e.apiKey),
+    }));
   }
 
   /** Sets the single per-user active key (`users.api_key`); shared across all of that
    * account's concurrent sessions, not per-session. */
   async setActiveApiKey(userId: string, index: number): Promise<string> {
-    const keys = await this.getUserApiKeys(userId);
+    const keys = await this.getUserApiKeys(userId); // already plaintext (decrypted above)
     if (!Number.isInteger(index) || index < 0 || index >= keys.length) {
       throw new Error("index_out_of_range");
     }
     const active = keys[index].apiKey;
-    await this.pool.query("UPDATE users SET api_key = $1 WHERE id = $2", [active, userId]);
+    await this.pool.query("UPDATE users SET api_key = $1 WHERE id = $2", [
+      this.secretBox.seal(active),
+      userId,
+    ]);
     return active;
   }
 
   // ── Sessions ──
 
+  /**
+   * Stores only `sha256(token)` (see report #15) — the raw token never
+   * touches the DB. `session-store.ts` still hands us/receives the raw
+   * token; hashing is entirely internal to this class.
+   */
   async createSession(userId: string, token: string, expiresAt: Date): Promise<void> {
     await this.pool.query(
-      `INSERT INTO sessions (user_id, token, expires_at) VALUES ($1, $2, $3)`,
-      [userId, token, expiresAt.toISOString()]
+      `INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+      [userId, sha256Hex(token), expiresAt.toISOString()]
     );
   }
 
   async getSessionByToken(token: string): Promise<{ user_id: string; expires_at: string } | null> {
     const { rows } = await this.pool.query(
-      "SELECT user_id, expires_at FROM sessions WHERE token = $1",
-      [token]
+      "SELECT user_id, expires_at FROM sessions WHERE token_hash = $1",
+      [sha256Hex(token)]
     );
     return rows[0] ?? null;
   }
 
   async touchSession(token: string): Promise<void> {
     await this.pool.query(
-      "UPDATE sessions SET last_seen_at = now() WHERE token = $1",
-      [token]
+      "UPDATE sessions SET last_seen_at = now() WHERE token_hash = $1",
+      [sha256Hex(token)]
     );
   }
 
   async deleteSession(token: string): Promise<void> {
-    await this.pool.query("DELETE FROM sessions WHERE token = $1", [token]);
+    await this.pool.query("DELETE FROM sessions WHERE token_hash = $1", [sha256Hex(token)]);
   }
 
   // ── Review Logs ──
@@ -1178,7 +1252,7 @@ export class DB {
       `INSERT INTO platform_accounts (user_id, platform, access_token, expires_at)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, platform) DO UPDATE SET access_token = EXCLUDED.access_token, expires_at = EXCLUDED.expires_at`,
-      [a.userId, a.platform, a.accessToken, a.expiresAt ?? null]
+      [a.userId, a.platform, this.secretBox.seal(a.accessToken), a.expiresAt ?? null]
     );
   }
 
@@ -1187,7 +1261,8 @@ export class DB {
       "SELECT * FROM platform_accounts WHERE user_id = $1 AND platform = $2",
       [userId, platform]
     );
-    return rows[0] ?? null;
+    if (!rows[0]) return null;
+    return { ...rows[0], access_token: this.secretBox.open(rows[0].access_token) };
   }
 
   // ── Publish Records ──
