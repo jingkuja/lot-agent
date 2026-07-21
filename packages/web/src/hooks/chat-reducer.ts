@@ -1,6 +1,8 @@
 export interface GenerationView {
   mediaType: "image" | "video";
-  status: "generating" | "completed" | "failed" | "cancelled";
+  /** `download_failed`: the vendor produced the media but the server-side
+   * download of it failed — recoverable, the card offers a re-download. */
+  status: "generating" | "completed" | "failed" | "cancelled" | "download_failed";
   progress?: number;
   /** Whether the provider reports intermediate progress. When false (e.g. the
    * synchronous chat-completions image provider) the UI shows a plain "生成中……"

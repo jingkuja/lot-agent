@@ -27,6 +27,8 @@ interface ChatPanelProps {
   /** Currently selected model id for this conversation (null = agent default). */
   selectedModel?: string | null;
   onModelChange?: (id: string) => void;
+  /** Retry the download of a generation left in "下载失败". */
+  onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
 }
 
 /** 按本地时间返回问候语：早上好 / 下午好 / 晚上好。 */
@@ -50,6 +52,7 @@ export function ChatPanel({
   modelCatalog,
   selectedModel,
   onModelChange,
+  onRedownloadGeneration,
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -163,6 +166,7 @@ export function ChatPanel({
               askAnswer={askAnswer}
               askInteractive={hasInteractive && askAnswer === undefined && !isStreaming}
               failedToolNames={failedTools}
+              onRedownloadGeneration={onRedownloadGeneration}
             />
           );
         })}

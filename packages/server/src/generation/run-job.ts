@@ -67,30 +67,31 @@ export class JobCancelledError extends Error {
 
 interface JobLike { id: string; userId: string; input: Record<string, unknown> }
 type GenAssets = { url: string; mime: string; durationSec?: number }[];
-type GenOut = { assetIds: string[]; assets: GenAssets };
+/**
+ * `downloadFailed` marks the case where the vendor DID produce the media (poll
+ * returned `completed` with a url) but our local download of it failed. The
+ * generation is not a real failure — `sourceUrl` is preserved so the user can
+ * retry just the download (see `redownloadGenerationJob`) instead of paying to
+ * regenerate the whole asset.
+ */
+type GenOut = { assetIds: string[]; assets: GenAssets; downloadFailed?: boolean; sourceUrl?: string; error?: string };
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType: MediaType): Promise<GenOut> {
+/** Build the message-status writer bound to this job's owner + base metadata.
+ * Shared by the create→poll→download path and the download-only retry path so
+ * both render the same generation card (kind/mediaType/prompt/settings). */
+function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt: string) {
   const input = job.input;
-  const prompt = (input.prompt as string) ?? "";
   const assistantMessageId = input.assistantMessageId as string | undefined;
-  // Both id fields are server-injected by the generations route (the /tasks
-  // route strips them). Without the conversation id there is nothing to scope
-  // the update to, so no message write happens at all.
   const conversationId = input.conversationId as string | undefined;
-  const media = input.media as ReferenceMedia[] | undefined;
   const baseMeta = {
     kind: "generation",
     mediaType,
     prompt,
     settings: { size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio },
   };
-  const sleep = deps.sleep ?? realSleep;
-  const pollIntervalMs = deps.pollIntervalMs ?? 3000;
-  const maxWaitMs = deps.maxWaitMs ?? 15 * 60 * 1000;
-
-  const setMsg = async (status: string, extra: Record<string, unknown>) => {
+  return async (status: string, extra: Record<string, unknown>) => {
     if (assistantMessageId && conversationId) {
       await deps.db.updateMessageGeneration(
         assistantMessageId,
@@ -99,6 +100,59 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       );
     }
   };
+}
+
+/**
+ * Download the vendor's finished media into our own storage, register the
+ * asset, meter it, and flip the message to `completed`. If the download (or
+ * store) fails after the vendor already produced the media, classify it as a
+ * recoverable `download_failed` — persist `sourceUrl` on the message and return
+ * a `downloadFailed` output rather than failing the whole generation. A
+ * cancellation observed mid-download is re-raised so the caller marks the
+ * message 'cancelled'.
+ */
+async function downloadAndFinalize(
+  deps: RunJobDeps,
+  job: JobLike,
+  mediaType: MediaType,
+  sourceUrl: string,
+  cacheKey: string | null,
+  setMsg: (status: string, extra: Record<string, unknown>) => Promise<void>
+): Promise<GenOut> {
+  try {
+    const { body, mime } = await deps.urlToBytes(sourceUrl, { signal: deps.signal });
+    const assetId = randomUUID();
+    const key = `${assetId}.${deps.extFor(mime)}`;
+    const { url } = await deps.storage.put({ key, body, contentType: mime });
+    const durationSec = mediaType === "video" ? Number(job.input.durationSec ?? 5) : undefined;
+    await deps.db.createAsset({ id: assetId, taskId: job.id, userId: job.userId, type: mediaType, storageKey: key, url, mime, sizeBytes: body.byteLength, durationSec });
+    await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount: mediaType === "video" ? (durationSec ?? 1) : 1 } });
+    const assets: GenAssets = [durationSec != null ? { url, mime, durationSec } : { url, mime }];
+    const out: GenOut = { assetIds: [assetId], assets };
+    if (cacheKey) await deps.cache.set(cacheKey, out);
+    await setMsg("completed", { assets });
+    await deps.updateProgress(job.id, 100);
+    return out;
+  } catch (err) {
+    // A cancellation observed during the download is not a download failure —
+    // let the caller finalize the message as 'cancelled'.
+    if (err instanceof JobCancelledError) throw err;
+    if (deps.signal?.aborted) throw new JobCancelledError();
+    const message = err instanceof Error ? err.message : String(err);
+    await setMsg("download_failed", { sourceUrl, error: message });
+    return { assetIds: [], assets: [], downloadFailed: true, sourceUrl, error: message };
+  }
+}
+
+export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType: MediaType): Promise<GenOut> {
+  const input = job.input;
+  const prompt = (input.prompt as string) ?? "";
+  const media = input.media as ReferenceMedia[] | undefined;
+  const sleep = deps.sleep ?? realSleep;
+  const pollIntervalMs = deps.pollIntervalMs ?? 3000;
+  const maxWaitMs = deps.maxWaitMs ?? 15 * 60 * 1000;
+
+  const setMsg = makeSetMsg(deps, job, mediaType, prompt);
 
   // Cancellation is observed at every pause point of the job: the in-process
   // abort signal is instant, the task row covers a cancel issued from another
@@ -155,19 +209,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     }
     if (!p.url) throw new Error("generation completed without a url");
 
-    const { body, mime } = await deps.urlToBytes(p.url, { signal: deps.signal });
-    const assetId = randomUUID();
-    const key = `${assetId}.${deps.extFor(mime)}`;
-    const { url } = await deps.storage.put({ key, body, contentType: mime });
-    const durationSec = mediaType === "video" ? Number(input.durationSec ?? 5) : undefined;
-    await deps.db.createAsset({ id: assetId, taskId: job.id, userId: job.userId, type: mediaType, storageKey: key, url, mime, sizeBytes: body.byteLength, durationSec });
-    await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount: mediaType === "video" ? (durationSec ?? 1) : 1 } });
-    const assets: GenAssets = [durationSec != null ? { url, mime, durationSec } : { url, mime }];
-    const out: GenOut = { assetIds: [assetId], assets };
-    await deps.cache.set(cacheKey, out);
-    await setMsg("completed", { assets });
-    await deps.updateProgress(job.id, 100);
-    return out;
+    return await downloadAndFinalize(deps, job, mediaType, p.url, cacheKey, setMsg);
   } catch (err) {
     if (err instanceof JobCancelledError) {
       await setMsg("cancelled", {});
@@ -176,4 +218,25 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     }
     throw err;
   }
+}
+
+/**
+ * Retry only the download step of a generation whose vendor media already
+ * succeeded (message left in `download_failed`, `sourceUrl` re-supplied on the
+ * job input). Skips the vendor create→poll entirely: no re-billing of the
+ * generation, just a fresh attempt to pull the media into our storage. On
+ * success the message flips to `completed`; a repeated download failure leaves
+ * it `download_failed` again (retriable once more).
+ */
+export async function redownloadGenerationJob(deps: RunJobDeps, job: JobLike, mediaType: MediaType): Promise<GenOut> {
+  const input = job.input;
+  const prompt = (input.prompt as string) ?? "";
+  const sourceUrl = input.sourceUrl as string | undefined;
+  const setMsg = makeSetMsg(deps, job, mediaType, prompt);
+  if (!sourceUrl) throw new Error("redownload requires a sourceUrl");
+  if (deps.signal?.aborted) {
+    await setMsg("cancelled", {});
+    throw new JobCancelledError();
+  }
+  return await downloadAndFinalize(deps, job, mediaType, sourceUrl, null, setMsg);
 }

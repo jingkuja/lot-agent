@@ -64,3 +64,64 @@ describe("addMessage generation status", () => {
     expect(params).toContain("completed");
   });
 });
+
+describe("getGenerationMessage", () => {
+  it("scopes the read to the owning conversation + user and parses metadata", async () => {
+    const db = Object.create(DB.prototype) as DB;
+    const query = vi.fn(async () => ({
+      rows: [{ status: "download_failed", metadata: { kind: "generation", sourceUrl: "https://v/x.mp4" } }],
+    }));
+    // @ts-expect-error inject a fake pool
+    db.pool = { query };
+    const out = await db.getGenerationMessage("m1", "c1", "u1");
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toMatch(/m\.id = \$1/);
+    expect(sql).toMatch(/m\.conversation_id = \$2/);
+    expect(sql).toMatch(/c\.user_id = \$3/);
+    expect(params).toEqual(["m1", "c1", "u1"]);
+    expect(out).toMatchObject({ status: "download_failed", metadata: { sourceUrl: "https://v/x.mp4" } });
+  });
+
+  it("parses a metadata column returned as a JSON string", async () => {
+    const db = Object.create(DB.prototype) as DB;
+    const query = vi.fn(async () => ({
+      rows: [{ status: "download_failed", metadata: '{"kind":"generation","sourceUrl":"https://v/x.mp4"}' }],
+    }));
+    // @ts-expect-error inject a fake pool
+    db.pool = { query };
+    const out = await db.getGenerationMessage("m1", "c1", "u1");
+    expect(out?.metadata).toMatchObject({ kind: "generation", sourceUrl: "https://v/x.mp4" });
+  });
+
+  it("returns null when no owned row exists", async () => {
+    const db = Object.create(DB.prototype) as DB;
+    const query = vi.fn(async () => ({ rows: [] }));
+    // @ts-expect-error inject a fake pool
+    db.pool = { query };
+    expect(await db.getGenerationMessage("m1", "c1", "u1")).toBeNull();
+  });
+});
+
+describe("resetGenerationForRedownload", () => {
+  it("only reopens a 'download_failed' message back to 'generating', scoped to owner", async () => {
+    const db = Object.create(DB.prototype) as DB;
+    const query = vi.fn(async () => ({ rowCount: 1 }));
+    // @ts-expect-error inject a fake pool
+    db.pool = { query };
+    const ok = await db.resetGenerationForRedownload("m1", { conversationId: "c1", userId: "u1" });
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toMatch(/SET status = 'generating'/);
+    expect(sql).toMatch(/m\.status = 'download_failed'/);
+    expect(sql).toMatch(/c\.user_id = \$3/);
+    expect(params).toEqual(["m1", "c1", "u1"]);
+    expect(ok).toBe(true);
+  });
+
+  it("returns false when the guard matched no row (already retried / wrong state)", async () => {
+    const db = Object.create(DB.prototype) as DB;
+    const query = vi.fn(async () => ({ rowCount: 0 }));
+    // @ts-expect-error inject a fake pool
+    db.pool = { query };
+    expect(await db.resetGenerationForRedownload("m1", { conversationId: "c1", userId: "u1" })).toBe(false);
+  });
+});

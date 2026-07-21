@@ -3,8 +3,8 @@ import { api } from "../api/client.js";
 import type { GenerationView } from "../hooks/useChat.js";
 
 const LABELS = {
-  image: { loading: "图片生成中……", fail: "图片生成失败", cancelled: "图片生成已取消" },
-  video: { loading: "视频生成中……", fail: "视频生成失败", cancelled: "视频生成已取消" },
+  image: { loading: "图片生成中……", fail: "图片生成失败", cancelled: "图片生成已取消", downloadFail: "图片下载失败" },
+  video: { loading: "视频生成中……", fail: "视频生成失败", cancelled: "视频生成已取消", downloadFail: "视频下载失败" },
 };
 
 type Asset = { url: string; mime: string; durationSec?: number };
@@ -69,7 +69,17 @@ function MediaIcon({ mediaType }: { mediaType: "image" | "video" }) {
   );
 }
 
-export function GenerationCard({ generation }: { generation: GenerationView }) {
+export function GenerationCard({
+  generation,
+  messageId,
+  onRedownload,
+}: {
+  generation: GenerationView;
+  messageId?: string;
+  /** Retry only the download of a "下载失败" generation (vendor media already
+   * succeeded). Undefined disables the re-download button. */
+  onRedownload?: (messageId: string, mediaType: "image" | "video") => void;
+}) {
   const { mediaType, status, assets, error, taskId } = generation;
   const [cancelRequested, setCancelRequested] = useState(false);
 
@@ -84,15 +94,20 @@ export function GenerationCard({ generation }: { generation: GenerationView }) {
   }
 
   const cancelled = status === "cancelled";
+  // The vendor produced the media but our download of it failed — recoverable,
+  // shown distinctly from a real generation failure and offering a retry.
+  const downloadFailed = status === "download_failed";
   const failed = status === "failed" || status === "completed";
-  const generating = !failed && !cancelled;
+  const generating = !failed && !cancelled && !downloadFailed;
   const label = cancelled
     ? LABELS[mediaType].cancelled
-    : failed
-      ? LABELS[mediaType].fail
-      : generation.supportsProgress
-        ? `${mediaType === "video" ? "视频" : "图片"}生成中 ${generation.progress ?? 0}%`
-        : LABELS[mediaType].loading;
+    : downloadFailed
+      ? LABELS[mediaType].downloadFail
+      : failed
+        ? LABELS[mediaType].fail
+        : generation.supportsProgress
+          ? `${mediaType === "video" ? "视频" : "图片"}生成中 ${generation.progress ?? 0}%`
+          : LABELS[mediaType].loading;
 
   // Fire the cancel request; the ongoing task poll observes the terminal
   // 'cancelled' status and finalizes the card, so no local state juggling.
@@ -109,6 +124,11 @@ export function GenerationCard({ generation }: { generation: GenerationView }) {
       {generating && taskId && (
         <button type="button" className="gen-card-cancel" onClick={onCancel} disabled={cancelRequested}>
           {cancelRequested ? "取消中…" : "取消"}
+        </button>
+      )}
+      {downloadFailed && messageId && onRedownload && (
+        <button type="button" className="gen-card-retry" onClick={() => onRedownload(messageId, mediaType)}>
+          重新下载
         </button>
       )}
     </div>

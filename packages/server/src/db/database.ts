@@ -529,6 +529,57 @@ export class DB {
     );
   }
 
+  /**
+   * Read a generation message's status + parsed metadata, scoped to its owner.
+   * Used by the download-retry route to recover the persisted `sourceUrl`
+   * (and settings) of a generation left in 'download_failed'. Returns null if
+   * the message doesn't exist or isn't owned by `userId`.
+   */
+  async getGenerationMessage(
+    messageId: string,
+    conversationId: string,
+    userId: string
+  ): Promise<{ status: string; metadata: Record<string, unknown> } | null> {
+    const { rows } = await this.pool.query(
+      `SELECT m.status, m.metadata
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.id = $1 AND m.conversation_id = $2 AND c.user_id = $3`,
+      [messageId, conversationId, userId]
+    );
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    const metadata =
+      typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata ?? {});
+    return { status: r.status, metadata };
+  }
+
+  /**
+   * Reopen a 'download_failed' generation message for a download-only retry:
+   * flip it back to 'generating' so the retry worker's finalize (guarded on
+   * 'generating') can land 'completed'. Guarded on the current status being
+   * exactly 'download_failed' so a double-click / concurrent retry only ever
+   * enqueues one job. Returns whether the transition happened.
+   */
+  async resetGenerationForRedownload(
+    messageId: string,
+    owner: { conversationId: string; userId: string }
+  ): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE messages m
+       SET status = 'generating',
+           metadata = COALESCE(m.metadata, '{}'::jsonb) || '{"status":"generating"}'::jsonb
+       FROM conversations c
+       WHERE m.id = $1
+         AND m.conversation_id = $2
+         AND c.id = m.conversation_id
+         AND c.user_id = $3
+         AND m.status = 'download_failed'`,
+      [messageId, owner.conversationId, owner.userId]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
   async getMessages(conversationId: string): Promise<StoredMessage[]> {
     // NULLS FIRST is pure defense: every row should have a non-null seq after
     // the 0002 migration's backfill + the atomic allocation in addMessage.

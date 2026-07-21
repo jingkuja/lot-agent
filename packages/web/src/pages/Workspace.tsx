@@ -87,7 +87,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     [updateTitle, defaultAgentId]
   );
 
-  const { messages, conversationModel, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia } =
+  const { messages, conversationModel, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia, redownloadGeneration } =
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
 
   // Per-user model catalog + per-group (llm/image/video) selected models.
@@ -334,6 +334,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             isStreaming={isStreaming}
             activeConversationId={activeId}
             onRegenerate={regenerate}
+            onRedownloadGeneration={redownloadGeneration}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
             onSelectForPreview={
               openAgent?.type === "copywriting" || openAgent?.id === "copywriting"

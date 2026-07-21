@@ -14,7 +14,7 @@ import {
 } from "@lot-agent/core";
 import { loadLlmConfig } from "../config.js";
 import { loadGenerationConfig, makeImageProvider, makeVideoProvider } from "../generation/config.js";
-import { runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
+import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import type { ModelCatalogConfig } from "../models/catalog.js";
 import { pickGenModel } from "./gen-provider.js";
@@ -38,6 +38,14 @@ const storage = new LocalStorage(ASSETS_DIR, staticPrefix("/static/assets"));
 // exhaust worker memory. Sizes are generous upper bounds, not typical output.
 const IMAGE_MAX_BYTES = 30 * 1024 * 1024; // 30MB
 const VIDEO_MAX_BYTES = 300 * 1024 * 1024; // 300MB
+
+// Download time budgets. Videos are far larger than images and come off the
+// vendor's CDN over links of unknown speed, so the fetch default (120s) is
+// systematically too short for them — a completed generation would then read
+// as "download timed out". Give video a generous 5-minute budget; a failure is
+// still recoverable via the download-only retry (generation.redownload).
+const IMAGE_DOWNLOAD_TIMEOUT_MS = 120_000; // 2min
+const VIDEO_DOWNLOAD_TIMEOUT_MS = 5 * 60_000; // 5min
 
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
@@ -99,7 +107,7 @@ async function main() {
   async function urlToBytes(
     url: string,
     maxBytes: number,
-    opts: { signal?: AbortSignal } = {}
+    opts: { signal?: AbortSignal; timeoutMs?: number } = {}
   ): Promise<{ body: Buffer; mime: string }> {
     if (url.startsWith("data:")) {
       const [head, b64] = url.slice(5).split(",", 2);
@@ -114,7 +122,7 @@ async function main() {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       throw new Error(`unsupported protocol: ${parsed.protocol}`);
     }
-    return fetchPublicBinary(url, { maxBytes, signal: opts.signal });
+    return fetchPublicBinary(url, { maxBytes, signal: opts.signal, timeoutMs: opts.timeoutMs });
   }
 
   /** Map a mime to a stored-file extension. */
@@ -132,6 +140,7 @@ async function main() {
   ): Promise<RunJobDeps> => {
     const base = mediaType === "image" ? genConfig.image : genConfig.video;
     const maxBytes = mediaType === "image" ? IMAGE_MAX_BYTES : VIDEO_MAX_BYTES;
+    const downloadTimeoutMs = mediaType === "image" ? IMAGE_DOWNLOAD_TIMEOUT_MS : VIDEO_DOWNLOAD_TIMEOUT_MS;
     const model = pickGenModel(mediaType, job.input, base.modelId);
     const apiKey = (await db.getUserApiKey(job.userId)) ?? "";
     const provider = apiKey
@@ -148,7 +157,7 @@ async function main() {
       meter,
       cache,
       updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
-      urlToBytes: (url, o) => urlToBytes(url, maxBytes, o),
+      urlToBytes: (url, o) => urlToBytes(url, maxBytes, { ...o, timeoutMs: downloadTimeoutMs }),
       extFor,
       modelId: base.modelId,
       vendorModel: model,
@@ -175,6 +184,17 @@ async function main() {
   queue.process("video.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
     return runGenerationJob(await genDeps("video", j, ctl.signal), j, "video");
+  });
+
+  // Download-only retry: the vendor generation already succeeded but pulling
+  // the media into our storage failed (e.g. slow CDN → download timed out).
+  // The job carries `sourceUrl` + `mediaType`; we re-fetch that url with the
+  // owning user's deps and finalize, without re-calling / re-billing the vendor.
+  queue.process("generation.redownload", async (job, ctl) => {
+    const input = job.input as Record<string, unknown>;
+    const mediaType = input.mediaType === "image" ? "image" : "video";
+    const j = { id: job.id, userId: job.userId, input };
+    return redownloadGenerationJob(await genDeps(mediaType, j, ctl.signal), j, mediaType);
   });
 
   // Register memory.extract handler — runs a cheap LLM to pull durable user

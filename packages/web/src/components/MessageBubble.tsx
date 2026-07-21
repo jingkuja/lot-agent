@@ -22,6 +22,8 @@ interface MessageBubbleProps {
   askInteractive?: boolean;
   /** 本消息中执行失败的交互工具名（如未通过校验的 propose_outline），不渲染为卡片。 */
   failedToolNames?: string[];
+  /** 生成媒体「下载失败」时重新下载(仅重拉下载,不重新计费生成)。 */
+  onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
 }
 
 export function MessageBubble({
@@ -32,12 +34,17 @@ export function MessageBubble({
   askAnswer,
   askInteractive,
   failedToolNames,
+  onRedownloadGeneration,
 }: MessageBubbleProps) {
   if (message.generation) {
     return (
       <div className="message-wrapper message-assistant">
         <div className="message-wrapper-inner">
-          <GenerationCard generation={message.generation} />
+          <GenerationCard
+            generation={message.generation}
+            messageId={message.id}
+            onRedownload={onRedownloadGeneration}
+          />
         </div>
       </div>
     );

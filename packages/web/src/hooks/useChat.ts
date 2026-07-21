@@ -58,13 +58,30 @@ export function useChat(
           }
           failures = 0;
           if (t.status === "succeeded" || t.status === "failed" || t.status === "cancelled") {
-            const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
-            const finalStatus =
-              t.status === "succeeded" ? "completed" : t.status === "cancelled" ? "cancelled" : "failed";
+            const out = t.output;
+            // A 'succeeded' task can still carry downloadFailed: the vendor made
+            // the media but the server-side download of it failed. That's a
+            // recoverable "下载失败" state (offers re-download), not a generation
+            // failure.
+            const downloadFailed = t.status === "succeeded" && out?.downloadFailed === true;
+            const finalStatus: GenerationView["status"] = downloadFailed
+              ? "download_failed"
+              : t.status === "succeeded"
+                ? "completed"
+                : t.status === "cancelled"
+                  ? "cancelled"
+                  : "failed";
             dispatch({
               type: "generation_finished",
               messageId,
-              generation: { mediaType, status: finalStatus, progress: 100, assets: out?.assets, error: t.error, taskId },
+              generation: {
+                mediaType,
+                status: finalStatus,
+                progress: 100,
+                assets: out?.assets,
+                error: downloadFailed ? (out?.error as string | undefined) : t.error,
+                taskId,
+              },
             });
             if (genPollRef.current === token) genPollRef.current = null;
             onStreamEndRef.current?.();
@@ -435,6 +452,41 @@ export function useChat(
     [state.isStreaming, pollGeneration]
   );
 
+  // Retry only the download of a generation left in "下载失败": the vendor media
+  // already succeeded, so this re-fetches it server-side (no re-billing) and
+  // resumes polling the new task. On success the card flips to the inline media.
+  const redownloadGeneration = useCallback(
+    (messageId: string, mediaType: "image" | "video") => {
+      const cid = cidRef.current;
+      if (!cid || state.isStreaming) return;
+      dispatch({ type: "stream_started" });
+
+      if (genPollRef.current) genPollRef.current.cancelled = true;
+      const token = { cancelled: false };
+      genPollRef.current = token;
+
+      // Flip the card back to a live "生成中/下载中" state right away.
+      dispatch({ type: "generation_progress", messageId, progress: 0 });
+
+      (async () => {
+        try {
+          const res = await api.redownloadGeneration(cid, messageId);
+          if (token.cancelled) return;
+          pollGeneration(res.taskId, messageId, mediaType, token);
+        } catch (e) {
+          if (genPollRef.current === token) genPollRef.current = null;
+          const msg = e instanceof Error ? e.message : String(e);
+          dispatch({
+            type: "generation_finished",
+            messageId,
+            generation: { mediaType, status: "download_failed", error: `重新下载失败：${msg}` },
+          });
+        }
+      })();
+    },
+    [state.isStreaming, pollGeneration]
+  );
+
   const stop = useCallback(() => {
     // Stop only the conversation on screen — a concurrent stream in another
     // conversation keeps running.
@@ -464,5 +516,6 @@ export function useChat(
     clear,
     regenerate,
     generateMedia,
+    redownloadGeneration,
   };
 }

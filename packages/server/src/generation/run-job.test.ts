@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { runGenerationJob, JobCancelledError, type RunJobDeps, type JobGenerationProvider } from "./run-job.js";
+import {
+  runGenerationJob,
+  redownloadGenerationJob,
+  JobCancelledError,
+  type RunJobDeps,
+  type JobGenerationProvider,
+} from "./run-job.js";
 
 function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {}): { deps: RunJobDeps; calls: any } {
   const calls: any = { progress: [], asset: null, message: [], metered: false, cacheSet: null, vendorIdSet: null };
@@ -225,5 +231,86 @@ describe("runGenerationJob", () => {
     expect(provider.create).toHaveBeenCalledTimes(2);
     expect(callsB.asset.userId).toBe("userB");
     expect(callsB.metered).toBe(true);
+  });
+
+  it("classifies a post-completion download failure as download_failed, not failed", async () => {
+    // The vendor produced the media (poll → completed with a url) but pulling
+    // it into our storage timed out. That is recoverable: the message goes to
+    // 'download_failed' with the vendor url preserved, the job returns a
+    // downloadFailed output (does NOT throw → the task stays succeeded), and
+    // nothing is metered (no asset was stored).
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://vendor.example/out.mp4" })),
+    };
+    const { deps, calls } = fakeDeps(provider, {
+      urlToBytes: vi.fn(async () => { throw new Error("download timed out"); }),
+    });
+    const out = await runGenerationJob(deps, job, "video");
+    expect(out.downloadFailed).toBe(true);
+    expect(out.sourceUrl).toBe("https://vendor.example/out.mp4");
+    expect(out.assets).toHaveLength(0);
+    expect(calls.metered).toBe(false);
+    const last = calls.message.at(-1);
+    expect(last).toMatchObject({ id: "m1", status: "download_failed" });
+    expect(last.metadata.sourceUrl).toBe("https://vendor.example/out.mp4");
+    expect(last.metadata.error).toContain("download timed out");
+  });
+
+  it("finalizes a cancellation observed during download as cancelled, not download_failed", async () => {
+    const controller = new AbortController();
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://vendor.example/out.mp4" })),
+    };
+    const { deps, calls } = fakeDeps(provider, {
+      signal: controller.signal,
+      // The download aborts because the job was cancelled mid-flight.
+      urlToBytes: vi.fn(async () => { controller.abort(); throw new Error("aborted"); }),
+    });
+    await expect(runGenerationJob(deps, job, "video")).rejects.toBeInstanceOf(JobCancelledError);
+    expect(calls.message.at(-1)).toMatchObject({ status: "cancelled" });
+  });
+});
+
+describe("redownloadGenerationJob", () => {
+  const redlJob = {
+    id: "job1",
+    userId: "u1",
+    input: { prompt: "菊花", conversationId: "c1", assistantMessageId: "m1", sourceUrl: "https://vendor.example/out.mp4", durationSec: 5 },
+  };
+
+  it("re-fetches the source url, stores the asset, meters, and completes the message — no vendor call", async () => {
+    const provider: JobGenerationProvider = { create: vi.fn(), poll: vi.fn() };
+    const { deps, calls } = fakeDeps(provider, {
+      urlToBytes: vi.fn(async () => ({ body: Buffer.from("mp4"), mime: "video/mp4" })),
+      extFor: () => "mp4",
+    });
+    const out = await redownloadGenerationJob(deps, redlJob, "video");
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(provider.poll).not.toHaveBeenCalled();
+    expect(deps.urlToBytes).toHaveBeenCalledWith("https://vendor.example/out.mp4", { signal: undefined });
+    expect(out.assets).toHaveLength(1);
+    expect(calls.asset.userId).toBe("u1");
+    expect(calls.metered).toBe(true);
+    expect(calls.message.at(-1)).toMatchObject({ id: "m1", status: "completed" });
+  });
+
+  it("leaves the message download_failed again when the retry download fails too", async () => {
+    const provider: JobGenerationProvider = { create: vi.fn(), poll: vi.fn() };
+    const { deps, calls } = fakeDeps(provider, {
+      urlToBytes: vi.fn(async () => { throw new Error("download timed out"); }),
+    });
+    const out = await redownloadGenerationJob(deps, redlJob, "video");
+    expect(out.downloadFailed).toBe(true);
+    expect(calls.metered).toBe(false);
+    expect(calls.message.at(-1)).toMatchObject({ id: "m1", status: "download_failed" });
+  });
+
+  it("throws when no sourceUrl is supplied", async () => {
+    const provider: JobGenerationProvider = { create: vi.fn(), poll: vi.fn() };
+    const { deps } = fakeDeps(provider);
+    const bad = { id: "job1", userId: "u1", input: { prompt: "x", conversationId: "c1", assistantMessageId: "m1" } };
+    await expect(redownloadGenerationJob(deps, bad, "video")).rejects.toThrow(/sourceUrl/);
   });
 });

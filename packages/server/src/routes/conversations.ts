@@ -395,5 +395,47 @@ export function createGenerationRoutes(service: AgentService) {
     );
   });
 
+  // POST /:id/generations/:messageId/redownload — retry ONLY the download of a
+  // generation whose vendor media succeeded but whose local download failed
+  // (message left in 'download_failed' with a persisted sourceUrl). Re-fetches
+  // that url without re-calling / re-billing the vendor. Reopens the message
+  // and enqueues a `generation.redownload` job; returns the new taskId to poll.
+  app.post("/:id/generations/:messageId/redownload", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    const metaStatus = (meta.status as string | undefined) ?? msg.status;
+    const sourceUrl = meta.sourceUrl as string | undefined;
+    if (meta.kind !== "generation" || metaStatus !== "download_failed" || !sourceUrl) {
+      return c.json({ error: "No failed download to retry" }, 409);
+    }
+    const mediaType = meta.mediaType === "image" ? "image" : "video";
+    const settings = (meta.settings as Record<string, unknown> | undefined) ?? {};
+    const prompt = (meta.prompt as string | undefined) ?? "";
+
+    // Reopen before enqueuing (guarded on the 'download_failed' status) so a
+    // double-click / concurrent retry only ever spawns one job.
+    const reopened = await service.db.resetGenerationForRedownload(messageId, { conversationId, userId });
+    if (!reopened) return c.json({ error: "Retry already in progress" }, 409);
+
+    // Identity fields spread LAST so nothing stored in settings can override them.
+    const taskId = await service.jobQueue.enqueue(
+      "generation.redownload",
+      { ...settings, mediaType, sourceUrl, prompt, conversationId, assistantMessageId: messageId },
+      userId
+    );
+    const metadata = { kind: "generation", mediaType, prompt, settings, status: "generating", taskId };
+    await service.db.updateMessageGeneration(
+      messageId,
+      { status: "generating", metadata },
+      { conversationId, userId }
+    );
+    return c.json({ taskId }, 202);
+  });
+
   return app;
 }

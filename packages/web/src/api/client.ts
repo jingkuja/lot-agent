@@ -87,6 +87,10 @@ export interface TaskStatus {
     assetIds?: string[];
     assets?: { url: string; mime: string; durationSec?: number }[];
     url?: string;
+    /** Vendor generation succeeded but the server-side download of the media
+     * failed; `sourceUrl` is the vendor url to retry the download from. */
+    downloadFailed?: boolean;
+    sourceUrl?: string;
     [key: string]: unknown;
   };
   error?: string;
@@ -359,6 +363,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  // Retry only the download of a generation whose vendor media succeeded but
+  // whose server-side download failed (card in "下载失败" state). Returns the
+  // new taskId to poll.
+  redownloadGeneration: (conversationId: string, messageId: string) =>
+    request<{ taskId: string }>(
+      `/conversations/${conversationId}/generations/${messageId}/redownload`,
+      { method: "POST" }
+    ),
 
   // ── Tasks ───────────────────────────────────────────────────────────────────
   createTask: (type: "image.generate" | "video.generate", input: unknown) =>
