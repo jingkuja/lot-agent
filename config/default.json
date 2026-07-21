@@ -23,15 +23,11 @@
     "mock": false,
     "adapter": "happyhorse",
     "image": { "model": "gpt-image-2-token", "modelId": "gpt-image-2-token", "adapter": "chat-completions" },
-    "video": { "model": "happyhorse-1.0-t2v", "modelId": "kling-standard" }
+    "video": { "model": "doubao-seedance-2.0", "modelId": "kling-standard", "adapter": "openai-video" }
   },
   "modelCatalog": {
-    "defaultProvider": { "llm": "openai", "image": "chat-completions", "video": "happyhorse" },
+    "defaultProvider": { "llm": "openai", "image": "chat-completions", "video": "openai-video" },
     "providerMap": {
-      "happyhorse-1.0-t2v": "happyhorse",
-      "doubao-seedance-2.0": "happyhorse",
-      "veo2": "happyhorse",
-      "veo3.1": "happyhorse",
       "gemini-2.5-flash-image": "chat-completions",
       "gpt-image-2": "chat-completions",
       "gpt-image-2-token": "chat-completions",

@@ -56,16 +56,17 @@ describe("runGenerationJob", () => {
     expect(calls.message.at(-1)).toMatchObject({ id: "m1", status: "failed" });
   });
 
-  it("marks message failed and rethrows when create itself throws (e.g. HTTP 500 from the vendor)", async () => {
+  it("marks the message failed and preserves the create response for the UI tooltip", async () => {
+    const rawResponse = '{"id":"task_1","object":"video","status":"queued","progress":0}';
     const provider: JobGenerationProvider = {
-      create: vi.fn(async () => { throw new Error("当前账号处未订购seedance2.0模型资费包"); }),
+      create: vi.fn(async () => { throw new Error(`未返回任务ID：${rawResponse}`); }),
       poll: vi.fn(),
     };
     const { deps, calls } = fakeDeps(provider);
-    await expect(runGenerationJob(deps, job, "video")).rejects.toThrow(/未订购seedance2\.0/);
+    await expect(runGenerationJob(deps, job, "video")).rejects.toThrow(rawResponse);
     expect(provider.poll).not.toHaveBeenCalled();
     expect(calls.message.at(-1)).toMatchObject({ id: "m1", status: "failed" });
-    expect(calls.message.at(-1).metadata.error).toContain("未订购seedance2.0");
+    expect(calls.message.at(-1).metadata.error).toContain(rawResponse);
   });
 
   it("persists the vendor task id after create, then polls with it", async () => {

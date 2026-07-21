@@ -10,7 +10,9 @@
  */
 const SETTING_TYPES: Record<"image" | "video", Record<string, "string" | "number">> = {
   image: { size: "string", n: "number" },
-  video: { durationSec: "number", ratio: "string" },
+  // `size` (WxH) is required by the openai-video `/videos` endpoint; `ratio` is
+  // kept for metadata/back-compat though the openai-video adapter no longer sends it.
+  video: { size: "string", durationSec: "number", ratio: "string" },
 };
 
 export function pickGenerationSettings(

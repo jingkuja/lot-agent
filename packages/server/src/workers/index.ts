@@ -7,7 +7,6 @@ import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { LocalStorage, fetchPublicBinary } from "@lot-agent/core";
 import type { ModelConfig } from "@lot-agent/core";
 import {
-  createLLMProvider,
   PgMemoryAdapter,
   buildExtractionMessages,
   parseExtraction,
@@ -24,6 +23,7 @@ import { UsageMeter } from "../billing/meter.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { GenCache } from "../billing/gen-cache.js";
 import { staticPrefix } from "../util/public-base.js";
+import { createOptionalFallbackLLM } from "./fallback-llm.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
@@ -162,7 +162,7 @@ async function main() {
   // back to the env-configured LLM only when either is unavailable (e.g. a
   // user without a tokenhub key, or an older queued job with no modelId).
   const llmConfig = await loadLlmConfig(ROOT);
-  const fallbackExtractLlm = createLLMProvider(llmConfig);
+  const fallbackExtractLlm = createOptionalFallbackLLM(llmConfig);
   const fallbackExtractModelId =
     llmConfig.default === "openai" ? llmConfig.openai.model : llmConfig.anthropic.model;
   const memAdapter = new PgMemoryAdapter(db.pool);
@@ -193,8 +193,18 @@ async function main() {
     const existing = await memAdapter.list(userId);
 
     const apiKey = await db.getUserApiKey(userId);
-    const extractLlm = apiKey && modelId ? providerFactory.llm(modelId, apiKey) : fallbackExtractLlm;
+    const extractLlm =
+      apiKey && modelId
+        ? providerFactory.llm(modelId, apiKey)
+        : fallbackExtractLlm;
     const extractModelId = apiKey && modelId ? modelId : fallbackExtractModelId;
+    if (!extractLlm) {
+      console.warn(
+        `[memory.extract] skipped task ${job.id}: no user or fallback LLM API key`
+      );
+      await queue.updateProgress(job.id, 100);
+      return { upserts: 0, deletes: 0 };
+    }
 
     let raw = "";
     let inputTokens = 0;

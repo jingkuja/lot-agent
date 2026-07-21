@@ -57,17 +57,32 @@ describe("HttpGenerationClient.create", () => {
     // as a failure carrying the vendor message — not a queued task with an empty id.
     const fetchMock = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ code: "fail_to_fetch_task", message: '{"error":{"message":"当前账号处未订购seedance2.0模型资费包"}}', data: null }),
+      text: async () => JSON.stringify({ code: "fail_to_fetch_task", message: '{"error":{"message":"当前账号处未订购seedance2.0模型资费包"}}', data: null }),
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
     await expect(c.create({})).rejects.toThrow(/未订购seedance2\.0/);
   });
   it("returns the task when a create response carries a task id", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ task_id: "task_1", status: "queued" }) }));
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => JSON.stringify({ task_id: "task_1", status: "queued" }) }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
     expect(await c.create({})).toEqual({ taskId: "task_1", status: "queued", progress: 0 });
+  });
+  it("carries the RAW response body in the error when no task id comes back", async () => {
+    // A 200 body with no task_id and no vendor error envelope must still fail —
+    // and the thrown error must contain the raw payload so the UI shows it on hover.
+    const rawBody = JSON.stringify({ object: "video", status: "queued", progress: 0 });
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => rawBody }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
+    await expect(c.create({})).rejects.toThrow(rawBody);
+  });
+  it("fails with the raw text when a 2xx body is not JSON", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => "<html>gateway hiccup</html>" }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
+    await expect(c.create({})).rejects.toThrow(/gateway hiccup/);
   });
 });
 

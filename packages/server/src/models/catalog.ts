@@ -16,10 +16,13 @@ export interface ModelCatalogConfig {
   defaultPricing: Record<string, Pricing>;
 }
 
-/** LLM always uses its default provider (openai-compatible). Image/video look up
- * the per-model providerMap, then fall back to the per-type default. */
+/** LLM and video always use their per-type default provider (all video models
+ * route through the same tokenhub `/videos` endpoint, so per-model matching is
+ * meaningless and would break for dynamic agent-market models not in the map).
+ * Only image still looks up the per-model providerMap before its default. */
 export function resolveProvider(cfg: ModelCatalogConfig, id: string, type: string): string {
   if (type === "llm") return cfg.defaultProvider.llm;
+  if (type === "video") return cfg.defaultProvider.video ?? cfg.defaultProvider.llm;
   return cfg.providerMap[id] ?? cfg.defaultProvider[type] ?? cfg.defaultProvider.llm;
 }
 

@@ -45,7 +45,7 @@ describe("HappyhorseImageAdapter", () => {
 describe("HttpImageGenerationProvider", () => {
   afterEach(() => vi.restoreAllMocks());
   it("create POSTs the image create path with adapter body + Bearer", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ task_id: "task_1", status: "queued", progress: 0 }) }));
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => JSON.stringify({ task_id: "task_1", status: "queued", progress: 0 }) }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const p = new HttpImageGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseImageAdapter(), model: "im" });
     const r = await p.create({ prompt: "hi" });

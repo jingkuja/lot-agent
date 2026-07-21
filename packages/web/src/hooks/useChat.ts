@@ -1,5 +1,6 @@
 import { useReducer, useCallback, useRef } from "react";
 import { api, type UploadedAttachment, type PickedFile } from "../api/client.js";
+import { randomId } from "../lib/uuid.js";
 import {
   chatReducer,
   initialChatState,
@@ -209,7 +210,7 @@ export function useChat(
         }
 
         const userMsg: DisplayMessage = {
-          id: `user-${crypto.randomUUID()}`,
+          id: `user-${randomId()}`,
           role: "user",
           content,
           attachments: uploaded,
@@ -222,7 +223,7 @@ export function useChat(
         // full accumulated message re-attaches on the first event after the
         // user switches back.
         let assistantMsg: DisplayMessage = {
-          id: `assistant-${crypto.randomUUID()}`,
+          id: `assistant-${randomId()}`,
           role: "assistant",
           content: "",
           isStreaming: true,
@@ -277,7 +278,7 @@ export function useChat(
             dispatch({
               type: "tool_result_appended",
               assistantId: assistantMsg.id,
-              cardId: `tool-result-${event.toolCallId ?? crypto.randomUUID()}-${event.name}`,
+              cardId: `tool-result-${event.toolCallId ?? randomId()}-${event.name}`,
               name: event.name ?? "",
               output: event.output ?? "",
               isError: event.isError ?? false,
@@ -285,7 +286,7 @@ export function useChat(
 
           // Reset for next LLM iteration (new assistant message)
           assistantMsg = {
-            id: `assistant-${crypto.randomUUID()}`,
+            id: `assistant-${randomId()}`,
             role: "assistant",
             content: "",
             isStreaming: true,
@@ -379,8 +380,8 @@ export function useChat(
       // user sees "图片/视频生成中" right away instead of a stuck input box.
       // The placeholders are reconciled with server ids once /generations returns
       // (or flipped to "failed" if the request errors).
-      const tempUserId = `user-${crypto.randomUUID()}`;
-      const tempGenId = `assistant-${crypto.randomUUID()}`;
+      const tempUserId = `user-${randomId()}`;
+      const tempGenId = `assistant-${randomId()}`;
       dispatch({
         type: "generation_pair_appended",
         userMessage: { id: tempUserId, role: "user", content: prompt },

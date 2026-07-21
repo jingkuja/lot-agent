@@ -78,6 +78,40 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
   }
 }
 
+/**
+ * tokenhub OpenAI-compatible video format: `POST /videos` create, `GET
+ * /videos/{id}` poll. The create body uses `seconds` (a string) + `size` where
+ * happyhorse used `duration` + `ratio`; the async task envelope (task_id/status/
+ * progress, `metadata.url` on completion) and error handling are identical, so
+ * only the create path + body diverge — everything else is reused.
+ */
+export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
+  override createPath(): string {
+    return "/videos";
+  }
+  override buildCreateBody(req: VideoGenerationRequest, model: string): unknown {
+    const body: Record<string, unknown> = { model, prompt: req.prompt };
+    if (req.durationSec != null) body.seconds = String(req.durationSec);
+    if (req.size) body.size = req.size;
+    // The openai-video endpoint takes a single reference image as
+    // `input_reference` (a url), not happyhorse's `media` array — the UI allows
+    // only one. Use the first reference image if present.
+    const ref = req.media?.find((m) => m.type === "reference_image");
+    if (ref) body.input_reference = ref.url;
+    return body;
+  }
+  override parseCreate(json: unknown): CreateResult {
+    const j = (json ?? {}) as Record<string, unknown>;
+    return {
+      // `/v1/videos` only accepts `task_id` as the pollable task identifier.
+      // An id-only response is a malformed create result, not a success.
+      taskId: typeof j.task_id === "string" ? j.task_id : "",
+      status: String(j.status ?? "queued"),
+      progress: Number(j.progress ?? 0),
+    };
+  }
+}
+
 export class HttpVideoGenerationProvider
   extends HttpGenerationClient<VideoGenerationRequest>
   implements VideoGenerationProvider {}
@@ -93,6 +127,7 @@ export class MockVideoGenerationProvider
 
 export const VIDEO_ADAPTERS: Record<string, () => VideoVendorAdapter> = {
   happyhorse: () => new HappyhorseVideoAdapter(),
+  "openai-video": () => new OpenaiVideoAdapter(),
 };
 export function pickVideoAdapter(name: string): VideoVendorAdapter {
   return (VIDEO_ADAPTERS[name] ?? VIDEO_ADAPTERS.happyhorse)();

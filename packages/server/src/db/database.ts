@@ -502,6 +502,33 @@ export class DB {
     );
   }
 
+  /**
+   * Flip a generation message to 'failed' with an error, merging into (not
+   * replacing) the existing metadata so the card's kind/mediaType/prompt keep
+   * rendering and the error shows on hover. Same ownership scope and one-way
+   * ('generating' only) guard as markMessageGenerationCancelled. Used by the
+   * stale-task reaper when a job is never claimed by a worker.
+   */
+  async markMessageGenerationFailed(
+    messageId: string,
+    error: string,
+    owner: { conversationId: string; userId: string }
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE messages m
+       SET status = 'failed',
+           metadata = COALESCE(m.metadata, '{}'::jsonb)
+             || jsonb_build_object('status', 'failed', 'error', $4::text)
+       FROM conversations c
+       WHERE m.id = $1
+         AND m.conversation_id = $2
+         AND c.id = m.conversation_id
+         AND c.user_id = $3
+         AND m.status = 'generating'`,
+      [messageId, owner.conversationId, owner.userId, error]
+    );
+  }
+
   async getMessages(conversationId: string): Promise<StoredMessage[]> {
     // NULLS FIRST is pure defense: every row should have a non-null seq after
     // the 0002 migration's backfill + the atomic allocation in addMessage.
@@ -1209,6 +1236,26 @@ export class DB {
       [id]
     );
     return rows[0]?.vendor_task_id ?? null;
+  }
+
+  /**
+   * Fail generation tasks that were enqueued but **never claimed** by a worker
+   * (`status = 'pending'` with `attempts = 0`) and are older than `staleMs`.
+   * This is the safety net for a down/misconfigured worker (crashed on startup,
+   * wrong Redis DB, not running): without it such tasks — and the "生成中" cards
+   * bound to them — hang forever. `attempts = 0` scopes it to jobs a worker
+   * never even started, so an in-flight (running) or retrying job is untouched.
+   * Returns the failed rows so the caller can also fail the linked message.
+   */
+  async failStalePendingTasks(staleMs: number, error: string): Promise<StoredTask[]> {
+    const { rows } = await this.pool.query(
+      `UPDATE tasks SET status = 'failed', error = $2, updated_at = now()
+       WHERE status = 'pending' AND attempts = 0
+         AND created_at < now() - make_interval(secs => $1::double precision / 1000)
+       RETURNING *`,
+      [staleMs, error]
+    );
+    return rows as StoredTask[];
   }
 
   async setTaskVendorId(id: string, vendorTaskId: string): Promise<void> {

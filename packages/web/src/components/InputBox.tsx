@@ -56,6 +56,9 @@ export function InputBox({
   const [files, setFiles] = useState<File[]>([]);
   // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
   const mediaMode = mode === "image" || mode === "video";
+  // 视频生成的「参考图」上游只接受一张(input_reference),因此视频模式下限制为 1;
+  // 图片生成仍可传多张参考图。
+  const maxFiles = mode === "video" ? 1 : MAX_FILES;
   const pptMode = mode === "ppt";
   const contractMode = mode === "contract";
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -89,7 +92,7 @@ export function InputBox({
     setFiles((prev) => {
       const next = [...prev];
       for (const f of incoming) {
-        if (next.length >= MAX_FILES) break;
+        if (next.length >= maxFiles) break;
         next.push(f);
       }
       return next;
@@ -101,7 +104,7 @@ export function InputBox({
         urlsRef.current.set(f, URL.createObjectURL(f));
       }
     }
-  }, []);
+  }, [maxFiles]);
 
   const removeFile = useCallback((idx: number) => {
     setFiles((prev) => {
@@ -249,7 +252,7 @@ export function InputBox({
         <input
           ref={fileInputRef}
           type="file"
-          multiple
+          multiple={maxFiles > 1}
           accept={mediaMode ? "image/*" : pptMode ? ACCEPT_CONTENT : ACCEPT}
           style={{ display: "none" }}
           onChange={(e) => {
@@ -308,7 +311,7 @@ export function InputBox({
               type="button"
               className="btn-reference"
               onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || files.length >= MAX_FILES}
+              disabled={disabled || files.length >= maxFiles}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="14" height="14" rx="2.5" />

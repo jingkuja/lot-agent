@@ -13,14 +13,15 @@ describe("pickGenerationSettings", () => {
     ).toEqual({ size: "1024x1024", n: 2 });
   });
 
-  it("keeps only the video whitelist (durationSec, ratio)", () => {
+  it("keeps the video whitelist (size, durationSec, ratio)", () => {
     expect(
       pickGenerationSettings("video", {
         durationSec: 5,
         ratio: "16:9",
-        size: "1024x1024", // image-only — dropped for video
+        size: "720x1280", // required by the openai-video endpoint
+        n: 3, // image-only — dropped for video
       })
-    ).toEqual({ durationSec: 5, ratio: "16:9" });
+    ).toEqual({ size: "720x1280", durationSec: 5, ratio: "16:9" });
   });
 
   it("drops server identity fields no matter what the client sends", () => {

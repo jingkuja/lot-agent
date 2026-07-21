@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { resolveProvider, resolvePricing, enrichCatalog, type ModelCatalogConfig } from "./catalog.js";
 
 const cfg: ModelCatalogConfig = {
-  defaultProvider: { llm: "openai", image: "chat-completions", video: "happyhorse" },
+  defaultProvider: { llm: "openai", image: "chat-completions", video: "openai-video" },
+  // the "veo3.1" video entry exists to prove video resolution IGNORES providerMap.
   providerMap: { "veo3.1": "happyhorse", "gpt-image-2-token": "chat-completions" },
   pricing: { "gpt-image-2-token": { inputPrice: 0, outputPrice: 0, unitPrice: 0.04 } },
   defaultPricing: {
@@ -16,8 +17,14 @@ describe("catalog resolvers", () => {
   it("llm always resolves to the llm default provider", () => {
     expect(resolveProvider(cfg, "any-unknown-llm", "llm")).toBe("openai");
   });
-  it("image/video use providerMap then per-type default", () => {
-    expect(resolveProvider(cfg, "veo3.1", "video")).toBe("happyhorse");
+  it("video always resolves to the video default, ignoring providerMap", () => {
+    // veo3.1 is mapped to happyhorse in providerMap, but video ignores the map —
+    // every video model routes through the single defaultProvider.video.
+    expect(resolveProvider(cfg, "veo3.1", "video")).toBe("openai-video");
+    expect(resolveProvider(cfg, "any-dynamic-video", "video")).toBe("openai-video");
+  });
+  it("image uses providerMap then per-type default", () => {
+    expect(resolveProvider(cfg, "gpt-image-2-token", "image")).toBe("chat-completions");
     expect(resolveProvider(cfg, "unknown-image", "image")).toBe("chat-completions");
   });
   it("pricing uses the table then falls back to per-type default", () => {
@@ -27,6 +34,6 @@ describe("catalog resolvers", () => {
   it("enrichCatalog builds three typed buckets", () => {
     const out = enrichCatalog(cfg, { llm: ["gpt-5.4"], image: ["gpt-image-2-token"], video: ["veo3.1"] });
     expect(out.llm[0]).toEqual({ id: "gpt-5.4", type: "llm", provider: "openai", pricing: cfg.defaultPricing.llm });
-    expect(out.video[0].provider).toBe("happyhorse");
+    expect(out.video[0].provider).toBe("openai-video");
   });
 });
