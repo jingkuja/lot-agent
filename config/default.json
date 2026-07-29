@@ -3,7 +3,7 @@
     "default": "openai",
     "openai": {
       "apiKey": "",
-      "baseUrl": "https://tokenhub.todoucloud.com/v1",
+      "baseUrl": "https://tokenhub.wetok.ai/v1",
       "model": "deepseek-v4-flash"
     },
     "anthropic": {
@@ -19,7 +19,7 @@
     { "id": "kling-standard", "type": "video", "provider": "kling", "billingUnit": "second", "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.5, "enabled": true }
   ],
   "generation": {
-    "baseUrl": "https://tokenhub.todoucloud.com/v1",
+    "baseUrl": "https://tokenhub.wetok.ai/v1",
     "mock": false,
     "adapter": "happyhorse",
     "image": { "model": "gpt-image-2-token", "modelId": "gpt-image-2-token", "adapter": "chat-completions" },

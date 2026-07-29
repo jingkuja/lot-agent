@@ -123,19 +123,11 @@ export interface UploadedAttachment {
 }
 
 // ── Token management ──────────────────────────────────────────────────────────
-const TOKEN_KEY = "lot_token";
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-}
+// Delegated to token-store so the desktop shell can back it with the OS secure
+// storage while the browser keeps using localStorage. Re-exported here because
+// App.tsx / Login.tsx historically import them from the API client.
+import { clearToken, getToken, setToken } from "../lib/token-store.js";
+export { getToken, setToken, clearToken };
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 const BASE = "/api";

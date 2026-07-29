@@ -31,3 +31,20 @@ export function storeTheme(theme: Theme): void {
 export function applyTheme(theme: Theme): void {
   document.documentElement.setAttribute("data-theme", theme);
 }
+
+/**
+ * Flip light ↔ dark from outside React (e.g. the desktop Cmd/Ctrl+Shift+T
+ * shortcut). Persists + applies the new theme, then notifies every mounted
+ * `useTheme` consumer so their state re-syncs.
+ */
+export function toggleTheme(): void {
+  const next: Theme = getStoredTheme() === "dark" ? "light" : "dark";
+  storeTheme(next);
+  applyTheme(next);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(THEME_SYNC_EVENT));
+  }
+}
+
+/** Window event `useTheme` listens to for externally-triggered theme changes. */
+export const THEME_SYNC_EVENT = "lot:theme-sync";

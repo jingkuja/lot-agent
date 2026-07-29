@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from "react";
 import { Login } from "./components/Login.js";
 import { Workspace } from "./pages/Workspace.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
+import { Titlebar } from "./components/Titlebar.js";
+import { DownloadToast } from "./components/DownloadToast.js";
 import { api, getToken, setToken, clearToken, type User } from "./api/client.js";
 import { readTokenFromUrl, stripTokenFromUrl } from "./lib/url-token.js";
 import "./App.css";
@@ -99,9 +101,11 @@ export default function App() {
   }
 
   return (
-    <>
+    <div className="app-shell">
+      <Titlebar />
       {content}
       <ThemeToggle />
-    </>
+      <DownloadToast />
+    </div>
   );
 }

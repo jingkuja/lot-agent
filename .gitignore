@@ -19,3 +19,4 @@ config/*.tmp
 .DS_Store
 *.db
 *.log
+packages/desktop/release/

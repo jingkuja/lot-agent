@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, setToken, type User } from "../api/client.js";
 import { encryptPassword } from "../lib/rsa.js";
+import { ServerSettingsModal } from "./ServerSettingsModal.js";
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -15,6 +16,12 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(initialError);
   const [loading, setLoading] = useState(false);
+  // Desktop shell: server endpoint is configurable via the bridge.
+  const desktop = typeof window !== "undefined" ? window.lotDesktop : undefined;
+  const [serverModalOpen, setServerModalOpen] = useState(false);
+  const [serverUrl, setServerUrl] = useState<string | null>(() =>
+    desktop ? desktop.getServerUrl() : null
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,7 +83,25 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
             {loading ? "登录中..." : "进入"}
           </button>
         </form>
+        {desktop && (
+          <button
+            type="button"
+            className="login-server-link"
+            onClick={() => setServerModalOpen(true)}
+          >
+            服务器设置{serverUrl ? `（${serverUrl}）` : ""}
+          </button>
+        )}
       </div>
+      {serverModalOpen && desktop && (
+        <ServerSettingsModal
+          onClose={() => {
+            setServerModalOpen(false);
+            // Refresh the displayed url after a successful save.
+            setServerUrl(desktop.getServerUrl());
+          }}
+        />
+      )}
     </div>
   );
 }

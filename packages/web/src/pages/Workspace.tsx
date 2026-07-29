@@ -11,6 +11,7 @@ import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
 import { useModels } from "../hooks/useModels.js";
+import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveLlmSelection } from "../lib/model-defaults.js";
@@ -165,6 +166,13 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     },
     [setActiveId, clear]
   );
+
+  // Desktop shortcuts: Cmd/Ctrl+N opens a fresh chat for the agent currently
+  // on screen; Cmd/Ctrl+, opens the key settings modal. No-op in browsers.
+  useDesktopShortcuts({
+    onNewChat: () => handleStartNewChat(openAgentId),
+    onOpenSettings: () => setKeyModalOpen(true),
+  });
 
   const handlePickOverflow = useCallback(
     async (agentId: string) => {

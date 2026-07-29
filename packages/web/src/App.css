@@ -1521,6 +1521,71 @@ html, body, #root {
   cursor: default;
 }
 
+.login-server-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 14px;
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.login-server-link:hover {
+  color: var(--accent);
+}
+
+/* ── Server settings modal (desktop) ── */
+.server-settings-modal {
+  max-width: 420px;
+}
+
+.server-settings-form {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0 8px;
+}
+
+.server-settings-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.server-settings-form input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.server-settings-form input:focus {
+  border-color: var(--accent);
+}
+
+.server-settings-msg {
+  font-size: 12px;
+  margin-top: 8px;
+  min-height: 16px;
+}
+
+.server-settings-msg.is-error {
+  color: var(--error);
+}
+
+.server-settings-msg.is-ok {
+  color: var(--success);
+}
+
 /* ── App Home Header ── */
 .app-home-header {
   display: flex;
@@ -1634,6 +1699,198 @@ html, body, #root {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.5;
+}
+
+/* ── Desktop shell (Electron titlebar) ── */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Inside the shell the full-viewport pages yield their height to flex so the
+   titlebar doesn't push content past the window bottom. No titlebar is
+   rendered in a plain browser, where this reduces to the old 100vh layout. */
+.app-shell > .workspace,
+.app-shell > .login-page {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.titlebar {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  height: 38px;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.titlebar-drag {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The whole strip is the window drag handle… */
+  -webkit-app-region: drag;
+}
+
+/* macOS: leave room for the inset traffic-light buttons. */
+.titlebar-mac .titlebar-drag {
+  padding-left: 78px;
+}
+
+.titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.titlebar-controls {
+  display: flex;
+  /* …but the window buttons are not. */
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.titlebar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.titlebar-btn-close:hover {
+  background: var(--error);
+  color: var(--text-on-accent);
+}
+
+/* ── Desktop download toasts ── */
+.download-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 300px;
+}
+
+.download-toast {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px var(--overlay-raise), 0 2px 8px var(--overlay-sink);
+  padding: 10px 12px;
+  font-size: 13px;
+  animation: download-toast-in 0.18s ease-out;
+}
+
+@keyframes download-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.download-toast-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.download-toast-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.download-toast-close {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.download-toast-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.download-toast-bar {
+  margin-top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.download-toast-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+
+.download-toast-bar-fill.indeterminate {
+  width: 40%;
+  animation: download-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes download-indeterminate {
+  0% { margin-left: -40%; }
+  100% { margin-left: 100%; }
+}
+
+.download-toast-status {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.download-toast-status.is-error {
+  color: var(--error);
+}
+
+.download-toast-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.download-toast-actions button {
+  flex: 1;
+  border: 1px solid var(--border-input);
+  background: var(--bg-input);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 5px 0;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.download-toast-actions button:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
 }
 
 /* ── Workspace Layout ── */

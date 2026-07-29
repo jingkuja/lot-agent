@@ -1,6 +1,7 @@
 import { useReducer, useCallback, useRef } from "react";
 import { api, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
+import { showAlert, notifyDesktop } from "../lib/notify.js";
 import {
   chatReducer,
   initialChatState,
@@ -83,6 +84,17 @@ export function useChat(
                 taskId,
               },
             });
+            // Desktop: background-completion system notification (no-op in the
+            // browser, and the shell suppresses it while the window is focused).
+            const mediaLabel = mediaType === "image" ? "图片" : "视频";
+            if (finalStatus === "completed") {
+              notifyDesktop(`${mediaLabel}生成完成`, "点击查看结果");
+            } else if (finalStatus !== "cancelled") {
+              notifyDesktop(
+                `${mediaLabel}生成失败`,
+                downloadFailed ? "媒体下载失败，可重试下载" : t.error
+              );
+            }
             if (genPollRef.current === token) genPollRef.current = null;
             onStreamEndRef.current?.();
             return;
@@ -219,7 +231,7 @@ export function useChat(
             streamsRef.current.delete(cid);
             if (isCurrent()) dispatch({ type: "stream_stopped" });
             if (controller.signal.aborted) return; // user pressed Stop — silent
-            window.alert(
+            showAlert(
               `文件上传失败：${e instanceof Error ? e.message : String(e)}`
             );
             return;
@@ -371,7 +383,7 @@ export function useChat(
       // messages that still exist server-side AND immediately hit its own
       // 409. Same "surface it, don't invent new UI" pattern as the file-
       // upload failure alert above.
-      window.alert(
+      showAlert(
         `重新生成失败：${error instanceof Error ? error.message : String(error)}`
       );
       return;
