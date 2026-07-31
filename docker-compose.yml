@@ -29,8 +29,8 @@ x-app-env: &app-env
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
   LLM_DEFAULT: ${LLM_DEFAULT:-openai}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://tokenhub.todoucloud.com/v1}
-  TOKENHUB_BASE_URL: ${TOKENHUB_BASE_URL:-https://tokenhub.todoucloud.com/api/agent-market}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://tokenhub.wetok.ai/v1}
+  TOKENHUB_BASE_URL: ${TOKENHUB_BASE_URL:-https://tokenhub.wetok.ai/api/agent-market}
   OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4-flash}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
