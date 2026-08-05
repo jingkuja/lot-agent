@@ -4,6 +4,7 @@ import {
   extractVendorError,
   type CreateResult,
   type PollResult,
+  type ReferenceInput,
   type ReferenceMedia,
   type VendorAdapter,
 } from "./generation-common.js";
@@ -16,6 +17,14 @@ export interface VideoGenerationRequest {
   durationSec?: number;
   ratio?: string;
   quality?: string;
+  /** Reference images for the OpenAI-compatible `/videos` endpoint. */
+  input_reference?: ReferenceInput;
+  /** Reference videos for the OpenAI-compatible `/videos` endpoint. */
+  reference_video?: ReferenceInput;
+  /** Reference audio for the OpenAI-compatible `/videos` endpoint. */
+  reference_audio?: ReferenceInput;
+  first_frame?: string;
+  last_frame?: string;
   media?: ReferenceMedia[];
 }
 
@@ -41,6 +50,11 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
     if (req.size) body.size = req.size;
     if (req.durationSec != null) body.duration = req.durationSec;
     if (req.ratio) body.ratio = req.ratio;
+    if (req.input_reference) body.input_reference = req.input_reference;
+    if (req.reference_video) body.reference_video = req.reference_video;
+    if (req.reference_audio) body.reference_audio = req.reference_audio;
+    if (req.first_frame) body.first_frame = req.first_frame;
+    if (req.last_frame) body.last_frame = req.last_frame;
     if (req.media && req.media.length > 0) body.media = req.media;
     // `quality` is part of the request but not sent — the Happyhorse API does not accept it.
     return body;
@@ -93,11 +107,21 @@ export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
     const body: Record<string, unknown> = { model, prompt: req.prompt };
     if (req.durationSec != null) body.seconds = String(req.durationSec);
     if (req.size) body.size = req.size;
-    // The openai-video endpoint takes a single reference image as
-    // `input_reference` (a url), not happyhorse's `media` array — the UI allows
-    // only one. Use the first reference image if present.
-    const ref = req.media?.find((m) => m.type === "reference_image");
-    if (ref) body.input_reference = ref.url;
+    // The OpenAI-compatible endpoint uses dedicated reference fields instead
+    // of Happyhorse's `media` array. Keep the value shape (string|string[]) so
+    // callers can send up to the vendor-supported number of references.
+    if (req.input_reference) {
+      body.input_reference = req.input_reference;
+    } else {
+      // Backwards compatibility for jobs created before the dedicated fields
+      // were introduced.
+      const refs = req.media?.filter((m) => m.type === "reference_image").map((m) => m.url) ?? [];
+      if (refs.length) body.input_reference = refs.length === 1 ? refs[0] : refs;
+    }
+    if (req.reference_video) body.reference_video = req.reference_video;
+    if (req.reference_audio) body.reference_audio = req.reference_audio;
+    if (req.first_frame) body.first_frame = req.first_frame;
+    if (req.last_frame) body.last_frame = req.last_frame;
     return body;
   }
   override parseCreate(json: unknown): CreateResult {

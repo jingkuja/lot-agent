@@ -84,4 +84,13 @@ describe("POST /uploads", () => {
     const json = await res.json();
     expect(json.kind).toBe("doc");
   });
+
+  it("accepts video and audio reference uploads", async () => {
+    const service = makeService();
+    const app = appFor(service);
+    const video = await app.request("/", { method: "POST", body: fileBody("ref.mp4", "video/mp4", new Uint8Array([0, 1])) });
+    const audio = await app.request("/", { method: "POST", body: fileBody("ref.mp3", "audio/mpeg", new Uint8Array([0, 1])) });
+    expect(video.status).toBe(200);
+    expect(audio.status).toBe(200);
+  });
 });

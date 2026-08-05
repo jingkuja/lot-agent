@@ -4,7 +4,7 @@ import { estimateCost } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
-import { pickGenerationSettings } from "../generation/input.js";
+import { pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
 
 type Variables = { userId: string };
 
@@ -306,7 +306,18 @@ export function createGenerationRoutes(service: AgentService) {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown>; media?: { type: string; url: string }[]; model?: string };
+    let body: {
+      prompt?: string;
+      mediaType?: "image" | "video";
+      settings?: Record<string, unknown>;
+      media?: { type: string; url: string }[];
+      input_reference?: unknown;
+      reference_video?: unknown;
+      reference_audio?: unknown;
+      first_frame?: unknown;
+      last_frame?: unknown;
+      model?: string;
+    };
     try {
       body = await c.req.json();
     } catch {
@@ -320,7 +331,21 @@ export function createGenerationRoutes(service: AgentService) {
     // Client settings pass a per-media whitelist so identity fields
     // (conversationId/assistantMessageId/userId) can never ride along.
     const settings = pickGenerationSettings(mediaType, body.settings);
+    let videoReferences: Record<string, string | string[]> = {};
+    if (mediaType === "video") {
+      try {
+        videoReferences = pickVideoReferenceInputs(body as Record<string, unknown>);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "invalid video references" }, 400);
+      }
+    }
     const media = Array.isArray(body.media) ? body.media : undefined;
+    if (mediaType === "video" && media) {
+      const legacyImages = media.filter((m) => m?.type === "reference_image");
+      if (legacyImages.length > 5) {
+        return c.json({ error: "input_reference supports at most 5 references" }, 400);
+      }
+    }
     const type = mediaType === "image" ? "image.generate" : "video.generate";
 
     // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
@@ -357,6 +382,7 @@ export function createGenerationRoutes(service: AgentService) {
       type,
       {
         ...settings,
+        ...videoReferences,
         ...(media ? { media } : {}),
         ...(selectedModel ? { modelId: selectedModel } : {}),
         prompt,

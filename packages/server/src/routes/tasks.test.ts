@@ -61,4 +61,35 @@ describe("POST /tasks input whitelisting", () => {
     const input = service.jobQueue.enqueue.mock.calls[0][1];
     expect(input).toEqual({ prompt: "菊花" });
   });
+
+  it("whitelists video references and frames", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "video.generate",
+        input: {
+          prompt: "镜头推进",
+          input_reference: ["a", "b"],
+          reference_video: ["v1", "v2"],
+          reference_audio: "a1",
+          first_frame: "first",
+          last_frame: "last",
+        },
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "video.generate",
+      expect.objectContaining({
+        input_reference: ["a", "b"],
+        reference_video: ["v1", "v2"],
+        reference_audio: "a1",
+        first_frame: "first",
+        last_frame: "last",
+      }),
+      "u1"
+    );
+  });
 });

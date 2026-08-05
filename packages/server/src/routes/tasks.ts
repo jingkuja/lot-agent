@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { estimateCost } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
-import { pickGenerationSettings } from "../generation/input.js";
+import { pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
 
 const ALLOWED_TYPES = ["image.generate", "video.generate"] as const;
 
@@ -19,7 +19,13 @@ export function sanitizeTaskInput(
   const input: Record<string, unknown> = pickGenerationSettings(mediaType, raw);
   if (typeof raw?.prompt === "string") input.prompt = raw.prompt;
   if (typeof raw?.modelId === "string") input.modelId = raw.modelId;
-  if (Array.isArray(raw?.media)) input.media = raw.media;
+  if (Array.isArray(raw?.media)) {
+    if (mediaType === "video" && raw.media.filter((m) => (m as { type?: unknown })?.type === "reference_image").length > 5) {
+      throw new Error("input_reference supports at most 5 references");
+    }
+    input.media = raw.media;
+  }
+  if (mediaType === "video") Object.assign(input, pickVideoReferenceInputs(raw));
   return input;
 }
 
@@ -47,10 +53,15 @@ export function createTaskRoutes(service: AgentService) {
       );
     }
 
-    const safeInput = sanitizeTaskInput(
-      type as (typeof ALLOWED_TYPES)[number],
-      input as Record<string, unknown> | undefined
-    );
+    let safeInput: Record<string, unknown>;
+    try {
+      safeInput = sanitizeTaskInput(
+        type as (typeof ALLOWED_TYPES)[number],
+        input as Record<string, unknown> | undefined
+      );
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "invalid task input" }, 400);
+    }
 
     // Quota pre-check: estimate cost via the shared billing source of truth.
     let estimatedCost = 0;

@@ -11,7 +11,13 @@ import { placeholderSvgDataUrl } from "./placeholder.js";
  */
 
 export type MediaType = "image" | "video";
-export interface ReferenceMedia { type: "reference_image"; url: string }
+export interface ReferenceMedia {
+  type: "reference_image" | "reference_video" | "reference_audio";
+  url: string;
+}
+
+/** A vendor input may be a single URL or a list of URLs. */
+export type ReferenceInput = string | string[];
 export interface CreateResult { taskId: string; status: string; progress: number }
 export interface PollResult {
   status: string;

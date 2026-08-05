@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickGenerationSettings } from "./input.js";
+import { pickGenerationSettings, pickVideoReferenceInputs } from "./input.js";
 
 describe("pickGenerationSettings", () => {
   it("keeps only the image whitelist (size, n) with matching types", () => {
@@ -44,5 +44,28 @@ describe("pickGenerationSettings", () => {
 
   it("handles a missing settings object", () => {
     expect(pickGenerationSettings("video", undefined)).toEqual({});
+  });
+
+  it("keeps video references and frame fields with their API shape", () => {
+    expect(pickVideoReferenceInputs({
+      input_reference: ["a", "b"],
+      reference_video: "v",
+      reference_audio: ["a1", "a2"],
+      first_frame: "first",
+      last_frame: "last",
+      assistantMessageId: "forged",
+    })).toEqual({
+      input_reference: ["a", "b"],
+      reference_video: "v",
+      reference_audio: ["a1", "a2"],
+      first_frame: "first",
+      last_frame: "last",
+    });
+  });
+
+  it("enforces the product limits for video references", () => {
+    expect(() => pickVideoReferenceInputs({ input_reference: ["1", "2", "3", "4", "5", "6"] })).toThrow(/at most 5/);
+    expect(() => pickVideoReferenceInputs({ reference_video: ["1", "2", "3"] })).toThrow(/at most 2/);
+    expect(() => pickVideoReferenceInputs({ reference_audio: ["1", "2", "3"] })).toThrow(/at most 2/);
   });
 });

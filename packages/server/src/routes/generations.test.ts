@@ -128,6 +128,47 @@ describe("POST /conversations/:id/generations", () => {
       "u1"
     );
   });
+
+  it("threads video references and frames into the enqueued input", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "镜头推进",
+        mediaType: "video",
+        input_reference: ["/static/uploads/a.png", "/static/uploads/b.png"],
+        reference_video: ["/static/uploads/r1.mp4", "/static/uploads/r2.mp4"],
+        reference_audio: ["/static/uploads/a1.mp3"],
+        first_frame: "/static/uploads/first.png",
+        last_frame: "/static/uploads/last.png",
+      }),
+    });
+    expect(res.status).toBe(202);
+    await res.json();
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "video.generate",
+      expect.objectContaining({
+        input_reference: ["/static/uploads/a.png", "/static/uploads/b.png"],
+        reference_video: ["/static/uploads/r1.mp4", "/static/uploads/r2.mp4"],
+        reference_audio: ["/static/uploads/a1.mp3"],
+        first_frame: "/static/uploads/first.png",
+        last_frame: "/static/uploads/last.png",
+      }),
+      "u1"
+    );
+  });
+
+  it("rejects video references over their limits", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "x", mediaType: "video", reference_video: ["1", "2", "3"] }),
+    });
+    expect(res.status).toBe(400);
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /conversations/:id/generations/:messageId/redownload", () => {

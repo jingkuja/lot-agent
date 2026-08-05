@@ -58,11 +58,32 @@ describe("OpenaiVideoAdapter", () => {
     expect("duration" in body).toBe(false);
     expect("ratio" in body).toBe(false);
   });
-  it("sends a single reference image as input_reference (url), omits seconds when no duration", () => {
-    const body = a.buildCreateBody({ prompt: "p", media: [{ type: "reference_image", url: "https://x/ref.png" }] }, "m") as Record<string, unknown>;
-    expect(body.input_reference).toBe("https://x/ref.png");
+  it("sends multiple reference inputs plus first/last frames", () => {
+    const body = a.buildCreateBody({
+      prompt: "p",
+      input_reference: ["https://x/ref-a.png", "https://x/ref-b.png"],
+      reference_video: ["https://x/ref-a.mp4", "https://x/ref-b.mp4"],
+      reference_audio: ["https://x/ref-a.mp3"],
+      first_frame: "https://x/first.png",
+      last_frame: "https://x/last.png",
+    }, "m") as Record<string, unknown>;
+    expect(body).toMatchObject({
+      input_reference: ["https://x/ref-a.png", "https://x/ref-b.png"],
+      reference_video: ["https://x/ref-a.mp4", "https://x/ref-b.mp4"],
+      reference_audio: ["https://x/ref-a.mp3"],
+      first_frame: "https://x/first.png",
+      last_frame: "https://x/last.png",
+    });
     expect("media" in body).toBe(false);
     expect("seconds" in body).toBe(false);
+  });
+  it("keeps backwards compatibility with legacy media reference images", () => {
+    const body = a.buildCreateBody({ prompt: "p", media: [
+      { type: "reference_image", url: "https://x/ref-a.png" },
+      { type: "reference_image", url: "https://x/ref-b.png" },
+    ] }, "m") as Record<string, unknown>;
+    expect(body.input_reference).toEqual(["https://x/ref-a.png", "https://x/ref-b.png"]);
+    expect("media" in body).toBe(false);
   });
   it("omits input_reference when no reference image is present", () => {
     const body = a.buildCreateBody({ prompt: "p" }, "m") as Record<string, unknown>;

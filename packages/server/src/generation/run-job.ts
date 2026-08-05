@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
-import type { CreateResult, MediaType, PollResult, ReferenceMedia } from "@lot-agent/core";
+import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
 /**
  * Media-neutral view of a generation provider. Both `ImageGenerationProvider`
@@ -18,6 +18,11 @@ export interface JobGenerationProvider {
     durationSec?: number;
     ratio?: string;
     quality?: string;
+    input_reference?: ReferenceInput;
+    reference_video?: ReferenceInput;
+    reference_audio?: ReferenceInput;
+    first_frame?: string;
+    last_frame?: string;
     media?: ReferenceMedia[];
   }): Promise<CreateResult>;
   poll(taskId: string): Promise<PollResult>;
@@ -148,6 +153,11 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   const input = job.input;
   const prompt = (input.prompt as string) ?? "";
   const media = input.media as ReferenceMedia[] | undefined;
+  const inputReference = input.input_reference as ReferenceInput | undefined;
+  const referenceVideo = input.reference_video as ReferenceInput | undefined;
+  const referenceAudio = input.reference_audio as ReferenceInput | undefined;
+  const firstFrame = input.first_frame as string | undefined;
+  const lastFrame = input.last_frame as string | undefined;
   const sleep = deps.sleep ?? realSleep;
   const pollIntervalMs = deps.pollIntervalMs ?? 3000;
   const maxWaitMs = deps.maxWaitMs ?? 15 * 60 * 1000;
@@ -169,6 +179,11 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     const cacheKey = genCacheKey(`${mediaType}.generate`, {
       userId: job.userId,
       prompt, size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio,
+      input_reference: inputReference,
+      reference_video: referenceVideo,
+      reference_audio: referenceAudio,
+      first_frame: firstFrame,
+      last_frame: lastFrame,
       media: media?.map((m) => m.url), model: deps.vendorModel,
     });
     const cached = await deps.cache.get(cacheKey) as GenOut | null;
@@ -190,6 +205,11 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
         n: input.n as number | undefined,
         durationSec: input.durationSec as number | undefined,
         ratio: input.ratio as string | undefined,
+        input_reference: inputReference,
+        reference_video: referenceVideo,
+        reference_audio: referenceAudio,
+        first_frame: firstFrame,
+        last_frame: lastFrame,
         media,
       });
       vendorTaskId = created.taskId;

@@ -424,11 +424,32 @@ export function useChat(
 
       (async () => {
         try {
-          const imgs = files.filter((f) => f.file.type.startsWith("image/"));
-          const uploaded = imgs.length ? await Promise.all(imgs.map((f) => api.uploadFile(f.file))) : [];
-          const media = uploaded.map((u) => ({ type: "reference_image" as const, url: u.url }));
+          const uploaded = files.length
+            ? await Promise.all(files.map(async (f) => ({ slot: f.slot, uploaded: await api.uploadFile(f.file) })))
+            : [];
+          const media = uploaded
+            .filter((f) => mediaType === "image" && f.uploaded.mime.startsWith("image/"))
+            .map((f) => ({ type: "reference_image" as const, url: f.uploaded.url }));
+          const urlsFor = (slot: PickedFile["slot"]) =>
+            uploaded.filter((f) => f.slot === slot).map((f) => f.uploaded.url);
+          const inputReference = urlsFor("video_reference_image");
+          const referenceVideo = urlsFor("video_reference_video");
+          const referenceAudio = urlsFor("video_reference_audio");
+          const firstFrame = urlsFor("video_first_frame")[0];
+          const lastFrame = urlsFor("video_last_frame")[0];
 
-          const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined, model: modelId });
+          const res = await api.generate(cid, {
+            prompt,
+            mediaType,
+            settings,
+            media: media.length ? media : undefined,
+            input_reference: inputReference.length ? inputReference : undefined,
+            reference_video: referenceVideo.length ? referenceVideo : undefined,
+            reference_audio: referenceAudio.length ? referenceAudio : undefined,
+            first_frame: firstFrame,
+            last_frame: lastFrame,
+            model: modelId,
+          });
           if (token.cancelled) return;
           // Reconcile the optimistic placeholders with the server-assigned ids
           // + vendor taskId, keeping the bubble in its "generating" state.

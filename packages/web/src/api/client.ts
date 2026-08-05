@@ -104,7 +104,10 @@ export interface AssetMeta {
   created_at: string;
 }
 
-export type AttachmentSlot = "ppt_template" | "ppt_background" | "content" | "contract_old" | "contract_new";
+export type AttachmentSlot =
+  | "ppt_template" | "ppt_background" | "content" | "contract_old" | "contract_new"
+  | "video_reference_image" | "video_reference_video" | "video_reference_audio"
+  | "video_first_frame" | "video_last_frame";
 
 /** 输入框选中的文件 + 它在消息里的角色（PPT 模版 / 内容素材 / 新旧合同）。 */
 export interface PickedFile {
@@ -339,7 +342,18 @@ export const api = {
   // ── Generation (image/video via conversation) ────────────────────────────
   generate: (
     conversationId: string,
-    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown; media?: { type: "reference_image"; url: string }[]; model?: string }
+    body: {
+      prompt: string;
+      mediaType: "image" | "video";
+      settings?: unknown;
+      media?: { type: "reference_image"; url: string }[];
+      input_reference?: string | string[];
+      reference_video?: string | string[];
+      reference_audio?: string | string[];
+      first_frame?: string;
+      last_frame?: string;
+      model?: string;
+    }
   ) =>
     request<{
       userMessage: { id: string; role: "user"; content: string };
