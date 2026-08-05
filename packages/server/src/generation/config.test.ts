@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { makeImageProvider, makeVideoProvider, mediaSupportsProgress, type MediaGenerationConfig } from "./config.js";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { loadGenerationConfig, makeImageProvider, makeVideoProvider, mediaSupportsProgress, type MediaGenerationConfig } from "./config.js";
 import {
   ChatCompletionsImageProvider,
   HttpImageGenerationProvider,
@@ -10,6 +10,24 @@ import {
 
 const imageBase: MediaGenerationConfig = { baseUrl: "https://api/v1", apiKey: "", mock: true, adapter: "happyhorse", model: "im", modelId: "wanx-standard" };
 const videoBase: MediaGenerationConfig = { baseUrl: "https://api/v1", apiKey: "", mock: true, adapter: "happyhorse", model: "vm", modelId: "kling-standard" };
+
+afterEach(() => vi.unstubAllEnvs());
+
+describe("loadGenerationConfig", () => {
+  it("uses OPENAI_BASE_URL for both image and video instead of config URLs", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "https://env.example/v1");
+    const cfg = await loadGenerationConfig(process.cwd());
+    expect(cfg.image.baseUrl).toBe("https://env.example/v1");
+    expect(cfg.video.baseUrl).toBe("https://env.example/v1");
+  });
+
+  it("does not fall back to config/default.json's generation URL when env is empty", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "");
+    const cfg = await loadGenerationConfig(process.cwd());
+    expect(cfg.image.baseUrl).toBe("https://tokenhub.todoucloud.com/v1");
+    expect(cfg.video.baseUrl).toBe("https://tokenhub.todoucloud.com/v1");
+  });
+});
 
 describe("makeImageProvider", () => {
   it("mock:true → MockImageGenerationProvider", () => {

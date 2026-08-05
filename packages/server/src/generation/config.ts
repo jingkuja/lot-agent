@@ -29,8 +29,9 @@ export interface GenerationConfig {
   video: MediaGenerationConfig;
 }
 
-/** Raw per-media block as authored in config/default.json. Each field is an
- * optional override of the shared top-level default. */
+/** Raw per-media block as authored in config/default.json. Endpoint fields are
+ * retained for config-file compatibility but generation URLs come from the
+ * OPENAI_BASE_URL environment variable at runtime. */
 interface RawMedia {
   model?: string;
   modelId?: string;
@@ -47,9 +48,9 @@ interface RawGeneration {
 }
 
 /**
- * Load the non-secret `generation` block from config + keys from env. Top-level
- * `baseUrl`/`adapter`/`mock` are shared defaults; each of `image`/`video` may
- * override any of them so the two providers can diverge onto different vendors.
+ * Load the non-secret `generation` block from config + keys from env. Adapter
+ * and mock settings still come from config, but both media providers use the
+ * same OPENAI_BASE_URL instead of any URL in config/default.json.
  * Keys come from env: `IMAGE_GEN_API_KEY` / `VIDEO_GEN_API_KEY` override the
  * shared `TOKENHUB_API_KEY` when image and video use different vendors.
  */
@@ -58,13 +59,16 @@ export async function loadGenerationConfig(rootDir: string): Promise<GenerationC
     generation?: RawGeneration;
   };
   const g = raw.generation ?? {};
-  const sharedBaseUrl = g.baseUrl ?? "https://tokenhub.todoucloud.com/v1";
+  // Image/video generation must follow the same OpenAI-compatible endpoint as
+  // the environment-configured LLM. Do not allow a stale config/default.json
+  // URL (including per-media overrides) to silently route generation elsewhere.
+  const sharedBaseUrl = process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1";
   const sharedAdapter = g.adapter ?? "happyhorse";
   const sharedMock = g.mock ?? true;
   const sharedKey = process.env.TOKENHUB_API_KEY ?? "";
 
   const merge = (m: RawMedia | undefined, defaultModelId: string, keyEnv: string): MediaGenerationConfig => ({
-    baseUrl: m?.baseUrl ?? sharedBaseUrl,
+    baseUrl: sharedBaseUrl,
     adapter: m?.adapter ?? sharedAdapter,
     mock: m?.mock ?? sharedMock,
     apiKey: process.env[keyEnv] || sharedKey,
