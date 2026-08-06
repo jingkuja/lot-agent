@@ -107,6 +107,12 @@ export default defineConfig({
   // the desktop shell's loopback server, or opened via file:// for debugging.
   base: "./",
   server: {
+    // Let a phone or another machine on the LAN open the dev workspace via
+    // this machine's IP address. The API remains behind the same Vite proxy.
+    host: "0.0.0.0",
+    // Vite rejects unknown Host headers by default. Permit the deployment
+    // domain when it is reverse-proxied to this local dev server.
+    allowedHosts: ["aigc.todoucloud.com"],
     port: 5173,
   },
 });

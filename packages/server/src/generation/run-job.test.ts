@@ -75,6 +75,52 @@ describe("runGenerationJob", () => {
     expect(calls.message.at(-1).metadata.error).toContain(rawResponse);
   });
 
+  it("uses PUBLIC_BASE_URL for every local video reference sent to the provider", async () => {
+    const originalBaseUrl = process.env.PUBLIC_BASE_URL;
+    process.env.PUBLIC_BASE_URL = "https://box.example.com/";
+    try {
+      const provider: JobGenerationProvider = {
+        create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+        poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+      };
+      const { deps } = fakeDeps(provider);
+      const videoJob = {
+        ...job,
+        input: {
+          ...job.input,
+          input_reference: ["/static/uploads/image.png"],
+          reference_video: "/static/uploads/reference.mp4",
+          reference_audio: ["/static/uploads/audio.mp3"],
+          first_frame: "/static/uploads/first.png",
+          last_frame: "/static/uploads/last.png",
+          media: [
+            { type: "reference_image", url: "/static/uploads/legacy-image.png" },
+            { type: "reference_video", url: "/static/uploads/legacy-video.mp4" },
+            { type: "reference_audio", url: "/static/uploads/legacy-audio.mp3" },
+          ],
+        },
+      };
+
+      await runGenerationJob(deps, videoJob, "video");
+
+      expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({
+        input_reference: ["https://box.example.com/static/uploads/image.png"],
+        reference_video: "https://box.example.com/static/uploads/reference.mp4",
+        reference_audio: ["https://box.example.com/static/uploads/audio.mp3"],
+        first_frame: "https://box.example.com/static/uploads/first.png",
+        last_frame: "https://box.example.com/static/uploads/last.png",
+        media: [
+          { type: "reference_image", url: "https://box.example.com/static/uploads/legacy-image.png" },
+          { type: "reference_video", url: "https://box.example.com/static/uploads/legacy-video.mp4" },
+          { type: "reference_audio", url: "https://box.example.com/static/uploads/legacy-audio.mp3" },
+        ],
+      }));
+    } finally {
+      if (originalBaseUrl === undefined) delete process.env.PUBLIC_BASE_URL;
+      else process.env.PUBLIC_BASE_URL = originalBaseUrl;
+    }
+  });
+
   it("persists the vendor task id after create, then polls with it", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "vendor_abc", status: "queued", progress: 0 })),

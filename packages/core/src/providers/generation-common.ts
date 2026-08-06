@@ -86,12 +86,12 @@ export interface HttpGenerationOpts<Req> {
   apiKey: string;
   adapter: VendorAdapter<Req>;
   model: string;
-  /** Per-request timeout. Default: 20s. */
+  /** Per-request timeout. Default: 2 minutes. */
   timeoutMs?: number;
 }
 
-/** Default per-request timeout for generation HTTP calls. */
-const DEFAULT_TIMEOUT_MS = 20_000;
+/** Default per-request timeout for generation HTTP calls (2 minutes). */
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
  * Turn a non-2xx generation response into an Error carrying the cleanest message

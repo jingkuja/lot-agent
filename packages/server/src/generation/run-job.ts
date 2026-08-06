@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
+import { publicStaticUrl } from "../util/public-base.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
 /**
@@ -82,6 +83,11 @@ type GenAssets = { url: string; mime: string; durationSec?: number }[];
 type GenOut = { assetIds: string[]; assets: GenAssets; downloadFailed?: boolean; sourceUrl?: string; error?: string };
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function publicReference(value: ReferenceInput | undefined): ReferenceInput | undefined {
+  if (typeof value === "string") return publicStaticUrl(value);
+  return value?.map(publicStaticUrl);
+}
 
 /** Build the message-status writer bound to this job's owner + base metadata.
  * Shared by the create→poll→download path and the download-only retry path so
@@ -199,19 +205,34 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     // create a duplicate generation.
     let vendorTaskId = await deps.db.getTaskVendorId(job.id);
     if (!vendorTaskId) {
-      const created = await deps.provider.create({
+      // Generation vendors fetch references themselves, so paths served only by
+      // this app ("/static/…") need the configured public host. Apply this to
+      // every supported media kind, including legacy `media` references.
+      const publicMedia = media?.map((item) => ({ ...item, url: publicStaticUrl(item.url) }));
+      const createRequest = {
         prompt,
         size: input.size as string | undefined,
         n: input.n as number | undefined,
         durationSec: input.durationSec as number | undefined,
         ratio: input.ratio as string | undefined,
-        input_reference: inputReference,
-        reference_video: referenceVideo,
-        reference_audio: referenceAudio,
-        first_frame: firstFrame,
-        last_frame: lastFrame,
-        media,
-      });
+        input_reference: publicReference(inputReference),
+        reference_video: publicReference(referenceVideo),
+        reference_audio: publicReference(referenceAudio),
+        first_frame: firstFrame ? publicStaticUrl(firstFrame) : undefined,
+        last_frame: lastFrame ? publicStaticUrl(lastFrame) : undefined,
+        media: publicMedia,
+      };
+      // Keep the task id and resolved vendor model beside the request payload so
+      // a video failure can be traced through the worker logs. Deliberately do
+      // not log provider configuration or headers: those contain the API key.
+      if (mediaType === "video") {
+        console.log("[video.generate] request", JSON.stringify({
+          taskId: job.id,
+          model: deps.vendorModel,
+          body: createRequest,
+        }));
+      }
+      const created = await deps.provider.create(createRequest);
       vendorTaskId = created.taskId;
       await deps.db.setTaskVendorId(job.id, vendorTaskId);
     }

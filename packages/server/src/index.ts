@@ -35,6 +35,7 @@ const ASSETS_DIR = resolve(ROOT, "data/assets");
 const DOCS_DIR = resolve(ROOT, "data/documents");
 // User-uploaded files, served at /static/uploads.
 const UPLOADS_DIR = resolve(ROOT, "data/uploads");
+const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "https://aigc.todoucloud.com"];
 
 async function loadConfig(): Promise<ServiceConfig> {
   const llm = await loadLlmConfig(ROOT);
@@ -188,7 +189,7 @@ async function main() {
 
   app.use("*", logger());
   app.use("*", cors({
-    origin: (process.env.CORS_ORIGIN ?? "http://localhost:5173").split(","),
+    origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
     credentials: true,
   }));
 
@@ -284,8 +285,8 @@ async function main() {
     process.exit(0);
   });
 
-  serve({ fetch: app.fetch, port }, (info) => {
-    console.log(`Server running on http://localhost:${info.port}`);
+  serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, (info) => {
+    console.log(`Server listening on 0.0.0.0:${info.port}`);
   });
 }
 
