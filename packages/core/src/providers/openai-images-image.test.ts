@@ -71,7 +71,7 @@ describe("OpenAIImagesImageProvider", () => {
     expect(JSON.parse(init.body as string).size).toBe("1024x1024");
   });
 
-  it("uses /images/edits and Tokenhub's Base64 image array when references are supplied", async () => {
+  it("uses /images/edits and Tokenhub's single Base64 image field when a reference is supplied", async () => {
     const fetchMock = vi.fn(async () => okResponse({ data: [{ url: "https://x/y.png" }] }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "gpt-image-2" });
@@ -80,21 +80,29 @@ describe("OpenAIImagesImageProvider", () => {
       prompt: "改成水彩画",
       size: "1024x1024",
       n: 1,
-      media: [
-        { type: "reference_image", url: "data:image/png;base64,YQ==" },
-        { type: "reference_image", url: "data:image/png;base64,Yg==" },
-      ],
+      media: [{ type: "reference_image", url: "data:image/png;base64,YQ==" }],
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api/v1/images/edits");
     expect(JSON.parse(init.body as string)).toEqual({
       model: "gpt-image-2",
-      image: ["data:image/png;base64,YQ==", "data:image/png;base64,Yg=="],
+      image: "data:image/png;base64,YQ==",
       prompt: "改成水彩画",
       size: "1024x1024",
       n: 1,
     });
+  });
+
+  it("rejects multiple reference images instead of silently dropping one", async () => {
+    const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "gpt-image-2" });
+    await expect(provider.create({
+      prompt: "改图",
+      media: [
+        { type: "reference_image", url: "data:image/png;base64,YQ==" },
+        { type: "reference_image", url: "data:image/png;base64,Yg==" },
+      ],
+    })).rejects.toThrow(/exactly one reference image/i);
   });
 
   it("returns b64_json output as a data URL for the existing server-side downloader", async () => {

@@ -340,6 +340,9 @@ export function createGenerationRoutes(service: AgentService) {
       }
     }
     const media = Array.isArray(body.media) ? body.media : undefined;
+    if (mediaType === "image" && media && media.length > 1) {
+      return c.json({ error: "image editing supports exactly one reference image" }, 400);
+    }
     if (mediaType === "video" && media) {
       const legacyImages = media.filter((m) => m?.type === "reference_image");
       if (legacyImages.length > 5) {

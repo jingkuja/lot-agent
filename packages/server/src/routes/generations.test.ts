@@ -129,6 +129,24 @@ describe("POST /conversations/:id/generations", () => {
     );
   });
 
+  it("rejects image edits with more than one reference image", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        media: [
+          { type: "reference_image", url: "/static/uploads/a.png" },
+          { type: "reference_image", url: "/static/uploads/b.png" },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
   it("threads video references and frames into the enqueued input", async () => {
     const service = fakeService();
     const res = await app(service).request("/conversations/c1/generations", {

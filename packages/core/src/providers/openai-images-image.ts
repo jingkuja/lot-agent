@@ -66,12 +66,15 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
   async create(req: ImageGenerationRequest): Promise<CreateResult> {
     const model = req.model ?? this.opts.model;
     const hasReferences = Boolean(req.media?.length);
+    if (hasReferences && req.media!.length !== 1) {
+      throw new Error("image editing supports exactly one reference image");
+    }
     const body: Record<string, unknown> = hasReferences
       ? {
           model,
-          // Tokenhub's edit endpoint accepts an array of Base64 data URLs in
-          // the singular `image` field (not OpenAI's usual `images` objects).
-          image: req.media!.map((media) => media.url),
+          // Tokenhub's edit endpoint accepts one Base64 data URL in the
+          // singular `image` field (not OpenAI's usual `images` objects).
+          image: req.media![0].url,
           prompt: req.prompt,
         }
       : { model, prompt: req.prompt };
