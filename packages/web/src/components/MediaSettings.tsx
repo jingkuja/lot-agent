@@ -6,20 +6,20 @@ export interface Ratio {
   h: number;
 }
 
-/** 图像比例选项。每个比例对应一个固定分辨率（该比例下接口支持的最小分辨率），
- * 由后端的 gpt-image-2-token 接口直接消费。注意：接口只接受 `WxH` 格式
+/** 图像比例选项。每个比例对应一个固定分辨率，长边最大为 1024px，
+ * 由后端的 gpt-image-2 接口直接消费。注意：接口只接受 `WxH` 格式
  * （`*` 会被判为不合法的 size），故这里用 `x` 分隔。 */
 export interface ImageRatio extends Ratio {
-  /** 该比例对应的固定分辨率，如 "2048x2048"。 */
+  /** 该比例对应的最大标准分辨率，如 "1024x1024"。 */
   size: string;
 }
 
 export const IMAGE_RATIOS: ImageRatio[] = [
-  { label: "16:9", w: 16, h: 9, size: "2688x1536" },
-  { label: "4:3", w: 4, h: 3, size: "2368x1728" },
-  { label: "1:1", w: 1, h: 1, size: "2048x2048" },
-  { label: "3:4", w: 3, h: 4, size: "1728x2368" },
-  { label: "9:16", w: 9, h: 16, size: "1536x2688" },
+  { label: "16:9", w: 16, h: 9, size: "1024x576" },
+  { label: "4:3", w: 4, h: 3, size: "1024x768" },
+  { label: "1:1", w: 1, h: 1, size: "1024x1024" },
+  { label: "3:4", w: 3, h: 4, size: "768x1024" },
+  { label: "9:16", w: 9, h: 16, size: "576x1024" },
 ];
 
 /** 视频生成比例选项。 */
@@ -114,7 +114,7 @@ function ResBarIcon() {
   );
 }
 
-/* ── 图像生成：仅比例（分辨率由比例固定推导，后端自动对应最小分辨率） ── */
+/* ── 图像生成：仅比例（分辨率由比例固定推导，长边最高 1024px） ── */
 
 // Remembered for the page session. The input box is unmounted/remounted when the
 // conversation switches between its empty (hero) and message-list layouts (e.g.

@@ -89,6 +89,27 @@ function publicReference(value: ReferenceInput | undefined): ReferenceInput | un
   return value?.map(publicStaticUrl);
 }
 
+/**
+ * Tokenhub's `/images/edits` accepts only `data:image/...;base64,...` inputs.
+ * Reference uploads are stored as static URLs, so resolve them through the
+ * worker's already guarded/bounded byte loader, then encode the exact bytes for
+ * the edit request. Data URLs are deliberately normalized the same way.
+ */
+async function imageReferencesAsDataUrls(
+  deps: RunJobDeps,
+  media: ReferenceMedia[] | undefined
+): Promise<ReferenceMedia[] | undefined> {
+  if (!media?.length) return undefined;
+  return Promise.all(media.map(async (item) => {
+    const source = publicStaticUrl(item.url);
+    const { body, mime } = await deps.urlToBytes(source, { signal: deps.signal });
+    if (!mime.startsWith("image/")) {
+      throw new Error(`image edit reference is not an image (${mime})`);
+    }
+    return { ...item, url: `data:${mime};base64,${body.toString("base64")}` };
+  }));
+}
+
 /** Build the message-status writer bound to this job's owner + base metadata.
  * Shared by the create→poll→download path and the download-only retry path so
  * both render the same generation card (kind/mediaType/prompt/settings). */
@@ -205,10 +226,11 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     // create a duplicate generation.
     let vendorTaskId = await deps.db.getTaskVendorId(job.id);
     if (!vendorTaskId) {
-      // Generation vendors fetch references themselves, so paths served only by
-      // this app ("/static/…") need the configured public host. Apply this to
-      // every supported media kind, including legacy `media` references.
-      const publicMedia = media?.map((item) => ({ ...item, url: publicStaticUrl(item.url) }));
+      // Tokenhub image edits only accept Base64 data URLs. Video vendors fetch
+      // references themselves, so those keep externally accessible URLs.
+      const publicMedia = mediaType === "image"
+        ? await imageReferencesAsDataUrls(deps, media)
+        : media?.map((item) => ({ ...item, url: publicStaticUrl(item.url) }));
       const createRequest = {
         prompt,
         size: input.size as string | undefined,

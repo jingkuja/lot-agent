@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
-  ChatCompletionsImageProvider,
+  OpenAIImagesImageProvider,
   HttpImageGenerationProvider,
   MockImageGenerationProvider,
   pickImageAdapter,
@@ -87,8 +87,10 @@ export async function loadGenerationConfig(rootDir: string): Promise<GenerationC
  * mock when running in mock mode or when no API key is configured. */
 export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationProvider {
   if (cfg.mock || !cfg.apiKey) return new MockImageGenerationProvider();
-  if (cfg.adapter === "chat-completions") {
-    return new ChatCompletionsImageProvider({
+  // `chat-completions` is retained as a config compatibility alias. Tokenhub's
+  // image models now use its synchronous OpenAI Images endpoints instead.
+  if (cfg.adapter === "openai-images" || cfg.adapter === "chat-completions") {
+    return new OpenAIImagesImageProvider({
       baseUrl: cfg.baseUrl,
       apiKey: cfg.apiKey,
       model: cfg.model,
@@ -107,12 +109,12 @@ export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationPr
  * (i.e. the UI should show a percentage). Mirrors the branching in
  * `makeImageProvider`/`makeVideoProvider`: the mock providers ramp progress, the
  * async create→poll providers report real progress, but the synchronous
- * `chat-completions` provider jumps straight to 100 — for it the UI shows a plain
+ * synchronous OpenAI Images provider jumps straight to 100 — for it the UI shows a plain
  * "生成中……" instead of a fake percentage.
  */
 export function mediaSupportsProgress(cfg: MediaGenerationConfig): boolean {
   if (cfg.mock || !cfg.apiKey) return true; // mock ramps progress
-  return cfg.adapter !== "chat-completions";
+  return cfg.adapter !== "openai-images" && cfg.adapter !== "chat-completions";
 }
 
 export function makeVideoProvider(cfg: MediaGenerationConfig): VideoGenerationProvider {

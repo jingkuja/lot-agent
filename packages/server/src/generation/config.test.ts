@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { loadGenerationConfig, makeImageProvider, makeVideoProvider, mediaSupportsProgress, type MediaGenerationConfig } from "./config.js";
 import {
-  ChatCompletionsImageProvider,
+  OpenAIImagesImageProvider,
   HttpImageGenerationProvider,
   MockImageGenerationProvider,
   HttpVideoGenerationProvider,
@@ -36,8 +36,11 @@ describe("makeImageProvider", () => {
   it("mock:false + key → HttpImageGenerationProvider", () => {
     expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "k" })).toBeInstanceOf(HttpImageGenerationProvider);
   });
-  it("mock:false + key + chat-completions adapter → ChatCompletionsImageProvider", () => {
-    expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "k", adapter: "chat-completions" })).toBeInstanceOf(ChatCompletionsImageProvider);
+  it("mock:false + key + openai-images adapter → OpenAIImagesImageProvider", () => {
+    expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "k", adapter: "openai-images" })).toBeInstanceOf(OpenAIImagesImageProvider);
+  });
+  it("keeps the former chat-completions adapter as an OpenAI Images alias", () => {
+    expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "k", adapter: "chat-completions" })).toBeInstanceOf(OpenAIImagesImageProvider);
   });
   it("mock:false + no key → falls back to mock", () => {
     expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "" })).toBeInstanceOf(MockImageGenerationProvider);
@@ -45,15 +48,15 @@ describe("makeImageProvider", () => {
 });
 
 describe("mediaSupportsProgress", () => {
-  it("synchronous chat-completions provider reports no progress", () => {
-    expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "k", adapter: "chat-completions" })).toBe(false);
+  it("synchronous OpenAI Images provider reports no progress", () => {
+    expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "k", adapter: "openai-images" })).toBe(false);
   });
   it("async create→poll provider reports progress", () => {
     expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "k", adapter: "happyhorse" })).toBe(true);
   });
   it("mock provider ramps progress, so it reports progress even for a sync adapter", () => {
-    expect(mediaSupportsProgress({ ...imageBase, mock: true, adapter: "chat-completions" })).toBe(true);
-    expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "", adapter: "chat-completions" })).toBe(true);
+    expect(mediaSupportsProgress({ ...imageBase, mock: true, adapter: "openai-images" })).toBe(true);
+    expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "", adapter: "openai-images" })).toBe(true);
   });
 });
 

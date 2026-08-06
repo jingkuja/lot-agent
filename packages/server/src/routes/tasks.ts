@@ -66,7 +66,7 @@ export function createTaskRoutes(service: AgentService) {
     // Quota pre-check: estimate cost via the shared billing source of truth.
     let estimatedCost = 0;
     if (type === "image.generate") {
-      const cfg = service.modelRegistry.getConfig("gpt-image-2-token");
+      const cfg = service.modelRegistry.getConfig("gpt-image-2");
       estimatedCost = cfg ? estimateCost(cfg, { outputCount: 1 }) : 0;
     } else if (type === "video.generate") {
       const cfg = service.modelRegistry.getConfig("kling-standard");

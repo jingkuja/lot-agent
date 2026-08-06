@@ -15,26 +15,27 @@
     { "id": "deepseek-v4-flash", "type": "llm", "provider": "openai", "billingUnit": "token", "inputPrice": 0.001, "outputPrice": 0.002, "unitPrice": 0, "enabled": true, "capabilities": { "contextWindow": 128000, "maxOutputTokens": 8192, "vision": false, "toolUse": true, "reasoning": false } },
     { "id": "claude-sonnet-4-20250514", "type": "llm", "provider": "anthropic", "billingUnit": "token", "inputPrice": 0.024, "outputPrice": 0.12, "unitPrice": 0, "enabled": true, "capabilities": { "contextWindow": 200000, "maxOutputTokens": 8192, "vision": true, "toolUse": true, "reasoning": true } },
     { "id": "wanx-standard", "type": "image", "provider": "wanx", "billingUnit": "image", "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.04, "enabled": true },
-    { "id": "gpt-image-2-token", "type": "image", "provider": "tokenhub", "billingUnit": "image", "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.04, "enabled": true },
+    { "id": "gpt-image-2", "type": "image", "provider": "tokenhub", "billingUnit": "image", "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.04, "enabled": true },
     { "id": "kling-standard", "type": "video", "provider": "kling", "billingUnit": "second", "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.5, "enabled": true }
   ],
   "generation": {
     "baseUrl": "https://tokenhub.wetok.ai/v1",
     "mock": false,
     "adapter": "happyhorse",
-    "image": { "model": "gpt-image-2-token", "modelId": "gpt-image-2-token", "adapter": "chat-completions" },
+    "image": { "model": "gpt-image-2", "modelId": "gpt-image-2", "adapter": "openai-images" },
     "video": { "model": "doubao-seedance-2.0", "modelId": "kling-standard", "adapter": "openai-video" }
   },
   "modelCatalog": {
-    "defaultProvider": { "llm": "openai", "image": "chat-completions", "video": "openai-video" },
+    "defaultProvider": { "llm": "openai", "image": "openai-images", "video": "openai-video" },
     "providerMap": {
-      "gemini-2.5-flash-image": "chat-completions",
-      "gpt-image-2": "chat-completions",
-      "gpt-image-2-token": "chat-completions",
-      "qwen-image-2.0": "chat-completions",
-      "qwen-image-2.0-pro": "chat-completions"
+      "gemini-2.5-flash-image": "openai-images",
+      "gpt-image-2": "openai-images",
+      "gpt-image-2-token": "openai-images",
+      "qwen-image-2.0": "openai-images",
+      "qwen-image-2.0-pro": "openai-images"
     },
     "pricing": {
+      "gpt-image-2": { "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.04 },
       "gpt-image-2-token": { "inputPrice": 0, "outputPrice": 0, "unitPrice": 0.04 }
     },
     "defaultPricing": {

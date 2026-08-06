@@ -1,4 +1,4 @@
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import { DB } from "../db/database.js";
@@ -30,7 +30,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // (one deeper than server's index.js, which sits at {src,dist}/index.js).
 const ROOT = resolve(__dirname, "../../../..");
 const ASSETS_DIR = resolve(ROOT, "data/assets");
+const UPLOADS_DIR = resolve(ROOT, "data/uploads");
 const storage = new LocalStorage(ASSETS_DIR, staticPrefix("/static/assets"));
+const uploadStorage = new LocalStorage(UPLOADS_DIR, staticPrefix("/static/uploads"));
 
 // Vendor-returned generation URLs are untrusted input (parsed out of a model
 // response) — download them defensively: SSRF-guarded (incl. redirect hops),
@@ -46,6 +48,22 @@ const VIDEO_MAX_BYTES = 300 * 1024 * 1024; // 300MB
 // still recoverable via the download-only retry (generation.redownload).
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 120_000; // 2min
 const VIDEO_DOWNLOAD_TIMEOUT_MS = 5 * 60_000; // 5min
+
+function safeUploadKeyFromUrl(url: string): string | null {
+  const prefix = staticPrefix("/static/uploads/");
+  if (!url.startsWith(prefix)) return null;
+  const key = url.slice(prefix.length);
+  return key && !key.includes("/") && !key.includes("\\") && !key.includes("..") ? key : null;
+}
+
+function imageMimeForUpload(key: string, body: Buffer): string | null {
+  const ext = extname(key).toLowerCase();
+  if (ext === ".png" || body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg" || (body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff)) return "image/jpeg";
+  if (ext === ".webp" || body.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (ext === ".gif" || body.subarray(0, 3).toString("ascii") === "GIF") return "image/gif";
+  return null;
+}
 
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
@@ -113,6 +131,19 @@ async function main() {
       const [head, b64] = url.slice(5).split(",", 2);
       const mime = head.split(";")[0] || "application/octet-stream";
       const body = Buffer.from(b64, "base64");
+      if (body.byteLength > maxBytes) {
+        throw new Error(`download exceeds maxBytes (${body.byteLength} > ${maxBytes})`);
+      }
+      return { body, mime };
+    }
+    // Image-edit references are normally uploads from this app. Read them
+    // directly instead of requiring a public HTTP address (and without routing
+    // the worker through its own SSRF-protected HTTP client).
+    const uploadKey = safeUploadKeyFromUrl(url);
+    if (uploadKey) {
+      const body = await uploadStorage.get(uploadKey);
+      const mime = imageMimeForUpload(uploadKey, body);
+      if (!mime) throw new Error("uploaded edit reference is not a supported image");
       if (body.byteLength > maxBytes) {
         throw new Error(`download exceeds maxBytes (${body.byteLength} > ${maxBytes})`);
       }

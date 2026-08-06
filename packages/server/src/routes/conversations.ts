@@ -349,7 +349,7 @@ export function createGenerationRoutes(service: AgentService) {
     const type = mediaType === "image" ? "image.generate" : "video.generate";
 
     // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
-    const modelId = mediaType === "image" ? "gpt-image-2-token" : "kling-standard";
+    const modelId = mediaType === "image" ? "gpt-image-2" : "kling-standard";
     const cfg = service.modelRegistry.getConfig(modelId);
     const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : Number(settings.durationSec ?? 5);
     const estimatedCost = cfg ? estimateCost(cfg, { outputCount }) : 0;
