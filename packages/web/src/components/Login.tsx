@@ -93,6 +93,16 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
           </button>
         )}
       </div>
+      <footer className="login-compliance" aria-label="网站备案与许可信息">
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          蜀ICP备2025156360号-2
+        </a>
+        <span>增值电信业务经营许可证：川B2-20260779</span>
+      </footer>
       {serverModalOpen && desktop && (
         <ServerSettingsModal
           onClose={() => {
