@@ -98,6 +98,10 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
       </section>
 
       <section className="login-access">
+        <div className="login-mobile-brand" aria-label="借势智算">
+          <span aria-hidden>✦</span>
+          借势智算
+        </div>
         <div className="login-card">
           <div className="login-card-heading">
             <p className="login-card-kicker">WELCOME BACK</p>
