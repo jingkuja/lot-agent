@@ -12,7 +12,7 @@ import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
 import { useModels } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
-import { api, type User, type PickedFile } from "../api/client.js";
+import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveLlmSelection } from "../lib/model-defaults.js";
 
@@ -207,13 +207,18 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
 
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
-    async (content: string, files: PickedFile[] = [], settings?: unknown) => {
+    async (
+      content: string,
+      files: PickedFile[] = [],
+      settings?: unknown,
+      knowledgeBases: KnowledgeBaseRef[] = []
+    ) => {
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
           generateMedia(content, kind as "image" | "video", settings, files, selectedModels[kind as "image" | "video"] ?? undefined);
         } else {
-          send(content, files, undefined, selectedModels.llm ?? undefined);
+          send(content, files, undefined, selectedModels.llm ?? undefined, knowledgeBases);
         }
       };
       if (newAgentId) {
@@ -306,6 +311,18 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           onCollapse={() => setSidebarCollapsed(true)}
           onOpenAgentCenter={() => setCenterOpen(true)}
           onOpenKeySettings={() => setKeyModalOpen(true)}
+          onOpenKnowledgeBase={() => {
+            const popup = window.open("about:blank", "_blank");
+            void api.getKnowledgeBaseLink()
+              .then(({ url }) => {
+                if (popup) {
+                  popup.opener = null;
+                  popup.location.href = url;
+                }
+                else window.location.href = url;
+              })
+              .catch(() => popup?.close());
+          }}
         />
         <Sidebar
           conversations={sidebarConversations}

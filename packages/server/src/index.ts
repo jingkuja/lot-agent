@@ -22,6 +22,7 @@ import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
+import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
 import { AppConfigSchema } from "@lot-agent/core";
 import { loadLlmConfig } from "./config.js";
 import { rateLimit, clientIp } from "./middleware/rate-limit.js";
@@ -225,6 +226,8 @@ async function main() {
   app.use("/api/balance", authMw);
   app.use("/api/platform/*", authMw);
   app.use("/api/publish/*", authMw);
+  app.use("/api/knowledge-bases", authMw);
+  app.use("/api/knowledge-bases/*", authMw);
 
   // userId-keyed rate limits — registered after authMw (so `userId` is set)
   // and before the route handlers below. Exact method+path so GET/SSE-poll
@@ -251,6 +254,7 @@ async function main() {
   app.route("/api/usage", createUsageRoutes(service));
   app.route("/api/platform", createPlatformRoutes(service));
   app.route("/api/publish", createPublishRoutes(service));
+  app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
 
   // /api/balance alias → same balance logic, user-scoped
   app.get("/api/balance", async (c) => {

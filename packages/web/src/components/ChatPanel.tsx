@@ -4,12 +4,12 @@ import { InputBox, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
-import type { Agent, CatalogModel, PickedFile } from "../api/client.js";
+import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile } from "../api/client.js";
 import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
 
 interface ChatPanelProps {
   messages: DisplayMessage[];
-  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings) => void;
+  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings, knowledgeBases?: KnowledgeBaseRef[]) => void;
   onStop: () => void;
   isStreaming: boolean;
   activeConversationId: string | null;
@@ -117,6 +117,7 @@ export function ChatPanel({
         models={modelList ?? []}
         selectedModel={selectedModel ?? null}
         onModelChange={onModelChange}
+        allowKnowledgeBase={agent?.id === "general"}
       />
     </>
   );

@@ -125,6 +125,17 @@ export interface UploadedAttachment {
   slot?: AttachmentSlot;
 }
 
+export interface KnowledgeBaseRef {
+  id: string;
+  name: string;
+}
+
+export interface KnowledgeBase extends KnowledgeBaseRef {
+  description: string;
+  documentCount: number;
+  availableDocumentCount: number;
+}
+
 // ── Token management ──────────────────────────────────────────────────────────
 // Delegated to token-store so the desktop shell can back it with the OS secure
 // storage while the browser keeps using localStorage. Re-exported here because
@@ -263,7 +274,8 @@ export const api = {
     // Caller may pass its own controller so a single Stop aborts both the
     // file-upload phase and the SSE stream.
     controller: AbortController = new AbortController(),
-    modelId?: string
+    modelId?: string,
+    knowledgeBaseIds?: string[]
   ): AbortController => {
     (async () => {
       try {
@@ -275,7 +287,7 @@ export const api = {
               "Content-Type": "application/json",
               ...authHeaders(),
             },
-            body: JSON.stringify({ content, attachments, modelId }),
+            body: JSON.stringify({ content, attachments, modelId, knowledgeBaseIds }),
             signal: controller.signal,
           }
         );
@@ -338,6 +350,12 @@ export const api = {
 
     return controller;
   },
+
+  listKnowledgeBases: () =>
+    request<{ data: KnowledgeBase[] }>("/knowledge-bases"),
+
+  getKnowledgeBaseLink: () =>
+    request<{ url: string }>("/knowledge-bases/link", { method: "POST" }),
 
   // ── Generation (image/video via conversation) ────────────────────────────
   generate: (

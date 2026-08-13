@@ -166,9 +166,38 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "Not found" }, 404);
     }
 
-    const body = await c.req.json<{ content: string; attachments?: AttachmentRef[]; modelId?: string }>();
+    const body = await c.req.json<{
+      content: string;
+      attachments?: AttachmentRef[];
+      modelId?: string;
+      knowledgeBaseIds?: string[];
+    }>();
     if (!body.content && !(body.attachments && body.attachments.length)) {
       return c.json({ error: "content or attachments required" }, 400);
+    }
+
+    const knowledgeBaseIds = body.knowledgeBaseIds ?? [];
+    if (
+      !Array.isArray(knowledgeBaseIds) ||
+      knowledgeBaseIds.length > 5 ||
+      knowledgeBaseIds.some((item) => typeof item !== "string" || !item) ||
+      new Set(knowledgeBaseIds).size !== knowledgeBaseIds.length
+    ) {
+      return c.json({ error: "invalid knowledgeBaseIds (max 5)" }, 400);
+    }
+    if (knowledgeBaseIds.length && conversation.agent_id !== "general") {
+      return c.json({ error: "knowledge bases are only available in the general assistant" }, 400);
+    }
+    let knowledgeBases: Awaited<ReturnType<typeof service.resolveKnowledgeBases>> = [];
+    if (knowledgeBaseIds.length) {
+      try {
+        knowledgeBases = await service.resolveKnowledgeBases(userId, knowledgeBaseIds);
+      } catch (error) {
+        return c.json(
+          { error: error instanceof Error ? error.message : "知识库不可用" },
+          502
+        );
+      }
     }
 
     // Validate + canonicalize attachments against the caller's OWN assets.
@@ -232,7 +261,7 @@ export function createConversationRoutes(service: AgentService): Hono {
             userId,
             attachments,
             c.req.raw.signal,
-            { modelId: body.modelId }
+            { modelId: body.modelId, knowledgeBases }
           )) {
             send(agentEventToSse(event));
           }

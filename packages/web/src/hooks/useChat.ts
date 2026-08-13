@@ -1,5 +1,5 @@
 import { useReducer, useCallback, useRef } from "react";
-import { api, type UploadedAttachment, type PickedFile } from "../api/client.js";
+import { api, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
 import {
@@ -151,6 +151,10 @@ export function useChat(
           role === "user"
             ? (parsedMeta?.attachments as UploadedAttachment[] | undefined)
             : undefined,
+        knowledgeBases:
+          role === "user"
+            ? (parsedMeta?.knowledgeBases as KnowledgeBaseRef[] | undefined)
+            : undefined,
         toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
         toolResult:
           role === "tool"
@@ -194,7 +198,13 @@ export function useChat(
   }, [pollGeneration]);
 
   const streamMessage = useCallback(
-    (content: string, files: PickedFile[] = [], preUploaded?: UploadedAttachment[], modelId?: string) => {
+    (
+      content: string,
+      files: PickedFile[] = [],
+      preUploaded?: UploadedAttachment[],
+      modelId?: string,
+      knowledgeBases: KnowledgeBaseRef[] = []
+    ) => {
       const cid = cidRef.current;
       if (
         !cid ||
@@ -243,6 +253,7 @@ export function useChat(
           role: "user",
           content,
           attachments: uploaded,
+          knowledgeBases,
         };
         if (isCurrent()) dispatch({ type: "user_appended", message: userMsg });
 
@@ -355,7 +366,7 @@ export function useChat(
           };
           if (isCurrent()) dispatch({ type: "turn_finalized", message: assistantMsg });
         }
-      }, uploaded, controller, modelId);
+      }, uploaded, controller, modelId, knowledgeBases.map((item) => item.id));
       })();
     },
     [conversationId, state.isStreaming, loadMessages]
@@ -372,6 +383,7 @@ export function useChat(
     // Preserve the original message's attachments so regenerating a message
     // that carried a file doesn't silently drop the document/image content.
     const lastUserAttachments = lastUserMsg.attachments;
+    const lastUserKnowledgeBases = lastUserMsg.knowledgeBases;
 
     try {
       await api.regenerate(conversationId, lastUserMsg.dbId);
@@ -391,7 +403,7 @@ export function useChat(
 
     dispatch({ type: "truncated_from", id: lastUserMsg.id });
 
-    streamMessage(lastUserContent, [], lastUserAttachments);
+    streamMessage(lastUserContent, [], lastUserAttachments, undefined, lastUserKnowledgeBases);
   }, [state.messages, state.isStreaming, conversationId, streamMessage]);
 
   const generateMedia = useCallback(

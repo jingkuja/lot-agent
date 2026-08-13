@@ -75,6 +75,17 @@ export function MessageBubble({
               ))}
             </div>
           )}
+          {message.knowledgeBases && message.knowledgeBases.length > 0 && (
+            <div className="message-attachments">
+              {message.knowledgeBases.map((item) => (
+                <span className="attachment-chip knowledge-chip" key={item.id}>
+                  <span className="attachment-slot-badge badge-knowledge">知识库</span>
+                  <span aria-hidden>▤</span>
+                  <span className="attachment-name" title={item.name}>{item.name}</span>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="message-actions-row message-actions-right">
             <MessageActions content={message.content} role="user" />
           </div>

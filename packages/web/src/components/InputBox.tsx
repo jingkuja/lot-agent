@@ -3,12 +3,19 @@ import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type Vide
 import { ModelPicker } from "./ModelPicker.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
+import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
+import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
 
 interface InputBoxProps {
-  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings) => void;
+  onSend: (
+    content: string,
+    files: PickedFile[],
+    settings?: ImageSettings | VideoSettings,
+    knowledgeBases?: KnowledgeBaseRef[]
+  ) => void;
   onStop: () => void;
   disabled: boolean;
   placeholder?: string;
@@ -20,6 +27,7 @@ interface InputBoxProps {
   /** 当前选中的模型 id（null = 用会话/agent 默认）。 */
   selectedModel?: string | null;
   onModelChange?: (id: string) => void;
+  allowKnowledgeBase?: boolean;
 }
 
 const MAX_FILES = 5;
@@ -52,11 +60,17 @@ export function InputBox({
   models = [],
   selectedModel = null,
   onModelChange,
+  allowKnowledgeBase = false,
 }: InputBoxProps) {
   const [value, setValue] = useState("");
   const noModels = !!onModelChange && models.length === 0;
   const [noModelNotice, setNoModelNotice] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseRef[]>([]);
+  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeBase[]>([]);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [referenceVideoFiles, setReferenceVideoFiles] = useState<File[]>([]);
   const [referenceAudioFiles, setReferenceAudioFiles] = useState<File[]>([]);
   const [firstFrameFile, setFirstFrameFile] = useState<File | null>(null);
@@ -128,6 +142,24 @@ export function InputBox({
     });
   }, []);
 
+  const loadKnowledgeBases = useCallback(async () => {
+    setKnowledgeLoading(true);
+    setKnowledgeError(null);
+    try {
+      const response = await api.listKnowledgeBases();
+      setKnowledgeItems(response.data);
+    } catch (error) {
+      setKnowledgeError(error instanceof Error ? error.message : "知识库加载失败");
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  }, []);
+
+  const openKnowledgeBases = useCallback(() => {
+    setKnowledgeOpen(true);
+    void loadKnowledgeBases();
+  }, [loadKnowledgeBases]);
+
   const setFrameFile = useCallback(
     (setter: (file: File | null) => void, previous: File | null, file: File | null) => {
       if (previous) {
@@ -174,9 +206,10 @@ export function InputBox({
             ...(newContractFile ? [{ file: newContractFile, slot: "contract_new" as const }] : []),
           ]
         : files.map((f) => ({ file: f }));
-    onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined);
+    onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined, knowledgeBases);
     setValue("");
     setFiles([]);
+    setKnowledgeBases([]);
     setReferenceVideoFiles([]);
     setReferenceAudioFiles([]);
     setFirstFrameFile(null);
@@ -187,7 +220,7 @@ export function InputBox({
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, videoMode, pptMode, contractMode, noModels]);
+  }, [value, files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, videoMode, pptMode, contractMode, noModels, knowledgeBases]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -221,8 +254,21 @@ export function InputBox({
           暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
         </div>
       )}
-      {(files.length > 0 || referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
+      {(knowledgeBases.length > 0 || files.length > 0 || referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
         <div className="input-attachments">
+          {knowledgeBases.map((item) => (
+            <div className="attachment-chip knowledge-chip" key={`kb:${item.id}`}>
+              <span className="attachment-slot-badge badge-knowledge">知识库</span>
+              <span aria-hidden>▤</span>
+              <span className="attachment-name" title={item.name}>{item.name}</span>
+              <button
+                className="attachment-remove"
+                onClick={() => setKnowledgeBases((previous) => previous.filter((kb) => kb.id !== item.id))}
+                title="移除"
+                type="button"
+              >✕</button>
+            </div>
+          ))}
           {templateFile && (
             <div className="attachment-chip" key="__template">
               <span className="attachment-slot-badge badge-template">模版</span>
@@ -533,6 +579,23 @@ export function InputBox({
         </div>
         <div className="input-toolbar-right">
           {!mediaMode && !pptMode && !contractMode && (
+            <>
+            {allowKnowledgeBase && (
+              <button
+                type="button"
+                className={`btn-knowledge${knowledgeBases.length ? " active" : ""}`}
+                onClick={openKnowledgeBases}
+                disabled={disabled}
+                title="选择个人知识库"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <ellipse cx="12" cy="5" rx="7" ry="3" />
+                  <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
+                  <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+                </svg>
+                <span>知识库</span>
+              </button>
+            )}
             <div className="upload-wrap">
               <button
                 type="button"
@@ -559,6 +622,7 @@ export function InputBox({
                 <div className="upload-tooltip-hint">最多 {MAX_FILES} 个文件</div>
               </div>
             </div>
+            </>
           )}
           {onModelChange && (
             <ModelPicker
@@ -595,6 +659,17 @@ export function InputBox({
           )}
         </div>
       </div>
+      {knowledgeOpen && (
+        <KnowledgeBaseModal
+          items={knowledgeItems}
+          selected={knowledgeBases}
+          loading={knowledgeLoading}
+          error={knowledgeError}
+          onConfirm={setKnowledgeBases}
+          onClose={() => setKnowledgeOpen(false)}
+          onRetry={() => void loadKnowledgeBases()}
+        />
+      )}
     </div>
   );
 }

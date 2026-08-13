@@ -48,6 +48,15 @@ describe("saveUserMessage", () => {
     const row = db.rows.find((r: any) => r.id === id);
     expect(row.metadata).toEqual({});
   });
+
+  it("stores selected knowledge bases like message attachments", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    const knowledgeBases = [{ id: "kb1", name: "制度库" }];
+    const id = await repo.saveUserMessage("c1", "差旅标准", [], knowledgeBases);
+    const row = db.rows.find((r: any) => r.id === id);
+    expect(row.metadata).toEqual({ knowledgeBases });
+  });
 });
 
 describe("loadHistory materialize", () => {

@@ -24,6 +24,7 @@ export interface DisplayMessage {
   isStreaming?: boolean;
   rating?: number | null;
   attachments?: import("../api/client.js").UploadedAttachment[];
+  knowledgeBases?: import("../api/client.js").KnowledgeBaseRef[];
   generation?: GenerationView;
 }
 
