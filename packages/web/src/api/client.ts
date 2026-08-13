@@ -6,6 +6,7 @@ export interface Conversation {
   title: string;
   agent_id: string;
   model?: string | null;
+  metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -235,6 +236,12 @@ export const api = {
     request<Conversation & { messages: StoredMessage[] }>(
       `/conversations/${id}`
     ),
+
+  setConversationKnowledgeBases: (id: string, knowledgeBaseIds: string[]) =>
+    request<{ knowledgeBases: KnowledgeBaseRef[] }>(`/conversations/${id}/knowledge-bases`, {
+      method: "PUT",
+      body: JSON.stringify({ knowledgeBaseIds }),
+    }),
 
   deleteConversation: (id: string) =>
     request<{ ok: boolean }>(`/conversations/${id}`, { method: "DELETE" }),

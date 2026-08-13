@@ -28,6 +28,8 @@ interface InputBoxProps {
   selectedModel?: string | null;
   onModelChange?: (id: string) => void;
   allowKnowledgeBase?: boolean;
+  knowledgeBases?: KnowledgeBaseRef[];
+  onKnowledgeBasesChange?: (items: KnowledgeBaseRef[]) => void;
 }
 
 const MAX_FILES = 5;
@@ -61,12 +63,13 @@ export function InputBox({
   selectedModel = null,
   onModelChange,
   allowKnowledgeBase = false,
+  knowledgeBases = [],
+  onKnowledgeBasesChange = () => {},
 }: InputBoxProps) {
   const [value, setValue] = useState("");
   const noModels = !!onModelChange && models.length === 0;
   const [noModelNotice, setNoModelNotice] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseRef[]>([]);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeBase[]>([]);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
@@ -209,7 +212,6 @@ export function InputBox({
     onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined, knowledgeBases);
     setValue("");
     setFiles([]);
-    setKnowledgeBases([]);
     setReferenceVideoFiles([]);
     setReferenceAudioFiles([]);
     setFirstFrameFile(null);
@@ -263,7 +265,7 @@ export function InputBox({
               <span className="attachment-name" title={item.name}>{item.name}</span>
               <button
                 className="attachment-remove"
-                onClick={() => setKnowledgeBases((previous) => previous.filter((kb) => kb.id !== item.id))}
+                onClick={() => onKnowledgeBasesChange(knowledgeBases.filter((kb) => kb.id !== item.id))}
                 title="移除"
                 type="button"
               >✕</button>
@@ -665,7 +667,7 @@ export function InputBox({
           selected={knowledgeBases}
           loading={knowledgeLoading}
           error={knowledgeError}
-          onConfirm={setKnowledgeBases}
+          onConfirm={onKnowledgeBasesChange}
           onClose={() => setKnowledgeOpen(false)}
           onRetry={() => void loadKnowledgeBases()}
         />

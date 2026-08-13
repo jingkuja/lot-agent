@@ -29,6 +29,8 @@ interface ChatPanelProps {
   onModelChange?: (id: string) => void;
   /** Retry the download of a generation left in "下载失败". */
   onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
+  knowledgeBases?: KnowledgeBaseRef[];
+  onKnowledgeBasesChange?: (items: KnowledgeBaseRef[]) => void;
 }
 
 /** 按本地时间返回问候语：早上好 / 下午好 / 晚上好。 */
@@ -53,6 +55,8 @@ export function ChatPanel({
   selectedModel,
   onModelChange,
   onRedownloadGeneration,
+  knowledgeBases,
+  onKnowledgeBasesChange,
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -118,6 +122,8 @@ export function ChatPanel({
         selectedModel={selectedModel ?? null}
         onModelChange={onModelChange}
         allowKnowledgeBase={agent?.id === "general"}
+        knowledgeBases={knowledgeBases}
+        onKnowledgeBasesChange={onKnowledgeBasesChange}
       />
     </>
   );

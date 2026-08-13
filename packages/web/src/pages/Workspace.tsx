@@ -88,8 +88,26 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     [updateTitle, defaultAgentId]
   );
 
-  const { messages, conversationModel, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia, redownloadGeneration } =
+  const { messages, conversationModel, conversationKnowledgeBases, setConversationKnowledgeBases, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia, redownloadGeneration } =
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
+
+  const knowledgeUpdateSeq = useRef(0);
+  const handleKnowledgeBasesChange = useCallback(
+    (items: KnowledgeBaseRef[]) => {
+      const previous = conversationKnowledgeBases;
+      const conversationId = activeIdRef.current;
+      const seq = ++knowledgeUpdateSeq.current;
+      setConversationKnowledgeBases(items);
+      if (!conversationId) return;
+      void api.setConversationKnowledgeBases(conversationId, items.map((item) => item.id)).catch(() => {
+        // Revert only if this is still the latest edit for the same open chat.
+        if (seq === knowledgeUpdateSeq.current && activeIdRef.current === conversationId) {
+          setConversationKnowledgeBases(previous);
+        }
+      });
+    },
+    [conversationKnowledgeBases, setConversationKnowledgeBases]
+  );
 
   // Per-user model catalog + per-group (llm/image/video) selected models.
   const { models: modelCatalog, reload: reloadModels } = useModels();
@@ -380,6 +398,8 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             modelCatalog={modelCatalog}
             selectedModel={selectedModels[modelGroup]}
             onModelChange={handleModelChange}
+            knowledgeBases={conversationKnowledgeBases}
+            onKnowledgeBasesChange={handleKnowledgeBasesChange}
           />
         </div>
 

@@ -4,12 +4,14 @@ import { estimateCost } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
+import type { KnowledgeBaseRef } from "../services/rag-client.js";
 import { pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
 
 type Variables = { userId: string };
 
 /** Server-side cap (the InputBox MAX_FILES=5 is only a client hint). */
 const MAX_ATTACHMENTS = 5;
+const MAX_KNOWLEDGE_BASES = 5;
 
 /**
  * Run-lease staleness window (report #20 concurrency half / architecture
@@ -24,6 +26,29 @@ const RUN_CONFLICT_MESSAGE = "对话正在处理另一条消息，请稍候再�
 
 /** Attachment slots accepted from the client; anything else is dropped. */
 const VALID_SLOTS = new Set(["ppt_template", "ppt_background", "content", "contract_old", "contract_new"]);
+
+function validateKnowledgeBaseIds(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_KNOWLEDGE_BASES &&
+    value.every((item) => typeof item === "string" && item.length > 0) &&
+    new Set(value).size === value.length
+  );
+}
+
+function storedKnowledgeBases(metadata: Record<string, unknown> | undefined): KnowledgeBaseRef[] {
+  const value = metadata?.knowledgeBases;
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (item): item is KnowledgeBaseRef =>
+        !!item &&
+        typeof item === "object" &&
+        typeof (item as KnowledgeBaseRef).id === "string" &&
+        typeof (item as KnowledgeBaseRef).name === "string"
+    )
+    .slice(0, MAX_KNOWLEDGE_BASES);
+}
 
 export function createConversationRoutes(service: AgentService): Hono {
   const app = new Hono<{ Variables: Variables }>();
@@ -113,6 +138,35 @@ export function createConversationRoutes(service: AgentService): Hono {
     return c.json({ ...conversation, messages: enriched });
   });
 
+  // Persist the knowledge bases attached to this conversation. This endpoint
+  // is called as soon as the user confirms or removes a selection, so the
+  // choice survives reloads even when no subsequent message is sent.
+  app.put("/:id/knowledge-bases", async (c) => {
+    const userId = c.get("userId");
+    const id = c.req.param("id");
+    const conversation = await service.db.getConversation(id);
+    if (!conversation || conversation.user_id !== userId) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const body = await c.req.json<{ knowledgeBaseIds?: unknown }>().catch(() => ({}));
+    if (!validateKnowledgeBaseIds(body.knowledgeBaseIds)) {
+      return c.json({ error: `invalid knowledgeBaseIds (max ${MAX_KNOWLEDGE_BASES})` }, 400);
+    }
+    if (body.knowledgeBaseIds.length && conversation.agent_id !== "general") {
+      return c.json({ error: "knowledge bases are only available in the general assistant" }, 400);
+    }
+    try {
+      const knowledgeBases = await service.resolveKnowledgeBases(userId, body.knowledgeBaseIds);
+      await service.db.mergeConversationMetadata(id, { knowledgeBases });
+      return c.json({ knowledgeBases });
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : "知识库不可用" },
+        502
+      );
+    }
+  });
+
   // Delete conversation (soft delete) — ownership check
   app.delete("/:id", async (c) => {
     const userId = c.get("userId");
@@ -176,14 +230,13 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "content or attachments required" }, 400);
     }
 
-    const knowledgeBaseIds = body.knowledgeBaseIds ?? [];
-    if (
-      !Array.isArray(knowledgeBaseIds) ||
-      knowledgeBaseIds.length > 5 ||
-      knowledgeBaseIds.some((item) => typeof item !== "string" || !item) ||
-      new Set(knowledgeBaseIds).size !== knowledgeBaseIds.length
-    ) {
-      return c.json({ error: "invalid knowledgeBaseIds (max 5)" }, 400);
+    // An omitted field means "keep using this conversation's selection".
+    // An explicit [] is the user's manual removal and clears the persisted set.
+    const suppliedKnowledgeBaseIds = body.knowledgeBaseIds;
+    const knowledgeBaseIds =
+      suppliedKnowledgeBaseIds ?? storedKnowledgeBases(conversation.metadata).map((item) => item.id);
+    if (!validateKnowledgeBaseIds(knowledgeBaseIds)) {
+      return c.json({ error: `invalid knowledgeBaseIds (max ${MAX_KNOWLEDGE_BASES})` }, 400);
     }
     if (knowledgeBaseIds.length && conversation.agent_id !== "general") {
       return c.json({ error: "knowledge bases are only available in the general assistant" }, 400);
@@ -198,6 +251,9 @@ export function createConversationRoutes(service: AgentService): Hono {
           502
         );
       }
+    }
+    if (suppliedKnowledgeBaseIds !== undefined) {
+      await service.db.mergeConversationMetadata(id, { knowledgeBases });
     }
 
     // Validate + canonicalize attachments against the caller's OWN assets.

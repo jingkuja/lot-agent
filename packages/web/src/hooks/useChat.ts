@@ -1,4 +1,4 @@
-import { useReducer, useCallback, useRef } from "react";
+import { useReducer, useCallback, useRef, useState } from "react";
 import { api, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
@@ -23,6 +23,7 @@ export function useChat(
   // translates async events (SSE, generation polling, user actions) into
   // ChatActions and owns the IO side effects (streams, uploads, polling).
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
+  const [conversationKnowledgeBases, setConversationKnowledgeBases] = useState<KnowledgeBaseRef[]>([]);
   // One live SSE stream per conversation id. Switching away must NOT kill the
   // stream (the reply still persists server-side) — but its events may only
   // touch the view while its conversation is the one on screen, otherwise a
@@ -125,6 +126,7 @@ export function useChat(
     // The user may have switched again while this fetch was in flight — a
     // stale response must not overwrite the conversation now on screen.
     if (cidRef.current !== convId) return;
+    const rawStoredKnowledgeBases = data.metadata?.knowledgeBases;
     const display: DisplayMessage[] = data.messages.map((m) => {
       const role = m.role as DisplayMessage["role"];
       const toolName = (m as { tool_name?: string | null }).tool_name;
@@ -171,6 +173,22 @@ export function useChat(
         generation: gen,
       };
     });
+    const storedKnowledgeBases = Array.isArray(rawStoredKnowledgeBases)
+      ? rawStoredKnowledgeBases.filter(
+          (item): item is KnowledgeBaseRef =>
+            !!item &&
+            typeof item === "object" &&
+            typeof (item as KnowledgeBaseRef).id === "string" &&
+            typeof (item as KnowledgeBaseRef).name === "string"
+        )
+      : undefined;
+    // Backward compatibility: conversations created before selection became
+    // conversation metadata still carry it on their user messages. Restore
+    // the latest such selection once; the next send persists it on the chat.
+    const latestMessageKnowledgeBases = [...display]
+      .reverse()
+      .find((message) => message.role === "user" && message.knowledgeBases)?.knowledgeBases;
+    setConversationKnowledgeBases(storedKnowledgeBases ?? latestMessageKnowledgeBases ?? []);
     // Re-entering a conversation whose stream is still live re-disables the
     // input; its stream events re-attach to the view on the next chunk.
     dispatch({
@@ -548,12 +566,15 @@ export function useChat(
     // Cancel any in-flight generation poll and drop the streaming lock so a
     // resumed poll in the next conversation doesn't leave the input disabled.
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
+    setConversationKnowledgeBases([]);
     dispatch({ type: "cleared" });
   }, []);
 
   return {
     messages: state.messages,
     conversationModel: state.conversationModel,
+    conversationKnowledgeBases,
+    setConversationKnowledgeBases,
     send: streamMessage,
     stop,
     isStreaming: state.isStreaming,
