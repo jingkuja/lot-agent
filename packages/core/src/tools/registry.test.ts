@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ToolRegistry } from "./registry.js";
 import type { Tool, ToolContext } from "../types/index.js";
 
@@ -87,5 +87,53 @@ describe("ToolRegistry.execute — input validation", () => {
     );
     expect(result.isError).toBeUndefined();
     expect(result.content).toBe("ok");
+  });
+});
+
+describe("ToolRegistry.execute — timer cleanup", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("clears the per-call timeout timer once the tool resolves normally", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "fast",
+      description: "a fast tool",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ content: "ok" }),
+    });
+
+    const result = await registry.execute("fast", {}, { workingDirectory: "/tmp" });
+
+    expect(result.content).toBe("ok");
+    // The timeout() race timer must be cancelled once the tool wins the race —
+    // otherwise every call leaves a live setTimeout hanging until timeoutMs.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears the timer even when a signal is passed alongside the call", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "fast",
+      description: "a fast tool",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ content: "ok" }),
+    });
+    const controller = new AbortController();
+
+    const result = await registry.execute(
+      "fast",
+      {},
+      { workingDirectory: "/tmp" },
+      { signal: controller.signal }
+    );
+
+    expect(result.content).toBe("ok");
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

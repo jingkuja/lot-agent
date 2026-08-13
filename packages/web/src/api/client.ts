@@ -6,6 +6,7 @@ export interface Conversation {
   title: string;
   agent_id: string;
   model?: string | null;
+  metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -32,6 +33,8 @@ export interface Rating {
 export interface AgentEvent {
   type: "text" | "thinking" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact" | "title";
   id?: string;
+  /** tool_result variant: id of the tool_call this result answers. */
+  toolCallId?: string;
   content?: string;
   name?: string;
   input?: unknown;
@@ -63,22 +66,32 @@ export interface Agent {
   sortOrder?: number | null;
 }
 
+export interface PublicApiKey {
+  key: string;
+  name: string;
+  group?: string;
+}
+
 export interface User {
   id: string;
   name: string;
   username: string | null;
-  apiKeys: string[];
+  apiKeys: PublicApiKey[];
   activeKeyIndex: number;
 }
 
 export interface TaskStatus {
   id: string;
-  status: "pending" | "running" | "succeeded" | "failed";
+  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
   progress: number;
   output?: {
     assetIds?: string[];
     assets?: { url: string; mime: string; durationSec?: number }[];
     url?: string;
+    /** Vendor generation succeeded but the server-side download of the media
+     * failed; `sourceUrl` is the vendor url to retry the download from. */
+    downloadFailed?: boolean;
+    sourceUrl?: string;
     [key: string]: unknown;
   };
   error?: string;
@@ -92,7 +105,10 @@ export interface AssetMeta {
   created_at: string;
 }
 
-export type AttachmentSlot = "ppt_template" | "ppt_background" | "content" | "contract_old" | "contract_new";
+export type AttachmentSlot =
+  | "ppt_template" | "ppt_background" | "content" | "contract_old" | "contract_new"
+  | "video_reference_image" | "video_reference_video" | "video_reference_audio"
+  | "video_first_frame" | "video_last_frame";
 
 /** 输入框选中的文件 + 它在消息里的角色（PPT 模版 / 内容素材 / 新旧合同）。 */
 export interface PickedFile {
@@ -110,20 +126,23 @@ export interface UploadedAttachment {
   slot?: AttachmentSlot;
 }
 
+export interface KnowledgeBaseRef {
+  id: string;
+  name: string;
+}
+
+export interface KnowledgeBase extends KnowledgeBaseRef {
+  description: string;
+  documentCount: number;
+  availableDocumentCount: number;
+}
+
 // ── Token management ──────────────────────────────────────────────────────────
-const TOKEN_KEY = "lot_token";
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-}
+// Delegated to token-store so the desktop shell can back it with the OS secure
+// storage while the browser keeps using localStorage. Re-exported here because
+// App.tsx / Login.tsx historically import them from the API client.
+import { clearToken, getToken, setToken } from "../lib/token-store.js";
+export { getToken, setToken, clearToken };
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 const BASE = "/api";
@@ -165,6 +184,13 @@ export const api = {
     request<{ token: string; user: User }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, encryptedPassword }),
+    }),
+
+  // Public: exchange a tokenhub-issued JWT (from a `?token=` deep link) for a session.
+  tokenLogin: (token: string) =>
+    request<{ token: string; user: User }>("/auth/token-login", {
+      method: "POST",
+      body: JSON.stringify({ token }),
     }),
 
   logout: () =>
@@ -211,6 +237,12 @@ export const api = {
       `/conversations/${id}`
     ),
 
+  setConversationKnowledgeBases: (id: string, knowledgeBaseIds: string[]) =>
+    request<{ knowledgeBases: KnowledgeBaseRef[] }>(`/conversations/${id}/knowledge-bases`, {
+      method: "PUT",
+      body: JSON.stringify({ knowledgeBaseIds }),
+    }),
+
   deleteConversation: (id: string) =>
     request<{ ok: boolean }>(`/conversations/${id}`, { method: "DELETE" }),
 
@@ -249,7 +281,8 @@ export const api = {
     // Caller may pass its own controller so a single Stop aborts both the
     // file-upload phase and the SSE stream.
     controller: AbortController = new AbortController(),
-    modelId?: string
+    modelId?: string,
+    knowledgeBaseIds?: string[]
   ): AbortController => {
     (async () => {
       try {
@@ -261,7 +294,7 @@ export const api = {
               "Content-Type": "application/json",
               ...authHeaders(),
             },
-            body: JSON.stringify({ content, attachments, modelId }),
+            body: JSON.stringify({ content, attachments, modelId, knowledgeBaseIds }),
             signal: controller.signal,
           }
         );
@@ -273,7 +306,15 @@ export const api = {
           return;
         }
 
-        if (!res.ok || !res.body) {
+        if (!res.ok) {
+          // Surface the server's actual reason (e.g. the run-lease 409 —
+          // "对话正在处理另一条消息，请稍候再试") instead of a generic
+          // message, same pattern as `request()`/`uploadFile` above.
+          const err = await res.json().catch(() => ({ error: "Request failed" }));
+          onEvent({ type: "error", message: err.error ?? "Request failed" });
+          return;
+        }
+        if (!res.body) {
           onEvent({ type: "error", message: "Request failed" });
           return;
         }
@@ -317,10 +358,27 @@ export const api = {
     return controller;
   },
 
+  listKnowledgeBases: () =>
+    request<{ data: KnowledgeBase[] }>("/knowledge-bases"),
+
+  getKnowledgeBaseLink: () =>
+    request<{ url: string }>("/knowledge-bases/link", { method: "POST" }),
+
   // ── Generation (image/video via conversation) ────────────────────────────
   generate: (
     conversationId: string,
-    body: { prompt: string; mediaType: "image" | "video"; settings?: unknown; media?: { type: "reference_image"; url: string }[]; model?: string }
+    body: {
+      prompt: string;
+      mediaType: "image" | "video";
+      settings?: unknown;
+      media?: { type: "reference_image"; url: string }[];
+      input_reference?: string | string[];
+      reference_video?: string | string[];
+      reference_audio?: string | string[];
+      first_frame?: string;
+      last_frame?: string;
+      model?: string;
+    }
   ) =>
     request<{
       userMessage: { id: string; role: "user"; content: string };
@@ -337,6 +395,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // Retry only the download of a generation whose vendor media succeeded but
+  // whose server-side download failed (card in "下载失败" state). Returns the
+  // new taskId to poll.
+  redownloadGeneration: (conversationId: string, messageId: string) =>
+    request<{ taskId: string }>(
+      `/conversations/${conversationId}/generations/${messageId}/redownload`,
+      { method: "POST" }
+    ),
+
   // ── Tasks ───────────────────────────────────────────────────────────────────
   createTask: (type: "image.generate" | "video.generate", input: unknown) =>
     request<{ jobId: string }>("/tasks", {
@@ -345,6 +412,9 @@ export const api = {
     }),
 
   getTask: (id: string) => request<TaskStatus>(`/tasks/${id}`),
+
+  cancelTask: (id: string) =>
+    request<{ ok: boolean; status: string }>(`/tasks/${id}/cancel`, { method: "POST" }),
 
   // ── Assets ──────────────────────────────────────────────────────────────────
   getAsset: (id: string) => request<AssetMeta>(`/assets/${id}`),

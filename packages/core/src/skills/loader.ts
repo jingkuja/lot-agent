@@ -132,6 +132,16 @@ export class SkillLoader {
   }
 
   /**
+   * Skills visible to an agent: unscoped skills are visible to everyone;
+   * agent-scoped skills only to their declared agent(s). Load order preserved.
+   */
+  visibleTo(agentId?: string): Skill[] {
+    return this.skills.filter((s) =>
+      s.agents && s.agents.length > 0 ? !!agentId && s.agents.includes(agentId) : true
+    );
+  }
+
+  /**
    * Select skills to inject for a message. Agent-scoped skills always match
    * their agent; unscoped skills match on trigger substrings. Results are
    * deduped by name, capped to `maxSkills` (default 3), and — when `maxTokens`

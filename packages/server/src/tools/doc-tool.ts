@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Tool, ToolResult, ObjectStorage } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 import { generateDocument, type DocFormat } from "./doc-generator.js";
+import { DOWNLOAD_RESULT_HINT } from "./artifact-result.js";
 
 const MIME: Record<string, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -121,7 +122,8 @@ export function createDocTool(deps: DocToolDeps): Tool {
       return {
         content:
           `已生成文档「${title || key}」(${actualFmt})。\n` +
-          `下载链接：${url}\nasset_id: ${id}${degradeNote}`,
+          `下载链接：${url}\nasset_id: ${id}${degradeNote}\n` +
+          DOWNLOAD_RESULT_HINT,
       };
     },
   };

@@ -12,6 +12,7 @@ function fakeService(
 ) {
   const chat = async function* () {
     yield { type: "text", content: "测试标题" };
+    yield { type: "done", usage: { promptTokens: 3, completionTokens: 2 } };
   };
   const fake = {
     db: {
@@ -39,6 +40,7 @@ function fakeService(
     }),
     providerFactory: { llm: vi.fn(() => ({ chat })) },
     getLLMProvider: vi.fn(() => ({ chat })),
+    usageMeter: { record: vi.fn(async () => 0) },
     generateTitle: AgentService.prototype.generateTitle,
   };
   return fake as unknown as AgentService & typeof fake;
@@ -93,5 +95,27 @@ describe("generateTitle model resolution", () => {
     expect(svc.db.getUserApiKey).not.toHaveBeenCalled();
     expect(svc.providerFactory.llm).not.toHaveBeenCalled();
     expect(svc.getLLMProvider).toHaveBeenCalled();
+  });
+});
+
+describe("generateTitle usage metering", () => {
+  it("meters the title call under the model that actually generated it", async () => {
+    const svc = fakeService({ apiKey: "key-1", catalogLlm: ["m-cat-1"] });
+    await svc.generateTitle("c1", "你好", [], { userId: "u1" });
+    expect(svc.usageMeter.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        modelId: "m-cat-1",
+        usage: { inputCount: 3, outputCount: 2 },
+      })
+    );
+  });
+
+  it("meters the env-fallback title call under the env model", async () => {
+    const svc = fakeService({ apiKey: null });
+    await svc.generateTitle("c1", "你好", [], { userId: "u1" });
+    expect(svc.usageMeter.record).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u1", modelId: "m-env" })
+    );
   });
 });

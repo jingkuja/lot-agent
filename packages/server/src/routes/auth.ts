@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { logger } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { generateRsaKeypair } from "../auth/rsa.js";
 import { toPublicUser } from "../db/user-sanitize.js";
@@ -46,8 +47,39 @@ export function createAuthRoutes(service: AgentService): Hono {
       });
       const token = await service.sessions.createSession(user.id);
       return c.json({ token, user: toPublicUser(user) });
+    } catch (err) {
+      // Client sees one generic message; the cause is logged for operators.
+      logger.warn("login failed", { route: "login", err });
+      return c.json({ error: LOGIN_FAIL }, 401);
+    }
+  });
+
+  // POST /token-login — public. Exchanges a tokenhub-issued JWT (delivered via a
+  // `?token=` deep link) for a local session, so users linked in from tokenhub
+  // skip the manual login form.
+  app.post("/token-login", async (c) => {
+    let body: { token?: string };
+    try {
+      body = await c.req.json();
     } catch {
-      // Any failure — decrypt, tokenhub network/auth — is collapsed to one message.
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const token = body.token?.trim();
+    if (!token) {
+      return c.json({ error: LOGIN_FAIL }, 401);
+    }
+    try {
+      const result = await service.tokenhub.tokenLogin(token);
+      const user = await service.db.upsertUserByExternalId({
+        externalUserId: result.userId,
+        username: result.name,
+        apiKeys: result.apiKeys,
+      });
+      const sessionToken = await service.sessions.createSession(user.id);
+      return c.json({ token: sessionToken, user: toPublicUser(user) });
+    } catch (err) {
+      // Same opacity as /login — client sees one message; cause is logged.
+      logger.warn("token-login failed", { route: "token-login", err });
       return c.json({ error: LOGIN_FAIL }, 401);
     }
   });

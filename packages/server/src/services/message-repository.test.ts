@@ -48,6 +48,15 @@ describe("saveUserMessage", () => {
     const row = db.rows.find((r: any) => r.id === id);
     expect(row.metadata).toEqual({});
   });
+
+  it("stores selected knowledge bases like message attachments", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    const knowledgeBases = [{ id: "kb1", name: "制度库" }];
+    const id = await repo.saveUserMessage("c1", "差旅标准", [], knowledgeBases);
+    const row = db.rows.find((r: any) => r.id === id);
+    expect(row.metadata).toEqual({ knowledgeBases });
+  });
 });
 
 describe("loadHistory materialize", () => {
@@ -121,6 +130,24 @@ describe("loadHistory tool-call reconstruction", () => {
     await repo.saveToolResult("c1", "dangling", "orphaned result");
     const history = await repo.loadHistory("c1", "nonexistent");
     expect(history.find((m) => m.role === "tool")).toBeUndefined();
+  });
+});
+
+describe("saveToolResult error flag", () => {
+  it("persists isError in metadata for a failed call", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    await repo.saveToolResult("c1", "call_1", "propose_outline 校验失败：第 22 页", true);
+    const row = db.rows.find((r: any) => r.tool_call_id === "call_1");
+    expect(row.metadata).toEqual({ isError: true });
+  });
+
+  it("writes empty metadata for a successful call", async () => {
+    const db = memDb();
+    const repo = new MessageRepository(db);
+    await repo.saveToolResult("c1", "call_1", "[大纲已展示给用户]");
+    const row = db.rows.find((r: any) => r.tool_call_id === "call_1");
+    expect(row.metadata).toEqual({});
   });
 });
 

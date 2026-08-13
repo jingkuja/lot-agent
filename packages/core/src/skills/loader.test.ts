@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SkillLoader } from "./loader.js";
+import { SkillLoader, type Skill } from "./loader.js";
 
 function loaderWith(skills: any[]): SkillLoader {
   const l = new SkillLoader();
@@ -62,5 +62,35 @@ describe("SkillLoader.match caps and dedup", () => {
     const l = loaderWith([mk("a", "go", big), mk("b", "go", big)]);
     const r = l.match("go", { maxTokens: 600 });
     expect(r.map((s) => s.name)).toEqual(["a"]);
+  });
+});
+
+describe("visibleTo", () => {
+  const skills: Skill[] = [
+    { name: "unscoped-a", description: "a", triggers: ["aaa"], content: "A" },
+    { name: "ppt-only", description: "p", triggers: [], content: "P", agents: ["ppt"] },
+    { name: "unscoped-b", description: "b", triggers: [], content: "B", agents: [] },
+  ];
+
+  function loaderWithVisibleTo(list: Skill[]): SkillLoader {
+    const loader = new SkillLoader();
+    // 测试注入：绕过文件系统直接放入内部列表
+    (loader as unknown as { skills: Skill[] }).skills = list;
+    return loader;
+  }
+
+  it("returns unscoped skills plus skills scoped to the given agent", () => {
+    const out = loaderWithVisibleTo(skills).visibleTo("ppt");
+    expect(out.map((s) => s.name)).toEqual(["unscoped-a", "ppt-only", "unscoped-b"]);
+  });
+
+  it("hides agent-scoped skills from other agents", () => {
+    const out = loaderWithVisibleTo(skills).visibleTo("general");
+    expect(out.map((s) => s.name)).toEqual(["unscoped-a", "unscoped-b"]);
+  });
+
+  it("returns only unscoped skills when no agentId given", () => {
+    const out = loaderWithVisibleTo(skills).visibleTo();
+    expect(out.map((s) => s.name)).toEqual(["unscoped-a", "unscoped-b"]);
   });
 });

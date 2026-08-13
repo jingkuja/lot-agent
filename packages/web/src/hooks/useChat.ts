@@ -1,32 +1,17 @@
-import { useState, useCallback, useRef } from "react";
-import { api, type UploadedAttachment, type PickedFile } from "../api/client.js";
+import { useReducer, useCallback, useRef, useState } from "react";
+import { api, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
+import { randomId } from "../lib/uuid.js";
+import { showAlert, notifyDesktop } from "../lib/notify.js";
+import {
+  chatReducer,
+  initialChatState,
+  type DisplayMessage,
+  type GenerationView,
+} from "./chat-reducer.js";
 
-export interface GenerationView {
-  mediaType: "image" | "video";
-  status: "generating" | "completed" | "failed";
-  progress?: number;
-  /** Whether the provider reports intermediate progress. When false (e.g. the
-   * synchronous chat-completions image provider) the UI shows a plain "生成中……"
-   * with no percentage. */
-  supportsProgress?: boolean;
-  assets?: { url: string; mime: string; durationSec?: number }[];
-  error?: string;
-  taskId?: string;
-}
-
-export interface DisplayMessage {
-  id: string;
-  dbId?: string;
-  role: "user" | "assistant" | "tool";
-  content: string;
-  thinking?: string;
-  toolCalls?: { name: string; input: unknown }[];
-  toolResult?: { name: string; output: string; isError: boolean };
-  isStreaming?: boolean;
-  rating?: number | null;
-  attachments?: UploadedAttachment[];
-  generation?: GenerationView;
-}
+// The message/generation view models live with the reducer; components keep
+// importing them from here.
+export type { DisplayMessage, GenerationView } from "./chat-reducer.js";
 
 export function useChat(
   conversationId: string | null,
@@ -34,9 +19,11 @@ export function useChat(
   conversationIdRef?: React.RefObject<string | null>,
   onTitle?: (conversationId: string, title: string) => void
 ) {
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [conversationModel, setConversationModel] = useState<string | null>(null);
-  const [isStreaming, setIsStreaming] = useState(false);
+  // All view state lives in the pure reducer (chat-reducer.ts). This hook only
+  // translates async events (SSE, generation polling, user actions) into
+  // ChatActions and owns the IO side effects (streams, uploads, polling).
+  const [state, dispatch] = useReducer(chatReducer, initialChatState);
+  const [conversationKnowledgeBases, setConversationKnowledgeBases] = useState<KnowledgeBaseRef[]>([]);
   // One live SSE stream per conversation id. Switching away must NOT kill the
   // stream (the reply still persists server-side) — but its events may only
   // touch the view while its conversation is the one on screen, otherwise a
@@ -67,44 +54,62 @@ export function useChat(
           // this, an unknown `status` falls through to the progress branch and
           // the loop polls forever instead of ever terminating. Route it through
           // the failure budget so persistent bad responses fail the generation.
-          const known = ["pending", "running", "succeeded", "failed"];
+          const known = ["pending", "running", "succeeded", "failed", "cancelled"];
           if (!t || !known.includes(t.status)) {
             throw new Error("任务状态返回格式异常");
           }
           failures = 0;
-          if (t.status === "succeeded" || t.status === "failed") {
-            const out = t.output as { assets?: { url: string; mime: string; durationSec?: number }[] } | undefined;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === messageId
-                  ? { ...m, generation: { mediaType, status: t.status === "succeeded" ? "completed" : "failed", progress: 100, assets: out?.assets, error: t.error, taskId } }
-                  : m
-              )
-            );
+          if (t.status === "succeeded" || t.status === "failed" || t.status === "cancelled") {
+            const out = t.output;
+            // A 'succeeded' task can still carry downloadFailed: the vendor made
+            // the media but the server-side download of it failed. That's a
+            // recoverable "下载失败" state (offers re-download), not a generation
+            // failure.
+            const downloadFailed = t.status === "succeeded" && out?.downloadFailed === true;
+            const finalStatus: GenerationView["status"] = downloadFailed
+              ? "download_failed"
+              : t.status === "succeeded"
+                ? "completed"
+                : t.status === "cancelled"
+                  ? "cancelled"
+                  : "failed";
+            dispatch({
+              type: "generation_finished",
+              messageId,
+              generation: {
+                mediaType,
+                status: finalStatus,
+                progress: 100,
+                assets: out?.assets,
+                error: downloadFailed ? (out?.error as string | undefined) : t.error,
+                taskId,
+              },
+            });
+            // Desktop: background-completion system notification (no-op in the
+            // browser, and the shell suppresses it while the window is focused).
+            const mediaLabel = mediaType === "image" ? "图片" : "视频";
+            if (finalStatus === "completed") {
+              notifyDesktop(`${mediaLabel}生成完成`, "点击查看结果");
+            } else if (finalStatus !== "cancelled") {
+              notifyDesktop(
+                `${mediaLabel}生成失败`,
+                downloadFailed ? "媒体下载失败，可重试下载" : t.error
+              );
+            }
             if (genPollRef.current === token) genPollRef.current = null;
-            setIsStreaming(false);
             onStreamEndRef.current?.();
             return;
           }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === messageId && m.generation
-                ? { ...m, generation: { ...m.generation, status: "generating", progress: t.progress } }
-                : m
-            )
-          );
+          dispatch({ type: "generation_progress", messageId, progress: t.progress });
         } catch {
           failures += 1;
           if (failures >= 15) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === messageId
-                  ? { ...m, generation: { mediaType, status: "failed", error: "生成状态获取失败", taskId } }
-                  : m
-              )
-            );
+            dispatch({
+              type: "generation_finished",
+              messageId,
+              generation: { mediaType, status: "failed", error: "生成状态获取失败", taskId },
+            });
             if (genPollRef.current === token) genPollRef.current = null;
-            setIsStreaming(false);
             onStreamEndRef.current?.();
             return;
           }
@@ -121,10 +126,7 @@ export function useChat(
     // The user may have switched again while this fetch was in flight — a
     // stale response must not overwrite the conversation now on screen.
     if (cidRef.current !== convId) return;
-    // Re-entering a conversation whose stream is still live re-disables the
-    // input; its stream events re-attach to the view on the next chunk.
-    setIsStreaming(streamsRef.current.has(convId));
-    setConversationModel((data as { model?: string | null }).model ?? null);
+    const rawStoredKnowledgeBases = data.metadata?.knowledgeBases;
     const display: DisplayMessage[] = data.messages.map((m) => {
       const role = m.role as DisplayMessage["role"];
       const toolName = (m as { tool_name?: string | null }).tool_name;
@@ -151,16 +153,50 @@ export function useChat(
           role === "user"
             ? (parsedMeta?.attachments as UploadedAttachment[] | undefined)
             : undefined,
+        knowledgeBases:
+          role === "user"
+            ? (parsedMeta?.knowledgeBases as KnowledgeBaseRef[] | undefined)
+            : undefined,
         toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
         toolResult:
           role === "tool"
-            ? { name: toolName ?? "tool", output: m.content, isError: false }
+            ? {
+                name: toolName ?? "tool",
+                output: m.content,
+                // Persisted by saveToolResult for failed calls; the UI needs it
+                // to keep rejected interactive calls (propose_outline/ask_user)
+                // from re-rendering as live confirmation cards after reload.
+                isError: parsedMeta?.isError === true,
+              }
             : undefined,
         rating: m.rating ?? null,
         generation: gen,
       };
     });
-    setMessages(display);
+    const storedKnowledgeBases = Array.isArray(rawStoredKnowledgeBases)
+      ? rawStoredKnowledgeBases.filter(
+          (item): item is KnowledgeBaseRef =>
+            !!item &&
+            typeof item === "object" &&
+            typeof (item as KnowledgeBaseRef).id === "string" &&
+            typeof (item as KnowledgeBaseRef).name === "string"
+        )
+      : undefined;
+    // Backward compatibility: conversations created before selection became
+    // conversation metadata still carry it on their user messages. Restore
+    // the latest such selection once; the next send persists it on the chat.
+    const latestMessageKnowledgeBases = [...display]
+      .reverse()
+      .find((message) => message.role === "user" && message.knowledgeBases)?.knowledgeBases;
+    setConversationKnowledgeBases(storedKnowledgeBases ?? latestMessageKnowledgeBases ?? []);
+    // Re-entering a conversation whose stream is still live re-disables the
+    // input; its stream events re-attach to the view on the next chunk.
+    dispatch({
+      type: "snapshot_loaded",
+      messages: display,
+      model: (data as { model?: string | null }).model ?? null,
+      isStreaming: streamsRef.current.has(convId),
+    });
 
     // Resume polling for any generation still marked "generating" (e.g. the
     // user reloaded or reopened the conversation before it finished). The
@@ -174,31 +210,37 @@ export function useChat(
       if (genPollRef.current) genPollRef.current.cancelled = true;
       const token = { cancelled: false };
       genPollRef.current = token;
-      setIsStreaming(true);
+      dispatch({ type: "stream_started" });
       pollGeneration(last.generation.taskId, last.id, last.generation.mediaType, token);
     }
   }, [pollGeneration]);
 
   const streamMessage = useCallback(
-    (content: string, files: PickedFile[] = [], preUploaded?: UploadedAttachment[], modelId?: string) => {
+    (
+      content: string,
+      files: PickedFile[] = [],
+      preUploaded?: UploadedAttachment[],
+      modelId?: string,
+      knowledgeBases: KnowledgeBaseRef[] = []
+    ) => {
       const cid = cidRef.current;
       if (
         !cid ||
         (!content.trim() && files.length === 0 && !preUploaded?.length) ||
-        isStreaming ||
+        state.isStreaming ||
         streamsRef.current.has(cid)
       )
         return;
 
-      setIsStreaming(true);
+      dispatch({ type: "stream_started" });
 
       // One controller for the whole turn so Stop can abort an in-flight upload
       // (set BEFORE uploads start), not just the SSE stream.
       const controller = new AbortController();
       streamsRef.current.set(cid, controller);
       // True while this stream's conversation is still the one on screen.
-      // Every view mutation below is gated on it; the stream itself keeps
-      // running (and persisting) even when the user switches away.
+      // Every dispatch below is gated on it; the stream itself keeps running
+      // (and persisting) even when the user switches away.
       const isCurrent = () => cidRef.current === cid;
 
       (async () => {
@@ -215,32 +257,35 @@ export function useChat(
             );
           } catch (e) {
             streamsRef.current.delete(cid);
-            if (isCurrent()) setIsStreaming(false);
+            if (isCurrent()) dispatch({ type: "stream_stopped" });
             if (controller.signal.aborted) return; // user pressed Stop — silent
-            window.alert(
+            showAlert(
               `文件上传失败：${e instanceof Error ? e.message : String(e)}`
             );
             return;
           }
         }
 
-        const userMsgId = `user-${Date.now()}`;
         const userMsg: DisplayMessage = {
-          id: userMsgId,
+          id: `user-${randomId()}`,
           role: "user",
           content,
           attachments: uploaded,
+          knowledgeBases,
         };
-        if (isCurrent()) setMessages((prev) => [...prev, userMsg]);
+        if (isCurrent()) dispatch({ type: "user_appended", message: userMsg });
 
+        // The accumulating assistant message for the current LLM iteration.
+        // It deliberately lives here, NOT in the reducer: while this stream's
+        // conversation is off-screen no action is dispatched at all, and the
+        // full accumulated message re-attaches on the first event after the
+        // user switches back.
         let assistantMsg: DisplayMessage = {
-          id: `assistant-${Date.now()}`,
+          id: `assistant-${randomId()}`,
           role: "assistant",
           content: "",
           isStreaming: true,
         };
-
-        // Accumulate tool calls for the current assistant message
         let pendingToolCalls: { name: string; input: unknown }[] = [];
 
         // stream_end ends the turn but the connection stays open for the tail
@@ -258,11 +303,7 @@ export function useChat(
             ...assistantMsg,
             thinking: (assistantMsg.thinking ?? "") + event.content,
           };
-          if (isCurrent())
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              return [...filtered, assistantMsg];
-            });
+          if (isCurrent()) dispatch({ type: "assistant_upserted", message: assistantMsg });
         }
 
         if (event.type === "text" && event.content) {
@@ -270,15 +311,10 @@ export function useChat(
             ...assistantMsg,
             content: assistantMsg.content + event.content,
           };
-          if (isCurrent())
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              return [...filtered, assistantMsg];
-            });
+          if (isCurrent()) dispatch({ type: "assistant_upserted", message: assistantMsg });
         }
 
         if (event.type === "tool_call") {
-          // Accumulate tool calls on the assistant message
           pendingToolCalls.push({
             name: event.name ?? "",
             input: event.input,
@@ -287,11 +323,7 @@ export function useChat(
             ...assistantMsg,
             toolCalls: [...pendingToolCalls],
           };
-          if (isCurrent())
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              return [...filtered, assistantMsg];
-            });
+          if (isCurrent()) dispatch({ type: "assistant_upserted", message: assistantMsg });
           // The "executing tool" state stays visible until tool_result arrives,
           // so no artificial delay is needed. Blocking here would stall the
           // awaited SSE read loop and add real latency per tool call.
@@ -299,30 +331,20 @@ export function useChat(
 
         if (event.type === "tool_result") {
           // The assistant message that issued this tool call is now done —
-          // finalize it so its (empty) bubble stops showing the typing dots.
-          const finishedAssistantId = assistantMsg.id;
-          // Show tool result as a separate collapsible card
-          const resultMsg: DisplayMessage = {
-            id: `tool-result-${Date.now()}-${event.name}`,
-            role: "tool",
-            content: "",
-            toolResult: {
+          // the reducer finalizes it and shows the result as a separate card.
+          if (isCurrent())
+            dispatch({
+              type: "tool_result_appended",
+              assistantId: assistantMsg.id,
+              cardId: `tool-result-${event.toolCallId ?? randomId()}-${event.name}`,
               name: event.name ?? "",
               output: event.output ?? "",
               isError: event.isError ?? false,
-            },
-          };
-          if (isCurrent())
-            setMessages((prev) => [
-              ...prev.map((m) =>
-                m.id === finishedAssistantId ? { ...m, isStreaming: false } : m
-              ),
-              resultMsg,
-            ]);
+            });
 
           // Reset for next LLM iteration (new assistant message)
           assistantMsg = {
-            id: `assistant-${Date.now()}`,
+            id: `assistant-${randomId()}`,
             role: "assistant",
             content: "",
             isStreaming: true,
@@ -338,17 +360,7 @@ export function useChat(
 
         if (event.type === "done" || event.type === "stream_end") {
           assistantMsg = { ...assistantMsg, isStreaming: false };
-          if (isCurrent()) {
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              // Only add if it has content or tool calls
-              if (assistantMsg.content || assistantMsg.toolCalls?.length) {
-                return [...filtered, assistantMsg];
-              }
-              return filtered;
-            });
-            setIsStreaming(false);
-          }
+          if (isCurrent()) dispatch({ type: "turn_finalized", message: assistantMsg });
 
           if (event.type === "stream_end") {
             turnEnded = true;
@@ -370,24 +382,18 @@ export function useChat(
             content: assistantMsg.content + `\n\n[Error: ${event.message}]`,
             isStreaming: false,
           };
-          if (isCurrent()) {
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== assistantMsg.id);
-              return [...filtered, assistantMsg];
-            });
-            setIsStreaming(false);
-          }
+          if (isCurrent()) dispatch({ type: "turn_finalized", message: assistantMsg });
         }
-      }, uploaded, controller, modelId);
+      }, uploaded, controller, modelId, knowledgeBases.map((item) => item.id));
       })();
     },
-    [conversationId, isStreaming, loadMessages]
+    [conversationId, state.isStreaming, loadMessages]
   );
 
   const regenerate = useCallback(async () => {
-    if (isStreaming || !conversationId) return;
+    if (state.isStreaming || !conversationId) return;
 
-    const reversed = [...messages].reverse();
+    const reversed = [...state.messages].reverse();
     const lastUserMsg = reversed.find((m) => m.role === "user" && m.dbId);
     if (!lastUserMsg?.dbId) return;
 
@@ -395,24 +401,34 @@ export function useChat(
     // Preserve the original message's attachments so regenerating a message
     // that carried a file doesn't silently drop the document/image content.
     const lastUserAttachments = lastUserMsg.attachments;
+    const lastUserKnowledgeBases = lastUserMsg.knowledgeBases;
 
     try {
       await api.regenerate(conversationId, lastUserMsg.dbId);
     } catch (error) {
-      console.warn("Regenerate cleanup failed:", error);
+      // Bail out here — don't touch the view or resend. `api.regenerate`
+      // failing (e.g. the run-lease 409 when another tab/device is mid-turn
+      // on this conversation) means the server deleted nothing, so slicing
+      // messages locally and re-streaming would both show a UI missing
+      // messages that still exist server-side AND immediately hit its own
+      // 409. Same "surface it, don't invent new UI" pattern as the file-
+      // upload failure alert above.
+      showAlert(
+        `重新生成失败：${error instanceof Error ? error.message : String(error)}`
+      );
+      return;
     }
 
-    const lastUserIdx = messages.lastIndexOf(lastUserMsg);
-    setMessages((prev) => prev.slice(0, lastUserIdx));
+    dispatch({ type: "truncated_from", id: lastUserMsg.id });
 
-    streamMessage(lastUserContent, [], lastUserAttachments);
-  }, [messages, isStreaming, conversationId, streamMessage]);
+    streamMessage(lastUserContent, [], lastUserAttachments, undefined, lastUserKnowledgeBases);
+  }, [state.messages, state.isStreaming, conversationId, streamMessage]);
 
   const generateMedia = useCallback(
     (prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [], modelId?: string) => {
       const cid = cidRef.current;
-      if (!cid || !prompt.trim() || isStreaming) return;
-      setIsStreaming(true);
+      if (!cid || !prompt.trim() || state.isStreaming) return;
+      dispatch({ type: "stream_started" });
 
       if (genPollRef.current) genPollRef.current.cancelled = true;
       const token = { cancelled: false };
@@ -423,59 +439,115 @@ export function useChat(
       // user sees "图片/视频生成中" right away instead of a stuck input box.
       // The placeholders are reconciled with server ids once /generations returns
       // (or flipped to "failed" if the request errors).
-      const tempUserId = `user-${Date.now()}`;
-      const tempGenId = `assistant-${Date.now()}`;
-      const userMsg: DisplayMessage = { id: tempUserId, role: "user", content: prompt };
-      const genMsg: DisplayMessage = {
-        id: tempGenId,
-        role: "assistant",
-        content: "",
-        generation: { mediaType, status: "generating", progress: 0 },
-      };
-      setMessages((prev) => [...prev, userMsg, genMsg]);
+      const tempUserId = `user-${randomId()}`;
+      const tempGenId = `assistant-${randomId()}`;
+      dispatch({
+        type: "generation_pair_appended",
+        userMessage: { id: tempUserId, role: "user", content: prompt },
+        genMessage: {
+          id: tempGenId,
+          role: "assistant",
+          content: "",
+          generation: { mediaType, status: "generating", progress: 0 },
+        },
+      });
 
       (async () => {
         try {
-          const imgs = files.filter((f) => f.file.type.startsWith("image/"));
-          const uploaded = imgs.length ? await Promise.all(imgs.map((f) => api.uploadFile(f.file))) : [];
-          const media = uploaded.map((u) => ({ type: "reference_image" as const, url: u.url }));
+          const uploaded = files.length
+            ? await Promise.all(files.map(async (f) => ({ slot: f.slot, uploaded: await api.uploadFile(f.file) })))
+            : [];
+          const media = uploaded
+            .filter((f) => mediaType === "image" && f.uploaded.mime.startsWith("image/"))
+            .map((f) => ({ type: "reference_image" as const, url: f.uploaded.url }));
+          const urlsFor = (slot: PickedFile["slot"]) =>
+            uploaded.filter((f) => f.slot === slot).map((f) => f.uploaded.url);
+          const inputReference = urlsFor("video_reference_image");
+          const referenceVideo = urlsFor("video_reference_video");
+          const referenceAudio = urlsFor("video_reference_audio");
+          const firstFrame = urlsFor("video_first_frame")[0];
+          const lastFrame = urlsFor("video_last_frame")[0];
 
-          const res = await api.generate(cid, { prompt, mediaType, settings, media: media.length ? media : undefined, model: modelId });
+          const res = await api.generate(cid, {
+            prompt,
+            mediaType,
+            settings,
+            media: media.length ? media : undefined,
+            input_reference: inputReference.length ? inputReference : undefined,
+            reference_video: referenceVideo.length ? referenceVideo : undefined,
+            reference_audio: referenceAudio.length ? referenceAudio : undefined,
+            first_frame: firstFrame,
+            last_frame: lastFrame,
+            model: modelId,
+          });
           if (token.cancelled) return;
           // Reconcile the optimistic placeholders with the server-assigned ids
           // + vendor taskId, keeping the bubble in its "generating" state.
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id === tempUserId) return { ...m, id: res.userMessage.id, dbId: res.userMessage.id };
-              if (m.id === tempGenId)
-                return {
-                  ...m,
-                  id: res.assistantMessage.id,
-                  dbId: res.assistantMessage.id,
-                  generation: { mediaType, status: "generating", progress: 0, supportsProgress: res.assistantMessage.metadata?.supportsProgress, taskId: res.taskId },
-                };
-              return m;
-            })
-          );
+          dispatch({
+            type: "generation_ids_reconciled",
+            tempUserId,
+            userMessageId: res.userMessage.id,
+            tempGenId,
+            assistantMessageId: res.assistantMessage.id,
+            generation: {
+              mediaType,
+              status: "generating",
+              progress: 0,
+              supportsProgress: res.assistantMessage.metadata?.supportsProgress,
+              taskId: res.taskId,
+            },
+          });
           if (res.title) onTitleRef.current?.(cid, res.title);
           pollGeneration(res.taskId, res.assistantMessage.id, mediaType, token);
         } catch (e) {
           if (genPollRef.current === token) genPollRef.current = null;
-          setIsStreaming(false);
           // The create request itself failed (non-2xx / network). Flip the
           // optimistic bubble to "failed" so the attempt + error stay visible.
           const msg = e instanceof Error ? e.message : String(e);
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempGenId
-                ? { ...m, generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` } }
-                : m
-            )
-          );
+          dispatch({
+            type: "generation_finished",
+            messageId: tempGenId,
+            generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` },
+          });
         }
       })();
     },
-    [isStreaming, pollGeneration]
+    [state.isStreaming, pollGeneration]
+  );
+
+  // Retry only the download of a generation left in "下载失败": the vendor media
+  // already succeeded, so this re-fetches it server-side (no re-billing) and
+  // resumes polling the new task. On success the card flips to the inline media.
+  const redownloadGeneration = useCallback(
+    (messageId: string, mediaType: "image" | "video") => {
+      const cid = cidRef.current;
+      if (!cid || state.isStreaming) return;
+      dispatch({ type: "stream_started" });
+
+      if (genPollRef.current) genPollRef.current.cancelled = true;
+      const token = { cancelled: false };
+      genPollRef.current = token;
+
+      // Flip the card back to a live "生成中/下载中" state right away.
+      dispatch({ type: "generation_progress", messageId, progress: 0 });
+
+      (async () => {
+        try {
+          const res = await api.redownloadGeneration(cid, messageId);
+          if (token.cancelled) return;
+          pollGeneration(res.taskId, messageId, mediaType, token);
+        } catch (e) {
+          if (genPollRef.current === token) genPollRef.current = null;
+          const msg = e instanceof Error ? e.message : String(e);
+          dispatch({
+            type: "generation_finished",
+            messageId,
+            generation: { mediaType, status: "download_failed", error: `重新下载失败：${msg}` },
+          });
+        }
+      })();
+    },
+    [state.isStreaming, pollGeneration]
   );
 
   const stop = useCallback(() => {
@@ -487,27 +559,29 @@ export function useChat(
       streamsRef.current.delete(cid);
     }
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
-    setIsStreaming(false);
+    dispatch({ type: "stream_stopped" });
   }, []);
 
   const clear = useCallback(() => {
     // Cancel any in-flight generation poll and drop the streaming lock so a
     // resumed poll in the next conversation doesn't leave the input disabled.
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
-    setIsStreaming(false);
-    setMessages([]);
-    setConversationModel(null);
+    setConversationKnowledgeBases([]);
+    dispatch({ type: "cleared" });
   }, []);
 
   return {
-    messages,
-    conversationModel,
+    messages: state.messages,
+    conversationModel: state.conversationModel,
+    conversationKnowledgeBases,
+    setConversationKnowledgeBases,
     send: streamMessage,
     stop,
-    isStreaming,
+    isStreaming: state.isStreaming,
     loadMessages,
     clear,
     regenerate,
     generateMedia,
+    redownloadGeneration,
   };
 }

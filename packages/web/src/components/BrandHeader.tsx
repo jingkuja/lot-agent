@@ -6,12 +6,13 @@ interface BrandHeaderProps {
   onOpenKeySettings?: () => void;
   onCollapse: () => void;
   onOpenAgentCenter: () => void;
+  onOpenKnowledgeBase: () => void;
 }
 
 /** Top-left brand card: cloud logo + product name + tagline, a collapse
  *  toggle, and the account block (username on top, 退出 on its own line).
  *  The new-chat button lives in the sidebar's 最近对话 header. */
-export function BrandHeader({ user, onLogout, onOpenKeySettings, onCollapse, onOpenAgentCenter }: BrandHeaderProps) {
+export function BrandHeader({ user, onLogout, onOpenKeySettings, onCollapse, onOpenAgentCenter, onOpenKnowledgeBase }: BrandHeaderProps) {
   return (
     <div className="brand-header">
       <div className="brand-card">
@@ -87,6 +88,7 @@ export function BrandHeader({ user, onLogout, onOpenKeySettings, onCollapse, onO
         </div>
       </div>
 
+      <div className="brand-navigation-actions">
       <button className="brand-agent-center-btn" onClick={onOpenAgentCenter} title="Agent 中心">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -96,6 +98,16 @@ export function BrandHeader({ user, onLogout, onOpenKeySettings, onCollapse, onO
         </svg>
         Agent 中心
       </button>
+      <button className="brand-agent-center-btn brand-knowledge-btn" onClick={onOpenKnowledgeBase} title="个人知识库">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <ellipse cx="12" cy="5" rx="7" ry="3" />
+          <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
+          <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+        </svg>
+        个人知识库
+        <span className="brand-link-arrow" aria-hidden>↗</span>
+      </button>
+      </div>
     </div>
   );
 }

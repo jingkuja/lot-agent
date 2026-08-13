@@ -29,6 +29,18 @@ describe("mapOpenAIStream", () => {
     expect(done?.usage).toEqual({ promptTokens: 10, completionTokens: 2 });
   });
 
+  it("tolerates a trailing chunk with no choices field at all (non-compliant vendor)", async () => {
+    const stream = chunkStream([
+      { choices: [{ index: 0, delta: { content: "hi" }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+      { usage: { prompt_tokens: 10, completion_tokens: 2 } },
+    ]);
+    const out = await collect(mapOpenAIStream(stream));
+    expect(out[0]).toEqual({ type: "text", content: "hi" });
+    const done = out.find((c) => c.type === "done");
+    expect(done?.usage).toEqual({ promptTokens: 10, completionTokens: 2 });
+  });
+
   it("emits done with usage immediately when usage arrives on the finish_reason chunk", async () => {
     const stream = chunkStream([
       {

@@ -4,14 +4,51 @@ import { estimateCost } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
+import type { KnowledgeBaseRef } from "../services/rag-client.js";
+import { pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
 
 type Variables = { userId: string };
 
 /** Server-side cap (the InputBox MAX_FILES=5 is only a client hint). */
 const MAX_ATTACHMENTS = 5;
+const MAX_KNOWLEDGE_BASES = 5;
+
+/**
+ * Run-lease staleness window (report #20 concurrency half / architecture
+ * #10). Matches the Agent's `maxRunTimeMs` default (`core/agent/agent.ts`) —
+ * a lease only needs reclaiming when its holder process crashed/hung and
+ * never reached its `finally` release, so this should never fire in the
+ * ordinary "still running" case; it's purely a dead-holder fallback.
+ */
+const RUN_LEASE_STALE_MS = 600_000;
+
+const RUN_CONFLICT_MESSAGE = "对话正在处理另一条消息，请稍候再试";
 
 /** Attachment slots accepted from the client; anything else is dropped. */
 const VALID_SLOTS = new Set(["ppt_template", "ppt_background", "content", "contract_old", "contract_new"]);
+
+function validateKnowledgeBaseIds(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_KNOWLEDGE_BASES &&
+    value.every((item) => typeof item === "string" && item.length > 0) &&
+    new Set(value).size === value.length
+  );
+}
+
+function storedKnowledgeBases(metadata: Record<string, unknown> | undefined): KnowledgeBaseRef[] {
+  const value = metadata?.knowledgeBases;
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (item): item is KnowledgeBaseRef =>
+        !!item &&
+        typeof item === "object" &&
+        typeof (item as KnowledgeBaseRef).id === "string" &&
+        typeof (item as KnowledgeBaseRef).name === "string"
+    )
+    .slice(0, MAX_KNOWLEDGE_BASES);
+}
 
 export function createConversationRoutes(service: AgentService): Hono {
   const app = new Hono<{ Variables: Variables }>();
@@ -101,6 +138,35 @@ export function createConversationRoutes(service: AgentService): Hono {
     return c.json({ ...conversation, messages: enriched });
   });
 
+  // Persist the knowledge bases attached to this conversation. This endpoint
+  // is called as soon as the user confirms or removes a selection, so the
+  // choice survives reloads even when no subsequent message is sent.
+  app.put("/:id/knowledge-bases", async (c) => {
+    const userId = c.get("userId");
+    const id = c.req.param("id");
+    const conversation = await service.db.getConversation(id);
+    if (!conversation || conversation.user_id !== userId) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const body = await c.req.json<{ knowledgeBaseIds?: unknown }>().catch(() => ({}));
+    if (!validateKnowledgeBaseIds(body.knowledgeBaseIds)) {
+      return c.json({ error: `invalid knowledgeBaseIds (max ${MAX_KNOWLEDGE_BASES})` }, 400);
+    }
+    if (body.knowledgeBaseIds.length && conversation.agent_id !== "general") {
+      return c.json({ error: "knowledge bases are only available in the general assistant" }, 400);
+    }
+    try {
+      const knowledgeBases = await service.resolveKnowledgeBases(userId, body.knowledgeBaseIds);
+      await service.db.mergeConversationMetadata(id, { knowledgeBases });
+      return c.json({ knowledgeBases });
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : "知识库不可用" },
+        502
+      );
+    }
+  });
+
   // Delete conversation (soft delete) — ownership check
   app.delete("/:id", async (c) => {
     const userId = c.get("userId");
@@ -128,8 +194,21 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "afterMessageId is required" }, 400);
     }
 
-    await service.db.deleteMessagesFromAndAfter(id, body.afterMessageId);
-    return c.json({ ok: true });
+    // Deleting history out from under a turn that's currently being written
+    // (another tab/device mid-stream) would race that turn's own inserts —
+    // claim the same run lease messages/:id uses so the two can't overlap.
+    const runId = randomUUID();
+    const claimed = await service.db.claimConversationRun(id, runId, RUN_LEASE_STALE_MS);
+    if (!claimed) {
+      return c.json({ error: RUN_CONFLICT_MESSAGE }, 409);
+    }
+    try {
+      const deleted = await service.db.deleteMessagesFromAndAfter(id, body.afterMessageId);
+      if (!deleted) return c.json({ error: "Not found" }, 404);
+      return c.json({ ok: true });
+    } finally {
+      await service.db.releaseConversationRun(id, runId);
+    }
   });
 
   // Send message — returns SSE stream, ownership check
@@ -141,9 +220,40 @@ export function createConversationRoutes(service: AgentService): Hono {
       return c.json({ error: "Not found" }, 404);
     }
 
-    const body = await c.req.json<{ content: string; attachments?: AttachmentRef[]; modelId?: string }>();
+    const body = await c.req.json<{
+      content: string;
+      attachments?: AttachmentRef[];
+      modelId?: string;
+      knowledgeBaseIds?: string[];
+    }>();
     if (!body.content && !(body.attachments && body.attachments.length)) {
       return c.json({ error: "content or attachments required" }, 400);
+    }
+
+    // An omitted field means "keep using this conversation's selection".
+    // An explicit [] is the user's manual removal and clears the persisted set.
+    const suppliedKnowledgeBaseIds = body.knowledgeBaseIds;
+    const knowledgeBaseIds =
+      suppliedKnowledgeBaseIds ?? storedKnowledgeBases(conversation.metadata).map((item) => item.id);
+    if (!validateKnowledgeBaseIds(knowledgeBaseIds)) {
+      return c.json({ error: `invalid knowledgeBaseIds (max ${MAX_KNOWLEDGE_BASES})` }, 400);
+    }
+    if (knowledgeBaseIds.length && conversation.agent_id !== "general") {
+      return c.json({ error: "knowledge bases are only available in the general assistant" }, 400);
+    }
+    let knowledgeBases: Awaited<ReturnType<typeof service.resolveKnowledgeBases>> = [];
+    if (knowledgeBaseIds.length) {
+      try {
+        knowledgeBases = await service.resolveKnowledgeBases(userId, knowledgeBaseIds);
+      } catch (error) {
+        return c.json(
+          { error: error instanceof Error ? error.message : "知识库不可用" },
+          502
+        );
+      }
+    }
+    if (suppliedKnowledgeBaseIds !== undefined) {
+      await service.db.mergeConversationMetadata(id, { knowledgeBases });
     }
 
     // Validate + canonicalize attachments against the caller's OWN assets.
@@ -172,6 +282,19 @@ export function createConversationRoutes(service: AgentService): Hono {
       });
     }
 
+    // Claim the run lease as the last step before starting the stream — every
+    // earlier `return` above is a plain validation failure that never touched
+    // the conversation, so it doesn't need to release anything. From here on,
+    // ANY exit path (normal finish, thrown error, or the client disconnecting
+    // mid-stream — `c.req.raw.signal` aborts and `service.streamAgentResponse`'s
+    // own `for await` unwinds, see agent-service.ts) unwinds through the
+    // `finally` below, which is the one place that releases the lease.
+    const runId = randomUUID();
+    const claimed = await service.db.claimConversationRun(id, runId, RUN_LEASE_STALE_MS);
+    if (!claimed) {
+      return c.json({ error: RUN_CONFLICT_MESSAGE }, 409);
+    }
+
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -194,7 +317,7 @@ export function createConversationRoutes(service: AgentService): Hono {
             userId,
             attachments,
             c.req.raw.signal,
-            { modelId: body.modelId }
+            { modelId: body.modelId, knowledgeBases }
           )) {
             send(agentEventToSse(event));
           }
@@ -224,6 +347,16 @@ export function createConversationRoutes(service: AgentService): Hono {
             message: error instanceof Error ? error.message : String(error),
           });
         } finally {
+          // Covers every exit from the try above: normal completion, the
+          // catch branch, and a client disconnect (the AbortSignal unwinds
+          // `service.streamAgentResponse`'s for-await, which propagates here
+          // the same way a thrown error would). This is the ONLY release call
+          // for this route — nothing above can return once the lease is claimed.
+          try {
+            await service.db.releaseConversationRun(id, runId);
+          } catch (err) {
+            console.warn("[run-lease] release failed:", err);
+          }
           controller.close();
         }
       },
@@ -258,7 +391,18 @@ export function createGenerationRoutes(service: AgentService) {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    let body: { prompt?: string; mediaType?: "image" | "video"; settings?: Record<string, unknown>; media?: { type: string; url: string }[]; model?: string };
+    let body: {
+      prompt?: string;
+      mediaType?: "image" | "video";
+      settings?: Record<string, unknown>;
+      media?: { type: string; url: string }[];
+      input_reference?: unknown;
+      reference_video?: unknown;
+      reference_audio?: unknown;
+      first_frame?: unknown;
+      last_frame?: unknown;
+      model?: string;
+    };
     try {
       body = await c.req.json();
     } catch {
@@ -269,12 +413,31 @@ export function createGenerationRoutes(service: AgentService) {
     if (!prompt || (mediaType !== "image" && mediaType !== "video")) {
       return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
     }
-    const settings = body.settings ?? {};
+    // Client settings pass a per-media whitelist so identity fields
+    // (conversationId/assistantMessageId/userId) can never ride along.
+    const settings = pickGenerationSettings(mediaType, body.settings);
+    let videoReferences: Record<string, string | string[]> = {};
+    if (mediaType === "video") {
+      try {
+        videoReferences = pickVideoReferenceInputs(body as Record<string, unknown>);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "invalid video references" }, 400);
+      }
+    }
     const media = Array.isArray(body.media) ? body.media : undefined;
+    if (mediaType === "image" && media && media.length > 1) {
+      return c.json({ error: "image editing supports exactly one reference image" }, 400);
+    }
+    if (mediaType === "video" && media) {
+      const legacyImages = media.filter((m) => m?.type === "reference_image");
+      if (legacyImages.length > 5) {
+        return c.json({ error: "input_reference supports at most 5 references" }, 400);
+      }
+    }
     const type = mediaType === "image" ? "image.generate" : "video.generate";
 
     // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
-    const modelId = mediaType === "image" ? "gpt-image-2-token" : "kling-standard";
+    const modelId = mediaType === "image" ? "gpt-image-2" : "kling-standard";
     const cfg = service.modelRegistry.getConfig(modelId);
     const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : Number(settings.durationSec ?? 5);
     const estimatedCost = cfg ? estimateCost(cfg, { outputCount }) : 0;
@@ -285,33 +448,43 @@ export function createGenerationRoutes(service: AgentService) {
     const userMessageId = randomUUID();
     await service.db.addMessage(userMessageId, conversationId, "user", prompt);
 
-    // Persist pending assistant generation message (status forced to
-    // 'generating'; the DB column defaults to 'completed').
+    // Persist pending assistant generation message, born 'generating' (the
+    // status column would otherwise default to 'completed'). Setting it at
+    // insert time closes the race where a cache-hit worker completes the
+    // message before a follow-up status write could land.
     const assistantMessageId = randomUUID();
     const supportsProgress = service.generationSupportsProgress[mediaType];
     const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress };
     await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
       metadata: { ...baseMeta, status: "generating" },
       model: modelId,
+      status: "generating",
     });
 
     // Enqueue, then record the taskId on the message so a client that reloads
     // mid-generation can re-poll the task to resume progress / completion.
     const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
+    // Identity fields are spread LAST: they are server-created and must win
+    // over anything a client could try to smuggle into the payload.
     const taskId = await service.jobQueue.enqueue(
       type,
       {
+        ...settings,
+        ...videoReferences,
+        ...(media ? { media } : {}),
+        ...(selectedModel ? { modelId: selectedModel } : {}),
         prompt,
         conversationId,
         assistantMessageId,
-        ...settings,
-        ...(media ? { media } : {}),
-        ...(selectedModel ? { modelId: selectedModel } : {}),
       },
       userId
     );
     const metadata = { ...baseMeta, status: "generating", taskId };
-    await service.db.updateMessageGeneration(assistantMessageId, { status: "generating", metadata });
+    await service.db.updateMessageGeneration(
+      assistantMessageId,
+      { status: "generating", metadata },
+      { conversationId, userId }
+    );
 
     // Auto-title the conversation from the prompt (first message only, gated
     // inside generateTitle). The chat SSE path does this too; without it,
@@ -334,6 +507,48 @@ export function createGenerationRoutes(service: AgentService) {
       },
       202
     );
+  });
+
+  // POST /:id/generations/:messageId/redownload — retry ONLY the download of a
+  // generation whose vendor media succeeded but whose local download failed
+  // (message left in 'download_failed' with a persisted sourceUrl). Re-fetches
+  // that url without re-calling / re-billing the vendor. Reopens the message
+  // and enqueues a `generation.redownload` job; returns the new taskId to poll.
+  app.post("/:id/generations/:messageId/redownload", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    const metaStatus = (meta.status as string | undefined) ?? msg.status;
+    const sourceUrl = meta.sourceUrl as string | undefined;
+    if (meta.kind !== "generation" || metaStatus !== "download_failed" || !sourceUrl) {
+      return c.json({ error: "No failed download to retry" }, 409);
+    }
+    const mediaType = meta.mediaType === "image" ? "image" : "video";
+    const settings = (meta.settings as Record<string, unknown> | undefined) ?? {};
+    const prompt = (meta.prompt as string | undefined) ?? "";
+
+    // Reopen before enqueuing (guarded on the 'download_failed' status) so a
+    // double-click / concurrent retry only ever spawns one job.
+    const reopened = await service.db.resetGenerationForRedownload(messageId, { conversationId, userId });
+    if (!reopened) return c.json({ error: "Retry already in progress" }, 409);
+
+    // Identity fields spread LAST so nothing stored in settings can override them.
+    const taskId = await service.jobQueue.enqueue(
+      "generation.redownload",
+      { ...settings, mediaType, sourceUrl, prompt, conversationId, assistantMessageId: messageId },
+      userId
+    );
+    const metadata = { kind: "generation", mediaType, prompt, settings, status: "generating", taskId };
+    await service.db.updateMessageGeneration(
+      messageId,
+      { status: "generating", metadata },
+      { conversationId, userId }
+    );
+    return c.json({ taskId }, 202);
   });
 
   return app;

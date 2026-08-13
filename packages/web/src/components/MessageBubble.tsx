@@ -7,6 +7,7 @@ import type { DisplayMessage } from "../hooks/useChat.js";
 import { GenerationCard } from "./GenerationCard.js";
 import { AskUserCard } from "./AskUserCard.js";
 import { OutlineCard } from "./OutlineCard.js";
+import { parseDownloadArtifact } from "../lib/download-artifact.js";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
@@ -19,6 +20,10 @@ interface MessageBubbleProps {
   askAnswer?: string;
   /** 该 ask_user 提问是否仍在等待回答。 */
   askInteractive?: boolean;
+  /** 本消息中执行失败的交互工具名（如未通过校验的 propose_outline），不渲染为卡片。 */
+  failedToolNames?: string[];
+  /** 生成媒体「下载失败」时重新下载(仅重拉下载,不重新计费生成)。 */
+  onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
 }
 
 export function MessageBubble({
@@ -28,12 +33,18 @@ export function MessageBubble({
   onQuickReply,
   askAnswer,
   askInteractive,
+  failedToolNames,
+  onRedownloadGeneration,
 }: MessageBubbleProps) {
   if (message.generation) {
     return (
       <div className="message-wrapper message-assistant">
         <div className="message-wrapper-inner">
-          <GenerationCard generation={message.generation} />
+          <GenerationCard
+            generation={message.generation}
+            messageId={message.id}
+            onRedownload={onRedownloadGeneration}
+          />
         </div>
       </div>
     );
@@ -64,6 +75,17 @@ export function MessageBubble({
               ))}
             </div>
           )}
+          {message.knowledgeBases && message.knowledgeBases.length > 0 && (
+            <div className="message-attachments">
+              {message.knowledgeBases.map((item) => (
+                <span className="attachment-chip knowledge-chip" key={item.id}>
+                  <span className="attachment-slot-badge badge-knowledge">知识库</span>
+                  <span aria-hidden>▤</span>
+                  <span className="attachment-name" title={item.name}>{item.name}</span>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="message-actions-row message-actions-right">
             <MessageActions content={message.content} role="user" />
           </div>
@@ -77,6 +99,37 @@ export function MessageBubble({
     // above (in the assistant message) already conveys the state.
     if (message.toolResult?.name === "ask_user") return null;
     if (message.toolResult?.name === "propose_outline") return null;
+    // A document/PPT result: render a real download button from the tool's own
+    // (trustworthy) URL instead of the raw text — the model's prose link is
+    // unreliable, so we never surface it. See lib/download-artifact.
+    const artifact = parseDownloadArtifact(
+      message.toolResult?.name,
+      message.toolResult?.output,
+      message.toolResult?.isError
+    );
+    if (artifact) {
+      return (
+        <div className="message-wrapper message-tool">
+          <div className="message-wrapper-inner">
+            <div className="doc-download-card">
+              <span className="doc-download-icon" aria-hidden>📄</span>
+              <span className="doc-download-name" title={artifact.filename}>
+                {artifact.filename}
+              </span>
+              <a
+                className="gen-asset-download"
+                href={artifact.url}
+                download={artifact.filename}
+                target="_blank"
+                rel="noreferrer"
+              >
+                下载
+              </a>
+            </div>
+          </div>
+        </div>
+      );
+    }
     // Tool result message — rendered as a collapsible card
     return (
       <div className="message-wrapper message-tool">
@@ -146,6 +199,18 @@ export function MessageBubble({
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="tool-calls-section">
             {message.toolCalls.map((tc, i) => {
+              // A rejected interactive call (e.g. propose_outline failing
+              // layout validation) was retried by the agent — rendering it as
+              // a live card would show two near-identical confirmation cards.
+              if (failedToolNames?.includes(tc.name)) {
+                return (
+                  <div key={i} className="interactive-failed-note">
+                    {tc.name === "propose_outline"
+                      ? "大纲未通过布局校验，已自动调整重试"
+                      : "提问未成功发出，已自动重试"}
+                  </div>
+                );
+              }
               if (tc.name === "ask_user") {
                 return (
                   <AskUserCard

@@ -1,0 +1,26 @@
+{
+  "name": "@lot-agent/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lot Agent desktop client (Electron shell over @lot-agent/web)",
+  "author": "Lot Agent",
+  "type": "module",
+  "main": "./dist/main/index.js",
+  "scripts": {
+    "build": "tsup",
+    "icons": "node scripts/make-icons.mjs",
+    "dev": "tsup && LOT_DESKTOP_DEV=1 electron .",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "clean": "rm -rf dist release"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "43.2.0",
+    "electron-builder": "^26.15.3",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0"
+  }
+}

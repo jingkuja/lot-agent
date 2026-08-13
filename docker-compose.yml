@@ -29,7 +29,8 @@ x-app-env: &app-env
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
   LLM_DEFAULT: ${LLM_DEFAULT:-openai}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://tokenhub.todoucloud.com/v1}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://tokenhub.wetok.ai/v1}
+  TOKENHUB_BASE_URL: ${TOKENHUB_BASE_URL:-https://tokenhub.wetok.ai/api/agent-market}
   OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4-flash}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
@@ -40,12 +41,18 @@ x-app-env: &app-env
   TOKENHUB_API_KEY: ${TOKENHUB_API_KEY:-}
   IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
   VIDEO_GEN_API_KEY: ${VIDEO_GEN_API_KEY:-}
+  # Shared secret proving this Agent (box) to new-api on URL token auto-login.
+  # Sent as `Authorization: Bearer` when exchanging ?token via /auth/token-login;
+  # if unset or mismatched, new-api replies 403 "invalid agent key". Keep secret.
+  NEW_API_AGENT_KEY: ${NEW_API_AGENT_KEY:-}
   BIGMODEL_API_KEY: ${BIGMODEL_API_KEY:-}
   CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
   # Absolute base for static file URLs (assets/documents/uploads). Leave empty
   # for same-origin access; set to the box address so generated download links
   # are reachable externally, e.g. http://192.168.1.50:3000
   PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+  RAG_API_URL: ${RAG_API_URL:-https://ai-rag.gafz.com.cn}
+  RAG_INTEGRATION_KEY: ${RAG_INTEGRATION_KEY:-}
   DEBUG_LLM: ${DEBUG_LLM:-}
 
 services:

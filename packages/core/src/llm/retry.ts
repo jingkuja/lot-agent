@@ -9,6 +9,9 @@ export interface LLMRetryConfig {
   isRetryable?(err: unknown): boolean;
   /** Reads a Retry-After-style delay off the error, if present. */
   retryAfterMs?(err: unknown): number | undefined;
+  /** Aborts an in-progress backoff wait immediately (run cancellation), instead
+   * of blocking the caller for up to the full delay. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -66,8 +69,27 @@ function defaultIsRetryable(err: unknown): boolean {
   );
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Abortable backoff wait. If `signal` fires while sleeping, the timer is
+ * cleared and the promise rejects immediately with the signal's abort reason
+ * instead of blocking the caller for the remainder of the delay.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("aborted"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolvePromise();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("aborted"));
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
@@ -98,7 +120,7 @@ export async function* withLLMRetry(
       }
       const retryAfter = cfg.retryAfterMs?.(err);
       const delay = retryAfter ?? baseDelayMs * 2 ** attempt + Math.random() * 300;
-      await sleep(Math.min(delay, 10_000));
+      await sleep(Math.min(delay, 10_000), cfg.signal);
     }
   }
 }

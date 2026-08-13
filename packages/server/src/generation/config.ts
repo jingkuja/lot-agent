@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
-  ChatCompletionsImageProvider,
+  OpenAIImagesImageProvider,
   HttpImageGenerationProvider,
   MockImageGenerationProvider,
   pickImageAdapter,
@@ -29,8 +29,9 @@ export interface GenerationConfig {
   video: MediaGenerationConfig;
 }
 
-/** Raw per-media block as authored in config/default.json. Each field is an
- * optional override of the shared top-level default. */
+/** Raw per-media block as authored in config/default.json. Endpoint fields are
+ * retained for config-file compatibility but generation URLs come from the
+ * OPENAI_BASE_URL environment variable at runtime. */
 interface RawMedia {
   model?: string;
   modelId?: string;
@@ -47,9 +48,9 @@ interface RawGeneration {
 }
 
 /**
- * Load the non-secret `generation` block from config + keys from env. Top-level
- * `baseUrl`/`adapter`/`mock` are shared defaults; each of `image`/`video` may
- * override any of them so the two providers can diverge onto different vendors.
+ * Load the non-secret `generation` block from config + keys from env. Adapter
+ * and mock settings still come from config, but both media providers use the
+ * same OPENAI_BASE_URL instead of any URL in config/default.json.
  * Keys come from env: `IMAGE_GEN_API_KEY` / `VIDEO_GEN_API_KEY` override the
  * shared `TOKENHUB_API_KEY` when image and video use different vendors.
  */
@@ -58,13 +59,16 @@ export async function loadGenerationConfig(rootDir: string): Promise<GenerationC
     generation?: RawGeneration;
   };
   const g = raw.generation ?? {};
-  const sharedBaseUrl = g.baseUrl ?? "https://tokenhub.todoucloud.com/v1";
+  // Image/video generation must follow the same OpenAI-compatible endpoint as
+  // the environment-configured LLM. Do not allow a stale config/default.json
+  // URL (including per-media overrides) to silently route generation elsewhere.
+  const sharedBaseUrl = process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1";
   const sharedAdapter = g.adapter ?? "happyhorse";
   const sharedMock = g.mock ?? true;
   const sharedKey = process.env.TOKENHUB_API_KEY ?? "";
 
   const merge = (m: RawMedia | undefined, defaultModelId: string, keyEnv: string): MediaGenerationConfig => ({
-    baseUrl: m?.baseUrl ?? sharedBaseUrl,
+    baseUrl: sharedBaseUrl,
     adapter: m?.adapter ?? sharedAdapter,
     mock: m?.mock ?? sharedMock,
     apiKey: process.env[keyEnv] || sharedKey,
@@ -83,8 +87,10 @@ export async function loadGenerationConfig(rootDir: string): Promise<GenerationC
  * mock when running in mock mode or when no API key is configured. */
 export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationProvider {
   if (cfg.mock || !cfg.apiKey) return new MockImageGenerationProvider();
-  if (cfg.adapter === "chat-completions") {
-    return new ChatCompletionsImageProvider({
+  // `chat-completions` is retained as a config compatibility alias. Tokenhub's
+  // image models now use its synchronous OpenAI Images endpoints instead.
+  if (cfg.adapter === "openai-images" || cfg.adapter === "chat-completions") {
+    return new OpenAIImagesImageProvider({
       baseUrl: cfg.baseUrl,
       apiKey: cfg.apiKey,
       model: cfg.model,
@@ -103,12 +109,12 @@ export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationPr
  * (i.e. the UI should show a percentage). Mirrors the branching in
  * `makeImageProvider`/`makeVideoProvider`: the mock providers ramp progress, the
  * async create→poll providers report real progress, but the synchronous
- * `chat-completions` provider jumps straight to 100 — for it the UI shows a plain
+ * synchronous OpenAI Images provider jumps straight to 100 — for it the UI shows a plain
  * "生成中……" instead of a fake percentage.
  */
 export function mediaSupportsProgress(cfg: MediaGenerationConfig): boolean {
   if (cfg.mock || !cfg.apiKey) return true; // mock ramps progress
-  return cfg.adapter !== "chat-completions";
+  return cfg.adapter !== "openai-images" && cfg.adapter !== "chat-completions";
 }
 
 export function makeVideoProvider(cfg: MediaGenerationConfig): VideoGenerationProvider {

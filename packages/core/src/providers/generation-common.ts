@@ -11,7 +11,13 @@ import { placeholderSvgDataUrl } from "./placeholder.js";
  */
 
 export type MediaType = "image" | "video";
-export interface ReferenceMedia { type: "reference_image"; url: string }
+export interface ReferenceMedia {
+  type: "reference_image" | "reference_video" | "reference_audio";
+  url: string;
+}
+
+/** A vendor input may be a single URL or a list of URLs. */
+export type ReferenceInput = string | string[];
 export interface CreateResult { taskId: string; status: string; progress: number }
 export interface PollResult {
   status: string;
@@ -80,12 +86,12 @@ export interface HttpGenerationOpts<Req> {
   apiKey: string;
   adapter: VendorAdapter<Req>;
   model: string;
-  /** Per-request timeout. Default: 20s. */
+  /** Per-request timeout. Default: 2 minutes. */
   timeoutMs?: number;
 }
 
-/** Default per-request timeout for generation HTTP calls. */
-const DEFAULT_TIMEOUT_MS = 20_000;
+/** Default per-request timeout for generation HTTP calls (2 minutes). */
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
  * Turn a non-2xx generation response into an Error carrying the cleanest message
@@ -102,6 +108,29 @@ async function responseError(res: { status: number; text(): Promise<string> }, c
     // body wasn't JSON — fall back to the raw text below
   }
   return new Error(vendorMsg ?? `${ctx}: ${res.status} ${body}`);
+}
+
+/** Max chars of a raw vendor response body carried in a create-failure error —
+ * enough to show the full returned payload on hover without an unbounded tooltip. */
+const RAW_BODY_CAP = 2000;
+
+/**
+ * Build a create-failure Error that carries the **raw response body** so the UI
+ * can show exactly what the vendor returned on hover. A create only succeeds when
+ * the response yields a task id; every other outcome (non-2xx, non-JSON body, or
+ * a 2xx envelope with no adapter-recognized task id) routes here. Leads with the
+ * extracted vendor message when there is one, then appends the raw payload.
+ */
+function createFailError(status: number, bodyText: string): Error {
+  const raw = bodyText.trim().slice(0, RAW_BODY_CAP);
+  let vendorMsg: string | undefined;
+  try {
+    vendorMsg = extractVendorError(JSON.parse(bodyText) as Record<string, unknown>);
+  } catch {
+    // body wasn't JSON — the raw text is all we have to show
+  }
+  const lead = vendorMsg ?? (status >= 400 ? `请求失败 (HTTP ${status})` : "未返回任务ID");
+  return new Error(raw ? `${lead}：${raw}` : lead);
 }
 
 /** Drives any `VendorAdapter<Req>` over HTTP (async create→poll). */
@@ -129,23 +158,36 @@ export class HttpGenerationClient<Req extends { model?: string }> {
   async create(req: Req): Promise<CreateResult> {
     const { adapter, baseUrl, apiKey } = this.opts;
     const model = req.model ?? this.opts.model;
-    const res = await this.request(`${baseUrl}${adapter.createPath()}`, {
+    const url = `${baseUrl}${adapter.createPath()}`;
+    const body = adapter.buildCreateBody(req, model);
+    // Debug: print the exact outgoing create request (URL + body) so the vendor
+    // call can be reproduced with curl. Auth header omitted on purpose.
+    console.log("[generation.create] →", "POST", url, JSON.stringify(body));
+    const res = await this.request(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(adapter.buildCreateBody(req, model)),
+      body: JSON.stringify(body),
     }, 0);
-    if (!res.ok) throw await responseError(res, "generation create failed");
-    const json = await res.json();
-    const created = adapter.parseCreate(json);
-    // A create response with no task id is a failure disguised as HTTP 200 — a
-    // vendor error envelope (`{ code, message, data:null }`) with no task_id/id.
-    // Without a task id there is nothing to poll, so surface it as an error
-    // carrying the vendor message instead of returning an empty id the job runner
-    // would poll (`/videos/`) until the max-wait timeout.
-    if (!created.taskId) {
-      const vendorMsg = extractVendorError((json ?? {}) as Record<string, unknown>);
-      throw new Error(vendorMsg ?? "generation create returned no task id");
+    // Read the body once as text so both the success path and every failure path
+    // (non-2xx, non-JSON, or a 2xx envelope with no task id) can see the raw
+    // payload — the create only "succeeds" when a task id comes back.
+    const bodyText = await res.text();
+    console.log("[generation.create] ←", res.status, bodyText);
+    if (!res.ok) throw createFailError(res.status, bodyText);
+    let json: unknown;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      // A 2xx with a non-JSON body can't carry a task id — fail with the raw text.
+      throw createFailError(res.status, bodyText);
     }
+    const created = adapter.parseCreate(json);
+    // Success REQUIRES a vendor task id. A 200 with an error envelope (or any body
+    // lacking the task id required by its adapter) has nothing to poll, so fail
+    // immediately — carrying the raw response so the UI shows what came back on
+    // hover — instead of returning an empty id the job runner would poll
+    // (`/videos/`) until the max-wait timeout.
+    if (!created.taskId) throw createFailError(res.status, bodyText);
     return created;
   }
   async poll(taskId: string): Promise<PollResult> {

@@ -110,7 +110,7 @@ export class AnthropicProvider implements LLMProvider {
         structured ? STRUCTURED_TOOL : undefined
       );
 
-    yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable });
+    yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable, signal: opts?.signal });
   }
 }
 

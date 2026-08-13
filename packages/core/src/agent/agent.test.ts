@@ -162,6 +162,100 @@ describe("Agent.run", () => {
     expect(events.some((e) => e.type === "done")).toBe(true);
   });
 
+});
+
+/** LLM where each call optionally yields chunks then optionally throws. Lets a
+ * test emit a preamble before failing, reproducing the mid-stream malformed
+ * tool-call rejection. */
+function stepLLM(
+  steps: Array<{ chunks?: ChatChunk[]; error?: Error }>
+): LLMProvider & { calls: Message[][] } {
+  let i = 0;
+  const calls: Message[][] = [];
+  return {
+    calls,
+    async *chat(messages: Message[]): AsyncIterable<ChatChunk> {
+      calls.push(messages);
+      const step = steps[i++] ?? {
+        chunks: [{ type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
+      };
+      for (const c of step.chunks ?? []) yield c;
+      if (step.error) throw step.error;
+    },
+  };
+}
+
+const MALFORMED = () =>
+  new Error(
+    "The model returned incomplete tool_call arguments. Function 'generate_ppt' has malformed arguments. Please retry the request."
+  );
+
+describe("Agent.run malformed tool-call recovery", () => {
+  it("silently retries a malformed tool-call error even after a preamble streamed", async () => {
+    const llm = stepLLM([
+      // preamble text THEN the vendor rejects the truncated tool call
+      { chunks: [{ type: "text", content: "好的，我来生成" }], error: MALFORMED() },
+      { chunks: textChunks("done") },
+    ]);
+    const agent = new Agent({ systemPrompt: "sys" });
+
+    const events = await collect(agent.run("hi", makeContext(llm)));
+
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(llm.calls.length).toBe(2); // retried the generation
+  });
+
+  it("feeds the failure back to the model after silent retries are exhausted", async () => {
+    const llm = stepLLM([
+      { error: MALFORMED() },
+      { error: MALFORMED() },
+      { error: MALFORMED() }, // initial + 2 silent retries all fail
+      { chunks: textChunks("recovered with fewer slides") },
+    ]);
+    const agent = new Agent({ systemPrompt: "sys" });
+
+    const events = await collect(agent.run("hi", makeContext(llm)));
+
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(llm.calls.length).toBe(4);
+    // The 4th call carries a synthetic recovery note guiding the model.
+    const fourth = llm.calls[3];
+    expect(
+      fourth.some(
+        (m) => m.role === "user" && String(m.content).includes("[系统自动提示]")
+      )
+    ).toBe(true);
+  });
+
+  it("surfaces a friendly (non-raw) error when recovery also keeps failing, without looping forever", async () => {
+    const llm = stepLLM(Array.from({ length: 20 }, () => ({ error: MALFORMED() })));
+    const agent = new Agent({ systemPrompt: "sys" });
+
+    const events = await collect(agent.run("hi", makeContext(llm)));
+
+    const err = events.find((e) => e.type === "error");
+    expect(err).toBeDefined();
+    // Not the raw vendor string dumped at the user.
+    expect(err && "message" in err ? err.message : "").not.toContain(
+      "incomplete tool_call"
+    );
+    expect(llm.calls.length).toBeLessThan(10); // bounded
+    expect(events.some((e) => e.type === "done")).toBe(true);
+  });
+
+  it("does not retry a non-malformed error — surfaces it immediately", async () => {
+    const llm = stepLLM([{ error: new Error("400 bad request: invalid model") }]);
+    const agent = new Agent({ systemPrompt: "sys" });
+
+    const events = await collect(agent.run("hi", makeContext(llm)));
+
+    const err = events.find((e) => e.type === "error");
+    expect(err && "message" in err ? err.message : "").toContain("invalid model");
+    expect(llm.calls.length).toBe(1);
+  });
+});
+
+describe("Agent.run (cont)", () => {
   it("does NOT dedup identical calls to a non-cacheable tool", async () => {
     let executions = 0;
     const registry = new ToolRegistry();
@@ -418,6 +512,20 @@ describe("Agent.run parallel tool execution", () => {
       .filter((e): e is Extract<AgentEvent, { type: "tool_result" }> => e.type === "tool_result")
       .map((e) => e.name);
     expect(resultNames).toEqual(["p1", "p2"]);
+  });
+
+  it("tags each tool_result with the toolCallId of its call, even for same-name parallel calls", async () => {
+    const track = { active: 0, max: 0 };
+    const registry = new ToolRegistry();
+    registry.register(concurrencyTool("p1", true, track));
+    const llm = scriptedLLM([twoToolCall("p1", "p1"), textChunks("done")]);
+
+    const events = await collect(new Agent({ systemPrompt: "s" }).run("hi", makeContext(llm, registry)));
+
+    const results = events.filter(
+      (e): e is Extract<AgentEvent, { type: "tool_result" }> => e.type === "tool_result"
+    );
+    expect(results.map((e) => e.toolCallId)).toEqual(["a", "b"]);
   });
 
   it("runs non-parallelSafe tool calls sequentially", async () => {

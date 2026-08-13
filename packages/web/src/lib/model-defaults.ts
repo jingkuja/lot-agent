@@ -23,3 +23,15 @@ export function fillModelDefaults(
     video: prev.video ?? catalog.video[0]?.id ?? null,
   };
 }
+
+/**
+ * 选 llm 组模型:对话已存的模型若仍在目录中则沿用,否则回落到目录第一个。
+ * 用于切换 API key / 目录刷新后,避免选中已失效(不在新目录中)的模型。
+ */
+export function resolveLlmSelection(
+  persisted: string | null,
+  llmCatalog: CatalogModel[]
+): string | null {
+  if (persisted && llmCatalog.some((m) => m.id === persisted)) return persisted;
+  return llmCatalog[0]?.id ?? null;
+}

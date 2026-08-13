@@ -1,13 +1,12 @@
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
-import { LocalStorage } from "@lot-agent/core";
+import { LocalStorage, fetchPublicBinary } from "@lot-agent/core";
 import type { ModelConfig } from "@lot-agent/core";
 import {
-  createLLMProvider,
   PgMemoryAdapter,
   buildExtractionMessages,
   parseExtraction,
@@ -15,21 +14,56 @@ import {
 } from "@lot-agent/core";
 import { loadLlmConfig } from "../config.js";
 import { loadGenerationConfig, makeImageProvider, makeVideoProvider } from "../generation/config.js";
-import { runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
+import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import type { ModelCatalogConfig } from "../models/catalog.js";
 import { pickGenModel } from "./gen-provider.js";
 import { lastTurn } from "../memory/last-turn.js";
 import { UsageMeter } from "../billing/meter.js";
+import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { GenCache } from "../billing/gen-cache.js";
 import { staticPrefix } from "../util/public-base.js";
+import { createOptionalFallbackLLM } from "./fallback-llm.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
 // (one deeper than server's index.js, which sits at {src,dist}/index.js).
 const ROOT = resolve(__dirname, "../../../..");
 const ASSETS_DIR = resolve(ROOT, "data/assets");
+const UPLOADS_DIR = resolve(ROOT, "data/uploads");
 const storage = new LocalStorage(ASSETS_DIR, staticPrefix("/static/assets"));
+const uploadStorage = new LocalStorage(UPLOADS_DIR, staticPrefix("/static/uploads"));
+
+// Vendor-returned generation URLs are untrusted input (parsed out of a model
+// response) — download them defensively: SSRF-guarded (incl. redirect hops),
+// time-boxed, and capped so a malicious/misbehaving vendor response can't
+// exhaust worker memory. Sizes are generous upper bounds, not typical output.
+const IMAGE_MAX_BYTES = 30 * 1024 * 1024; // 30MB
+const VIDEO_MAX_BYTES = 300 * 1024 * 1024; // 300MB
+
+// Download time budgets. Videos are far larger than images and come off the
+// vendor's CDN over links of unknown speed, so the fetch default (120s) is
+// systematically too short for them — a completed generation would then read
+// as "download timed out". Give video a generous 5-minute budget; a failure is
+// still recoverable via the download-only retry (generation.redownload).
+const IMAGE_DOWNLOAD_TIMEOUT_MS = 120_000; // 2min
+const VIDEO_DOWNLOAD_TIMEOUT_MS = 5 * 60_000; // 5min
+
+function safeUploadKeyFromUrl(url: string): string | null {
+  const prefix = staticPrefix("/static/uploads/");
+  if (!url.startsWith(prefix)) return null;
+  const key = url.slice(prefix.length);
+  return key && !key.includes("/") && !key.includes("\\") && !key.includes("..") ? key : null;
+}
+
+function imageMimeForUpload(key: string, body: Buffer): string | null {
+  const ext = extname(key).toLowerCase();
+  if (ext === ".png" || body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg" || (body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff)) return "image/jpeg";
+  if (ext === ".webp" || body.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (ext === ".gif" || body.subarray(0, 3).toString("ascii") === "GIF") return "image/gif";
+  return null;
+}
 
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
@@ -62,7 +96,11 @@ async function main() {
   const modelMap = new Map(models.map((m) => [m.id, m]));
   const modelCatalog = rawConfig.modelCatalog;
 
-  const meter = new UsageMeter(db, (id) => modelMap.get(id));
+  // Shares the same static-then-catalog pricing resolution as the server's
+  // chat path (agent-service.ts) — otherwise a dynamic tokenhub model id
+  // (e.g. memory.extract running on the triggering turn's model) is unknown
+  // to `modelMap` and its usage silently goes unmetered (#18).
+  const meter = new UsageMeter(db, makePricingLookup((id) => modelMap.get(id), modelCatalog));
   const cache = new GenCache(conn);
 
   const genConfig = await loadGenerationConfig(ROOT);
@@ -76,17 +114,46 @@ async function main() {
     videoBase: genConfig.video,
   });
 
-  /** Resolve a provider url (http(s) or data:) to bytes + mime. */
-  async function urlToBytes(url: string): Promise<{ body: Buffer; mime: string }> {
+  /**
+   * Resolve a provider url (http(s) or data:) to bytes + mime, enforcing
+   * `maxBytes` either way: `data:` URLs are decoded then length-checked (the
+   * decode itself is bounded by the base64 already being in memory as part
+   * of the vendor's poll response); http(s) URLs go through the SSRF-guarded,
+   * streaming `fetchPublicBinary` so an oversized/malicious response is
+   * aborted before it is fully buffered.
+   */
+  async function urlToBytes(
+    url: string,
+    maxBytes: number,
+    opts: { signal?: AbortSignal; timeoutMs?: number } = {}
+  ): Promise<{ body: Buffer; mime: string }> {
     if (url.startsWith("data:")) {
       const [head, b64] = url.slice(5).split(",", 2);
       const mime = head.split(";")[0] || "application/octet-stream";
-      return { body: Buffer.from(b64, "base64"), mime };
+      const body = Buffer.from(b64, "base64");
+      if (body.byteLength > maxBytes) {
+        throw new Error(`download exceeds maxBytes (${body.byteLength} > ${maxBytes})`);
+      }
+      return { body, mime };
     }
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`download failed: ${res.status}`);
-    const mime = res.headers.get("content-type") ?? "application/octet-stream";
-    return { body: Buffer.from(await res.arrayBuffer()), mime };
+    // Image-edit references are normally uploads from this app. Read them
+    // directly instead of requiring a public HTTP address (and without routing
+    // the worker through its own SSRF-protected HTTP client).
+    const uploadKey = safeUploadKeyFromUrl(url);
+    if (uploadKey) {
+      const body = await uploadStorage.get(uploadKey);
+      const mime = imageMimeForUpload(uploadKey, body);
+      if (!mime) throw new Error("uploaded edit reference is not a supported image");
+      if (body.byteLength > maxBytes) {
+        throw new Error(`download exceeds maxBytes (${body.byteLength} > ${maxBytes})`);
+      }
+      return { body, mime };
+    }
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`unsupported protocol: ${parsed.protocol}`);
+    }
+    return fetchPublicBinary(url, { maxBytes, signal: opts.signal, timeoutMs: opts.timeoutMs });
   }
 
   /** Map a mime to a stored-file extension. */
@@ -99,9 +166,12 @@ async function main() {
   // selected model drives the actual generation and the per-model cache key.
   const genDeps = async (
     mediaType: "image" | "video",
-    job: { userId: string; input: Record<string, unknown> }
+    job: { userId: string; input: Record<string, unknown> },
+    signal?: AbortSignal
   ): Promise<RunJobDeps> => {
     const base = mediaType === "image" ? genConfig.image : genConfig.video;
+    const maxBytes = mediaType === "image" ? IMAGE_MAX_BYTES : VIDEO_MAX_BYTES;
+    const downloadTimeoutMs = mediaType === "image" ? IMAGE_DOWNLOAD_TIMEOUT_MS : VIDEO_DOWNLOAD_TIMEOUT_MS;
     const model = pickGenModel(mediaType, job.input, base.modelId);
     const apiKey = (await db.getUserApiKey(job.userId)) ?? "";
     const provider = apiKey
@@ -118,10 +188,11 @@ async function main() {
       meter,
       cache,
       updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
-      urlToBytes,
+      urlToBytes: (url, o) => urlToBytes(url, maxBytes, { ...o, timeoutMs: downloadTimeoutMs }),
       extFor,
       modelId: base.modelId,
       vendorModel: model,
+      signal,
     };
   };
 
@@ -131,19 +202,30 @@ async function main() {
   // back to the env-configured LLM only when either is unavailable (e.g. a
   // user without a tokenhub key, or an older queued job with no modelId).
   const llmConfig = await loadLlmConfig(ROOT);
-  const fallbackExtractLlm = createLLMProvider(llmConfig);
+  const fallbackExtractLlm = createOptionalFallbackLLM(llmConfig);
   const fallbackExtractModelId =
     llmConfig.default === "openai" ? llmConfig.openai.model : llmConfig.anthropic.model;
   const memAdapter = new PgMemoryAdapter(db.pool);
   await memAdapter.init();
 
-  queue.process("image.generate", async (job) => {
+  queue.process("image.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
-    return runGenerationJob(await genDeps("image", j), j, "image");
+    return runGenerationJob(await genDeps("image", j, ctl.signal), j, "image");
   });
-  queue.process("video.generate", async (job) => {
+  queue.process("video.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
-    return runGenerationJob(await genDeps("video", j), j, "video");
+    return runGenerationJob(await genDeps("video", j, ctl.signal), j, "video");
+  });
+
+  // Download-only retry: the vendor generation already succeeded but pulling
+  // the media into our storage failed (e.g. slow CDN → download timed out).
+  // The job carries `sourceUrl` + `mediaType`; we re-fetch that url with the
+  // owning user's deps and finalize, without re-calling / re-billing the vendor.
+  queue.process("generation.redownload", async (job, ctl) => {
+    const input = job.input as Record<string, unknown>;
+    const mediaType = input.mediaType === "image" ? "image" : "video";
+    const j = { id: job.id, userId: job.userId, input };
+    return redownloadGenerationJob(await genDeps(mediaType, j, ctl.signal), j, mediaType);
   });
 
   // Register memory.extract handler — runs a cheap LLM to pull durable user
@@ -162,8 +244,18 @@ async function main() {
     const existing = await memAdapter.list(userId);
 
     const apiKey = await db.getUserApiKey(userId);
-    const extractLlm = apiKey && modelId ? providerFactory.llm(modelId, apiKey) : fallbackExtractLlm;
+    const extractLlm =
+      apiKey && modelId
+        ? providerFactory.llm(modelId, apiKey)
+        : fallbackExtractLlm;
     const extractModelId = apiKey && modelId ? modelId : fallbackExtractModelId;
+    if (!extractLlm) {
+      console.warn(
+        `[memory.extract] skipped task ${job.id}: no user or fallback LLM API key`
+      );
+      await queue.updateProgress(job.id, 100);
+      return { upserts: 0, deletes: 0 };
+    }
 
     let raw = "";
     let inputTokens = 0;

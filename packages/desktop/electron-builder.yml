@@ -1,0 +1,46 @@
+appId: com.lotagent.desktop
+productName: Lot Agent
+copyright: Copyright © 2026
+
+directories:
+  output: release
+
+# The app is fully bundled by tsup (only `electron` is external), so no
+# node_modules need to ship inside the asar.
+files:
+  - dist/**
+  - package.json
+
+extraResources:
+  # The built web app, served by the main process's loopback server.
+  - from: ../web/dist
+    to: web-dist
+  - from: build/tray-icon.png
+    to: icons/tray-icon.png
+
+asar: true
+npmRebuild: false
+
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.png
+  # Unsigned by default so anyone can build. To sign + notarize, remove the
+  # line below and provide CSC_LINK / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+  # APPLE_TEAM_ID — see docs/desktop.md.
+  identity: null
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: true
+  perMachine: false
+  shortcutName: Lot Agent

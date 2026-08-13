@@ -5,6 +5,10 @@ import {
   nextSortOrder,
   promotedSortOrder,
 } from "../agents/install-order.js";
+import { normalizeApiKeyEntries, type RawApiKeyEntry } from "../tokenhub/api-key-entry.js";
+import { SecretBox, createSecretBox, sha256Hex } from "../auth/secret-box.js";
+import { runMigrations } from "./migration-runner.js";
+import { migrations } from "./migrations/index.js";
 
 export interface Conversation {
   id: string;
@@ -32,6 +36,9 @@ export interface StoredMessage {
   status: string;
   metadata: Record<string, unknown>;
   created_at: string;
+  /** Conversation-scoped, monotonically increasing order key (report #20).
+   * BIGINT — pg returns it as a string, converted to number in getMessages. */
+  seq: number;
 }
 
 export interface StoredToolCall {
@@ -130,7 +137,7 @@ export interface StoredUser {
   external_user_id?: number | null;
   username?: string | null;
   api_key?: string | null;
-  api_keys?: string[] | null;
+  api_keys?: (RawApiKeyEntry | string)[] | null;
 }
 
 export interface UserBalance {
@@ -190,8 +197,17 @@ const DEFAULT_CONFIG: DBConfig = {
 
 export class DB {
   readonly pool: pg.Pool;
+  private readonly secretBox: SecretBox;
 
-  constructor(config?: Partial<DBConfig>) {
+  /**
+   * `secretBox` defaults to `createSecretBox()` (reads `SECRET_MASTER_KEY`
+   * from the environment) so both the server and worker process — which
+   * construct `DB` independently but share the same env — encrypt/decrypt
+   * consistently with zero extra wiring. Tests that don't care about
+   * encryption can pass an explicit passthrough `new SecretBox(undefined)`
+   * to avoid depending on env state.
+   */
+  constructor(config?: Partial<DBConfig>, secretBox: SecretBox = createSecretBox()) {
     const cfg = { ...DEFAULT_CONFIG, ...config };
     this.pool = new pg.Pool({
       host: cfg.host,
@@ -203,6 +219,23 @@ export class DB {
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
     });
+    this.secretBox = secretBox;
+  }
+
+  /** Decrypts a user row's `api_key` / `api_keys` in place (mutates and returns `row`).
+   * Single choke point so every read path (getUserById, upsertUserByExternalId, …)
+   * returns plaintext consistently. */
+  private openUserRow<T extends { api_key?: string | null; api_keys?: unknown }>(row: T): T {
+    if (row.api_key) {
+      row.api_key = this.secretBox.open(row.api_key) as T["api_key"];
+    }
+    if (Array.isArray(row.api_keys)) {
+      row.api_keys = normalizeApiKeyEntries(row.api_keys).map((e) => ({
+        ...e,
+        apiKey: this.secretBox.open(e.apiKey),
+      })) as T["api_keys"];
+    }
+    return row;
   }
 
   /**
@@ -213,391 +246,7 @@ export class DB {
    * uses the pool created in the constructor.
    */
   async migrate(): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS conversations (
-          id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-          title       VARCHAR(500) NOT NULL DEFAULT '新对话',
-          model       VARCHAR(100),
-          provider    VARCHAR(50),
-          system_prompt TEXT,
-          agent_id    VARCHAR(50) NOT NULL DEFAULT 'general',
-          status      VARCHAR(20) NOT NULL DEFAULT 'active',
-          metadata    JSONB       NOT NULL DEFAULT '{}',
-          created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-
-      // Idempotent migration: add agent_id to existing databases
-      await client.query(`
-        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS agent_id VARCHAR(50) NOT NULL DEFAULT 'general';
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_conversations_status_updated
-          ON conversations (status, updated_at DESC);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS messages (
-          id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-          conversation_id UUID        NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-          role            VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'tool', 'system')),
-          content         TEXT        NOT NULL DEFAULT '',
-          tool_call_id    VARCHAR(100),
-          token_count     INTEGER,
-          model           VARCHAR(100),
-          latency_ms      INTEGER,
-          status          VARCHAR(20) NOT NULL DEFAULT 'completed',
-          metadata        JSONB       NOT NULL DEFAULT '{}',
-          created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_messages_conversation
-          ON messages (conversation_id, created_at);
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_messages_tool_call_id
-          ON messages (tool_call_id) WHERE tool_call_id IS NOT NULL;
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS message_tool_calls (
-          id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-          message_id  UUID         NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-          tool_call_id VARCHAR(100) NOT NULL,
-          tool_name   VARCHAR(200) NOT NULL,
-          tool_input  JSONB        NOT NULL DEFAULT '{}',
-          status      VARCHAR(20)  NOT NULL DEFAULT 'pending',
-          created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_tool_calls_message
-          ON message_tool_calls (message_id);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS message_ratings (
-          id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-          message_id  UUID        NOT NULL REFERENCES messages(id) ON DELETE CASCADE UNIQUE,
-          rating      SMALLINT    NOT NULL CHECK (rating IN (1, -1)),
-          feedback    TEXT,
-          created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_ratings_message ON message_ratings (message_id);
-        CREATE INDEX IF NOT EXISTS idx_ratings_rating  ON message_ratings (rating);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS traces (
-          id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-          conversation_id  UUID        NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-          model            VARCHAR(100),
-          provider         VARCHAR(50),
-          total_tokens     INTEGER     NOT NULL DEFAULT 0,
-          total_latency_ms INTEGER,
-          status           VARCHAR(20) NOT NULL DEFAULT 'ok',
-          error_message    TEXT,
-          metadata         JSONB       NOT NULL DEFAULT '{}',
-          created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_traces_conversation
-          ON traces (conversation_id, created_at DESC);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS spans (
-          id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-          trace_id        UUID        NOT NULL REFERENCES traces(id) ON DELETE CASCADE,
-          parent_span_id  UUID        REFERENCES spans(id) ON DELETE SET NULL,
-          name            VARCHAR(100) NOT NULL,
-          status          VARCHAR(20) NOT NULL DEFAULT 'ok',
-          attributes      JSONB       NOT NULL DEFAULT '{}',
-          events          JSONB       NOT NULL DEFAULT '[]',
-          start_time      TIMESTAMPTZ NOT NULL,
-          end_time        TIMESTAMPTZ
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans (trace_id, start_time);
-        CREATE INDEX IF NOT EXISTS idx_spans_name  ON spans (name);
-      `);
-
-      // Trigger for auto-updating conversations.updated_at
-      await client.query(`
-        CREATE OR REPLACE FUNCTION update_conversation_timestamp()
-        RETURNS TRIGGER AS $$
-        BEGIN
-            UPDATE conversations SET updated_at = now() WHERE id = NEW.conversation_id;
-            RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;
-      `);
-
-      // Only create trigger if it doesn't exist
-      await client.query(`
-        DO $$ BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_trigger WHERE tgname = 'trg_messages_updated_at'
-          ) THEN
-            CREATE TRIGGER trg_messages_updated_at
-              AFTER INSERT ON messages
-              FOR EACH ROW
-              EXECUTE FUNCTION update_conversation_timestamp();
-          END IF;
-        END $$;
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS tasks (
-          id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-          type        VARCHAR(50)  NOT NULL,
-          status      VARCHAR(20)  NOT NULL DEFAULT 'pending',
-          progress    SMALLINT     NOT NULL DEFAULT 0,
-          input       JSONB        NOT NULL DEFAULT '{}',
-          output      JSONB,
-          error       TEXT,
-          user_id     VARCHAR(100) NOT NULL DEFAULT 'default',
-          created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-          updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
-        );
-      `);
-
-      // The vendor's own async task id (e.g. tokenhub "task_x6a2k…"), persisted
-      // after create so a restarted worker can resume polling rather than
-      // re-creating the generation. Distinct from our local tasks.id.
-      await client.query(`
-        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS vendor_task_id TEXT;
-      `);
-
-      // Jobs v2: attempt counter (retry accounting) + human-readable stage label.
-      await client.query(`
-        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attempts SMALLINT NOT NULL DEFAULT 0;
-        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stage TEXT;
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks (user_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS assets (
-          id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-          task_id      UUID         REFERENCES tasks(id) ON DELETE SET NULL,
-          user_id      VARCHAR(100) NOT NULL DEFAULT 'default',
-          type         VARCHAR(20)  NOT NULL,
-          storage_key  VARCHAR(500) NOT NULL,
-          url          TEXT         NOT NULL,
-          mime         VARCHAR(100) NOT NULL,
-          size_bytes   INTEGER      NOT NULL DEFAULT 0,
-          width        INTEGER,
-          height       INTEGER,
-          duration_sec NUMERIC,
-          created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_assets_task ON assets (task_id);
-        CREATE INDEX IF NOT EXISTS idx_assets_user ON assets (user_id, created_at DESC);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS usage_logs (
-          id           UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id      VARCHAR(100)  NOT NULL DEFAULT 'default',
-          task_id      UUID,
-          model_id     VARCHAR(100)  NOT NULL,
-          model_type   VARCHAR(20)   NOT NULL,
-          input_count  INTEGER       NOT NULL DEFAULT 0,
-          output_count INTEGER       NOT NULL DEFAULT 0,
-          total_cost   NUMERIC(12,6) NOT NULL DEFAULT 0,
-          created_at   TIMESTAMPTZ   NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_logs (user_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_usage_model_type ON usage_logs (model_type);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS user_balance (
-          user_id       VARCHAR(100)  PRIMARY KEY,
-          balance       NUMERIC(12,4) NOT NULL DEFAULT 0,
-          daily_limit   NUMERIC(12,4),
-          monthly_limit NUMERIC(12,4),
-          created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
-          updated_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
-        );
-      `);
-
-      // ── Users & Sessions (P6) ──
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS users (
-          id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-          email      VARCHAR(255) UNIQUE NOT NULL,
-          name       VARCHAR(255),
-          created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS external_user_id BIGINT;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key TEXT;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS api_keys JSONB;
-        ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external ON users (external_user_id);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS sessions (
-          id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id      UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          token        VARCHAR(128) UNIQUE NOT NULL,
-          created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-          expires_at   TIMESTAMPTZ  NOT NULL,
-          last_seen_at TIMESTAMPTZ  NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token);
-        CREATE INDEX IF NOT EXISTS idx_sessions_user  ON sessions (user_id);
-      `);
-
-      await client.query(`
-        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id VARCHAR(100) NOT NULL DEFAULT 'default';
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations (user_id, updated_at DESC);
-      `);
-
-      // Seed stable dev user
-      await client.query(`
-        INSERT INTO users (email, name) VALUES ('seed@local', 'Seed User')
-          ON CONFLICT (email) DO NOTHING;
-      `);
-
-      // ── P7: Review & Publish tables ──
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS review_logs (
-          id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id      VARCHAR(100) NOT NULL,
-          task_id      UUID,
-          content_type VARCHAR(20)  NOT NULL,
-          verdict      VARCHAR(20)  NOT NULL,
-          detail       JSONB        NOT NULL DEFAULT '{}',
-          created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_review_user ON review_logs (user_id, created_at DESC);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS platform_accounts (
-          id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id      VARCHAR(100) NOT NULL,
-          platform     VARCHAR(50)  NOT NULL,
-          access_token TEXT         NOT NULL,
-          expires_at   TIMESTAMPTZ,
-          created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-          UNIQUE (user_id, platform)
-        );
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS publish_records (
-          id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id       VARCHAR(100) NOT NULL,
-          platform      VARCHAR(50)  NOT NULL,
-          title         TEXT,
-          status        VARCHAR(20)  NOT NULL DEFAULT 'published',
-          published_url TEXT,
-          created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_publish_user ON publish_records (user_id, created_at DESC);
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS user_agents (
-          user_id      VARCHAR(100)     NOT NULL,
-          agent_id     VARCHAR(64)      NOT NULL,
-          sort_order   DOUBLE PRECISION NOT NULL DEFAULT 0,
-          installed_at TIMESTAMPTZ      NOT NULL DEFAULT now(),
-          PRIMARY KEY (user_id, agent_id)
-        );
-      `);
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_user_agents_user ON user_agents (user_id, sort_order);
-      `);
-
-      await client.query("COMMIT");
-
-      // Backfill legacy 'default' rows to the seed user (idempotent, outside transaction)
-      const { rows: seedRows } = await this.pool.query(
-        "SELECT id FROM users WHERE email = 'seed@local'"
-      );
-      if (seedRows.length > 0) {
-        const seedId = seedRows[0].id as string;
-        await this.pool.query(
-          "UPDATE conversations SET user_id = $1 WHERE user_id = 'default'",
-          [seedId]
-        );
-        await this.pool.query(
-          "UPDATE tasks SET user_id = $1 WHERE user_id = 'default'",
-          [seedId]
-        );
-        await this.pool.query(
-          "UPDATE assets SET user_id = $1 WHERE user_id = 'default'",
-          [seedId]
-        );
-        await this.pool.query(
-          "UPDATE usage_logs SET user_id = $1 WHERE user_id = 'default'",
-          [seedId]
-        );
-        await this.pool.query(
-          "INSERT INTO user_balance (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
-          [seedId]
-        );
-      }
-
-      console.log("Database migration complete");
-      return;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    await runMigrations(this.pool, migrations);
   }
 
   // ── Conversations ──
@@ -714,6 +363,49 @@ export class DB {
     );
   }
 
+  /**
+   * Atomic run-lease claim (report #20 concurrency half / architecture #10).
+   * Two tabs/devices sending into the same conversation at once must not both
+   * start a turn — this is a plain CAS, not a queue: a caller that loses the
+   * race gets `false` back and the route turns that into an immediate 409,
+   * it never waits/retries.
+   *
+   * Succeeds (claims the lease) when the conversation has no active run, OR
+   * its existing lease is older than `staleMs`. The staleness branch exists
+   * purely as a crash/hang fallback for a holder process that died mid-turn
+   * without reaching its `finally`/release — a live request never needs it,
+   * since nothing refreshes `run_started_at` mid-stream. Returns whether THIS
+   * call won the claim (`false` also covers an unknown conversationId).
+   */
+  async claimConversationRun(
+    conversationId: string,
+    runId: string,
+    staleMs: number
+  ): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE conversations
+       SET active_run_id = $2, run_started_at = now()
+       WHERE id = $1
+         AND (active_run_id IS NULL OR run_started_at < now() - make_interval(secs => $3::double precision / 1000.0))`,
+      [conversationId, runId, staleMs]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Fencing release: only clears the lease when it still belongs to `runId`.
+   * Without this check, a holder that hung long enough for its lease to go
+   * stale — and get reclaimed by a newer run — would clobber that newer run's
+   * ownership when it finally reaches its own (late) release.
+   */
+  async releaseConversationRun(conversationId: string, runId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversations SET active_run_id = NULL, run_started_at = NULL
+       WHERE id = $1 AND active_run_id = $2`,
+      [conversationId, runId]
+    );
+  }
+
   // ── Messages ──
 
   async addMessage(
@@ -727,11 +419,25 @@ export class DB {
       model?: string;
       latencyMs?: number;
       metadata?: Record<string, unknown>;
+      /** Row status; generation messages are born 'generating' so no separate
+       * status write (and its race window) is needed after insert. */
+      status?: string;
     } = {}
   ): Promise<void> {
+    // seq is allocated atomically via the `alloc` CTE: the UPDATE takes a row
+    // lock on the owning conversation, so concurrent inserts into the same
+    // conversation serialize on that lock and each gets a distinct,
+    // gap-free-per-writer next_seq (report #20). If the conversation row
+    // doesn't exist, `alloc` returns zero rows and the INSERT...SELECT
+    // inserts zero rows — stricter than the previous behavior (which would
+    // have silently inserted an orphaned message), and acceptable since a
+    // conversation_id with no owning row is already a caller bug.
     await this.pool.query(
-      `INSERT INTO messages (id, conversation_id, role, content, tool_call_id, token_count, model, latency_ms, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `WITH alloc AS (
+         UPDATE conversations SET next_seq = next_seq + 1 WHERE id = $2 RETURNING next_seq
+       )
+       INSERT INTO messages (id, conversation_id, role, content, tool_call_id, token_count, model, latency_ms, metadata, status, seq)
+       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, alloc.next_seq FROM alloc`,
       [
         id,
         conversationId,
@@ -742,27 +448,150 @@ export class DB {
         options.model ?? null,
         options.latencyMs ?? null,
         JSON.stringify(options.metadata ?? {}),
+        options.status ?? "completed",
       ]
     );
   }
 
-  /** Patch a generation message's status + metadata (used by the worker). */
+  /**
+   * Patch a generation message's status + metadata (used by the worker).
+   * The update is scoped to the owning conversation AND user: a message id
+   * alone is client-forgeable job input, so an id pointing at another user's
+   * message must update zero rows.
+   */
   async updateMessageGeneration(
     messageId: string,
-    patch: { status: string; metadata: Record<string, unknown> }
+    patch: { status: string; metadata: Record<string, unknown> },
+    owner: { conversationId: string; userId: string }
   ): Promise<void> {
+    // `m.status = 'generating'` makes the transition one-way: once a worker
+    // has written completed/failed/cancelled, a slower writer (e.g. the
+    // route's post-enqueue taskId write racing a cache-hit completion) can't
+    // drag the message back to 'generating' and drop its assets.
     await this.pool.query(
-      "UPDATE messages SET status = $1, metadata = $2 WHERE id = $3",
-      [patch.status, JSON.stringify(patch.metadata), messageId]
+      `UPDATE messages m SET status = $1, metadata = $2
+       FROM conversations c
+       WHERE m.id = $3
+         AND m.conversation_id = $4
+         AND c.id = m.conversation_id
+         AND c.user_id = $5
+         AND m.status = 'generating'`,
+      [patch.status, JSON.stringify(patch.metadata), messageId, owner.conversationId, owner.userId]
     );
   }
 
-  async getMessages(conversationId: string): Promise<StoredMessage[]> {
+  /**
+   * Flip a generation message to 'cancelled' without touching the rest of its
+   * metadata (prompt/settings keep rendering the card). Same ownership scope
+   * and one-way guard as updateMessageGeneration.
+   */
+  async markMessageGenerationCancelled(
+    messageId: string,
+    owner: { conversationId: string; userId: string }
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE messages m
+       SET status = 'cancelled', metadata = m.metadata || '{"status":"cancelled"}'::jsonb
+       FROM conversations c
+       WHERE m.id = $1
+         AND m.conversation_id = $2
+         AND c.id = m.conversation_id
+         AND c.user_id = $3
+         AND m.status = 'generating'`,
+      [messageId, owner.conversationId, owner.userId]
+    );
+  }
+
+  /**
+   * Flip a generation message to 'failed' with an error, merging into (not
+   * replacing) the existing metadata so the card's kind/mediaType/prompt keep
+   * rendering and the error shows on hover. Same ownership scope and one-way
+   * ('generating' only) guard as markMessageGenerationCancelled. Used by the
+   * stale-task reaper when a job is never claimed by a worker.
+   */
+  async markMessageGenerationFailed(
+    messageId: string,
+    error: string,
+    owner: { conversationId: string; userId: string }
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE messages m
+       SET status = 'failed',
+           metadata = COALESCE(m.metadata, '{}'::jsonb)
+             || jsonb_build_object('status', 'failed', 'error', $4::text)
+       FROM conversations c
+       WHERE m.id = $1
+         AND m.conversation_id = $2
+         AND c.id = m.conversation_id
+         AND c.user_id = $3
+         AND m.status = 'generating'`,
+      [messageId, owner.conversationId, owner.userId, error]
+    );
+  }
+
+  /**
+   * Read a generation message's status + parsed metadata, scoped to its owner.
+   * Used by the download-retry route to recover the persisted `sourceUrl`
+   * (and settings) of a generation left in 'download_failed'. Returns null if
+   * the message doesn't exist or isn't owned by `userId`.
+   */
+  async getGenerationMessage(
+    messageId: string,
+    conversationId: string,
+    userId: string
+  ): Promise<{ status: string; metadata: Record<string, unknown> } | null> {
     const { rows } = await this.pool.query(
-      "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+      `SELECT m.status, m.metadata
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.id = $1 AND m.conversation_id = $2 AND c.user_id = $3`,
+      [messageId, conversationId, userId]
+    );
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    const metadata =
+      typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata ?? {});
+    return { status: r.status, metadata };
+  }
+
+  /**
+   * Reopen a 'download_failed' generation message for a download-only retry:
+   * flip it back to 'generating' so the retry worker's finalize (guarded on
+   * 'generating') can land 'completed'. Guarded on the current status being
+   * exactly 'download_failed' so a double-click / concurrent retry only ever
+   * enqueues one job. Returns whether the transition happened.
+   */
+  async resetGenerationForRedownload(
+    messageId: string,
+    owner: { conversationId: string; userId: string }
+  ): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE messages m
+       SET status = 'generating',
+           metadata = COALESCE(m.metadata, '{}'::jsonb) || '{"status":"generating"}'::jsonb
+       FROM conversations c
+       WHERE m.id = $1
+         AND m.conversation_id = $2
+         AND c.id = m.conversation_id
+         AND c.user_id = $3
+         AND m.status = 'download_failed'`,
+      [messageId, owner.conversationId, owner.userId]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
+  async getMessages(conversationId: string): Promise<StoredMessage[]> {
+    // NULLS FIRST is pure defense: every row should have a non-null seq after
+    // the 0002 migration's backfill + the atomic allocation in addMessage.
+    // created_at stays as the tiebreaker for defense-in-depth, not because
+    // seq can actually collide within a conversation (idx_messages_conv_seq
+    // enforces uniqueness).
+    const { rows } = await this.pool.query(
+      "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY seq ASC NULLS FIRST, created_at ASC",
       [conversationId]
     );
-    return rows;
+    // seq is BIGINT — pg returns it as a string; convert so callers get a number.
+    return rows.map((r) => ({ ...r, seq: Number(r.seq) }));
   }
 
   async getToolCallsForConversation(conversationId: string): Promise<Map<string, StoredToolCall[]>> {
@@ -782,14 +611,28 @@ export class DB {
     return map;
   }
 
-  async deleteMessagesFromAndAfter(conversationId: string, messageId: string): Promise<void> {
-    // Delete the given message and all messages created after it
-    await this.pool.query(
+  /**
+   * Delete the given message and all messages after it (by seq), scoped to
+   * `conversationId`. The boundary subquery is ALSO scoped to
+   * `conversationId` — otherwise a `messageId` from a different conversation
+   * would smuggle in that conversation's seq as the deletion boundary
+   * (deleting the caller's own messages based on someone else's message
+   * ordering). Uses `seq` rather than `created_at` (report #20) since seq is
+   * the stable, gap-free-per-conversation order key; created_at ties within
+   * the same conversation are exactly what seq exists to disambiguate.
+   * Returns whether the boundary message existed in this conversation (it
+   * deletes itself too, so a hit is always >= 1 row).
+   */
+  async deleteMessagesFromAndAfter(conversationId: string, messageId: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
       `DELETE FROM messages
        WHERE conversation_id = $1
-         AND created_at >= (SELECT created_at FROM messages WHERE id = $2)`,
+         AND seq >= (
+           SELECT seq FROM messages WHERE id = $2 AND conversation_id = $1
+         )`,
       [conversationId, messageId]
     );
+    return (rowCount ?? 0) > 0;
   }
 
   async getRatingsForConversation(conversationId: string): Promise<Map<string, number>> {
@@ -828,6 +671,25 @@ export class DB {
       [messageId]
     );
     return rows;
+  }
+
+  /**
+   * Resolve a message's ownership chain (message → conversation → user).
+   * Returns null for an unknown message; used by routes to collapse
+   * cross-user access to 404.
+   */
+  async getMessageOwner(
+    messageId: string
+  ): Promise<{ conversationId: string; userId: string | null } | null> {
+    const { rows } = await this.pool.query(
+      `SELECT m.conversation_id, c.user_id
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.id = $1`,
+      [messageId]
+    );
+    if (!rows[0]) return null;
+    return { conversationId: rows[0].conversation_id, userId: rows[0].user_id ?? null };
   }
 
   // ── Ratings ──
@@ -1012,24 +874,26 @@ export class DB {
       "SELECT * FROM users WHERE id = $1",
       [id]
     );
-    return rows[0] ?? null;
+    return rows[0] ? this.openUserRow(rows[0]) : null;
   }
 
   async upsertUserByExternalId(args: {
     externalUserId: number;
     username: string;
-    apiKeys: string[];
+    apiKeys: RawApiKeyEntry[];
   }): Promise<StoredUser> {
-    const active = args.apiKeys[0] ?? null;
+    const activePlain = args.apiKeys[0]?.apiKey ?? null;
+    const active = activePlain ? this.secretBox.seal(activePlain) : null;
+    const sealedKeys = args.apiKeys.map((k) => ({ ...k, apiKey: this.secretBox.seal(k.apiKey) }));
     const { rows } = await this.pool.query(
       `INSERT INTO users (external_user_id, username, name, api_key, api_keys, email)
          VALUES ($1, $2, $2, $3, $4, $5)
        ON CONFLICT (external_user_id)
          DO UPDATE SET username = $2, api_key = $3, api_keys = $4
        RETURNING *`,
-      [args.externalUserId, args.username, active, JSON.stringify(args.apiKeys), `${args.username}@tokenhub.local`]
+      [args.externalUserId, args.username, active, JSON.stringify(sealedKeys), `${args.username}@tokenhub.local`]
     );
-    return rows[0];
+    return this.openUserRow(rows[0]);
   }
 
   async getUserApiKey(userId: string): Promise<string | null> {
@@ -1037,56 +901,79 @@ export class DB {
       "SELECT api_key FROM users WHERE id = $1",
       [userId]
     );
-    return rows[0]?.api_key ?? null;
+    const raw = rows[0]?.api_key ?? null;
+    return raw ? this.secretBox.open(raw) : null;
   }
 
-  async getUserApiKeys(userId: string): Promise<string[]> {
+  async getUserApiKeys(userId: string): Promise<RawApiKeyEntry[]> {
     const { rows } = await this.pool.query(
       "SELECT api_keys FROM users WHERE id = $1",
       [userId]
     );
-    const keys = rows[0]?.api_keys;
-    return Array.isArray(keys) ? keys : [];
+    return normalizeApiKeyEntries(rows[0]?.api_keys).map((e) => ({
+      ...e,
+      apiKey: this.secretBox.open(e.apiKey),
+    }));
   }
 
   /** Sets the single per-user active key (`users.api_key`); shared across all of that
    * account's concurrent sessions, not per-session. */
   async setActiveApiKey(userId: string, index: number): Promise<string> {
-    const keys = await this.getUserApiKeys(userId);
+    const keys = await this.getUserApiKeys(userId); // already plaintext (decrypted above)
     if (!Number.isInteger(index) || index < 0 || index >= keys.length) {
       throw new Error("index_out_of_range");
     }
-    const active = keys[index];
-    await this.pool.query("UPDATE users SET api_key = $1 WHERE id = $2", [active, userId]);
+    const active = keys[index].apiKey;
+    await this.pool.query("UPDATE users SET api_key = $1 WHERE id = $2", [
+      this.secretBox.seal(active),
+      userId,
+    ]);
     return active;
   }
 
   // ── Sessions ──
 
+  /**
+   * Stores only `sha256(token)` (see report #15) — the raw token never
+   * touches the DB. `session-store.ts` still hands us/receives the raw
+   * token; hashing is entirely internal to this class.
+   */
   async createSession(userId: string, token: string, expiresAt: Date): Promise<void> {
     await this.pool.query(
-      `INSERT INTO sessions (user_id, token, expires_at) VALUES ($1, $2, $3)`,
-      [userId, token, expiresAt.toISOString()]
+      `INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+      [userId, sha256Hex(token), expiresAt.toISOString()]
     );
   }
 
   async getSessionByToken(token: string): Promise<{ user_id: string; expires_at: string } | null> {
     const { rows } = await this.pool.query(
-      "SELECT user_id, expires_at FROM sessions WHERE token = $1",
-      [token]
+      "SELECT user_id, expires_at FROM sessions WHERE token_hash = $1",
+      [sha256Hex(token)]
     );
     return rows[0] ?? null;
   }
 
   async touchSession(token: string): Promise<void> {
     await this.pool.query(
-      "UPDATE sessions SET last_seen_at = now() WHERE token = $1",
-      [token]
+      "UPDATE sessions SET last_seen_at = now() WHERE token_hash = $1",
+      [sha256Hex(token)]
     );
   }
 
   async deleteSession(token: string): Promise<void> {
-    await this.pool.query("DELETE FROM sessions WHERE token = $1", [token]);
+    await this.pool.query("DELETE FROM sessions WHERE token_hash = $1", [sha256Hex(token)]);
+  }
+
+  /**
+   * Sweep hard-expired session rows (#16). `SessionStore.resolve` already
+   * treats an expired row as invalid via `token_hash` lookup, so these rows
+   * are pure dead weight — nothing else reads them. Sliding renewal / device
+   * management are explicitly out of scope (product decision per the review
+   * report), this is cleanup only. Returns the number of rows removed.
+   */
+  async deleteExpiredSessions(): Promise<number> {
+    const { rowCount } = await this.pool.query("DELETE FROM sessions WHERE expires_at < now()");
+    return rowCount ?? 0;
   }
 
   // ── Review Logs ──
@@ -1117,7 +1004,7 @@ export class DB {
       `INSERT INTO platform_accounts (user_id, platform, access_token, expires_at)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, platform) DO UPDATE SET access_token = EXCLUDED.access_token, expires_at = EXCLUDED.expires_at`,
-      [a.userId, a.platform, a.accessToken, a.expiresAt ?? null]
+      [a.userId, a.platform, this.secretBox.seal(a.accessToken), a.expiresAt ?? null]
     );
   }
 
@@ -1126,7 +1013,8 @@ export class DB {
       "SELECT * FROM platform_accounts WHERE user_id = $1 AND platform = $2",
       [userId, platform]
     );
-    return rows[0] ?? null;
+    if (!rows[0]) return null;
+    return { ...rows[0], access_token: this.secretBox.open(rows[0].access_token) };
   }
 
   // ── Publish Records ──
@@ -1359,12 +1247,29 @@ export class DB {
     );
   }
 
-  /** Mark a task running and record which attempt this is (jobs v2 retries). */
-  async markTaskRunning(id: string, attempts: number): Promise<void> {
-    await this.pool.query(
-      "UPDATE tasks SET status = 'running', attempts = $2, updated_at = now() WHERE id = $1",
+  /**
+   * Mark a task running and record which attempt this is (jobs v2 retries).
+   * Guarded so a cancelled/succeeded task can't be resurrected (a cancel can
+   * race the queue handing the job to a worker); 'failed' stays claimable for
+   * BullMQ retries. Returns whether the task was actually claimed — a false
+   * means the worker must skip execution.
+   */
+  async markTaskRunning(id: string, attempts: number): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE tasks SET status = 'running', attempts = $2, updated_at = now()
+       WHERE id = $1 AND status IN ('pending','running','failed')`,
       [id, attempts]
     );
+    return (rowCount ?? 0) > 0;
+  }
+
+  /** Current status of a task row (workers poll this to observe cross-process cancellation). */
+  async getTaskStatus(id: string): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      "SELECT status FROM tasks WHERE id = $1",
+      [id]
+    );
+    return rows[0]?.status ?? null;
   }
 
   /** Cancel a task if it hasn't already reached a terminal state. Returns whether a row changed. */
@@ -1382,6 +1287,26 @@ export class DB {
       [id]
     );
     return rows[0]?.vendor_task_id ?? null;
+  }
+
+  /**
+   * Fail generation tasks that were enqueued but **never claimed** by a worker
+   * (`status = 'pending'` with `attempts = 0`) and are older than `staleMs`.
+   * This is the safety net for a down/misconfigured worker (crashed on startup,
+   * wrong Redis DB, not running): without it such tasks — and the "生成中" cards
+   * bound to them — hang forever. `attempts = 0` scopes it to jobs a worker
+   * never even started, so an in-flight (running) or retrying job is untouched.
+   * Returns the failed rows so the caller can also fail the linked message.
+   */
+  async failStalePendingTasks(staleMs: number, error: string): Promise<StoredTask[]> {
+    const { rows } = await this.pool.query(
+      `UPDATE tasks SET status = 'failed', error = $2, updated_at = now()
+       WHERE status = 'pending' AND attempts = 0
+         AND created_at < now() - make_interval(secs => $1::double precision / 1000)
+       RETURNING *`,
+      [staleMs, error]
+    );
+    return rows as StoredTask[];
   }
 
   async setTaskVendorId(id: string, vendorTaskId: string): Promise<void> {
@@ -1405,10 +1330,12 @@ export class DB {
     }
   }
 
+  // Success/failure only apply to live tasks: 'cancelled' (and any other
+  // terminal state) must survive a slower worker finishing after the cancel.
   async setTaskResult(id: string, output: unknown): Promise<void> {
     await this.pool.query(
       `UPDATE tasks SET output = $1, status = 'succeeded', progress = 100, updated_at = now()
-       WHERE id = $2`,
+       WHERE id = $2 AND status IN ('pending','running')`,
       [JSON.stringify(output), id]
     );
   }
@@ -1416,7 +1343,7 @@ export class DB {
   async setTaskError(id: string, error: string): Promise<void> {
     await this.pool.query(
       `UPDATE tasks SET error = $1, status = 'failed', updated_at = now()
-       WHERE id = $2`,
+       WHERE id = $2 AND status IN ('pending','running')`,
       [error, id]
     );
   }

@@ -11,9 +11,10 @@ import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
 import { useModels } from "../hooks/useModels.js";
-import { api, type User, type PickedFile } from "../api/client.js";
+import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
+import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
-import { EMPTY_SELECTED, fillModelDefaults, groupForKind } from "../lib/model-defaults.js";
+import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveLlmSelection } from "../lib/model-defaults.js";
 
 interface WorkspaceProps {
   user: User;
@@ -87,8 +88,26 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     [updateTitle, defaultAgentId]
   );
 
-  const { messages, conversationModel, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia } =
+  const { messages, conversationModel, conversationKnowledgeBases, setConversationKnowledgeBases, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia, redownloadGeneration } =
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
+
+  const knowledgeUpdateSeq = useRef(0);
+  const handleKnowledgeBasesChange = useCallback(
+    (items: KnowledgeBaseRef[]) => {
+      const previous = conversationKnowledgeBases;
+      const conversationId = activeIdRef.current;
+      const seq = ++knowledgeUpdateSeq.current;
+      setConversationKnowledgeBases(items);
+      if (!conversationId) return;
+      void api.setConversationKnowledgeBases(conversationId, items.map((item) => item.id)).catch(() => {
+        // Revert only if this is still the latest edit for the same open chat.
+        if (seq === knowledgeUpdateSeq.current && activeIdRef.current === conversationId) {
+          setConversationKnowledgeBases(previous);
+        }
+      });
+    },
+    [conversationKnowledgeBases, setConversationKnowledgeBases]
+  );
 
   // Per-user model catalog + per-group (llm/image/video) selected models.
   const { models: modelCatalog, reload: reloadModels } = useModels();
@@ -118,11 +137,12 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
   useEffect(() => {
     setSelectedModels((prev) => fillModelDefaults(prev, modelCatalog));
   }, [modelCatalog]);
-  // 进入会话:已存模型优先;无存储(新会话)回落到 llm 组第一个。
+  // 进入会话:已存模型若仍在目录中则沿用,否则回落到 llm 组第一个(切 key / 订阅
+  // 变更后旧模型可能已不在新目录中,需校验避免选中失效模型)。
   useEffect(() => {
     setSelectedModels((prev) => ({
       ...prev,
-      llm: conversationModel ?? modelCatalog.llm[0]?.id ?? null,
+      llm: resolveLlmSelection(conversationModel, modelCatalog.llm),
     }));
   }, [conversationModel, modelCatalog]);
 
@@ -165,6 +185,13 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     [setActiveId, clear]
   );
 
+  // Desktop shortcuts: Cmd/Ctrl+N opens a fresh chat for the agent currently
+  // on screen; Cmd/Ctrl+, opens the key settings modal. No-op in browsers.
+  useDesktopShortcuts({
+    onNewChat: () => handleStartNewChat(openAgentId),
+    onOpenSettings: () => setKeyModalOpen(true),
+  });
+
   const handlePickOverflow = useCallback(
     async (agentId: string) => {
       await promote(agentId); // 移到子 Agent 首位,持久化 sortOrder
@@ -198,13 +225,18 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
 
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
-    async (content: string, files: PickedFile[] = [], settings?: unknown) => {
+    async (
+      content: string,
+      files: PickedFile[] = [],
+      settings?: unknown,
+      knowledgeBases: KnowledgeBaseRef[] = []
+    ) => {
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
           generateMedia(content, kind as "image" | "video", settings, files, selectedModels[kind as "image" | "video"] ?? undefined);
         } else {
-          send(content, files, undefined, selectedModels.llm ?? undefined);
+          send(content, files, undefined, selectedModels.llm ?? undefined, knowledgeBases);
         }
       };
       if (newAgentId) {
@@ -297,6 +329,18 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           onCollapse={() => setSidebarCollapsed(true)}
           onOpenAgentCenter={() => setCenterOpen(true)}
           onOpenKeySettings={() => setKeyModalOpen(true)}
+          onOpenKnowledgeBase={() => {
+            const popup = window.open("about:blank", "_blank");
+            void api.getKnowledgeBaseLink()
+              .then(({ url }) => {
+                if (popup) {
+                  popup.opener = null;
+                  popup.location.href = url;
+                }
+                else window.location.href = url;
+              })
+              .catch(() => popup?.close());
+          }}
         />
         <Sidebar
           conversations={sidebarConversations}
@@ -333,6 +377,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             isStreaming={isStreaming}
             activeConversationId={activeId}
             onRegenerate={regenerate}
+            onRedownloadGeneration={redownloadGeneration}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
             onSelectForPreview={
               openAgent?.type === "copywriting" || openAgent?.id === "copywriting"
@@ -353,6 +398,8 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             modelCatalog={modelCatalog}
             selectedModel={selectedModels[modelGroup]}
             onModelChange={handleModelChange}
+            knowledgeBases={conversationKnowledgeBases}
+            onKnowledgeBasesChange={handleKnowledgeBasesChange}
           />
         </div>
 

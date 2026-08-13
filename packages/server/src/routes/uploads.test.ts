@@ -48,6 +48,27 @@ describe("POST /uploads", () => {
     expect(service.created.length).toBe(1);
   });
 
+  it("rejects with 413 before reading the body when Content-Length exceeds the precheck cap", async () => {
+    const service = makeService();
+    const app = appFor(service);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "content-length": String(22 * 1024 * 1024) },
+      body: fileBody("note.txt", "text/plain", new Uint8Array([104, 105])),
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "payload too large" });
+    // Rejected before parseBody ever ran, so no asset was created.
+    expect(service.created.length).toBe(0);
+  });
+
+  it("passes the precheck for a small request (no explicit oversized Content-Length)", async () => {
+    const service = makeService();
+    const app = appFor(service);
+    const res = await app.request("/", { method: "POST", body: fileBody("note.txt", "text/plain", new Uint8Array([104, 105])) });
+    expect(res.status).toBe(200);
+  });
+
   it("accepts a pptx template upload as doc", async () => {
     const service = makeService();
     const app = appFor(service);
@@ -62,5 +83,14 @@ describe("POST /uploads", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.kind).toBe("doc");
+  });
+
+  it("accepts video and audio reference uploads", async () => {
+    const service = makeService();
+    const app = appFor(service);
+    const video = await app.request("/", { method: "POST", body: fileBody("ref.mp4", "video/mp4", new Uint8Array([0, 1])) });
+    const audio = await app.request("/", { method: "POST", body: fileBody("ref.mp3", "audio/mpeg", new Uint8Array([0, 1])) });
+    expect(video.status).toBe(200);
+    expect(audio.status).toBe(200);
   });
 });

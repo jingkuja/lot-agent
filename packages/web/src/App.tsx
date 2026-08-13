@@ -2,24 +2,48 @@ import { useEffect, useState, useCallback } from "react";
 import { Login } from "./components/Login.js";
 import { Workspace } from "./pages/Workspace.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
-import { api, getToken, clearToken, type User } from "./api/client.js";
+import { Titlebar } from "./components/Titlebar.js";
+import { DownloadToast } from "./components/DownloadToast.js";
+import { api, getToken, setToken, clearToken, type User } from "./api/client.js";
+import { readTokenFromUrl, stripTokenFromUrl } from "./lib/url-token.js";
 import "./App.css";
 
 type View = "loading" | "login" | "ready";
 
+const AUTO_LOGIN_FAIL = "自动登录失败，请手动登录";
+
 export default function App() {
   const [view, setView] = useState<View>("loading");
   const [user, setUser] = useState<User | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // Authenticated → go straight to the workspace (agents managed inside Workspace).
   const enter = useCallback(async (u: User) => {
+    setLoginError(null);
     setUser(u);
     setView("ready");
   }, []);
 
-  // On mount: validate an existing token if present. With no token, check for
-  // debug mode (DEBUG=1) — if on, enter login-less as the debug user.
+  // On mount: a `?token=` deep link (tokenhub JWT) always wins — exchange it for
+  // a session and enter directly. Otherwise validate an existing token; with no
+  // token, check for debug mode (DEBUG=1) and enter login-less as the debug user.
   useEffect(() => {
+    const urlToken = readTokenFromUrl(window.location.search);
+    if (urlToken) {
+      api
+        .tokenLogin(urlToken)
+        .then((res) => {
+          setToken(res.token);
+          stripTokenFromUrl();
+          enter(res.user);
+        })
+        .catch(() => {
+          stripTokenFromUrl();
+          setLoginError(AUTO_LOGIN_FAIL);
+          setView("login");
+        });
+      return;
+    }
     const token = getToken();
     if (!token) {
       api
@@ -73,13 +97,15 @@ export default function App() {
   } else if (view === "ready" && user) {
     content = <Workspace user={user} onLogout={handleLogout} />;
   } else {
-    content = <Login onLogin={handleLogin} />;
+    content = <Login onLogin={handleLogin} initialError={loginError} />;
   }
 
   return (
-    <>
+    <div className="app-shell">
+      <Titlebar />
       {content}
       <ThemeToggle />
-    </>
+      <DownloadToast />
+    </div>
   );
 }

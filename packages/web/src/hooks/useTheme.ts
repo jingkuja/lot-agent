@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { type Theme, getStoredTheme, storeTheme, applyTheme } from "../lib/theme.js";
+import { type Theme, getStoredTheme, storeTheme, applyTheme, THEME_SYNC_EVENT } from "../lib/theme.js";
 
 /**
  * Theme state synced to <html data-theme> and localStorage.
@@ -14,6 +14,14 @@ export function useTheme() {
     applyTheme(theme);
     storeTheme(theme);
   }, [theme]);
+
+  // Re-sync when the theme is changed outside this hook instance (e.g. the
+  // desktop theme shortcut calling `toggleTheme()` in lib/theme).
+  useEffect(() => {
+    const sync = () => setThemeState(getStoredTheme());
+    window.addEventListener(THEME_SYNC_EVENT, sync);
+    return () => window.removeEventListener(THEME_SYNC_EVENT, sync);
+  }, []);
 
   const setTheme = useCallback((next: Theme) => setThemeState(next), []);
 

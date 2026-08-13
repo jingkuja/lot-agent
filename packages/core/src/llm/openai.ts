@@ -95,7 +95,7 @@ export class OpenAIProvider implements LLMProvider {
         })()
       );
 
-    yield* withLLMRetry(createStream, { isRetryable: isOpenAIRetryable });
+    yield* withLLMRetry(createStream, { isRetryable: isOpenAIRetryable, signal: opts?.signal });
   }
 }
 
@@ -149,9 +149,12 @@ export async function* mapOpenAIStream(
   }
 
   for await (const chunk of stream) {
-    if (debug) log.debug("chunk", { choice: chunk.choices[0] });
+    // Some gateways omit `choices` entirely on the trailing usage chunk
+    // (instead of the spec's empty array) — treat missing as empty.
+    const choices = chunk.choices ?? [];
+    if (debug) log.debug("chunk", { choice: choices[0] });
 
-    const delta = chunk.choices[0]?.delta as
+    const delta = choices[0]?.delta as
       | (ChatCompletionChunk.Choice["delta"] & { reasoning_content?: string })
       | undefined;
 
@@ -175,11 +178,11 @@ export async function* mapOpenAIStream(
       }
     }
 
-    if (chunk.choices[0]?.finish_reason) {
-      finishReason = chunk.choices[0].finish_reason;
+    if (choices[0]?.finish_reason) {
+      finishReason = choices[0].finish_reason;
     }
 
-    if (finishReason && (chunk.usage || chunk.choices.length === 0)) {
+    if (finishReason && (chunk.usage || choices.length === 0)) {
       yield* flushToolCalls();
       yield {
         type: "done",

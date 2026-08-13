@@ -13,3 +13,12 @@ export function staticPrefix(path: string): string {
   const base = process.env.PUBLIC_BASE_URL?.replace(/\/+$/, "") ?? "";
   return `${base}${path}`;
 }
+
+/**
+ * Turn a locally-served static URL into an externally fetchable URL for a
+ * model vendor. Absolute and non-static URLs are deliberately left unchanged:
+ * they may be vendor URLs, data URLs, or another trusted file host.
+ */
+export function publicStaticUrl(url: string): string {
+  return url.startsWith("/static/") ? staticPrefix(url) : url;
+}

@@ -58,6 +58,25 @@ describe("withLLMRetry", () => {
     expect(calls).toBe(1);
   });
 
+  it("aborts immediately during backoff instead of waiting out the full delay", async () => {
+    let calls = 0;
+    async function* stream() {
+      calls++;
+      throw new Error("429 rate limit");
+    }
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 20);
+    const start = Date.now();
+    await expect(
+      drain(
+        withLLMRetry(stream, { baseDelayMs: 5000, signal: controller.signal })
+      )
+    ).rejects.toThrow();
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(500);
+    expect(calls).toBe(1); // aborted during backoff, never re-invoked createStream
+  });
+
   it("honors a custom isRetryable predicate", async () => {
     let calls = 0;
     async function* stream() {

@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { makeImageProvider, makeVideoProvider, mediaSupportsProgress, type MediaGenerationConfig } from "./config.js";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { loadGenerationConfig, makeImageProvider, makeVideoProvider, mediaSupportsProgress, type MediaGenerationConfig } from "./config.js";
 import {
-  ChatCompletionsImageProvider,
+  OpenAIImagesImageProvider,
   HttpImageGenerationProvider,
   MockImageGenerationProvider,
   HttpVideoGenerationProvider,
@@ -11,6 +11,24 @@ import {
 const imageBase: MediaGenerationConfig = { baseUrl: "https://api/v1", apiKey: "", mock: true, adapter: "happyhorse", model: "im", modelId: "wanx-standard" };
 const videoBase: MediaGenerationConfig = { baseUrl: "https://api/v1", apiKey: "", mock: true, adapter: "happyhorse", model: "vm", modelId: "kling-standard" };
 
+afterEach(() => vi.unstubAllEnvs());
+
+describe("loadGenerationConfig", () => {
+  it("uses OPENAI_BASE_URL for both image and video instead of config URLs", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "https://env.example/v1");
+    const cfg = await loadGenerationConfig(process.cwd());
+    expect(cfg.image.baseUrl).toBe("https://env.example/v1");
+    expect(cfg.video.baseUrl).toBe("https://env.example/v1");
+  });
+
+  it("does not fall back to config/default.json's generation URL when env is empty", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "");
+    const cfg = await loadGenerationConfig(process.cwd());
+    expect(cfg.image.baseUrl).toBe("https://tokenhub.todoucloud.com/v1");
+    expect(cfg.video.baseUrl).toBe("https://tokenhub.todoucloud.com/v1");
+  });
+});
+
 describe("makeImageProvider", () => {
   it("mock:true → MockImageGenerationProvider", () => {
     expect(makeImageProvider(imageBase)).toBeInstanceOf(MockImageGenerationProvider);
@@ -18,8 +36,11 @@ describe("makeImageProvider", () => {
   it("mock:false + key → HttpImageGenerationProvider", () => {
     expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "k" })).toBeInstanceOf(HttpImageGenerationProvider);
   });
-  it("mock:false + key + chat-completions adapter → ChatCompletionsImageProvider", () => {
-    expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "k", adapter: "chat-completions" })).toBeInstanceOf(ChatCompletionsImageProvider);
+  it("mock:false + key + openai-images adapter → OpenAIImagesImageProvider", () => {
+    expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "k", adapter: "openai-images" })).toBeInstanceOf(OpenAIImagesImageProvider);
+  });
+  it("keeps the former chat-completions adapter as an OpenAI Images alias", () => {
+    expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "k", adapter: "chat-completions" })).toBeInstanceOf(OpenAIImagesImageProvider);
   });
   it("mock:false + no key → falls back to mock", () => {
     expect(makeImageProvider({ ...imageBase, mock: false, apiKey: "" })).toBeInstanceOf(MockImageGenerationProvider);
@@ -27,15 +48,15 @@ describe("makeImageProvider", () => {
 });
 
 describe("mediaSupportsProgress", () => {
-  it("synchronous chat-completions provider reports no progress", () => {
-    expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "k", adapter: "chat-completions" })).toBe(false);
+  it("synchronous OpenAI Images provider reports no progress", () => {
+    expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "k", adapter: "openai-images" })).toBe(false);
   });
   it("async create→poll provider reports progress", () => {
     expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "k", adapter: "happyhorse" })).toBe(true);
   });
   it("mock provider ramps progress, so it reports progress even for a sync adapter", () => {
-    expect(mediaSupportsProgress({ ...imageBase, mock: true, adapter: "chat-completions" })).toBe(true);
-    expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "", adapter: "chat-completions" })).toBe(true);
+    expect(mediaSupportsProgress({ ...imageBase, mock: true, adapter: "openai-images" })).toBe(true);
+    expect(mediaSupportsProgress({ ...imageBase, mock: false, apiKey: "", adapter: "openai-images" })).toBe(true);
   });
 });
 

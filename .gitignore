@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.zcode/
 *.tsbuildinfo
 data/*.db
 data/*.db-shm
@@ -18,3 +19,4 @@ config/*.tmp
 .DS_Store
 *.db
 *.log
+packages/desktop/release/

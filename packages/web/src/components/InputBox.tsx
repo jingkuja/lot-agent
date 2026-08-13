@@ -3,12 +3,19 @@ import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type Vide
 import { ModelPicker } from "./ModelPicker.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
+import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
+import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
 
 interface InputBoxProps {
-  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings) => void;
+  onSend: (
+    content: string,
+    files: PickedFile[],
+    settings?: ImageSettings | VideoSettings,
+    knowledgeBases?: KnowledgeBaseRef[]
+  ) => void;
   onStop: () => void;
   disabled: boolean;
   placeholder?: string;
@@ -20,9 +27,15 @@ interface InputBoxProps {
   /** 当前选中的模型 id（null = 用会话/agent 默认）。 */
   selectedModel?: string | null;
   onModelChange?: (id: string) => void;
+  allowKnowledgeBase?: boolean;
+  knowledgeBases?: KnowledgeBaseRef[];
+  onKnowledgeBasesChange?: (items: KnowledgeBaseRef[]) => void;
 }
 
 const MAX_FILES = 5;
+const MAX_VIDEO_REFERENCE_IMAGES = 5;
+const MAX_VIDEO_REFERENCE_VIDEOS = 2;
+const MAX_VIDEO_REFERENCE_AUDIOS = 2;
 const ACCEPT =
   "image/jpeg,image/png,image/webp,image/gif,.txt,.md,.csv,.json,application/pdf,.docx,.xlsx,.xls";
 /** ppt 模式内容文件的可选类型（不含图片；旧 pptx 可作素材）。 */
@@ -49,13 +62,26 @@ export function InputBox({
   models = [],
   selectedModel = null,
   onModelChange,
+  allowKnowledgeBase = false,
+  knowledgeBases = [],
+  onKnowledgeBasesChange = () => {},
 }: InputBoxProps) {
   const [value, setValue] = useState("");
   const noModels = !!onModelChange && models.length === 0;
   const [noModelNotice, setNoModelNotice] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeBase[]>([]);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
+  const [referenceVideoFiles, setReferenceVideoFiles] = useState<File[]>([]);
+  const [referenceAudioFiles, setReferenceAudioFiles] = useState<File[]>([]);
+  const [firstFrameFile, setFirstFrameFile] = useState<File | null>(null);
+  const [lastFrameFile, setLastFrameFile] = useState<File | null>(null);
   // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
   const mediaMode = mode === "image" || mode === "video";
+  const videoMode = mode === "video";
+  const maxFiles = videoMode ? MAX_VIDEO_REFERENCE_IMAGES : MAX_FILES;
   const pptMode = mode === "ppt";
   const contractMode = mode === "contract";
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -68,6 +94,10 @@ export function InputBox({
   const newContractInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const referenceVideoInputRef = useRef<HTMLInputElement>(null);
+  const referenceAudioInputRef = useRef<HTMLInputElement>(null);
+  const firstFrameInputRef = useRef<HTMLInputElement>(null);
+  const lastFrameInputRef = useRef<HTMLInputElement>(null);
 
   // One object URL per image file, created once when the file is picked and
   // revoked on remove/send/unmount. Kept in a ref (not state) and created in
@@ -89,7 +119,7 @@ export function InputBox({
     setFiles((prev) => {
       const next = [...prev];
       for (const f of incoming) {
-        if (next.length >= MAX_FILES) break;
+        if (next.length >= maxFiles) break;
         next.push(f);
       }
       return next;
@@ -101,7 +131,7 @@ export function InputBox({
         urlsRef.current.set(f, URL.createObjectURL(f));
       }
     }
-  }, []);
+  }, [maxFiles]);
 
   const removeFile = useCallback((idx: number) => {
     setFiles((prev) => {
@@ -115,6 +145,39 @@ export function InputBox({
     });
   }, []);
 
+  const loadKnowledgeBases = useCallback(async () => {
+    setKnowledgeLoading(true);
+    setKnowledgeError(null);
+    try {
+      const response = await api.listKnowledgeBases();
+      setKnowledgeItems(response.data);
+    } catch (error) {
+      setKnowledgeError(error instanceof Error ? error.message : "知识库加载失败");
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  }, []);
+
+  const openKnowledgeBases = useCallback(() => {
+    setKnowledgeOpen(true);
+    void loadKnowledgeBases();
+  }, [loadKnowledgeBases]);
+
+  const setFrameFile = useCallback(
+    (setter: (file: File | null) => void, previous: File | null, file: File | null) => {
+      if (previous) {
+        const url = urlsRef.current.get(previous);
+        if (url) URL.revokeObjectURL(url);
+        urlsRef.current.delete(previous);
+      }
+      if (file && file.type.startsWith("image/") && !urlsRef.current.has(file)) {
+        urlsRef.current.set(file, URL.createObjectURL(file));
+      }
+      setter(file);
+    },
+    []
+  );
+
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     if (noModels) {
@@ -122,9 +185,19 @@ export function InputBox({
       return;
     }
     const hasFiles =
-      files.length > 0 || !!templateFile || backgroundFiles.length > 0 || !!oldContractFile || !!newContractFile;
+      files.length > 0 ||
+      (videoMode && (referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || !!firstFrameFile || !!lastFrameFile)) ||
+      !!templateFile || backgroundFiles.length > 0 || !!oldContractFile || !!newContractFile;
     if ((!trimmed && !hasFiles) || disabled) return;
-    const picked: PickedFile[] = pptMode
+    const picked: PickedFile[] = videoMode
+      ? [
+          ...files.map((f) => ({ file: f, slot: "video_reference_image" as const })),
+          ...referenceVideoFiles.map((f) => ({ file: f, slot: "video_reference_video" as const })),
+          ...referenceAudioFiles.map((f) => ({ file: f, slot: "video_reference_audio" as const })),
+          ...(firstFrameFile ? [{ file: firstFrameFile, slot: "video_first_frame" as const }] : []),
+          ...(lastFrameFile ? [{ file: lastFrameFile, slot: "video_last_frame" as const }] : []),
+        ]
+      : pptMode
       ? [
           ...(templateFile ? [{ file: templateFile, slot: "ppt_template" as const }] : []),
           ...backgroundFiles.map((f) => ({ file: f, slot: "ppt_background" as const })),
@@ -136,16 +209,20 @@ export function InputBox({
             ...(newContractFile ? [{ file: newContractFile, slot: "contract_new" as const }] : []),
           ]
         : files.map((f) => ({ file: f }));
-    onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined);
+    onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined, knowledgeBases);
     setValue("");
     setFiles([]);
+    setReferenceVideoFiles([]);
+    setReferenceAudioFiles([]);
+    setFirstFrameFile(null);
+    setLastFrameFile(null);
     setTemplateFile(null);
     setBackgroundFiles([]);
     setOldContractFile(null);
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, files, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, pptMode, contractMode, noModels]);
+  }, [value, files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, videoMode, pptMode, contractMode, noModels, knowledgeBases]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -179,8 +256,21 @@ export function InputBox({
           暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
         </div>
       )}
-      {(files.length > 0 || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
+      {(knowledgeBases.length > 0 || files.length > 0 || referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
         <div className="input-attachments">
+          {knowledgeBases.map((item) => (
+            <div className="attachment-chip knowledge-chip" key={`kb:${item.id}`}>
+              <span className="attachment-slot-badge badge-knowledge">知识库</span>
+              <span aria-hidden>▤</span>
+              <span className="attachment-name" title={item.name}>{item.name}</span>
+              <button
+                className="attachment-remove"
+                onClick={() => onKnowledgeBasesChange(knowledgeBases.filter((kb) => kb.id !== item.id))}
+                title="移除"
+                type="button"
+              >✕</button>
+            </div>
+          ))}
           {templateFile && (
             <div className="attachment-chip" key="__template">
               <span className="attachment-slot-badge badge-template">模版</span>
@@ -209,8 +299,41 @@ export function InputBox({
               <button className="attachment-remove" onClick={() => setNewContractFile(null)} title="移除" type="button">✕</button>
             </div>
           )}
+          {videoMode && referenceVideoFiles.map((f, i) => (
+            <div className="attachment-chip" key={`__video${i}`}>
+              <span className="attachment-slot-badge badge-video-reference">参考视频</span>
+              <span className="attachment-attachment-icon" aria-hidden>🎞️</span>
+              <span className="attachment-name" title={f.name}>{f.name}</span>
+              <button type="button" className="attachment-remove" onClick={() => setReferenceVideoFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+            </div>
+          ))}
+          {videoMode && referenceAudioFiles.map((f, i) => (
+            <div className="attachment-chip" key={`__audio${i}`}>
+              <span className="attachment-slot-badge badge-audio-reference">参考音频</span>
+              <span className="attachment-attachment-icon" aria-hidden>🔊</span>
+              <span className="attachment-name" title={f.name}>{f.name}</span>
+              <button type="button" className="attachment-remove" onClick={() => setReferenceAudioFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+            </div>
+          ))}
+          {videoMode && firstFrameFile && (
+            <div className="attachment-chip" key="__first_frame">
+              <span className="attachment-slot-badge badge-frame">首帧</span>
+              {urlsRef.current.get(firstFrameFile) && <img className="attachment-thumb" src={urlsRef.current.get(firstFrameFile)} alt={firstFrameFile.name} />}
+              <span className="attachment-name" title={firstFrameFile.name}>{firstFrameFile.name}</span>
+              <button type="button" className="attachment-remove" onClick={() => setFrameFile(setFirstFrameFile, firstFrameFile, null)} title="移除">✕</button>
+            </div>
+          )}
+          {videoMode && lastFrameFile && (
+            <div className="attachment-chip" key="__last_frame">
+              <span className="attachment-slot-badge badge-frame">尾帧</span>
+              {urlsRef.current.get(lastFrameFile) && <img className="attachment-thumb" src={urlsRef.current.get(lastFrameFile)} alt={lastFrameFile.name} />}
+              <span className="attachment-name" title={lastFrameFile.name}>{lastFrameFile.name}</span>
+              <button type="button" className="attachment-remove" onClick={() => setFrameFile(setLastFrameFile, lastFrameFile, null)} title="移除">✕</button>
+            </div>
+          )}
           {files.map((f, i) => (
             <div className="attachment-chip" key={i}>
+              {videoMode && <span className="attachment-slot-badge badge-image-reference">参考图</span>}
               {pptMode && <span className="attachment-slot-badge badge-content">内容</span>}
               {f.type.startsWith("image/") && urlsRef.current.get(f) ? (
                 <img className="attachment-thumb" src={urlsRef.current.get(f)} alt={f.name} />
@@ -245,15 +368,61 @@ export function InputBox({
         rows={1}
         autoFocus={autoFocus}
       />
-      <div className="input-toolbar">
+      <div className={`input-toolbar ${videoMode ? "input-toolbar--video" : ""}`}>
         <input
           ref={fileInputRef}
           type="file"
-          multiple
+          multiple={maxFiles > 1}
           accept={mediaMode ? "image/*" : pptMode ? ACCEPT_CONTENT : ACCEPT}
           style={{ display: "none" }}
           onChange={(e) => {
             addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={referenceVideoInputRef}
+          type="file"
+          accept="video/*"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            setReferenceVideoFiles((prev) => [...prev, ...picked].slice(0, MAX_VIDEO_REFERENCE_VIDEOS));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={referenceAudioInputRef}
+          type="file"
+          accept="audio/*"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            setReferenceAudioFiles((prev) => [...prev, ...picked].slice(0, MAX_VIDEO_REFERENCE_AUDIOS));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={firstFrameInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            if (f) setFrameFile(setFirstFrameFile, firstFrameFile, f);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={lastFrameInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            if (f) setFrameFile(setLastFrameFile, lastFrameFile, f);
             e.target.value = "";
           }}
         />
@@ -303,12 +472,12 @@ export function InputBox({
           }}
         />
         <div className="input-toolbar-left">
-          {mediaMode && (
+          {mediaMode && !videoMode && (
             <button
               type="button"
               className="btn-reference"
               onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || files.length >= MAX_FILES}
+              disabled={disabled || files.length >= maxFiles}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="14" height="14" rx="2.5" />
@@ -318,6 +487,25 @@ export function InputBox({
               </svg>
               参考图
             </button>
+          )}
+          {videoMode && (
+            <>
+              <button type="button" className="btn-reference" onClick={() => fileInputRef.current?.click()} disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES} title="最多5张">
+                🖼️ 参考图
+              </button>
+              <button type="button" className="btn-reference" onClick={() => referenceVideoInputRef.current?.click()} disabled={disabled || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS} title="最多2个">
+                🎞️ 参考视频
+              </button>
+              <button type="button" className="btn-reference" onClick={() => referenceAudioInputRef.current?.click()} disabled={disabled || referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS} title="最多2个">
+                🔊 参考音频
+              </button>
+              <button type="button" className="btn-reference" onClick={() => firstFrameInputRef.current?.click()} disabled={disabled}>
+                首帧图
+              </button>
+              <button type="button" className="btn-reference" onClick={() => lastFrameInputRef.current?.click()} disabled={disabled}>
+                尾帧图
+              </button>
+            </>
           )}
           {pptMode && (
             <>
@@ -393,6 +581,23 @@ export function InputBox({
         </div>
         <div className="input-toolbar-right">
           {!mediaMode && !pptMode && !contractMode && (
+            <>
+            {allowKnowledgeBase && (
+              <button
+                type="button"
+                className={`btn-knowledge${knowledgeBases.length ? " active" : ""}`}
+                onClick={openKnowledgeBases}
+                disabled={disabled}
+                title="选择个人知识库"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <ellipse cx="12" cy="5" rx="7" ry="3" />
+                  <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
+                  <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+                </svg>
+                <span>知识库</span>
+              </button>
+            )}
             <div className="upload-wrap">
               <button
                 type="button"
@@ -419,6 +624,7 @@ export function InputBox({
                 <div className="upload-tooltip-hint">最多 {MAX_FILES} 个文件</div>
               </div>
             </div>
+            </>
           )}
           {onModelChange && (
             <ModelPicker
@@ -444,7 +650,7 @@ export function InputBox({
             <button
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={!value.trim() && files.length === 0 && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile}
+              disabled={!value.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile}
               title="发送"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -455,6 +661,17 @@ export function InputBox({
           )}
         </div>
       </div>
+      {knowledgeOpen && (
+        <KnowledgeBaseModal
+          items={knowledgeItems}
+          selected={knowledgeBases}
+          loading={knowledgeLoading}
+          error={knowledgeError}
+          onConfirm={onKnowledgeBasesChange}
+          onClose={() => setKnowledgeOpen(false)}
+          onRetry={() => void loadKnowledgeBases()}
+        />
+      )}
     </div>
   );
 }

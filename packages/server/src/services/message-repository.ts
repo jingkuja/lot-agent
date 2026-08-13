@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Message, ContentPart } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 import type { AttachmentRef } from "./attachment-extractor.js";
+import type { KnowledgeBaseRef } from "./rag-client.js";
 
 /**
  * Handles all message/tool_call DB persistence during a chat turn.
@@ -15,11 +16,15 @@ export class MessageRepository {
   async saveUserMessage(
     conversationId: string,
     userMessage: string,
-    attachments?: AttachmentRef[]
+    attachments?: AttachmentRef[],
+    knowledgeBases?: KnowledgeBaseRef[]
   ): Promise<string> {
     const userMsgId = randomUUID();
     await this.db.addMessage(userMsgId, conversationId, "user", userMessage, {
-      metadata: attachments?.length ? { attachments } : {},
+      metadata: {
+        ...(attachments?.length ? { attachments } : {}),
+        ...(knowledgeBases?.length ? { knowledgeBases } : {}),
+      },
     });
     return userMsgId;
   }
@@ -133,14 +138,18 @@ export class MessageRepository {
   async saveToolResult(
     conversationId: string,
     toolCallId: string | undefined,
-    output: string
+    output: string,
+    isError?: boolean
   ): Promise<void> {
     await this.db.addMessage(
       randomUUID(),
       conversationId,
       "tool",
       output,
-      { toolCallId }
+      // A failed call must stay recognizable after reload: the web renders
+      // interactive calls (propose_outline/ask_user) as confirmation cards
+      // and needs to skip the ones whose execution was rejected.
+      { toolCallId, metadata: isError ? { isError: true } : {} }
     );
   }
 

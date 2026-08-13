@@ -5,6 +5,7 @@ import { logger } from "hono/logger";
 import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { staticFileHandler } from "./static-files.js";
 import { AgentService, type ServiceConfig } from "./services/agent-service.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
@@ -21,8 +22,11 @@ import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
+import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
 import { AppConfigSchema } from "@lot-agent/core";
 import { loadLlmConfig } from "./config.js";
+import { rateLimit, clientIp } from "./middleware/rate-limit.js";
+import { RedisRateLimitStore } from "./middleware/redis-rate-limit-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../../..");
@@ -32,23 +36,7 @@ const ASSETS_DIR = resolve(ROOT, "data/assets");
 const DOCS_DIR = resolve(ROOT, "data/documents");
 // User-uploaded files, served at /static/uploads.
 const UPLOADS_DIR = resolve(ROOT, "data/uploads");
-
-function guessMime(name: string): string {
-  if (name.endsWith(".png")) return "image/png";
-  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-  if (name.endsWith(".svg")) return "image/svg+xml";
-  if (name.endsWith(".webp")) return "image/webp";
-  if (name.endsWith(".gif")) return "image/gif";
-  if (name.endsWith(".mp4")) return "video/mp4";
-  if (name.endsWith(".mp3")) return "audio/mpeg";
-  if (name.endsWith(".docx"))
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  if (name.endsWith(".pdf")) return "application/pdf";
-  if (name.endsWith(".md")) return "text/markdown; charset=utf-8";
-  if (name.endsWith(".html")) return "text/html; charset=utf-8";
-  if (name.endsWith(".txt")) return "text/plain; charset=utf-8";
-  return "application/octet-stream";
-}
+const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "https://aigc.todoucloud.com"];
 
 async function loadConfig(): Promise<ServiceConfig> {
   const llm = await loadLlmConfig(ROOT);
@@ -91,6 +79,64 @@ async function main() {
   const service = new AgentService(serviceConfig);
   await service.init();
 
+  // Sessions hard-expire after 7 days (session-store.ts) but expired rows are
+  // never otherwise deleted (#16) — sweep once at startup, then hourly. Runs
+  // detached from the process lifecycle (`.unref()`) and never lets a sweep
+  // failure crash the server.
+  const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+  const sweepExpiredSessions = async () => {
+    try {
+      const deleted = await service.db.deleteExpiredSessions();
+      if (deleted > 0) console.log(`Cleaned up ${deleted} expired session(s)`);
+    } catch (err) {
+      console.warn("Session cleanup failed:", err);
+    }
+  };
+  void sweepExpiredSessions();
+  setInterval(sweepExpiredSessions, SESSION_CLEANUP_INTERVAL_MS).unref();
+
+  // Generation tasks are enqueued to Redis and consumed by a SEPARATE worker
+  // process. If that worker is down or misconfigured (crashed on startup for a
+  // missing env key, pointed at the wrong Redis DB, or simply not running), its
+  // jobs are never claimed and the tasks — plus the "生成中" cards bound to them —
+  // hang at 'pending' forever. This server-side sweep (the server is the always-
+  // up process) fails tasks that were never picked up (attempts 0) beyond the
+  // threshold and flips their generation message to 'failed', so the UI shows a
+  // visible failure with a diagnostic instead of an endless spinner. Same
+  // detached (`.unref()`), never-crash-the-server shape as the session sweep.
+  const STALE_TASK_MS = 3 * 60 * 1000; // never-claimed after 3 min ⇒ worker not consuming
+  const STALE_TASK_SWEEP_INTERVAL_MS = 60 * 1000;
+  const reapStalePendingTasks = async () => {
+    try {
+      const failed = await service.db.failStalePendingTasks(
+        STALE_TASK_MS,
+        "任务未被处理：generation worker 不可用（队列未被消费，请检查 worker 是否启动、REDIS_URL/DB 是否一致）"
+      );
+      for (const t of failed) {
+        const input = (t.input ?? {}) as Record<string, unknown>;
+        const messageId = input.assistantMessageId as string | undefined;
+        const conversationId = input.conversationId as string | undefined;
+        if (messageId && conversationId) {
+          await service.db
+            .markMessageGenerationFailed(messageId, t.error ?? "worker unavailable", {
+              conversationId,
+              userId: t.user_id,
+            })
+            .catch(() => {});
+        }
+      }
+      if (failed.length > 0) {
+        console.warn(
+          `[stale-task-reaper] failed ${failed.length} unclaimed task(s) — is the generation worker running and on the same REDIS_URL DB?`
+        );
+      }
+    } catch (err) {
+      console.warn("Stale task reaper failed:", err);
+    }
+  };
+  void reapStalePendingTasks();
+  setInterval(reapStalePendingTasks, STALE_TASK_SWEEP_INTERVAL_MS).unref();
+
   // Debug mode (DEBUG=1): seed a stable login-less user whose empty key set makes
   // every provider resolution fall through to the env LLM. externalUserId 0 is
   // reserved (real users get their id from tokenhub).
@@ -106,16 +152,56 @@ async function main() {
 
   const app = new Hono<{ Variables: { userId: string } }>();
 
+  // ── Rate limiting (report.md #21) ──────────────────────────────────────
+  // Fixed-window counters on the shared Redis connection (same one used for
+  // the model-catalog cache / session memory — see agent-service.ts `init`).
+  // A single centralized table of limits so every endpoint's quota is
+  // reviewable at a glance; store failures fail OPEN (see rate-limit.ts).
+  const rateLimitStore = new RedisRateLimitStore(service.redis);
+  const RATE_LIMITS = {
+    // Login endpoints are unauthenticated (no userId yet) — keyed by IP.
+    // /login and /token-login share one bucket: both are password/token
+    // exchange attempts against the same abuse surface.
+    login: { prefix: "rl:login", limit: 10, windowMs: 5 * 60 * 1000 },
+    // Everything below is keyed by userId (post-authMw).
+    upload: { prefix: "rl:upload", limit: 30, windowMs: 60 * 1000 },
+    // Chat send + regenerate share one bucket: both trigger an LLM turn.
+    messages: { prefix: "rl:messages", limit: 30, windowMs: 60 * 1000 },
+    // In-conversation generation + the standalone task API share one bucket:
+    // both enqueue the same billed image/video jobs.
+    generation: { prefix: "rl:generation", limit: 10, windowMs: 60 * 1000 },
+  } as const;
+  const loginRateLimit = rateLimit({ store: rateLimitStore, keyFn: clientIp, ...RATE_LIMITS.login });
+  const uploadRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.upload,
+  });
+  const messagesRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.messages,
+  });
+  const generationRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.generation,
+  });
+
   app.use("*", logger());
   app.use("*", cors({
-    origin: (process.env.CORS_ORIGIN ?? "http://localhost:5173").split(","),
+    origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
     credentials: true,
   }));
 
   // Public routes
   app.get("/health", (c) => c.json({ status: "ok" }));
 
-  // Auth routes — PUBLIC (no bearer token required)
+  // Auth routes — PUBLIC (no bearer token required). Rate limit mounted on
+  // the exact POST paths (method+path match) BEFORE the route below, so it
+  // runs first in the chain without touching GET /public-key, /mode, /me.
+  app.on("POST", "/api/auth/login", loginRateLimit);
+  app.on("POST", "/api/auth/token-login", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
 
   // Auth guard for all other /api/* routes
@@ -140,6 +226,17 @@ async function main() {
   app.use("/api/balance", authMw);
   app.use("/api/platform/*", authMw);
   app.use("/api/publish/*", authMw);
+  app.use("/api/knowledge-bases", authMw);
+  app.use("/api/knowledge-bases/*", authMw);
+
+  // userId-keyed rate limits — registered after authMw (so `userId` is set)
+  // and before the route handlers below. Exact method+path so GET/SSE-poll
+  // traffic (model list, task polling, etc.) is never limited.
+  app.on("POST", "/api/uploads", uploadRateLimit);
+  app.on("POST", "/api/conversations/:id/messages", messagesRateLimit);
+  app.on("POST", "/api/conversations/:id/regenerate", messagesRateLimit);
+  app.on("POST", "/api/conversations/:id/generations", generationRateLimit);
+  app.on("POST", "/api/tasks", generationRateLimit);
 
   // Protected API routes
   app.route("/api/conversations", createConversationRoutes(service));
@@ -157,6 +254,7 @@ async function main() {
   app.route("/api/usage", createUsageRoutes(service));
   app.route("/api/platform", createPlatformRoutes(service));
   app.route("/api/publish", createPublishRoutes(service));
+  app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
 
   // /api/balance alias → same balance logic, user-scoped
   app.get("/api/balance", async (c) => {
@@ -175,54 +273,13 @@ async function main() {
     });
   });
 
-  app.get("/static/assets/:filename", async (c) => {
-    const filename = c.req.param("filename");
-    if (filename.includes("/") || filename.includes("..")) {
-      return c.text("bad request", 400);
-    }
-    try {
-      const buf = await readFile(resolve(ASSETS_DIR, filename));
-      return c.body(buf, 200, { "Content-Type": guessMime(filename) });
-    } catch {
-      return c.text("not found", 404);
-    }
-  });
-
-  app.get("/static/documents/:filename", async (c) => {
-    const filename = c.req.param("filename");
-    if (filename.includes("/") || filename.includes("..")) {
-      return c.text("bad request", 400);
-    }
-    try {
-      const buf = await readFile(resolve(DOCS_DIR, filename));
-      return c.body(buf, 200, { "Content-Type": guessMime(filename) });
-    } catch {
-      return c.text("not found", 404);
-    }
-  });
-
-  app.get("/static/uploads/:filename", async (c) => {
-    const filename = c.req.param("filename");
-    if (filename.includes("/") || filename.includes("..")) {
-      return c.text("bad request", 400);
-    }
-    try {
-      const buf = await readFile(resolve(UPLOADS_DIR, filename));
-      const mime = guessMime(filename);
-      // User-controlled uploads: only let known-safe types render inline, and
-      // always send nosniff so e.g. an "evil.html" can't be sniffed/rendered as
-      // HTML and execute JS in our origin (stored XSS). Everything else is
-      // forced to download as an opaque attachment.
-      const safeInline = mime.startsWith("image/") || mime === "application/pdf";
-      return c.body(buf, 200, {
-        "Content-Type": safeInline ? mime : "application/octet-stream",
-        "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": safeInline ? "inline" : "attachment",
-      });
-    } catch {
-      return c.text("not found", 404);
-    }
-  });
+  // Static file serving is centralized in static-files.ts: streamed bodies
+  // (Range support, no full-buffer reads) and a shared content policy that
+  // isolates active content (HTML, SVG) from same-origin inline rendering —
+  // see contentPolicy() for the whitelist rationale.
+  app.get("/static/assets/:filename", staticFileHandler(ASSETS_DIR));
+  app.get("/static/documents/:filename", staticFileHandler(DOCS_DIR));
+  app.get("/static/uploads/:filename", staticFileHandler(UPLOADS_DIR));
 
   const port = Number(process.env.PORT) || 3000;
 
@@ -232,8 +289,8 @@ async function main() {
     process.exit(0);
   });
 
-  serve({ fetch: app.fetch, port }, (info) => {
-    console.log(`Server running on http://localhost:${info.port}`);
+  serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, (info) => {
+    console.log(`Server listening on 0.0.0.0:${info.port}`);
   });
 }
 
