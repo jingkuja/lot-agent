@@ -8,6 +8,7 @@ import { customerRegion } from "./0006-customer-region.js";
 import { uploadOriginalName } from "./0007-upload-original-name.js";
 import { customerCohortSnapshot } from "./0008-customer-cohort-snapshot.js";
 import { cohortGenerationMethod } from "./0009-cohort-generation-method.js";
+import { digitalEmployeeFollowUpCopy } from "./0010-digital-employee-follow-up-copy.js";
 
 // Static array (no fs scan — dynamic directory scanning isn't reliable once
 // this ships through tsup's bundling). To add a migration: create
@@ -22,4 +23,5 @@ export const migrations: Migration[] = [
   uploadOriginalName,
   customerCohortSnapshot,
   cohortGenerationMethod,
+  digitalEmployeeFollowUpCopy,
 ];
