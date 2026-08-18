@@ -114,6 +114,7 @@ export interface StoredAsset {
   width: number | null;
   height: number | null;
   duration_sec: number | null;
+  original_name: string | null;
   created_at: string;
 }
 
@@ -867,10 +868,11 @@ export class DB {
     width?: number | null;
     height?: number | null;
     durationSec?: number | null;
+    originalName?: string | null;
   }): Promise<void> {
     await this.pool.query(
-      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec, original_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         a.id,
         a.taskId ?? null,
@@ -883,6 +885,7 @@ export class DB {
         a.width ?? null,
         a.height ?? null,
         a.durationSec ?? null,
+        a.originalName ?? null,
       ]
     );
   }
@@ -891,6 +894,22 @@ export class DB {
     const { rows } = await this.pool.query(
       "SELECT * FROM assets WHERE id = $1",
       [id]
+    );
+    return rows[0] ?? null;
+  }
+
+  async listUserUploads(userId: string): Promise<StoredAsset[]> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM assets WHERE user_id = $1 AND type = 'upload' ORDER BY created_at DESC, id DESC",
+      [userId]
+    );
+    return rows;
+  }
+
+  async deleteUserUpload(id: string, userId: string): Promise<StoredAsset | null> {
+    const { rows } = await this.pool.query(
+      "DELETE FROM assets WHERE id = $1 AND user_id = $2 AND type = 'upload' RETURNING *",
+      [id, userId]
     );
     return rows[0] ?? null;
   }

@@ -229,6 +229,7 @@ async function main() {
   app.use("/api/models/*", authMw);
   app.use("/api/keys/*", authMw);
   app.use("/api/tasks/*", authMw);
+  app.use("/api/assets", authMw);
   app.use("/api/assets/*", authMw);
   app.use("/api/uploads/*", authMw);
   app.use("/api/usage/*", authMw);

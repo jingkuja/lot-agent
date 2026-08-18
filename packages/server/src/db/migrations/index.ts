@@ -5,6 +5,7 @@ import { conversationRunLease } from "./0003-conversation-run-lease.js";
 import { digitalEmployeeProfile } from "./0004-digital-employee-profile.js";
 import { digitalEmployeeProfileChangeDraft } from "./0005-digital-employee-profile-change-draft.js";
 import { customerRegion } from "./0006-customer-region.js";
+import { uploadOriginalName } from "./0007-upload-original-name.js";
 
 // Static array (no fs scan — dynamic directory scanning isn't reliable once
 // this ships through tsup's bundling). To add a migration: create
@@ -16,4 +17,5 @@ export const migrations: Migration[] = [
   digitalEmployeeProfile,
   digitalEmployeeProfileChangeDraft,
   customerRegion,
+  uploadOriginalName,
 ];

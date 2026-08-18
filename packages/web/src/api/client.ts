@@ -117,6 +117,15 @@ export interface AssetMeta {
   created_at: string;
 }
 
+export interface ManagedUpload {
+  id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  url: string;
+  createdAt: string;
+}
+
 export type AttachmentSlot =
   | "ppt_template" | "ppt_background" | "content" | "contract_old" | "contract_new"
   | "video_reference_image" | "video_reference_video" | "video_reference_audio"
@@ -430,6 +439,11 @@ export const api = {
 
   // ── Assets ──────────────────────────────────────────────────────────────────
   getAsset: (id: string) => request<AssetMeta>(`/assets/${id}`),
+
+  listUploadedFiles: () => request<{ data: ManagedUpload[] }>("/assets"),
+
+  deleteUploadedFile: (id: string) =>
+    request<{ ok: boolean }>(`/assets/${id}`, { method: "DELETE" }),
 
   // ── Ratings ─────────────────────────────────────────────────────────────────
   setRating: (messageId: string, rating: number, feedback?: string) =>

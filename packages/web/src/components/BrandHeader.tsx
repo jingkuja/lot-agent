@@ -1,5 +1,6 @@
 import { BRAND_LOGO_SRC } from "../assets/brand-logo.js";
 import type { User } from "../api/client.js";
+import { AccountMenu } from "./AccountMenu.js";
 
 interface BrandHeaderProps {
   user?: User;
@@ -53,18 +54,7 @@ export function BrandHeader({
       </div>
 
       <div className="brand-actions">
-        <div className="brand-account">
-          {user && (
-            <span className="brand-email" title={user.name ?? user.username ?? ""}>
-              {user.name ?? user.username ?? ""}
-            </span>
-          )}
-          {user && onLogout && (
-            <button className="btn-logout" onClick={onLogout}>
-              退出
-            </button>
-          )}
-        </div>
+        {user && <AccountMenu user={user} onLogout={onLogout} />}
       </div>
 
       {(onOpenKeySettings || onOpenAgentCenter || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (

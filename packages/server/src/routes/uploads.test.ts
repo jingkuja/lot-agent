@@ -46,6 +46,7 @@ describe("POST /uploads", () => {
     expect(json).toMatchObject({ filename: "note.txt", mime: "text/plain", size: 2, kind: "doc" });
     expect(json.assetId).toBeTruthy();
     expect(service.created.length).toBe(1);
+    expect(service.created[0].originalName).toBe("note.txt");
   });
 
   it("rejects with 413 before reading the body when Content-Length exceeds the precheck cap", async () => {
