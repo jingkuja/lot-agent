@@ -11,7 +11,7 @@ interface Props {
   busyId?: string | null;
 }
 
-/** Agent 中心:卡片网格市场,按 category 分组,安装 / 卸载。 */
+/** Agent 管理:卡片网格市场,按 category 分组,安装 / 卸载。 */
 export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busyId }: Props) {
   const groups = useMemo(() => {
     const m = new Map<string, Agent[]>();
@@ -26,9 +26,9 @@ export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busy
 
   return (
     <div className="agent-center-overlay" onClick={onClose}>
-      <div className="agent-center-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Agent 中心">
+      <div className="agent-center-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Agent 管理">
         <div className="agent-center-head">
-          <span className="agent-center-title">Agent 中心</span>
+          <span className="agent-center-title">Agent 管理</span>
           <button className="agent-center-close" onClick={onClose} aria-label="关闭">×</button>
         </div>
 

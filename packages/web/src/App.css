@@ -2601,7 +2601,7 @@ html, body, #root {
 .brand-card {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
   /* Plain inner row — the visual card lives on .brand-header now. */
   padding: 0;
 }
@@ -2611,8 +2611,18 @@ html, body, #root {
   display: flex;
 }
 
-.brand-logo svg {
+.brand-logo svg,
+.brand-logo img {
   display: block;
+}
+
+.brand-logo img {
+  width: 44px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  object-fit: cover;
+  box-shadow: var(--shadow-sm);
 }
 
 .brand-meta {
@@ -3338,7 +3348,7 @@ html, body, #root {
 }
 
 
-/* ── Agent 中心 marketplace modal ─────────────────────────────────── */
+/* ── Agent 管理 marketplace modal ─────────────────────────────────── */
 .agent-center-overlay {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(0, 0, 0, 0.45);

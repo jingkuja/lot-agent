@@ -8,14 +8,14 @@ interface KeySettingsModalProps {
   onClose: () => void;
 }
 
-/** API-Key 设置弹窗：单选一个激活 key（视觉为 checkbox 列表），选中即切换。
+/** API-Key 选择弹窗：单选一个激活 key（视觉为 checkbox 列表），选中即切换。
  *  key 已是遮罩串；组件从不接触原始 key，仅按 index 回传选择。 */
 export function KeySettingsModal({ keys, activeIndex, busy, onSelect, onClose }: KeySettingsModalProps) {
   return (
     <div className="agent-center-overlay" onClick={onClose}>
       <div className="agent-center-modal key-settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="agent-center-head">
-          <h2 className="agent-center-title">API-Key 设置</h2>
+          <h2 className="agent-center-title">API-Key 选择</h2>
           <button className="agent-center-close" onClick={onClose} aria-label="关闭">✕</button>
         </div>
         {keys.length === 0 ? (
