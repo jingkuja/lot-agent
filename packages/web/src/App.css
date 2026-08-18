@@ -3550,9 +3550,10 @@ html, body, #root {
 .input-area--digital-home {
   width: min(1080px, 100%);
   max-width: none;
-  margin: 18px auto 0;
+  margin: 10px auto 0;
   padding: 0;
 }
+.input-area--digital-home .input-switcher { margin-bottom: 10px; }
 .input-area--digital-home .input-box { border-color: color-mix(in srgb, var(--de-accent) 45%, transparent); }
 
 .de-home-skeleton { margin-top: 19px; }
@@ -4105,31 +4106,73 @@ html, body, #root {
 
 .de-chat-actions {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
   min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-card));
+  padding: 0 2px;
+}
+.de-chat-actions-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
 }
 .de-chat-management-button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 9px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--accent);
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
   font: inherit;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
 }
-.de-chat-management-button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.de-chat-actions-hint { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.de-chat-current-customer { display: inline-flex; align-items: center; min-width: 0; color: var(--text-secondary); font-size: 12px; }
+.de-chat-management-button > span { color: var(--de-accent-strong); }
+.de-chat-management-button:hover {
+  border-color: color-mix(in srgb, var(--de-accent) 45%, var(--border));
+  color: var(--de-accent-strong);
+}
+.de-chat-actions-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.5;
+}
+.de-chat-actions-hint-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 7px;
+  color: var(--de-accent-strong);
+  background: var(--de-accent-soft);
+  font-size: 10px;
+}
+.de-chat-current-customer {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--overlay-sink);
+  font-size: 11px;
+}
 .de-chat-current-customer strong { overflow: hidden; max-width: 180px; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 .de-chat-current-customer button { margin-left: 5px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
 

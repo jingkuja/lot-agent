@@ -70,7 +70,10 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
         <div className="de-main-surface">
           {view === "profiles" && (profileId
             ? <ProfileDetailPage profileId={profileId} onBack={goProfiles} />
-            : <ProfileListPage onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)} />)}
+            : <ProfileListPage
+              onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
+              onBackToConversation={() => onNavigate("/digital-employee/customer-profile")}
+            />)}
           {view === "acquisition" && <ComingSoon title="获客宝" description="线索发现、客户分层与跟进建议将在下一阶段接入；客户画像继续作为事实来源。" onBack={goProfiles} />}
           {view === "copy" && <ComingSoon title="营销文案" description="画像摘要与脱敏上下文已准备完成；文案项目和版本工作台将在下一阶段接入。" onBack={goProfiles} />}
         </div>
