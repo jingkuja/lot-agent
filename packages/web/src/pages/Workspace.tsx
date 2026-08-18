@@ -17,6 +17,7 @@ import { GENERAL_ID } from "../lib/agent-order.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveLlmSelection } from "../lib/model-defaults.js";
 import { digitalEmployeeConversations as filterDigitalEmployeeConversations, withoutDigitalEmployee } from "../lib/product-agent-scope.js";
 import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
+import { DigitalEmployeeHome } from "../modules/digital-employee/DigitalEmployeeHome.js";
 import {
   DigitalEmployeeSidebar,
   type DigitalEmployeeFeature,
@@ -26,6 +27,7 @@ interface WorkspaceProps {
   user: User;
   onLogout: () => void;
   onNavigateDigitalEmployee?: () => void;
+  onNavigateDigitalProfile?: (profileId: string) => void;
   onNavigateDigitalFeature?: (feature: DigitalEmployeeFeature) => void;
   onNavigateAssistant?: () => void;
   mode?: "assistant" | "digitalEmployee";
@@ -37,6 +39,7 @@ export function Workspace({
   user,
   onLogout,
   onNavigateDigitalEmployee,
+  onNavigateDigitalProfile,
   onNavigateDigitalFeature,
   onNavigateAssistant,
   mode = "assistant",
@@ -487,6 +490,13 @@ export function Workspace({
             onModelChange={handleModelChange}
             knowledgeBases={conversationKnowledgeBases}
             onKnowledgeBasesChange={handleKnowledgeBasesChange}
+            emptyDashboard={isDigitalEmployeeMode && onNavigateDigitalEmployee ? (
+              <DigitalEmployeeHome
+                onOpenProfiles={onNavigateDigitalEmployee}
+                onOpenProfile={onNavigateDigitalProfile ?? onNavigateDigitalEmployee}
+                onPrompt={(prompt) => void doSend(prompt)}
+              />
+            ) : undefined}
           />
         </div>
 

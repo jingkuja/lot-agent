@@ -1,5 +1,5 @@
 /**
- * Customer-profile domain types.  UI calls the feature "用户画像", while the
+ * Customer-profile domain types. UI calls the feature "客户画像", while the
  * code deliberately uses CustomerProfile so it can never be confused with the
  * authenticated application user.
  */
@@ -217,6 +217,43 @@ export interface ProfileListResult {
   page: number;
   limit: number;
   total: number;
+}
+
+export interface CohortCount {
+  key: string;
+  label: string;
+  count: number;
+}
+
+/** Account-scoped aggregate persisted by the nightly customer-portrait job. */
+export interface CustomerCohortMetrics {
+  totalProfiles: number;
+  activeLast7Days: number;
+  dueFollowUps: number;
+  relationshipStages: CohortCount[];
+  health: CohortCount[];
+  topTags: CohortCount[];
+}
+
+export interface CustomerCohortSnapshot {
+  snapshotDate: string;
+  summary: string;
+  metrics: CustomerCohortMetrics;
+  generatedAt: string;
+  generationMethod: "llm" | "logic";
+  modelId: string | null;
+}
+
+export interface DigitalEmployeeOverview {
+  recentProfiles: CustomerProfile[];
+  totalProfiles: number;
+  cohort: CustomerCohortSnapshot & { source: "nightly" | "live" };
+  schedule: {
+    enabled: true;
+    timeZone: "Asia/Shanghai";
+    localTime: "23:00";
+    nextRunAt: string;
+  };
 }
 
 export interface CreateProductStateInput {

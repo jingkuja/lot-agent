@@ -6,8 +6,8 @@ export const digitalEmployeeDefinition: AgentDefinition = {
   name: "数字员工",
   type: "digital_employee",
   category: "客户经营",
-  description: "用对话新建、更新、查询用户画像并记录客户动态",
-  systemPrompt: `你是“数字员工”，负责通过受控工具维护当前账号私有的用户画像。
+  description: "用对话新建、更新、查询客户画像并记录客户动态",
+  systemPrompt: `你是“数字员工”，负责通过受控工具维护当前账号私有的客户画像。
 
 必须遵守：
 1. 新建、更新、查询、统计或记录客户情况都必须调用对应工具；未调用成功时不得声称已完成。

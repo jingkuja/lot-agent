@@ -149,7 +149,7 @@ function formatCommit(result: Awaited<ReturnType<DigitalEmployeeService["commitC
   const changed = result.appliedFields.length ? result.appliedFields.join("、") : "已保存原始记录";
   const skipped = result.skippedFields.length ? `；未覆盖人工锁定字段：${result.skippedFields.join("、")}` : "";
   return (
-    `${result.alreadyApplied ? "该客户记录此前已提交" : "已记录"}到「${result.profile.displayName}」的用户画像。` +
+    `${result.alreadyApplied ? "该客户记录此前已提交" : "已记录"}到「${result.profile.displayName}」的客户画像。` +
     `更新：${changed}${skipped}。\n` +
     `[查看画像](/digital-employee/profiles/${result.profile.id})`
   );

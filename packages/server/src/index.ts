@@ -96,6 +96,21 @@ async function main() {
   void sweepExpiredSessions();
   setInterval(sweepExpiredSessions, SESSION_CLEANUP_INTERVAL_MS).unref();
 
+  // Customer group portraits are account-scoped aggregates. Check
+  // frequently after 23:00 Asia/Shanghai; the snapshot's (user, date) key makes
+  // this safe across restarts and avoids billing users for an LLM cron job.
+  const COHORT_SUMMARY_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  const runCustomerCohortSummaries = async () => {
+    try {
+      const completed = await service.digitalEmployee.runNightlyCohortSummaries();
+      if (completed > 0) console.log(`Generated ${completed} nightly customer cohort portrait(s)`);
+    } catch (err) {
+      console.warn("Customer cohort summary scheduler failed:", err);
+    }
+  };
+  void runCustomerCohortSummaries();
+  setInterval(runCustomerCohortSummaries, COHORT_SUMMARY_CHECK_INTERVAL_MS).unref();
+
   // Generation tasks are enqueued to Redis and consumed by a SEPARATE worker
   // process. If that worker is down or misconfigured (crashed on startup for a
   // missing env key, pointed at the wrong Redis DB, or simply not running), its

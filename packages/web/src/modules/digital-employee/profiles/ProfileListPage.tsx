@@ -46,7 +46,7 @@ export function ProfileListPage({ onOpenProfile }: ProfileListPageProps) {
       setItems(result.items);
       setTotal(result.total);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "用户画像加载失败");
+      setError(reason instanceof Error ? reason.message : "客户画像加载失败");
     } finally {
       setLoading(false);
     }
@@ -78,14 +78,14 @@ export function ProfileListPage({ onOpenProfile }: ProfileListPageProps) {
     <div className="de-page de-profile-list-page">
       <header className="de-page-header">
         <div>
-          <p className="de-eyebrow">数字员工 / 用户画像</p>
-          <h1>用户画像管理</h1>
+          <p className="de-eyebrow">数字员工 / 客户画像</p>
+          <h1>客户画像管理</h1>
           <p>把身份主档、原始观察和当前产品状态分开保存，方便持续跟进且可追溯。</p>
         </div>
         <button className="de-primary-button" onClick={() => setNewOpen(true)}>＋ 新建画像</button>
       </header>
 
-      <section className="de-filter-card" aria-label="用户画像筛选">
+      <section className="de-filter-card" aria-label="客户画像筛选">
         <form className="de-search" onSubmit={search}>
           <input value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder="搜索名称或别名" maxLength={200} />
           <button className="de-secondary-button" type="submit">搜索</button>
@@ -108,20 +108,20 @@ export function ProfileListPage({ onOpenProfile }: ProfileListPageProps) {
       {error && <div className="de-inline-error" role="alert"><span>{error}</span><button onClick={() => void load()}>重试</button></div>}
 
       <section className="de-table-card">
-        <div className="de-table-meta"><span>{loading ? "正在加载…" : `共 ${total} 位用户`}</span><span>{!loading && range}</span></div>
+        <div className="de-table-meta"><span>{loading ? "正在加载…" : `共 ${total} 位客户`}</span><span>{!loading && range}</span></div>
         {loading ? (
-          <div className="de-state">正在读取用户画像…</div>
+          <div className="de-state">正在读取客户画像…</div>
         ) : items.length === 0 ? (
           <div className="de-state de-empty-state">
             <span className="de-empty-icon" aria-hidden>◌</span>
-            <strong>{query || relationshipStage || health ? "没有匹配的用户画像" : "还没有用户画像"}</strong>
+            <strong>{query || relationshipStage || health ? "没有匹配的客户画像" : "还没有客户画像"}</strong>
             <p>{query || relationshipStage || health ? "调整筛选条件后再试。" : "可手工新建，也可在 AI 工作台里用自然语言记录客户情况。"}</p>
             {!query && !relationshipStage && !health && <button className="de-primary-button" onClick={() => setNewOpen(true)}>新建第一条画像</button>}
           </div>
         ) : (
           <div className="de-profile-table-wrap">
             <table className="de-profile-table">
-              <thead><tr><th>用户</th><th>总体关系</th><th>健康度</th><th>标签</th><th>最近观察</th><th aria-label="操作" /></tr></thead>
+              <thead><tr><th>客户</th><th>总体关系</th><th>健康度</th><th>标签</th><th>最近观察</th><th aria-label="操作" /></tr></thead>
               <tbody>{items.map((profile) => (
                 <tr key={profile.id}>
                   <td>

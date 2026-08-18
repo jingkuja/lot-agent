@@ -97,6 +97,41 @@ export interface ProfileListResponse {
   total: number;
 }
 
+export interface CohortCount {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface CustomerCohortMetrics {
+  totalProfiles: number;
+  activeLast7Days: number;
+  dueFollowUps: number;
+  relationshipStages: CohortCount[];
+  health: CohortCount[];
+  topTags: CohortCount[];
+}
+
+export interface DigitalEmployeeOverview {
+  recentProfiles: CustomerProfile[];
+  totalProfiles: number;
+  cohort: {
+    snapshotDate: string;
+    summary: string;
+    metrics: CustomerCohortMetrics;
+    generatedAt: string;
+    generationMethod: "llm" | "logic";
+    modelId: string | null;
+    source: "nightly" | "live";
+  };
+  schedule: {
+    enabled: true;
+    timeZone: "Asia/Shanghai";
+    localTime: "23:00";
+    nextRunAt: string;
+  };
+}
+
 export interface ProfileDetailResponse {
   profile: CustomerProfile;
   productStates: CustomerProductState[];

@@ -4,6 +4,7 @@ import type {
   CustomerProductState,
   CustomerProfile,
   CustomerStateChange,
+  DigitalEmployeeOverview,
   ManualObservationInput,
   ProductStateUpdateInput,
   ProfileDetailResponse,
@@ -459,6 +460,9 @@ export const api = {
     request<{ ok: boolean }>(`/ratings/${messageId}`, { method: "DELETE" }),
 
   // ── Digital employee / customer profiles ──────────────────────────────────
+  getDigitalEmployeeOverview: () =>
+    request<DigitalEmployeeOverview>("/digital-employee/overview"),
+
   listCustomerProfiles: (filters: {
     page?: number;
     limit?: number;

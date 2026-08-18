@@ -31,6 +31,8 @@ interface ChatPanelProps {
   onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
   knowledgeBases?: KnowledgeBaseRef[];
   onKnowledgeBasesChange?: (items: KnowledgeBaseRef[]) => void;
+  /** Product-specific content replacing the generic empty-state hero. */
+  emptyDashboard?: React.ReactNode;
 }
 
 /** 按本地时间返回问候语：早上好 / 下午好 / 晚上好。 */
@@ -57,6 +59,7 @@ export function ChatPanel({
   onRedownloadGeneration,
   knowledgeBases,
   onKnowledgeBasesChange,
+  emptyDashboard,
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -130,6 +133,16 @@ export function ChatPanel({
 
   // Empty conversation: center the (enlarged) input in the page.
   if (isEmpty) {
+    if (emptyDashboard) {
+      return (
+        <div className="chat-panel chat-panel--empty chat-panel--digital-home">
+          <div className="digital-home-scroll">
+            {emptyDashboard}
+            <div className="input-area input-area--digital-home">{inputEl}</div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="chat-panel chat-panel--empty">
         <div className="chat-empty-hero">

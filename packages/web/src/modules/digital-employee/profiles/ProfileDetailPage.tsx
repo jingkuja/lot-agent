@@ -77,7 +77,7 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
       setProducts(detail.productStates);
       setTimeline(nextTimeline);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "用户画像加载失败");
+      setError(reason instanceof Error ? reason.message : "客户画像加载失败");
     } finally {
       setLoading(false);
     }
@@ -143,8 +143,8 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
     }
   };
 
-  if (loading && !profile) return <div className="de-page de-state">正在读取用户画像…</div>;
-  if (!profile) return <div className="de-page"><div className="de-inline-error">{error ?? "未找到该用户画像"}<button onClick={onBack}>返回列表</button></div></div>;
+  if (loading && !profile) return <div className="de-page de-state">正在读取客户画像…</div>;
+  if (!profile) return <div className="de-page"><div className="de-inline-error">{error ?? "未找到该客户画像"}<button onClick={onBack}>返回列表</button></div></div>;
 
   const contactEntries = [
     ["手机号", profile.contact?.phone],
@@ -155,10 +155,10 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
   return (
     <div className="de-page de-profile-detail-page">
       <header className="de-detail-header">
-        <button className="de-back-button" onClick={onBack}>‹ 返回用户画像</button>
+        <button className="de-back-button" onClick={onBack}>‹ 返回客户画像</button>
         <div className="de-detail-title-row">
           <div>
-            <p className="de-eyebrow">用户画像 / 详情</p>
+            <p className="de-eyebrow">客户画像 / 详情</p>
             <h1>{profile.displayName}</h1>
             <p>{profile.customerRegion || "尚未补充客户区域"}</p>
           </div>

@@ -26,6 +26,7 @@ import {
   XiaohongshuConnector,
   WechatMpConnector,
   LocalStorage,
+  complete,
 } from "@lot-agent/core";
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
@@ -65,6 +66,7 @@ import { RagClient, type KnowledgeBase, type KnowledgeBaseRef, type RagIdentity,
 import { DigitalEmployeeService } from "../digital-employee/service.js";
 import { createCustomerCaptureTools } from "../digital-employee/tools/customer-capture-tools.js";
 import { createCustomerProfileTools } from "../digital-employee/tools/customer-profile-tools.js";
+import { cohortLlmMetrics } from "../digital-employee/profile/cohort-summary.js";
 
 /**
  * Builtin tools that touch the host filesystem / shell. On the deployed
@@ -277,11 +279,6 @@ export class AgentService {
     // Initialize session store
     this.sessions = new SessionStore(this.db);
 
-    // The service owns user-scoped customer facts; tools merely adapt Agent
-    // context to it. Construct after migration so it can safely be used as
-    // soon as the general-agent definition is assembled below.
-    this.digitalEmployee = new DigitalEmployeeService(this.db);
-
     registerBuiltinTools(this.toolRegistry);
 
     // Register the document-generation tool. It generates documents in-process
@@ -305,6 +302,40 @@ export class AgentService {
       llmBaseUrl: this.llmConfig.openai.baseUrl ?? this.tokenhubBaseUrl,
       imageBase: genConfig.image,
       videoBase: genConfig.video,
+    });
+
+    // Customer facts stay in the domain service. Its nightly portrait writer
+    // prefers the owning user's first available LLM, but receives aggregate,
+    // PII-free metrics only. Any resolution/request/validation error is caught
+    // by DigitalEmployeeService and persisted as deterministic logic fallback.
+    this.digitalEmployee = new DigitalEmployeeService(this.db, undefined, {
+      generate: async ({ userId, snapshotDate, metrics }) => {
+        const { llm, usedModelId } = await this.resolveUtilityLLM({ userId });
+        const metered = meterLLM(llm, (usage) =>
+          this.meterUtilityUsage("customer-cohort-summary", usedModelId, userId, usage)
+        );
+        // Tag labels may contain free-form customer data. Send only their
+        // aggregate frequencies; labels remain local and still render in UI.
+        const safeMetrics = cohortLlmMetrics(snapshotDate, metrics);
+        const summary = await complete(
+          metered,
+          [
+            {
+              role: "system",
+              content:
+                "你是客户运营分析助手。仅根据给定的脱敏聚合指标生成客户群像总结。" +
+                "输出2到4句中文纯文本，先概括结构与活跃度，再指出风险和下一步行动。" +
+                "不得虚构客户、产品、地域、标签名称或联系方式，不要使用标题、列表或Markdown。",
+            },
+            { role: "user", content: JSON.stringify(safeMetrics) },
+          ],
+          {
+            signal: AbortSignal.timeout(30_000),
+            params: { temperature: 0.2, maxTokens: 320 },
+          }
+        );
+        return { summary, modelId: usedModelId };
+      },
     });
 
     // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）

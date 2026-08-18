@@ -8,6 +8,7 @@ import type {
   CustomerObservationExtraction,
   CustomerProductState,
   CustomerProfile,
+  CustomerCohortSnapshot,
   CustomerStateChange,
   ExtractionApplyStatus,
   JsonObject,
@@ -206,6 +207,77 @@ export class DigitalEmployeeRepository {
       limit,
       total: Number(count.rows[0]?.total ?? 0),
     };
+  }
+
+  async listActiveProfilesForCohort(userId: string): Promise<StoredCustomerProfile[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM de_customer_profiles
+       WHERE user_id = $1 AND status = 'active'
+       ORDER BY updated_at DESC, id DESC`,
+      [userId]
+    );
+    return result.rows.map(toProfile);
+  }
+
+  async listUsersMissingCohortSnapshot(snapshotDate: string): Promise<string[]> {
+    const result = await this.pool.query(
+      `SELECT DISTINCT profile.user_id
+       FROM de_customer_profiles profile
+       LEFT JOIN de_customer_cohort_snapshots snapshot
+         ON snapshot.user_id = profile.user_id
+        AND snapshot.snapshot_date = $1::date
+       WHERE profile.status = 'active' AND snapshot.user_id IS NULL
+       ORDER BY profile.user_id`,
+      [snapshotDate]
+    );
+    return result.rows.map((row) => String(row.user_id));
+  }
+
+  async getLatestCohortSnapshot(userId: string): Promise<CustomerCohortSnapshot | null> {
+    const result = await this.pool.query(
+      `SELECT snapshot_date, summary, metrics, generated_at, generation_method, model_id
+       FROM de_customer_cohort_snapshots
+       WHERE user_id = $1
+       ORDER BY snapshot_date DESC
+       LIMIT 1`,
+      [userId]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      snapshotDate: dateOnly(row.snapshot_date),
+      summary: String(row.summary),
+      metrics: row.metrics,
+      generatedAt: toIso(row.generated_at),
+      generationMethod: row.generation_method === "llm" ? "llm" : "logic",
+      modelId: nullableText(row.model_id),
+    } as CustomerCohortSnapshot;
+  }
+
+  async upsertCohortSnapshot(userId: string, snapshot: CustomerCohortSnapshot): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO de_customer_cohort_snapshots (
+         user_id, snapshot_date, summary, metrics, generated_at,
+         generation_method, model_id, fallback_reason
+       ) VALUES ($1, $2::date, $3, $4::jsonb, $5::timestamptz, $6, $7, $8)
+       ON CONFLICT (user_id, snapshot_date) DO UPDATE SET
+         summary = EXCLUDED.summary,
+         metrics = EXCLUDED.metrics,
+         generated_at = EXCLUDED.generated_at,
+         generation_method = EXCLUDED.generation_method,
+         model_id = EXCLUDED.model_id,
+         fallback_reason = EXCLUDED.fallback_reason`,
+      [
+        userId,
+        snapshot.snapshotDate,
+        snapshot.summary,
+        JSON.stringify(snapshot.metrics),
+        snapshot.generatedAt,
+        snapshot.generationMethod,
+        snapshot.modelId,
+        snapshot.generationMethod === "logic" ? "llm_unavailable_or_failed" : null,
+      ]
+    );
   }
 
   async getProfile(userId: string, profileId: string, client: Client = this.pool): Promise<StoredCustomerProfile | null> {
@@ -612,6 +684,15 @@ function time(value: unknown): string | null {
 
 function requiredTime(value: unknown): string {
   return time(value) ?? new Date(0).toISOString();
+}
+
+function toIso(value: unknown): string {
+  return requiredTime(value);
+}
+
+function dateOnly(value: unknown): string {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
 }
 
 function number(value: unknown, fallback = 0): number {

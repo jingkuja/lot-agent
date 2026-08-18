@@ -80,5 +80,5 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
 }
 
 function ComingSoon({ title, description, onBack }: { title: string; description: string; onBack: () => void }) {
-  return <div className="de-page de-coming-soon"><span aria-hidden>◌</span><h1>{title}</h1><p>{description}</p><button className="de-secondary-button" onClick={onBack}>查看用户画像</button></div>;
+  return <div className="de-page de-coming-soon"><span aria-hidden>◌</span><h1>{title}</h1><p>{description}</p><button className="de-secondary-button" onClick={onBack}>查看客户画像</button></div>;
 }

@@ -51,6 +51,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           onLogout={onLogout}
           onNavigateAssistant={() => navigate("/assistant")}
           onNavigateDigitalEmployee={() => navigate("/digital-employee/profiles")}
+          onNavigateDigitalProfile={(id) => navigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
           onNavigateDigitalFeature={(feature) => navigate(`/digital-employee/${feature}`)}
           requestedConversationId={requestedDigitalConversationId}
           onRequestedConversationHandled={() => setRequestedDigitalConversationId(null)}

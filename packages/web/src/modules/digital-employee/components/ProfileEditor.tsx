@@ -62,7 +62,7 @@ export function ProfileEditor({ profile, saving = false, onClose, onSave }: Prof
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!form.displayName.trim()) {
-      setError("请填写用户名称");
+      setError("请填写客户名称");
       return;
     }
     setError(null);
@@ -93,10 +93,10 @@ export function ProfileEditor({ profile, saving = false, onClose, onSave }: Prof
 
   return (
     <div className="de-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="de-modal" role="dialog" aria-modal="true" aria-label={profile ? "编辑用户画像" : "新建用户画像"} onMouseDown={(event) => event.stopPropagation()}>
+      <section className="de-modal" role="dialog" aria-modal="true" aria-label={profile ? "编辑客户画像" : "新建客户画像"} onMouseDown={(event) => event.stopPropagation()}>
         <div className="de-modal-head">
           <div>
-            <h2>{profile ? "编辑用户画像" : "新建用户画像"}</h2>
+            <h2>{profile ? "编辑客户画像" : "新建客户画像"}</h2>
             <p>身份信息与当前关系分开维护；联系方式只在当前账号内加密保存。</p>
           </div>
           <button className="de-icon-button" type="button" onClick={onClose} aria-label="关闭">×</button>
@@ -104,7 +104,7 @@ export function ProfileEditor({ profile, saving = false, onClose, onSave }: Prof
         <form className="de-form" onSubmit={submit}>
           <div className="de-form-grid">
             <label>
-              <span>用户名称 *</span>
+              <span>客户名称 *</span>
               <input value={form.displayName} onChange={(event) => change("displayName", event.target.value)} maxLength={200} autoFocus />
             </label>
             <label>

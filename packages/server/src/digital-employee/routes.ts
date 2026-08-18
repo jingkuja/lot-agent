@@ -29,6 +29,14 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     }
   });
 
+  app.get("/overview", async (c) => {
+    try {
+      return c.json(await service.getOverview(c.get("userId")));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
   app.get("/profiles", async (c) => {
     try {
       return c.json(await service.listProfiles(c.get("userId"), parseProfileList(c.req.query())));

@@ -82,4 +82,24 @@ describe("DigitalEmployeeRepository persistence parameters", () => {
     expect(params[10]).toBe('["对价格敏感"]');
     expect(params[11]).toBe("[]");
   });
+
+  it("persists the cohort summary generation method for audit", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const repository = new DigitalEmployeeRepository({ query } as any);
+
+    await repository.upsertCohortSnapshot("u1", {
+      snapshotDate: "2026-08-18",
+      summary: "客户整体保持活跃。",
+      metrics: {
+        totalProfiles: 3, activeLast7Days: 2, dueFollowUps: 1,
+        relationshipStages: [], health: [], topTags: [],
+      },
+      generatedAt: "2026-08-18T15:00:00.000Z",
+      generationMethod: "llm",
+      modelId: "llm-primary",
+    });
+
+    expect(query.mock.calls[0][0] as string).toContain("generation_method");
+    expect(query.mock.calls[0][1]).toEqual(expect.arrayContaining(["llm", "llm-primary"]));
+  });
 });

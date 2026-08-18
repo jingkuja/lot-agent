@@ -39,7 +39,7 @@ describe("customer profile agent tools", () => {
         status: "needs_confirmation",
         operation: "update",
         risks: ["identity_ambiguous"],
-        question: "李姐对应哪位用户？",
+        question: "李姐对应哪位客户？",
         options: ["李晨", "李静"],
         candidates: [],
       })),
@@ -50,7 +50,7 @@ describe("customer profile agent tools", () => {
       { userId: "u1", workingDirectory: "/tmp", sourceText: "把李姐标记为重点客户" }
     );
     expect(result.content).toContain("ask_user");
-    expect(result.content).toContain("李姐对应哪位用户");
+    expect(result.content).toContain("李姐对应哪位客户");
     expect(service.commitProfileChange).not.toHaveBeenCalled();
   });
 });

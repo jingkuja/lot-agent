@@ -11,7 +11,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
   const search: Tool = {
     name: "search_customer_profiles",
     description:
-      "查询或统计当前账号的用户画像。支持名称/别名关键词、总体关系、健康度和标签筛选。" +
+      "查询或统计当前账号的客户画像。支持名称/别名关键词、总体关系、健康度和标签筛选。" +
       "返回的 total 是数据库匹配总数，items 只是当前页；回答数量问题必须使用 total。此工具不返回联系方式。",
     parameters: {
       type: "object",
@@ -54,7 +54,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
           }),
         };
       } catch (error) {
-        return toolError("查询用户画像失败", error);
+        return toolError("查询客户画像失败", error);
       }
     },
   };
@@ -86,7 +86,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
         }
         return { content: JSON.stringify(profiles) };
       } catch (error) {
-        return toolError("读取用户画像失败", error);
+        return toolError("读取客户画像失败", error);
       }
     },
   };
@@ -95,7 +95,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
     name: "prepare_customer_profile_change",
     description:
       "准备对话式新建或更新客户主档。只处理姓名、别名、客户区域、来源、总体关系、健康度和标签；" +
-      "联系方式、归档、人工锁定请引导至“用户画像管理”。此工具不写正式画像，返回 needs_confirmation 时必须先调用 ask_user。",
+      "联系方式、归档、人工锁定请引导至“客户画像管理”。此工具不写正式画像，返回 needs_confirmation 时必须先调用 ask_user。",
     parameters: {
       type: "object",
       properties: {
@@ -168,7 +168,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
         }, sourceContext(context));
         return {
           content:
-            `已${profile.version === 1 ? "新建" : "更新"}「${profile.displayName}」的用户画像。\n` +
+            `已${profile.version === 1 ? "新建" : "更新"}「${profile.displayName}」的客户画像。\n` +
             `[查看画像](/digital-employee/profiles/${profile.id})`,
         };
       } catch (error) {

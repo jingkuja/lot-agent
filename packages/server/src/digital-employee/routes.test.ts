@@ -11,6 +11,15 @@ function app(service: Record<string, unknown>) {
 }
 
 describe("digital employee profile routes", () => {
+  it("returns the user-scoped digital employee overview", async () => {
+    const overview = { recentProfiles: [], totalProfiles: 0 };
+    const service = { getOverview: vi.fn(async () => overview) };
+    const response = await app(service).request("/digital-employee/overview");
+    expect(response.status).toBe(200);
+    expect(service.getOverview).toHaveBeenCalledWith("u1");
+    await expect(response.json()).resolves.toEqual(overview);
+  });
+
   it("passes the authenticated owner to list queries", async () => {
     const service = { listProfiles: vi.fn(async () => ({ items: [], page: 1, limit: 20, total: 0 })) };
     const response = await app(service).request("/digital-employee/profiles?q=%E6%9D%8E%E5%A7%90");

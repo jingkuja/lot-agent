@@ -8,6 +8,15 @@ import {
   type NewProfileRow,
 } from "./repository.js";
 import { buildProfileSummary } from "./profile/profile-summary.js";
+import {
+  buildCohortSnapshot,
+  cohortDateKey,
+  COHORT_LOCAL_TIME,
+  COHORT_TIME_ZONE,
+  isCohortNightlyWindow,
+  nextCohortRunAt,
+  parseLlmCohortSummary,
+} from "./profile/cohort-summary.js";
 import { productKeyFor, projectObservation } from "./profile/state-projector.js";
 import type {
   AddManualObservationInput,
@@ -73,6 +82,14 @@ interface AppliedObservation {
   skippedFields: string[];
 }
 
+export interface CohortSummaryGenerator {
+  generate(input: {
+    userId: string;
+    snapshotDate: string;
+    metrics: import("./types.js").CustomerCohortMetrics;
+  }): Promise<{ summary: string; modelId: string }>;
+}
+
 /**
  * Application service for customer profiles. It owns permissions, encryption,
  * transactions and optimistic concurrency; SQL remains in the repository and
@@ -82,7 +99,11 @@ export class DigitalEmployeeService {
   readonly repository: DigitalEmployeeRepository;
   private readonly secretBox: SecretBox;
 
-  constructor(private readonly db: DB, secretBox: SecretBox = createSecretBox()) {
+  constructor(
+    private readonly db: DB,
+    secretBox: SecretBox = createSecretBox(),
+    private readonly cohortSummaryGenerator?: CohortSummaryGenerator
+  ) {
     this.repository = new DigitalEmployeeRepository(db.pool);
     this.secretBox = secretBox;
   }
@@ -90,6 +111,68 @@ export class DigitalEmployeeService {
   async listProfiles(userId: string, filters: ProfileListFilters) {
     const result = await this.repository.listProfiles(userId, filters);
     return { ...result, items: result.items.map((profile) => this.publicProfile(profile, false)) };
+  }
+
+  async getOverview(userId: string, now: Date = new Date()) {
+    const [recent, storedSnapshot] = await Promise.all([
+      this.repository.listProfiles(userId, { page: 1, limit: 5, status: "active" }),
+      this.repository.getLatestCohortSnapshot(userId),
+    ]);
+    const snapshot = storedSnapshot ?? buildCohortSnapshot(
+      await this.repository.listActiveProfilesForCohort(userId),
+      now
+    );
+    return {
+      recentProfiles: recent.items.map((profile) => this.publicProfile(profile, false)),
+      totalProfiles: recent.total,
+      cohort: { ...snapshot, source: storedSnapshot ? "nightly" as const : "live" as const },
+      schedule: {
+        enabled: true as const,
+        timeZone: COHORT_TIME_ZONE,
+        localTime: COHORT_LOCAL_TIME,
+        nextRunAt: nextCohortRunAt(now),
+      },
+    };
+  }
+
+  /**
+   * Idempotent account-level scheduler target. The server calls it repeatedly;
+   * a user/date primary key means each account is summarized once per local day.
+   */
+  async runNightlyCohortSummaries(now: Date = new Date()): Promise<number> {
+    if (!isCohortNightlyWindow(now)) return 0;
+    const snapshotDate = cohortDateKey(now);
+    const userIds = await this.repository.listUsersMissingCohortSnapshot(snapshotDate);
+    let completed = 0;
+    for (const userId of userIds) {
+      try {
+        const profiles = await this.repository.listActiveProfilesForCohort(userId);
+        const logicSnapshot = buildCohortSnapshot(profiles, now);
+        let snapshot = logicSnapshot;
+        if (this.cohortSummaryGenerator) {
+          try {
+            const generated = await this.cohortSummaryGenerator.generate({
+              userId,
+              snapshotDate,
+              metrics: logicSnapshot.metrics,
+            });
+            snapshot = {
+              ...logicSnapshot,
+              summary: parseLlmCohortSummary(generated.summary),
+              generationMethod: "llm",
+              modelId: generated.modelId,
+            };
+          } catch (error) {
+            console.warn(`[digital-employee] LLM cohort summary degraded to logic for user ${userId}:`, error);
+          }
+        }
+        await this.repository.upsertCohortSnapshot(userId, snapshot);
+        completed += 1;
+      } catch (error) {
+        console.warn(`[digital-employee] cohort summary failed for user ${userId}:`, error);
+      }
+    }
+    return completed;
   }
 
   async getProfile(userId: string, profileId: string): Promise<{ profile: CustomerProfile; productStates: CustomerProductState[] }> {
@@ -114,7 +197,7 @@ export class DigitalEmployeeService {
   /** Bounded, redacted detail view used in model context. */
   async getProfilesForAgent(userId: string, profileIds: string[]) {
     const ids = [...new Set(profileIds)];
-    if (!ids.length || ids.length > 6) throw new InputError("一次只能读取1到6条用户画像");
+    if (!ids.length || ids.length > 6) throw new InputError("一次只能读取1到6条客户画像");
     return Promise.all(ids.map(async (profileId) => {
       const profile = await this.requireProfile(userId, profileId);
       if (profile.status !== "active") throw new NotFoundError();
@@ -215,10 +298,10 @@ export class DigitalEmployeeService {
       result.question = `已找到可能重复的“${mention}”画像，要使用已有画像还是继续新建？`;
       result.options = [...views.map(displayCandidate), "继续新建", "取消"];
     } else if (draft.risks.includes("identity_ambiguous")) {
-      result.question = `“${mention}”对应哪位用户？${draft.risks.includes("high_impact_field") ? "选择后将应用本次关键字段修改。" : ""}`;
+      result.question = `“${mention}”对应哪位客户？${draft.risks.includes("high_impact_field") ? "选择后将应用本次关键字段修改。" : ""}`;
       result.options = views.map(displayCandidate);
     } else if (draft.risks.includes("profile_not_found")) {
-      result.question = `未找到“${mention}”的用户画像，请提供更准确的名称或先新建画像。`;
+      result.question = `未找到“${mention}”的客户画像，请提供更准确的名称或先新建画像。`;
       result.options = ["重新描述", "取消"];
     } else if (draft.risks.includes("high_impact_field")) {
       result.question = `本次将修改“${mention}”的关键画像字段，是否确认？`;
@@ -477,14 +560,14 @@ export class DigitalEmployeeService {
       ambiguities.push("new_profile");
       clarification = {
         kind: "new_profile",
-        question: `未找到“${input.customerMention}”的用户画像，是否新建？`,
-        options: ["新建用户画像", "暂不记录"],
+        question: `未找到“${input.customerMention}”的客户画像，是否新建？`,
+        options: ["新建客户画像", "暂不记录"],
       };
     } else if (candidates.length > 1) {
       ambiguities.push("identity");
       clarification = {
         kind: "identity",
-        question: `“${input.customerMention}”对应哪位用户？`,
+        question: `“${input.customerMention}”对应哪位客户？`,
         options: candidateViews.map((candidate) => displayCandidate(candidate)),
       };
     } else {
@@ -571,20 +654,20 @@ export class DigitalEmployeeService {
       let profileId = storedProfileId;
 
       if (draft.candidateProfileIds.length > 1) {
-        if (!input.profileId) throw new InputError("请先确认要记录到哪位用户画像");
-        if (!draft.candidateProfileIds.includes(input.profileId)) throw new InputError("选择的用户不在当前候选范围内");
+        if (!input.profileId) throw new InputError("请先确认要记录到哪位客户画像");
+        if (!draft.candidateProfileIds.includes(input.profileId)) throw new InputError("选择的客户不在当前候选范围内");
         profileId = input.profileId;
       } else if (draft.candidateProfileIds.length === 1 && input.profileId && input.profileId !== draft.candidateProfileIds[0]) {
-        throw new InputError("选择的用户与采集草稿不一致");
+        throw new InputError("选择的客户与采集草稿不一致");
       }
 
       let profile: StoredCustomerProfile | null = profileId
         ? await this.repository.getProfile(userId, profileId, client)
         : null;
       if (!profile && draft.ambiguities.includes("new_profile")) {
-        if (!input.createProfile) throw new InputError("请先确认是否新建用户画像");
+        if (!input.createProfile) throw new InputError("请先确认是否新建客户画像");
         const displayName = input.createProfile.displayName?.trim() || capture.customerMention;
-        if (!displayName || displayName.length > 200) throw new InputError("新用户名称无效");
+        if (!displayName || displayName.length > 200) throw new InputError("新客户名称无效");
         const profileIdForNew = randomUUID();
         profile = await this.repository.createProfile(
           this.newProfileRow(userId, profileIdForNew, { displayName }, `${displayName}：线索，整体健康。`),

@@ -14,7 +14,7 @@ export function DigitalEmployeeActions({
     <div className="de-chat-actions" aria-label="数字员工快捷操作">
       <button type="button" className="de-chat-management-button" onClick={onOpenProfiles}>
         <span aria-hidden>◎</span>
-        用户画像管理
+        客户画像管理
       </button>
       {currentCustomerName ? (
         <span className="de-chat-current-customer">

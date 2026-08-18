@@ -1,9 +1,9 @@
 import type { CustomerProductState, CustomerProfile } from "../types.js";
 
 /**
- * A deterministic, PII-free summary used in profile lists and as the safe base
- * for future LLM contexts. It never includes encrypted contact details or raw
- * observations, so callers cannot accidentally pass direct identifiers onward.
+ * A deterministic, contact-free summary used in profile lists. It never
+ * includes encrypted contact details or raw observations. It still contains
+ * customer-authored profile fields, so callers must redact before LLM use.
  */
 export function buildProfileSummary(
   profile: Pick<CustomerProfile, "displayName" | "relationshipStage" | "overallHealth" | "tags">,
