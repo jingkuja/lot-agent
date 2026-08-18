@@ -5,6 +5,9 @@ export const DEFAULT_INSTALLED_AGENT_IDS = ["image", "video"] as const;
 /** 永远已安装、不可卸载、恒排第一的通用 Agent id(不入库、不进 Agent 中心)。 */
 export const GENERAL_AGENT_ID = "general";
 
+/** Product-level built-ins are always available and cannot be uninstalled. */
+export const FIXED_AGENT_IDS = new Set([GENERAL_AGENT_ID, "digital_employee"]);
+
 /** 追加安装时的 sort_order:排到当前最大之后。 */
 export function nextSortOrder(existing: number[]): number {
   return (existing.length ? Math.max(...existing) : -1) + 1;

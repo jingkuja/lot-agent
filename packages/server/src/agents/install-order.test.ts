@@ -7,8 +7,9 @@ import {
 } from "./install-order.js";
 
 describe("install-order", () => {
-  it("default set installs image/video only (general is a base capability, never seeded)", () => {
+  it("keeps the independent digital-employee module out of user Agent installs", () => {
     expect(DEFAULT_INSTALLED_AGENT_IDS).toEqual(["image", "video"]);
+    expect(DEFAULT_INSTALLED_AGENT_IDS).not.toContain("digital_employee");
     expect(DEFAULT_INSTALLED_AGENT_IDS).not.toContain(GENERAL_AGENT_ID);
   });
 

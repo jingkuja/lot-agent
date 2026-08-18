@@ -1,4 +1,16 @@
 import type { CatalogModel } from "../lib/model-filter.js";
+import type {
+  CustomerObservation,
+  CustomerProductState,
+  CustomerProfile,
+  CustomerStateChange,
+  ManualObservationInput,
+  ProductStateUpdateInput,
+  ProfileDetailResponse,
+  ProfileInput,
+  ProfileListResponse,
+  ProfileUpdateInput,
+} from "../modules/digital-employee/types.js";
 export type { CatalogModel };
 
 export interface Conversation {
@@ -431,4 +443,72 @@ export const api = {
 
   removeRating: (messageId: string) =>
     request<{ ok: boolean }>(`/ratings/${messageId}`, { method: "DELETE" }),
+
+  // ── Digital employee / customer profiles ──────────────────────────────────
+  listCustomerProfiles: (filters: {
+    page?: number;
+    limit?: number;
+    q?: string;
+    relationshipStage?: string;
+    health?: string;
+    tag?: string;
+    status?: string;
+  } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    const suffix = query.toString();
+    return request<ProfileListResponse>(`/digital-employee/profiles${suffix ? `?${suffix}` : ""}`);
+  },
+
+  getCustomerProfile: (id: string) =>
+    request<ProfileDetailResponse>(`/digital-employee/profiles/${encodeURIComponent(id)}`),
+
+  createCustomerProfile: (input: ProfileInput) =>
+    request<ProfileDetailResponse>("/digital-employee/profiles", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateCustomerProfile: (id: string, input: ProfileUpdateInput) =>
+    request<CustomerProfile>(`/digital-employee/profiles/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+
+  archiveCustomerProfile: (id: string, version: number) =>
+    request<CustomerProfile>(`/digital-employee/profiles/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ version }),
+    }),
+
+  updateCustomerProductState: (profileId: string, productKey: string, input: ProductStateUpdateInput) =>
+    request<{ profile: CustomerProfile; productState: CustomerProductState }>(
+      `/digital-employee/profiles/${encodeURIComponent(profileId)}/products/${encodeURIComponent(productKey)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    ),
+
+  addCustomerObservation: (profileId: string, input: ManualObservationInput) =>
+    request<{
+      profile: CustomerProfile;
+      observation: CustomerObservation;
+      extraction: unknown;
+      appliedFields: string[];
+      skippedFields: string[];
+    }>(`/digital-employee/profiles/${encodeURIComponent(profileId)}/observations`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  getCustomerTimeline: (profileId: string) =>
+    request<{ observations: CustomerObservation[]; changes: CustomerStateChange[] }>(
+      `/digital-employee/profiles/${encodeURIComponent(profileId)}/timeline`
+    ),
+
+  clearDigitalEmployeeContext: (conversationId: string) =>
+    request<{ ok: boolean }>(
+      `/digital-employee/conversation-context/${encodeURIComponent(conversationId)}`,
+      { method: "DELETE" }
+    ),
 };

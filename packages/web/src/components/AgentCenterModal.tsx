@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Agent } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
+import { withoutDigitalEmployee } from "../lib/product-agent-scope.js";
 
 interface Props {
   agents: Agent[];
@@ -14,8 +15,9 @@ interface Props {
 export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busyId }: Props) {
   const groups = useMemo(() => {
     const m = new Map<string, Agent[]>();
-    for (const a of agents) {
-      if (a.id === GENERAL_ID) continue; // 通用是基础能力,不在市场展示
+    for (const a of withoutDigitalEmployee(agents)) {
+      // 通用助手是基础能力；数字员工是独立产品模块。两者都不属于市场。
+      if (a.id === GENERAL_ID) continue;
       const key = a.category ?? "其他";
       (m.get(key) ?? m.set(key, []).get(key)!).push(a);
     }
@@ -36,7 +38,7 @@ export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busy
               <div className="agent-center-group-label">{category}</div>
               <div className="agent-center-grid">
                 {list.map((a) => {
-                  const isGeneral = a.id === "general";
+                  const isBuiltIn = a.id === "general";
                   const busy = busyId === a.id;
                   return (
                     <div key={a.id} className="agent-card">
@@ -46,11 +48,11 @@ export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busy
                         {a.installed ? (
                           <button
                             className="agent-card-btn installed"
-                            disabled={isGeneral || busy}
+                            disabled={isBuiltIn || busy}
                             onClick={() => onUninstall(a.id)}
-                            title={isGeneral ? "通用助手不可卸载" : "卸载"}
+                            title={isBuiltIn ? "内置 Agent 不可卸载" : "卸载"}
                           >
-                            {isGeneral ? "默认" : busy ? "处理中…" : "已安装 · 卸载"}
+                            {isBuiltIn ? "内置" : busy ? "处理中…" : "已安装 · 卸载"}
                           </button>
                         ) : (
                           <button

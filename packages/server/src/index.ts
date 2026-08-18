@@ -23,6 +23,7 @@ import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
+import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { AppConfigSchema } from "@lot-agent/core";
 import { loadLlmConfig } from "./config.js";
 import { rateLimit, clientIp } from "./middleware/rate-limit.js";
@@ -170,6 +171,9 @@ async function main() {
     // In-conversation generation + the standalone task API share one bucket:
     // both enqueue the same billed image/video jobs.
     generation: { prefix: "rl:generation", limit: 10, windowMs: 60 * 1000 },
+    // Customer-profile CRUD is bounded separately from chat. Natural-language
+    // capture still runs through the existing message limit above.
+    digitalEmployee: { prefix: "rl:digital-employee", limit: 90, windowMs: 60 * 1000 },
   } as const;
   const loginRateLimit = rateLimit({ store: rateLimitStore, keyFn: clientIp, ...RATE_LIMITS.login });
   const uploadRateLimit = rateLimit({
@@ -186,6 +190,11 @@ async function main() {
     store: rateLimitStore,
     keyFn: (c) => c.get("userId"),
     ...RATE_LIMITS.generation,
+  });
+  const digitalEmployeeRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.digitalEmployee,
   });
 
   app.use("*", logger());
@@ -228,6 +237,8 @@ async function main() {
   app.use("/api/publish/*", authMw);
   app.use("/api/knowledge-bases", authMw);
   app.use("/api/knowledge-bases/*", authMw);
+  app.use("/api/digital-employee", authMw);
+  app.use("/api/digital-employee/*", authMw);
 
   // userId-keyed rate limits — registered after authMw (so `userId` is set)
   // and before the route handlers below. Exact method+path so GET/SSE-poll
@@ -237,6 +248,7 @@ async function main() {
   app.on("POST", "/api/conversations/:id/regenerate", messagesRateLimit);
   app.on("POST", "/api/conversations/:id/generations", generationRateLimit);
   app.on("POST", "/api/tasks", generationRateLimit);
+  app.use("/api/digital-employee/*", digitalEmployeeRateLimit);
 
   // Protected API routes
   app.route("/api/conversations", createConversationRoutes(service));
@@ -255,6 +267,7 @@ async function main() {
   app.route("/api/platform", createPlatformRoutes(service));
   app.route("/api/publish", createPublishRoutes(service));
   app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
+  app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
 
   // /api/balance alias → same balance logic, user-scoped
   app.get("/api/balance", async (c) => {

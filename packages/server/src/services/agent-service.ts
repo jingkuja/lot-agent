@@ -18,6 +18,7 @@ import {
   videoDefinition,
   pptDefinition,
   contractDefinition,
+  digitalEmployeeDefinition,
   InMemoryModelRegistry,
   populateModelRegistry,
   contextBudgetTotal,
@@ -61,6 +62,9 @@ import { meterLLM } from "../billing/metered-llm.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
 import { RagClient, type KnowledgeBase, type KnowledgeBaseRef, type RagIdentity, type RagRecord } from "./rag-client.js";
+import { DigitalEmployeeService } from "../digital-employee/service.js";
+import { createCustomerCaptureTools } from "../digital-employee/tools/customer-capture-tools.js";
+import { createCustomerProfileTools } from "../digital-employee/tools/customer-profile-tools.js";
 
 /**
  * Builtin tools that touch the host filesystem / shell. On the deployed
@@ -75,6 +79,10 @@ const DISABLED_HOST_TOOLS = new Set([
   "search_files",
   "execute_command",
 ]);
+
+const DIGITAL_EMPLOYEE_TOOLS = new Set(
+  digitalEmployeeDefinition.toolNames.filter((name) => name !== "ask_user" && name !== "load_skill")
+);
 
 /** How long a user's tokenhub model catalog stays cached in Redis. */
 const MODEL_CATALOG_TTL_SEC = 300;
@@ -204,6 +212,8 @@ export class AgentService {
   generationSupportsProgress: { image: boolean; video: boolean } = { image: true, video: true };
   /** Storage for user-uploaded files, served at /static/uploads (separate from generated assets). */
   uploadStorage!: LocalStorage;
+  /** Customer profiles are a separate business module, not an AgentDefinition. */
+  digitalEmployee!: DigitalEmployeeService;
   private llmConfig: LLMConfig;
   private configModels: ModelConfig[];
   private agentConfig: Partial<AgentConfig>;
@@ -267,6 +277,11 @@ export class AgentService {
     // Initialize session store
     this.sessions = new SessionStore(this.db);
 
+    // The service owns user-scoped customer facts; tools merely adapt Agent
+    // context to it. Construct after migration so it can safely be used as
+    // soon as the general-agent definition is assembled below.
+    this.digitalEmployee = new DigitalEmployeeService(this.db);
+
     registerBuiltinTools(this.toolRegistry);
 
     // Register the document-generation tool. It generates documents in-process
@@ -312,6 +327,12 @@ export class AgentService {
       })
     );
     this.toolRegistry.register(proposeOutlineTool);
+    for (const tool of createCustomerCaptureTools(this.digitalEmployee)) {
+      this.toolRegistry.register(tool);
+    }
+    for (const tool of createCustomerProfileTools(this.digitalEmployee)) {
+      this.toolRegistry.register(tool);
+    }
 
     // Load skills
     await this.skillLoader.loadFromDirectory(this.skillsDir);
@@ -372,10 +393,11 @@ export class AgentService {
       toolNames: this.toolRegistry
         .getAll()
         .map((t) => t.name)
-        .filter((name) => !DISABLED_HOST_TOOLS.has(name)),
+        .filter((name) => !DISABLED_HOST_TOOLS.has(name) && !DIGITAL_EMPLOYEE_TOOLS.has(name)),
       defaultModelId,
     };
     this.agentRegistry.register(generalDef);
+    this.agentRegistry.register({ ...digitalEmployeeDefinition, defaultModelId });
     this.agentRegistry.register(copywritingDefinition);
     this.agentRegistry.register(imageDefinition);
     this.agentRegistry.register(videoDefinition);
@@ -717,7 +739,15 @@ export class AgentService {
     const context: AgentContext = {
       llm,
       toolRegistry: this.toolRegistry,
-      toolContext: { workingDirectory: process.cwd(), memory, userId: userId ?? "default" },
+      toolContext: {
+        workingDirectory: process.cwd(),
+        memory,
+        userId: userId ?? "default",
+        conversationId,
+        sourceMessageId: userMsgId,
+        sourceText: userMessage,
+        modelId,
+      },
       memory,
     };
 

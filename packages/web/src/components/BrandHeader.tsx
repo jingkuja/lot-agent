@@ -5,14 +5,27 @@ interface BrandHeaderProps {
   onLogout?: () => void;
   onOpenKeySettings?: () => void;
   onCollapse: () => void;
-  onOpenAgentCenter: () => void;
-  onOpenKnowledgeBase: () => void;
+  onOpenAgentCenter?: () => void;
+  onOpenAssistant?: () => void;
+  onOpenDigitalEmployee?: () => void;
+  onOpenKnowledgeBase?: () => void;
+  activeModule?: "assistant" | "digitalEmployee";
 }
 
 /** Top-left brand card: cloud logo + product name + tagline, a collapse
  *  toggle, and the account block (username on top, 退出 on its own line).
  *  The new-chat button lives in the sidebar's 最近对话 header. */
-export function BrandHeader({ user, onLogout, onOpenKeySettings, onCollapse, onOpenAgentCenter, onOpenKnowledgeBase }: BrandHeaderProps) {
+export function BrandHeader({
+  user,
+  onLogout,
+  onOpenKeySettings,
+  onCollapse,
+  onOpenAgentCenter,
+  onOpenAssistant,
+  onOpenDigitalEmployee,
+  onOpenKnowledgeBase,
+  activeModule = "assistant",
+}: BrandHeaderProps) {
   return (
     <div className="brand-header">
       <div className="brand-card">
@@ -67,19 +80,6 @@ export function BrandHeader({ user, onLogout, onOpenKeySettings, onCollapse, onO
               {user.name ?? user.username ?? ""}
             </span>
           )}
-          {user && onOpenKeySettings && (
-            <button
-              className="btn-key-settings"
-              onClick={onOpenKeySettings}
-              title="API-Key 设置"
-              aria-label="API-Key 设置"
-            >
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-          )}
           {user && onLogout && (
             <button className="btn-logout" onClick={onLogout}>
               退出
@@ -88,26 +88,85 @@ export function BrandHeader({ user, onLogout, onOpenKeySettings, onCollapse, onO
         </div>
       </div>
 
-      <div className="brand-navigation-actions">
-      <button className="brand-agent-center-btn" onClick={onOpenAgentCenter} title="Agent 中心">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <rect x="3" y="3" width="7" height="7" rx="1.5" />
-          <rect x="14" y="3" width="7" height="7" rx="1.5" />
-          <rect x="3" y="14" width="7" height="7" rx="1.5" />
-          <path d="M17.5 14v7M14 17.5h7" />
-        </svg>
-        Agent 中心
-      </button>
-      <button className="brand-agent-center-btn brand-knowledge-btn" onClick={onOpenKnowledgeBase} title="个人知识库">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <ellipse cx="12" cy="5" rx="7" ry="3" />
-          <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
-          <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
-        </svg>
-        个人知识库
-        <span className="brand-link-arrow" aria-hidden>↗</span>
-      </button>
-      </div>
+      {(onOpenKeySettings || onOpenAgentCenter || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (
+        <div className="brand-navigation-actions">
+          {(onOpenKeySettings || onOpenAgentCenter) && (
+            <div className="brand-quick-actions">
+              {onOpenKeySettings && (
+                <button className="brand-quick-action" onClick={onOpenKeySettings} title="API-Key 设置">
+                  <span className="brand-action-icon" aria-hidden>
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="8" cy="15" r="3" />
+                      <path d="m10.2 12.8 7.3-7.3M15 8l2 2M17.5 5.5l1 1" />
+                    </svg>
+                  </span>
+                  <span>API-Key 设置</span>
+                </button>
+              )}
+              {onOpenAgentCenter && (
+                <button className="brand-quick-action" onClick={onOpenAgentCenter} title="Agent 中心">
+                  <span className="brand-action-icon" aria-hidden>
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                      <path d="M17.5 14v7M14 17.5h7" />
+                    </svg>
+                  </span>
+                  <span>Agent 中心</span>
+                </button>
+              )}
+            </div>
+          )}
+          {onOpenKnowledgeBase && (
+            <button className="brand-knowledge-btn" onClick={onOpenKnowledgeBase} title="个人知识库">
+              <span className="brand-action-icon brand-knowledge-icon" aria-hidden>
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <ellipse cx="12" cy="5" rx="7" ry="3" />
+                  <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
+                  <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+                </svg>
+              </span>
+              <span className="brand-knowledge-copy">
+                <strong>个人知识库</strong>
+                <small>沉淀资料与专属知识</small>
+              </span>
+              <span className="brand-link-arrow" aria-hidden>↗</span>
+            </button>
+          )}
+          {(onOpenAssistant || onOpenDigitalEmployee) && (
+            <div className="brand-module-switch" role="tablist" aria-label="工作区导航">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeModule === "assistant"}
+                className={`brand-module-tab ${activeModule === "assistant" ? "active" : ""}`}
+                onClick={onOpenAssistant}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M4 19V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12" />
+                  <path d="M8 9h3v3H8zM14 9h2M14 12h2M8 16h8" />
+                </svg>
+                Agent 广场
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeModule === "digitalEmployee"}
+                className={`brand-module-tab ${activeModule === "digitalEmployee" ? "active" : ""}`}
+                onClick={onOpenDigitalEmployee}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="8" r="3.5" />
+                  <path d="M5.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6" />
+                  <path d="M18.5 5.5h2M19.5 4.5v2" />
+                </svg>
+                数字员工
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

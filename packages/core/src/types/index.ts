@@ -129,6 +129,13 @@ export interface ToolContext {
   memory?: import("../memory/store.js").AgentMemoryStore;
   /** Owner of the current request — used by tools that persist user-scoped artifacts (e.g. generated documents). */
   userId?: string;
+  /** Source conversation/message are optional generic provenance fields for business-domain tools. */
+  conversationId?: string;
+  sourceMessageId?: string;
+  /** The original user text, supplied by the server rather than the model. */
+  sourceText?: string;
+  /** Model actually selected for this turn, for domain audit records only. */
+  modelId?: string;
   /** Aborts long-running tool work when the run times out or the client disconnects. */
   signal?: AbortSignal;
 }

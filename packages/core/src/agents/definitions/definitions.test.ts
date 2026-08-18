@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pptDefinition, contractDefinition, imageDefinition } from "./index.js";
+import { pptDefinition, contractDefinition, imageDefinition, digitalEmployeeDefinition } from "./index.js";
 
 describe("agent definitions", () => {
   it("ppt is a real office agent with ask_user + generate_ppt", () => {
@@ -25,5 +25,13 @@ describe("agent definitions", () => {
 
   it("existing agents carry a category", () => {
     expect(imageDefinition.category).toBe("创作");
+  });
+
+  it("digital employee exposes only controlled customer-profile tools", () => {
+    expect(digitalEmployeeDefinition.type).toBe("digital_employee");
+    expect(digitalEmployeeDefinition.toolNames).toContain("search_customer_profiles");
+    expect(digitalEmployeeDefinition.toolNames).toContain("commit_customer_profile_change");
+    expect(digitalEmployeeDefinition.toolNames).not.toContain("execute_command");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("不得声称已完成");
   });
 });

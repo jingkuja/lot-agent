@@ -348,6 +348,44 @@ export class DB {
     );
   }
 
+  async getConversationCustomerContext(
+    id: string,
+    userId: string
+  ): Promise<{ id: string; displayName: string } | null> {
+    const { rows } = await this.pool.query(
+      `SELECT metadata->'digitalEmployeeCurrentProfile' AS context
+       FROM conversations WHERE id = $1 AND user_id = $2 AND status = 'active'`,
+      [id, userId]
+    );
+    const value = rows[0]?.context;
+    if (!value || typeof value !== "object") return null;
+    const profileId = (value as Record<string, unknown>).id;
+    const displayName = (value as Record<string, unknown>).displayName;
+    return typeof profileId === "string" && typeof displayName === "string"
+      ? { id: profileId, displayName }
+      : null;
+  }
+
+  async setConversationCustomerContext(
+    id: string,
+    userId: string,
+    profile: { id: string; displayName: string } | null
+  ): Promise<boolean> {
+    const { rowCount } = profile
+      ? await this.pool.query(
+          `UPDATE conversations
+           SET metadata = metadata || jsonb_build_object('digitalEmployeeCurrentProfile', $1::jsonb)
+           WHERE id = $2 AND user_id = $3 AND status = 'active'`,
+          [JSON.stringify(profile), id, userId]
+        )
+      : await this.pool.query(
+          `UPDATE conversations SET metadata = metadata - 'digitalEmployeeCurrentProfile'
+           WHERE id = $1 AND user_id = $2 AND status = 'active'`,
+          [id, userId]
+        );
+    return (rowCount ?? 0) > 0;
+  }
+
   async updateConversationTitle(id: string, title: string): Promise<void> {
     await this.pool.query(
       "UPDATE conversations SET title = $1 WHERE id = $2",
@@ -1164,7 +1202,7 @@ export class DB {
 
     let rows = await read();
     if (rows.length === 0) {
-      // 懒播种默认安装集(general/image/video),sort_order 按数组下标。
+      // 懒播种默认安装集(digital employee/image/video),sort_order 按数组下标。
       for (let i = 0; i < DEFAULT_INSTALLED_AGENT_IDS.length; i++) {
         await this.pool.query(
           `INSERT INTO user_agents (user_id, agent_id, sort_order) VALUES ($1, $2, $3)

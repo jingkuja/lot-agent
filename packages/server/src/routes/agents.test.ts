@@ -5,6 +5,7 @@ import { createAgentRoutes } from "./agents.js";
 function fakeService(installed: Map<string, number>) {
   const defs = [
     { id: "general", name: "通用助手", type: "general", description: "", toolNames: [], defaultModelId: "m" },
+    { id: "digital_employee", name: "数字员工", type: "digital_employee", description: "", toolNames: [], defaultModelId: "m" },
     { id: "image", name: "图片生成", type: "image", description: "", toolNames: [], defaultModelId: "m" },
     { id: "contract", name: "合同审核", type: "contract", description: "", toolNames: [], defaultModelId: "m" },
     { id: "copywriting", name: "文案创作", type: "copywriting", description: "", toolNames: [], defaultModelId: "m", hidden: true },
@@ -38,6 +39,7 @@ describe("agents routes", () => {
     const body = await res.json();
     const byId = Object.fromEntries(body.map((a: any) => [a.id, a]));
     expect(byId.general.installed).toBe(true);
+    expect(byId.digital_employee).toMatchObject({ installed: true, sortOrder: -1 });
     expect(byId.image).toMatchObject({ installed: true, sortOrder: 1 });
     expect(byId.contract).toMatchObject({ installed: false, sortOrder: null });
   });
@@ -72,6 +74,11 @@ describe("agents routes", () => {
 
   it("DELETE general -> 400", async () => {
     const res = await app(fakeService(new Map())).request("/agents/general/install", { method: "DELETE" });
+    expect(res.status).toBe(400);
+  });
+
+  it("DELETE digital employee -> 400", async () => {
+    const res = await app(fakeService(new Map())).request("/agents/digital_employee/install", { method: "DELETE" });
     expect(res.status).toBe(400);
   });
 
