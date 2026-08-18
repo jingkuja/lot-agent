@@ -41,6 +41,7 @@ import type {
   UpdateProductStateInput,
 } from "./types.js";
 import { parseCaptureInput } from "./validators.js";
+import { MarketingMaterialsService } from "./marketing-service.js";
 
 const CAPTURE_DRAFT_TTL_MS = 24 * 60 * 60 * 1_000;
 const CAPTURE_PROMPT_VERSION = "customer-capture/v1";
@@ -97,6 +98,7 @@ export interface CohortSummaryGenerator {
  */
 export class DigitalEmployeeService {
   readonly repository: DigitalEmployeeRepository;
+  readonly marketingMaterials: MarketingMaterialsService;
   private readonly secretBox: SecretBox;
 
   constructor(
@@ -105,6 +107,7 @@ export class DigitalEmployeeService {
     private readonly cohortSummaryGenerator?: CohortSummaryGenerator
   ) {
     this.repository = new DigitalEmployeeRepository(db.pool);
+    this.marketingMaterials = new MarketingMaterialsService(db);
     this.secretBox = secretBox;
   }
 

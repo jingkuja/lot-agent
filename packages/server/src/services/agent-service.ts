@@ -67,6 +67,7 @@ import { DigitalEmployeeService } from "../digital-employee/service.js";
 import { createCustomerCaptureTools } from "../digital-employee/tools/customer-capture-tools.js";
 import { createCustomerProfileTools } from "../digital-employee/tools/customer-profile-tools.js";
 import { cohortLlmMetrics } from "../digital-employee/profile/cohort-summary.js";
+import { createMarketingMaterialTools } from "../digital-employee/tools/marketing-material-tools.js";
 
 /**
  * Builtin tools that touch the host filesystem / shell. On the deployed
@@ -362,6 +363,9 @@ export class AgentService {
       this.toolRegistry.register(tool);
     }
     for (const tool of createCustomerProfileTools(this.digitalEmployee)) {
+      this.toolRegistry.register(tool);
+    }
+    for (const tool of createMarketingMaterialTools(this.digitalEmployee.marketingMaterials)) {
       this.toolRegistry.register(tool);
     }
 

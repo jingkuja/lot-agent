@@ -18,6 +18,7 @@ import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveLlmSelection } 
 import { digitalEmployeeConversations as filterDigitalEmployeeConversations, withoutDigitalEmployee } from "../lib/product-agent-scope.js";
 import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
 import { DigitalEmployeeHome } from "../modules/digital-employee/DigitalEmployeeHome.js";
+import { MarketingMaterialsHome } from "../modules/digital-employee/marketing/MarketingMaterialsHome.js";
 import {
   DigitalEmployeeSidebar,
   type DigitalEmployeeFeature,
@@ -31,6 +32,7 @@ interface WorkspaceProps {
   onNavigateDigitalFeature?: (feature: DigitalEmployeeFeature) => void;
   onNavigateAssistant?: () => void;
   mode?: "assistant" | "digitalEmployee";
+  digitalEmployeeFeature?: DigitalEmployeeFeature;
   requestedConversationId?: string | null;
   onRequestedConversationHandled?: () => void;
 }
@@ -43,6 +45,7 @@ export function Workspace({
   onNavigateDigitalFeature,
   onNavigateAssistant,
   mode = "assistant",
+  digitalEmployeeFeature = "customer-profile",
   requestedConversationId,
   onRequestedConversationHandled,
 }: WorkspaceProps) {
@@ -403,11 +406,11 @@ export function Workspace({
         />
         {isDigitalEmployeeMode ? (
           <DigitalEmployeeSidebar
-            activeFeature="customer-profile"
+            activeFeature={digitalEmployeeFeature}
             conversations={digitalEmployeeConversations}
             activeConversationId={activeId}
             onOpenFeature={(feature) => {
-              if (feature === "customer-profile") handleStartNewChat("digital_employee");
+              if (feature === digitalEmployeeFeature) handleStartNewChat("digital_employee");
               else onNavigateDigitalFeature?.(feature);
             }}
             onOpenConversation={handleSelect}
@@ -475,6 +478,7 @@ export function Workspace({
                 )}
                 {isDigitalEmployeeMode && onNavigateDigitalEmployee && (
                   <DigitalEmployeeActions
+                    feature={digitalEmployeeFeature}
                     onOpenProfiles={onNavigateDigitalEmployee}
                     currentCustomerName={currentCustomerName}
                     onClearCurrentCustomer={activeId ? () => {
@@ -491,7 +495,10 @@ export function Workspace({
             knowledgeBases={conversationKnowledgeBases}
             onKnowledgeBasesChange={handleKnowledgeBasesChange}
             emptyDashboard={isDigitalEmployeeMode && onNavigateDigitalEmployee ? (
-              <DigitalEmployeeHome
+              digitalEmployeeFeature === "marketing-materials" ? <MarketingMaterialsHome
+                onOpenManagement={onNavigateDigitalEmployee}
+                onPrompt={(prompt) => void doSend(prompt)}
+              /> : <DigitalEmployeeHome
                 onOpenProfiles={onNavigateDigitalEmployee}
                 onOpenProfile={onNavigateDigitalProfile ?? onNavigateDigitalEmployee}
                 onPrompt={(prompt) => void doSend(prompt)}

@@ -22,7 +22,10 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
   const [pathname, setPathname] = useState(currentPath);
   const [requestedDigitalConversationId, setRequestedDigitalConversationId] = useState<string | null>(null);
   const isDigitalEmployee = pathname.startsWith("/digital-employee");
-  const isDigitalEmployeeChat = pathname === "/digital-employee" || pathname === "/digital-employee/customer-profile";
+  const isDigitalEmployeeChat = pathname === "/digital-employee" || pathname === "/digital-employee/customer-profile" || pathname === "/digital-employee/marketing-materials";
+  const digitalEmployeeFeature = pathname === "/digital-employee" || pathname.startsWith("/digital-employee/marketing-materials")
+    ? "marketing-materials"
+    : "customer-profile";
 
   useEffect(() => {
     const onPopState = () => setPathname(currentPath());
@@ -41,16 +44,17 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
         <Workspace
           user={user}
           onLogout={onLogout}
-          onNavigateDigitalEmployee={() => navigate("/digital-employee/customer-profile")}
+          onNavigateDigitalEmployee={() => navigate("/digital-employee/marketing-materials")}
         />
       </div>
       <div className={isDigitalEmployeeChat ? "product-shell-view" : "product-shell-view is-hidden"} aria-hidden={!isDigitalEmployeeChat || undefined}>
         <Workspace
           mode="digitalEmployee"
+          digitalEmployeeFeature={digitalEmployeeFeature}
           user={user}
           onLogout={onLogout}
           onNavigateAssistant={() => navigate("/assistant")}
-          onNavigateDigitalEmployee={() => navigate("/digital-employee/profiles")}
+          onNavigateDigitalEmployee={() => navigate(digitalEmployeeFeature === "marketing-materials" ? "/digital-employee/marketing-materials/manage" : "/digital-employee/profiles")}
           onNavigateDigitalProfile={(id) => navigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
           onNavigateDigitalFeature={(feature) => navigate(`/digital-employee/${feature}`)}
           requestedConversationId={requestedDigitalConversationId}
@@ -66,7 +70,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           onNavigateAssistant={() => navigate("/assistant")}
           onOpenConversation={(id) => {
             setRequestedDigitalConversationId(id);
-            navigate("/digital-employee/customer-profile");
+            navigate(`/digital-employee/${digitalEmployeeFeature}`);
           }}
         />
       )}

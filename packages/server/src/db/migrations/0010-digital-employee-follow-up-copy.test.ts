@@ -13,10 +13,10 @@ function recordingClient() {
 }
 
 describe("digital employee follow-up/copy schema migration", () => {
-  it("is registered after the existing migrations", () => {
+  it("remains registered at version 10", () => {
     expect(digitalEmployeeFollowUpCopy.version).toBe(10);
-    expect(migrations.at(-1)).toBe(digitalEmployeeFollowUpCopy);
-    expect(migrations.map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(migrations.find((migration) => migration.version === 10)).toBe(digitalEmployeeFollowUpCopy);
+    expect(migrations.map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
   it("creates the complete follow-up and copy schema with integrity guards", async () => {

@@ -10,12 +10,83 @@ import {
   parseVersion,
   parseEntityId,
 } from "./validators.js";
+import {
+  parseMarketingBrandAssets,
+  parseMarketingProduct,
+  parseMarketingProductList,
+  parseMarketingProductUpdate,
+} from "./marketing-validators.js";
 
 type Variables = { userId: string };
 
 /** Browser-facing, authenticated customer-profile API. */
 export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Hono<{ Variables: Variables }> {
   const app = new Hono<{ Variables: Variables }>();
+
+  app.get("/marketing/products", async (c) => {
+    try {
+      return c.json(await service.marketingMaterials.listProducts(c.get("userId"), parseMarketingProductList(c.req.query())));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.post("/marketing/products", async (c) => {
+    try {
+      return c.json(await service.marketingMaterials.createProduct(c.get("userId"), parseMarketingProduct(await body(c))), 201);
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.get("/marketing/products/:id", async (c) => {
+    try {
+      return c.json(await service.marketingMaterials.getProduct(c.get("userId"), parseEntityId(c.req.param("id"), "productId")));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.patch("/marketing/products/:id", async (c) => {
+    try {
+      return c.json(await service.marketingMaterials.updateProduct(
+        c.get("userId"),
+        parseEntityId(c.req.param("id"), "productId"),
+        parseMarketingProductUpdate(await body(c))
+      ));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.delete("/marketing/products/:id", async (c) => {
+    try {
+      const payload = await body(c);
+      return c.json(await service.marketingMaterials.archiveProduct(
+        c.get("userId"),
+        parseEntityId(c.req.param("id"), "productId"),
+        parseVersion(payload.version)
+      ));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.get("/marketing/brand-assets", async (c) => {
+    try {
+      return c.json(await service.marketingMaterials.getBrandAssets(c.get("userId")));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.put("/marketing/brand-assets", async (c) => {
+    try {
+      return c.json(await service.marketingMaterials.saveBrandAssets(c.get("userId"), parseMarketingBrandAssets(await body(c))));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
 
   app.delete("/conversation-context/:conversationId", async (c) => {
     try {

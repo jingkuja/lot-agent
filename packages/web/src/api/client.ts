@@ -3,6 +3,10 @@ import type {
   CustomerObservation,
   CustomerProductState,
   CustomerProfile,
+  MarketingBrandAssets,
+  MarketingProduct,
+  MarketingProductInput,
+  MarketingProductListResponse,
   CustomerStateChange,
   DigitalEmployeeOverview,
   ManualObservationInput,
@@ -529,4 +533,40 @@ export const api = {
       `/digital-employee/conversation-context/${encodeURIComponent(conversationId)}`,
       { method: "DELETE" }
     ),
+
+  listMarketingProducts: (filters: { q?: string; status?: string; page?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    const suffix = query.toString();
+    return request<MarketingProductListResponse>(`/digital-employee/marketing/products${suffix ? `?${suffix}` : ""}`);
+  },
+
+  createMarketingProduct: (input: MarketingProductInput) =>
+    request<MarketingProduct>("/digital-employee/marketing/products", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateMarketingProduct: (id: string, input: Partial<MarketingProductInput> & { version: number }) =>
+    request<MarketingProduct>(`/digital-employee/marketing/products/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+
+  archiveMarketingProduct: (id: string, version: number) =>
+    request<MarketingProduct>(`/digital-employee/marketing/products/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ version }),
+    }),
+
+  getMarketingBrandAssets: () =>
+    request<MarketingBrandAssets | null>("/digital-employee/marketing/brand-assets"),
+
+  saveMarketingBrandAssets: (input: Partial<Pick<MarketingBrandAssets, "tone" | "visualAssets" | "standardCallsToAction">> & { version?: number }) =>
+    request<MarketingBrandAssets>("/digital-employee/marketing/brand-assets", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
 };

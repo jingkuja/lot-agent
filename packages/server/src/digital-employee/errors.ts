@@ -1,4 +1,4 @@
-/** Stable, deliberately non-sensitive errors returned by the customer-profile API. */
+/** Stable, deliberately non-sensitive errors returned by the digital-employee API. */
 export class DigitalEmployeeError extends Error {
   constructor(
     message: string,
@@ -33,5 +33,5 @@ export function apiError(error: unknown): { status: number; body: { error: strin
     return { status: error.status, body: { error: error.message, code: error.code } };
   }
   console.error("digital-employee request failed", error);
-  return { status: 500, body: { error: "客户画像服务暂时不可用", code: "internal_error" } };
+  return { status: 500, body: { error: "数字员工资料服务暂时不可用", code: "internal_error" } };
 }

@@ -27,10 +27,12 @@ describe("agent definitions", () => {
     expect(imageDefinition.category).toBe("创作");
   });
 
-  it("digital employee exposes only controlled customer-profile tools", () => {
+  it("digital employee exposes only controlled customer and marketing tools", () => {
     expect(digitalEmployeeDefinition.type).toBe("digital_employee");
     expect(digitalEmployeeDefinition.toolNames).toContain("search_customer_profiles");
     expect(digitalEmployeeDefinition.toolNames).toContain("commit_customer_profile_change");
+    expect(digitalEmployeeDefinition.toolNames).toContain("search_marketing_materials");
+    expect(digitalEmployeeDefinition.toolNames).toContain("update_marketing_brand_assets");
     expect(digitalEmployeeDefinition.toolNames).not.toContain("execute_command");
     expect(digitalEmployeeDefinition.systemPrompt).toContain("不得声称已完成");
   });

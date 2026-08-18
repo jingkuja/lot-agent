@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Conversation } from "../../api/client.js";
 
-export type DigitalEmployeeFeature = "customer-profile" | "acquisition" | "copy";
+export type DigitalEmployeeFeature = "marketing-materials" | "customer-profile" | "acquisition" | "copy";
 
 interface DigitalEmployeeSidebarProps {
   activeFeature: DigitalEmployeeFeature;
@@ -30,6 +30,7 @@ const DIGITAL_EMPLOYEE_GROUPS: Array<{
     id: "marketing",
     label: "营销 Agent",
     features: [
+      { id: "marketing-materials", label: "营销资料", description: "产品与品牌事实库", icon: "◆" },
       { id: "customer-profile", label: "客户画像", description: "记录客户事实与动态画像", icon: "◎" },
       { id: "acquisition", label: "获客宝", description: "线索发现与跟进建议", icon: "◇" },
       { id: "copy", label: "营销文案", description: "基于画像生成营销内容", icon: "✎" },

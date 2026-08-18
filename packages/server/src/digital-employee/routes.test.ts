@@ -61,4 +61,36 @@ describe("digital employee profile routes", () => {
     expect(response.status).toBe(200);
     expect(service.clearCurrentProfile).toHaveBeenCalledWith("u1", conversationId);
   });
+
+  it("serves user-scoped marketing products", async () => {
+    const listProducts = vi.fn(async () => ({ items: [], page: 1, limit: 20, total: 0 }));
+    const service = { marketingMaterials: { listProducts } };
+    const response = await app(service).request("/digital-employee/marketing/products?q=%E4%BC%9A%E5%91%98");
+    expect(response.status).toBe(200);
+    expect(listProducts).toHaveBeenCalledWith("u1", expect.objectContaining({ query: "会员" }));
+  });
+
+  it("validates and saves brand assets for the authenticated user", async () => {
+    const saveBrandAssets = vi.fn(async (_userId, input) => ({ id: "b1", ...input, version: 1 }));
+    const service = { marketingMaterials: { saveBrandAssets } };
+    const response = await app(service).request("/digital-employee/marketing/brand-assets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tone: ["专业克制"], standardCallsToAction: ["预约演示"] }),
+    });
+    expect(response.status).toBe(200);
+    expect(saveBrandAssets).toHaveBeenCalledWith("u1", expect.objectContaining({ tone: ["专业克制"] }));
+  });
+
+  it("rejects executable visual-asset links before persistence", async () => {
+    const saveBrandAssets = vi.fn();
+    const service = { marketingMaterials: { saveBrandAssets } };
+    const response = await app(service).request("/digital-employee/marketing/brand-assets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visualAssets: [{ name: "品牌图", url: "javascript:alert(1)" }] }),
+    });
+    expect(response.status).toBe(400);
+    expect(saveBrandAssets).not.toHaveBeenCalled();
+  });
 });
