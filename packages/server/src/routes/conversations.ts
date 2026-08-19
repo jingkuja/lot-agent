@@ -304,6 +304,19 @@ export function createConversationRoutes(service: AgentService): Hono {
           );
         };
 
+        // `stream_end` is the client's permission to start the next turn. Keep
+        // that signal fenced behind the database lease release; otherwise the
+        // client can immediately submit an ask_user/propose_outline answer while
+        // this request still owns the conversation, and the new request gets a
+        // spurious 409. Title generation is only best-effort tail work and does
+        // not need to hold the message-writing lease.
+        let leaseReleased = false;
+        const releaseLease = async () => {
+          if (leaseReleased) return;
+          await service.db.releaseConversationRun(id, runId);
+          leaseReleased = true;
+        };
+
         // Open the stream immediately with an SSE comment so the client (and
         // any reverse proxy) flushes the connection before the first token,
         // rather than holding everything until the response completes.
@@ -321,10 +334,10 @@ export function createConversationRoutes(service: AgentService): Hono {
           )) {
             send(agentEventToSse(event));
           }
-          // End the turn BEFORE title generation: the client unlocks the
-          // conversation (input box, ask_user cards) on stream_end, and the
-          // title is a whole extra LLM round-trip — holding stream_end for it
-          // left the UI locked for seconds after the agent already finished.
+          // Release the server-side turn first, then tell the client it may
+          // unlock. The title is a whole extra LLM round-trip and deliberately
+          // runs after both sides agree that the conversation turn has ended.
+          await releaseLease();
           send({ type: "stream_end" });
           // Summarize + persist the conversation title (first message only) and
           // push it to the client so the sidebar updates live, no refresh. The
@@ -347,13 +360,12 @@ export function createConversationRoutes(service: AgentService): Hono {
             message: error instanceof Error ? error.message : String(error),
           });
         } finally {
-          // Covers every exit from the try above: normal completion, the
-          // catch branch, and a client disconnect (the AbortSignal unwinds
-          // `service.streamAgentResponse`'s for-await, which propagates here
-          // the same way a thrown error would). This is the ONLY release call
-          // for this route — nothing above can return once the lease is claimed.
+          // Covers exits before the normal pre-stream_end release: an agent
+          // error, a failed release attempt, or a client disconnect (the
+          // AbortSignal unwinds `service.streamAgentResponse`'s for-await).
+          // `releaseLease` is idempotent, so the normal path is a no-op here.
           try {
-            await service.db.releaseConversationRun(id, runId);
+            await releaseLease();
           } catch (err) {
             console.warn("[run-lease] release failed:", err);
           }

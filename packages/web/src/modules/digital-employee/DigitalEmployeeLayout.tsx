@@ -74,8 +74,8 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
               onBackToConversation={() => onNavigate("/digital-employee/customer-profile")}
             />)}
           {view === "marketing-materials" && <MarketingMaterialsPage onBackToConversation={() => onNavigate("/digital-employee/marketing-materials")} />}
-          {view === "acquisition" && <ComingSoon title="获客宝" description="线索发现、客户分层与跟进建议将在下一阶段接入；客户画像继续作为事实来源。" onBack={goProfiles} />}
-          {view === "copy" && <ComingSoon title="营销文案" description="画像摘要与脱敏上下文已准备完成；文案项目和版本工作台将在下一阶段接入。" onBack={goProfiles} />}
+          {view === "acquisition" && <ComingSoon title="商机参谋" description="发现有依据、有时效的商机，给出可执行的跟进建议；客户画像继续作为事实来源。" onBack={goProfiles} />}
+          {view === "copy" && <ComingSoon title="获客宝" description="基于客户画像与营销目标生成可直接使用的营销内容；内容项目和版本工作台将在下一阶段接入。" onBack={goProfiles} />}
         </div>
       </main>
     </div>

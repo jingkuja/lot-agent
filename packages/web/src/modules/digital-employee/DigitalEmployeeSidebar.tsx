@@ -32,8 +32,8 @@ const DIGITAL_EMPLOYEE_GROUPS: Array<{
     features: [
       { id: "marketing-materials", label: "营销资料", description: "产品与品牌事实库", icon: "◆" },
       { id: "customer-profile", label: "客户画像", description: "记录客户事实与动态画像", icon: "◎" },
-      { id: "acquisition", label: "获客宝", description: "线索发现与跟进建议", icon: "◇" },
-      { id: "copy", label: "营销文案", description: "基于画像生成营销内容", icon: "✎" },
+      { id: "acquisition", label: "商机参谋", description: "发现商机，推动跟进", icon: "◇" },
+      { id: "copy", label: "获客宝", description: "基于画像生成营销内容", icon: "✎" },
     ],
   },
 ];

@@ -16,6 +16,7 @@ function fakeService(
     claimResult?: boolean;
     deleteResult?: boolean;
     streamThrows?: Error;
+    generateTitle?: () => Promise<string | null>;
   } = {}
 ) {
   const owner = opts.conversationOwner === undefined ? "u1" : opts.conversationOwner;
@@ -36,7 +37,7 @@ function fakeService(
       yield { type: "text", content: "hi" };
       yield { type: "done", totalTokens: 1, inputTokens: 1, outputTokens: 0, cachedPromptTokens: 0 };
     }),
-    generateTitle: vi.fn(async () => null),
+    generateTitle: vi.fn(opts.generateTitle ?? (async () => null)),
   } as any;
 }
 
@@ -80,6 +81,51 @@ describe("POST /conversations/:id/messages — run lease", () => {
     expect(claimConvId).toBe("c1");
     expect(releaseConvId).toBe("c1");
     expect(releaseRunId).toBe(claimRunId);
+  });
+
+  it("releases the lease before title tail work so stream_end really permits the next turn", async () => {
+    let activeRunId: string | null = null;
+    let finishFirstTitle!: () => void;
+    const firstTitlePending = new Promise<void>((resolve) => {
+      finishFirstTitle = resolve;
+    });
+    let titleCalls = 0;
+    const service = fakeService({
+      generateTitle: async () => {
+        titleCalls += 1;
+        if (titleCalls === 1) await firstTitlePending;
+        return null;
+      },
+    });
+    service.db.claimConversationRun.mockImplementation(async (_id: string, runId: string) => {
+      if (activeRunId) return false;
+      activeRunId = runId;
+      return true;
+    });
+    service.db.releaseConversationRun.mockImplementation(async (_id: string, runId: string) => {
+      if (activeRunId === runId) activeRunId = null;
+    });
+
+    const firstResponse = await sendMessage(app(service), "first");
+    const firstReader = firstResponse.body!.getReader();
+    const decoder = new TextDecoder();
+    let firstBody = "";
+    while (!firstBody.includes('"type":"stream_end"')) {
+      const chunk = await firstReader.read();
+      expect(chunk.done).toBe(false);
+      firstBody += decoder.decode(chunk.value, { stream: true });
+    }
+
+    // The first request is deliberately still blocked in generateTitle. Once
+    // stream_end is visible, a follow-up (especially an interactive tool card
+    // answer) must nevertheless be able to claim and run immediately.
+    const secondResponse = await sendMessage(app(service), "second");
+    expect(secondResponse.status).toBe(200);
+    expect(await secondResponse.text()).toContain('"type":"stream_end"');
+
+    finishFirstTitle();
+    await firstReader.read();
+    expect(service.streamAgentResponse).toHaveBeenCalledTimes(2);
   });
 
   it("409s and never starts the stream when the lease is already held", async () => {
