@@ -89,10 +89,12 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile }: Props
           <h1>商机参谋</h1>
           <p>盯住每个客户：今天该联系谁、为什么、下一步做什么。</p>
         </div>
-        <button className="de-primary-button" disabled={discovering} onClick={() => void discover()}>
-          {discovering ? `发现中 ${discoverProgress}%` : "✦ 发现新商机"}
-        </button>
-        <button className="de-secondary-button" onClick={() => { setActive(null); setDialog("create"); }}>手动添加行动</button>
+        <div className="de-opportunity-header-actions">
+          <button className="de-primary-button" disabled={discovering} onClick={() => void discover()}>
+            {discovering ? `发现中 ${discoverProgress}%` : "✦ 发现新商机"}
+          </button>
+          <button className="de-secondary-button" onClick={() => { setActive(null); setDialog("create"); }}>手动添加行动</button>
+        </div>
       </header>
 
       {data && <Summary summary={data.summary} />}
@@ -173,12 +175,19 @@ function OpportunityCard({ item, onOpenProfile, onAction, onExecute, onCancel }:
   onAction: (item: OpportunityItem, action: "accept" | "snooze" | "dismiss" | "reschedule" | "result") => void;
   onExecute: () => void; onCancel: () => void;
 }) {
+  const [talkOpen, setTalkOpen] = useState(false);
   const blocked = item.riskFlags.some((risk) => risk.blocking);
-  return <article className={`de-opportunity-card priority-${item.priority} ${item.overdue ? "is-overdue" : ""} ${blocked ? "is-blocked" : ""}`}>
+  return <article className={`de-opportunity-card priority-${item.priority} ${item.overdue ? "is-overdue" : ""} ${blocked ? "is-blocked" : ""} ${talkOpen ? "has-talk-track" : ""}`}>
     <header>
-      <button className="de-opportunity-customer" onClick={() => onOpenProfile(item.profileId)}><span>{item.customerName.slice(0, 1)}</span><strong>{item.customerName}<small>{item.organization || RELATIONSHIP_LABELS[item.relationshipStage]}</small></strong></button>
+      <div className="de-opportunity-identity">
+        <button className="de-opportunity-customer" onClick={() => onOpenProfile(item.profileId)}><span>{item.customerName.slice(0, 1)}</span><strong>{item.customerName}<small>{item.organization || RELATIONSHIP_LABELS[item.relationshipStage]}</small></strong></button>
+        <button type="button" className={`de-talk-track-toggle${talkOpen ? " is-open" : ""}`} aria-expanded={talkOpen} onClick={() => setTalkOpen((value) => !value)}>
+          <span aria-hidden="true">✦</span>联系话术
+        </button>
+      </div>
       <div className="de-opportunity-badges"><i className={`source-${item.source}`}>{item.source === "manual" ? "确定提醒" : "AI 商机"}</i><span>{OPPORTUNITY_TYPE_LABELS[item.opportunityType]}</span><b className={`priority-${item.priority}`}>{PRIORITY_LABELS[item.priority]}</b><em>{READINESS_LABELS[item.readiness]}</em></div>
     </header>
+    <TalkTrackAssistant item={item} open={talkOpen} onClose={() => setTalkOpen(false)} />
     <div className="de-opportunity-body">
       <div className="de-opportunity-main">
         <h2>{item.title}</h2><p>{item.objective}</p>
@@ -193,7 +202,6 @@ function OpportunityCard({ item, onOpenProfile, onAction, onExecute, onCancel }:
       {item.view === "in_progress" && <><button className="de-primary-button" onClick={onExecute}>标记已执行</button><button className="de-secondary-button" onClick={() => onAction(item, "reschedule")}>改时间</button><button className="de-quiet-button" onClick={onCancel}>取消</button></>}
       {item.view === "awaiting_result" && <button className="de-primary-button" onClick={() => onAction(item, "result")}>回填结果</button>}
       {item.view === "completed" && <><span className="de-opportunity-outcome">{item.closeReason === "overdue_closed" ? "已逾期关闭" : OUTCOME_LABELS[item.outcome ?? ""] || "已取消"}</span>{item.customerQuote && <q>{item.customerQuote}</q>}</>}
-      <TalkTrackAssistant item={item} />
       <button className="de-opportunity-profile-link" onClick={() => onOpenProfile(item.profileId)}>查看画像与来源 →</button>
     </footer>
   </article>;
@@ -205,8 +213,7 @@ const TALK_TRACK_PRESETS: Array<{ intent: TalkTrackIntent; label: string; prompt
   { intent: "sales", label: "产品推介", prompt: "请结合客户需求和已核实的产品资料，生成一段有针对性的产品推介话术。" },
 ];
 
-function TalkTrackAssistant({ item }: { item: OpportunityItem }) {
-  const [open, setOpen] = useState(false);
+function TalkTrackAssistant({ item, open, onClose }: { item: OpportunityItem; open: boolean; onClose: () => void }) {
   const [intent, setIntent] = useState<TalkTrackIntent>("follow_up");
   const [messages, setMessages] = useState<TalkTrackMessage[]>([]);
   const [input, setInput] = useState("");
@@ -228,12 +235,9 @@ function TalkTrackAssistant({ item }: { item: OpportunityItem }) {
     } finally { setLoading(false); }
   };
 
-  return <div className={`de-talk-track ${open ? "is-open" : ""}`}>
-    <button type="button" className="de-secondary-button de-talk-track-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-      ✦ 联系话术
-    </button>
-    {open && <section className="de-talk-track-panel" aria-label={`${item.customerName}联系话术助手`}>
-      <header><div><strong>单客户话术助手</strong><span>已带入 {item.customerName} 的画像、当前事项{item.productName ? `和${item.productName}资料` : ""}</span></div><button type="button" onClick={() => setOpen(false)} aria-label="收起话术助手">×</button></header>
+  if (!open) return null;
+  return <section className="de-talk-track-panel" aria-label={`${item.customerName}联系话术助手`}>
+      <header><div><strong>单客户话术助手</strong><span>已带入 {item.customerName} 的画像、当前事项{item.productName ? `和${item.productName}资料` : ""}</span></div><button type="button" onClick={onClose} aria-label="收起话术助手">×</button></header>
       <div className="de-talk-track-presets">
         {TALK_TRACK_PRESETS.map((preset) => <button type="button" key={preset.intent} disabled={loading} className={intent === preset.intent ? "active" : ""} onClick={() => void send(preset.prompt, preset.intent)}>{preset.label}</button>)}
       </div>
@@ -253,8 +257,7 @@ function TalkTrackAssistant({ item }: { item: OpportunityItem }) {
         <button type="submit" className="de-primary-button" disabled={loading || !input.trim()}>{loading ? "生成中" : "发送"}</button>
       </form>
       <small>AI 话术仅供参考，发送前请核对客户事实、产品承诺和价格权益。</small>
-    </section>}
-  </div>;
+    </section>;
 }
 
 function Empty({ view, hasProfiles, hasFilters, onCreateProfile, onDiscover }: { view: OpportunityView; hasProfiles: boolean; hasFilters: boolean; onCreateProfile: () => void; onDiscover: () => void }) {
