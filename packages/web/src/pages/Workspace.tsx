@@ -501,6 +501,7 @@ export function Workspace({
               /> : <DigitalEmployeeHome
                 onOpenProfiles={onNavigateDigitalEmployee}
                 onOpenProfile={onNavigateDigitalProfile ?? onNavigateDigitalEmployee}
+                onOpenOpportunities={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("acquisition") : undefined}
                 onPrompt={(prompt) => void doSend(prompt)}
               />
             ) : undefined}

@@ -263,10 +263,13 @@ export interface MarketingProductListResponse {
 }
 
 export type OpportunityType = "prospect_progress" | "silent_reengage" | "event_invitation" | "renewal" | "risk_recovery" |
-  "new_lead_contact" | "trial_conversion" | "repurchase" | "referral" | "cohort_marketing";
-export type OpportunityView = "pending" | "in_progress" | "awaiting_result" | "completed";
+  "new_lead_contact" | "trial_conversion" | "repurchase" | "referral";
+export type StoredOpportunityType = OpportunityType | "cohort_marketing";
+export type OpportunityView = "today" | "pending" | "in_progress" | "awaiting_result" | "completed";
 export type OpportunityReadiness = "actionable" | "tryable" | "needs_info" | "paused";
 export type OpportunityPriority = "low" | "normal" | "high";
+export type TalkTrackIntent = "maintenance" | "follow_up" | "sales";
+export interface TalkTrackMessage { role: "user" | "assistant"; content: string }
 
 export interface OpportunityEvidence { fact: string; occurredAt: string; sourceType: string; sourceId?: string }
 export interface OpportunityRisk { code: string; message: string; blocking: boolean }
@@ -280,7 +283,8 @@ export interface OpportunityItem {
   customerName: string;
   organization: string | null;
   relationshipStage: RelationshipStage;
-  opportunityType: OpportunityType;
+  opportunityType: StoredOpportunityType;
+  source: "manual" | "ai";
   title: string;
   objective: string;
   followUpMethod: string | null;
@@ -323,10 +327,10 @@ export interface OpportunityListResponse {
   settings: OpportunitySettings;
 }
 
-export const OPPORTUNITY_TYPE_LABELS: Record<OpportunityType, string> = {
+export const OPPORTUNITY_TYPE_LABELS: Record<StoredOpportunityType, string> = {
   prospect_progress: "潜客推进", silent_reengage: "沉默唤醒", event_invitation: "活动邀约", renewal: "续费经营",
   risk_recovery: "风险挽回", new_lead_contact: "新线索首触达", trial_conversion: "试用转化", repurchase: "复购增购",
-  referral: "转介绍", cohort_marketing: "客群营销",
+  referral: "转介绍", cohort_marketing: "客群营销（历史）",
 };
 export const READINESS_LABELS: Record<OpportunityReadiness, string> = {
   actionable: "可行动", tryable: "可尝试", needs_info: "需补信息", paused: "暂停营销",

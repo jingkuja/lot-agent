@@ -63,7 +63,7 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
         <div>
           <p className="de-eyebrow">数字员工 / 营销资料</p>
           <h1>产品与品牌事实库</h1>
-          <p>统一维护产品能说什么、品牌怎么说；数字员工会在对话中调用同一份结构化资料。</p>
+          <p>统一维护产品能说什么、品牌怎么说；商机参谋的单客跟进与获客宝的客群营销共同引用这份事实。</p>
         </div>
         <button className="de-primary-button" onClick={() => setEditingProduct("new")}>＋ 新建产品</button>
       </header>

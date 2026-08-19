@@ -113,6 +113,19 @@ describe("digital employee profile routes", () => {
     expect(decide).not.toHaveBeenCalled();
   });
 
+  it("generates a personal talk track for one customer item", async () => {
+    const generateTalkTrack = vi.fn(async () => ({ reply: "您好，想跟您确认一下合同反馈。", modelId: "m1" }));
+    const service = { opportunities: { generateTalkTrack } };
+    const response = await app(service).request("/digital-employee/opportunities/00000000-0000-0000-0000-000000000011/talk-track", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ intent: "follow_up", message: "生成微信跟进话术", history: [] }),
+    });
+    expect(response.status).toBe(200);
+    expect(generateTalkTrack).toHaveBeenCalledWith("u1", "00000000-0000-0000-0000-000000000011", {
+      intent: "follow_up", message: "生成微信跟进话术", history: [],
+    });
+  });
+
   it("validates and saves daily opportunity discovery settings", async () => {
     const saveSettings = vi.fn(async (_userId, input) => ({ ...input, nextRunAt: null }));
     const service = { opportunities: { saveSettings } };

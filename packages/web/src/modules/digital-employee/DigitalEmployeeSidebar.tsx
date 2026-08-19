@@ -30,10 +30,10 @@ const DIGITAL_EMPLOYEE_GROUPS: Array<{
     id: "marketing",
     label: "营销 Agent",
     features: [
-      { id: "marketing-materials", label: "营销资料", description: "产品与品牌事实库", icon: "◆" },
-      { id: "customer-profile", label: "客户画像", description: "记录客户事实与动态画像", icon: "◎" },
-      { id: "acquisition", label: "商机参谋", description: "发现商机，推动跟进", icon: "◇" },
-      { id: "copy", label: "获客宝", description: "基于画像生成营销内容", icon: "✎" },
+      { id: "marketing-materials", label: "营销资料", description: "单客与客群共用事实库", icon: "◆" },
+      { id: "customer-profile", label: "客户画像", description: "记录客户事实与动态", icon: "◎" },
+      { id: "acquisition", label: "商机参谋", description: "单客提醒与跟进", icon: "◇" },
+      { id: "copy", label: "获客宝", description: "客群洞察与营销内容", icon: "✎" },
     ],
   },
 ];

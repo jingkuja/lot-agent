@@ -42,7 +42,7 @@ import type {
 } from "./types.js";
 import { parseCaptureInput } from "./validators.js";
 import { MarketingMaterialsService } from "./marketing-service.js";
-import { OpportunityService } from "./opportunity-service.js";
+import { OpportunityService, type OpportunityTalkTrackGenerator } from "./opportunity-service.js";
 import type { JobQueue } from "@lot-agent/core";
 
 const CAPTURE_DRAFT_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -108,11 +108,12 @@ export class DigitalEmployeeService {
     private readonly db: DB,
     secretBox: SecretBox = createSecretBox(),
     private readonly cohortSummaryGenerator?: CohortSummaryGenerator,
-    opportunityQueue?: JobQueue
+    opportunityQueue?: JobQueue,
+    opportunityTalkTrackGenerator?: OpportunityTalkTrackGenerator
   ) {
     this.repository = new DigitalEmployeeRepository(db.pool);
     this.marketingMaterials = new MarketingMaterialsService(db);
-    this.opportunities = new OpportunityService(db, opportunityQueue);
+    this.opportunities = new OpportunityService(db, opportunityQueue, undefined, opportunityTalkTrackGenerator);
     this.secretBox = secretBox;
   }
 

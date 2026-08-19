@@ -78,9 +78,8 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
           {view === "acquisition" && <OpportunityAdvisorPage
             onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
             onCreateProfile={goProfiles}
-            onOpenCopyProject={(id) => onNavigate(`/digital-employee/copy?project=${encodeURIComponent(id)}`)}
           />}
-          {view === "copy" && <ComingSoon title="获客宝" description="基于客户画像与营销目标生成可直接使用的营销内容；内容项目和版本工作台将在下一阶段接入。" onBack={goProfiles} />}
+          {view === "copy" && <ComingSoon title="获客宝" description="围绕整体客群洞察与产品匹配生成营销文案、海报和视频；客群营销工作台将在下一阶段接入。" onBack={goProfiles} />}
         </div>
       </main>
     </div>

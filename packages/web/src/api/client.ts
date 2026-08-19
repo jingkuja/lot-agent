@@ -17,6 +17,8 @@ import type {
   ProfileUpdateInput,
   OpportunityListResponse,
   OpportunitySettings,
+  TalkTrackIntent,
+  TalkTrackMessage,
   OpportunityView,
 } from "../modules/digital-employee/types.js";
 export type { CatalogModel };
@@ -551,8 +553,13 @@ export const api = {
     }),
 
   decideOpportunity: (id: string, input: Record<string, unknown>) =>
-    request<{ opportunityId: string; status: string; actionId?: string; copyProjectId?: string | null }>(`/digital-employee/opportunities/${encodeURIComponent(id)}`, {
+    request<{ opportunityId: string; status: string; actionId?: string }>(`/digital-employee/opportunities/${encodeURIComponent(id)}`, {
       method: "PATCH", body: JSON.stringify(input),
+    }),
+
+  generateOpportunityTalkTrack: (id: string, input: { intent: TalkTrackIntent; message: string; history: TalkTrackMessage[] }) =>
+    request<{ reply: string; modelId: string }>(`/digital-employee/opportunities/${encodeURIComponent(id)}/talk-track`, {
+      method: "POST", body: JSON.stringify(input),
     }),
 
   updateOpportunityAction: (id: string, input: Record<string, unknown>) =>

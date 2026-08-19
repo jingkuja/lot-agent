@@ -23,6 +23,7 @@ import {
   parseOpportunityDecision,
   parseOpportunityList,
   parseOpportunitySettings,
+  parseTalkTrackRequest,
 } from "./opportunity-validators.js";
 
 type Variables = { userId: string };
@@ -40,6 +41,16 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.post("/opportunities/discover", async (c) => {
     try {
       return c.json(await service.opportunities.requestDiscovery(c.get("userId")), 202);
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/opportunities/:id/talk-track", async (c) => {
+    try {
+      return c.json(await service.opportunities.generateTalkTrack(
+        c.get("userId"),
+        parseEntityId(c.req.param("id"), "itemId"),
+        parseTalkTrackRequest(await body(c))
+      ));
     } catch (error) { return respondError(c, error); }
   });
 

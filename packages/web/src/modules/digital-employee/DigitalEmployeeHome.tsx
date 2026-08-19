@@ -10,16 +10,16 @@ import {
 interface DigitalEmployeeHomeProps {
   onOpenProfiles: () => void;
   onOpenProfile: (profileId: string) => void;
+  onOpenOpportunities?: () => void;
   onPrompt: (prompt: string) => void;
 }
 
 const QUICK_PROMPTS = [
-  { label: "今天该跟进谁", prompt: "请查询已到跟进时间或近期需要关注的客户，并按优先级给我建议。" },
   { label: "查看风险客户", prompt: "请查找当前健康度有风险的客户，概括每位客户的风险点。" },
   { label: "记录客户动态", prompt: "我要记录一条新的客户动态，请引导我补全客户、事件和产品信息。" },
 ];
 
-export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onPrompt }: DigitalEmployeeHomeProps) {
+export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOpportunities, onPrompt }: DigitalEmployeeHomeProps) {
   const [overview, setOverview] = useState<DigitalEmployeeOverview | null>(null);
   const [error, setError] = useState(false);
 
@@ -138,6 +138,9 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onPrompt }:
 
       <div className="de-quick-prompts" aria-label="客户工作快捷操作">
         <span>快捷开始</span>
+        <button type="button" onClick={() => onOpenOpportunities ? onOpenOpportunities() : onPrompt("请查询已到跟进时间或近期需要关注的客户，并按优先级给我建议。") }>
+          进入今日经营<span aria-hidden>↗</span>
+        </button>
         {QUICK_PROMPTS.map((item) => (
           <button key={item.label} type="button" onClick={() => onPrompt(item.prompt)}>
             {item.label}<span aria-hidden>↗</span>

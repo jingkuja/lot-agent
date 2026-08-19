@@ -4628,7 +4628,9 @@ html, body, #root {
 .de-opportunity-customer strong { display: grid; gap: 2px; font-size: 13px; }
 .de-opportunity-customer small { color: var(--text-muted); font-size: 10px; font-weight: 450; }
 .de-opportunity-badges { display: flex; align-items: center; flex-wrap: wrap; justify-content: end; gap: 6px; }
-.de-opportunity-badges span, .de-opportunity-badges b, .de-opportunity-badges em { padding: 4px 8px; border-radius: 999px; font-size: 10px; font-style: normal; font-weight: 650; }
+.de-opportunity-badges span, .de-opportunity-badges b, .de-opportunity-badges em, .de-opportunity-badges i { padding: 4px 8px; border-radius: 999px; font-size: 10px; font-style: normal; font-weight: 650; }
+.de-opportunity-badges i.source-manual { background: color-mix(in srgb, var(--de-warning) 10%, var(--bg-card)); color: var(--de-warning); }
+.de-opportunity-badges i.source-ai { background: color-mix(in srgb, var(--accent) 9%, var(--bg-card)); color: var(--accent); }
 .de-opportunity-badges span { background: var(--bg-tool); color: var(--text-secondary); }
 .de-opportunity-badges b { border: 1px solid var(--border); color: var(--text-muted); }
 .de-opportunity-badges b.priority-high { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); color: var(--accent); }
@@ -4652,6 +4654,35 @@ html, body, #root {
 .de-opportunity-profile-link:hover { color: var(--accent); }
 .de-opportunity-outcome { color: var(--success); font-size: 12px; font-weight: 700; }
 .de-opportunity-card q { color: var(--text-secondary); font-size: 12px; }
+.de-talk-track { display: contents; }
+.de-talk-track-toggle { color: var(--accent); }
+.de-talk-track-panel { display: grid; order: 2; flex: 1 0 100%; gap: 11px; margin-top: 4px; padding: 15px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); border-radius: var(--radius-md); background: var(--bg-card); box-shadow: var(--neu-inset); }
+.de-talk-track-panel > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.de-talk-track-panel > header div { display: grid; gap: 3px; }
+.de-talk-track-panel > header strong { color: var(--text); font-size: 13px; }
+.de-talk-track-panel > header span { color: var(--text-muted); font-size: 10px; }
+.de-talk-track-panel > header button { border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 18px; cursor: pointer; }
+.de-talk-track-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.de-talk-track-presets button { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--overlay-raise); color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.de-talk-track-presets button:hover, .de-talk-track-presets button.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--bg-card)); color: var(--accent); }
+.de-talk-track-presets button:disabled { cursor: wait; opacity: .6; }
+.de-talk-track-empty { display: flex; align-items: center; gap: 9px; min-height: 58px; padding: 10px 12px; border: 1px dashed var(--border-input); border-radius: var(--radius-sm); color: var(--text-muted); }
+.de-talk-track-empty > span { color: var(--accent); font-size: 18px; }
+.de-talk-track-empty p { font-size: 11px; line-height: 1.5; }
+.de-talk-track-messages { display: grid; gap: 9px; max-height: 360px; overflow-y: auto; padding: 3px; }
+.de-talk-track-message { position: relative; display: grid; max-width: min(88%, 720px); gap: 4px; padding: 9px 11px; border-radius: var(--radius-md); }
+.de-talk-track-message > span { color: var(--text-muted); font-size: 9px; font-weight: 700; }
+.de-talk-track-message p { color: var(--text-secondary); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
+.de-talk-track-message.user { justify-self: end; background: color-mix(in srgb, var(--accent) 11%, var(--bg-card)); }
+.de-talk-track-message.assistant { justify-self: start; padding-right: 48px; background: var(--overlay-raise); }
+.de-talk-track-message > button { position: absolute; top: 8px; right: 9px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 10px; cursor: pointer; }
+.de-talk-track-thinking { display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: 11px; }
+.de-talk-track-thinking i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.de-talk-track-error { color: var(--error); font-size: 11px; }
+.de-talk-track-panel form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.de-talk-track-panel textarea { min-height: 58px; resize: vertical; padding: 9px 11px; border: 1px solid var(--border-input); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; line-height: 1.5; outline: none; }
+.de-talk-track-panel textarea:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.de-talk-track-panel > small { color: var(--text-muted); font-size: 9px; }
 .de-opportunity-empty { border: 1px dashed var(--border-input); border-radius: var(--radius-lg); background: var(--bg-card); }
 .de-opportunity-dialog { width: min(700px, 100%); }
 .de-opportunity-dialog .de-modal-head { padding-block: 16px; }
@@ -4694,5 +4725,8 @@ html, body, #root {
   .de-opportunity-body { padding: 14px; }
   .de-opportunity-card > footer .de-primary-button, .de-opportunity-card > footer .de-secondary-button { flex: 1; }
   .de-opportunity-profile-link { width: 100%; margin-left: 0; padding-top: 5px; text-align: left; }
+  .de-talk-track-panel form { grid-template-columns: 1fr; }
+  .de-talk-track-panel form .de-primary-button { width: 100%; }
+  .de-talk-track-message { max-width: 96%; }
   .de-result-options { grid-template-columns: 1fr; }
 }

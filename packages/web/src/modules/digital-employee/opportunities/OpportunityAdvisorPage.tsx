@@ -3,16 +3,16 @@ import { api } from "../../../api/client.js";
 import {
   OPPORTUNITY_TYPE_LABELS, OUTCOME_LABELS, READINESS_LABELS, RELATIONSHIP_LABELS,
   type OpportunityItem, type OpportunityListResponse, type OpportunitySettings,
-  type OpportunityType, type OpportunityView,
+  type OpportunityType, type OpportunityView, type TalkTrackIntent, type TalkTrackMessage,
 } from "../types.js";
 
 interface Props {
   onOpenProfile: (id: string) => void;
   onCreateProfile: () => void;
-  onOpenCopyProject: (projectId: string) => void;
 }
 
 const VIEWS: Array<{ id: OpportunityView; label: string }> = [
+  { id: "today", label: "今日经营" },
   { id: "pending", label: "待判断" }, { id: "in_progress", label: "跟进中" },
   { id: "awaiting_result", label: "待回填" }, { id: "completed", label: "已完成" },
 ];
@@ -21,8 +21,8 @@ const FIRST_TYPES: OpportunityType[] = ["prospect_progress", "silent_reengage", 
 const DISMISS_REASONS = ["当前不合适", "已经处理", "客户明确拒绝", "信息不准确", "不再跟进"];
 type FilterValues = { readiness: string; priority: string; opportunityType: string; relationshipStage: string; product: string; suggestedFrom: string; suggestedTo: string };
 
-export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile, onOpenCopyProject }: Props) {
-  const [view, setView] = useState<OpportunityView>("pending");
+export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile }: Props) {
+  const [view, setView] = useState<OpportunityView>("today");
   const [data, setData] = useState<OpportunityListResponse | null>(null);
   const [filters, setFilters] = useState<FilterValues>({ readiness: "", priority: "", opportunityType: "", relationshipStage: "", product: "", suggestedFrom: "", suggestedTo: "" });
   const [loading, setLoading] = useState(true);
@@ -76,6 +76,7 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile, onOpenC
   };
 
   const counts = useMemo(() => ({
+    today: view === "today" ? data?.total : undefined,
     pending: view === "pending" ? data?.total : undefined,
     awaiting_result: data?.summary.awaitingResult,
   }), [data, view]);
@@ -86,7 +87,7 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile, onOpenC
         <div>
           <p className="de-eyebrow">数字员工 / 商机参谋</p>
           <h1>商机参谋</h1>
-          <p>今天先跟进谁、为什么、怎么跟，系统给出有依据的建议。</p>
+          <p>盯住每个客户：今天该联系谁、为什么、下一步做什么。</p>
         </div>
         <button className="de-primary-button" disabled={discovering} onClick={() => void discover()}>
           {discovering ? `发现中 ${discoverProgress}%` : "✦ 发现新商机"}
@@ -106,7 +107,7 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile, onOpenC
 
       <Filters values={filters} onChange={setFilters} />
 
-      {loading ? <div className="de-state">正在读取商机…</div> : !data?.items.length ? (
+      {loading ? <div className="de-state">正在读取客户经营事项…</div> : !data?.items.length ? (
         <Empty view={view} hasProfiles={data?.hasProfiles ?? false} hasFilters={Object.values(filters).some(Boolean)} onCreateProfile={onCreateProfile} onDiscover={() => void discover()} />
       ) : (
         <section className="de-opportunity-list" aria-label={VIEWS.find((item) => item.id === view)?.label}>
@@ -116,10 +117,9 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile, onOpenC
         </section>
       )}
 
-      {active && dialog === "accept" && <AcceptDialog item={active} onClose={closeDialog} onSave={(input) => void mutate(async () => {
-        const result = await api.decideOpportunity(active.opportunityId, { decision: "accept", ...input });
-        if (result.copyProjectId) onOpenCopyProject(result.copyProjectId);
-      })} />}
+      {active && dialog === "accept" && <AcceptDialog item={active} onClose={closeDialog} onSave={(input) => void mutate(() =>
+        api.decideOpportunity(active.opportunityId, { decision: "accept", ...input })
+      )} />}
       {active && dialog === "snooze" && <SnoozeDialog onClose={closeDialog} onSave={(snoozedUntil) => void mutate(() => api.decideOpportunity(active.opportunityId, { decision: "snooze", snoozedUntil }))} />}
       {active && dialog === "dismiss" && <DismissDialog onClose={closeDialog} onSave={(reason) => {
         if (reason === "信息不准确") {
@@ -138,9 +138,9 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile, onOpenC
 
 function Summary({ summary }: { summary: OpportunityListResponse["summary"] }) {
   return <section className="de-opportunity-summary" aria-label="商机汇总">
-    <div className="high"><span>高优先机会</span><strong>{summary.highPriority}</strong></div>
     <div><span>今日待跟进</span><strong>{summary.dueToday}</strong></div>
     <div className="overdue"><span>逾期行动</span><strong>{summary.overdue}</strong></div>
+    <div className="high"><span>高优先新商机</span><strong>{summary.highPriority}</strong></div>
     <div><span>待回填结果</span><strong>{summary.awaitingResult}</strong></div>
   </section>;
 }
@@ -177,7 +177,7 @@ function OpportunityCard({ item, onOpenProfile, onAction, onExecute, onCancel }:
   return <article className={`de-opportunity-card priority-${item.priority} ${item.overdue ? "is-overdue" : ""} ${blocked ? "is-blocked" : ""}`}>
     <header>
       <button className="de-opportunity-customer" onClick={() => onOpenProfile(item.profileId)}><span>{item.customerName.slice(0, 1)}</span><strong>{item.customerName}<small>{item.organization || RELATIONSHIP_LABELS[item.relationshipStage]}</small></strong></button>
-      <div className="de-opportunity-badges"><span>{OPPORTUNITY_TYPE_LABELS[item.opportunityType]}</span><b className={`priority-${item.priority}`}>{PRIORITY_LABELS[item.priority]}</b><em>{READINESS_LABELS[item.readiness]}</em></div>
+      <div className="de-opportunity-badges"><i className={`source-${item.source}`}>{item.source === "manual" ? "确定提醒" : "AI 商机"}</i><span>{OPPORTUNITY_TYPE_LABELS[item.opportunityType]}</span><b className={`priority-${item.priority}`}>{PRIORITY_LABELS[item.priority]}</b><em>{READINESS_LABELS[item.readiness]}</em></div>
     </header>
     <div className="de-opportunity-body">
       <div className="de-opportunity-main">
@@ -193,13 +193,72 @@ function OpportunityCard({ item, onOpenProfile, onAction, onExecute, onCancel }:
       {item.view === "in_progress" && <><button className="de-primary-button" onClick={onExecute}>标记已执行</button><button className="de-secondary-button" onClick={() => onAction(item, "reschedule")}>改时间</button><button className="de-quiet-button" onClick={onCancel}>取消</button></>}
       {item.view === "awaiting_result" && <button className="de-primary-button" onClick={() => onAction(item, "result")}>回填结果</button>}
       {item.view === "completed" && <><span className="de-opportunity-outcome">{item.closeReason === "overdue_closed" ? "已逾期关闭" : OUTCOME_LABELS[item.outcome ?? ""] || "已取消"}</span>{item.customerQuote && <q>{item.customerQuote}</q>}</>}
+      <TalkTrackAssistant item={item} />
       <button className="de-opportunity-profile-link" onClick={() => onOpenProfile(item.profileId)}>查看画像与来源 →</button>
     </footer>
   </article>;
 }
 
+const TALK_TRACK_PRESETS: Array<{ intent: TalkTrackIntent; label: string; prompt: string }> = [
+  { intent: "maintenance", label: "维护问候", prompt: "请生成一段自然、不带强推销感的客户维护问候话术。" },
+  { intent: "follow_up", label: "跟进联络", prompt: "请根据当前事项生成一段可直接发送的跟进联络话术，明确但不要给客户压力。" },
+  { intent: "sales", label: "产品推介", prompt: "请结合客户需求和已核实的产品资料，生成一段有针对性的产品推介话术。" },
+];
+
+function TalkTrackAssistant({ item }: { item: OpportunityItem }) {
+  const [open, setOpen] = useState(false);
+  const [intent, setIntent] = useState<TalkTrackIntent>("follow_up");
+  const [messages, setMessages] = useState<TalkTrackMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async (content: string, nextIntent: TalkTrackIntent = intent) => {
+    const message = content.trim();
+    if (!message || loading) return;
+    const history = messages.slice(-12);
+    setIntent(nextIntent);
+    setMessages((current) => [...current, { role: "user", content: message }]);
+    setInput(""); setLoading(true); setError(null);
+    try {
+      const result = await api.generateOpportunityTalkTrack(item.id, { intent: nextIntent, message, history });
+      setMessages((current) => [...current, { role: "assistant", content: result.reply }]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "话术生成失败，请重试");
+    } finally { setLoading(false); }
+  };
+
+  return <div className={`de-talk-track ${open ? "is-open" : ""}`}>
+    <button type="button" className="de-secondary-button de-talk-track-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      ✦ 联系话术
+    </button>
+    {open && <section className="de-talk-track-panel" aria-label={`${item.customerName}联系话术助手`}>
+      <header><div><strong>单客户话术助手</strong><span>已带入 {item.customerName} 的画像、当前事项{item.productName ? `和${item.productName}资料` : ""}</span></div><button type="button" onClick={() => setOpen(false)} aria-label="收起话术助手">×</button></header>
+      <div className="de-talk-track-presets">
+        {TALK_TRACK_PRESETS.map((preset) => <button type="button" key={preset.intent} disabled={loading} className={intent === preset.intent ? "active" : ""} onClick={() => void send(preset.prompt, preset.intent)}>{preset.label}</button>)}
+      </div>
+      {messages.length === 0 && <div className="de-talk-track-empty"><span>✦</span><p>选择一种场景直接生成，或在下方说明渠道、语气和想达到的目的。</p></div>}
+      {messages.length > 0 && <div className="de-talk-track-messages">
+        {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`de-talk-track-message ${message.role}`}>
+          <span>{message.role === "assistant" ? "参谋" : "你"}</span><p>{message.content}</p>
+          {message.role === "assistant" && <button type="button" onClick={() => void navigator.clipboard.writeText(message.content)}>复制</button>}
+        </div>)}
+        {loading && <div className="de-talk-track-thinking"><i /><span>正在结合客户信息生成…</span></div>}
+      </div>}
+      {error && <p className="de-talk-track-error" role="alert">{error}</p>}
+      <form onSubmit={(event) => { event.preventDefault(); void send(input); }}>
+        <textarea value={input} maxLength={2_000} rows={2} disabled={loading} placeholder="例如：语气更熟悉一点，适合微信，先询问对方是否方便……" onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(input); }
+        }} />
+        <button type="submit" className="de-primary-button" disabled={loading || !input.trim()}>{loading ? "生成中" : "发送"}</button>
+      </form>
+      <small>AI 话术仅供参考，发送前请核对客户事实、产品承诺和价格权益。</small>
+    </section>}
+  </div>;
+}
+
 function Empty({ view, hasProfiles, hasFilters, onCreateProfile, onDiscover }: { view: OpportunityView; hasProfiles: boolean; hasFilters: boolean; onCreateProfile: () => void; onDiscover: () => void }) {
-  const content = !hasProfiles ? ["还没有可分析的客户画像", "商机参谋需要以真实客户事实为依据，请先建立客户画像。"] : hasFilters ? ["没有符合筛选条件的商机", "清除或调整筛选条件后再看。"] : view === "pending" ? ["当前没有需要立即处理的商机", "可以立即运行一次发现；活动邀约需先明确活动主题和有效期。"] : ["这个视图目前为空", "行动采纳、执行和结果回填后会自动流转到对应视图。"];
+  const content = !hasProfiles ? ["还没有可经营的客户画像", "商机参谋只围绕已建档的单个客户工作，请先建立客户画像。"] : hasFilters ? ["没有符合筛选条件的客户事项", "清除或调整筛选条件后再看。"] : view === "today" ? ["今天没有必须处理的客户事项", "可以查看待判断商机，或手动安排一次回访和维护。"] : view === "pending" ? ["当前没有需要判断的新商机", "可以立即运行一次发现；确定性提醒仍会按计划出现在今日经营。"] : ["这个视图目前为空", "行动采纳、执行和结果回填后会自动流转到对应视图。"];
   return <div className="de-state de-empty-state de-opportunity-empty"><span className="de-empty-icon">◇</span><strong>{content[0]}</strong><p>{content[1]}</p>{!hasProfiles ? <button className="de-primary-button" onClick={onCreateProfile}>新建客户</button> : view === "pending" && <button className="de-secondary-button" onClick={onDiscover}>发现新商机</button>}</div>;
 }
 
@@ -210,12 +269,11 @@ function DialogFrame({ title, children, onClose }: { title: string; children: Re
 function AcceptDialog({ item, onClose, onSave }: { item: OpportunityItem; onClose: () => void; onSave: (input: Record<string, unknown>) => void }) {
   const [objective, setObjective] = useState(item.objective); const [method, setMethod] = useState(item.followUpMethod || "企微/微信");
   const [scheduledAt, setScheduledAt] = useState(localInput(item.scheduledAt || item.suggestedAt)); const [criteria, setCriteria] = useState(item.resultCriteria || "获得有效回复或下一步");
-  const [prepareContent, setPrepareContent] = useState(true);
-  return <DialogFrame title="确认跟进行动" onClose={onClose}><form className="de-form" onSubmit={(e) => { e.preventDefault(); onSave({ objective, followUpMethod: method, scheduledAt: new Date(scheduledAt).toISOString(), resultCriteria: criteria, prepareContent }); }}>
+  return <DialogFrame title="确认跟进行动" onClose={onClose}><form className="de-form" onSubmit={(e) => { e.preventDefault(); onSave({ objective, followUpMethod: method, scheduledAt: new Date(scheduledAt).toISOString(), resultCriteria: criteria }); }}>
     <div className="de-dialog-context"><strong>{item.customerName} · {OPPORTUNITY_TYPE_LABELS[item.opportunityType]}</strong><p>{item.reason}</p></div>
     <div className="de-form-grid"><label><span>推荐目标</span><textarea value={objective} onChange={(e) => setObjective(e.target.value)} required /></label><label><span>结果口径</span><textarea value={criteria} onChange={(e) => setCriteria(e.target.value)} required /></label><label><span>沟通方式</span><select value={method} onChange={(e) => setMethod(e.target.value)}><option>企微/微信</option><option>电话</option><option>邮件</option><option>线下拜访</option></select></label><label><span>计划时间</span><input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} required /></label></div>
-    <label className="de-dialog-check"><input type="checkbox" checked={prepareContent} onChange={(e) => setPrepareContent(e.target.checked)} /><span>同时在获客宝创建内容项目并带入客户、事实、产品与行动号召</span></label>
-    <div className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>取消</button><button className="de-primary-button">{prepareContent ? "采纳并准备内容" : "仅创建行动"}</button></div>
+    <p className="de-field-hint">采纳后形成该客户的正式行动，不会创建客群营销项目；单客户联系话术将在商机参谋内继续准备。</p>
+    <div className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>取消</button><button className="de-primary-button">采纳并创建行动</button></div>
   </form></DialogFrame>;
 }
 

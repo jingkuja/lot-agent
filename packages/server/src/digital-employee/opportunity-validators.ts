@@ -1,7 +1,8 @@
 import { InputError } from "./errors.js";
 import {
-  ACTION_OUTCOMES, OPPORTUNITY_TYPES, OPPORTUNITY_VIEWS, PRIORITY_VALUES, READINESS_VALUES,
+  ACTION_OUTCOMES, OPPORTUNITY_TYPES, OPPORTUNITY_VIEWS, PRIORITY_VALUES, READINESS_VALUES, TALK_TRACK_INTENTS,
   type ActionResultInput, type ActionUpdateInput, type ManualActionInput, type OpportunityDecisionInput, type OpportunityListFilters,
+  type TalkTrackRequest,
 } from "./opportunity-types.js";
 
 function object(value: unknown): Record<string, unknown> {
@@ -52,8 +53,7 @@ export function parseOpportunityDecision(value: unknown): OpportunityDecisionInp
   const snoozedUntil = date(source.snoozedUntil, "snoozedUntil", decision === "snooze");
   if (decision === "snooze" && snoozedUntil! <= new Date().toISOString()) throw new InputError("恢复日期必须晚于当前时间");
   if (decision === "dismiss" && !reason) throw new InputError("忽略商机时请选择原因");
-  if (source.prepareContent !== undefined && typeof source.prepareContent !== "boolean") throw new InputError("prepareContent格式无效");
-  return { decision, reason, snoozedUntil, prepareContent: source.prepareContent as boolean | undefined,
+  return { decision, reason, snoozedUntil,
     scheduledAt: date(source.scheduledAt, "scheduledAt"), followUpMethod: text(source.followUpMethod, "followUpMethod", 32),
     objective: text(source.objective, "objective", 2_000), resultCriteria: text(source.resultCriteria, "resultCriteria", 500) };
 }
@@ -93,6 +93,24 @@ export function parseCreateAction(value: unknown): ManualActionInput {
     resultCriteria: text(source.resultCriteria, "resultCriteria", 500),
     productKey: text(source.productKey, "productKey", 160),
     productName: text(source.productName, "productName", 200),
+  };
+}
+
+export function parseTalkTrackRequest(value: unknown): TalkTrackRequest {
+  const source = object(value);
+  const rawHistory = source.history ?? [];
+  if (!Array.isArray(rawHistory) || rawHistory.length > 12) throw new InputError("话术对话历史格式无效");
+  const history = rawHistory.map((entry) => {
+    const item = object(entry);
+    return {
+      role: choice(item.role, ["user", "assistant"] as const, "history.role", true)!,
+      content: text(item.content, "history.content", 4_000, true)!,
+    };
+  });
+  return {
+    intent: choice(source.intent, TALK_TRACK_INTENTS, "intent", true)!,
+    message: text(source.message, "message", 2_000, true)!,
+    history,
   };
 }
 

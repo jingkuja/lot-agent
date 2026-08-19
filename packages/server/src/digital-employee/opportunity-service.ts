@@ -7,7 +7,7 @@ import { discoverByRules, type DiscoveryCandidate } from "./opportunity-rules.js
 import type { RuleOpportunity } from "./opportunity-rules.js";
 import type {
   ActionResultInput, ActionUpdateInput, ManualActionInput, OpportunityDecisionInput, OpportunityListFilters,
-  OpportunityListItem, OpportunitySettings, OpportunitySummary,
+  OpportunityListItem, OpportunitySettings, OpportunitySummary, TalkTrackContext, TalkTrackRequest,
 } from "./opportunity-types.js";
 
 export interface OpportunityAdvicePatch {
@@ -26,10 +26,23 @@ export interface OpportunityAdviceGenerator {
   }): Promise<{ modelId: string; patches: OpportunityAdvicePatch[] }>;
 }
 
+export interface OpportunityTalkTrackGenerator {
+  generate(input: {
+    userId: string;
+    context: TalkTrackContext;
+    request: TalkTrackRequest;
+  }): Promise<{ modelId: string; reply: string }>;
+}
+
 export class OpportunityService {
   private readonly pool: Pool;
 
-  constructor(db: DB, private readonly queue?: JobQueue, private readonly adviceGenerator?: OpportunityAdviceGenerator) {
+  constructor(
+    db: DB,
+    private readonly queue?: JobQueue,
+    private readonly adviceGenerator?: OpportunityAdviceGenerator,
+    private readonly talkTrackGenerator?: OpportunityTalkTrackGenerator
+  ) {
     this.pool = db.pool;
   }
 
@@ -212,22 +225,7 @@ export class OpportunityService {
         `UPDATE de_follow_up_suggestions SET status = 'accepted', decided_at = now(), snoozed_until = NULL, version = version + 1
          WHERE id = $1 AND user_id = $2`, [opportunityId, userId]
       );
-      let copyProjectId: string | null = null;
-      if (input.prepareContent) {
-        copyProjectId = randomUUID();
-        const brief = {
-          customer: row.display_name, organization: row.organization, opportunityType: row.opportunity_type,
-          objective: input.objective ?? row.objective, reason: row.reason, evidence: array(row.evidence),
-          product: row.product_name, channel: input.followUpMethod ?? row.follow_up_method,
-          callToAction: input.resultCriteria ?? defaultResultCriteria(row.opportunity_type), actionId,
-        };
-        await client.query(
-          `INSERT INTO de_copy_projects (id,user_id,profile_id,name,objective,brief,status,follow_up_task_id)
-           VALUES ($1,$2,$3,$4,$5,$6::jsonb,'draft',$7)`,
-          [copyProjectId, userId, row.profile_id, `${row.display_name} · ${row.title}`, input.objective ?? row.objective, JSON.stringify(brief), actionId]
-        );
-      }
-      return { opportunityId, status: "accepted", actionId, copyProjectId };
+      return { opportunityId, status: "accepted", actionId };
     });
   }
 
@@ -328,6 +326,78 @@ export class OpportunityService {
     return row ? toSettings(row) : { enabled: false, timezone: "Asia/Shanghai", dailyRunTime: "09:00", nextRunAt: null, lastRunAt: null, version: 0 };
   }
 
+  async generateTalkTrack(userId: string, itemId: string, request: TalkTrackRequest) {
+    if (!this.talkTrackGenerator) throw new InputError("话术生成服务暂不可用");
+    let rows = await this.actionRows(userId, undefined, itemId);
+    if (rows.length === 0) {
+      const pending = await this.pool.query(
+        `${baseSelect()} WHERE suggestion.user_id = $1 AND suggestion.id = $2 LIMIT 1`,
+        [userId, itemId]
+      );
+      rows = pending.rows;
+    }
+    if (rows.length === 0) throw new NotFoundError("未找到该客户经营事项");
+    const item = toItem(rows[0]);
+    const detail = await this.pool.query(
+      `SELECT left(profile.summary, 2000) AS summary, profile.tags,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'productName', state.product_name, 'journeyStage', state.journey_stage,
+            'sentiment', state.sentiment, 'satisfaction', state.satisfaction,
+            'health', state.health, 'needs', state.needs, 'objections', state.objections,
+            'currentIssues', state.current_issues
+          ) ORDER BY state.updated_at DESC)
+          FROM de_customer_product_states state
+          WHERE state.user_id = profile.user_id AND state.profile_id = profile.id
+        ), '[]'::jsonb) AS product_states,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object('text', recent.raw_text, 'occurredAt', recent.occurred_at) ORDER BY recent.occurred_at DESC)
+          FROM (
+            SELECT left(observation.raw_text, 1500) AS raw_text, COALESCE(observation.occurred_at, observation.created_at) AS occurred_at
+            FROM de_customer_observations observation
+            WHERE observation.user_id = profile.user_id AND observation.profile_id = profile.id
+            ORDER BY COALESCE(observation.occurred_at, observation.created_at) DESC LIMIT 8
+          ) recent
+        ), '[]'::jsonb) AS recent_facts
+       FROM de_customer_profiles profile
+       WHERE profile.id = $1 AND profile.user_id = $2 AND profile.status = 'active'`,
+      [item.profileId, userId]
+    );
+    if (!detail.rows[0]) throw new NotFoundError("未找到该客户画像");
+    const product = item.productName ? await this.pool.query(
+      `SELECT name, positioning, core_values, verifiable_facts, common_objections,
+        current_benefits, prohibited_expressions, case_materials
+       FROM marketing_products
+       WHERE user_id = $1 AND status = 'active' AND lower(name) = lower($2)
+       ORDER BY updated_at DESC LIMIT 1`,
+      [userId, item.productName]
+    ) : { rows: [] };
+    const context: TalkTrackContext = {
+      customerName: item.customerName,
+      organization: item.organization,
+      relationshipStage: item.relationshipStage,
+      customerSummary: detail.rows[0].summary ?? "",
+      tags: array(detail.rows[0].tags),
+      opportunityType: item.opportunityType,
+      title: item.title,
+      objective: item.objective,
+      reason: item.reason,
+      followUpMethod: item.followUpMethod,
+      productName: item.productName,
+      resultCriteria: item.resultCriteria,
+      customerProductStates: array(detail.rows[0].product_states),
+      recentFacts: array(detail.rows[0].recent_facts).map((fact: any) => ({
+        text: String(fact.text ?? ""),
+        occurredAt: iso(fact.occurredAt ?? fact.occurred_at),
+      })).filter((fact: { text: string }) => fact.text),
+      productMaterial: product.rows[0] ?? null,
+    };
+    const generated = await this.talkTrackGenerator.generate({ userId, context, request });
+    const reply = generated.reply.trim();
+    if (!reply) throw new InputError("话术生成结果为空，请重试");
+    return { reply, modelId: generated.modelId };
+  }
+
   async saveSettings(userId: string, input: { enabled: boolean; timezone: string; dailyRunTime: string; version: number }) {
     const result = await this.pool.query(
       `INSERT INTO de_follow_up_automation_settings (user_id,enabled,timezone,daily_run_time,next_run_at,version)
@@ -378,6 +448,7 @@ export class OpportunityService {
     const result = await this.pool.query(
       `${baseSelect()}
        WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested'
+         AND suggestion.opportunity_type <> 'cohort_marketing'
          AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
          AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now())
        ORDER BY CASE suggestion.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
@@ -390,12 +461,22 @@ export class OpportunityService {
     const conditions = ["task.user_id = $1"];
     const params: unknown[] = [userId];
     if (actionId) { params.push(actionId); conditions.push(`task.id = $${params.length}`); }
+    if (view === "today") conditions.push(`(
+      (task.status = 'pending' AND task.scheduled_at < date_trunc('day', now()) + interval '1 day')
+      OR task.status = 'awaiting_result'
+    )`);
     if (view === "in_progress") conditions.push("task.status = 'pending'");
     if (view === "awaiting_result") conditions.push("task.status = 'awaiting_result'");
     if (view === "completed") conditions.push("task.status IN ('completed','cancelled')");
     const result = await this.pool.query(
       `${actionSelect()} WHERE ${conditions.join(" AND ")}
-       ORDER BY CASE WHEN task.status = 'pending' AND task.scheduled_at < now() THEN 0 ELSE 1 END,
+       ORDER BY CASE
+         WHEN task.status = 'pending' AND task.scheduled_at < now() THEN 0
+         WHEN task.status = 'pending' THEN 1
+         WHEN task.status = 'awaiting_result' THEN 2
+         ELSE 3
+       END,
+         CASE WHEN task.status = 'pending' THEN task.scheduled_at END ASC,
          COALESCE(task.completed_at, task.executed_at, task.scheduled_at) DESC`, params
     );
     return result.rows;
@@ -448,9 +529,10 @@ export class OpportunityService {
       `SELECT
         (SELECT count(*) FROM de_follow_up_suggestions suggestion
          WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested' AND suggestion.priority = 'high'
+           AND suggestion.opportunity_type <> 'cohort_marketing'
            AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
            AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now()))::int AS high_priority,
-        count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at >= date_trunc('day',now())
+        count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at >= now()
           AND task.scheduled_at < date_trunc('day',now()) + interval '1 day')::int AS due_today,
         count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at < now())::int AS overdue,
         count(*) FILTER (WHERE task.status = 'awaiting_result')::int AS awaiting_result
@@ -483,6 +565,7 @@ export class OpportunityService {
 function baseSelect() {
   return `SELECT suggestion.*, profile.display_name, profile.organization, profile.relationship_stage,
     task.id AS action_id, task.status AS action_status, task.scheduled_at, task.result_criteria,
+    task.source AS action_source,
     task.executed_at, task.completed_at, task.close_reason, task.version AS action_version,
     record.outcome, record.customer_quote, record.next_action
    FROM de_follow_up_suggestions suggestion
@@ -513,6 +596,7 @@ function actionSelect() {
     suggestion.status, suggestion.snoozed_until,
     profile.display_name, profile.organization, profile.relationship_stage,
     task.id AS action_id, task.status AS action_status, task.scheduled_at, task.result_criteria,
+    task.source AS action_source,
     task.executed_at, task.completed_at, task.close_reason, task.version AS action_version,
     record.outcome, record.customer_quote, record.next_action
    FROM de_follow_up_tasks task
@@ -531,6 +615,7 @@ function toItem(row: any): OpportunityListItem & { actionVersion?: number } {
     id: row.action_id ?? row.id, view, opportunityId: row.id, actionId: row.action_id ?? null,
     profileId: row.profile_id, customerName: row.display_name, organization: row.organization ?? null,
     relationshipStage: row.relationship_stage, opportunityType: row.opportunity_type,
+    source: row.action_source === "manual" ? "manual" : "ai",
     title: row.title, objective: row.objective, followUpMethod: row.follow_up_method ?? null,
     suggestedAt: iso(row.suggested_at)!, scheduledAt: iso(row.scheduled_at), priority: row.priority,
     reason: row.reason, evidence: array(row.evidence), readiness: row.readiness, riskFlags: array(row.risk_flags),
