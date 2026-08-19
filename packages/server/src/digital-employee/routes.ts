@@ -16,12 +16,72 @@ import {
   parseMarketingProductList,
   parseMarketingProductUpdate,
 } from "./marketing-validators.js";
+import {
+  parseActionResult,
+  parseActionUpdate,
+  parseCreateAction,
+  parseOpportunityDecision,
+  parseOpportunityList,
+  parseOpportunitySettings,
+} from "./opportunity-validators.js";
 
 type Variables = { userId: string };
 
 /** Browser-facing, authenticated customer-profile API. */
 export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Hono<{ Variables: Variables }> {
   const app = new Hono<{ Variables: Variables }>();
+
+  app.get("/opportunities", async (c) => {
+    try {
+      return c.json(await service.opportunities.list(c.get("userId"), parseOpportunityList(c.req.query())));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/opportunities/discover", async (c) => {
+    try {
+      return c.json(await service.opportunities.requestDiscovery(c.get("userId")), 202);
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.patch("/opportunities/:id", async (c) => {
+    try {
+      return c.json(await service.opportunities.decide(c.get("userId"), parseEntityId(c.req.param("id"), "opportunityId"), parseOpportunityDecision(await body(c))));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/actions", async (c) => {
+    try {
+      return c.json(await service.opportunities.createAction(c.get("userId"), parseCreateAction(await body(c))), 201);
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/actions/:id", async (c) => {
+    try {
+      return c.json(await service.opportunities.getAction(c.get("userId"), parseEntityId(c.req.param("id"), "actionId")));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.patch("/actions/:id", async (c) => {
+    try {
+      return c.json(await service.opportunities.updateAction(c.get("userId"), parseEntityId(c.req.param("id"), "actionId"), parseActionUpdate(await body(c))));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/actions/:id/results", async (c) => {
+    try {
+      return c.json(await service.opportunities.addResult(c.get("userId"), parseEntityId(c.req.param("id"), "actionId"), parseActionResult(await body(c))), 201);
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/opportunity-settings", async (c) => {
+    try { return c.json(await service.opportunities.getSettings(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.put("/opportunity-settings", async (c) => {
+    try { return c.json(await service.opportunities.saveSettings(c.get("userId"), parseOpportunitySettings(await body(c)))); }
+    catch (error) { return respondError(c, error); }
+  });
 
   app.get("/marketing/products", async (c) => {
     try {

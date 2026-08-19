@@ -262,6 +262,80 @@ export interface MarketingProductListResponse {
   total: number;
 }
 
+export type OpportunityType = "prospect_progress" | "silent_reengage" | "event_invitation" | "renewal" | "risk_recovery" |
+  "new_lead_contact" | "trial_conversion" | "repurchase" | "referral" | "cohort_marketing";
+export type OpportunityView = "pending" | "in_progress" | "awaiting_result" | "completed";
+export type OpportunityReadiness = "actionable" | "tryable" | "needs_info" | "paused";
+export type OpportunityPriority = "low" | "normal" | "high";
+
+export interface OpportunityEvidence { fact: string; occurredAt: string; sourceType: string; sourceId?: string }
+export interface OpportunityRisk { code: string; message: string; blocking: boolean }
+export interface OpportunityItem {
+  id: string;
+  view: OpportunityView;
+  opportunityId: string;
+  actionId: string | null;
+  actionVersion?: number;
+  profileId: string;
+  customerName: string;
+  organization: string | null;
+  relationshipStage: RelationshipStage;
+  opportunityType: OpportunityType;
+  title: string;
+  objective: string;
+  followUpMethod: string | null;
+  suggestedAt: string;
+  scheduledAt: string | null;
+  priority: OpportunityPriority;
+  reason: string;
+  evidence: OpportunityEvidence[];
+  readiness: OpportunityReadiness;
+  riskFlags: OpportunityRisk[];
+  productKey: string | null;
+  productName: string | null;
+  status: string;
+  snoozedUntil: string | null;
+  resultCriteria: string | null;
+  executedAt: string | null;
+  completedAt: string | null;
+  closeReason: string | null;
+  outcome: string | null;
+  customerQuote: string | null;
+  nextAction: string | null;
+  overdue: boolean;
+}
+
+export interface OpportunitySettings {
+  enabled: boolean;
+  timezone: string;
+  dailyRunTime: string;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  version: number;
+}
+
+export interface OpportunityListResponse {
+  items: OpportunityItem[];
+  total: number;
+  summary: { highPriority: number; dueToday: number; overdue: number; awaitingResult: number };
+  hasProfiles: boolean;
+  lastDiscoveredAt: string | null;
+  settings: OpportunitySettings;
+}
+
+export const OPPORTUNITY_TYPE_LABELS: Record<OpportunityType, string> = {
+  prospect_progress: "潜客推进", silent_reengage: "沉默唤醒", event_invitation: "活动邀约", renewal: "续费经营",
+  risk_recovery: "风险挽回", new_lead_contact: "新线索首触达", trial_conversion: "试用转化", repurchase: "复购增购",
+  referral: "转介绍", cohort_marketing: "客群营销",
+};
+export const READINESS_LABELS: Record<OpportunityReadiness, string> = {
+  actionable: "可行动", tryable: "可尝试", needs_info: "需补信息", paused: "暂停营销",
+};
+export const OUTCOME_LABELS: Record<string, string> = {
+  no_response: "无响应", replied: "已回复", interested: "感兴趣 / 有效下一步", scheduled: "已预约",
+  won: "已成交或续费", rejected: "拒绝", service_needed: "投诉或需要服务处理",
+};
+
 export const RELATIONSHIP_LABELS: Record<RelationshipStage, string> = {
   lead: "线索",
   prospect: "潜客",

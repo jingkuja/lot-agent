@@ -93,4 +93,34 @@ describe("digital employee profile routes", () => {
     expect(response.status).toBe(400);
     expect(saveBrandAssets).not.toHaveBeenCalled();
   });
+
+  it("lists the four-view opportunity workflow for the authenticated user", async () => {
+    const list = vi.fn(async () => ({ items: [], total: 0 }));
+    const service = { opportunities: { list } };
+    const response = await app(service).request("/digital-employee/opportunities?view=awaiting_result&priority=high");
+    expect(response.status).toBe(200);
+    expect(list).toHaveBeenCalledWith("u1", expect.objectContaining({ view: "awaiting_result", priority: "high" }));
+  });
+
+  it("requires a future date when snoozing an opportunity", async () => {
+    const decide = vi.fn();
+    const service = { opportunities: { decide } };
+    const response = await app(service).request("/digital-employee/opportunities/00000000-0000-0000-0000-000000000011", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "snooze", snoozedUntil: "2020-01-01T00:00:00.000Z" }),
+    });
+    expect(response.status).toBe(400);
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("validates and saves daily opportunity discovery settings", async () => {
+    const saveSettings = vi.fn(async (_userId, input) => ({ ...input, nextRunAt: null }));
+    const service = { opportunities: { saveSettings } };
+    const response = await app(service).request("/digital-employee/opportunity-settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, timezone: "Asia/Shanghai", dailyRunTime: "09:30", version: 0 }),
+    });
+    expect(response.status).toBe(200);
+    expect(saveSettings).toHaveBeenCalledWith("u1", expect.objectContaining({ dailyRunTime: "09:30" }));
+  });
 });

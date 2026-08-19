@@ -14,7 +14,7 @@ describe("marketing materials migration", () => {
     await marketingMaterials.up(client);
     const ddl = statements.join("\n");
     expect(marketingMaterials.version).toBe(11);
-    expect(migrations.at(-1)).toBe(marketingMaterials);
+    expect(migrations.find((migration) => migration.version === 11)).toBe(marketingMaterials);
     expect(ddl).toContain("CREATE TABLE IF NOT EXISTS marketing_products");
     expect(ddl).toContain("CREATE TABLE IF NOT EXISTS marketing_brand_assets");
     expect(ddl).toContain("current_benefits");

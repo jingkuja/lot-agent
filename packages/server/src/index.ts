@@ -111,6 +111,21 @@ async function main() {
   void runCustomerCohortSummaries();
   setInterval(runCustomerCohortSummaries, COHORT_SUMMARY_CHECK_INTERVAL_MS).unref();
 
+  // Each account owns its local time-zone setting. The database selects only
+  // due rows and advances next_run_at, while the same daily idempotency key
+  // prevents restarts or overlapping ticks from creating duplicate runs.
+  const OPPORTUNITY_DISCOVERY_CHECK_INTERVAL_MS = 60 * 1000;
+  const enqueueDailyOpportunityDiscoveries = async () => {
+    try {
+      const queued = await service.digitalEmployee.opportunities.enqueueDueDiscoveries();
+      if (queued > 0) console.log(`Queued ${queued} daily opportunity discovery task(s)`);
+    } catch (err) {
+      console.warn("Opportunity discovery scheduler failed:", err);
+    }
+  };
+  void enqueueDailyOpportunityDiscoveries();
+  setInterval(enqueueDailyOpportunityDiscoveries, OPPORTUNITY_DISCOVERY_CHECK_INTERVAL_MS).unref();
+
   // Generation tasks are enqueued to Redis and consumed by a SEPARATE worker
   // process. If that worker is down or misconfigured (crashed on startup for a
   // missing env key, pointed at the wrong Redis DB, or simply not running), its

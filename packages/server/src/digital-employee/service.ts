@@ -42,6 +42,8 @@ import type {
 } from "./types.js";
 import { parseCaptureInput } from "./validators.js";
 import { MarketingMaterialsService } from "./marketing-service.js";
+import { OpportunityService } from "./opportunity-service.js";
+import type { JobQueue } from "@lot-agent/core";
 
 const CAPTURE_DRAFT_TTL_MS = 24 * 60 * 60 * 1_000;
 const CAPTURE_PROMPT_VERSION = "customer-capture/v1";
@@ -99,15 +101,18 @@ export interface CohortSummaryGenerator {
 export class DigitalEmployeeService {
   readonly repository: DigitalEmployeeRepository;
   readonly marketingMaterials: MarketingMaterialsService;
+  readonly opportunities: OpportunityService;
   private readonly secretBox: SecretBox;
 
   constructor(
     private readonly db: DB,
     secretBox: SecretBox = createSecretBox(),
-    private readonly cohortSummaryGenerator?: CohortSummaryGenerator
+    private readonly cohortSummaryGenerator?: CohortSummaryGenerator,
+    opportunityQueue?: JobQueue
   ) {
     this.repository = new DigitalEmployeeRepository(db.pool);
     this.marketingMaterials = new MarketingMaterialsService(db);
+    this.opportunities = new OpportunityService(db, opportunityQueue);
     this.secretBox = secretBox;
   }
 

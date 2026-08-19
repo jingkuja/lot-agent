@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
-import { LocalStorage, fetchPublicBinary } from "@lot-agent/core";
+import { LocalStorage, complete, fetchPublicBinary } from "@lot-agent/core";
 import type { ModelConfig } from "@lot-agent/core";
 import {
   PgMemoryAdapter,
@@ -24,6 +24,8 @@ import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { GenCache } from "../billing/gen-cache.js";
 import { staticPrefix } from "../util/public-base.js";
 import { createOptionalFallbackLLM } from "./fallback-llm.js";
+import { OpportunityService, type OpportunityAdvicePatch } from "../digital-employee/opportunity-service.js";
+import { meterLLM } from "../billing/metered-llm.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
@@ -208,6 +210,34 @@ async function main() {
   const memAdapter = new PgMemoryAdapter(db.pool);
   await memAdapter.init();
 
+  const opportunityService = new OpportunityService(db, undefined, {
+    enhance: async ({ userId, taskId, opportunities }) => {
+      const apiKey = await db.getUserApiKey(userId);
+      const modelId = fallbackExtractModelId;
+      const llm = apiKey ? providerFactory.llm(modelId, apiKey) : fallbackExtractLlm;
+      if (!llm) throw new Error("no opportunity advice LLM available");
+      const meters: Promise<unknown>[] = [];
+      const metered = meterLLM(llm, (usage) => {
+        meters.push(meter.record({
+          userId, taskId: taskId ?? undefined, modelId,
+          usage: { inputCount: usage.promptTokens, outputCount: usage.completionTokens },
+        }));
+      });
+      const raw = await complete(metered, [
+        {
+          role: "system",
+          content:
+            "你是商机参谋。根据服务端已经筛选和校验的候选商机，优化标题、目标、沟通方式和理由。" +
+            "不得改变dedupKey、机会类型、优先级、事实证据或风险，不得添加联系方式或虚构事实。" +
+            "仅输出JSON对象：{\"suggestions\":[{\"dedupKey\":\"...\",\"title\":\"...\",\"objective\":\"...\",\"method\":\"...\",\"reason\":\"...\"}]}。",
+        },
+        { role: "user", content: JSON.stringify({ opportunities }) },
+      ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.2, maxTokens: 2_400 } });
+      await Promise.allSettled(meters);
+      return { modelId, patches: parseOpportunityAdvice(raw) };
+    },
+  });
+
   queue.process("image.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
     return runGenerationJob(await genDeps("image", j, ctl.signal), j, "image");
@@ -215,6 +245,10 @@ async function main() {
   queue.process("video.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
     return runGenerationJob(await genDeps("video", j, ctl.signal), j, "video");
+  });
+  queue.process("opportunity.discover", async (job) => {
+    const { runId } = job.input as { runId: string };
+    return opportunityService.runDiscovery(job.userId, runId, (value, stage) => queue.updateProgress(job.id, value, stage));
   });
 
   // Download-only retry: the vendor generation already succeeded but pulling
@@ -302,3 +336,12 @@ main().catch((error) => {
   console.error("Worker failed to start:", error);
   process.exit(1);
 });
+
+function parseOpportunityAdvice(raw: string): OpportunityAdvicePatch[] {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const parsed = JSON.parse(cleaned) as { suggestions?: unknown };
+  if (!Array.isArray(parsed.suggestions)) throw new Error("invalid opportunity advice response");
+  return parsed.suggestions.filter((item): item is OpportunityAdvicePatch =>
+    Boolean(item && typeof item === "object" && typeof (item as { dedupKey?: unknown }).dedupKey === "string")
+  );
+}

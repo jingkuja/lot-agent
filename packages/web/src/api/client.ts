@@ -15,6 +15,9 @@ import type {
   ProfileInput,
   ProfileListResponse,
   ProfileUpdateInput,
+  OpportunityListResponse,
+  OpportunitySettings,
+  OpportunityView,
 } from "../modules/digital-employee/types.js";
 export type { CatalogModel };
 
@@ -533,6 +536,40 @@ export const api = {
       `/digital-employee/conversation-context/${encodeURIComponent(conversationId)}`,
       { method: "DELETE" }
     ),
+
+  listOpportunities: (filters: { view: OpportunityView; readiness?: string; priority?: string; opportunityType?: string; relationshipStage?: string; product?: string; suggestedFrom?: string; suggestedTo?: string }) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+    return request<OpportunityListResponse>(`/digital-employee/opportunities?${query.toString()}`);
+  },
+
+  discoverOpportunities: () => request<{ runId: string; taskId: string; reused: boolean }>("/digital-employee/opportunities/discover", { method: "POST" }),
+  createOpportunityAction: (input: Record<string, unknown>) =>
+    request<import("../modules/digital-employee/types.js").OpportunityItem>("/digital-employee/actions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  decideOpportunity: (id: string, input: Record<string, unknown>) =>
+    request<{ opportunityId: string; status: string; actionId?: string; copyProjectId?: string | null }>(`/digital-employee/opportunities/${encodeURIComponent(id)}`, {
+      method: "PATCH", body: JSON.stringify(input),
+    }),
+
+  updateOpportunityAction: (id: string, input: Record<string, unknown>) =>
+    request<import("../modules/digital-employee/types.js").OpportunityItem>(`/digital-employee/actions/${encodeURIComponent(id)}`, {
+      method: "PATCH", body: JSON.stringify(input),
+    }),
+
+  addOpportunityActionResult: (id: string, input: Record<string, unknown>) =>
+    request<{ recordId: string; actionId: string; status: string; nextActionId: string | null }>(`/digital-employee/actions/${encodeURIComponent(id)}/results`, {
+      method: "POST", body: JSON.stringify(input),
+    }),
+
+  getOpportunitySettings: () => request<OpportunitySettings>("/digital-employee/opportunity-settings"),
+
+  saveOpportunitySettings: (input: OpportunitySettings) => request<OpportunitySettings>("/digital-employee/opportunity-settings", {
+    method: "PUT", body: JSON.stringify({ enabled: input.enabled, timezone: input.timezone, dailyRunTime: input.dailyRunTime, version: input.version }),
+  }),
 
   listMarketingProducts: (filters: { q?: string; status?: string; page?: number; limit?: number } = {}) => {
     const query = new URLSearchParams();

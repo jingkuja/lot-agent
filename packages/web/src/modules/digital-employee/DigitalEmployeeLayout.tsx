@@ -7,6 +7,7 @@ import { DigitalEmployeeSidebar, type DigitalEmployeeFeature } from "./DigitalEm
 import { ProfileDetailPage } from "./profiles/ProfileDetailPage.js";
 import { ProfileListPage } from "./profiles/ProfileListPage.js";
 import { MarketingMaterialsPage } from "./marketing/MarketingMaterialsPage.js";
+import { OpportunityAdvisorPage } from "./opportunities/OpportunityAdvisorPage.js";
 
 interface DigitalEmployeeLayoutProps {
   pathname: string;
@@ -74,7 +75,11 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
               onBackToConversation={() => onNavigate("/digital-employee/customer-profile")}
             />)}
           {view === "marketing-materials" && <MarketingMaterialsPage onBackToConversation={() => onNavigate("/digital-employee/marketing-materials")} />}
-          {view === "acquisition" && <ComingSoon title="商机参谋" description="发现有依据、有时效的商机，给出可执行的跟进建议；客户画像继续作为事实来源。" onBack={goProfiles} />}
+          {view === "acquisition" && <OpportunityAdvisorPage
+            onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
+            onCreateProfile={goProfiles}
+            onOpenCopyProject={(id) => onNavigate(`/digital-employee/copy?project=${encodeURIComponent(id)}`)}
+          />}
           {view === "copy" && <ComingSoon title="获客宝" description="基于客户画像与营销目标生成可直接使用的营销内容；内容项目和版本工作台将在下一阶段接入。" onBack={goProfiles} />}
         </div>
       </main>

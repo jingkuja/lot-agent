@@ -337,7 +337,7 @@ export class AgentService {
         );
         return { summary, modelId: usedModelId };
       },
-    });
+    }, this.jobQueue);
 
     // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
     this.uploadStorage = new LocalStorage(resolve(root, "data/uploads"), staticPrefix("/static/uploads"));
