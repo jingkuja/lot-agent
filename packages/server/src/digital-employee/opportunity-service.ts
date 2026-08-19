@@ -331,8 +331,8 @@ export class OpportunityService {
   async saveSettings(userId: string, input: { enabled: boolean; timezone: string; dailyRunTime: string; version: number }) {
     const result = await this.pool.query(
       `INSERT INTO de_follow_up_automation_settings (user_id,enabled,timezone,daily_run_time,next_run_at,version)
-       VALUES ($1,$2,$3,$4::time,
-         CASE WHEN $2 THEN next_daily_run($3,$4::time) ELSE NULL END,1)
+       VALUES ($1,$2::boolean,$3::text,$4::time,
+         CASE WHEN $2::boolean THEN next_daily_run($3::text,$4::time) ELSE NULL END,1)
        ON CONFLICT (user_id) DO UPDATE SET
          enabled = EXCLUDED.enabled, timezone = EXCLUDED.timezone, daily_run_time = EXCLUDED.daily_run_time,
          next_run_at = CASE WHEN EXCLUDED.enabled THEN next_daily_run(EXCLUDED.timezone,EXCLUDED.daily_run_time) ELSE NULL END,
