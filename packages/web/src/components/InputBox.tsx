@@ -1,7 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
 import { ModelPicker } from "./ModelPicker.js";
-import { isSeedanceModel, type CatalogModel } from "../lib/model-filter.js";
+import {
+  isSeedance25Model,
+  isSeedanceModel,
+  missingSeedanceMentions,
+  seedanceAssetMention,
+  type CatalogModel,
+} from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
@@ -85,7 +91,15 @@ export function InputBox({
   const videoMode = mode === "video";
   const effectiveVideoModel = selectedModel ?? models[0]?.id ?? "";
   const seedanceVideo = videoMode && isSeedanceModel(effectiveVideoModel);
+  const seedance25Video = videoMode && isSeedance25Model(effectiveVideoModel);
   const lockAdaptive = seedanceVideo && referenceVideoFiles.length > 0;
+  const missingMentions = seedance25Video
+    ? missingSeedanceMentions(value, {
+        images: files.length,
+        videos: referenceVideoFiles.length,
+        audios: referenceAudioFiles.length,
+      })
+    : [];
   const maxFiles = videoMode
     ? MAX_VIDEO_REFERENCE_IMAGES
     : mode === "image"
@@ -281,6 +295,15 @@ export function InputBox({
           提供参考视频后视频时长和比例不能选择，自动适配参考视频
         </div>
       )}
+      {seedance25Video && missingMentions.length > 0 && (
+        <div className="input-modal-hint" role="alert">
+          <span aria-hidden>⚠️</span>
+          当前提示词尚未写出
+          {missingMentions.map((tag) => (
+            <code key={tag} className="input-seedance-mention">{tag}</code>
+          ))}
+        </div>
+      )}
       {(knowledgeBases.length > 0 || files.length > 0 || referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
         <div className="input-attachments">
           {knowledgeBases.map((item) => (
@@ -326,7 +349,9 @@ export function InputBox({
           )}
           {videoMode && referenceVideoFiles.map((f, i) => (
             <div className="attachment-chip" key={`__video${i}`}>
-              <span className="attachment-slot-badge badge-video-reference">参考视频</span>
+              <span className="attachment-slot-badge badge-video-reference">
+                {seedance25Video ? `参考视频 ${seedanceAssetMention("Video", i)}` : "参考视频"}
+              </span>
               <span className="attachment-attachment-icon" aria-hidden>🎞️</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
               <button type="button" className="attachment-remove" onClick={() => setReferenceVideoFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
@@ -334,7 +359,9 @@ export function InputBox({
           ))}
           {videoMode && referenceAudioFiles.map((f, i) => (
             <div className="attachment-chip" key={`__audio${i}`}>
-              <span className="attachment-slot-badge badge-audio-reference">参考音频</span>
+              <span className="attachment-slot-badge badge-audio-reference">
+                {seedance25Video ? `参考音频 ${seedanceAssetMention("Audio", i)}` : "参考音频"}
+              </span>
               <span className="attachment-attachment-icon" aria-hidden>🔊</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
               <button type="button" className="attachment-remove" onClick={() => setReferenceAudioFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
@@ -360,7 +387,11 @@ export function InputBox({
             <div className="attachment-chip" key={i}>
               {mediaMode && (
                 <span className="attachment-slot-badge badge-image-reference">
-                  {mode === "image" && files.length > 1 ? `参考图${i + 1}` : "参考图"}
+                  {seedance25Video
+                    ? `参考图 ${seedanceAssetMention("Image", i)}`
+                    : mode === "image" && files.length > 1
+                      ? `参考图${i + 1}`
+                      : "参考图"}
                 </span>
               )}
               {pptMode && <span className="attachment-slot-badge badge-content">内容</span>}
@@ -530,19 +561,49 @@ export function InputBox({
           )}
           {videoMode && (
             <>
-              <button type="button" className="btn-reference" onClick={() => fileInputRef.current?.click()} disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES} title="最多5张">
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES}
+                title={seedance25Video ? "最多5张；提示词须按上传顺序写出 @Image1、@Image2…" : "最多5张"}
+              >
                 🖼️ 参考图
               </button>
-              <button type="button" className="btn-reference" onClick={() => referenceVideoInputRef.current?.click()} disabled={disabled || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS} title="最多2个">
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => referenceVideoInputRef.current?.click()}
+                disabled={disabled || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS}
+                title={seedance25Video ? "最多2个；提示词须按上传顺序写出 @Video1、@Video2…" : "最多2个"}
+              >
                 🎞️ 参考视频
               </button>
-              <button type="button" className="btn-reference" onClick={() => referenceAudioInputRef.current?.click()} disabled={disabled || referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS} title="最多2个">
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => referenceAudioInputRef.current?.click()}
+                disabled={disabled || referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS}
+                title={seedance25Video ? "最多2个；提示词须按上传顺序写出 @Audio1、@Audio2…" : "最多2个"}
+              >
                 🔊 参考音频
               </button>
-              <button type="button" className="btn-reference" onClick={() => firstFrameInputRef.current?.click()} disabled={disabled}>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => firstFrameInputRef.current?.click()}
+                disabled={disabled}
+                title={seedance25Video ? "首帧图比例需与生成视频比例一致" : undefined}
+              >
                 首帧图
               </button>
-              <button type="button" className="btn-reference" onClick={() => lastFrameInputRef.current?.click()} disabled={disabled}>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => lastFrameInputRef.current?.click()}
+                disabled={disabled}
+                title={seedance25Video ? "尾帧图比例需与生成视频比例一致" : undefined}
+              >
                 尾帧图
               </button>
             </>

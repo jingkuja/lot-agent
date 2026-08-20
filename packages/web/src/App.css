@@ -1313,6 +1313,61 @@ html, body, #root {
   color: var(--text-muted);
 }
 
+.input-seedance-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--de-warning) 46%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--de-warning) 14%, var(--bg-card));
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: left;
+}
+.input-seedance-hint-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--de-warning);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.input-seedance-hint-body {
+  min-width: 0;
+}
+.input-seedance-hint strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--de-warning);
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+.input-seedance-hint ul {
+  margin: 0;
+  padding-left: 1.15em;
+}
+.input-seedance-hint li + li {
+  margin-top: 4px;
+}
+.input-seedance-hint code,
+.input-seedance-mention {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--code-inline-bg);
+  color: var(--accent);
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+.input-seedance-mention {
+  margin-left: 4px;
+}
+
 .input-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -1323,7 +1378,7 @@ html, body, #root {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 220px;
+  max-width: 280px;
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

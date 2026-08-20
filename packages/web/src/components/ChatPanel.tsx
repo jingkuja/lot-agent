@@ -43,6 +43,32 @@ function timeGreeting(): string {
   return "晚上好";
 }
 
+function Seedance25Hint() {
+  return (
+    <div className="input-seedance-hint" role="note">
+      <span className="input-seedance-hint-icon" aria-hidden>⚠</span>
+      <div className="input-seedance-hint-body">
+        <strong>Seedance 2.5</strong>
+        <ul>
+          <li>
+            使用参考图 / 参考视频 / 参考音频时，提示词必须按上传顺序显式写出
+            {" "}
+            <code>@Image1</code>、<code>@Video1</code>、<code>@Audio1</code>
+            ，否则参考视频/音频会被静默降级为「风格暗示」甚至忽略。
+          </li>
+          <li>
+            若参考图或参考视频涉及真人，必须先到火山方舟官方完成真人认证；不支持直接使用含真人人脸的公网 URL。
+          </li>
+          <li>首帧图、尾帧图比例需要和生成视频比例一致。</li>
+          <li>
+            提示词案例：<code>@Video1</code> 中增加一条鱼从湖面上跳出来
+          </li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 export function ChatPanel({
   messages,
   onSend,
@@ -105,6 +131,7 @@ export function ChatPanel({
 
   const inputEl = (
     <>
+      {isEmpty && mode === "video" && <Seedance25Hint />}
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
       <InputBox
         onSend={onSend}
