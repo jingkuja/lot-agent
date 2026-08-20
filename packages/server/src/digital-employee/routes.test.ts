@@ -136,4 +136,23 @@ describe("digital employee profile routes", () => {
     expect(response.status).toBe(200);
     expect(saveSettings).toHaveBeenCalledWith("u1", expect.objectContaining({ dailyRunTime: "09:30" }));
   });
+
+  it("lists the authenticated user's customer-acquisition assets", async () => {
+    const listAssets = vi.fn(async () => ({ items: [], total: 0, page: 1, limit: 12 }));
+    const service = { customerAcquisition: { listAssets } };
+    const response = await app(service).request("/digital-employee/acquisition/assets?range=7d&assetType=poster");
+    expect(response.status).toBe(200);
+    expect(listAssets).toHaveBeenCalledWith("u1", expect.objectContaining({ range: "7d", assetType: "poster" }));
+  });
+
+  it("rejects campaign generation without a cohort or public audience", async () => {
+    const createAsset = vi.fn();
+    const service = { customerAcquisition: { createAsset } };
+    const response = await app(service).request("/digital-employee/acquisition/assets", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assetType: "copy", prompt: "生成营销文案", productId: "p1", objective: "咨询", channels: ["朋友圈"], callToAction: "预约" }),
+    });
+    expect(response.status).toBe(400);
+    expect(createAsset).not.toHaveBeenCalled();
+  });
 });

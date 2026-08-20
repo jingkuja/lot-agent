@@ -136,6 +136,8 @@ export interface ToolContext {
   sourceText?: string;
   /** Model actually selected for this turn, for domain audit records only. */
   modelId?: string;
+  /** Visible product-module scope persisted on the conversation. */
+  featureScope?: string;
   /** Aborts long-running tool work when the run times out or the client disconnects. */
   signal?: AbortSignal;
 }

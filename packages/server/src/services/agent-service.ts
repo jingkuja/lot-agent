@@ -27,6 +27,7 @@ import {
   WechatMpConnector,
   LocalStorage,
   complete,
+  estimateCost,
 } from "@lot-agent/core";
 import { dirname, resolve } from "node:path";
 import { createDocTool } from "../tools/doc-tool.js";
@@ -69,6 +70,7 @@ import { createCustomerCaptureTools } from "../digital-employee/tools/customer-c
 import { createCustomerProfileTools } from "../digital-employee/tools/customer-profile-tools.js";
 import { cohortLlmMetrics } from "../digital-employee/profile/cohort-summary.js";
 import { createMarketingMaterialTools } from "../digital-employee/tools/marketing-material-tools.js";
+import { createCustomerAcquisitionTools } from "../digital-employee/tools/customer-acquisition-tools.js";
 
 /**
  * Builtin tools that touch the host filesystem / shell. On the deployed
@@ -87,6 +89,28 @@ const DISABLED_HOST_TOOLS = new Set([
 const DIGITAL_EMPLOYEE_TOOLS = new Set(
   digitalEmployeeDefinition.toolNames.filter((name) => name !== "ask_user" && name !== "load_skill")
 );
+
+const DIGITAL_EMPLOYEE_SCOPE_TOOLS: Record<string, Set<string>> = {
+  "marketing-materials": new Set([
+    "search_marketing_materials", "create_marketing_product", "update_marketing_product",
+    "update_marketing_brand_assets", "ask_user", "load_skill",
+  ]),
+  "customer-profile": new Set([
+    "search_customer_profiles", "get_customer_profiles", "prepare_customer_profile_change",
+    "commit_customer_profile_change", "prepare_customer_capture", "commit_customer_capture",
+    "ask_user", "load_skill",
+  ]),
+  "opportunity-advisor": new Set([
+    "search_customer_profiles", "get_customer_profiles", "prepare_customer_capture",
+    "commit_customer_capture", "ask_user", "load_skill",
+  ]),
+  "customer-acquisition": new Set([
+    "analyze_customer_cohort", "search_customer_segments", "generate_campaign_copy",
+    "search_marketing_assets", "get_asset_deployment_status", "generate_daily_recommendations",
+    "get_daily_recommendations", "adopt_recommendation", "ignore_recommendation",
+    "check_user_generation_models", "search_marketing_materials", "ask_user", "load_skill",
+  ]),
+};
 
 /** How long a user's tokenhub model catalog stays cached in Redis. */
 const MODEL_CATALOG_TTL_SEC = 300;
@@ -368,6 +392,68 @@ export class AgentService {
         });
         return { reply, modelId: usedModelId };
       },
+    }, {
+      contentGenerator: {
+        recommend: async (input) => {
+          const { llm, usedModelId } = await this.resolveUtilityLLM({ userId: input.userId });
+          const metered = meterLLM(llm, (usage) =>
+            this.meterUtilityUsage("customer-acquisition recommendations", usedModelId, input.userId, usage)
+          );
+          const raw = await complete(metered, [
+            {
+              role: "system",
+              content:
+                "你是获客宝的客群营销策略助手。输入只包含脱敏聚合群像和已经确认的产品/品牌事实。" +
+                "不要推断或输出任何单个客户身份，不得虚构产品能力、优惠、案例或数据。" +
+                "生成2到3条copy、1到2条poster、1到2条video_script推荐；客群差异大或样本过小时要在reasoning中明确风险。" +
+                "仅输出JSON对象：{\"recommendations\":[{\"type\":\"copy|poster|video_script\",\"segmentId\":null,\"productId\":null," +
+                "\"targetSegmentDescription\":\"...\",\"theme\":\"...\",\"corePoints\":[\"...\"],\"suggestedChannels\":[\"...\"]," +
+                "\"reasoning\":[\"...\"],\"creativeDirection\":\"...\",\"durationSeconds\":15}]}。",
+            },
+            { role: "user", content: JSON.stringify(input).slice(0, 30_000) },
+          ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.3, maxTokens: 2_400 } });
+          return { recommendations: parseAcquisitionRecommendations(raw), modelId: usedModelId };
+        },
+        createCopy: async (input) => {
+          const { llm, usedModelId } = await this.resolveUtilityLLM({ userId: input.userId });
+          const metered = meterLLM(llm, (usage) =>
+            this.meterUtilityUsage("customer-acquisition copy", usedModelId, input.userId, usage)
+          );
+          const raw = await complete(metered, [
+            {
+              role: "system",
+              content:
+                "你是获客宝的客群营销文案助手。只能使用brief中的聚合洞察、产品事实和品牌口径。" +
+                "严禁出现单个客户身份、联系方式、未确认数字、过期权益和夸大承诺。" +
+                "文案要面向一类受众，包含清晰标题、正文和行动号召，并适配brief中的渠道。" +
+                "仅输出JSON对象：{\"title\":\"...\",\"content\":\"...\"}。",
+            },
+            { role: "user", content: JSON.stringify({ request: input.prompt, brief: input.brief }).slice(0, 30_000) },
+          ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.55, maxTokens: 1_600 } });
+          const parsed = parseAcquisitionCopy(raw);
+          return { ...parsed, modelId: usedModelId };
+        },
+      },
+      modelResolver: {
+        get: async (userId) => {
+          const apiKey = await this.db.getUserApiKey(userId);
+          let catalog = null;
+          try { catalog = await this.getUserModelCatalog(userId, apiKey); } catch { catalog = null; }
+          const image = catalog?.image.find((model) => isCampaignImageModel(model.id)) ?? null;
+          const video = catalog?.video.find((model) => isCampaignVideoModel(model.id)) ?? null;
+          return {
+            image: Boolean(image), video: Boolean(video),
+            imageModelId: image?.id ?? null, videoModelId: video?.id ?? null,
+            configurationUrl: process.env.TOKENHUB_WEB_URL ?? "https://tokenhub.todoucloud.com",
+          };
+        },
+        checkQuota: async ({ userId, mediaType, modelId, outputCount }) => {
+          const config = this.modelRegistry.getConfig(modelId) ?? catalogModelConfig(this.modelCatalog, modelId, mediaType);
+          const estimatedCost = estimateCost(config, { outputCount });
+          const result = await this.usageMeter.checkQuota(userId, estimatedCost);
+          return { ok: result.ok, reason: result.reason };
+        },
+      },
     });
 
     // 用户上传文件的独立存储，服务于 /static/uploads（与 data/assets 生成物分开）
@@ -397,6 +483,9 @@ export class AgentService {
       this.toolRegistry.register(tool);
     }
     for (const tool of createMarketingMaterialTools(this.digitalEmployee.marketingMaterials)) {
+      this.toolRegistry.register(tool);
+    }
+    for (const tool of createCustomerAcquisitionTools(this.digitalEmployee.customerAcquisition)) {
       this.toolRegistry.register(tool);
     }
 
@@ -730,6 +819,15 @@ export class AgentService {
     // Falls back to the shared registry provider when the user has no api_key
     // (e.g. local/dev without tokenhub) so the chat path still runs.
     const conversation = await this.db.getConversation(conversationId);
+    const featureScope = typeof conversation?.metadata?.digitalEmployeeFeatureScope === "string"
+      ? conversation.metadata.digitalEmployeeFeatureScope
+      : undefined;
+    if (def.id === "digital_employee" && featureScope) {
+      dynamicParts.push(
+        `[当前功能作用域]\nfeatureScope=${featureScope}。这是用户界面明确显示并随会话保存的作用域。` +
+        "只能使用当前作用域允许的工具和对象；不得把其他模块的隐式客户、客群、机会或资产带入本次对话。"
+      );
+    }
     if (opts?.modelId) await this.db.setConversationModel(conversationId, opts.modelId);
     const modelId = resolveConversationModel(
       opts?.modelId,
@@ -754,7 +852,9 @@ export class AgentService {
     const agent = new Agent({
       ...this.agentConfig,
       systemPrompt: def.systemPrompt,
-      allowedToolNames: def.toolNames,
+      allowedToolNames: def.id === "digital_employee" && featureScope && DIGITAL_EMPLOYEE_SCOPE_TOOLS[featureScope]
+        ? def.toolNames.filter((name) => DIGITAL_EMPLOYEE_SCOPE_TOOLS[featureScope].has(name))
+        : def.toolNames,
       dynamicPromptParts: dynamicParts,
       modelParams: def.modelParams,
       outputSchema: def.outputSchema,
@@ -813,6 +913,7 @@ export class AgentService {
         sourceMessageId: userMsgId,
         sourceText: userMessage,
         modelId,
+        featureScope,
       },
       memory,
     };
@@ -1009,4 +1110,59 @@ export class AgentService {
     }
     await this.db.close();
   }
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> {
+  const trimmed = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("模型没有返回JSON对象");
+  const value = JSON.parse(trimmed.slice(start, end + 1)) as unknown;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("模型返回格式无效");
+  return value as Record<string, unknown>;
+}
+
+function parseAcquisitionRecommendations(raw: string): import("../digital-employee/acquisition-types.js").CampaignRecommendationDraft[] {
+  const value = parseJsonObject(raw).recommendations;
+  if (!Array.isArray(value)) throw new Error("推荐结果格式无效");
+  return value.flatMap((item): import("../digital-employee/acquisition-types.js").CampaignRecommendationDraft[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    if (!(["copy", "poster", "video_script"] as const).includes(row.type as any)) return [];
+    if (typeof row.targetSegmentDescription !== "string" || typeof row.theme !== "string") return [];
+    const strings = (input: unknown) => Array.isArray(input) ? input.filter((entry): entry is string => typeof entry === "string") : [];
+    return [{
+      type: row.type as "copy" | "poster" | "video_script",
+      segmentId: typeof row.segmentId === "string" ? row.segmentId : null,
+      productId: typeof row.productId === "string" ? row.productId : null,
+      targetSegmentDescription: row.targetSegmentDescription.slice(0, 500),
+      theme: row.theme.slice(0, 500),
+      corePoints: strings(row.corePoints).slice(0, 5),
+      suggestedChannels: strings(row.suggestedChannels).slice(0, 5),
+      reasoning: strings(row.reasoning).slice(0, 5),
+      creativeDirection: typeof row.creativeDirection === "string" ? row.creativeDirection.slice(0, 1_000) : "",
+      durationSeconds: [15, 30, 60].includes(Number(row.durationSeconds)) ? Number(row.durationSeconds) : null,
+    }];
+  });
+}
+
+function parseAcquisitionCopy(raw: string): { title: string; content: string } {
+  const value = parseJsonObject(raw);
+  if (typeof value.title !== "string" || !value.title.trim() || typeof value.content !== "string" || value.content.trim().length < 10) {
+    throw new Error("文案结果格式无效");
+  }
+  return { title: value.title.trim().slice(0, 500), content: value.content.trim().slice(0, 20_000) };
+}
+
+function normalizedModelId(id: string): string {
+  return id.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isCampaignImageModel(id: string): boolean {
+  return ["gptimage20", "gptimage2"].includes(normalizedModelId(id));
+}
+
+function isCampaignVideoModel(id: string): boolean {
+  const normalized = normalizedModelId(id);
+  return normalized.includes("seedance") && (normalized.includes("20") || normalized.endsWith("2"));
 }

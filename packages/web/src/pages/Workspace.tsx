@@ -19,6 +19,7 @@ import { digitalEmployeeConversations as filterDigitalEmployeeConversations, wit
 import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
 import { DigitalEmployeeHome } from "../modules/digital-employee/DigitalEmployeeHome.js";
 import { MarketingMaterialsHome } from "../modules/digital-employee/marketing/MarketingMaterialsHome.js";
+import { CustomerAcquisitionChatHome } from "../modules/digital-employee/acquisition/CustomerAcquisitionChatHome.js";
 import {
   DigitalEmployeeSidebar,
   type DigitalEmployeeFeature,
@@ -231,6 +232,17 @@ export function Workspace({
     [setActiveId, clear]
   );
 
+  // A digital-employee feature is a hard business boundary. Switching from
+  // 客户画像/商机参谋 to 获客宝 must never keep the previous conversation's
+  // implicit object or tool scope, even though this Workspace stays mounted.
+  const previousDigitalFeature = useRef(digitalEmployeeFeature);
+  useEffect(() => {
+    const previous = previousDigitalFeature.current;
+    previousDigitalFeature.current = digitalEmployeeFeature;
+    if (!isDigitalEmployeeMode || previous === digitalEmployeeFeature) return;
+    handleStartNewChat("digital_employee");
+  }, [digitalEmployeeFeature, handleStartNewChat, isDigitalEmployeeMode]);
+
   // Desktop shortcuts: Cmd/Ctrl+N opens a fresh chat for the agent currently
   // on screen; Cmd/Ctrl+, opens the key settings modal. No-op in browsers.
   useDesktopShortcuts({
@@ -295,7 +307,14 @@ export function Workspace({
         }
       };
       if (newAgentId) {
-        const conv = await api.createConversation(undefined, newAgentId);
+        const featureScope = newAgentId === "digital_employee"
+          ? digitalEmployeeFeature === "copy"
+            ? "customer-acquisition"
+            : digitalEmployeeFeature === "acquisition"
+              ? "opportunity-advisor"
+              : digitalEmployeeFeature
+          : undefined;
+        const conv = await api.createConversation(undefined, newAgentId, featureScope);
         activeIdRef.current = conv.id;
         setActiveId(conv.id);
         setNewAgentId(null);
@@ -308,7 +327,7 @@ export function Workspace({
       }
       dispatch();
     },
-    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels]
+    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, digitalEmployeeFeature]
   );
 
   const handleDelete = useCallback(
@@ -371,6 +390,17 @@ export function Workspace({
     () => filterDigitalEmployeeConversations(conversations),
     [conversations]
   );
+  const featureScopedDigitalEmployeeConversations = useMemo(() => {
+    const scope = digitalEmployeeFeature === "copy"
+      ? "customer-acquisition"
+      : digitalEmployeeFeature === "acquisition"
+        ? "opportunity-advisor"
+        : digitalEmployeeFeature;
+    return digitalEmployeeConversations.filter((conversation) => {
+      const stored = conversation.metadata?.digitalEmployeeFeatureScope;
+      return stored === scope || (stored === undefined && scope === "customer-profile");
+    });
+  }, [digitalEmployeeConversations, digitalEmployeeFeature]);
 
   // 当前 hero Agent 对应的模型分组;切组时各组各自记住上次的选择。
   const modelGroup = groupForKind(openAgent?.type || openAgent?.id);
@@ -407,7 +437,7 @@ export function Workspace({
         {isDigitalEmployeeMode ? (
           <DigitalEmployeeSidebar
             activeFeature={digitalEmployeeFeature}
-            conversations={digitalEmployeeConversations}
+            conversations={featureScopedDigitalEmployeeConversations}
             activeConversationId={activeId}
             onOpenFeature={(feature) => {
               if (feature === digitalEmployeeFeature) handleStartNewChat("digital_employee");
@@ -498,10 +528,14 @@ export function Workspace({
               digitalEmployeeFeature === "marketing-materials" ? <MarketingMaterialsHome
                 onOpenManagement={onNavigateDigitalEmployee}
                 onPrompt={(prompt) => void doSend(prompt)}
+              /> : digitalEmployeeFeature === "copy" ? <CustomerAcquisitionChatHome
+                onOpenWorkspace={onNavigateDigitalEmployee}
+                onPrompt={(prompt) => void doSend(prompt)}
               /> : <DigitalEmployeeHome
                 onOpenProfiles={onNavigateDigitalEmployee}
                 onOpenProfile={onNavigateDigitalProfile ?? onNavigateDigitalEmployee}
                 onOpenOpportunities={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("acquisition") : undefined}
+                onOpenAcquisition={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("copy") : undefined}
                 onPrompt={(prompt) => void doSend(prompt)}
               />
             ) : undefined}

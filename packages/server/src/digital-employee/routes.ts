@@ -25,12 +25,108 @@ import {
   parseOpportunitySettings,
   parseTalkTrackRequest,
 } from "./opportunity-validators.js";
+import {
+  parseAssetList,
+  parseCreateCampaignAsset,
+  parseDeployment,
+  parseFeedback,
+  parseRecommendationFilter,
+  parseRecommendationStatus,
+  parseSegmentInput,
+} from "./acquisition-validators.js";
 
 type Variables = { userId: string };
 
 /** Browser-facing, authenticated customer-profile API. */
 export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Hono<{ Variables: Variables }> {
   const app = new Hono<{ Variables: Variables }>();
+
+  app.get("/acquisition/segments", async (c) => {
+    try { return c.json({ items: await service.customerAcquisition.listSegments(c.get("userId")) }); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/segments", async (c) => {
+    try { return c.json(await service.customerAcquisition.createSegment(c.get("userId"), parseSegmentInput(await body(c))), 201); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/segments/:id/snapshots", async (c) => {
+    try {
+      return c.json(await service.customerAcquisition.snapshotSegment(
+        c.get("userId"), parseEntityId(c.req.param("id"), "segmentId")
+      ), 201);
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/insights", async (c) => {
+    try { return c.json(await service.customerAcquisition.getCohortInsights(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/recommendations", async (c) => {
+    try { return c.json(await service.customerAcquisition.listRecommendations(c.get("userId"), parseRecommendationFilter(c.req.query("status")))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/recommendations/refresh", async (c) => {
+    try { return c.json(await service.customerAcquisition.refreshRecommendations(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.patch("/acquisition/recommendations/:id", async (c) => {
+    try {
+      return c.json(await service.customerAcquisition.updateRecommendation(
+        c.get("userId"), parseEntityId(c.req.param("id"), "recommendationId"), parseRecommendationStatus(await body(c))
+      ));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/model-configuration", async (c) => {
+    try { return c.json(await service.customerAcquisition.getModelAvailability(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/assets", async (c) => {
+    try { return c.json(await service.customerAcquisition.listAssets(c.get("userId"), parseAssetList(c.req.query()))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/assets", async (c) => {
+    try { return c.json(await service.customerAcquisition.createAsset(c.get("userId"), parseCreateCampaignAsset(await body(c))), 201); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/assets/:id", async (c) => {
+    try { return c.json(await service.customerAcquisition.getAsset(c.get("userId"), parseEntityId(c.req.param("id"), "assetId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.delete("/acquisition/assets/:id", async (c) => {
+    try { return c.json(await service.customerAcquisition.archiveAsset(c.get("userId"), parseEntityId(c.req.param("id"), "assetId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.put("/acquisition/assets/:id/deployments", async (c) => {
+    try {
+      return c.json(await service.customerAcquisition.saveDeployment(
+        c.get("userId"), parseEntityId(c.req.param("id"), "assetId"), parseDeployment(await body(c))
+      ));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/deployments/:id/feedback", async (c) => {
+    try {
+      return c.json(await service.customerAcquisition.addFeedback(
+        c.get("userId"), parseEntityId(c.req.param("id"), "deploymentId"), parseFeedback(await body(c))
+      ), 201);
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/analytics", async (c) => {
+    try { return c.json(await service.customerAcquisition.analytics(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
 
   app.get("/opportunities", async (c) => {
     try {

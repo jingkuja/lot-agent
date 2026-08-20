@@ -14,7 +14,7 @@ describe("opportunity advisor migration", () => {
     await opportunityAdvisor.up(client);
     const ddl = statements.join("\n");
     expect(opportunityAdvisor.version).toBe(12);
-    expect(migrations.at(-1)).toBe(opportunityAdvisor);
+    expect(migrations.find((migration) => migration.version === 12)).toBe(opportunityAdvisor);
     expect(ddl).toContain("opportunity_type");
     expect(ddl).toContain("risk_flags JSONB");
     expect(ddl).toContain("snoozed_until");

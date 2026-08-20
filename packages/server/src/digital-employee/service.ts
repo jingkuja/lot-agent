@@ -44,6 +44,8 @@ import { parseCaptureInput } from "./validators.js";
 import { MarketingMaterialsService } from "./marketing-service.js";
 import { OpportunityService, type OpportunityTalkTrackGenerator } from "./opportunity-service.js";
 import type { JobQueue } from "@lot-agent/core";
+import { CustomerAcquisitionService } from "./acquisition-service.js";
+import type { CampaignContentGenerator, CampaignModelResolver } from "./acquisition-types.js";
 
 const CAPTURE_DRAFT_TTL_MS = 24 * 60 * 60 * 1_000;
 const CAPTURE_PROMPT_VERSION = "customer-capture/v1";
@@ -102,6 +104,7 @@ export class DigitalEmployeeService {
   readonly repository: DigitalEmployeeRepository;
   readonly marketingMaterials: MarketingMaterialsService;
   readonly opportunities: OpportunityService;
+  readonly customerAcquisition: CustomerAcquisitionService;
   private readonly secretBox: SecretBox;
 
   constructor(
@@ -109,11 +112,21 @@ export class DigitalEmployeeService {
     secretBox: SecretBox = createSecretBox(),
     private readonly cohortSummaryGenerator?: CohortSummaryGenerator,
     opportunityQueue?: JobQueue,
-    opportunityTalkTrackGenerator?: OpportunityTalkTrackGenerator
+    opportunityTalkTrackGenerator?: OpportunityTalkTrackGenerator,
+    acquisitionDeps?: {
+      contentGenerator?: CampaignContentGenerator;
+      modelResolver?: CampaignModelResolver;
+    }
   ) {
     this.repository = new DigitalEmployeeRepository(db.pool);
     this.marketingMaterials = new MarketingMaterialsService(db);
     this.opportunities = new OpportunityService(db, opportunityQueue, undefined, opportunityTalkTrackGenerator);
+    this.customerAcquisition = new CustomerAcquisitionService(
+      db,
+      opportunityQueue,
+      acquisitionDeps?.contentGenerator,
+      acquisitionDeps?.modelResolver,
+    );
     this.secretBox = secretBox;
   }
 

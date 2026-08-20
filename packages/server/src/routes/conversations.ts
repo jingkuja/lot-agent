@@ -81,7 +81,7 @@ export function createConversationRoutes(service: AgentService): Hono {
   // Create conversation — owned by current user
   app.post("/", async (c) => {
     const userId = c.get("userId");
-    const body = await c.req.json<{ title?: string; agentId?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ title?: string; agentId?: string; featureScope?: string }>().catch(() => ({}));
     const id = randomUUID();
     const title = body.title ?? "新对话";
     const model =
@@ -90,7 +90,14 @@ export function createConversationRoutes(service: AgentService): Hono {
         : service["llmConfig"].anthropic.model;
     const provider = service["llmConfig"].default;
     const agentId = body.agentId ?? "general";
-    const conversation = await service.db.createConversation(id, title, model, provider, agentId, userId);
+    const allowedScopes = new Set(["marketing-materials", "customer-profile", "opportunity-advisor", "customer-acquisition"]);
+    const featureScope = agentId === "digital_employee" && body.featureScope && allowedScopes.has(body.featureScope)
+      ? body.featureScope
+      : undefined;
+    const conversation = await service.db.createConversation(
+      id, title, model, provider, agentId, userId,
+      featureScope ? { digitalEmployeeFeatureScope: featureScope } : undefined
+    );
     return c.json(conversation, 201);
   });
 

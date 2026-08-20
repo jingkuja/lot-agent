@@ -327,6 +327,142 @@ export interface OpportunityListResponse {
   settings: OpportunitySettings;
 }
 
+export interface CustomerSegmentCriteria {
+  relationshipStages?: RelationshipStage[];
+  health?: Health[];
+  regions?: string[];
+  tags?: string[];
+  journeyStages?: JourneyStage[];
+  productName?: string;
+  activeWithinDays?: number;
+  excludeAtRisk?: boolean;
+  excludeRecentlyContactedDays?: number;
+}
+
+export interface CustomerSegmentMetrics {
+  totalProfiles: number;
+  excludedProfiles: number;
+  relationshipStages: Array<{ key: string; label?: string; count: number }>;
+  health: Array<{ key: string; label?: string; count: number }>;
+  regions: Array<{ key: string; label?: string; count: number }>;
+  journeyStages: Array<{ key: string; label?: string; count: number }>;
+  commonNeeds: Array<{ key?: string; label: string; count: number }>;
+  commonObjections: Array<{ key?: string; label: string; count: number }>;
+  topTags: Array<{ key?: string; label: string; count: number }>;
+  warnings: string[];
+}
+
+export interface CustomerSegmentSnapshot {
+  id: string;
+  segmentId: string | null;
+  audienceDescription: string;
+  criteria: CustomerSegmentCriteria;
+  profileIds: string[];
+  excludedProfileIds: string[];
+  metrics: CustomerSegmentMetrics;
+  sampledAt: string;
+  createdAt: string;
+  memberPreview?: Array<{ id: string; displayName: string; relationshipStage: RelationshipStage; health: Health; region: string | null }>;
+}
+
+export interface CustomerSegment {
+  id: string;
+  name: string;
+  description: string;
+  criteria: CustomerSegmentCriteria;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt: string;
+  latestSnapshot?: Pick<CustomerSegmentSnapshot, "id" | "metrics" | "sampledAt">;
+}
+
+export interface AcquisitionInsights {
+  overall: { snapshotDate: string; summary: string; metrics: CustomerCohortMetrics; generatedAt: string; generationMethod: string; modelId: string | null } | null;
+  segments: CustomerSegment[];
+}
+
+export type CampaignRecommendationType = "copy" | "poster" | "video_script";
+export interface CampaignRecommendation {
+  id: string;
+  type: CampaignRecommendationType;
+  segmentId: string | null;
+  segmentName: string | null;
+  productId: string | null;
+  productName: string | null;
+  targetSegmentDescription: string;
+  theme: string;
+  corePoints: string[];
+  suggestedChannels: string[];
+  reasoning: string[];
+  creativeDirection: string;
+  durationSeconds: number | null;
+  status: "pending" | "adopted" | "ignored" | "expired";
+  generatedAt: string;
+  expiresAt: string;
+}
+
+export interface AcquisitionModelConfiguration {
+  image: boolean;
+  video: boolean;
+  imageModelId: string | null;
+  videoModelId: string | null;
+  configurationUrl: string;
+}
+
+export type MarketingAssetType = "text" | "poster" | "image" | "video";
+export type DeploymentPlatform = "moments" | "wechat_official" | "channels" | "douyin_kuaishou" | "xiaohongshu" | "ad_platform" | "other";
+export interface DeploymentFeedback {
+  id: string;
+  deploymentId?: string;
+  impressions: number | null;
+  interactions: number | null;
+  conversions: number | null;
+  feedbackText: string;
+  recordedAt: string;
+}
+export interface AssetDeployment {
+  id: string;
+  assetId?: string;
+  platform: DeploymentPlatform;
+  customPlatform: string | null;
+  status: "pending" | "deployed" | "ended";
+  deployedAt: string | null;
+  feedback: DeploymentFeedback[];
+}
+export interface MarketingAsset {
+  id: string;
+  campaignId: string | null;
+  campaignName: string | null;
+  segmentSnapshotId: string | null;
+  segmentName: string | null;
+  parentAssetId: string | null;
+  assetType: MarketingAssetType;
+  title: string;
+  content: string;
+  fileUrl: string | null;
+  source: "workspace" | "recommendation" | "reuse";
+  modelId: string | null;
+  taskId: string | null;
+  generationStatus: "pending" | "running" | "ready" | "failed" | "cancelled";
+  status: "draft" | "ready" | "archived";
+  version: number;
+  deployments: AssetDeployment[];
+  createdAt: string;
+  updatedAt: string;
+}
+export interface MarketingAssetListResponse {
+  items: MarketingAsset[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface AcquisitionAnalytics {
+  assets: { total: number; text: number; image: number; video: number; deployed: number };
+  totals: { deployments: number; feedbackCount: number; impressions: number; interactions: number; conversions: number };
+  platforms: Array<{ platform: DeploymentPlatform; customPlatform: string | null; deployments: number; impressions: number; interactions: number; conversions: number }>;
+}
+
 export const OPPORTUNITY_TYPE_LABELS: Record<StoredOpportunityType, string> = {
   prospect_progress: "潜客推进", silent_reengage: "沉默唤醒", event_invitation: "活动邀约", renewal: "续费经营",
   risk_recovery: "风险挽回", new_lead_contact: "新线索首触达", trial_conversion: "试用转化", repurchase: "复购增购",

@@ -258,13 +258,14 @@ export class DB {
     model?: string,
     provider?: string,
     agentId?: string,
-    userId?: string
+    userId?: string,
+    metadata?: Record<string, unknown>
   ): Promise<Conversation> {
     const { rows } = await this.pool.query(
-      `INSERT INTO conversations (id, title, model, provider, agent_id, user_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO conversations (id, title, model, provider, agent_id, user_id, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
        RETURNING *`,
-      [id, title, model ?? null, provider ?? null, agentId ?? "general", userId ?? "default"]
+      [id, title, model ?? null, provider ?? null, agentId ?? "general", userId ?? "default", JSON.stringify(metadata ?? {})]
     );
     return rows[0];
   }

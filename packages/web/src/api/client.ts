@@ -20,6 +20,18 @@ import type {
   TalkTrackIntent,
   TalkTrackMessage,
   OpportunityView,
+  CustomerSegment,
+  CustomerSegmentCriteria,
+  CustomerSegmentSnapshot,
+  AcquisitionInsights,
+  CampaignRecommendation,
+  AcquisitionModelConfiguration,
+  MarketingAsset,
+  MarketingAssetListResponse,
+  DeploymentPlatform,
+  AssetDeployment,
+  DeploymentFeedback,
+  AcquisitionAnalytics,
 } from "../modules/digital-employee/types.js";
 export type { CatalogModel };
 
@@ -257,10 +269,10 @@ export const api = {
       `/conversations?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ),
 
-  createConversation: (title?: string, agentId?: string) =>
+  createConversation: (title?: string, agentId?: string, featureScope?: string) =>
     request<Conversation>("/conversations", {
       method: "POST",
-      body: JSON.stringify({ title, agentId }),
+      body: JSON.stringify({ title, agentId, featureScope }),
     }),
 
   getConversation: (id: string) =>
@@ -613,4 +625,59 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+
+  listCustomerSegments: () =>
+    request<{ items: CustomerSegment[] }>("/digital-employee/acquisition/segments"),
+
+  createCustomerSegment: (input: { name: string; description?: string; criteria: CustomerSegmentCriteria }) =>
+    request<CustomerSegment & { latestSnapshot: CustomerSegmentSnapshot }>("/digital-employee/acquisition/segments", {
+      method: "POST", body: JSON.stringify(input),
+    }),
+
+  snapshotCustomerSegment: (id: string) =>
+    request<CustomerSegmentSnapshot>(`/digital-employee/acquisition/segments/${encodeURIComponent(id)}/snapshots`, { method: "POST" }),
+
+  getAcquisitionInsights: () => request<AcquisitionInsights>("/digital-employee/acquisition/insights"),
+
+  listAcquisitionRecommendations: (status?: string) =>
+    request<{ items: CampaignRecommendation[]; generatedAt: string | null }>(`/digital-employee/acquisition/recommendations${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+
+  refreshAcquisitionRecommendations: () =>
+    request<{ items: CampaignRecommendation[]; generatedAt: string | null }>("/digital-employee/acquisition/recommendations/refresh", { method: "POST" }),
+
+  updateAcquisitionRecommendation: (id: string, status: "adopted" | "ignored") =>
+    request<CampaignRecommendation>(`/digital-employee/acquisition/recommendations/${encodeURIComponent(id)}`, {
+      method: "PATCH", body: JSON.stringify({ status }),
+    }),
+
+  getAcquisitionModelConfiguration: () =>
+    request<AcquisitionModelConfiguration>("/digital-employee/acquisition/model-configuration"),
+
+  listMarketingAssets: (filters: { range?: string; assetType?: string; page?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== "") query.set(key, String(value));
+    return request<MarketingAssetListResponse>(`/digital-employee/acquisition/assets?${query.toString()}`);
+  },
+
+  createMarketingAsset: (input: {
+    assetType: "copy" | "poster" | "video"; prompt: string; segmentId?: string; segmentSnapshotId?: string;
+    publicAudience?: string; productId: string; recommendationId?: string; parentAssetId?: string; campaignId?: string;
+    objective: string; channels: string[]; callToAction: string; title?: string; durationSeconds?: 15 | 30 | 60;
+  }) => request<MarketingAsset>("/digital-employee/acquisition/assets", { method: "POST", body: JSON.stringify(input) }),
+
+  getMarketingAsset: (id: string) => request<MarketingAsset>(`/digital-employee/acquisition/assets/${encodeURIComponent(id)}`),
+
+  archiveMarketingAsset: (id: string) => request<{ assetId: string; status: "archived" }>(`/digital-employee/acquisition/assets/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  saveAssetDeployment: (assetId: string, input: { platform: DeploymentPlatform; customPlatform?: string; status: "pending" | "deployed" | "ended"; deployedAt?: string | null }) =>
+    request<AssetDeployment>(`/digital-employee/acquisition/assets/${encodeURIComponent(assetId)}/deployments`, {
+      method: "PUT", body: JSON.stringify(input),
+    }),
+
+  addDeploymentFeedback: (deploymentId: string, input: { impressions?: number | null; interactions?: number | null; conversions?: number | null; feedbackText?: string }) =>
+    request<DeploymentFeedback>(`/digital-employee/acquisition/deployments/${encodeURIComponent(deploymentId)}/feedback`, {
+      method: "POST", body: JSON.stringify(input),
+    }),
+
+  getAcquisitionAnalytics: () => request<AcquisitionAnalytics>("/digital-employee/acquisition/analytics"),
 };

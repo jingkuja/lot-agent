@@ -28,6 +28,12 @@ export class ConflictError extends DigitalEmployeeError {
   }
 }
 
+export class QuotaError extends DigitalEmployeeError {
+  constructor(message = "当前余额不足，无法创建生成任务") {
+    super(message, 402, "quota_exceeded");
+  }
+}
+
 export function apiError(error: unknown): { status: number; body: { error: string; code?: string } } {
   if (error instanceof DigitalEmployeeError) {
     return { status: error.status, body: { error: error.message, code: error.code } };

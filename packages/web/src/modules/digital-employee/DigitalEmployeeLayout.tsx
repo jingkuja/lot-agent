@@ -8,6 +8,7 @@ import { ProfileDetailPage } from "./profiles/ProfileDetailPage.js";
 import { ProfileListPage } from "./profiles/ProfileListPage.js";
 import { MarketingMaterialsPage } from "./marketing/MarketingMaterialsPage.js";
 import { OpportunityAdvisorPage } from "./opportunities/OpportunityAdvisorPage.js";
+import { CustomerAcquisitionPage } from "./acquisition/CustomerAcquisitionPage.js";
 
 interface DigitalEmployeeLayoutProps {
   pathname: string;
@@ -40,7 +41,17 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
   const goProfiles = () => onNavigate("/digital-employee/profiles");
   const digitalEmployeeConversations = filterDigitalEmployeeConversations(conversations);
   const activeFeature: DigitalEmployeeFeature = view === "profiles" ? "customer-profile" : view;
+  const activeScope = activeFeature === "copy" ? "customer-acquisition" : activeFeature === "acquisition" ? "opportunity-advisor" : activeFeature;
+  const featureConversations = digitalEmployeeConversations.filter((conversation) => {
+    const stored = conversation.metadata?.digitalEmployeeFeatureScope;
+    return stored === activeScope || (stored === undefined && activeScope === "customer-profile");
+  });
   const openFeature = (feature: DigitalEmployeeFeature) => onNavigate(`/digital-employee/${feature}`);
+  const openFeatureChat = () => onNavigate(
+    activeFeature === "copy" || activeFeature === "acquisition"
+      ? `/digital-employee/${activeFeature}/chat`
+      : `/digital-employee/${activeFeature}`
+  );
 
   return (
     <div className="workspace de-workspace">
@@ -55,10 +66,10 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
         />
         <DigitalEmployeeSidebar
           activeFeature={activeFeature}
-          conversations={digitalEmployeeConversations}
+          conversations={featureConversations}
           onOpenFeature={openFeature}
           onOpenConversation={onOpenConversation}
-          onNewConversation={() => onNavigate(view === "marketing-materials" ? "/digital-employee/marketing-materials" : "/digital-employee/customer-profile")}
+          onNewConversation={openFeatureChat}
           loadingMore={loadingMore}
           hasMore={hasMore}
           onLoadMore={loadMore}
@@ -79,13 +90,9 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
             onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
             onCreateProfile={goProfiles}
           />}
-          {view === "copy" && <ComingSoon title="获客宝" description="围绕整体客群洞察与产品匹配生成营销文案、海报和视频；客群营销工作台将在下一阶段接入。" onBack={goProfiles} />}
+          {view === "copy" && <CustomerAcquisitionPage onOpenChat={openFeatureChat} />}
         </div>
       </main>
     </div>
   );
-}
-
-function ComingSoon({ title, description, onBack }: { title: string; description: string; onBack: () => void }) {
-  return <div className="de-page de-coming-soon"><span aria-hidden>◌</span><h1>{title}</h1><p>{description}</p><button className="de-secondary-button" onClick={onBack}>查看客户画像</button></div>;
 }

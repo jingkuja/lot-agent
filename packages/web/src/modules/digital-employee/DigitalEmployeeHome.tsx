@@ -11,6 +11,7 @@ interface DigitalEmployeeHomeProps {
   onOpenProfiles: () => void;
   onOpenProfile: (profileId: string) => void;
   onOpenOpportunities?: () => void;
+  onOpenAcquisition?: () => void;
   onPrompt: (prompt: string) => void;
 }
 
@@ -19,7 +20,7 @@ const QUICK_PROMPTS = [
   { label: "记录客户动态", prompt: "我要记录一条新的客户动态，请引导我补全客户、事件和产品信息。" },
 ];
 
-export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOpportunities, onPrompt }: DigitalEmployeeHomeProps) {
+export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOpportunities, onOpenAcquisition, onPrompt }: DigitalEmployeeHomeProps) {
   const [overview, setOverview] = useState<DigitalEmployeeOverview | null>(null);
   const [error, setError] = useState(false);
 
@@ -140,6 +141,9 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
         <span>快捷开始</span>
         <button type="button" onClick={() => onOpenOpportunities ? onOpenOpportunities() : onPrompt("请查询已到跟进时间或近期需要关注的客户，并按优先级给我建议。") }>
           进入今日经营<span aria-hidden>↗</span>
+        </button>
+        <button type="button" onClick={() => onOpenAcquisition ? onOpenAcquisition() : onPrompt("请总结整体客群的共同需求和差异，并建议适合建立的营销客群。") }>
+          进入获客宝分析<span aria-hidden>↗</span>
         </button>
         {QUICK_PROMPTS.map((item) => (
           <button key={item.label} type="button" onClick={() => onPrompt(item.prompt)}>

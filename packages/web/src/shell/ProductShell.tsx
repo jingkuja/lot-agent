@@ -12,6 +12,25 @@ function currentPath(): string {
   return window.location.pathname || "/assistant";
 }
 
+function digitalEmployeeFeatureFor(pathname: string) {
+  if (pathname.startsWith("/digital-employee/copy")) return "copy" as const;
+  if (pathname.startsWith("/digital-employee/acquisition") || pathname.startsWith("/digital-employee/follow-ups")) return "acquisition" as const;
+  if (pathname === "/digital-employee" || pathname.startsWith("/digital-employee/marketing-materials")) return "marketing-materials" as const;
+  return "customer-profile" as const;
+}
+
+function digitalEmployeeChatPath(feature: ReturnType<typeof digitalEmployeeFeatureFor>) {
+  return feature === "copy" || feature === "acquisition"
+    ? `/digital-employee/${feature}/chat`
+    : `/digital-employee/${feature}`;
+}
+
+function digitalEmployeeManagementPath(feature: ReturnType<typeof digitalEmployeeFeatureFor>) {
+  if (feature === "marketing-materials") return "/digital-employee/marketing-materials/manage";
+  if (feature === "customer-profile") return "/digital-employee/profiles";
+  return `/digital-employee/${feature}`;
+}
+
 /**
  * Tiny history router for the assistant and its precision-management pages.
  * The app intentionally avoids an extra router dependency while preserving
@@ -22,10 +41,10 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
   const [pathname, setPathname] = useState(currentPath);
   const [requestedDigitalConversationId, setRequestedDigitalConversationId] = useState<string | null>(null);
   const isDigitalEmployee = pathname.startsWith("/digital-employee");
-  const isDigitalEmployeeChat = pathname === "/digital-employee" || pathname === "/digital-employee/customer-profile" || pathname === "/digital-employee/marketing-materials";
-  const digitalEmployeeFeature = pathname === "/digital-employee" || pathname.startsWith("/digital-employee/marketing-materials")
-    ? "marketing-materials"
-    : "customer-profile";
+  const isDigitalEmployeeChat = pathname === "/digital-employee" || pathname === "/digital-employee/customer-profile" ||
+    pathname === "/digital-employee/marketing-materials" || pathname === "/digital-employee/copy/chat" ||
+    pathname === "/digital-employee/acquisition/chat";
+  const digitalEmployeeFeature = digitalEmployeeFeatureFor(pathname);
 
   useEffect(() => {
     const onPopState = () => setPathname(currentPath());
@@ -54,7 +73,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           user={user}
           onLogout={onLogout}
           onNavigateAssistant={() => navigate("/assistant")}
-          onNavigateDigitalEmployee={() => navigate(digitalEmployeeFeature === "marketing-materials" ? "/digital-employee/marketing-materials/manage" : "/digital-employee/profiles")}
+          onNavigateDigitalEmployee={() => navigate(digitalEmployeeManagementPath(digitalEmployeeFeature))}
           onNavigateDigitalProfile={(id) => navigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
           onNavigateDigitalFeature={(feature) => navigate(`/digital-employee/${feature}`)}
           requestedConversationId={requestedDigitalConversationId}
@@ -70,7 +89,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           onNavigateAssistant={() => navigate("/assistant")}
           onOpenConversation={(id) => {
             setRequestedDigitalConversationId(id);
-            navigate(`/digital-employee/${digitalEmployeeFeature}`);
+            navigate(digitalEmployeeChatPath(digitalEmployeeFeature));
           }}
         />
       )}
