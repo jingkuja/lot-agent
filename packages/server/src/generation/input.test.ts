@@ -1,16 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { billedVideoSeconds, pickGenerationSettings, pickVideoReferenceInputs } from "./input.js";
+import {
+  billedVideoSeconds,
+  finalizeImageSettings,
+  pickGenerationSettings,
+  pickVideoReferenceInputs,
+} from "./input.js";
 
 describe("pickGenerationSettings", () => {
-  it("keeps only the image whitelist (size, n) with matching types", () => {
+  it("keeps only the image whitelist (size, n, quality) with matching types", () => {
     expect(
       pickGenerationSettings("image", {
         size: "1024x1024",
         n: 2,
+        quality: "high",
         durationSec: 5, // video-only — dropped for image
         extra: "x",
       })
-    ).toEqual({ size: "1024x1024", n: 2 });
+    ).toEqual({ size: "1024x1024", n: 2, quality: "high" });
   });
 
   it("keeps the video whitelist (size, durationSec, ratio)", () => {
@@ -60,6 +66,35 @@ describe("pickGenerationSettings", () => {
 
   it("handles a missing settings object", () => {
     expect(pickGenerationSettings("video", undefined)).toEqual({});
+  });
+
+  it("defaults image quality to auto and accepts the three presets", () => {
+    expect(finalizeImageSettings({ size: "1536x1024" })).toEqual({
+      settings: { size: "1536x1024", quality: "auto" },
+      error: null,
+    });
+    expect(finalizeImageSettings({ size: "1024x1536", quality: "low" }).error).toBeNull();
+  });
+
+  it("rejects custom sizes that are not multiples of 16 or exceed 1:3 / 3:1", () => {
+    expect(finalizeImageSettings({ size: "1000x1000" }).error).toBe("宽和高都必须能被 16 整除");
+    expect(finalizeImageSettings({ size: "1000x1024" }).error).toBe("宽度必须能被 16 整除");
+    expect(finalizeImageSettings({ size: "1024x1000" }).error).toBe("高度必须能被 16 整除");
+    expect(finalizeImageSettings({ size: "1024x768" }).error).toBeNull();
+    expect(finalizeImageSettings({ size: "1024x576" }).error).toBe("分辨率过低，宽×高不能小于 655360 像素");
+    expect(finalizeImageSettings({ size: "512x2048" }).error).toBe("宽高比不能超过 1:3 或 3:1");
+  });
+
+  it("rejects custom sizes on gpt-image 1.5", () => {
+    expect(finalizeImageSettings({ size: "1280x720" }, "gpt-image-1.5").error).toBe(
+      "当前模型不支持自定义分辨率"
+    );
+    expect(finalizeImageSettings({ size: "1024x1024" }, "gpt-image-1.5").error).toBeNull();
+    expect(finalizeImageSettings({ size: "1280x720" }, "gpt-image-2").error).toBeNull();
+  });
+
+  it("rejects unknown quality values", () => {
+    expect(finalizeImageSettings({ quality: "hd" }).error).toBe("质量仅支持 auto、low、medium、high");
   });
 
   it("keeps video references and frame fields with their API shape", () => {

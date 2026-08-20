@@ -36,21 +36,17 @@ export interface OpenAIImagesImageOpts {
   model: string;
 }
 
-/** Tokenhub generates its highest standard image resolution with a 1024px
- * longest edge. Keep the requested aspect ratio, but downscale stale clients'
- * former 2048px+ presets before the request leaves the server. */
+/** Keep a well-formed `WxH` size as-is. Malformed values fall back to the
+ * square default so a missing/stale client size still produces a request. */
 export function normalizeImageSize(size?: string): string {
   const matched = /^(\d+)x(\d+)$/.exec(size ?? "");
   if (!matched) return "1024x1024";
   const width = Number(matched[1]);
   const height = Number(matched[2]);
-  const longest = Math.max(width, height);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
     return "1024x1024";
   }
-  if (longest <= 1024) return `${width}x${height}`;
-  const scale = 1024 / longest;
-  return `${Math.max(1, Math.round(width * scale))}x${Math.max(1, Math.round(height * scale))}`;
+  return `${width}x${height}`;
 }
 
 /** Tokenhub `/images/edits` accepts up to five Base64 data URLs in `image`. */
@@ -88,10 +84,12 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
     if (req.quality) body.quality = req.quality;
 
     const endpoint = hasReferences ? "/images/edits" : "/images/generations";
+    const payload = JSON.stringify(body);
+    console.log("[images] request", JSON.stringify({ endpoint, model, size: body.size, quality: body.quality, n: body.n }));
     const res = await fetch(`${this.opts.baseUrl}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.opts.apiKey}` },
-      body: JSON.stringify(body),
+      body: payload,
     });
     const text = await res.text();
     if (!res.ok) throw new Error(`image generation failed: ${res.status} ${text}`);

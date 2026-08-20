@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
-import { billedVideoSeconds, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
 
 const ALLOWED_TYPES = ["image.generate", "video.generate"] as const;
 
@@ -17,6 +17,14 @@ export function sanitizeTaskInput(
 ): Record<string, unknown> {
   const mediaType = type === "image.generate" ? "image" : "video";
   const input: Record<string, unknown> = pickGenerationSettings(mediaType, raw);
+  if (mediaType === "image") {
+    const finalized = finalizeImageSettings(
+      input as Record<string, string | number>,
+      typeof raw?.modelId === "string" ? raw.modelId : undefined
+    );
+    if (finalized.error) throw new Error(finalized.error);
+    Object.assign(input, finalized.settings);
+  }
   if (typeof raw?.prompt === "string") input.prompt = raw.prompt;
   if (typeof raw?.modelId === "string") input.modelId = raw.modelId;
   if (Array.isArray(raw?.media)) {

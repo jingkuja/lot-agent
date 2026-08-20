@@ -122,7 +122,7 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
     kind: "generation",
     mediaType,
     prompt,
-    settings: { size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio },
+    settings: { size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio },
   };
   return async (status: string, extra: Record<string, unknown>) => {
     if (assistantMessageId && conversationId) {
@@ -206,7 +206,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     await assertNotCancelled();
     const cacheKey = genCacheKey(`${mediaType}.generate`, {
       userId: job.userId,
-      prompt, size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio,
+      prompt, size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
       input_reference: inputReference,
       reference_video: referenceVideo,
       reference_audio: referenceAudio,
@@ -236,6 +236,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
         prompt,
         size: input.size as string | undefined,
         n: input.n as number | undefined,
+        quality: (input.quality as string | undefined) ?? (mediaType === "image" ? "auto" : undefined),
         durationSec: input.durationSec as number | undefined,
         ratio: input.ratio as string | undefined,
         input_reference: publicReference(inputReference),
@@ -248,8 +249,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       // Keep the task id and resolved vendor model beside the request payload so
       // a video failure can be traced through the worker logs. Deliberately do
       // not log provider configuration or headers: those contain the API key.
-      if (mediaType === "video") {
-        console.log("[video.generate] request", JSON.stringify({
+      if (mediaType === "video" || mediaType === "image") {
+        console.log(`[${mediaType}.generate] request`, JSON.stringify({
           taskId: job.id,
           model: deps.vendorModel,
           body: createRequest,

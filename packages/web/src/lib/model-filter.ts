@@ -6,6 +6,11 @@ export interface CatalogModel {
   description?: string;
 }
 
+/** gpt-image 1.5 only accepts the three standard sizes; custom WxH is rejected. */
+export function isGptImage15(id: string | null | undefined): boolean {
+  return /gpt[-_ ]?image[-_ ]?1[\.\-_]?5(?!\d)/i.test(id ?? "");
+}
+
 /** Seedance (and only Seedance) auto-adapts duration/ratio from a reference video. */
 export function isSeedanceModel(id: string | null | undefined): boolean {
   return (id ?? "").toLowerCase().includes("seedance");

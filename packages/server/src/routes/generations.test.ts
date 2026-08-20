@@ -58,7 +58,7 @@ describe("POST /conversations/:id/generations", () => {
     expect(body.assistantMessage.metadata.supportsProgress).toBe(false);
     expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
       "image.generate",
-      expect.objectContaining({ prompt: "菊花", conversationId: "c1", assistantMessageId: body.assistantMessage.id, size: "1024x1024" }),
+      expect.objectContaining({ prompt: "菊花", conversationId: "c1", assistantMessageId: body.assistantMessage.id, size: "1024x1024", quality: "auto" }),
       "u1"
     );
     expect(service.messages).toHaveLength(2);
@@ -110,7 +110,7 @@ describe("POST /conversations/:id/generations", () => {
     expect(input.conversationId).toBe("c1");
     expect(input.userId).toBeUndefined();
     // The persisted metadata must not echo the forged identity fields either.
-    expect(body.assistantMessage.metadata.settings).toEqual({ n: 1 });
+    expect(body.assistantMessage.metadata.settings).toEqual({ n: 1, quality: "auto" });
   });
 
   it("threads media (reference images) into the enqueued input", async () => {
@@ -221,6 +221,74 @@ describe("POST /conversations/:id/generations", () => {
       }),
       "u1"
     );
+  });
+
+  it("threads image quality into the enqueued input", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        settings: { size: "1536x1024", quality: "high" },
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({ size: "1536x1024", quality: "high" }),
+      "u1"
+    );
+  });
+
+  it("rejects the old 16:9 1024x576 size below the pixel budget", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        settings: { size: "1024x576" },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "分辨率过低，宽×高不能小于 655360 像素" });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("rejects an image size whose aspect ratio exceeds 1:3 or 3:1", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        settings: { size: "512x2048" },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "宽高比不能超过 1:3 或 3:1" });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("rejects a custom size on gpt-image 1.5", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        model: "gpt-image-1.5",
+        settings: { size: "1280x720" },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "当前模型不支持自定义分辨率" });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
   });
 
   it("rejects video references over their limits", async () => {

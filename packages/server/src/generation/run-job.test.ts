@@ -52,6 +52,20 @@ describe("runGenerationJob", () => {
     expect(calls.metered).toBe(true);
   });
 
+  it("forwards image quality to the provider, defaulting to auto", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const { deps } = fakeDeps(provider);
+    await runGenerationJob(deps, job, "image");
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ quality: "auto", size: "1024x1024" }));
+
+    const high = { ...job, input: { ...job.input, quality: "high" } };
+    await runGenerationJob(deps, high, "image");
+    expect(provider.create).toHaveBeenLastCalledWith(expect.objectContaining({ quality: "high" }));
+  });
+
   it("marks message failed and rethrows when poll returns failed", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),

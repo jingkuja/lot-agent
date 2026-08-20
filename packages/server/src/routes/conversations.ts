@@ -5,7 +5,7 @@ import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
-import { billedVideoSeconds, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
 import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
 
 type Variables = { userId: string };
@@ -441,7 +441,13 @@ export function createGenerationRoutes(service: AgentService) {
     }
     // Client settings pass a per-media whitelist so identity fields
     // (conversationId/assistantMessageId/userId) can never ride along.
-    const settings = pickGenerationSettings(mediaType, body.settings);
+    const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
+    let settings = pickGenerationSettings(mediaType, body.settings);
+    if (mediaType === "image") {
+      const finalized = finalizeImageSettings(settings, selectedModel);
+      if (finalized.error) return c.json({ error: finalized.error }, 400);
+      settings = finalized.settings;
+    }
     let videoReferences: Record<string, string | string[]> = {};
     if (mediaType === "video") {
       try {
@@ -489,7 +495,6 @@ export function createGenerationRoutes(service: AgentService) {
 
     // Enqueue, then record the taskId on the message so a client that reloads
     // mid-generation can re-poll the task to resume progress / completion.
-    const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
     // Identity fields are spread LAST: they are server-created and must win
     // over anything a client could try to smuggle into the payload.
     const taskId = await service.jobQueue.enqueue(

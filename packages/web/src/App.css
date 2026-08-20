@@ -1110,6 +1110,26 @@ html, body, #root {
   height: auto;
   padding: 13px 6px;
 }
+.seg--stack small {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.seg--stack.active small {
+  color: inherit;
+}
+
+.media-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.media-hint--error {
+  color: var(--error);
+}
 .seg .media-timer {
   width: 17px;
   height: 17px;
@@ -1135,6 +1155,11 @@ html, body, #root {
   padding: 0 16px;
   border-radius: 13px;
   background: var(--bg-tool);
+  border: 1px solid transparent;
+}
+.res-field--invalid {
+  border-color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, var(--bg-tool));
 }
 .res-key {
   color: var(--text-muted);
@@ -1341,6 +1366,9 @@ html, body, #root {
   font-size: 11px;
   line-height: 1.4;
   color: var(--text-muted);
+}
+.input-modal-hint--error {
+  color: var(--error);
 }
 
 .input-seedance-hint {

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
+import { DEFAULT_IMAGE_QUALITY, DEFAULT_IMAGE_SIZE, imageSizeError } from "../lib/image-settings.js";
 import { ModelPicker } from "./ModelPicker.js";
 import {
   isSeedance25Model,
@@ -126,8 +127,13 @@ export function InputBox({
   // revoked on remove/send/unmount. Kept in a ref (not state) and created in
   // the event handler — never inline in JSX (would leak a blob URL per render)
   // and never in a render/effect path (StrictMode double-invokes those).
-  const settingsRef = useRef<ImageSettings | VideoSettings | undefined>(undefined);
+  const settingsRef = useRef<ImageSettings | VideoSettings | undefined>(
+    mode === "image" ? { size: DEFAULT_IMAGE_SIZE, n: 1, quality: DEFAULT_IMAGE_QUALITY } : undefined
+  );
+  const [imageSettingsError, setImageSettingsError] = useState<string | null>(null);
   const handleSettingsChange = useCallback((s: ImageSettings | VideoSettings) => { settingsRef.current = s; }, []);
+  const handleImageSettingsError = useCallback((error: string | null) => { setImageSettingsError(error); }, []);
+  const effectiveImageModel = selectedModel ?? models[0]?.id ?? null;
 
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
@@ -210,6 +216,14 @@ export function InputBox({
       setNoModelNotice(true);
       return;
     }
+    if (mode === "image") {
+      const current = settingsRef.current as ImageSettings | undefined;
+      const err = imageSizeError(current?.size ?? "", effectiveImageModel);
+      if (err) {
+        setImageSettingsError(err);
+        return;
+      }
+    }
     const hasFiles =
       files.length > 0 ||
       (videoMode && (referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || !!firstFrameFile || !!lastFrameFile)) ||
@@ -249,7 +263,7 @@ export function InputBox({
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, videoMode, pptMode, contractMode, noModels, knowledgeBases]);
+  }, [value, files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, videoMode, pptMode, contractMode, noModels, knowledgeBases, mode, effectiveImageModel]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -281,6 +295,12 @@ export function InputBox({
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
           暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
+        </div>
+      )}
+      {mode === "image" && imageSettingsError && (
+        <div className="input-modal-hint input-modal-hint--error" role="alert">
+          <span aria-hidden>⚠️</span>
+          {imageSettingsError}
         </div>
       )}
       {mode === "image" && (uploadLimitNotice || files.length >= MAX_IMAGE_REFERENCE_IMAGES) && (
@@ -736,7 +756,12 @@ export function InputBox({
             />
           )}
           {mode === "image" && (
-            <ImageSettingsPicker disabled={disabled} onChange={handleSettingsChange} />
+            <ImageSettingsPicker
+              disabled={disabled}
+              selectedModel={effectiveImageModel}
+              onChange={handleSettingsChange}
+              onError={handleImageSettingsError}
+            />
           )}
           {mode === "video" && (
             <VideoSettingsPicker disabled={disabled} lockAdaptive={lockAdaptive} onChange={handleSettingsChange} />
@@ -751,7 +776,7 @@ export function InputBox({
             <button
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={!value.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile}
+              disabled={(mode === "image" && !!imageSettingsError) || (!value.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile)}
               title="发送"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

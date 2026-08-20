@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   filterModels,
+  isGptImage15,
   isSeedance25Model,
   isSeedanceModel,
   missingSeedanceMentions,
@@ -21,6 +22,23 @@ describe("filterModels", () => {
     expect(filterModels(models, "deep").map((m) => m.id)).toEqual(["deepseek-v4-pro"]);
     expect(filterModels(models, "glm").map((m) => m.id)).toEqual(["GLM-5.2"]);
     expect(filterModels(models, "5").map((m) => m.id)).toEqual(["gpt-5.4", "GLM-5.2"]);
+  });
+});
+
+describe("isGptImage15", () => {
+  it("matches gpt-image 1.5 ids across separators", () => {
+    expect(isGptImage15("gpt-image-1.5")).toBe(true);
+    expect(isGptImage15("gpt-image-1-5")).toBe(true);
+    expect(isGptImage15("GPT-Image 1.5")).toBe(true);
+    expect(isGptImage15("gpt-image1.5")).toBe(true);
+  });
+
+  it("does not match other gpt-image models", () => {
+    expect(isGptImage15("gpt-image-1")).toBe(false);
+    expect(isGptImage15("gpt-image-2")).toBe(false);
+    expect(isGptImage15("gpt-image-2.0")).toBe(false);
+    expect(isGptImage15(null)).toBe(false);
+    expect(isGptImage15(undefined)).toBe(false);
   });
 });
 
