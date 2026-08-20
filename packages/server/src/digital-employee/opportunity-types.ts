@@ -60,6 +60,7 @@ export interface OpportunityListItem {
   customerQuote: string | null;
   nextAction: string | null;
   overdue: boolean;
+  actionVersion?: number;
 }
 
 export interface OpportunityListFilters {
@@ -71,6 +72,8 @@ export interface OpportunityListFilters {
   product?: string;
   suggestedFrom?: string;
   suggestedTo?: string;
+  query?: string;
+  profileId?: string;
 }
 
 export interface OpportunitySummary {
@@ -163,4 +166,53 @@ export interface ActionResultInput {
   nextAction?: string;
   nextActionAt?: string;
   confirmedRelationshipStage?: "lead" | "prospect" | "customer" | "inactive" | "lost";
+}
+
+export const FOLLOW_UP_ACTION_OPERATIONS = [
+  "create", "accept", "snooze", "dismiss", "reschedule", "cancel", "execute",
+] as const;
+export type FollowUpActionOperation = typeof FOLLOW_UP_ACTION_OPERATIONS[number];
+
+export const OUTREACH_CHANNELS = ["wechat", "phone", "email", "visit"] as const;
+export type OutreachChannel = typeof OUTREACH_CHANNELS[number];
+
+export interface FollowUpActionPrepareInput {
+  operation: FollowUpActionOperation;
+  customerMention?: string;
+  profileId?: string;
+  opportunityId?: string;
+  actionId?: string;
+  opportunityType?: OpportunityType;
+  title?: string;
+  objective?: string;
+  followUpMethod?: string;
+  priority?: OpportunityPriority;
+  scheduledAt?: string;
+  resultCriteria?: string;
+  productName?: string;
+  reason?: string;
+  snoozedUntil?: string;
+  version?: number;
+}
+
+export interface OutreachGenerateInput {
+  itemId?: string;
+  profileId?: string;
+  intent: TalkTrackIntent;
+  channel?: OutreachChannel;
+  message: string;
+  history?: TalkTrackMessage[];
+}
+
+export interface OutreachDraft {
+  id: string;
+  profileId: string;
+  taskId: string | null;
+  opportunityId: string | null;
+  channel: OutreachChannel;
+  objective: string;
+  content: string;
+  version: number;
+  usedAt: string | null;
+  modelId: string | null;
 }

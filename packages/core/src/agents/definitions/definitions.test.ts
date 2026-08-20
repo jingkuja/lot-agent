@@ -33,7 +33,15 @@ describe("agent definitions", () => {
     expect(digitalEmployeeDefinition.toolNames).toContain("commit_customer_profile_change");
     expect(digitalEmployeeDefinition.toolNames).toContain("search_marketing_materials");
     expect(digitalEmployeeDefinition.toolNames).toContain("update_marketing_brand_assets");
+    expect(digitalEmployeeDefinition.toolNames).toContain("search_customer_work_queue");
+    expect(digitalEmployeeDefinition.toolNames).toContain("prepare_follow_up_action");
+    expect(digitalEmployeeDefinition.toolNames).toContain("generate_individual_outreach");
+    expect(digitalEmployeeDefinition.toolNames).toContain("prepare_marketing_campaign");
+    expect(digitalEmployeeDefinition.toolNames).toContain("rewrite_campaign_asset");
+    expect(digitalEmployeeDefinition.toolNames).toContain("prepare_campaign_result");
     expect(digitalEmployeeDefinition.toolNames).not.toContain("execute_command");
     expect(digitalEmployeeDefinition.systemPrompt).toContain("不得声称已完成");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("prepare_follow_up_action");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("prepare_marketing_campaign");
   });
 });

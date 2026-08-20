@@ -1,13 +1,17 @@
 import type { Tool, ToolContext, ToolResult } from "@lot-agent/core";
 import type { CustomerAcquisitionService } from "../acquisition-service.js";
 import { InputError } from "../errors.js";
-import { parseAssetList, parseCreateCampaignAsset, parseRecommendationFilter } from "../acquisition-validators.js";
-import { parseEntityId } from "../validators.js";
+import {
+  parseAssetList, parseCampaignResult, parseCreateCampaign, parseCreateCampaignAsset, parseDeployment, parseFeedback,
+  parseRecommendationFilter, parseSegmentInput,
+} from "../acquisition-validators.js";
+import { parseDraftId, parseEntityId } from "../validators.js";
+import { confirmationContent, sourceContext } from "./agent-tool-helpers.js";
 
 const RECOMMENDATION_STATUS = ["pending", "adopted", "ignored", "expired"];
 
-/** Conversation tools for 获客宝. They expose aggregate cohort data only;
- * paid image/video generation remains behind the structured confirmation UI. */
+/** Conversation tools for 获客宝. Aggregate cohort data only; paid media still
+ * requires model checks and explicit user confirmation before generate_* calls. */
 export function createCustomerAcquisitionTools(service: CustomerAcquisitionService): Tool[] {
   const analyze: Tool = {
     name: "analyze_customer_cohort",
@@ -42,8 +46,8 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
   const generateCopy: Tool = {
     name: "generate_campaign_copy",
     description:
-      "根据已确认的客群快照（segmentSnapshotId）、动态客群（segmentId）或明确公开受众生成一版群体营销文案，并保存到营销资产库。" +
-      "必须提供产品、目标、渠道和行动号召；不得用于单个客户联系话术。",
+      "根据已确认的客群快照（segmentSnapshotId）、动态客群（segmentId）、明确公开受众或已有营销活动生成一版群体营销文案。" +
+      "已有 campaignId 时追加到该活动，不会再新建活动和快照。不得用于单个客户联系话术。",
     parameters: {
       type: "object",
       properties: {
@@ -56,6 +60,8 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
         channels: { type: "array", items: { type: "string" }, maxItems: 8 },
         callToAction: { type: "string" },
         title: { type: "string" },
+        campaignId: { type: "string" },
+        recommendationId: { type: "string" },
       },
       required: ["prompt", "productId", "objective", "channels", "callToAction"],
     },
@@ -150,6 +156,55 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     },
   });
 
+  const searchCampaigns: Tool = {
+    name: "search_marketing_campaigns",
+    description: "查询获客宝营销活动列表，含素材数量和结果回填次数。生成文案/海报/视频前应先确定唯一 campaignId。",
+    parameters: {
+      type: "object",
+      properties: { status: { type: "string", enum: ["draft", "active", "completed", "archived"] } },
+    },
+    async execute(input, context) {
+      return run(context, "查询营销活动失败", async (userId) => ({
+        ...await service.listCampaigns(userId, { status: object(input ?? {}).status as "draft" | undefined, page: 1, limit: 20 }),
+        managementUrl: "/digital-employee/copy",
+      }));
+    },
+  };
+
+  const getCampaign: Tool = {
+    name: "get_marketing_campaign",
+    description: "读取一个营销活动的简报、文案/海报/视频版本、选用版本和群体结果汇总。",
+    parameters: { type: "object", properties: { campaignId: { type: "string" } }, required: ["campaignId"] },
+    async execute(input, context) {
+      return run(context, "读取营销活动失败", async (userId) => ({
+        campaign: await service.getCampaign(userId, parseEntityId(object(input).campaignId, "campaignId")),
+        managementUrl: "/digital-employee/copy",
+      }));
+    },
+  };
+
+  const searchOpportunities: Tool = {
+    name: "search_campaign_opportunities",
+    description: "查询获客宝客群营销机会。采纳后会创建营销活动，再生成内容。",
+    parameters: { type: "object", properties: { status: { type: "string", enum: ["suggested", "accepted", "dismissed", "expired"] } } },
+    async execute(input, context) {
+      return run(context, "查询客群机会失败", async (userId) =>
+        service.listCampaignOpportunities(userId, optionalString(object(input ?? {}).status, 32)));
+    },
+  };
+
+  const acceptOpportunity: Tool = {
+    name: "accept_campaign_opportunity",
+    description: "把用户明确选择的客群营销机会转成营销活动。只在用户确认后调用。",
+    parameters: { type: "object", properties: { opportunityId: { type: "string" } }, required: ["opportunityId"] },
+    async execute(input, context) {
+      return run(context, "采纳客群机会失败", async (userId) => ({
+        campaign: await service.acceptCampaignOpportunity(userId, parseEntityId(object(input).opportunityId, "opportunityId")),
+        managementUrl: "/digital-employee/copy",
+      }));
+    },
+  };
+
   const modelConfiguration: Tool = {
     name: "check_user_generation_models",
     description: "检查当前用户是否已经配置获客宝固定使用的图片和视频模型；不展示或切换模型选择器。",
@@ -159,18 +214,360 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     },
   };
 
+  const prepareSegment: Tool = {
+    name: "prepare_customer_segment",
+    description:
+      "准备保存一个动态客群及其筛选条件，并预览聚合人数与排除项。不直接写正式客群。" +
+      "确认后调用 commit_customer_segment。只返回群体统计，不返回单个客户姓名。",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        description: { type: "string" },
+        criteria: {
+          type: "object",
+          properties: {
+            relationshipStages: { type: "array", items: { type: "string" } },
+            health: { type: "array", items: { type: "string" } },
+            regions: { type: "array", items: { type: "string" } },
+            tags: { type: "array", items: { type: "string" } },
+            journeyStages: { type: "array", items: { type: "string" } },
+            productName: { type: "string" },
+            activeWithinDays: { type: "integer" },
+            excludeAtRisk: { type: "boolean" },
+            excludeRecentlyContactedDays: { type: "integer" },
+          },
+        },
+      },
+      required: ["name", "criteria"],
+    },
+    async execute(input, context) {
+      return run(context, "准备客群失败", async (userId) => {
+        const draft = await service.prepareCustomerSegment(userId, parseSegmentInput(input), sourceContext(context));
+        return confirmationContent(draft, "commit_customer_segment");
+      });
+    },
+  };
+
+  const commitSegment: Tool = {
+    name: "commit_customer_segment",
+    description: "提交 prepare_customer_segment 产生的草稿并固定一次客群快照。",
+    parameters: { type: "object", properties: { draftId: { type: "string" } }, required: ["draftId"] },
+    async execute(input, context) {
+      return run(context, "保存客群失败", async (userId) =>
+        service.commitCustomerSegment(userId, parseDraftId(object(input).draftId)));
+    },
+  };
+
+  const evaluateFit: Tool = {
+    name: "evaluate_segment_product_fit",
+    description:
+      "结合脱敏聚合群像和已确认产品资料，判断该类客户适合推什么、为什么、风险是什么。" +
+      "不创建营销活动，也不读取单个客户原文。",
+    parameters: {
+      type: "object",
+      properties: {
+        segmentId: { type: "string" },
+        segmentSnapshotId: { type: "string" },
+        productId: { type: "string" },
+      },
+      required: ["productId"],
+    },
+    async execute(input, context) {
+      return run(context, "评估客群产品匹配失败", async (userId) => {
+        const value = object(input);
+        return service.evaluateSegmentProductFit(userId, {
+          productId: parseEntityId(value.productId, "productId"),
+          segmentId: value.segmentId === undefined ? undefined : parseEntityId(value.segmentId, "segmentId"),
+          segmentSnapshotId: value.segmentSnapshotId === undefined ? undefined : parseEntityId(value.segmentSnapshotId, "segmentSnapshotId"),
+        });
+      });
+    },
+  };
+
+  const prepareCampaign: Tool = {
+    name: "prepare_marketing_campaign",
+    description:
+      "准备创建一次客群营销活动及简报。必须有客群快照、动态客群或明确公开受众，以及产品、目标、渠道和行动号召。" +
+      "确认后调用 commit_marketing_campaign。",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        objective: { type: "string" },
+        channels: { type: "array", items: { type: "string" }, maxItems: 8 },
+        callToAction: { type: "string" },
+        productId: { type: "string" },
+        segmentId: { type: "string" },
+        segmentSnapshotId: { type: "string" },
+        publicAudience: { type: "string" },
+        startsAt: { type: "string" },
+        endsAt: { type: "string" },
+      },
+      required: ["name", "objective", "channels", "callToAction", "productId"],
+    },
+    async execute(input, context) {
+      return run(context, "准备营销活动失败", async (userId) => {
+        const draft = await service.prepareMarketingCampaign(userId, parseCreateCampaign(input), sourceContext(context));
+        return confirmationContent(draft, "commit_marketing_campaign");
+      });
+    },
+  };
+
+  const commitCampaign: Tool = {
+    name: "commit_marketing_campaign",
+    description: "提交 prepare_marketing_campaign 产生的草稿，创建营销活动。",
+    parameters: { type: "object", properties: { draftId: { type: "string" } }, required: ["draftId"] },
+    async execute(input, context) {
+      return run(context, "创建营销活动失败", async (userId) =>
+        service.commitMarketingCampaign(userId, parseDraftId(object(input).draftId)));
+    },
+  };
+
+  const mediaTool = (assetType: "poster" | "video"): Tool => ({
+    name: assetType === "poster" ? "generate_campaign_poster" : "generate_campaign_video",
+    description: assetType === "poster"
+      ? "在用户确认费用和受众后生成客群营销海报。固定使用 gpt-image-2.0。必须先 check_user_generation_models，并用 ask_user 确认后再调用。"
+      : "在用户确认费用和受众后生成客群营销视频。固定使用 seedance 2.0。必须先 check_user_generation_models，并用 ask_user 确认后再调用。",
+    parameters: {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        segmentId: { type: "string" },
+        segmentSnapshotId: { type: "string" },
+        publicAudience: { type: "string" },
+        productId: { type: "string" },
+        campaignId: { type: "string" },
+        objective: { type: "string" },
+        channels: { type: "array", items: { type: "string" }, maxItems: 8 },
+        callToAction: { type: "string" },
+        title: { type: "string" },
+        recommendationId: { type: "string" },
+        durationSeconds: { type: "integer", enum: [15, 30, 60] },
+      },
+      required: ["prompt", "productId", "objective", "channels", "callToAction"],
+    },
+    async execute(input, context) {
+      return run(context, assetType === "poster" ? "生成海报失败" : "生成视频失败", async (userId) => {
+        const asset = await service.createAsset(userId, parseCreateCampaignAsset({ ...object(input), assetType }));
+        return {
+          asset,
+          message: assetType === "poster" ? "已提交海报生成任务，完成后会进入营销资产库。" : "已提交视频生成任务，完成后会进入营销资产库。",
+          managementUrl: "/digital-employee/copy",
+        };
+      });
+    },
+  });
+
+  const rewriteAsset: Tool = {
+    name: "rewrite_campaign_asset",
+    description:
+      "按用户要求改写已生成的群体文案、海报或视频，例如更克制、强调某一卖点、不能出现未确认数字。保存为新版本。不得改成单客户话术。",
+    parameters: {
+      type: "object",
+      properties: {
+        assetId: { type: "string" },
+        instruction: { type: "string" },
+      },
+      required: ["assetId", "instruction"],
+    },
+    async execute(input, context) {
+      return run(context, "改写营销资产失败", async (userId) => {
+        const value = object(input);
+        const asset = await service.rewriteAsset(
+          userId,
+          parseEntityId(value.assetId, "assetId"),
+          asObjectString(value.instruction, "改写要求")
+        );
+        return { asset, managementUrl: "/digital-employee/copy" };
+      });
+    },
+  };
+
+  const recordUsage: Tool = {
+    name: "record_campaign_usage",
+    description: "在用户明确表示已使用或已投放某项营销资产后记录使用。生成完成不等于已投放。",
+    parameters: {
+      type: "object",
+      properties: {
+        assetId: { type: "string" },
+        platform: { type: "string", enum: ["moments", "wechat_official", "channels", "douyin_kuaishou", "xiaohongshu", "ad_platform", "other"] },
+        customPlatform: { type: "string" },
+        status: { type: "string", enum: ["pending", "deployed", "ended"] },
+        deployedAt: { type: "string" },
+      },
+      required: ["assetId", "platform", "status"],
+    },
+    async execute(input, context) {
+      return run(context, "记录资产使用失败", async (userId) => {
+        const value = object(input);
+        const deployment = await service.recordCampaignUsage(
+          userId,
+          parseEntityId(value.assetId, "assetId"),
+          parseDeployment(value)
+        );
+        return { deployment, managementUrl: "/digital-employee/copy" };
+      });
+    },
+  };
+
+  const prepareDeployment: Tool = {
+    name: "prepare_asset_deployment",
+    description: "准备标记营销资产的投放状态和平台。确认后调用 commit_asset_deployment。",
+    parameters: {
+      type: "object",
+      properties: {
+        assetId: { type: "string" },
+        platform: { type: "string", enum: ["moments", "wechat_official", "channels", "douyin_kuaishou", "xiaohongshu", "ad_platform", "other"] },
+        customPlatform: { type: "string" },
+        status: { type: "string", enum: ["pending", "deployed", "ended"] },
+        deployedAt: { type: "string" },
+      },
+      required: ["assetId", "platform", "status"],
+    },
+    async execute(input, context) {
+      return run(context, "准备投放记录失败", async (userId) => {
+        const value = object(input);
+        const draft = await service.prepareAssetDeployment(
+          userId,
+          parseEntityId(value.assetId, "assetId"),
+          parseDeployment(value),
+          sourceContext(context)
+        );
+        return confirmationContent(draft, "commit_asset_deployment");
+      });
+    },
+  };
+
+  const commitDeployment: Tool = {
+    name: "commit_asset_deployment",
+    description: "提交 prepare_asset_deployment 产生的草稿。",
+    parameters: { type: "object", properties: { draftId: { type: "string" } }, required: ["draftId"] },
+    async execute(input, context) {
+      return run(context, "提交投放记录失败", async (userId) =>
+        service.commitAssetDeployment(userId, parseDraftId(object(input).draftId)));
+    },
+  };
+
+  const prepareFeedback: Tool = {
+    name: "prepare_deployment_feedback",
+    description: "准备记录某次投放的曝光、互动、转化或文字反馈。确认后调用 commit_deployment_feedback。",
+    parameters: {
+      type: "object",
+      properties: {
+        deploymentId: { type: "string" },
+        impressions: { type: "integer" },
+        interactions: { type: "integer" },
+        conversions: { type: "integer" },
+        feedbackText: { type: "string" },
+      },
+      required: ["deploymentId"],
+    },
+    async execute(input, context) {
+      return run(context, "准备投放反馈失败", async (userId) => {
+        const value = object(input);
+        const draft = await service.prepareDeploymentFeedback(
+          userId,
+          parseEntityId(value.deploymentId, "deploymentId"),
+          parseFeedback(value),
+          sourceContext(context)
+        );
+        return confirmationContent(draft, "commit_deployment_feedback");
+      });
+    },
+  };
+
+  const commitFeedback: Tool = {
+    name: "commit_deployment_feedback",
+    description: "提交 prepare_deployment_feedback 产生的草稿。",
+    parameters: { type: "object", properties: { draftId: { type: "string" } }, required: ["draftId"] },
+    async execute(input, context) {
+      return run(context, "提交投放反馈失败", async (userId) =>
+        service.commitDeploymentFeedback(userId, parseDraftId(object(input).draftId)));
+    },
+  };
+
+  const prepareResult: Tool = {
+    name: "prepare_campaign_result",
+    description: "准备回填一次营销活动的群体结果。不把生成完成当作业务完成。具体咨询者应转到客户画像和商机参谋。",
+    parameters: {
+      type: "object",
+      properties: {
+        campaignId: { type: "string" },
+        impressions: { type: "integer" },
+        interactions: { type: "integer" },
+        conversions: { type: "integer" },
+        leads: { type: "integer" },
+        note: { type: "string" },
+      },
+      required: ["campaignId"],
+    },
+    async execute(input, context) {
+      return run(context, "准备活动结果失败", async (userId) => {
+        const draft = await service.prepareCampaignResult(userId, parseCampaignResult(input), sourceContext(context));
+        return confirmationContent(draft, "commit_campaign_result");
+      });
+    },
+  };
+
+  const commitResult: Tool = {
+    name: "commit_campaign_result",
+    description: "提交 prepare_campaign_result 产生的草稿。",
+    parameters: { type: "object", properties: { draftId: { type: "string" } }, required: ["draftId"] },
+    async execute(input, context) {
+      return run(context, "提交活动结果失败", async (userId) =>
+        service.commitCampaignResult(userId, parseDraftId(object(input).draftId)));
+    },
+  };
+
+  const archiveAsset: Tool = {
+    name: "archive_marketing_asset",
+    description: "在用户明确要求后归档一项营销资产。进行中的生成任务会被取消。",
+    parameters: { type: "object", properties: { assetId: { type: "string" } }, required: ["assetId"] },
+    async execute(input, context) {
+      return run(context, "归档营销资产失败", async (userId) =>
+        service.archiveAsset(userId, parseEntityId(object(input).assetId, "assetId")));
+    },
+  };
+
   return [
     analyze,
     segments,
+    prepareSegment,
+    commitSegment,
+    evaluateFit,
+    prepareCampaign,
+    commitCampaign,
+    searchCampaigns,
+    getCampaign,
+    searchOpportunities,
+    acceptOpportunity,
     generateCopy,
+    mediaTool("poster"),
+    mediaTool("video"),
+    rewriteAsset,
     searchAssets,
     deploymentStatus,
+    recordUsage,
+    prepareDeployment,
+    commitDeployment,
+    prepareFeedback,
+    commitFeedback,
+    prepareResult,
+    commitResult,
+    archiveAsset,
     refreshRecommendations,
     getRecommendations,
     recommendationAction("adopted"),
     recommendationAction("ignored"),
     modelConfiguration,
   ];
+}
+
+function asObjectString(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new InputError(`${label}不能为空`);
+  if (value.trim().length > 4_000) throw new InputError(`${label}过长`);
+  return value.trim();
 }
 
 async function run(
@@ -182,7 +579,8 @@ async function run(
     if (context.featureScope && context.featureScope !== "customer-acquisition") {
       throw new InputError("当前对话不在获客宝作用域，请先进入获客宝对话");
     }
-    return { content: JSON.stringify(await operation(context.userId ?? "default")) };
+    const value = await operation(context.userId ?? "default");
+    return { content: typeof value === "string" ? value : JSON.stringify(value) };
   } catch (error) {
     return {
       content: `${prefix}：${error instanceof Error ? error.message : "服务暂时不可用"}`,

@@ -145,6 +145,22 @@ describe("digital employee profile routes", () => {
     expect(listAssets).toHaveBeenCalledWith("u1", expect.objectContaining({ range: "7d", assetType: "poster" }));
   });
 
+  it("lists marketing campaigns for the authenticated user", async () => {
+    const listCampaigns = vi.fn(async () => ({ items: [], total: 0, page: 1, limit: 20 }));
+    const service = { customerAcquisition: { listCampaigns } };
+    const response = await app(service).request("/digital-employee/acquisition/campaigns?status=draft");
+    expect(response.status).toBe(200);
+    expect(listCampaigns).toHaveBeenCalledWith("u1", expect.objectContaining({ status: "draft" }));
+  });
+
+  it("accepts a cohort marketing opportunity", async () => {
+    const acceptCampaignOpportunity = vi.fn(async () => ({ id: "c1", name: "部署简单" }));
+    const service = { customerAcquisition: { acceptCampaignOpportunity } };
+    const response = await app(service).request("/digital-employee/acquisition/campaign-opportunities/00000000-0000-4000-8000-000000000009/accept", { method: "POST" });
+    expect(response.status).toBe(201);
+    expect(acceptCampaignOpportunity).toHaveBeenCalledWith("u1", "00000000-0000-4000-8000-000000000009");
+  });
+
   it("rejects campaign generation without a cohort or public audience", async () => {
     const createAsset = vi.fn();
     const service = { customerAcquisition: { createAsset } };

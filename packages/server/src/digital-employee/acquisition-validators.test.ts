@@ -4,9 +4,17 @@ import { parseCreateCampaignAsset, parseDeployment, parseSegmentInput } from "./
 describe("customer acquisition validators", () => {
   it("requires a cohort snapshot, segment or explicit public audience", () => {
     expect(() => parseCreateCampaignAsset({
-      assetType: "copy", prompt: "生成文案", productId: "p1", objective: "咨询",
+      assetType: "copy", prompt: "生成文案", productId: "00000000-0000-4000-8000-000000000001", objective: "咨询",
       channels: ["朋友圈"], callToAction: "预约咨询",
-    })).toThrow("请选择客群或填写明确的公开受众");
+    })).toThrow("请选择客群、填写公开受众，或指定已有营销活动");
+  });
+
+  it("lets an existing campaign receive more assets without repeating audience", () => {
+    expect(parseCreateCampaignAsset({
+      assetType: "poster", prompt: "同一主题海报", campaignId: "00000000-0000-4000-8000-000000000201",
+    })).toMatchObject({
+      assetType: "poster", campaignId: "00000000-0000-4000-8000-000000000201",
+    });
   });
 
   it("accepts safe structured segment criteria", () => {

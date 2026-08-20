@@ -27,6 +27,48 @@ describe("customer acquisition agent tools", () => {
     expect(service.getCohortInsights).not.toHaveBeenCalled();
   });
 
+  it("exposes segment, campaign, rewrite and result tools", () => {
+    const names = createCustomerAcquisitionTools({} as any).map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "prepare_customer_segment", "commit_customer_segment", "evaluate_segment_product_fit",
+      "prepare_marketing_campaign", "commit_marketing_campaign", "search_marketing_campaigns",
+      "get_marketing_campaign", "search_campaign_opportunities", "accept_campaign_opportunity",
+      "generate_campaign_poster",
+      "generate_campaign_video", "rewrite_campaign_asset", "record_campaign_usage",
+      "prepare_campaign_result", "commit_campaign_result", "archive_marketing_asset",
+    ]));
+  });
+
+  it("prepares a segment save and requires confirmation", async () => {
+    const prepareCustomerSegment = vi.fn(async () => ({
+      id: "00000000-0000-4000-8000-000000000211",
+      question: "确认保存动态客群「华东制造业」？",
+      options: ["确认保存", "取消"],
+      preview: { name: "华东制造业", metrics: { totalProfiles: 8 } },
+    }));
+    const result = await find("prepare_customer_segment", { prepareCustomerSegment }).execute({
+      name: "华东制造业",
+      criteria: { regions: ["华东"], relationshipStages: ["prospect"] },
+    }, context);
+    expect(prepareCustomerSegment).toHaveBeenCalledWith("u1", expect.objectContaining({ name: "华东制造业" }), expect.any(Object));
+    expect(result.content).toContain("commit_customer_segment");
+    expect(result.content).toContain("ask_user");
+  });
+
+  it("rewrites a campaign asset from an existing library item", async () => {
+    const rewriteAsset = vi.fn(async () => ({ id: "a2", title: "更克制的文案", assetType: "text" }));
+    const result = await find("rewrite_campaign_asset", { rewriteAsset }).execute({
+      assetId: "00000000-0000-4000-8000-000000000012",
+      instruction: "更克制，不能出现未确认的性能数字",
+    }, context);
+    expect(rewriteAsset).toHaveBeenCalledWith(
+      "u1",
+      "00000000-0000-4000-8000-000000000012",
+      "更克制，不能出现未确认的性能数字"
+    );
+    expect(JSON.parse(result.content).asset.id).toBe("a2");
+  });
+
   it("forces conversational asset generation to copy", async () => {
     const service = { createAsset: vi.fn(async (_userId, input) => ({ id: "a1", title: "新文案", assetType: input.assetType })) };
     const result = await find("generate_campaign_copy", service).execute({

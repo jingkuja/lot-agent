@@ -1,8 +1,8 @@
 import { InputError } from "./errors.js";
 import {
-  ACTION_OUTCOMES, OPPORTUNITY_TYPES, OPPORTUNITY_VIEWS, PRIORITY_VALUES, READINESS_VALUES, TALK_TRACK_INTENTS,
-  type ActionResultInput, type ActionUpdateInput, type ManualActionInput, type OpportunityDecisionInput, type OpportunityListFilters,
-  type TalkTrackRequest,
+  ACTION_OUTCOMES, FOLLOW_UP_ACTION_OPERATIONS, OPPORTUNITY_TYPES, OPPORTUNITY_VIEWS, OUTREACH_CHANNELS, PRIORITY_VALUES, READINESS_VALUES, TALK_TRACK_INTENTS,
+  type ActionResultInput, type ActionUpdateInput, type FollowUpActionPrepareInput, type ManualActionInput, type OpportunityDecisionInput, type OpportunityListFilters,
+  type OutreachGenerateInput, type TalkTrackRequest,
 } from "./opportunity-types.js";
 
 function object(value: unknown): Record<string, unknown> {
@@ -43,6 +43,8 @@ export function parseOpportunityList(query: Record<string, string>): Opportunity
     product: text(query.product, "product", 200),
     suggestedFrom: date(query.suggestedFrom, "suggestedFrom"),
     suggestedTo: date(query.suggestedTo, "suggestedTo"),
+    query: text(query.query, "query", 200),
+    profileId: text(query.profileId, "profileId", 80),
   };
 }
 
@@ -111,6 +113,65 @@ export function parseTalkTrackRequest(value: unknown): TalkTrackRequest {
     intent: choice(source.intent, TALK_TRACK_INTENTS, "intent", true)!,
     message: text(source.message, "message", 2_000, true)!,
     history,
+  };
+}
+
+export function parseFollowUpActionPrepare(value: unknown): FollowUpActionPrepareInput {
+  const source = object(value);
+  const operation = choice(source.operation, FOLLOW_UP_ACTION_OPERATIONS, "operation", true)!;
+  const input: FollowUpActionPrepareInput = {
+    operation,
+    customerMention: text(source.customerMention, "customerMention", 200),
+    profileId: text(source.profileId, "profileId", 80),
+    opportunityId: text(source.opportunityId, "opportunityId", 80),
+    actionId: text(source.actionId, "actionId", 80),
+    opportunityType: choice(source.opportunityType, OPPORTUNITY_TYPES, "opportunityType"),
+    title: text(source.title, "title", 300),
+    objective: text(source.objective, "objective", 2_000),
+    followUpMethod: text(source.followUpMethod, "followUpMethod", 32),
+    priority: choice(source.priority, PRIORITY_VALUES, "priority"),
+    scheduledAt: date(source.scheduledAt, "scheduledAt"),
+    resultCriteria: text(source.resultCriteria, "resultCriteria", 500),
+    productName: text(source.productName, "productName", 200),
+    reason: text(source.reason, "reason", 500),
+    snoozedUntil: date(source.snoozedUntil, "snoozedUntil"),
+    version: source.version === undefined ? undefined : version(source.version),
+  };
+  if (operation === "create" && !input.profileId && !input.customerMention) throw new InputError("创建行动需要客户称呼或 profileId");
+  if (operation === "create" && !input.title) throw new InputError("title不能为空");
+  if (operation === "create" && !input.objective) throw new InputError("objective不能为空");
+  if (operation === "create" && !input.opportunityType) throw new InputError("opportunityType不能为空");
+  if (operation === "create" && !input.priority) throw new InputError("priority不能为空");
+  if (operation === "create" && !input.scheduledAt) throw new InputError("scheduledAt不能为空");
+  if ((operation === "accept" || operation === "snooze" || operation === "dismiss") && !input.opportunityId) {
+    throw new InputError("处理商机需要 opportunityId");
+  }
+  if ((operation === "reschedule" || operation === "cancel" || operation === "execute") && !input.actionId) {
+    throw new InputError("更新行动需要 actionId");
+  }
+  if (operation === "reschedule" && !input.scheduledAt) throw new InputError("改期需要 scheduledAt");
+  if (operation === "snooze" && !input.snoozedUntil) throw new InputError("稍后处理需要恢复时间");
+  if (operation === "dismiss" && !input.reason) throw new InputError("忽略商机时请选择原因");
+  return input;
+}
+
+export function parseOutreachGenerate(value: unknown): OutreachGenerateInput {
+  const source = object(value);
+  const history = parseTalkTrackRequest({
+    intent: source.intent ?? "follow_up",
+    message: source.message,
+    history: source.history ?? [],
+  });
+  const itemId = text(source.itemId, "itemId", 80);
+  const profileId = text(source.profileId, "profileId", 80);
+  if (!itemId && !profileId) throw new InputError("生成话术需要 itemId 或 profileId");
+  return {
+    itemId,
+    profileId,
+    intent: history.intent,
+    channel: choice(source.channel, OUTREACH_CHANNELS, "channel") ?? "wechat",
+    message: history.message,
+    history: history.history,
   };
 }
 

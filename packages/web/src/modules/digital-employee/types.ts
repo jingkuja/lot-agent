@@ -457,6 +457,62 @@ export interface MarketingAssetListResponse {
   limit: number;
 }
 
+export interface CampaignSelectedAssets {
+  copy: string | null;
+  poster: string | null;
+  video: string | null;
+}
+
+export interface MarketingCampaignSummary {
+  id: string;
+  name: string;
+  objective: string;
+  channels: string[];
+  callToAction: string;
+  status: "draft" | "active" | "completed" | "archived";
+  productId: string | null;
+  productName: string | null;
+  segmentSnapshotId: string | null;
+  audienceDescription: string;
+  opportunityId: string | null;
+  selectedAssets: CampaignSelectedAssets;
+  assetCount: number;
+  resultCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MarketingCampaignDetail extends MarketingCampaignSummary {
+  brief: Record<string, unknown> | null;
+  assets: { copy: MarketingAsset[]; poster: MarketingAsset[]; video: MarketingAsset[] };
+  results: {
+    impressions: number;
+    interactions: number;
+    conversions: number;
+    leads: number;
+    items: Array<{ id: string; impressions: number | null; interactions: number | null; conversions: number | null; leads: number | null; note: string; recordedAt: string }>;
+  };
+}
+
+export interface CampaignOpportunity {
+  id: string;
+  title: string;
+  objective: string;
+  theme: string;
+  reasoning: string;
+  corePoints: string[];
+  suggestedChannels: string[];
+  risks: string[];
+  priority: "low" | "normal" | "high";
+  status: "suggested" | "accepted" | "dismissed" | "expired";
+  productId: string | null;
+  productName: string | null;
+  segmentSnapshotId: string;
+  audienceDescription: string;
+  campaignId: string | null;
+  createdAt: string;
+}
+
 export interface AcquisitionAnalytics {
   assets: { total: number; text: number; image: number; video: number; deployed: number };
   totals: { deployments: number; feedbackCount: number; impressions: number; interactions: number; conversions: number };

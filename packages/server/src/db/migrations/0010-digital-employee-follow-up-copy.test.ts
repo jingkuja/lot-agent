@@ -16,7 +16,7 @@ describe("digital employee follow-up/copy schema migration", () => {
   it("remains registered at version 10", () => {
     expect(digitalEmployeeFollowUpCopy.version).toBe(10);
     expect(migrations.find((migration) => migration.version === 10)).toBe(digitalEmployeeFollowUpCopy);
-    expect(migrations.map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect(migrations.map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
   });
 
   it("creates the complete follow-up and copy schema with integrity guards", async () => {

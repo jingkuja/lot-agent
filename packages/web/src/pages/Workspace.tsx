@@ -20,6 +20,7 @@ import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmplo
 import { DigitalEmployeeHome } from "../modules/digital-employee/DigitalEmployeeHome.js";
 import { MarketingMaterialsHome } from "../modules/digital-employee/marketing/MarketingMaterialsHome.js";
 import { CustomerAcquisitionChatHome } from "../modules/digital-employee/acquisition/CustomerAcquisitionChatHome.js";
+import { OpportunityAdvisorChatHome } from "../modules/digital-employee/opportunities/OpportunityAdvisorChatHome.js";
 import {
   DigitalEmployeeSidebar,
   type DigitalEmployeeFeature,
@@ -529,6 +530,9 @@ export function Workspace({
                 onOpenManagement={onNavigateDigitalEmployee}
                 onPrompt={(prompt) => void doSend(prompt)}
               /> : digitalEmployeeFeature === "copy" ? <CustomerAcquisitionChatHome
+                onOpenWorkspace={onNavigateDigitalEmployee}
+                onPrompt={(prompt) => void doSend(prompt)}
+              /> : digitalEmployeeFeature === "acquisition" ? <OpportunityAdvisorChatHome
                 onOpenWorkspace={onNavigateDigitalEmployee}
                 onPrompt={(prompt) => void doSend(prompt)}
               /> : <DigitalEmployeeHome

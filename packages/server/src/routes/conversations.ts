@@ -6,6 +6,7 @@ import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
 import { billedVideoSeconds, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
+import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
 
 type Variables = { userId: string };
 
@@ -90,13 +91,16 @@ export function createConversationRoutes(service: AgentService): Hono {
         : service["llmConfig"].anthropic.model;
     const provider = service["llmConfig"].default;
     const agentId = body.agentId ?? "general";
-    const allowedScopes = new Set(["marketing-materials", "customer-profile", "opportunity-advisor", "customer-acquisition"]);
-    const featureScope = agentId === "digital_employee" && body.featureScope && allowedScopes.has(body.featureScope)
-      ? body.featureScope
-      : undefined;
+    let metadata: Record<string, unknown> | undefined;
+    if (agentId === "digital_employee") {
+      const featureScope = parseDigitalEmployeeFeatureScope(body.featureScope);
+      if (!featureScope) {
+        return c.json({ error: "digital_employee conversations require a valid featureScope" }, 400);
+      }
+      metadata = { digitalEmployeeFeatureScope: featureScope };
+    }
     const conversation = await service.db.createConversation(
-      id, title, model, provider, agentId, userId,
-      featureScope ? { digitalEmployeeFeatureScope: featureScope } : undefined
+      id, title, model, provider, agentId, userId, metadata
     );
     return c.json(conversation, 201);
   });
@@ -225,6 +229,9 @@ export function createConversationRoutes(service: AgentService): Hono {
     const conversation = await service.db.getConversation(id);
     if (!conversation || conversation.user_id !== userId) {
       return c.json({ error: "Not found" }, 404);
+    }
+    if (conversation.agent_id === "digital_employee" && !readConversationFeatureScope(conversation.metadata)) {
+      return c.json({ error: "digital_employee conversations require a valid featureScope" }, 400);
     }
 
     const body = await c.req.json<{

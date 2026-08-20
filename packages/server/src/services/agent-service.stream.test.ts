@@ -175,3 +175,27 @@ describe("streamAgentResponse usage metering", () => {
     expect(usageMeter.record.mock.calls[0][0]).toMatchObject({ modelId: "m-conv" });
   });
 });
+
+describe("streamAgentResponse digital employee scope", () => {
+  it("fail-closes to no tools when the conversation has no legal featureScope", async () => {
+    const { fake } = fakeService({
+      script: [[{ type: "text", content: "ok" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }]],
+    });
+    (fake as any).agentRegistry = {
+      get: () => ({
+        id: "digital_employee",
+        name: "数字员工",
+        type: "digital_employee",
+        description: "",
+        systemPrompt: "sys",
+        toolNames: ["search_customer_profiles", "generate_campaign_copy", "fetchy"],
+        defaultModelId: "m-default",
+      }),
+    };
+    const toLLMTools = vi.spyOn((fake as any).toolRegistry, "toLLMTools");
+
+    await drain(fake.streamAgentResponse("c1", "hi", "digital_employee", "u1"));
+
+    expect(toLLMTools).toHaveBeenCalledWith([]);
+  });
+});

@@ -20,9 +20,9 @@ export function DigitalEmployeeActions({
   const hint = isMarketing
     ? "直接在下方对话中快速维护产品卖点、权益、案例和品牌口径"
     : isOpportunity
-      ? "商机参谋对话只处理单个客户：查询队列、解释原因、记录结果和生成个性化话术"
+      ? "商机参谋对话只处理单个客户：查询今日队列、采纳商机、创建或改期行动、生成话术并回填结果"
       : isAcquisition
-        ? "获客宝对话只处理客群：分析共性、建立营销简报和生成群体内容"
+        ? "获客宝对话只处理客群：保存客群、创建活动、改写素材、标记投放并回填群体结果"
         : "直接在下方对话中快速创建、查询、补充和更新客户画像";
   const management = isMarketing ? ["◆", "营销资料管理"] : isOpportunity ? ["◇", "商机参谋工作台"] : isAcquisition ? ["✎", "获客宝工作台"] : ["◎", "客户画像管理"];
   return (

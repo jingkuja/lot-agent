@@ -32,6 +32,9 @@ import type {
   AssetDeployment,
   DeploymentFeedback,
   AcquisitionAnalytics,
+  MarketingCampaignSummary,
+  MarketingCampaignDetail,
+  CampaignOpportunity,
 } from "../modules/digital-employee/types.js";
 export type { CatalogModel };
 
@@ -680,4 +683,42 @@ export const api = {
     }),
 
   getAcquisitionAnalytics: () => request<AcquisitionAnalytics>("/digital-employee/acquisition/analytics"),
+
+  listMarketingCampaigns: (filters: { status?: string; page?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== "") query.set(key, String(value));
+    return request<{ items: MarketingCampaignSummary[]; total: number; page: number; limit: number }>(
+      `/digital-employee/acquisition/campaigns?${query.toString()}`
+    );
+  },
+
+  createMarketingCampaign: (input: {
+    name: string; objective: string; channels: string[]; callToAction: string; productId: string;
+    segmentId?: string; segmentSnapshotId?: string; publicAudience?: string;
+  }) => request<MarketingCampaignDetail>("/digital-employee/acquisition/campaigns", { method: "POST", body: JSON.stringify(input) }),
+
+  getMarketingCampaign: (id: string) =>
+    request<MarketingCampaignDetail>(`/digital-employee/acquisition/campaigns/${encodeURIComponent(id)}`),
+
+  updateMarketingCampaign: (id: string, input: {
+    name?: string; objective?: string; channels?: string[]; callToAction?: string;
+    status?: string; selectedAssets?: Partial<Record<"copy" | "poster" | "video", string | null>>;
+  }) => request<MarketingCampaignDetail>(
+    `/digital-employee/acquisition/campaigns/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }
+  ),
+
+  listCampaignOpportunities: (status?: string) =>
+    request<{ items: CampaignOpportunity[]; total: number }>(
+      `/digital-employee/acquisition/campaign-opportunities${status ? `?status=${encodeURIComponent(status)}` : ""}`
+    ),
+
+  acceptCampaignOpportunity: (id: string) =>
+    request<MarketingCampaignDetail>(
+      `/digital-employee/acquisition/campaign-opportunities/${encodeURIComponent(id)}/accept`, { method: "POST" }
+    ),
+
+  dismissCampaignOpportunity: (id: string) =>
+    request<{ opportunityId: string; status: string }>(
+      `/digital-employee/acquisition/campaign-opportunities/${encodeURIComponent(id)}/dismiss`, { method: "POST" }
+    ),
 };

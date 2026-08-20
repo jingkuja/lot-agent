@@ -12,6 +12,8 @@ import { digitalEmployeeFollowUpCopy } from "./0010-digital-employee-follow-up-c
 import { marketingMaterials } from "./0011-marketing-materials.js";
 import { opportunityAdvisor } from "./0012-opportunity-advisor.js";
 import { customerAcquisition } from "./0013-customer-acquisition.js";
+import { conversationWorkflows } from "./0014-conversation-workflows.js";
+import { campaignSelectedAssets } from "./0015-campaign-selected-assets.js";
 
 // Static array (no fs scan — dynamic directory scanning isn't reliable once
 // this ships through tsup's bundling). To add a migration: create
@@ -30,4 +32,6 @@ export const migrations: Migration[] = [
   marketingMaterials,
   opportunityAdvisor,
   customerAcquisition,
+  conversationWorkflows,
+  campaignSelectedAssets,
 ];

@@ -1,17 +1,19 @@
 import { useState } from "react";
-import type { CampaignRecommendation, CustomerSegment, MarketingAsset } from "../types.js";
+import type { CampaignRecommendation, CustomerSegment, MarketingAsset, MarketingCampaignSummary } from "../types.js";
 import { MarketingAssetLibraryPage } from "./MarketingAssetLibraryPage.js";
 import { DailyRecommendationsPage } from "./DailyRecommendationsPage.js";
 import { CreationWorkspacePage, type CreationSeed } from "./CreationWorkspacePage.js";
 import { CustomerSegmentsPage } from "./CustomerSegmentsPage.js";
 import { AcquisitionAnalyticsPage } from "./AcquisitionAnalyticsPage.js";
+import { CampaignsPage } from "./CampaignsPage.js";
 
-type Workspace = "assets" | "recommendations" | "creation" | "segments" | "analytics";
+type Workspace = "assets" | "recommendations" | "creation" | "campaigns" | "segments" | "analytics";
 
 const WORKSPACES: Array<{ id: Workspace; label: string; description: string }> = [
   { id: "assets", label: "营销资产库", description: "内容与投放" },
   { id: "recommendations", label: "每日推荐", description: "AI 机会建议" },
   { id: "creation", label: "创作工作台", description: "主动生成" },
+  { id: "campaigns", label: "营销活动", description: "简报与版本" },
   { id: "segments", label: "客群洞察", description: "分群与快照" },
   { id: "analytics", label: "效果复盘", description: "跨平台反馈" },
 ];
@@ -39,9 +41,17 @@ export function CustomerAcquisitionPage({ onOpenChat }: { onOpenChat?: () => voi
 
   const reuseAsset = (item: MarketingAsset) => startCreation({
     parentAssetId: item.id,
+    campaignId: item.campaignId ?? undefined,
     title: `${item.title} · 新版本`,
     prompt: item.assetType === "text" ? `参考以下历史文案的主题和结构生成新版本，但不要直接照抄：\n${item.content}` : `基于“${item.title}”延续主题，生成一个差异化新版本。`,
     assetType: item.assetType === "video" ? "video" : item.assetType === "text" ? "copy" : "poster",
+  });
+
+  const continueCampaign = (item: MarketingCampaignSummary) => startCreation({
+    campaignId: item.id,
+    title: item.name,
+    productId: item.productId ?? undefined,
+    channels: item.channels,
   });
 
   const fromSegment = (item: CustomerSegment) => startCreation({ segmentId: item.id, title: `${item.name}营销内容` });
@@ -67,7 +77,8 @@ export function CustomerAcquisitionPage({ onOpenChat }: { onOpenChat?: () => voi
 
     {workspace === "assets" && <MarketingAssetLibraryPage onReuse={reuseAsset} onCreate={() => startCreation({})} />}
     {workspace === "recommendations" && <DailyRecommendationsPage onCreate={fromRecommendation} />}
-    {workspace === "creation" && <CreationWorkspacePage seed={seed} onOpenAssets={() => setWorkspace("assets")} onOpenSegments={() => setWorkspace("segments")} />}
+    {workspace === "creation" && <CreationWorkspacePage seed={seed} onOpenAssets={() => setWorkspace("assets")} onOpenSegments={() => setWorkspace("segments")} onOpenCampaigns={() => setWorkspace("campaigns")} />}
+    {workspace === "campaigns" && <CampaignsPage onCreate={() => startCreation({})} onContinue={continueCampaign} />}
     {workspace === "segments" && <CustomerSegmentsPage onCreateContent={fromSegment} />}
     {workspace === "analytics" && <AcquisitionAnalyticsPage />}
   </div>;

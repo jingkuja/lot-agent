@@ -27,6 +27,9 @@ import {
 } from "./opportunity-validators.js";
 import {
   parseAssetList,
+  parseCampaignList,
+  parseCampaignUpdate,
+  parseCreateCampaign,
   parseCreateCampaignAsset,
   parseDeployment,
   parseFeedback,
@@ -126,6 +129,50 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.get("/acquisition/analytics", async (c) => {
     try { return c.json(await service.customerAcquisition.analytics(c.get("userId"))); }
     catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/campaigns", async (c) => {
+    try { return c.json(await service.customerAcquisition.listCampaigns(c.get("userId"), parseCampaignList(c.req.query()))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/campaigns", async (c) => {
+    try { return c.json(await service.customerAcquisition.createMarketingCampaign(c.get("userId"), parseCreateCampaign(await body(c))), 201); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/campaigns/:id", async (c) => {
+    try { return c.json(await service.customerAcquisition.getCampaign(c.get("userId"), parseEntityId(c.req.param("id"), "campaignId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.patch("/acquisition/campaigns/:id", async (c) => {
+    try {
+      return c.json(await service.customerAcquisition.updateCampaign(
+        c.get("userId"), parseEntityId(c.req.param("id"), "campaignId"), parseCampaignUpdate(await body(c))
+      ));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/acquisition/campaign-opportunities", async (c) => {
+    try { return c.json(await service.customerAcquisition.listCampaignOpportunities(c.get("userId"), c.req.query("status"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/campaign-opportunities/:id/accept", async (c) => {
+    try {
+      return c.json(await service.customerAcquisition.acceptCampaignOpportunity(
+        c.get("userId"), parseEntityId(c.req.param("id"), "opportunityId")
+      ), 201);
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/campaign-opportunities/:id/dismiss", async (c) => {
+    try {
+      return c.json(await service.customerAcquisition.dismissCampaignOpportunity(
+        c.get("userId"), parseEntityId(c.req.param("id"), "opportunityId")
+      ));
+    } catch (error) { return respondError(c, error); }
   });
 
   app.get("/opportunities", async (c) => {

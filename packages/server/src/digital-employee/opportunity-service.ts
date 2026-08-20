@@ -1,13 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { JobQueue } from "@lot-agent/core";
 import type { Pool, PoolClient } from "pg";
 import type { DB } from "../db/database.js";
 import { ConflictError, InputError, NotFoundError } from "./errors.js";
 import { discoverByRules, type DiscoveryCandidate } from "./opportunity-rules.js";
 import type { RuleOpportunity } from "./opportunity-rules.js";
+import { ConversationActionDrafts } from "./conversation-drafts.js";
 import type {
-  ActionResultInput, ActionUpdateInput, ManualActionInput, OpportunityDecisionInput, OpportunityListFilters,
-  OpportunityListItem, OpportunitySettings, OpportunitySummary, TalkTrackContext, TalkTrackRequest,
+  ActionResultInput, ActionUpdateInput, FollowUpActionPrepareInput, ManualActionInput, OpportunityDecisionInput, OpportunityListFilters,
+  OpportunityListItem, OpportunitySettings, OpportunitySummary, OutreachChannel, OutreachDraft, OutreachGenerateInput,
+  TalkTrackContext, TalkTrackRequest,
 } from "./opportunity-types.js";
 
 export interface OpportunityAdvicePatch {
@@ -36,6 +38,7 @@ export interface OpportunityTalkTrackGenerator {
 
 export class OpportunityService {
   private readonly pool: Pool;
+  private readonly drafts: ConversationActionDrafts;
 
   constructor(
     db: DB,
@@ -44,6 +47,7 @@ export class OpportunityService {
     private readonly talkTrackGenerator?: OpportunityTalkTrackGenerator
   ) {
     this.pool = db.pool;
+    this.drafts = new ConversationActionDrafts(db.pool);
   }
 
   async list(userId: string, filters: OpportunityListFilters) {
@@ -225,6 +229,7 @@ export class OpportunityService {
         `UPDATE de_follow_up_suggestions SET status = 'accepted', decided_at = now(), snoozed_until = NULL, version = version + 1
          WHERE id = $1 AND user_id = $2`, [opportunityId, userId]
       );
+      await this.syncProfileCadence(client, userId, row.profile_id);
       return { opportunityId, status: "accepted", actionId };
     });
   }
@@ -245,6 +250,7 @@ export class OpportunityService {
         input.followUpMethod ?? null, input.priority, input.scheduledAt,
         input.resultCriteria ?? null, input.productKey ?? null, input.productName ?? null]
     );
+    await this.syncProfileCadence(this.pool, userId, input.profileId);
     return this.getAction(userId, actionId);
   }
 
@@ -276,6 +282,13 @@ export class OpportunityService {
       if (!exists.rows[0]) throw new NotFoundError("未找到该行动");
       throw new ConflictError();
     }
+    const row = result.rows[0];
+    await this.syncProfileCadence(
+      this.pool,
+      userId,
+      row.profile_id,
+      input.operation === "execute" ? row.executed_at ?? new Date() : null
+    );
     return this.getAction(userId, actionId);
   }
 
@@ -316,6 +329,22 @@ export class OpportunityService {
           [nextActionId, userId, task.profile_id, input.nextAction, task.follow_up_method, task.priority, input.nextActionAt, task.product_key, task.product_name]
         );
       }
+      const occurredAt = task.executed_at ?? new Date();
+      await this.recordFollowUpObservation(client, {
+        userId,
+        profileId: task.profile_id,
+        recordId,
+        taskId: actionId,
+        occurredAt,
+        method: task.follow_up_method,
+        outcome: input.outcome,
+        note: input.note ?? "",
+        customerQuote: input.customerQuote ?? "",
+        nextAction: input.nextAction ?? "",
+        productKey: task.product_key,
+        productName: task.product_name,
+      });
+      await this.syncProfileCadence(client, userId, task.profile_id, occurredAt);
       return { recordId, actionId, status: "completed", nextActionId };
     });
   }
@@ -398,6 +427,187 @@ export class OpportunityService {
     return { reply, modelId: generated.modelId };
   }
 
+  async getCustomerBusinessContext(userId: string, profileId: string) {
+    await this.closeStaleActions(userId);
+    const profile = await this.requireProfile(userId, profileId);
+    const [detail, pending, actions, outreach] = await Promise.all([
+      this.talkTrackFacts(userId, profileId),
+      this.pendingRows(userId, profileId),
+      this.actionRows(userId, undefined, undefined, profileId),
+      this.pool.query(
+        `SELECT id, channel, objective, content, version, used_at, created_at
+         FROM de_outreach_drafts WHERE user_id=$1 AND profile_id=$2
+         ORDER BY created_at DESC LIMIT 5`,
+        [userId, profileId]
+      ),
+    ]);
+    return {
+      profile: {
+        id: profile.id,
+        displayName: profile.display_name,
+        organization: profile.organization,
+        relationshipStage: profile.relationship_stage,
+        customerRegion: profile.customer_region,
+        summary: detail.summary,
+        tags: detail.tags,
+        lastContactAt: iso(profile.last_contact_at),
+        nextFollowUpAt: iso(profile.next_follow_up_at),
+      },
+      productStates: detail.productStates,
+      recentFacts: detail.recentFacts,
+      opportunities: pending.map(toItem),
+      actions: actions.map(toItem),
+      outreach: outreach.rows.map((row) => ({
+        id: row.id, channel: row.channel, objective: row.objective, version: Number(row.version),
+        usedAt: iso(row.used_at), createdAt: iso(row.created_at), excerpt: String(row.content ?? "").slice(0, 180),
+      })),
+      managementUrl: "/digital-employee/acquisition",
+    };
+  }
+
+  async prepareFollowUpAction(
+    userId: string,
+    input: FollowUpActionPrepareInput,
+    source: { conversationId?: string; sourceMessageId?: string }
+  ) {
+    const preview = await this.previewFollowUpAction(userId, input);
+    return this.drafts.create({
+      userId,
+      conversationId: source.conversationId,
+      sourceMessageId: source.sourceMessageId,
+      featureScope: "opportunity-advisor",
+      kind: "follow_up_action",
+      payload: { ...input, version: preview.version ?? input.version },
+      preview,
+      question: String(preview.question),
+      options: preview.options as string[],
+    });
+  }
+
+  async commitFollowUpAction(userId: string, draftId: string, profileId?: string) {
+    const draft = await this.drafts.get(userId, draftId, "follow_up_action");
+    if (draft.status === "applied") {
+      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/acquisition" };
+    }
+    const input = {
+      ...(draft.payload as unknown as FollowUpActionPrepareInput),
+      ...(profileId ? { profileId } : {}),
+    };
+    const result = await this.applyFollowUpAction(userId, input);
+    const entityId = ("actionId" in result && result.actionId) || result.opportunityId || null;
+    await this.drafts.markApplied(userId, draftId, entityId);
+    return { ...result, alreadyApplied: false, managementUrl: "/digital-employee/acquisition" };
+  }
+
+  async prepareFollowUpResult(
+    userId: string,
+    actionId: string,
+    input: ActionResultInput,
+    source: { conversationId?: string; sourceMessageId?: string }
+  ) {
+    const action = await this.getAction(userId, actionId);
+    if (action.status !== "awaiting_result") throw new ConflictError("该行动当前不需要回填结果");
+    const preview = {
+      customerName: action.customerName,
+      profileId: action.profileId,
+      actionId,
+      title: action.title,
+      outcome: input.outcome,
+      nextAction: input.nextAction ?? null,
+      nextActionAt: input.nextActionAt ?? null,
+      confirmedRelationshipStage: input.confirmedRelationshipStage ?? null,
+      question: `确认把「${action.customerName}」的「${action.title}」标记为${resultLabel(input.outcome)}？`,
+      options: ["确认回填", "取消"],
+    };
+    return this.drafts.create({
+      userId,
+      conversationId: source.conversationId,
+      sourceMessageId: source.sourceMessageId,
+      featureScope: "opportunity-advisor",
+      kind: "follow_up_result",
+      payload: { actionId, ...input },
+      preview,
+      question: preview.question,
+      options: preview.options,
+    });
+  }
+
+  async commitFollowUpResult(userId: string, draftId: string) {
+    const draft = await this.drafts.get(userId, draftId, "follow_up_result");
+    if (draft.status === "applied") {
+      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/acquisition" };
+    }
+    const payload = draft.payload as unknown as ActionResultInput & { actionId: string };
+    const result = await this.addResult(userId, payload.actionId, payload);
+    await this.drafts.markApplied(userId, draftId, result.recordId);
+    return { ...result, alreadyApplied: false, managementUrl: "/digital-employee/acquisition" };
+  }
+
+  async generateOutreach(userId: string, input: OutreachGenerateInput): Promise<OutreachDraft> {
+    const request: TalkTrackRequest = {
+      intent: input.intent,
+      message: channelPrompt(input.channel ?? "wechat", input.message),
+      history: input.history ?? [],
+    };
+    let generated: { reply: string; modelId: string; objective: string; customerName: string };
+    let profileId: string;
+    let taskId: string | null = null;
+    let opportunityId: string | null = null;
+    if (input.itemId) {
+      const item = await this.loadWorkItem(userId, input.itemId);
+      const result = await this.generateTalkTrack(userId, input.itemId, request);
+      generated = { ...result, objective: item.objective, customerName: item.customerName };
+      profileId = item.profileId;
+      taskId = item.actionId;
+      opportunityId = item.opportunityId;
+    } else {
+      const result = await this.generateProfileTalkTrack(userId, input.profileId!, request);
+      generated = { reply: result.reply, modelId: result.modelId, objective: result.context.objective, customerName: result.context.customerName };
+      profileId = input.profileId!;
+    }
+    return this.saveOutreach({
+      userId, profileId, taskId, opportunityId,
+      channel: input.channel ?? "wechat",
+      objective: generated.objective || input.message,
+      content: generated.reply,
+      source: "generated",
+      modelId: generated.modelId,
+      snapshot: { intent: input.intent, customerName: generated.customerName },
+    });
+  }
+
+  async rewriteOutreach(userId: string, draftId: string, instruction: string): Promise<OutreachDraft> {
+    const current = await this.getOutreach(userId, draftId);
+    const generated = await this.generateProfileTalkTrack(userId, current.profileId, {
+      intent: "follow_up",
+      message: instruction,
+      history: [
+        { role: "assistant", content: current.content },
+        { role: "user", content: instruction },
+      ],
+    });
+    return this.saveOutreach({
+      userId, profileId: current.profileId, taskId: current.taskId, opportunityId: current.opportunityId,
+      parentId: current.id, channel: current.channel, objective: current.objective,
+      content: generated.reply, source: "rewrite", version: current.version + 1, modelId: generated.modelId,
+      snapshot: { rewriteOf: current.id },
+    });
+  }
+
+  async markOutreachUsed(userId: string, draftId: string) {
+    const { rows } = await this.pool.query(
+      `UPDATE de_outreach_drafts SET used_at=now()
+       WHERE id=$1 AND user_id=$2 AND used_at IS NULL RETURNING *`,
+      [draftId, userId]
+    );
+    if (!rows[0]) {
+      const existing = await this.getOutreach(userId, draftId);
+      if (existing.usedAt) return existing;
+      throw new NotFoundError("未找到该话术");
+    }
+    return toOutreach(rows[0]);
+  }
+
   async saveSettings(userId: string, input: { enabled: boolean; timezone: string; dailyRunTime: string; version: number }) {
     const result = await this.pool.query(
       `INSERT INTO de_follow_up_automation_settings (user_id,enabled,timezone,daily_run_time,next_run_at,version)
@@ -445,23 +655,225 @@ export class OpportunityService {
     return count;
   }
 
-  private async pendingRows(userId: string) {
+  private async previewFollowUpAction(userId: string, input: FollowUpActionPrepareInput) {
+    if (input.operation === "create") {
+      const profile = await this.requireProfile(userId, input.profileId!);
+      return {
+        operation: input.operation, profileId: profile.id, customerName: profile.display_name,
+        title: input.title, objective: input.objective, scheduledAt: input.scheduledAt,
+        opportunityType: input.opportunityType, followUpMethod: input.followUpMethod ?? null,
+        question: `确认为「${profile.display_name}」创建跟进「${input.title}」？`,
+        options: ["确认创建", "取消"],
+      };
+    }
+    if (input.operation === "accept" || input.operation === "snooze" || input.operation === "dismiss") {
+      const item = await this.getOpportunity(userId, input.opportunityId!);
+      const verb = input.operation === "accept" ? "采纳并创建行动" : input.operation === "snooze" ? "稍后处理" : "忽略";
+      return {
+        operation: input.operation, opportunityId: item.opportunityId, profileId: item.profileId,
+        customerName: item.customerName, title: item.title, scheduledAt: input.scheduledAt ?? item.scheduledAt,
+        snoozedUntil: input.snoozedUntil ?? null, reason: input.reason ?? null,
+        question: `确认${verb}「${item.customerName}」的商机「${item.title}」？`,
+        options: [`确认${verb}`, "取消"],
+      };
+    }
+    const action = await this.getAction(userId, input.actionId!);
+    const verb = input.operation === "reschedule" ? "改期" : input.operation === "cancel" ? "取消" : "标记已执行";
+    return {
+      operation: input.operation, actionId: action.actionId, profileId: action.profileId,
+      customerName: action.customerName, title: action.title, scheduledAt: input.scheduledAt ?? action.scheduledAt,
+      version: action.actionVersion, reason: input.reason ?? null,
+      question: `确认${verb}「${action.customerName}」的行动「${action.title}」？`,
+      options: [`确认${verb}`, "取消"],
+    };
+  }
+
+  private async applyFollowUpAction(userId: string, input: FollowUpActionPrepareInput) {
+    if (input.operation === "create") {
+      const action = await this.createAction(userId, {
+        profileId: input.profileId!,
+        opportunityType: input.opportunityType!,
+        title: input.title!,
+        objective: input.objective!,
+        followUpMethod: input.followUpMethod,
+        priority: input.priority ?? "normal",
+        scheduledAt: input.scheduledAt!,
+        resultCriteria: input.resultCriteria,
+        productName: input.productName,
+      });
+      return { opportunityId: action.opportunityId, actionId: action.actionId, status: action.status, action };
+    }
+    if (input.operation === "accept" || input.operation === "snooze" || input.operation === "dismiss") {
+      return this.decide(userId, input.opportunityId!, {
+        decision: input.operation === "accept" ? "accept" : input.operation === "snooze" ? "snooze" : "dismiss",
+        reason: input.reason,
+        snoozedUntil: input.snoozedUntil,
+        scheduledAt: input.scheduledAt,
+        followUpMethod: input.followUpMethod,
+        objective: input.objective,
+        resultCriteria: input.resultCriteria,
+      });
+    }
+    const action = await this.updateAction(userId, input.actionId!, {
+      operation: input.operation,
+      scheduledAt: input.scheduledAt,
+      reason: input.reason,
+      version: input.version ?? 0,
+    });
+    return { opportunityId: action.opportunityId, actionId: action.actionId, status: action.status, action };
+  }
+
+  async getOpportunity(userId: string, opportunityId: string): Promise<OpportunityListItem> {
+    const { rows } = await this.pool.query(
+      `${baseSelect()} WHERE suggestion.user_id = $1 AND suggestion.id = $2 LIMIT 1`,
+      [userId, opportunityId]
+    );
+    if (!rows[0]) throw new NotFoundError("未找到该商机");
+    return toItem(rows[0]);
+  }
+
+  private async requireProfile(userId: string, profileId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT id, display_name, organization, relationship_stage, customer_region, summary, tags,
+              last_contact_at, next_follow_up_at
+       FROM de_customer_profiles WHERE id=$1 AND user_id=$2 AND status='active'`,
+      [profileId, userId]
+    );
+    if (!rows[0]) throw new NotFoundError("未找到该客户画像");
+    return rows[0];
+  }
+
+  private async talkTrackFacts(userId: string, profileId: string) {
+    const detail = await this.pool.query(
+      `SELECT left(profile.summary, 2000) AS summary, profile.tags,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'productName', state.product_name, 'journeyStage', state.journey_stage,
+            'sentiment', state.sentiment, 'satisfaction', state.satisfaction,
+            'health', state.health, 'needs', state.needs, 'objections', state.objections,
+            'currentIssues', state.current_issues
+          ) ORDER BY state.updated_at DESC)
+          FROM de_customer_product_states state
+          WHERE state.user_id = profile.user_id AND state.profile_id = profile.id
+        ), '[]'::jsonb) AS product_states,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object('text', recent.raw_text, 'occurredAt', recent.occurred_at) ORDER BY recent.occurred_at DESC)
+          FROM (
+            SELECT left(observation.raw_text, 1500) AS raw_text, COALESCE(observation.occurred_at, observation.created_at) AS occurred_at
+            FROM de_customer_observations observation
+            WHERE observation.user_id = profile.user_id AND observation.profile_id = profile.id
+            ORDER BY COALESCE(observation.occurred_at, observation.created_at) DESC LIMIT 8
+          ) recent
+        ), '[]'::jsonb) AS recent_facts
+       FROM de_customer_profiles profile
+       WHERE profile.id = $1 AND profile.user_id = $2 AND profile.status = 'active'`,
+      [profileId, userId]
+    );
+    if (!detail.rows[0]) throw new NotFoundError("未找到该客户画像");
+    return {
+      summary: detail.rows[0].summary ?? "",
+      tags: array(detail.rows[0].tags),
+      productStates: array(detail.rows[0].product_states),
+      recentFacts: array(detail.rows[0].recent_facts).map((fact: any) => ({
+        text: String(fact.text ?? ""),
+        occurredAt: iso(fact.occurredAt ?? fact.occurred_at),
+      })).filter((fact: { text: string }) => fact.text),
+    };
+  }
+
+  private async loadWorkItem(userId: string, itemId: string): Promise<OpportunityListItem & { actionVersion?: number }> {
+    const actions = await this.actionRows(userId, undefined, itemId);
+    if (actions[0]) return toItem(actions[0]);
+    const pending = await this.pool.query(
+      `${baseSelect()} WHERE suggestion.user_id = $1 AND suggestion.id = $2 LIMIT 1`,
+      [userId, itemId]
+    );
+    if (!pending.rows[0]) throw new NotFoundError("未找到该客户经营事项");
+    return toItem(pending.rows[0]);
+  }
+
+  private async generateProfileTalkTrack(userId: string, profileId: string, request: TalkTrackRequest) {
+    if (!this.talkTrackGenerator) throw new InputError("话术生成服务暂不可用");
+    const profile = await this.requireProfile(userId, profileId);
+    const facts = await this.talkTrackFacts(userId, profileId);
+    const productName = facts.productStates[0]?.productName ?? null;
+    const product = productName ? await this.pool.query(
+      `SELECT name, positioning, core_values, verifiable_facts, common_objections,
+        current_benefits, prohibited_expressions, case_materials
+       FROM marketing_products
+       WHERE user_id = $1 AND status = 'active' AND lower(name) = lower($2)
+       ORDER BY updated_at DESC LIMIT 1`,
+      [userId, productName]
+    ) : { rows: [] };
+    const context: TalkTrackContext = {
+      customerName: profile.display_name,
+      organization: profile.organization ?? null,
+      relationshipStage: profile.relationship_stage,
+      customerSummary: facts.summary,
+      tags: facts.tags,
+      opportunityType: profile.relationship_stage === "customer" ? "repurchase" : "prospect_progress",
+      title: "个性化联系",
+      objective: request.message,
+      reason: facts.summary || "用户主动要求生成联系话术",
+      followUpMethod: null,
+      productName,
+      resultCriteria: null,
+      customerProductStates: facts.productStates,
+      recentFacts: facts.recentFacts,
+      productMaterial: product.rows[0] ?? null,
+    };
+    const generated = await this.talkTrackGenerator.generate({ userId, context, request });
+    const reply = generated.reply.trim();
+    if (!reply) throw new InputError("话术生成结果为空，请重试");
+    return { reply, modelId: generated.modelId, context };
+  }
+
+  private async saveOutreach(row: {
+    userId: string; profileId: string; taskId: string | null; opportunityId: string | null;
+    parentId?: string; channel: OutreachChannel; objective: string; content: string;
+    source: "generated" | "rewrite"; version?: number; modelId: string; snapshot: Record<string, unknown>;
+  }): Promise<OutreachDraft> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO de_outreach_drafts
+        (id,user_id,profile_id,task_id,opportunity_id,parent_id,channel,objective,content,source,version,input_snapshot,model_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13) RETURNING *`,
+      [
+        randomUUID(), row.userId, row.profileId, row.taskId, row.opportunityId, row.parentId ?? null,
+        row.channel, row.objective, row.content, row.source, row.version ?? 1,
+        JSON.stringify(row.snapshot), row.modelId,
+      ]
+    );
+    return toOutreach(rows[0]);
+  }
+
+  async getOutreach(userId: string, draftId: string): Promise<OutreachDraft> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM de_outreach_drafts WHERE id=$1 AND user_id=$2`, [draftId, userId]
+    );
+    if (!rows[0]) throw new NotFoundError("未找到该话术");
+    return toOutreach(rows[0]);
+  }
+
+  private async pendingRows(userId: string, profileId?: string) {
+    const params: unknown[] = [userId];
+    const profileFilter = profileId ? (params.push(profileId), " AND suggestion.profile_id = $2") : "";
     const result = await this.pool.query(
       `${baseSelect()}
        WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested'
          AND suggestion.opportunity_type <> 'cohort_marketing'
          AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
-         AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now())
+         AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now())${profileFilter}
        ORDER BY CASE suggestion.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
-         suggestion.suggested_at DESC`, [userId]
+         suggestion.suggested_at DESC`, params
     );
     return result.rows;
   }
 
-  private async actionRows(userId: string, view?: string, actionId?: string) {
+  private async actionRows(userId: string, view?: string, actionId?: string, profileId?: string) {
     const conditions = ["task.user_id = $1"];
     const params: unknown[] = [userId];
     if (actionId) { params.push(actionId); conditions.push(`task.id = $${params.length}`); }
+    if (profileId) { params.push(profileId); conditions.push(`task.profile_id = $${params.length}`); }
     if (view === "today") conditions.push(`(
       (task.status = 'pending' AND task.scheduled_at < date_trunc('day', now()) + interval '1 day')
       OR task.status = 'awaiting_result'
@@ -519,9 +931,91 @@ export class OpportunityService {
   }
 
   private async closeStaleActions(userId: string) {
-    await this.pool.query(
+    const closed = await this.pool.query(
       `UPDATE de_follow_up_tasks SET status = 'cancelled', cancelled_at = now(), close_reason = 'overdue_closed', version = version + 1
-       WHERE user_id = $1 AND status = 'pending' AND scheduled_at < now() - interval '30 days'`, [userId]
+       WHERE user_id = $1 AND status = 'pending' AND scheduled_at < now() - interval '30 days'
+       RETURNING profile_id`, [userId]
+    );
+    const profileIds = [...new Set(closed.rows.map((row) => String(row.profile_id)))];
+    for (const profileId of profileIds) await this.syncProfileCadence(this.pool, userId, profileId);
+  }
+
+  /** Keep homepage due-counts and acquisition contact exclusion on the same cadence as tasks. */
+  private async syncProfileCadence(
+    client: Pool | PoolClient,
+    userId: string,
+    profileId: string,
+    contactAt: string | Date | null = null
+  ) {
+    await client.query(
+      `UPDATE de_customer_profiles SET
+         last_contact_at = CASE
+           WHEN $3::timestamptz IS NULL THEN last_contact_at
+           WHEN last_contact_at IS NULL OR last_contact_at < $3::timestamptz THEN $3::timestamptz
+           ELSE last_contact_at
+         END,
+         last_observed_at = CASE
+           WHEN $3::timestamptz IS NULL THEN last_observed_at
+           WHEN last_observed_at IS NULL OR last_observed_at < $3::timestamptz THEN $3::timestamptz
+           ELSE last_observed_at
+         END,
+         next_follow_up_at = (
+           SELECT MIN(task.scheduled_at) FROM de_follow_up_tasks task
+           WHERE task.user_id = $1 AND task.profile_id = $2 AND task.status = 'pending'
+         ),
+         version = version + 1
+       WHERE id = $2 AND user_id = $1 AND status = 'active'`,
+      [userId, profileId, contactAt]
+    );
+  }
+
+  private async recordFollowUpObservation(
+    client: PoolClient,
+    input: {
+      userId: string;
+      profileId: string;
+      recordId: string;
+      taskId: string;
+      occurredAt: string | Date;
+      method: string | null;
+      outcome: string;
+      note: string;
+      customerQuote: string;
+      nextAction: string;
+      productKey: string | null;
+      productName: string | null;
+    }
+  ) {
+    const observationId = randomUUID();
+    const rawText = followUpObservationText(input);
+    const inserted = await client.query(
+      `INSERT INTO de_customer_observations (
+         id, user_id, profile_id, source_type, source_id, source_locator, raw_text, raw_text_hash, occurred_at
+       ) VALUES ($1,$2,$3,'manual',$4,$5::jsonb,$6,$7,$8)
+       ON CONFLICT (user_id, source_type, source_id) DO NOTHING
+       RETURNING id`,
+      [
+        observationId, input.userId, input.profileId, `follow_up_record:${input.recordId}`,
+        JSON.stringify({ kind: "follow_up_result", taskId: input.taskId, recordId: input.recordId }),
+        rawText, createHash("sha256").update(rawText).digest("hex"), input.occurredAt,
+      ]
+    );
+    if (!inserted.rows[0]) return;
+    await client.query(
+      `INSERT INTO de_customer_observation_extractions (
+         id, user_id, profile_id, observation_id, event_type, product_key, product_name,
+         extracted_facts, proposed_patch, apply_status, prompt_version, schema_version, applied_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'{}'::jsonb,'applied','follow-up-result/v1','customer-observation/v1',now())`,
+      [
+        randomUUID(), input.userId, input.profileId, inserted.rows[0].id,
+        followUpEventType(input.outcome), input.productKey, input.productName,
+        JSON.stringify({
+          outcome: input.outcome,
+          followUpMethod: input.method,
+          customerQuote: input.customerQuote || undefined,
+          nextAction: input.nextAction || undefined,
+        }),
+      ]
     );
   }
 
@@ -630,6 +1124,12 @@ function toItem(row: any): OpportunityListItem & { actionVersion?: number } {
 }
 
 function matches(item: OpportunityListItem, filters: OpportunityListFilters) {
+  if (filters.profileId && item.profileId !== filters.profileId) return false;
+  if (filters.query) {
+    const query = filters.query.toLocaleLowerCase("zh-CN");
+    const haystack = `${item.customerName} ${item.organization ?? ""}`.toLocaleLowerCase("zh-CN");
+    if (!haystack.includes(query)) return false;
+  }
   if (filters.readiness && item.readiness !== filters.readiness) return false;
   if (filters.priority && item.priority !== filters.priority) return false;
   if (filters.opportunityType && item.opportunityType !== filters.opportunityType) return false;
@@ -703,4 +1203,60 @@ function redactModelText(value: string, customerName?: string): string {
 
 function containsContact(value: string): boolean {
   return /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/.test(value) || /(?<!\d)1[3-9]\d{9}(?!\d)/.test(value);
+}
+
+function resultLabel(outcome: string) {
+  const labels: Record<string, string> = {
+    no_response: "无响应", replied: "已回复", interested: "感兴趣", scheduled: "已预约",
+    won: "已成交", rejected: "已拒绝", service_needed: "需要服务处理",
+  };
+  return labels[outcome] ?? outcome;
+}
+
+function channelPrompt(channel: OutreachChannel, message: string) {
+  const labels: Record<OutreachChannel, string> = {
+    wechat: "生成一条可直接发送的微信/企微消息",
+    phone: "生成一份电话提纲，包含开场、关键问题和结束下一步",
+    email: "生成一封邮件，包含主题、正文和行动号召",
+    visit: "生成一份线下回访提纲",
+  };
+  return `${labels[channel]}。${message}`;
+}
+
+function followUpEventType(outcome: string) {
+  if (outcome === "service_needed") return "complaint";
+  if (outcome === "won") return "purchase";
+  return "contact";
+}
+
+function followUpObservationText(input: {
+  outcome: string;
+  method: string | null;
+  note: string;
+  customerQuote: string;
+  nextAction: string;
+}) {
+  const parts = [
+    `跟进结果：${resultLabel(input.outcome)}`,
+    input.method ? `方式：${input.method}` : "",
+    input.customerQuote ? `客户原话：${input.customerQuote}` : "",
+    input.note ? `说明：${input.note}` : "",
+    input.nextAction ? `下一步：${input.nextAction}` : "",
+  ].filter(Boolean);
+  return parts.join("。");
+}
+
+function toOutreach(row: any): OutreachDraft {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    taskId: row.task_id ?? null,
+    opportunityId: row.opportunity_id ?? null,
+    channel: row.channel,
+    objective: row.objective ?? "",
+    content: row.content,
+    version: Number(row.version),
+    usedAt: iso(row.used_at),
+    modelId: row.model_id ?? null,
+  };
 }

@@ -241,6 +241,17 @@ export class DigitalEmployeeService {
     }));
   }
 
+  async resolveCustomerCandidates(userId: string, mention: string, conversationId?: string) {
+    const name = mention.trim();
+    if (!name) throw new InputError("请提供客户名称或称呼");
+    const contextual = await this.contextProfileForMention(userId, conversationId, name);
+    if (contextual) return [this.publicProfile(contextual, false)];
+    const exact = await this.repository.findProfilesByExactMention(userId, name);
+    if (exact.length) return exact.map((profile) => this.publicProfile(profile, false));
+    const fuzzy = await this.repository.listProfiles(userId, { page: 1, limit: 5, query: name, status: "active" });
+    return fuzzy.items.map((profile) => this.publicProfile(profile, false));
+  }
+
   async rememberCurrentProfile(userId: string, conversationId: string | undefined, profile: Pick<CustomerProfile, "id" | "displayName">) {
     if (!conversationId) return;
     const owned = await this.requireProfile(userId, profile.id);

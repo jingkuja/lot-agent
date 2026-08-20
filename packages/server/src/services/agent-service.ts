@@ -71,6 +71,8 @@ import { createCustomerProfileTools } from "../digital-employee/tools/customer-p
 import { cohortLlmMetrics } from "../digital-employee/profile/cohort-summary.js";
 import { createMarketingMaterialTools } from "../digital-employee/tools/marketing-material-tools.js";
 import { createCustomerAcquisitionTools } from "../digital-employee/tools/customer-acquisition-tools.js";
+import { createOpportunityAdvisorTools } from "../digital-employee/tools/opportunity-advisor-tools.js";
+import { parseDigitalEmployeeFeatureScope } from "../digital-employee/feature-scope.js";
 
 /**
  * Builtin tools that touch the host filesystem / shell. On the deployed
@@ -102,13 +104,23 @@ const DIGITAL_EMPLOYEE_SCOPE_TOOLS: Record<string, Set<string>> = {
   ]),
   "opportunity-advisor": new Set([
     "search_customer_profiles", "get_customer_profiles", "prepare_customer_capture",
-    "commit_customer_capture", "ask_user", "load_skill",
+    "commit_customer_capture", "search_customer_work_queue", "get_customer_business_context",
+    "search_customer_opportunities", "prepare_follow_up_action", "commit_follow_up_action",
+    "prepare_follow_up_result", "commit_follow_up_result", "generate_individual_outreach",
+    "rewrite_individual_outreach", "mark_individual_outreach_used", "ask_user", "load_skill",
   ]),
   "customer-acquisition": new Set([
-    "analyze_customer_cohort", "search_customer_segments", "generate_campaign_copy",
-    "search_marketing_assets", "get_asset_deployment_status", "generate_daily_recommendations",
-    "get_daily_recommendations", "adopt_recommendation", "ignore_recommendation",
-    "check_user_generation_models", "search_marketing_materials", "ask_user", "load_skill",
+    "analyze_customer_cohort", "search_customer_segments", "prepare_customer_segment",
+    "commit_customer_segment", "evaluate_segment_product_fit", "search_campaign_opportunities",
+    "accept_campaign_opportunity", "prepare_marketing_campaign", "commit_marketing_campaign",
+    "search_marketing_campaigns", "get_marketing_campaign", "generate_campaign_copy", "generate_campaign_poster",
+    "generate_campaign_video", "rewrite_campaign_asset", "search_marketing_assets",
+    "get_asset_deployment_status", "record_campaign_usage", "prepare_asset_deployment",
+    "commit_asset_deployment", "prepare_deployment_feedback", "commit_deployment_feedback",
+    "prepare_campaign_result", "commit_campaign_result", "archive_marketing_asset",
+    "generate_daily_recommendations", "get_daily_recommendations", "adopt_recommendation",
+    "ignore_recommendation", "check_user_generation_models", "search_marketing_materials",
+    "ask_user", "load_skill",
   ]),
 };
 
@@ -168,6 +180,16 @@ export function resolveConversationModel(
   agentDefault: string
 ): string {
   return explicit ?? conversationModelId ?? agentDefault;
+}
+
+/** Digital-employee chats without a known workspace scope get no tools. */
+export function digitalEmployeeAllowedToolNames(
+  featureScope: string | undefined,
+  toolNames: string[]
+): string[] {
+  const allowed = featureScope ? DIGITAL_EMPLOYEE_SCOPE_TOOLS[featureScope] : undefined;
+  if (!allowed) return [];
+  return toolNames.filter((name) => allowed.has(name));
 }
 
 /** Synthesize a ModelConfig (for the UsageMeter) for a dynamically-discovered
@@ -433,6 +455,25 @@ export class AgentService {
           const parsed = parseAcquisitionCopy(raw);
           return { ...parsed, modelId: usedModelId };
         },
+        evaluateFit: async (input) => {
+          const { llm, usedModelId } = await this.resolveUtilityLLM({ userId: input.userId });
+          const metered = meterLLM(llm, (usage) =>
+            this.meterUtilityUsage("customer-acquisition fit", usedModelId, input.userId, usage)
+          );
+          const raw = await complete(metered, [
+            {
+              role: "system",
+              content:
+                "你是获客宝的客群产品匹配助手。输入只包含脱敏聚合群像和已经确认的产品/品牌事实。" +
+                "不要推断或输出任何单个客户身份，不得虚构产品能力、优惠、案例或数据。" +
+                "若客群差异过大或样本过小，必须写入 risks 并建议拆分。" +
+                "仅输出JSON对象：{\"title\":\"...\",\"objective\":\"...\",\"theme\":\"...\",\"reasoning\":[\"...\"]," +
+                "\"corePoints\":[\"...\"],\"suggestedChannels\":[\"...\"],\"risks\":[\"...\"],\"priority\":\"low|normal|high\"}。",
+            },
+            { role: "user", content: JSON.stringify(input).slice(0, 30_000) },
+          ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.3, maxTokens: 1_200 } });
+          return { ...parseAcquisitionFit(raw), modelId: usedModelId };
+        },
       },
       modelResolver: {
         get: async (userId) => {
@@ -486,6 +527,9 @@ export class AgentService {
       this.toolRegistry.register(tool);
     }
     for (const tool of createCustomerAcquisitionTools(this.digitalEmployee.customerAcquisition)) {
+      this.toolRegistry.register(tool);
+    }
+    for (const tool of createOpportunityAdvisorTools(this.digitalEmployee)) {
       this.toolRegistry.register(tool);
     }
 
@@ -819,13 +863,18 @@ export class AgentService {
     // Falls back to the shared registry provider when the user has no api_key
     // (e.g. local/dev without tokenhub) so the chat path still runs.
     const conversation = await this.db.getConversation(conversationId);
-    const featureScope = typeof conversation?.metadata?.digitalEmployeeFeatureScope === "string"
-      ? conversation.metadata.digitalEmployeeFeatureScope
+    const featureScope = def.id === "digital_employee"
+      ? parseDigitalEmployeeFeatureScope(conversation?.metadata?.digitalEmployeeFeatureScope)
       : undefined;
     if (def.id === "digital_employee" && featureScope) {
       dynamicParts.push(
         `[当前功能作用域]\nfeatureScope=${featureScope}。这是用户界面明确显示并随会话保存的作用域。` +
         "只能使用当前作用域允许的工具和对象；不得把其他模块的隐式客户、客群、机会或资产带入本次对话。"
+      );
+    } else if (def.id === "digital_employee") {
+      dynamicParts.push(
+        "[当前功能作用域]\n本会话缺少合法的功能作用域，已禁止调用数字员工经营工具。" +
+        "请从对应工作台重新开始对话，不要声称已查询、更新或生成任何经营对象。"
       );
     }
     if (opts?.modelId) await this.db.setConversationModel(conversationId, opts.modelId);
@@ -852,8 +901,8 @@ export class AgentService {
     const agent = new Agent({
       ...this.agentConfig,
       systemPrompt: def.systemPrompt,
-      allowedToolNames: def.id === "digital_employee" && featureScope && DIGITAL_EMPLOYEE_SCOPE_TOOLS[featureScope]
-        ? def.toolNames.filter((name) => DIGITAL_EMPLOYEE_SCOPE_TOOLS[featureScope].has(name))
+      allowedToolNames: def.id === "digital_employee"
+        ? digitalEmployeeAllowedToolNames(featureScope, def.toolNames)
         : def.toolNames,
       dynamicPromptParts: dynamicParts,
       modelParams: def.modelParams,
@@ -1152,6 +1201,25 @@ function parseAcquisitionCopy(raw: string): { title: string; content: string } {
     throw new Error("文案结果格式无效");
   }
   return { title: value.title.trim().slice(0, 500), content: value.content.trim().slice(0, 20_000) };
+}
+
+function parseAcquisitionFit(raw: string): import("../digital-employee/acquisition-types.js").CampaignFitDraft {
+  const value = parseJsonObject(raw);
+  const strings = (input: unknown) => Array.isArray(input) ? input.filter((entry): entry is string => typeof entry === "string") : [];
+  if (typeof value.title !== "string" || !value.title.trim() || typeof value.theme !== "string") {
+    throw new Error("匹配结果格式无效");
+  }
+  const priority = value.priority === "high" || value.priority === "low" ? value.priority : "normal";
+  return {
+    title: value.title.trim().slice(0, 300),
+    objective: typeof value.objective === "string" && value.objective.trim() ? value.objective.trim().slice(0, 500) : "获得咨询或留资",
+    theme: value.theme.trim().slice(0, 300),
+    reasoning: strings(value.reasoning).slice(0, 6),
+    corePoints: strings(value.corePoints).slice(0, 5),
+    suggestedChannels: strings(value.suggestedChannels).slice(0, 5),
+    risks: strings(value.risks).slice(0, 6),
+    priority,
+  };
 }
 
 function normalizedModelId(id: string): string {

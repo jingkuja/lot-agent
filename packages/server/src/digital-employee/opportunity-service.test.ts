@@ -130,4 +130,99 @@ describe("OpportunityService personal work queue", () => {
       }),
     }));
   });
+
+  it("persists generated outreach against the selected customer", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_tasks task")) return { rows: [{
+        id: "o1", action_id: "a1", profile_id: "p1", action_status: "pending", action_source: "manual",
+        display_name: "李静", organization: null, relationship_stage: "prospect",
+        opportunity_type: "prospect_progress", title: "回访", objective: "确认演示",
+        follow_up_method: "微信", suggested_at: "2026-08-18T01:00:00.000Z",
+        scheduled_at: "2026-08-20T01:00:00.000Z", priority: "normal", reason: "约定回访",
+        evidence: [], readiness: "actionable", risk_flags: [], product_name: null,
+        result_criteria: null, action_version: 1,
+      }] };
+      if (sql.includes("AS product_states")) return { rows: [{ summary: "", tags: [], product_states: [], recent_facts: [] }] };
+      if (sql.includes("INSERT INTO de_outreach_drafts")) return { rows: [{
+        id: "d1", profile_id: "p1", task_id: "a1", opportunity_id: "o1", channel: "wechat",
+        objective: "确认演示", content: "李静，周四方便吗？", version: 1, used_at: null, model_id: "m1",
+      }] };
+      return { rows: [] };
+    });
+    const service = new OpportunityService(
+      { pool: { query } } as any,
+      undefined,
+      undefined,
+      { generate: vi.fn(async () => ({ modelId: "m1", reply: "李静，周四方便吗？" })) },
+    );
+
+    const result = await service.generateOutreach("u1", {
+      itemId: "a1", intent: "follow_up", channel: "wechat", message: "生成微信回访",
+    });
+
+    expect(result).toMatchObject({ profileId: "p1", taskId: "a1", content: "李静，周四方便吗？" });
+    expect(query.mock.calls.some((call) => String(call[0]).includes("INSERT INTO de_outreach_drafts"))).toBe(true);
+  });
+
+  it("writes a contact observation and refreshes profile cadence when a result is recorded", async () => {
+    const clientQuery = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_tasks WHERE id")) {
+        return { rows: [{
+          id: "a1", user_id: "u1", profile_id: "p1", status: "awaiting_result",
+          executed_at: "2026-08-20T04:00:00.000Z", follow_up_method: "企微/微信",
+          product_key: "edge", product_name: "边缘算力", priority: "normal",
+        }] };
+      }
+      if (sql.includes("INSERT INTO de_customer_observations")) return { rows: [{ id: "obs1" }] };
+      return { rows: [], rowCount: 1 };
+    });
+    const client = { query: clientQuery, release: vi.fn() };
+    const service = new OpportunityService({ pool: { connect: vi.fn(async () => client) } } as any);
+
+    const result = await service.addResult("u1", "a1", {
+      outcome: "scheduled",
+      customerQuote: "周四可以演示",
+      nextAction: "安排演示",
+      nextActionAt: "2026-08-21T02:00:00.000Z",
+    });
+
+    expect(result).toMatchObject({ actionId: "a1", status: "completed" });
+    const sql = clientQuery.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(sql).toContain("INSERT INTO de_customer_observations");
+    expect(sql).toContain("INSERT INTO de_customer_observation_extractions");
+    expect(sql).toContain("last_contact_at");
+    expect(sql).toContain("next_follow_up_at");
+    expect(sql).toContain("last_observed_at");
+    const observationCall = clientQuery.mock.calls.find((call) => String(call[0]).includes("INSERT INTO de_customer_observations"));
+    expect(observationCall?.[1]?.[5]).toContain("周四可以演示");
+    const cadenceCall = clientQuery.mock.calls.find((call) => String(call[0]).includes("next_follow_up_at"));
+    expect(cadenceCall?.[1]).toEqual(["u1", "p1", "2026-08-20T04:00:00.000Z"]);
+    const extractionCall = clientQuery.mock.calls.find((call) => String(call[0]).includes("INSERT INTO de_customer_observation_extractions"));
+    expect(extractionCall?.[1]?.[4]).toBe("contact");
+  });
+
+  it("marks last contact when an action is executed, even before the result is filled in", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("RETURNING *") && sql.includes("executed_at")) {
+        return { rows: [{ id: "a1", profile_id: "p1", executed_at: "2026-08-20T05:00:00.000Z" }] };
+      }
+      if (sql.includes("FROM de_follow_up_tasks task")) return { rows: [{
+        id: "o1", action_id: "a1", profile_id: "p1", action_status: "awaiting_result", action_source: "manual",
+        display_name: "李静", organization: null, relationship_stage: "prospect",
+        opportunity_type: "prospect_progress", title: "回访", objective: "确认演示",
+        follow_up_method: "微信", suggested_at: "2026-08-18T01:00:00.000Z",
+        scheduled_at: "2026-08-20T01:00:00.000Z", priority: "normal", reason: "约定回访",
+        evidence: [], readiness: "actionable", risk_flags: [], product_name: null,
+        result_criteria: null, action_version: 2,
+      }] };
+      return { rows: [] };
+    });
+    const service = new OpportunityService({ pool: { query } } as any);
+    await service.updateAction("u1", "a1", { operation: "execute", version: 1 });
+    const cadenceSql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("last_contact_at")) ?? "";
+    expect(cadenceSql).toContain("last_contact_at");
+    expect(cadenceSql).toContain("next_follow_up_at");
+    const cadenceArgs = query.mock.calls.find((call) => String(call[0]).includes("last_contact_at"))?.[1];
+    expect(cadenceArgs).toEqual(["u1", "p1", "2026-08-20T05:00:00.000Z"]);
+  });
 });

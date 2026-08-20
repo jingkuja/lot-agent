@@ -62,6 +62,12 @@ export interface CampaignContentGenerator {
     prompt: string;
     brief: Record<string, unknown>;
   }): Promise<{ title: string; content: string; modelId: string }>;
+  evaluateFit?(input: {
+    userId: string;
+    audience: Record<string, unknown>;
+    product: Record<string, unknown>;
+    brand: Record<string, unknown> | null;
+  }): Promise<CampaignFitDraft & { modelId: string }>;
 }
 
 export interface CampaignModelAvailability {
@@ -120,4 +126,53 @@ export interface FeedbackInput {
   interactions?: number | null;
   conversions?: number | null;
   feedbackText?: string;
+}
+
+export interface CreateCampaignInput {
+  name: string;
+  objective: string;
+  channels: string[];
+  callToAction: string;
+  productId: string;
+  segmentId?: string;
+  segmentSnapshotId?: string;
+  publicAudience?: string;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  opportunityId?: string;
+}
+
+export interface CampaignListFilters {
+  status?: "draft" | "active" | "completed" | "archived";
+  page: number;
+  limit: number;
+}
+
+export interface CampaignUpdateInput {
+  name?: string;
+  objective?: string;
+  channels?: string[];
+  callToAction?: string;
+  status?: "draft" | "active" | "completed" | "archived";
+  selectedAssets?: Partial<Record<"copy" | "poster" | "video", string | null>>;
+}
+
+export interface CampaignFitDraft {
+  title: string;
+  objective: string;
+  theme: string;
+  reasoning: string[];
+  corePoints: string[];
+  suggestedChannels: string[];
+  risks: string[];
+  priority: "low" | "normal" | "high";
+}
+
+export interface CampaignResultInput {
+  campaignId: string;
+  impressions?: number | null;
+  interactions?: number | null;
+  conversions?: number | null;
+  leads?: number | null;
+  note?: string;
 }

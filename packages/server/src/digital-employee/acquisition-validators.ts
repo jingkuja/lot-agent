@@ -4,7 +4,11 @@ import {
   SEGMENT_JOURNEY_STAGES,
   SEGMENT_RELATIONSHIP_STAGES,
   type AssetListFilters,
+  type CampaignListFilters,
+  type CampaignResultInput,
+  type CampaignUpdateInput,
   type CreateCampaignAssetInput,
+  type CreateCampaignInput,
   type DeploymentInput,
   type FeedbackInput,
   type SegmentCriteria,
@@ -21,7 +25,7 @@ export function parseSegmentInput(value: unknown): SegmentInput {
   return {
     name: text(source.name, "客群名称", 1, 200),
     description: optionalText(source.description, "客群说明", 1_000),
-    criteria: parseCriteria(source.criteria),
+    criteria: parseSegmentCriteria(source.criteria),
   };
 }
 
@@ -39,22 +43,25 @@ export function parseCreateCampaignAsset(value: unknown): CreateCampaignAssetInp
   const segmentId = optionalUuid(source.segmentId, "segmentId");
   const snapshotId = optionalUuid(source.segmentSnapshotId, "segmentSnapshotId");
   const publicAudience = optionalText(source.publicAudience, "公开受众", 500);
-  if (!segmentId && !snapshotId && !publicAudience) throw new InputError("请选择客群或填写明确的公开受众");
+  const campaignId = optionalUuid(source.campaignId, "campaignId");
+  if (!campaignId && !segmentId && !snapshotId && !publicAudience) throw new InputError("请选择客群、填写公开受众，或指定已有营销活动");
   const duration = source.durationSeconds === undefined ? undefined : integer(source.durationSeconds, "视频时长", 15, 60, 15);
   if (duration !== undefined && ![15, 30, 60].includes(duration)) throw new InputError("视频时长仅支持15、30或60秒");
+  const productId = campaignId ? optionalUuid(source.productId, "产品") : uuid(source.productId, "产品");
+  if (!campaignId && !productId) throw new InputError("产品不能为空");
   return {
     assetType: choice(source.assetType, ASSET_TYPES, "内容形式", true)!,
     prompt: text(source.prompt, "创作要求", 2, 4_000),
     segmentId,
     segmentSnapshotId: snapshotId,
     publicAudience,
-    productId: uuid(source.productId, "产品"),
+    productId: productId ?? "",
     recommendationId: optionalUuid(source.recommendationId, "recommendationId"),
     parentAssetId: optionalUuid(source.parentAssetId, "parentAssetId"),
-    campaignId: optionalUuid(source.campaignId, "campaignId"),
-    objective: text(source.objective, "活动目标", 1, 500),
-    channels: stringList(source.channels, "渠道", 8, 80, true),
-    callToAction: text(source.callToAction, "行动号召", 1, 300),
+    campaignId,
+    objective: campaignId ? (optionalText(source.objective, "活动目标", 500) ?? "") : text(source.objective, "活动目标", 1, 500),
+    channels: stringList(source.channels, "渠道", 8, 80, !campaignId),
+    callToAction: campaignId ? (optionalText(source.callToAction, "行动号召", 300) ?? "") : text(source.callToAction, "行动号召", 1, 300),
     title: optionalText(source.title, "活动名称", 300),
     durationSeconds: duration as 15 | 30 | 60 | undefined,
   };
@@ -89,7 +96,72 @@ export function parseRecommendationFilter(value: unknown): "pending" | "adopted"
   return choice(value, ["pending", "adopted", "ignored", "expired"] as const, "推荐状态");
 }
 
-function parseCriteria(value: unknown): SegmentCriteria {
+export function parseCreateCampaign(value: unknown): CreateCampaignInput {
+  const source = object(value);
+  const segmentId = optionalUuid(source.segmentId, "segmentId");
+  const snapshotId = optionalUuid(source.segmentSnapshotId, "segmentSnapshotId");
+  const publicAudience = optionalText(source.publicAudience, "公开受众", 500);
+  if (!segmentId && !snapshotId && !publicAudience) throw new InputError("请选择客群或填写明确的公开受众");
+  return {
+    name: text(source.name, "活动名称", 1, 300),
+    objective: text(source.objective, "活动目标", 1, 500),
+    channels: stringList(source.channels, "渠道", 8, 80, true),
+    callToAction: text(source.callToAction, "行动号召", 1, 300),
+    productId: uuid(source.productId, "产品"),
+    segmentId,
+    segmentSnapshotId: snapshotId,
+    publicAudience,
+    startsAt: optionalDate(source.startsAt, "开始时间"),
+    endsAt: optionalDate(source.endsAt, "结束时间"),
+    opportunityId: optionalUuid(source.opportunityId, "客群机会"),
+  };
+}
+
+export function parseCampaignList(query: Record<string, string>): CampaignListFilters {
+  return {
+    status: choice(query.status, ["draft", "active", "completed", "archived"] as const, "status"),
+    page: integer(query.page, "page", 1, 100_000, 1),
+    limit: integer(query.limit, "limit", 1, 50, 20),
+  };
+}
+
+export function parseCampaignUpdate(value: unknown): CampaignUpdateInput {
+  const source = object(value);
+  const selected = source.selectedAssets;
+  let selectedAssets: CampaignUpdateInput["selectedAssets"];
+  if (selected !== undefined) {
+    const raw = object(selected);
+    selectedAssets = {
+      copy: raw.copy === null ? null : optionalUuid(raw.copy, "文案版本"),
+      poster: raw.poster === null ? null : optionalUuid(raw.poster, "海报版本"),
+      video: raw.video === null ? null : optionalUuid(raw.video, "视频版本"),
+    };
+  }
+  const status = choice(source.status, ["draft", "active", "completed", "archived"] as const, "status");
+  const channels = source.channels === undefined ? undefined : stringList(source.channels, "渠道", 8, 80, true);
+  return {
+    name: optionalText(source.name, "活动名称", 300),
+    objective: optionalText(source.objective, "活动目标", 500),
+    channels,
+    callToAction: optionalText(source.callToAction, "行动号召", 300),
+    status,
+    selectedAssets,
+  };
+}
+
+export function parseCampaignResult(value: unknown): CampaignResultInput {
+  const source = object(value);
+  return {
+    campaignId: uuid(source.campaignId, "活动"),
+    impressions: optionalCount(source.impressions, "曝光数"),
+    interactions: optionalCount(source.interactions, "互动数"),
+    conversions: optionalCount(source.conversions, "转化数"),
+    leads: optionalCount(source.leads, "有效线索"),
+    note: optionalText(source.note, "结果说明", 2_000),
+  };
+}
+
+export function parseSegmentCriteria(value: unknown): SegmentCriteria {
   const source = object(value ?? {});
   return {
     relationshipStages: enumList(source.relationshipStages, SEGMENT_RELATIONSHIP_STAGES, "关系阶段"),

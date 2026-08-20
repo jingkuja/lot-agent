@@ -8,7 +8,7 @@ describe("customer acquisition migration", () => {
     await customerAcquisition.up({ query } as any);
     const ddl = query.mock.calls.map((call) => String(call[0])).join("\n");
     expect(customerAcquisition.version).toBe(13);
-    expect(migrations.at(-1)).toBe(customerAcquisition);
+    expect(migrations.find((migration) => migration.version === 13)).toBe(customerAcquisition);
     expect(ddl).toContain("de_customer_segments");
     expect(ddl).toContain("de_customer_segment_snapshots");
     expect(ddl).toContain("de_marketing_asset_library");

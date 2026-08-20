@@ -154,6 +154,35 @@
 .de-canvas-result pre { min-height: 420px; margin: 0; padding: 24px; overflow: auto; color: var(--text-secondary); font-family: inherit; font-size: 12px; line-height: 1.8; white-space: pre-wrap; }
 .de-canvas-result > div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 8px; }
 .de-canvas-result footer { display: flex; justify-content: end; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border); }
+.de-creation-head-actions { display: flex; gap: 8px; }
+.de-campaign-pack { display: grid; gap: 14px; padding: 14px 16px 18px; }
+.de-campaign-pack-group { display: grid; gap: 8px; }
+.de-campaign-pack-group header { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 10px; }
+.de-campaign-pack-empty { margin: 0; color: var(--text-muted); font-size: 10px; }
+.de-canvas-result.compact pre { min-height: 120px; max-height: 180px; padding: 12px; font-size: 11px; }
+.de-canvas-result.compact img, .de-canvas-result.compact video { max-height: 180px; }
+.de-version-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.de-version-pills button { padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--text-muted); font: inherit; font-size: 9px; cursor: pointer; }
+.de-version-pills button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); }
+.de-campaign-pack-results { color: var(--text-muted); font-size: 9px; }
+.de-campaign-layout { display: grid; grid-template-columns: minmax(220px, .42fr) minmax(0, 1fr); gap: 14px; }
+.de-campaign-list { display: grid; align-content: start; gap: 6px; }
+.de-campaign-list button { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); color: var(--text); text-align: left; cursor: pointer; }
+.de-campaign-list button.active { border-color: var(--accent); }
+.de-campaign-list small { color: var(--text-muted); font-size: 9px; }
+.de-campaign-detail { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); }
+.de-campaign-detail > header { display: flex; justify-content: space-between; gap: 12px; }
+.de-campaign-detail header p { margin: 0; color: var(--accent); font-size: 9px; }
+.de-campaign-name-row { display: flex; gap: 8px; }
+.de-campaign-name-row input { min-width: 220px; min-height: 34px; padding: 6px 8px; border: 1px solid var(--border-input); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); }
+.de-campaign-brief-line, .de-campaign-result-bar { color: var(--text-muted); font-size: 11px; }
+.de-campaign-copy-preview { max-height: 180px; overflow: auto; padding: 10px; border-radius: var(--radius-sm); background: var(--overlay-sink); color: var(--text-secondary); font: inherit; font-size: 11px; white-space: pre-wrap; }
+.de-campaign-opportunities { margin-bottom: 16px; }
+.de-campaign-opportunities h3 { margin: 0 0 8px; font-size: 13px; }
+.de-campaign-opportunity-list { display: grid; gap: 8px; }
+.de-campaign-opportunity-list article { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
+.de-campaign-opportunity-list p { margin: 4px 0 0; color: var(--text-muted); font-size: 10px; }
+.de-campaign-opportunity-actions { display: flex; gap: 8px; align-items: center; }
 .de-overall-cohort { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 15px; padding: 18px 20px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--accent) 5%, var(--bg-card)); }
 .de-overall-cohort > div:first-child { max-width: 65%; }
 .de-overall-cohort p { color: var(--accent); font-size: 9px; font-weight: 750; }
@@ -216,7 +245,8 @@
 
 @media (max-width: 1100px) {
   .de-asset-grid, .de-recommendation-grid, .de-segment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .de-creation-layout { grid-template-columns: 1fr; }
+  .de-creation-layout, .de-campaign-layout { grid-template-columns: 1fr; }
+  .de-campaign-opportunity-list article { flex-direction: column; }
   .de-creation-canvas { position: static; min-height: 400px; }
 }
 
