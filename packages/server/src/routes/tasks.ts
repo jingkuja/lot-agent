@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { estimateCost } from "@lot-agent/core";
+import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { billedVideoSeconds, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
 
@@ -20,6 +20,9 @@ export function sanitizeTaskInput(
   if (typeof raw?.prompt === "string") input.prompt = raw.prompt;
   if (typeof raw?.modelId === "string") input.modelId = raw.modelId;
   if (Array.isArray(raw?.media)) {
+    if (mediaType === "image" && raw.media.length > MAX_IMAGE_EDIT_REFERENCES) {
+      throw new Error(`image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images`);
+    }
     if (mediaType === "video" && raw.media.filter((m) => (m as { type?: unknown })?.type === "reference_image").length > 5) {
       throw new Error("input_reference supports at most 5 references");
     }

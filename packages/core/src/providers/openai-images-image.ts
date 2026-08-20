@@ -53,6 +53,9 @@ export function normalizeImageSize(size?: string): string {
   return `${Math.max(1, Math.round(width * scale))}x${Math.max(1, Math.round(height * scale))}`;
 }
 
+/** Tokenhub `/images/edits` accepts up to five Base64 data URLs in `image`. */
+export const MAX_IMAGE_EDIT_REFERENCES = 5;
+
 /**
  * Synchronous provider for Tokenhub's OpenAI-compatible Images API. Text-only
  * requests use `/images/generations`; requests with reference images use
@@ -65,16 +68,18 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
 
   async create(req: ImageGenerationRequest): Promise<CreateResult> {
     const model = req.model ?? this.opts.model;
-    const hasReferences = Boolean(req.media?.length);
-    if (hasReferences && req.media!.length !== 1) {
-      throw new Error("image editing supports exactly one reference image");
+    const references = req.media ?? [];
+    if (references.length > MAX_IMAGE_EDIT_REFERENCES) {
+      throw new Error(`image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images`);
     }
+    const hasReferences = references.length > 0;
+    const referenceUrls = references.map((item) => item.url);
     const body: Record<string, unknown> = hasReferences
       ? {
           model,
-          // Tokenhub's edit endpoint accepts one Base64 data URL in the
-          // singular `image` field (not OpenAI's usual `images` objects).
-          image: req.media![0].url,
+          // Tokenhub's edit endpoint takes Base64 data URLs in `image` as
+          // an array, including the single-reference case.
+          image: referenceUrls,
           prompt: req.prompt,
         }
       : { model, prompt: req.prompt };

@@ -33,6 +33,7 @@ interface InputBoxProps {
 }
 
 const MAX_FILES = 5;
+const MAX_IMAGE_REFERENCE_IMAGES = 5;
 const MAX_VIDEO_REFERENCE_IMAGES = 5;
 const MAX_VIDEO_REFERENCE_VIDEOS = 2;
 const MAX_VIDEO_REFERENCE_AUDIOS = 2;
@@ -69,6 +70,7 @@ export function InputBox({
   const [value, setValue] = useState("");
   const noModels = !!onModelChange && models.length === 0;
   const [noModelNotice, setNoModelNotice] = useState(false);
+  const [uploadLimitNotice, setUploadLimitNotice] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeBase[]>([]);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
@@ -84,7 +86,11 @@ export function InputBox({
   const effectiveVideoModel = selectedModel ?? models[0]?.id ?? "";
   const seedanceVideo = videoMode && isSeedanceModel(effectiveVideoModel);
   const lockAdaptive = seedanceVideo && referenceVideoFiles.length > 0;
-  const maxFiles = videoMode ? MAX_VIDEO_REFERENCE_IMAGES : MAX_FILES;
+  const maxFiles = videoMode
+    ? MAX_VIDEO_REFERENCE_IMAGES
+    : mode === "image"
+      ? MAX_IMAGE_REFERENCE_IMAGES
+      : MAX_FILES;
   const pptMode = mode === "ppt";
   const contractMode = mode === "contract";
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -120,6 +126,8 @@ export function InputBox({
     if (!picked) return;
     const incoming = Array.from(picked);
     setFiles((prev) => {
+      const room = Math.max(0, maxFiles - prev.length);
+      if (mode === "image" && incoming.length > room) setUploadLimitNotice(true);
       const next = [...prev];
       for (const f of incoming) {
         if (next.length >= maxFiles) break;
@@ -134,7 +142,7 @@ export function InputBox({
         urlsRef.current.set(f, URL.createObjectURL(f));
       }
     }
-  }, [maxFiles]);
+  }, [maxFiles, mode]);
 
   const removeFile = useCallback((idx: number) => {
     setFiles((prev) => {
@@ -146,6 +154,7 @@ export function InputBox({
       }
       return prev.filter((_, i) => i !== idx);
     });
+    setUploadLimitNotice(false);
   }, []);
 
   const loadKnowledgeBases = useCallback(async () => {
@@ -214,6 +223,7 @@ export function InputBox({
         : files.map((f) => ({ file: f }));
     onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined, knowledgeBases);
     setValue("");
+    setUploadLimitNotice(false);
     setFiles([]);
     setReferenceVideoFiles([]);
     setReferenceAudioFiles([]);
@@ -257,6 +267,12 @@ export function InputBox({
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
           暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
+        </div>
+      )}
+      {mode === "image" && (uploadLimitNotice || files.length >= MAX_IMAGE_REFERENCE_IMAGES) && (
+        <div className="input-modal-hint" role="alert">
+          <span aria-hidden>⚠️</span>
+          参考图最多 {MAX_IMAGE_REFERENCE_IMAGES} 张，不能再上传
         </div>
       )}
       {lockAdaptive && (
@@ -342,7 +358,11 @@ export function InputBox({
           )}
           {files.map((f, i) => (
             <div className="attachment-chip" key={i}>
-              {videoMode && <span className="attachment-slot-badge badge-image-reference">参考图</span>}
+              {mediaMode && (
+                <span className="attachment-slot-badge badge-image-reference">
+                  {mode === "image" && files.length > 1 ? `参考图${i + 1}` : "参考图"}
+                </span>
+              )}
               {pptMode && <span className="attachment-slot-badge badge-content">内容</span>}
               {f.type.startsWith("image/") && urlsRef.current.get(f) ? (
                 <img className="attachment-thumb" src={urlsRef.current.get(f)} alt={f.name} />
@@ -489,8 +509,15 @@ export function InputBox({
             <button
               type="button"
               className="btn-reference"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || files.length >= maxFiles}
+              onClick={() => {
+                if (files.length >= MAX_IMAGE_REFERENCE_IMAGES) {
+                  setUploadLimitNotice(true);
+                  return;
+                }
+                fileInputRef.current?.click();
+              }}
+              disabled={disabled}
+              title="最多5张"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="14" height="14" rx="2.5" />

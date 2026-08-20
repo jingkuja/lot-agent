@@ -62,6 +62,26 @@ describe("POST /tasks input whitelisting", () => {
     expect(input).toEqual({ prompt: "菊花" });
   });
 
+  it("rejects image edits with more than five reference images", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "image.generate",
+        input: {
+          prompt: "改图",
+          media: Array.from({ length: 6 }, (_, i) => ({
+            type: "reference_image",
+            url: `/static/uploads/${i}.png`,
+          })),
+        },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
   it("whitelists video references and frames", async () => {
     const service = fakeService();
     const res = await app(service).request("/tasks", {

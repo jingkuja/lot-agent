@@ -145,6 +145,38 @@ describe("runGenerationJob", () => {
     expect(deps.urlToBytes).toHaveBeenCalledWith("/static/uploads/reference.png", { signal: undefined });
   });
 
+  it("encodes two image-edit references as Base64 data URLs before calling the provider", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const { deps } = fakeDeps(provider, {
+      urlToBytes: vi.fn(async (url: string) => ({
+        body: Buffer.from(url.includes("a.png") ? "first" : "second"),
+        mime: url.includes("a.png") ? "image/jpeg" : "image/png",
+      })),
+    });
+    const imageJob = {
+      ...job,
+      input: {
+        ...job.input,
+        media: [
+          { type: "reference_image", url: "/static/uploads/a.png" },
+          { type: "reference_image", url: "/static/uploads/b.png" },
+        ],
+      },
+    };
+
+    await runGenerationJob(deps, imageJob, "image");
+
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({
+      media: [
+        { type: "reference_image", url: "data:image/jpeg;base64,Zmlyc3Q=" },
+        { type: "reference_image", url: "data:image/png;base64,c2Vjb25k" },
+      ],
+    }));
+  });
+
   it("persists the vendor task id after create, then polls with it", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "vendor_abc", status: "queued", progress: 0 })),

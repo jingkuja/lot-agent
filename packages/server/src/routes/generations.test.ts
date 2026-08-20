@@ -129,7 +129,53 @@ describe("POST /conversations/:id/generations", () => {
     );
   });
 
-  it("rejects image edits with more than one reference image", async () => {
+  it("threads two image-edit references into the enqueued input", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "以第一张图为主体，参考第二张图的水彩风格",
+        mediaType: "image",
+        media: [
+          { type: "reference_image", url: "/static/uploads/a.png" },
+          { type: "reference_image", url: "/static/uploads/b.png" },
+        ],
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({
+        media: [
+          { type: "reference_image", url: "/static/uploads/a.png" },
+          { type: "reference_image", url: "/static/uploads/b.png" },
+        ],
+      }),
+      "u1"
+    );
+  });
+
+  it("accepts five image-edit references", async () => {
+    const service = fakeService();
+    const media = Array.from({ length: 5 }, (_, i) => ({
+      type: "reference_image",
+      url: `/static/uploads/${i}.png`,
+    }));
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", media }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({ media }),
+      "u1"
+    );
+  });
+
+  it("rejects image edits with more than five reference images", async () => {
     const service = fakeService();
     const res = await app(service).request("/conversations/c1/generations", {
       method: "POST",
@@ -137,10 +183,10 @@ describe("POST /conversations/:id/generations", () => {
       body: JSON.stringify({
         prompt: "菊花",
         mediaType: "image",
-        media: [
-          { type: "reference_image", url: "/static/uploads/a.png" },
-          { type: "reference_image", url: "/static/uploads/b.png" },
-        ],
+        media: Array.from({ length: 6 }, (_, i) => ({
+          type: "reference_image",
+          url: `/static/uploads/${i}.png`,
+        })),
       }),
     });
     expect(res.status).toBe(400);

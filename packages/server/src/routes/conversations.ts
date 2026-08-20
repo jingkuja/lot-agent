@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { estimateCost } from "@lot-agent/core";
+import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
@@ -444,8 +444,8 @@ export function createGenerationRoutes(service: AgentService) {
       }
     }
     const media = Array.isArray(body.media) ? body.media : undefined;
-    if (mediaType === "image" && media && media.length > 1) {
-      return c.json({ error: "image editing supports exactly one reference image" }, 400);
+    if (mediaType === "image" && media && media.length > MAX_IMAGE_EDIT_REFERENCES) {
+      return c.json({ error: `image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images` }, 400);
     }
     if (mediaType === "video" && media) {
       const legacyImages = media.filter((m) => m?.type === "reference_image");
