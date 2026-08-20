@@ -824,8 +824,12 @@ html, body, #root {
   cursor: pointer;
   transition: background 0.12s, color 0.12s, box-shadow 0.12s;
 }
-.seg:hover {
+.seg:hover:not(:disabled) {
   color: var(--text);
+}
+.seg:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .seg.active {
   background: var(--bg-card);

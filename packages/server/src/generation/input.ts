@@ -59,6 +59,13 @@ export function pickVideoReferenceInputs(
   return out;
 }
 
+/** Video quota/metering needs a positive second count. Seedance reference-video
+ * jobs send durationSec = -1 (auto-adapt); bill those at the default 5s. */
+export function billedVideoSeconds(durationSec: unknown): number {
+  const n = Number(durationSec ?? 5);
+  return Number.isFinite(n) && n > 0 ? n : 5;
+}
+
 export function pickGenerationSettings(
   mediaType: "image" | "video",
   raw: Record<string, unknown> | undefined

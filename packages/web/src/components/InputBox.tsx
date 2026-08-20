@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
 import { ModelPicker } from "./ModelPicker.js";
-import type { CatalogModel } from "../lib/model-filter.js";
+import { isSeedanceModel, type CatalogModel } from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
@@ -81,6 +81,9 @@ export function InputBox({
   // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
   const mediaMode = mode === "image" || mode === "video";
   const videoMode = mode === "video";
+  const effectiveVideoModel = selectedModel ?? models[0]?.id ?? "";
+  const seedanceVideo = videoMode && isSeedanceModel(effectiveVideoModel);
+  const lockAdaptive = seedanceVideo && referenceVideoFiles.length > 0;
   const maxFiles = videoMode ? MAX_VIDEO_REFERENCE_IMAGES : MAX_FILES;
   const pptMode = mode === "ppt";
   const contractMode = mode === "contract";
@@ -256,6 +259,12 @@ export function InputBox({
           暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
         </div>
       )}
+      {lockAdaptive && (
+        <div className="input-modal-hint" role="alert">
+          <span aria-hidden>⚠️</span>
+          提供参考视频后视频时长和比例不能选择，自动适配参考视频
+        </div>
+      )}
       {(knowledgeBases.length > 0 || files.length > 0 || referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
         <div className="input-attachments">
           {knowledgeBases.map((item) => (
@@ -388,7 +397,11 @@ export function InputBox({
           style={{ display: "none" }}
           onChange={(e) => {
             const picked = Array.from(e.target.files ?? []);
-            setReferenceVideoFiles((prev) => [...prev, ...picked].slice(0, MAX_VIDEO_REFERENCE_VIDEOS));
+            const next = [...referenceVideoFiles, ...picked].slice(0, MAX_VIDEO_REFERENCE_VIDEOS);
+            if (seedanceVideo && referenceVideoFiles.length === 0 && next.length > 0) {
+              window.alert("提供参考视频后视频时长和比例不能选择，自动适配参考视频");
+            }
+            setReferenceVideoFiles(next);
             e.target.value = "";
           }}
         />
@@ -638,7 +651,7 @@ export function InputBox({
             <ImageSettingsPicker disabled={disabled} onChange={handleSettingsChange} />
           )}
           {mode === "video" && (
-            <VideoSettingsPicker disabled={disabled} onChange={handleSettingsChange} />
+            <VideoSettingsPicker disabled={disabled} lockAdaptive={lockAdaptive} onChange={handleSettingsChange} />
           )}
           {disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">

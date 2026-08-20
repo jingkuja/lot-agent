@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterModels } from "./model-filter.js";
+import { filterModels, isSeedanceModel } from "./model-filter.js";
 
 const models = [
   { id: "gpt-5.4", type: "llm" as const, provider: "openai" },
@@ -15,5 +15,15 @@ describe("filterModels", () => {
     expect(filterModels(models, "deep").map((m) => m.id)).toEqual(["deepseek-v4-pro"]);
     expect(filterModels(models, "glm").map((m) => m.id)).toEqual(["GLM-5.2"]);
     expect(filterModels(models, "5").map((m) => m.id)).toEqual(["gpt-5.4", "GLM-5.2"]);
+  });
+});
+
+describe("isSeedanceModel", () => {
+  it("matches seedance ids case-insensitively", () => {
+    expect(isSeedanceModel("doubao-seedance-2.0")).toBe(true);
+    expect(isSeedanceModel("Seedance-2.0")).toBe(true);
+    expect(isSeedanceModel("kling-standard")).toBe(false);
+    expect(isSeedanceModel(null)).toBe(false);
+    expect(isSeedanceModel(undefined)).toBe(false);
   });
 });

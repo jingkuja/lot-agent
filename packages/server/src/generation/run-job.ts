@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
+import { billedVideoSeconds } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
@@ -156,7 +157,7 @@ async function downloadAndFinalize(
     const assetId = randomUUID();
     const key = `${assetId}.${deps.extFor(mime)}`;
     const { url } = await deps.storage.put({ key, body, contentType: mime });
-    const durationSec = mediaType === "video" ? Number(job.input.durationSec ?? 5) : undefined;
+    const durationSec = mediaType === "video" ? billedVideoSeconds(job.input.durationSec) : undefined;
     await deps.db.createAsset({ id: assetId, taskId: job.id, userId: job.userId, type: mediaType, storageKey: key, url, mime, sizeBytes: body.byteLength, durationSec });
     await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount: mediaType === "video" ? (durationSec ?? 1) : 1 } });
     const assets: GenAssets = [durationSec != null ? { url, mime, durationSec } : { url, mime }];

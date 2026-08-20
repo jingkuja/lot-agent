@@ -28,6 +28,30 @@ describe("OpportunityService settings", () => {
     expect(sql).toContain("$4::time");
     expect(query).toHaveBeenCalledWith(expect.any(String), ["u1", true, "Asia/Shanghai", "09:30", 0]);
   });
+
+  it("casts the next-run timestamp so Postgres does not treat Date+$interval as interval", async () => {
+    const now = new Date("2026-08-20T01:00:00.000Z");
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_automation_settings")) {
+        return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
+      }
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => "task-1");
+    const service = new OpportunityService(
+      { pool: { query } } as any,
+      { enqueue } as any,
+    );
+
+    await service.enqueueDueDiscoveries(now);
+
+    const advanceSql = query.mock.calls
+      .map((call) => String(call[0]))
+      .find((sql) => sql.includes("next_daily_run")) ?? "";
+    expect(advanceSql).toContain("$2::timestamptz + interval '1 minute'");
+    expect(advanceSql).toContain("timezone::text");
+    expect(advanceSql).not.toContain("daily_run_time,$2 + interval");
+  });
 });
 
 describe("OpportunityService personal work queue", () => {

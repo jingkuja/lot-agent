@@ -193,9 +193,12 @@ const lastVideo = {
 
 export function VideoSettingsPicker({
   disabled,
+  lockAdaptive,
   onChange,
 }: {
   disabled?: boolean;
+  /** Seedance + 参考视频：时长/比例固定为自动适配，页面不可改。 */
+  lockAdaptive?: boolean;
   onChange?: (s: VideoSettings) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -214,11 +217,11 @@ export function VideoSettingsPicker({
   useEffect(() => {
     onChange?.({
       size: `${dim.width}x${dim.height}`,
-      durationSec: Number(duration.replace(/[^0-9]/g, "")) || 5,
-      ratio: ratio.label,
+      durationSec: lockAdaptive ? -1 : Number(duration.replace(/[^0-9]/g, "")) || 5,
+      ratio: lockAdaptive ? "adaptive" : ratio.label,
       quality: quality.short,
     });
-  }, [dim, duration, ratio, quality, onChange]);
+  }, [dim, duration, ratio, quality, lockAdaptive, onChange]);
 
   const pickQuality = (q: Quality) => {
     lastVideo.quality = q.short;
@@ -226,11 +229,13 @@ export function VideoSettingsPicker({
     setDim(deriveResolution(ratio.w, ratio.h, q.edge));
   };
   const pickRatio = (r: Ratio) => {
+    if (lockAdaptive) return;
     lastVideo.ratio = r.label;
     setRatio(r);
     setDim(deriveResolution(r.w, r.h, quality.edge));
   };
   const pickDuration = (d: string) => {
+    if (lockAdaptive) return;
     lastVideo.duration = d;
     setDuration(d);
   };
@@ -244,14 +249,14 @@ export function VideoSettingsPicker({
         disabled={disabled}
         aria-haspopup="true"
         aria-expanded={open}
-        title="视频设置"
+        title={lockAdaptive ? "提供参考视频后视频时长和比例不能选择，自动适配参考视频" : "视频设置"}
       >
         <ResBarIcon />
         <span className="media-trigger-label">
-          {quality.short} · {ratio.label}
+          {quality.short} · {lockAdaptive ? "自适应" : ratio.label}
         </span>
         <TimerIcon />
-        <span className="media-trigger-label">{duration}</span>
+        <span className="media-trigger-label">{lockAdaptive ? "自动" : duration}</span>
         <ChevronIcon />
       </button>
       {open && (
@@ -271,31 +276,44 @@ export function VideoSettingsPicker({
           </div>
           <div className="media-section-title">视频比例</div>
           <div className="seg-track">
-            {VIDEO_RATIOS.map((r) => (
-              <button
-                key={r.label}
-                type="button"
-                className={`seg ${r.label === ratio.label ? "active" : ""}`}
-                onClick={() => pickRatio(r)}
-              >
-                <RatioGlyph w={r.w} h={r.h} size={16} />
-                <span>{r.label}</span>
+            {lockAdaptive ? (
+              <button type="button" className="seg active" disabled title="提供参考视频后自动适配参考视频">
+                自适应
               </button>
-            ))}
+            ) : (
+              VIDEO_RATIOS.map((r) => (
+                <button
+                  key={r.label}
+                  type="button"
+                  className={`seg ${r.label === ratio.label ? "active" : ""}`}
+                  onClick={() => pickRatio(r)}
+                >
+                  <RatioGlyph w={r.w} h={r.h} size={16} />
+                  <span>{r.label}</span>
+                </button>
+              ))
+            )}
           </div>
           <div className="media-section-title">视频时长</div>
           <div className="seg-track">
-            {VIDEO_DURATIONS.map((d) => (
-              <button
-                key={d}
-                type="button"
-                className={`seg ${d === duration ? "active" : ""}`}
-                onClick={() => pickDuration(d)}
-              >
+            {lockAdaptive ? (
+              <button type="button" className="seg active" disabled title="提供参考视频后自动适配参考视频">
                 <TimerIcon />
-                <span>{d}</span>
+                <span>自动</span>
               </button>
-            ))}
+            ) : (
+              VIDEO_DURATIONS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`seg ${d === duration ? "active" : ""}`}
+                  onClick={() => pickDuration(d)}
+                >
+                  <TimerIcon />
+                  <span>{d}</span>
+                </button>
+              ))
+            )}
           </div>
         </div>
       )}

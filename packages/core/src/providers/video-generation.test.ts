@@ -5,6 +5,7 @@ import {
   HttpVideoGenerationProvider,
   MockVideoGenerationProvider,
   pickVideoAdapter,
+  usesSeedanceReferenceVideoAdaptive,
 } from "./video-generation.js";
 
 describe("HappyhorseVideoAdapter", () => {
@@ -57,6 +58,42 @@ describe("OpenaiVideoAdapter", () => {
     expect(body).toMatchObject({ model: "doubao-seedance-2.0", prompt: "A cinematic drone shot", seconds: "4", size: "720x1280" });
     expect("duration" in body).toBe(false);
     expect("ratio" in body).toBe(false);
+  });
+  it("seedance + reference video forces duration -1 and ratio adaptive", () => {
+    const body = a.buildCreateBody(
+      {
+        prompt: "follow this clip",
+        size: "720x1280",
+        durationSec: 5,
+        ratio: "9:16",
+        reference_video: "https://x/ref.mp4",
+      },
+      "doubao-seedance-2.0"
+    ) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      model: "doubao-seedance-2.0",
+      prompt: "follow this clip",
+      duration: -1,
+      ratio: "adaptive",
+      size: "720x1280",
+      reference_video: "https://x/ref.mp4",
+    });
+    expect("seconds" in body).toBe(false);
+  });
+  it("does not force adaptive duration/ratio for non-seedance models with a reference video", () => {
+    const body = a.buildCreateBody(
+      {
+        prompt: "follow this clip",
+        size: "720x1280",
+        durationSec: 5,
+        ratio: "9:16",
+        reference_video: "https://x/ref.mp4",
+      },
+      "kling-standard"
+    ) as Record<string, unknown>;
+    expect(body).toMatchObject({ seconds: "5", size: "720x1280" });
+    expect(body.duration).toBeUndefined();
+    expect(body.ratio).toBeUndefined();
   });
   it("sends multiple reference inputs plus first/last frames", () => {
     const body = a.buildCreateBody({
@@ -191,6 +228,16 @@ describe("MockVideoGenerationProvider", () => {
     t = 600;
     const r = await p.poll(c.taskId);
     expect(r.status).toBe("failed");
+  });
+});
+
+describe("usesSeedanceReferenceVideoAdaptive", () => {
+  it("is true only for seedance models with a reference video", () => {
+    expect(usesSeedanceReferenceVideoAdaptive("doubao-seedance-2.0", "https://x/r.mp4")).toBe(true);
+    expect(usesSeedanceReferenceVideoAdaptive("Seedance-2.0", ["https://x/r.mp4"])).toBe(true);
+    expect(usesSeedanceReferenceVideoAdaptive("doubao-seedance-2.0", [])).toBe(false);
+    expect(usesSeedanceReferenceVideoAdaptive("doubao-seedance-2.0", undefined)).toBe(false);
+    expect(usesSeedanceReferenceVideoAdaptive("kling-standard", "https://x/r.mp4")).toBe(false);
   });
 });
 

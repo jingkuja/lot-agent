@@ -5,7 +5,7 @@ import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
-import { pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
+import { billedVideoSeconds, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
 
 type Variables = { userId: string };
 
@@ -451,7 +451,7 @@ export function createGenerationRoutes(service: AgentService) {
     // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
     const modelId = mediaType === "image" ? "gpt-image-2" : "kling-standard";
     const cfg = service.modelRegistry.getConfig(modelId);
-    const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : Number(settings.durationSec ?? 5);
+    const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : billedVideoSeconds(settings.durationSec);
     const estimatedCost = cfg ? estimateCost(cfg, { outputCount }) : 0;
     const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
     if (!quota.ok) return c.json({ error: quota.reason, estimatedCost }, 402);

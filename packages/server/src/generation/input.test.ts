@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickGenerationSettings, pickVideoReferenceInputs } from "./input.js";
+import { billedVideoSeconds, pickGenerationSettings, pickVideoReferenceInputs } from "./input.js";
 
 describe("pickGenerationSettings", () => {
   it("keeps only the image whitelist (size, n) with matching types", () => {
@@ -22,6 +22,22 @@ describe("pickGenerationSettings", () => {
         n: 3, // image-only — dropped for video
       })
     ).toEqual({ size: "720x1280", durationSec: 5, ratio: "16:9" });
+  });
+
+  it("keeps seedance reference-video adaptive settings (durationSec -1, ratio adaptive)", () => {
+    expect(
+      pickGenerationSettings("video", {
+        durationSec: -1,
+        ratio: "adaptive",
+        size: "720x1280",
+      })
+    ).toEqual({ size: "720x1280", durationSec: -1, ratio: "adaptive" });
+  });
+
+  it("bills adaptive duration as the default 5 seconds", () => {
+    expect(billedVideoSeconds(-1)).toBe(5);
+    expect(billedVideoSeconds(10)).toBe(10);
+    expect(billedVideoSeconds(undefined)).toBe(5);
   });
 
   it("drops server identity fields no matter what the client sends", () => {

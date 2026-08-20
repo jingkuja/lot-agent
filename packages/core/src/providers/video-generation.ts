@@ -35,6 +35,27 @@ export interface VideoGenerationProvider {
 
 export type VideoVendorAdapter = VendorAdapter<VideoGenerationRequest>;
 
+/** Seedance requires these when a reference video is present. */
+export const SEEDANCE_REFERENCE_VIDEO_DURATION = -1;
+export const SEEDANCE_REFERENCE_VIDEO_RATIO = "adaptive";
+
+export function isSeedanceModel(model: string): boolean {
+  return model.toLowerCase().includes("seedance");
+}
+
+function hasReferenceVideo(value: ReferenceInput | undefined): boolean {
+  if (value == null) return false;
+  return Array.isArray(value) ? value.length > 0 : value.length > 0;
+}
+
+/** Seedance + 参考视频：时长/比例必须跟参考视频走，不能由调用方指定。 */
+export function usesSeedanceReferenceVideoAdaptive(
+  model: string,
+  referenceVideo: ReferenceInput | undefined
+): boolean {
+  return isSeedanceModel(model) && hasReferenceVideo(referenceVideo);
+}
+
 /** tokenhub "happyhorse" async create→poll format, video endpoints. */
 export class HappyhorseVideoAdapter implements VideoVendorAdapter {
   // Create is plural ("/video/generations"); poll is also plural
@@ -95,9 +116,11 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
 /**
  * tokenhub OpenAI-compatible video format: `POST /videos` create, `GET
  * /videos/{id}` poll. The create body uses `seconds` (a string) + `size` where
- * happyhorse used `duration` + `ratio`; the async task envelope (task_id/status/
- * progress, `metadata.url` on completion) and error handling are identical, so
- * only the create path + body diverge — everything else is reused.
+ * happyhorse used `duration` + `ratio`, except Seedance with a reference video
+ * which must send `duration: -1` and `ratio: "adaptive"`. The async task
+ * envelope (task_id/status/progress, `metadata.url` on completion) and error
+ * handling are identical, so only the create path + body diverge — everything
+ * else is reused.
  */
 export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
   override createPath(): string {
@@ -105,7 +128,14 @@ export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
   }
   override buildCreateBody(req: VideoGenerationRequest, model: string): unknown {
     const body: Record<string, unknown> = { model, prompt: req.prompt };
-    if (req.durationSec != null) body.seconds = String(req.durationSec);
+    if (usesSeedanceReferenceVideoAdaptive(model, req.reference_video)) {
+      // Seedance rejects a caller-chosen duration/ratio when a reference
+      // video is present — the output must match the reference clip.
+      body.duration = SEEDANCE_REFERENCE_VIDEO_DURATION;
+      body.ratio = SEEDANCE_REFERENCE_VIDEO_RATIO;
+    } else if (req.durationSec != null) {
+      body.seconds = String(req.durationSec);
+    }
     if (req.size) body.size = req.size;
     // The OpenAI-compatible endpoint uses dedicated reference fields instead
     // of Happyhorse's `media` array. Keep the value shape (string|string[]) so

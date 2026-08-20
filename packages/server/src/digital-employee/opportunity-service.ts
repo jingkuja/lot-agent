@@ -436,8 +436,9 @@ export class OpportunityService {
         count += 1;
       }
       await this.pool.query(
-        `UPDATE de_follow_up_automation_settings SET last_run_at = $2,
-          next_run_at = next_daily_run(timezone,daily_run_time,$2 + interval '1 minute'), version = version + 1
+        `UPDATE de_follow_up_automation_settings SET last_run_at = $2::timestamptz,
+          next_run_at = next_daily_run(timezone::text, daily_run_time, $2::timestamptz + interval '1 minute'),
+          version = version + 1
          WHERE user_id = $1`, [row.user_id, now]
       );
     }
