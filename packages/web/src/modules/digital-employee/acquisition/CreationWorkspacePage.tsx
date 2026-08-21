@@ -25,6 +25,7 @@ export interface CreationSeed {
 }
 
 const CHANNELS = ["朋友圈", "公众号", "私域群", "视频号", "抖音/快手", "小红书", "活动页"];
+const ACQUISITION_VIDEO_DURATIONS = ["10秒", "15秒"] as const;
 
 export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOpenCampaigns }: {
   seed?: CreationSeed; onOpenAssets: () => void; onOpenSegments: () => void; onOpenCampaigns?: () => void;
@@ -217,6 +218,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
                 allowKnowledgeBase={assetType === "copy"}
                 knowledgeBases={assetType === "copy" ? knowledgeBases : []}
                 onKnowledgeBasesChange={setKnowledgeBases}
+                videoDurations={assetType === "video" ? ACQUISITION_VIDEO_DURATIONS : undefined}
                 placeholder={
                   assetType === "copy"
                     ? "例如：为下周线上分享会生成一套朋友圈文案，强调部署简单，语气专业克制，不使用未确认性能数字。"

@@ -36,7 +36,7 @@ export function CustomerAcquisitionPage({ onOpenChat }: { onOpenChat?: () => voi
     prompt: [item.theme, item.creativeDirection, ...item.corePoints].filter(Boolean).join("；"),
     channels: item.suggestedChannels,
     assetType: item.type === "copy" ? "copy" : item.type === "poster" ? "poster" : "video",
-    durationSeconds: item.durationSeconds === 30 || item.durationSeconds === 60 ? item.durationSeconds : 15,
+    durationSeconds: item.durationSeconds === 10 ? 10 : 15,
   });
 
   const reuseAsset = (item: MarketingAsset) => startCreation({

@@ -48,6 +48,8 @@ interface InputBoxProps {
   embedded?: boolean;
   value?: string;
   onChange?: (value: string) => void;
+  /** 视频时长选项；不传则沿用项目默认 5秒 / 10秒。 */
+  videoDurations?: readonly string[];
 }
 
 const MAX_FILES = 5;
@@ -87,6 +89,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   embedded = false,
   value,
   onChange,
+  videoDurations,
 }: InputBoxProps, ref) {
   const [internalValue, setInternalValue] = useState("");
   const promptValue = value !== undefined ? value : internalValue;
@@ -792,7 +795,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             />
           )}
           {mode === "video" && (
-            <VideoSettingsPicker disabled={disabled} lockAdaptive={lockAdaptive} onChange={handleSettingsChange} />
+            <VideoSettingsPicker disabled={disabled} lockAdaptive={lockAdaptive} durations={videoDurations} onChange={handleSettingsChange} />
           )}
           {!embedded && (disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">

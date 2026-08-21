@@ -311,14 +311,19 @@ export function VideoSettingsPicker({
   disabled,
   lockAdaptive,
   onChange,
+  durations = VIDEO_DURATIONS,
 }: {
   disabled?: boolean;
   /** Seedance + 参考视频：时长/比例固定为自动适配，页面不可改。 */
   lockAdaptive?: boolean;
   onChange?: (s: VideoSettings) => void;
+  /** 时长选项，默认 5秒 / 10秒；获客宝使用 10秒 / 15秒。 */
+  durations?: readonly string[];
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
+  const durationOptions = durations.length ? durations : VIDEO_DURATIONS;
+  const defaultDuration = durationOptions[0];
   const [quality, setQuality] = useState<Quality>(
     () => VIDEO_QUALITIES.find((q) => q.short === lastVideo.quality) ?? VIDEO_QUALITIES[0]
   );
@@ -326,18 +331,24 @@ export function VideoSettingsPicker({
     () => VIDEO_RATIOS.find((r) => r.label === lastVideo.ratio) ?? VIDEO_RATIOS[0] // 16:9
   );
   const [duration, setDuration] = useState(
-    () => (VIDEO_DURATIONS.includes(lastVideo.duration) ? lastVideo.duration : VIDEO_DURATIONS[0])
+    () => (durationOptions.includes(lastVideo.duration) ? lastVideo.duration : defaultDuration)
   );
   const [dim, setDim] = useState<Dim>(() => deriveResolution(ratio.w, ratio.h, quality.edge));
 
   useEffect(() => {
+    if (durationOptions.includes(duration)) return;
+    setDuration(defaultDuration);
+  }, [duration, durationOptions, defaultDuration]);
+
+  useEffect(() => {
+    const fallbackSec = Number(defaultDuration.replace(/[^0-9]/g, "")) || 5;
     onChange?.({
       size: `${dim.width}x${dim.height}`,
-      durationSec: lockAdaptive ? -1 : Number(duration.replace(/[^0-9]/g, "")) || 5,
+      durationSec: lockAdaptive ? -1 : Number(duration.replace(/[^0-9]/g, "")) || fallbackSec,
       ratio: lockAdaptive ? "adaptive" : ratio.label,
       quality: quality.short,
     });
-  }, [dim, duration, ratio, quality, lockAdaptive, onChange]);
+  }, [dim, duration, ratio, quality, lockAdaptive, onChange, defaultDuration]);
 
   const pickQuality = (q: Quality) => {
     lastVideo.quality = q.short;
@@ -418,7 +429,7 @@ export function VideoSettingsPicker({
                 <span>自动</span>
               </button>
             ) : (
-              VIDEO_DURATIONS.map((d) => (
+              durationOptions.map((d) => (
                 <button
                   key={d}
                   type="button"
