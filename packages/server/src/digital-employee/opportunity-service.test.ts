@@ -35,6 +35,9 @@ describe("OpportunityService settings", () => {
       if (sql.includes("FROM de_follow_up_automation_settings")) {
         return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
       }
+      if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) {
+        return { rows: [{ id: "run-1" }] };
+      }
       return { rows: [] };
     });
     const enqueue = vi.fn(async () => "task-1");
@@ -51,6 +54,87 @@ describe("OpportunityService settings", () => {
     expect(advanceSql).toContain("$2::timestamptz + interval '1 minute'");
     expect(advanceSql).toContain("timezone::text");
     expect(advanceSql).not.toContain("daily_run_time,$2 + interval");
+  });
+
+  it("retries today's failed discovery instead of blocking on the unique daily row", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) return { rows: [] };
+      if (sql.includes("SELECT id, task_id, status FROM de_follow_up_suggestion_runs")) {
+        return { rows: [{ id: "run-1", task_id: null, status: "failed" }] };
+      }
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => "task-retry");
+    const service = new OpportunityService({ pool: { query } } as any, { enqueue } as any);
+
+    const result = await service.requestDiscovery("u1");
+
+    expect(result).toEqual({ runId: "run-1", taskId: "task-retry", reused: false });
+    expect(enqueue).toHaveBeenCalledWith("opportunity.discover", { runId: "run-1" }, "u1", { maxAttempts: 2 });
+    const relinkSql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("SET task_id")) ?? "";
+    expect(relinkSql).toContain("status = 'pending'");
+    expect(relinkSql).toContain("error_code = NULL");
+  });
+
+  it("does not advance next_run_at when daily enqueue fails", async () => {
+    const now = new Date("2026-08-20T01:00:00.000Z");
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_automation_settings")) {
+        return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
+      }
+      if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) {
+        return { rows: [{ id: "run-1" }] };
+      }
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => { throw new Error("redis down"); });
+    const service = new OpportunityService({ pool: { query } } as any, { enqueue } as any);
+
+    await expect(service.enqueueDueDiscoveries(now)).resolves.toBe(0);
+
+    const sql = query.mock.calls.map((call) => String(call[0]));
+    expect(sql.some((item) => item.includes("error_code = 'enqueue_failed'"))).toBe(true);
+    expect(sql.some((item) => item.includes("next_daily_run"))).toBe(false);
+  });
+
+  it("retries a same-day enqueue_failed run on the next scan without skipping the schedule", async () => {
+    const now = new Date("2026-08-20T01:00:00.000Z");
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_automation_settings") && sql.includes("next_run_at")) {
+        return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
+      }
+      if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) return { rows: [] };
+      if (sql.includes("SELECT id, task_id, status FROM de_follow_up_suggestion_runs")) {
+        return { rows: [{ id: "run-1", task_id: null, status: "failed" }] };
+      }
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => "task-2");
+    const service = new OpportunityService({ pool: { query } } as any, { enqueue } as any);
+
+    await expect(service.enqueueDueDiscoveries(now)).resolves.toBe(1);
+    expect(enqueue).toHaveBeenCalledWith("opportunity.discover", { runId: "run-1" }, "u1", { maxAttempts: 2 });
+    expect(query.mock.calls.some((call) => String(call[0]).includes("next_daily_run"))).toBe(true);
+  });
+
+  it("advances the schedule for an already queued same-day run without enqueueing again", async () => {
+    const now = new Date("2026-08-20T01:00:00.000Z");
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_automation_settings") && sql.includes("next_run_at")) {
+        return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
+      }
+      if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) return { rows: [] };
+      if (sql.includes("SELECT id, task_id, status FROM de_follow_up_suggestion_runs")) {
+        return { rows: [{ id: "run-1", task_id: "task-1", status: "succeeded" }] };
+      }
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => "task-new");
+    const service = new OpportunityService({ pool: { query } } as any, { enqueue } as any);
+
+    await expect(service.enqueueDueDiscoveries(now)).resolves.toBe(0);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(query.mock.calls.some((call) => String(call[0]).includes("next_daily_run"))).toBe(true);
   });
 });
 
@@ -70,6 +154,33 @@ describe("OpportunityService personal work queue", () => {
     const workQueueSql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("FROM de_follow_up_tasks task")) ?? "";
     expect(workQueueSql).toContain("task.scheduled_at < date_trunc('day', now()) + interval '1 day'");
     expect(workQueueSql).toContain("task.status = 'awaiting_result'");
+    expect(workQueueSql).toContain("profile.status = 'active'");
+    const summarySql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("AS high_priority")) ?? "";
+    expect(summarySql).toContain("profile.status = 'active'");
+  });
+
+  it("cancels open tasks and dismisses suggestions when a profile is archived", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const service = new OpportunityService({ pool: { query } } as any);
+    await service.cancelOpenWorkForProfile("u1", "p1");
+    const sql = query.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(sql).toContain("close_reason = 'profile_archived'");
+    expect(sql).toContain("status = 'dismissed'");
+    expect(sql).toContain("decision_reason = 'profile_archived'");
+  });
+
+  it("excludes archived customers from the pending suggestion queue", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_automation_settings")) return { rows: [] };
+      if (sql.includes("FROM de_follow_up_suggestion_runs")) return { rows: [] };
+      if (sql.includes("count(*)::int AS count FROM de_customer_profiles")) return { rows: [{ count: 1 }] };
+      if (sql.includes("AS high_priority")) return { rows: [{ high_priority: 0, due_today: 0, overdue: 0, awaiting_result: 0 }] };
+      return { rows: [] };
+    });
+    const service = new OpportunityService({ pool: { query } } as any);
+    await service.list("u1", { view: "pending" });
+    const pendingSql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("suggestion.status = 'suggested'")) ?? "";
+    expect(pendingSql).toContain("profile.status = 'active'");
   });
 
   it("accepts a personal opportunity without creating an acquisition content project", async () => {

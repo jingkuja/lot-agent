@@ -104,17 +104,16 @@
 .de-creation-layout { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(340px, .82fr); align-items: start; gap: 16px; }
 .de-creation-form { display: grid; gap: 12px; }
 .de-model-guard { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
-.de-model-guard > div { display: flex; align-items: center; gap: 9px; }
-.de-model-guard > div > span { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--success) 12%, var(--bg-card)); color: var(--success); font-weight: 800; }
+.de-model-guard-head { display: flex; align-items: flex-start; gap: 9px; }
+.de-model-guard-head > span { display: grid; width: 27px; height: 27px; place-items: center; flex: 0 0 27px; border-radius: 50%; background: color-mix(in srgb, var(--success) 12%, var(--bg-card)); color: var(--success); font-weight: 800; }
 .de-model-guard.missing { border-color: color-mix(in srgb, var(--de-warning) 38%, var(--border)); }
-.de-model-guard.missing > div > span { background: color-mix(in srgb, var(--de-warning) 12%, var(--bg-card)); color: var(--de-warning); }
+.de-model-guard.missing .de-model-guard-head > span { background: color-mix(in srgb, var(--de-warning) 12%, var(--bg-card)); color: var(--de-warning); }
 .de-model-guard p { display: grid; gap: 2px; margin: 0; }
-.de-model-guard small { color: var(--text-muted); font-size: 9px; }
-.de-model-guard ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.de-model-guard li { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: var(--radius-sm); background: var(--overlay-sink); color: var(--text-secondary); font-size: 9px; }
-.de-model-guard li i { width: 6px; height: 6px; border-radius: 50%; background: var(--error); }
-.de-model-guard li i.ok { background: var(--success); }
-.de-model-guard li b { color: var(--text-muted); }
+.de-model-guard small { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.de-model-guard-pickers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.de-model-guard-pickers label { display: grid; gap: 4px; color: var(--text-muted); font-size: 9px; }
+.de-model-guard-pickers select { width: 100%; min-height: 36px; padding: 8px 9px; border: 1px solid var(--border-input); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); }
+.de-model-guard-pickers select:disabled { opacity: .65; cursor: not-allowed; }
 .de-model-guard .de-secondary-button { justify-self: start; }
 .de-creation-block { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); box-shadow: var(--neu-raise-sm); }
 .de-creation-block > header { display: flex; gap: 10px; margin-bottom: 13px; }
@@ -137,6 +136,9 @@
 .de-duration-picker { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--text-muted); font-size: 9px; }
 .de-creation-prompt { margin-top: 11px; }
 .de-creation-prompt textarea { min-height: 105px; line-height: 1.6; resize: vertical; }
+.de-creation-composer { margin-top: 6px; }
+.de-creation-composer .input-box { padding: 12px 14px 10px; box-shadow: none; }
+.de-creation-composer .input-box textarea { min-height: 88px; font-size: 13px; }
 .de-creation-blocker { padding: 9px 11px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--de-warning) 9%, var(--bg-card)); color: var(--de-warning); font-size: 10px; }
 .de-create-submit { min-height: 44px; }
 .de-creation-canvas { position: sticky; top: 18px; overflow: hidden; min-height: 540px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); box-shadow: var(--neu-raise-sm); }
@@ -262,7 +264,7 @@
   .de-acquisition-total { margin-left: 0; }
   .de-deployment-fields { align-items: stretch; flex-direction: column; }
   .de-deployment-list > article { grid-template-columns: 1fr; }
-  .de-feedback-fields, .de-brief-grid, .de-segment-editor-grid { grid-template-columns: 1fr; }
+  .de-feedback-fields, .de-brief-grid, .de-segment-editor-grid, .de-model-guard-pickers { grid-template-columns: 1fr; }
   .de-content-type-picker { grid-template-columns: 1fr; }
   .de-creation-context-bar { align-items: start; flex-direction: column; }
   .de-creation-context-bar small { margin-left: 0; }

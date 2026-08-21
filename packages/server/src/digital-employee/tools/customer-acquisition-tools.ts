@@ -207,7 +207,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const modelConfiguration: Tool = {
     name: "check_user_generation_models",
-    description: "检查当前用户是否已经配置获客宝固定使用的图片和视频模型；不展示或切换模型选择器。",
+    description: "检查当前用户在 TokenHub 已开通的图像和视频模型列表。若列表为空，引导用户前往 configurationUrl 配置后再生成海报或视频。",
     parameters: { type: "object", properties: {} },
     async execute(_input, context) {
       return run(context, "检查生成模型失败", async (userId) => service.getModelAvailability(userId));
@@ -327,8 +327,8 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
   const mediaTool = (assetType: "poster" | "video"): Tool => ({
     name: assetType === "poster" ? "generate_campaign_poster" : "generate_campaign_video",
     description: assetType === "poster"
-      ? "在用户确认费用和受众后生成客群营销海报。固定使用 gpt-image-2.0。必须先 check_user_generation_models，并用 ask_user 确认后再调用。"
-      : "在用户确认费用和受众后生成客群营销视频。固定使用 seedance 2.0。必须先 check_user_generation_models，并用 ask_user 确认后再调用。",
+      ? "在用户确认费用和受众后生成客群营销海报。使用用户选择或当前可用的图像模型。必须先 check_user_generation_models，并用 ask_user 确认后再调用。"
+      : "在用户确认费用和受众后生成客群营销视频。使用用户选择或当前可用的视频模型。必须先 check_user_generation_models，并用 ask_user 确认后再调用。",
     parameters: {
       type: "object",
       properties: {
@@ -344,6 +344,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
         title: { type: "string" },
         recommendationId: { type: "string" },
         durationSeconds: { type: "integer", enum: [15, 30, 60] },
+        modelId: { type: "string", description: "用户选择的生成模型 id，必须来自 check_user_generation_models 返回的可用列表。" },
       },
       required: ["prompt", "productId", "objective", "channels", "callToAction"],
     },

@@ -28,13 +28,22 @@ export class ConflictError extends DigitalEmployeeError {
   }
 }
 
+export class OpenTasksError extends DigitalEmployeeError {
+  constructor(readonly openTaskCount: number) {
+    super("该客户还有未完成的跟进任务，请选择取消或保留后再归档", 409, "open_tasks");
+  }
+}
+
 export class QuotaError extends DigitalEmployeeError {
   constructor(message = "当前余额不足，无法创建生成任务") {
     super(message, 402, "quota_exceeded");
   }
 }
 
-export function apiError(error: unknown): { status: number; body: { error: string; code?: string } } {
+export function apiError(error: unknown): { status: number; body: { error: string; code?: string; openTaskCount?: number } } {
+  if (error instanceof OpenTasksError) {
+    return { status: error.status, body: { error: error.message, code: error.code, openTaskCount: error.openTaskCount } };
+  }
   if (error instanceof DigitalEmployeeError) {
     return { status: error.status, body: { error: error.message, code: error.code } };
   }

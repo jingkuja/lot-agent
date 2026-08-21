@@ -4,9 +4,12 @@ import {
   SEGMENT_JOURNEY_STAGES,
   SEGMENT_RELATIONSHIP_STAGES,
   type AssetListFilters,
+  type AcquisitionLeadInput,
   type CampaignListFilters,
   type CampaignResultInput,
   type CampaignUpdateInput,
+  type CampaignAssetAttachment,
+  type CampaignMediaSettings,
   type CreateCampaignAssetInput,
   type CreateCampaignInput,
   type DeploymentInput,
@@ -45,8 +48,7 @@ export function parseCreateCampaignAsset(value: unknown): CreateCampaignAssetInp
   const publicAudience = optionalText(source.publicAudience, "公开受众", 500);
   const campaignId = optionalUuid(source.campaignId, "campaignId");
   if (!campaignId && !segmentId && !snapshotId && !publicAudience) throw new InputError("请选择客群、填写公开受众，或指定已有营销活动");
-  const duration = source.durationSeconds === undefined ? undefined : integer(source.durationSeconds, "视频时长", 15, 60, 15);
-  if (duration !== undefined && ![15, 30, 60].includes(duration)) throw new InputError("视频时长仅支持15、30或60秒");
+  const duration = source.durationSeconds === undefined ? undefined : integer(source.durationSeconds, "视频时长", -1, 60, 5);
   const productId = campaignId ? optionalUuid(source.productId, "产品") : uuid(source.productId, "产品");
   if (!campaignId && !productId) throw new InputError("产品不能为空");
   return {
@@ -63,7 +65,16 @@ export function parseCreateCampaignAsset(value: unknown): CreateCampaignAssetInp
     channels: stringList(source.channels, "渠道", 8, 80, !campaignId),
     callToAction: campaignId ? (optionalText(source.callToAction, "行动号召", 300) ?? "") : text(source.callToAction, "行动号召", 1, 300),
     title: optionalText(source.title, "活动名称", 300),
-    durationSeconds: duration as 15 | 30 | 60 | undefined,
+    durationSeconds: duration,
+    modelId: optionalText(source.modelId, "生成模型", 200),
+    knowledgeBaseIds: stringList(source.knowledgeBaseIds, "知识库", 8, 80),
+    attachments: parseAssetAttachments(source.attachments),
+    mediaSettings: parseMediaSettings(source.mediaSettings),
+    ...parseOptionalUrlField(source.input_reference, "input_reference"),
+    ...parseOptionalUrlField(source.reference_video, "reference_video"),
+    ...parseOptionalUrlField(source.reference_audio, "reference_audio"),
+    first_frame: optionalText(source.first_frame, "首帧图", 500),
+    last_frame: optionalText(source.last_frame, "尾帧图", 500),
   };
 }
 
@@ -149,6 +160,17 @@ export function parseCampaignUpdate(value: unknown): CampaignUpdateInput {
   };
 }
 
+export function parseAcquisitionLead(value: unknown): AcquisitionLeadInput {
+  const source = object(value);
+  return {
+    displayName: text(source.displayName, "咨询者姓名", 1, 200),
+    organization: optionalText(source.organization, "机构", 200) ?? null,
+    sourceCampaign: optionalText(source.sourceCampaign, "来源活动", 300),
+    productName: optionalText(source.productName, "感兴趣产品", 200),
+    quote: optionalText(source.quote, "客户原话", 2_000),
+  };
+}
+
 export function parseCampaignResult(value: unknown): CampaignResultInput {
   const source = object(value);
   return {
@@ -174,6 +196,47 @@ export function parseSegmentCriteria(value: unknown): SegmentCriteria {
     excludeAtRisk: boolean(source.excludeAtRisk, "排除风险客户"),
     excludeRecentlyContactedDays: source.excludeRecentlyContactedDays === undefined ? undefined : integer(source.excludeRecentlyContactedDays, "近期触达天数", 1, 90, 7),
   };
+}
+
+function parseMediaSettings(value: unknown): CampaignMediaSettings | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const source = object(value);
+  const settings: CampaignMediaSettings = {};
+  if (source.size !== undefined) settings.size = text(source.size, "分辨率", 1, 32);
+  if (source.n !== undefined) settings.n = integer(source.n, "出图数量", 1, 4, 1);
+  if (source.quality !== undefined) settings.quality = text(source.quality, "质量", 1, 32);
+  if (source.durationSec !== undefined) settings.durationSec = integer(source.durationSec, "视频时长", -1, 60, 5);
+  if (source.ratio !== undefined) settings.ratio = text(source.ratio, "视频比例", 1, 16);
+  return settings;
+}
+
+function parseAssetAttachments(value: unknown): CampaignAssetAttachment[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.length > 8) throw new InputError("附件数量无效");
+  if (value.length === 0) return [];
+  return value.map((item) => {
+    const source = object(item);
+    const url = text(source.url, "附件地址", 1, 500);
+    if (!url.includes("/static/uploads/")) throw new InputError("附件地址无效");
+    return {
+      assetId: text(source.assetId, "附件", 1, 80),
+      filename: text(source.filename, "附件名称", 1, 300),
+      mime: text(source.mime, "附件类型", 1, 200),
+      size: integer(source.size, "附件大小", 0, 80_000_000, 0),
+      url,
+      kind: choice(source.kind, ["image", "doc"] as const, "附件种类") ?? "doc",
+    };
+  });
+}
+
+function parseOptionalUrlField(
+  value: unknown,
+  field: "input_reference" | "reference_video" | "reference_audio",
+): Partial<Pick<CreateCampaignAssetInput, "input_reference" | "reference_video" | "reference_audio">> {
+  if (value === undefined || value === null || value === "") return {};
+  if (typeof value === "string") return { [field]: text(value, field, 1, 500) };
+  if (!Array.isArray(value) || value.length > 8) throw new InputError(`${field}数量无效`);
+  return { [field]: value.map((item) => text(item, field, 1, 500)) };
 }
 
 function object(value: unknown): Record<string, unknown> {

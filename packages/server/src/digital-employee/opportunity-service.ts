@@ -72,37 +72,7 @@ export class OpportunityService {
   async requestDiscovery(userId: string): Promise<{ runId: string; taskId: string; reused: boolean }> {
     if (!this.queue) throw new InputError("商机发现任务队列暂不可用");
     const scanDate = dateKey(new Date());
-    const idempotencyKey = `manual:${scanDate}`;
-    const runId = randomUUID();
-    const inserted = await this.pool.query(
-      `INSERT INTO de_follow_up_suggestion_runs
-        (id, user_id, idempotency_key, scan_date, prompt_version, status)
-       VALUES ($1,$2,$3,$4,'opportunity-rules/v1','pending')
-       ON CONFLICT DO NOTHING RETURNING id`,
-      [runId, userId, idempotencyKey, scanDate]
-    );
-    if (!inserted.rows[0]) {
-      const existing = await this.pool.query(
-        `SELECT id, task_id FROM de_follow_up_suggestion_runs
-         WHERE user_id = $1 AND (idempotency_key = $2 OR scan_date = $3::date)
-         ORDER BY created_at DESC LIMIT 1`,
-        [userId, idempotencyKey, scanDate]
-      );
-      const row = existing.rows[0];
-      if (row?.task_id) return { runId: row.id, taskId: row.task_id, reused: true };
-      throw new ConflictError("今天的商机发现任务正在创建，请稍后重试");
-    }
-    try {
-      const taskId = await this.queue.enqueue("opportunity.discover", { runId }, userId, { maxAttempts: 2 });
-      await this.pool.query("UPDATE de_follow_up_suggestion_runs SET task_id = $2 WHERE id = $1 AND user_id = $3", [runId, taskId, userId]);
-      return { runId, taskId, reused: false };
-    } catch (error) {
-      await this.pool.query(
-        "UPDATE de_follow_up_suggestion_runs SET status = 'failed', error_code = 'enqueue_failed', finished_at = now() WHERE id = $1",
-        [runId]
-      );
-      throw error;
-    }
+    return this.startOrReuseDiscovery(userId, `manual:${scanDate}`, scanDate);
   }
 
   /** Worker entry point; discovery stays useful without a model. */
@@ -189,8 +159,10 @@ export class OpportunityService {
     return this.transaction(async (client) => {
       const found = await client.query(
         `SELECT suggestion.*, profile.display_name, profile.organization, profile.relationship_stage
-         FROM de_follow_up_suggestions suggestion JOIN de_customer_profiles profile ON profile.id = suggestion.profile_id
-         WHERE suggestion.id = $1 AND suggestion.user_id = $2 FOR UPDATE OF suggestion`,
+         FROM de_follow_up_suggestions suggestion
+         JOIN de_customer_profiles profile ON profile.id = suggestion.profile_id AND profile.user_id = suggestion.user_id
+         WHERE suggestion.id = $1 AND suggestion.user_id = $2 AND profile.status = 'active'
+         FOR UPDATE OF suggestion`,
         [opportunityId, userId]
       );
       const row = found.rows[0];
@@ -235,13 +207,22 @@ export class OpportunityService {
   }
 
   async createAction(userId: string, input: ManualActionInput): Promise<OpportunityListItem> {
-    const profile = await this.pool.query(
+    const actionId = await this.insertManualAction(userId, input, this.pool);
+    return this.getAction(userId, actionId);
+  }
+
+  async insertManualAction(
+    userId: string,
+    input: ManualActionInput,
+    client: Pool | PoolClient = this.pool
+  ): Promise<string> {
+    const profile = await client.query(
       "SELECT id FROM de_customer_profiles WHERE id = $1 AND user_id = $2 AND status = 'active'",
       [input.profileId, userId]
     );
     if (!profile.rows[0]) throw new NotFoundError("未找到该客户画像");
     const actionId = randomUUID();
-    await this.pool.query(
+    await client.query(
       `INSERT INTO de_follow_up_tasks (
          id,user_id,owner_user_id,profile_id,source,opportunity_type,title,objective,note,
          follow_up_method,priority,scheduled_at,status,result_criteria,product_key,product_name
@@ -250,8 +231,8 @@ export class OpportunityService {
         input.followUpMethod ?? null, input.priority, input.scheduledAt,
         input.resultCriteria ?? null, input.productKey ?? null, input.productName ?? null]
     );
-    await this.syncProfileCadence(this.pool, userId, input.profileId);
-    return this.getAction(userId, actionId);
+    await this.syncProfileCadence(client, userId, input.profileId);
+    return actionId;
   }
 
   async getAction(userId: string, actionId: string): Promise<OpportunityListItem> {
@@ -634,25 +615,83 @@ export class OpportunityService {
     let count = 0;
     for (const row of due.rows) {
       const scanDate = dateKey(now);
-      const runId = randomUUID();
-      const inserted = await this.pool.query(
-        `INSERT INTO de_follow_up_suggestion_runs (id,user_id,idempotency_key,scan_date,prompt_version,status)
-         VALUES ($1,$2,$3,$4,'opportunity-rules/v1','pending') ON CONFLICT DO NOTHING RETURNING id`,
-        [runId, row.user_id, `daily:${scanDate}`, scanDate]
-      );
-      if (inserted.rows[0]) {
-        const taskId = await this.queue.enqueue("opportunity.discover", { runId }, row.user_id, { maxAttempts: 2 });
-        await this.pool.query("UPDATE de_follow_up_suggestion_runs SET task_id = $2 WHERE id = $1", [runId, taskId]);
-        count += 1;
+      try {
+        const result = await this.startOrReuseDiscovery(row.user_id, `daily:${scanDate}`, scanDate);
+        await this.advanceDiscoverySchedule(row.user_id, now);
+        if (!result.reused) count += 1;
+      } catch {
+        // Enqueue failure leaves next_run_at in place so the next tick can retry.
       }
-      await this.pool.query(
-        `UPDATE de_follow_up_automation_settings SET last_run_at = $2::timestamptz,
-          next_run_at = next_daily_run(timezone::text, daily_run_time, $2::timestamptz + interval '1 minute'),
-          version = version + 1
-         WHERE user_id = $1`, [row.user_id, now]
-      );
     }
     return count;
+  }
+
+  private async startOrReuseDiscovery(userId: string, idempotencyKey: string, scanDate: string): Promise<{ runId: string; taskId: string; reused: boolean }> {
+    if (!this.queue) throw new InputError("商机发现任务队列暂不可用");
+    const runId = randomUUID();
+    const inserted = await this.pool.query(
+      `INSERT INTO de_follow_up_suggestion_runs
+        (id, user_id, idempotency_key, scan_date, prompt_version, status)
+       VALUES ($1,$2,$3,$4,'opportunity-rules/v1','pending')
+       ON CONFLICT DO NOTHING RETURNING id`,
+      [runId, userId, idempotencyKey, scanDate]
+    );
+    if (inserted.rows[0]) {
+      try {
+        const taskId = await this.enqueueDiscovery(userId, inserted.rows[0].id);
+        return { runId: inserted.rows[0].id, taskId, reused: false };
+      } catch (error) {
+        await this.markDiscoveryEnqueueFailed(inserted.rows[0].id);
+        throw error;
+      }
+    }
+    const existing = await this.pool.query(
+      `SELECT id, task_id, status FROM de_follow_up_suggestion_runs
+       WHERE user_id = $1 AND (idempotency_key = $2 OR scan_date = $3::date)
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, idempotencyKey, scanDate]
+    );
+    const row = existing.rows[0] as { id: string; task_id: string | null; status: string } | undefined;
+    if (row?.task_id && row.status !== "failed") {
+      return { runId: row.id, taskId: row.task_id, reused: true };
+    }
+    if (row && (row.status === "failed" || !row.task_id)) {
+      try {
+        const taskId = await this.enqueueDiscovery(userId, row.id);
+        return { runId: row.id, taskId, reused: false };
+      } catch (error) {
+        await this.markDiscoveryEnqueueFailed(row.id);
+        throw error;
+      }
+    }
+    throw new ConflictError("今天的商机发现任务正在创建，请稍后重试");
+  }
+
+  private async enqueueDiscovery(userId: string, runId: string): Promise<string> {
+    const taskId = await this.queue!.enqueue("opportunity.discover", { runId }, userId, { maxAttempts: 2 });
+    await this.pool.query(
+      `UPDATE de_follow_up_suggestion_runs
+          SET task_id = $2, status = 'pending', error_code = NULL, finished_at = NULL
+        WHERE id = $1 AND user_id = $3`,
+      [runId, taskId, userId]
+    );
+    return taskId;
+  }
+
+  private async markDiscoveryEnqueueFailed(runId: string) {
+    await this.pool.query(
+      "UPDATE de_follow_up_suggestion_runs SET status = 'failed', error_code = 'enqueue_failed', finished_at = now() WHERE id = $1",
+      [runId]
+    );
+  }
+
+  private async advanceDiscoverySchedule(userId: string, now: Date) {
+    await this.pool.query(
+      `UPDATE de_follow_up_automation_settings SET last_run_at = $2::timestamptz,
+        next_run_at = next_daily_run(timezone::text, daily_run_time, $2::timestamptz + interval '1 minute'),
+        version = version + 1
+       WHERE user_id = $1`, [userId, now]
+    );
   }
 
   private async previewFollowUpAction(userId: string, input: FollowUpActionPrepareInput) {
@@ -725,7 +764,7 @@ export class OpportunityService {
 
   async getOpportunity(userId: string, opportunityId: string): Promise<OpportunityListItem> {
     const { rows } = await this.pool.query(
-      `${baseSelect()} WHERE suggestion.user_id = $1 AND suggestion.id = $2 LIMIT 1`,
+      `${baseSelect()} WHERE suggestion.user_id = $1 AND suggestion.id = $2 AND profile.status = 'active' LIMIT 1`,
       [userId, opportunityId]
     );
     if (!rows[0]) throw new NotFoundError("未找到该商机");
@@ -854,6 +893,31 @@ export class OpportunityService {
     return toOutreach(rows[0]);
   }
 
+  async countOpenTasks(userId: string, profileId: string, client: Pool | PoolClient = this.pool): Promise<number> {
+    const result = await client.query(
+      `SELECT count(*)::int AS count FROM de_follow_up_tasks
+       WHERE user_id = $1 AND profile_id = $2 AND status IN ('pending','awaiting_result')`,
+      [userId, profileId]
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  }
+
+  async cancelOpenWorkForProfile(userId: string, profileId: string, client: Pool | PoolClient = this.pool): Promise<void> {
+    await client.query(
+      `UPDATE de_follow_up_tasks
+          SET status = 'cancelled', cancelled_at = now(), close_reason = 'profile_archived', version = version + 1
+        WHERE user_id = $1 AND profile_id = $2 AND status IN ('pending','awaiting_result')`,
+      [userId, profileId]
+    );
+    await client.query(
+      `UPDATE de_follow_up_suggestions
+          SET status = 'dismissed', decision_reason = 'profile_archived', decided_at = now(), version = version + 1
+        WHERE user_id = $1 AND profile_id = $2 AND status = 'suggested'`,
+      [userId, profileId]
+    );
+    await this.syncProfileCadence(client, userId, profileId);
+  }
+
   private async pendingRows(userId: string, profileId?: string) {
     const params: unknown[] = [userId];
     const profileFilter = profileId ? (params.push(profileId), " AND suggestion.profile_id = $2") : "";
@@ -861,6 +925,7 @@ export class OpportunityService {
       `${baseSelect()}
        WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested'
          AND suggestion.opportunity_type <> 'cohort_marketing'
+         AND profile.status = 'active'
          AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
          AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now())${profileFilter}
        ORDER BY CASE suggestion.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
@@ -870,7 +935,7 @@ export class OpportunityService {
   }
 
   private async actionRows(userId: string, view?: string, actionId?: string, profileId?: string) {
-    const conditions = ["task.user_id = $1"];
+    const conditions = ["task.user_id = $1", "profile.status = 'active'"];
     const params: unknown[] = [userId];
     if (actionId) { params.push(actionId); conditions.push(`task.id = $${params.length}`); }
     if (profileId) { params.push(profileId); conditions.push(`task.profile_id = $${params.length}`); }
@@ -1023,15 +1088,19 @@ export class OpportunityService {
     const result = await this.pool.query(
       `SELECT
         (SELECT count(*) FROM de_follow_up_suggestions suggestion
+         JOIN de_customer_profiles profile ON profile.id = suggestion.profile_id AND profile.user_id = suggestion.user_id
          WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested' AND suggestion.priority = 'high'
            AND suggestion.opportunity_type <> 'cohort_marketing'
+           AND profile.status = 'active'
            AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
            AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now()))::int AS high_priority,
         count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at >= now()
           AND task.scheduled_at < date_trunc('day',now()) + interval '1 day')::int AS due_today,
         count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at < now())::int AS overdue,
         count(*) FILTER (WHERE task.status = 'awaiting_result')::int AS awaiting_result
-       FROM de_follow_up_tasks task WHERE task.user_id = $1`, [userId]
+       FROM de_follow_up_tasks task
+       JOIN de_customer_profiles profile ON profile.id = task.profile_id AND profile.user_id = task.user_id
+       WHERE task.user_id = $1 AND profile.status = 'active'`, [userId]
     );
     const row = result.rows[0] ?? {};
     return { highPriority: Number(row.high_priority ?? 0), dueToday: Number(row.due_today ?? 0), overdue: Number(row.overdue ?? 0), awaitingResult: Number(row.awaiting_result ?? 0) };

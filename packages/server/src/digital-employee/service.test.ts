@@ -21,6 +21,104 @@ function draft(row: any) {
   };
 }
 
+describe("DigitalEmployeeService acquisition lead return", () => {
+  it("replays an identical lead payload without creating another profile", async () => {
+    const insertManualAction = vi.fn();
+    const getAction = vi.fn(async () => ({ id: "a1", profileId: "p1", title: "跟进李静的活动咨询" }));
+    const client = { query: vi.fn(async () => ({ rows: [{ id: "a1" }] })) };
+    const service = serviceWith({
+      transaction: vi.fn(async (operation: (c: typeof client) => Promise<unknown>) => operation(client)),
+      getObservationBySource: vi.fn(async () => ({ id: "obs1", profileId: "p1" })),
+      getProfile: vi.fn(async () => ({
+        id: "p1", displayName: "李静", aliases: [], customerKind: "person", organization: null,
+        department: null, title: null, customerRegion: null, contactCiphertext: null, source: "获客宝",
+        relationshipStage: "lead", overallHealth: "healthy", tags: [], customFields: {}, summary: "",
+        summaryVersion: 1, manualLockFields: [], lastObservedAt: null, lastContactAt: null, nextFollowUpAt: null,
+        version: 1, status: "active", archivedAt: null, createdAt: "", updatedAt: "", userId: "u1", ownerUserId: "u1",
+      })),
+      createProfile: vi.fn(),
+    });
+    (service as any).opportunities = { insertManualAction, getAction };
+
+    const first = await service.returnAcquisitionLead("u1", { displayName: "李静", sourceCampaign: "分享会", quote: "想看演示" });
+    const second = await service.returnAcquisitionLead("u1", { displayName: "李静", sourceCampaign: "分享会", quote: "想看演示" });
+
+    expect(first.alreadyApplied).toBe(true);
+    expect(second.alreadyApplied).toBe(true);
+    expect(first.profile.id).toBe("p1");
+    expect(insertManualAction).not.toHaveBeenCalled();
+    expect((service as any).repository.createProfile).not.toHaveBeenCalled();
+  });
+});
+
+describe("DigitalEmployeeService archive", () => {
+  const profile = {
+    id: "p1", displayName: "李静", aliases: [], customerKind: "person", organization: null,
+    department: null, title: null, customerRegion: null, contactCiphertext: null, source: null,
+    relationshipStage: "lead", overallHealth: "healthy", tags: [], customFields: {}, summary: "",
+    summaryVersion: 1, manualLockFields: [], lastObservedAt: null, lastContactAt: null, nextFollowUpAt: null,
+    version: 1, status: "active", archivedAt: null, createdAt: "", updatedAt: "", userId: "u1", ownerUserId: "u1",
+  };
+
+  it("refuses to archive when open tasks exist and cancel/keep was not chosen", async () => {
+    const cancelOpenWorkForProfile = vi.fn();
+    const archiveProfile = vi.fn(async () => ({ ...profile, status: "archived", version: 2 }));
+    const service = serviceWith({
+      getProfile: vi.fn(async () => profile),
+      transaction: vi.fn(async (operation: (c: unknown) => Promise<unknown>) => operation({})),
+      archiveProfile,
+    });
+    (service as any).opportunities = { countOpenTasks: vi.fn(async () => 2), cancelOpenWorkForProfile };
+
+    await expect(service.archiveProfile("u1", "p1", 1)).rejects.toMatchObject({
+      code: "open_tasks",
+      openTaskCount: 2,
+    });
+    expect(cancelOpenWorkForProfile).not.toHaveBeenCalled();
+  });
+
+  it("cancels open follow-ups when archiving with onOpenTasks=cancel", async () => {
+    const cancelOpenWorkForProfile = vi.fn();
+    const service = serviceWith({
+      getProfile: vi.fn(async () => profile),
+      transaction: vi.fn(async (operation: (c: unknown) => Promise<unknown>) => operation({ tag: "tx" })),
+      archiveProfile: vi.fn(async () => ({ ...profile, status: "archived", version: 2 })),
+    });
+    (service as any).opportunities = { countOpenTasks: vi.fn(async () => 1), cancelOpenWorkForProfile };
+
+    const result = await service.archiveProfile("u1", "p1", 1, "cancel");
+
+    expect(result.status).toBe("archived");
+    expect(cancelOpenWorkForProfile).toHaveBeenCalledWith("u1", "p1", { tag: "tx" });
+  });
+
+  it("keeps open follow-ups when archiving with onOpenTasks=keep", async () => {
+    const cancelOpenWorkForProfile = vi.fn();
+    const service = serviceWith({
+      getProfile: vi.fn(async () => profile),
+      transaction: vi.fn(async (operation: (c: unknown) => Promise<unknown>) => operation({})),
+      archiveProfile: vi.fn(async () => ({ ...profile, status: "archived", version: 2 })),
+    });
+    (service as any).opportunities = { countOpenTasks: vi.fn(async () => 1), cancelOpenWorkForProfile };
+
+    await service.archiveProfile("u1", "p1", 1, "keep");
+    expect(cancelOpenWorkForProfile).not.toHaveBeenCalled();
+  });
+
+  it("archives without a task choice when the customer has no open follow-ups", async () => {
+    const cancelOpenWorkForProfile = vi.fn();
+    const service = serviceWith({
+      getProfile: vi.fn(async () => profile),
+      transaction: vi.fn(async (operation: (c: unknown) => Promise<unknown>) => operation({})),
+      archiveProfile: vi.fn(async () => ({ ...profile, status: "archived", version: 2 })),
+    });
+    (service as any).opportunities = { countOpenTasks: vi.fn(async () => 0), cancelOpenWorkForProfile };
+
+    await expect(service.archiveProfile("u1", "p1", 1)).resolves.toMatchObject({ status: "archived" });
+    expect(cancelOpenWorkForProfile).not.toHaveBeenCalled();
+  });
+});
+
 describe("DigitalEmployeeService profile changes", () => {
   it("allows a unique low-risk create to commit in the same agent turn", async () => {
     const service = serviceWith({

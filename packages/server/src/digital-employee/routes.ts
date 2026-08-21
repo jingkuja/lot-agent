@@ -8,6 +8,7 @@ import {
   parseUpdateProductState,
   parseUpdateProfile,
   parseVersion,
+  parseArchiveProfile,
   parseEntityId,
 } from "./validators.js";
 import {
@@ -27,6 +28,7 @@ import {
 } from "./opportunity-validators.js";
 import {
   parseAssetList,
+  parseAcquisitionLead,
   parseCampaignList,
   parseCampaignUpdate,
   parseCreateCampaign,
@@ -129,6 +131,13 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.get("/acquisition/analytics", async (c) => {
     try { return c.json(await service.customerAcquisition.analytics(c.get("userId"))); }
     catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/acquisition/leads", async (c) => {
+    try {
+      const result = await service.returnAcquisitionLead(c.get("userId"), parseAcquisitionLead(await body(c)));
+      return c.json(result, result.alreadyApplied ? 200 : 201);
+    } catch (error) { return respondError(c, error); }
   });
 
   app.get("/acquisition/campaigns", async (c) => {
@@ -429,8 +438,13 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
 
   app.delete("/profiles/:id", async (c) => {
     try {
-      const payload = await body(c);
-      return c.json(await service.archiveProfile(c.get("userId"), parseEntityId(c.req.param("id"), "profileId"), parseVersion(payload.version)));
+      const payload = parseArchiveProfile(await body(c));
+      return c.json(await service.archiveProfile(
+        c.get("userId"),
+        parseEntityId(c.req.param("id"), "profileId"),
+        payload.version,
+        payload.onOpenTasks,
+      ));
     } catch (error) {
       return respondError(c, error);
     }

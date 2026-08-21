@@ -1,5 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { CustomerAcquisitionService } from "./acquisition-service.js";
+import type { CampaignModelAvailability } from "./acquisition-types.js";
+
+function availability(overrides: Partial<CampaignModelAvailability> = {}): CampaignModelAvailability {
+  const imageModels = overrides.imageModels
+    ?? (overrides.image === false ? [] : [{ id: overrides.imageModelId ?? "gpt-image-2.0" }]);
+  const videoModels = overrides.videoModels
+    ?? (overrides.video === false ? [] : [{ id: overrides.videoModelId ?? "seedance 2.0" }]);
+  return {
+    configurationUrl: "https://tokenhub.example",
+    ...overrides,
+    imageModels,
+    videoModels,
+    image: imageModels.length > 0,
+    video: videoModels.length > 0,
+    imageModelId: overrides.imageModelId !== undefined ? overrides.imageModelId : imageModels[0]?.id ?? null,
+    videoModelId: overrides.videoModelId !== undefined ? overrides.videoModelId : videoModels[0]?.id ?? null,
+  };
+}
 
 describe("CustomerAcquisitionService", () => {
   it("sends only aggregate audience data and approved product facts to copy generation", async () => {
@@ -68,6 +86,60 @@ describe("CustomerAcquisitionService", () => {
     expect(recommend).toHaveBeenCalledOnce();
   });
 
+  it("does not resurrect adopted or ignored recommendations when the same theme conflicts", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("de_customer_cohort_snapshots")) return { rows: [{ snapshot_date: "2026-08-20", summary: "聚合总结", metrics: { totalProfiles: 5 }, generated_at: new Date(), generation_method: "logic", model_id: null }] };
+      if (sql.includes("FROM de_customer_segments segment")) return { rows: [] };
+      if (sql.includes("FROM marketing_products WHERE user_id")) return { rows: [{ id: "p1", name: "产品A", positioning: "定位", core_values: ["价值"], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [], version: 1 }] };
+      if (sql.includes("marketing_brand_assets")) return { rows: [] };
+      if (sql.includes("SELECT recommendation.*")) return { rows: [] };
+      return { rows: [] };
+    });
+    const recommend = vi.fn(async () => ({
+      recommendations: [{
+        type: "copy" as const, theme: "已处理主题", targetSegmentDescription: "制造业潜客",
+        corePoints: ["价值"], suggestedChannels: ["朋友圈"], reasoning: ["聚合"],
+      }],
+      modelId: "m1",
+    }));
+    const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, { recommend, createCopy: vi.fn() });
+    await service.refreshRecommendations("u1");
+
+    const upsertSql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("ON CONFLICT (user_id,recommendation_date,recommendation_type,theme)")) ?? "";
+    expect(upsertSql).toContain("status='pending'");
+    expect(upsertSql).toContain("WHERE de_daily_recommendations.status IN ('pending','expired')");
+  });
+
+  it("expires leftover pending recommendations that are not in the new batch", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("de_customer_cohort_snapshots")) return { rows: [{ snapshot_date: "2026-08-20", summary: "聚合总结", metrics: { totalProfiles: 5 }, generated_at: new Date(), generation_method: "logic", model_id: null }] };
+      if (sql.includes("FROM de_customer_segments segment")) return { rows: [] };
+      if (sql.includes("FROM marketing_products WHERE user_id")) return { rows: [{ id: "p1", name: "产品A", positioning: "定位", core_values: ["价值"], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [], version: 1 }] };
+      if (sql.includes("marketing_brand_assets")) return { rows: [] };
+      if (sql.includes("SELECT recommendation.*")) return { rows: [] };
+      return { rows: [] };
+    });
+    const recommend = vi.fn(async () => ({
+      recommendations: [
+        { type: "copy" as const, theme: "新主题A", targetSegmentDescription: "制造业潜客", corePoints: ["价值"], suggestedChannels: ["朋友圈"], reasoning: ["聚合"] },
+        { type: "poster" as const, theme: "新主题B", targetSegmentDescription: "制造业潜客", corePoints: ["价值"], suggestedChannels: ["朋友圈"], reasoning: ["聚合"] },
+      ],
+      modelId: "m1",
+    }));
+    const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, { recommend, createCopy: vi.fn() });
+    await service.refreshRecommendations("u1");
+
+    const expireCall = query.mock.calls.find((call) => {
+      const sql = String(call[0]);
+      return sql.includes("SET status='expired'") && sql.includes("unnest");
+    });
+    expect(expireCall).toBeTruthy();
+    expect(String(expireCall?.[0])).toContain("AND status='pending'");
+    expect(String(expireCall?.[0])).toContain("(recommendation_type, theme) IN");
+    expect(expireCall?.[1]?.[2]).toEqual(["copy", "poster"]);
+    expect(expireCall?.[1]?.[3]).toEqual(["新主题A", "新主题B"]);
+  });
+
   it("evaluates segment-product fit with aggregate metrics only", async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("FROM de_customer_segment_snapshots")) return { rows: [{
@@ -102,7 +174,18 @@ describe("CustomerAcquisitionService", () => {
     expect(result.audience.metrics.totalProfiles).toBe(12);
   });
 
-  it("checks the fixed media model before creating campaign records", async () => {
+  it("returns an empty catalog and TokenHub URL when no resolver is configured", async () => {
+    const service = new CustomerAcquisitionService({ pool: { query: vi.fn() } } as any);
+    await expect(service.getModelAvailability("u1")).resolves.toMatchObject({
+      image: false,
+      video: false,
+      imageModels: [],
+      videoModels: [],
+      configurationUrl: "https://wetok.ai/",
+    });
+  });
+
+  it("blocks media generation when no image models are available", async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
@@ -114,17 +197,162 @@ describe("CustomerAcquisitionService", () => {
       { pool: { query } } as any,
       { enqueue } as any,
       undefined,
-      { get: vi.fn(async () => ({ image: false, video: true, imageModelId: null, videoModelId: "doubao-seedance-2.0", configurationUrl: "https://tokenhub.example" })) },
+      { get: vi.fn(async () => availability({ image: false, video: true, imageModelId: null, videoModelId: "doubao-seedance-2.0" })) },
     );
 
     await expect(service.createAsset("u1", {
       assetType: "poster", prompt: "生成海报", publicAudience: "制造业管理者",
       productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
       channels: ["朋友圈"], callToAction: "预约",
-    })).rejects.toThrow("gpt-image-2.0");
+    })).rejects.toThrow("图像模型");
 
     expect(enqueue).not.toHaveBeenCalled();
     expect(query.mock.calls.some((call) => String(call[0]).includes("INSERT INTO de_marketing_campaigns"))).toBe(false);
+  });
+
+  it("uses the requested image model when it is in the user's catalog", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
+        positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
+      }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) {
+        return { rows: [{ id: "ss1", audience_description: "公开受众", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date() }] };
+      }
+      if (sql.includes("FROM marketing_brand_assets")) return { rows: [] };
+      if (sql.includes("FROM de_marketing_asset_library asset")) return { rows: [{
+        id: "a1", campaign_id: "c1", asset_type: "poster", title: "海报", content: "", source: "workspace",
+        generation_status: "pending", status: "draft", version: 1, deployments: [], created_at: new Date(), updated_at: new Date(),
+      }] };
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => "task-1");
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      { enqueue, cancel: vi.fn() } as any,
+      undefined,
+      { get: vi.fn(async () => availability({
+        imageModels: [{ id: "gpt-image-2.0" }, { id: "flux-pro" }],
+        videoModels: [{ id: "seedance 2.0" }],
+      })) },
+    );
+    await service.createAsset("u1", {
+      assetType: "poster", prompt: "生成海报", publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
+      channels: ["朋友圈"], callToAction: "预约", modelId: "flux-pro",
+    });
+    expect(enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({ modelId: "flux-pro" }),
+      "u1",
+    );
+  });
+
+  it("forwards image settings and reference images into the generation job", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
+        positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
+      }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) {
+        return { rows: [{ id: "ss1", audience_description: "公开受众", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date() }] };
+      }
+      if (sql.includes("FROM marketing_brand_assets")) return { rows: [] };
+      if (sql.includes("FROM de_marketing_asset_library asset")) return { rows: [{
+        id: "a1", campaign_id: "c1", asset_type: "poster", title: "海报", content: "", source: "workspace",
+        generation_status: "pending", status: "draft", version: 1, deployments: [], created_at: new Date(), updated_at: new Date(),
+      }] };
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => "task-2");
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      { enqueue, cancel: vi.fn() } as any,
+      undefined,
+      { get: vi.fn(async () => availability()) },
+    );
+    await service.createAsset("u1", {
+      assetType: "poster", prompt: "生成海报", publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
+      channels: ["朋友圈"], callToAction: "预约",
+      mediaSettings: { size: "1536x1024", n: 1, quality: "high" },
+      attachments: [{
+        assetId: "att1", filename: "ref.png", mime: "image/png", size: 12,
+        url: "/static/uploads/ref.png", kind: "image",
+      }],
+    });
+    expect(enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({
+        size: "1536x1024",
+        quality: "high",
+        media: [{ type: "reference_image", url: "/static/uploads/ref.png" }],
+      }),
+      "u1",
+    );
+  });
+
+  it("passes knowledge bases and attachments into copy generation", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", user_id: "u1", name: "边缘算力",
+        positioning: "快速部署", core_values: ["部署简单"], verifiable_facts: [],
+        current_benefits: [], common_objections: [], prohibited_expressions: [], version: 1,
+      }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000102", audience_description: "华东制造业管理者",
+        criteria: {}, metrics: { totalProfiles: 0, warnings: [] }, sampled_at: new Date(), created_at: new Date(),
+      }] };
+      if (sql.includes("FROM marketing_brand_assets")) return { rows: [] };
+      if (sql.includes("FROM de_marketing_asset_library asset")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000103", campaign_id: "c1", asset_type: "text", title: "文案",
+        content: "正文", source: "workspace", model_id: "m1", generation_status: "ready", status: "ready",
+        version: 1, deployments: [], created_at: new Date(), updated_at: new Date(),
+      }] };
+      return { rows: [] };
+    });
+    const createCopy = vi.fn(async () => ({ title: "文案", content: "正文", modelId: "m1" }));
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      undefined,
+      { createCopy, recommend: vi.fn() },
+    );
+    await service.createAsset("u1", {
+      assetType: "copy", prompt: "强调部署简单", publicAudience: "华东制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "获得咨询",
+      channels: ["朋友圈"], callToAction: "预约咨询",
+      knowledgeBaseIds: ["kb-1"],
+      attachments: [{
+        assetId: "att1", filename: "note.txt", mime: "text/plain", size: 8,
+        url: "/static/uploads/note.txt", kind: "doc",
+      }],
+    });
+    expect(createCopy).toHaveBeenCalledWith(expect.objectContaining({
+      knowledgeBaseIds: ["kb-1"],
+      attachments: [expect.objectContaining({ filename: "note.txt" })],
+    }));
+  });
+
+  it("rejects a media model that is not in the user's catalog", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
+      }] };
+      return { rows: [] };
+    });
+    const enqueue = vi.fn();
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      { enqueue } as any,
+      undefined,
+      { get: vi.fn(async () => availability()) },
+    );
+    await expect(service.createAsset("u1", {
+      assetType: "video", prompt: "生成视频", publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
+      channels: ["朋友圈"], callToAction: "预约", modelId: "unknown-video",
+    })).rejects.toThrow("所选视频模型不可用");
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("reuses an existing campaign snapshot and brief instead of creating another activity", async () => {
@@ -159,7 +387,7 @@ describe("CustomerAcquisitionService", () => {
       { pool: { query } } as any,
       { enqueue } as any,
       { createCopy: vi.fn(), recommend: vi.fn() },
-      { get: vi.fn(async () => ({ image: true, video: true, imageModelId: "gpt-image-2.0", videoModelId: "seedance 2.0", configurationUrl: "https://tokenhub.example" })) },
+      { get: vi.fn(async () => availability()) },
     );
 
     const result = await service.createAsset("u1", {
@@ -173,6 +401,102 @@ describe("CustomerAcquisitionService", () => {
     expect(query.mock.calls.some((call) => String(call[0]).includes("INSERT INTO de_customer_segment_snapshots"))).toBe(false);
     expect(query.mock.calls.some((call) => String(call[0]).includes("INSERT INTO de_campaign_briefs"))).toBe(false);
     expect(enqueue).toHaveBeenCalledOnce();
+    const insertAt = query.mock.calls.findIndex((call) => String(call[0]).includes("INSERT INTO de_marketing_asset_library"));
+    expect(insertAt).toBeGreaterThanOrEqual(0);
+    expect(String(query.mock.calls[insertAt]?.[0])).not.toContain("task_id");
+  });
+
+  it("does not enqueue a media job before the asset row is persisted", async () => {
+    const events: string[] = [];
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
+        positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
+      }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) {
+        return { rows: [{ id: "ss1", audience_description: "公开受众", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date() }] };
+      }
+      if (sql.includes("FROM marketing_brand_assets")) return { rows: [] };
+      if (sql.includes("INSERT INTO de_marketing_asset_library")) { events.push("insert-asset"); return { rows: [] }; }
+      if (sql.includes("UPDATE de_marketing_asset_library SET task_id")) { events.push("link-task"); return { rows: [] }; }
+      if (sql.includes("FROM de_marketing_asset_library asset")) return { rows: [{
+        id: "a1", campaign_id: "c1", asset_type: "poster", title: "海报", content: "", source: "workspace",
+        generation_status: "pending", status: "draft", version: 1, deployments: [], created_at: new Date(), updated_at: new Date(),
+      }] };
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => { events.push("enqueue"); return "task-1"; });
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      { enqueue, cancel: vi.fn() } as any,
+      undefined,
+      { get: vi.fn(async () => availability({ configurationUrl: "https://x" })) },
+    );
+    await service.createAsset("u1", {
+      assetType: "poster", prompt: "生成海报", publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
+      channels: ["朋友圈"], callToAction: "预约",
+    });
+    expect(events.indexOf("insert-asset")).toBeLessThan(events.indexOf("enqueue"));
+    expect(events.indexOf("enqueue")).toBeLessThan(events.indexOf("link-task"));
+  });
+
+  it("does not enqueue when persisting the media asset fails", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
+        positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
+      }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) {
+        return { rows: [{ id: "ss1", audience_description: "公开受众", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date() }] };
+      }
+      if (sql.includes("FROM marketing_brand_assets")) return { rows: [] };
+      if (sql.includes("INSERT INTO de_marketing_asset_library")) throw new Error("db down");
+      return { rows: [] };
+    });
+    const enqueue = vi.fn();
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      { enqueue } as any,
+      undefined,
+      { get: vi.fn(async () => availability({ configurationUrl: "https://x" })) },
+    );
+    await expect(service.createAsset("u1", {
+      assetType: "poster", prompt: "生成海报", publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
+      channels: ["朋友圈"], callToAction: "预约",
+    })).rejects.toThrow("db down");
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("cancels the queued job if linking the task id fails", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
+        positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
+      }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) {
+        return { rows: [{ id: "ss1", audience_description: "公开受众", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date() }] };
+      }
+      if (sql.includes("FROM marketing_brand_assets")) return { rows: [] };
+      if (sql.includes("UPDATE de_marketing_asset_library SET task_id")) throw new Error("link failed");
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => "task-9");
+    const cancel = vi.fn(async () => true);
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      { enqueue, cancel } as any,
+      undefined,
+      { get: vi.fn(async () => availability({ configurationUrl: "https://x" })) },
+    );
+    await expect(service.createAsset("u1", {
+      assetType: "poster", prompt: "生成海报", publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
+      channels: ["朋友圈"], callToAction: "预约",
+    })).rejects.toThrow("link failed");
+    expect(cancel).toHaveBeenCalledWith("task-9");
+    expect(query.mock.calls.some((call) => String(call[0]).includes("generation_status='failed'"))).toBe(true);
   });
 
   it("turns a stored campaign opportunity into a marketing campaign", async () => {

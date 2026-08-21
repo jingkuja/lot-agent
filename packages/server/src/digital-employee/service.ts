@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createSecretBox, sha256Hex, type SecretBox } from "../auth/secret-box.js";
 import type { DB } from "../db/database.js";
-import { ConflictError, InputError, NotFoundError } from "./errors.js";
+import { ConflictError, InputError, NotFoundError, OpenTasksError } from "./errors.js";
 import {
   DigitalEmployeeRepository,
   type NewProductStateRow,
@@ -448,6 +448,93 @@ export class DigitalEmployeeService {
     });
   }
 
+  async returnAcquisitionLead(userId: string, input: import("./acquisition-types.js").AcquisitionLeadInput) {
+    const sourceId = acquisitionLeadSourceId(userId, input);
+    const source = `获客宝${input.sourceCampaign ? ` · ${input.sourceCampaign}` : ""}`;
+    const rawText = [
+      `来源：获客宝${input.sourceCampaign ? `活动“${input.sourceCampaign}”` : "营销活动"}`,
+      input.quote ? `客户原话：${input.quote}` : "客户产生了具体咨询",
+      input.productName ? `感兴趣产品：${input.productName}` : "",
+    ].filter(Boolean).join("；");
+    const scheduledAt = new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString();
+    const actionInput = (profileId: string) => ({
+      profileId,
+      opportunityType: "new_lead_contact" as const,
+      title: `跟进${input.displayName}的活动咨询`,
+      objective: "确认咨询需求并获得明确下一步",
+      followUpMethod: "企微/微信",
+      priority: "normal" as const,
+      scheduledAt,
+      resultCriteria: "获得首次有效回复",
+      productName: input.productName,
+    });
+
+    const committed = await this.repository.transaction(async (client) => {
+      const existing = await this.repository.getObservationBySource(userId, "manual", sourceId, client);
+      if (existing) {
+        const profile = await this.repository.getProfile(userId, existing.profileId, client);
+        if (!profile) throw new NotFoundError();
+        const found = await client.query(
+          `SELECT id FROM de_follow_up_tasks
+           WHERE user_id=$1 AND profile_id=$2 AND source='manual' AND opportunity_type='new_lead_contact'
+           ORDER BY created_at DESC LIMIT 1`,
+          [userId, profile.id]
+        );
+        const actionId = found.rows[0]?.id
+          ?? await this.opportunities.insertManualAction(userId, actionInput(profile.id), client);
+        return { profile, actionId, alreadyApplied: true as const };
+      }
+
+      const profileId = randomUUID();
+      const productInput = input.productName
+        ? { productName: input.productName, journeyStage: "evaluating" as const }
+        : undefined;
+      const productRow = productInput ? this.newProductRow(userId, profileId, productInput) : null;
+      const profile = await this.repository.createProfile(
+        this.newProfileRow(
+          userId,
+          profileId,
+          { displayName: input.displayName, organization: input.organization ?? null, source, relationshipStage: "lead" },
+          buildProfileSummary(
+            { displayName: input.displayName, relationshipStage: "lead", overallHealth: "healthy", tags: [] },
+            productRow ? [productSummaryShape(productRow)] : []
+          )
+        ),
+        client
+      );
+      if (productRow) {
+        const created = await this.repository.createProductState({ ...productRow, profileId }, client);
+        await this.repository.createStateChange({
+          id: randomUUID(), userId, profileId, productStateId: created.id, actorType: "user",
+          beforeState: {}, patch: productStateSnapshot(created), afterState: productStateSnapshot(created),
+          reason: "获客宝线索回流",
+        }, client);
+      }
+      await this.applyObservation(client, userId, {
+        profile,
+        rawText,
+        sourceType: "manual",
+        sourceId,
+        sourceLocator: { kind: "acquisition_lead", sourceCampaign: input.sourceCampaign ?? null },
+        input: {
+          eventType: "purchase_intent",
+          productName: input.productName,
+          occurredAt: new Date().toISOString(),
+        },
+        actor: "user",
+      });
+      const actionId = await this.opportunities.insertManualAction(userId, actionInput(profileId), client);
+      const stored = await this.repository.getProfile(userId, profileId, client) ?? profile;
+      return { profile: stored, actionId, alreadyApplied: false as const };
+    });
+
+    return {
+      alreadyApplied: committed.alreadyApplied,
+      profile: this.publicProfile(committed.profile, false),
+      action: await this.opportunities.getAction(userId, committed.actionId),
+    };
+  }
+
   async updateProfile(userId: string, profileId: string, input: UpdateCustomerProfileInput): Promise<CustomerProfile> {
     return this.repository.transaction(async (client) => {
       const current = await this.repository.getProfile(userId, profileId, client);
@@ -473,12 +560,26 @@ export class DigitalEmployeeService {
     });
   }
 
-  async archiveProfile(userId: string, profileId: string, version: number): Promise<CustomerProfile> {
+  async archiveProfile(
+    userId: string,
+    profileId: string,
+    version: number,
+    onOpenTasks?: "cancel" | "keep",
+  ): Promise<CustomerProfile> {
     const existing = await this.repository.getProfile(userId, profileId);
     if (!existing || existing.status !== "active") throw new NotFoundError();
-    const archived = await this.repository.archiveProfile(userId, profileId, version);
-    if (!archived) throw new ConflictError();
-    return this.publicProfile(archived, true);
+    return this.repository.transaction(async (client) => {
+      const archived = await this.repository.archiveProfile(userId, profileId, version, client);
+      if (!archived) throw new ConflictError();
+      const openTaskCount = await this.opportunities.countOpenTasks(userId, profileId, client);
+      if (openTaskCount > 0 && onOpenTasks !== "cancel" && onOpenTasks !== "keep") {
+        throw new OpenTasksError(openTaskCount);
+      }
+      if (onOpenTasks === "cancel") {
+        await this.opportunities.cancelOpenWorkForProfile(userId, profileId, client);
+      }
+      return this.publicProfile(archived, true);
+    });
   }
 
   async updateProductState(
@@ -1102,4 +1203,16 @@ function profileChangePatch(input: ProfileChangeInput): JsonObject {
 
 function isContextReference(value: string): boolean {
   return /^(她|他|ta|TA|刚才那位|刚才的客户|这位|这个客户|该客户|上面那位)$/.test(value.trim());
+}
+
+function acquisitionLeadSourceId(userId: string, input: import("./acquisition-types.js").AcquisitionLeadInput): string {
+  const fingerprint = sha256Hex([
+    userId,
+    input.displayName.trim().toLocaleLowerCase("zh-CN"),
+    (input.organization ?? "").trim().toLocaleLowerCase("zh-CN"),
+    (input.sourceCampaign ?? "").trim(),
+    (input.productName ?? "").trim(),
+    (input.quote ?? "").trim(),
+  ].join("\0"));
+  return `acquisition_lead:${fingerprint}`;
 }

@@ -401,11 +401,18 @@ export interface CampaignRecommendation {
   expiresAt: string;
 }
 
+export interface AcquisitionModelOption {
+  id: string;
+  label?: string;
+}
+
 export interface AcquisitionModelConfiguration {
   image: boolean;
   video: boolean;
   imageModelId: string | null;
   videoModelId: string | null;
+  imageModels: AcquisitionModelOption[];
+  videoModels: AcquisitionModelOption[];
   configurationUrl: string;
 }
 

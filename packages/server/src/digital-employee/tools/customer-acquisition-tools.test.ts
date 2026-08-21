@@ -82,4 +82,21 @@ describe("customer acquisition agent tools", () => {
     expect(service.createAsset).toHaveBeenCalledWith("u1", expect.objectContaining({ assetType: "copy" }));
     expect(JSON.parse(result.content).asset).toMatchObject({ id: "a1", assetType: "copy" });
   });
+
+  it("passes the selected image model into poster generation", async () => {
+    const service = { createAsset: vi.fn(async () => ({ id: "p1", assetType: "poster" })) };
+    await find("generate_campaign_poster", service).execute({
+      prompt: "生成海报",
+      publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000001",
+      objective: "咨询",
+      channels: ["朋友圈"],
+      callToAction: "预约",
+      modelId: "flux-pro",
+    }, context);
+    expect(service.createAsset).toHaveBeenCalledWith("u1", expect.objectContaining({
+      assetType: "poster",
+      modelId: "flux-pro",
+    }));
+  });
 });

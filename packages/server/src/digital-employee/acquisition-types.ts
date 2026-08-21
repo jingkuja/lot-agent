@@ -1,5 +1,4 @@
-export const CAMPAIGN_IMAGE_MODEL = "gpt-image-2.0" as const;
-export const CAMPAIGN_VIDEO_MODEL = "seedance 2.0" as const;
+export const DEFAULT_TOKENHUB_CONFIGURATION_URL = "https://wetok.ai/";
 
 export const SEGMENT_RELATIONSHIP_STAGES = ["lead", "prospect", "customer", "inactive", "lost"] as const;
 export const SEGMENT_HEALTH_VALUES = ["healthy", "watch", "at_risk"] as const;
@@ -49,6 +48,15 @@ export interface CampaignRecommendationDraft {
   durationSeconds?: number | null;
 }
 
+export interface CampaignAssetAttachment {
+  assetId: string;
+  filename: string;
+  mime: string;
+  size: number;
+  url: string;
+  kind: "image" | "doc";
+}
+
 export interface CampaignContentGenerator {
   recommend(input: {
     userId: string;
@@ -61,6 +69,8 @@ export interface CampaignContentGenerator {
     userId: string;
     prompt: string;
     brief: Record<string, unknown>;
+    knowledgeBaseIds?: string[];
+    attachments?: CampaignAssetAttachment[];
   }): Promise<{ title: string; content: string; modelId: string }>;
   evaluateFit?(input: {
     userId: string;
@@ -70,11 +80,18 @@ export interface CampaignContentGenerator {
   }): Promise<CampaignFitDraft & { modelId: string }>;
 }
 
+export interface CampaignModelOption {
+  id: string;
+  label?: string;
+}
+
 export interface CampaignModelAvailability {
   image: boolean;
   video: boolean;
   imageModelId: string | null;
   videoModelId: string | null;
+  imageModels: CampaignModelOption[];
+  videoModels: CampaignModelOption[];
   configurationUrl: string;
 }
 
@@ -90,6 +107,14 @@ export interface CampaignModelResolver {
 
 export type AssetTypeInput = "copy" | "poster" | "video";
 
+export interface CampaignMediaSettings {
+  size?: string;
+  n?: number;
+  quality?: string;
+  durationSec?: number;
+  ratio?: string;
+}
+
 export interface CreateCampaignAssetInput {
   assetType: AssetTypeInput;
   prompt: string;
@@ -104,7 +129,16 @@ export interface CreateCampaignAssetInput {
   channels: string[];
   callToAction: string;
   title?: string;
-  durationSeconds?: 15 | 30 | 60;
+  durationSeconds?: number;
+  modelId?: string;
+  knowledgeBaseIds?: string[];
+  attachments?: CampaignAssetAttachment[];
+  mediaSettings?: CampaignMediaSettings;
+  input_reference?: string | string[];
+  reference_video?: string | string[];
+  reference_audio?: string | string[];
+  first_frame?: string;
+  last_frame?: string;
 }
 
 export interface AssetListFilters {
@@ -166,6 +200,14 @@ export interface CampaignFitDraft {
   suggestedChannels: string[];
   risks: string[];
   priority: "low" | "normal" | "high";
+}
+
+export interface AcquisitionLeadInput {
+  displayName: string;
+  organization?: string | null;
+  sourceCampaign?: string;
+  productName?: string;
+  quote?: string;
 }
 
 export interface CampaignResultInput {

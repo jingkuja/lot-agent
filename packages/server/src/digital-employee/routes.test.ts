@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { createDigitalEmployeeRoutes } from "./routes.js";
-import { NotFoundError } from "./errors.js";
+import { NotFoundError, OpenTasksError } from "./errors.js";
 
 function app(service: Record<string, unknown>) {
   const server = new Hono<{ Variables: { userId: string } }>();
@@ -43,6 +43,39 @@ describe("digital employee profile routes", () => {
     });
     expect(response.status).toBe(400);
     expect(service.archiveProfile).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid open-task choice before archiving", async () => {
+    const service = { archiveProfile: vi.fn() };
+    const response = await app(service).request("/digital-employee/profiles/00000000-0000-0000-0000-000000000001", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: 1, onOpenTasks: "delete" }),
+    });
+    expect(response.status).toBe(400);
+    expect(service.archiveProfile).not.toHaveBeenCalled();
+  });
+
+  it("passes the open-task choice through to archive", async () => {
+    const service = { archiveProfile: vi.fn(async () => ({ id: "p1", status: "archived" })) };
+    const response = await app(service).request("/digital-employee/profiles/00000000-0000-0000-0000-000000000001", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: 3, onOpenTasks: "cancel" }),
+    });
+    expect(response.status).toBe(200);
+    expect(service.archiveProfile).toHaveBeenCalledWith("u1", "00000000-0000-0000-0000-000000000001", 3, "cancel");
+  });
+
+  it("returns open-task details when archive needs a cancel-or-keep choice", async () => {
+    const service = { archiveProfile: vi.fn(async () => { throw new OpenTasksError(3); }) };
+    const response = await app(service).request("/digital-employee/profiles/00000000-0000-0000-0000-000000000001", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "open_tasks", openTaskCount: 3 });
   });
 
   it("rejects malformed UUIDs before reaching the service", async () => {
@@ -143,6 +176,17 @@ describe("digital employee profile routes", () => {
     const response = await app(service).request("/digital-employee/acquisition/assets?range=7d&assetType=poster");
     expect(response.status).toBe(200);
     expect(listAssets).toHaveBeenCalledWith("u1", expect.objectContaining({ range: "7d", assetType: "poster" }));
+  });
+
+  it("returns an acquisition lead through a single endpoint", async () => {
+    const returnAcquisitionLead = vi.fn(async () => ({ alreadyApplied: false, profile: { id: "p1", displayName: "李静" }, action: { id: "a1" } }));
+    const service = { returnAcquisitionLead };
+    const response = await app(service).request("/digital-employee/acquisition/leads", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName: "李静", sourceCampaign: "部署简单", quote: "想看演示" }),
+    });
+    expect(response.status).toBe(201);
+    expect(returnAcquisitionLead).toHaveBeenCalledWith("u1", expect.objectContaining({ displayName: "李静", sourceCampaign: "部署简单" }));
   });
 
   it("lists marketing campaigns for the authenticated user", async () => {

@@ -353,8 +353,8 @@ export class DigitalEmployeeRepository {
     return result.rows[0] ? toProfile(result.rows[0]) : null;
   }
 
-  async archiveProfile(userId: string, profileId: string, version: number): Promise<StoredCustomerProfile | null> {
-    const result = await this.pool.query(
+  async archiveProfile(userId: string, profileId: string, version: number, client: Client = this.pool): Promise<StoredCustomerProfile | null> {
+    const result = await client.query(
       `UPDATE de_customer_profiles
        SET status = 'archived', archived_at = now(), version = version + 1, updated_at = now()
        WHERE id = $1 AND user_id = $2 AND status = 'active' AND version = $3

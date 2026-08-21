@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../../api/client.js";
+import { ApiClientError, api } from "../../../api/client.js";
 import { ProfileEditor } from "../components/ProfileEditor.js";
 import {
   HEALTH_LABELS,
@@ -64,6 +64,8 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
   const [noteType, setNoteType] = useState<ObservationType>("note");
   const [noteProduct, setNoteProduct] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [archiveOpenCount, setArchiveOpenCount] = useState<number | null>(null);
+  const [savingArchive, setSavingArchive] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -133,13 +135,24 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
     }
   };
 
-  const archive = async () => {
-    if (!profile || !window.confirm(`确定归档「${profile.displayName}」吗？归档后不会出现在默认列表中。`)) return;
+  const archive = async (onOpenTasks?: "cancel" | "keep") => {
+    if (!profile) return;
+    if (onOpenTasks === undefined && archiveOpenCount === null) {
+      if (!window.confirm(`确定归档「${profile.displayName}」吗？归档后不会出现在默认列表和商机待办中。`)) return;
+    }
+    setSavingArchive(true);
+    setError(null);
     try {
-      await api.archiveCustomerProfile(profile.id, profile.version);
+      await api.archiveCustomerProfile(profile.id, profile.version, onOpenTasks);
       onBack();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "归档失败");
+      if (reason instanceof ApiClientError && reason.code === "open_tasks") {
+        setArchiveOpenCount(typeof reason.details.openTaskCount === "number" ? reason.details.openTaskCount : 0);
+      } else {
+        setError(reason instanceof Error ? reason.message : "归档失败");
+      }
+    } finally {
+      setSavingArchive(false);
     }
   };
 
@@ -169,6 +182,24 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
       </header>
 
       {error && <div className="de-inline-error" role="alert"><span>{error}</span><button onClick={() => void reload()}>重试</button></div>}
+      {archiveOpenCount !== null && profile && (
+        <div className="de-modal-backdrop" onMouseDown={() => !savingArchive && setArchiveOpenCount(null)}>
+          <section className="de-modal" role="dialog" aria-modal="true" aria-label="处理未完成跟进" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="de-modal-head">
+              <div>
+                <h2>归档「{profile.displayName}」</h2>
+                <p>该客户还有 {archiveOpenCount} 项未完成跟进。请选择取消或保留这些任务后再归档；归档后不会出现在商机待办中。</p>
+              </div>
+              <button className="de-icon-button" type="button" onClick={() => setArchiveOpenCount(null)} disabled={savingArchive}>×</button>
+            </div>
+            <footer className="de-modal-actions">
+              <button type="button" className="de-secondary-button" onClick={() => setArchiveOpenCount(null)} disabled={savingArchive}>返回</button>
+              <button type="button" className="de-secondary-button" onClick={() => void archive("keep")} disabled={savingArchive}>保留任务并归档</button>
+              <button type="button" className="de-danger-button" onClick={() => void archive("cancel")} disabled={savingArchive}>取消任务并归档</button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       <div className="de-detail-grid">
         <section className="de-detail-card de-profile-overview">

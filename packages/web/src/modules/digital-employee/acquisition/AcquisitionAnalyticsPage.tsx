@@ -20,10 +20,13 @@ function LeadReturnDialog({ onClose }: { onClose: () => void }) {
   const save = async () => {
     setSaving(true); setError(null);
     try {
-      const created = await api.createCustomerProfile({ displayName, organization: organization || null, source: `获客宝${sourceCampaign ? ` · ${sourceCampaign}` : ""}`, relationshipStage: "lead", productStates: productName ? [{ productName, journeyStage: "evaluating" }] : [] });
-      const context = [`来源：获客宝${sourceCampaign ? `活动“${sourceCampaign}”` : "营销活动"}`, quote ? `客户原话：${quote}` : "客户产生了具体咨询", productName ? `感兴趣产品：${productName}` : ""].filter(Boolean).join("；");
-      await api.addCustomerObservation(created.profile.id, { rawText: context, eventType: "purchase_intent", productName: productName || undefined, occurredAt: new Date().toISOString(), facts: { sourceCampaign: sourceCampaign || "获客宝营销活动", customerQuote: quote || undefined } });
-      await api.createOpportunityAction({ profileId: created.profile.id, opportunityType: "new_lead_contact", title: `跟进${displayName}的活动咨询`, objective: "确认咨询需求并获得明确下一步", followUpMethod: "企微/微信", priority: "normal", scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(), resultCriteria: "获得首次有效回复", productName: productName || undefined });
+      await api.returnAcquisitionLead({
+        displayName: displayName.trim(),
+        organization: organization.trim() || null,
+        sourceCampaign: sourceCampaign.trim() || undefined,
+        productName: productName.trim() || undefined,
+        quote: quote.trim() || undefined,
+      });
       setDone(true);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "线索回流失败"); }
     finally { setSaving(false); }

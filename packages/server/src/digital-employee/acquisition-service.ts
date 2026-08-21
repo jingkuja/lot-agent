@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type { DB } from "../db/database.js";
 import type { JobQueue } from "@lot-agent/core";
+import { billedVideoSeconds, validateImageGenerationSettings } from "../generation/input.js";
 import { ConversationActionDrafts } from "./conversation-drafts.js";
 import { ConflictError, InputError, NotFoundError, QuotaError } from "./errors.js";
 import {
-  CAMPAIGN_IMAGE_MODEL,
-  CAMPAIGN_VIDEO_MODEL,
+  DEFAULT_TOKENHUB_CONFIGURATION_URL,
   type AssetListFilters,
   type CampaignContentGenerator,
   type CampaignFitDraft,
   type CampaignListFilters,
+  type CampaignModelAvailability,
+  type CampaignModelOption,
   type CampaignModelResolver,
   type CampaignRecommendationDraft,
   type CampaignResultInput,
@@ -201,13 +203,27 @@ export class CustomerAcquisitionService {
            target_segment_description=EXCLUDED.target_segment_description, core_points=EXCLUDED.core_points,
            suggested_channels=EXCLUDED.suggested_channels, reasoning=EXCLUDED.reasoning,
            creative_direction=EXCLUDED.creative_direction, duration_seconds=EXCLUDED.duration_seconds,
-           status='pending', generated_at=now(), expires_at=now()+interval '7 days'`,
+           status='pending', generated_at=now(), expires_at=now()+interval '7 days'
+         WHERE de_daily_recommendations.status IN ('pending','expired')`,
         [
           randomUUID(), userId, recommendationDate, draft.type, segmentId, productId,
           draft.targetSegmentDescription, draft.theme, JSON.stringify(draft.corePoints),
           JSON.stringify(draft.suggestedChannels), JSON.stringify(draft.reasoning),
           draft.creativeDirection ?? "", draft.durationSeconds ?? null,
         ]
+      );
+    }
+    if (drafts.length) {
+      await this.db.pool.query(
+        `UPDATE de_daily_recommendations SET status='expired'
+         WHERE user_id=$1 AND status='pending'
+           AND NOT (
+             recommendation_date=$2::date
+             AND (recommendation_type, theme) IN (
+               SELECT keep.type, keep.theme FROM unnest($3::text[], $4::text[]) AS keep(type, theme)
+             )
+           )`,
+        [userId, recommendationDate, drafts.map((draft) => draft.type), drafts.map((draft) => draft.theme)]
       );
     }
     return this.listRecommendations(userId, "pending");
@@ -224,10 +240,7 @@ export class CustomerAcquisitionService {
   }
 
   async getModelAvailability(userId: string) {
-    return this.modelResolver?.get(userId) ?? {
-      image: false, video: false, imageModelId: null, videoModelId: null,
-      configurationUrl: "https://tokenhub.todoucloud.com",
-    };
+    return this.modelResolver?.get(userId) ?? emptyModelAvailability();
   }
 
   async createAsset(userId: string, input: CreateCampaignAssetInput) {
@@ -270,14 +283,22 @@ export class CustomerAcquisitionService {
     if (resolvedInput.assetType !== "copy") {
       if (!queue) throw new InputError("生成任务队列不可用");
       const availability = await this.getModelAvailability(userId);
-      if (isPoster && !availability.image) throw new InputError(`请先在灵渠 TokenHub 配置 ${CAMPAIGN_IMAGE_MODEL}`);
-      if (!isPoster && !availability.video) throw new InputError(`请先在灵渠 TokenHub 配置 ${CAMPAIGN_VIDEO_MODEL}`);
-      mediaModelId = isPoster ? availability.imageModelId! : availability.videoModelId!;
+      mediaModelId = resolveCampaignMediaModel(availability, isPoster ? "image" : "video", resolvedInput.modelId);
+      if (isPoster) {
+        const invalid = validateImageGenerationSettings({
+          size: resolvedInput.mediaSettings?.size ?? "1024x1024",
+          n: resolvedInput.mediaSettings?.n ?? 1,
+          quality: resolvedInput.mediaSettings?.quality ?? "auto",
+        }, mediaModelId);
+        if (invalid) throw new InputError(invalid);
+      }
       const quota = await this.modelResolver?.checkQuota?.({
         userId,
         mediaType: isPoster ? "image" : "video",
         modelId: mediaModelId,
-        outputCount: isPoster ? 1 : resolvedInput.durationSeconds ?? 15,
+        outputCount: isPoster
+          ? resolvedInput.mediaSettings?.n ?? 1
+          : billedVideoSeconds(resolvedInput.mediaSettings?.durationSec ?? resolvedInput.durationSeconds),
       });
       if (quota && !quota.ok) throw new QuotaError(quota.reason);
     }
@@ -301,7 +322,13 @@ export class CustomerAcquisitionService {
       };
       if (this.contentGenerator) {
         try {
-          generated = await this.contentGenerator.createCopy({ userId, prompt: resolvedInput.prompt, brief });
+          generated = await this.contentGenerator.createCopy({
+            userId,
+            prompt: resolvedInput.prompt,
+            brief,
+            knowledgeBaseIds: resolvedInput.knowledgeBaseIds,
+            attachments: resolvedInput.attachments,
+          });
         } catch {
           // A usable, fact-bound draft is preferable to losing the whole brief.
         }
@@ -326,28 +353,75 @@ export class CustomerAcquisitionService {
 
     const modelId = mediaModelId!;
     const mediaPrompt = campaignMediaPrompt(resolvedInput, snapshot, product, brand, isPoster ? "poster" : "video");
-    const taskId = await queue!.enqueue(
-      isPoster ? "image.generate" : "video.generate",
-      isPoster
-        ? { prompt: mediaPrompt, modelId, size: "1024x1024", n: 1, featureScope: "customer-acquisition", campaignId }
-        : { prompt: mediaPrompt, modelId, durationSec: resolvedInput.durationSeconds ?? 15, ratio: "16:9", featureScope: "customer-acquisition", campaignId },
-      userId
-    );
     const assetId = randomUUID();
+    const runId = randomUUID();
     await this.db.pool.query(
       `INSERT INTO de_marketing_asset_library
-         (id,user_id,campaign_id,segment_snapshot_id,parent_asset_id,task_id,asset_type,title,source,model_id,generation_status,status,version)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending','draft',$11)`,
-      [assetId, userId, campaignId, snapshot.id, resolvedInput.parentAssetId ?? null, taskId, isPoster ? "poster" : "video", title, source, modelId, parentVersion]
+         (id,user_id,campaign_id,segment_snapshot_id,parent_asset_id,asset_type,title,source,model_id,generation_status,status,version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending','draft',$10)`,
+      [assetId, userId, campaignId, snapshot.id, resolvedInput.parentAssetId ?? null, isPoster ? "poster" : "video", title, source, modelId, parentVersion]
     );
     await this.db.pool.query(
       `INSERT INTO de_campaign_generation_runs
-         (id,user_id,campaign_id,asset_id,task_id,model_id,input_snapshot,prompt_version,status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'running')`,
-      [randomUUID(), userId, campaignId, assetId, taskId, modelId, JSON.stringify(brief), CREATION_PROMPT_VERSION]
+         (id,user_id,campaign_id,asset_id,model_id,input_snapshot,prompt_version,status)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'running')`,
+      [runId, userId, campaignId, assetId, modelId, JSON.stringify(brief), CREATION_PROMPT_VERSION]
     );
     await this.adoptIfNeeded(userId, resolvedInput.recommendationId);
     await this.selectAssetIfEmpty(userId, campaignId, isPoster ? "poster" : "video", assetId);
+    let taskId: string | undefined;
+    try {
+      const media = isPoster
+        ? (resolvedInput.attachments ?? [])
+          .filter((item) => item.kind === "image")
+          .slice(0, 5)
+          .map((item) => ({ type: "reference_image" as const, url: item.url }))
+        : undefined;
+      const videoSettings = resolvedInput.mediaSettings;
+      taskId = await queue!.enqueue(
+        isPoster ? "image.generate" : "video.generate",
+        isPoster
+          ? {
+              prompt: mediaPrompt,
+              modelId,
+              size: resolvedInput.mediaSettings?.size ?? "1024x1024",
+              n: resolvedInput.mediaSettings?.n ?? 1,
+              quality: resolvedInput.mediaSettings?.quality ?? "auto",
+              ...(media?.length ? { media } : {}),
+              featureScope: "customer-acquisition",
+              campaignId,
+              assetId,
+            }
+          : {
+              prompt: mediaPrompt,
+              modelId,
+              durationSec: videoSettings?.durationSec ?? resolvedInput.durationSeconds ?? 5,
+              ratio: videoSettings?.ratio ?? "16:9",
+              size: videoSettings?.size,
+              ...(resolvedInput.input_reference ? { input_reference: resolvedInput.input_reference } : {}),
+              ...(resolvedInput.reference_video ? { reference_video: resolvedInput.reference_video } : {}),
+              ...(resolvedInput.reference_audio ? { reference_audio: resolvedInput.reference_audio } : {}),
+              ...(resolvedInput.first_frame ? { first_frame: resolvedInput.first_frame } : {}),
+              ...(resolvedInput.last_frame ? { last_frame: resolvedInput.last_frame } : {}),
+              featureScope: "customer-acquisition",
+              campaignId,
+              assetId,
+            },
+        userId
+      );
+      await this.db.pool.query(
+        `UPDATE de_marketing_asset_library SET task_id=$2 WHERE id=$1 AND user_id=$3`,
+        [assetId, taskId, userId]
+      );
+      await this.db.pool.query(
+        `UPDATE de_campaign_generation_runs SET task_id=$2 WHERE id=$1 AND user_id=$3`,
+        [runId, taskId, userId]
+      );
+    } catch (error) {
+      if (taskId) await queue!.cancel(taskId).catch(() => false);
+      await this.failMediaAsset(userId, assetId, runId, error);
+      throw error;
+    }
     return this.getAsset(userId, assetId);
   }
 
@@ -992,6 +1066,20 @@ export class CustomerAcquisitionService {
     return toSnapshot(rows[0]);
   }
 
+  private async failMediaAsset(userId: string, assetId: string, runId: string, error: unknown) {
+    const message = error instanceof Error ? error.message : "生成任务创建失败";
+    await this.db.pool.query(
+      `UPDATE de_marketing_asset_library SET generation_status='failed', status='draft'
+       WHERE id=$1 AND user_id=$2 AND generation_status='pending'`,
+      [assetId, userId]
+    );
+    await this.db.pool.query(
+      `UPDATE de_campaign_generation_runs SET status='failed', error=$3, finished_at=now()
+       WHERE id=$1 AND user_id=$2 AND status='running'`,
+      [runId, userId, message]
+    );
+  }
+
   private async selectAssetIfEmpty(userId: string, campaignId: string, kind: "copy" | "poster" | "video", assetId: string) {
     await this.db.pool.query(
       `UPDATE de_marketing_campaigns SET selected_assets = selected_assets || jsonb_build_object($3::text, to_jsonb($4::text))
@@ -1284,7 +1372,7 @@ function campaignMediaPrompt(input: CreateCampaignAssetInput, snapshot: any, pro
   const facts = (product.verifiable_facts ?? []).map((item: any) => item.statement).filter(Boolean).slice(0, 4);
   const forbidden = product.prohibited_expressions ?? [];
   return [
-    kind === "poster" ? "生成一张专业营销海报，不要绘制任何真实客户或个人身份信息。" : `生成${input.durationSeconds ?? 15}秒营销视频，画面不得包含真实客户身份。`,
+    kind === "poster" ? "生成一张专业营销海报，不要绘制任何真实客户或个人身份信息。" : `生成${input.mediaSettings?.durationSec ?? input.durationSeconds ?? 5}秒营销视频，画面不得包含真实客户身份。`,
     `目标客群：${snapshot.audienceDescription || "已确认客群快照"}（仅作为聚合受众描述）`,
     `产品：${product.name}`, `定位：${product.positioning || "未填写"}`,
     `已确认价值：${(product.core_values ?? []).join("；") || "无"}`,
@@ -1326,6 +1414,46 @@ function normalizeRecommendationMix(value: CampaignRecommendationDraft[]) {
 }
 
 function iso(value: string | Date): string { return new Date(value).toISOString(); }
+
+function emptyModelAvailability(): CampaignModelAvailability {
+  return {
+    image: false,
+    video: false,
+    imageModelId: null,
+    videoModelId: null,
+    imageModels: [],
+    videoModels: [],
+    configurationUrl: process.env.TOKENHUB_WEB_URL?.trim() || DEFAULT_TOKENHUB_CONFIGURATION_URL,
+  };
+}
+
+function listedCampaignModels(availability: CampaignModelAvailability, kind: "image" | "video"): CampaignModelOption[] {
+  const listed = kind === "image" ? availability.imageModels : availability.videoModels;
+  if (listed?.length) return listed;
+  const selected = kind === "image" ? availability.imageModelId : availability.videoModelId;
+  const available = kind === "image" ? availability.image : availability.video;
+  return available && selected ? [{ id: selected }] : [];
+}
+
+function resolveCampaignMediaModel(
+  availability: CampaignModelAvailability,
+  kind: "image" | "video",
+  requested?: string,
+): string {
+  const models = listedCampaignModels(availability, kind);
+  const label = kind === "image" ? "图像" : "视频";
+  if (!models.length) {
+    throw new InputError(`当前没有可用的${label}模型，请先前往 TokenHub 配置`);
+  }
+  if (requested) {
+    if (!models.some((model) => model.id === requested)) {
+      throw new InputError(`所选${label}模型不可用，请重新选择或前往 TokenHub 配置`);
+    }
+    return requested;
+  }
+  const fallback = kind === "image" ? availability.imageModelId : availability.videoModelId;
+  return fallback && models.some((model) => model.id === fallback) ? fallback : models[0].id;
+}
 function dateOnly(value: string | Date): string { return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10); }
 function shanghaiDate(value: Date) { return new Date(value.getTime() + 8 * 60 * 60 * 1_000).toISOString().slice(0, 10); }
 function isUniqueViolation(error: unknown) { return Boolean(error && typeof error === "object" && "code" in error && (error as any).code === "23505"); }

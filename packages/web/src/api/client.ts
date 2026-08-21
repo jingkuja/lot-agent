@@ -198,6 +198,18 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+export class ApiClientError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(message);
+    this.name = "ApiClientError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const { headers: callerHeaders, ...restInit } = init ?? {};
   const res = await fetch(`${BASE}${path}`, {
@@ -217,7 +229,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error ?? res.statusText);
+    throw new ApiClientError(err.error ?? res.statusText, res.status, err.code, err);
   }
   return res.json();
 }
@@ -519,10 +531,10 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  archiveCustomerProfile: (id: string, version: number) =>
+  archiveCustomerProfile: (id: string, version: number, onOpenTasks?: "cancel" | "keep") =>
     request<CustomerProfile>(`/digital-employee/profiles/${encodeURIComponent(id)}`, {
       method: "DELETE",
-      body: JSON.stringify({ version }),
+      body: JSON.stringify({ version, onOpenTasks }),
     }),
 
   updateCustomerProductState: (profileId: string, productKey: string, input: ProductStateUpdateInput) =>
@@ -665,7 +677,11 @@ export const api = {
   createMarketingAsset: (input: {
     assetType: "copy" | "poster" | "video"; prompt: string; segmentId?: string; segmentSnapshotId?: string;
     publicAudience?: string; productId: string; recommendationId?: string; parentAssetId?: string; campaignId?: string;
-    objective: string; channels: string[]; callToAction: string; title?: string; durationSeconds?: 15 | 30 | 60;
+    objective: string; channels: string[]; callToAction: string; title?: string; durationSeconds?: number;
+    modelId?: string; knowledgeBaseIds?: string[]; attachments?: UploadedAttachment[];
+    mediaSettings?: { size?: string; n?: number; quality?: string; durationSec?: number; ratio?: string };
+    input_reference?: string | string[]; reference_video?: string | string[]; reference_audio?: string | string[];
+    first_frame?: string; last_frame?: string;
   }) => request<MarketingAsset>("/digital-employee/acquisition/assets", { method: "POST", body: JSON.stringify(input) }),
 
   getMarketingAsset: (id: string) => request<MarketingAsset>(`/digital-employee/acquisition/assets/${encodeURIComponent(id)}`),
@@ -683,6 +699,12 @@ export const api = {
     }),
 
   getAcquisitionAnalytics: () => request<AcquisitionAnalytics>("/digital-employee/acquisition/analytics"),
+
+  returnAcquisitionLead: (input: {
+    displayName: string; organization?: string | null; sourceCampaign?: string; productName?: string; quote?: string;
+  }) => request<{ alreadyApplied: boolean; profile: CustomerProfile; action: { id: string; profileId: string; title: string } }>(
+    "/digital-employee/acquisition/leads", { method: "POST", body: JSON.stringify(input) }
+  ),
 
   listMarketingCampaigns: (filters: { status?: string; page?: number; limit?: number } = {}) => {
     const query = new URLSearchParams();

@@ -340,6 +340,15 @@ export function parseVersion(value: unknown): number {
   return positiveInt(value, "version", { min: 1, max: 2_147_483_647 });
 }
 
+export function parseArchiveProfile(value: unknown): { version: number; onOpenTasks?: "cancel" | "keep" } {
+  const source = record(value);
+  const onOpenTasks = source.onOpenTasks;
+  if (onOpenTasks !== undefined && onOpenTasks !== "cancel" && onOpenTasks !== "keep") {
+    throw new InputError("onOpenTasks必须是cancel或keep");
+  }
+  return { version: parseVersion(source.version), onOpenTasks };
+}
+
 export function parseDraftId(value: unknown): string {
   if (typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) throw new InputError("draftId无效");
   return value;
