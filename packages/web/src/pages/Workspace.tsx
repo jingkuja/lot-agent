@@ -234,7 +234,7 @@ export function Workspace({
   );
 
   // A digital-employee feature is a hard business boundary. Switching from
-  // 客户画像/商机参谋 to 获客宝 must never keep the previous conversation's
+  // 客户画像/商机雷达 to 获客宝 must never keep the previous conversation's
   // implicit object or tool scope, even though this Workspace stays mounted.
   const previousDigitalFeature = useRef(digitalEmployeeFeature);
   useEffect(() => {

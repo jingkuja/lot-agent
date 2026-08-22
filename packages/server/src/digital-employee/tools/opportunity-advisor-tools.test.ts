@@ -57,7 +57,7 @@ describe("opportunity advisor agent tools", () => {
       { ...context, featureScope: "customer-acquisition" }
     );
     expect(result.isError).toBe(true);
-    expect(result.content).toContain("不在商机参谋作用域");
+    expect(result.content).toContain("不在商机雷达作用域");
     expect(list).not.toHaveBeenCalled();
   });
 

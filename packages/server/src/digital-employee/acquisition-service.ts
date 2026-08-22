@@ -930,7 +930,7 @@ export class CustomerAcquisitionService {
     );
     return {
       alreadyApplied: false, resultId: id, campaignId: input.campaignId,
-      message: "已记录群体结果。具体咨询者请到客户画像建档，并由商机参谋继续单客跟进。",
+      message: "已记录群体结果。具体咨询者请到客户画像建档，并由商机雷达继续单客跟进。",
       managementUrl: "/digital-employee/copy",
     };
   }

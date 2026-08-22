@@ -85,8 +85,8 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile }: Props
     <div className="de-page de-opportunity-page">
       <header className="de-opportunity-header">
         <div>
-          <p className="de-eyebrow">数字员工 / 商机参谋</p>
-          <h1>商机参谋</h1>
+          <p className="de-eyebrow">数字员工 / 商机雷达</p>
+          <h1>商机雷达</h1>
           <p>盯住每个客户：今天该联系谁、为什么、下一步做什么。</p>
         </div>
         <div className="de-opportunity-header-actions">
@@ -261,7 +261,7 @@ function TalkTrackAssistant({ item, open, onClose }: { item: OpportunityItem; op
 }
 
 function Empty({ view, hasProfiles, hasFilters, onCreateProfile, onDiscover }: { view: OpportunityView; hasProfiles: boolean; hasFilters: boolean; onCreateProfile: () => void; onDiscover: () => void }) {
-  const content = !hasProfiles ? ["还没有可经营的客户画像", "商机参谋只围绕已建档的单个客户工作，请先建立客户画像。"] : hasFilters ? ["没有符合筛选条件的客户事项", "清除或调整筛选条件后再看。"] : view === "today" ? ["今天没有必须处理的客户事项", "可以查看待判断商机，或手动安排一次回访和维护。"] : view === "pending" ? ["当前没有需要判断的新商机", "可以立即运行一次发现；确定性提醒仍会按计划出现在今日经营。"] : ["这个视图目前为空", "行动采纳、执行和结果回填后会自动流转到对应视图。"];
+  const content = !hasProfiles ? ["还没有可经营的客户画像", "商机雷达只围绕已建档的单个客户工作，请先建立客户画像。"] : hasFilters ? ["没有符合筛选条件的客户事项", "清除或调整筛选条件后再看。"] : view === "today" ? ["今天没有必须处理的客户事项", "可以查看待判断商机，或手动安排一次回访和维护。"] : view === "pending" ? ["当前没有需要判断的新商机", "可以立即运行一次发现；确定性提醒仍会按计划出现在今日经营。"] : ["这个视图目前为空", "行动采纳、执行和结果回填后会自动流转到对应视图。"];
   return <div className="de-state de-empty-state de-opportunity-empty"><span className="de-empty-icon">◇</span><strong>{content[0]}</strong><p>{content[1]}</p>{!hasProfiles ? <button className="de-primary-button" onClick={onCreateProfile}>新建客户</button> : view === "pending" && <button className="de-secondary-button" onClick={onDiscover}>发现新商机</button>}</div>;
 }
 
@@ -275,7 +275,7 @@ function AcceptDialog({ item, onClose, onSave }: { item: OpportunityItem; onClos
   return <DialogFrame title="确认跟进行动" onClose={onClose}><form className="de-form" onSubmit={(e) => { e.preventDefault(); onSave({ objective, followUpMethod: method, scheduledAt: new Date(scheduledAt).toISOString(), resultCriteria: criteria }); }}>
     <div className="de-dialog-context"><strong>{item.customerName} · {OPPORTUNITY_TYPE_LABELS[item.opportunityType]}</strong><p>{item.reason}</p></div>
     <div className="de-form-grid"><label><span>推荐目标</span><textarea value={objective} onChange={(e) => setObjective(e.target.value)} required /></label><label><span>结果口径</span><textarea value={criteria} onChange={(e) => setCriteria(e.target.value)} required /></label><label><span>沟通方式</span><select value={method} onChange={(e) => setMethod(e.target.value)}><option>企微/微信</option><option>电话</option><option>邮件</option><option>线下拜访</option></select></label><label><span>计划时间</span><input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} required /></label></div>
-    <p className="de-field-hint">采纳后形成该客户的正式行动，不会创建客群营销项目；单客户联系话术将在商机参谋内继续准备。</p>
+    <p className="de-field-hint">采纳后形成该客户的正式行动，不会创建客群营销项目；单客户联系话术将在商机雷达内继续准备。</p>
     <div className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>取消</button><button className="de-primary-button">采纳并创建行动</button></div>
   </form></DialogFrame>;
 }

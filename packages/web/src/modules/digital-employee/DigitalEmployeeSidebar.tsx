@@ -32,7 +32,7 @@ const DIGITAL_EMPLOYEE_GROUPS: Array<{
     features: [
       { id: "marketing-materials", label: "营销资料", description: "单客与客群共用事实库", icon: "◆" },
       { id: "customer-profile", label: "客户画像", description: "记录客户事实与动态", icon: "◎" },
-      { id: "acquisition", label: "商机参谋", description: "单客提醒与跟进", icon: "◇" },
+      { id: "acquisition", label: "商机雷达", description: "单客提醒与跟进", icon: "◇" },
       { id: "copy", label: "获客宝", description: "客群洞察与营销内容", icon: "✎" },
     ],
   },

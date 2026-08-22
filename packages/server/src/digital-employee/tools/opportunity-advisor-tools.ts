@@ -19,16 +19,16 @@ import {
 } from "./agent-tool-helpers.js";
 
 const SCOPE = "opportunity-advisor";
-const LABEL = "商机参谋";
+const LABEL = "商机雷达";
 
-/** Conversation tools for 商机参谋. Writes go through prepare → ask_user → commit. */
+/** Conversation tools for 商机雷达. Writes go through prepare → ask_user → commit. */
 export function createOpportunityAdvisorTools(service: DigitalEmployeeService): Tool[] {
   const opportunities = service.opportunities;
 
   const searchQueue: Tool = {
     name: "search_customer_work_queue",
     description:
-      "查询商机参谋今日经营队列、逾期行动、跟进中或待回填事项。只返回单个客户事项，不含客群营销。" +
+      "查询商机雷达今日经营队列、逾期行动、跟进中或待回填事项。只返回单个客户事项，不含客群营销。" +
       "回答“今天该跟谁”优先用 view=today；逾期未完成也包含在 today 中。",
     parameters: {
       type: "object",

@@ -490,7 +490,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const prepareResult: Tool = {
     name: "prepare_campaign_result",
-    description: "准备回填一次营销活动的群体结果。不把生成完成当作业务完成。具体咨询者应转到客户画像和商机参谋。",
+    description: "准备回填一次营销活动的群体结果。不把生成完成当作业务完成。具体咨询者应转到客户画像和商机雷达。",
     parameters: {
       type: "object",
       properties: {
