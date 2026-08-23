@@ -90,7 +90,10 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
             onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
             onCreateProfile={goProfiles}
           />}
-          {view === "copy" && <CustomerAcquisitionPage onOpenChat={openFeatureChat} />}
+          {view === "copy" && <CustomerAcquisitionPage
+            onOpenChat={openFeatureChat}
+            onOpenMarketingMaterials={() => onNavigate("/digital-employee/marketing-materials/manage")}
+          />}
         </div>
       </main>
     </div>

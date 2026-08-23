@@ -15,17 +15,23 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
   const [products, setProducts] = useState<MarketingProduct[]>([]);
   const [brand, setBrand] = useState<MarketingBrandAssets | null>(null);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<MarketingProduct | "new" | null>(null);
   const [editingBrand, setEditingBrand] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [productResult, brandResult] = await Promise.all([
-        api.listMarketingProducts({ q: query || undefined, limit: 100 }),
+        api.listMarketingProducts({ q: debouncedQuery || undefined, limit: 100 }),
         api.getMarketingBrandAssets(),
       ]);
       setProducts(productResult.items);
@@ -35,7 +41,7 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [debouncedQuery]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -94,11 +100,11 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
           <div><h2>产品目录</h2><p>卖点、事实、异议、权益、禁用表达与案例素材集中管理。</p></div>
           <div className="marketing-product-search"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索产品名称或定位" /></div>
         </div>
-        {loading && <div className="de-state">正在读取营销资料…</div>}
+        {loading && products.length === 0 && <div className="de-state">正在读取营销资料…</div>}
         {!loading && products.length === 0 && (
-          <div className="de-state de-empty-state"><span className="de-empty-icon">◇</span><strong>{query ? "没有匹配的产品" : "还没有产品资料"}</strong><p>可以在此结构化维护，也可以回到对话直接告诉数字员工。</p>{!query && <button className="de-primary-button" onClick={() => setEditingProduct("new")}>新建第一条产品资料</button>}</div>
+          <div className="de-state de-empty-state"><span className="de-empty-icon">◇</span><strong>{debouncedQuery ? "没有匹配的产品" : "还没有产品资料"}</strong><p>可以在此结构化维护，也可以回到对话直接告诉数字员工。</p>{!debouncedQuery && <button className="de-primary-button" onClick={() => setEditingProduct("new")}>新建第一条产品资料</button>}</div>
         )}
-        {!loading && products.length > 0 && <div className="marketing-product-grid">{products.map((product) => (
+        {products.length > 0 && <div className="marketing-product-grid">{products.map((product) => (
           <ProductCard key={product.id} product={product} onEdit={() => setEditingProduct(product)} onArchive={() => void archiveProduct(product)} />
         ))}</div>}
       </section>

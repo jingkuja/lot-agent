@@ -18,7 +18,7 @@ const WORKSPACES: Array<{ id: Workspace; label: string; description: string }> =
   { id: "analytics", label: "效果复盘", description: "跨平台反馈" },
 ];
 
-export function CustomerAcquisitionPage({ onOpenChat }: { onOpenChat?: () => void }) {
+export function CustomerAcquisitionPage({ onOpenChat, onOpenMarketingMaterials }: { onOpenChat?: () => void; onOpenMarketingMaterials?: () => void }) {
   const [workspace, setWorkspace] = useState<Workspace>("assets");
   const [seed, setSeed] = useState<CreationSeed | undefined>();
 
@@ -77,7 +77,7 @@ export function CustomerAcquisitionPage({ onOpenChat }: { onOpenChat?: () => voi
 
     {workspace === "assets" && <MarketingAssetLibraryPage onReuse={reuseAsset} onCreate={() => startCreation({})} />}
     {workspace === "recommendations" && <DailyRecommendationsPage onCreate={fromRecommendation} />}
-    {workspace === "creation" && <CreationWorkspacePage seed={seed} onOpenAssets={() => setWorkspace("assets")} onOpenSegments={() => setWorkspace("segments")} onOpenCampaigns={() => setWorkspace("campaigns")} />}
+    {workspace === "creation" && <CreationWorkspacePage seed={seed} onOpenAssets={() => setWorkspace("assets")} onOpenSegments={() => setWorkspace("segments")} onOpenCampaigns={() => setWorkspace("campaigns")} onOpenMarketingMaterials={onOpenMarketingMaterials} />}
     {workspace === "campaigns" && <CampaignsPage onCreate={() => startCreation({})} onContinue={continueCampaign} />}
     {workspace === "segments" && <CustomerSegmentsPage onCreateContent={fromSegment} />}
     {workspace === "analytics" && <AcquisitionAnalyticsPage />}

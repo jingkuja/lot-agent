@@ -3924,6 +3924,7 @@ html, body, #root {
 .de-recent-empty small { color: var(--text-muted); font-size: 10px; }
 
 .de-home-inline-state { display: grid; place-items: center; min-height: 180px; color: var(--text-muted); font-size: 12px; text-align: center; }
+.de-home-inline-state button { margin-top: 8px; border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
 .de-quick-prompts {
   display: flex;
   align-items: center;
