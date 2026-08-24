@@ -26,7 +26,7 @@ describe("conversation feature scope", () => {
     });
     expect(response.status).toBe(201);
     expect(createConversation).toHaveBeenCalledWith(
-      expect.any(String), "新对话", "test-model", "openai", "digital_employee", "u1",
+      expect.any(String), "新对话", undefined, undefined, "digital_employee", "u1",
       { digitalEmployeeFeatureScope: "customer-acquisition" }
     );
   });

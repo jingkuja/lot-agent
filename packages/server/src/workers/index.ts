@@ -16,7 +16,12 @@ import { loadLlmConfig } from "../config.js";
 import { loadGenerationConfig, makeImageProvider, makeVideoProvider } from "../generation/config.js";
 import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { ProviderFactory } from "../models/provider-factory.js";
+import {
+  DIGITAL_EMPLOYEE_LLM_UNAVAILABLE,
+  resolveDigitalEmployeeLlm,
+} from "../models/digital-employee-llm.js";
 import type { ModelCatalogConfig } from "../models/catalog.js";
+import { TokenhubClient } from "../tokenhub/client.js";
 import { pickGenModel } from "./gen-provider.js";
 import { lastTurn } from "../memory/last-turn.js";
 import { UsageMeter } from "../billing/meter.js";
@@ -115,6 +120,26 @@ async function main() {
     imageBase: genConfig.image,
     videoBase: genConfig.video,
   });
+  const tokenhub = new TokenhubClient(
+    process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market",
+    undefined,
+    process.env.NEW_API_AGENT_KEY ?? ""
+  );
+
+  const resolveDigitalEmployeeTaskLlm = async (userId: string) => {
+    const activeApiKey = await db.getUserApiKey(userId);
+    let apiKeys: string[] = [];
+    try {
+      apiKeys = (await db.getUserApiKeys(userId)).map((entry) => entry.apiKey);
+    } catch {
+      // The active key can still be tried when the stored key list is unavailable.
+    }
+    return resolveDigitalEmployeeLlm(
+      activeApiKey,
+      apiKeys,
+      async (apiKey) => (await tokenhub.listModels(apiKey)).llm
+    );
+  };
 
   /**
    * Resolve a provider url (http(s) or data:) to bytes + mime, enforcing
@@ -176,6 +201,9 @@ async function main() {
     const downloadTimeoutMs = mediaType === "image" ? IMAGE_DOWNLOAD_TIMEOUT_MS : VIDEO_DOWNLOAD_TIMEOUT_MS;
     const model = pickGenModel(mediaType, job.input, base.modelId);
     const apiKey = (await db.getUserApiKey(job.userId)) ?? "";
+    if (!apiKey && (job.input.requireUserModelKey === true || job.input.featureScope)) {
+      throw new Error("数字员工生成任务缺少用户 TokenHub key");
+    }
     const provider = apiKey
       ? mediaType === "image"
         ? providerFactory.image(model, apiKey)
@@ -212,10 +240,10 @@ async function main() {
 
   const opportunityService = new OpportunityService(db, undefined, {
     enhance: async ({ userId, taskId, opportunities }) => {
-      const apiKey = await db.getUserApiKey(userId);
-      const modelId = fallbackExtractModelId;
-      const llm = apiKey ? providerFactory.llm(modelId, apiKey) : fallbackExtractLlm;
-      if (!llm) throw new Error("no opportunity advice LLM available");
+      const selection = await resolveDigitalEmployeeTaskLlm(userId);
+      if (!selection) throw new Error(DIGITAL_EMPLOYEE_LLM_UNAVAILABLE);
+      const modelId = selection.modelId;
+      const llm = providerFactory.llm(selection.modelId, selection.apiKey);
       const meters: Promise<unknown>[] = [];
       const metered = meterLLM(llm, (usage) => {
         meters.push(meter.record({
@@ -267,6 +295,14 @@ async function main() {
   queue.process("memory.extract", async (job) => {
     const { conversationId, modelId } = job.input as { conversationId: string; modelId?: string };
     const userId = job.userId;
+
+    // Digital-employee facts belong in its controlled profile/marketing tables,
+    // not user memory. This also guarantees old queued tasks cannot fall back
+    // to an environment LLM after a user's TokenHub key disappears.
+    if (await db.getConversationAgentId(conversationId) === "digital_employee") {
+      await queue.updateProgress(job.id, 100);
+      return { upserts: 0, deletes: 0 };
+    }
 
     const messages = await db.getMessages(conversationId);
     const turn = lastTurn(messages);

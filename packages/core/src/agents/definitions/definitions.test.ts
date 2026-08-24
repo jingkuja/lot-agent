@@ -40,6 +40,7 @@ describe("agent definitions", () => {
     expect(digitalEmployeeDefinition.toolNames).toContain("rewrite_campaign_asset");
     expect(digitalEmployeeDefinition.toolNames).toContain("prepare_campaign_result");
     expect(digitalEmployeeDefinition.toolNames).not.toContain("execute_command");
+    expect(digitalEmployeeDefinition.defaultModelId).toBe("tokenhub-user-selected");
     expect(digitalEmployeeDefinition.systemPrompt).toContain("不得声称已完成");
     expect(digitalEmployeeDefinition.systemPrompt).toContain("prepare_follow_up_action");
     expect(digitalEmployeeDefinition.systemPrompt).toContain("prepare_marketing_campaign");

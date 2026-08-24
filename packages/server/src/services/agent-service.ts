@@ -38,6 +38,10 @@ import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } fr
 import { TokenhubClient } from "../tokenhub/client.js";
 import { enrichCatalog, resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
 import { ProviderFactory } from "../models/provider-factory.js";
+import {
+  DIGITAL_EMPLOYEE_LLM_UNAVAILABLE,
+  resolveDigitalEmployeeLlm,
+} from "../models/digital-employee-llm.js";
 import type {
   AgentEvent,
   AgentConfig,
@@ -273,7 +277,7 @@ export class AgentService {
   private llmProvider: LLMProvider | null = null;
   private bullmqQueue: BullmqJobQueue | null = null;
   private messageRepo!: MessageRepository;
-  private traceRecorderFactory!: () => TraceRecorder;
+  private traceRecorderFactory!: (modelId?: string, provider?: string) => TraceRecorder;
 
   constructor(config: ServiceConfig) {
     this.db = new DB(config.db);
@@ -354,12 +358,12 @@ export class AgentService {
     });
 
     // Customer facts stay in the domain service. Its nightly portrait writer
-    // prefers the owning user's first available LLM, but receives aggregate,
+    // uses only an LLM exposed by the owning user's TokenHub keys and receives aggregate,
     // PII-free metrics only. Any resolution/request/validation error is caught
     // by DigitalEmployeeService and persisted as deterministic logic fallback.
     this.digitalEmployee = new DigitalEmployeeService(this.db, undefined, {
       generate: async ({ userId, snapshotDate, metrics }) => {
-        const { llm, usedModelId } = await this.resolveUtilityLLM({ userId });
+        const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, digitalEmployee: true });
         const metered = meterLLM(llm, (usage) =>
           this.meterUtilityUsage("customer-cohort-summary", usedModelId, userId, usage)
         );
@@ -387,7 +391,7 @@ export class AgentService {
       },
     }, this.jobQueue, {
       generate: async ({ userId, context, request }) => {
-        const { llm, usedModelId } = await this.resolveUtilityLLM({ userId });
+        const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, digitalEmployee: true });
         const metered = meterLLM(llm, (usage) =>
           this.meterUtilityUsage("opportunity talk-track", usedModelId, userId, usage)
         );
@@ -418,7 +422,10 @@ export class AgentService {
     }, {
       contentGenerator: {
         recommend: async (input) => {
-          const { llm, usedModelId } = await this.resolveUtilityLLM({ userId: input.userId });
+          const { llm, usedModelId } = await this.resolveUtilityLLM({
+            userId: input.userId,
+            digitalEmployee: true,
+          });
           const metered = meterLLM(llm, (usage) =>
             this.meterUtilityUsage("customer-acquisition recommendations", usedModelId, input.userId, usage)
           );
@@ -438,7 +445,11 @@ export class AgentService {
           return { recommendations: parseAcquisitionRecommendations(raw), modelId: usedModelId };
         },
         createCopy: async (input) => {
-          const { llm, usedModelId } = await this.resolveUtilityLLM({ userId: input.userId, modelId: input.modelId });
+          const { llm, usedModelId } = await this.resolveUtilityLLM({
+            userId: input.userId,
+            modelId: input.modelId,
+            digitalEmployee: true,
+          });
           const metered = meterLLM(llm, (usage) =>
             this.meterUtilityUsage("customer-acquisition copy", usedModelId, input.userId, usage)
           );
@@ -486,7 +497,10 @@ export class AgentService {
           return { ...parsed, modelId: usedModelId };
         },
         evaluateFit: async (input) => {
-          const { llm, usedModelId } = await this.resolveUtilityLLM({ userId: input.userId });
+          const { llm, usedModelId } = await this.resolveUtilityLLM({
+            userId: input.userId,
+            digitalEmployee: true,
+          });
           const metered = meterLLM(llm, (usage) =>
             this.meterUtilityUsage("customer-acquisition fit", usedModelId, input.userId, usage)
           );
@@ -510,14 +524,16 @@ export class AgentService {
           const apiKey = await this.db.getUserApiKey(userId);
           let catalog = null;
           try { catalog = await this.getUserModelCatalog(userId, apiKey); } catch { catalog = null; }
-          const llmModels = (catalog?.llm ?? []).map((model) => ({ id: model.id, label: model.id }));
+          const llmResolution = await this.resolveDigitalEmployeeLLM(userId).catch(() => null);
+          const llmModels = (llmResolution?.modelIds ?? [])
+            .map((id) => ({ id, label: id }));
           const imageModels = (catalog?.image ?? []).map((model) => ({ id: model.id, label: model.id }));
           const videoModels = (catalog?.video ?? []).map((model) => ({ id: model.id, label: model.id }));
           return {
             llm: llmModels.length > 0,
             image: imageModels.length > 0,
             video: videoModels.length > 0,
-            llmModelId: llmModels[0]?.id ?? null,
+            llmModelId: llmResolution?.usedModelId ?? null,
             imageModelId: imageModels[0]?.id ?? null,
             videoModelId: videoModels[0]?.id ?? null,
             llmModels,
@@ -615,8 +631,8 @@ export class AgentService {
     this.messageRepo = new MessageRepository(this.db);
     const traceModel = defaultLlmModelId(this.llmConfig);
     const traceProvider = this.llmConfig.default;
-    this.traceRecorderFactory = () =>
-      new TraceRecorder(this.traceManager, this.db, traceModel, traceProvider);
+    this.traceRecorderFactory = (modelId = traceModel, provider = traceProvider) =>
+      new TraceRecorder(this.traceManager, this.db, modelId, provider);
 
     // Register agent definitions after all tools are loaded
     const defaultModelId = defaultLlmModelId(this.llmConfig);
@@ -634,7 +650,7 @@ export class AgentService {
       defaultModelId,
     };
     this.agentRegistry.register(generalDef);
-    this.agentRegistry.register({ ...digitalEmployeeDefinition, defaultModelId });
+    this.agentRegistry.register(digitalEmployeeDefinition);
     this.agentRegistry.register(copywritingDefinition);
     this.agentRegistry.register(imageDefinition);
     this.agentRegistry.register(videoDefinition);
@@ -706,23 +722,70 @@ export class AgentService {
     return resolved.map(({ id, name }) => ({ id, name }));
   }
 
-  private async resolveUtilityLLM(opts?: { userId?: string; modelId?: string }): Promise<{
+  private async resolveDigitalEmployeeLLM(
+    userId: string,
+    requestedModelId?: string | null
+  ): Promise<{ llm: LLMProvider; usedModelId: string; modelIds: string[] }> {
+    const activeApiKey = await this.db.getUserApiKey(userId);
+    let apiKeys: string[] = [];
+    try {
+      apiKeys = (await this.db.getUserApiKeys(userId)).map((entry) => entry.apiKey);
+    } catch {
+      // The active key can still be resolved when the stored key list is unavailable.
+    }
+    const selection = await resolveDigitalEmployeeLlm(
+      activeApiKey,
+      apiKeys,
+      async (apiKey) => {
+        if (apiKey === activeApiKey) {
+          const catalog = await this.getUserModelCatalog(userId, apiKey);
+          return catalog?.llm.map((model) => model.id) ?? [];
+        }
+        return (await this.tokenhub.listModels(apiKey)).llm;
+      },
+      requestedModelId
+    );
+    if (!selection) throw new Error(DIGITAL_EMPLOYEE_LLM_UNAVAILABLE);
+    return {
+      usedModelId: selection.modelId,
+      modelIds: selection.modelIds,
+      llm: this.providerFactory.llm(selection.modelId, selection.apiKey),
+    };
+  }
+
+  private async resolveUtilityLLM(opts?: {
+    userId?: string;
+    modelId?: string;
+    digitalEmployee?: boolean;
+  }): Promise<{
     llm: LLMProvider;
     usedModelId: string;
   }> {
-    const apiKey = opts?.userId ? await this.db.getUserApiKey(opts.userId) : null;
+    if (opts?.digitalEmployee) {
+      if (!opts.userId) throw new Error(DIGITAL_EMPLOYEE_LLM_UNAVAILABLE);
+      return this.resolveDigitalEmployeeLLM(opts.userId, opts.modelId);
+    }
+
+    const activeApiKey = opts?.userId ? await this.db.getUserApiKey(opts.userId) : null;
+    if (opts?.modelId && activeApiKey) {
+      return {
+        usedModelId: opts.modelId,
+        llm: this.providerFactory.llm(opts.modelId, activeApiKey),
+      };
+    }
+
     let modelId = opts?.modelId ?? null;
-    if (!modelId && opts?.userId && apiKey) {
-      modelId = await this.getUserModelCatalog(opts.userId, apiKey)
+    if (!modelId && opts?.userId && activeApiKey) {
+      modelId = await this.getUserModelCatalog(opts.userId, activeApiKey)
         .then((catalog) => catalog?.llm[0]?.id ?? null)
         .catch(() => null);
     }
-    const usedModelId = apiKey
+    const usedModelId = activeApiKey
       ? modelId ?? defaultLlmModelId(this.llmConfig)
       : defaultLlmModelId(this.llmConfig);
     return {
       usedModelId,
-      llm: apiKey ? this.providerFactory.llm(usedModelId, apiKey) : this.getLLMProvider(),
+      llm: activeApiKey ? this.providerFactory.llm(usedModelId, activeApiKey) : this.getLLMProvider(),
     };
   }
 
@@ -791,7 +854,7 @@ export class AgentService {
     conversationId: string,
     userMessage: string,
     attachments?: AttachmentRef[],
-    opts?: { userId?: string; modelId?: string }
+    opts?: { userId?: string; modelId?: string; digitalEmployee?: boolean }
   ): Promise<string | null> {
     try {
       const conversation = await this.db.getConversation(conversationId);
@@ -813,7 +876,9 @@ export class AgentService {
         : "";
       const titleInput = (userMessage || "（无文字，仅附件）") + attachmentNote;
 
-      // 标题模型:显式回合模型 > 用户模型目录第一个 LLM > env 默认 LLM。
+      // 通用助手标题模型:显式回合模型 > 用户模型目录第一个 LLM > env 默认 LLM。
+      // 数字员工传入 digitalEmployee=true，严格限定为用户 TokenHub key；
+      // 无用户 LLM 时直接失败，不允许使用 env 模型或 key。
       // 故意不回落到 conversation.model:会话创建时它被种成 env 默认模型,
       // 若在这里采用,图片/视频会话和目录未加载就发出的首条消息(进页面竞态)
       // 的标题都会跑到 env 模型上,而不是和对话一致的目录第一名。
@@ -915,16 +980,31 @@ export class AgentService {
         "请从对应工作台重新开始对话，不要声称已查询、更新或生成任何经营对象。"
       );
     }
-    if (opts?.modelId) await this.db.setConversationModel(conversationId, opts.modelId);
-    const modelId = resolveConversationModel(
-      opts?.modelId,
-      conversation?.model,
-      def.defaultModelId
-    );
-    const apiKey = userId ? await this.db.getUserApiKey(userId) : null;
-    const llm = apiKey
-      ? this.providerFactory.llm(modelId, apiKey)
-      : (this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider());
+    let modelId: string;
+    let llm: LLMProvider;
+    if (def.id === "digital_employee") {
+      if (!userId) throw new Error(DIGITAL_EMPLOYEE_LLM_UNAVAILABLE);
+      const resolved = await this.resolveDigitalEmployeeLLM(
+        userId,
+        opts?.modelId ?? conversation?.model
+      );
+      modelId = resolved.usedModelId;
+      llm = resolved.llm;
+      if (conversation?.model !== modelId) {
+        await this.db.setConversationModel(conversationId, modelId);
+      }
+    } else {
+      if (opts?.modelId) await this.db.setConversationModel(conversationId, opts.modelId);
+      modelId = resolveConversationModel(
+        opts?.modelId,
+        conversation?.model,
+        def.defaultModelId
+      );
+      const apiKey = userId ? await this.db.getUserApiKey(userId) : null;
+      llm = apiKey
+        ? this.providerFactory.llm(modelId, apiKey)
+        : (this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider());
+    }
     const agentConfig = this.agentConfig as Record<string, unknown>;
     const contextConfig = agentConfig.context as import("@lot-agent/core").ContextManagerConfig | undefined;
     // Size the context window to the chosen model instead of the hard-coded
@@ -975,8 +1055,11 @@ export class AgentService {
     });
 
     // ── Start trace ──
-    const recorder = this.traceRecorderFactory();
-    recorder.start(conversationId, this.llmConfig.default);
+    const recorder = this.traceRecorderFactory(
+      modelId,
+      def.id === "digital_employee" ? "tokenhub-user" : this.llmConfig.default
+    );
+    recorder.start(conversationId, modelId);
 
     // Fresh per-request memory store — ephemeral/session state is request-scoped,
     // so concurrent users/sessions never clobber each other.
@@ -1145,7 +1228,7 @@ export class AgentService {
       // and create a junk task row. Pass this turn's resolved modelId so the
       // worker can extract with the same model + user tokenhub key that
       // generated the turn, instead of a fixed env-configured model.
-      if (producedAssistantText.trim()) {
+      if (def.id !== "digital_employee" && producedAssistantText.trim()) {
         this.jobQueue
           .enqueue("memory.extract", { conversationId, modelId }, userId ?? "default")
           .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
@@ -1259,4 +1342,3 @@ function parseAcquisitionFit(raw: string): import("../digital-employee/acquisiti
     priority,
   };
 }
-

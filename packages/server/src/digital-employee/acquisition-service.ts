@@ -394,6 +394,7 @@ export class CustomerAcquisitionService {
               quality: resolvedInput.mediaSettings?.quality ?? "auto",
               ...(media?.length ? { media } : {}),
               featureScope: "customer-acquisition",
+              requireUserModelKey: true,
               campaignId,
               assetId,
             }
@@ -409,6 +410,7 @@ export class CustomerAcquisitionService {
               ...(resolvedInput.first_frame ? { first_frame: resolvedInput.first_frame } : {}),
               ...(resolvedInput.last_frame ? { last_frame: resolvedInput.last_frame } : {}),
               featureScope: "customer-acquisition",
+              requireUserModelKey: true,
               campaignId,
               assetId,
             },

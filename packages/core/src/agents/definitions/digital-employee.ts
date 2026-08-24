@@ -75,6 +75,8 @@ export const digitalEmployeeDefinition: AgentDefinition = {
     "ask_user",
     "load_skill",
   ],
-  defaultModelId: "deepseek-chat",
+  // Sentinel only: the server must resolve a real model from the owning user's
+  // TokenHub keys for every turn and must never replace this with an env model.
+  defaultModelId: "tokenhub-user-selected",
   modelParams: { temperature: 0.2 },
 };

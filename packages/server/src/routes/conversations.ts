@@ -85,14 +85,16 @@ export function createConversationRoutes(service: AgentService): Hono {
     const body = await c.req.json<{ title?: string; agentId?: string; featureScope?: string }>().catch(() => ({}));
     const id = randomUUID();
     const title = body.title ?? "新对话";
-    const model =
-      service["llmConfig"].default === "openai"
+    const agentId = body.agentId ?? "general";
+    const isDigitalEmployee = agentId === "digital_employee";
+    const model = isDigitalEmployee
+      ? undefined
+      : service["llmConfig"].default === "openai"
         ? service["llmConfig"].openai.model
         : service["llmConfig"].anthropic.model;
-    const provider = service["llmConfig"].default;
-    const agentId = body.agentId ?? "general";
+    const provider = isDigitalEmployee ? undefined : service["llmConfig"].default;
     let metadata: Record<string, unknown> | undefined;
-    if (agentId === "digital_employee") {
+    if (isDigitalEmployee) {
       const featureScope = parseDigitalEmployeeFeatureScope(body.featureScope);
       if (!featureScope) {
         return c.json({ error: "digital_employee conversations require a valid featureScope" }, 400);
@@ -362,7 +364,11 @@ export function createConversationRoutes(service: AgentService): Hono {
               id,
               body.content ?? "",
               attachments,
-              { userId, modelId: body.modelId }
+              {
+                userId,
+                modelId: body.modelId,
+                digitalEmployee: conversation.agent_id === "digital_employee",
+              }
             );
             if (title) send({ type: "title", title });
           } catch {
@@ -507,6 +513,7 @@ export function createGenerationRoutes(service: AgentService) {
         prompt,
         conversationId,
         assistantMessageId,
+        requireUserModelKey: conv.agent_id === "digital_employee",
       },
       userId
     );
@@ -522,9 +529,12 @@ export function createGenerationRoutes(service: AgentService) {
     // image/video conversations stay stuck on the "新对话" placeholder.
     let title: string | null = null;
     try {
-      // 只传 userId:本回合的模型是图片/视频模型,做不了文字总结,
-      // 让 generateTitle 回落到模型目录第一个 LLM(无目录时才用 env 默认)。
-      title = await service.generateTitle(conversationId, prompt, [], { userId });
+      // 本回合的模型是图片/视频模型，标题改用 LLM。数字员工会话仍严格
+      // 限定为用户 TokenHub key，不允许标题请求回退环境模型。
+      title = await service.generateTitle(conversationId, prompt, [], {
+        userId,
+        digitalEmployee: conv.agent_id === "digital_employee",
+      });
     } catch {
       // title generation is best-effort
     }

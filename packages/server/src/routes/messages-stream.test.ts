@@ -86,4 +86,28 @@ describe("POST /conversations/:id/messages (SSE)", () => {
     expect(types).toContain("stream_end");
     expect(types).not.toContain("title");
   });
+
+  it("marks digital-employee title generation as user-TokenHub-only", async () => {
+    const service = fakeService();
+    service.db.getConversation = vi.fn(async () => ({
+      id: "c1",
+      user_id: "u1",
+      agent_id: "digital_employee",
+      metadata: { digitalEmployeeFeatureScope: "customer-profile" },
+    }));
+
+    const res = await app(service).request("/conversations/c1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "查询客户" }),
+    });
+    await res.text();
+
+    expect(service.generateTitle).toHaveBeenCalledWith(
+      "c1",
+      "查询客户",
+      [],
+      expect.objectContaining({ userId: "u1", digitalEmployee: true })
+    );
+  });
 });

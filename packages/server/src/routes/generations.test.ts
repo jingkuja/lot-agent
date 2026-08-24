@@ -73,8 +73,32 @@ describe("POST /conversations/:id/generations", () => {
     });
     expect(res.status).toBe(202);
     const body = await res.json();
-    expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], { userId: "u1" });
+    expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], {
+      userId: "u1",
+      digitalEmployee: false,
+    });
     expect(body.title).toBe("菊花特写");
+  });
+
+  it("marks digital-employee generation titles as user-TokenHub-only", async () => {
+    const service = fakeService();
+    service.db.getConversation = vi.fn(async () => ({
+      id: "c1", user_id: "u1", agent_id: "digital_employee",
+    }));
+    await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "营销海报", mediaType: "image", settings: { n: 1 } }),
+    });
+    expect(service.generateTitle).toHaveBeenCalledWith("c1", "营销海报", [], {
+      userId: "u1",
+      digitalEmployee: true,
+    });
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({ requireUserModelKey: true }),
+      "u1"
+    );
   });
 
   it("404s when the conversation belongs to another user", async () => {
