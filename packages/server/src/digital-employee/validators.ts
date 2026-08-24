@@ -189,9 +189,13 @@ function productState(value: unknown): CreateProductStateInput {
   const source = record(value, "productStates项");
   const productName = requiredString(source, "productName", 200);
   const productKey = optionalString(source, "productKey", 160);
+  const marketingProductId = source.marketingProductId === undefined
+    ? undefined
+    : parseEntityId(source.marketingProductId, "marketingProductId");
   return {
     productName,
     ...(productKey ? { productKey } : {}),
+    ...(marketingProductId ? { marketingProductId } : {}),
     journeyStage: enumValue(source, "journeyStage", JOURNEY_STAGES) as JourneyStage | undefined,
     sentiment: enumValue(source, "sentiment", SENTIMENT_VALUES) as Sentiment | undefined,
     satisfaction: enumValue(source, "satisfaction", SATISFACTION_VALUES) as Satisfaction | undefined,
@@ -262,6 +266,9 @@ export function parseUpdateProductState(value: unknown): UpdateProductStateInput
   return {
     version,
     productName: productName || undefined,
+    marketingProductId: source.marketingProductId === undefined
+      ? undefined
+      : parseEntityId(source.marketingProductId, "marketingProductId"),
     journeyStage: enumValue(source, "journeyStage", JOURNEY_STAGES) as JourneyStage | undefined,
     sentiment: enumValue(source, "sentiment", SENTIMENT_VALUES) as Sentiment | undefined,
     satisfaction: enumValue(source, "satisfaction", SATISFACTION_VALUES) as Satisfaction | undefined,
@@ -316,6 +323,9 @@ export function parseCaptureInput(value: unknown): CustomerCaptureInput {
     customerMention: requiredString(source, "customerMention", 200),
     eventType: requiredEnum(source, "eventType", OBSERVATION_TYPES) as ObservationType,
     productName: optionalString(source, "productName", 200) || undefined,
+    marketingProductId: source.marketingProductId === undefined
+      ? undefined
+      : parseEntityId(source.marketingProductId, "marketingProductId"),
     occurredAt: isoDate(source.occurredAt, "occurredAt"),
     facts: facts(source.facts),
     proposedStatePatch: facts(source.proposedStatePatch),
@@ -330,6 +340,9 @@ export function parseManualObservation(value: unknown): AddManualObservationInpu
     rawText: requiredString(source, "rawText", 12_000),
     eventType: (enumValue(source, "eventType", OBSERVATION_TYPES) as ObservationType | undefined) ?? "note",
     productName: optionalString(source, "productName", 200) || undefined,
+    marketingProductId: source.marketingProductId === undefined
+      ? undefined
+      : parseEntityId(source.marketingProductId, "marketingProductId"),
     occurredAt: isoDate(source.occurredAt, "occurredAt"),
     facts: facts(source.facts),
     proposedStatePatch: facts(source.proposedStatePatch),

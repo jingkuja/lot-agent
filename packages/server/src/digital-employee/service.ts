@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createSecretBox, sha256Hex, type SecretBox } from "../auth/secret-box.js";
 import type { DB } from "../db/database.js";
-import { ConflictError, InputError, NotFoundError, OpenTasksError } from "./errors.js";
+import { ConflictError, InputError, NotFoundError, OpenTasksError, ProductSelectionRequiredError } from "./errors.js";
 import {
   DigitalEmployeeRepository,
   type NewProductStateRow,
@@ -68,6 +68,7 @@ interface ApplyObservationArgs {
   input: {
     eventType: CustomerCaptureInput["eventType"];
     productName?: string;
+    marketingProductId?: string;
     occurredAt?: string | null;
     facts?: ObservationFacts;
     proposedStatePatch?: ObservationFacts;
@@ -92,6 +93,7 @@ export interface CohortSummaryGenerator {
     userId: string;
     snapshotDate: string;
     metrics: import("./types.js").CustomerCohortMetrics;
+    modelId?: string;
   }): Promise<{ summary: string; modelId: string }>;
 }
 
@@ -155,6 +157,29 @@ export class DigitalEmployeeService {
         nextRunAt: nextCohortRunAt(now),
       },
     };
+  }
+
+  /** User-triggered refresh using the model explicitly selected in the UI. */
+  async refreshCohortSummary(userId: string, modelId: string, now: Date = new Date()) {
+    if (!this.cohortSummaryGenerator) throw new InputError("当前无法使用 LLM 更新群像总结");
+    const logicSnapshot = buildCohortSnapshot(
+      await this.repository.listActiveProfilesForCohort(userId),
+      now
+    );
+    const generated = await this.cohortSummaryGenerator.generate({
+      userId,
+      snapshotDate: logicSnapshot.snapshotDate,
+      metrics: logicSnapshot.metrics,
+      modelId,
+    });
+    const snapshot = {
+      ...logicSnapshot,
+      summary: parseLlmCohortSummary(generated.summary),
+      generationMethod: "llm" as const,
+      modelId: generated.modelId,
+    };
+    await this.repository.upsertCohortSnapshot(userId, snapshot);
+    return { ...snapshot, source: "nightly" as const };
   }
 
   /**
@@ -418,8 +443,13 @@ export class DigitalEmployeeService {
     userId: string,
     input: CreateCustomerProfileInput
   ): Promise<{ profile: CustomerProfile; productStates: CustomerProductState[] }> {
+    const linkedProductStates = await Promise.all((input.productStates ?? []).map(async (state) => {
+      if (!state.marketingProductId) throw new InputError("请选择营销资料中的产品");
+      const product = await this.requireActiveMarketingProduct(userId, state.marketingProductId);
+      return { ...state, productName: product.name, marketingProductId: product.id };
+    }));
     return this.repository.transaction(async (client) => {
-      const productRows = (input.productStates ?? []).map((state) => this.newProductRow(userId, "", state));
+      const productRows = linkedProductStates.map((state) => this.newProductRow(userId, "", state));
       const seenKeys = new Set<string>();
       for (const product of productRows) {
         if (seenKeys.has(product.productKey)) throw new InputError("产品名称不能重复");
@@ -588,6 +618,9 @@ export class DigitalEmployeeService {
     productKey: string,
     input: UpdateProductStateInput
   ): Promise<{ profile: CustomerProfile; productState: CustomerProductState }> {
+    const marketingProduct = input.marketingProductId
+      ? await this.requireActiveMarketingProduct(userId, input.marketingProductId)
+      : null;
     return this.repository.transaction(async (client) => {
       const profile = await this.repository.getProfile(userId, profileId, client);
       if (!profile || profile.status !== "active") throw new NotFoundError();
@@ -595,17 +628,31 @@ export class DigitalEmployeeService {
       let savedState: CustomerProductState;
       if (!current) {
         if (input.version !== undefined) throw new InputError("新产品状态不应携带version");
-        const name = input.productName?.trim();
-        if (!name) throw new InputError("新产品状态需要productName");
+        if (!marketingProduct) throw new InputError("请选择营销资料中的产品");
+        const duplicate = await this.repository.getProductStateByMarketingProduct(userId, profileId, marketingProduct.id, client);
+        if (duplicate) throw new ConflictError("该客户已关联此营销产品");
         savedState = await this.repository.createProductState(
-          this.newProductRow(userId, profileId, { productName: name, productKey, ...input }),
+          this.newProductRow(userId, profileId, {
+            ...input,
+            productKey,
+            productName: marketingProduct.name,
+            marketingProductId: marketingProduct.id,
+          }),
           client
         );
       } else {
         if (input.version === undefined) throw new InputError("更新产品状态需要version");
+        if (current.marketingProductId && marketingProduct && marketingProduct.id !== current.marketingProductId) {
+          throw new InputError("已关联的产品关系不能更换产品，请新建另一条产品关系");
+        }
+        if (marketingProduct && marketingProduct.id !== current.marketingProductId) {
+          const duplicate = await this.repository.getProductStateByMarketingProduct(userId, profileId, marketingProduct.id, client);
+          if (duplicate && duplicate.id !== current.id) throw new ConflictError("该客户已关联此营销产品");
+        }
         const next: CustomerProductState = {
           ...current,
-          productName: input.productName ?? current.productName,
+          productName: marketingProduct?.name ?? current.productName,
+          marketingProductId: marketingProduct?.id ?? current.marketingProductId,
           journeyStage: input.journeyStage ?? current.journeyStage,
           sentiment: input.sentiment ?? current.sentiment,
           satisfaction: input.satisfaction ?? current.satisfaction,
@@ -646,6 +693,7 @@ export class DigitalEmployeeService {
     profileId: string,
     input: AddManualObservationInput
   ): Promise<CommitCaptureResult> {
+    const productInput = await this.resolveObservationProduct(userId, input);
     return this.repository.transaction(async (client) => {
       const profile = await this.repository.getProfile(userId, profileId, client);
       if (!profile || profile.status !== "active") throw new NotFoundError();
@@ -655,7 +703,7 @@ export class DigitalEmployeeService {
         sourceType: "manual",
         sourceId: `manual:${randomUUID()}`,
         sourceLocator: { source: "profile_page" },
-        input: { ...input, eventType: input.eventType ?? "note" },
+        input: { ...input, ...productInput, eventType: input.eventType ?? "note" },
         actor: "user",
       });
       return this.commitResult(applied, true);
@@ -678,6 +726,32 @@ export class DigitalEmployeeService {
     source: CaptureSourceContext
   ): Promise<PrepareCaptureResult> {
     if (!source.sourceText?.trim()) throw new InputError("当前消息没有可保存的原始客户记录");
+    let productCandidates: Array<{ id: string; name: string }> = [];
+    if (!input.productName && !input.marketingProductId) {
+      const mentionedProducts = await this.marketingMaterials.findActiveProductsMentionedInText(userId, source.sourceText);
+      if (mentionedProducts.length === 1) {
+        input = {
+          ...input,
+          productName: mentionedProducts[0].name,
+          marketingProductId: mentionedProducts[0].id,
+        };
+      } else if (mentionedProducts.length === 0) {
+        const inferredProductName = inferProductNameFromSource(source.sourceText);
+        if (inferredProductName) input = { ...input, productName: inferredProductName };
+      }
+    }
+    if (input.marketingProductId) {
+      input = { ...input, ...await this.resolveObservationProduct(userId, input) };
+    } else if (input.productName) {
+      const exact = await this.marketingMaterials.findActiveProductByName(userId, input.productName);
+      if (exact) {
+        input = { ...input, productName: exact.name, marketingProductId: exact.id };
+      } else {
+        const catalog = await this.marketingMaterials.listProducts(userId, { page: 1, limit: 100, status: "active" });
+        productCandidates = rankProductCandidates(input.productName, catalog.items).slice(0, 4)
+          .map((product) => ({ id: product.id, name: product.name }));
+      }
+    }
     const rawText = source.sourceText.trim().slice(0, 12_000);
     const contextual = await this.contextProfileForMention(userId, source.conversationId, input.customerMention);
     const candidates = contextual ? [contextual] : await this.repository.findProfilesByExactMention(userId, input.customerMention);
@@ -687,6 +761,8 @@ export class DigitalEmployeeService {
       customerRegion: profile.customerRegion,
     }));
     const ambiguities = [...(input.uncertainties ?? [])];
+    const productNeedsConfirmation = Boolean(input.productName && !input.marketingProductId);
+    if (productNeedsConfirmation) ambiguities.push("marketing_product");
     let selected = candidates.length === 1 ? candidates[0] : undefined;
     let clarification: PrepareCaptureResult["clarification"];
 
@@ -705,8 +781,10 @@ export class DigitalEmployeeService {
         options: candidateViews.map((candidate) => displayCandidate(candidate)),
       };
     } else {
-      const product = input.productName
-        ? await this.repository.getProductState(userId, selected!.id, productKeyFor(input.productName))
+      const product = input.marketingProductId
+        ? await this.repository.getProductStateByMarketingProduct(userId, selected!.id, input.marketingProductId)
+        : input.productName
+          ? await this.repository.getProductState(userId, selected!.id, productKeyFor(input.productName))
         : undefined;
       const projected = projectObservation(this.publicProfile(selected!, false), product ?? undefined, {
         eventType: input.eventType,
@@ -715,7 +793,7 @@ export class DigitalEmployeeService {
         actor: "ai_confirmed",
       });
       const explicitlyUncertain = ambiguities.includes("product_journey_stage");
-      if (projected.requiresJourneyConfirmation || explicitlyUncertain) {
+      if (!productNeedsConfirmation && (projected.requiresJourneyConfirmation || explicitlyUncertain)) {
         if (!ambiguities.includes("product_journey_stage")) ambiguities.push("product_journey_stage");
         clarification = {
           kind: "journey_stage",
@@ -723,6 +801,18 @@ export class DigitalEmployeeService {
           options: ["已购买正在使用", "正在试用", "仍在评估", "已经放弃购买"],
         };
       }
+    }
+
+    if (!clarification && productNeedsConfirmation) {
+      clarification = {
+        kind: "marketing_product",
+        question: `“${input.productName}”要关联到哪个营销产品？`,
+        options: [
+          ...productCandidates.map((product) => product.name),
+          `将“${input.productName}”添加为新产品`,
+          "本次不关联产品",
+        ],
+      };
     }
 
     const draftId = randomUUID();
@@ -735,6 +825,7 @@ export class DigitalEmployeeService {
       candidateProfileIds: candidates.map((candidate) => candidate.id),
       proposedObservation: compact({
         capture: input,
+        productCandidates,
         profileId: selected?.id,
         modelId: source.modelId,
       }),
@@ -748,6 +839,7 @@ export class DigitalEmployeeService {
       status: clarification ? "needs_clarification" : "ready",
       profile: selected ? { id: selected.id, displayName: selected.displayName } : undefined,
       candidates: candidateViews,
+      productCandidates,
       ambiguities: [...new Set(ambiguities)],
       clarification,
     };
@@ -782,7 +874,7 @@ export class DigitalEmployeeService {
       }
 
       const proposal = draft.proposedObservation;
-      const capture = parseCaptureInput(proposal.capture);
+      let capture = parseCaptureInput(proposal.capture);
       const storedProfileId = stringValue(proposal.profileId);
       const modelId = stringValue(proposal.modelId);
       let profileId = storedProfileId;
@@ -809,6 +901,32 @@ export class DigitalEmployeeService {
         );
       }
       if (!profile || profile.status !== "active") throw new NotFoundError();
+      if (draft.ambiguities.includes("marketing_product")) {
+        const storedProductCandidates = productCandidateValues(proposal.productCandidates);
+        const choices = Number(Boolean(input.marketingProductId))
+          + Number(input.createMarketingProduct === true)
+          + Number(input.skipProduct === true);
+        if (choices === 0) {
+          throw new ProductSelectionRequiredError(capture.productName ?? "该产品", storedProductCandidates);
+        }
+        if (choices > 1) throw new InputError("产品确认只能选择一个处理方式");
+
+        if (input.marketingProductId) {
+          if (!storedProductCandidates.some((candidate) => candidate.id === input.marketingProductId)) {
+            throw new InputError("选择的产品不在当前候选范围内");
+          }
+          const product = await this.requireActiveMarketingProduct(userId, input.marketingProductId);
+          capture = { ...capture, productName: product.name, marketingProductId: product.id };
+        } else if (input.createMarketingProduct) {
+          const productName = capture.productName?.trim();
+          if (!productName) throw new InputError("原始记录中没有可用于新建的产品名称");
+          const product = await this.marketingMaterials.createProduct(userId, { name: productName }, client);
+          capture = { ...capture, productName: product.name, marketingProductId: product.id };
+        } else {
+          const { productName: _productName, marketingProductId: _marketingProductId, ...withoutProduct } = capture;
+          capture = withoutProduct;
+        }
+      }
       if (draft.ambiguities.includes("product_journey_stage") && !input.confirmedJourneyStage) {
         throw new InputError("请先确认客户当前的产品阶段");
       }
@@ -886,10 +1004,15 @@ export class DigitalEmployeeService {
     );
     if (!observation) throw new ConflictError("客户记录已被重复提交，请刷新后重试");
 
-    const productKey = args.input.productName ? productKeyFor(args.input.productName) : undefined;
-    const currentProduct = productKey
-      ? await this.repository.getProductState(userId, args.profile.id, productKey, client)
+    const initialProductKey = args.input.marketingProductId
+      ? marketingProductKey(args.input.marketingProductId)
+      : args.input.productName ? productKeyFor(args.input.productName) : undefined;
+    const currentProduct = args.input.marketingProductId
+      ? await this.repository.getProductStateByMarketingProduct(userId, args.profile.id, args.input.marketingProductId, client)
+      : initialProductKey
+        ? await this.repository.getProductState(userId, args.profile.id, initialProductKey, client)
       : null;
+    const productKey = currentProduct?.productKey ?? initialProductKey;
     const projection = projectObservation(this.publicProfile(args.profile, false), currentProduct ?? undefined, {
       eventType: args.input.eventType,
       facts: args.input.facts,
@@ -909,7 +1032,8 @@ export class DigitalEmployeeService {
       {
         id: randomUUID(), userId, profileId: args.profile.id, observationId: observation.id,
         eventType: args.input.eventType, productKey: productKey ?? null,
-        productName: args.input.productName ?? null, extractedFacts: compact(args.input.facts ?? {}),
+        productName: args.input.productName ?? null, marketingProductId: args.input.marketingProductId ?? null,
+        extractedFacts: compact(args.input.facts ?? {}),
         proposedPatch: compact(args.input.proposedStatePatch ?? {}), applyStatus,
         confidence: args.input.confidence ?? null, modelId: args.modelId ?? null,
         promptVersion: CAPTURE_PROMPT_VERSION, schemaVersion: CAPTURE_SCHEMA_VERSION,
@@ -920,7 +1044,13 @@ export class DigitalEmployeeService {
 
     let savedProduct = currentProduct ?? undefined;
     if (args.input.productName && productKey) {
-      const base = currentProduct ?? this.emptyProductState(userId, args.profile.id, productKey, args.input.productName);
+      const base = currentProduct ?? this.emptyProductState(
+        userId,
+        args.profile.id,
+        productKey,
+        args.input.productName,
+        args.input.marketingProductId ?? null
+      );
       const nextProduct: CustomerProductState = {
         ...base,
         ...projection.productPatch,
@@ -935,6 +1065,7 @@ export class DigitalEmployeeService {
         savedProduct = await this.repository.createProductState(
           {
             id: nextProduct.id, userId, profileId: args.profile.id, productKey, productName: nextProduct.productName,
+            marketingProductId: nextProduct.marketingProductId,
             journeyStage: nextProduct.journeyStage, sentiment: nextProduct.sentiment,
             satisfaction: nextProduct.satisfaction, health: nextProduct.health,
             needs: nextProduct.needs, objections: nextProduct.objections, currentIssues: nextProduct.currentIssues,
@@ -1002,6 +1133,24 @@ export class DigitalEmployeeService {
     };
   }
 
+  private async requireActiveMarketingProduct(userId: string, marketingProductId: string) {
+    const product = await this.marketingMaterials.getProduct(userId, marketingProductId);
+    if (product.status !== "active") throw new InputError("已归档的营销产品不能建立新的客户关系");
+    return product;
+  }
+
+  private async resolveObservationProduct(
+    userId: string,
+    input: Pick<CustomerCaptureInput, "productName" | "marketingProductId">
+  ): Promise<{ productName?: string; marketingProductId?: string }> {
+    if (!input.productName && !input.marketingProductId) return {};
+    if (!input.marketingProductId) {
+      throw new InputError("关联产品时必须先从营销资料中选择产品");
+    }
+    const product = await this.requireActiveMarketingProduct(userId, input.marketingProductId);
+    return { productName: product.name, marketingProductId: product.id };
+  }
+
   private async requireProfile(userId: string, profileId: string): Promise<StoredCustomerProfile> {
     const profile = await this.repository.getProfile(userId, profileId);
     if (!profile) throw new NotFoundError();
@@ -1042,6 +1191,7 @@ export class DigitalEmployeeService {
     return {
       id: randomUUID(), userId, profileId,
       productKey: input.productKey?.trim() || productKeyFor(productName), productName,
+      marketingProductId: input.marketingProductId ?? null,
       journeyStage: input.journeyStage ?? "unknown", sentiment: input.sentiment ?? "unknown",
       satisfaction: input.satisfaction ?? "unknown", health: input.health ?? "healthy",
       needs: input.needs ?? [], objections: input.objections ?? [], currentIssues: input.currentIssues ?? [],
@@ -1049,10 +1199,16 @@ export class DigitalEmployeeService {
     };
   }
 
-  private emptyProductState(userId: string, profileId: string, productKey: string, productName: string): CustomerProductState {
+  private emptyProductState(
+    userId: string,
+    profileId: string,
+    productKey: string,
+    productName: string,
+    marketingProductId: string | null = null
+  ): CustomerProductState {
     const now = new Date().toISOString();
     return {
-      id: randomUUID(), userId, profileId, productKey, productName,
+      id: randomUUID(), userId, profileId, productKey, productName, marketingProductId,
       journeyStage: "unknown", sentiment: "unknown", satisfaction: "unknown", health: "healthy",
       needs: [], objections: [], currentIssues: [], manualLockFields: [], lastObservationId: null,
       lastConfirmedAt: null, version: 1, createdAt: now, updatedAt: now,
@@ -1139,9 +1295,10 @@ function profileStatePatch(before: Pick<CustomerProfile, "relationshipStage" | "
   return patch;
 }
 
-function productStateSnapshot(product: Pick<CustomerProductState, "productName" | "journeyStage" | "sentiment" | "satisfaction" | "health" | "needs" | "objections" | "currentIssues" | "manualLockFields">): JsonObject {
+function productStateSnapshot(product: Pick<CustomerProductState, "productName" | "marketingProductId" | "journeyStage" | "sentiment" | "satisfaction" | "health" | "needs" | "objections" | "currentIssues" | "manualLockFields">): JsonObject {
   return {
     productName: product.productName,
+    marketingProductId: product.marketingProductId,
     journeyStage: product.journeyStage,
     sentiment: product.sentiment,
     satisfaction: product.satisfaction,
@@ -1151,6 +1308,42 @@ function productStateSnapshot(product: Pick<CustomerProductState, "productName" 
     currentIssues: product.currentIssues,
     manualLockFields: product.manualLockFields,
   };
+}
+
+function marketingProductKey(marketingProductId: string): string {
+  return `marketing:${marketingProductId}`;
+}
+
+function normalizedProductName(value: string): string {
+  return value.trim().toLocaleLowerCase("zh-CN").replace(/\s+/g, "");
+}
+
+function inferProductNameFromSource(text: string): string | undefined {
+  const patterns = [
+    /(?:咨询|了解|关注|试用|购买|采购|订购|续费)(?:了|一下)?\s*[“"'「]?([^，。；;,.!?！？]{2,80}?)[”"'」]?(?=\s*(?:表示|但|不过|然而|，|。|；|,|;|$))/iu,
+    /对\s*[“"'「]?([^，。；;,.!?！？]{2,80}?)[”"'」]?\s*(?:很|比较|挺|非常)?感兴趣/iu,
+  ];
+  const generic = new Set(["产品", "服务", "业务", "情况", "问题", "事情", "方案"]);
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const candidate = match?.[1]?.trim().replace(/^关于\s*/, "").replace(/\s+/g, " ");
+    if (candidate && candidate.length <= 200 && !generic.has(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function rankProductCandidates<T extends { name: string }>(requestedName: string, products: T[]): T[] {
+  const requested = normalizedProductName(requestedName);
+  return products
+    .map((product, index) => {
+      const candidate = normalizedProductName(product.name);
+      const score = candidate === requested ? 100
+        : candidate.includes(requested) || requested.includes(candidate) ? 50
+          : 0;
+      return { product, index, score };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ product }) => product);
 }
 
 function productStatePatch(before: CustomerProductState, after: CustomerProductState): JsonObject {
@@ -1173,6 +1366,17 @@ function compact<T extends object>(value: T): JsonObject {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
+}
+
+function productCandidateValues(value: unknown): Array<{ id: string; name: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    return typeof source.id === "string" && typeof source.name === "string"
+      ? [{ id: source.id, name: source.name }]
+      : [];
+  });
 }
 
 function displayCandidate(candidate: { displayName: string; customerRegion?: string | null }): string {

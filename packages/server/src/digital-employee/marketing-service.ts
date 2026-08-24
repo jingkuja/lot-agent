@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DB } from "../db/database.js";
+import type { QueryClient } from "../db/migration-runner.js";
 import { ConflictError, InputError, NotFoundError } from "./errors.js";
 import { MarketingMaterialsRepository } from "./marketing-repository.js";
 import type {
@@ -26,9 +27,17 @@ export class MarketingMaterialsService {
     return product;
   }
 
-  async createProduct(userId: string, input: MarketingProductInput) {
+  findActiveProductByName(userId: string, name: string) {
+    return this.repository.findActiveProductByName(userId, name);
+  }
+
+  findActiveProductsMentionedInText(userId: string, text: string) {
+    return this.repository.findActiveProductsMentionedInText(userId, text);
+  }
+
+  async createProduct(userId: string, input: MarketingProductInput, client?: QueryClient) {
     try {
-      return await this.repository.createProduct(userId, randomUUID(), input);
+      return await this.repository.createProduct(userId, randomUUID(), input, client);
     } catch (error) {
       if (isUniqueViolation(error)) throw new ConflictError("已有同名的有效产品资料");
       throw error;

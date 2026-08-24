@@ -331,6 +331,17 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     }
   });
 
+  app.post("/overview/refresh", async (c) => {
+    try {
+      const payload = await body(c);
+      const modelId = typeof payload.modelId === "string" ? payload.modelId.trim() : "";
+      if (!modelId || modelId.length > 200) throw new InputError("请选择有效的 LLM 模型");
+      return c.json(await service.refreshCohortSummary(c.get("userId"), modelId));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
   app.get("/profiles", async (c) => {
     try {
       return c.json(await service.listProfiles(c.get("userId"), parseProfileList(c.req.query())));

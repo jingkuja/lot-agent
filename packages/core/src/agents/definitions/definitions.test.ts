@@ -44,5 +44,7 @@ describe("agent definitions", () => {
     expect(digitalEmployeeDefinition.systemPrompt).toContain("不得声称已完成");
     expect(digitalEmployeeDefinition.systemPrompt).toContain("prepare_follow_up_action");
     expect(digitalEmployeeDefinition.systemPrompt).toContain("prepare_marketing_campaign");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("productName=\"agent代销\"");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("负面态度不能成为省略产品的理由");
   });
 });

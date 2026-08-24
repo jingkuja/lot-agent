@@ -119,6 +119,256 @@ describe("DigitalEmployeeService archive", () => {
   });
 });
 
+describe("DigitalEmployeeService product relationships", () => {
+  const profile = {
+    id: "p1", displayName: "李静", aliases: [], customerKind: "person", organization: null,
+    department: null, title: null, customerRegion: null, contactCiphertext: null, source: null,
+    relationshipStage: "lead", overallHealth: "healthy", tags: [], customFields: {}, summary: "",
+    summaryVersion: 1, manualLockFields: [], lastObservedAt: null, lastContactAt: null, nextFollowUpAt: null,
+    version: 1, status: "active", archivedAt: null, createdAt: "", updatedAt: "", userId: "u1", ownerUserId: "u1",
+  };
+  const marketingProductId = "00000000-0000-0000-0000-000000000123";
+
+  it("stores the owned marketing product id and canonical product name", async () => {
+    const createProductState = vi.fn(async (row) => ({
+      ...row, version: 1, createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z",
+      lastObservationId: null, lastConfirmedAt: null,
+    }));
+    const service = serviceWith({
+      transaction: vi.fn(async (operation: (client: unknown) => Promise<unknown>) => operation({})),
+      getProfile: vi.fn(async () => profile),
+      getProductState: vi.fn(async () => null),
+      getProductStateByMarketingProduct: vi.fn(async () => null),
+      createProductState,
+      listProductStates: vi.fn(async () => []),
+      saveProfile: vi.fn(async (_userId, next) => ({ ...next, version: 2 })),
+      createStateChange: vi.fn(async () => undefined),
+    });
+    (service as any).marketingMaterials = {
+      getProduct: vi.fn(async () => ({ id: marketingProductId, name: "营销资料标准名称", status: "active" })),
+    };
+
+    await service.updateProductState("u1", "p1", `marketing:${marketingProductId}`, {
+      marketingProductId,
+      productName: "模型猜测的名称",
+      journeyStage: "evaluating",
+    });
+
+    expect(createProductState).toHaveBeenCalledWith(expect.objectContaining({
+      marketingProductId,
+      productName: "营销资料标准名称",
+    }), expect.anything());
+  });
+
+  it("does not create a free-text-only product relationship", async () => {
+    const service = serviceWith({
+      transaction: vi.fn(async (operation: (client: unknown) => Promise<unknown>) => operation({})),
+      getProfile: vi.fn(async () => profile),
+      getProductState: vi.fn(async () => null),
+    });
+    await expect(service.updateProductState("u1", "p1", "free-text", { productName: "自由文本产品" }))
+      .rejects.toThrow("请选择营销资料中的产品");
+  });
+
+  it("asks for confirmation when the conversation product cannot be matched exactly", async () => {
+    const createDraft = vi.fn(async (row) => row);
+    const service = serviceWith({
+      findProfilesByExactMention: vi.fn(async () => [profile]),
+      getProductState: vi.fn(async () => null),
+      createDraft,
+    });
+    (service as any).marketingMaterials = {
+      findActiveProductByName: vi.fn(async () => null),
+      listProducts: vi.fn(async () => ({
+        items: [
+          { id: marketingProductId, name: "中转站", status: "active" },
+          { id: "00000000-0000-0000-0000-000000000124", name: "会员版", status: "active" },
+        ],
+        page: 1, limit: 100, total: 2,
+      })),
+    };
+
+    const result = await service.prepareCustomerCapture(
+      "u1",
+      { customerMention: "李静", eventType: "note", productName: "中转站增强版" },
+      { sourceText: "把李静关联到中转站增强版" }
+    );
+
+    expect(result.status).toBe("needs_clarification");
+    expect(result.clarification).toMatchObject({ kind: "marketing_product" });
+    expect(result.clarification?.options).toEqual([
+      "中转站", "会员版", "将“中转站增强版”添加为新产品", "本次不关联产品",
+    ]);
+    expect(createDraft).toHaveBeenCalledWith(expect.objectContaining({
+      ambiguities: expect.arrayContaining(["marketing_product"]),
+      proposedObservation: expect.objectContaining({
+        productCandidates: expect.arrayContaining([expect.objectContaining({ id: marketingProductId })]),
+      }),
+    }));
+  });
+
+  it("automatically links an exact marketing-product name", async () => {
+    const createDraft = vi.fn(async (row) => row);
+    const getProductStateByMarketingProduct = vi.fn(async () => null);
+    const service = serviceWith({
+      findProfilesByExactMention: vi.fn(async () => [profile]),
+      getProductStateByMarketingProduct,
+      createDraft,
+    });
+    (service as any).marketingMaterials = {
+      findActiveProductByName: vi.fn(async () => ({ id: marketingProductId, name: "中转站", status: "active" })),
+      listProducts: vi.fn(),
+    };
+
+    const result = await service.prepareCustomerCapture(
+      "u1",
+      { customerMention: "李静", eventType: "note", productName: " 中转站 " },
+      { sourceText: "把李静关联到中转站" }
+    );
+
+    expect(result.status).toBe("ready");
+    expect((service as any).marketingMaterials.listProducts).not.toHaveBeenCalled();
+    expect(getProductStateByMarketingProduct).toHaveBeenCalledWith("u1", "p1", marketingProductId);
+    expect(createDraft).toHaveBeenCalledWith(expect.objectContaining({
+      proposedObservation: expect.objectContaining({
+        capture: expect.objectContaining({ marketingProductId, productName: "中转站" }),
+      }),
+    }));
+  });
+
+  it("recovers an explicitly mentioned catalog product when the model omitted productName", async () => {
+    const createDraft = vi.fn(async (row) => row);
+    const getProductStateByMarketingProduct = vi.fn(async () => null);
+    const service = serviceWith({
+      findProfilesByExactMention: vi.fn(async () => [profile]),
+      getProductStateByMarketingProduct,
+      createDraft,
+    });
+    (service as any).marketingMaterials = {
+      findActiveProductsMentionedInText: vi.fn(async () => [{
+        id: marketingProductId, name: "agent代销", status: "active",
+      }]),
+      getProduct: vi.fn(async () => ({ id: marketingProductId, name: "agent代销", status: "active" })),
+    };
+
+    const result = await service.prepareCustomerCapture(
+      "u1",
+      { customerMention: "张老师", eventType: "purchase_intent" },
+      { sourceText: "张老师今天咨询 agent代销，表示很感兴趣，但对于入场金额太高犹豫了" }
+    );
+
+    expect(result.status).toBe("ready");
+    expect(createDraft).toHaveBeenCalledWith(expect.objectContaining({
+      proposedObservation: expect.objectContaining({
+        capture: expect.objectContaining({ productName: "agent代销", marketingProductId }),
+      }),
+    }));
+  });
+
+  it("infers a consultation object and asks for confirmation when it is not in marketing materials", async () => {
+    const createDraft = vi.fn(async (row) => row);
+    const service = serviceWith({
+      findProfilesByExactMention: vi.fn(async () => [profile]),
+      getProductState: vi.fn(async () => null),
+      createDraft,
+    });
+    (service as any).marketingMaterials = {
+      findActiveProductsMentionedInText: vi.fn(async () => []),
+      findActiveProductByName: vi.fn(async () => null),
+      listProducts: vi.fn(async () => ({
+        items: [{ id: marketingProductId, name: "中转站", status: "active" }],
+        page: 1, limit: 100, total: 1,
+      })),
+    };
+
+    const result = await service.prepareCustomerCapture(
+      "u1",
+      { customerMention: "张老师", eventType: "purchase_intent" },
+      { sourceText: "张老师今天咨询 agent代销，表示很感兴趣，但对于入场金额太高犹豫了" }
+    );
+
+    expect(result.clarification).toMatchObject({
+      kind: "marketing_product",
+      question: "“agent代销”要关联到哪个营销产品？",
+    });
+    expect(result.clarification?.options).toContain("将“agent代销”添加为新产品");
+    expect(createDraft).toHaveBeenCalledWith(expect.objectContaining({
+      proposedObservation: expect.objectContaining({
+        capture: expect.objectContaining({ productName: "agent代销" }),
+      }),
+    }));
+  });
+
+  function captureCommitService() {
+    const applyObservation = vi.fn(async (_client, _userId, args) => ({
+      profile: args.profile,
+      observation: { id: "o1" },
+      extraction: { id: "e1" },
+      products: [], appliedFields: [], skippedFields: [],
+    }));
+    const repository = {
+      transaction: vi.fn(async (operation: (client: unknown) => Promise<unknown>) => operation({ tx: true })),
+      getDraft: vi.fn(async () => ({
+        id: "d1", status: "awaiting_confirmation", expiresAt: "2999-01-01T00:00:00.000Z",
+        candidateProfileIds: ["p1"], appliedProfileId: null, appliedObservationId: null,
+        proposedObservation: {
+          capture: { customerMention: "李静", eventType: "note", productName: "中转站增强版" },
+          profileId: "p1",
+          productCandidates: [{ id: marketingProductId, name: "中转站" }],
+        },
+        ambiguities: ["marketing_product"], conversationId: null, sourceMessageId: null,
+      })),
+      getProfile: vi.fn(async () => profile),
+      markDraftApplied: vi.fn(async () => ({})),
+    };
+    const service = serviceWith(repository);
+    (service as any).applyObservation = applyObservation;
+    return { service, applyObservation };
+  }
+
+  it("commits a user-selected existing marketing product", async () => {
+    const { service, applyObservation } = captureCommitService();
+    (service as any).marketingMaterials = {
+      getProduct: vi.fn(async () => ({ id: marketingProductId, name: "中转站", status: "active" })),
+    };
+
+    await service.commitCustomerCapture("u1", { draftId: "d1", marketingProductId });
+
+    expect(applyObservation).toHaveBeenCalledWith(expect.anything(), "u1", expect.objectContaining({
+      input: expect.objectContaining({ marketingProductId, productName: "中转站" }),
+    }));
+  });
+
+  it("creates a new marketing product from the confirmed original name", async () => {
+    const { service, applyObservation } = captureCommitService();
+    const createProduct = vi.fn(async () => ({
+      id: "00000000-0000-0000-0000-000000000125", name: "中转站增强版", status: "active",
+    }));
+    (service as any).marketingMaterials = { createProduct };
+
+    await service.commitCustomerCapture("u1", { draftId: "d1", createMarketingProduct: true });
+
+    expect(createProduct).toHaveBeenCalledWith("u1", { name: "中转站增强版" }, { tx: true });
+    expect(applyObservation).toHaveBeenCalledWith(expect.anything(), "u1", expect.objectContaining({
+      input: expect.objectContaining({
+        marketingProductId: "00000000-0000-0000-0000-000000000125",
+        productName: "中转站增强版",
+      }),
+    }));
+  });
+
+  it("can save the observation without a product when the user chooses so", async () => {
+    const { service, applyObservation } = captureCommitService();
+    (service as any).marketingMaterials = {};
+
+    await service.commitCustomerCapture("u1", { draftId: "d1", skipProduct: true });
+
+    const appliedInput = applyObservation.mock.calls[0]?.[2].input;
+    expect(appliedInput).not.toHaveProperty("productName");
+    expect(appliedInput).not.toHaveProperty("marketingProductId");
+  });
+});
+
 describe("DigitalEmployeeService profile changes", () => {
   it("allows a unique low-risk create to commit in the same agent turn", async () => {
     const service = serviceWith({
@@ -244,6 +494,35 @@ describe("DigitalEmployeeService cohort overview", () => {
       modelId: "llm-primary",
       summary: expect.stringContaining("到期跟进"),
     }));
+  });
+
+  it("immediately refreshes the cohort with the explicitly selected model", async () => {
+    const upsertCohortSnapshot = vi.fn(async () => {});
+    const generate = vi.fn(async () => ({
+      summary: "当前客户整体活跃度稳定，潜客仍是主体。建议优先处理到期跟进，并持续观察风险变化。",
+      modelId: "model-from-input",
+    }));
+    const service = serviceWith({
+      listActiveProfilesForCohort: vi.fn(async () => []),
+      upsertCohortSnapshot,
+    }, {}, { generate });
+
+    const cohort = await service.refreshCohortSummary(
+      "u1",
+      "model-from-input",
+      new Date("2026-08-18T08:00:00.000Z")
+    );
+
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "u1",
+      snapshotDate: "2026-08-18",
+      modelId: "model-from-input",
+    }));
+    expect(upsertCohortSnapshot).toHaveBeenCalledWith("u1", expect.objectContaining({
+      generationMethod: "llm",
+      modelId: "model-from-input",
+    }));
+    expect(cohort).toMatchObject({ source: "nightly", modelId: "model-from-input" });
   });
 
   it("persists the deterministic summary when the LLM fails", async () => {

@@ -7,7 +7,7 @@ describe("campaign selected assets migration", () => {
     const query = vi.fn(async () => ({ rows: [] }));
     await campaignSelectedAssets.up({ query } as any);
     expect(campaignSelectedAssets.version).toBe(15);
-    expect(migrations.at(-1)).toBe(campaignSelectedAssets);
+    expect(migrations).toContain(campaignSelectedAssets);
     expect(String(query.mock.calls[0]?.[0])).toContain("selected_assets");
   });
 });

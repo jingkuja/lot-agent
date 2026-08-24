@@ -544,6 +544,7 @@ export function Workspace({
                 onOpenOpportunities={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("acquisition") : undefined}
                 onOpenAcquisition={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("copy") : undefined}
                 onPrompt={(prompt) => void doSend(prompt)}
+                llmModelId={selectedModels.llm}
               />
             ) : undefined}
           />

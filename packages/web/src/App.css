@@ -3787,6 +3787,13 @@ html, body, #root {
 }
 
 .de-home-card-heading > button:hover { color: var(--de-accent-strong); }
+.de-cohort-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
 .de-cohort-source {
   padding: 5px 8px;
   border-radius: 999px;
@@ -3794,6 +3801,26 @@ html, body, #root {
   background: var(--overlay-sink);
   font-size: 10px;
   white-space: nowrap;
+}
+.de-cohort-refresh {
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--de-accent) 32%, var(--border));
+  border-radius: 999px;
+  color: var(--de-accent-strong);
+  background: color-mix(in srgb, var(--de-accent-soft) 68%, var(--bg-card));
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.de-cohort-refresh:hover:not(:disabled) { border-color: var(--de-accent); }
+.de-cohort-refresh:disabled { opacity: .55; cursor: not-allowed; }
+.de-cohort-refresh-error {
+  position: relative;
+  margin-top: 10px;
+  color: var(--error);
+  font-size: 11px;
 }
 
 .de-cohort-summary {
@@ -4903,6 +4930,7 @@ html, body, #root {
 .de-product-metrics .health-text-at_risk { color: var(--error); }
 .de-product-card p { display: grid; gap: 4px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
 .de-product-card footer { margin-top: auto; color: var(--text-muted); font-size: 11px; }
+.de-product-catalog-hint { margin: -4px 0 12px; color: var(--text-muted); font-size: 12px; }
 .de-empty-inline { padding: 24px; border: 1px dashed var(--border-input); border-radius: var(--radius-md); color: var(--text-muted); font-size: 13px; text-align: center; }
 .de-observation-form { padding: 15px; }
 .de-observation-form textarea { min-height: 105px; }

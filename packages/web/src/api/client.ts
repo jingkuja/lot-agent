@@ -499,6 +499,12 @@ export const api = {
   getDigitalEmployeeOverview: () =>
     request<DigitalEmployeeOverview>("/digital-employee/overview"),
 
+  refreshDigitalEmployeeCohort: (modelId: string) =>
+    request<DigitalEmployeeOverview["cohort"]>("/digital-employee/overview/refresh", {
+      method: "POST",
+      body: JSON.stringify({ modelId }),
+    }),
+
   listCustomerProfiles: (filters: {
     page?: number;
     limit?: number;

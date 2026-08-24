@@ -112,6 +112,7 @@ export interface CustomerProductState {
   profileId: string;
   productKey: string;
   productName: string;
+  marketingProductId: string | null;
   journeyStage: JourneyStage;
   sentiment: Sentiment;
   satisfaction: Satisfaction;
@@ -151,6 +152,7 @@ export interface CustomerObservationExtraction {
   eventType: ObservationType;
   productKey: string | null;
   productName: string | null;
+  marketingProductId: string | null;
   extractedFacts: JsonObject;
   proposedPatch: JsonObject;
   applyStatus: ExtractionApplyStatus;
@@ -259,6 +261,7 @@ export interface DigitalEmployeeOverview {
 export interface CreateProductStateInput {
   productName: string;
   productKey?: string;
+  marketingProductId?: string;
   journeyStage?: JourneyStage;
   sentiment?: Sentiment;
   satisfaction?: Satisfaction;
@@ -326,6 +329,7 @@ export interface CustomerCaptureInput {
   customerMention: string;
   eventType: ObservationType;
   productName?: string;
+  marketingProductId?: string;
   occurredAt?: string | null;
   facts?: ObservationFacts;
   proposedStatePatch?: ObservationFacts;
@@ -338,11 +342,12 @@ export interface PrepareCaptureResult {
   status: "ready" | "needs_clarification";
   profile?: { id: string; displayName: string };
   candidates: Array<{ id: string; displayName: string; customerRegion?: string | null }>;
+  productCandidates?: Array<{ id: string; name: string }>;
   ambiguities: string[];
   clarification?: {
     question: string;
     options: string[];
-    kind: "identity" | "new_profile" | "journey_stage" | "locked_field";
+    kind: "identity" | "new_profile" | "marketing_product" | "journey_stage" | "locked_field";
   };
 }
 
@@ -354,6 +359,12 @@ export interface CommitCaptureInput {
   createProfile?: { displayName?: string };
   /** Explicit user answer for a product-stage ambiguity. */
   confirmedJourneyStage?: JourneyStage;
+  /** Choose one of the product candidates stored on the capture draft. */
+  marketingProductId?: string;
+  /** Create a minimal marketing product using the product name from the original message. */
+  createMarketingProduct?: boolean;
+  /** Save the observation without a product relationship. */
+  skipProduct?: boolean;
 }
 
 export interface CommitCaptureResult {
@@ -369,6 +380,7 @@ export interface AddManualObservationInput {
   rawText: string;
   eventType?: ObservationType;
   productName?: string;
+  marketingProductId?: string;
   occurredAt?: string | null;
   facts?: ObservationFacts;
   proposedStatePatch?: ObservationFacts;

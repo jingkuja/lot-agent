@@ -14,6 +14,7 @@ import {
   type Health,
   type JourneyStage,
   type ManualObservationInput,
+  type MarketingProduct,
   type ObservationType,
   type ProductStateUpdateInput,
   type ProfileInput,
@@ -53,6 +54,7 @@ function shortValues(values: unknown[]): string {
 export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps) {
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [products, setProducts] = useState<CustomerProductState[]>([]);
+  const [marketingProducts, setMarketingProducts] = useState<MarketingProduct[]>([]);
   const [timeline, setTimeline] = useState<{ observations: Array<{ id: string; rawText: string; eventType?: string; occurredAt: string | null; createdAt: string }>; changes: CustomerStateChange[] }>({ observations: [], changes: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,13 +73,15 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
     setLoading(true);
     setError(null);
     try {
-      const [detail, nextTimeline] = await Promise.all([
+      const [detail, nextTimeline, productCatalog] = await Promise.all([
         api.getCustomerProfile(profileId),
         api.getCustomerTimeline(profileId),
+        api.listMarketingProducts({ status: "active", limit: 100 }),
       ]);
       setProfile(detail.profile);
       setProducts(detail.productStates);
       setTimeline(nextTimeline);
+      setMarketingProducts(productCatalog.items);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "客户画像加载失败");
     } finally {
@@ -100,11 +104,12 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
     }
   };
 
-  const saveProduct = async (input: ProductStateUpdateInput & { productName: string }) => {
+  const saveProduct = async (input: ProductStateUpdateInput & { productName: string; marketingProductId?: string }) => {
     if (!profile) return;
     setSavingState(true);
     try {
-      const key = stateEditor === "new" ? normalizeProductKey(input.productName) : stateEditor!.productKey;
+      if (stateEditor === "new" && !input.marketingProductId) throw new Error("请选择营销资料中的有效产品");
+      const key = stateEditor === "new" ? `marketing:${input.marketingProductId}` : stateEditor!.productKey;
       const result = await api.updateCustomerProductState(profile.id, key, stateEditor === "new" ? input : { ...input, version: stateEditor!.version });
       setProfile(result.profile);
       setStateEditor(null);
@@ -122,7 +127,10 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
       const input: ManualObservationInput = {
         rawText: note.trim(),
         eventType: noteType,
-        productName: noteProduct.trim() || undefined,
+        ...(noteProduct ? {
+          marketingProductId: noteProduct,
+          productName: marketingProducts.find((product) => product.id === noteProduct)?.name,
+        } : {}),
       };
       await api.addCustomerObservation(profile.id, input);
       setNote("");
@@ -164,6 +172,9 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
     ["邮箱", profile.contact?.email],
     ["微信", profile.contact?.wechat],
   ].filter(([, value]) => !!value) as Array<[string, string]>;
+
+  const allActiveProductsLinked = marketingProducts.length > 0
+    && marketingProducts.every((product) => products.some((state) => state.marketingProductId === product.id));
 
   return (
     <div className="de-page de-profile-detail-page">
@@ -225,7 +236,8 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
       </div>
 
       <section className="de-section">
-        <div className="de-section-heading"><div><h2>产品关系</h2><p>每个产品独立维护购买阶段、满意度、问题和风险。</p></div>{profile.status === "active" && <button className="de-secondary-button" onClick={() => setStateEditor("new")}>＋ 添加产品</button>}</div>
+        <div className="de-section-heading"><div><h2>产品关系</h2><p>关联营销资料中的产品，并独立维护购买阶段、满意度、问题和风险。</p></div>{profile.status === "active" && <button className="de-secondary-button" disabled={marketingProducts.length === 0 || allActiveProductsLinked} onClick={() => setStateEditor("new")}>＋ 关联产品</button>}</div>
+        {marketingProducts.length === 0 && <div className="de-product-catalog-hint">营销资料中还没有有效产品，请先建立产品资料后再关联客户。</div>}
         {products.length === 0 ? <div className="de-empty-inline">尚未关联产品。添加产品后可独立记录试用、使用和反馈状态。</div> : <div className="de-product-grid">{products.map((state) => <ProductStateCard key={state.id} state={state} disabled={profile.status !== "active"} onEdit={() => setStateEditor(state)} />)}</div>}
       </section>
 
@@ -235,7 +247,7 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
           <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：李姐反馈边缘算力性能在高峰期不稳定，希望本周安排技术支持。" maxLength={12_000} />
           <div className="de-observation-controls">
             <label><span>记录类型</span><select value={noteType} onChange={(event) => setNoteType(event.target.value as ObservationType)}>{OBSERVATION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-            <label><span>关联产品（可选）</span><input value={noteProduct} onChange={(event) => setNoteProduct(event.target.value)} maxLength={200} placeholder="如：边缘算力" /></label>
+            <label><span>关联产品（可选）</span><select value={noteProduct} onChange={(event) => setNoteProduct(event.target.value)}><option value="">不关联产品</option>{marketingProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>
             <button className="de-primary-button" disabled={savingNote || !note.trim()}>{savingNote ? "保存中…" : "保存记录"}</button>
           </div>
         </form>
@@ -252,14 +264,14 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
       </section>
 
       {editProfile && <ProfileEditor profile={profile} saving={savingProfile} onClose={() => !savingProfile && setEditProfile(false)} onSave={saveProfile} />}
-      {stateEditor && <ProductStateEditor state={stateEditor === "new" ? undefined : stateEditor} saving={savingState} onClose={() => !savingState && setStateEditor(null)} onSave={saveProduct} />}
+      {stateEditor && <ProductStateEditor state={stateEditor === "new" ? undefined : stateEditor} products={stateEditor === "new" ? marketingProducts.filter((product) => !products.some((state) => state.marketingProductId === product.id)) : marketingProducts} saving={savingState} onClose={() => !savingState && setStateEditor(null)} onSave={saveProduct} />}
     </div>
   );
 }
 
 function ProductStateCard({ state, disabled, onEdit }: { state: CustomerProductState; disabled: boolean; onEdit: () => void }) {
   return <article className="de-product-card">
-    <header><div><h3>{state.productName}</h3><span>{state.productKey}</span></div>{!disabled && <button className="de-row-action" onClick={onEdit}>编辑</button>}</header>
+    <header><div><h3>{state.productName}</h3><span>{state.marketingProductId ? "已关联营销资料" : "待关联营销资料"}</span></div>{!disabled && <button className="de-row-action" onClick={onEdit}>编辑</button>}</header>
     <div className="de-product-metrics"><span><small>阶段</small><b>{JOURNEY_LABELS[state.journeyStage]}</b></span><span><small>满意度</small><b>{SATISFACTION_LABELS[state.satisfaction]}</b></span><span><small>健康度</small><b className={`health-text-${state.health}`}>{HEALTH_LABELS[state.health]}</b></span></div>
     {shortValues(state.currentIssues) && <p><small>当前问题</small>{shortValues(state.currentIssues)}</p>}
     {shortValues(state.objections) && <p><small>异议</small>{shortValues(state.objections)}</p>}
@@ -277,18 +289,14 @@ function formatValue(value: unknown): string {
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-function normalizeProductKey(name: string): string {
-  const value = name.trim().toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
-  return value || "product";
-}
-
-function ProductStateEditor({ state, saving, onClose, onSave }: {
+function ProductStateEditor({ state, products, saving, onClose, onSave }: {
   state?: CustomerProductState;
+  products: MarketingProduct[];
   saving: boolean;
   onClose: () => void;
-  onSave: (input: ProductStateUpdateInput & { productName: string }) => Promise<void> | void;
+  onSave: (input: ProductStateUpdateInput & { productName: string; marketingProductId?: string }) => Promise<void> | void;
 }) {
-  const [productName, setProductName] = useState(state?.productName ?? "");
+  const [marketingProductId, setMarketingProductId] = useState(state?.marketingProductId ?? "");
   const [journeyStage, setJourneyStage] = useState<JourneyStage>(state?.journeyStage ?? "unknown");
   const [sentiment, setSentiment] = useState<Sentiment>(state?.sentiment ?? "unknown");
   const [satisfaction, setSatisfaction] = useState<Satisfaction>(state?.satisfaction ?? "unknown");
@@ -300,14 +308,26 @@ function ProductStateEditor({ state, saving, onClose, onSave }: {
   const parse = (text: string) => text.split(/[；;\n]/).map((item) => item.trim()).filter(Boolean);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!productName.trim()) { setError("请填写产品名称"); return; }
+    const selectedProduct = products.find((product) => product.id === marketingProductId)
+      ?? (state?.marketingProductId === marketingProductId ? { id: marketingProductId, name: state.productName } : undefined);
+    if (!selectedProduct) { setError("请选择营销资料中的有效产品"); return; }
     setError(null);
     try {
-      await onSave({ productName: productName.trim(), journeyStage, sentiment, satisfaction, health, currentIssues: parse(issues), objections: parse(objections), manualLockFields: lockJourney ? ["journeyStage"] : [] });
+      await onSave({
+        productName: selectedProduct.name,
+        ...(!state?.marketingProductId ? { marketingProductId: selectedProduct.id } : {}),
+        journeyStage,
+        sentiment,
+        satisfaction,
+        health,
+        currentIssues: parse(issues),
+        objections: parse(objections),
+        manualLockFields: lockJourney ? ["journeyStage"] : [],
+      });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "保存失败"); }
   };
   return <div className="de-modal-backdrop" onMouseDown={onClose}><section className="de-modal de-product-editor" role="dialog" aria-modal="true" aria-label={state ? "编辑产品状态" : "添加产品"} onMouseDown={(event) => event.stopPropagation()}>
     <div className="de-modal-head"><div><h2>{state ? "编辑产品状态" : "添加产品关系"}</h2><p>销售阶段、使用满意度和风险独立记录。</p></div><button className="de-icon-button" type="button" onClick={onClose}>×</button></div>
-    <form className="de-form" onSubmit={submit}><div className="de-form-grid"><label><span>产品名称 *</span><input value={productName} onChange={(event) => setProductName(event.target.value)} disabled={!!state} autoFocus /></label><label><span>旅程阶段</span><select value={journeyStage} onChange={(event) => setJourneyStage(event.target.value as JourneyStage)}>{JOURNEY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>最近态度</span><select value={sentiment} onChange={(event) => setSentiment(event.target.value as Sentiment)}>{SENTIMENT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>满意度</span><select value={satisfaction} onChange={(event) => setSatisfaction(event.target.value as Satisfaction)}>{SATISFACTION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>健康度</span><select value={health} onChange={(event) => setHealth(event.target.value as Health)}>{HEALTH_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>当前问题</span><textarea value={issues} onChange={(event) => setIssues(event.target.value)} placeholder="用分号分隔" /></label><label><span>异议</span><textarea value={objections} onChange={(event) => setObjections(event.target.value)} placeholder="用分号分隔" /></label></div><fieldset className="de-form-section"><legend>人工锁定</legend><div className="de-check-row"><label><input type="checkbox" checked={lockJourney} onChange={(event) => setLockJourney(event.target.checked)} /> 锁定产品旅程阶段</label></div></fieldset>{error && <p className="de-form-error">{error}</p>}<footer className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose} disabled={saving}>取消</button><button className="de-primary-button" disabled={saving}>{saving ? "保存中…" : "保存状态"}</button></footer></form>
+    <form className="de-form" onSubmit={submit}><div className="de-form-grid"><label><span>营销资料产品 *</span><select value={marketingProductId} onChange={(event) => setMarketingProductId(event.target.value)} disabled={!!state?.marketingProductId} autoFocus><option value="">请选择产品</option>{state?.marketingProductId && !products.some((product) => product.id === state.marketingProductId) && <option value={state.marketingProductId}>{state.productName}（已归档）</option>}{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label><label><span>旅程阶段</span><select value={journeyStage} onChange={(event) => setJourneyStage(event.target.value as JourneyStage)}>{JOURNEY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>最近态度</span><select value={sentiment} onChange={(event) => setSentiment(event.target.value as Sentiment)}>{SENTIMENT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>满意度</span><select value={satisfaction} onChange={(event) => setSatisfaction(event.target.value as Satisfaction)}>{SATISFACTION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>健康度</span><select value={health} onChange={(event) => setHealth(event.target.value as Health)}>{HEALTH_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>当前问题</span><textarea value={issues} onChange={(event) => setIssues(event.target.value)} placeholder="用分号分隔" /></label><label><span>异议</span><textarea value={objections} onChange={(event) => setObjections(event.target.value)} placeholder="用分号分隔" /></label></div><fieldset className="de-form-section"><legend>人工锁定</legend><div className="de-check-row"><label><input type="checkbox" checked={lockJourney} onChange={(event) => setLockJourney(event.target.checked)} /> 锁定产品旅程阶段</label></div></fieldset>{error && <p className="de-form-error">{error}</p>}<footer className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose} disabled={saving}>取消</button><button className="de-primary-button" disabled={saving || !marketingProductId}>{saving ? "保存中…" : "保存状态"}</button></footer></form>
   </section></div>;
 }

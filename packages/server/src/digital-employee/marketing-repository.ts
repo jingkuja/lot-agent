@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { QueryClient } from "../db/migration-runner.js";
 import type {
   MarketingBrandAssets,
   MarketingBrandAssetsInput,
@@ -40,8 +41,28 @@ export class MarketingMaterialsRepository {
     return result.rows[0] ? toProduct(result.rows[0]) : null;
   }
 
-  async createProduct(userId: string, id: string, input: MarketingProductInput): Promise<MarketingProduct> {
+  async findActiveProductByName(userId: string, name: string): Promise<MarketingProduct | null> {
     const result = await this.pool.query(
+      "SELECT * FROM marketing_products WHERE user_id = $1 AND status = 'active' AND lower(name) = lower($2) LIMIT 1",
+      [userId, name]
+    );
+    return result.rows[0] ? toProduct(result.rows[0]) : null;
+  }
+
+  async findActiveProductsMentionedInText(userId: string, text: string): Promise<MarketingProduct[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM marketing_products
+       WHERE user_id = $1 AND status = 'active' AND char_length(trim(name)) >= 2
+         AND position(lower(name) in lower($2)) > 0
+       ORDER BY char_length(name) DESC, updated_at DESC
+       LIMIT 5`,
+      [userId, text]
+    );
+    return result.rows.map(toProduct);
+  }
+
+  async createProduct(userId: string, id: string, input: MarketingProductInput, client: QueryClient = this.pool): Promise<MarketingProduct> {
+    const result = await client.query(
       `INSERT INTO marketing_products (
          id, user_id, name, positioning, core_values, verifiable_facts, common_objections,
          current_benefits, prohibited_expressions, case_materials

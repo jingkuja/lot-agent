@@ -63,7 +63,8 @@ describe("DigitalEmployeeRepository persistence parameters", () => {
   it("serializes product-state list fields for JSONB columns", async () => {
     const query = vi.fn(async () => ({ rows: [{
       id: "s1", user_id: "u1", profile_id: "p1", product_key: "compute",
-      product_name: "算力设备出租", journey_stage: "evaluating", sentiment: "neutral",
+      product_name: "算力设备出租", marketing_product_id: "00000000-0000-0000-0000-000000000123",
+      journey_stage: "evaluating", sentiment: "neutral",
       satisfaction: "unknown", health: "healthy", needs: ["算力设备出租"],
       objections: ["对价格敏感"], current_issues: [], manual_lock_fields: [],
       version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -72,15 +73,17 @@ describe("DigitalEmployeeRepository persistence parameters", () => {
 
     await repository.createProductState({
       id: "s1", userId: "u1", profileId: "p1", productKey: "compute",
-      productName: "算力设备出租", journeyStage: "evaluating", sentiment: "neutral",
+      productName: "算力设备出租", marketingProductId: "00000000-0000-0000-0000-000000000123",
+      journeyStage: "evaluating", sentiment: "neutral",
       satisfaction: "unknown", health: "healthy", needs: ["算力设备出租"],
       objections: ["对价格敏感"], currentIssues: [], manualLockFields: [],
     });
 
     const params = query.mock.calls[0][1] as unknown[];
-    expect(params[9]).toBe('["算力设备出租"]');
-    expect(params[10]).toBe('["对价格敏感"]');
-    expect(params[11]).toBe("[]");
+    expect(params[5]).toBe("00000000-0000-0000-0000-000000000123");
+    expect(params[10]).toBe('["算力设备出租"]');
+    expect(params[11]).toBe('["对价格敏感"]');
+    expect(params[12]).toBe("[]");
   });
 
   it("persists the cohort summary generation method for audit", async () => {

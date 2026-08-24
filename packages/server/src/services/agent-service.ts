@@ -105,6 +105,7 @@ const DIGITAL_EMPLOYEE_SCOPE_TOOLS: Record<string, Set<string>> = {
   "customer-profile": new Set([
     "search_customer_profiles", "get_customer_profiles", "prepare_customer_profile_change",
     "commit_customer_profile_change", "prepare_customer_capture", "commit_customer_capture",
+    "search_marketing_materials",
     "ask_user", "load_skill",
   ]),
   "opportunity-advisor": new Set([
@@ -362,8 +363,15 @@ export class AgentService {
     // PII-free metrics only. Any resolution/request/validation error is caught
     // by DigitalEmployeeService and persisted as deterministic logic fallback.
     this.digitalEmployee = new DigitalEmployeeService(this.db, undefined, {
-      generate: async ({ userId, snapshotDate, metrics }) => {
-        const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, digitalEmployee: true });
+      generate: async ({ userId, snapshotDate, metrics, modelId }) => {
+        const { llm, usedModelId } = await this.resolveUtilityLLM({
+          userId,
+          modelId,
+          digitalEmployee: true,
+        });
+        if (modelId && usedModelId !== modelId) {
+          throw new Error(`Selected cohort summary model is unavailable: ${modelId}`);
+        }
         const metered = meterLLM(llm, (usage) =>
           this.meterUtilityUsage("customer-cohort-summary", usedModelId, userId, usage)
         );

@@ -52,6 +52,7 @@ export interface CustomerProductState {
   profileId: string;
   productKey: string;
   productName: string;
+  marketingProductId: string | null;
   journeyStage: JourneyStage;
   sentiment: Sentiment;
   satisfaction: Satisfaction;
@@ -155,6 +156,7 @@ export interface ProfileInput {
   productStates?: Array<{
     productName: string;
     productKey?: string;
+    marketingProductId?: string;
     journeyStage?: JourneyStage;
     sentiment?: Sentiment;
     satisfaction?: Satisfaction;
@@ -173,6 +175,7 @@ export interface ProfileUpdateInput extends Omit<Partial<ProfileInput>, "product
 export interface ProductStateUpdateInput {
   version?: number;
   productName?: string;
+  marketingProductId?: string;
   journeyStage?: JourneyStage;
   sentiment?: Sentiment;
   satisfaction?: Satisfaction;
@@ -187,6 +190,7 @@ export interface ManualObservationInput {
   rawText: string;
   eventType?: ObservationType;
   productName?: string;
+  marketingProductId?: string;
   occurredAt?: string | null;
   facts?: Record<string, unknown>;
   proposedStatePatch?: Record<string, unknown>;

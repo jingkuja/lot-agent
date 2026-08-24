@@ -18,8 +18,11 @@ describe("digitalEmployeeAllowedToolNames", () => {
   });
 
   it("keeps opportunity and acquisition tools in their own scopes", () => {
+    const profiles = digitalEmployeeAllowedToolNames("customer-profile", tools);
     const advisor = digitalEmployeeAllowedToolNames("opportunity-advisor", tools);
     const acquisition = digitalEmployeeAllowedToolNames("customer-acquisition", tools);
+    expect(profiles).toContain("search_marketing_materials");
+    expect(profiles).toContain("prepare_customer_capture");
     expect(advisor).toContain("search_customer_work_queue");
     expect(advisor).toContain("generate_individual_outreach");
     expect(advisor).not.toContain("generate_campaign_copy");

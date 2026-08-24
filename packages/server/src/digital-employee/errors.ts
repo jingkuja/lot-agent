@@ -34,6 +34,16 @@ export class OpenTasksError extends DigitalEmployeeError {
   }
 }
 
+export class ProductSelectionRequiredError extends InputError {
+  constructor(
+    readonly productName: string,
+    readonly candidates: Array<{ id: string; name: string }>
+  ) {
+    super("请先确认要关联的营销产品");
+    this.name = "ProductSelectionRequiredError";
+  }
+}
+
 export class QuotaError extends DigitalEmployeeError {
   constructor(message = "当前余额不足，无法创建生成任务") {
     super(message, 402, "quota_exceeded");

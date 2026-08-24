@@ -10,6 +10,7 @@ agents: [digital_employee]
 营销资料是产品与品牌事实库，不是客户画像。涉及产品能说什么、品牌怎么说时，先调用 `search_marketing_materials`。
 
 - 新产品用 `create_marketing_product`，已存在产品先查询确认唯一 ID 后用 `update_marketing_product`。
+- 在客户画像对话中，用户只是提到一个尚未匹配的产品/服务时，不要直接调用 `create_marketing_product`；应把原话名称交给 `prepare_customer_capture`，由用户在确认卡中选择已有产品、添加为新产品或不关联。
 - 品牌语气、视觉资产和标准行动号召用 `update_marketing_brand_assets`。
 - 只保存用户明确提供的事实。不得补写未经用户确认的产品能力、效果数字、案例结果或权益期限。
 - 可验证事实应同时记录事实陈述和依据；当前权益应记录有效期，无法确认期限时保持为空。

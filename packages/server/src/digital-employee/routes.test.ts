@@ -20,6 +20,30 @@ describe("digital employee profile routes", () => {
     await expect(response.json()).resolves.toEqual(overview);
   });
 
+  it("refreshes the cohort with the LLM model selected by the user", async () => {
+    const cohort = { summary: "已更新", modelId: "deepseek-v4-flash" };
+    const service = { refreshCohortSummary: vi.fn(async () => cohort) };
+    const response = await app(service).request("/digital-employee/overview/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ modelId: "deepseek-v4-flash" }),
+    });
+    expect(response.status).toBe(200);
+    expect(service.refreshCohortSummary).toHaveBeenCalledWith("u1", "deepseek-v4-flash");
+    await expect(response.json()).resolves.toEqual(cohort);
+  });
+
+  it("requires a model when refreshing the cohort", async () => {
+    const service = { refreshCohortSummary: vi.fn() };
+    const response = await app(service).request("/digital-employee/overview/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(response.status).toBe(400);
+    expect(service.refreshCohortSummary).not.toHaveBeenCalled();
+  });
+
   it("passes the authenticated owner to list queries", async () => {
     const service = { listProfiles: vi.fn(async () => ({ items: [], page: 1, limit: 20, total: 0 })) };
     const response = await app(service).request("/digital-employee/profiles?q=%E6%9D%8E%E5%A7%90");

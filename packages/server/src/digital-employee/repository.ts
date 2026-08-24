@@ -54,6 +54,7 @@ export interface NewProductStateRow {
   profileId: string;
   productKey: string;
   productName: string;
+  marketingProductId?: string | null;
   journeyStage: CustomerProductState["journeyStage"];
   sentiment: CustomerProductState["sentiment"];
   satisfaction: CustomerProductState["satisfaction"];
@@ -87,6 +88,7 @@ export interface NewExtractionRow {
   eventType: ObservationType;
   productKey?: string | null;
   productName?: string | null;
+  marketingProductId?: string | null;
   extractedFacts: JsonObject;
   proposedPatch: JsonObject;
   applyStatus: ExtractionApplyStatus;
@@ -366,9 +368,11 @@ export class DigitalEmployeeRepository {
 
   async listProductStates(userId: string, profileId: string, client: Client = this.pool): Promise<CustomerProductState[]> {
     const result = await client.query(
-      `SELECT * FROM de_customer_product_states
-       WHERE user_id = $1 AND profile_id = $2
-       ORDER BY updated_at DESC, product_name ASC`,
+      `SELECT state.*, product.name AS marketing_product_name
+       FROM de_customer_product_states state
+       LEFT JOIN marketing_products product ON product.id = state.marketing_product_id
+       WHERE state.user_id = $1 AND state.profile_id = $2
+       ORDER BY state.updated_at DESC, state.product_name ASC`,
       [userId, profileId]
     );
     return result.rows.map(toProductState);
@@ -381,9 +385,28 @@ export class DigitalEmployeeRepository {
     client: Client = this.pool
   ): Promise<CustomerProductState | null> {
     const result = await client.query(
-      `SELECT * FROM de_customer_product_states
-       WHERE user_id = $1 AND profile_id = $2 AND product_key = $3`,
+      `SELECT state.*, product.name AS marketing_product_name
+       FROM de_customer_product_states state
+       LEFT JOIN marketing_products product ON product.id = state.marketing_product_id
+       WHERE state.user_id = $1 AND state.profile_id = $2 AND state.product_key = $3`,
       [userId, profileId, productKey]
+    );
+    return result.rows[0] ? toProductState(result.rows[0]) : null;
+  }
+
+  async getProductStateByMarketingProduct(
+    userId: string,
+    profileId: string,
+    marketingProductId: string,
+    client: Client = this.pool
+  ): Promise<CustomerProductState | null> {
+    const result = await client.query(
+      `SELECT state.*, product.name AS marketing_product_name
+       FROM de_customer_product_states state
+       LEFT JOIN marketing_products product ON product.id = state.marketing_product_id
+       WHERE state.user_id = $1 AND state.profile_id = $2 AND state.marketing_product_id = $3
+       ORDER BY state.updated_at DESC LIMIT 1`,
+      [userId, profileId, marketingProductId]
     );
     return result.rows[0] ? toProductState(result.rows[0]) : null;
   }
@@ -391,13 +414,13 @@ export class DigitalEmployeeRepository {
   async createProductState(row: NewProductStateRow, client: Client = this.pool): Promise<CustomerProductState> {
     const result = await client.query(
       `INSERT INTO de_customer_product_states (
-        id, user_id, profile_id, product_key, product_name, journey_stage,
+        id, user_id, profile_id, product_key, product_name, marketing_product_id, journey_stage,
         sentiment, satisfaction, health, needs, objections, current_issues,
         manual_lock_fields, last_observation_id, last_confirmed_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING *`,
       [
-        row.id, row.userId, row.profileId, row.productKey, row.productName, row.journeyStage,
+        row.id, row.userId, row.profileId, row.productKey, row.productName, row.marketingProductId ?? null, row.journeyStage,
         row.sentiment, row.satisfaction, row.health, jsonParam(row.needs), jsonParam(row.objections), jsonParam(row.currentIssues),
         row.manualLockFields, row.lastObservationId ?? null, row.lastConfirmedAt ?? null,
       ]
@@ -413,14 +436,14 @@ export class DigitalEmployeeRepository {
   ): Promise<CustomerProductState | null> {
     const result = await client.query(
       `UPDATE de_customer_product_states
-       SET product_name = $1, journey_stage = $2, sentiment = $3, satisfaction = $4,
-           health = $5, needs = $6, objections = $7, current_issues = $8,
-           manual_lock_fields = $9, last_observation_id = $10, last_confirmed_at = $11,
+       SET product_name = $1, marketing_product_id = $2, journey_stage = $3, sentiment = $4, satisfaction = $5,
+           health = $6, needs = $7, objections = $8, current_issues = $9,
+           manual_lock_fields = $10, last_observation_id = $11, last_confirmed_at = $12,
            version = version + 1, updated_at = now()
-       WHERE id = $12 AND user_id = $13 AND version = $14
+       WHERE id = $13 AND user_id = $14 AND version = $15
        RETURNING *`,
       [
-        row.productName, row.journeyStage, row.sentiment, row.satisfaction, row.health,
+        row.productName, row.marketingProductId, row.journeyStage, row.sentiment, row.satisfaction, row.health,
         jsonParam(row.needs), jsonParam(row.objections), jsonParam(row.currentIssues), row.manualLockFields,
         row.lastObservationId, row.lastConfirmedAt, row.id, userId, expectedVersion,
       ]
@@ -479,14 +502,15 @@ export class DigitalEmployeeRepository {
   async createExtraction(row: NewExtractionRow, client: Client = this.pool): Promise<CustomerObservationExtraction> {
     const result = await client.query(
       `INSERT INTO de_customer_observation_extractions (
-        id, user_id, profile_id, observation_id, event_type, product_key, product_name,
+        id, user_id, profile_id, observation_id, event_type, product_key, product_name, marketing_product_id,
         extracted_facts, proposed_patch, apply_status, confidence, model_id,
         prompt_version, schema_version, supersedes_extraction_id, applied_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *`,
       [
         row.id, row.userId, row.profileId, row.observationId, row.eventType,
-        row.productKey ?? null, row.productName ?? null, jsonParam(row.extractedFacts), jsonParam(row.proposedPatch),
+        row.productKey ?? null, row.productName ?? null, row.marketingProductId ?? null,
+        jsonParam(row.extractedFacts), jsonParam(row.proposedPatch),
         row.applyStatus, row.confidence ?? null, row.modelId ?? null, row.promptVersion,
         row.schemaVersion, row.supersedesExtractionId ?? null, row.appliedAt ?? null,
       ]
@@ -738,7 +762,8 @@ function toProductState(row: Record<string, unknown>): CustomerProductState {
     userId: String(row.user_id),
     profileId: String(row.profile_id),
     productKey: String(row.product_key),
-    productName: String(row.product_name),
+    productName: String(row.marketing_product_name ?? row.product_name),
+    marketingProductId: nullableText(row.marketing_product_id),
     journeyStage: String(row.journey_stage ?? "unknown") as CustomerProductState["journeyStage"],
     sentiment: String(row.sentiment ?? "unknown") as CustomerProductState["sentiment"],
     satisfaction: String(row.satisfaction ?? "unknown") as CustomerProductState["satisfaction"],
@@ -771,6 +796,7 @@ function toExtraction(row: Record<string, unknown>): CustomerObservationExtracti
     id: String(row.id), userId: String(row.user_id), profileId: String(row.profile_id),
     observationId: String(row.observation_id), eventType: String(row.event_type) as ObservationType,
     productKey: nullableText(row.product_key), productName: nullableText(row.product_name),
+    marketingProductId: nullableText(row.marketing_product_id),
     extractedFacts: jsonObject(row.extracted_facts), proposedPatch: jsonObject(row.proposed_patch),
     applyStatus: String(row.apply_status) as ExtractionApplyStatus,
     confidence: row.confidence == null ? null : number(row.confidence), modelId: nullableText(row.model_id),

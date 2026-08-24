@@ -13,6 +13,7 @@ interface DigitalEmployeeHomeProps {
   onOpenOpportunities?: () => void;
   onOpenAcquisition?: () => void;
   onPrompt: (prompt: string) => void;
+  llmModelId?: string | null;
 }
 
 const QUICK_PROMPTS = [
@@ -20,9 +21,11 @@ const QUICK_PROMPTS = [
   { label: "记录客户动态", prompt: "我要记录一条新的客户动态，请引导我补全客户、事件和产品信息。" },
 ];
 
-export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOpportunities, onOpenAcquisition, onPrompt }: DigitalEmployeeHomeProps) {
+export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOpportunities, onOpenAcquisition, onPrompt, llmModelId }: DigitalEmployeeHomeProps) {
   const [overview, setOverview] = useState<DigitalEmployeeOverview | null>(null);
   const [error, setError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -35,6 +38,20 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
       });
     return () => { active = false; };
   }, []);
+
+  const refreshCohort = async () => {
+    if (!llmModelId || refreshing) return;
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const cohort = await api.refreshDigitalEmployeeCohort(llmModelId);
+      setOverview((current) => current ? { ...current, cohort } : current);
+    } catch (requestError) {
+      setRefreshError(requestError instanceof Error ? requestError.message : "群像总结更新失败，请稍后重试");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <section className="de-home" aria-label="客户洞察工作台">
@@ -60,16 +77,29 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
               <p className="de-home-card-kicker">客户群像</p>
               <h2>整体客户脉搏</h2>
             </div>
-            {overview && (
-              <span className="de-cohort-source">
-                {overview.cohort.source === "live"
-                  ? "实时规则预览"
-                  : overview.cohort.generationMethod === "llm"
-                    ? `AI 智能总结 · ${dateTime(overview.cohort.generatedAt)}`
-                    : `规则兜底 · ${dateTime(overview.cohort.generatedAt)}`}
-              </span>
-            )}
+            <div className="de-cohort-heading-actions">
+              {overview && (
+                <span className="de-cohort-source">
+                  {overview.cohort.source === "live"
+                    ? "实时规则预览"
+                    : overview.cohort.generationMethod === "llm"
+                      ? `AI 智能总结 · ${dateTime(overview.cohort.generatedAt)}`
+                      : `规则兜底 · ${dateTime(overview.cohort.generatedAt)}`}
+                </span>
+              )}
+              <button
+                className="de-cohort-refresh"
+                type="button"
+                onClick={() => void refreshCohort()}
+                disabled={refreshing || !llmModelId || !overview}
+                title={llmModelId ? `使用当前模型 ${llmModelId} 更新` : "当前没有可用的 LLM 模型"}
+              >
+                {refreshing ? "更新中…" : "即刻更新"}
+              </button>
+            </div>
           </div>
+
+          {refreshError && <p className="de-cohort-refresh-error" role="alert">{refreshError}</p>}
 
           {!overview && !error && <CohortSkeleton />}
           {error && (

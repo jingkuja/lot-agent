@@ -8,6 +8,20 @@ describe("customer profile validators", () => {
     expect(() => parseCaptureInput({ customerMention: "李姐", eventType: "invented" })).toThrow(InputError);
   });
 
+  it("validates the marketing product reference on a capture", () => {
+    expect(parseCaptureInput({
+      customerMention: "李姐",
+      eventType: "note",
+      productName: "边缘算力",
+      marketingProductId: "00000000-0000-0000-0000-000000000123",
+    })).toMatchObject({ marketingProductId: "00000000-0000-0000-0000-000000000123" });
+    expect(() => parseCaptureInput({
+      customerMention: "李姐",
+      eventType: "note",
+      marketingProductId: "not-an-id",
+    })).toThrow(InputError);
+  });
+
   it("does not silently accept an empty display-name update", () => {
     expect(() => parseUpdateProfile({ version: 1, displayName: "  " })).toThrow("displayName不能为空");
   });

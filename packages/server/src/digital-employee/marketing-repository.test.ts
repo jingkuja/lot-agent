@@ -50,6 +50,25 @@ describe("MarketingMaterialsRepository listProducts", () => {
     expect(query.mock.calls[0][1].slice(0, 2)).toEqual(["u1", "active"]);
   });
 
+  it("按当前用户和规范名称精确查找有效产品", async () => {
+    const query = vi.fn(async () => ({ rows: [productRow()] }));
+    const result = await repositoryWith(query).findActiveProductByName("u1", "会员版");
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("lower(name) = lower($2)"), ["u1", "会员版"]);
+    expect(result).toMatchObject({ name: "会员版", status: "active" });
+  });
+
+  it("从客户原话中查找明确提到的有效产品", async () => {
+    const query = vi.fn(async () => ({ rows: [productRow({ name: "agent代销" })] }));
+    const result = await repositoryWith(query).findActiveProductsMentionedInText(
+      "u1",
+      "张老师今天咨询 agent代销，但对于入场金额太高犹豫了"
+    );
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("position(lower(name) in lower($2)) > 0"), [
+      "u1", "张老师今天咨询 agent代销，但对于入场金额太高犹豫了",
+    ]);
+    expect(result[0]).toMatchObject({ name: "agent代销" });
+  });
+
   it("汇总总数并把行映射为驼峰字段与数字版本", async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [{ total: 7 }] })
