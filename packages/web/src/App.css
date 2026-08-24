@@ -5118,9 +5118,10 @@ html, body, #root {
 .de-dialog-check input { width: 15px; height: 15px; accent-color: var(--accent); }
 .de-result-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 17px; border: 0; }
 .de-result-options legend { grid-column: 1 / -1; margin-bottom: 7px; color: var(--text-muted); font-size: 11px; }
-.de-result-options label { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.de-result-options label { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 9px; min-height: 42px; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
 .de-result-options label.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); color: var(--accent); }
-.de-result-options input { accent-color: var(--accent); }
+.de-result-options input[type="radio"] { width: 14px; height: 14px; min-height: 0; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.de-result-options label > span { min-width: 0; line-height: 1.45; }
 
 @media (max-width: 850px) {
   .de-detail-grid { grid-template-columns: 1fr; }
