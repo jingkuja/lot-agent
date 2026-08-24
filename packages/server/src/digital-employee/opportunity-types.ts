@@ -81,6 +81,7 @@ export interface OpportunitySummary {
   dueToday: number;
   overdue: number;
   awaitingResult: number;
+  viewCounts: Record<OpportunityView, number>;
 }
 
 export interface OpportunitySettings {
@@ -139,6 +140,7 @@ export interface TalkTrackRequest {
   intent: TalkTrackIntent;
   message: string;
   history: TalkTrackMessage[];
+  modelId?: string;
 }
 
 export interface TalkTrackContext {

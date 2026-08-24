@@ -76,6 +76,33 @@ describe("OpportunityService settings", () => {
     expect(relinkSql).toContain("error_code = NULL");
   });
 
+  it("starts a fresh task for every manual discovery request", async () => {
+    const insertedIds = ["run-1", "run-2"];
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) {
+        return { rows: [{ id: insertedIds.shift() }] };
+      }
+      return { rows: [] };
+    });
+    const enqueue = vi.fn()
+      .mockResolvedValueOnce("task-1")
+      .mockResolvedValueOnce("task-2");
+    const service = new OpportunityService({ pool: { query } } as any, { enqueue } as any);
+
+    const first = await service.requestDiscovery("u1");
+    const second = await service.requestDiscovery("u1");
+
+    expect(first).toEqual({ runId: "run-1", taskId: "task-1", reused: false });
+    expect(second).toEqual({ runId: "run-2", taskId: "task-2", reused: false });
+    expect(enqueue).toHaveBeenCalledTimes(2);
+    const keys = query.mock.calls
+      .filter((call) => String(call[0]).includes("INSERT INTO de_follow_up_suggestion_runs"))
+      .map((call) => String(call[1]?.[2]));
+    expect(keys[0]).toMatch(/^manual:/);
+    expect(keys[1]).toMatch(/^manual:/);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
   it("does not advance next_run_at when daily enqueue fails", async () => {
     const now = new Date("2026-08-20T01:00:00.000Z");
     const query = vi.fn(async (sql: string) => {
@@ -144,12 +171,15 @@ describe("OpportunityService personal work queue", () => {
       if (sql.includes("FROM de_follow_up_automation_settings")) return { rows: [] };
       if (sql.includes("FROM de_follow_up_suggestion_runs")) return { rows: [] };
       if (sql.includes("count(*)::int AS count FROM de_customer_profiles")) return { rows: [{ count: 1 }] };
-      if (sql.includes("AS high_priority")) return { rows: [{ high_priority: 0, due_today: 0, overdue: 0, awaiting_result: 0 }] };
+      if (sql.includes("AS high_priority")) return { rows: [{
+        high_priority: 3, due_today: 1, overdue: 1, awaiting_result: 2,
+        today_count: 4, pending_count: 5, in_progress_count: 6, completed_count: 7,
+      }] };
       return { rows: [] };
     });
     const service = new OpportunityService({ pool: { query } } as any);
 
-    await service.list("u1", { view: "today" });
+    const result = await service.list("u1", { view: "today" });
 
     const workQueueSql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("FROM de_follow_up_tasks task")) ?? "";
     expect(workQueueSql).toContain("task.scheduled_at < date_trunc('day', now()) + interval '1 day'");
@@ -157,6 +187,29 @@ describe("OpportunityService personal work queue", () => {
     expect(workQueueSql).toContain("profile.status = 'active'");
     const summarySql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("AS high_priority")) ?? "";
     expect(summarySql).toContain("profile.status = 'active'");
+    expect(summarySql).toContain("AS pending_count");
+    expect(summarySql).toContain("AS in_progress_count");
+    expect(summarySql).toContain("AS completed_count");
+    expect(result.summary.viewCounts).toEqual({
+      today: 4, pending: 5, in_progress: 6, awaiting_result: 2, completed: 7,
+    });
+  });
+
+  it("returns zero for every opportunity view when there is no data", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_automation_settings")) return { rows: [] };
+      if (sql.includes("FROM de_follow_up_suggestion_runs")) return { rows: [] };
+      if (sql.includes("count(*)::int AS count FROM de_customer_profiles")) return { rows: [{ count: 0 }] };
+      if (sql.includes("AS high_priority")) return { rows: [{}] };
+      return { rows: [] };
+    });
+    const service = new OpportunityService({ pool: { query } } as any);
+
+    const result = await service.list("u1", { view: "today" });
+
+    expect(result.summary.viewCounts).toEqual({
+      today: 0, pending: 0, in_progress: 0, awaiting_result: 0, completed: 0,
+    });
   });
 
   it("cancels open tasks and dismisses suggestions when a profile is archived", async () => {
@@ -229,7 +282,7 @@ describe("OpportunityService personal work queue", () => {
     const service = new OpportunityService({ pool: { query } } as any, undefined, undefined, { generate });
 
     const result = await service.generateTalkTrack("u1", "a1", {
-      intent: "follow_up", message: "生成微信跟进话术", history: [],
+      intent: "follow_up", message: "生成微信跟进话术", history: [], modelId: "test-model",
     });
 
     expect(result).toEqual({ modelId: "test-model", reply: "李姐，合同模板您看得怎么样？" });
@@ -239,6 +292,7 @@ describe("OpportunityService personal work queue", () => {
         customerName: "李姐", productName: "机房运维服务",
         recentFacts: [{ text: "客户要求先发合同模板", occurredAt: "2026-08-18T02:00:00.000Z" }],
       }),
+      request: expect.objectContaining({ modelId: "test-model" }),
     }));
   });
 

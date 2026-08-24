@@ -121,6 +121,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
         <DigitalEmployeeLayout
           pathname={pathname}
           user={user}
+          llmModels={modelCatalog.llm}
           onLogout={onLogout}
           onNavigate={navigateWithModelGuard}
           onOpenDigitalEmployee={() => handleOpenDigitalEmployee(digitalEmployeeManagementPath(digitalEmployeeFeature))}

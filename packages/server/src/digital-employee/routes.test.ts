@@ -175,11 +175,11 @@ describe("digital employee profile routes", () => {
     const service = { opportunities: { generateTalkTrack } };
     const response = await app(service).request("/digital-employee/opportunities/00000000-0000-0000-0000-000000000011/talk-track", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ intent: "follow_up", message: "生成微信跟进话术", history: [] }),
+      body: JSON.stringify({ intent: "follow_up", message: "生成微信跟进话术", history: [], modelId: "m1" }),
     });
     expect(response.status).toBe(200);
     expect(generateTalkTrack).toHaveBeenCalledWith("u1", "00000000-0000-0000-0000-000000000011", {
-      intent: "follow_up", message: "生成微信跟进话术", history: [],
+      intent: "follow_up", message: "生成微信跟进话术", history: [], modelId: "m1",
     });
   });
 

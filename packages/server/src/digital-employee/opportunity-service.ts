@@ -72,7 +72,10 @@ export class OpportunityService {
   async requestDiscovery(userId: string): Promise<{ runId: string; taskId: string; reused: boolean }> {
     if (!this.queue) throw new InputError("商机发现任务队列暂不可用");
     const scanDate = dateKey(new Date());
-    return this.startOrReuseDiscovery(userId, `manual:${scanDate}`, scanDate);
+    // A manual click is an explicit request to rescan the latest customer
+    // facts and run model enhancement again. Daily automation remains
+    // idempotent, but manual runs must not reuse an earlier run from today.
+    return this.startOrReuseDiscovery(userId, `manual:${randomUUID()}`, scanDate);
   }
 
   /** Worker entry point; discovery stays useful without a model. */
@@ -647,9 +650,9 @@ export class OpportunityService {
     }
     const existing = await this.pool.query(
       `SELECT id, task_id, status FROM de_follow_up_suggestion_runs
-       WHERE user_id = $1 AND (idempotency_key = $2 OR scan_date = $3::date)
+       WHERE user_id = $1 AND idempotency_key = $2
        ORDER BY created_at DESC LIMIT 1`,
-      [userId, idempotencyKey, scanDate]
+      [userId, idempotencyKey]
     );
     const row = existing.rows[0] as { id: string; task_id: string | null; status: string } | undefined;
     if (row?.task_id && row.status !== "failed") {
@@ -1086,24 +1089,48 @@ export class OpportunityService {
 
   private async summary(userId: string): Promise<OpportunitySummary> {
     const result = await this.pool.query(
-      `SELECT
-        (SELECT count(*) FROM de_follow_up_suggestions suggestion
-         JOIN de_customer_profiles profile ON profile.id = suggestion.profile_id AND profile.user_id = suggestion.user_id
-         WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested' AND suggestion.priority = 'high'
-           AND suggestion.opportunity_type <> 'cohort_marketing'
-           AND profile.status = 'active'
-           AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
-           AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now()))::int AS high_priority,
-        count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at >= now()
-          AND task.scheduled_at < date_trunc('day',now()) + interval '1 day')::int AS due_today,
-        count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at < now())::int AS overdue,
-        count(*) FILTER (WHERE task.status = 'awaiting_result')::int AS awaiting_result
-       FROM de_follow_up_tasks task
-       JOIN de_customer_profiles profile ON profile.id = task.profile_id AND profile.user_id = task.user_id
-       WHERE task.user_id = $1 AND profile.status = 'active'`, [userId]
+      `WITH suggestion_counts AS (
+        SELECT
+          count(*) FILTER (WHERE suggestion.priority = 'high')::int AS high_priority,
+          count(*)::int AS pending_count
+        FROM de_follow_up_suggestions suggestion
+        JOIN de_customer_profiles profile ON profile.id = suggestion.profile_id AND profile.user_id = suggestion.user_id
+        WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested'
+          AND suggestion.opportunity_type <> 'cohort_marketing'
+          AND profile.status = 'active'
+          AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
+          AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now())
+      ), task_counts AS (
+        SELECT
+          count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at >= now()
+            AND task.scheduled_at < date_trunc('day',now()) + interval '1 day')::int AS due_today,
+          count(*) FILTER (WHERE task.status = 'pending' AND task.scheduled_at < now())::int AS overdue,
+          count(*) FILTER (WHERE task.status = 'awaiting_result')::int AS awaiting_result,
+          count(*) FILTER (WHERE (task.status = 'pending'
+            AND task.scheduled_at < date_trunc('day',now()) + interval '1 day')
+            OR task.status = 'awaiting_result')::int AS today_count,
+          count(*) FILTER (WHERE task.status = 'pending')::int AS in_progress_count,
+          count(*) FILTER (WHERE task.status IN ('completed','cancelled'))::int AS completed_count
+        FROM de_follow_up_tasks task
+        JOIN de_customer_profiles profile ON profile.id = task.profile_id AND profile.user_id = task.user_id
+        WHERE task.user_id = $1 AND profile.status = 'active'
+      )
+      SELECT suggestion_counts.*, task_counts.* FROM suggestion_counts CROSS JOIN task_counts`, [userId]
     );
     const row = result.rows[0] ?? {};
-    return { highPriority: Number(row.high_priority ?? 0), dueToday: Number(row.due_today ?? 0), overdue: Number(row.overdue ?? 0), awaitingResult: Number(row.awaiting_result ?? 0) };
+    return {
+      highPriority: Number(row.high_priority ?? 0),
+      dueToday: Number(row.due_today ?? 0),
+      overdue: Number(row.overdue ?? 0),
+      awaitingResult: Number(row.awaiting_result ?? 0),
+      viewCounts: {
+        today: Number(row.today_count ?? 0),
+        pending: Number(row.pending_count ?? 0),
+        in_progress: Number(row.in_progress_count ?? 0),
+        awaiting_result: Number(row.awaiting_result ?? 0),
+        completed: Number(row.completed_count ?? 0),
+      },
+    };
   }
 
   private async profileCount(userId: string) {

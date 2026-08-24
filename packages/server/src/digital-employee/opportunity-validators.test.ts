@@ -22,10 +22,12 @@ describe("opportunity validators", () => {
       intent: "sales",
       message: "改成适合微信的简短版本",
       history: [{ role: "assistant", content: "上一版话术" }],
+      modelId: "deepseek-v4-pro",
     })).toEqual({
       intent: "sales",
       message: "改成适合微信的简短版本",
       history: [{ role: "assistant", content: "上一版话术" }],
+      modelId: "deepseek-v4-pro",
     });
   });
 

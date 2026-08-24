@@ -113,6 +113,7 @@ export function parseTalkTrackRequest(value: unknown): TalkTrackRequest {
     intent: choice(source.intent, TALK_TRACK_INTENTS, "intent", true)!,
     message: text(source.message, "message", 2_000, true)!,
     history,
+    modelId: text(source.modelId, "modelId", 200),
   };
 }
 

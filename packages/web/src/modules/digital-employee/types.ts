@@ -325,7 +325,13 @@ export interface OpportunitySettings {
 export interface OpportunityListResponse {
   items: OpportunityItem[];
   total: number;
-  summary: { highPriority: number; dueToday: number; overdue: number; awaitingResult: number };
+  summary: {
+    highPriority: number;
+    dueToday: number;
+    overdue: number;
+    awaitingResult: number;
+    viewCounts: Record<OpportunityView, number>;
+  };
   hasProfiles: boolean;
   lastDiscoveredAt: string | null;
   settings: OpportunitySettings;

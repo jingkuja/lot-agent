@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../../api/client.js";
+import { ModelPicker } from "../../../components/ModelPicker.js";
+import type { CatalogModel } from "../../../lib/model-filter.js";
 import {
   OPPORTUNITY_TYPE_LABELS, OUTCOME_LABELS, READINESS_LABELS, RELATIONSHIP_LABELS,
   type OpportunityItem, type OpportunityListResponse, type OpportunitySettings,
@@ -7,6 +9,7 @@ import {
 } from "../types.js";
 
 interface Props {
+  llmModels: CatalogModel[];
   onOpenProfile: (id: string) => void;
   onCreateProfile: () => void;
 }
@@ -21,7 +24,7 @@ const FIRST_TYPES: OpportunityType[] = ["prospect_progress", "silent_reengage", 
 const DISMISS_REASONS = ["当前不合适", "已经处理", "客户明确拒绝", "信息不准确", "不再跟进"];
 type FilterValues = { readiness: string; priority: string; opportunityType: string; relationshipStage: string; product: string; suggestedFrom: string; suggestedTo: string };
 
-export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile }: Props) {
+export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfile }: Props) {
   const [view, setView] = useState<OpportunityView>("today");
   const [data, setData] = useState<OpportunityListResponse | null>(null);
   const [filters, setFilters] = useState<FilterValues>({ readiness: "", priority: "", opportunityType: "", relationshipStage: "", product: "", suggestedFrom: "", suggestedTo: "" });
@@ -75,11 +78,7 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile }: Props
     catch (reason) { setError(reason instanceof Error ? reason.message : "操作失败"); }
   };
 
-  const counts = useMemo(() => ({
-    today: view === "today" ? data?.total : undefined,
-    pending: view === "pending" ? data?.total : undefined,
-    awaiting_result: data?.summary.awaitingResult,
-  }), [data, view]);
+  const counts = useMemo(() => data?.summary.viewCounts, [data]);
 
   return (
     <div className="de-page de-opportunity-page">
@@ -103,7 +102,7 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile }: Props
 
       <div className="de-opportunity-tabs" role="tablist">
         {VIEWS.map((item) => <button key={item.id} role="tab" aria-selected={view === item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
-          {item.label}{counts[item.id as keyof typeof counts] !== undefined && <b>{counts[item.id as keyof typeof counts]}</b>}
+          {item.label}{counts && <b>{counts[item.id]}</b>}
         </button>)}
       </div>
 
@@ -113,7 +112,7 @@ export function OpportunityAdvisorPage({ onOpenProfile, onCreateProfile }: Props
         <Empty view={view} hasProfiles={data?.hasProfiles ?? false} hasFilters={Object.values(filters).some(Boolean)} onCreateProfile={onCreateProfile} onDiscover={() => void discover()} />
       ) : (
         <section className="de-opportunity-list" aria-label={VIEWS.find((item) => item.id === view)?.label}>
-          {data.items.map((item) => <OpportunityCard key={item.id} item={item} onOpenProfile={onOpenProfile} onAction={openDialog}
+          {data.items.map((item) => <OpportunityCard key={item.id} item={item} llmModels={llmModels} onOpenProfile={onOpenProfile} onAction={openDialog}
             onExecute={() => void mutate(() => api.updateOpportunityAction(item.actionId!, { operation: "execute", version: item.actionVersion }))}
             onCancel={() => void mutate(() => api.updateOpportunityAction(item.actionId!, { operation: "cancel", reason: "user_cancelled", version: item.actionVersion }))} />)}
         </section>
@@ -170,8 +169,8 @@ function Filters({ values, onChange }: { values: FilterValues; onChange: (value:
   </section>;
 }
 
-function OpportunityCard({ item, onOpenProfile, onAction, onExecute, onCancel }: {
-  item: OpportunityItem; onOpenProfile: (id: string) => void;
+function OpportunityCard({ item, llmModels, onOpenProfile, onAction, onExecute, onCancel }: {
+  item: OpportunityItem; llmModels: CatalogModel[]; onOpenProfile: (id: string) => void;
   onAction: (item: OpportunityItem, action: "accept" | "snooze" | "dismiss" | "reschedule" | "result") => void;
   onExecute: () => void; onCancel: () => void;
 }) {
@@ -187,7 +186,7 @@ function OpportunityCard({ item, onOpenProfile, onAction, onExecute, onCancel }:
       </div>
       <div className="de-opportunity-badges"><i className={`source-${item.source}`}>{item.source === "manual" ? "确定提醒" : "AI 商机"}</i><span>{OPPORTUNITY_TYPE_LABELS[item.opportunityType]}</span><b className={`priority-${item.priority}`}>{PRIORITY_LABELS[item.priority]}</b><em>{READINESS_LABELS[item.readiness]}</em></div>
     </header>
-    <TalkTrackAssistant item={item} open={talkOpen} onClose={() => setTalkOpen(false)} />
+    <TalkTrackAssistant item={item} open={talkOpen} llmModels={llmModels} onClose={() => setTalkOpen(false)} />
     <div className="de-opportunity-body">
       <div className="de-opportunity-main">
         <h2>{item.title}</h2><p>{item.objective}</p>
@@ -213,22 +212,26 @@ const TALK_TRACK_PRESETS: Array<{ intent: TalkTrackIntent; label: string; prompt
   { intent: "sales", label: "产品推介", prompt: "请结合客户需求和已核实的产品资料，生成一段有针对性的产品推介话术。" },
 ];
 
-function TalkTrackAssistant({ item, open, onClose }: { item: OpportunityItem; open: boolean; onClose: () => void }) {
+function TalkTrackAssistant({ item, open, llmModels, onClose }: { item: OpportunityItem; open: boolean; llmModels: CatalogModel[]; onClose: () => void }) {
   const [intent, setIntent] = useState<TalkTrackIntent>("follow_up");
   const [messages, setMessages] = useState<TalkTrackMessage[]>([]);
   const [input, setInput] = useState("");
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const effectiveModel = selectedModel && llmModels.some((model) => model.id === selectedModel)
+    ? selectedModel
+    : llmModels[0]?.id ?? null;
 
   const send = async (content: string, nextIntent: TalkTrackIntent = intent) => {
     const message = content.trim();
-    if (!message || loading) return;
+    if (!message || loading || !effectiveModel) return;
     const history = messages.slice(-12);
     setIntent(nextIntent);
     setMessages((current) => [...current, { role: "user", content: message }]);
     setInput(""); setLoading(true); setError(null);
     try {
-      const result = await api.generateOpportunityTalkTrack(item.id, { intent: nextIntent, message, history });
+      const result = await api.generateOpportunityTalkTrack(item.id, { intent: nextIntent, message, history, modelId: effectiveModel });
       setMessages((current) => [...current, { role: "assistant", content: result.reply }]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "话术生成失败，请重试");
@@ -239,7 +242,7 @@ function TalkTrackAssistant({ item, open, onClose }: { item: OpportunityItem; op
   return <section className="de-talk-track-panel" aria-label={`${item.customerName}联系话术助手`}>
       <header><div><strong>单客户话术助手</strong><span>已带入 {item.customerName} 的画像、当前事项{item.productName ? `和${item.productName}资料` : ""}</span></div><button type="button" onClick={onClose} aria-label="收起话术助手">×</button></header>
       <div className="de-talk-track-presets">
-        {TALK_TRACK_PRESETS.map((preset) => <button type="button" key={preset.intent} disabled={loading} className={intent === preset.intent ? "active" : ""} onClick={() => void send(preset.prompt, preset.intent)}>{preset.label}</button>)}
+        {TALK_TRACK_PRESETS.map((preset) => <button type="button" key={preset.intent} disabled={loading || !effectiveModel} className={intent === preset.intent ? "active" : ""} onClick={() => void send(preset.prompt, preset.intent)}>{preset.label}</button>)}
       </div>
       {messages.length === 0 && <div className="de-talk-track-empty"><span>✦</span><p>选择一种场景直接生成，或在下方说明渠道、语气和想达到的目的。</p></div>}
       {messages.length > 0 && <div className="de-talk-track-messages">
@@ -251,10 +254,16 @@ function TalkTrackAssistant({ item, open, onClose }: { item: OpportunityItem; op
       </div>}
       {error && <p className="de-talk-track-error" role="alert">{error}</p>}
       <form onSubmit={(event) => { event.preventDefault(); void send(input); }}>
-        <textarea value={input} maxLength={2_000} rows={2} disabled={loading} placeholder="例如：语气更熟悉一点，适合微信，先询问对方是否方便……" onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(input); }
-        }} />
-        <button type="submit" className="de-primary-button" disabled={loading || !input.trim()}>{loading ? "生成中" : "发送"}</button>
+        <div className="de-talk-track-composer">
+          <textarea value={input} maxLength={2_000} rows={2} disabled={loading || !effectiveModel} placeholder={effectiveModel ? "例如：语气更熟悉一点，适合微信，先询问对方是否方便……" : "当前 Key 暂无可用的 LLM 模型"} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(input); }
+          }} />
+          <div className="de-talk-track-composer-toolbar">
+            <span>当前 Key 模型</span>
+            <ModelPicker models={llmModels} value={effectiveModel} onChange={setSelectedModel} disabled={loading} />
+          </div>
+        </div>
+        <button type="submit" className="de-primary-button" disabled={loading || !effectiveModel || !input.trim()}>{loading ? "生成中" : "发送"}</button>
       </form>
       <small>AI 话术仅供参考，发送前请核对客户事实、产品承诺和价格权益。</small>
     </section>;

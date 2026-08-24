@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
 import { useConversations } from "../../hooks/useConversations.js";
+import type { CatalogModel } from "../../lib/model-filter.js";
 import { digitalEmployeeConversations as filterDigitalEmployeeConversations } from "../../lib/product-agent-scope.js";
 import { DigitalEmployeeSidebar, type DigitalEmployeeFeature } from "./DigitalEmployeeSidebar.js";
 import { ProfileDetailPage } from "./profiles/ProfileDetailPage.js";
@@ -13,6 +14,7 @@ import { CustomerAcquisitionPage } from "./acquisition/CustomerAcquisitionPage.j
 interface DigitalEmployeeLayoutProps {
   pathname: string;
   user: User;
+  llmModels: CatalogModel[];
   onLogout: () => void;
   onNavigate: (path: string) => void;
   onOpenDigitalEmployee: () => void;
@@ -34,7 +36,7 @@ function profileIdFor(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, onOpenDigitalEmployee, onNavigateAssistant, onOpenConversation }: DigitalEmployeeLayoutProps) {
+export function DigitalEmployeeLayout({ pathname, user, llmModels, onLogout, onNavigate, onOpenDigitalEmployee, onNavigateAssistant, onOpenConversation }: DigitalEmployeeLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { conversations, loadingMore, hasMore, loadMore } = useConversations();
   const view = viewFor(pathname);
@@ -88,6 +90,7 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
             />)}
           {view === "marketing-materials" && <MarketingMaterialsPage onBackToConversation={() => onNavigate("/digital-employee/marketing-materials")} />}
           {view === "acquisition" && <OpportunityAdvisorPage
+            llmModels={llmModels}
             onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
             onCreateProfile={goProfiles}
           />}

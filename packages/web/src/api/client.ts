@@ -590,7 +590,7 @@ export const api = {
       method: "PATCH", body: JSON.stringify(input),
     }),
 
-  generateOpportunityTalkTrack: (id: string, input: { intent: TalkTrackIntent; message: string; history: TalkTrackMessage[] }) =>
+  generateOpportunityTalkTrack: (id: string, input: { intent: TalkTrackIntent; message: string; history: TalkTrackMessage[]; modelId?: string }) =>
     request<{ reply: string; modelId: string }>(`/digital-employee/opportunities/${encodeURIComponent(id)}/talk-track`, {
       method: "POST", body: JSON.stringify(input),
     }),

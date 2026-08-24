@@ -12,6 +12,6 @@ describe("customer product marketing link migration", () => {
     expect(ddl).toContain("FROM marketing_products product");
     expect(ddl).toContain("product.user_id = state.user_id");
     expect(customerProductMarketingLink.version).toBe(16);
-    expect(migrations.at(-1)).toBe(customerProductMarketingLink);
+    expect(migrations.find((migration) => migration.version === 16)).toBe(customerProductMarketingLink);
   });
 });

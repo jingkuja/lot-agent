@@ -211,6 +211,38 @@ export function catalogModelConfig(
   return { id, type, provider: "", billingUnit, ...p, enabled: true };
 }
 
+/**
+ * Reasoning models can spend a small output budget entirely on thinking and
+ * finish without a user-visible text chunk. Talk tracks must never expose that
+ * private reasoning as the reply, so retry an empty first result with a direct
+ * final-answer instruction and a larger output budget.
+ */
+export async function completeTalkTrackReply(
+  llm: LLMProvider,
+  messages: Message[]
+): Promise<string> {
+  const first = await complete(llm, messages, {
+    signal: AbortSignal.timeout(45_000),
+    params: { temperature: 0.45, maxTokens: 1_600 },
+  });
+  if (first.trim()) return first.trim();
+
+  const retryMessages: Message[] = [
+    ...messages,
+    {
+      role: "user",
+      content:
+        "请直接输出最终可发送的话术正文，不要复述要求或输出分析过程。" +
+        "即使资料不足，也先给出带可编辑占位符的版本；正文不能为空。",
+    },
+  ];
+  const retried = await complete(llm, retryMessages, {
+    signal: AbortSignal.timeout(45_000),
+    params: { temperature: 0.3, maxTokens: 3_200 },
+  });
+  return retried.trim();
+}
+
 export interface ServiceConfig {
   llm: LLMConfig;
   models: ModelConfig[];
@@ -399,7 +431,11 @@ export class AgentService {
       },
     }, this.jobQueue, {
       generate: async ({ userId, context, request }) => {
-        const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, digitalEmployee: true });
+        const { llm, usedModelId } = await this.resolveUtilityLLM({
+          userId,
+          modelId: request.modelId,
+          digitalEmployee: true,
+        });
         const metered = meterLLM(llm, (usage) =>
           this.meterUtilityUsage("opportunity talk-track", usedModelId, userId, usage)
         );
@@ -421,10 +457,7 @@ export class AgentService {
           ...request.history,
           { role: "user", content: request.message },
         ];
-        const reply = await complete(metered, messages, {
-          signal: AbortSignal.timeout(45_000),
-          params: { temperature: 0.45, maxTokens: 900 },
-        });
+        const reply = await completeTalkTrackReply(metered, messages);
         return { reply, modelId: usedModelId };
       },
     }, {
