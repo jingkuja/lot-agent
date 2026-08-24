@@ -20,6 +20,7 @@ describe("pickAcquisitionModel", () => {
 describe("listedAcquisitionModels", () => {
   it("prefers the catalog list over a single selected id", () => {
     expect(listedAcquisitionModels({
+      llm: true, llmModelId: "gpt-5.4", llmModels: [{ id: "gpt-5.4" }],
       image: true, video: false, imageModelId: "gpt-image-2.0", videoModelId: null,
       imageModels: [{ id: "gpt-image-2.0" }, { id: "flux-pro" }], videoModels: [],
       configurationUrl: "https://wetok.ai/",
@@ -28,10 +29,19 @@ describe("listedAcquisitionModels", () => {
 
   it("falls back to the selected id when the catalog list is empty", () => {
     expect(listedAcquisitionModels({
+      llm: true, llmModelId: "gpt-5.4", llmModels: [{ id: "gpt-5.4" }],
       image: false, video: true, imageModelId: null, videoModelId: "seedance 2.0",
       imageModels: [], videoModels: [],
       configurationUrl: "https://wetok.ai/",
     }, "video")).toEqual([{ id: "seedance 2.0" }]);
   });
-});
 
+  it("lists LLM models for the copy composer", () => {
+    expect(listedAcquisitionModels({
+      llm: true, image: false, video: false,
+      llmModelId: "gpt-5.4", imageModelId: null, videoModelId: null,
+      llmModels: [{ id: "gpt-5.4" }, { id: "claude-sonnet", label: "Claude Sonnet" }],
+      imageModels: [], videoModels: [], configurationUrl: "https://wetok.ai/",
+    }, "llm")).toEqual([{ id: "gpt-5.4" }, { id: "claude-sonnet", label: "Claude Sonnet" }]);
+  });
+});

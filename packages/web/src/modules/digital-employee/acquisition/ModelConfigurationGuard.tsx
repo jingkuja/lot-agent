@@ -16,17 +16,18 @@ export function ModelConfigurationGuard({
   onImageModelChange: (id: string) => void;
   onVideoModelChange: (id: string) => void;
 }) {
-  if (loading) return <div className="de-model-guard loading">正在检查图像与视频模型权限…</div>;
-  if (!configuration) return <div className="de-model-guard missing"><strong>模型配置暂时无法读取</strong><span>文案仍可生成；海报和视频将在配置可用后开放。</span></div>;
+  if (loading) return <div className="de-model-guard loading">正在检查 LLM、图像与视频模型权限…</div>;
+  if (!configuration) return <div className="de-model-guard missing"><strong>模型配置暂时无法读取</strong><span>模型配置可用后才能生成相应内容。</span></div>;
+  const llmModels = listedAcquisitionModels(configuration, "llm");
   const imageModels = listedAcquisitionModels(configuration, "image");
   const videoModels = listedAcquisitionModels(configuration, "video");
-  const complete = imageModels.length > 0 && videoModels.length > 0;
+  const complete = llmModels.length > 0 && imageModels.length > 0 && videoModels.length > 0;
   return <div className={`de-model-guard ${complete ? "ready" : "missing"}`}>
     <div className="de-model-guard-head">
       <span>{complete ? "✓" : "!"}</span>
       <p>
         <strong>{complete ? "生成模型已就绪" : "模型配置提示"}</strong>
-        <small>如无可用的图像模型或视频模型，需要前往 TokenHub 配置后再选择。</small>
+        <small>如无可用的 LLM、图像或视频模型，需要前往 TokenHub 密钥管理选择对应模型分组。</small>
       </p>
     </div>
     <div className="de-model-guard-pickers">

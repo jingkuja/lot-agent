@@ -69,6 +69,7 @@ export interface CampaignContentGenerator {
     userId: string;
     prompt: string;
     brief: Record<string, unknown>;
+    modelId?: string;
     knowledgeBaseIds?: string[];
     attachments?: CampaignAssetAttachment[];
   }): Promise<{ title: string; content: string; modelId: string }>;
@@ -86,10 +87,13 @@ export interface CampaignModelOption {
 }
 
 export interface CampaignModelAvailability {
+  llm: boolean;
   image: boolean;
   video: boolean;
+  llmModelId: string | null;
   imageModelId: string | null;
   videoModelId: string | null;
+  llmModels: CampaignModelOption[];
   imageModels: CampaignModelOption[];
   videoModels: CampaignModelOption[];
   configurationUrl: string;

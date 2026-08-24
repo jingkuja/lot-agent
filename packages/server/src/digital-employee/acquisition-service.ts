@@ -278,12 +278,16 @@ export class CustomerAcquisitionService {
       throw new InputError("活动目标、渠道和行动号召不能为空");
     }
     const isPoster = resolvedInput.assetType === "poster";
+    let copyModelId: string | null = null;
     let mediaModelId: string | null = null;
     const queue = this.queue;
-    if (resolvedInput.assetType !== "copy") {
+    if (resolvedInput.assetType === "copy" && this.modelResolver) {
+      const availability = await this.getModelAvailability(userId);
+      copyModelId = resolveCampaignModel(availability, "llm", resolvedInput.modelId);
+    } else if (resolvedInput.assetType !== "copy") {
       if (!queue) throw new InputError("生成任务队列不可用");
       const availability = await this.getModelAvailability(userId);
-      mediaModelId = resolveCampaignMediaModel(availability, isPoster ? "image" : "video", resolvedInput.modelId);
+      mediaModelId = resolveCampaignModel(availability, isPoster ? "image" : "video", resolvedInput.modelId);
       if (isPoster) {
         const invalid = validateImageGenerationSettings({
           size: resolvedInput.mediaSettings?.size ?? "1024x1024",
@@ -326,6 +330,7 @@ export class CustomerAcquisitionService {
             userId,
             prompt: resolvedInput.prompt,
             brief,
+            modelId: copyModelId ?? resolvedInput.modelId,
             knowledgeBaseIds: resolvedInput.knowledgeBaseIds,
             attachments: resolvedInput.attachments,
           });
@@ -1417,31 +1422,34 @@ function iso(value: string | Date): string { return new Date(value).toISOString(
 
 function emptyModelAvailability(): CampaignModelAvailability {
   return {
+    llm: false,
     image: false,
     video: false,
+    llmModelId: null,
     imageModelId: null,
     videoModelId: null,
+    llmModels: [],
     imageModels: [],
     videoModels: [],
     configurationUrl: process.env.TOKENHUB_WEB_URL?.trim() || DEFAULT_TOKENHUB_CONFIGURATION_URL,
   };
 }
 
-function listedCampaignModels(availability: CampaignModelAvailability, kind: "image" | "video"): CampaignModelOption[] {
-  const listed = kind === "image" ? availability.imageModels : availability.videoModels;
+function listedCampaignModels(availability: CampaignModelAvailability, kind: "llm" | "image" | "video"): CampaignModelOption[] {
+  const listed = kind === "llm" ? availability.llmModels : kind === "image" ? availability.imageModels : availability.videoModels;
   if (listed?.length) return listed;
-  const selected = kind === "image" ? availability.imageModelId : availability.videoModelId;
-  const available = kind === "image" ? availability.image : availability.video;
+  const selected = kind === "llm" ? availability.llmModelId : kind === "image" ? availability.imageModelId : availability.videoModelId;
+  const available = kind === "llm" ? availability.llm : kind === "image" ? availability.image : availability.video;
   return available && selected ? [{ id: selected }] : [];
 }
 
-function resolveCampaignMediaModel(
+function resolveCampaignModel(
   availability: CampaignModelAvailability,
-  kind: "image" | "video",
+  kind: "llm" | "image" | "video",
   requested?: string,
 ): string {
   const models = listedCampaignModels(availability, kind);
-  const label = kind === "image" ? "图像" : "视频";
+  const label = kind === "llm" ? "LLM" : kind === "image" ? "图像" : "视频";
   if (!models.length) {
     throw new InputError(`当前没有可用的${label}模型，请先前往 TokenHub 配置`);
   }
@@ -1451,7 +1459,7 @@ function resolveCampaignMediaModel(
     }
     return requested;
   }
-  const fallback = kind === "image" ? availability.imageModelId : availability.videoModelId;
+  const fallback = kind === "llm" ? availability.llmModelId : kind === "image" ? availability.imageModelId : availability.videoModelId;
   return fallback && models.some((model) => model.id === fallback) ? fallback : models[0].id;
 }
 function dateOnly(value: string | Date): string { return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10); }

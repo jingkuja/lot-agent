@@ -10,7 +10,7 @@ import { AgentSwitcher } from "../components/AgentSwitcher.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
-import { useModels } from "../hooks/useModels.js";
+import type { ModelCatalog } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
@@ -28,6 +28,8 @@ import {
 
 interface WorkspaceProps {
   user: User;
+  modelCatalog: ModelCatalog;
+  reloadModels: () => Promise<ModelCatalog>;
   onLogout: () => void;
   onNavigateDigitalEmployee?: () => void;
   onNavigateDigitalProfile?: (profileId: string) => void;
@@ -41,6 +43,8 @@ interface WorkspaceProps {
 
 export function Workspace({
   user,
+  modelCatalog,
+  reloadModels,
   onLogout,
   onNavigateDigitalEmployee,
   onNavigateDigitalProfile,
@@ -158,7 +162,6 @@ export function Workspace({
   );
 
   // Per-user model catalog + per-group (llm/image/video) selected models.
-  const { models: modelCatalog, reload: reloadModels } = useModels();
   const [selectedModels, setSelectedModels] = useState(EMPTY_SELECTED);
   const [activeKeyIndex, setActiveKeyIndex] = useState(user.activeKeyIndex);
   const [keyModalOpen, setKeyModalOpen] = useState(false);

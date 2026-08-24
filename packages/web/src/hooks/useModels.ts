@@ -2,17 +2,26 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "../api/client.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 
-type Catalog = { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] };
-const EMPTY: Catalog = { llm: [], image: [], video: [] };
+export type ModelCatalog = { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] };
+const EMPTY: ModelCatalog = { llm: [], image: [], video: [] };
 
 /** Fetch the caller's available models once on mount (server caches ~5min). */
 export function useModels() {
-  const [models, setModels] = useState<Catalog>(EMPTY);
+  const [models, setModels] = useState<ModelCatalog>(EMPTY);
   const [loading, setLoading] = useState(true);
-  const reload = useCallback(() => {
+  const reload = useCallback(async () => {
     setLoading(true);
-    api.listModels().then(setModels).catch(() => setModels(EMPTY)).finally(() => setLoading(false));
+    try {
+      const next = await api.listModels();
+      setModels(next);
+      return next;
+    } catch {
+      setModels(EMPTY);
+      return EMPTY;
+    } finally {
+      setLoading(false);
+    }
   }, []);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { void reload(); }, [reload]);
   return { models, loading, reload };
 }

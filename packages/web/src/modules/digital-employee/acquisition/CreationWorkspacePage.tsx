@@ -35,6 +35,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
   const [campaigns, setCampaigns] = useState<MarketingCampaignSummary[]>([]);
   const [campaign, setCampaign] = useState<MarketingCampaignDetail | null>(null);
   const [configuration, setConfiguration] = useState<AcquisitionModelConfiguration | null>(null);
+  const [llmModelId, setLlmModelId] = useState("");
   const [imageModelId, setImageModelId] = useState("");
   const [videoModelId, setVideoModelId] = useState("");
   const [contextLoading, setContextLoading] = useState(true);
@@ -82,11 +83,13 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
       setProducts(productResult.items);
       setConfiguration(modelResult);
       const stored = readStoredAcquisitionModels();
+      const nextLlm = pickAcquisitionModel(listedAcquisitionModels(modelResult, "llm"), stored.llm, modelResult.llmModelId);
       const nextImage = pickAcquisitionModel(listedAcquisitionModels(modelResult, "image"), stored.image, modelResult.imageModelId);
       const nextVideo = pickAcquisitionModel(listedAcquisitionModels(modelResult, "video"), stored.video, modelResult.videoModelId);
+      setLlmModelId(nextLlm);
       setImageModelId(nextImage);
       setVideoModelId(nextVideo);
-      writeStoredAcquisitionModels({ image: nextImage || undefined, video: nextVideo || undefined });
+      writeStoredAcquisitionModels({ llm: nextLlm || undefined, image: nextImage || undefined, video: nextVideo || undefined });
       setCampaigns(campaignResult.items);
       setSegmentId((current) => current || segmentResult.items[0]?.id || "");
       setProductId((current) => current || productResult.items[0]?.id || "");
@@ -126,8 +129,11 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
 
   const selectedSegment = segments.find((item) => item.id === segmentId);
   const selectedProduct = products.find((item) => item.id === productId);
+  const llmModels = listedAcquisitionModels(configuration, "llm");
+  const llmPickerModels = llmModels.map((model) => ({ ...model, type: "llm" as const, provider: "tokenhub" }));
+  const copyBlocked = !contextLoading && llmModels.length === 0;
   const mediaBlocked = assetType === "poster" ? !imageModelId : assetType === "video" ? !videoModelId : false;
-  const canSubmit = prompt.trim().length >= 2 && productId && (campaignId || segmentId || publicAudience.trim()) && channels.length && callToAction.trim() && !mediaBlocked && !creating;
+  const canSubmit = prompt.trim().length >= 2 && productId && (campaignId || segmentId || publicAudience.trim()) && channels.length && callToAction.trim() && !(assetType === "copy" && copyBlocked) && !mediaBlocked && !creating;
   const contextLabel = useMemo(
     () => `${campaign?.name || title || "新活动"} · ${selectedSegment?.name || publicAudience || campaign?.audienceDescription || "未选择受众"} / ${selectedProduct?.name || campaign?.productName || "未选择产品"}`,
     [campaign, title, selectedSegment, selectedProduct, publicAudience]
@@ -153,7 +159,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
         publicAudience: campaignId || segmentId ? undefined : publicAudience.trim(),
         productId, recommendationId, parentAssetId, objective, channels, callToAction,
         title: title.trim() || undefined,
-        modelId: assetType === "poster" ? imageModelId || undefined : assetType === "video" ? videoModelId || undefined : undefined,
+        modelId: assetType === "copy" ? llmModelId || undefined : assetType === "poster" ? imageModelId || undefined : videoModelId || undefined,
         knowledgeBaseIds: assetType === "copy" ? knowledgeBases.map((item) => item.id) : undefined,
         ...composerPayload(assetType, uploaded, settings),
       });
@@ -213,15 +219,19 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
                 mode={assetType === "poster" ? "image" : assetType === "video" ? "video" : "default"}
                 value={prompt}
                 onChange={setPrompt}
-                disabled={creating}
-                selectedModel={assetType === "poster" ? imageModelId || null : assetType === "video" ? videoModelId || null : null}
+                disabled={creating || (assetType === "copy" && copyBlocked)}
+                models={assetType === "copy" ? llmPickerModels : []}
+                selectedModel={assetType === "copy" ? llmModelId || null : assetType === "poster" ? imageModelId || null : videoModelId || null}
+                onModelChange={assetType === "copy" ? (id) => { setLlmModelId(id); writeStoredAcquisitionModels({ llm: id }); } : undefined}
                 allowKnowledgeBase={assetType === "copy"}
                 knowledgeBases={assetType === "copy" ? knowledgeBases : []}
                 onKnowledgeBasesChange={setKnowledgeBases}
                 videoDurations={assetType === "video" ? ACQUISITION_VIDEO_DURATIONS : undefined}
                 placeholder={
                   assetType === "copy"
-                    ? "例如：为下周线上分享会生成一套朋友圈文案，强调部署简单，语气专业克制，不使用未确认性能数字。"
+                    ? copyBlocked
+                      ? "无法执行任务，需要到灵渠tokenhub 密钥管理 选择对应模型的分组"
+                      : "例如：为下周线上分享会生成一套朋友圈文案，强调部署简单，语气专业克制，不使用未确认性能数字。"
                     : assetType === "poster"
                       ? "描述海报画面、主标题和行动号召，可上传参考图。"
                       : "描述视频画面与节奏，可上传参考图、参考视频或首尾帧。"

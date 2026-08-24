@@ -15,6 +15,7 @@ interface DigitalEmployeeLayoutProps {
   user: User;
   onLogout: () => void;
   onNavigate: (path: string) => void;
+  onOpenDigitalEmployee: () => void;
   onNavigateAssistant: () => void;
   onOpenConversation: (id: string) => void;
 }
@@ -33,7 +34,7 @@ function profileIdFor(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, onNavigateAssistant, onOpenConversation }: DigitalEmployeeLayoutProps) {
+export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, onOpenDigitalEmployee, onNavigateAssistant, onOpenConversation }: DigitalEmployeeLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { conversations, loadingMore, hasMore, loadMore } = useConversations();
   const view = viewFor(pathname);
@@ -61,7 +62,7 @@ export function DigitalEmployeeLayout({ pathname, user, onLogout, onNavigate, on
           onLogout={onLogout}
           onCollapse={() => setSidebarCollapsed(true)}
           onOpenAssistant={onNavigateAssistant}
-          onOpenDigitalEmployee={() => onNavigate("/digital-employee/marketing-materials")}
+          onOpenDigitalEmployee={onOpenDigitalEmployee}
           activeModule="digitalEmployee"
         />
         <DigitalEmployeeSidebar

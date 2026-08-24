@@ -438,7 +438,7 @@ export class AgentService {
           return { recommendations: parseAcquisitionRecommendations(raw), modelId: usedModelId };
         },
         createCopy: async (input) => {
-          const { llm, usedModelId } = await this.resolveUtilityLLM({ userId: input.userId });
+          const { llm, usedModelId } = await this.resolveUtilityLLM({ userId: input.userId, modelId: input.modelId });
           const metered = meterLLM(llm, (usage) =>
             this.meterUtilityUsage("customer-acquisition copy", usedModelId, input.userId, usage)
           );
@@ -510,13 +510,17 @@ export class AgentService {
           const apiKey = await this.db.getUserApiKey(userId);
           let catalog = null;
           try { catalog = await this.getUserModelCatalog(userId, apiKey); } catch { catalog = null; }
+          const llmModels = (catalog?.llm ?? []).map((model) => ({ id: model.id, label: model.id }));
           const imageModels = (catalog?.image ?? []).map((model) => ({ id: model.id, label: model.id }));
           const videoModels = (catalog?.video ?? []).map((model) => ({ id: model.id, label: model.id }));
           return {
+            llm: llmModels.length > 0,
             image: imageModels.length > 0,
             video: videoModels.length > 0,
+            llmModelId: llmModels[0]?.id ?? null,
             imageModelId: imageModels[0]?.id ?? null,
             videoModelId: videoModels[0]?.id ?? null,
+            llmModels,
             imageModels,
             videoModels,
             configurationUrl: process.env.TOKENHUB_WEB_URL?.trim() || DEFAULT_TOKENHUB_CONFIGURATION_URL,
@@ -1255,5 +1259,4 @@ function parseAcquisitionFit(raw: string): import("../digital-employee/acquisiti
     priority,
   };
 }
-
 

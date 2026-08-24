@@ -3,6 +3,8 @@ import { CustomerAcquisitionService } from "./acquisition-service.js";
 import type { CampaignModelAvailability } from "./acquisition-types.js";
 
 function availability(overrides: Partial<CampaignModelAvailability> = {}): CampaignModelAvailability {
+  const llmModels = overrides.llmModels
+    ?? (overrides.llm === false ? [] : [{ id: overrides.llmModelId ?? "gpt-5.4" }]);
   const imageModels = overrides.imageModels
     ?? (overrides.image === false ? [] : [{ id: overrides.imageModelId ?? "gpt-image-2.0" }]);
   const videoModels = overrides.videoModels
@@ -10,10 +12,13 @@ function availability(overrides: Partial<CampaignModelAvailability> = {}): Campa
   return {
     configurationUrl: "https://tokenhub.example",
     ...overrides,
+    llmModels,
     imageModels,
     videoModels,
+    llm: llmModels.length > 0,
     image: imageModels.length > 0,
     video: videoModels.length > 0,
+    llmModelId: overrides.llmModelId !== undefined ? overrides.llmModelId : llmModels[0]?.id ?? null,
     imageModelId: overrides.imageModelId !== undefined ? overrides.imageModelId : imageModels[0]?.id ?? null,
     videoModelId: overrides.videoModelId !== undefined ? overrides.videoModelId : videoModels[0]?.id ?? null,
   };
@@ -177,8 +182,10 @@ describe("CustomerAcquisitionService", () => {
   it("returns an empty catalog and TokenHub URL when no resolver is configured", async () => {
     const service = new CustomerAcquisitionService({ pool: { query: vi.fn() } } as any);
     await expect(service.getModelAvailability("u1")).resolves.toMatchObject({
+      llm: false,
       image: false,
       video: false,
+      llmModels: [],
       imageModels: [],
       videoModels: [],
       configurationUrl: "https://wetok.ai/",
@@ -316,11 +323,13 @@ describe("CustomerAcquisitionService", () => {
       { pool: { query } } as any,
       undefined,
       { createCopy, recommend: vi.fn() },
+      { get: vi.fn(async () => availability({ llmModels: [{ id: "gpt-5.4" }, { id: "claude-sonnet" }] })) },
     );
     await service.createAsset("u1", {
       assetType: "copy", prompt: "强调部署简单", publicAudience: "华东制造业管理者",
       productId: "00000000-0000-4000-8000-000000000101", objective: "获得咨询",
       channels: ["朋友圈"], callToAction: "预约咨询",
+      modelId: "claude-sonnet",
       knowledgeBaseIds: ["kb-1"],
       attachments: [{
         assetId: "att1", filename: "note.txt", mime: "text/plain", size: 8,
@@ -328,9 +337,35 @@ describe("CustomerAcquisitionService", () => {
       }],
     });
     expect(createCopy).toHaveBeenCalledWith(expect.objectContaining({
+      modelId: "claude-sonnet",
       knowledgeBaseIds: ["kb-1"],
       attachments: [expect.objectContaining({ filename: "note.txt" })],
     }));
+  });
+
+  it("blocks copy generation before creating an activity when no LLM models are available", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
+      }] };
+      return { rows: [] };
+    });
+    const createCopy = vi.fn();
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      undefined,
+      { createCopy, recommend: vi.fn() },
+      { get: vi.fn(async () => availability({ llm: false, llmModelId: null, llmModels: [] })) },
+    );
+
+    await expect(service.createAsset("u1", {
+      assetType: "copy", prompt: "生成文案", publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
+      channels: ["朋友圈"], callToAction: "预约",
+    })).rejects.toThrow("LLM模型");
+
+    expect(createCopy).not.toHaveBeenCalled();
+    expect(query.mock.calls.some((call) => String(call[0]).includes("INSERT INTO de_marketing_campaigns"))).toBe(false);
   });
 
   it("rejects a media model that is not in the user's catalog", async () => {

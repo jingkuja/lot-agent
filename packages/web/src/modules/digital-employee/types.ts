@@ -407,10 +407,13 @@ export interface AcquisitionModelOption {
 }
 
 export interface AcquisitionModelConfiguration {
+  llm: boolean;
   image: boolean;
   video: boolean;
+  llmModelId: string | null;
   imageModelId: string | null;
   videoModelId: string | null;
+  llmModels: AcquisitionModelOption[];
   imageModels: AcquisitionModelOption[];
   videoModels: AcquisitionModelOption[];
   configurationUrl: string;

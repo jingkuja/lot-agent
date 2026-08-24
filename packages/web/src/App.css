@@ -4921,6 +4921,8 @@ html, body, #root {
 
 .de-modal-backdrop { position: fixed; z-index: 110; inset: 0; display: flex; align-items: center; justify-content: center; padding: 22px; background: color-mix(in srgb, var(--text) 30%, transparent); }
 .de-modal { width: min(760px, 100%); max-height: min(840px, calc(100vh - 44px)); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--bg-card); box-shadow: var(--shadow-lg); }
+.llm-model-required-modal { width: min(520px, 100%); }
+.llm-model-required-heading { display: block; color: var(--text); font-size: 16px; }
 .de-modal-head { align-items: start; justify-content: space-between; gap: 18px; padding: 20px 22px; border-bottom: 1px solid var(--border); }
 .de-modal-head h2 { font-size: 20px; }
 .de-form { padding: 20px 22px 22px; }

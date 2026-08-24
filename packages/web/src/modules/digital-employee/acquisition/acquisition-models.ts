@@ -1,13 +1,14 @@
 import type { AcquisitionModelConfiguration, AcquisitionModelOption } from "../types.js";
 
-export const ACQUISITION_MEDIA_MODELS_KEY = "lot:acquisition-media-models";
+export const ACQUISITION_MODELS_KEY = "lot:acquisition-media-models";
 
-export function readStoredAcquisitionModels(): { image?: string; video?: string } {
+export function readStoredAcquisitionModels(): { llm?: string; image?: string; video?: string } {
   try {
-    const raw = localStorage.getItem(ACQUISITION_MEDIA_MODELS_KEY);
+    const raw = localStorage.getItem(ACQUISITION_MODELS_KEY);
     if (!raw) return {};
-    const parsed = JSON.parse(raw) as { image?: unknown; video?: unknown };
+    const parsed = JSON.parse(raw) as { llm?: unknown; image?: unknown; video?: unknown };
     return {
+      llm: typeof parsed.llm === "string" ? parsed.llm : undefined,
       image: typeof parsed.image === "string" ? parsed.image : undefined,
       video: typeof parsed.video === "string" ? parsed.video : undefined,
     };
@@ -16,9 +17,9 @@ export function readStoredAcquisitionModels(): { image?: string; video?: string 
   }
 }
 
-export function writeStoredAcquisitionModels(next: { image?: string; video?: string }) {
+export function writeStoredAcquisitionModels(next: { llm?: string; image?: string; video?: string }) {
   try {
-    localStorage.setItem(ACQUISITION_MEDIA_MODELS_KEY, JSON.stringify({ ...readStoredAcquisitionModels(), ...next }));
+    localStorage.setItem(ACQUISITION_MODELS_KEY, JSON.stringify({ ...readStoredAcquisitionModels(), ...next }));
   } catch {
     // ignore quota / private mode
   }
@@ -26,12 +27,12 @@ export function writeStoredAcquisitionModels(next: { image?: string; video?: str
 
 export function listedAcquisitionModels(
   configuration: AcquisitionModelConfiguration | null | undefined,
-  kind: "image" | "video",
+  kind: "llm" | "image" | "video",
 ): AcquisitionModelOption[] {
   if (!configuration) return [];
-  const listed = kind === "image" ? configuration.imageModels : configuration.videoModels;
+  const listed = kind === "llm" ? configuration.llmModels : kind === "image" ? configuration.imageModels : configuration.videoModels;
   if (listed?.length) return listed;
-  const selected = kind === "image" ? configuration.imageModelId : configuration.videoModelId;
+  const selected = kind === "llm" ? configuration.llmModelId : kind === "image" ? configuration.imageModelId : configuration.videoModelId;
   return selected ? [{ id: selected }] : [];
 }
 
