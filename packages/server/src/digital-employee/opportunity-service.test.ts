@@ -360,6 +360,8 @@ describe("OpportunityService personal work queue", () => {
     expect(sql).toContain("last_observed_at");
     const observationCall = clientQuery.mock.calls.find((call) => String(call[0]).includes("INSERT INTO de_customer_observations"));
     expect(observationCall?.[1]?.[5]).toContain("周四可以演示");
+    const nextActionCall = clientQuery.mock.calls.find((call) => String(call[0]).includes("INSERT INTO de_follow_up_tasks"));
+    expect(String(nextActionCall?.[0]).replace(/\s+/g, " ")).toContain("left($4::text,300),$4::text");
     const cadenceCall = clientQuery.mock.calls.find((call) => String(call[0]).includes("next_follow_up_at"));
     expect(cadenceCall?.[1]).toEqual(["u1", "p1", "2026-08-20T04:00:00.000Z"]);
     const extractionCall = clientQuery.mock.calls.find((call) => String(call[0]).includes("INSERT INTO de_customer_observation_extractions"));

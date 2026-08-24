@@ -309,7 +309,7 @@ export class OpportunityService {
         await client.query(
           `INSERT INTO de_follow_up_tasks (
              id,user_id,owner_user_id,profile_id,source,title,objective,note,follow_up_method,priority,scheduled_at,status,result_criteria,product_key,product_name
-           ) VALUES ($1,$2,$2,$3,'manual',$4,$4,'',$5,$6,$7,'pending','获得有效下一步',$8,$9)`,
+           ) VALUES ($1,$2,$2,$3,'manual',left($4::text,300),$4::text,'',$5,$6,$7,'pending','获得有效下一步',$8,$9)`,
           [nextActionId, userId, task.profile_id, input.nextAction, task.follow_up_method, task.priority, input.nextActionAt, task.product_key, task.product_name]
         );
       }
