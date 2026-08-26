@@ -23,11 +23,28 @@ const CONTACT_ERROR_MESSAGES: Record<string, string> = {
   phone_code_invalid: "手机验证码错误或已过期",
   sms_too_frequent: "验证码发送过于频繁，请稍后再试",
   user_exists: "该用户名已被使用",
+  password_reset_code_invalid: "重置链接无效或已过期",
+  password_invalid: "密码至少需要 8 位",
+  password_mismatch: "两次输入的密码不一致",
 };
 
 function contactError(err: unknown, fallback: string): { message: string; code?: string } {
   const code = err instanceof TokenhubClientError ? err.code : undefined;
   return { message: code ? CONTACT_ERROR_MESSAGES[code] ?? fallback : fallback, code };
+}
+
+function passwordResetPageUrl(c: { req: { header(name: string): string | undefined } }): string {
+  const configured = process.env.LOT_AGENT_PUBLIC_URL?.trim() || process.env.PUBLIC_BASE_URL?.trim();
+  const origin = c.req.header("Origin")?.trim();
+  const forwardedProto = c.req.header("X-Forwarded-Proto")?.split(",")[0]?.trim();
+  const forwardedHost = c.req.header("X-Forwarded-Host")?.split(",")[0]?.trim();
+  const host = forwardedHost || c.req.header("Host")?.trim();
+  const base = configured || origin || (host ? `${forwardedProto || "http"}://${host}` : "http://localhost:5173");
+  try {
+    return new URL("/reset-password", base).toString();
+  } catch {
+    return "http://localhost:5173/reset-password";
+  }
 }
 
 export function createAuthRoutes(service: AgentService): Hono {
@@ -83,6 +100,7 @@ export function createAuthRoutes(service: AgentService): Hono {
             externalUserId: result.userId,
             username: result.username,
             name: result.name,
+            email: result.email,
             phone: result.phone,
             tokenId: result.managedKey.tokenId,
             apiKey: result.managedKey.apiKey,
@@ -121,6 +139,65 @@ export function createAuthRoutes(service: AgentService): Hono {
     } catch (err) {
       logger.warn("email verification send failed", { route: "verification/email", err });
       const mapped = contactError(err, "邮箱验证码发送失败，请稍后重试");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
+    }
+  });
+
+  app.post("/password-reset/request", async (c) => {
+    if (!service.managedKeysEnabled) {
+      return c.json({ error: "密码重置功能未启用" }, 404);
+    }
+    let body: { email?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (!body.email?.trim()) {
+      return c.json({ error: "请输入邮箱地址" }, 400);
+    }
+    try {
+      const result = await service.tokenhub.sendAgentPasswordResetEmail(
+        body.email.trim(),
+        passwordResetPageUrl(c)
+      );
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      logger.warn("password reset email send failed", { route: "password-reset/request", err });
+      const mapped = contactError(err, "重置邮件发送失败，请稍后重试");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
+    }
+  });
+
+  app.post("/password-reset/confirm", async (c) => {
+    if (!service.managedKeysEnabled) {
+      return c.json({ error: "密码重置功能未启用" }, 404);
+    }
+    let body: {
+      email?: string;
+      token?: string;
+      password?: string;
+      confirmPassword?: string;
+    };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (!body.email?.trim() || !body.token?.trim() || !body.password || !body.confirmPassword) {
+      return c.json({ error: "请输入完整的重置信息" }, 400);
+    }
+    try {
+      await service.tokenhub.resetAgentPassword({
+        email: body.email.trim(),
+        token: body.token.trim(),
+        password: body.password,
+        confirmPassword: body.confirmPassword,
+      });
+      return c.json({ ok: true });
+    } catch (err) {
+      logger.warn("password reset failed", { route: "password-reset/confirm", err });
+      const mapped = contactError(err, "密码重置失败，请重新获取重置邮件");
       return c.json({ error: mapped.message, code: mapped.code }, 400);
     }
   });
@@ -170,6 +247,7 @@ export function createAuthRoutes(service: AgentService): Hono {
         externalUserId: result.userId,
         username: result.username,
         name: result.name,
+        email: result.email,
         phone: result.phone,
         tokenId: result.managedKey.tokenId,
         apiKey: result.managedKey.apiKey,
@@ -269,6 +347,9 @@ export function createAuthRoutes(service: AgentService): Hono {
     if (!body.username || !body.encryptedPassword) {
       return c.json({ error: LOGIN_FAIL }, 400);
     }
+    if (!body.email?.trim() || !body.emailVerificationCode?.trim()) {
+      return c.json({ error: "注册必须绑定邮箱并完成邮箱验证" }, 400);
+    }
     try {
       const password = keypair.decrypt(body.encryptedPassword);
       const result = await service.tokenhub.registerAgentUser({
@@ -285,6 +366,7 @@ export function createAuthRoutes(service: AgentService): Hono {
         externalUserId: result.userId,
         username: result.username,
         name: result.name,
+        email: result.email ?? body.email.trim(),
         phone: result.phone ?? body.phone?.trim(),
         tokenId: result.managedKey.tokenId,
         apiKey: result.managedKey.apiKey,
@@ -323,6 +405,7 @@ export function createAuthRoutes(service: AgentService): Hono {
             externalUserId: result.userId,
             username: result.username,
             name: result.name,
+            email: result.email,
             phone: result.phone,
             tokenId: result.managedKey.tokenId,
             apiKey: result.managedKey.apiKey,

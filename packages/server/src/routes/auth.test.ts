@@ -18,6 +18,8 @@ function fakeManagedService() {
       tokenLogin: vi.fn(),
       registerAgentUser: vi.fn(),
       sendAgentEmailVerification: vi.fn(),
+      sendAgentPasswordResetEmail: vi.fn(),
+      resetAgentPassword: vi.fn(),
       sendAgentPhoneVerification: vi.fn(),
       authenticateAgentUserByPhone: vi.fn(),
       sendAgentPhoneBindingVerification: vi.fn(),
@@ -200,6 +202,18 @@ describe("auth token-login", () => {
 });
 
 describe("managed contact verification", () => {
+  it("requires an email and verification code for registration", async () => {
+    const svc = fakeManagedService();
+    const res = await createAuthRoutes(svc).request("/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "alice", encryptedPassword: "not-used" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("注册必须绑定邮箱并完成邮箱验证");
+    expect(svc.tokenhub.registerAgentUser).not.toHaveBeenCalled();
+  });
+
   it("blocks an occupied email before reporting a code as sent", async () => {
     const svc = fakeManagedService();
     (svc.tokenhub.sendAgentEmailVerification as ReturnType<typeof vi.fn>).mockRejectedValue(
@@ -212,6 +226,50 @@ describe("managed contact verification", () => {
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "该邮箱已被其他用户使用", code: "email_taken" });
+  });
+
+  it("forwards password reset requests to new-api with the public Lot Agent page", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.sendAgentPasswordResetEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      expiresIn: 600,
+      resendAfter: 60,
+    });
+    const res = await createAuthRoutes(svc).request("/password-reset/request", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://lot.example",
+      },
+      body: JSON.stringify({ email: "alice@example.com" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, expiresIn: 600 });
+    expect(svc.tokenhub.sendAgentPasswordResetEmail).toHaveBeenCalledWith(
+      "alice@example.com",
+      "https://lot.example/reset-password"
+    );
+  });
+
+  it("forwards password reset confirmation to new-api", async () => {
+    const svc = fakeManagedService();
+    const res = await createAuthRoutes(svc).request("/password-reset/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "alice@example.com",
+        token: "reset-token",
+        password: "password2",
+        confirmPassword: "password2",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(svc.tokenhub.resetAgentPassword).toHaveBeenCalledWith({
+      email: "alice@example.com",
+      token: "reset-token",
+      password: "password2",
+      confirmPassword: "password2",
+    });
   });
 
   it("passes both optional bindings and their codes to managed registration", async () => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, setToken, type User } from "../api/client.js";
 import { encryptPassword } from "../lib/rsa.js";
 import { ServerSettingsModal } from "./ServerSettingsModal.js";
+import { PasswordReset } from "./PasswordReset.js";
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -10,6 +11,14 @@ interface LoginProps {
 }
 
 const LOGIN_FAIL = "登录失败，请稍后再试或者联系管理员";
+
+type LoginScreen = "login" | "register" | "forgot" | "reset";
+
+function initialLoginScreen(): LoginScreen {
+  if (typeof window === "undefined") return "login";
+  const params = new URLSearchParams(window.location.search);
+  return window.location.pathname === "/reset-password" && params.get("reset_token") ? "reset" : "login";
+}
 
 export function Login({ onLogin, initialError = null }: LoginProps) {
   const [username, setUsername] = useState("");
@@ -20,8 +29,8 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   const [phoneCode, setPhoneCode] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [screen, setScreen] = useState<LoginScreen>(initialLoginScreen);
   const [loginMethod, setLoginMethod] = useState<"password" | "phone">("password");
-  const [bindEmail, setBindEmail] = useState(false);
   const [bindPhone, setBindPhone] = useState(false);
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const registrationRequestId = useRef(crypto.randomUUID());
@@ -37,6 +46,10 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   const [serverUrl, setServerUrl] = useState<string | null>(() =>
     desktop ? desktop.getServerUrl() : null
   );
+
+  const resetParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const resetEmail = resetParams?.get("email") ?? "";
+  const resetToken = resetParams?.get("reset_token") ?? "";
 
   useEffect(() => {
     void api.mode()
@@ -102,7 +115,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
       setError("两次输入的密码不一致");
       return;
     }
-    if (mode === "register" && bindEmail && (!email.trim() || !emailCode.trim())) {
+    if (mode === "register" && (!email.trim() || !emailCode.trim())) {
       setError("请填写邮箱并输入邮箱验证码");
       return;
     }
@@ -124,8 +137,8 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
           ? await api.register({
               username: username.trim(),
               encryptedPassword: encrypted,
-              email: bindEmail ? email.trim() : undefined,
-              emailVerificationCode: bindEmail ? emailCode.trim() : undefined,
+              email: email.trim(),
+              emailVerificationCode: emailCode.trim(),
               phone: bindPhone ? phone.trim() : undefined,
               phoneVerificationCode: bindPhone ? phoneCode.trim() : undefined,
               requestId: registrationRequestId.current,
@@ -146,12 +159,29 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   const submitDisabled = loading || sendingCode !== null || (
     mode === "register"
       ? !username.trim() || !password || !confirmPassword
-        || (bindEmail && (!email.trim() || !emailCode.trim()))
+        || !email.trim() || !emailCode.trim()
         || (bindPhone && (!phone.trim() || !phoneCode.trim()))
       : loginMethod === "password"
         ? !username.trim() || !password
         : !phone.trim() || !phoneCode.trim()
   );
+
+  if (screen === "forgot" || screen === "reset") {
+    return (
+      <PasswordReset
+        key={screen}
+        initialMode={screen === "reset" ? "confirm" : "request"}
+        initialEmail={screen === "reset" ? resetEmail : email}
+        token={resetToken}
+        onBack={() => {
+          window.history.replaceState({}, "", "/");
+          setScreen("login");
+          setError(null);
+          setNotice(null);
+        }}
+      />
+    );
+  }
 
   return (
     <div className={`login-page login-page-${mode}`}>
@@ -259,15 +289,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
 
             {mode === "register" && (
               <div className="login-bindings">
-                <label className="login-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={bindEmail}
-                    onChange={(e) => { setBindEmail(e.target.checked); setError(null); setNotice(null); }}
-                    disabled={loading}
-                  />
-                  <span>绑定邮箱</span>
-                </label>
+                <span className="login-required-binding"><span aria-hidden>✓</span> 邮箱（必填）</span>
                 <label className="login-checkbox">
                   <input
                     type="checkbox"
@@ -280,7 +302,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
               </div>
             )}
 
-            {mode === "register" && bindEmail && (
+            {mode === "register" && (
               <div className="login-verification-group">
                 <div className="login-field">
                   <label htmlFor="register-email">邮箱</label>
@@ -330,6 +352,20 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
                 <label htmlFor="login-password">密码</label>
                 <input id="login-password" type="password" placeholder="请输入密码" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete={mode === "register" ? "new-password" : "current-password"} disabled={loading} />
               </div>
+            )}
+            {mode === "login" && loginMethod === "password" && registrationEnabled && (
+              <button
+                type="button"
+                className="login-forgot-link"
+                onClick={() => {
+                  setScreen("forgot");
+                  setError(null);
+                  setNotice(null);
+                }}
+                disabled={loading}
+              >
+                忘记密码？
+              </button>
             )}
             {mode === "register" && (
               <div className="login-field">

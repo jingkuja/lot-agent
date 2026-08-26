@@ -24,6 +24,7 @@ export interface ManagedUserResult {
   userId: number;
   username: string;
   name: string;
+  email?: string;
   phone?: string;
   managedKey: ManagedKeyCredential;
   created: boolean;
@@ -127,6 +128,41 @@ export class TokenhubClient {
       "new_api_email_verification_failed"
     );
     return { expiresIn: data.expires_in, resendAfter: data.resend_after };
+  }
+
+  async sendAgentPasswordResetEmail(
+    email: string,
+    resetUrl: string
+  ): Promise<{ expiresIn: number; resendAfter: number }> {
+    const data = await this.internalRequest<{ expires_in: number; resend_after: number }>(
+      "POST",
+      "/agent-users/password-reset",
+      { owner_app: "lot-agent", email, reset_url: resetUrl },
+      "agent:user.authenticate",
+      "new_api_password_reset_send_failed"
+    );
+    return { expiresIn: data.expires_in, resendAfter: data.resend_after };
+  }
+
+  async resetAgentPassword(args: {
+    email: string;
+    token: string;
+    password: string;
+    confirmPassword: string;
+  }): Promise<void> {
+    await this.internalRequest<true>(
+      "POST",
+      "/agent-users/password-reset/confirm",
+      {
+        owner_app: "lot-agent",
+        email: args.email,
+        token: args.token,
+        password: args.password,
+        confirm_password: args.confirmPassword,
+      },
+      "agent:user.authenticate",
+      "new_api_password_reset_confirm_failed"
+    );
   }
 
   async sendAgentPhoneVerification(
@@ -474,6 +510,7 @@ interface ManagedUserWire {
   user_id: number;
   username: string;
   display_name: string;
+  email?: string;
   phone?: string;
   managed_key: {
     token_id: number;
@@ -489,6 +526,7 @@ function mapManagedUser(data: ManagedUserWire): ManagedUserResult {
     userId: data.user_id,
     username: data.username,
     name: data.display_name || data.username,
+    email: typeof data.email === "string" ? data.email.trim() || undefined : undefined,
     phone: typeof data.phone === "string" ? data.phone.trim() || undefined : undefined,
     managedKey: {
       tokenId: data.managed_key.token_id,

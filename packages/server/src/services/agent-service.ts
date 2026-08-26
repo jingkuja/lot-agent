@@ -742,6 +742,7 @@ export class AgentService {
       externalUserId: result.userId,
       username: result.username,
       name: result.name,
+      email: result.email,
       phone: result.phone,
       tokenId: result.managedKey.tokenId,
       apiKey: result.managedKey.apiKey,

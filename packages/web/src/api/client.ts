@@ -277,6 +277,23 @@ export const api = {
       body: JSON.stringify({ email }),
     }),
 
+  requestPasswordReset: (email: string) =>
+    request<{ ok: true; expiresIn: number; resendAfter: number }>("/auth/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  confirmPasswordReset: (args: {
+    email: string;
+    token: string;
+    password: string;
+    confirmPassword: string;
+  }) =>
+    request<{ ok: true }>("/auth/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify(args),
+    }),
+
   sendPhoneVerification: (phone: string, purpose: "register" | "login") =>
     request<{ ok: true; expiresIn: number; resendAfter: number }>("/auth/verification/phone", {
       method: "POST",

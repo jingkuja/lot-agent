@@ -63,6 +63,54 @@ describe("TokenhubClient", () => {
     expect(error.code).toBe("email_taken");
   });
 
+  it("sends password reset email requests through the signed control plane", async () => {
+    const f = vi.fn().mockResolvedValue(ok({ expires_in: 600, resend_after: 60 }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.sendAgentPasswordResetEmail("alice@example.com", "https://lot.example/reset-password"))
+      .resolves.toEqual({ expiresIn: 600, resendAfter: 60 });
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("https://h/api/internal/agent-users/password-reset");
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      owner_app: "lot-agent",
+      email: "alice@example.com",
+      reset_url: "https://lot.example/reset-password",
+    });
+  });
+
+  it("confirms password reset through the signed control plane", async () => {
+    const f = vi.fn().mockResolvedValue(ok(true));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.resetAgentPassword({
+      email: "alice@example.com",
+      token: "reset-token",
+      password: "password2",
+      confirmPassword: "password2",
+    })).resolves.toBeUndefined();
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("https://h/api/internal/agent-users/password-reset/confirm");
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      owner_app: "lot-agent",
+      email: "alice@example.com",
+      token: "reset-token",
+      password: "password2",
+      confirm_password: "password2",
+    });
+  });
+
   it("authenticates a phone verification code through the signed control plane", async () => {
     const f = vi.fn().mockResolvedValue(ok({
       user_id: 7,

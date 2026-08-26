@@ -999,6 +999,7 @@ export class DB {
     externalUserId: number;
     username: string;
     name: string;
+    email?: string | null;
     phone?: string | null;
     tokenId: number;
     apiKey: string;
@@ -1014,6 +1015,7 @@ export class DB {
        ON CONFLICT (external_user_id) DO UPDATE SET
          username = EXCLUDED.username,
          name = EXCLUDED.name,
+         email = COALESCE(EXCLUDED.email, users.email),
          phone = COALESCE(EXCLUDED.phone, users.phone),
          managed_token_id = EXCLUDED.managed_token_id,
          managed_api_key = EXCLUDED.managed_api_key,
@@ -1025,7 +1027,7 @@ export class DB {
         args.externalUserId,
         args.username,
         args.name,
-        `${args.username}@tokenhub.local`,
+        args.email?.trim() || null,
         maskPhone(args.phone),
         args.tokenId,
         sealedManagedKey,
