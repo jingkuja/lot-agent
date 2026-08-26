@@ -59,7 +59,7 @@ export function BrandHeader({
         <div className="brand-navigation-actions">
           {onOpenAgentCenter && (
             <div className="brand-quick-actions">
-              <button className="brand-quick-action" onClick={onOpenAgentCenter} title="Agent 管理">
+              <button className="brand-quick-action" onClick={onOpenAgentCenter} title="Studio 管理">
                 <span className="brand-action-icon" aria-hidden>
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -68,7 +68,7 @@ export function BrandHeader({
                     <path d="M17.5 14v7M14 17.5h7" />
                   </svg>
                 </span>
-                <span>Agent 管理</span>
+                <span>Studio 管理</span>
               </button>
               {user && <PointsBalance />}
             </div>

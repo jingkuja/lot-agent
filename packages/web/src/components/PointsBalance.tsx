@@ -11,11 +11,6 @@ interface BalanceSummary {
   usedRatio: number;
 }
 
-function clampRatio(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(1, Math.max(0, value));
-}
-
 export function PointsBalance() {
   const [summary, setSummary] = useState<BalanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,9 +28,6 @@ export function PointsBalance() {
   }, []);
 
   useEffect(load, [load]);
-
-  const ratio = clampRatio(summary?.usedRatio ?? 0);
-  const percent = Math.round(ratio * 100);
 
   return (
     <>
@@ -94,16 +86,6 @@ export function PointsBalance() {
                     <div>
                       <small>历史充值积分</small>
                       <strong>{formatPoints(yuanToPoints(summary.totalRecharged))}</strong>
-                    </div>
-                  </div>
-
-                  <div className="points-progress-card">
-                    <div>
-                      <span>当前充值积分已使用比例</span>
-                      <strong>{percent}%</strong>
-                    </div>
-                    <div className="points-progress-track" role="progressbar" aria-label="当前充值积分已使用比例" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-                      <span style={{ width: `${percent}%` }} />
                     </div>
                   </div>
 
