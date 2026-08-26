@@ -96,12 +96,13 @@ export function Sidebar({
             <span className="sidebar-item-title">{conv.title}</span>
             <button
               className="btn-delete"
+              aria-label="删除对话"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(conv.id);
               }}
             >
-              x
+              ×
             </button>
           </div>
         ))}

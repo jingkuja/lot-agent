@@ -14,9 +14,8 @@ interface BrandHeaderProps {
   activeModule?: "assistant" | "digitalEmployee";
 }
 
-/** Top-left brand card: cloud logo + product name + tagline, a collapse
- *  toggle, and the account block (username on top, 退出 on its own line).
- *  The new-chat button lives in the sidebar's 最近对话 header. */
+/** Top-left identity strip: logo, product name, account, and workspace nav.
+ *  The new-chat button lives in the sidebar's 历史对话 header. */
 export function BrandHeader({
   user,
   onLogout,
