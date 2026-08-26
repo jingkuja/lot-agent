@@ -46,10 +46,8 @@ export function PointsBalance() {
             <path d="M9 9.5h6M9 14.5h6M12 8v8" />
           </svg>
         </span>
-        <span className="brand-points-copy">
-          <small>剩余积分</small>
-          <strong>{loading && !summary ? "加载中" : error && !summary ? "--" : formatPoints(yuanToPoints(summary?.balance ?? 0))}</strong>
-        </span>
+        <span className="brand-points-label">剩余积分</span>
+        <strong className="brand-points-value">{loading && !summary ? "加载中" : error && !summary ? "--" : formatPoints(yuanToPoints(summary?.balance ?? 0))}</strong>
       </button>
 
       {detailsOpen && createPortal(

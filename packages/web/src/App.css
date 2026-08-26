@@ -4772,7 +4772,7 @@ html, body, #root {
 .agent-card-btn.installed { background: transparent; color: var(--text-muted); border-color: var(--border); }
 .agent-card-btn:disabled { opacity: 0.6; cursor: default; }
 
-/* Brand card actions: two utilities, one knowledge entry, then a product switch. */
+/* Brand card actions: Studio + knowledge sit together; points get a dedicated row. */
 .brand-navigation-actions { display: flex; flex-direction: column; gap: 6px; }
 .brand-quick-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .brand-quick-action {
@@ -4789,10 +4789,26 @@ html, body, #root {
   background: var(--bg-hover); color: var(--accent);
 }
 .brand-quick-action:active { background: color-mix(in srgb, var(--accent) 10%, var(--bg-card)); }
-.brand-points-action { justify-content: flex-start; padding-inline: 8px; }
-.brand-points-copy { min-width: 0; display: grid; gap: 0; text-align: left; }
-.brand-points-copy small { overflow: hidden; color: var(--text-muted); font-size: 9px; font-weight: 550; text-overflow: ellipsis; }
-.brand-points-copy strong { overflow: hidden; color: var(--accent); font-size: 13px; line-height: 1.2; text-overflow: ellipsis; }
+.brand-points-action {
+  width: 100%; min-height: 43px; padding: 8px 10px;
+  justify-content: flex-start; gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+.brand-points-action:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  color: var(--text);
+}
+.brand-points-label {
+  min-width: 0; overflow: hidden; margin-right: auto;
+  color: var(--text-secondary); font-size: 13px; font-weight: 650;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.brand-points-value {
+  flex-shrink: 0; color: var(--accent); font-size: 19px; font-weight: 800; line-height: 1;
+}
 .brand-action-icon {
   width: 22px; height: 22px; flex: 0 0 22px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -4812,9 +4828,8 @@ html, body, #root {
 }
 .brand-knowledge-icon { width: 22px; height: 22px; flex-basis: 22px; }
 .brand-knowledge-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 0; }
-.brand-knowledge-copy strong { font-size: 12px; line-height: 1.25; font-weight: 600; }
+.brand-knowledge-copy strong { overflow: hidden; font-size: 12px; line-height: 1.25; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .brand-knowledge-copy small { display: none; }
-.brand-link-arrow { margin-left: auto; color: var(--text-muted); font-size: 12px; }
 .brand-module-switch {
   position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
   padding: 3px; border: none; border-radius: 9px;

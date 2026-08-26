@@ -57,37 +57,38 @@ export function BrandHeader({
 
       {(onOpenAgentCenter || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (
         <div className="brand-navigation-actions">
-          {onOpenAgentCenter && (
+          {user && <PointsBalance />}
+          {(onOpenAgentCenter || onOpenKnowledgeBase) && (
             <div className="brand-quick-actions">
-              <button className="brand-quick-action" onClick={onOpenAgentCenter} title="Studio 管理">
-                <span className="brand-action-icon" aria-hidden>
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="7" height="7" rx="1.5" />
-                    <rect x="14" y="3" width="7" height="7" rx="1.5" />
-                    <rect x="3" y="14" width="7" height="7" rx="1.5" />
-                    <path d="M17.5 14v7M14 17.5h7" />
-                  </svg>
-                </span>
-                <span>Studio 管理</span>
-              </button>
-              {user && <PointsBalance />}
+              {onOpenAgentCenter && (
+                <button className="brand-quick-action" onClick={onOpenAgentCenter} title="Studio 管理">
+                  <span className="brand-action-icon" aria-hidden>
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                      <path d="M17.5 14v7M14 17.5h7" />
+                    </svg>
+                  </span>
+                  <span>Studio 管理</span>
+                </button>
+              )}
+              {onOpenKnowledgeBase && (
+                <button className="brand-knowledge-btn" onClick={onOpenKnowledgeBase} title="个人知识库">
+                  <span className="brand-action-icon brand-knowledge-icon" aria-hidden>
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <ellipse cx="12" cy="5" rx="7" ry="3" />
+                      <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
+                      <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+                    </svg>
+                  </span>
+                  <span className="brand-knowledge-copy">
+                    <strong>个人知识库</strong>
+                    <small>沉淀资料与专属知识</small>
+                  </span>
+                </button>
+              )}
             </div>
-          )}
-          {onOpenKnowledgeBase && (
-            <button className="brand-knowledge-btn" onClick={onOpenKnowledgeBase} title="个人知识库">
-              <span className="brand-action-icon brand-knowledge-icon" aria-hidden>
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <ellipse cx="12" cy="5" rx="7" ry="3" />
-                  <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
-                  <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
-                </svg>
-              </span>
-              <span className="brand-knowledge-copy">
-                <strong>个人知识库</strong>
-                <small>沉淀资料与专属知识</small>
-              </span>
-              <span className="brand-link-arrow" aria-hidden>↗</span>
-            </button>
           )}
           {(onOpenAssistant || onOpenDigitalEmployee) && (
             <div className="brand-module-switch" role="tablist" aria-label="工作区导航">
