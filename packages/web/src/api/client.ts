@@ -282,6 +282,18 @@ export const api = {
       body: JSON.stringify({ phone, purpose }),
     }),
 
+  sendPhoneBindingVerification: (phone: string) =>
+    request<{ ok: true; expiresIn: number; resendAfter: number }>("/auth/phone-binding/verification", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    }),
+
+  bindPhone: (phone: string, verificationCode: string) =>
+    request<{ ok: true; phone: string }>("/auth/phone-binding", {
+      method: "POST",
+      body: JSON.stringify({ phone, verificationCode }),
+    }),
+
   register: (args: {
     username: string;
     encryptedPassword: string;

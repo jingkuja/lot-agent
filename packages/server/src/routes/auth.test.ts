@@ -20,9 +20,17 @@ function fakeManagedService() {
       sendAgentEmailVerification: vi.fn(),
       sendAgentPhoneVerification: vi.fn(),
       authenticateAgentUserByPhone: vi.fn(),
+      sendAgentPhoneBindingVerification: vi.fn(),
+      bindAgentPhone: vi.fn(),
     },
-    db: { upsertManagedUser: vi.fn() },
-    sessions: { createSession: vi.fn().mockResolvedValue("tok-managed") },
+    db: {
+      upsertManagedUser: vi.fn(),
+      getUserById: vi.fn().mockResolvedValue({ external_user_id: 7 }),
+    },
+    sessions: {
+      createSession: vi.fn().mockResolvedValue("tok-managed"),
+      resolve: vi.fn().mockResolvedValue({ userId: "u7" }),
+    },
   };
   return service as unknown as import("../services/agent-service.js").AgentService;
 }
@@ -242,6 +250,45 @@ describe("managed contact verification", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ token: "tok-managed", user: { id: "u7", username: "alice" } });
     expect(svc.tokenhub.authenticateAgentUserByPhone).toHaveBeenCalledWith("13800138000", "123456");
+  });
+
+  it("binds a phone only for the managed user resolved from the local session", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.sendAgentPhoneBindingVerification as ReturnType<typeof vi.fn>).mockResolvedValue({
+      expiresIn: 600,
+      resendAfter: 60,
+    });
+    (svc.tokenhub.bindAgentPhone as ReturnType<typeof vi.fn>).mockResolvedValue({ phone: "13800138000" });
+    const app = createAuthRoutes(svc);
+
+    const send = await app.request("/phone-binding/verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer local-session" },
+      body: JSON.stringify({ phone: "13800138000" }),
+    });
+    expect(send.status).toBe(200);
+    expect(svc.tokenhub.sendAgentPhoneBindingVerification).toHaveBeenCalledWith(7, "13800138000");
+
+    const bind = await app.request("/phone-binding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer local-session" },
+      body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
+    });
+    expect(bind.status).toBe(200);
+    expect(await bind.json()).toEqual({ ok: true, phone: "13800138000" });
+    expect(svc.tokenhub.bindAgentPhone).toHaveBeenCalledWith(7, "13800138000", "123456");
+  });
+
+  it("rejects phone binding without a valid local session", async () => {
+    const svc = fakeManagedService();
+    (svc.sessions.resolve as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const res = await createAuthRoutes(svc).request("/phone-binding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer expired" },
+      body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
+    });
+    expect(res.status).toBe(401);
+    expect(svc.tokenhub.bindAgentPhone).not.toHaveBeenCalled();
   });
 });
 

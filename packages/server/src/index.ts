@@ -243,6 +243,8 @@ async function main() {
   app.on("POST", "/api/auth/phone-login", loginRateLimit);
   app.on("POST", "/api/auth/verification/email", loginRateLimit);
   app.on("POST", "/api/auth/verification/phone", loginRateLimit);
+  app.on("POST", "/api/auth/phone-binding/verification", loginRateLimit);
+  app.on("POST", "/api/auth/phone-binding", loginRateLimit);
   app.on("POST", "/api/auth/register", loginRateLimit);
   app.on("POST", "/api/auth/token-login", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));

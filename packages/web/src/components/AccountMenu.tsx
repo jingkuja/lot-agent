@@ -8,7 +8,7 @@ interface AccountMenuProps {
   onLogout?: () => void;
 }
 
-type Dialog = "recharge" | "files" | "privacy" | "terms" | null;
+type Dialog = "recharge" | "files" | "phone" | "privacy" | "terms" | null;
 
 function accountText(user: User) {
   const email = user.username ?? user.name ?? "当前账号";
@@ -78,6 +78,9 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
               <button type="button" role="menuitem" onClick={() => openDialog("files")}>
                 <span aria-hidden>▤</span>文件管理
               </button>
+              <button type="button" role="menuitem" onClick={() => openDialog("phone")}>
+                <span aria-hidden>☎</span>绑定/更换手机号
+              </button>
               <button type="button" role="menuitem" className="danger" onClick={onLogout}>
                 <span aria-hidden>↪</span>退出账号
               </button>
@@ -95,12 +98,123 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
         <>
           {dialog === "recharge" && <RechargeModal onClose={() => setDialog(null)} />}
           {dialog === "files" && <FileManagerModal onClose={() => setDialog(null)} />}
+          {dialog === "phone" && <PhoneBindingModal onClose={() => setDialog(null)} />}
           {dialog === "privacy" && <LegalModal kind="privacy" onClose={() => setDialog(null)} />}
           {dialog === "terms" && <LegalModal kind="terms" onClose={() => setDialog(null)} />}
         </>,
         document.body
       )}
     </>
+  );
+}
+
+const mainlandPhonePattern = /^1[3-9]\d{9}$/;
+
+function PhoneBindingModal({ onClose }: { onClose: () => void }) {
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [countdown, setCountdown] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [binding, setBinding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = window.setTimeout(() => {
+      setCountdown((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [countdown]);
+
+  const sendCode = async () => {
+    if (!mainlandPhonePattern.test(phone)) {
+      setError("请输入有效的中国大陆手机号");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setSending(true);
+    try {
+      const result = await api.sendPhoneBindingVerification(phone);
+      setCountdown(result.resendAfter || 60);
+      setNotice("验证码已发送，请注意查收");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "验证码发送失败，请稍后重试");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const bindPhone = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!mainlandPhonePattern.test(phone)) {
+      setError("请输入有效的中国大陆手机号");
+      return;
+    }
+    if (!/^\d{6}$/.test(code)) {
+      setError("请输入 6 位短信验证码");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setBinding(true);
+    try {
+      await api.bindPhone(phone, code);
+      onClose();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "手机号绑定失败，请稍后重试");
+    } finally {
+      setBinding(false);
+    }
+  };
+
+  return (
+    <div className="account-dialog-overlay" onClick={onClose}>
+      <section className="account-dialog phone-binding-dialog" role="dialog" aria-modal="true" aria-labelledby="phone-binding-title" onClick={(event) => event.stopPropagation()}>
+        <header className="account-dialog-head">
+          <span>
+            <h2 id="phone-binding-title">绑定/更换手机号</h2>
+            <p>验证新手机号后，将自动完成绑定或更换。</p>
+          </span>
+          <button type="button" onClick={onClose} aria-label="关闭" disabled={sending || binding}>×</button>
+        </header>
+        <form className="phone-binding-form" onSubmit={(event) => void bindPhone(event)}>
+          <label htmlFor="binding-phone">新手机号</label>
+          <div className="phone-binding-code-row">
+            <input
+              id="binding-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="请输入中国大陆手机号"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 11))}
+              disabled={sending || binding}
+            />
+            <button type="button" onClick={() => void sendCode()} disabled={sending || binding || countdown > 0 || !phone}>
+              {sending ? "发送中…" : countdown > 0 ? `${countdown}s` : "发送验证码"}
+            </button>
+          </div>
+          <label htmlFor="binding-code">验证码</label>
+          <input
+            id="binding-code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="请输入 6 位短信验证码"
+            value={code}
+            onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))}
+            disabled={binding}
+          />
+          {notice && <p className="phone-binding-message success" role="status">{notice}</p>}
+          {error && <p className="phone-binding-message error" role="alert">{error}</p>}
+          <button className="phone-binding-submit" type="submit" disabled={binding || !mainlandPhonePattern.test(phone) || code.length !== 6}>
+            {binding ? "绑定中…" : "确认绑定"}
+          </button>
+        </form>
+      </section>
+    </div>
   );
 }
 

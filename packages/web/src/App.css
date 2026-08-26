@@ -3357,6 +3357,29 @@ html, body, #root {
 .account-dialog-state small { font-size: 11px; }
 .account-dialog-state.error { color: var(--error); }
 .account-dialog-state button { margin-top: 5px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text); cursor: pointer; }
+.phone-binding-dialog { width: min(460px, 100%); }
+.phone-binding-form { display: grid; gap: 9px; padding: 20px 22px 24px; }
+.phone-binding-form label { margin-top: 3px; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
+.phone-binding-form input {
+  width: 100%; min-width: 0; min-height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px;
+  outline: none; background: var(--bg-card); color: var(--text); font: inherit; font-size: 13px;
+}
+.phone-binding-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.phone-binding-form input:disabled { cursor: default; opacity: .6; }
+.phone-binding-code-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; }
+.phone-binding-code-row button {
+  min-width: 104px; padding: 0 12px; border: 1px solid var(--accent); border-radius: 10px;
+  background: var(--bg-card); color: var(--accent); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer;
+}
+.phone-binding-code-row button:disabled { border-color: var(--border); color: var(--text-muted); cursor: default; opacity: .7; }
+.phone-binding-message { margin: 2px 0 0; padding: 9px 11px; border-radius: 9px; font-size: 12px; }
+.phone-binding-message.success { background: color-mix(in srgb, var(--success) 8%, var(--bg-card)); color: var(--success); }
+.phone-binding-message.error { background: color-mix(in srgb, var(--error) 8%, var(--bg-card)); color: var(--error); }
+.phone-binding-submit {
+  min-height: 42px; margin-top: 8px; border: 1px solid var(--accent); border-radius: 10px;
+  background: var(--accent); color: var(--text-on-accent); font: inherit; font-size: 13px; font-weight: 750; cursor: pointer;
+}
+.phone-binding-submit:disabled { cursor: default; opacity: .55; }
 .file-empty-icon { display: grid; width: 44px; height: 44px; margin-bottom: 5px; place-items: center; border-radius: 13px; background: color-mix(in srgb, var(--accent) 10%, var(--bg-card)); color: var(--accent); font-size: 22px; }
 .managed-file-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .managed-file-list li {

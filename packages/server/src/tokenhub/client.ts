@@ -164,6 +164,31 @@ export class TokenhubClient {
     return mapManagedUser(data);
   }
 
+  async sendAgentPhoneBindingVerification(
+    userId: number,
+    phone: string
+  ): Promise<{ expiresIn: number; resendAfter: number }> {
+    const data = await this.internalRequest<{ expires_in: number; resend_after: number }>(
+      "POST",
+      "/agent-users/verification/phone/bind",
+      { owner_app: "lot-agent", user_id: userId, phone },
+      "agent:user.authenticate",
+      "new_api_phone_binding_verification_failed"
+    );
+    return { expiresIn: data.expires_in, resendAfter: data.resend_after };
+  }
+
+  async bindAgentPhone(userId: number, phone: string, verificationCode: string): Promise<{ phone: string }> {
+    const data = await this.internalRequest<{ phone: string }>(
+      "POST",
+      "/agent-users/bind-phone",
+      { owner_app: "lot-agent", user_id: userId, phone, verification_code: verificationCode },
+      "agent:user.authenticate",
+      "new_api_phone_binding_failed"
+    );
+    return { phone: data.phone };
+  }
+
   async ensureManagedKey(userId: number): Promise<ManagedUserResult> {
     const data = await this.internalRequest<ManagedUserWire>(
       "POST",

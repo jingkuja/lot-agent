@@ -20,6 +20,7 @@ const CONTACT_ERROR_MESSAGES: Record<string, string> = {
   sms_not_configured: "短信服务尚未配置，请联系管理员",
   email_code_invalid: "邮箱验证码错误或已过期",
   phone_code_invalid: "手机验证码错误或已过期",
+  sms_too_frequent: "验证码发送过于频繁，请稍后再试",
   user_exists: "该用户名已被使用",
 };
 
@@ -30,6 +31,16 @@ function contactError(err: unknown, fallback: string): { message: string; code?:
 
 export function createAuthRoutes(service: AgentService): Hono {
   const app = new Hono();
+
+  const resolveExternalUserId = async (authorization?: string): Promise<number | null> => {
+    if (!authorization?.startsWith("Bearer ")) return null;
+    const token = authorization.slice("Bearer ".length).trim();
+    if (!token) return null;
+    const session = await service.sessions.resolve(token);
+    if (!session) return null;
+    const user = await service.db.getUserById(session.userId);
+    return user?.external_user_id ?? null;
+  };
 
   // GET /public-key — public; browser fetches this to encrypt the password.
   app.get("/public-key", (c) => c.json({ publicKey: keypair.publicKeyPem }));
@@ -162,6 +173,59 @@ export function createAuthRoutes(service: AgentService): Hono {
       logger.warn("phone login failed", { route: "phone-login", err });
       const mapped = contactError(err, "手机号或验证码错误");
       return c.json({ error: mapped.message, code: mapped.code }, 401);
+    }
+  });
+
+  app.post("/phone-binding/verification", async (c) => {
+    if (!service.managedKeysEnabled) {
+      return c.json({ error: "手机号绑定功能未启用" }, 404);
+    }
+    const externalUserId = await resolveExternalUserId(c.req.header("Authorization"));
+    if (externalUserId == null) return c.json({ error: "Unauthorized" }, 401);
+    let body: { phone?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (!body.phone?.trim()) return c.json({ error: "请输入手机号" }, 400);
+    try {
+      const result = await service.tokenhub.sendAgentPhoneBindingVerification(
+        externalUserId,
+        body.phone.trim()
+      );
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      logger.warn("phone binding verification send failed", { route: "phone-binding/verification", externalUserId, err });
+      const mapped = contactError(err, "手机验证码发送失败，请稍后重试");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
+    }
+  });
+
+  app.post("/phone-binding", async (c) => {
+    if (!service.managedKeysEnabled) {
+      return c.json({ error: "手机号绑定功能未启用" }, 404);
+    }
+    const externalUserId = await resolveExternalUserId(c.req.header("Authorization"));
+    if (externalUserId == null) return c.json({ error: "Unauthorized" }, 401);
+    let body: { phone?: string; verificationCode?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (!body.phone?.trim() || !body.verificationCode?.trim()) return c.json({ error: "请输入手机号和短信验证码" }, 400);
+    try {
+      const result = await service.tokenhub.bindAgentPhone(
+        externalUserId,
+        body.phone.trim(),
+        body.verificationCode.trim()
+      );
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      logger.warn("phone binding failed", { route: "phone-binding", externalUserId, err });
+      const mapped = contactError(err, "手机号绑定失败，请稍后重试");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
     }
   });
 

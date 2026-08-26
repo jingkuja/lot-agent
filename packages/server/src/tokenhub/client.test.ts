@@ -90,6 +90,38 @@ describe("TokenhubClient", () => {
     });
   });
 
+  it("sends and confirms a phone binding for the authenticated managed user", async () => {
+    const f = vi.fn()
+      .mockResolvedValueOnce(ok({ expires_in: 600, resend_after: 60 }))
+      .mockResolvedValueOnce(ok({ phone: "13800138000" }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+
+    await expect(c.sendAgentPhoneBindingVerification(7, "13800138000")).resolves.toEqual({
+      expiresIn: 600,
+      resendAfter: 60,
+    });
+    await expect(c.bindAgentPhone(7, "13800138000", "123456")).resolves.toEqual({ phone: "13800138000" });
+
+    expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-users/verification/phone/bind");
+    expect(JSON.parse(String((f.mock.calls[0][1] as RequestInit).body))).toMatchObject({
+      user_id: 7,
+      phone: "13800138000",
+    });
+    expect(f.mock.calls[1][0]).toBe("https://h/api/internal/agent-users/bind-phone");
+    expect(JSON.parse(String((f.mock.calls[1][1] as RequestInit).body))).toMatchObject({
+      user_id: 7,
+      phone: "13800138000",
+      verification_code: "123456",
+    });
+  });
+
   it("login maps a successful response with only api_key", async () => {
     const f = vi.fn().mockResolvedValue(
       ok({ user_id: 2, name: "13881071870", api_key: "sk-X", access_token: "sk-X" })
