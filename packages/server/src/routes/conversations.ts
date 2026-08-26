@@ -5,7 +5,7 @@ import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
-import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
 
 type Variables = { userId: string };
@@ -461,6 +461,10 @@ export function createGenerationRoutes(service: AgentService) {
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : "invalid video references" }, 400);
       }
+      settings = {
+        ...settings,
+        generate_audio: resolveVideoGenerateAudio(settings.generate_audio, videoReferences.reference_audio),
+      };
     }
     const media = Array.isArray(body.media) ? body.media : undefined;
     if (mediaType === "image" && media && media.length > MAX_IMAGE_EDIT_REFERENCES) {

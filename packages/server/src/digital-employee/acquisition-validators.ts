@@ -207,6 +207,7 @@ function parseMediaSettings(value: unknown): CampaignMediaSettings | undefined {
   if (source.quality !== undefined) settings.quality = text(source.quality, "质量", 1, 32);
   if (source.durationSec !== undefined) settings.durationSec = integer(source.durationSec, "视频时长", -1, 60, 5);
   if (source.ratio !== undefined) settings.ratio = text(source.ratio, "视频比例", 1, 16);
+  if (source.generate_audio !== undefined) settings.generate_audio = boolean(source.generate_audio, "视频声音");
   return settings;
 }
 

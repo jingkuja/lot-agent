@@ -1028,6 +1028,10 @@ html, body, #root {
   color: var(--text-secondary);
   flex-shrink: 0;
 }
+.media-trigger-audio {
+  line-height: 1;
+  font-size: 14px;
+}
 
 /* The little bordered rectangle that represents an aspect ratio. */
 .ratio-glyph {

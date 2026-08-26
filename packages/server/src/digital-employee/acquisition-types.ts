@@ -117,6 +117,7 @@ export interface CampaignMediaSettings {
   quality?: string;
   durationSec?: number;
   ratio?: string;
+  generate_audio?: boolean;
 }
 
 export interface CreateCampaignAssetInput {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DB } from "../db/database.js";
 import type { JobQueue } from "@lot-agent/core";
-import { billedVideoSeconds, validateImageGenerationSettings } from "../generation/input.js";
+import { billedVideoSeconds, resolveVideoGenerateAudio, validateImageGenerationSettings } from "../generation/input.js";
 import { ConversationActionDrafts } from "./conversation-drafts.js";
 import { ConflictError, InputError, NotFoundError, QuotaError } from "./errors.js";
 import {
@@ -404,6 +404,7 @@ export class CustomerAcquisitionService {
               durationSec: videoSettings?.durationSec ?? resolvedInput.durationSeconds ?? 5,
               ratio: videoSettings?.ratio ?? "16:9",
               size: videoSettings?.size,
+              generate_audio: resolveVideoGenerateAudio(videoSettings?.generate_audio, resolvedInput.reference_audio),
               ...(resolvedInput.input_reference ? { input_reference: resolvedInput.input_reference } : {}),
               ...(resolvedInput.reference_video ? { reference_video: resolvedInput.reference_video } : {}),
               ...(resolvedInput.reference_audio ? { reference_audio: resolvedInput.reference_audio } : {}),

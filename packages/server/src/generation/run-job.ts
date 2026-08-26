@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
-import { billedVideoSeconds } from "./input.js";
+import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
@@ -20,6 +20,7 @@ export interface JobGenerationProvider {
     durationSec?: number;
     ratio?: string;
     quality?: string;
+    generate_audio?: boolean;
     input_reference?: ReferenceInput;
     reference_video?: ReferenceInput;
     reference_audio?: ReferenceInput;
@@ -118,11 +119,21 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
   const input = job.input;
   const assistantMessageId = input.assistantMessageId as string | undefined;
   const conversationId = input.conversationId as string | undefined;
+  const referenceAudio = input.reference_audio as ReferenceInput | undefined;
   const baseMeta = {
     kind: "generation",
     mediaType,
     prompt,
-    settings: { size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio },
+    settings: {
+      size: input.size,
+      n: input.n,
+      quality: input.quality,
+      durationSec: input.durationSec,
+      ratio: input.ratio,
+      ...(mediaType === "video"
+        ? { generate_audio: resolveVideoGenerateAudio(input.generate_audio, referenceAudio) }
+        : {}),
+    },
   };
   return async (status: string, extra: Record<string, unknown>) => {
     if (assistantMessageId && conversationId) {
@@ -184,6 +195,9 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   const inputReference = input.input_reference as ReferenceInput | undefined;
   const referenceVideo = input.reference_video as ReferenceInput | undefined;
   const referenceAudio = input.reference_audio as ReferenceInput | undefined;
+  const generateAudio = mediaType === "video"
+    ? resolveVideoGenerateAudio(input.generate_audio, referenceAudio)
+    : undefined;
   const firstFrame = input.first_frame as string | undefined;
   const lastFrame = input.last_frame as string | undefined;
   const sleep = deps.sleep ?? realSleep;
@@ -210,6 +224,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       input_reference: inputReference,
       reference_video: referenceVideo,
       reference_audio: referenceAudio,
+      generate_audio: generateAudio,
       first_frame: firstFrame,
       last_frame: lastFrame,
       media: media?.map((m) => m.url), model: deps.vendorModel,
@@ -242,6 +257,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
         input_reference: publicReference(inputReference),
         reference_video: publicReference(referenceVideo),
         reference_audio: publicReference(referenceAudio),
+        generate_audio: generateAudio,
         first_frame: firstFrame ? publicStaticUrl(firstFrame) : undefined,
         last_frame: lastFrame ? publicStaticUrl(lastFrame) : undefined,
         media: publicMedia,

@@ -275,7 +275,12 @@ function composerPayload(
   const referenceAudio = urlsFor("video_reference_audio");
   return {
     mediaSettings: videoSettings
-      ? { size: videoSettings.size, durationSec: videoSettings.durationSec, ratio: videoSettings.ratio }
+      ? {
+          size: videoSettings.size,
+          durationSec: videoSettings.durationSec,
+          ratio: videoSettings.ratio,
+          generate_audio: videoSettings.generate_audio,
+        }
       : undefined,
     durationSeconds: videoSettings?.durationSec,
     input_reference: inputReference.length ? inputReference : undefined,

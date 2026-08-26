@@ -228,6 +228,7 @@ describe("POST /conversations/:id/generations", () => {
         input_reference: ["/static/uploads/a.png", "/static/uploads/b.png"],
         reference_video: ["/static/uploads/r1.mp4", "/static/uploads/r2.mp4"],
         reference_audio: ["/static/uploads/a1.mp3"],
+        generate_audio: true,
         first_frame: "/static/uploads/first.png",
         last_frame: "/static/uploads/last.png",
       }),
@@ -244,6 +245,43 @@ describe("POST /conversations/:id/generations", () => {
         last_frame: "/static/uploads/last.png",
       }),
       "u1"
+    );
+  });
+
+  it("defaults video generation audio to false when no reference audio is supplied", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "无声视频", mediaType: "video", settings: {} }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.assistantMessage.metadata.settings.generate_audio).toBe(false);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "video.generate",
+      expect.objectContaining({ generate_audio: false }),
+      "u1",
+    );
+  });
+
+  it("forces video generation audio on when reference audio is supplied", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "参考音频视频",
+        mediaType: "video",
+        settings: { generate_audio: false },
+        reference_audio: "/static/uploads/reference.mp3",
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "video.generate",
+      expect.objectContaining({ reference_audio: "/static/uploads/reference.mp3", generate_audio: true }),
+      "u1",
     );
   });
 

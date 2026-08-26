@@ -19,10 +19,15 @@ describe("HappyhorseVideoAdapter", () => {
       { prompt: "麦田", size: "832x480", durationSec: 5, ratio: "16:9", media: [{ type: "reference_image", url: "u" }] },
       "happyhorse-1.0-t2v"
     ) as Record<string, unknown>;
-    expect(body).toMatchObject({ model: "happyhorse-1.0-t2v", prompt: "麦田", size: "832x480", duration: 5, ratio: "16:9", media: [{ type: "reference_image", url: "u" }] });
+    expect(body).toMatchObject({ model: "happyhorse-1.0-t2v", prompt: "麦田", size: "832x480", duration: 5, ratio: "16:9", generate_audio: false, media: [{ type: "reference_image", url: "u" }] });
     const noMedia = a.buildCreateBody({ prompt: "p" }, "m") as Record<string, unknown>;
     expect("media" in noMedia).toBe(false);
     expect("duration" in noMedia).toBe(false);
+    expect(noMedia.generate_audio).toBe(false);
+  });
+  it("forces generated audio on when a reference audio is present", () => {
+    const body = a.buildCreateBody({ prompt: "p", generate_audio: false, reference_audio: "https://x/ref.mp3" }, "m") as Record<string, unknown>;
+    expect(body.generate_audio).toBe(true);
   });
   it("parseCreate/parsePoll/isTerminal", () => {
     expect(a.parseCreate({ id: "x", task_id: "task_9", status: "queued", progress: 0 })).toEqual({ taskId: "task_9", status: "queued", progress: 0 });
@@ -55,7 +60,7 @@ describe("OpenaiVideoAdapter", () => {
       { prompt: "A cinematic drone shot", size: "720x1280", durationSec: 4, ratio: "9:16" },
       "doubao-seedance-2.0"
     ) as Record<string, unknown>;
-    expect(body).toMatchObject({ model: "doubao-seedance-2.0", prompt: "A cinematic drone shot", seconds: "4", size: "720x1280" });
+    expect(body).toMatchObject({ model: "doubao-seedance-2.0", prompt: "A cinematic drone shot", seconds: "4", size: "720x1280", generate_audio: false });
     expect("duration" in body).toBe(false);
     expect("ratio" in body).toBe(false);
   });

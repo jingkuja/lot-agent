@@ -8,11 +8,13 @@
  * whitelisted here (wrong key, wrong media type, wrong runtime type) is
  * silently dropped before the input reaches the queue.
  */
-const SETTING_TYPES: Record<"image" | "video", Record<string, "string" | "number">> = {
+type GenerationSettingValue = string | number | boolean;
+
+const SETTING_TYPES: Record<"image" | "video", Record<string, "string" | "number" | "boolean">> = {
   image: { size: "string", n: "number", quality: "string" },
   // `size` (WxH) is required by the openai-video `/videos` endpoint; `ratio` is
   // kept for metadata/back-compat though the openai-video adapter no longer sends it.
-  video: { size: "string", durationSec: "number", ratio: "string" },
+  video: { size: "string", durationSec: "number", ratio: "string", generate_audio: "boolean" },
 };
 
 export const IMAGE_PRESET_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;
@@ -31,7 +33,7 @@ export function isGptImage15(modelId?: string): boolean {
  * or null when the request may be enqueued. Missing size is allowed (provider
  * default); missing quality is filled with `auto` by the caller. */
 export function validateImageGenerationSettings(
-  settings: Record<string, string | number>,
+  settings: Record<string, GenerationSettingValue>,
   modelId?: string
 ): string | null {
   if (typeof settings.quality === "string" && !(IMAGE_QUALITY_VALUES as readonly string[]).includes(settings.quality)) {
@@ -69,6 +71,14 @@ export const VIDEO_REFERENCE_LIMITS = {
   reference_video: 2,
   reference_audio: 2,
 } as const;
+
+/** A reference audio input requires the generated video to contain audio. */
+export function resolveVideoGenerateAudio(requested: unknown, referenceAudio: unknown): boolean {
+  const hasReferenceAudio = Array.isArray(referenceAudio)
+    ? referenceAudio.length > 0
+    : typeof referenceAudio === "string" && referenceAudio.trim().length > 0;
+  return hasReferenceAudio || requested === true;
+}
 
 type VideoReferenceField = keyof typeof VIDEO_REFERENCE_LIMITS;
 
@@ -118,22 +128,22 @@ export function billedVideoSeconds(durationSec: unknown): number {
 export function pickGenerationSettings(
   mediaType: "image" | "video",
   raw: Record<string, unknown> | undefined
-): Record<string, string | number> {
+): Record<string, GenerationSettingValue> {
   const allowed = SETTING_TYPES[mediaType];
-  const out: Record<string, string | number> = {};
+  const out: Record<string, GenerationSettingValue> = {};
   if (!raw) return out;
   for (const [key, type] of Object.entries(allowed)) {
     const value = raw[key];
-    if (typeof value === type) out[key] = value as string | number;
+    if (typeof value === type) out[key] = value as GenerationSettingValue;
   }
   return out;
 }
 
 /** Default image quality to `auto` then validate size/quality for the model. */
 export function finalizeImageSettings(
-  settings: Record<string, string | number>,
+  settings: Record<string, GenerationSettingValue>,
   modelId?: string
-): { settings: Record<string, string | number>; error: string | null } {
+): { settings: Record<string, GenerationSettingValue>; error: string | null } {
   const next = { ...settings };
   if (typeof next.quality !== "string") next.quality = DEFAULT_IMAGE_QUALITY;
   return { settings: next, error: validateImageGenerationSettings(next, modelId) };

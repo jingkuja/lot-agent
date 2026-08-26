@@ -17,6 +17,8 @@ export interface VideoGenerationRequest {
   durationSec?: number;
   ratio?: string;
   quality?: string;
+  /** Whether the generated video should contain audio. Reference audio always enables this. */
+  generate_audio?: boolean;
   /** Reference images for the OpenAI-compatible `/videos` endpoint. */
   input_reference?: ReferenceInput;
   /** Reference videos for the OpenAI-compatible `/videos` endpoint. */
@@ -48,6 +50,15 @@ function hasReferenceVideo(value: ReferenceInput | undefined): boolean {
   return Array.isArray(value) ? value.length > 0 : value.length > 0;
 }
 
+function hasReferenceAudio(value: ReferenceInput | undefined): boolean {
+  if (value == null) return false;
+  return Array.isArray(value) ? value.length > 0 : value.trim().length > 0;
+}
+
+function resolveGenerateAudio(req: VideoGenerationRequest): boolean {
+  return hasReferenceAudio(req.reference_audio) || req.generate_audio === true;
+}
+
 /** Seedance + 参考视频：时长/比例必须跟参考视频走，不能由调用方指定。 */
 export function usesSeedanceReferenceVideoAdaptive(
   model: string,
@@ -68,6 +79,7 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
   }
   buildCreateBody(req: VideoGenerationRequest, model: string): unknown {
     const body: Record<string, unknown> = { model, prompt: req.prompt };
+    body.generate_audio = resolveGenerateAudio(req);
     if (req.size) body.size = req.size;
     if (req.durationSec != null) body.duration = req.durationSec;
     if (req.ratio) body.ratio = req.ratio;
@@ -128,6 +140,7 @@ export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
   }
   override buildCreateBody(req: VideoGenerationRequest, model: string): unknown {
     const body: Record<string, unknown> = { model, prompt: req.prompt };
+    body.generate_audio = resolveGenerateAudio(req);
     if (usesSeedanceReferenceVideoAdaptive(model, req.reference_video)) {
       // Seedance rejects a caller-chosen duration/ratio when a reference
       // video is present — the output must match the reference clip.

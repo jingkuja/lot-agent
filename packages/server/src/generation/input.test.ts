@@ -4,6 +4,7 @@ import {
   finalizeImageSettings,
   pickGenerationSettings,
   pickVideoReferenceInputs,
+  resolveVideoGenerateAudio,
 } from "./input.js";
 
 describe("pickGenerationSettings", () => {
@@ -19,15 +20,20 @@ describe("pickGenerationSettings", () => {
     ).toEqual({ size: "1024x1024", n: 2, quality: "high" });
   });
 
-  it("keeps the video whitelist (size, durationSec, ratio)", () => {
+  it("keeps the video whitelist (size, durationSec, ratio, generate_audio)", () => {
     expect(
       pickGenerationSettings("video", {
         durationSec: 5,
         ratio: "16:9",
         size: "720x1280", // required by the openai-video endpoint
+        generate_audio: false,
         n: 3, // image-only — dropped for video
       })
-    ).toEqual({ size: "720x1280", durationSec: 5, ratio: "16:9" });
+    ).toEqual({ size: "720x1280", durationSec: 5, ratio: "16:9", generate_audio: false });
+  });
+
+  it("drops a video audio flag carrying the wrong type", () => {
+    expect(pickGenerationSettings("video", { generate_audio: "false" })).toEqual({});
   });
 
   it("keeps seedance reference-video adaptive settings (durationSec -1, ratio adaptive)", () => {
@@ -118,5 +124,13 @@ describe("pickGenerationSettings", () => {
     expect(() => pickVideoReferenceInputs({ input_reference: ["1", "2", "3", "4", "5", "6"] })).toThrow(/at most 5/);
     expect(() => pickVideoReferenceInputs({ reference_video: ["1", "2", "3"] })).toThrow(/at most 2/);
     expect(() => pickVideoReferenceInputs({ reference_audio: ["1", "2", "3"] })).toThrow(/at most 2/);
+  });
+
+  it("enables generated audio when a reference audio is present", () => {
+    expect(resolveVideoGenerateAudio(false, "/static/uploads/reference.mp3")).toBe(true);
+    expect(resolveVideoGenerateAudio(false, ["/static/uploads/reference.mp3"])).toBe(true);
+    expect(resolveVideoGenerateAudio(false, [])).toBe(false);
+    expect(resolveVideoGenerateAudio(undefined, undefined)).toBe(false);
+    expect(resolveVideoGenerateAudio(true, undefined)).toBe(true);
   });
 });

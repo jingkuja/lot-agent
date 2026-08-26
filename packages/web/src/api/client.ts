@@ -777,7 +777,7 @@ export const api = {
     publicAudience?: string; productId: string; recommendationId?: string; parentAssetId?: string; campaignId?: string;
     objective: string; channels: string[]; callToAction: string; title?: string; durationSeconds?: number;
     modelId?: string; knowledgeBaseIds?: string[]; attachments?: UploadedAttachment[];
-    mediaSettings?: { size?: string; n?: number; quality?: string; durationSec?: number; ratio?: string };
+    mediaSettings?: { size?: string; n?: number; quality?: string; durationSec?: number; ratio?: string; generate_audio?: boolean };
     input_reference?: string | string[]; reference_video?: string | string[]; reference_audio?: string | string[];
     first_frame?: string; last_frame?: string;
   }) => request<MarketingAsset>("/digital-employee/acquisition/assets", { method: "POST", body: JSON.stringify(input) }),

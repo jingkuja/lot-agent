@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
-import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 
 const ALLOWED_TYPES = ["image.generate", "video.generate"] as const;
 
@@ -36,7 +36,10 @@ export function sanitizeTaskInput(
     }
     input.media = raw.media;
   }
-  if (mediaType === "video") Object.assign(input, pickVideoReferenceInputs(raw));
+  if (mediaType === "video") {
+    Object.assign(input, pickVideoReferenceInputs(raw));
+    input.generate_audio = resolveVideoGenerateAudio(input.generate_audio, input.reference_audio);
+  }
   return input;
 }
 

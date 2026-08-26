@@ -121,6 +121,7 @@ describe("runGenerationJob", () => {
         input_reference: ["https://box.example.com/static/uploads/image.png"],
         reference_video: "https://box.example.com/static/uploads/reference.mp4",
         reference_audio: ["https://box.example.com/static/uploads/audio.mp3"],
+        generate_audio: true,
         first_frame: "https://box.example.com/static/uploads/first.png",
         last_frame: "https://box.example.com/static/uploads/last.png",
         media: [

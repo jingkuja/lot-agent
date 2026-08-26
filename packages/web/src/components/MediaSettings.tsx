@@ -43,7 +43,13 @@ export const VIDEO_QUALITIES: Quality[] = [
 
 export const VIDEO_DURATIONS = ["5秒", "10秒"];
 
-export interface VideoSettings { size: string; durationSec: number; ratio: string; quality: string }
+export interface VideoSettings {
+  size: string;
+  durationSec: number;
+  ratio: string;
+  quality: string;
+  generate_audio: boolean;
+}
 
 interface Dim {
   width: number;
@@ -297,7 +303,7 @@ export function ImageSettingsPicker({
   );
 }
 
-/* ── 视频生成：质量 + 比例 + 分辨率 + 时长 ── */
+/* ── 视频生成：质量 + 比例 + 分辨率 + 时长 + 声音 ── */
 
 // Session-remembered video selection — same remount survival as the image picker
 // (see lastImage).
@@ -305,17 +311,21 @@ const lastVideo = {
   quality: VIDEO_QUALITIES[0].short,
   ratio: VIDEO_RATIOS[0].label,
   duration: VIDEO_DURATIONS[0],
+  generateAudio: false,
 };
 
 export function VideoSettingsPicker({
   disabled,
   lockAdaptive,
+  hasReferenceAudio = false,
   onChange,
   durations = VIDEO_DURATIONS,
 }: {
   disabled?: boolean;
   /** Seedance + 参考视频：时长/比例固定为自动适配，页面不可改。 */
   lockAdaptive?: boolean;
+  /** 有参考音频时供应商必须生成声音，页面不可改。 */
+  hasReferenceAudio?: boolean;
   onChange?: (s: VideoSettings) => void;
   /** 时长选项，默认 5秒 / 10秒；获客宝使用 10秒 / 15秒。 */
   durations?: readonly string[];
@@ -333,7 +343,9 @@ export function VideoSettingsPicker({
   const [duration, setDuration] = useState(
     () => (durationOptions.includes(lastVideo.duration) ? lastVideo.duration : defaultDuration)
   );
+  const [generateAudio, setGenerateAudio] = useState(() => lastVideo.generateAudio);
   const [dim, setDim] = useState<Dim>(() => deriveResolution(ratio.w, ratio.h, quality.edge));
+  const effectiveGenerateAudio = hasReferenceAudio || generateAudio;
 
   useEffect(() => {
     if (durationOptions.includes(duration)) return;
@@ -347,8 +359,9 @@ export function VideoSettingsPicker({
       durationSec: lockAdaptive ? -1 : Number(duration.replace(/[^0-9]/g, "")) || fallbackSec,
       ratio: lockAdaptive ? "adaptive" : ratio.label,
       quality: quality.short,
+      generate_audio: effectiveGenerateAudio,
     });
-  }, [dim, duration, ratio, quality, lockAdaptive, onChange, defaultDuration]);
+  }, [dim, duration, ratio, quality, lockAdaptive, onChange, defaultDuration, effectiveGenerateAudio]);
 
   const pickQuality = (q: Quality) => {
     lastVideo.quality = q.short;
@@ -365,6 +378,11 @@ export function VideoSettingsPicker({
     if (lockAdaptive) return;
     lastVideo.duration = d;
     setDuration(d);
+  };
+  const pickGenerateAudio = (value: boolean) => {
+    if (hasReferenceAudio) return;
+    lastVideo.generateAudio = value;
+    setGenerateAudio(value);
   };
 
   return (
@@ -384,6 +402,9 @@ export function VideoSettingsPicker({
         </span>
         <TimerIcon />
         <span className="media-trigger-label">{lockAdaptive ? "自动" : duration}</span>
+        <span className="media-trigger-audio" aria-label={effectiveGenerateAudio ? "有声音" : "无声音"}>
+          {effectiveGenerateAudio ? "🔊" : "🔇"}
+        </span>
         <ChevronIcon />
       </button>
       {open && (
@@ -442,6 +463,26 @@ export function VideoSettingsPicker({
               ))
             )}
           </div>
+          <div className="media-section-title">视频声音</div>
+          <div className="seg-track">
+            {[
+              { value: true, label: "有" },
+              { value: false, label: "无" },
+            ].map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                className={`seg ${option.value === effectiveGenerateAudio ? "active" : ""}`}
+                disabled={disabled || hasReferenceAudio}
+                title={hasReferenceAudio ? "存在参考音频时固定为有" : undefined}
+                onClick={() => pickGenerateAudio(option.value)}
+              >
+                <span aria-hidden>{option.value ? "🔊" : "🔇"}</span>
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+          {hasReferenceAudio && <div className="media-hint">已上传参考音频，视频声音固定为有</div>}
         </div>
       )}
     </div>

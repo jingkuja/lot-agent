@@ -795,7 +795,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             />
           )}
           {mode === "video" && (
-            <VideoSettingsPicker disabled={disabled} lockAdaptive={lockAdaptive} durations={videoDurations} onChange={handleSettingsChange} />
+            <VideoSettingsPicker
+              disabled={disabled}
+              lockAdaptive={lockAdaptive}
+              hasReferenceAudio={referenceAudioFiles.length > 0}
+              durations={videoDurations}
+              onChange={handleSettingsChange}
+            />
           )}
           {!embedded && (disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">

@@ -42,11 +42,11 @@ describe("customer acquisition validators", () => {
   it("accepts video generation settings from the shared input UI", () => {
     expect(parseCreateCampaignAsset({
       assetType: "video", prompt: "生成视频", campaignId: "00000000-0000-4000-8000-000000000201",
-      mediaSettings: { durationSec: 5, ratio: "9:16", size: "720x1280" },
+      mediaSettings: { durationSec: 5, ratio: "9:16", size: "720x1280", generate_audio: false },
       input_reference: ["/static/uploads/a.png"],
       first_frame: "/static/uploads/first.png",
     })).toMatchObject({
-      mediaSettings: { durationSec: 5, ratio: "9:16", size: "720x1280" },
+      mediaSettings: { durationSec: 5, ratio: "9:16", size: "720x1280", generate_audio: false },
       input_reference: ["/static/uploads/a.png"],
       first_frame: "/static/uploads/first.png",
     });
