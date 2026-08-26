@@ -1,4 +1,5 @@
 import type { StoredUser } from "./database.js";
+import { maskPhone } from "./phone.js";
 
 export interface PublicApiKey {
   key: string;
@@ -10,6 +11,7 @@ export interface PublicUser {
   id: string;
   name: string;
   username: string | null;
+  phone: string | null;
   apiKeys: PublicApiKey[];
   activeKeyIndex: number;
 }
@@ -23,10 +25,12 @@ export function maskKey(key: string): string {
 export function toPublicUser(u: StoredUser): PublicUser {
   // Lot Agent never exposes or selects user-owned API keys. All production
   // model calls use the server-held managed subscription credential.
+  const phone = maskPhone(u.phone);
   return {
     id: u.id,
     name: u.name ?? u.username ?? "",
     username: u.username ?? null,
+    phone,
     apiKeys: [],
     activeKeyIndex: -1,
   };

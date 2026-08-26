@@ -113,6 +113,7 @@ export interface User {
   id: string;
   name: string;
   username: string | null;
+  phone: string | null;
   apiKeys: PublicApiKey[];
   activeKeyIndex: number;
 }

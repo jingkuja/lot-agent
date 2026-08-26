@@ -17,6 +17,12 @@ describe("maskKey", () => {
 });
 
 describe("toPublicUser", () => {
+  it("returns a masked phone without exposing the raw value", () => {
+    const pub = toPublicUser({ ...base, phone: "13800138000" });
+    expect(pub.phone).toBe("138****8000");
+    expect(JSON.stringify(pub)).not.toContain("13800138000");
+  });
+
   it("never exposes ordinary keys, active selection, raw keys, or email", () => {
     const u = {
       ...base,
@@ -29,6 +35,7 @@ describe("toPublicUser", () => {
     const pub = toPublicUser(u);
     expect(pub).toEqual({
       id: "u1", name: "138", username: "138",
+      phone: null,
       apiKeys: [],
       activeKeyIndex: -1,
     });

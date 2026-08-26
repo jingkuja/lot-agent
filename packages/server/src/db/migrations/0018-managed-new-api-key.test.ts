@@ -9,6 +9,6 @@ describe("managed New API key migration", () => {
     const ddl = query.mock.calls.map((call) => String(call[0])).join("\n");
     expect(ddl).toContain("managed_api_key TEXT");
     expect(managedNewApiKey.version).toBe(18);
-    expect(migrations.at(-1)).toBe(managedNewApiKey);
+    expect(migrations.find((migration) => migration.version === managedNewApiKey.version)).toBe(managedNewApiKey);
   });
 });

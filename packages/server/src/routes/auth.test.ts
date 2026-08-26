@@ -25,6 +25,7 @@ function fakeManagedService() {
     },
     db: {
       upsertManagedUser: vi.fn(),
+      updateUserPhone: vi.fn(),
       getUserById: vi.fn().mockResolvedValue({ external_user_id: 7 }),
     },
     sessions: {
@@ -39,6 +40,7 @@ const managedResult = {
   userId: 7,
   username: "alice",
   name: "Alice",
+  phone: "13800138000",
   managedKey: { tokenId: 9, apiKey: "managed-secret", credentialVersion: 2, remainQuota: 0 },
   created: false,
 };
@@ -46,6 +48,7 @@ const managedResult = {
 const storedManagedUser = {
   id: "u7", email: null, name: "Alice", created_at: "t",
   external_user_id: 7, username: "alice", api_key: "managed-secret", api_keys: [],
+  phone: "138****8000",
   managed_token_id: 9, managed_credential_version: 2,
 };
 
@@ -82,6 +85,7 @@ describe("auth login", () => {
     expect(json.token).toBe("tok-1");
     expect(json.user).toEqual({
       id: "u1", name: "138", username: "138",
+      phone: null,
       apiKeys: [], activeKeyIndex: -1,
     });
     expect(JSON.stringify(json)).not.toContain("sk-SECRETSECRET");
@@ -275,8 +279,9 @@ describe("managed contact verification", () => {
       body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
     });
     expect(bind.status).toBe(200);
-    expect(await bind.json()).toEqual({ ok: true, phone: "13800138000" });
+    expect(await bind.json()).toEqual({ ok: true, phone: "138****8000" });
     expect(svc.tokenhub.bindAgentPhone).toHaveBeenCalledWith(7, "13800138000", "123456");
+    expect(svc.db.updateUserPhone).toHaveBeenCalledWith("u7", "13800138000");
   });
 
   it("rejects phone binding without a valid local session", async () => {

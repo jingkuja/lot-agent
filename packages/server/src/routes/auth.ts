@@ -3,6 +3,7 @@ import { logger } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { generateRsaKeypair } from "../auth/rsa.js";
 import { toPublicUser } from "../db/user-sanitize.js";
+import { maskPhone } from "../db/phone.js";
 import { randomUUID } from "node:crypto";
 import { TokenhubClientError } from "../tokenhub/client.js";
 
@@ -32,14 +33,19 @@ function contactError(err: unknown, fallback: string): { message: string; code?:
 export function createAuthRoutes(service: AgentService): Hono {
   const app = new Hono();
 
-  const resolveExternalUserId = async (authorization?: string): Promise<number | null> => {
+  const resolveSessionUser = async (authorization?: string) => {
     if (!authorization?.startsWith("Bearer ")) return null;
     const token = authorization.slice("Bearer ".length).trim();
     if (!token) return null;
     const session = await service.sessions.resolve(token);
     if (!session) return null;
     const user = await service.db.getUserById(session.userId);
-    return user?.external_user_id ?? null;
+    return user ? { session, user } : null;
+  };
+
+  const resolveExternalUserId = async (authorization?: string): Promise<number | null> => {
+    const resolved = await resolveSessionUser(authorization);
+    return resolved?.user.external_user_id ?? null;
   };
 
   // GET /public-key — public; browser fetches this to encrypt the password.
@@ -77,6 +83,7 @@ export function createAuthRoutes(service: AgentService): Hono {
             externalUserId: result.userId,
             username: result.username,
             name: result.name,
+            phone: result.phone,
             tokenId: result.managedKey.tokenId,
             apiKey: result.managedKey.apiKey,
             credentialVersion: result.managedKey.credentialVersion,
@@ -163,6 +170,7 @@ export function createAuthRoutes(service: AgentService): Hono {
         externalUserId: result.userId,
         username: result.username,
         name: result.name,
+        phone: result.phone,
         tokenId: result.managedKey.tokenId,
         apiKey: result.managedKey.apiKey,
         credentialVersion: result.managedKey.credentialVersion,
@@ -206,7 +214,8 @@ export function createAuthRoutes(service: AgentService): Hono {
     if (!service.managedKeysEnabled) {
       return c.json({ error: "手机号绑定功能未启用" }, 404);
     }
-    const externalUserId = await resolveExternalUserId(c.req.header("Authorization"));
+    const resolved = await resolveSessionUser(c.req.header("Authorization"));
+    const externalUserId = resolved?.user.external_user_id ?? null;
     if (externalUserId == null) return c.json({ error: "Unauthorized" }, 401);
     let body: { phone?: string; verificationCode?: string };
     try {
@@ -221,7 +230,14 @@ export function createAuthRoutes(service: AgentService): Hono {
         body.phone.trim(),
         body.verificationCode.trim()
       );
-      return c.json({ ok: true, ...result });
+      try {
+        await service.db.updateUserPhone(resolved.session.userId, result.phone);
+      } catch (err) {
+        // The tokenhub bind has already succeeded. Keep the client result
+        // successful and let the next /me sync repair the local cache.
+        logger.warn("local phone cache update failed", { route: "phone-binding", userId: resolved.session.userId, err });
+      }
+      return c.json({ ok: true, phone: maskPhone(result.phone) ?? "" });
     } catch (err) {
       logger.warn("phone binding failed", { route: "phone-binding", externalUserId, err });
       const mapped = contactError(err, "手机号绑定失败，请稍后重试");
@@ -269,6 +285,7 @@ export function createAuthRoutes(service: AgentService): Hono {
         externalUserId: result.userId,
         username: result.username,
         name: result.name,
+        phone: result.phone ?? body.phone?.trim(),
         tokenId: result.managedKey.tokenId,
         apiKey: result.managedKey.apiKey,
         credentialVersion: result.managedKey.credentialVersion,
@@ -306,6 +323,7 @@ export function createAuthRoutes(service: AgentService): Hono {
             externalUserId: result.userId,
             username: result.username,
             name: result.name,
+            phone: result.phone,
             tokenId: result.managedKey.tokenId,
             apiKey: result.managedKey.apiKey,
             credentialVersion: result.managedKey.credentialVersion,

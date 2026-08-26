@@ -16,11 +16,32 @@ function accountText(user: User) {
   return { email, displayName, initial: (displayName.trim()[0] || "用").toUpperCase() };
 }
 
+function maskPhone(phone: string | null | undefined) {
+  const value = phone?.trim();
+  if (!value) return null;
+  if (value.length <= 7) return `${value.slice(0, 3)}****`;
+  return `${value.slice(0, 3)}****${value.slice(-4)}`;
+}
+
 export function AccountMenu({ user, onLogout }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [boundPhone, setBoundPhone] = useState(() => maskPhone(user.phone));
   const rootRef = useRef<HTMLDivElement>(null);
   const account = accountText(user);
+
+  useEffect(() => {
+    setBoundPhone(maskPhone(user.phone));
+  }, [user.phone]);
+
+  useEffect(() => {
+    const onPhoneBound = (event: Event) => {
+      const phone = (event as CustomEvent<{ phone?: string }>).detail?.phone;
+      setBoundPhone(maskPhone(phone));
+    };
+    window.addEventListener("lot:phone-bound", onPhoneBound);
+    return () => window.removeEventListener("lot:phone-bound", onPhoneBound);
+  }, []);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -78,9 +99,19 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
               <button type="button" role="menuitem" onClick={() => openDialog("files")}>
                 <span aria-hidden>▤</span>文件管理
               </button>
-              <button type="button" role="menuitem" onClick={() => openDialog("phone")}>
-                <span aria-hidden>☎</span>绑定/更换手机号
-              </button>
+              {boundPhone ? (
+                <div className="account-phone-row">
+                  <span aria-hidden>☎</span>
+                  <span className="account-phone-number" title="已绑定手机号">手机号 {boundPhone}</span>
+                  <button type="button" className="account-phone-change" onClick={() => openDialog("phone")}>
+                    更改
+                  </button>
+                </div>
+              ) : (
+                <button type="button" role="menuitem" onClick={() => openDialog("phone")}>
+                  <span aria-hidden>☎</span>绑定手机号
+                </button>
+              )}
               <button type="button" role="menuitem" className="danger" onClick={onLogout}>
                 <span aria-hidden>↪</span>退出账号
               </button>
@@ -98,7 +129,15 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
         <>
           {dialog === "recharge" && <RechargeModal onClose={() => setDialog(null)} />}
           {dialog === "files" && <FileManagerModal onClose={() => setDialog(null)} />}
-          {dialog === "phone" && <PhoneBindingModal onClose={() => setDialog(null)} />}
+          {dialog === "phone" && (
+            <PhoneBindingModal
+              onClose={() => setDialog(null)}
+              onSuccess={(phone) => {
+                setBoundPhone(maskPhone(phone));
+                window.dispatchEvent(new CustomEvent("lot:phone-bound", { detail: { phone } }));
+              }}
+            />
+          )}
           {dialog === "privacy" && <LegalModal kind="privacy" onClose={() => setDialog(null)} />}
           {dialog === "terms" && <LegalModal kind="terms" onClose={() => setDialog(null)} />}
         </>,
@@ -110,7 +149,7 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
 
 const mainlandPhonePattern = /^1[3-9]\d{9}$/;
 
-function PhoneBindingModal({ onClose }: { onClose: () => void }) {
+function PhoneBindingModal({ onClose, onSuccess }: { onClose: () => void; onSuccess?: (phone: string) => void }) {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [countdown, setCountdown] = useState(0);
@@ -160,7 +199,8 @@ function PhoneBindingModal({ onClose }: { onClose: () => void }) {
     setNotice(null);
     setBinding(true);
     try {
-      await api.bindPhone(phone, code);
+      const result = await api.bindPhone(phone, code);
+      onSuccess?.(result.phone);
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "手机号绑定失败，请稍后重试");

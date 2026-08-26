@@ -24,6 +24,7 @@ export interface ManagedUserResult {
   userId: number;
   username: string;
   name: string;
+  phone?: string;
   managedKey: ManagedKeyCredential;
   created: boolean;
 }
@@ -473,6 +474,7 @@ interface ManagedUserWire {
   user_id: number;
   username: string;
   display_name: string;
+  phone?: string;
   managed_key: {
     token_id: number;
     api_key: string;
@@ -487,6 +489,7 @@ function mapManagedUser(data: ManagedUserWire): ManagedUserResult {
     userId: data.user_id,
     username: data.username,
     name: data.display_name || data.username,
+    phone: typeof data.phone === "string" ? data.phone.trim() || undefined : undefined,
     managedKey: {
       tokenId: data.managed_key.token_id,
       apiKey: data.managed_key.api_key,

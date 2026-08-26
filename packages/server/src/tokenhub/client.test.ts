@@ -13,6 +13,7 @@ describe("TokenhubClient", () => {
       user_id: 7,
       username: "alice",
       display_name: "Alice",
+      phone: "13800138000",
       managed_key: { token_id: 9, api_key: "managed-secret", credential_version: 2, remain_quota: 0 },
       created: true,
     }));
@@ -67,6 +68,7 @@ describe("TokenhubClient", () => {
       user_id: 7,
       username: "alice",
       display_name: "Alice",
+      phone: "13800138000",
       managed_key: { token_id: 9, api_key: "managed-secret", credential_version: 2, remain_quota: 0 },
       created: false,
     }));
@@ -81,6 +83,7 @@ describe("TokenhubClient", () => {
     await expect(c.authenticateAgentUserByPhone("13800138000", "123456")).resolves.toMatchObject({
       userId: 7,
       username: "alice",
+      phone: "13800138000",
     });
     const [url, init] = f.mock.calls[0];
     expect(url).toBe("https://h/api/internal/agent-users/authenticate-phone");

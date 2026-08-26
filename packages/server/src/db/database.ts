@@ -9,6 +9,7 @@ import { normalizeApiKeyEntries, type RawApiKeyEntry } from "../tokenhub/api-key
 import { SecretBox, createSecretBox, sha256Hex } from "../auth/secret-box.js";
 import { runMigrations } from "./migration-runner.js";
 import { migrations } from "./migrations/index.js";
+import { maskPhone } from "./phone.js";
 
 export interface Conversation {
   id: string;
@@ -137,6 +138,8 @@ export interface StoredUser {
   created_at: string;
   external_user_id?: number | null;
   username?: string | null;
+  /** Display-safe phone value; the raw number is never persisted locally. */
+  phone?: string | null;
   api_key?: string | null;
   api_keys?: (RawApiKeyEntry | string)[] | null;
   managed_token_id?: number | null;
@@ -278,6 +281,14 @@ export class DB {
    */
   async migrate(): Promise<void> {
     await runMigrations(this.pool, migrations);
+
+    // Keep the physical schema as the source of truth during rolling upgrades.
+    // A previous deployment can have recorded migration 19 while its DDL was
+    // interrupted or applied to a different database; managed login writes
+    // this column, so repair that drift before the server accepts requests.
+    await this.pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32)
+    `);
   }
 
   // ── Conversations ──
@@ -988,6 +999,7 @@ export class DB {
     externalUserId: number;
     username: string;
     name: string;
+    phone?: string | null;
     tokenId: number;
     apiKey: string;
     credentialVersion: number;
@@ -996,12 +1008,13 @@ export class DB {
     const sealedManagedKey = this.secretBox.seal(args.apiKey);
     const { rows } = await this.pool.query(
       `INSERT INTO users (
-         external_user_id, username, name, email, managed_token_id,
+         external_user_id, username, name, email, phone, managed_token_id,
          managed_api_key, credential_version, managed_key_status, managed_key_provisioned_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
        ON CONFLICT (external_user_id) DO UPDATE SET
          username = EXCLUDED.username,
          name = EXCLUDED.name,
+         phone = COALESCE(EXCLUDED.phone, users.phone),
          managed_token_id = EXCLUDED.managed_token_id,
          managed_api_key = EXCLUDED.managed_api_key,
          credential_version = EXCLUDED.credential_version,
@@ -1013,6 +1026,7 @@ export class DB {
         args.username,
         args.name,
         `${args.username}@tokenhub.local`,
+        maskPhone(args.phone),
         args.tokenId,
         sealedManagedKey,
         args.credentialVersion,
@@ -1020,6 +1034,14 @@ export class DB {
       ]
     );
     return this.openUserRow(rows[0]);
+  }
+
+  async updateUserPhone(id: string, phone: string): Promise<StoredUser | null> {
+    const { rows } = await this.pool.query(
+      "UPDATE users SET phone = $2 WHERE id = $1 RETURNING *",
+      [id, maskPhone(phone)]
+    );
+    return rows[0] ? this.openUserRow(rows[0]) : null;
   }
 
   async getUserApiKey(userId: string, managedOnly = false): Promise<string | null> {

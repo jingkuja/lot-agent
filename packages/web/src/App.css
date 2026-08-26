@@ -3238,16 +3238,30 @@ html, body, #root {
 .account-popover-profile strong { color: var(--text); font-size: 14px; }
 .account-popover-profile small { color: var(--text-muted); font-size: 11px; }
 .account-popover-actions { display: grid; gap: 7px; }
-.account-popover-actions button {
+.account-popover-actions > button {
   width: 100%; min-height: 36px; padding: 7px 12px;
   display: flex; align-items: center; justify-content: flex-start; gap: 8px;
   border: 1px solid transparent; border-radius: 8px;
   background: transparent; color: var(--text); font: inherit; font-size: 13px; font-weight: 550;
   cursor: pointer; transition: color .14s ease, background .14s ease;
 }
-.account-popover-actions button:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); }
-.account-popover-actions button.danger:hover { color: var(--error); background: color-mix(in srgb, var(--error) 8%, var(--bg-card)); }
-.account-popover-actions button span { width: 16px; color: currentColor; font-size: 16px; text-align: center; }
+.account-popover-actions > button:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); }
+.account-popover-actions > button.danger:hover { color: var(--error); background: color-mix(in srgb, var(--error) 8%, var(--bg-card)); }
+.account-popover-actions > button > span { width: 16px; color: currentColor; font-size: 16px; text-align: center; }
+.account-phone-row {
+  min-width: 0; min-height: 36px; padding: 7px 8px 7px 12px;
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid transparent; border-radius: 8px;
+  color: var(--text); font-size: 13px; font-weight: 550;
+}
+.account-phone-row > span:first-child { width: 16px; flex: 0 0 16px; color: currentColor; font-size: 16px; text-align: center; }
+.account-phone-number { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-phone-change {
+  flex: none; padding: 3px 6px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--accent); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.account-phone-change:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg-card)); }
+.account-phone-change:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
 .account-popover-legal { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 14px 0 1px; color: var(--text-muted); }
 .account-popover-legal button { border: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
 .account-popover-legal button:hover { color: var(--accent); }
