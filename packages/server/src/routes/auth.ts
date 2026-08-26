@@ -4,11 +4,29 @@ import type { AgentService } from "../services/agent-service.js";
 import { generateRsaKeypair } from "../auth/rsa.js";
 import { toPublicUser } from "../db/user-sanitize.js";
 import { randomUUID } from "node:crypto";
+import { TokenhubClientError } from "../tokenhub/client.js";
 
 // Ephemeral per-process keypair used to decrypt login passwords.
 const keypair = generateRsaKeypair();
 
 const LOGIN_FAIL = "登录失败，请稍后再试或者联系管理员";
+
+const CONTACT_ERROR_MESSAGES: Record<string, string> = {
+  email_taken: "该邮箱已被其他用户使用",
+  phone_taken: "该手机号已被其他用户使用",
+  invalid_email: "请输入有效的邮箱地址",
+  invalid_phone: "请输入有效的中国大陆手机号",
+  phone_not_registered: "该手机号尚未注册",
+  sms_not_configured: "短信服务尚未配置，请联系管理员",
+  email_code_invalid: "邮箱验证码错误或已过期",
+  phone_code_invalid: "手机验证码错误或已过期",
+  user_exists: "该用户名已被使用",
+};
+
+function contactError(err: unknown, fallback: string): { message: string; code?: string } {
+  const code = err instanceof TokenhubClientError ? err.code : undefined;
+  return { message: code ? CONTACT_ERROR_MESSAGES[code] ?? fallback : fallback, code };
+}
 
 export function createAuthRoutes(service: AgentService): Hono {
   const app = new Hono();
@@ -66,13 +84,103 @@ export function createAuthRoutes(service: AgentService): Hono {
     }
   });
 
+  app.post("/verification/email", async (c) => {
+    if (!service.managedKeysEnabled) {
+      return c.json({ error: "注册功能未启用" }, 404);
+    }
+    let body: { email?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (!body.email?.trim()) {
+      return c.json({ error: "请输入邮箱地址" }, 400);
+    }
+    try {
+      const result = await service.tokenhub.sendAgentEmailVerification(body.email.trim());
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      logger.warn("email verification send failed", { route: "verification/email", err });
+      const mapped = contactError(err, "邮箱验证码发送失败，请稍后重试");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
+    }
+  });
+
+  app.post("/verification/phone", async (c) => {
+    if (!service.managedKeysEnabled) {
+      return c.json({ error: "验证码登录功能未启用" }, 404);
+    }
+    let body: { phone?: string; purpose?: "register" | "login" };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (!body.phone?.trim() || (body.purpose !== "register" && body.purpose !== "login")) {
+      return c.json({ error: "请输入手机号" }, 400);
+    }
+    try {
+      const result = await service.tokenhub.sendAgentPhoneVerification(body.phone.trim(), body.purpose);
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      logger.warn("phone verification send failed", { route: "verification/phone", err });
+      const mapped = contactError(err, "手机验证码发送失败，请稍后重试");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
+    }
+  });
+
+  app.post("/phone-login", async (c) => {
+    if (!service.managedKeysEnabled) {
+      return c.json({ error: LOGIN_FAIL }, 404);
+    }
+    let body: { phone?: string; verificationCode?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (!body.phone?.trim() || !body.verificationCode?.trim()) {
+      return c.json({ error: "请输入手机号和验证码" }, 400);
+    }
+    try {
+      const result = await service.tokenhub.authenticateAgentUserByPhone(
+        body.phone.trim(),
+        body.verificationCode.trim()
+      );
+      const user = await service.db.upsertManagedUser({
+        externalUserId: result.userId,
+        username: result.username,
+        name: result.name,
+        tokenId: result.managedKey.tokenId,
+        apiKey: result.managedKey.apiKey,
+        credentialVersion: result.managedKey.credentialVersion,
+      });
+      const token = await service.sessions.createSession(user.id);
+      return c.json({ token, user: toPublicUser(user) });
+    } catch (err) {
+      logger.warn("phone login failed", { route: "phone-login", err });
+      const mapped = contactError(err, "手机号或验证码错误");
+      return c.json({ error: mapped.message, code: mapped.code }, 401);
+    }
+  });
+
   // POST /register — creates a real New API user and its admin-only managed
   // subscription key in one idempotent New API transaction.
   app.post("/register", async (c) => {
     if (!service.managedKeysEnabled) {
       return c.json({ error: "注册功能未启用" }, 404);
     }
-    let body: { username?: string; encryptedPassword?: string; email?: string; displayName?: string; requestId?: string };
+    let body: {
+      username?: string;
+      encryptedPassword?: string;
+      email?: string;
+      emailVerificationCode?: string;
+      phone?: string;
+      phoneVerificationCode?: string;
+      displayName?: string;
+      requestId?: string;
+    };
     try {
       body = await c.req.json();
     } catch {
@@ -88,6 +196,9 @@ export function createAuthRoutes(service: AgentService): Hono {
         username: body.username.trim(),
         password,
         email: body.email?.trim(),
+        emailVerificationCode: body.emailVerificationCode?.trim(),
+        phone: body.phone?.trim(),
+        phoneVerificationCode: body.phoneVerificationCode?.trim(),
         displayName: body.displayName?.trim(),
       });
       const user = await service.db.upsertManagedUser({
@@ -102,7 +213,8 @@ export function createAuthRoutes(service: AgentService): Hono {
       return c.json({ token, user: toPublicUser(user) });
     } catch (err) {
       logger.warn("registration failed", { route: "register", err });
-      return c.json({ error: "注册失败，请稍后再试或者联系管理员" }, 400);
+      const mapped = contactError(err, "注册失败，请稍后再试或者联系管理员");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
     }
   });
 

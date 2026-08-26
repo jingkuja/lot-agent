@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { TokenhubClient } from "./client.js";
+import { TokenhubClient, TokenhubClientError } from "./client.js";
 import { createHash, createHmac } from "node:crypto";
 
 const ok = (data: unknown) =>
@@ -8,6 +8,88 @@ const fail = () =>
   ({ ok: true, json: async () => ({ data: null, success: false, message: "bad" }) }) as Response;
 
 describe("TokenhubClient", () => {
+  it("sends registration bindings and both verification codes through the signed control plane", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      user_id: 7,
+      username: "alice",
+      display_name: "Alice",
+      managed_key: { token_id: 9, api_key: "managed-secret", credential_version: 2, remain_quota: 0 },
+      created: true,
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await c.registerAgentUser({
+      requestId: "req-1",
+      username: "alice",
+      password: "password1",
+      email: "alice@example.com",
+      emailVerificationCode: "123456",
+      phone: "13800138000",
+      phoneVerificationCode: "654321",
+    });
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("https://h/api/internal/agent-users/register");
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      email: "alice@example.com",
+      email_verification_code: "123456",
+      phone: "13800138000",
+      phone_verification_code: "654321",
+    });
+  });
+
+  it("preserves safe upstream error codes for the Lot Agent route to translate", async () => {
+    const f = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ data: null, success: false, code: "email_taken", message: "occupied" }),
+    } as Response);
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    const error = await c.sendAgentEmailVerification("used@example.com").catch((err) => err);
+    expect(error).toBeInstanceOf(TokenhubClientError);
+    expect(error.code).toBe("email_taken");
+  });
+
+  it("authenticates a phone verification code through the signed control plane", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      user_id: 7,
+      username: "alice",
+      display_name: "Alice",
+      managed_key: { token_id: 9, api_key: "managed-secret", credential_version: 2, remain_quota: 0 },
+      created: false,
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.authenticateAgentUserByPhone("13800138000", "123456")).resolves.toMatchObject({
+      userId: 7,
+      username: "alice",
+    });
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("https://h/api/internal/agent-users/authenticate-phone");
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      phone: "13800138000",
+      verification_code: "123456",
+    });
+  });
+
   it("login maps a successful response with only api_key", async () => {
     const f = vi.fn().mockResolvedValue(
       ok({ user_id: 2, name: "13881071870", api_key: "sk-X", access_token: "sk-X" })

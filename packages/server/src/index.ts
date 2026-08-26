@@ -240,6 +240,9 @@ async function main() {
   // the exact POST paths (method+path match) BEFORE the route below, so it
   // runs first in the chain without touching GET /public-key, /mode, /me.
   app.on("POST", "/api/auth/login", loginRateLimit);
+  app.on("POST", "/api/auth/phone-login", loginRateLimit);
+  app.on("POST", "/api/auth/verification/email", loginRateLimit);
+  app.on("POST", "/api/auth/verification/phone", loginRateLimit);
   app.on("POST", "/api/auth/register", loginRateLimit);
   app.on("POST", "/api/auth/token-login", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));

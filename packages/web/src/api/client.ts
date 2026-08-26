@@ -264,7 +264,33 @@ export const api = {
       body: JSON.stringify({ username, encryptedPassword }),
     }),
 
-  register: (args: { username: string; encryptedPassword: string; email?: string; requestId: string }) =>
+  phoneLogin: (phone: string, verificationCode: string) =>
+    request<{ token: string; user: User }>("/auth/phone-login", {
+      method: "POST",
+      body: JSON.stringify({ phone, verificationCode }),
+    }),
+
+  sendEmailVerification: (email: string) =>
+    request<{ ok: true; expiresIn: number; resendAfter: number }>("/auth/verification/email", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  sendPhoneVerification: (phone: string, purpose: "register" | "login") =>
+    request<{ ok: true; expiresIn: number; resendAfter: number }>("/auth/verification/phone", {
+      method: "POST",
+      body: JSON.stringify({ phone, purpose }),
+    }),
+
+  register: (args: {
+    username: string;
+    encryptedPassword: string;
+    email?: string;
+    emailVerificationCode?: string;
+    phone?: string;
+    phoneVerificationCode?: string;
+    requestId: string;
+  }) =>
     request<{ token: string; user: User }>("/auth/register", {
       method: "POST",
       body: JSON.stringify(args),

@@ -15,12 +15,22 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [phone, setPhone] = useState("");
+  const [phoneCode, setPhoneCode] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [loginMethod, setLoginMethod] = useState<"password" | "phone">("password");
+  const [bindEmail, setBindEmail] = useState(false);
+  const [bindPhone, setBindPhone] = useState(false);
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const registrationRequestId = useRef(crypto.randomUUID());
   const [error, setError] = useState<string | null>(initialError);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sendingCode, setSendingCode] = useState<"email" | "phone" | null>(null);
+  const [emailCountdown, setEmailCountdown] = useState(0);
+  const [phoneCountdown, setPhoneCountdown] = useState(0);
   // Desktop shell: server endpoint is configurable via the bridge.
   const desktop = typeof window !== "undefined" ? window.lotDesktop : undefined;
   const [serverModalOpen, setServerModalOpen] = useState(false);
@@ -34,26 +44,94 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
       .catch(() => setRegistrationEnabled(false));
   }, []);
 
+  useEffect(() => {
+    if (emailCountdown <= 0 && phoneCountdown <= 0) return;
+    const timer = window.setInterval(() => {
+      setEmailCountdown((value) => Math.max(0, value - 1));
+      setPhoneCountdown((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [emailCountdown > 0, phoneCountdown > 0]);
+
+  const sendEmailCode = async () => {
+    if (!email.trim()) {
+      setError("请先填写邮箱地址");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setSendingCode("email");
+    try {
+      const result = await api.sendEmailVerification(email.trim());
+      setEmailCountdown(result.resendAfter || 60);
+      setNotice("邮箱验证码已发送，请注意查收");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "邮箱验证码发送失败");
+    } finally {
+      setSendingCode(null);
+    }
+  };
+
+  const sendPhoneCode = async () => {
+    if (!phone.trim()) {
+      setError("请先填写手机号");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setSendingCode("phone");
+    try {
+      const result = await api.sendPhoneVerification(phone.trim(), mode === "register" ? "register" : "login");
+      setPhoneCountdown(result.resendAfter || 60);
+      setNotice("手机验证码已发送，请注意查收");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "手机验证码发送失败");
+    } finally {
+      setSendingCode(null);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password) return;
+    if (mode === "login" && loginMethod === "phone") {
+      if (!phone.trim() || !phoneCode.trim()) return;
+    } else if (!username.trim() || !password) {
+      return;
+    }
     if (mode === "register" && password !== confirmPassword) {
       setError("两次输入的密码不一致");
       return;
     }
+    if (mode === "register" && bindEmail && (!email.trim() || !emailCode.trim())) {
+      setError("请填写邮箱并输入邮箱验证码");
+      return;
+    }
+    if (mode === "register" && bindPhone && (!phone.trim() || !phoneCode.trim())) {
+      setError("请填写手机号并输入手机验证码");
+      return;
+    }
     setError(null);
+    setNotice(null);
     setLoading(true);
     try {
-      const { publicKey } = await api.getPublicKey();
-      const encrypted = await encryptPassword(publicKey, password);
-      const res = mode === "register"
-        ? await api.register({
-            username: username.trim(),
-            encryptedPassword: encrypted,
-            email: email.trim() || undefined,
-            requestId: registrationRequestId.current,
-          })
-        : await api.login(username.trim(), encrypted);
+      let res: Awaited<ReturnType<typeof api.login>>;
+      if (mode === "login" && loginMethod === "phone") {
+        res = await api.phoneLogin(phone.trim(), phoneCode.trim());
+      } else {
+        const { publicKey } = await api.getPublicKey();
+        const encrypted = await encryptPassword(publicKey, password);
+        res = mode === "register"
+          ? await api.register({
+              username: username.trim(),
+              encryptedPassword: encrypted,
+              email: bindEmail ? email.trim() : undefined,
+              emailVerificationCode: bindEmail ? emailCode.trim() : undefined,
+              phone: bindPhone ? phone.trim() : undefined,
+              phoneVerificationCode: bindPhone ? phoneCode.trim() : undefined,
+              requestId: registrationRequestId.current,
+            })
+          : await api.login(username.trim(), encrypted);
+      }
       setToken(res.token);
       onLogin(res.user);
     } catch (err) {
@@ -65,8 +143,18 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
     }
   };
 
+  const submitDisabled = loading || sendingCode !== null || (
+    mode === "register"
+      ? !username.trim() || !password || !confirmPassword
+        || (bindEmail && (!email.trim() || !emailCode.trim()))
+        || (bindPhone && (!phone.trim() || !phoneCode.trim()))
+      : loginMethod === "password"
+        ? !username.trim() || !password
+        : !phone.trim() || !phoneCode.trim()
+  );
+
   return (
-    <div className="login-page">
+    <div className={`login-page login-page-${mode}`}>
       <section className="login-showcase" aria-label="借势智算产品介绍">
         <div className="login-showcase-glow login-showcase-glow-one" aria-hidden />
         <div className="login-showcase-glow login-showcase-glow-two" aria-hidden />
@@ -131,63 +219,130 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
             <p>{mode === "login" ? "登录后继续你的智能工作流" : "注册后即可使用托管 AI 订阅"}</p>
           </div>
           <form className="login-form" onSubmit={handleSubmit}>
-            <div className="login-field">
-              <label htmlFor="login-username">用户名</label>
-              <input
-                id="login-username"
-                type="text"
-                placeholder="请输入手机号或账号"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                autoFocus
-                disabled={loading}
-              />
-            </div>
-            {mode === "register" && (
+            {mode === "login" && registrationEnabled && (
+              <div className="login-method-tabs" role="tablist" aria-label="登录方式">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={loginMethod === "password"}
+                  className={loginMethod === "password" ? "active" : ""}
+                  onClick={() => { setLoginMethod("password"); setError(null); setNotice(null); }}
+                  disabled={loading}
+                >用户名密码</button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={loginMethod === "phone"}
+                  className={loginMethod === "phone" ? "active" : ""}
+                  onClick={() => { setLoginMethod("phone"); setError(null); setNotice(null); }}
+                  disabled={loading}
+                >手机号验证码</button>
+              </div>
+            )}
+
+            {(mode === "register" || loginMethod === "password") && (
               <div className="login-field">
-                <label htmlFor="register-email">邮箱（可选）</label>
+                <label htmlFor="login-username">用户名</label>
                 <input
-                  id="register-email"
-                  type="email"
-                  placeholder="用于账号找回"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="login-username"
+                  type="text"
+                  placeholder="请输入用户名"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  autoFocus
+                  autoComplete="username"
                   disabled={loading}
                 />
               </div>
             )}
-            <div className="login-field">
-              <label htmlFor="login-password">密码</label>
-              <input
-                id="login-password"
-                type="password"
-                placeholder="请输入密码"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={loading}
-              />
-            </div>
+
+            {mode === "register" && (
+              <div className="login-bindings">
+                <label className="login-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={bindEmail}
+                    onChange={(e) => { setBindEmail(e.target.checked); setError(null); setNotice(null); }}
+                    disabled={loading}
+                  />
+                  <span>绑定邮箱</span>
+                </label>
+                <label className="login-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={bindPhone}
+                    onChange={(e) => { setBindPhone(e.target.checked); setError(null); setNotice(null); }}
+                    disabled={loading}
+                  />
+                  <span>绑定手机号</span>
+                </label>
+              </div>
+            )}
+
+            {mode === "register" && bindEmail && (
+              <div className="login-verification-group">
+                <div className="login-field">
+                  <label htmlFor="register-email">邮箱</label>
+                  <div className="login-code-row">
+                    <input
+                      id="register-email"
+                      type="email"
+                      placeholder="请输入邮箱地址"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      autoComplete="email"
+                      disabled={loading}
+                    />
+                    <button type="button" onClick={sendEmailCode} disabled={loading || sendingCode !== null || emailCountdown > 0 || !email.trim()}>
+                      {sendingCode === "email" ? "发送中..." : emailCountdown > 0 ? `${emailCountdown}s` : "发送验证码"}
+                    </button>
+                  </div>
+                </div>
+                <div className="login-field">
+                  <label htmlFor="register-email-code">邮箱验证码</label>
+                  <input id="register-email-code" inputMode="numeric" maxLength={6} placeholder="请输入 6 位验证码" value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} required disabled={loading} />
+                </div>
+              </div>
+            )}
+
+            {((mode === "register" && bindPhone) || (mode === "login" && loginMethod === "phone")) && (
+              <div className="login-verification-group">
+                <div className="login-field">
+                  <label htmlFor="login-phone">手机号</label>
+                  <div className="login-code-row">
+                    <input id="login-phone" type="tel" inputMode="tel" placeholder="请输入中国大陆手机号" value={phone} onChange={(e) => setPhone(e.target.value)} required autoFocus={mode === "login"} autoComplete="tel" disabled={loading} />
+                    <button type="button" onClick={sendPhoneCode} disabled={loading || sendingCode !== null || phoneCountdown > 0 || !phone.trim()}>
+                      {sendingCode === "phone" ? "发送中..." : phoneCountdown > 0 ? `${phoneCountdown}s` : "发送验证码"}
+                    </button>
+                  </div>
+                </div>
+                <div className="login-field">
+                  <label htmlFor="login-phone-code">手机验证码</label>
+                  <input id="login-phone-code" inputMode="numeric" maxLength={6} placeholder="请输入 6 位验证码" value={phoneCode} onChange={(e) => setPhoneCode(e.target.value.replace(/\D/g, ""))} required autoComplete="one-time-code" disabled={loading} />
+                </div>
+              </div>
+            )}
+
+            {(mode === "register" || loginMethod === "password") && (
+              <div className="login-field">
+                <label htmlFor="login-password">密码</label>
+                <input id="login-password" type="password" placeholder="请输入密码" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete={mode === "register" ? "new-password" : "current-password"} disabled={loading} />
+              </div>
+            )}
             {mode === "register" && (
               <div className="login-field">
                 <label htmlFor="register-confirm-password">确认密码</label>
-                <input
-                  id="register-confirm-password"
-                  type="password"
-                  placeholder="请再次输入密码"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  disabled={loading}
-                />
+                <input id="register-confirm-password" type="password" placeholder="请再次输入密码" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required autoComplete="new-password" disabled={loading} />
               </div>
             )}
             {error && <p className="login-error">{error}</p>}
+            {notice && <p className="login-notice">{notice}</p>}
             <button
               type="submit"
               className="login-btn"
-              disabled={loading || !username.trim() || !password || (mode === "register" && !confirmPassword)}
+              disabled={submitDisabled}
             >
               {loading ? (mode === "login" ? "正在进入..." : "正在创建...") : (mode === "login" ? "进入工作空间" : "创建并进入")}
               {!loading && <span aria-hidden>→</span>}
@@ -216,19 +371,17 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
             </button>
           )}
         </div>
-        <p className="login-access-tip"><span>✦</span> 托管订阅凭证由平台安全管理，额度与普通 API 账户相互隔离</p>
+        <footer className="login-compliance" aria-label="网站备案与许可信息">
+          <a
+            href="https://beian.miit.gov.cn/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            蜀ICP备2025156360号-2
+          </a>
+          <span>增值电信业务经营许可证：川B2-20260779</span>
+        </footer>
       </section>
-
-      <footer className="login-compliance" aria-label="网站备案与许可信息">
-        <a
-          href="https://beian.miit.gov.cn/"
-          target="_blank"
-          rel="noreferrer"
-        >
-          蜀ICP备2025156360号-2
-        </a>
-        <span>增值电信业务经营许可证：川B2-20260779</span>
-      </footer>
       {serverModalOpen && desktop && (
         <ServerSettingsModal
           onClose={() => {

@@ -62,11 +62,19 @@ interface Envelope<T> {
   data: T | null;
   success: boolean;
   message?: string;
+  code?: string;
 }
 
-/** Thin fetch wrapper over tokenhub's agent-market API. Every failure — network,
- * non-2xx, or `success:false` — is collapsed into a single generic Error so
- * callers cannot leak the underlying cause to end users. */
+export class TokenhubClientError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+    this.name = "TokenhubClientError";
+  }
+}
+
+/** Thin fetch wrapper over tokenhub's agent-market API. Error messages stay
+ * generic; signed internal calls may also carry a structured code that routes
+ * explicitly translate from a small safe allowlist. */
 export class TokenhubClient {
   constructor(
     private readonly baseUrl: string,
@@ -84,6 +92,9 @@ export class TokenhubClient {
     username: string;
     password: string;
     email?: string;
+    emailVerificationCode?: string;
+    phone?: string;
+    phoneVerificationCode?: string;
     displayName?: string;
   }): Promise<ManagedUserResult> {
     const data = await this.internalRequest<ManagedUserWire>(
@@ -94,6 +105,9 @@ export class TokenhubClient {
         username: args.username,
         password: args.password,
         email: args.email ?? "",
+        email_verification_code: args.emailVerificationCode ?? "",
+        phone: args.phone ?? "",
+        phone_verification_code: args.phoneVerificationCode ?? "",
         display_name: args.displayName ?? "",
       },
       "agent:user.register",
@@ -103,6 +117,31 @@ export class TokenhubClient {
     return mapManagedUser(data);
   }
 
+  async sendAgentEmailVerification(email: string): Promise<{ expiresIn: number; resendAfter: number }> {
+    const data = await this.internalRequest<{ expires_in: number; resend_after: number }>(
+      "POST",
+      "/agent-users/verification/email",
+      { owner_app: "lot-agent", email },
+      "agent:user.register",
+      "new_api_email_verification_failed"
+    );
+    return { expiresIn: data.expires_in, resendAfter: data.resend_after };
+  }
+
+  async sendAgentPhoneVerification(
+    phone: string,
+    purpose: "register" | "login"
+  ): Promise<{ expiresIn: number; resendAfter: number }> {
+    const data = await this.internalRequest<{ expires_in: number; resend_after: number }>(
+      "POST",
+      `/agent-users/verification/phone/${purpose}`,
+      { owner_app: "lot-agent", phone },
+      purpose === "login" ? "agent:user.authenticate" : "agent:user.register",
+      "new_api_phone_verification_failed"
+    );
+    return { expiresIn: data.expires_in, resendAfter: data.resend_after };
+  }
+
   async authenticateAgentUser(username: string, password: string): Promise<ManagedUserResult> {
     const data = await this.internalRequest<ManagedUserWire>(
       "POST",
@@ -110,6 +149,17 @@ export class TokenhubClient {
       { owner_app: "lot-agent", username, password },
       "agent:user.authenticate",
       "new_api_managed_auth_failed"
+    );
+    return mapManagedUser(data);
+  }
+
+  async authenticateAgentUserByPhone(phone: string, verificationCode: string): Promise<ManagedUserResult> {
+    const data = await this.internalRequest<ManagedUserWire>(
+      "POST",
+      "/agent-users/authenticate-phone",
+      { owner_app: "lot-agent", phone, verification_code: verificationCode },
+      "agent:user.authenticate",
+      "new_api_managed_phone_auth_failed"
     );
     return mapManagedUser(data);
   }
@@ -338,7 +388,7 @@ export class TokenhubClient {
   ): Promise<T> {
     if (!this.internalClientId || !this.internalClientSecret) {
       logger.warn("new-api internal client is not configured", { errCode, scope });
-      throw new Error(errCode);
+      throw new TokenhubClientError(errCode);
     }
     const bodyText = body === undefined ? "" : JSON.stringify(body);
     const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -374,7 +424,7 @@ export class TokenhubClient {
       res = await call();
     } catch (err) {
       logger.warn("tokenhub request failed", { errCode, cause: "network", err });
-      throw new Error(errCode);
+      throw new TokenhubClientError(errCode);
     }
     let env: Envelope<T> | null = null;
     try {
@@ -388,7 +438,7 @@ export class TokenhubClient {
         status: res.status,
         message: env?.message,
       });
-      throw new Error(errCode);
+      throw new TokenhubClientError(errCode, env?.code);
     }
     return env.data;
   }

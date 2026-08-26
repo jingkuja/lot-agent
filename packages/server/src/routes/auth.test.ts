@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createAuthRoutes } from "./auth.js";
+import { TokenhubClientError } from "../tokenhub/client.js";
 
 function fakeService() {
   return {
@@ -8,6 +9,37 @@ function fakeService() {
     sessions: { createSession: vi.fn().mockResolvedValue("tok-1") },
   } as unknown as import("../services/agent-service.js").AgentService;
 }
+
+function fakeManagedService() {
+  const service = {
+    managedKeysEnabled: true,
+    tokenhub: {
+      login: vi.fn(),
+      tokenLogin: vi.fn(),
+      registerAgentUser: vi.fn(),
+      sendAgentEmailVerification: vi.fn(),
+      sendAgentPhoneVerification: vi.fn(),
+      authenticateAgentUserByPhone: vi.fn(),
+    },
+    db: { upsertManagedUser: vi.fn() },
+    sessions: { createSession: vi.fn().mockResolvedValue("tok-managed") },
+  };
+  return service as unknown as import("../services/agent-service.js").AgentService;
+}
+
+const managedResult = {
+  userId: 7,
+  username: "alice",
+  name: "Alice",
+  managedKey: { tokenId: 9, apiKey: "managed-secret", credentialVersion: 2, remainQuota: 0 },
+  created: false,
+};
+
+const storedManagedUser = {
+  id: "u7", email: null, name: "Alice", created_at: "t",
+  external_user_id: 7, username: "alice", api_key: "managed-secret", api_keys: [],
+  managed_token_id: 9, managed_credential_version: 2,
+};
 
 async function encryptFor(app: ReturnType<typeof createAuthRoutes>, pw: string) {
   const { publicEncrypt, constants } = await import("node:crypto");
@@ -152,6 +184,64 @@ describe("auth token-login", () => {
     });
     expect(res.status).toBe(401);
     expect((await res.json()).error).toBe("登录失败，请稍后再试或者联系管理员");
+  });
+});
+
+describe("managed contact verification", () => {
+  it("blocks an occupied email before reporting a code as sent", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.sendAgentEmailVerification as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new TokenhubClientError("new_api_email_verification_failed", "email_taken")
+    );
+    const res = await createAuthRoutes(svc).request("/verification/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "used@example.com" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "该邮箱已被其他用户使用", code: "email_taken" });
+  });
+
+  it("passes both optional bindings and their codes to managed registration", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.registerAgentUser as ReturnType<typeof vi.fn>).mockResolvedValue(managedResult);
+    (svc.db.upsertManagedUser as ReturnType<typeof vi.fn>).mockResolvedValue(storedManagedUser);
+    const app = createAuthRoutes(svc);
+    const encryptedPassword = await encryptFor(app, "password1");
+    const res = await app.request("/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: "alice",
+        encryptedPassword,
+        email: "alice@example.com",
+        emailVerificationCode: "123456",
+        phone: "13800138000",
+        phoneVerificationCode: "654321",
+        requestId: "req-1",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(svc.tokenhub.registerAgentUser).toHaveBeenCalledWith(expect.objectContaining({
+      email: "alice@example.com",
+      emailVerificationCode: "123456",
+      phone: "13800138000",
+      phoneVerificationCode: "654321",
+    }));
+  });
+
+  it("creates a local session after phone-code authentication", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.authenticateAgentUserByPhone as ReturnType<typeof vi.fn>).mockResolvedValue(managedResult);
+    (svc.db.upsertManagedUser as ReturnType<typeof vi.fn>).mockResolvedValue(storedManagedUser);
+    const res = await createAuthRoutes(svc).request("/phone-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ token: "tok-managed", user: { id: "u7", username: "alice" } });
+    expect(svc.tokenhub.authenticateAgentUserByPhone).toHaveBeenCalledWith("13800138000", "123456");
   });
 });
 
