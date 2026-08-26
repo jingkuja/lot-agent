@@ -11,7 +11,10 @@ export function createModelRoutes(service: AgentService): Hono<{ Variables: Vari
 
   app.get("/", async (c) => {
     const userId = c.get("userId");
-    const apiKey = await service.db.getUserApiKey(userId);
+    const apiKey = await service.db.getUserApiKey(userId, service.managedKeysEnabled);
+    if (service.managedKeysEnabled && !apiKey) {
+      return c.json({ error: "托管模型凭证不可用" }, 503);
+    }
     let catalog;
     try {
       catalog = await service.getUserModelCatalog(userId, apiKey);

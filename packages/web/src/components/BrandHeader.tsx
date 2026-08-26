@@ -1,11 +1,11 @@
 import { BRAND_LOGO_SRC } from "../assets/brand-logo.js";
 import type { User } from "../api/client.js";
 import { AccountMenu } from "./AccountMenu.js";
+import { PointsBalance } from "./PointsBalance.js";
 
 interface BrandHeaderProps {
   user?: User;
   onLogout?: () => void;
-  onOpenKeySettings?: () => void;
   onCollapse: () => void;
   onOpenAgentCenter?: () => void;
   onOpenAssistant?: () => void;
@@ -20,7 +20,6 @@ interface BrandHeaderProps {
 export function BrandHeader({
   user,
   onLogout,
-  onOpenKeySettings,
   onCollapse,
   onOpenAgentCenter,
   onOpenAssistant,
@@ -57,34 +56,22 @@ export function BrandHeader({
         {user && <AccountMenu user={user} onLogout={onLogout} />}
       </div>
 
-      {(onOpenKeySettings || onOpenAgentCenter || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (
+      {(onOpenAgentCenter || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (
         <div className="brand-navigation-actions">
-          {(onOpenKeySettings || onOpenAgentCenter) && (
+          {onOpenAgentCenter && (
             <div className="brand-quick-actions">
-              {onOpenKeySettings && (
-                <button className="brand-quick-action" onClick={onOpenKeySettings} title="API-Key 选择">
-                  <span className="brand-action-icon" aria-hidden>
-                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="8" cy="15" r="3" />
-                      <path d="m10.2 12.8 7.3-7.3M15 8l2 2M17.5 5.5l1 1" />
-                    </svg>
-                  </span>
-                  <span>API-Key 选择</span>
-                </button>
-              )}
-              {onOpenAgentCenter && (
-                <button className="brand-quick-action" onClick={onOpenAgentCenter} title="Agent 管理">
-                  <span className="brand-action-icon" aria-hidden>
-                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-                      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-                      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-                      <path d="M17.5 14v7M14 17.5h7" />
-                    </svg>
-                  </span>
-                  <span>Agent 管理</span>
-                </button>
-              )}
+              <button className="brand-quick-action" onClick={onOpenAgentCenter} title="Agent 管理">
+                <span className="brand-action-icon" aria-hidden>
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                    <path d="M17.5 14v7M14 17.5h7" />
+                  </svg>
+                </span>
+                <span>Agent 管理</span>
+              </button>
+              {user && <PointsBalance />}
             </div>
           )}
           {onOpenKnowledgeBase && (

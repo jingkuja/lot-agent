@@ -16,6 +16,7 @@ import { conversationWorkflows } from "./0014-conversation-workflows.js";
 import { campaignSelectedAssets } from "./0015-campaign-selected-assets.js";
 import { customerProductMarketingLink } from "./0016-customer-product-marketing-link.js";
 import { repeatableManualOpportunityDiscovery } from "./0017-repeatable-manual-opportunity-discovery.js";
+import { managedNewApiKey } from "./0018-managed-new-api-key.js";
 
 // Static array (no fs scan — dynamic directory scanning isn't reliable once
 // this ships through tsup's bundling). To add a migration: create
@@ -38,4 +39,5 @@ export const migrations: Migration[] = [
   campaignSelectedAssets,
   customerProductMarketingLink,
   repeatableManualOpportunityDiscovery,
+  managedNewApiKey,
 ];

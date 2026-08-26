@@ -1,4 +1,5 @@
 import { logger } from "@lot-agent/core";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { normalizeApiKeyEntries, type RawApiKeyEntry } from "./api-key-entry.js";
 
 export interface TokenhubLoginResult {
@@ -10,6 +11,51 @@ export interface TokenhubModels {
   llm: string[];
   image: string[];
   video: string[];
+}
+
+export interface ManagedKeyCredential {
+  tokenId: number;
+  apiKey: string;
+  credentialVersion: number;
+  remainQuota: number;
+}
+
+export interface ManagedUserResult {
+  userId: number;
+  username: string;
+  name: string;
+  managedKey: ManagedKeyCredential;
+  created: boolean;
+}
+
+export interface ManagedBalanceResult {
+  userId: number;
+  tokenId: number;
+  remainAmount: number;
+  usedAmount: number;
+  rechargedAmount: number;
+  status: string;
+  credentialVersion: number;
+  policyRevision: number;
+}
+
+export interface ManagedRechargeOrder {
+  transactionId: string;
+  status: "pending" | "payment_failed" | "credited";
+  amount?: number;
+  points?: number;
+  quota?: number;
+  currency?: string;
+  orderSource?: string;
+  paymentMethod?: string;
+  paymentKind?: "qrcode" | "redirect";
+  codeUrl?: string;
+  payUrl?: string;
+}
+
+export interface ManagedRechargeInfo {
+  enabled: boolean;
+  paymentMethods: Array<{ name: string; type: string }>;
 }
 
 interface Envelope<T> {
@@ -27,8 +73,197 @@ export class TokenhubClient {
     private readonly fetchImpl: typeof fetch = fetch,
     /** Shared secret proving this Agent (compute box) to new-api on token-login.
      * Sent as a Bearer header; missing/wrong key → 403 invalid agent key. */
-    private readonly agentKey: string = ""
+    private readonly agentKey: string = "",
+    private readonly internalBaseUrl: string = deriveInternalBaseUrl(baseUrl),
+    private readonly internalClientId: string = process.env.NEW_API_INTERNAL_CLIENT_ID ?? "",
+    private readonly internalClientSecret: string = process.env.NEW_API_INTERNAL_CLIENT_SECRET ?? ""
   ) {}
+
+  async registerAgentUser(args: {
+    requestId: string;
+    username: string;
+    password: string;
+    email?: string;
+    displayName?: string;
+  }): Promise<ManagedUserResult> {
+    const data = await this.internalRequest<ManagedUserWire>(
+      "POST",
+      "/agent-users/register",
+      {
+        owner_app: "lot-agent",
+        username: args.username,
+        password: args.password,
+        email: args.email ?? "",
+        display_name: args.displayName ?? "",
+      },
+      "agent:user.register",
+      "new_api_managed_register_failed",
+      { "Idempotency-Key": args.requestId }
+    );
+    return mapManagedUser(data);
+  }
+
+  async authenticateAgentUser(username: string, password: string): Promise<ManagedUserResult> {
+    const data = await this.internalRequest<ManagedUserWire>(
+      "POST",
+      "/agent-users/authenticate",
+      { owner_app: "lot-agent", username, password },
+      "agent:user.authenticate",
+      "new_api_managed_auth_failed"
+    );
+    return mapManagedUser(data);
+  }
+
+  async ensureManagedKey(userId: number): Promise<ManagedUserResult> {
+    const data = await this.internalRequest<ManagedUserWire>(
+      "POST",
+      "/agent-managed-keys/ensure",
+      { owner_app: "lot-agent", user_id: userId },
+      "agent:key.ensure",
+      "new_api_managed_ensure_failed"
+    );
+    return mapManagedUser(data);
+  }
+
+  async creditManagedKey(args: {
+    userId: number;
+    transactionId: string;
+    quotaDelta: number;
+    paidAmount?: string;
+    currency?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<{ transactionId: string; tokenId: number; remainQuota: number; duplicate: boolean }> {
+    const data = await this.internalRequest<{
+      transaction_id: string;
+      token_id: number;
+      remain_quota: number;
+      duplicate: boolean;
+    }>(
+      "POST",
+      "/agent-managed-keys/credit",
+      {
+        owner_app: "lot-agent",
+        user_id: args.userId,
+        transaction_id: args.transactionId,
+        quota_delta: args.quotaDelta,
+        paid_amount: args.paidAmount ?? "",
+        currency: args.currency ?? "CNY",
+        metadata: args.metadata ?? {},
+      },
+      "agent:key.credit",
+      "new_api_managed_credit_failed",
+      { "Idempotency-Key": args.transactionId }
+    );
+    return {
+      transactionId: data.transaction_id,
+      tokenId: data.token_id,
+      remainQuota: data.remain_quota,
+      duplicate: data.duplicate,
+    };
+  }
+
+  async getManagedBalance(userId: number): Promise<ManagedBalanceResult> {
+    const data = await this.internalRequest<{
+      user_id: number;
+      token_id: number;
+      remain_quota: number;
+      used_quota: number;
+      remain_amount: number;
+      used_amount: number;
+      recharged_amount: number;
+      status: string;
+      credential_version: number;
+      policy_revision: number;
+    }>(
+      "GET",
+      `/agent-managed-keys/${userId}/balance?owner_app=lot-agent`,
+      undefined,
+      "agent:key.balance",
+      "new_api_managed_balance_failed"
+    );
+    return {
+      userId: data.user_id,
+      tokenId: data.token_id,
+      remainAmount: data.remain_amount,
+      usedAmount: data.used_amount,
+      rechargedAmount: data.recharged_amount,
+      status: data.status,
+      credentialVersion: data.credential_version,
+      policyRevision: data.policy_revision,
+    };
+  }
+
+  async createManagedRechargeOrder(args: {
+    userId: number;
+    points: number;
+    paymentMethod: string;
+  }): Promise<ManagedRechargeOrder> {
+    const data = await this.internalRequest<{
+      transaction_id: string;
+      status: string;
+      amount?: number;
+      points?: number;
+      currency?: string;
+      order_source?: string;
+      payment_method?: string;
+      payment_kind?: string;
+      code_url?: string;
+      pay_url?: string;
+    }>(
+      "POST",
+      "/agent-managed-recharge/orders",
+      {
+        owner_app: "lot-agent",
+        user_id: args.userId,
+        points: args.points,
+        payment_method: args.paymentMethod,
+      },
+      "agent:recharge.create",
+      "new_api_managed_recharge_create_failed"
+    );
+    return mapManagedRechargeOrder(data);
+  }
+
+  async getManagedRechargeInfo(userId: number): Promise<ManagedRechargeInfo> {
+    const data = await this.internalRequest<{
+      enabled: boolean;
+      pay_methods?: Array<Record<string, string>>;
+    }>(
+      "GET",
+      `/agent-managed-recharge/info?owner_app=lot-agent&user_id=${userId}`,
+      undefined,
+      "agent:recharge.read",
+      "new_api_managed_recharge_info_failed"
+    );
+    return {
+      enabled: data.enabled,
+      paymentMethods: (data.pay_methods ?? []).flatMap((method) => {
+        const name = method.name?.trim();
+        const type = method.type?.trim();
+        return name && type ? [{ name, type }] : [];
+      }),
+    };
+  }
+
+  async getManagedRechargeOrder(userId: number, transactionId: string): Promise<ManagedRechargeOrder> {
+    const data = await this.internalRequest<{
+      transaction_id: string;
+      status: string;
+      amount?: number;
+      points?: number;
+      quota?: number;
+      currency?: string;
+      order_source?: string;
+      payment_method?: string;
+    }>(
+      "GET",
+      `/agent-managed-recharge/orders/${encodeURIComponent(transactionId)}?owner_app=lot-agent&user_id=${userId}`,
+      undefined,
+      "agent:recharge.read",
+      "new_api_managed_recharge_status_failed"
+    );
+    return mapManagedRechargeOrder(data);
+  }
 
   async login(username: string, password: string): Promise<TokenhubLoginResult> {
     const data = await this.post<{
@@ -93,6 +328,43 @@ export class TokenhubClient {
     );
   }
 
+  private async internalRequest<T>(
+    method: "GET" | "POST",
+    path: string,
+    body: unknown,
+    scope: string,
+    errCode: string,
+    extraHeaders: Record<string, string> = {}
+  ): Promise<T> {
+    if (!this.internalClientId || !this.internalClientSecret) {
+      logger.warn("new-api internal client is not configured", { errCode, scope });
+      throw new Error(errCode);
+    }
+    const bodyText = body === undefined ? "" : JSON.stringify(body);
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = randomUUID();
+    const bodyHash = createHash("sha256").update(bodyText).digest("hex");
+    const requestUrl = new URL(`${this.internalBaseUrl.replace(/\/$/, "")}${path}`);
+    const signedRequestUri = `${requestUrl.pathname}${requestUrl.search}`;
+    const canonical = `${method}\n${signedRequestUri}\n${timestamp}\n${nonce}\n${bodyHash}`;
+    const signature = createHmac("sha256", this.internalClientSecret).update(canonical).digest("hex");
+    return this.unwrap<T>(
+      () => this.fetchImpl(requestUrl.toString(), {
+        method,
+        headers: {
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          "X-Internal-Client-Id": this.internalClientId,
+          "X-Internal-Timestamp": timestamp,
+          "X-Internal-Nonce": nonce,
+          "X-Internal-Signature": signature,
+          ...extraHeaders,
+        },
+        ...(body === undefined ? {} : { body: bodyText }),
+      }),
+      errCode
+    );
+  }
+
   private async unwrap<T>(call: () => Promise<Response>, errCode: string): Promise<T> {
     // Client-facing responses stay opaque (a single generic error), but the real
     // cause — HTTP status + upstream message (e.g. 403 "invalid agent key") — is
@@ -120,4 +392,66 @@ export class TokenhubClient {
     }
     return env.data;
   }
+}
+
+interface ManagedUserWire {
+  user_id: number;
+  username: string;
+  display_name: string;
+  managed_key: {
+    token_id: number;
+    api_key: string;
+    credential_version: number;
+    remain_quota: number;
+  };
+  created: boolean;
+}
+
+function mapManagedUser(data: ManagedUserWire): ManagedUserResult {
+  return {
+    userId: data.user_id,
+    username: data.username,
+    name: data.display_name || data.username,
+    managedKey: {
+      tokenId: data.managed_key.token_id,
+      apiKey: data.managed_key.api_key,
+      credentialVersion: data.managed_key.credential_version,
+      remainQuota: data.managed_key.remain_quota,
+    },
+    created: data.created,
+  };
+}
+
+function mapManagedRechargeOrder(data: {
+  transaction_id: string;
+  status: string;
+  amount?: number;
+  points?: number;
+  quota?: number;
+  currency?: string;
+  order_source?: string;
+  payment_method?: string;
+  payment_kind?: string;
+  code_url?: string;
+  pay_url?: string;
+}): ManagedRechargeOrder {
+  return {
+    transactionId: data.transaction_id,
+    status: data.status === "success"
+      ? "credited"
+      : data.status === "failed" || data.status === "expired" ? "payment_failed" : "pending",
+    amount: data.amount,
+    points: data.points,
+    quota: data.quota,
+    currency: data.currency,
+    orderSource: data.order_source,
+    paymentMethod: data.payment_method,
+    paymentKind: data.payment_kind === "qrcode" || data.payment_kind === "redirect" ? data.payment_kind : undefined,
+    codeUrl: data.code_url,
+    payUrl: data.pay_url,
+  };
+}
+
+function deriveInternalBaseUrl(agentMarketBaseUrl: string): string {
+  return agentMarketBaseUrl.replace(/\/$/, "").replace(/\/api\/agent-market$/, "/api/internal");
 }

@@ -30,6 +30,7 @@ import {
   estimateCost,
 } from "@lot-agent/core";
 import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { createDocTool } from "../tools/doc-tool.js";
 import { createPptTool } from "../tools/ppt-tool.js";
 import { proposeOutlineTool } from "../tools/propose-outline-tool.js";
@@ -252,6 +253,8 @@ export interface ServiceConfig {
   skillsDir: string;
   /** Local-dev debug mode (`DEBUG=1`): login-less, env-model-backed. */
   debug?: boolean;
+  /** Test-only/runtime override. Production defaults to managed subscription keys. */
+  managedKeysEnabled?: boolean;
   db?: {
     host?: string;
     port?: number;
@@ -259,6 +262,18 @@ export interface ServiceConfig {
     password?: string;
     database?: string;
   };
+}
+
+async function getStrictRuntimeApiKey(
+  db: Pick<DB, "getUserApiKey">,
+  managedKeysEnabled: boolean,
+  userId: string
+): Promise<string | null> {
+  const apiKey = await db.getUserApiKey(userId, managedKeysEnabled);
+  if (managedKeysEnabled && !apiKey) {
+    throw new Error("managed New API credential unavailable");
+  }
+  return apiKey;
 }
 
 export class AgentService {
@@ -286,6 +301,7 @@ export class AgentService {
   readonly modelCatalog: ModelCatalogConfig;
   /** Local-dev debug mode: admits login-less callers and surfaces the env model. */
   readonly debug: boolean;
+  readonly managedKeysEnabled: boolean;
   readonly ragClient: RagClient;
   /** Id of the seeded debug user (set in index.ts on startup when debug). */
   debugUserId?: string;
@@ -333,13 +349,27 @@ export class AgentService {
     this.skillsDir = config.skillsDir;
     this.modelCatalog = config.modelCatalog;
     this.debug = config.debug ?? false;
+    this.managedKeysEnabled = config.managedKeysEnabled ?? (!this.debug || process.env.NEW_API_MANAGED_KEYS === "1");
+    if (this.managedKeysEnabled) {
+      const missing = [
+        ["SECRET_MASTER_KEY", process.env.SECRET_MASTER_KEY],
+        ["NEW_API_INTERNAL_CLIENT_ID", process.env.NEW_API_INTERNAL_CLIENT_ID],
+        ["NEW_API_INTERNAL_CLIENT_SECRET", process.env.NEW_API_INTERNAL_CLIENT_SECRET],
+      ]
+        .filter(([, value]) => !value)
+        .map(([name]) => name);
+      if (missing.length > 0) {
+        throw new Error(`managed New API mode requires: ${missing.join(", ")}`);
+      }
+    }
     this.ragClient = new RagClient();
     this.tokenhubBaseUrl =
       process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market";
     this.tokenhub = new TokenhubClient(
       this.tokenhubBaseUrl,
       undefined,
-      process.env.NEW_API_AGENT_KEY ?? ""
+      process.env.NEW_API_AGENT_KEY ?? "",
+      process.env.NEW_API_INTERNAL_BASE_URL
     );
   }
 
@@ -562,7 +592,11 @@ export class AgentService {
       },
       modelResolver: {
         get: async (userId) => {
-          const apiKey = await this.db.getUserApiKey(userId);
+          const apiKey = await getStrictRuntimeApiKey(
+            this.db,
+            this.managedKeysEnabled === true,
+            userId
+          );
           let catalog = null;
           try { catalog = await this.getUserModelCatalog(userId, apiKey); } catch { catalog = null; }
           const llmResolution = await this.resolveDigitalEmployeeLLM(userId).catch(() => null);
@@ -699,6 +733,23 @@ export class AgentService {
     this.agentRegistry.register(contractDefinition);
   }
 
+  async syncManagedCredential(userId: string): Promise<string | null> {
+    if (!this.managedKeysEnabled) return this.db.getUserApiKey(userId);
+    const current = await this.db.getUserById(userId);
+    if (!current || current.external_user_id == null) return null;
+    const result = await this.tokenhub.ensureManagedKey(current.external_user_id);
+    await this.db.upsertManagedUser({
+      externalUserId: result.userId,
+      username: result.username,
+      name: result.name,
+      tokenId: result.managedKey.tokenId,
+      apiKey: result.managedKey.apiKey,
+      credentialVersion: result.managedKey.credentialVersion,
+    });
+    if (this.redis) await this.redis.del(`models:${userId}`);
+    return result.managedKey.apiKey;
+  }
+
   private getLLMProvider(): import("@lot-agent/core").LLMProvider {
     if (!this.llmProvider) {
       this.llmProvider = createLLMProvider(this.llmConfig);
@@ -716,7 +767,10 @@ export class AgentService {
     userId: string,
     apiKey: string | null
   ): Promise<ReturnType<typeof enrichCatalog> | null> {
-    const cacheKey = `models:${userId}`;
+    const credentialFingerprint = apiKey
+      ? createHash("sha256").update(apiKey).digest("hex").slice(0, 16)
+      : "no-key";
+    const cacheKey = `models:${userId}:${credentialFingerprint}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) return JSON.parse(cached) as ReturnType<typeof enrichCatalog>;
     if (!apiKey) {
@@ -767,10 +821,17 @@ export class AgentService {
     userId: string,
     requestedModelId?: string | null
   ): Promise<{ llm: LLMProvider; usedModelId: string; modelIds: string[] }> {
-    const activeApiKey = await this.db.getUserApiKey(userId);
+    const activeApiKey = await getStrictRuntimeApiKey(
+      this.db,
+      this.managedKeysEnabled === true,
+      userId
+    );
     let apiKeys: string[] = [];
     try {
-      apiKeys = (await this.db.getUserApiKeys(userId)).map((entry) => entry.apiKey);
+      const runtimeKeyReader = (this.db as DB & { getUserRuntimeApiKeys?: DB["getUserRuntimeApiKeys"] }).getUserRuntimeApiKeys;
+      apiKeys = runtimeKeyReader
+        ? (await runtimeKeyReader.call(this.db, userId, this.managedKeysEnabled)).map((entry) => entry.apiKey)
+        : (await this.db.getUserApiKeys(userId)).map((entry) => entry.apiKey);
     } catch {
       // The active key can still be resolved when the stored key list is unavailable.
     }
@@ -807,7 +868,9 @@ export class AgentService {
       return this.resolveDigitalEmployeeLLM(opts.userId, opts.modelId);
     }
 
-    const activeApiKey = opts?.userId ? await this.db.getUserApiKey(opts.userId) : null;
+    const activeApiKey = opts?.userId
+      ? await getStrictRuntimeApiKey(this.db, this.managedKeysEnabled === true, opts.userId)
+      : null;
     if (opts?.modelId && activeApiKey) {
       return {
         usedModelId: opts.modelId,
@@ -1041,7 +1104,9 @@ export class AgentService {
         conversation?.model,
         def.defaultModelId
       );
-      const apiKey = userId ? await this.db.getUserApiKey(userId) : null;
+      const apiKey = userId
+        ? await getStrictRuntimeApiKey(this.db, this.managedKeysEnabled === true, userId)
+        : null;
       llm = apiKey
         ? this.providerFactory.llm(modelId, apiKey)
         : (this.modelRegistry.getProvider<LLMProvider>(def.defaultModelId) ?? this.getLLMProvider());

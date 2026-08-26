@@ -12,6 +12,6 @@ describe("repeatable manual opportunity discovery migration", () => {
     expect(ddl).toContain("DROP CONSTRAINT IF EXISTS de_follow_up_suggestion_runs_user_id_scan_date_key");
     expect(ddl).toContain("idx_de_follow_up_runs_user_scan_date");
     expect(repeatableManualOpportunityDiscovery.version).toBe(17);
-    expect(migrations.at(-1)).toBe(repeatableManualOpportunityDiscovery);
+    expect(migrations.find((migration) => migration.version === 17)).toBe(repeatableManualOpportunityDiscovery);
   });
 });

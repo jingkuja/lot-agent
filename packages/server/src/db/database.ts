@@ -139,6 +139,11 @@ export interface StoredUser {
   username?: string | null;
   api_key?: string | null;
   api_keys?: (RawApiKeyEntry | string)[] | null;
+  managed_token_id?: number | null;
+  managed_api_key?: string | null;
+  credential_version?: number;
+  managed_key_status?: string | null;
+  managed_key_provisioned_at?: string | null;
 }
 
 export interface UserBalance {
@@ -196,6 +201,14 @@ const DEFAULT_CONFIG: DBConfig = {
   database: "lot",
 };
 
+function parsePgBigInt(value: number | string, column: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`invalid ${column} returned by PostgreSQL`);
+  }
+  return parsed;
+}
+
 export class DB {
   readonly pool: pg.Pool;
   private readonly secretBox: SecretBox;
@@ -223,10 +236,24 @@ export class DB {
     this.secretBox = secretBox;
   }
 
-  /** Decrypts a user row's `api_key` / `api_keys` in place (mutates and returns `row`).
+  /** Normalizes/decrypts a user row in place (mutates and returns `row`).
+   * PostgreSQL BIGINT values are strings in `pg`; convert the user/token ids
+   * here so callers do not accidentally serialize them as JSON strings.
    * Single choke point so every read path (getUserById, upsertUserByExternalId, …)
-   * returns plaintext consistently. */
-  private openUserRow<T extends { api_key?: string | null; api_keys?: unknown }>(row: T): T {
+   * returns normalized plaintext consistently. */
+  private openUserRow<T extends {
+    external_user_id?: number | string | null;
+    managed_token_id?: number | string | null;
+    api_key?: string | null;
+    api_keys?: unknown;
+    managed_api_key?: string | null;
+  }>(row: T): T {
+    if (row.external_user_id != null) {
+      row.external_user_id = parsePgBigInt(row.external_user_id, "external_user_id") as T["external_user_id"];
+    }
+    if (row.managed_token_id != null) {
+      row.managed_token_id = parsePgBigInt(row.managed_token_id, "managed_token_id") as T["managed_token_id"];
+    }
     if (row.api_key) {
       row.api_key = this.secretBox.open(row.api_key) as T["api_key"];
     }
@@ -235,6 +262,9 @@ export class DB {
         ...e,
         apiKey: this.secretBox.open(e.apiKey),
       })) as T["api_keys"];
+    }
+    if (row.managed_api_key) {
+      row.managed_api_key = this.secretBox.open(row.managed_api_key) as T["managed_api_key"];
     }
     return row;
   }
@@ -954,13 +984,67 @@ export class DB {
     return this.openUserRow(rows[0]);
   }
 
-  async getUserApiKey(userId: string): Promise<string | null> {
+  async upsertManagedUser(args: {
+    externalUserId: number;
+    username: string;
+    name: string;
+    tokenId: number;
+    apiKey: string;
+    credentialVersion: number;
+    status?: string;
+  }): Promise<StoredUser> {
+    const sealedManagedKey = this.secretBox.seal(args.apiKey);
     const { rows } = await this.pool.query(
-      "SELECT api_key FROM users WHERE id = $1",
+      `INSERT INTO users (
+         external_user_id, username, name, email, managed_token_id,
+         managed_api_key, credential_version, managed_key_status, managed_key_provisioned_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+       ON CONFLICT (external_user_id) DO UPDATE SET
+         username = EXCLUDED.username,
+         name = EXCLUDED.name,
+         managed_token_id = EXCLUDED.managed_token_id,
+         managed_api_key = EXCLUDED.managed_api_key,
+         credential_version = EXCLUDED.credential_version,
+         managed_key_status = EXCLUDED.managed_key_status,
+         managed_key_provisioned_at = now()
+       RETURNING *`,
+      [
+        args.externalUserId,
+        args.username,
+        args.name,
+        `${args.username}@tokenhub.local`,
+        args.tokenId,
+        sealedManagedKey,
+        args.credentialVersion,
+        args.status ?? "active",
+      ]
+    );
+    return this.openUserRow(rows[0]);
+  }
+
+  async getUserApiKey(userId: string, managedOnly = false): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      "SELECT managed_api_key, api_key FROM users WHERE id = $1",
       [userId]
     );
-    const raw = rows[0]?.api_key ?? null;
+    const raw = rows[0]?.managed_api_key ?? (managedOnly ? null : rows[0]?.api_key) ?? null;
     return raw ? this.secretBox.open(raw) : null;
+  }
+
+  async getUserRuntimeApiKeys(userId: string, managedOnly = false): Promise<RawApiKeyEntry[]> {
+    const { rows } = await this.pool.query(
+      "SELECT managed_api_key, api_keys FROM users WHERE id = $1",
+      [userId]
+    );
+    const managed = rows[0]?.managed_api_key as string | null | undefined;
+    if (managed) {
+      return [{ apiKey: this.secretBox.open(managed), name: "Lot Agent 托管订阅" }];
+    }
+    if (managedOnly) return [];
+    return normalizeApiKeyEntries(rows[0]?.api_keys).map((entry) => ({
+      ...entry,
+      apiKey: this.secretBox.open(entry.apiKey),
+    }));
   }
 
   async getUserApiKeys(userId: string): Promise<RawApiKeyEntry[]> {
@@ -1203,6 +1287,15 @@ export class DB {
     const { rows } = await this.pool.query(
       `SELECT COALESCE(SUM(total_cost), 0) AS total
        FROM usage_logs WHERE user_id = $1 AND created_at >= date_trunc('month', now())`,
+      [userId]
+    );
+    return Number(rows[0].total);
+  }
+
+  async getTotalSpend(userId: string): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT COALESCE(SUM(total_cost), 0) AS total
+       FROM usage_logs WHERE user_id = $1`,
       [userId]
     );
     return Number(rows[0].total);

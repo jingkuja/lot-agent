@@ -17,7 +17,7 @@ describe("maskKey", () => {
 });
 
 describe("toPublicUser", () => {
-  it("returns masked keys + name/group + active index, never the raw key or email", () => {
+  it("never exposes ordinary keys, active selection, raw keys, or email", () => {
     const u = {
       ...base,
       api_key: "sk-BBBBBBBBBBBBBB",
@@ -29,24 +29,21 @@ describe("toPublicUser", () => {
     const pub = toPublicUser(u);
     expect(pub).toEqual({
       id: "u1", name: "138", username: "138",
-      apiKeys: [
-        { key: "sk-AAA***AAAA", name: "开放API密钥" },
-        { key: "sk-BBB***BBBB", name: "test", group: "agent2_demo" },
-      ],
-      activeKeyIndex: 1,
+      apiKeys: [],
+      activeKeyIndex: -1,
     });
     expect(JSON.stringify(pub)).not.toContain("sk-BBBBBBBBBBBBBB");
     expect(JSON.stringify(pub)).not.toContain("e@x");
   });
 
-  it("falls back to the masked key as name when tokenhub gave no name", () => {
+  it("does not expose a key when tokenhub gave no name", () => {
     const u = { ...base, api_key: "sk-AAAAAAAAAAAAAA", api_keys: [{ apiKey: "sk-AAAAAAAAAAAAAA" }] };
-    expect(toPublicUser(u).apiKeys).toEqual([{ key: "sk-AAA***AAAA", name: "sk-AAA***AAAA" }]);
+    expect(toPublicUser(u).apiKeys).toEqual([]);
   });
 
   it("handles legacy bare-string api_keys rows the same way", () => {
     const u = { ...base, api_key: "sk-AAAAAAAAAAAAAA", api_keys: ["sk-AAAAAAAAAAAAAA"] };
-    expect(toPublicUser(u).apiKeys).toEqual([{ key: "sk-AAA***AAAA", name: "sk-AAA***AAAA" }]);
+    expect(toPublicUser(u).apiKeys).toEqual([]);
   });
 
   it("activeKeyIndex is -1 when there is no key", () => {
@@ -56,5 +53,17 @@ describe("toPublicUser", () => {
   it("activeKeyIndex is -1 when api_key is not in the list", () => {
     const u = { ...base, api_key: "sk-ZZZZZZZZZZZZZZ", api_keys: [{ apiKey: "sk-AAAAAAAAAAAAAA" }] };
     expect(toPublicUser(u).activeKeyIndex).toBe(-1);
+  });
+
+  it("never exposes the managed credential or legacy ordinary keys after provisioning", () => {
+    const pub = toPublicUser({
+      ...base,
+      managed_api_key: "managed-super-secret",
+      api_key: "ordinary-active",
+      api_keys: [{ apiKey: "ordinary-active", name: "ordinary" }],
+    });
+    expect(pub).toMatchObject({ apiKeys: [], activeKeyIndex: -1 });
+    expect(JSON.stringify(pub)).not.toContain("managed-super-secret");
+    expect(JSON.stringify(pub)).not.toContain("ordinary-active");
   });
 });

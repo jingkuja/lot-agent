@@ -5,7 +5,6 @@ import { BrandHeader } from "../components/BrandHeader.js";
 import { PreviewPanel } from "../components/PreviewPanel.js";
 import { ArtifactGallery, type Artifact } from "../components/ArtifactGallery.js";
 import { AgentCenterModal } from "../components/AgentCenterModal.js";
-import { KeySettingsModal } from "../components/KeySettingsModal.js";
 import { AgentSwitcher } from "../components/AgentSwitcher.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
@@ -29,7 +28,6 @@ import {
 interface WorkspaceProps {
   user: User;
   modelCatalog: ModelCatalog;
-  reloadModels: () => Promise<ModelCatalog>;
   onLogout: () => void;
   onNavigateDigitalEmployee?: () => void;
   onNavigateDigitalProfile?: (profileId: string) => void;
@@ -44,7 +42,6 @@ interface WorkspaceProps {
 export function Workspace({
   user,
   modelCatalog,
-  reloadModels,
   onLogout,
   onNavigateDigitalEmployee,
   onNavigateDigitalProfile,
@@ -163,27 +160,6 @@ export function Workspace({
 
   // Per-user model catalog + per-group (llm/image/video) selected models.
   const [selectedModels, setSelectedModels] = useState(EMPTY_SELECTED);
-  const [activeKeyIndex, setActiveKeyIndex] = useState(user.activeKeyIndex);
-  const [keyModalOpen, setKeyModalOpen] = useState(false);
-  const [keyBusy, setKeyBusy] = useState(false);
-
-  const handleSelectKey = useCallback(
-    async (index: number) => {
-      setKeyBusy(true);
-      try {
-        await api.setActiveKey(index);
-        setActiveKeyIndex(index);
-        setSelectedModels(EMPTY_SELECTED); // 丢弃旧 key 的选择，等新目录回填
-        reloadModels();
-        setKeyModalOpen(false);
-      } catch {
-        // 切换失败：保持原激活项；弹窗留开供重试
-      } finally {
-        setKeyBusy(false);
-      }
-    },
-    [reloadModels]
-  );
   // Catalog loaded → 各组默认选中接口返回的第一个模型(已选过的槽位不动)。
   useEffect(() => {
     setSelectedModels((prev) => fillModelDefaults(prev, modelCatalog));
@@ -247,11 +223,10 @@ export function Workspace({
     handleStartNewChat("digital_employee");
   }, [digitalEmployeeFeature, handleStartNewChat, isDigitalEmployeeMode]);
 
-  // Desktop shortcuts: Cmd/Ctrl+N opens a fresh chat for the agent currently
-  // on screen; Cmd/Ctrl+, opens the key settings modal. No-op in browsers.
+  // Desktop shortcut: Cmd/Ctrl+N opens a fresh chat for the agent currently
+  // on screen. The Agent has no user-selectable API key settings.
   useDesktopShortcuts({
     onNewChat: () => handleStartNewChat(openAgentId),
-    onOpenSettings: () => setKeyModalOpen(true),
   });
 
   const handlePickOverflow = useCallback(
@@ -424,7 +399,6 @@ export function Workspace({
           onOpenAssistant={isDigitalEmployeeMode ? onNavigateAssistant : () => {}}
           onOpenDigitalEmployee={isDigitalEmployeeMode ? () => {} : onNavigateDigitalEmployee}
           activeModule={isDigitalEmployeeMode ? "digitalEmployee" : "assistant"}
-          onOpenKeySettings={() => setKeyModalOpen(true)}
           onOpenKnowledgeBase={() => {
             const popup = window.open("about:blank", "_blank");
             void api.getKnowledgeBaseLink()
@@ -567,15 +541,6 @@ export function Workspace({
           onUninstall={handleUninstall}
           onClose={() => setCenterOpen(false)}
           busyId={busyAgentId}
-        />
-      )}
-      {keyModalOpen && (
-        <KeySettingsModal
-          keys={user.apiKeys}
-          activeIndex={activeKeyIndex}
-          busy={keyBusy}
-          onSelect={handleSelectKey}
-          onClose={() => setKeyModalOpen(false)}
         />
       )}
     </div>

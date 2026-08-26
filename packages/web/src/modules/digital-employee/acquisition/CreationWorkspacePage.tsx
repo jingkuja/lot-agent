@@ -230,7 +230,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
                 placeholder={
                   assetType === "copy"
                     ? copyBlocked
-                      ? "无法执行任务，需要到灵渠tokenhub 密钥管理 选择对应模型的分组"
+                      ? "平台暂未返回可用的 LLM 模型，请稍后重试或联系管理员"
                       : "例如：为下周线上分享会生成一套朋友圈文案，强调部署简单，语气专业克制，不使用未确认性能数字。"
                     : assetType === "poster"
                       ? "描述海报画面、主标题和行动号召，可上传参考图。"
@@ -241,7 +241,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
           </div>
         </section>
         {error && <div className="de-inline-error"><span>{error}</span></div>}
-        {mediaBlocked && <p className="de-creation-blocker">当前没有可用的{assetType === "poster" ? "图像" : "视频"}模型，请先前往 TokenHub 配置。</p>}
+        {mediaBlocked && <p className="de-creation-blocker">当前没有可用的{assetType === "poster" ? "图像" : "视频"}模型，请稍后重试或联系管理员。</p>}
         <button className="de-primary-button de-create-submit" disabled={!canSubmit} onClick={() => void submit()}>{creating ? (assetType === "copy" ? "正在撰写文案…" : "正在创建生成任务…") : campaignId ? `追加生成${assetType === "copy" ? "文案" : assetType === "poster" ? "海报" : "视频"}` : `创建活动并生成${assetType === "copy" ? "文案" : assetType === "poster" ? "海报" : "视频"}`}</button>
       </div>
       <aside className="de-creation-canvas"><header><div><p>活动内容包</p><h3>{campaign?.name || result?.title || "预览与版本"}</h3></div>{campaign && <span>{campaign.assetCount} 项素材</span>}</header>{campaign ? <CampaignPack campaign={campaign} focusId={result?.id} onSelect={selectVersion} onOpenAssets={onOpenAssets} /> : !result ? <div className="de-canvas-empty"><span>✦</span><strong>确认左侧简报后开始生成</strong><p>第一次生成会创建活动；文案、海报和视频可以追加到同一活动。</p></div> : <CreationResult asset={result} onOpenAssets={onOpenAssets} />}</aside>

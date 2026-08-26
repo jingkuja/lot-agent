@@ -27,7 +27,7 @@ export function ModelConfigurationGuard({
       <span>{complete ? "✓" : "!"}</span>
       <p>
         <strong>{complete ? "生成模型已就绪" : "模型配置提示"}</strong>
-        <small>如无可用的 LLM、图像或视频模型，需要前往 TokenHub 密钥管理选择对应模型分组。</small>
+        <small>平台会自动提供订阅模型；如暂时缺少某类模型，请稍后重试或联系管理员。</small>
       </p>
     </div>
     <div className="de-model-guard-pickers">
@@ -46,7 +46,6 @@ export function ModelConfigurationGuard({
         onChange={onVideoModelChange}
       />
     </div>
-    {!complete && <a className="de-secondary-button" href={configuration.configurationUrl} target="_blank" rel="noreferrer">前往 TokenHub 配置 ↗</a>}
   </div>;
 }
 

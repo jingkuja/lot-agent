@@ -24,6 +24,7 @@ x-app-env: &app-env
   PG_USER: ${PG_USER:-postgres}
   PG_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required}
   PG_DATABASE: ${PG_DATABASE:-lot}
+  SECRET_MASTER_KEY: ${SECRET_MASTER_KEY:-}
   REDIS_HOST: redis
   REDIS_PORT: "6379"
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
@@ -45,6 +46,10 @@ x-app-env: &app-env
   # Sent as `Authorization: Bearer` when exchanging ?token via /auth/token-login;
   # if unset or mismatched, new-api replies 403 "invalid agent key". Keep secret.
   NEW_API_AGENT_KEY: ${NEW_API_AGENT_KEY:-}
+  NEW_API_MANAGED_KEYS: ${NEW_API_MANAGED_KEYS:-1}
+  NEW_API_INTERNAL_BASE_URL: ${NEW_API_INTERNAL_BASE_URL:-https://tokenhub.wetok.ai/api/internal}
+  NEW_API_INTERNAL_CLIENT_ID: ${NEW_API_INTERNAL_CLIENT_ID:-}
+  NEW_API_INTERNAL_CLIENT_SECRET: ${NEW_API_INTERNAL_CLIENT_SECRET:-}
   BIGMODEL_API_KEY: ${BIGMODEL_API_KEY:-}
   CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
   # Absolute base for static file URLs (assets/documents/uploads). Leave empty

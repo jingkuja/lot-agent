@@ -17,13 +17,13 @@ import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
 import { createModelRoutes } from "./routes/models.js";
-import { createKeyRoutes } from "./routes/keys.js";
 import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
-import { createUsageRoutes } from "./routes/usage.js";
+import { createUsageRoutes, summarizeBalance } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
 import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
+import { createRechargeRoutes } from "./routes/recharge.js";
 import { AppConfigSchema } from "@lot-agent/core";
 import { loadLlmConfig } from "./config.js";
 import { rateLimit, clientIp } from "./middleware/rate-limit.js";
@@ -240,6 +240,7 @@ async function main() {
   // the exact POST paths (method+path match) BEFORE the route below, so it
   // runs first in the chain without touching GET /public-key, /mode, /me.
   app.on("POST", "/api/auth/login", loginRateLimit);
+  app.on("POST", "/api/auth/register", loginRateLimit);
   app.on("POST", "/api/auth/token-login", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
 
@@ -257,12 +258,12 @@ async function main() {
   app.use("/api/agents/*", authMw);
   app.use("/api/models", authMw);
   app.use("/api/models/*", authMw);
-  app.use("/api/keys/*", authMw);
   app.use("/api/tasks/*", authMw);
   app.use("/api/assets", authMw);
   app.use("/api/assets/*", authMw);
   app.use("/api/uploads/*", authMw);
   app.use("/api/usage/*", authMw);
+  app.use("/api/recharge/*", authMw);
   app.use("/api/balance", authMw);
   app.use("/api/platform/*", authMw);
   app.use("/api/publish/*", authMw);
@@ -290,11 +291,11 @@ async function main() {
   app.route("/api/memory", createMemoryRoutes(service));
   app.route("/api/agents", createAgentRoutes(service));
   app.route("/api/models", createModelRoutes(service));
-  app.route("/api/keys", createKeyRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));
   app.route("/api/usage", createUsageRoutes(service));
+  app.route("/api/recharge", createRechargeRoutes(service));
   app.route("/api/platform", createPlatformRoutes(service));
   app.route("/api/publish", createPublishRoutes(service));
   app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
@@ -303,13 +304,34 @@ async function main() {
   // /api/balance alias → same balance logic, user-scoped
   app.get("/api/balance", async (c) => {
     const userId = c.get("userId");
-    const [bal, dailySpend, monthlySpend] = await Promise.all([
+    const user = await service.db.getUserById(userId);
+    if (service.managedKeysEnabled && user?.external_user_id != null) {
+      try {
+        const [managed, dailySpend, monthlySpend] = await Promise.all([
+          service.tokenhub.getManagedBalance(user.external_user_id),
+          service.db.getDailySpend(userId),
+          service.db.getMonthlySpend(userId),
+        ]);
+        return c.json({
+          ...summarizeBalance(managed.remainAmount, managed.usedAmount, managed.rechargedAmount),
+          status: managed.status,
+          credentialVersion: managed.credentialVersion,
+          policyRevision: managed.policyRevision,
+          dailySpend,
+          monthlySpend,
+        });
+      } catch {
+        return c.json({ error: "额度加载失败" }, 502);
+      }
+    }
+    const [bal, dailySpend, monthlySpend, totalSpend] = await Promise.all([
       service.db.ensureUserBalance(userId),
       service.db.getDailySpend(userId),
       service.db.getMonthlySpend(userId),
+      service.db.getTotalSpend(userId),
     ]);
     return c.json({
-      balance: bal.balance,
+      ...summarizeBalance(bal.balance, totalSpend),
       daily_limit: bal.daily_limit,
       monthly_limit: bal.monthly_limit,
       dailySpend,

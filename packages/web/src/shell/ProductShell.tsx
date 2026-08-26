@@ -97,7 +97,6 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           user={user}
           onLogout={onLogout}
           modelCatalog={modelCatalog}
-          reloadModels={reloadModels}
           onNavigateDigitalEmployee={() => handleOpenDigitalEmployee()}
         />
       </div>
@@ -108,7 +107,6 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           user={user}
           onLogout={onLogout}
           modelCatalog={modelCatalog}
-          reloadModels={reloadModels}
           onNavigateAssistant={() => navigate("/assistant")}
           onNavigateDigitalEmployee={() => handleOpenDigitalEmployee(digitalEmployeeManagementPath(digitalEmployeeFeature))}
           onNavigateDigitalProfile={(id) => navigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}

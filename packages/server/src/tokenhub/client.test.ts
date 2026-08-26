@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { TokenhubClient } from "./client.js";
+import { createHash, createHmac } from "node:crypto";
 
 const ok = (data: unknown) =>
   ({ ok: true, json: async () => ({ data, success: true }) }) as Response;
@@ -142,5 +143,171 @@ describe("TokenhubClient", () => {
     const [url, init] = f.mock.calls[0];
     expect(url).toBe("https://h/api/agent-market/models");
     expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-X" });
+  });
+
+  it("authenticates through the signed internal control plane and maps only the managed key", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      user_id: 7,
+      username: "alice",
+      display_name: "Alice",
+      managed_key: {
+        token_id: 9,
+        api_key: "managed-secret",
+        credential_version: 2,
+        remain_quota: 123,
+      },
+      created: false,
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.authenticateAgentUser("alice", "password1")).resolves.toMatchObject({
+      userId: 7,
+      username: "alice",
+      managedKey: { tokenId: 9, apiKey: "managed-secret", credentialVersion: 2 },
+    });
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("https://h/api/internal/agent-users/authenticate");
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    const body = String((init as RequestInit).body);
+    const canonical = [
+      "POST",
+      "/api/internal/agent-users/authenticate",
+      headers["X-Internal-Timestamp"],
+      headers["X-Internal-Nonce"],
+      createHash("sha256").update(body).digest("hex"),
+    ].join("\n");
+    expect(headers["X-Internal-Client-Id"]).toBe("lot-agent");
+    expect(headers["X-Internal-Signature"]).toBe(
+      createHmac("sha256", "control-secret").update(canonical).digest("hex")
+    );
+    expect(body).not.toContain("managed-secret");
+  });
+
+  it("creates a managed recharge order through New API's signed payment control plane", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      transaction_id: "LOT7abc",
+      status: "pending",
+      payment_method: "wxpay",
+      payment_kind: "qrcode",
+      code_url: "weixin://wxpay/bizpayurl?pr=test",
+      order_source: "lot-agent",
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.createManagedRechargeOrder({
+      userId: 7,
+      points: 1_000,
+      paymentMethod: "alipay",
+    })).resolves.toMatchObject({
+      transactionId: "LOT7abc",
+      status: "pending",
+      orderSource: "lot-agent",
+      paymentMethod: "wxpay",
+      paymentKind: "qrcode",
+      codeUrl: "weixin://wxpay/bizpayurl?pr=test",
+    });
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("https://h/api/internal/agent-managed-recharge/orders");
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      owner_app: "lot-agent",
+      user_id: 7,
+      points: 1_000,
+      payment_method: "alipay",
+    });
+    expect((init as RequestInit).headers).toMatchObject({ "X-Internal-Client-Id": "lot-agent" });
+  });
+
+  it("loads the New API payment methods available to Lot Agent", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      enabled: true,
+      pay_methods: [
+        { name: "支付宝", type: "alipay", color: "blue" },
+        { name: "微信支付", type: "wxpay" },
+        { name: "invalid" },
+      ],
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.getManagedRechargeInfo(7)).resolves.toEqual({
+      enabled: true,
+      paymentMethods: [
+        { name: "支付宝", type: "alipay" },
+        { name: "微信支付", type: "wxpay" },
+      ],
+    });
+    expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-managed-recharge/info?owner_app=lot-agent&user_id=7");
+  });
+
+  it("maps an Alipay recharge order to a redirect URL", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      transaction_id: "LOT-alipay",
+      status: "pending",
+      payment_method: "alipay",
+      payment_kind: "redirect",
+      pay_url: "https://pay.example.com/alipay/order",
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.createManagedRechargeOrder({
+      userId: 7,
+      points: 1_000,
+      paymentMethod: "alipay",
+    })).resolves.toMatchObject({
+      paymentMethod: "alipay",
+      paymentKind: "redirect",
+      payUrl: "https://pay.example.com/alipay/order",
+    });
+  });
+
+  it("reads managed balance as monetary amounts for lot-agent", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      user_id: 7,
+      token_id: 9,
+      remain_quota: 1_500_000,
+      used_quota: 500_000,
+      remain_amount: 3,
+      used_amount: 1,
+      recharged_amount: 10,
+      status: "active",
+      credential_version: 1,
+      policy_revision: 1,
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.getManagedBalance(7)).resolves.toMatchObject({
+      remainAmount: 3,
+      usedAmount: 1,
+      rechargedAmount: 10,
+    });
   });
 });

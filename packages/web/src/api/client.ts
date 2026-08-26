@@ -117,6 +117,26 @@ export interface User {
   activeKeyIndex: number;
 }
 
+export interface RechargeOrder {
+  transactionId: string;
+  amount?: number | null;
+  points?: number;
+  currency?: string;
+  quota?: number;
+  status: "pending" | "payment_failed" | "paid" | "crediting" | "credited" | "credit_failed";
+  createdAt?: string;
+  orderSource?: string;
+  paymentMethod?: string;
+  paymentKind?: "qrcode" | "redirect";
+  codeUrl?: string;
+  payUrl?: string;
+}
+
+export interface RechargeInfo {
+  enabled: boolean;
+  paymentMethods: Array<{ name: string; type: string }>;
+}
+
 export interface TaskStatus {
   id: string;
   status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
@@ -244,6 +264,12 @@ export const api = {
       body: JSON.stringify({ username, encryptedPassword }),
     }),
 
+  register: (args: { username: string; encryptedPassword: string; email?: string; requestId: string }) =>
+    request<{ token: string; user: User }>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(args),
+    }),
+
   // Public: exchange a tokenhub-issued JWT (from a `?token=` deep link) for a session.
   tokenLogin: (token: string) =>
     request<{ token: string; user: User }>("/auth/token-login", {
@@ -257,13 +283,23 @@ export const api = {
   me: () => request<User>("/auth/me"),
 
   // Public: whether the server runs in login-less debug mode, and the debug user.
-  mode: () => request<{ debug: boolean; user: User | null }>("/auth/mode"),
+  mode: () => request<{ debug: boolean; user: User | null; managedRegistration?: boolean }>("/auth/mode"),
 
-  setActiveKey: (index: number) =>
-    request<{ ok: boolean; activeKeyIndex: number }>("/keys/active", {
+  getRechargeInfo: () => request<RechargeInfo>("/recharge/info"),
+  createRechargeOrder: (points: number, paymentMethod: string) =>
+    request<RechargeOrder>("/recharge/orders", {
       method: "POST",
-      body: JSON.stringify({ index }),
+      body: JSON.stringify({ points, paymentMethod }),
     }),
+  getRechargeOrder: (transactionId: string) =>
+    request<RechargeOrder>(`/recharge/orders/${encodeURIComponent(transactionId)}`),
+  getManagedBalance: () => request<{
+    balance: number;
+    totalUsed: number;
+    totalRecharged: number;
+    usedRatio: number;
+    status?: string;
+  }>("/usage/balance"),
 
   // ── Models (per-user dynamic catalog) ─────────────────────────────────────────
   listModels: () =>

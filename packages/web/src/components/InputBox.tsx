@@ -325,7 +325,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       {noModelNotice && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
-          暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
+          模型目录暂时不可用，请稍后重试或联系管理员
         </div>
       )}
       {mode === "image" && imageSettingsError && (

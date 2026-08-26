@@ -42,7 +42,7 @@ describe("auth login", () => {
     expect(json.token).toBe("tok-1");
     expect(json.user).toEqual({
       id: "u1", name: "138", username: "138",
-      apiKeys: [{ key: "sk-SEC***CRET", name: "开放API密钥" }], activeKeyIndex: 0,
+      apiKeys: [], activeKeyIndex: -1,
     });
     expect(JSON.stringify(json)).not.toContain("sk-SECRETSECRET");
     expect(svc.tokenhub.login).toHaveBeenCalledWith("138", "pw");

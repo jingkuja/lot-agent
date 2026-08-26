@@ -1,4 +1,4 @@
-export const LLM_MODEL_REQUIRED_MESSAGE = "没有获取到 LLM 模型，请到灵渠 TokenHub 的「密钥管理」中增加 LLM 模型分组。";
+export const LLM_MODEL_REQUIRED_MESSAGE = "没有获取到 LLM 模型，请稍后重试；如持续出现，请联系管理员检查平台模型目录。";
 
 interface LlmModelRequiredModalProps {
   title: string;

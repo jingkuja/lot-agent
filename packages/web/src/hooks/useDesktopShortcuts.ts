@@ -4,8 +4,6 @@ import { toggleTheme } from "../lib/theme.js";
 export interface DesktopShortcutHandlers {
   /** Cmd/Ctrl+N — start a new chat with the agent currently on screen. */
   onNewChat: () => void;
-  /** Cmd/Ctrl+, — open the key/settings modal. */
-  onOpenSettings: () => void;
 }
 
 /**
@@ -14,7 +12,6 @@ export interface DesktopShortcutHandlers {
  * purpose: no global shortcuts that would steal keys from other apps.
  *
  *   Cmd/Ctrl+N         新会话
- *   Cmd/Ctrl+,         设置
  *   Cmd/Ctrl+Shift+T   切换深浅主题
  */
 export function useDesktopShortcuts(handlers: DesktopShortcutHandlers): void {
@@ -29,9 +26,6 @@ export function useDesktopShortcuts(handlers: DesktopShortcutHandlers): void {
       if (key === "n" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         handlersRef.current.onNewChat();
-      } else if (key === ",") {
-        e.preventDefault();
-        handlersRef.current.onOpenSettings();
       } else if (key === "t" && e.shiftKey) {
         e.preventDefault();
         toggleTheme();

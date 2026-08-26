@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type ManagedUpload, type User } from "../api/client.js";
-
-const WALLET_URL = "https://tokenhub.wetok.ai/wallet";
+import { RechargeModal } from "./RechargeModal.js";
 
 interface AccountMenuProps {
   user: User;
   onLogout?: () => void;
 }
 
-type Dialog = "files" | "privacy" | "terms" | null;
+type Dialog = "recharge" | "files" | "privacy" | "terms" | null;
 
 function accountText(user: User) {
   const email = user.username ?? user.name ?? "当前账号";
@@ -73,7 +72,7 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
               </span>
             </div>
             <div className="account-popover-actions">
-              <button type="button" role="menuitem" onClick={() => window.open(WALLET_URL, "_blank", "noopener,noreferrer")}>
+              <button type="button" role="menuitem" onClick={() => openDialog("recharge")}>
                 <span aria-hidden>＋</span>充值
               </button>
               <button type="button" role="menuitem" onClick={() => openDialog("files")}>
@@ -94,6 +93,7 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
 
       {dialog && createPortal(
         <>
+          {dialog === "recharge" && <RechargeModal onClose={() => setDialog(null)} />}
           {dialog === "files" && <FileManagerModal onClose={() => setDialog(null)} />}
           {dialog === "privacy" && <LegalModal kind="privacy" onClose={() => setDialog(null)} />}
           {dialog === "terms" && <LegalModal kind="terms" onClose={() => setDialog(null)} />}
@@ -221,7 +221,7 @@ function ServiceTerms() {
     <>
       <p>欢迎使用灵渠claw。登录、访问或使用本服务，即表示你已阅读并同意本协议。</p>
       <h3>一、服务基础与配置</h3>
-      <p>灵渠claw依托灵渠AI提供AI推理服务。可使用的模型、API Key、额度和推理能力均需先在灵渠AI完成配置并保持有效。因配置缺失、额度不足、模型下线或上游服务异常导致的功能不可用，不视为灵渠claw对服务能力的额外承诺。</p>
+      <p>灵渠claw依托灵渠AI提供AI推理服务，所有模型调用统一使用由平台管理的订阅 Key。用户无需选择或提供个人 API Key；可用模型、订阅额度和推理能力以平台配置为准。因额度不足、模型下线或上游服务异常导致的功能不可用，不视为灵渠claw对服务能力的额外承诺。</p>
       <h3>二、账号范围</h3>
       <p>灵渠claw内的服务、配置、文件、知识库、用量及权益仅限当前登录账号使用。其他账号不能继承、共享或自动获得当前灵渠AI账号已有的服务与权益。你应妥善保管账号凭证，并对账号下的操作负责。</p>
       <h3>三、知识库免费额度</h3>

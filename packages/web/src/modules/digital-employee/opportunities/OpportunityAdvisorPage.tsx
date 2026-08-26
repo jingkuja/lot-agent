@@ -255,7 +255,7 @@ function TalkTrackAssistant({ item, open, llmModels, onClose }: { item: Opportun
       {error && <p className="de-talk-track-error" role="alert">{error}</p>}
       <form onSubmit={(event) => { event.preventDefault(); void send(input); }}>
         <div className="de-talk-track-composer">
-          <textarea value={input} maxLength={2_000} rows={2} disabled={loading || !effectiveModel} placeholder={effectiveModel ? "例如：语气更熟悉一点，适合微信，先询问对方是否方便……" : "当前 Key 暂无可用的 LLM 模型"} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
+          <textarea value={input} maxLength={2_000} rows={2} disabled={loading || !effectiveModel} placeholder={effectiveModel ? "例如：语气更熟悉一点，适合微信，先询问对方是否方便……" : "平台暂未返回可用的 LLM 模型"} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(input); }
           }} />
           <div className="de-talk-track-composer-toolbar">

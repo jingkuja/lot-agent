@@ -75,6 +75,9 @@ function imageMimeForUpload(key: string, body: Buffer): string | null {
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
   if (!pgPassword) throw new Error("PG_PASSWORD is required");
+  if (process.env.NEW_API_MANAGED_KEYS === "1" && !process.env.SECRET_MASTER_KEY) {
+    throw new Error("managed New API mode requires SECRET_MASTER_KEY in worker");
+  }
 
   const db = new DB({
     host: process.env.PG_HOST ?? "localhost",
@@ -125,12 +128,16 @@ async function main() {
     undefined,
     process.env.NEW_API_AGENT_KEY ?? ""
   );
+  const managedKeysEnabled = process.env.DEBUG !== "1" || process.env.NEW_API_MANAGED_KEYS === "1";
 
   const resolveDigitalEmployeeTaskLlm = async (userId: string) => {
-    const activeApiKey = await db.getUserApiKey(userId);
+    const activeApiKey = await db.getUserApiKey(userId, managedKeysEnabled);
+    if (managedKeysEnabled && !activeApiKey) {
+      throw new Error("managed New API credential unavailable");
+    }
     let apiKeys: string[] = [];
     try {
-      apiKeys = (await db.getUserApiKeys(userId)).map((entry) => entry.apiKey);
+      apiKeys = (await db.getUserRuntimeApiKeys(userId, managedKeysEnabled)).map((entry) => entry.apiKey);
     } catch {
       // The active key can still be tried when the stored key list is unavailable.
     }
@@ -200,8 +207,8 @@ async function main() {
     const maxBytes = mediaType === "image" ? IMAGE_MAX_BYTES : VIDEO_MAX_BYTES;
     const downloadTimeoutMs = mediaType === "image" ? IMAGE_DOWNLOAD_TIMEOUT_MS : VIDEO_DOWNLOAD_TIMEOUT_MS;
     const model = pickGenModel(mediaType, job.input, base.modelId);
-    const apiKey = (await db.getUserApiKey(job.userId)) ?? "";
-    if (!apiKey && (job.input.requireUserModelKey === true || job.input.featureScope)) {
+    const apiKey = (await db.getUserApiKey(job.userId, managedKeysEnabled)) ?? "";
+    if (!apiKey && (managedKeysEnabled || job.input.requireUserModelKey === true || job.input.featureScope)) {
       throw new Error("数字员工生成任务缺少用户 TokenHub key");
     }
     const provider = apiKey
@@ -313,7 +320,10 @@ async function main() {
 
     const existing = await memAdapter.list(userId);
 
-    const apiKey = await db.getUserApiKey(userId);
+    const apiKey = await db.getUserApiKey(userId, managedKeysEnabled);
+    if (managedKeysEnabled && !apiKey) {
+      throw new Error("managed New API credential unavailable");
+    }
     const extractLlm =
       apiKey && modelId
         ? providerFactory.llm(modelId, apiKey)
