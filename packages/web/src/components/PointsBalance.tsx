@@ -67,7 +67,7 @@ export function PointsBalance() {
         </button>
         {summary?.allowBalanceFallback !== undefined && (
           <label className="brand-balance-fallback" title="订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费">
-            <span>订阅额度不足时使用灵渠 AI 余额</span>
+            <span>积分不足时使用灵渠 AI 余额</span>
             <input
               type="checkbox"
               checked={summary.allowBalanceFallback}

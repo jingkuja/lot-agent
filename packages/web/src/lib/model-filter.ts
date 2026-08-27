@@ -6,6 +6,16 @@ export interface CatalogModel {
   description?: string;
 }
 
+/** Keep the catalog's existing order while grouping Claude LLMs at the end. */
+export function moveClaudeModelsToEnd(models: CatalogModel[]): CatalogModel[] {
+  const nonClaude: CatalogModel[] = [];
+  const claude: CatalogModel[] = [];
+  for (const model of models) {
+    (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
+  }
+  return [...nonClaude, ...claude];
+}
+
 /** gpt-image 1.5 only accepts the three standard sizes; custom WxH is rejected. */
 export function isGptImage15(id: string | null | undefined): boolean {
   return /gpt[-_ ]?image[-_ ]?1[\.\-_]?5(?!\d)/i.test(id ?? "");

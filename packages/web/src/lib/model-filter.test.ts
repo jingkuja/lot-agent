@@ -5,6 +5,7 @@ import {
   isSeedance25Model,
   isSeedanceModel,
   missingSeedanceMentions,
+  moveClaudeModelsToEnd,
   seedanceAssetMention,
 } from "./model-filter.js";
 
@@ -22,6 +23,33 @@ describe("filterModels", () => {
     expect(filterModels(models, "deep").map((m) => m.id)).toEqual(["deepseek-v4-pro"]);
     expect(filterModels(models, "glm").map((m) => m.id)).toEqual(["GLM-5.2"]);
     expect(filterModels(models, "5").map((m) => m.id)).toEqual(["gpt-5.4", "GLM-5.2"]);
+  });
+});
+
+describe("moveClaudeModelsToEnd", () => {
+  it("stably moves every Claude model behind all other models", () => {
+    const input = [
+      { id: "claude-opus-4.1", type: "llm" as const, provider: "openai" },
+      { id: "gpt-5.4", type: "llm" as const, provider: "openai" },
+      { id: "Claude-Sonnet-4.5", type: "llm" as const, provider: "openai" },
+      { id: "deepseek-v4", type: "llm" as const, provider: "openai" },
+      { id: "claude-haiku-4.5", type: "llm" as const, provider: "openai" },
+    ];
+
+    expect(moveClaudeModelsToEnd(input).map((model) => model.id)).toEqual([
+      "gpt-5.4",
+      "deepseek-v4",
+      "claude-opus-4.1",
+      "Claude-Sonnet-4.5",
+      "claude-haiku-4.5",
+    ]);
+    expect(input.map((model) => model.id)).toEqual([
+      "claude-opus-4.1",
+      "gpt-5.4",
+      "Claude-Sonnet-4.5",
+      "deepseek-v4",
+      "claude-haiku-4.5",
+    ]);
   });
 });
 
