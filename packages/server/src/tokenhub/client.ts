@@ -58,6 +58,7 @@ export interface ManagedRechargeOrder {
 export interface ManagedRechargeInfo {
   enabled: boolean;
   paymentMethods: Array<{ name: string; type: string }>;
+  amountDiscount: Record<string, number>;
 }
 
 interface Envelope<T> {
@@ -340,6 +341,7 @@ export class TokenhubClient {
     const data = await this.internalRequest<{
       enabled: boolean;
       pay_methods?: Array<Record<string, string>>;
+      amount_discount?: unknown;
     }>(
       "GET",
       `/agent-managed-recharge/info?owner_app=lot-agent&user_id=${userId}`,
@@ -354,6 +356,7 @@ export class TokenhubClient {
         const type = method.type?.trim();
         return name && type ? [{ name, type }] : [];
       }),
+      amountDiscount: normalizeManagedRechargeDiscount(data.amount_discount),
     };
   }
 
@@ -566,6 +569,18 @@ function mapManagedRechargeOrder(data: {
     codeUrl: data.code_url,
     payUrl: data.pay_url,
   };
+}
+
+function normalizeManagedRechargeDiscount(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized: Record<string, number> = {};
+  for (const [rawThreshold, rawDiscount] of Object.entries(value)) {
+    const threshold = Number(rawThreshold);
+    if (!Number.isSafeInteger(threshold) || threshold <= 0) continue;
+    if (typeof rawDiscount !== "number" || !Number.isFinite(rawDiscount) || rawDiscount <= 0 || rawDiscount > 1) continue;
+    normalized[String(threshold)] = rawDiscount;
+  }
+  return normalized;
 }
 
 function deriveInternalBaseUrl(agentMarketBaseUrl: string): string {

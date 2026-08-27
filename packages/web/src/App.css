@@ -3551,10 +3551,17 @@ html, body, #root {
   width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px;
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-card)); color: var(--accent); font-size: 12px; font-weight: 800;
 }
+.recharge-discount-list { display: grid; gap: 7px; margin-top: 9px; }
+.recharge-discount-hint {
+  padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card)); color: var(--text-secondary); font-size: 12px;
+}
 .recharge-payable, .recharge-order-summary {
   margin-top: 9px; padding: 15px 16px; display: flex; align-items: center; justify-content: space-between;
   border: 1px solid var(--border); border-radius: 12px; background: var(--bg-tool); color: var(--text-secondary); font-size: 13px;
 }
+.recharge-payable-price { display: inline-flex; align-items: baseline; gap: 9px; }
+.recharge-payable-price del { color: var(--text-muted); font-size: 13px; }
 .recharge-payable strong, .recharge-order-summary strong { color: var(--accent); font-size: 22px; }
 .recharge-submit {
   width: 100%; min-height: 42px; margin-top: 16px; border: 1px solid var(--accent); border-radius: 11px;

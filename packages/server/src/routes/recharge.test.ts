@@ -11,6 +11,7 @@ function mount() {
       getManagedRechargeInfo: vi.fn().mockResolvedValue({
         enabled: true,
         paymentMethods: [{ name: "支付宝", type: "alipay" }],
+        amountDiscount: { "1000": 0.9 },
       }),
       createManagedRechargeOrder: vi.fn().mockResolvedValue({
         transactionId: "LOT7abc",
@@ -75,6 +76,7 @@ describe("managed recharge routes", () => {
     await expect(response.json()).resolves.toEqual({
       enabled: true,
       paymentMethods: [{ name: "支付宝", type: "alipay" }],
+      amountDiscount: { "1000": 0.9 },
     });
   });
 });

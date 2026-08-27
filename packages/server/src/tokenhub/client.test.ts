@@ -402,6 +402,7 @@ describe("TokenhubClient", () => {
         { name: "微信支付", type: "wxpay" },
         { name: "invalid" },
       ],
+      amount_discount: { "1000": 0.95, invalid: 0.5, "5000": 1.2 },
     }));
     const c = new TokenhubClient(
       "https://h/api/agent-market",
@@ -417,6 +418,7 @@ describe("TokenhubClient", () => {
         { name: "支付宝", type: "alipay" },
         { name: "微信支付", type: "wxpay" },
       ],
+      amountDiscount: { "1000": 0.95 },
     });
     expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-managed-recharge/info?owner_app=lot-agent&user_id=7");
   });

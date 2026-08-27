@@ -136,6 +136,7 @@ export interface RechargeOrder {
 export interface RechargeInfo {
   enabled: boolean;
   paymentMethods: Array<{ name: string; type: string }>;
+  amountDiscount: Record<string, number>;
 }
 
 export interface TaskStatus {

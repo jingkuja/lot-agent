@@ -7,6 +7,9 @@ import {
   formatPoints,
   isValidRechargePoints,
   pointsToYuan,
+  rechargeDiscountForPoints,
+  rechargeDiscountTiers,
+  rechargePayableYuan,
   yuanToPoints,
 } from "../lib/points.js";
 
@@ -62,6 +65,10 @@ function openPendingAlipayWindow(): Window | null {
   return popup;
 }
 
+function formatDiscount(discount: number): string {
+  return `${Number((discount * 10).toFixed(2))} 折`;
+}
+
 export function RechargeModal({ onClose, onBalanceChange }: RechargeModalProps) {
   const [pointsInput, setPointsInput] = useState("1000");
   const [balance, setBalance] = useState<number | null>(null);
@@ -72,7 +79,11 @@ export function RechargeModal({ onClose, onBalanceChange }: RechargeModalProps) 
   const [error, setError] = useState<string | null>(null);
   const points = Number(pointsInput);
   const validPoints = isValidRechargePoints(points);
-  const payable = useMemo(() => pointsToYuan(validPoints ? points : 0), [points, validPoints]);
+  const originalPayable = pointsToYuan(validPoints ? points : 0);
+  const appliedDiscount = rechargeDiscountForPoints(validPoints ? points : 0, rechargeInfo?.amountDiscount);
+  const discountTiers = useMemo(() => rechargeDiscountTiers(rechargeInfo?.amountDiscount), [rechargeInfo?.amountDiscount]);
+  const displayDiscountTiers = discountTiers.filter((tier) => tier.discount < 1);
+  const payable = useMemo(() => rechargePayableYuan(validPoints ? points : 0, rechargeInfo?.amountDiscount), [points, rechargeInfo?.amountDiscount, validPoints]);
 
   const refreshBalance = () => {
     void api.getManagedBalance()
@@ -92,7 +103,7 @@ export function RechargeModal({ onClose, onBalanceChange }: RechargeModalProps) 
         setPaymentMethod((current) => current || info.paymentMethods[0]?.type || "");
       })
       .catch((reason) => {
-        setRechargeInfo({ enabled: false, paymentMethods: [] });
+        setRechargeInfo({ enabled: false, paymentMethods: [], amountDiscount: {} });
         setError(reason instanceof Error ? reason.message : "支付方式加载失败");
       });
   }, []);
@@ -193,9 +204,22 @@ export function RechargeModal({ onClose, onBalanceChange }: RechargeModalProps) 
                 <div className="recharge-notice error">暂时没有可用的收款方式</div>
               )}
 
+              {displayDiscountTiers.length > 0 && (
+                <div className="recharge-discount-list" aria-label="充值优惠">
+                  {displayDiscountTiers.map((tier) => (
+                    <div className="recharge-discount-hint" key={tier.threshold}>
+                      充值满 {formatPoints(tier.threshold)} 积分享 {formatDiscount(tier.discount)}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="recharge-payable">
                 <span>需要付款</span>
-                <strong>¥ {payable.toFixed(2)}</strong>
+                <span className="recharge-payable-price">
+                  {appliedDiscount < 1 && <del>¥ {originalPayable.toFixed(2)}</del>}
+                  <strong>¥ {payable.toFixed(2)}</strong>
+                </span>
               </div>
 
               {error && <div className="recharge-notice error">{error}</div>}
