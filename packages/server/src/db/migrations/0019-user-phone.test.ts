@@ -10,6 +10,6 @@ describe("user phone migration", () => {
 
     expect(String(query.mock.calls[0][0])).toContain("phone VARCHAR(32)");
     expect(userPhone.version).toBe(19);
-    expect(migrations.at(-1)).toBe(userPhone);
+    expect(migrations.find((migration) => migration.version === 19)).toBe(userPhone);
   });
 });

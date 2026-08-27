@@ -8,7 +8,11 @@ function serviceWith(
   cohortSummaryGenerator?: { generate: (input: any) => Promise<{ summary: string; modelId: string }> }
 ) {
   const service = new DigitalEmployeeService({ pool: {}, ...db } as any, new SecretBox(), cohortSummaryGenerator);
-  (service as any).repository = repository;
+  (service as any).repository = {
+    getCohortAutomationSetting: vi.fn(async () => null),
+    markCohortAutomationRun: vi.fn(async () => {}),
+    ...repository,
+  };
   return service;
 }
 
@@ -457,7 +461,24 @@ describe("DigitalEmployeeService cohort overview", () => {
     expect(overview.totalProfiles).toBe(1);
     expect(overview.cohort.source).toBe("live");
     expect(overview.cohort.metrics.totalProfiles).toBe(1);
-    expect(overview.schedule).toMatchObject({ localTime: "23:00", timeZone: "Asia/Shanghai" });
+    expect(overview.schedule).toMatchObject({
+      enabled: false, localTime: "23:00", timeZone: "Asia/Shanghai", nextRunAt: null, version: 0,
+    });
+  });
+
+  it("persists an explicit opt-in before exposing the next nightly run", async () => {
+    const saveCohortAutomationSetting = vi.fn(async () => ({ enabled: true, lastRunAt: null, version: 1 }));
+    const service = serviceWith({ saveCohortAutomationSetting });
+
+    const schedule = await service.saveCohortSchedule(
+      "u1",
+      { enabled: true, version: 0 },
+      new Date("2026-08-18T12:00:00.000Z")
+    );
+
+    expect(saveCohortAutomationSetting).toHaveBeenCalledWith("u1", true, 0);
+    expect(schedule).toMatchObject({ enabled: true, localTime: "23:00", version: 1 });
+    expect(schedule.nextRunAt).toBe("2026-08-18T15:00:00.000Z");
   });
 
   it("persists only users missing today's snapshot inside the nightly window", async () => {

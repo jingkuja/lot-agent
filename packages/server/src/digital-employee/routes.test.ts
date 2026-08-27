@@ -44,6 +44,20 @@ describe("digital employee profile routes", () => {
     expect(service.refreshCohortSummary).not.toHaveBeenCalled();
   });
 
+  it("saves the default-off cohort automation switch for the authenticated user", async () => {
+    const schedule = { enabled: true, version: 1, nextRunAt: "2026-08-18T15:00:00.000Z" };
+    const service = { saveCohortSchedule: vi.fn(async () => schedule) };
+    const response = await app(service).request("/digital-employee/overview/schedule", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, version: 0 }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(service.saveCohortSchedule).toHaveBeenCalledWith("u1", { enabled: true, version: 0 });
+    await expect(response.json()).resolves.toEqual(schedule);
+  });
+
   it("passes the authenticated owner to list queries", async () => {
     const service = { listProfiles: vi.fn(async () => ({ items: [], page: 1, limit: 20, total: 0 })) };
     const response = await app(service).request("/digital-employee/profiles?q=%E6%9D%8E%E5%A7%90");

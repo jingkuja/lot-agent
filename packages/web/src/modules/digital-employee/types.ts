@@ -126,10 +126,12 @@ export interface DigitalEmployeeOverview {
     source: "nightly" | "live";
   };
   schedule: {
-    enabled: true;
+    enabled: boolean;
     timeZone: "Asia/Shanghai";
     localTime: "23:00";
-    nextRunAt: string;
+    nextRunAt: string | null;
+    lastRunAt: string | null;
+    version: number;
   };
 }
 

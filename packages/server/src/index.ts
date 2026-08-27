@@ -96,9 +96,9 @@ async function main() {
   void sweepExpiredSessions();
   setInterval(sweepExpiredSessions, SESSION_CLEANUP_INTERVAL_MS).unref();
 
-  // Customer group portraits are account-scoped aggregates. Check
-  // frequently after 23:00 Asia/Shanghai; the snapshot's (user, date) key makes
-  // this safe across restarts and avoids billing users for an LLM cron job.
+  // Customer group portraits are account-scoped aggregates. Only explicitly
+  // opted-in accounts are selected after 23:00 Asia/Shanghai; the snapshot's
+  // (user, date) key also prevents duplicate model billing across restarts.
   const COHORT_SUMMARY_CHECK_INTERVAL_MS = 5 * 60 * 1000;
   const runCustomerCohortSummaries = async () => {
     try {

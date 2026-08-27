@@ -251,11 +251,19 @@ export interface DigitalEmployeeOverview {
   totalProfiles: number;
   cohort: CustomerCohortSnapshot & { source: "nightly" | "live" };
   schedule: {
-    enabled: true;
+    enabled: boolean;
     timeZone: "Asia/Shanghai";
     localTime: "23:00";
-    nextRunAt: string;
+    nextRunAt: string | null;
+    lastRunAt: string | null;
+    version: number;
   };
+}
+
+export interface CohortAutomationSetting {
+  enabled: boolean;
+  lastRunAt: string | null;
+  version: number;
 }
 
 export interface CreateProductStateInput {

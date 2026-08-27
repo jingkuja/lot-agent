@@ -597,6 +597,12 @@ export const api = {
       body: JSON.stringify({ modelId }),
     }),
 
+  saveDigitalEmployeeCohortSchedule: (input: { enabled: boolean; version: number }) =>
+    request<DigitalEmployeeOverview["schedule"]>("/digital-employee/overview/schedule", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+
   listCustomerProfiles: (filters: {
     page?: number;
     limit?: number;

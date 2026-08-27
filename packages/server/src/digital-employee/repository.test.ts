@@ -105,4 +105,15 @@ describe("DigitalEmployeeRepository persistence parameters", () => {
     expect(query.mock.calls[0][0] as string).toContain("generation_method");
     expect(query.mock.calls[0][1]).toEqual(expect.arrayContaining(["llm", "llm-primary"]));
   });
+
+  it("selects nightly cohort work only for users who explicitly enabled it", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const repository = new DigitalEmployeeRepository({ query } as any);
+
+    await repository.listUsersMissingCohortSnapshot("2026-08-18");
+
+    const sql = String(query.mock.calls[0][0]);
+    expect(sql).toContain("JOIN de_cohort_automation_settings automation");
+    expect(sql).toContain("automation.enabled = true");
+  });
 });

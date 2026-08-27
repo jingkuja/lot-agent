@@ -26,6 +26,8 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +55,23 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
     }
   };
 
+  const toggleCohortSchedule = async (enabled: boolean) => {
+    if (!overview || savingSchedule) return;
+    setSavingSchedule(true);
+    setScheduleError(null);
+    try {
+      const schedule = await api.saveDigitalEmployeeCohortSchedule({
+        enabled,
+        version: overview.schedule.version,
+      });
+      setOverview((current) => current ? { ...current, schedule } : current);
+    } catch (requestError) {
+      setScheduleError(requestError instanceof Error ? requestError.message : "自动更新设置保存失败");
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
   return (
     <section className="de-home" aria-label="客户洞察工作台">
       <header className="de-home-header">
@@ -64,11 +83,24 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
             <p>快速查看群像变化与最近客户，也可以直接用对话查询、更新或记录画像。</p>
           </div>
         </div>
-        <div className="de-home-schedule" title="群像总结每天 23:00（北京时间）自动生成">
-          <span className="de-home-live-dot" aria-hidden />
-          <span><strong>群像总结</strong> 每晚 23:00 自动更新</span>
-        </div>
+        <label
+          className="de-home-schedule de-switch"
+          title={overview?.schedule.enabled
+            ? "已开启：群像总结每天 23:00（北京时间）自动生成，并产生模型费用"
+            : "默认关闭；开启后群像总结将在每天 23:00（北京时间）自动生成"}
+        >
+          <input
+            type="checkbox"
+            checked={overview?.schedule.enabled ?? false}
+            disabled={!overview || savingSchedule}
+            onChange={(event) => void toggleCohortSchedule(event.target.checked)}
+          />
+          <i aria-hidden />
+          <span><strong>群像总结</strong> {overview?.schedule.enabled ? "每晚 23:00 自动更新" : "自动更新已关闭"}</span>
+        </label>
       </header>
+
+      {scheduleError && <p className="de-cohort-refresh-error" role="alert">{scheduleError}</p>}
 
       <div className="de-home-grid">
         <article className="de-cohort-card">

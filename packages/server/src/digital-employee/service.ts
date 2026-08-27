@@ -138,9 +138,10 @@ export class DigitalEmployeeService {
   }
 
   async getOverview(userId: string, now: Date = new Date()) {
-    const [recent, storedSnapshot] = await Promise.all([
+    const [recent, storedSnapshot, storedSchedule] = await Promise.all([
       this.repository.listProfiles(userId, { page: 1, limit: 5, status: "active" }),
       this.repository.getLatestCohortSnapshot(userId),
+      this.repository.getCohortAutomationSetting(userId),
     ]);
     const snapshot = storedSnapshot ?? buildCohortSnapshot(
       await this.repository.listActiveProfilesForCohort(userId),
@@ -151,11 +152,24 @@ export class DigitalEmployeeService {
       totalProfiles: recent.total,
       cohort: { ...snapshot, source: storedSnapshot ? "nightly" as const : "live" as const },
       schedule: {
-        enabled: true as const,
+        enabled: storedSchedule?.enabled ?? false,
         timeZone: COHORT_TIME_ZONE,
         localTime: COHORT_LOCAL_TIME,
-        nextRunAt: nextCohortRunAt(now),
+        nextRunAt: storedSchedule?.enabled ? nextCohortRunAt(now) : null,
+        lastRunAt: storedSchedule?.lastRunAt ?? null,
+        version: storedSchedule?.version ?? 0,
       },
+    };
+  }
+
+  async saveCohortSchedule(userId: string, input: { enabled: boolean; version: number }, now: Date = new Date()) {
+    const stored = await this.repository.saveCohortAutomationSetting(userId, input.enabled, input.version);
+    if (!stored) throw new ConflictError();
+    return {
+      ...stored,
+      timeZone: COHORT_TIME_ZONE,
+      localTime: COHORT_LOCAL_TIME,
+      nextRunAt: stored.enabled ? nextCohortRunAt(now) : null,
     };
   }
 
@@ -183,8 +197,8 @@ export class DigitalEmployeeService {
   }
 
   /**
-   * Idempotent account-level scheduler target. The server calls it repeatedly;
-   * a user/date primary key means each account is summarized once per local day.
+   * Idempotent account-level scheduler target. The repository returns only
+   * opted-in users; a user/date primary key limits each account to one run per day.
    */
   async runNightlyCohortSummaries(now: Date = new Date()): Promise<number> {
     if (!isCohortNightlyWindow(now)) return 0;
@@ -214,6 +228,7 @@ export class DigitalEmployeeService {
           }
         }
         await this.repository.upsertCohortSnapshot(userId, snapshot);
+        await this.repository.markCohortAutomationRun(userId, now);
         completed += 1;
       } catch (error) {
         console.warn(`[digital-employee] cohort summary failed for user ${userId}:`, error);

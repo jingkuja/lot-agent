@@ -342,6 +342,22 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     }
   });
 
+  app.put("/overview/schedule", async (c) => {
+    try {
+      const payload = await body(c);
+      if (typeof payload.enabled !== "boolean") throw new InputError("enabled格式无效");
+      if (typeof payload.version !== "number" || !Number.isInteger(payload.version) || payload.version < 0) {
+        throw new InputError("version无效");
+      }
+      return c.json(await service.saveCohortSchedule(c.get("userId"), {
+        enabled: payload.enabled,
+        version: payload.version,
+      }));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
   app.get("/profiles", async (c) => {
     try {
       return c.json(await service.listProfiles(c.get("userId"), parseProfileList(c.req.query())));

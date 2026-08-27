@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import type { QueryClient } from "../db/migration-runner.js";
 import type {
   CaptureDraftStatus,
+  CohortAutomationSetting,
   CustomerCaptureDraft,
   CustomerProfileChangeDraft,
   CustomerObservation,
@@ -225,6 +226,9 @@ export class DigitalEmployeeRepository {
     const result = await this.pool.query(
       `SELECT DISTINCT profile.user_id
        FROM de_customer_profiles profile
+       JOIN de_cohort_automation_settings automation
+         ON automation.user_id = profile.user_id
+        AND automation.enabled = true
        LEFT JOIN de_customer_cohort_snapshots snapshot
          ON snapshot.user_id = profile.user_id
         AND snapshot.snapshot_date = $1::date
@@ -233,6 +237,54 @@ export class DigitalEmployeeRepository {
       [snapshotDate]
     );
     return result.rows.map((row) => String(row.user_id));
+  }
+
+  async getCohortAutomationSetting(userId: string): Promise<CohortAutomationSetting | null> {
+    const result = await this.pool.query(
+      `SELECT enabled, last_run_at, version
+       FROM de_cohort_automation_settings
+       WHERE user_id = $1`,
+      [userId]
+    );
+    const row = result.rows[0];
+    return row ? {
+      enabled: row.enabled === true,
+      lastRunAt: row.last_run_at ? toIso(row.last_run_at) : null,
+      version: Number(row.version),
+    } : null;
+  }
+
+  async saveCohortAutomationSetting(
+    userId: string,
+    enabled: boolean,
+    version: number
+  ): Promise<CohortAutomationSetting | null> {
+    const result = await this.pool.query(
+      `INSERT INTO de_cohort_automation_settings (user_id, enabled, version)
+       VALUES ($1, $2, 1)
+       ON CONFLICT (user_id) DO UPDATE SET
+         enabled = EXCLUDED.enabled,
+         version = de_cohort_automation_settings.version + 1,
+         updated_at = now()
+       WHERE de_cohort_automation_settings.version = $3
+       RETURNING enabled, last_run_at, version`,
+      [userId, enabled, version]
+    );
+    const row = result.rows[0];
+    return row ? {
+      enabled: row.enabled === true,
+      lastRunAt: row.last_run_at ? toIso(row.last_run_at) : null,
+      version: Number(row.version),
+    } : null;
+  }
+
+  async markCohortAutomationRun(userId: string, now: Date): Promise<void> {
+    await this.pool.query(
+      `UPDATE de_cohort_automation_settings
+       SET last_run_at = $2, updated_at = now()
+       WHERE user_id = $1 AND enabled = true`,
+      [userId, now]
+    );
   }
 
   async getLatestCohortSnapshot(userId: string): Promise<CustomerCohortSnapshot | null> {

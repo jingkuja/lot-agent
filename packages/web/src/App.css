@@ -4186,13 +4186,9 @@ html, body, #root {
 }
 
 .de-home-schedule strong { color: var(--de-accent-strong); font-weight: 750; }
-.de-home-live-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--de-accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--de-accent) 14%, transparent);
-}
+.de-home-schedule.de-switch { cursor: pointer; }
+.de-home-schedule.de-switch:has(input:disabled) { cursor: wait; opacity: .7; }
+.de-home-schedule.de-switch i { flex: 0 0 auto; }
 
 .de-home-grid {
   display: grid;
@@ -4472,7 +4468,7 @@ html, body, #root {
 @media (max-width: 900px) {
   .de-home-grid { grid-template-columns: 1fr; }
   .de-recent-card { min-height: 0; }
-  .de-home-schedule { display: none; }
+  .de-home-header { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 620px) {
