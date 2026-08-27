@@ -39,6 +39,7 @@ export interface ManagedBalanceResult {
   status: string;
   credentialVersion: number;
   policyRevision: number;
+  allowBalanceFallback: boolean;
 }
 
 export interface ManagedRechargeOrder {
@@ -287,6 +288,7 @@ export class TokenhubClient {
       status: string;
       credential_version: number;
       policy_revision: number;
+      allow_balance_fallback: boolean;
     }>(
       "GET",
       `/agent-managed-keys/${userId}/balance?owner_app=lot-agent`,
@@ -303,7 +305,19 @@ export class TokenhubClient {
       status: data.status,
       credentialVersion: data.credential_version,
       policyRevision: data.policy_revision,
+      allowBalanceFallback: data.allow_balance_fallback,
     };
+  }
+
+  async setManagedBalanceFallback(userId: number, enabled: boolean): Promise<boolean> {
+    const data = await this.internalRequest<{ allow_balance_fallback: boolean }>(
+      "PUT",
+      `/agent-managed-keys/${userId}/balance-fallback`,
+      { owner_app: "lot-agent", enabled },
+      "agent:key.balance",
+      "new_api_managed_balance_fallback_failed"
+    );
+    return data.allow_balance_fallback;
   }
 
   async createManagedRechargeOrder(args: {
@@ -444,7 +458,7 @@ export class TokenhubClient {
   }
 
   private async internalRequest<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT",
     path: string,
     body: unknown,
     scope: string,

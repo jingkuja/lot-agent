@@ -42,6 +42,7 @@ describe("GET /balance", () => {
           status: "active",
           credentialVersion: 1,
           policyRevision: 1,
+          allowBalanceFallback: false,
         }),
       },
     } as unknown as AgentService;
@@ -59,6 +60,34 @@ describe("GET /balance", () => {
       totalUsed: 1,
       totalRecharged: 10,
       usedRatio: 0.1,
+      allowBalanceFallback: false,
     });
+  });
+
+  it("updates the managed key balance-fallback preference for the same user", async () => {
+    const service = {
+      managedKeysEnabled: true,
+      db: {
+        getUserById: vi.fn().mockResolvedValue({ external_user_id: 7 }),
+      },
+      tokenhub: {
+        setManagedBalanceFallback: vi.fn().mockResolvedValue(true),
+      },
+    } as unknown as AgentService;
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("userId", "local-1");
+      await next();
+    });
+    app.route("/", createUsageRoutes(service));
+
+    const response = await app.request("/balance-fallback", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ enabled: true });
+    expect(service.tokenhub.setManagedBalanceFallback).toHaveBeenCalledWith(7, true);
   });
 });

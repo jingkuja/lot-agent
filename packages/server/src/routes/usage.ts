@@ -58,6 +58,7 @@ export function createUsageRoutes(service: AgentService) {
           status: managed.status,
           credentialVersion: managed.credentialVersion,
           policyRevision: managed.policyRevision,
+          allowBalanceFallback: managed.allowBalanceFallback,
           dailySpend,
           monthlySpend,
         });
@@ -78,6 +79,31 @@ export function createUsageRoutes(service: AgentService) {
       dailySpend,
       monthlySpend,
     });
+  });
+
+  // PUT /balance-fallback — opt in/out of charging the New API wallet only
+  // after the current managed subscription key cannot cover a request.
+  app.put("/balance-fallback", async (c) => {
+    const userId = c.get("userId");
+    const user = await service.db.getUserById(userId);
+    if (!service.managedKeysEnabled || user?.external_user_id == null) {
+      return c.json({ error: "托管订阅未启用" }, 409);
+    }
+    let body: { enabled?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (typeof body.enabled !== "boolean") {
+      return c.json({ error: "enabled must be a boolean" }, 400);
+    }
+    try {
+      const enabled = await service.tokenhub.setManagedBalanceFallback(user.external_user_id, body.enabled);
+      return c.json({ enabled });
+    } catch {
+      return c.json({ error: "余额补扣设置保存失败" }, 502);
+    }
   });
 
   return app;

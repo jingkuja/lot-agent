@@ -9,6 +9,7 @@ interface BalanceSummary {
   totalUsed: number;
   totalRecharged: number;
   usedRatio: number;
+  allowBalanceFallback?: boolean;
 }
 
 export function PointsBalance() {
@@ -17,6 +18,8 @@ export function PointsBalance() {
   const [error, setError] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [rechargeOpen, setRechargeOpen] = useState(false);
+  const [fallbackSaving, setFallbackSaving] = useState(false);
+  const [fallbackError, setFallbackError] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -29,26 +32,53 @@ export function PointsBalance() {
 
   useEffect(load, [load]);
 
+  const updateBalanceFallback = useCallback((enabled: boolean) => {
+    if (!summary || fallbackSaving) return;
+    setFallbackSaving(true);
+    setFallbackError(false);
+    void api.setManagedBalanceFallback(enabled)
+      .then((result) => {
+        setSummary((current) => current ? { ...current, allowBalanceFallback: result.enabled } : current);
+      })
+      .catch(() => setFallbackError(true))
+      .finally(() => setFallbackSaving(false));
+  }, [fallbackSaving, summary]);
+
   return (
     <>
-      <button
-        type="button"
-        className="brand-quick-action brand-points-action"
-        onClick={() => {
-          setDetailsOpen(true);
-          load();
-        }}
-        title="查看我的积分"
-      >
-        <span className="brand-action-icon" aria-hidden>
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="8.5" />
-            <path d="M9 9.5h6M9 14.5h6M12 8v8" />
-          </svg>
-        </span>
-        <span className="brand-points-label">剩余积分</span>
-        <strong className="brand-points-value">{loading && !summary ? "加载中" : error && !summary ? "--" : formatPoints(yuanToPoints(summary?.balance ?? 0))}</strong>
-      </button>
+      <div className="brand-points-action">
+        <button
+          type="button"
+          className="brand-points-main"
+          onClick={() => {
+            setDetailsOpen(true);
+            load();
+          }}
+          title="查看我的积分"
+        >
+          <span className="brand-action-icon" aria-hidden>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M9 9.5h6M9 14.5h6M12 8v8" />
+            </svg>
+          </span>
+          <span className="brand-points-label">剩余积分</span>
+          <strong className="brand-points-value">{loading && !summary ? "加载中" : error && !summary ? "--" : formatPoints(yuanToPoints(summary?.balance ?? 0))}</strong>
+        </button>
+        {summary?.allowBalanceFallback !== undefined && (
+          <label className="brand-balance-fallback" title="订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费">
+            <span>订阅额度不足时使用灵渠 AI 余额</span>
+            <input
+              type="checkbox"
+              checked={summary.allowBalanceFallback}
+              disabled={fallbackSaving}
+              onChange={(event) => updateBalanceFallback(event.target.checked)}
+            />
+            <i aria-hidden />
+          </label>
+        )}
+        {fallbackError && <small className="brand-balance-fallback-error">设置保存失败，请重试</small>}
+      </div>
 
       {detailsOpen && createPortal(
         <div className="account-dialog-overlay" onClick={() => setDetailsOpen(false)}>

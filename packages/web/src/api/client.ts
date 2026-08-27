@@ -356,7 +356,13 @@ export const api = {
     totalRecharged: number;
     usedRatio: number;
     status?: string;
+    allowBalanceFallback?: boolean;
   }>("/usage/balance"),
+  setManagedBalanceFallback: (enabled: boolean) =>
+    request<{ enabled: boolean }>("/usage/balance-fallback", {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
 
   // ── Models (per-user dynamic catalog) ─────────────────────────────────────────
   listModels: () =>

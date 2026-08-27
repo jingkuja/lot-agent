@@ -4793,17 +4793,42 @@ html, body, #root {
 }
 .brand-quick-action:active { background: color-mix(in srgb, var(--accent) 10%, var(--bg-card)); }
 .brand-points-action {
-  width: 100%; min-height: 43px; padding: 8px 10px;
-  justify-content: flex-start; gap: 8px;
+  width: 100%; min-height: 43px; padding: 5px 8px 7px;
+  display: grid; gap: 2px;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
   background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
   color: var(--text);
   box-shadow: var(--shadow-sm);
+  border-radius: 8px;
 }
 .brand-points-action:hover {
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
   color: var(--text);
 }
+.brand-points-main {
+  min-width: 0; min-height: 35px; padding: 3px 2px;
+  display: flex; align-items: center; gap: 8px;
+  border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.brand-balance-fallback {
+  min-width: 0; padding: 4px 2px 1px; display: flex; align-items: center; gap: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  color: var(--text-secondary); font-size: 10px; line-height: 1.25; cursor: pointer;
+}
+.brand-balance-fallback > span { min-width: 0; margin-right: auto; }
+.brand-balance-fallback input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.brand-balance-fallback i {
+  position: relative; width: 30px; height: 17px; flex: 0 0 30px; border-radius: 999px;
+  background: var(--border-input); transition: background .15s;
+}
+.brand-balance-fallback i::after {
+  position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--bg-card); box-shadow: var(--shadow-sm); content: ""; transition: transform .15s;
+}
+.brand-balance-fallback input:checked + i { background: var(--accent); }
+.brand-balance-fallback input:checked + i::after { transform: translateX(13px); }
+.brand-balance-fallback:has(input:disabled) { cursor: wait; opacity: .65; }
+.brand-balance-fallback-error { padding: 1px 2px; color: var(--error); font-size: 10px; }
 .brand-points-label {
   min-width: 0; overflow: hidden; margin-right: auto;
   color: var(--text-secondary); font-size: 13px; font-weight: 650;

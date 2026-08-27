@@ -322,6 +322,7 @@ async function main() {
           status: managed.status,
           credentialVersion: managed.credentialVersion,
           policyRevision: managed.policyRevision,
+          allowBalanceFallback: managed.allowBalanceFallback,
           dailySpend,
           monthlySpend,
         });

@@ -462,6 +462,7 @@ describe("TokenhubClient", () => {
       status: "active",
       credential_version: 1,
       policy_revision: 1,
+      allow_balance_fallback: false,
     }));
     const c = new TokenhubClient(
       "https://h/api/agent-market",
@@ -475,6 +476,26 @@ describe("TokenhubClient", () => {
       remainAmount: 3,
       usedAmount: 1,
       rechargedAmount: 10,
+      allowBalanceFallback: false,
     });
+  });
+
+  it("updates managed balance fallback without changing the key", async () => {
+    const f = vi.fn().mockResolvedValue(ok({ allow_balance_fallback: true }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+
+    await expect(c.setManagedBalanceFallback(7, true)).resolves.toBe(true);
+    expect(f).toHaveBeenCalledOnce();
+    const [url, init] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://h/api/internal/agent-managed-keys/7/balance-fallback");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toEqual({ owner_app: "lot-agent", enabled: true });
   });
 });
