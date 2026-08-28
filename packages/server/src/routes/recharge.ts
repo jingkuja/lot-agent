@@ -25,6 +25,21 @@ export function createRechargeRoutes(service: AgentService): Hono<{ Variables: V
     }
   });
 
+  app.get("/orders", async (c) => {
+    if (!service.managedKeysEnabled) return c.json({ error: "托管订阅未启用" }, 409);
+    const userId = c.get("userId");
+    const newApiUserId = await externalUserId(service, userId);
+    if (newApiUserId == null) return c.json({ error: "订阅凭证不可用" }, 409);
+    const requestedPage = Number(c.req.query("page") ?? "1");
+    const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 && requestedPage <= 1_000_000 ? requestedPage : 1;
+    try {
+      return c.json(await service.tokenhub.getManagedRechargeHistory(newApiUserId, page, 20));
+    } catch (err) {
+      logger.warn("managed recharge history failed", { userId, err });
+      return c.json({ error: "充值明细加载失败" }, 502);
+    }
+  });
+
   app.post("/orders", async (c) => {
     if (!service.managedKeysEnabled) return c.json({ error: "托管订阅未启用" }, 409);
     let body: { points?: number; paymentMethod?: string };

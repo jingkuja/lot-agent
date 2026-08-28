@@ -423,6 +423,46 @@ describe("TokenhubClient", () => {
     expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-managed-recharge/info?owner_app=lot-agent&user_id=7");
   });
 
+  it("loads and maps the authenticated user's successful managed recharge history", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      records: [
+        {
+          transaction_id: "LOT-paid",
+          recharged_at: 1_777_356_600,
+          payment_method: "wxpay",
+          amount: 9.5,
+          currency: "CNY",
+        },
+      ],
+      page: 2,
+      page_size: 20,
+      total: 21,
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.getManagedRechargeHistory(7, 2, 20)).resolves.toEqual({
+      records: [
+        {
+          transactionId: "LOT-paid",
+          rechargedAt: new Date(1_777_356_600_000).toISOString(),
+          paymentMethod: "wxpay",
+          amount: 9.5,
+          currency: "CNY",
+        },
+      ],
+      page: 2,
+      pageSize: 20,
+      total: 21,
+    });
+    expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-managed-recharge/orders?owner_app=lot-agent&user_id=7&page=2&limit=20");
+  });
+
   it("maps an Alipay recharge order to a redirect URL", async () => {
     const f = vi.fn().mockResolvedValue(ok({
       transaction_id: "LOT-alipay",

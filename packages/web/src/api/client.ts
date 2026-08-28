@@ -139,6 +139,14 @@ export interface RechargeInfo {
   amountDiscount: Record<string, number>;
 }
 
+export interface RechargeRecord {
+  transactionId: string;
+  rechargedAt: string;
+  paymentMethod: string;
+  amount: number;
+  currency: string;
+}
+
 export interface TaskStatus {
   id: string;
   status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
@@ -343,6 +351,12 @@ export const api = {
   mode: () => request<{ debug: boolean; user: User | null; managedRegistration?: boolean }>("/auth/mode"),
 
   getRechargeInfo: () => request<RechargeInfo>("/recharge/info"),
+  getRechargeHistory: (page = 1) => request<{
+    records: RechargeRecord[];
+    page: number;
+    pageSize: number;
+    total: number;
+  }>(`/recharge/orders?page=${page}`),
   createRechargeOrder: (points: number, paymentMethod: string) =>
     request<RechargeOrder>("/recharge/orders", {
       method: "POST",

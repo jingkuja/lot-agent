@@ -23,6 +23,20 @@ function mount() {
         codeUrl: "weixin://wxpay/bizpayurl?pr=test",
       }),
       getManagedRechargeOrder: vi.fn().mockResolvedValue({ transactionId: "LOT7abc", status: "credited" }),
+      getManagedRechargeHistory: vi.fn().mockResolvedValue({
+        records: [
+          {
+            transactionId: "LOT-success",
+            rechargedAt: "2026-08-28T04:30:00.000Z",
+            paymentMethod: "alipay",
+            amount: 10,
+            currency: "CNY",
+          },
+        ],
+        page: 2,
+        pageSize: 20,
+        total: 21,
+      }),
     },
   } as unknown as AgentService;
   const app = new Hono();
@@ -77,6 +91,27 @@ describe("managed recharge routes", () => {
       enabled: true,
       paymentMethods: [{ name: "支付宝", type: "alipay" }],
       amountDiscount: { "1000": 0.9 },
+    });
+  });
+
+  it("loads only the authenticated user's successful recharge history", async () => {
+    const { app, service } = mount();
+    const response = await app.request("/orders?page=2");
+    expect(response.status).toBe(200);
+    expect(service.tokenhub.getManagedRechargeHistory).toHaveBeenCalledWith(7, 2, 20);
+    await expect(response.json()).resolves.toEqual({
+      records: [
+        {
+          transactionId: "LOT-success",
+          rechargedAt: "2026-08-28T04:30:00.000Z",
+          paymentMethod: "alipay",
+          amount: 10,
+          currency: "CNY",
+        },
+      ],
+      page: 2,
+      pageSize: 20,
+      total: 21,
     });
   });
 });

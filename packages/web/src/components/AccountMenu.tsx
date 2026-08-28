@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type ManagedUpload, type User } from "../api/client.js";
 import { RechargeModal } from "./RechargeModal.js";
+import { RechargeHistoryModal } from "./RechargeHistoryModal.js";
 
 interface AccountMenuProps {
   user: User;
   onLogout?: () => void;
 }
 
-type Dialog = "recharge" | "files" | "phone" | "privacy" | "terms" | null;
+type Dialog = "recharge" | "recharge-history" | "files" | "phone" | "privacy" | "terms" | null;
 
 function accountText(user: User) {
   const email = user.username ?? user.name ?? "当前账号";
@@ -96,6 +97,9 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
               <button type="button" role="menuitem" onClick={() => openDialog("recharge")}>
                 <span aria-hidden>＋</span>充值
               </button>
+              <button type="button" role="menuitem" onClick={() => openDialog("recharge-history")}>
+                <span aria-hidden>≡</span>充值明细
+              </button>
               <button type="button" role="menuitem" onClick={() => openDialog("files")}>
                 <span aria-hidden>▤</span>文件管理
               </button>
@@ -128,6 +132,7 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
       {dialog && createPortal(
         <>
           {dialog === "recharge" && <RechargeModal onClose={() => setDialog(null)} />}
+          {dialog === "recharge-history" && <RechargeHistoryModal onClose={() => setDialog(null)} />}
           {dialog === "files" && <FileManagerModal onClose={() => setDialog(null)} />}
           {dialog === "phone" && (
             <PhoneBindingModal

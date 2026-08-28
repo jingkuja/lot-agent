@@ -23,6 +23,7 @@ Lot Agent 复用 New API 已配置的支付宝/微信直连支付网关和回调
 5. 微信下单返回 `code_url`，Lot Agent 在弹窗内生成二维码；支付宝下单返回 `pay_url`，Lot Agent 在新标签中打开支付页。
 6. 支付网关验签并核对金额后调用 New API 的内部支付成功接口；New API 通过幂等账本给用户的 Lot Agent 托管 Key 入账。
 7. Lot Agent 轮询 `PaymentBusinessOrder` 状态；成功后刷新积分余额。
+8. 用户打开“充值明细”时，Lot Agent 使用当前登录账号对应的 New API 用户 ID 查询；New API 仅返回该用户 `lot-agent` 来源、托管 Key 入账且状态为成功的订单，并按到账时间倒序分页展示充值时间、渠道和金额。
 
 普通 New API 充值使用 `order_source = new-api`、`billing_target = user_wallet`，不会进入 Agent 托管 Key。
 

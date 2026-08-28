@@ -62,6 +62,21 @@ export interface ManagedRechargeInfo {
   amountDiscount: Record<string, number>;
 }
 
+export interface ManagedRechargeRecord {
+  transactionId: string;
+  rechargedAt: string;
+  paymentMethod: string;
+  amount: number;
+  currency: string;
+}
+
+export interface ManagedRechargeHistory {
+  records: ManagedRechargeRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
 interface Envelope<T> {
   data: T | null;
   success: boolean;
@@ -374,6 +389,40 @@ export class TokenhubClient {
     };
   }
 
+  async getManagedRechargeHistory(userId: number, page = 1, pageSize = 20): Promise<ManagedRechargeHistory> {
+    const data = await this.internalRequest<{
+      records?: Array<{
+        transaction_id: string;
+        recharged_at: number;
+        payment_method: string;
+        amount: number;
+        currency?: string;
+      }>;
+      page?: number;
+      page_size?: number;
+      total?: number;
+    }>(
+      "GET",
+      `/agent-managed-recharge/orders?owner_app=lot-agent&user_id=${userId}&page=${page}&limit=${pageSize}`,
+      undefined,
+      "agent:recharge.read",
+      "new_api_managed_recharge_history_failed"
+    );
+    const records = (data.records ?? []).map((record) => ({
+      transactionId: record.transaction_id,
+      rechargedAt: unixSecondsToIso(record.recharged_at),
+      paymentMethod: record.payment_method,
+      amount: record.amount,
+      currency: record.currency ?? "CNY",
+    }));
+    return {
+      records,
+      page: data.page ?? page,
+      pageSize: data.page_size ?? pageSize,
+      total: data.total ?? records.length,
+    };
+  }
+
   async getManagedRechargeOrder(userId: number, transactionId: string): Promise<ManagedRechargeOrder> {
     const data = await this.internalRequest<{
       transaction_id: string;
@@ -583,6 +632,11 @@ function mapManagedRechargeOrder(data: {
     codeUrl: data.code_url,
     payUrl: data.pay_url,
   };
+}
+
+function unixSecondsToIso(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return new Date(value * 1000).toISOString();
 }
 
 function normalizeManagedRechargeDiscount(value: unknown): Record<string, number> {
