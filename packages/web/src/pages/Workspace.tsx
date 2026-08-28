@@ -113,11 +113,15 @@ export function Workspace({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [centerOpen, setCenterOpen] = useState(false);
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
+  const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
 
   const handleStreamEnd = useCallback(() => {
-    // The server finalizes the auto-generated title before emitting stream_end,
-    // so refresh right away to pull in the summarized conversation title.
+    // Pull in the completed conversation's persisted messages/order. A later
+    // title SSE event updates the first-turn title separately via handleTitle.
     refresh();
+    // Usage for the completed turn has been persisted before stream_end. Signal
+    // the header balance to fetch the latest remaining points as well.
+    setBalanceRefreshKey((key) => key + 1);
   }, [refresh]);
 
   const activeIdRef = useRef(activeId);
@@ -399,6 +403,7 @@ export function Workspace({
           onOpenAssistant={isDigitalEmployeeMode ? onNavigateAssistant : () => {}}
           onOpenDigitalEmployee={isDigitalEmployeeMode ? () => {} : onNavigateDigitalEmployee}
           activeModule={isDigitalEmployeeMode ? "digitalEmployee" : "assistant"}
+          balanceRefreshKey={balanceRefreshKey}
           onOpenKnowledgeBase={() => {
             const popup = window.open("about:blank", "_blank");
             void api.getKnowledgeBaseLink()

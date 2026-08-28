@@ -12,6 +12,7 @@ interface BrandHeaderProps {
   onOpenDigitalEmployee?: () => void;
   onOpenKnowledgeBase?: () => void;
   activeModule?: "assistant" | "digitalEmployee";
+  balanceRefreshKey?: number;
 }
 
 /** Top-left identity strip: logo, product name, account, and workspace nav.
@@ -25,6 +26,7 @@ export function BrandHeader({
   onOpenDigitalEmployee,
   onOpenKnowledgeBase,
   activeModule = "assistant",
+  balanceRefreshKey,
 }: BrandHeaderProps) {
   return (
     <div className="brand-header">
@@ -57,7 +59,7 @@ export function BrandHeader({
 
       {(onOpenAgentCenter || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (
         <div className="brand-navigation-actions">
-          {user && <PointsBalance />}
+          {user && <PointsBalance refreshKey={balanceRefreshKey} />}
           {(onOpenAgentCenter || onOpenKnowledgeBase) && (
             <div className="brand-quick-actions">
               {onOpenAgentCenter && (

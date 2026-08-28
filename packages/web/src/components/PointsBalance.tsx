@@ -12,7 +12,12 @@ interface BalanceSummary {
   allowBalanceFallback?: boolean;
 }
 
-export function PointsBalance() {
+interface PointsBalanceProps {
+  /** Changes after a billable turn finishes so the compact header value stays current. */
+  refreshKey?: number;
+}
+
+export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
   const [summary, setSummary] = useState<BalanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -30,7 +35,7 @@ export function PointsBalance() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(load, [load]);
+  useEffect(load, [load, refreshKey]);
 
   const updateBalanceFallback = useCallback((enabled: boolean) => {
     if (!summary || fallbackSaving) return;
