@@ -47,6 +47,18 @@ describe("GET /api/models", () => {
     expect(service.tokenhub.listModels).not.toHaveBeenCalled();
   });
 
+  it("normalizes a pre-change cached catalog so server-side defaults are Claude-last", async () => {
+    const cached = JSON.stringify({
+      llm: [{ id: "claude-sonnet-4", type: "llm", provider: "openai" }, { id: "gpt-5.4", type: "llm", provider: "openai" }],
+      image: [],
+      video: [],
+    });
+    const service = svc(cached);
+    const res = await mount(service).request("/");
+    expect((await res.json()).llm.map((model: { id: string }) => model.id)).toEqual(["gpt-5.4", "claude-sonnet-4"]);
+    expect(service.tokenhub.listModels).not.toHaveBeenCalled();
+  });
+
   it("does not reuse the legacy user-only cache created by a different key", async () => {
     const cached = JSON.stringify({ llm: [{ id: "old-key-model" }], image: [], video: [] });
     const service = svc(null);

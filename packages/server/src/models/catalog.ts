@@ -16,6 +16,19 @@ export interface ModelCatalogConfig {
   defaultPricing: Record<string, Pricing>;
 }
 
+/** Keep tokenhub's relative order, but make non-Claude models the defaults.
+ * This lives on the server because background/utility LLM calls also choose
+ * the catalog's first model; sorting only in the web picker makes the two
+ * selections disagree. */
+export function moveClaudeModelsToEnd<T extends { id: string }>(models: T[]): T[] {
+  const nonClaude: T[] = [];
+  const claude: T[] = [];
+  for (const model of models) {
+    (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
+  }
+  return [...nonClaude, ...claude];
+}
+
 /** LLM and video always use their per-type default provider (all video models
  * route through the same tokenhub `/videos` endpoint, so per-model matching is
  * meaningless and would break for dynamic agent-market models not in the map).
@@ -41,5 +54,9 @@ export function enrichCatalog(
       provider: resolveProvider(cfg, id, type),
       pricing: resolvePricing(cfg, id, type),
     }));
-  return { llm: build(models.llm, "llm"), image: build(models.image, "image"), video: build(models.video, "video") };
+  return {
+    llm: moveClaudeModelsToEnd(build(models.llm, "llm")),
+    image: build(models.image, "image"),
+    video: build(models.video, "video"),
+  };
 }

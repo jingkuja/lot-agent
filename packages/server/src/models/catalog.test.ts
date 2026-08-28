@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveProvider, resolvePricing, enrichCatalog, type ModelCatalogConfig } from "./catalog.js";
+import { resolveProvider, resolvePricing, enrichCatalog, moveClaudeModelsToEnd, type ModelCatalogConfig } from "./catalog.js";
 
 const cfg: ModelCatalogConfig = {
   defaultProvider: { llm: "openai", image: "chat-completions", video: "openai-video" },
@@ -35,5 +35,25 @@ describe("catalog resolvers", () => {
     const out = enrichCatalog(cfg, { llm: ["gpt-5.4"], image: ["gpt-image-2-token"], video: ["veo3.1"] });
     expect(out.llm[0]).toEqual({ id: "gpt-5.4", type: "llm", provider: "openai", pricing: cfg.defaultPricing.llm });
     expect(out.video[0].provider).toBe("openai-video");
+  });
+  it("stably moves Claude LLMs behind other models before choosing a default", () => {
+    const out = enrichCatalog(cfg, {
+      llm: ["claude-opus-4.1", "gpt-5.4", "Claude-Sonnet-4.5", "deepseek-v4"],
+      image: ["gpt-image-2-token"],
+      video: ["veo3.1"],
+    });
+    expect(out.llm.map((model) => model.id)).toEqual([
+      "gpt-5.4",
+      "deepseek-v4",
+      "claude-opus-4.1",
+      "Claude-Sonnet-4.5",
+    ]);
+    expect(out.image.map((model) => model.id)).toEqual(["gpt-image-2-token"]);
+    expect(out.video.map((model) => model.id)).toEqual(["veo3.1"]);
+  });
+  it("does not mutate cached model arrays while normalizing their order", () => {
+    const input = [{ id: "claude-4" }, { id: "gpt-5.4" }];
+    expect(moveClaudeModelsToEnd(input).map((model) => model.id)).toEqual(["gpt-5.4", "claude-4"]);
+    expect(input.map((model) => model.id)).toEqual(["claude-4", "gpt-5.4"]);
   });
 });
