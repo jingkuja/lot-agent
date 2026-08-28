@@ -83,7 +83,10 @@ export function createTaskRoutes(service: AgentService) {
       const cfg = service.modelRegistry.getConfig("gpt-image-2");
       estimatedCost = cfg ? estimateCost(cfg, { outputCount: 1 }) : 0;
     } else if (type === "video.generate") {
-      const cfg = service.modelRegistry.getConfig("kling-standard");
+      const selectedModel = typeof safeInput.modelId === "string" && safeInput.modelId
+        ? safeInput.modelId
+        : "kling-video-v3-omni";
+      const cfg = service.modelRegistry.getConfig(selectedModel);
       estimatedCost = cfg ? estimateCost(cfg, { outputCount: billedVideoSeconds(safeInput.durationSec) }) : 0;
     }
     const quota = await service.usageMeter.checkQuota(userId, estimatedCost);

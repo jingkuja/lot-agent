@@ -78,7 +78,7 @@ export async function loadGenerationConfig(rootDir: string): Promise<GenerationC
 
   return {
     image: merge(g.image, "wanx-standard", "IMAGE_GEN_API_KEY"),
-    video: merge(g.video, "kling-standard", "VIDEO_GEN_API_KEY"),
+    video: merge(g.video, "kling-video-v3-omni", "VIDEO_GEN_API_KEY"),
   };
 }
 

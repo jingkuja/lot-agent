@@ -20,16 +20,17 @@ describe("pickGenerationSettings", () => {
     ).toEqual({ size: "1024x1024", n: 2, quality: "high" });
   });
 
-  it("keeps the video whitelist (size, durationSec, ratio, generate_audio)", () => {
+  it("keeps the video whitelist (size, durationSec, ratio, quality, generate_audio)", () => {
     expect(
       pickGenerationSettings("video", {
         durationSec: 5,
         ratio: "16:9",
         size: "720x1280", // required by the openai-video endpoint
+        quality: "720p",
         generate_audio: false,
         n: 3, // image-only — dropped for video
       })
-    ).toEqual({ size: "720x1280", durationSec: 5, ratio: "16:9", generate_audio: false });
+    ).toEqual({ size: "720x1280", durationSec: 5, ratio: "16:9", quality: "720p", generate_audio: false });
   });
 
   it("drops a video audio flag carrying the wrong type", () => {
