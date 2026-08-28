@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../api/client.js";
 import { ModelPicker } from "../../../components/ModelPicker.js";
+import { shouldSubmitComposer } from "../../../lib/composer-keyboard.js";
 import type { CatalogModel } from "../../../lib/model-filter.js";
 import {
   OPPORTUNITY_TYPE_LABELS, OUTCOME_LABELS, READINESS_LABELS, RELATIONSHIP_LABELS,
@@ -213,6 +214,7 @@ const TALK_TRACK_PRESETS: Array<{ intent: TalkTrackIntent; label: string; prompt
 ];
 
 function TalkTrackAssistant({ item, open, llmModels, onClose }: { item: OpportunityItem; open: boolean; llmModels: CatalogModel[]; onClose: () => void }) {
+  const compositionActiveRef = useRef(false);
   const [intent, setIntent] = useState<TalkTrackIntent>("follow_up");
   const [messages, setMessages] = useState<TalkTrackMessage[]>([]);
   const [input, setInput] = useState("");
@@ -255,8 +257,8 @@ function TalkTrackAssistant({ item, open, llmModels, onClose }: { item: Opportun
       {error && <p className="de-talk-track-error" role="alert">{error}</p>}
       <form onSubmit={(event) => { event.preventDefault(); void send(input); }}>
         <div className="de-talk-track-composer">
-          <textarea value={input} maxLength={2_000} rows={2} disabled={loading || !effectiveModel} placeholder={effectiveModel ? "例如：语气更熟悉一点，适合微信，先询问对方是否方便……" : "平台暂未返回可用的 LLM 模型"} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(input); }
+          <textarea value={input} maxLength={2_000} rows={2} disabled={loading || !effectiveModel} placeholder={effectiveModel ? "例如：语气更熟悉一点，适合微信，先询问对方是否方便……" : "平台暂未返回可用的 LLM 模型"} onChange={(event) => setInput(event.target.value)} onCompositionStart={() => { compositionActiveRef.current = true; }} onCompositionEnd={() => { compositionActiveRef.current = false; }} onKeyDown={(event) => {
+            if (shouldSubmitComposer({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode }, compositionActiveRef.current)) { event.preventDefault(); void send(input); }
           }} />
           <div className="de-talk-track-composer-toolbar">
             <span>当前 Key 模型</span>

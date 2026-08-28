@@ -12,6 +12,7 @@ import {
 import type { PickedFile } from "../api/client.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
+import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
@@ -136,6 +137,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const oldContractInputRef = useRef<HTMLInputElement>(null);
   const newContractInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const compositionActiveRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const referenceVideoInputRef = useRef<HTMLInputElement>(null);
   const referenceAudioInputRef = useRef<HTMLInputElement>(null);
@@ -298,7 +300,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (embedded) return;
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (shouldSubmitComposer({
+        key: e.key,
+        shiftKey: e.shiftKey,
+        isComposing: e.nativeEvent.isComposing,
+        keyCode: e.nativeEvent.keyCode,
+      }, compositionActiveRef.current)) {
         e.preventDefault();
         handleSend();
       }
@@ -469,6 +476,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         value={promptValue}
         onChange={(e) => { setPromptValue(e.target.value); if (noModelNotice) setNoModelNotice(false); }}
         onKeyDown={handleKeyDown}
+        onCompositionStart={() => { compositionActiveRef.current = true; }}
+        onCompositionEnd={() => { compositionActiveRef.current = false; }}
         onInput={handleInput}
         placeholder={
           disabled && !embedded

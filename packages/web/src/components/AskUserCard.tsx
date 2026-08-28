@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 
 export interface AskUserInput {
   question?: string;
@@ -27,6 +28,7 @@ const BULLET_LIST_RE = /^\s*(?:[-*+]\s+|\d+[.)]\s+)\S/m;
 
 /** ask_user 工具调用的结构化提问卡片：问题 + 选项按钮 + 自由输入。 */
 export function AskUserCard({ input, interactive, answer, onReply }: AskUserCardProps) {
+  const compositionActiveRef = useRef(false);
   const parsed = (input ?? {}) as AskUserInput;
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
@@ -98,8 +100,15 @@ export function AskUserCard({ input, interactive, answer, onReply }: AskUserCard
                 : "或输入其他回答，Enter 发送"
           }
           onChange={(e) => setText(e.target.value)}
+          onCompositionStart={() => { compositionActiveRef.current = true; }}
+          onCompositionEnd={() => { compositionActiveRef.current = false; }}
           onKeyDown={(e) => {
-            if (e.key !== "Enter") return;
+            if (!shouldSubmitComposer({
+              key: e.key,
+              shiftKey: e.shiftKey,
+              isComposing: e.nativeEvent.isComposing,
+              keyCode: e.nativeEvent.keyCode,
+            }, compositionActiveRef.current)) return;
             if (multi) {
               submitMulti();
             } else if (text.trim()) {

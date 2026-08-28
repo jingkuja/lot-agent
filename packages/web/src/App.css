@@ -4805,10 +4805,34 @@ html, body, #root {
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
   color: var(--text);
 }
+.brand-points-top {
+  min-width: 0; display: flex; align-items: center; gap: 7px;
+}
 .brand-points-main {
-  min-width: 0; min-height: 35px; padding: 3px 2px;
+  flex: 1; min-width: 0; min-height: 35px; padding: 3px 2px;
   display: flex; align-items: center; gap: 8px;
   border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.brand-points-recharge {
+  min-height: 29px; padding: 0 9px;
+  display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 76%, var(--text)));
+  color: var(--text-on-accent); font: inherit; font-size: 11px; font-weight: 750;
+  cursor: pointer;
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--accent) 25%, transparent);
+  transition: transform .14s ease, box-shadow .14s ease, filter .14s ease;
+}
+.brand-points-recharge:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.brand-points-recharge:active { transform: translateY(0); }
+.brand-points-recharge:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
 }
 .brand-balance-fallback {
   min-width: 0; padding: 4px 2px 1px; display: flex; align-items: center; gap: 7px;

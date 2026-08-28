@@ -52,24 +52,37 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
   return (
     <>
       <div className="brand-points-action">
-        <button
-          type="button"
-          className="brand-points-main"
-          onClick={() => {
-            setDetailsOpen(true);
-            load();
-          }}
-          title="查看我的积分"
-        >
-          <span className="brand-action-icon" aria-hidden>
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="8.5" />
-              <path d="M9 9.5h6M9 14.5h6M12 8v8" />
+        <div className="brand-points-top">
+          <button
+            type="button"
+            className="brand-points-main"
+            onClick={() => {
+              setDetailsOpen(true);
+              load();
+            }}
+            title="查看我的积分"
+          >
+            <span className="brand-action-icon" aria-hidden>
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="8.5" />
+                <path d="M9 9.5h6M9 14.5h6M12 8v8" />
+              </svg>
+            </span>
+            <span className="brand-points-label">剩余积分</span>
+            <strong className="brand-points-value">{loading && !summary ? "加载中" : error && !summary ? "--" : formatPoints(yuanToPoints(summary?.balance ?? 0))}</strong>
+          </button>
+          <button
+            type="button"
+            className="brand-points-recharge"
+            onClick={() => setRechargeOpen(true)}
+            title="充值积分"
+          >
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
             </svg>
-          </span>
-          <span className="brand-points-label">剩余积分</span>
-          <strong className="brand-points-value">{loading && !summary ? "加载中" : error && !summary ? "--" : formatPoints(yuanToPoints(summary?.balance ?? 0))}</strong>
-        </button>
+            <span>充值</span>
+          </button>
+        </div>
         {summary?.allowBalanceFallback !== undefined && (
           <label className="brand-balance-fallback" title="订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费">
             <span>积分不足时使用灵渠 AI 余额</span>
