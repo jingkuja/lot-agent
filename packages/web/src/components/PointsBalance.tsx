@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api/client.js";
 import { formatPoints, yuanToPoints } from "../lib/points.js";
+import { RechargeHistoryModal } from "./RechargeHistoryModal.js";
 import { RechargeModal } from "./RechargeModal.js";
 
 interface BalanceSummary {
@@ -23,6 +24,7 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
   const [error, setError] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [rechargeOpen, setRechargeOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [fallbackSaving, setFallbackSaving] = useState(false);
   const [fallbackError, setFallbackError] = useState(false);
 
@@ -135,16 +137,28 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    className="recharge-submit points-recharge-button"
-                    onClick={() => {
-                      setDetailsOpen(false);
-                      setRechargeOpen(true);
-                    }}
-                  >
-                    充值积分
-                  </button>
+                  <div className="points-dialog-actions">
+                    <button
+                      type="button"
+                      className="recharge-submit"
+                      onClick={() => {
+                        setDetailsOpen(false);
+                        setRechargeOpen(true);
+                      }}
+                    >
+                      充值积分
+                    </button>
+                    <button
+                      type="button"
+                      className="points-history-button"
+                      onClick={() => {
+                        setDetailsOpen(false);
+                        setHistoryOpen(true);
+                      }}
+                    >
+                      充值明细
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -158,6 +172,11 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
           onClose={() => setRechargeOpen(false)}
           onBalanceChange={() => load()}
         />,
+        document.body
+      )}
+
+      {historyOpen && createPortal(
+        <RechargeHistoryModal onClose={() => setHistoryOpen(false)} />,
         document.body
       )}
     </>

@@ -11,6 +11,12 @@ import {
   parseImageSize,
   type ImageSettings,
 } from "../lib/image-settings.js";
+import {
+  VIDEO_QUALITIES,
+  pickVideoQuality,
+  videoQualitiesForModel,
+  type VideoQuality,
+} from "../lib/video-settings.js";
 
 export type { ImageSettings } from "../lib/image-settings.js";
 export { IMAGE_PRESETS, IMAGE_QUALITIES } from "../lib/image-settings.js";
@@ -28,18 +34,8 @@ export const VIDEO_RATIOS: Ratio[] = [
   { label: "1:1", w: 1, h: 1 },
 ];
 
-export interface Quality {
-  label: string;
-  short: string;
-  /** 短边像素，分辨率由它和比例推导。 */
-  edge: number;
-}
-
-export const VIDEO_QUALITIES: Quality[] = [
-  { label: "480p标清", short: "480p", edge: 480 },
-  { label: "720p高清", short: "720p", edge: 720 },
-  { label: "1080p超清", short: "1080p", edge: 1080 },
-];
+export type Quality = VideoQuality;
+export { VIDEO_QUALITIES, KLING_VIDEO_QUALITIES, videoQualitiesForModel } from "../lib/video-settings.js";
 
 export const VIDEO_DURATIONS = ["5秒", "10秒"];
 
@@ -318,6 +314,7 @@ export function VideoSettingsPicker({
   disabled,
   lockAdaptive,
   hasReferenceAudio = false,
+  selectedModel,
   onChange,
   durations = VIDEO_DURATIONS,
 }: {
@@ -326,6 +323,8 @@ export function VideoSettingsPicker({
   lockAdaptive?: boolean;
   /** 有参考音频时供应商必须生成声音，页面不可改。 */
   hasReferenceAudio?: boolean;
+  /** 当前视频模型；Kling 使用 720p / 1080p / 4k。 */
+  selectedModel?: string | null;
   onChange?: (s: VideoSettings) => void;
   /** 时长选项，默认 5秒 / 10秒；获客宝使用 10秒 / 15秒。 */
   durations?: readonly string[];
@@ -334,9 +333,12 @@ export function VideoSettingsPicker({
   const wrapRef = useDismiss(open, () => setOpen(false));
   const durationOptions = durations.length ? durations : VIDEO_DURATIONS;
   const defaultDuration = durationOptions[0];
-  const [quality, setQuality] = useState<Quality>(
-    () => VIDEO_QUALITIES.find((q) => q.short === lastVideo.quality) ?? VIDEO_QUALITIES[0]
-  );
+  const qualityOptions = videoQualitiesForModel(selectedModel);
+  const [quality, setQuality] = useState<Quality>(() => {
+    const next = pickVideoQuality(qualityOptions, lastVideo.quality);
+    lastVideo.quality = next.short;
+    return next;
+  });
   const [ratio, setRatio] = useState<Ratio>(
     () => VIDEO_RATIOS.find((r) => r.label === lastVideo.ratio) ?? VIDEO_RATIOS[0] // 16:9
   );
@@ -351,6 +353,14 @@ export function VideoSettingsPicker({
     if (durationOptions.includes(duration)) return;
     setDuration(defaultDuration);
   }, [duration, durationOptions, defaultDuration]);
+
+  useEffect(() => {
+    const next = pickVideoQuality(qualityOptions, quality.short);
+    if (next.short === quality.short) return;
+    lastVideo.quality = next.short;
+    setQuality(next);
+    setDim(deriveResolution(ratio.w, ratio.h, next.edge));
+  }, [qualityOptions, quality, ratio]);
 
   useEffect(() => {
     const fallbackSec = Number(defaultDuration.replace(/[^0-9]/g, "")) || 5;
@@ -411,7 +421,7 @@ export function VideoSettingsPicker({
         <div className="media-popup">
           <div className="media-section-title">视频质量</div>
           <div className="seg-track">
-            {VIDEO_QUALITIES.map((q) => (
+            {qualityOptions.map((q) => (
               <button
                 key={q.short}
                 type="button"

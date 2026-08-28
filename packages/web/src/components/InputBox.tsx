@@ -808,6 +808,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               disabled={disabled}
               lockAdaptive={lockAdaptive}
               hasReferenceAudio={referenceAudioFiles.length > 0}
+              selectedModel={effectiveVideoModel}
               durations={videoDurations}
               onChange={handleSettingsChange}
             />

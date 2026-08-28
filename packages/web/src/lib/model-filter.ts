@@ -26,6 +26,11 @@ export function isSeedanceModel(id: string | null | undefined): boolean {
   return (id ?? "").toLowerCase().includes("seedance");
 }
 
+/** Kling video models (ids like `kling-video-v3-omni`) use a 720p / 1080p / 4k ladder. */
+export function isKlingModel(id: string | null | undefined): boolean {
+  return (id ?? "").toLowerCase().startsWith("kling");
+}
+
 /** Seedance 2.5 (ids like `doubao-seedance-2.5` / `doubao-seedance-2-5`). */
 export function isSeedance25Model(id: string | null | undefined): boolean {
   return /seedance[^a-z0-9]*2[\.\-_]?5(?!\d)/i.test(id ?? "");

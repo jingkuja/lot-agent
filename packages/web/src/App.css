@@ -3616,7 +3616,13 @@ html, body, #root {
 .points-progress-card > div:first-child strong { color: var(--accent); font-size: 14px; }
 .points-progress-track { height: 9px; margin-top: 11px; overflow: hidden; border-radius: 999px; background: var(--bg-hover); }
 .points-progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-grad); transition: width .2s ease; }
-.points-recharge-button { margin-top: 18px; }
+.points-dialog-actions { display: grid; gap: 10px; margin-top: 18px; }
+.points-dialog-actions .recharge-submit { margin-top: 0; }
+.points-history-button {
+  width: 100%; min-height: 42px; border: 1px solid var(--accent); border-radius: 11px;
+  background: var(--bg-card); color: var(--accent); font: inherit; font-size: 14px; font-weight: 750; cursor: pointer;
+}
+.points-history-button:hover { background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); }
 .file-manager-body { min-height: 260px; overflow-y: auto; padding: 15px 18px 20px; }
 .account-dialog-state { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: var(--text-muted); font-size: 13px; text-align: center; }
 .account-dialog-state strong { color: var(--text-secondary); }

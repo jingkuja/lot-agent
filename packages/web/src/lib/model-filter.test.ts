@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   filterModels,
   isGptImage15,
+  isKlingModel,
   isSeedance25Model,
   isSeedanceModel,
   missingSeedanceMentions,
@@ -67,6 +68,22 @@ describe("isGptImage15", () => {
     expect(isGptImage15("gpt-image-2.0")).toBe(false);
     expect(isGptImage15(null)).toBe(false);
     expect(isGptImage15(undefined)).toBe(false);
+  });
+});
+
+describe("isKlingModel", () => {
+  it("matches ids that start with kling, case-insensitively", () => {
+    expect(isKlingModel("kling-video-v3-omni")).toBe(true);
+    expect(isKlingModel("kling-standard")).toBe(true);
+    expect(isKlingModel("Kling-Video-v3")).toBe(true);
+  });
+
+  it("does not match other video models or empty ids", () => {
+    expect(isKlingModel("doubao-seedance-2.0")).toBe(false);
+    expect(isKlingModel("openai-video-kling")).toBe(false);
+    expect(isKlingModel("")).toBe(false);
+    expect(isKlingModel(null)).toBe(false);
+    expect(isKlingModel(undefined)).toBe(false);
   });
 });
 
