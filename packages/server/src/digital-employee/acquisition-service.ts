@@ -159,7 +159,7 @@ export class CustomerAcquisitionService {
     const [insights, productsResult, brandResult] = await Promise.all([
       this.getCohortInsights(userId),
       this.db.pool.query(
-        `SELECT id,name,positioning,core_values,verifiable_facts,current_benefits,common_objections,prohibited_expressions,version
+        `SELECT id,name,positioning,core_values,verifiable_facts,current_benefits,common_objections,prohibited_expressions,faqs,product_notes,version
          FROM marketing_products WHERE user_id=$1 AND status='active' ORDER BY updated_at DESC LIMIT 20`, [userId]
       ),
       this.db.pool.query(`SELECT tone,standard_calls_to_action,version FROM marketing_brand_assets WHERE user_id=$1`, [userId]),

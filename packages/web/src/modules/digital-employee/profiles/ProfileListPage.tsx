@@ -56,13 +56,16 @@ export function ProfileListPage({ onOpenProfile, onBackToConversation }: Profile
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    // Keep the flag until the dialog is dismissed so React StrictMode remounts
+    // still reopen the editor (remove-on-read races the second mount).
     try {
-      if (sessionStorage.getItem("de-profile-create") === "1") {
-        sessionStorage.removeItem("de-profile-create");
-        setNewOpen(true);
-      }
+      if (sessionStorage.getItem("de-profile-create") === "1") setNewOpen(true);
     } catch { /* ignore */ }
   }, []);
+
+  const clearCreateFlag = () => {
+    try { sessionStorage.removeItem("de-profile-create"); } catch { /* ignore */ }
+  };
 
   const pages = Math.max(1, Math.ceil(total / limit));
   const range = useMemo(() => `${total ? (page - 1) * limit + 1 : 0}–${Math.min(page * limit, total)} / ${total}`, [page, total]);
@@ -77,6 +80,7 @@ export function ProfileListPage({ onOpenProfile, onBackToConversation }: Profile
     setSaving(true);
     try {
       const created = await api.createCustomerProfile(input);
+      clearCreateFlag();
       setNewOpen(false);
       onOpenProfile(created.profile.id);
     } finally {
@@ -154,7 +158,7 @@ export function ProfileListPage({ onOpenProfile, onBackToConversation }: Profile
         {!loading && total > limit && <footer className="de-pagination"><button className="de-secondary-button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>上一页</button><span>第 {page} / {pages} 页</span><button className="de-secondary-button" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>下一页</button></footer>}
       </section>
 
-      {newOpen && <ProfileEditor saving={saving} onClose={() => !saving && setNewOpen(false)} onSave={create} />}
+      {newOpen && <ProfileEditor saving={saving} onClose={() => { if (saving) return; clearCreateFlag(); setNewOpen(false); }} onSave={create} />}
     </div>
   );
 }

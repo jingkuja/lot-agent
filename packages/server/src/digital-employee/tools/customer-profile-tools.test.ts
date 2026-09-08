@@ -53,8 +53,6 @@ describe("customer profile agent tools", () => {
     expect(result.content).toContain("李姐对应哪位客户");
     expect(service.commitProfileChange).not.toHaveBeenCalled();
   });
-});
-
 
   it("passes organization department and title into profile change prepare", async () => {
     const prepareProfileChange = vi.fn(async () => ({
@@ -89,3 +87,4 @@ describe("customer profile agent tools", () => {
       expect.any(Object),
     );
   });
+});
