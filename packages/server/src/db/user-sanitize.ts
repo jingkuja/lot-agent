@@ -1,5 +1,5 @@
 import type { StoredUser } from "./database.js";
-import { normalizeApiKeyEntries } from "../tokenhub/api-key-entry.js";
+import { maskPhone } from "./phone.js";
 
 export interface PublicApiKey {
   key: string;
@@ -11,6 +11,7 @@ export interface PublicUser {
   id: string;
   name: string;
   username: string | null;
+  phone: string | null;
   apiKeys: PublicApiKey[];
   activeKeyIndex: number;
 }
@@ -22,17 +23,15 @@ export function maskKey(key: string): string {
 
 /** Never send api_key/email to the client. Single choke point for user->client. */
 export function toPublicUser(u: StoredUser): PublicUser {
-  const keys = normalizeApiKeyEntries(u.api_keys);
-  const activeKeyIndex = u.api_key ? keys.findIndex((k) => k.apiKey === u.api_key) : -1;
+  // Lot Agent never exposes or selects user-owned API keys. All production
+  // model calls use the server-held managed subscription credential.
+  const phone = maskPhone(u.phone);
   return {
     id: u.id,
     name: u.name ?? u.username ?? "",
     username: u.username ?? null,
-    apiKeys: keys.map((k) => ({
-      key: maskKey(k.apiKey),
-      name: k.name || maskKey(k.apiKey),
-      ...(k.group ? { group: k.group } : {}),
-    })),
-    activeKeyIndex,
+    phone,
+    apiKeys: [],
+    activeKeyIndex: -1,
   };
 }

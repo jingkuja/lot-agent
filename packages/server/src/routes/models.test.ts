@@ -47,6 +47,30 @@ describe("GET /api/models", () => {
     expect(service.tokenhub.listModels).not.toHaveBeenCalled();
   });
 
+  it("normalizes a pre-change cached catalog so server-side defaults are Claude-last", async () => {
+    const cached = JSON.stringify({
+      llm: [{ id: "claude-sonnet-4", type: "llm", provider: "openai" }, { id: "gpt-5.4", type: "llm", provider: "openai" }],
+      image: [],
+      video: [],
+    });
+    const service = svc(cached);
+    const res = await mount(service).request("/");
+    expect((await res.json()).llm.map((model: { id: string }) => model.id)).toEqual(["gpt-5.4", "claude-sonnet-4"]);
+    expect(service.tokenhub.listModels).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse the legacy user-only cache created by a different key", async () => {
+    const cached = JSON.stringify({ llm: [{ id: "old-key-model" }], image: [], video: [] });
+    const service = svc(null);
+    (service.redis.get as ReturnType<typeof vi.fn>).mockImplementation(async (key: string) =>
+      key === "models:u1" ? cached : null
+    );
+    const res = await mount(service).request("/");
+    expect(res.status).toBe(200);
+    expect((await res.json()).llm[0].id).toBe("gpt-5.4");
+    expect(service.tokenhub.listModels).toHaveBeenCalledWith("sk-user");
+  });
+
   it("returns an empty catalog (200) when the user has no api key", async () => {
     const service = {
       redis: { get: vi.fn().mockResolvedValue(null), set: vi.fn() },

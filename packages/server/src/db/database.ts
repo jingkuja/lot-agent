@@ -9,6 +9,7 @@ import { normalizeApiKeyEntries, type RawApiKeyEntry } from "../tokenhub/api-key
 import { SecretBox, createSecretBox, sha256Hex } from "../auth/secret-box.js";
 import { runMigrations } from "./migration-runner.js";
 import { migrations } from "./migrations/index.js";
+import { maskPhone } from "./phone.js";
 
 export interface Conversation {
   id: string;
@@ -114,6 +115,7 @@ export interface StoredAsset {
   width: number | null;
   height: number | null;
   duration_sec: number | null;
+  original_name: string | null;
   created_at: string;
 }
 
@@ -136,8 +138,15 @@ export interface StoredUser {
   created_at: string;
   external_user_id?: number | null;
   username?: string | null;
+  /** Display-safe phone value; the raw number is never persisted locally. */
+  phone?: string | null;
   api_key?: string | null;
   api_keys?: (RawApiKeyEntry | string)[] | null;
+  managed_token_id?: number | null;
+  managed_api_key?: string | null;
+  credential_version?: number;
+  managed_key_status?: string | null;
+  managed_key_provisioned_at?: string | null;
 }
 
 export interface UserBalance {
@@ -195,6 +204,14 @@ const DEFAULT_CONFIG: DBConfig = {
   database: "lot",
 };
 
+function parsePgBigInt(value: number | string, column: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`invalid ${column} returned by PostgreSQL`);
+  }
+  return parsed;
+}
+
 export class DB {
   readonly pool: pg.Pool;
   private readonly secretBox: SecretBox;
@@ -222,10 +239,24 @@ export class DB {
     this.secretBox = secretBox;
   }
 
-  /** Decrypts a user row's `api_key` / `api_keys` in place (mutates and returns `row`).
+  /** Normalizes/decrypts a user row in place (mutates and returns `row`).
+   * PostgreSQL BIGINT values are strings in `pg`; convert the user/token ids
+   * here so callers do not accidentally serialize them as JSON strings.
    * Single choke point so every read path (getUserById, upsertUserByExternalId, …)
-   * returns plaintext consistently. */
-  private openUserRow<T extends { api_key?: string | null; api_keys?: unknown }>(row: T): T {
+   * returns normalized plaintext consistently. */
+  private openUserRow<T extends {
+    external_user_id?: number | string | null;
+    managed_token_id?: number | string | null;
+    api_key?: string | null;
+    api_keys?: unknown;
+    managed_api_key?: string | null;
+  }>(row: T): T {
+    if (row.external_user_id != null) {
+      row.external_user_id = parsePgBigInt(row.external_user_id, "external_user_id") as T["external_user_id"];
+    }
+    if (row.managed_token_id != null) {
+      row.managed_token_id = parsePgBigInt(row.managed_token_id, "managed_token_id") as T["managed_token_id"];
+    }
     if (row.api_key) {
       row.api_key = this.secretBox.open(row.api_key) as T["api_key"];
     }
@@ -234,6 +265,9 @@ export class DB {
         ...e,
         apiKey: this.secretBox.open(e.apiKey),
       })) as T["api_keys"];
+    }
+    if (row.managed_api_key) {
+      row.managed_api_key = this.secretBox.open(row.managed_api_key) as T["managed_api_key"];
     }
     return row;
   }
@@ -247,6 +281,14 @@ export class DB {
    */
   async migrate(): Promise<void> {
     await runMigrations(this.pool, migrations);
+
+    // Keep the physical schema as the source of truth during rolling upgrades.
+    // A previous deployment can have recorded migration 19 while its DDL was
+    // interrupted or applied to a different database; managed login writes
+    // this column, so repair that drift before the server accepts requests.
+    await this.pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32)
+    `);
   }
 
   // ── Conversations ──
@@ -257,13 +299,14 @@ export class DB {
     model?: string,
     provider?: string,
     agentId?: string,
-    userId?: string
+    userId?: string,
+    metadata?: Record<string, unknown>
   ): Promise<Conversation> {
     const { rows } = await this.pool.query(
-      `INSERT INTO conversations (id, title, model, provider, agent_id, user_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO conversations (id, title, model, provider, agent_id, user_id, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
        RETURNING *`,
-      [id, title, model ?? null, provider ?? null, agentId ?? "general", userId ?? "default"]
+      [id, title, model ?? null, provider ?? null, agentId ?? "general", userId ?? "default", JSON.stringify(metadata ?? {})]
     );
     return rows[0];
   }
@@ -346,6 +389,44 @@ export class DB {
       "UPDATE conversations SET metadata = metadata || $1::jsonb WHERE id = $2",
       [JSON.stringify(patch), id]
     );
+  }
+
+  async getConversationCustomerContext(
+    id: string,
+    userId: string
+  ): Promise<{ id: string; displayName: string } | null> {
+    const { rows } = await this.pool.query(
+      `SELECT metadata->'digitalEmployeeCurrentProfile' AS context
+       FROM conversations WHERE id = $1 AND user_id = $2 AND status = 'active'`,
+      [id, userId]
+    );
+    const value = rows[0]?.context;
+    if (!value || typeof value !== "object") return null;
+    const profileId = (value as Record<string, unknown>).id;
+    const displayName = (value as Record<string, unknown>).displayName;
+    return typeof profileId === "string" && typeof displayName === "string"
+      ? { id: profileId, displayName }
+      : null;
+  }
+
+  async setConversationCustomerContext(
+    id: string,
+    userId: string,
+    profile: { id: string; displayName: string } | null
+  ): Promise<boolean> {
+    const { rowCount } = profile
+      ? await this.pool.query(
+          `UPDATE conversations
+           SET metadata = metadata || jsonb_build_object('digitalEmployeeCurrentProfile', $1::jsonb)
+           WHERE id = $2 AND user_id = $3 AND status = 'active'`,
+          [JSON.stringify(profile), id, userId]
+        )
+      : await this.pool.query(
+          `UPDATE conversations SET metadata = metadata - 'digitalEmployeeCurrentProfile'
+           WHERE id = $1 AND user_id = $2 AND status = 'active'`,
+          [id, userId]
+        );
+    return (rowCount ?? 0) > 0;
   }
 
   async updateConversationTitle(id: string, title: string): Promise<void> {
@@ -829,10 +910,11 @@ export class DB {
     width?: number | null;
     height?: number | null;
     durationSec?: number | null;
+    originalName?: string | null;
   }): Promise<void> {
     await this.pool.query(
-      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec, original_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         a.id,
         a.taskId ?? null,
@@ -845,6 +927,7 @@ export class DB {
         a.width ?? null,
         a.height ?? null,
         a.durationSec ?? null,
+        a.originalName ?? null,
       ]
     );
   }
@@ -853,6 +936,22 @@ export class DB {
     const { rows } = await this.pool.query(
       "SELECT * FROM assets WHERE id = $1",
       [id]
+    );
+    return rows[0] ?? null;
+  }
+
+  async listUserUploads(userId: string): Promise<StoredAsset[]> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM assets WHERE user_id = $1 AND type = 'upload' ORDER BY created_at DESC, id DESC",
+      [userId]
+    );
+    return rows;
+  }
+
+  async deleteUserUpload(id: string, userId: string): Promise<StoredAsset | null> {
+    const { rows } = await this.pool.query(
+      "DELETE FROM assets WHERE id = $1 AND user_id = $2 AND type = 'upload' RETURNING *",
+      [id, userId]
     );
     return rows[0] ?? null;
   }
@@ -896,13 +995,80 @@ export class DB {
     return this.openUserRow(rows[0]);
   }
 
-  async getUserApiKey(userId: string): Promise<string | null> {
+  async upsertManagedUser(args: {
+    externalUserId: number;
+    username: string;
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    tokenId: number;
+    apiKey: string;
+    credentialVersion: number;
+    status?: string;
+  }): Promise<StoredUser> {
+    const sealedManagedKey = this.secretBox.seal(args.apiKey);
     const { rows } = await this.pool.query(
-      "SELECT api_key FROM users WHERE id = $1",
+      `INSERT INTO users (
+         external_user_id, username, name, email, phone, managed_token_id,
+         managed_api_key, credential_version, managed_key_status, managed_key_provisioned_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+       ON CONFLICT (external_user_id) DO UPDATE SET
+         username = EXCLUDED.username,
+         name = EXCLUDED.name,
+         email = COALESCE(EXCLUDED.email, users.email),
+         phone = COALESCE(EXCLUDED.phone, users.phone),
+         managed_token_id = EXCLUDED.managed_token_id,
+         managed_api_key = EXCLUDED.managed_api_key,
+         credential_version = EXCLUDED.credential_version,
+         managed_key_status = EXCLUDED.managed_key_status,
+         managed_key_provisioned_at = now()
+       RETURNING *`,
+      [
+        args.externalUserId,
+        args.username,
+        args.name,
+        args.email?.trim() || null,
+        maskPhone(args.phone),
+        args.tokenId,
+        sealedManagedKey,
+        args.credentialVersion,
+        args.status ?? "active",
+      ]
+    );
+    return this.openUserRow(rows[0]);
+  }
+
+  async updateUserPhone(id: string, phone: string): Promise<StoredUser | null> {
+    const { rows } = await this.pool.query(
+      "UPDATE users SET phone = $2 WHERE id = $1 RETURNING *",
+      [id, maskPhone(phone)]
+    );
+    return rows[0] ? this.openUserRow(rows[0]) : null;
+  }
+
+  async getUserApiKey(userId: string, managedOnly = false): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      "SELECT managed_api_key, api_key FROM users WHERE id = $1",
       [userId]
     );
-    const raw = rows[0]?.api_key ?? null;
+    const raw = rows[0]?.managed_api_key ?? (managedOnly ? null : rows[0]?.api_key) ?? null;
     return raw ? this.secretBox.open(raw) : null;
+  }
+
+  async getUserRuntimeApiKeys(userId: string, managedOnly = false): Promise<RawApiKeyEntry[]> {
+    const { rows } = await this.pool.query(
+      "SELECT managed_api_key, api_keys FROM users WHERE id = $1",
+      [userId]
+    );
+    const managed = rows[0]?.managed_api_key as string | null | undefined;
+    if (managed) {
+      return [{ apiKey: this.secretBox.open(managed), name: "Lot Agent 托管订阅" }];
+    }
+    if (managedOnly) return [];
+    return normalizeApiKeyEntries(rows[0]?.api_keys).map((entry) => ({
+      ...entry,
+      apiKey: this.secretBox.open(entry.apiKey),
+    }));
   }
 
   async getUserApiKeys(userId: string): Promise<RawApiKeyEntry[]> {
@@ -1150,6 +1316,15 @@ export class DB {
     return Number(rows[0].total);
   }
 
+  async getTotalSpend(userId: string): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT COALESCE(SUM(total_cost), 0) AS total
+       FROM usage_logs WHERE user_id = $1`,
+      [userId]
+    );
+    return Number(rows[0].total);
+  }
+
   // ── User agents (Agent 中心) ──
 
   async getUserAgents(userId: string): Promise<Map<string, number>> {
@@ -1164,7 +1339,7 @@ export class DB {
 
     let rows = await read();
     if (rows.length === 0) {
-      // 懒播种默认安装集(general/image/video),sort_order 按数组下标。
+      // 懒播种默认安装集(digital employee/image/video),sort_order 按数组下标。
       for (let i = 0; i < DEFAULT_INSTALLED_AGENT_IDS.length; i++) {
         await this.pool.query(
           `INSERT INTO user_agents (user_id, agent_id, sort_order) VALUES ($1, $2, $3)

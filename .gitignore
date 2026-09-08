@@ -20,3 +20,4 @@ config/*.tmp
 *.db
 *.log
 packages/desktop/release/
+design/

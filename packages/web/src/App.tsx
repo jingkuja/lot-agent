@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Login } from "./components/Login.js";
-import { Workspace } from "./pages/Workspace.js";
+import { ProductShell } from "./shell/ProductShell.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
 import { Titlebar } from "./components/Titlebar.js";
 import { DownloadToast } from "./components/DownloadToast.js";
@@ -95,7 +95,7 @@ export default function App() {
       </div>
     );
   } else if (view === "ready" && user) {
-    content = <Workspace user={user} onLogout={handleLogout} />;
+    content = <ProductShell user={user} onLogout={handleLogout} />;
   } else {
     content = <Login onLogin={handleLogin} initialError={loginError} />;
   }

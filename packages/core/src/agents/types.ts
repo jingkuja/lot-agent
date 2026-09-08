@@ -1,6 +1,6 @@
 import type { ChatParams } from "../types/index.js";
 
-export type AgentType = "general" | "copywriting" | "image" | "video" | "ppt" | "contract";
+export type AgentType = "general" | "digital_employee" | "copywriting" | "image" | "video" | "ppt" | "contract";
 
 export interface AgentDefinition {
   id: string;

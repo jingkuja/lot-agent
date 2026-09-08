@@ -28,9 +28,10 @@ describe("normalizeImageSize", () => {
     expect(normalizeImageSize("invalid")).toBe("1024x1024");
   });
 
-  it("caps the longest edge at 1024 while preserving the ratio", () => {
-    expect(normalizeImageSize("2048x2048")).toBe("1024x1024");
-    expect(normalizeImageSize("2048x1152")).toBe("1024x576");
+  it("passes through well-formed sizes including the 1536px presets", () => {
+    expect(normalizeImageSize("1536x1024")).toBe("1536x1024");
+    expect(normalizeImageSize("1024x1536")).toBe("1024x1536");
+    expect(normalizeImageSize("1280x720")).toBe("1280x720");
     expect(normalizeImageSize("768x1024")).toBe("768x1024");
   });
 });
@@ -60,18 +61,18 @@ describe("OpenAIImagesImageProvider", () => {
     });
   });
 
-  it("caps a stale 2048px request to 1024px before sending it to Tokenhub", async () => {
+  it("sends a landscape 1536x1024 preset without downscaling", async () => {
     const fetchMock = vi.fn(async () => okResponse({ data: [{ url: "https://x/y.png" }] }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "gpt-image-2" });
 
-    await provider.create({ prompt: "生成一只猫", size: "2048x2048" });
+    await provider.create({ prompt: "生成一只猫", size: "1536x1024" });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(init.body as string).size).toBe("1024x1024");
+    expect(JSON.parse(init.body as string).size).toBe("1536x1024");
   });
 
-  it("uses /images/edits and Tokenhub's single Base64 image field when a reference is supplied", async () => {
+  it("uses /images/edits and sends even a single reference as Tokenhub's image array", async () => {
     const fetchMock = vi.fn(async () => okResponse({ data: [{ url: "https://x/y.png" }] }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "gpt-image-2" });
@@ -87,22 +88,63 @@ describe("OpenAIImagesImageProvider", () => {
     expect(url).toBe("https://api/v1/images/edits");
     expect(JSON.parse(init.body as string)).toEqual({
       model: "gpt-image-2",
-      image: "data:image/png;base64,YQ==",
+      image: ["data:image/png;base64,YQ=="],
       prompt: "改成水彩画",
       size: "1024x1024",
       n: 1,
     });
   });
 
-  it("rejects multiple reference images instead of silently dropping one", async () => {
+  it("sends two reference images as Tokenhub's image array", async () => {
+    const fetchMock = vi.fn(async () => okResponse({ data: [{ url: "https://x/y.png" }] }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "gpt-image-2" });
+
+    await provider.create({
+      prompt: "以第一张图为主体，参考第二张图的水彩风格",
+      size: "1024x1024",
+      n: 1,
+      media: [
+        { type: "reference_image", url: "data:image/jpeg;base64,YQ==" },
+        { type: "reference_image", url: "data:image/png;base64,Yg==" },
+      ],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api/v1/images/edits");
+    expect(JSON.parse(init.body as string)).toEqual({
+      model: "gpt-image-2",
+      image: ["data:image/jpeg;base64,YQ==", "data:image/png;base64,Yg=="],
+      prompt: "以第一张图为主体，参考第二张图的水彩风格",
+      size: "1024x1024",
+      n: 1,
+    });
+  });
+
+  it("sends five reference images as Tokenhub's image array", async () => {
+    const fetchMock = vi.fn(async () => okResponse({ data: [{ url: "https://x/y.png" }] }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "gpt-image-2" });
+    const media = Array.from({ length: 5 }, (_, i) => ({
+      type: "reference_image" as const,
+      url: `data:image/png;base64,${i}`,
+    }));
+
+    await provider.create({ prompt: "改图", media });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).image).toEqual(media.map((item) => item.url));
+  });
+
+  it("rejects more than five reference images instead of silently dropping extras", async () => {
     const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "gpt-image-2" });
     await expect(provider.create({
       prompt: "改图",
-      media: [
-        { type: "reference_image", url: "data:image/png;base64,YQ==" },
-        { type: "reference_image", url: "data:image/png;base64,Yg==" },
-      ],
-    })).rejects.toThrow(/exactly one reference image/i);
+      media: Array.from({ length: 6 }, (_, i) => ({
+        type: "reference_image" as const,
+        url: `data:image/png;base64,${i}`,
+      })),
+    })).rejects.toThrow(/at most 5 reference images/i);
   });
 
   it("returns b64_json output as a data URL for the existing server-side downloader", async () => {

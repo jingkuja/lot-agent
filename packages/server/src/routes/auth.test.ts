@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createAuthRoutes } from "./auth.js";
+import { TokenhubClientError } from "../tokenhub/client.js";
 
 function fakeService() {
   return {
@@ -8,6 +9,50 @@ function fakeService() {
     sessions: { createSession: vi.fn().mockResolvedValue("tok-1") },
   } as unknown as import("../services/agent-service.js").AgentService;
 }
+
+function fakeManagedService() {
+  const service = {
+    managedKeysEnabled: true,
+    tokenhub: {
+      login: vi.fn(),
+      tokenLogin: vi.fn(),
+      registerAgentUser: vi.fn(),
+      sendAgentEmailVerification: vi.fn(),
+      sendAgentPasswordResetEmail: vi.fn(),
+      resetAgentPassword: vi.fn(),
+      sendAgentPhoneVerification: vi.fn(),
+      authenticateAgentUserByPhone: vi.fn(),
+      sendAgentPhoneBindingVerification: vi.fn(),
+      bindAgentPhone: vi.fn(),
+    },
+    db: {
+      upsertManagedUser: vi.fn(),
+      updateUserPhone: vi.fn(),
+      getUserById: vi.fn().mockResolvedValue({ external_user_id: 7 }),
+    },
+    sessions: {
+      createSession: vi.fn().mockResolvedValue("tok-managed"),
+      resolve: vi.fn().mockResolvedValue({ userId: "u7" }),
+    },
+  };
+  return service as unknown as import("../services/agent-service.js").AgentService;
+}
+
+const managedResult = {
+  userId: 7,
+  username: "alice",
+  name: "Alice",
+  phone: "13800138000",
+  managedKey: { tokenId: 9, apiKey: "managed-secret", credentialVersion: 2, remainQuota: 0 },
+  created: false,
+};
+
+const storedManagedUser = {
+  id: "u7", email: null, name: "Alice", created_at: "t",
+  external_user_id: 7, username: "alice", api_key: "managed-secret", api_keys: [],
+  phone: "138****8000",
+  managed_token_id: 9, managed_credential_version: 2,
+};
 
 async function encryptFor(app: ReturnType<typeof createAuthRoutes>, pw: string) {
   const { publicEncrypt, constants } = await import("node:crypto");
@@ -42,7 +87,8 @@ describe("auth login", () => {
     expect(json.token).toBe("tok-1");
     expect(json.user).toEqual({
       id: "u1", name: "138", username: "138",
-      apiKeys: [{ key: "sk-SEC***CRET", name: "开放API密钥" }], activeKeyIndex: 0,
+      phone: null,
+      apiKeys: [], activeKeyIndex: -1,
     });
     expect(JSON.stringify(json)).not.toContain("sk-SECRETSECRET");
     expect(svc.tokenhub.login).toHaveBeenCalledWith("138", "pw");
@@ -152,6 +198,160 @@ describe("auth token-login", () => {
     });
     expect(res.status).toBe(401);
     expect((await res.json()).error).toBe("登录失败，请稍后再试或者联系管理员");
+  });
+});
+
+describe("managed contact verification", () => {
+  it("requires an email and verification code for registration", async () => {
+    const svc = fakeManagedService();
+    const res = await createAuthRoutes(svc).request("/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "alice", encryptedPassword: "not-used" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("注册必须绑定邮箱并完成邮箱验证");
+    expect(svc.tokenhub.registerAgentUser).not.toHaveBeenCalled();
+  });
+
+  it("blocks an occupied email before reporting a code as sent", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.sendAgentEmailVerification as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new TokenhubClientError("new_api_email_verification_failed", "email_taken")
+    );
+    const res = await createAuthRoutes(svc).request("/verification/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "used@example.com" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "该邮箱已被其他用户使用", code: "email_taken" });
+  });
+
+  it("forwards password reset requests to new-api with the public Lot Agent page", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.sendAgentPasswordResetEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      expiresIn: 600,
+      resendAfter: 60,
+    });
+    const res = await createAuthRoutes(svc).request("/password-reset/request", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://lot.example",
+      },
+      body: JSON.stringify({ email: "alice@example.com" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, expiresIn: 600 });
+    expect(svc.tokenhub.sendAgentPasswordResetEmail).toHaveBeenCalledWith(
+      "alice@example.com",
+      "https://lot.example/reset-password"
+    );
+  });
+
+  it("forwards password reset confirmation to new-api", async () => {
+    const svc = fakeManagedService();
+    const res = await createAuthRoutes(svc).request("/password-reset/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "alice@example.com",
+        token: "reset-token",
+        password: "password2",
+        confirmPassword: "password2",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(svc.tokenhub.resetAgentPassword).toHaveBeenCalledWith({
+      email: "alice@example.com",
+      token: "reset-token",
+      password: "password2",
+      confirmPassword: "password2",
+    });
+  });
+
+  it("passes both optional bindings and their codes to managed registration", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.registerAgentUser as ReturnType<typeof vi.fn>).mockResolvedValue(managedResult);
+    (svc.db.upsertManagedUser as ReturnType<typeof vi.fn>).mockResolvedValue(storedManagedUser);
+    const app = createAuthRoutes(svc);
+    const encryptedPassword = await encryptFor(app, "password1");
+    const res = await app.request("/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: "alice",
+        encryptedPassword,
+        email: "alice@example.com",
+        emailVerificationCode: "123456",
+        phone: "13800138000",
+        phoneVerificationCode: "654321",
+        requestId: "req-1",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(svc.tokenhub.registerAgentUser).toHaveBeenCalledWith(expect.objectContaining({
+      email: "alice@example.com",
+      emailVerificationCode: "123456",
+      phone: "13800138000",
+      phoneVerificationCode: "654321",
+    }));
+  });
+
+  it("creates a local session after phone-code authentication", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.authenticateAgentUserByPhone as ReturnType<typeof vi.fn>).mockResolvedValue(managedResult);
+    (svc.db.upsertManagedUser as ReturnType<typeof vi.fn>).mockResolvedValue(storedManagedUser);
+    const res = await createAuthRoutes(svc).request("/phone-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ token: "tok-managed", user: { id: "u7", username: "alice" } });
+    expect(svc.tokenhub.authenticateAgentUserByPhone).toHaveBeenCalledWith("13800138000", "123456");
+  });
+
+  it("binds a phone only for the managed user resolved from the local session", async () => {
+    const svc = fakeManagedService();
+    (svc.tokenhub.sendAgentPhoneBindingVerification as ReturnType<typeof vi.fn>).mockResolvedValue({
+      expiresIn: 600,
+      resendAfter: 60,
+    });
+    (svc.tokenhub.bindAgentPhone as ReturnType<typeof vi.fn>).mockResolvedValue({ phone: "13800138000" });
+    const app = createAuthRoutes(svc);
+
+    const send = await app.request("/phone-binding/verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer local-session" },
+      body: JSON.stringify({ phone: "13800138000" }),
+    });
+    expect(send.status).toBe(200);
+    expect(svc.tokenhub.sendAgentPhoneBindingVerification).toHaveBeenCalledWith(7, "13800138000");
+
+    const bind = await app.request("/phone-binding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer local-session" },
+      body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
+    });
+    expect(bind.status).toBe(200);
+    expect(await bind.json()).toEqual({ ok: true, phone: "138****8000" });
+    expect(svc.tokenhub.bindAgentPhone).toHaveBeenCalledWith(7, "13800138000", "123456");
+    expect(svc.db.updateUserPhone).toHaveBeenCalledWith("u7", "13800138000");
+  });
+
+  it("rejects phone binding without a valid local session", async () => {
+    const svc = fakeManagedService();
+    (svc.sessions.resolve as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const res = await createAuthRoutes(svc).request("/phone-binding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer expired" },
+      body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
+    });
+    expect(res.status).toBe(401);
+    expect(svc.tokenhub.bindAgentPhone).not.toHaveBeenCalled();
   });
 });
 

@@ -52,6 +52,20 @@ describe("runGenerationJob", () => {
     expect(calls.metered).toBe(true);
   });
 
+  it("forwards image quality to the provider, defaulting to auto", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const { deps } = fakeDeps(provider);
+    await runGenerationJob(deps, job, "image");
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ quality: "auto", size: "1024x1024" }));
+
+    const high = { ...job, input: { ...job.input, quality: "high" } };
+    await runGenerationJob(deps, high, "image");
+    expect(provider.create).toHaveBeenLastCalledWith(expect.objectContaining({ quality: "high" }));
+  });
+
   it("marks message failed and rethrows when poll returns failed", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
@@ -107,6 +121,7 @@ describe("runGenerationJob", () => {
         input_reference: ["https://box.example.com/static/uploads/image.png"],
         reference_video: "https://box.example.com/static/uploads/reference.mp4",
         reference_audio: ["https://box.example.com/static/uploads/audio.mp3"],
+        generate_audio: true,
         first_frame: "https://box.example.com/static/uploads/first.png",
         last_frame: "https://box.example.com/static/uploads/last.png",
         media: [
@@ -143,6 +158,38 @@ describe("runGenerationJob", () => {
       media: [{ type: "reference_image", url: "data:image/png;base64,cmVmZXJlbmNl" }],
     }));
     expect(deps.urlToBytes).toHaveBeenCalledWith("/static/uploads/reference.png", { signal: undefined });
+  });
+
+  it("encodes two image-edit references as Base64 data URLs before calling the provider", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const { deps } = fakeDeps(provider, {
+      urlToBytes: vi.fn(async (url: string) => ({
+        body: Buffer.from(url.includes("a.png") ? "first" : "second"),
+        mime: url.includes("a.png") ? "image/jpeg" : "image/png",
+      })),
+    });
+    const imageJob = {
+      ...job,
+      input: {
+        ...job.input,
+        media: [
+          { type: "reference_image", url: "/static/uploads/a.png" },
+          { type: "reference_image", url: "/static/uploads/b.png" },
+        ],
+      },
+    };
+
+    await runGenerationJob(deps, imageJob, "image");
+
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({
+      media: [
+        { type: "reference_image", url: "data:image/jpeg;base64,Zmlyc3Q=" },
+        { type: "reference_image", url: "data:image/png;base64,c2Vjb25k" },
+      ],
+    }));
   });
 
   it("persists the vendor task id after create, then polls with it", async () => {

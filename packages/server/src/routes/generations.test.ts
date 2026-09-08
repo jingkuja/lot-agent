@@ -58,7 +58,7 @@ describe("POST /conversations/:id/generations", () => {
     expect(body.assistantMessage.metadata.supportsProgress).toBe(false);
     expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
       "image.generate",
-      expect.objectContaining({ prompt: "菊花", conversationId: "c1", assistantMessageId: body.assistantMessage.id, size: "1024x1024" }),
+      expect.objectContaining({ prompt: "菊花", conversationId: "c1", assistantMessageId: body.assistantMessage.id, size: "1024x1024", quality: "auto" }),
       "u1"
     );
     expect(service.messages).toHaveLength(2);
@@ -73,8 +73,32 @@ describe("POST /conversations/:id/generations", () => {
     });
     expect(res.status).toBe(202);
     const body = await res.json();
-    expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], { userId: "u1" });
+    expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], {
+      userId: "u1",
+      digitalEmployee: false,
+    });
     expect(body.title).toBe("菊花特写");
+  });
+
+  it("marks digital-employee generation titles as user-TokenHub-only", async () => {
+    const service = fakeService();
+    service.db.getConversation = vi.fn(async () => ({
+      id: "c1", user_id: "u1", agent_id: "digital_employee",
+    }));
+    await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "营销海报", mediaType: "image", settings: { n: 1 } }),
+    });
+    expect(service.generateTitle).toHaveBeenCalledWith("c1", "营销海报", [], {
+      userId: "u1",
+      digitalEmployee: true,
+    });
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({ requireUserModelKey: true }),
+      "u1"
+    );
   });
 
   it("404s when the conversation belongs to another user", async () => {
@@ -110,7 +134,7 @@ describe("POST /conversations/:id/generations", () => {
     expect(input.conversationId).toBe("c1");
     expect(input.userId).toBeUndefined();
     // The persisted metadata must not echo the forged identity fields either.
-    expect(body.assistantMessage.metadata.settings).toEqual({ n: 1 });
+    expect(body.assistantMessage.metadata.settings).toEqual({ n: 1, quality: "auto" });
   });
 
   it("threads media (reference images) into the enqueued input", async () => {
@@ -129,7 +153,53 @@ describe("POST /conversations/:id/generations", () => {
     );
   });
 
-  it("rejects image edits with more than one reference image", async () => {
+  it("threads two image-edit references into the enqueued input", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "以第一张图为主体，参考第二张图的水彩风格",
+        mediaType: "image",
+        media: [
+          { type: "reference_image", url: "/static/uploads/a.png" },
+          { type: "reference_image", url: "/static/uploads/b.png" },
+        ],
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({
+        media: [
+          { type: "reference_image", url: "/static/uploads/a.png" },
+          { type: "reference_image", url: "/static/uploads/b.png" },
+        ],
+      }),
+      "u1"
+    );
+  });
+
+  it("accepts five image-edit references", async () => {
+    const service = fakeService();
+    const media = Array.from({ length: 5 }, (_, i) => ({
+      type: "reference_image",
+      url: `/static/uploads/${i}.png`,
+    }));
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", media }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({ media }),
+      "u1"
+    );
+  });
+
+  it("rejects image edits with more than five reference images", async () => {
     const service = fakeService();
     const res = await app(service).request("/conversations/c1/generations", {
       method: "POST",
@@ -137,10 +207,10 @@ describe("POST /conversations/:id/generations", () => {
       body: JSON.stringify({
         prompt: "菊花",
         mediaType: "image",
-        media: [
-          { type: "reference_image", url: "/static/uploads/a.png" },
-          { type: "reference_image", url: "/static/uploads/b.png" },
-        ],
+        media: Array.from({ length: 6 }, (_, i) => ({
+          type: "reference_image",
+          url: `/static/uploads/${i}.png`,
+        })),
       }),
     });
     expect(res.status).toBe(400);
@@ -158,6 +228,7 @@ describe("POST /conversations/:id/generations", () => {
         input_reference: ["/static/uploads/a.png", "/static/uploads/b.png"],
         reference_video: ["/static/uploads/r1.mp4", "/static/uploads/r2.mp4"],
         reference_audio: ["/static/uploads/a1.mp3"],
+        generate_audio: true,
         first_frame: "/static/uploads/first.png",
         last_frame: "/static/uploads/last.png",
       }),
@@ -175,6 +246,111 @@ describe("POST /conversations/:id/generations", () => {
       }),
       "u1"
     );
+  });
+
+  it("defaults video generation audio to false when no reference audio is supplied", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "无声视频", mediaType: "video", settings: {} }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.assistantMessage.metadata.settings.generate_audio).toBe(false);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "video.generate",
+      expect.objectContaining({ generate_audio: false }),
+      "u1",
+    );
+  });
+
+  it("forces video generation audio on when reference audio is supplied", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "参考音频视频",
+        mediaType: "video",
+        settings: { generate_audio: false },
+        reference_audio: "/static/uploads/reference.mp3",
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "video.generate",
+      expect.objectContaining({ reference_audio: "/static/uploads/reference.mp3", generate_audio: true }),
+      "u1",
+    );
+  });
+
+  it("threads image quality into the enqueued input", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        settings: { size: "1536x1024", quality: "high" },
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "image.generate",
+      expect.objectContaining({ size: "1536x1024", quality: "high" }),
+      "u1"
+    );
+  });
+
+  it("rejects the old 16:9 1024x576 size below the pixel budget", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        settings: { size: "1024x576" },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "分辨率过低，宽×高不能小于 655360 像素" });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("rejects an image size whose aspect ratio exceeds 1:3 or 3:1", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        settings: { size: "512x2048" },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "宽高比不能超过 1:3 或 3:1" });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("rejects a custom size on gpt-image 1.5", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        model: "gpt-image-1.5",
+        settings: { size: "1280x720" },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "当前模型不支持自定义分辨率" });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
   });
 
   it("rejects video references over their limits", async () => {

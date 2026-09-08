@@ -6,6 +6,61 @@ export interface CatalogModel {
   description?: string;
 }
 
+/** Keep the catalog's existing order while grouping Claude LLMs at the end. */
+export function moveClaudeModelsToEnd(models: CatalogModel[]): CatalogModel[] {
+  const nonClaude: CatalogModel[] = [];
+  const claude: CatalogModel[] = [];
+  for (const model of models) {
+    (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
+  }
+  return [...nonClaude, ...claude];
+}
+
+/** gpt-image 1.5 only accepts the three standard sizes; custom WxH is rejected. */
+export function isGptImage15(id: string | null | undefined): boolean {
+  return /gpt[-_ ]?image[-_ ]?1[\.\-_]?5(?!\d)/i.test(id ?? "");
+}
+
+/** Seedance (and only Seedance) auto-adapts duration/ratio from a reference video. */
+export function isSeedanceModel(id: string | null | undefined): boolean {
+  return (id ?? "").toLowerCase().includes("seedance");
+}
+
+/** Kling video models (ids like `kling-video-v3-omni`) use a 720p / 1080p / 4k ladder. */
+export function isKlingModel(id: string | null | undefined): boolean {
+  return (id ?? "").toLowerCase().startsWith("kling");
+}
+
+/** Seedance 2.5 (ids like `doubao-seedance-2.5` / `doubao-seedance-2-5`). */
+export function isSeedance25Model(id: string | null | undefined): boolean {
+  return /seedance[^a-z0-9]*2[\.\-_]?5(?!\d)/i.test(id ?? "");
+}
+
+export type SeedanceAssetKind = "Image" | "Video" | "Audio";
+
+export function seedanceAssetMention(kind: SeedanceAssetKind, index: number): string {
+  return `@${kind}${index + 1}`;
+}
+
+/** Mentions required by uploaded assets that are missing from the prompt. */
+export function missingSeedanceMentions(
+  prompt: string,
+  counts: { images?: number; videos?: number; audios?: number }
+): string[] {
+  const text = prompt.toLowerCase();
+  const missing: string[] = [];
+  const check = (kind: SeedanceAssetKind, n: number) => {
+    for (let i = 0; i < n; i++) {
+      const tag = seedanceAssetMention(kind, i);
+      if (!text.includes(tag.toLowerCase())) missing.push(tag);
+    }
+  };
+  check("Image", counts.images ?? 0);
+  check("Video", counts.videos ?? 0);
+  check("Audio", counts.audios ?? 0);
+  return missing;
+}
+
 /** Case-insensitive substring quick-filter over model id (and label if given). */
 export function filterModels(models: CatalogModel[], query: string): CatalogModel[] {
   const q = query.trim().toLowerCase();

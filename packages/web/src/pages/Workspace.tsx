@@ -5,33 +5,74 @@ import { BrandHeader } from "../components/BrandHeader.js";
 import { PreviewPanel } from "../components/PreviewPanel.js";
 import { ArtifactGallery, type Artifact } from "../components/ArtifactGallery.js";
 import { AgentCenterModal } from "../components/AgentCenterModal.js";
-import { KeySettingsModal } from "../components/KeySettingsModal.js";
 import { AgentSwitcher } from "../components/AgentSwitcher.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
-import { useModels } from "../hooks/useModels.js";
+import type { ModelCatalog } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveLlmSelection } from "../lib/model-defaults.js";
+import { digitalEmployeeConversations as filterDigitalEmployeeConversations, withoutDigitalEmployee } from "../lib/product-agent-scope.js";
+import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
+import { DigitalEmployeeHome } from "../modules/digital-employee/DigitalEmployeeHome.js";
+import { MarketingMaterialsHome } from "../modules/digital-employee/marketing/MarketingMaterialsHome.js";
+import { CustomerAcquisitionChatHome } from "../modules/digital-employee/acquisition/CustomerAcquisitionChatHome.js";
+import { OpportunityAdvisorChatHome } from "../modules/digital-employee/opportunities/OpportunityAdvisorChatHome.js";
+import {
+  DigitalEmployeeSidebar,
+  type DigitalEmployeeFeature,
+} from "../modules/digital-employee/DigitalEmployeeSidebar.js";
 
 interface WorkspaceProps {
   user: User;
+  modelCatalog: ModelCatalog;
   onLogout: () => void;
+  onNavigateDigitalEmployee?: () => void;
+  onNavigateDigitalProfile?: (profileId: string) => void;
+  onNavigateDigitalFeature?: (feature: DigitalEmployeeFeature) => void;
+  onNavigateAssistant?: () => void;
+  mode?: "assistant" | "digitalEmployee";
+  digitalEmployeeFeature?: DigitalEmployeeFeature;
+  requestedConversationId?: string | null;
+  onRequestedConversationHandled?: () => void;
 }
 
-export function Workspace({ user, onLogout }: WorkspaceProps) {
+export function Workspace({
+  user,
+  modelCatalog,
+  onLogout,
+  onNavigateDigitalEmployee,
+  onNavigateDigitalProfile,
+  onNavigateDigitalFeature,
+  onNavigateAssistant,
+  mode = "assistant",
+  digitalEmployeeFeature = "customer-profile",
+  requestedConversationId,
+  onRequestedConversationHandled,
+}: WorkspaceProps) {
   const { agents, installed, install, uninstall, promote } = useAgents(true);
+  const isDigitalEmployeeMode = mode === "digitalEmployee";
+  const assistantAgents = useMemo(
+    () => withoutDigitalEmployee(agents),
+    [agents]
+  );
+  const assistantInstalled = useMemo(
+    () => withoutDigitalEmployee(installed),
+    [installed]
+  );
+  const digitalEmployee = agents.find((agent) => agent.id === "digital_employee") ?? null;
 
   // 已安装 agents;general 恒第一(仅用于 Sidebar 标签映射等需要全序的场景)。
   const orderedAgents = useMemo(() => {
-    const general = installed.find((a) => a.type === "general" || a.id === GENERAL_ID);
-    if (!general) return installed;
-    return [general, ...installed.filter((a) => a !== general)];
-  }, [installed]);
+    if (isDigitalEmployeeMode) return digitalEmployee ? [digitalEmployee] : [];
+    const general = assistantInstalled.find((a) => a.type === "general" || a.id === GENERAL_ID);
+    if (!general) return assistantInstalled;
+    return [general, ...assistantInstalled.filter((a) => a !== general)];
+  }, [assistantInstalled, digitalEmployee, isDigitalEmployeeMode]);
 
-  const defaultAgentId = orderedAgents[0]?.id ?? GENERAL_ID;
+  const defaultAgentId = isDigitalEmployeeMode ? "digital_employee" : orderedAgents[0]?.id ?? GENERAL_ID;
   const [activeAgentId, setActiveAgentId] = useState(defaultAgentId);
 
   // newAgentId: page-only "new chat" state. No server conversation exists yet.
@@ -53,22 +94,34 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
 
   // The agent of the chat currently on screen (drives the panel/input/model),
   // decoupled from activeAgentId which only highlights the tab + filters the list.
+  const openConversation = conversations.find((c) => c.id === activeId);
   const openAgentId =
     newAgentId ??
-    conversations.find((c) => c.id === activeId)?.agent_id ??
+    openConversation?.agent_id ??
     defaultAgentId;
-  const openAgent = agents.find((a) => a.id === openAgentId) ?? null;
+  const openAgent = agents.find((a) => a.id === openAgentId) ?? (isDigitalEmployeeMode ? digitalEmployee : null);
+  const currentProfileValue = openConversation?.metadata?.digitalEmployeeCurrentProfile;
+  const currentProfile = currentProfileValue && typeof currentProfileValue === "object"
+    ? currentProfileValue as { id?: unknown; displayName?: unknown }
+    : null;
+  const currentCustomerName = typeof currentProfile?.displayName === "string"
+    ? currentProfile.displayName
+    : null;
 
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [centerOpen, setCenterOpen] = useState(false);
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
+  const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
 
   const handleStreamEnd = useCallback(() => {
-    // The server finalizes the auto-generated title before emitting stream_end,
-    // so refresh right away to pull in the summarized conversation title.
+    // Pull in the completed conversation's persisted messages/order. A later
+    // title SSE event updates the first-turn title separately via handleTitle.
     refresh();
+    // Usage for the completed turn has been persisted before stream_end. Signal
+    // the header balance to fetch the latest remaining points as well.
+    setBalanceRefreshKey((key) => key + 1);
   }, [refresh]);
 
   const activeIdRef = useRef(activeId);
@@ -110,29 +163,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
   );
 
   // Per-user model catalog + per-group (llm/image/video) selected models.
-  const { models: modelCatalog, reload: reloadModels } = useModels();
   const [selectedModels, setSelectedModels] = useState(EMPTY_SELECTED);
-  const [activeKeyIndex, setActiveKeyIndex] = useState(user.activeKeyIndex);
-  const [keyModalOpen, setKeyModalOpen] = useState(false);
-  const [keyBusy, setKeyBusy] = useState(false);
-
-  const handleSelectKey = useCallback(
-    async (index: number) => {
-      setKeyBusy(true);
-      try {
-        await api.setActiveKey(index);
-        setActiveKeyIndex(index);
-        setSelectedModels(EMPTY_SELECTED); // 丢弃旧 key 的选择，等新目录回填
-        reloadModels();
-        setKeyModalOpen(false);
-      } catch {
-        // 切换失败：保持原激活项；弹窗留开供重试
-      } finally {
-        setKeyBusy(false);
-      }
-    },
-    [reloadModels]
-  );
   // Catalog loaded → 各组默认选中接口返回的第一个模型(已选过的槽位不动)。
   useEffect(() => {
     setSelectedModels((prev) => fillModelDefaults(prev, modelCatalog));
@@ -185,11 +216,21 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     [setActiveId, clear]
   );
 
-  // Desktop shortcuts: Cmd/Ctrl+N opens a fresh chat for the agent currently
-  // on screen; Cmd/Ctrl+, opens the key settings modal. No-op in browsers.
+  // A digital-employee feature is a hard business boundary. Switching from
+  // 客户画像/商机雷达 to 获客宝 must never keep the previous conversation's
+  // implicit object or tool scope, even though this Workspace stays mounted.
+  const previousDigitalFeature = useRef(digitalEmployeeFeature);
+  useEffect(() => {
+    const previous = previousDigitalFeature.current;
+    previousDigitalFeature.current = digitalEmployeeFeature;
+    if (!isDigitalEmployeeMode || previous === digitalEmployeeFeature) return;
+    handleStartNewChat("digital_employee");
+  }, [digitalEmployeeFeature, handleStartNewChat, isDigitalEmployeeMode]);
+
+  // Desktop shortcut: Cmd/Ctrl+N opens a fresh chat for the agent currently
+  // on screen. The Agent has no user-selectable API key settings.
   useDesktopShortcuts({
     onNewChat: () => handleStartNewChat(openAgentId),
-    onOpenSettings: () => setKeyModalOpen(true),
   });
 
   const handlePickOverflow = useCallback(
@@ -218,7 +259,16 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
     [conversations, defaultAgentId, setActiveId, loadMessages, clear]
   );
 
-  // 新对话按钮:永远开默认(通用)Agent 的新对话。
+  const handledConversationRequest = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isDigitalEmployeeMode || !requestedConversationId) return;
+    if (handledConversationRequest.current === requestedConversationId) return;
+    handledConversationRequest.current = requestedConversationId;
+    handleSelect(requestedConversationId);
+    onRequestedConversationHandled?.();
+  }, [handleSelect, isDigitalEmployeeMode, onRequestedConversationHandled, requestedConversationId]);
+
+  // 普通工作台新建通用对话；数字员工模块新建内部数字员工对话。
   const handleCreate = useCallback(() => {
     handleStartNewChat(defaultAgentId);
   }, [handleStartNewChat, defaultAgentId]);
@@ -240,7 +290,14 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
         }
       };
       if (newAgentId) {
-        const conv = await api.createConversation(undefined, newAgentId);
+        const featureScope = newAgentId === "digital_employee"
+          ? digitalEmployeeFeature === "copy"
+            ? "customer-acquisition"
+            : digitalEmployeeFeature === "acquisition"
+              ? "opportunity-advisor"
+              : digitalEmployeeFeature
+          : undefined;
+        const conv = await api.createConversation(undefined, newAgentId, featureScope);
         activeIdRef.current = conv.id;
         setActiveId(conv.id);
         setNewAgentId(null);
@@ -253,7 +310,7 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       }
       dispatch();
     },
-    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels]
+    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, digitalEmployeeFeature]
   );
 
   const handleDelete = useCallback(
@@ -312,6 +369,21 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       ...filtered,
     ];
   }, [newAgentId, conversations, activeAgentId]);
+  const digitalEmployeeConversations = useMemo(
+    () => filterDigitalEmployeeConversations(conversations),
+    [conversations]
+  );
+  const featureScopedDigitalEmployeeConversations = useMemo(() => {
+    const scope = digitalEmployeeFeature === "copy"
+      ? "customer-acquisition"
+      : digitalEmployeeFeature === "acquisition"
+        ? "opportunity-advisor"
+        : digitalEmployeeFeature;
+    return digitalEmployeeConversations.filter((conversation) => {
+      const stored = conversation.metadata?.digitalEmployeeFeatureScope;
+      return stored === scope || (stored === undefined && scope === "customer-profile");
+    });
+  }, [digitalEmployeeConversations, digitalEmployeeFeature]);
 
   // 当前 hero Agent 对应的模型分组;切组时各组各自记住上次的选择。
   const modelGroup = groupForKind(openAgent?.type || openAgent?.id);
@@ -328,7 +400,10 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
           onLogout={onLogout}
           onCollapse={() => setSidebarCollapsed(true)}
           onOpenAgentCenter={() => setCenterOpen(true)}
-          onOpenKeySettings={() => setKeyModalOpen(true)}
+          onOpenAssistant={isDigitalEmployeeMode ? onNavigateAssistant : () => {}}
+          onOpenDigitalEmployee={isDigitalEmployeeMode ? () => {} : onNavigateDigitalEmployee}
+          activeModule={isDigitalEmployeeMode ? "digitalEmployee" : "assistant"}
+          balanceRefreshKey={balanceRefreshKey}
           onOpenKnowledgeBase={() => {
             const popup = window.open("about:blank", "_blank");
             void api.getKnowledgeBaseLink()
@@ -342,20 +417,38 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
               .catch(() => popup?.close());
           }}
         />
-        <Sidebar
-          conversations={sidebarConversations}
-          installedAgents={installed}
-          activeAgentId={activeAgentId}
-          onSwitchAgent={handleFilterAgent}
-          switchDisabled={isStreaming}
-          activeId={newAgentId ? "__new__" : activeId}
-          onSelect={handleSelect}
-          onDelete={handleDelete}
-          onCreate={handleCreate}
-          onLoadMore={loadMore}
-          hasMore={hasMore}
-          loadingMore={loadingMore}
-        />
+        {isDigitalEmployeeMode ? (
+          <DigitalEmployeeSidebar
+            activeFeature={digitalEmployeeFeature}
+            conversations={featureScopedDigitalEmployeeConversations}
+            activeConversationId={activeId}
+            onOpenFeature={(feature) => {
+              if (feature === digitalEmployeeFeature) handleStartNewChat("digital_employee");
+              else onNavigateDigitalFeature?.(feature);
+            }}
+            onOpenConversation={handleSelect}
+            onNewConversation={() => handleStartNewChat("digital_employee")}
+            onDeleteConversation={handleDelete}
+            onLoadMore={loadMore}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+          />
+        ) : (
+          <Sidebar
+            conversations={sidebarConversations}
+            installedAgents={assistantInstalled}
+            activeAgentId={activeAgentId}
+            onSwitchAgent={handleFilterAgent}
+            switchDisabled={isStreaming}
+            activeId={newAgentId ? "__new__" : activeId}
+            onSelect={handleSelect}
+            onDelete={handleDelete}
+            onCreate={handleCreate}
+            onLoadMore={loadMore}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+          />
+        )}
       </div>
 
       <div className="workspace-main">
@@ -386,13 +479,27 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             }
             agent={openAgent}
             inputAbove={
-              <AgentSwitcher
-                agents={installed}
-                activeId={openAgentId}
-                onSwitch={handleStartNewChat}
-                onPickOverflow={handlePickOverflow}
-                disabled={isStreaming}
-              />
+              <>
+                {!isDigitalEmployeeMode && (
+                  <AgentSwitcher
+                    agents={assistantInstalled}
+                    activeId={openAgentId}
+                    onSwitch={handleStartNewChat}
+                    onPickOverflow={handlePickOverflow}
+                    disabled={isStreaming}
+                  />
+                )}
+                {isDigitalEmployeeMode && onNavigateDigitalEmployee && (
+                  <DigitalEmployeeActions
+                    feature={digitalEmployeeFeature}
+                    onOpenProfiles={onNavigateDigitalEmployee}
+                    currentCustomerName={currentCustomerName}
+                    onClearCurrentCustomer={activeId ? () => {
+                      void api.clearDigitalEmployeeContext(activeId).then(() => refresh()).catch(() => {});
+                    } : undefined}
+                  />
+                )}
+              </>
             }
             userName={user.name}
             modelCatalog={modelCatalog}
@@ -400,6 +507,25 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
             onModelChange={handleModelChange}
             knowledgeBases={conversationKnowledgeBases}
             onKnowledgeBasesChange={handleKnowledgeBasesChange}
+            emptyDashboard={isDigitalEmployeeMode && onNavigateDigitalEmployee ? (
+              digitalEmployeeFeature === "marketing-materials" ? <MarketingMaterialsHome
+                onOpenManagement={onNavigateDigitalEmployee}
+                onPrompt={(prompt) => void doSend(prompt)}
+              /> : digitalEmployeeFeature === "copy" ? <CustomerAcquisitionChatHome
+                onOpenWorkspace={onNavigateDigitalEmployee}
+                onPrompt={(prompt) => void doSend(prompt)}
+              /> : digitalEmployeeFeature === "acquisition" ? <OpportunityAdvisorChatHome
+                onOpenWorkspace={onNavigateDigitalEmployee}
+                onPrompt={(prompt) => void doSend(prompt)}
+              /> : <DigitalEmployeeHome
+                onOpenProfiles={onNavigateDigitalEmployee}
+                onOpenProfile={onNavigateDigitalProfile ?? onNavigateDigitalEmployee}
+                onOpenOpportunities={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("acquisition") : undefined}
+                onOpenAcquisition={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("copy") : undefined}
+                onPrompt={(prompt) => void doSend(prompt)}
+                llmModelId={selectedModels.llm}
+              />
+            ) : undefined}
           />
         </div>
 
@@ -415,20 +541,11 @@ export function Workspace({ user, onLogout }: WorkspaceProps) {
       </div>
       {centerOpen && (
         <AgentCenterModal
-          agents={agents}
+          agents={assistantAgents}
           onInstall={handleInstall}
           onUninstall={handleUninstall}
           onClose={() => setCenterOpen(false)}
           busyId={busyAgentId}
-        />
-      )}
-      {keyModalOpen && (
-        <KeySettingsModal
-          keys={user.apiKeys}
-          activeIndex={activeKeyIndex}
-          busy={keyBusy}
-          onSelect={handleSelectKey}
-          onClose={() => setKeyModalOpen(false)}
         />
       )}
     </div>

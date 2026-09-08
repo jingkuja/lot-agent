@@ -5,6 +5,7 @@ import {
   HttpVideoGenerationProvider,
   MockVideoGenerationProvider,
   pickVideoAdapter,
+  usesSeedanceReferenceVideoAdaptive,
 } from "./video-generation.js";
 
 describe("HappyhorseVideoAdapter", () => {
@@ -18,10 +19,15 @@ describe("HappyhorseVideoAdapter", () => {
       { prompt: "麦田", size: "832x480", durationSec: 5, ratio: "16:9", media: [{ type: "reference_image", url: "u" }] },
       "happyhorse-1.0-t2v"
     ) as Record<string, unknown>;
-    expect(body).toMatchObject({ model: "happyhorse-1.0-t2v", prompt: "麦田", size: "832x480", duration: 5, ratio: "16:9", media: [{ type: "reference_image", url: "u" }] });
+    expect(body).toMatchObject({ model: "happyhorse-1.0-t2v", prompt: "麦田", size: "832x480", duration: 5, ratio: "16:9", generate_audio: false, media: [{ type: "reference_image", url: "u" }] });
     const noMedia = a.buildCreateBody({ prompt: "p" }, "m") as Record<string, unknown>;
     expect("media" in noMedia).toBe(false);
     expect("duration" in noMedia).toBe(false);
+    expect(noMedia.generate_audio).toBe(false);
+  });
+  it("forces generated audio on when a reference audio is present", () => {
+    const body = a.buildCreateBody({ prompt: "p", generate_audio: false, reference_audio: "https://x/ref.mp3" }, "m") as Record<string, unknown>;
+    expect(body.generate_audio).toBe(true);
   });
   it("parseCreate/parsePoll/isTerminal", () => {
     expect(a.parseCreate({ id: "x", task_id: "task_9", status: "queued", progress: 0 })).toEqual({ taskId: "task_9", status: "queued", progress: 0 });
@@ -49,14 +55,48 @@ describe("OpenaiVideoAdapter", () => {
     expect(a.createPath()).toBe("/videos");
     expect(a.pollPath("t1")).toBe("/videos/t1");
   });
-  it("buildCreateBody sends seconds (string) + size, not duration/ratio", () => {
+  it("buildCreateBody sends seconds (string) + size + quality + explicit ratio, not duration", () => {
     const body = a.buildCreateBody(
-      { prompt: "A cinematic drone shot", size: "720x1280", durationSec: 4, ratio: "9:16" },
+      { prompt: "A cinematic drone shot", size: "720x1280", durationSec: 4, ratio: "9:16", quality: "720p" },
       "doubao-seedance-2.0"
     ) as Record<string, unknown>;
-    expect(body).toMatchObject({ model: "doubao-seedance-2.0", prompt: "A cinematic drone shot", seconds: "4", size: "720x1280" });
+    expect(body).toMatchObject({ model: "doubao-seedance-2.0", prompt: "A cinematic drone shot", seconds: "4", size: "720x1280", ratio: "9:16", quality: "720p", generate_audio: false });
     expect("duration" in body).toBe(false);
-    expect("ratio" in body).toBe(false);
+  });
+  it("seedance + reference video forces duration -1 and ratio adaptive", () => {
+    const body = a.buildCreateBody(
+      {
+        prompt: "follow this clip",
+        size: "720x1280",
+        durationSec: 5,
+        ratio: "9:16",
+        reference_video: "https://x/ref.mp4",
+      },
+      "doubao-seedance-2.0"
+    ) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      model: "doubao-seedance-2.0",
+      prompt: "follow this clip",
+      duration: -1,
+      ratio: "adaptive",
+      size: "720x1280",
+      reference_video: "https://x/ref.mp4",
+    });
+    expect("seconds" in body).toBe(false);
+  });
+  it("keeps the requested ratio for a Kling feature-video reference", () => {
+    const body = a.buildCreateBody(
+      {
+        prompt: "follow this clip",
+        size: "720x1280",
+        durationSec: 5,
+        ratio: "9:16",
+        reference_video: "https://x/ref.mp4",
+      },
+      "kling-standard"
+    ) as Record<string, unknown>;
+    expect(body).toMatchObject({ seconds: "5", size: "720x1280", ratio: "9:16" });
+    expect(body.duration).toBeUndefined();
   });
   it("sends multiple reference inputs plus first/last frames", () => {
     const body = a.buildCreateBody({
@@ -90,14 +130,14 @@ describe("OpenaiVideoAdapter", () => {
     expect("input_reference" in body).toBe(false);
   });
   it("reuses the shared create/poll/terminal parsing", () => {
-    expect(a.parseCreate({ id: "x", task_id: "task_9", status: "queued", progress: 0 })).toEqual({ taskId: "task_9", status: "queued", progress: 0 });
+    expect(a.parseCreate({ id: "x", task_id: "task_9", status: "queued", progress: 0 })).toEqual({ taskId: "x", status: "queued", progress: 0 });
     expect(a.parsePoll({ status: "completed", progress: 100, metadata: { url: "http://x/y.mp4" } })).toEqual({ status: "completed", progress: 100, url: "http://x/y.mp4", error: undefined });
     expect(a.isTerminal("completed")).toBe("completed");
     expect(a.isTerminal("queued")).toBe(null);
   });
-  it("does not accept id as a fallback when task_id is missing", () => {
+  it("accepts the standard OpenAI id when the legacy task_id alias is missing", () => {
     expect(a.parseCreate({ id: "task_9", status: "queued", progress: 0 })).toEqual({
-      taskId: "",
+      taskId: "task_9",
       status: "queued",
       progress: 0,
     });
@@ -151,7 +191,7 @@ describe("HttpVideoGenerationProvider", () => {
     const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "vm" });
     await expect(p.create({ prompt: "小猫睡觉" })).rejects.toThrow(/未订购seedance2\.0/);
   });
-  it("openai-video fails with the raw response when only id is returned", async () => {
+  it("openai-video accepts the standard id-only create response", async () => {
     const rawBody = JSON.stringify({ id: "task_1", object: "video", status: "queued", progress: 0 });
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -168,7 +208,7 @@ describe("HttpVideoGenerationProvider", () => {
 
     await expect(
       p.create({ prompt: "小狗睡觉。", durationSec: 4, size: "720x1280" })
-    ).rejects.toThrow(rawBody);
+    ).resolves.toEqual({ taskId: "task_1", status: "queued", progress: 0 });
   });
   it("poll surfaces a 200 error envelope as failed instead of looping as 'running'", async () => {
     const fetchMock = vi.fn(async () => ({
@@ -181,6 +221,32 @@ describe("HttpVideoGenerationProvider", () => {
     expect(r.status).toBe("failed");
     expect(r.error).toContain("未订购seedance2.0");
   });
+  it("poll surfaces the raw Wand failed-task envelope as failed", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        code: 1201,
+        message: "Aspect ratio must be specified unless a first frame is provided or the task is video editing",
+        request_id: "922601cf-1003-4f9f-9b4f-66704c3b6f0e",
+        data: [{
+          id: "1448787899-WandVideo-83e562b6a79d4ebeb5d0360629b2a502",
+          status: "failed",
+          outputs: [],
+          message: "Aspect ratio must be specified unless a first frame is provided or the task is video editing",
+        }],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const p = new HttpVideoGenerationProvider({
+      baseUrl: "https://api/v1",
+      apiKey: "k",
+      adapter: new OpenaiVideoAdapter(),
+      model: "kling-video-v3-omni",
+    });
+    const r = await p.poll("task_1");
+    expect(r.status).toBe("failed");
+    expect(r.error).toContain("Aspect ratio must be specified");
+  });
 });
 
 describe("MockVideoGenerationProvider", () => {
@@ -191,6 +257,16 @@ describe("MockVideoGenerationProvider", () => {
     t = 600;
     const r = await p.poll(c.taskId);
     expect(r.status).toBe("failed");
+  });
+});
+
+describe("usesSeedanceReferenceVideoAdaptive", () => {
+  it("is true only for seedance models with a reference video", () => {
+    expect(usesSeedanceReferenceVideoAdaptive("doubao-seedance-2.0", "https://x/r.mp4")).toBe(true);
+    expect(usesSeedanceReferenceVideoAdaptive("Seedance-2.0", ["https://x/r.mp4"])).toBe(true);
+    expect(usesSeedanceReferenceVideoAdaptive("doubao-seedance-2.0", [])).toBe(false);
+    expect(usesSeedanceReferenceVideoAdaptive("doubao-seedance-2.0", undefined)).toBe(false);
+    expect(usesSeedanceReferenceVideoAdaptive("kling-standard", "https://x/r.mp4")).toBe(false);
   });
 });
 

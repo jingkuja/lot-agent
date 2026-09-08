@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { estimateCost } from "@lot-agent/core";
+import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
-import { pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 
 const ALLOWED_TYPES = ["image.generate", "video.generate"] as const;
 
@@ -17,15 +17,29 @@ export function sanitizeTaskInput(
 ): Record<string, unknown> {
   const mediaType = type === "image.generate" ? "image" : "video";
   const input: Record<string, unknown> = pickGenerationSettings(mediaType, raw);
+  if (mediaType === "image") {
+    const finalized = finalizeImageSettings(
+      input as Record<string, string | number>,
+      typeof raw?.modelId === "string" ? raw.modelId : undefined
+    );
+    if (finalized.error) throw new Error(finalized.error);
+    Object.assign(input, finalized.settings);
+  }
   if (typeof raw?.prompt === "string") input.prompt = raw.prompt;
   if (typeof raw?.modelId === "string") input.modelId = raw.modelId;
   if (Array.isArray(raw?.media)) {
+    if (mediaType === "image" && raw.media.length > MAX_IMAGE_EDIT_REFERENCES) {
+      throw new Error(`image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images`);
+    }
     if (mediaType === "video" && raw.media.filter((m) => (m as { type?: unknown })?.type === "reference_image").length > 5) {
       throw new Error("input_reference supports at most 5 references");
     }
     input.media = raw.media;
   }
-  if (mediaType === "video") Object.assign(input, pickVideoReferenceInputs(raw));
+  if (mediaType === "video") {
+    Object.assign(input, pickVideoReferenceInputs(raw));
+    input.generate_audio = resolveVideoGenerateAudio(input.generate_audio, input.reference_audio);
+  }
   return input;
 }
 
@@ -69,9 +83,11 @@ export function createTaskRoutes(service: AgentService) {
       const cfg = service.modelRegistry.getConfig("gpt-image-2");
       estimatedCost = cfg ? estimateCost(cfg, { outputCount: 1 }) : 0;
     } else if (type === "video.generate") {
-      const cfg = service.modelRegistry.getConfig("kling-standard");
-      const durationSec = (safeInput.durationSec as number | undefined) ?? 5;
-      estimatedCost = cfg ? estimateCost(cfg, { outputCount: durationSec }) : 0;
+      const selectedModel = typeof safeInput.modelId === "string" && safeInput.modelId
+        ? safeInput.modelId
+        : "kling-video-v3-omni";
+      const cfg = service.modelRegistry.getConfig(selectedModel);
+      estimatedCost = cfg ? estimateCost(cfg, { outputCount: billedVideoSeconds(safeInput.durationSec) }) : 0;
     }
     const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
     if (!quota.ok) {

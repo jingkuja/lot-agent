@@ -1,23 +1,38 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
+import { DEFAULT_IMAGE_QUALITY, DEFAULT_IMAGE_SIZE, imageSizeError } from "../lib/image-settings.js";
 import { ModelPicker } from "./ModelPicker.js";
-import type { CatalogModel } from "../lib/model-filter.js";
+import {
+  isSeedance25Model,
+  isSeedanceModel,
+  missingSeedanceMentions,
+  seedanceAssetMention,
+  type CatalogModel,
+} from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
+import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
 
+export interface InputBoxHandle {
+  getFiles: () => PickedFile[];
+  getSettings: () => ImageSettings | VideoSettings | undefined;
+  getImageSettingsError: () => string | null;
+  getMissingMentions: () => string[];
+}
+
 interface InputBoxProps {
-  onSend: (
+  onSend?: (
     content: string,
     files: PickedFile[],
     settings?: ImageSettings | VideoSettings,
     knowledgeBases?: KnowledgeBaseRef[]
   ) => void;
-  onStop: () => void;
-  disabled: boolean;
+  onStop?: () => void;
+  disabled?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
   /** 图像/视频生成 Agent：换「参考图」上传 + 对应的设置选择器。 */
@@ -30,9 +45,16 @@ interface InputBoxProps {
   allowKnowledgeBase?: boolean;
   knowledgeBases?: KnowledgeBaseRef[];
   onKnowledgeBasesChange?: (items: KnowledgeBaseRef[]) => void;
+  /** 嵌入表单：受控文案、不发送、不展示发送按钮。 */
+  embedded?: boolean;
+  value?: string;
+  onChange?: (value: string) => void;
+  /** 视频时长选项；不传则沿用项目默认 5秒 / 10秒。 */
+  videoDurations?: readonly string[];
 }
 
 const MAX_FILES = 5;
+const MAX_IMAGE_REFERENCE_IMAGES = 5;
 const MAX_VIDEO_REFERENCE_IMAGES = 5;
 const MAX_VIDEO_REFERENCE_VIDEOS = 2;
 const MAX_VIDEO_REFERENCE_AUDIOS = 2;
@@ -52,10 +74,10 @@ const SUPPORTED_TYPES: { label: string; exts: string }[] = [
   { label: "文本", exts: "TXT / Markdown / JSON" },
 ];
 
-export function InputBox({
+export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox({
   onSend,
   onStop,
-  disabled,
+  disabled = false,
   placeholder,
   autoFocus,
   mode = "default",
@@ -65,10 +87,17 @@ export function InputBox({
   allowKnowledgeBase = false,
   knowledgeBases = [],
   onKnowledgeBasesChange = () => {},
-}: InputBoxProps) {
-  const [value, setValue] = useState("");
+  embedded = false,
+  value,
+  onChange,
+  videoDurations,
+}: InputBoxProps, ref) {
+  const [internalValue, setInternalValue] = useState("");
+  const promptValue = value !== undefined ? value : internalValue;
+  const setPromptValue = onChange ?? setInternalValue;
   const noModels = !!onModelChange && models.length === 0;
   const [noModelNotice, setNoModelNotice] = useState(false);
+  const [uploadLimitNotice, setUploadLimitNotice] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeBase[]>([]);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
@@ -81,7 +110,22 @@ export function InputBox({
   // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
   const mediaMode = mode === "image" || mode === "video";
   const videoMode = mode === "video";
-  const maxFiles = videoMode ? MAX_VIDEO_REFERENCE_IMAGES : MAX_FILES;
+  const effectiveVideoModel = selectedModel ?? models[0]?.id ?? "";
+  const seedanceVideo = videoMode && isSeedanceModel(effectiveVideoModel);
+  const seedance25Video = videoMode && isSeedance25Model(effectiveVideoModel);
+  const lockAdaptive = seedanceVideo && referenceVideoFiles.length > 0;
+  const missingMentions = seedance25Video
+    ? missingSeedanceMentions(promptValue, {
+        images: files.length,
+        videos: referenceVideoFiles.length,
+        audios: referenceAudioFiles.length,
+      })
+    : [];
+  const maxFiles = videoMode
+    ? MAX_VIDEO_REFERENCE_IMAGES
+    : mode === "image"
+      ? MAX_IMAGE_REFERENCE_IMAGES
+      : MAX_FILES;
   const pptMode = mode === "ppt";
   const contractMode = mode === "contract";
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -93,6 +137,7 @@ export function InputBox({
   const oldContractInputRef = useRef<HTMLInputElement>(null);
   const newContractInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const compositionActiveRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const referenceVideoInputRef = useRef<HTMLInputElement>(null);
   const referenceAudioInputRef = useRef<HTMLInputElement>(null);
@@ -103,8 +148,13 @@ export function InputBox({
   // revoked on remove/send/unmount. Kept in a ref (not state) and created in
   // the event handler — never inline in JSX (would leak a blob URL per render)
   // and never in a render/effect path (StrictMode double-invokes those).
-  const settingsRef = useRef<ImageSettings | VideoSettings | undefined>(undefined);
+  const settingsRef = useRef<ImageSettings | VideoSettings | undefined>(
+    mode === "image" ? { size: DEFAULT_IMAGE_SIZE, n: 1, quality: DEFAULT_IMAGE_QUALITY } : undefined
+  );
+  const [imageSettingsError, setImageSettingsError] = useState<string | null>(null);
   const handleSettingsChange = useCallback((s: ImageSettings | VideoSettings) => { settingsRef.current = s; }, []);
+  const handleImageSettingsError = useCallback((error: string | null) => { setImageSettingsError(error); }, []);
+  const effectiveImageModel = selectedModel ?? models[0]?.id ?? null;
 
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
@@ -117,6 +167,8 @@ export function InputBox({
     if (!picked) return;
     const incoming = Array.from(picked);
     setFiles((prev) => {
+      const room = Math.max(0, maxFiles - prev.length);
+      if (mode === "image" && incoming.length > room) setUploadLimitNotice(true);
       const next = [...prev];
       for (const f of incoming) {
         if (next.length >= maxFiles) break;
@@ -131,7 +183,7 @@ export function InputBox({
         urlsRef.current.set(f, URL.createObjectURL(f));
       }
     }
-  }, [maxFiles]);
+  }, [maxFiles, mode]);
 
   const removeFile = useCallback((idx: number) => {
     setFiles((prev) => {
@@ -143,6 +195,7 @@ export function InputBox({
       }
       return prev.filter((_, i) => i !== idx);
     });
+    setUploadLimitNotice(false);
   }, []);
 
   const loadKnowledgeBases = useCallback(async () => {
@@ -178,39 +231,59 @@ export function InputBox({
     []
   );
 
+  const collectPickedFiles = useCallback((): PickedFile[] => {
+    if (videoMode) {
+      return [
+        ...files.map((f) => ({ file: f, slot: "video_reference_image" as const })),
+        ...referenceVideoFiles.map((f) => ({ file: f, slot: "video_reference_video" as const })),
+        ...referenceAudioFiles.map((f) => ({ file: f, slot: "video_reference_audio" as const })),
+        ...(firstFrameFile ? [{ file: firstFrameFile, slot: "video_first_frame" as const }] : []),
+        ...(lastFrameFile ? [{ file: lastFrameFile, slot: "video_last_frame" as const }] : []),
+      ];
+    }
+    if (pptMode) {
+      return [
+        ...(templateFile ? [{ file: templateFile, slot: "ppt_template" as const }] : []),
+        ...backgroundFiles.map((f) => ({ file: f, slot: "ppt_background" as const })),
+        ...files.map((f) => ({ file: f, slot: "content" as const })),
+      ];
+    }
+    if (contractMode) {
+      return [
+        ...(oldContractFile ? [{ file: oldContractFile, slot: "contract_old" as const }] : []),
+        ...(newContractFile ? [{ file: newContractFile, slot: "contract_new" as const }] : []),
+      ];
+    }
+    return files.map((f) => ({ file: f }));
+  }, [files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, videoMode, pptMode, contractMode]);
+
+  useImperativeHandle(ref, () => ({
+    getFiles: collectPickedFiles,
+    getSettings: () => mediaMode ? settingsRef.current : undefined,
+    getImageSettingsError: () => imageSettingsError,
+    getMissingMentions: () => missingMentions,
+  }), [collectPickedFiles, mediaMode, imageSettingsError, missingMentions]);
+
   const handleSend = useCallback(() => {
-    const trimmed = value.trim();
+    const trimmed = promptValue.trim();
     if (noModels) {
       setNoModelNotice(true);
       return;
     }
-    const hasFiles =
-      files.length > 0 ||
-      (videoMode && (referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || !!firstFrameFile || !!lastFrameFile)) ||
-      !!templateFile || backgroundFiles.length > 0 || !!oldContractFile || !!newContractFile;
-    if ((!trimmed && !hasFiles) || disabled) return;
-    const picked: PickedFile[] = videoMode
-      ? [
-          ...files.map((f) => ({ file: f, slot: "video_reference_image" as const })),
-          ...referenceVideoFiles.map((f) => ({ file: f, slot: "video_reference_video" as const })),
-          ...referenceAudioFiles.map((f) => ({ file: f, slot: "video_reference_audio" as const })),
-          ...(firstFrameFile ? [{ file: firstFrameFile, slot: "video_first_frame" as const }] : []),
-          ...(lastFrameFile ? [{ file: lastFrameFile, slot: "video_last_frame" as const }] : []),
-        ]
-      : pptMode
-      ? [
-          ...(templateFile ? [{ file: templateFile, slot: "ppt_template" as const }] : []),
-          ...backgroundFiles.map((f) => ({ file: f, slot: "ppt_background" as const })),
-          ...files.map((f) => ({ file: f, slot: "content" as const })),
-        ]
-      : contractMode
-        ? [
-            ...(oldContractFile ? [{ file: oldContractFile, slot: "contract_old" as const }] : []),
-            ...(newContractFile ? [{ file: newContractFile, slot: "contract_new" as const }] : []),
-          ]
-        : files.map((f) => ({ file: f }));
+    if (mode === "image") {
+      const current = settingsRef.current as ImageSettings | undefined;
+      const err = imageSizeError(current?.size ?? "", effectiveImageModel);
+      if (err) {
+        setImageSettingsError(err);
+        return;
+      }
+    }
+    const picked = collectPickedFiles();
+    const hasFiles = picked.length > 0;
+    if ((!trimmed && !hasFiles) || disabled || !onSend) return;
     onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined, knowledgeBases);
-    setValue("");
+    setPromptValue("");
+    setUploadLimitNotice(false);
     setFiles([]);
     setReferenceVideoFiles([]);
     setReferenceAudioFiles([]);
@@ -222,16 +295,22 @@ export function InputBox({
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, disabled, onSend, revokeAll, mediaMode, videoMode, pptMode, contractMode, noModels, knowledgeBases]);
+  }, [promptValue, collectPickedFiles, disabled, onSend, revokeAll, mediaMode, noModels, knowledgeBases, mode, effectiveImageModel, setPromptValue]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (embedded) return;
+      if (shouldSubmitComposer({
+        key: e.key,
+        shiftKey: e.shiftKey,
+        isComposing: e.nativeEvent.isComposing,
+        keyCode: e.nativeEvent.keyCode,
+      }, compositionActiveRef.current)) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend]
+    [handleSend, embedded]
   );
 
   const handleInput = useCallback(() => {
@@ -243,7 +322,7 @@ export function InputBox({
   }, []);
 
   return (
-    <div className="input-box">
+    <div className={`input-box${embedded ? " input-box--embedded" : ""}`}>
       {!mediaMode && files.some((f) => f.type.startsWith("image/")) && (
         <div className="input-modal-hint" role="note">
           <span aria-hidden>🖼️</span>
@@ -253,7 +332,34 @@ export function InputBox({
       {noModelNotice && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
-          暂无能使用模型，请前往订阅管理页面设置 api-key 和 key 能访问的模型
+          模型目录暂时不可用，请稍后重试或联系管理员
+        </div>
+      )}
+      {mode === "image" && imageSettingsError && (
+        <div className="input-modal-hint input-modal-hint--error" role="alert">
+          <span aria-hidden>⚠️</span>
+          {imageSettingsError}
+        </div>
+      )}
+      {mode === "image" && (uploadLimitNotice || files.length >= MAX_IMAGE_REFERENCE_IMAGES) && (
+        <div className="input-modal-hint" role="alert">
+          <span aria-hidden>⚠️</span>
+          参考图最多 {MAX_IMAGE_REFERENCE_IMAGES} 张，不能再上传
+        </div>
+      )}
+      {lockAdaptive && (
+        <div className="input-modal-hint" role="alert">
+          <span aria-hidden>⚠️</span>
+          提供参考视频后视频时长和比例不能选择，自动适配参考视频
+        </div>
+      )}
+      {seedance25Video && missingMentions.length > 0 && (
+        <div className="input-modal-hint" role="alert">
+          <span aria-hidden>⚠️</span>
+          当前提示词尚未写出
+          {missingMentions.map((tag) => (
+            <code key={tag} className="input-seedance-mention">{tag}</code>
+          ))}
         </div>
       )}
       {(knowledgeBases.length > 0 || files.length > 0 || referenceVideoFiles.length > 0 || referenceAudioFiles.length > 0 || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length > 0 || oldContractFile || newContractFile) && (
@@ -301,7 +407,9 @@ export function InputBox({
           )}
           {videoMode && referenceVideoFiles.map((f, i) => (
             <div className="attachment-chip" key={`__video${i}`}>
-              <span className="attachment-slot-badge badge-video-reference">参考视频</span>
+              <span className="attachment-slot-badge badge-video-reference">
+                {seedance25Video ? `参考视频 ${seedanceAssetMention("Video", i)}` : "参考视频"}
+              </span>
               <span className="attachment-attachment-icon" aria-hidden>🎞️</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
               <button type="button" className="attachment-remove" onClick={() => setReferenceVideoFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
@@ -309,7 +417,9 @@ export function InputBox({
           ))}
           {videoMode && referenceAudioFiles.map((f, i) => (
             <div className="attachment-chip" key={`__audio${i}`}>
-              <span className="attachment-slot-badge badge-audio-reference">参考音频</span>
+              <span className="attachment-slot-badge badge-audio-reference">
+                {seedance25Video ? `参考音频 ${seedanceAssetMention("Audio", i)}` : "参考音频"}
+              </span>
               <span className="attachment-attachment-icon" aria-hidden>🔊</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
               <button type="button" className="attachment-remove" onClick={() => setReferenceAudioFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
@@ -333,7 +443,15 @@ export function InputBox({
           )}
           {files.map((f, i) => (
             <div className="attachment-chip" key={i}>
-              {videoMode && <span className="attachment-slot-badge badge-image-reference">参考图</span>}
+              {mediaMode && (
+                <span className="attachment-slot-badge badge-image-reference">
+                  {seedance25Video
+                    ? `参考图 ${seedanceAssetMention("Image", i)}`
+                    : mode === "image" && files.length > 1
+                      ? `参考图${i + 1}`
+                      : "参考图"}
+                </span>
+              )}
               {pptMode && <span className="attachment-slot-badge badge-content">内容</span>}
               {f.type.startsWith("image/") && urlsRef.current.get(f) ? (
                 <img className="attachment-thumb" src={urlsRef.current.get(f)} alt={f.name} />
@@ -355,12 +473,14 @@ export function InputBox({
       )}
       <textarea
         ref={textareaRef}
-        value={value}
-        onChange={(e) => { setValue(e.target.value); if (noModelNotice) setNoModelNotice(false); }}
+        value={promptValue}
+        onChange={(e) => { setPromptValue(e.target.value); if (noModelNotice) setNoModelNotice(false); }}
         onKeyDown={handleKeyDown}
+        onCompositionStart={() => { compositionActiveRef.current = true; }}
+        onCompositionEnd={() => { compositionActiveRef.current = false; }}
         onInput={handleInput}
         placeholder={
-          disabled
+          disabled && !embedded
             ? "Agent 正在思考…"
             : placeholder ?? "输入消息，Enter 发送，Shift+Enter 换行"
         }
@@ -388,7 +508,11 @@ export function InputBox({
           style={{ display: "none" }}
           onChange={(e) => {
             const picked = Array.from(e.target.files ?? []);
-            setReferenceVideoFiles((prev) => [...prev, ...picked].slice(0, MAX_VIDEO_REFERENCE_VIDEOS));
+            const next = [...referenceVideoFiles, ...picked].slice(0, MAX_VIDEO_REFERENCE_VIDEOS);
+            if (seedanceVideo && referenceVideoFiles.length === 0 && next.length > 0) {
+              window.alert("提供参考视频后视频时长和比例不能选择，自动适配参考视频");
+            }
+            setReferenceVideoFiles(next);
             e.target.value = "";
           }}
         />
@@ -476,8 +600,15 @@ export function InputBox({
             <button
               type="button"
               className="btn-reference"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || files.length >= maxFiles}
+              onClick={() => {
+                if (files.length >= MAX_IMAGE_REFERENCE_IMAGES) {
+                  setUploadLimitNotice(true);
+                  return;
+                }
+                fileInputRef.current?.click();
+              }}
+              disabled={disabled}
+              title="最多5张"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="14" height="14" rx="2.5" />
@@ -490,19 +621,49 @@ export function InputBox({
           )}
           {videoMode && (
             <>
-              <button type="button" className="btn-reference" onClick={() => fileInputRef.current?.click()} disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES} title="最多5张">
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES}
+                title={seedance25Video ? "最多5张；提示词须按上传顺序写出 @Image1、@Image2…" : "最多5张"}
+              >
                 🖼️ 参考图
               </button>
-              <button type="button" className="btn-reference" onClick={() => referenceVideoInputRef.current?.click()} disabled={disabled || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS} title="最多2个">
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => referenceVideoInputRef.current?.click()}
+                disabled={disabled || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS}
+                title={seedance25Video ? "最多2个；提示词须按上传顺序写出 @Video1、@Video2…" : "最多2个"}
+              >
                 🎞️ 参考视频
               </button>
-              <button type="button" className="btn-reference" onClick={() => referenceAudioInputRef.current?.click()} disabled={disabled || referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS} title="最多2个">
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => referenceAudioInputRef.current?.click()}
+                disabled={disabled || referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS}
+                title={seedance25Video ? "最多2个；提示词须按上传顺序写出 @Audio1、@Audio2…" : "最多2个"}
+              >
                 🔊 参考音频
               </button>
-              <button type="button" className="btn-reference" onClick={() => firstFrameInputRef.current?.click()} disabled={disabled}>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => firstFrameInputRef.current?.click()}
+                disabled={disabled}
+                title={seedance25Video ? "首帧图比例需与生成视频比例一致" : undefined}
+              >
                 首帧图
               </button>
-              <button type="button" className="btn-reference" onClick={() => lastFrameInputRef.current?.click()} disabled={disabled}>
+              <button
+                type="button"
+                className="btn-reference"
+                onClick={() => lastFrameInputRef.current?.click()}
+                disabled={disabled}
+                title={seedance25Video ? "尾帧图比例需与生成视频比例一致" : undefined}
+              >
                 尾帧图
               </button>
             </>
@@ -635,12 +796,24 @@ export function InputBox({
             />
           )}
           {mode === "image" && (
-            <ImageSettingsPicker disabled={disabled} onChange={handleSettingsChange} />
+            <ImageSettingsPicker
+              disabled={disabled}
+              selectedModel={effectiveImageModel}
+              onChange={handleSettingsChange}
+              onError={handleImageSettingsError}
+            />
           )}
           {mode === "video" && (
-            <VideoSettingsPicker disabled={disabled} onChange={handleSettingsChange} />
+            <VideoSettingsPicker
+              disabled={disabled}
+              lockAdaptive={lockAdaptive}
+              hasReferenceAudio={referenceAudioFiles.length > 0}
+              selectedModel={effectiveVideoModel}
+              durations={videoDurations}
+              onChange={handleSettingsChange}
+            />
           )}
-          {disabled ? (
+          {!embedded && (disabled ? (
             <button onClick={onStop} className="btn-stop" title="停止">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
@@ -650,7 +823,7 @@ export function InputBox({
             <button
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={!value.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile}
+              disabled={(mode === "image" && !!imageSettingsError) || (!promptValue.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile)}
               title="发送"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -658,7 +831,7 @@ export function InputBox({
                 <polyline points="5 12 12 5 19 12" />
               </svg>
             </button>
-          )}
+          ))}
         </div>
       </div>
       {knowledgeOpen && (
@@ -674,4 +847,4 @@ export function InputBox({
       )}
     </div>
   );
-}
+});

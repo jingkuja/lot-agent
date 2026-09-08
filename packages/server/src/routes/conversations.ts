@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { estimateCost } from "@lot-agent/core";
+import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
-import { pickGenerationSettings, pickVideoReferenceInputs } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
+import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
 
 type Variables = { userId: string };
 
@@ -81,16 +82,28 @@ export function createConversationRoutes(service: AgentService): Hono {
   // Create conversation — owned by current user
   app.post("/", async (c) => {
     const userId = c.get("userId");
-    const body = await c.req.json<{ title?: string; agentId?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ title?: string; agentId?: string; featureScope?: string }>().catch(() => ({}));
     const id = randomUUID();
     const title = body.title ?? "新对话";
-    const model =
-      service["llmConfig"].default === "openai"
+    const agentId = body.agentId ?? "general";
+    const isDigitalEmployee = agentId === "digital_employee";
+    const model = isDigitalEmployee
+      ? undefined
+      : service["llmConfig"].default === "openai"
         ? service["llmConfig"].openai.model
         : service["llmConfig"].anthropic.model;
-    const provider = service["llmConfig"].default;
-    const agentId = body.agentId ?? "general";
-    const conversation = await service.db.createConversation(id, title, model, provider, agentId, userId);
+    const provider = isDigitalEmployee ? undefined : service["llmConfig"].default;
+    let metadata: Record<string, unknown> | undefined;
+    if (isDigitalEmployee) {
+      const featureScope = parseDigitalEmployeeFeatureScope(body.featureScope);
+      if (!featureScope) {
+        return c.json({ error: "digital_employee conversations require a valid featureScope" }, 400);
+      }
+      metadata = { digitalEmployeeFeatureScope: featureScope };
+    }
+    const conversation = await service.db.createConversation(
+      id, title, model, provider, agentId, userId, metadata
+    );
     return c.json(conversation, 201);
   });
 
@@ -219,6 +232,9 @@ export function createConversationRoutes(service: AgentService): Hono {
     if (!conversation || conversation.user_id !== userId) {
       return c.json({ error: "Not found" }, 404);
     }
+    if (conversation.agent_id === "digital_employee" && !readConversationFeatureScope(conversation.metadata)) {
+      return c.json({ error: "digital_employee conversations require a valid featureScope" }, 400);
+    }
 
     const body = await c.req.json<{
       content: string;
@@ -304,6 +320,19 @@ export function createConversationRoutes(service: AgentService): Hono {
           );
         };
 
+        // `stream_end` is the client's permission to start the next turn. Keep
+        // that signal fenced behind the database lease release; otherwise the
+        // client can immediately submit an ask_user/propose_outline answer while
+        // this request still owns the conversation, and the new request gets a
+        // spurious 409. Title generation is only best-effort tail work and does
+        // not need to hold the message-writing lease.
+        let leaseReleased = false;
+        const releaseLease = async () => {
+          if (leaseReleased) return;
+          await service.db.releaseConversationRun(id, runId);
+          leaseReleased = true;
+        };
+
         // Open the stream immediately with an SSE comment so the client (and
         // any reverse proxy) flushes the connection before the first token,
         // rather than holding everything until the response completes.
@@ -321,10 +350,10 @@ export function createConversationRoutes(service: AgentService): Hono {
           )) {
             send(agentEventToSse(event));
           }
-          // End the turn BEFORE title generation: the client unlocks the
-          // conversation (input box, ask_user cards) on stream_end, and the
-          // title is a whole extra LLM round-trip — holding stream_end for it
-          // left the UI locked for seconds after the agent already finished.
+          // Release the server-side turn first, then tell the client it may
+          // unlock. The title is a whole extra LLM round-trip and deliberately
+          // runs after both sides agree that the conversation turn has ended.
+          await releaseLease();
           send({ type: "stream_end" });
           // Summarize + persist the conversation title (first message only) and
           // push it to the client so the sidebar updates live, no refresh. The
@@ -335,7 +364,11 @@ export function createConversationRoutes(service: AgentService): Hono {
               id,
               body.content ?? "",
               attachments,
-              { userId, modelId: body.modelId }
+              {
+                userId,
+                modelId: body.modelId,
+                digitalEmployee: conversation.agent_id === "digital_employee",
+              }
             );
             if (title) send({ type: "title", title });
           } catch {
@@ -347,13 +380,12 @@ export function createConversationRoutes(service: AgentService): Hono {
             message: error instanceof Error ? error.message : String(error),
           });
         } finally {
-          // Covers every exit from the try above: normal completion, the
-          // catch branch, and a client disconnect (the AbortSignal unwinds
-          // `service.streamAgentResponse`'s for-await, which propagates here
-          // the same way a thrown error would). This is the ONLY release call
-          // for this route — nothing above can return once the lease is claimed.
+          // Covers exits before the normal pre-stream_end release: an agent
+          // error, a failed release attempt, or a client disconnect (the
+          // AbortSignal unwinds `service.streamAgentResponse`'s for-await).
+          // `releaseLease` is idempotent, so the normal path is a no-op here.
           try {
-            await service.db.releaseConversationRun(id, runId);
+            await releaseLease();
           } catch (err) {
             console.warn("[run-lease] release failed:", err);
           }
@@ -415,7 +447,13 @@ export function createGenerationRoutes(service: AgentService) {
     }
     // Client settings pass a per-media whitelist so identity fields
     // (conversationId/assistantMessageId/userId) can never ride along.
-    const settings = pickGenerationSettings(mediaType, body.settings);
+    const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
+    let settings = pickGenerationSettings(mediaType, body.settings);
+    if (mediaType === "image") {
+      const finalized = finalizeImageSettings(settings, selectedModel);
+      if (finalized.error) return c.json({ error: finalized.error }, 400);
+      settings = finalized.settings;
+    }
     let videoReferences: Record<string, string | string[]> = {};
     if (mediaType === "video") {
       try {
@@ -423,10 +461,14 @@ export function createGenerationRoutes(service: AgentService) {
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : "invalid video references" }, 400);
       }
+      settings = {
+        ...settings,
+        generate_audio: resolveVideoGenerateAudio(settings.generate_audio, videoReferences.reference_audio),
+      };
     }
     const media = Array.isArray(body.media) ? body.media : undefined;
-    if (mediaType === "image" && media && media.length > 1) {
-      return c.json({ error: "image editing supports exactly one reference image" }, 400);
+    if (mediaType === "image" && media && media.length > MAX_IMAGE_EDIT_REFERENCES) {
+      return c.json({ error: `image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images` }, 400);
     }
     if (mediaType === "video" && media) {
       const legacyImages = media.filter((m) => m?.type === "reference_image");
@@ -437,9 +479,11 @@ export function createGenerationRoutes(service: AgentService) {
     const type = mediaType === "image" ? "image.generate" : "video.generate";
 
     // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
-    const modelId = mediaType === "image" ? "gpt-image-2" : "kling-standard";
+    const modelId = mediaType === "image"
+      ? "gpt-image-2"
+      : selectedModel ?? "kling-video-v3-omni";
     const cfg = service.modelRegistry.getConfig(modelId);
-    const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : Number(settings.durationSec ?? 5);
+    const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : billedVideoSeconds(settings.durationSec);
     const estimatedCost = cfg ? estimateCost(cfg, { outputCount }) : 0;
     const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
     if (!quota.ok) return c.json({ error: quota.reason, estimatedCost }, 402);
@@ -463,7 +507,6 @@ export function createGenerationRoutes(service: AgentService) {
 
     // Enqueue, then record the taskId on the message so a client that reloads
     // mid-generation can re-poll the task to resume progress / completion.
-    const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
     // Identity fields are spread LAST: they are server-created and must win
     // over anything a client could try to smuggle into the payload.
     const taskId = await service.jobQueue.enqueue(
@@ -476,6 +519,7 @@ export function createGenerationRoutes(service: AgentService) {
         prompt,
         conversationId,
         assistantMessageId,
+        requireUserModelKey: conv.agent_id === "digital_employee",
       },
       userId
     );
@@ -491,9 +535,12 @@ export function createGenerationRoutes(service: AgentService) {
     // image/video conversations stay stuck on the "新对话" placeholder.
     let title: string | null = null;
     try {
-      // 只传 userId:本回合的模型是图片/视频模型,做不了文字总结,
-      // 让 generateTitle 回落到模型目录第一个 LLM(无目录时才用 env 默认)。
-      title = await service.generateTitle(conversationId, prompt, [], { userId });
+      // 本回合的模型是图片/视频模型，标题改用 LLM。数字员工会话仍严格
+      // 限定为用户 TokenHub key，不允许标题请求回退环境模型。
+      title = await service.generateTitle(conversationId, prompt, [], {
+        userId,
+        digitalEmployee: conv.agent_id === "digital_employee",
+      });
     } catch {
       // title generation is best-effort
     }

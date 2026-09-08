@@ -23,6 +23,7 @@ function makeService(debug: boolean): AgentService {
     models: [],
     modelCatalog,
     debug,
+    managedKeysEnabled: false,
     agent: {},
     mcpConfigPath: "",
     skillsDir: "",

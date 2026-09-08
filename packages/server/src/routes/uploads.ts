@@ -69,7 +69,7 @@ export function createUploadRoutes(service: AgentService) {
 
     await service.db.createAsset({
       id, taskId: null, userId, type: "upload",
-      storageKey: key, url, mime, sizeBytes: size,
+      storageKey: key, url, mime, sizeBytes: size, originalName: file.name,
     });
 
     return c.json({ assetId: id, filename: file.name, mime, size, url, kind });

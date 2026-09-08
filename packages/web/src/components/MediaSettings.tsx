@@ -1,26 +1,31 @@
 import { useState, useRef, useEffect } from "react";
+import { isGptImage15 } from "../lib/model-filter.js";
+import {
+  DEFAULT_IMAGE_QUALITY,
+  DEFAULT_IMAGE_SIZE,
+  IMAGE_PRESETS,
+  IMAGE_QUALITIES,
+  imageSizeError,
+  isMultipleOf16,
+  parseDim,
+  parseImageSize,
+  type ImageSettings,
+} from "../lib/image-settings.js";
+import {
+  VIDEO_QUALITIES,
+  pickVideoQuality,
+  videoQualitiesForModel,
+  type VideoQuality,
+} from "../lib/video-settings.js";
+
+export type { ImageSettings } from "../lib/image-settings.js";
+export { IMAGE_PRESETS, IMAGE_QUALITIES } from "../lib/image-settings.js";
 
 export interface Ratio {
   label: string;
   w: number;
   h: number;
 }
-
-/** 图像比例选项。每个比例对应一个固定分辨率，长边最大为 1024px，
- * 由后端的 gpt-image-2 接口直接消费。注意：接口只接受 `WxH` 格式
- * （`*` 会被判为不合法的 size），故这里用 `x` 分隔。 */
-export interface ImageRatio extends Ratio {
-  /** 该比例对应的最大标准分辨率，如 "1024x1024"。 */
-  size: string;
-}
-
-export const IMAGE_RATIOS: ImageRatio[] = [
-  { label: "16:9", w: 16, h: 9, size: "1024x576" },
-  { label: "4:3", w: 4, h: 3, size: "1024x768" },
-  { label: "1:1", w: 1, h: 1, size: "1024x1024" },
-  { label: "3:4", w: 3, h: 4, size: "768x1024" },
-  { label: "9:16", w: 9, h: 16, size: "576x1024" },
-];
 
 /** 视频生成比例选项。 */
 export const VIDEO_RATIOS: Ratio[] = [
@@ -29,23 +34,18 @@ export const VIDEO_RATIOS: Ratio[] = [
   { label: "1:1", w: 1, h: 1 },
 ];
 
-export interface Quality {
-  label: string;
-  short: string;
-  /** 短边像素，分辨率由它和比例推导。 */
-  edge: number;
-}
-
-export const VIDEO_QUALITIES: Quality[] = [
-  { label: "480p标清", short: "480p", edge: 480 },
-  { label: "720p高清", short: "720p", edge: 720 },
-  { label: "1080p超清", short: "1080p", edge: 1080 },
-];
+export type Quality = VideoQuality;
+export { VIDEO_QUALITIES, KLING_VIDEO_QUALITIES, videoQualitiesForModel } from "../lib/video-settings.js";
 
 export const VIDEO_DURATIONS = ["5秒", "10秒"];
 
-export interface ImageSettings { size: string; n: number }
-export interface VideoSettings { size: string; durationSec: number; ratio: string; quality: string }
+export interface VideoSettings {
+  size: string;
+  durationSec: number;
+  ratio: string;
+  quality: string;
+  generate_audio: boolean;
+}
 
 interface Dim {
   width: number;
@@ -114,35 +114,96 @@ function ResBarIcon() {
   );
 }
 
-/* ── 图像生成：仅比例（分辨率由比例固定推导，长边最高 1024px） ── */
+/* ── 图像生成：分辨率（三档预设 + 自定义）+ 质量 ── */
 
 // Remembered for the page session. The input box is unmounted/remounted when the
 // conversation switches between its empty (hero) and message-list layouts (e.g.
-// on the first send), which would otherwise reset the picker to its default. Keep
-// the last-chosen ratio in module scope so a selection made before sending stays.
-let lastImageRatioLabel = "1:1";
+// on the first send), which would otherwise reset the picker to its default.
+const lastImage = {
+  size: DEFAULT_IMAGE_SIZE,
+  quality: DEFAULT_IMAGE_QUALITY,
+};
+
+function splitSize(size: string): { width: string; height: string } {
+  const dim = parseImageSize(size);
+  if (dim) return { width: String(dim.width), height: String(dim.height) };
+  const [width = "", height = ""] = size.split("x");
+  return { width, height };
+}
 
 export function ImageSettingsPicker({
   disabled,
+  selectedModel,
   onChange,
+  onError,
 }: {
   disabled?: boolean;
+  selectedModel?: string | null;
   onChange?: (s: ImageSettings) => void;
+  onError?: (error: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
-  const [ratio, setRatio] = useState<ImageRatio>(
-    () => IMAGE_RATIOS.find((r) => r.label === lastImageRatioLabel) ?? IMAGE_RATIOS[2] // 1:1 默认
-  );
+  const allowCustom = !isGptImage15(selectedModel);
+  const [size, setSize] = useState(() => {
+    if (allowCustom || IMAGE_PRESETS.some((p) => p.size === lastImage.size)) return lastImage.size;
+    lastImage.size = DEFAULT_IMAGE_SIZE;
+    return DEFAULT_IMAGE_SIZE;
+  });
+  const [quality, setQuality] = useState(() => lastImage.quality);
+  const [widthStr, setWidthStr] = useState(() => splitSize(size).width);
+  const [heightStr, setHeightStr] = useState(() => splitSize(size).height);
+
+  const applySize = (next: string) => {
+    lastImage.size = next;
+    setSize(next);
+    const parts = splitSize(next);
+    setWidthStr(parts.width);
+    setHeightStr(parts.height);
+  };
 
   useEffect(() => {
-    onChange?.({ size: ratio.size, n: 1 });
-  }, [ratio, onChange]);
+    if (allowCustom) return;
+    if (IMAGE_PRESETS.some((p) => p.size === lastImage.size)) return;
+    applySize(DEFAULT_IMAGE_SIZE);
+  }, [allowCustom]);
 
-  const pickRatio = (r: ImageRatio) => {
-    lastImageRatioLabel = r.label;
-    setRatio(r);
+  const error = imageSizeError(size, selectedModel);
+  const preset = IMAGE_PRESETS.find((p) => p.size === size);
+  const qualityMeta = IMAGE_QUALITIES.find((q) => q.value === quality) ?? IMAGE_QUALITIES[0];
+  const parsed = parseImageSize(size);
+  const triggerGlyph = preset
+    ? { w: preset.w, h: preset.h }
+    : parsed
+      ? { w: parsed.width, h: parsed.height }
+      : { w: 1, h: 1 };
+
+  useEffect(() => {
+    onChange?.({ size, n: 1, quality });
+    onError?.(error);
+  }, [size, quality, error, onChange, onError]);
+
+  const pickPreset = (next: string) => applySize(next);
+  const pickQuality = (value: string) => {
+    lastImage.quality = value;
+    setQuality(value);
   };
+  const onDimChange = (nextWidth: string, nextHeight: string) => {
+    if (!allowCustom) return;
+    const width = nextWidth.replace(/[^\d]/g, "");
+    const height = nextHeight.replace(/[^\d]/g, "");
+    setWidthStr(width);
+    setHeightStr(height);
+    const w = parseDim(width);
+    const h = parseDim(height);
+    const next = w != null && h != null ? `${w}x${h}` : `${width}x${height}`;
+    lastImage.size = next;
+    setSize(next);
+  };
+  const widthInvalid = !isMultipleOf16(parseDim(widthStr) ?? 0);
+  const heightInvalid = !isMultipleOf16(parseDim(heightStr) ?? 0);
+
+  const sizeLabel = parsed ? `${parsed.width}×${parsed.height}` : size.replace("x", "×");
 
   return (
     <div className="media-picker" ref={wrapRef}>
@@ -153,25 +214,82 @@ export function ImageSettingsPicker({
         disabled={disabled}
         aria-haspopup="true"
         aria-expanded={open}
-        title="图片比例"
+        title="图片设置"
       >
-        <RatioGlyph w={ratio.w} h={ratio.h} size={14} />
-        <span className="media-trigger-label">{ratio.label}</span>
+        <RatioGlyph w={triggerGlyph.w} h={triggerGlyph.h} size={14} />
+        <span className="media-trigger-label">{sizeLabel} · {qualityMeta.label}</span>
         <ChevronIcon />
       </button>
       {open && (
         <div className="media-popup">
-          <div className="media-section-title">图片比例</div>
+          <div className="media-section-title">分辨率</div>
           <div className="seg-track">
-            {IMAGE_RATIOS.map((r) => (
+            {IMAGE_PRESETS.map((p) => (
               <button
-                key={r.label}
+                key={p.size}
                 type="button"
-                className={`seg seg--stack ${r.label === ratio.label ? "active" : ""}`}
-                onClick={() => pickRatio(r)}
+                className={`seg seg--stack ${p.size === size ? "active" : ""}`}
+                onClick={() => pickPreset(p.size)}
               >
-                <RatioGlyph w={r.w} h={r.h} size={20} />
-                <span>{r.label}</span>
+                <RatioGlyph w={p.w} h={p.h} size={20} />
+                <span>{p.label}</span>
+                <small>{p.size.replace("x", "×")}</small>
+              </button>
+            ))}
+          </div>
+          <div className="media-section-title">自定义分辨率</div>
+          {allowCustom ? (
+            <>
+              <div className="res-row">
+                <label className={`res-field${widthInvalid ? " res-field--invalid" : ""}`}>
+                  <span className="res-key">W</span>
+                  <input
+                    className="res-input"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={widthStr}
+                    onChange={(e) => onDimChange(e.target.value, heightStr)}
+                    aria-invalid={widthInvalid}
+                    aria-label="宽度"
+                  />
+                </label>
+                <span className="res-link" aria-hidden>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 5.93" />
+                    <path d="M14 11a5 5 0 0 0-7.07 0L5.52 12.41a5 5 0 0 0 7.07 7.07L14 18.07" />
+                  </svg>
+                </span>
+                <label className={`res-field${heightInvalid ? " res-field--invalid" : ""}`}>
+                  <span className="res-key">H</span>
+                  <input
+                    className="res-input"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={heightStr}
+                    onChange={(e) => onDimChange(widthStr, e.target.value)}
+                    aria-invalid={heightInvalid}
+                    aria-label="高度"
+                  />
+                </label>
+              </div>
+              <div className="media-hint">宽和高都必须能被 16 整除，总像素不能低于 655360，宽高比不能超过 1:3 或 3:1</div>
+              {error && <div className="media-hint media-hint--error">{error}</div>}
+            </>
+          ) : (
+            <div className="media-hint">当前模型不支持自定义分辨率</div>
+          )}
+          <div className="media-section-title">质量</div>
+          <div className="seg-track">
+            {IMAGE_QUALITIES.map((q) => (
+              <button
+                key={q.value}
+                type="button"
+                className={`seg ${q.value === quality ? "active" : ""}`}
+                onClick={() => pickQuality(q.value)}
+              >
+                {q.label}
               </button>
             ))}
           </div>
@@ -181,44 +299,79 @@ export function ImageSettingsPicker({
   );
 }
 
-/* ── 视频生成：质量 + 比例 + 分辨率 + 时长 ── */
+/* ── 视频生成：质量 + 比例 + 分辨率 + 时长 + 声音 ── */
 
 // Session-remembered video selection — same remount survival as the image picker
-// (see lastImageRatioLabel).
+// (see lastImage).
 const lastVideo = {
   quality: VIDEO_QUALITIES[0].short,
   ratio: VIDEO_RATIOS[0].label,
   duration: VIDEO_DURATIONS[0],
+  generateAudio: false,
 };
 
 export function VideoSettingsPicker({
   disabled,
+  lockAdaptive,
+  hasReferenceAudio = false,
+  selectedModel,
   onChange,
+  durations = VIDEO_DURATIONS,
 }: {
   disabled?: boolean;
+  /** Seedance + 参考视频：时长/比例固定为自动适配，页面不可改。 */
+  lockAdaptive?: boolean;
+  /** 有参考音频时供应商必须生成声音，页面不可改。 */
+  hasReferenceAudio?: boolean;
+  /** 当前视频模型；Kling 使用 720p / 1080p / 4k。 */
+  selectedModel?: string | null;
   onChange?: (s: VideoSettings) => void;
+  /** 时长选项，默认 5秒 / 10秒；获客宝使用 10秒 / 15秒。 */
+  durations?: readonly string[];
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
-  const [quality, setQuality] = useState<Quality>(
-    () => VIDEO_QUALITIES.find((q) => q.short === lastVideo.quality) ?? VIDEO_QUALITIES[0]
-  );
+  const durationOptions = durations.length ? durations : VIDEO_DURATIONS;
+  const defaultDuration = durationOptions[0];
+  const qualityOptions = videoQualitiesForModel(selectedModel);
+  const [quality, setQuality] = useState<Quality>(() => {
+    const next = pickVideoQuality(qualityOptions, lastVideo.quality);
+    lastVideo.quality = next.short;
+    return next;
+  });
   const [ratio, setRatio] = useState<Ratio>(
     () => VIDEO_RATIOS.find((r) => r.label === lastVideo.ratio) ?? VIDEO_RATIOS[0] // 16:9
   );
   const [duration, setDuration] = useState(
-    () => (VIDEO_DURATIONS.includes(lastVideo.duration) ? lastVideo.duration : VIDEO_DURATIONS[0])
+    () => (durationOptions.includes(lastVideo.duration) ? lastVideo.duration : defaultDuration)
   );
+  const [generateAudio, setGenerateAudio] = useState(() => lastVideo.generateAudio);
   const [dim, setDim] = useState<Dim>(() => deriveResolution(ratio.w, ratio.h, quality.edge));
+  const effectiveGenerateAudio = hasReferenceAudio || generateAudio;
 
   useEffect(() => {
+    if (durationOptions.includes(duration)) return;
+    setDuration(defaultDuration);
+  }, [duration, durationOptions, defaultDuration]);
+
+  useEffect(() => {
+    const next = pickVideoQuality(qualityOptions, quality.short);
+    if (next.short === quality.short) return;
+    lastVideo.quality = next.short;
+    setQuality(next);
+    setDim(deriveResolution(ratio.w, ratio.h, next.edge));
+  }, [qualityOptions, quality, ratio]);
+
+  useEffect(() => {
+    const fallbackSec = Number(defaultDuration.replace(/[^0-9]/g, "")) || 5;
     onChange?.({
       size: `${dim.width}x${dim.height}`,
-      durationSec: Number(duration.replace(/[^0-9]/g, "")) || 5,
-      ratio: ratio.label,
+      durationSec: lockAdaptive ? -1 : Number(duration.replace(/[^0-9]/g, "")) || fallbackSec,
+      ratio: lockAdaptive ? "adaptive" : ratio.label,
       quality: quality.short,
+      generate_audio: effectiveGenerateAudio,
     });
-  }, [dim, duration, ratio, quality, onChange]);
+  }, [dim, duration, ratio, quality, lockAdaptive, onChange, defaultDuration, effectiveGenerateAudio]);
 
   const pickQuality = (q: Quality) => {
     lastVideo.quality = q.short;
@@ -226,13 +379,20 @@ export function VideoSettingsPicker({
     setDim(deriveResolution(ratio.w, ratio.h, q.edge));
   };
   const pickRatio = (r: Ratio) => {
+    if (lockAdaptive) return;
     lastVideo.ratio = r.label;
     setRatio(r);
     setDim(deriveResolution(r.w, r.h, quality.edge));
   };
   const pickDuration = (d: string) => {
+    if (lockAdaptive) return;
     lastVideo.duration = d;
     setDuration(d);
+  };
+  const pickGenerateAudio = (value: boolean) => {
+    if (hasReferenceAudio) return;
+    lastVideo.generateAudio = value;
+    setGenerateAudio(value);
   };
 
   return (
@@ -244,21 +404,24 @@ export function VideoSettingsPicker({
         disabled={disabled}
         aria-haspopup="true"
         aria-expanded={open}
-        title="视频设置"
+        title={lockAdaptive ? "提供参考视频后视频时长和比例不能选择，自动适配参考视频" : "视频设置"}
       >
         <ResBarIcon />
         <span className="media-trigger-label">
-          {quality.short} · {ratio.label}
+          {quality.short} · {lockAdaptive ? "自适应" : ratio.label}
         </span>
         <TimerIcon />
-        <span className="media-trigger-label">{duration}</span>
+        <span className="media-trigger-label">{lockAdaptive ? "自动" : duration}</span>
+        <span className="media-trigger-audio" aria-label={effectiveGenerateAudio ? "有声音" : "无声音"}>
+          {effectiveGenerateAudio ? "🔊" : "🔇"}
+        </span>
         <ChevronIcon />
       </button>
       {open && (
         <div className="media-popup">
           <div className="media-section-title">视频质量</div>
           <div className="seg-track">
-            {VIDEO_QUALITIES.map((q) => (
+            {qualityOptions.map((q) => (
               <button
                 key={q.short}
                 type="button"
@@ -271,32 +434,65 @@ export function VideoSettingsPicker({
           </div>
           <div className="media-section-title">视频比例</div>
           <div className="seg-track">
-            {VIDEO_RATIOS.map((r) => (
-              <button
-                key={r.label}
-                type="button"
-                className={`seg ${r.label === ratio.label ? "active" : ""}`}
-                onClick={() => pickRatio(r)}
-              >
-                <RatioGlyph w={r.w} h={r.h} size={16} />
-                <span>{r.label}</span>
+            {lockAdaptive ? (
+              <button type="button" className="seg active" disabled title="提供参考视频后自动适配参考视频">
+                自适应
               </button>
-            ))}
+            ) : (
+              VIDEO_RATIOS.map((r) => (
+                <button
+                  key={r.label}
+                  type="button"
+                  className={`seg ${r.label === ratio.label ? "active" : ""}`}
+                  onClick={() => pickRatio(r)}
+                >
+                  <RatioGlyph w={r.w} h={r.h} size={16} />
+                  <span>{r.label}</span>
+                </button>
+              ))
+            )}
           </div>
           <div className="media-section-title">视频时长</div>
           <div className="seg-track">
-            {VIDEO_DURATIONS.map((d) => (
-              <button
-                key={d}
-                type="button"
-                className={`seg ${d === duration ? "active" : ""}`}
-                onClick={() => pickDuration(d)}
-              >
+            {lockAdaptive ? (
+              <button type="button" className="seg active" disabled title="提供参考视频后自动适配参考视频">
                 <TimerIcon />
-                <span>{d}</span>
+                <span>自动</span>
+              </button>
+            ) : (
+              durationOptions.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`seg ${d === duration ? "active" : ""}`}
+                  onClick={() => pickDuration(d)}
+                >
+                  <TimerIcon />
+                  <span>{d}</span>
+                </button>
+              ))
+            )}
+          </div>
+          <div className="media-section-title">视频声音</div>
+          <div className="seg-track">
+            {[
+              { value: true, label: "有" },
+              { value: false, label: "无" },
+            ].map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                className={`seg ${option.value === effectiveGenerateAudio ? "active" : ""}`}
+                disabled={disabled || hasReferenceAudio}
+                title={hasReferenceAudio ? "存在参考音频时固定为有" : undefined}
+                onClick={() => pickGenerateAudio(option.value)}
+              >
+                <span aria-hidden>{option.value ? "🔊" : "🔇"}</span>
+                <span>{option.label}</span>
               </button>
             ))}
           </div>
+          {hasReferenceAudio && <div className="media-hint">已上传参考音频，视频声音固定为有</div>}
         </div>
       )}
     </div>

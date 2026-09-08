@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pptDefinition, contractDefinition, imageDefinition } from "./index.js";
+import { pptDefinition, contractDefinition, imageDefinition, digitalEmployeeDefinition } from "./index.js";
 
 describe("agent definitions", () => {
   it("ppt is a real office agent with ask_user + generate_ppt", () => {
@@ -25,5 +25,26 @@ describe("agent definitions", () => {
 
   it("existing agents carry a category", () => {
     expect(imageDefinition.category).toBe("创作");
+  });
+
+  it("digital employee exposes only controlled customer and marketing tools", () => {
+    expect(digitalEmployeeDefinition.type).toBe("digital_employee");
+    expect(digitalEmployeeDefinition.toolNames).toContain("search_customer_profiles");
+    expect(digitalEmployeeDefinition.toolNames).toContain("commit_customer_profile_change");
+    expect(digitalEmployeeDefinition.toolNames).toContain("search_marketing_materials");
+    expect(digitalEmployeeDefinition.toolNames).toContain("update_marketing_brand_assets");
+    expect(digitalEmployeeDefinition.toolNames).toContain("search_customer_work_queue");
+    expect(digitalEmployeeDefinition.toolNames).toContain("prepare_follow_up_action");
+    expect(digitalEmployeeDefinition.toolNames).toContain("generate_individual_outreach");
+    expect(digitalEmployeeDefinition.toolNames).toContain("prepare_marketing_campaign");
+    expect(digitalEmployeeDefinition.toolNames).toContain("rewrite_campaign_asset");
+    expect(digitalEmployeeDefinition.toolNames).toContain("prepare_campaign_result");
+    expect(digitalEmployeeDefinition.toolNames).not.toContain("execute_command");
+    expect(digitalEmployeeDefinition.defaultModelId).toBe("tokenhub-user-selected");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("不得声称已完成");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("prepare_follow_up_action");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("prepare_marketing_campaign");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("productName=\"agent代销\"");
+    expect(digitalEmployeeDefinition.systemPrompt).toContain("负面态度不能成为省略产品的理由");
   });
 });

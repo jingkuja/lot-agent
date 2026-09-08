@@ -56,7 +56,7 @@ export function ModelPicker({
         <div className="media-popup model-popup">
           {isEmpty ? (
             /* 目录为空:仅一行灰色提示,不可选;沿用 model-empty 样式 */
-            <div className="model-empty">暂无模型，请前往订阅管理页面设置</div>
+            <div className="model-empty">模型目录暂时不可用，请稍后重试</div>
           ) : (
             <>
               <input

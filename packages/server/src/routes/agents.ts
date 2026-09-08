@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AgentService } from "../services/agent-service.js";
+import { FIXED_AGENT_IDS } from "../agents/install-order.js";
 
 export function createAgentRoutes(service: AgentService): Hono<{ Variables: { userId: string } }> {
   const app = new Hono<{ Variables: { userId: string } }>();
@@ -13,13 +14,13 @@ export function createAgentRoutes(service: AgentService): Hono<{ Variables: { us
         .list()
         .filter((d) => !d.hidden)
         .map((d) => {
-        const isInstalled = d.id === "general" ? true : installed.has(d.id);
-        return {
-          ...d,
-          installed: isInstalled,
-          sortOrder: installed.has(d.id) ? installed.get(d.id)! : null,
-        };
-      })
+          const isInstalled = FIXED_AGENT_IDS.has(d.id) ? true : installed.has(d.id);
+          return {
+            ...d,
+            installed: isInstalled,
+            sortOrder: installed.has(d.id) ? installed.get(d.id)! : d.id === "digital_employee" ? -1 : null,
+          };
+        })
     );
   });
 
@@ -36,7 +37,7 @@ export function createAgentRoutes(service: AgentService): Hono<{ Variables: { us
   app.delete("/:id/install", async (c) => {
     const userId = c.get("userId");
     const id = c.req.param("id");
-    if (id === "general") return c.json({ error: "Cannot uninstall the general agent" }, 400);
+    if (FIXED_AGENT_IDS.has(id)) return c.json({ error: "Cannot uninstall a built-in agent" }, 400);
     await service.db.uninstallUserAgent(userId, id);
     return c.json({ ok: true });
   });

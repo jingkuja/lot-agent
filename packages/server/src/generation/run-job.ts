@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
+import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
@@ -19,6 +20,7 @@ export interface JobGenerationProvider {
     durationSec?: number;
     ratio?: string;
     quality?: string;
+    generate_audio?: boolean;
     input_reference?: ReferenceInput;
     reference_video?: ReferenceInput;
     reference_audio?: ReferenceInput;
@@ -117,11 +119,21 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
   const input = job.input;
   const assistantMessageId = input.assistantMessageId as string | undefined;
   const conversationId = input.conversationId as string | undefined;
+  const referenceAudio = input.reference_audio as ReferenceInput | undefined;
   const baseMeta = {
     kind: "generation",
     mediaType,
     prompt,
-    settings: { size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio },
+    settings: {
+      size: input.size,
+      n: input.n,
+      quality: input.quality,
+      durationSec: input.durationSec,
+      ratio: input.ratio,
+      ...(mediaType === "video"
+        ? { generate_audio: resolveVideoGenerateAudio(input.generate_audio, referenceAudio) }
+        : {}),
+    },
   };
   return async (status: string, extra: Record<string, unknown>) => {
     if (assistantMessageId && conversationId) {
@@ -156,7 +168,7 @@ async function downloadAndFinalize(
     const assetId = randomUUID();
     const key = `${assetId}.${deps.extFor(mime)}`;
     const { url } = await deps.storage.put({ key, body, contentType: mime });
-    const durationSec = mediaType === "video" ? Number(job.input.durationSec ?? 5) : undefined;
+    const durationSec = mediaType === "video" ? billedVideoSeconds(job.input.durationSec) : undefined;
     await deps.db.createAsset({ id: assetId, taskId: job.id, userId: job.userId, type: mediaType, storageKey: key, url, mime, sizeBytes: body.byteLength, durationSec });
     await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount: mediaType === "video" ? (durationSec ?? 1) : 1 } });
     const assets: GenAssets = [durationSec != null ? { url, mime, durationSec } : { url, mime }];
@@ -183,6 +195,9 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   const inputReference = input.input_reference as ReferenceInput | undefined;
   const referenceVideo = input.reference_video as ReferenceInput | undefined;
   const referenceAudio = input.reference_audio as ReferenceInput | undefined;
+  const generateAudio = mediaType === "video"
+    ? resolveVideoGenerateAudio(input.generate_audio, referenceAudio)
+    : undefined;
   const firstFrame = input.first_frame as string | undefined;
   const lastFrame = input.last_frame as string | undefined;
   const sleep = deps.sleep ?? realSleep;
@@ -205,10 +220,11 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     await assertNotCancelled();
     const cacheKey = genCacheKey(`${mediaType}.generate`, {
       userId: job.userId,
-      prompt, size: input.size, n: input.n, durationSec: input.durationSec, ratio: input.ratio,
+      prompt, size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
       input_reference: inputReference,
       reference_video: referenceVideo,
       reference_audio: referenceAudio,
+      generate_audio: generateAudio,
       first_frame: firstFrame,
       last_frame: lastFrame,
       media: media?.map((m) => m.url), model: deps.vendorModel,
@@ -235,11 +251,13 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
         prompt,
         size: input.size as string | undefined,
         n: input.n as number | undefined,
+        quality: (input.quality as string | undefined) ?? (mediaType === "image" ? "auto" : undefined),
         durationSec: input.durationSec as number | undefined,
         ratio: input.ratio as string | undefined,
         input_reference: publicReference(inputReference),
         reference_video: publicReference(referenceVideo),
         reference_audio: publicReference(referenceAudio),
+        generate_audio: generateAudio,
         first_frame: firstFrame ? publicStaticUrl(firstFrame) : undefined,
         last_frame: lastFrame ? publicStaticUrl(lastFrame) : undefined,
         media: publicMedia,
@@ -247,8 +265,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       // Keep the task id and resolved vendor model beside the request payload so
       // a video failure can be traced through the worker logs. Deliberately do
       // not log provider configuration or headers: those contain the API key.
-      if (mediaType === "video") {
-        console.log("[video.generate] request", JSON.stringify({
+      if (mediaType === "video" || mediaType === "image") {
+        console.log(`[${mediaType}.generate] request`, JSON.stringify({
           taskId: job.id,
           model: deps.vendorModel,
           body: createRequest,

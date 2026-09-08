@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Agent } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
+import { withoutDigitalEmployee } from "../lib/product-agent-scope.js";
 
 interface Props {
   agents: Agent[];
@@ -10,12 +11,13 @@ interface Props {
   busyId?: string | null;
 }
 
-/** Agent 中心:卡片网格市场,按 category 分组,安装 / 卸载。 */
+/** Studio 管理:卡片网格市场,按 category 分组,安装 / 卸载。 */
 export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busyId }: Props) {
   const groups = useMemo(() => {
     const m = new Map<string, Agent[]>();
-    for (const a of agents) {
-      if (a.id === GENERAL_ID) continue; // 通用是基础能力,不在市场展示
+    for (const a of withoutDigitalEmployee(agents)) {
+      // 通用助手是基础能力；数字员工是独立产品模块。两者都不属于市场。
+      if (a.id === GENERAL_ID) continue;
       const key = a.category ?? "其他";
       (m.get(key) ?? m.set(key, []).get(key)!).push(a);
     }
@@ -24,9 +26,9 @@ export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busy
 
   return (
     <div className="agent-center-overlay" onClick={onClose}>
-      <div className="agent-center-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Agent 中心">
+      <div className="agent-center-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Studio 管理">
         <div className="agent-center-head">
-          <span className="agent-center-title">Agent 中心</span>
+          <span className="agent-center-title">Studio 管理</span>
           <button className="agent-center-close" onClick={onClose} aria-label="关闭">×</button>
         </div>
 
@@ -36,7 +38,7 @@ export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busy
               <div className="agent-center-group-label">{category}</div>
               <div className="agent-center-grid">
                 {list.map((a) => {
-                  const isGeneral = a.id === "general";
+                  const isBuiltIn = a.id === "general";
                   const busy = busyId === a.id;
                   return (
                     <div key={a.id} className="agent-card">
@@ -46,11 +48,11 @@ export function AgentCenterModal({ agents, onInstall, onUninstall, onClose, busy
                         {a.installed ? (
                           <button
                             className="agent-card-btn installed"
-                            disabled={isGeneral || busy}
+                            disabled={isBuiltIn || busy}
                             onClick={() => onUninstall(a.id)}
-                            title={isGeneral ? "通用助手不可卸载" : "卸载"}
+                            title={isBuiltIn ? "内置 Agent 不可卸载" : "卸载"}
                           >
-                            {isGeneral ? "默认" : busy ? "处理中…" : "已安装 · 卸载"}
+                            {isBuiltIn ? "内置" : busy ? "处理中…" : "已安装 · 卸载"}
                           </button>
                         ) : (
                           <button

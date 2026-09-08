@@ -17,12 +17,13 @@ import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
 import { createModelRoutes } from "./routes/models.js";
-import { createKeyRoutes } from "./routes/keys.js";
 import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
-import { createUsageRoutes } from "./routes/usage.js";
+import { createUsageRoutes, summarizeBalance } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
+import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
+import { createRechargeRoutes } from "./routes/recharge.js";
 import { AppConfigSchema } from "@lot-agent/core";
 import { loadLlmConfig } from "./config.js";
 import { rateLimit, clientIp } from "./middleware/rate-limit.js";
@@ -94,6 +95,36 @@ async function main() {
   };
   void sweepExpiredSessions();
   setInterval(sweepExpiredSessions, SESSION_CLEANUP_INTERVAL_MS).unref();
+
+  // Customer group portraits are account-scoped aggregates. Only explicitly
+  // opted-in accounts are selected after 23:00 Asia/Shanghai; the snapshot's
+  // (user, date) key also prevents duplicate model billing across restarts.
+  const COHORT_SUMMARY_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  const runCustomerCohortSummaries = async () => {
+    try {
+      const completed = await service.digitalEmployee.runNightlyCohortSummaries();
+      if (completed > 0) console.log(`Generated ${completed} nightly customer cohort portrait(s)`);
+    } catch (err) {
+      console.warn("Customer cohort summary scheduler failed:", err);
+    }
+  };
+  void runCustomerCohortSummaries();
+  setInterval(runCustomerCohortSummaries, COHORT_SUMMARY_CHECK_INTERVAL_MS).unref();
+
+  // Each account owns its local time-zone setting. The database selects only
+  // due rows and advances next_run_at, while the same daily idempotency key
+  // prevents restarts or overlapping ticks from creating duplicate runs.
+  const OPPORTUNITY_DISCOVERY_CHECK_INTERVAL_MS = 60 * 1000;
+  const enqueueDailyOpportunityDiscoveries = async () => {
+    try {
+      const queued = await service.digitalEmployee.opportunities.enqueueDueDiscoveries();
+      if (queued > 0) console.log(`Queued ${queued} daily opportunity discovery task(s)`);
+    } catch (err) {
+      console.warn("Opportunity discovery scheduler failed:", err);
+    }
+  };
+  void enqueueDailyOpportunityDiscoveries();
+  setInterval(enqueueDailyOpportunityDiscoveries, OPPORTUNITY_DISCOVERY_CHECK_INTERVAL_MS).unref();
 
   // Generation tasks are enqueued to Redis and consumed by a SEPARATE worker
   // process. If that worker is down or misconfigured (crashed on startup for a
@@ -170,6 +201,9 @@ async function main() {
     // In-conversation generation + the standalone task API share one bucket:
     // both enqueue the same billed image/video jobs.
     generation: { prefix: "rl:generation", limit: 10, windowMs: 60 * 1000 },
+    // Customer-profile CRUD is bounded separately from chat. Natural-language
+    // capture still runs through the existing message limit above.
+    digitalEmployee: { prefix: "rl:digital-employee", limit: 90, windowMs: 60 * 1000 },
   } as const;
   const loginRateLimit = rateLimit({ store: rateLimitStore, keyFn: clientIp, ...RATE_LIMITS.login });
   const uploadRateLimit = rateLimit({
@@ -187,6 +221,11 @@ async function main() {
     keyFn: (c) => c.get("userId"),
     ...RATE_LIMITS.generation,
   });
+  const digitalEmployeeRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.digitalEmployee,
+  });
 
   app.use("*", logger());
   app.use("*", cors({
@@ -201,6 +240,12 @@ async function main() {
   // the exact POST paths (method+path match) BEFORE the route below, so it
   // runs first in the chain without touching GET /public-key, /mode, /me.
   app.on("POST", "/api/auth/login", loginRateLimit);
+  app.on("POST", "/api/auth/phone-login", loginRateLimit);
+  app.on("POST", "/api/auth/verification/email", loginRateLimit);
+  app.on("POST", "/api/auth/verification/phone", loginRateLimit);
+  app.on("POST", "/api/auth/phone-binding/verification", loginRateLimit);
+  app.on("POST", "/api/auth/phone-binding", loginRateLimit);
+  app.on("POST", "/api/auth/register", loginRateLimit);
   app.on("POST", "/api/auth/token-login", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
 
@@ -218,16 +263,19 @@ async function main() {
   app.use("/api/agents/*", authMw);
   app.use("/api/models", authMw);
   app.use("/api/models/*", authMw);
-  app.use("/api/keys/*", authMw);
   app.use("/api/tasks/*", authMw);
+  app.use("/api/assets", authMw);
   app.use("/api/assets/*", authMw);
   app.use("/api/uploads/*", authMw);
   app.use("/api/usage/*", authMw);
+  app.use("/api/recharge/*", authMw);
   app.use("/api/balance", authMw);
   app.use("/api/platform/*", authMw);
   app.use("/api/publish/*", authMw);
   app.use("/api/knowledge-bases", authMw);
   app.use("/api/knowledge-bases/*", authMw);
+  app.use("/api/digital-employee", authMw);
+  app.use("/api/digital-employee/*", authMw);
 
   // userId-keyed rate limits — registered after authMw (so `userId` is set)
   // and before the route handlers below. Exact method+path so GET/SSE-poll
@@ -237,6 +285,7 @@ async function main() {
   app.on("POST", "/api/conversations/:id/regenerate", messagesRateLimit);
   app.on("POST", "/api/conversations/:id/generations", generationRateLimit);
   app.on("POST", "/api/tasks", generationRateLimit);
+  app.use("/api/digital-employee/*", digitalEmployeeRateLimit);
 
   // Protected API routes
   app.route("/api/conversations", createConversationRoutes(service));
@@ -247,25 +296,48 @@ async function main() {
   app.route("/api/memory", createMemoryRoutes(service));
   app.route("/api/agents", createAgentRoutes(service));
   app.route("/api/models", createModelRoutes(service));
-  app.route("/api/keys", createKeyRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));
   app.route("/api/usage", createUsageRoutes(service));
+  app.route("/api/recharge", createRechargeRoutes(service));
   app.route("/api/platform", createPlatformRoutes(service));
   app.route("/api/publish", createPublishRoutes(service));
   app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
+  app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
 
   // /api/balance alias → same balance logic, user-scoped
   app.get("/api/balance", async (c) => {
     const userId = c.get("userId");
-    const [bal, dailySpend, monthlySpend] = await Promise.all([
+    const user = await service.db.getUserById(userId);
+    if (service.managedKeysEnabled && user?.external_user_id != null) {
+      try {
+        const [managed, dailySpend, monthlySpend] = await Promise.all([
+          service.tokenhub.getManagedBalance(user.external_user_id),
+          service.db.getDailySpend(userId),
+          service.db.getMonthlySpend(userId),
+        ]);
+        return c.json({
+          ...summarizeBalance(managed.remainAmount, managed.usedAmount, managed.rechargedAmount),
+          status: managed.status,
+          credentialVersion: managed.credentialVersion,
+          policyRevision: managed.policyRevision,
+          allowBalanceFallback: managed.allowBalanceFallback,
+          dailySpend,
+          monthlySpend,
+        });
+      } catch {
+        return c.json({ error: "额度加载失败" }, 502);
+      }
+    }
+    const [bal, dailySpend, monthlySpend, totalSpend] = await Promise.all([
       service.db.ensureUserBalance(userId),
       service.db.getDailySpend(userId),
       service.db.getMonthlySpend(userId),
+      service.db.getTotalSpend(userId),
     ]);
     return c.json({
-      balance: bal.balance,
+      ...summarizeBalance(bal.balance, totalSpend),
       daily_limit: bal.daily_limit,
       monthly_limit: bal.monthly_limit,
       dailySpend,
