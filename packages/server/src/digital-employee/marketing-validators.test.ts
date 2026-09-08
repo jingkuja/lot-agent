@@ -27,6 +27,17 @@ describe("parseMarketingProduct", () => {
     expect(result.caseMaterials).toEqual([{ title: "制造企业案例", summary: "3 周上线", assetUrl: "/static/assets/case.png" }]);
   });
 
+
+  it("解析 FAQ 与产品补充说明", () => {
+    const result = parseMarketingProduct({
+      name: "会员版",
+      faqs: [{ question: "多久上线？", answer: "通常 2 周" }],
+      productNotes: " 面向中小团队的部署说明 ",
+    });
+    expect(result.faqs).toEqual([{ question: "多久上线？", answer: "通常 2 周" }]);
+    expect(result.productNotes).toBe("面向中小团队的部署说明");
+  });
+
   it("拒绝非对象请求体与缺失产品名称", () => {
     expect(() => parseMarketingProduct(null)).toThrow(InputError);
     expect(() => parseMarketingProduct([])).toThrow(InputError);

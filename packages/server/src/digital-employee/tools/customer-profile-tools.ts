@@ -94,8 +94,9 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
   const prepare: Tool = {
     name: "prepare_customer_profile_change",
     description:
-      "准备对话式新建或更新客户主档。只处理姓名、别名、客户区域、来源、总体关系、健康度和标签；" +
-      "联系方式、归档、人工锁定请引导至“客户画像管理”。此工具不写正式画像，返回 needs_confirmation 时必须先调用 ask_user。",
+      "准备对话式新建或更新客户主档。一句话建档时尽量一次抽出：姓名/称呼、别名、组织、部门、职位、客户区域、来源、总体关系、健康度、标签；" +
+      "原话里出现的字段都要填，不要只传姓名。联系方式、归档、人工锁定请引导至“客户画像管理”。" +
+      "此工具不写正式画像，返回 needs_confirmation 时必须先调用 ask_user。",
     parameters: {
       type: "object",
       properties: {
@@ -103,11 +104,14 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
         customerMention: { type: "string", description: "更新目标在用户原话中的称呼" },
         displayName: { type: "string" },
         aliases: { type: "array", items: { type: "string" }, maxItems: 20 },
+        organization: { type: ["string", "null"], description: "公司/组织名称，原话出现时必填" },
+        department: { type: ["string", "null"], description: "部门，原话出现时必填" },
+        title: { type: ["string", "null"], description: "职位/头衔，如经理、老师、负责人" },
         customerRegion: { type: ["string", "null"], description: "客户区域，自由文本，不拆分省市区" },
-        source: { type: ["string", "null"] },
+        source: { type: ["string", "null"], description: "来源渠道，如转介绍、展会、朋友圈" },
         relationshipStage: { type: "string", enum: RELATIONSHIP_ENUM },
         overallHealth: { type: "string", enum: HEALTH_ENUM },
-        tags: { type: "array", items: { type: "string" }, maxItems: 30 },
+        tags: { type: "array", items: { type: "string" }, maxItems: 30, description: "从原话提炼的短标签，如行业/角色/意向" },
       },
       required: ["operation"],
     },
@@ -187,6 +191,9 @@ function profileChangeInput(value: Record<string, unknown>): ProfileChangeInput 
     customerMention: optionalString(value.customerMention, 200),
     displayName: optionalString(value.displayName, 200),
     aliases: optionalStringArray(value.aliases, 20, 200),
+    organization: optionalNullableString(value.organization, 200),
+    department: optionalNullableString(value.department, 200),
+    title: optionalNullableString(value.title, 200),
     customerRegion: optionalNullableString(value.customerRegion, 500),
     source: optionalNullableString(value.source, 64),
     relationshipStage: value.relationshipStage as RelationshipStage | undefined,

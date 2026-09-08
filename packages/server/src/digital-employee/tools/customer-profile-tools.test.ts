@@ -54,3 +54,38 @@ describe("customer profile agent tools", () => {
     expect(service.commitProfileChange).not.toHaveBeenCalled();
   });
 });
+
+
+  it("passes organization department and title into profile change prepare", async () => {
+    const prepareProfileChange = vi.fn(async () => ({
+      draftId: "00000000-0000-0000-0000-000000000011",
+      status: "ready",
+      operation: "create",
+      candidates: [],
+      risks: [],
+    }));
+    await tool("prepare_customer_profile_change", { prepareProfileChange }).execute(
+      {
+        operation: "create",
+        displayName: "李静",
+        organization: "边缘科技",
+        department: "采购部",
+        title: "经理",
+        customerRegion: "深圳",
+        relationshipStage: "prospect",
+        tags: ["制造业"],
+      },
+      { userId: "u1", workingDirectory: "/tmp" }
+    );
+    expect(prepareProfileChange).toHaveBeenCalledWith(
+      "u1",
+      expect.objectContaining({
+        organization: "边缘科技",
+        department: "采购部",
+        title: "经理",
+        customerRegion: "深圳",
+        tags: ["制造业"],
+      }),
+      expect.any(Object),
+    );
+  });

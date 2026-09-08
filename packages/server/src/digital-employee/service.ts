@@ -768,6 +768,7 @@ export class DigitalEmployeeService {
       }
     }
     const rawText = source.sourceText.trim().slice(0, 12_000);
+    input = withCaptureDraftDefaults(input);
     const contextual = await this.contextProfileForMention(userId, source.conversationId, input.customerMention);
     const candidates = contextual ? [contextual] : await this.repository.findProfilesByExactMention(userId, input.customerMention);
     const candidateViews = candidates.map((profile) => ({
@@ -910,8 +911,20 @@ export class DigitalEmployeeService {
         const displayName = input.createProfile.displayName?.trim() || capture.customerMention;
         if (!displayName || displayName.length > 200) throw new InputError("新客户名称无效");
         const profileIdForNew = randomUUID();
+        const seedStage = capture.facts?.relationshipStage
+          ?? (capture.eventType === "purchase" || capture.eventType === "renewal" ? "customer"
+            : capture.eventType === "trial" || capture.eventType === "purchase_intent" || capture.eventType === "requirement" ? "prospect"
+              : "lead");
+        const seedHealth = capture.facts?.health
+          ?? (capture.eventType === "complaint" ? "at_risk" : "healthy");
+        const seedSummary = `${displayName}：${seedStage === "customer" ? "客户" : seedStage === "prospect" ? "潜客" : "线索"}，整体${seedHealth === "at_risk" ? "风险" : "健康"}。`;
         profile = await this.repository.createProfile(
-          this.newProfileRow(userId, profileIdForNew, { displayName }, `${displayName}：线索，整体健康。`),
+          this.newProfileRow(userId, profileIdForNew, {
+            displayName,
+            relationshipStage: seedStage,
+            overallHealth: seedHealth,
+            tags: [],
+          }, seedSummary),
           client
         );
       }
@@ -1402,11 +1415,50 @@ function sourceIdForDraft(draft: { sourceMessageId: string | null; id: string },
   return `${draft.sourceMessageId ?? draft.id}:${profileId}`;
 }
 
+
+/** Fill soft defaults so the first prepare pass carries more actionable fields
+ * without inventing high-impact journey stages (purchased/using/lost/churned). */
+export function withCaptureDraftDefaults(input: CustomerCaptureInput): CustomerCaptureInput {
+  const facts = { ...(input.facts ?? {}) };
+  const patch = { ...(input.proposedStatePatch ?? {}) };
+  const event = input.eventType;
+  if (!facts.journeyStage) {
+    if (event === "trial") facts.journeyStage = "trial";
+    else if (event === "requirement" || event === "purchase_intent") facts.journeyStage = "evaluating";
+    else if (event === "contact" || event === "note") facts.journeyStage = "unknown";
+  }
+  if (!facts.relationshipStage) {
+    if (event === "purchase" || event === "renewal" || event === "delivery") facts.relationshipStage = "customer";
+    else if (event === "trial" || event === "purchase_intent" || event === "requirement") facts.relationshipStage = "prospect";
+    else if (event === "churn") facts.relationshipStage = "lost";
+    else if (event === "contact" || event === "note") facts.relationshipStage = "lead";
+  }
+  if (!facts.sentiment) {
+    if (event === "complaint") facts.sentiment = "negative";
+    else if (event === "product_feedback") facts.sentiment = "mixed";
+    else if (event === "purchase" || event === "renewal" || event === "trial") facts.sentiment = "positive";
+  }
+  if (!facts.health && event === "complaint") facts.health = "at_risk";
+  if (!facts.satisfaction && event === "complaint") facts.satisfaction = "dissatisfied";
+  for (const key of ["journeyStage", "relationshipStage", "sentiment", "satisfaction", "health"] as const) {
+    if (facts[key] !== undefined && patch[key] === undefined) (patch as Record<string, unknown>)[key] = facts[key];
+  }
+  return {
+    ...input,
+    facts,
+    proposedStatePatch: Object.keys(patch).length ? patch : input.proposedStatePatch,
+    confidence: input.confidence ?? 0.7,
+  };
+}
+
 function profileChangePatch(input: ProfileChangeInput): JsonObject {
   const patch: JsonObject = {};
   const fields: Array<keyof Omit<ProfileChangeInput, "operation" | "customerMention">> = [
     "displayName",
     "aliases",
+    "organization",
+    "department",
+    "title",
     "customerRegion",
     "source",
     "relationshipStage",

@@ -5677,10 +5677,15 @@ html, body, #root {
 .de-opportunity-body { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 24px; padding: 17px 18px; }
 .de-opportunity-main h2 { color: var(--text); font-size: 17px; }
 .de-opportunity-main > p { margin-top: 5px; color: var(--text-secondary); font-size: 13px; }
+.de-opportunity-section { margin-top: 14px; }
+.de-opportunity-section h3 { color: var(--text-muted); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
+.de-opportunity-section > p { margin-top: 6px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+.de-opportunity-action-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; color: var(--text-muted); font-size: 11px; }
 .de-opportunity-main h3 { margin-top: 15px; color: var(--text-muted); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
 .de-opportunity-main ul { display: grid; gap: 7px; margin-top: 8px; list-style: none; }
 .de-opportunity-main li { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 8px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .de-opportunity-main li time { color: var(--text-muted); }
+.de-opportunity-task-aside { border: 1px dashed color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .de-opportunity-risk { margin-top: 10px; padding: 7px 9px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--de-warning) 9%, var(--bg-card)); color: var(--de-warning); font-size: 11px; }
 .de-opportunity-risk.blocking { background: color-mix(in srgb, var(--error) 8%, var(--bg-card)); color: var(--error); }
 .de-opportunity-body aside { display: flex; flex-direction: column; align-items: start; gap: 5px; padding: 12px; border-radius: var(--radius-md); background: var(--overlay-raise); }

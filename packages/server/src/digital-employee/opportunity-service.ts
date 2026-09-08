@@ -24,7 +24,10 @@ export interface OpportunityAdviceGenerator {
   enhance(input: {
     userId: string;
     taskId: string | null;
-    opportunities: Array<Pick<RuleOpportunity, "dedupKey" | "type" | "title" | "objective" | "method" | "reason" | "evidence" | "priority">>;
+    opportunities: Array<Pick<RuleOpportunity, "dedupKey" | "type" | "title" | "objective" | "method" | "reason" | "evidence" | "priority" | "productName"> & {
+      relationshipStage?: string | null;
+      summaryHint?: string | null;
+    }>;
   }): Promise<{ modelId: string; patches: OpportunityAdvicePatch[] }>;
 }
 
@@ -108,10 +111,13 @@ export class OpportunityService {
           const generated = await this.adviceGenerator.enhance({
             userId,
             taskId: claimed.rows[0].task_id ?? null,
-            opportunities: rules.slice(0, 40).map(({ dedupKey, type, title, objective, method, reason, evidence, priority, profileId }) => {
-              const customerName = candidates.find((candidate) => candidate.profileId === profileId)?.displayName;
+            opportunities: rules.slice(0, 40).map(({ dedupKey, type, title, objective, method, reason, evidence, priority, profileId, productName }) => {
+              const candidate = candidates.find((item) => item.profileId === profileId);
+              const customerName = candidate?.displayName;
               return {
-                dedupKey, type, method, priority,
+                dedupKey, type, method, priority, productName: productName ?? null,
+                relationshipStage: candidate?.relationshipStage ?? null,
+                summaryHint: candidate?.summary ? redactModelText(candidate.summary.slice(0, 120), customerName) : null,
                 title: redactModelText(title, customerName),
                 objective: redactModelText(objective, customerName),
                 reason: redactModelText(reason, customerName),

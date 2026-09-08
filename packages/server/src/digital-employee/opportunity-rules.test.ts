@@ -15,6 +15,9 @@ describe("opportunity discovery rules", () => {
     const result = discoverByRules(base, new Date("2026-08-19T00:00:00.000Z"));
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ type: "prospect_progress", readiness: "actionable", productName: "企业版" });
+    expect(result[0].title).toContain("企业版");
+    expect(result[0].objective).toContain("决策条件");
+    expect(result[0].reason).toContain("策略：推进评估转化");
     expect(result[0].evidence[0]).toMatchObject({ sourceId: "o1", occurredAt: "2026-08-18T00:00:00.000Z" });
   });
 

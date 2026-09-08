@@ -67,12 +67,17 @@ export function discoverByRules(candidate: DiscoveryCandidate, now = new Date())
 
   if (hasRisk) {
     const risks: OpportunityRisk[] = [{ code: "unresolved_risk", message: "当前存在投诉、不满或未解决问题，应先修复关系", blocking: false }];
+    const riskDetail = hasComplaint
+      ? (observation?.rawText?.slice(0, 80) || "近期投诉")
+      : (riskProduct ? `${riskProduct.productName}存在未解决问题` : (candidate.summary.slice(0, 80) || "存在未解决风险"));
     output.push(make(candidate, "risk_recovery", {
-      title: `优先处理${candidate.displayName}的服务风险`,
-      objective: "确认问题处理状态并恢复客户信任",
+      title: `优先安抚并处理${candidate.displayName}的服务风险`,
+      objective: riskProduct
+        ? `电话确认「${riskProduct.productName}」问题处理进度，给出明确时限与补偿口径，恢复信任`
+        : "电话确认投诉/风险处理状态，给出明确时限并恢复客户信任",
       method: "电话",
       priority: "high",
-      reason: hasComplaint ? "近期记录了客户投诉，应优先服务处理" : "客户画像或产品状态显示存在未解决风险",
+      reason: `策略：先服务后销售。依据：${riskDetail}`,
       evidence: [observationEvidence, ...(riskProduct ? [{ fact: `${riskProduct.productName}存在未解决问题`, occurredAt: riskProduct.updatedAt, sourceType: "product_state" }] : [])],
       readiness: "actionable",
       risks,
@@ -90,8 +95,11 @@ export function discoverByRules(candidate: DiscoveryCandidate, now = new Date())
   for (const product of candidate.products) {
     if (product.journeyStage === "renewal" && !hasRisk) {
       output.push(make(candidate, "renewal", {
-        title: `推进${candidate.displayName}的续费安排`, objective: "确认续费意向和时间安排", method: "电话",
-        priority: "high", reason: `${product.productName}已进入续费阶段`,
+        title: `推进${candidate.displayName}的「${product.productName}」续费`,
+        objective: `电话确认「${product.productName}」续费意向、决策人和期望时间，并预约下一次确认节点`,
+        method: "电话",
+        priority: "high",
+        reason: `策略：锁定续费窗口。${product.productName}已进入续费阶段${candidate.summary ? `；画像摘要：${candidate.summary.slice(0, 60)}` : ""}`,
         evidence: [{ fact: `${product.productName}当前处于续费阶段`, occurredAt: product.updatedAt, sourceType: "product_state" }],
         readiness: "actionable", risks: [], product, now,
       }));
@@ -101,10 +109,20 @@ export function discoverByRules(candidate: DiscoveryCandidate, now = new Date())
   const activeProduct = candidate.products.find((product) => ["evaluating", "trial"].includes(product.journeyStage));
   const recentSignal = observation && now.getTime() - Date.parse(observedAt) <= 30 * DAY;
   if (["lead", "prospect"].includes(candidate.relationshipStage) && (activeProduct || recentSignal)) {
+    const stageLabel = activeProduct?.journeyStage === "trial" ? "试用" : "评估";
+    const signal = observation?.rawText?.slice(0, 72) || candidate.summary.slice(0, 72) || "近期有互动";
     output.push(make(candidate, "prospect_progress", {
-      title: `推进${candidate.displayName}的当前需求`, objective: "确认需求与决策条件，形成有效下一步", method: "企微/微信",
+      title: activeProduct
+        ? `推进${candidate.displayName}的「${activeProduct.productName}」${stageLabel}`
+        : `推进${candidate.displayName}的当前需求`,
+      objective: activeProduct
+        ? `企微确认「${activeProduct.productName}」决策条件、卡点和下一步（演示/报价/试用反馈），形成可执行约定`
+        : "企微确认当前需求、决策人与时间点，形成有效下一步",
+      method: "企微/微信",
       priority: candidate.nextFollowUpAt && Date.parse(candidate.nextFollowUpAt) <= now.getTime() ? "high" : "normal",
-      reason: activeProduct ? `${activeProduct.productName}处于${activeProduct.journeyStage === "trial" ? "试用" : "评估"}阶段` : "近期画像记录了客户需求或互动",
+      reason: activeProduct
+        ? `策略：推进${stageLabel}转化。依据：${activeProduct.productName}处于${stageLabel}；信号：${signal}`
+        : `策略：推进需求澄清。依据：${signal}`,
       evidence: [observationEvidence, ...(activeProduct ? [{ fact: `${activeProduct.productName}处于${activeProduct.journeyStage === "trial" ? "试用中" : "评估中"}`, occurredAt: activeProduct.updatedAt, sourceType: "product_state" }] : [])],
       readiness: observation || candidate.summary ? "actionable" : "needs_info", risks: promotionRisks, product: activeProduct, now,
     }));
@@ -113,10 +131,16 @@ export function discoverByRules(candidate: DiscoveryCandidate, now = new Date())
   const lastContact = candidate.lastContactAt ? Date.parse(candidate.lastContactAt) : NaN;
   if (!hasRisk && Number.isFinite(lastContact) && now.getTime() - lastContact >= 30 * DAY &&
       (candidate.relationshipStage === "prospect" || candidate.relationshipStage === "customer" || candidate.relationshipStage === "inactive")) {
+    const silentDays = Math.floor((now.getTime() - lastContact) / DAY);
     output.push(make(candidate, "silent_reengage", {
-      title: `重新联系${candidate.displayName}`, objective: "确认客户现状并恢复有效沟通", method: "企微/微信",
-      priority: now.getTime() - lastContact >= 60 * DAY ? "high" : "normal", reason: "曾有真实关系，但已超过合理时间未联系",
-      evidence: [{ fact: "距上次联系已超过 30 天", occurredAt: candidate.lastContactAt!, sourceType: "profile" }],
+      title: `重新联系已沉默${silentDays}天的${candidate.displayName}`,
+      objective: activeProduct
+        ? `企微轻量问候并确认现状，试探「${activeProduct.productName}」是否仍有需求，预约一次短沟通`
+        : "企微轻量问候并确认现状，恢复有效沟通并约定下一步",
+      method: "企微/微信",
+      priority: silentDays >= 60 ? "high" : "normal",
+      reason: `策略：沉默唤醒。曾有真实关系，已${silentDays}天未联系${candidate.summary ? `；历史摘要：${candidate.summary.slice(0, 60)}` : ""}`,
+      evidence: [{ fact: `距上次联系已超过 ${silentDays} 天`, occurredAt: candidate.lastContactAt!, sourceType: "profile" }],
       readiness: candidate.summary ? "tryable" : "needs_info", risks: [], product: activeProduct, now,
     }));
   }

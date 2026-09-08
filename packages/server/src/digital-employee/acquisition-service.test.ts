@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CustomerAcquisitionService } from "./acquisition-service.js";
+import { CustomerAcquisitionService, campaignMediaPrompt, fallbackCopy, fallbackRecommendations } from "./acquisition-service.js";
 import type { CampaignModelAvailability } from "./acquisition-types.js";
 
 function availability(overrides: Partial<CampaignModelAvailability> = {}): CampaignModelAvailability {
@@ -561,5 +561,54 @@ describe("CustomerAcquisitionService", () => {
     expect(campaign.opportunityId).toBe("o1");
     expect(query.mock.calls.some((call) => String(call[0]).includes("INSERT INTO de_marketing_campaigns"))).toBe(true);
     expect(query.mock.calls.some((call) => String(call[0]).includes("status='accepted'"))).toBe(true);
+  });
+});
+
+
+describe("acquisition prompt quality helpers", () => {
+  const product = {
+    name: "边缘算力",
+    positioning: "快速部署",
+    core_values: ["部署简单", "成本可控"],
+    verifiable_facts: [{ statement: "已服务 30 家工厂" }],
+    current_benefits: [{ title: "首月试用" }],
+    faqs: [{ question: "多久上线？", answer: "两周内" }],
+    product_notes: "适合华东制造产线改造",
+    prohibited_expressions: ["绝对领先"],
+  };
+
+  it("builds richer fallback copy with facts and FAQ", () => {
+    const copy = fallbackCopy(
+      { title: "部署海报文案", prompt: "强调部署效率", callToAction: "预约演示", objective: "获咨询", channels: ["朋友圈"], assetType: "copy", productId: "p1" } as any,
+      { audienceDescription: "华东制造业管理者" },
+      product,
+    );
+    expect(copy).toContain("华东制造业管理者");
+    expect(copy).toContain("已服务 30 家工厂");
+    expect(copy).toContain("多久上线？");
+    expect(copy).toContain("预约演示");
+  });
+
+  it("includes layout and resolution guidance in poster prompts", () => {
+    const prompt = campaignMediaPrompt(
+      { prompt: "突出部署简单", objective: "获咨询", callToAction: "预约演示", channels: ["朋友圈"], assetType: "poster", productId: "p1", mediaSettings: { size: "1536x1024", quality: "high" } } as any,
+      { audienceDescription: "华东制造业管理者" },
+      product,
+      { tone: ["专业克制"], visual_assets: [{ name: "主色蓝" }] },
+      "poster",
+    );
+    expect(prompt).toContain("1536x1024");
+    expect(prompt).toContain("印刷级清晰");
+    expect(prompt).toContain("多久上线？");
+    expect(prompt).toContain("适合华东制造产线改造");
+  });
+
+  it("surfaces FAQ hooks in fallback recommendations", () => {
+    const drafts = fallbackRecommendations(
+      [{ id: "s1", name: "制造业潜客" }],
+      [{ id: "p1", name: "边缘算力", coreValues: ["部署简单"], faqs: [{ question: "多久上线？", answer: "两周内" }] }],
+    );
+    expect(drafts.some((item) => item.type === "poster" && item.creativeDirection?.includes("高清"))).toBe(true);
+    expect(drafts[0].reasoning?.some((line) => line.includes("多久上线"))).toBe(true);
   });
 });

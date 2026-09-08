@@ -55,6 +55,7 @@ export function createCustomerCaptureTools(service: DigitalEmployeeService): Too
     name: "prepare_customer_capture",
     description:
       "当用户在记录客户、潜客、购买、试用、投诉、反馈或沟通结果时调用。根据当前用户消息匹配客户并创建可提交的采集草稿。" +
+      "第一次调用就要尽量抽全：eventType、productName、facts（needs/objections/currentIssues/journeyStage/relationshipStage/sentiment/satisfaction/health）和 proposedStatePatch；能从原话推断的不要留空，以减少澄清回合。" +
       "也用于把客户关联到营销资料中的产品；涉及产品时先调用 search_marketing_materials，唯一匹配时同时传产品 id 与规范名称。" +
       "“某客户咨询/了解某对象、对某对象感兴趣、因某对象价格或门槛犹豫”都属于产品关系信号，必须传 productName；" +
       "搜索无匹配时只传原话 productName，工具会要求用户选择已有产品、新建产品或不关联。" +

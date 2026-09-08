@@ -65,14 +65,15 @@ export class MarketingMaterialsRepository {
     const result = await client.query(
       `INSERT INTO marketing_products (
          id, user_id, name, positioning, core_values, verifiable_facts, common_objections,
-         current_benefits, prohibited_expressions, case_materials
-       ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb)
+         current_benefits, prohibited_expressions, case_materials, faqs, product_notes
+       ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11::jsonb,$12)
        RETURNING *`,
       [
         id, userId, input.name, input.positioning ?? "", input.coreValues ?? [],
         JSON.stringify(input.verifiableFacts ?? []), JSON.stringify(input.commonObjections ?? []),
         JSON.stringify(input.currentBenefits ?? []), input.prohibitedExpressions ?? [],
         JSON.stringify(input.caseMaterials ?? []),
+        JSON.stringify(input.faqs ?? []), input.productNotes ?? "",
       ]
     );
     return toProduct(result.rows[0]);
@@ -85,6 +86,7 @@ export class MarketingMaterialsRepository {
          core_values = COALESCE($6, core_values), verifiable_facts = COALESCE($7::jsonb, verifiable_facts),
          common_objections = COALESCE($8::jsonb, common_objections), current_benefits = COALESCE($9::jsonb, current_benefits),
          prohibited_expressions = COALESCE($10, prohibited_expressions), case_materials = COALESCE($11::jsonb, case_materials),
+         faqs = COALESCE($12::jsonb, faqs), product_notes = COALESCE($13, product_notes),
          version = version + 1
        WHERE user_id = $1 AND id = $2 AND version = $3 AND status = 'active'
        RETURNING *`,
@@ -95,6 +97,8 @@ export class MarketingMaterialsRepository {
         input.currentBenefits === undefined ? null : JSON.stringify(input.currentBenefits),
         input.prohibitedExpressions ?? null,
         input.caseMaterials === undefined ? null : JSON.stringify(input.caseMaterials),
+        input.faqs === undefined ? null : JSON.stringify(input.faqs),
+        input.productNotes ?? null,
       ]
     );
     return result.rows[0] ? toProduct(result.rows[0]) : null;
@@ -151,6 +155,8 @@ function toProduct(row: any): MarketingProduct {
     currentBenefits: row.current_benefits ?? [],
     prohibitedExpressions: row.prohibited_expressions ?? [],
     caseMaterials: row.case_materials ?? [],
+    faqs: row.faqs ?? [],
+    productNotes: row.product_notes ?? "",
     status: row.status,
     version: Number(row.version),
     archivedAt: row.archived_at ? new Date(row.archived_at).toISOString() : null,

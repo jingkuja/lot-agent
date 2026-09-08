@@ -97,7 +97,7 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
 
       <section className="marketing-products-section">
         <div className="de-section-heading">
-          <div><h2>产品目录</h2><p>卖点、事实、异议、权益、禁用表达与案例素材集中管理。</p></div>
+          <div><h2>产品目录</h2><p>卖点、事实、FAQ、补充说明、异议、权益、禁用表达与案例素材集中管理。</p></div>
           <div className="marketing-product-search"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索产品名称或定位" /></div>
         </div>
         {loading && products.length === 0 && <div className="de-state">正在读取营销资料…</div>}
@@ -132,7 +132,10 @@ function ProductCard({ product, onEdit, onArchive }: { product: MarketingProduct
       <span><strong>{product.verifiableFacts.length}</strong>能说出口的证据</span>
       <span><strong>{activeBenefits.length}</strong>当前权益</span>
       <span><strong>{product.caseMaterials.length}</strong>案例素材</span>
+      <span><strong>{product.faqs?.length ?? 0}</strong>FAQ</span>
     </div>
+    {(product.faqs?.length ?? 0) > 0 && <div className="marketing-benefit-strip"><strong>FAQ</strong>{product.faqs.slice(0, 2).map((item) => <span key={item.question}>{item.question}</span>)}</div>}
+    {product.productNotes?.trim() && <div className="marketing-prohibited"><strong>补充说明</strong><span>{product.productNotes.trim().slice(0, 80)}{product.productNotes.trim().length > 80 ? "…" : ""}</span></div>}
     {product.coreValues.length > 0 && <div className="de-tag-list">{product.coreValues.slice(0, 4).map((item) => <span key={item}>{item}</span>)}</div>}
     {activeBenefits.length > 0 && <div className="marketing-benefit-strip"><strong>当前权益</strong>{activeBenefits.slice(0, 2).map((benefit) => <span key={benefit.title}>{benefit.title}{benefit.validUntil ? ` · 至 ${shortDate(benefit.validUntil)}` : ""}</span>)}</div>}
     {product.prohibitedExpressions.length > 0 && <div className="marketing-prohibited"><strong>禁用</strong><span>{product.prohibitedExpressions.slice(0, 3).join("、")}</span></div>}
@@ -145,7 +148,7 @@ function FactBlock({ title, items, empty }: { title: string; items: string[]; em
 
 interface ProductForm {
   name: string; positioning: string; coreValues: string; facts: string; objections: string;
-  benefits: string; prohibited: string; cases: string;
+  benefits: string; prohibited: string; cases: string; faqs: string; productNotes: string;
 }
 
 function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduct; onClose: () => void; onSave: (input: MarketingProductInput) => Promise<void> }) {
@@ -156,6 +159,8 @@ function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduc
     benefits: rows(product?.currentBenefits.map((item) => [item.title, item.description ?? "", dateInput(item.validFrom), dateInput(item.validUntil)])),
     prohibited: lines(product?.prohibitedExpressions),
     cases: rows(product?.caseMaterials.map((item) => [item.title, item.summary, item.result ?? "", item.assetUrl ?? ""])),
+    faqs: rows((product?.faqs ?? []).map((item) => [item.question, item.answer])),
+    productNotes: product?.productNotes ?? "",
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -172,6 +177,8 @@ function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduc
         currentBenefits: splitRows(form.benefits, 4).map(([title, description, validFrom, validUntil]) => ({ title, ...(description ? { description } : {}), ...(validFrom ? { validFrom } : {}), ...(validUntil ? { validUntil } : {}) })),
         prohibitedExpressions: splitLines(form.prohibited),
         caseMaterials: splitRows(form.cases, 4).map(([title, summary, result, assetUrl]) => ({ title, summary, ...(result ? { result } : {}), ...(assetUrl ? { assetUrl } : {}) })),
+        faqs: splitRows(form.faqs, 2).map(([question, answer]) => ({ question, answer })),
+        productNotes: form.productNotes.trim(),
       });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "保存失败"); }
     finally { setSaving(false); }
@@ -187,6 +194,8 @@ function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduc
       <TextRows label="当前权益" hint="权益｜说明｜开始日期｜结束日期；日期可用 YYYY-MM / YYYY-MM-DD，留空表示不限" value={form.benefits} onChange={(value) => change("benefits", value)} />
       <TextRows label="禁用表达" hint="每行一条" value={form.prohibited} onChange={(value) => change("prohibited", value)} />
       <TextRows label="案例素材" hint="标题｜摘要｜结果｜素材链接" value={form.cases} onChange={(value) => change("cases", value)} />
+      <TextRows label="产品 FAQ" hint="问题｜回答；可粘贴常见问答，获客文案/海报会引用" value={form.faqs} onChange={(value) => change("faqs", value)} />
+      <label className="marketing-form-wide"><span>产品补充说明</span><textarea value={form.productNotes} onChange={(e) => change("productNotes", e.target.value)} rows={4} placeholder="粘贴非 PDF 的产品介绍、话术要点或自定义文本资料" /></label>
     </div>{error && <p className="de-form-error">{error}</p>}<footer className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>取消</button><button className="de-primary-button" disabled={saving}>{saving ? "保存中…" : "保存产品资料"}</button></footer></form>
   </section></div>;
 }

@@ -225,9 +225,23 @@ function OpportunityCard({ item, llmModels, onOpenProfile, onAction, onResume, o
     <TalkTrackAssistant item={item} open={talkOpen} llmModels={llmModels} onClose={() => setTalkOpen(false)} />
     <div className="de-opportunity-body">
       <div className="de-opportunity-main">
-        <h2>{item.title}</h2><p>{item.objective}</p>
-        <h3>为什么现在</h3>
-        <ul>{item.evidence.map((evidence, index) => <li key={`${evidence.sourceId ?? evidence.sourceType}-${index}`}><time>{shortDate(evidence.occurredAt)}</time><span>{evidence.fact}</span></li>)}</ul>
+        <h2>{item.title}</h2>
+        <section className="de-opportunity-section">
+          <h3>策略建议</h3>
+          <p>{item.reason || "结合客户近况给出跟进策略"}</p>
+        </section>
+        <section className="de-opportunity-section">
+          <h3>具体行动</h3>
+          <p>{item.objective}</p>
+          <div className="de-opportunity-action-meta">
+            <span>沟通方式：{item.followUpMethod || "根据客户偏好"}</span>
+            {item.productName && <span>关联产品：{item.productName}</span>}
+          </div>
+        </section>
+        <section className="de-opportunity-section">
+          <h3>为什么现在</h3>
+          <ul>{item.evidence.map((evidence, index) => <li key={`${evidence.sourceId ?? evidence.sourceType}-${index}`}><time>{shortDate(evidence.occurredAt)}</time><span>{evidence.fact}</span></li>)}</ul>
+        </section>
         {item.riskFlags.map((risk) => <div key={risk.code} className={`de-opportunity-risk ${risk.blocking ? "blocking" : ""}`}>⚠ {risk.message}</div>)}
         {(item.view === "snoozed" || item.snoozedUntil) && item.view !== "pending" && (
           <div className="de-opportunity-later-trail">
@@ -238,7 +252,14 @@ function OpportunityCard({ item, llmModels, onOpenProfile, onAction, onResume, o
           </div>
         )}
       </div>
-      <aside><span>建议怎么做</span><strong>{item.followUpMethod || "根据客户偏好"}</strong><p>{item.view === "snoozed" && item.snoozedUntil ? `稍后至 ${formatTime(item.snoozedUntil)}` : item.scheduledAt ? formatTime(item.scheduledAt) : formatTime(item.suggestedAt)}</p>{item.productName && <small>关联：{item.productName}</small>}{item.resultCriteria && <small>结果口径：{item.resultCriteria}</small>}</aside>
+      <aside className="de-opportunity-task-aside">
+        <span>可一键任务</span>
+        <strong>{item.view === "pending" || item.view === "snoozed" ? "采纳后生成跟进任务" : item.view === "in_progress" ? "执行中的跟进任务" : item.view === "awaiting_result" ? "待回填结果" : "任务结果"}</strong>
+        <p>{item.view === "snoozed" && item.snoozedUntil ? `稍后至 ${formatTime(item.snoozedUntil)}` : item.scheduledAt ? formatTime(item.scheduledAt) : formatTime(item.suggestedAt)}</p>
+        {item.resultCriteria && <small>成功口径：{item.resultCriteria}</small>}
+        {!item.resultCriteria && <small>成功口径：获得有效回复或明确下一步</small>}
+        {item.productName && <small>关联：{item.productName}</small>}
+      </aside>
     </div>
     <footer>
       {item.view === "pending" && <><button className="de-primary-button" disabled={blocked} onClick={() => onAction(item, "accept")}>采纳并确认行动</button><button className="de-secondary-button" onClick={() => onAction(item, "snooze")}>稍后</button><button className="de-quiet-button" onClick={() => onAction(item, "dismiss")}>忽略</button></>}

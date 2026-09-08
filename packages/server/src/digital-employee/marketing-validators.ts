@@ -3,6 +3,7 @@ import type {
   MarketingBrandAssetsInput,
   MarketingCaseMaterial,
   MarketingFact,
+  MarketingFaq,
   MarketingObjection,
   MarketingProductInput,
   MarketingProductListFilters,
@@ -134,6 +135,13 @@ function cases(value: unknown): MarketingCaseMaterial[] | undefined {
   }));
 }
 
+function faqs(value: unknown): MarketingFaq[] | undefined {
+  return structured(value, "faqs", 50, (item) => ({
+    question: text(item.question, "FAQ问题", 500, true)!,
+    answer: text(item.answer, "FAQ回答", 4_000, true)!,
+  }));
+}
+
 function visuals(value: unknown): MarketingVisualAsset[] | undefined {
   return structured(value, "visualAssets", 50, (item) => ({
     name: text(item.name, "视觉资产名称", 500, true)!,
@@ -153,6 +161,8 @@ function productFields(source: Record<string, unknown>, requireName: boolean): M
     ...(benefits(source.currentBenefits) !== undefined ? { currentBenefits: benefits(source.currentBenefits) } : {}),
     ...(strings(source.prohibitedExpressions, "禁用表达", 50, 500) !== undefined ? { prohibitedExpressions: strings(source.prohibitedExpressions, "禁用表达", 50, 500) } : {}),
     ...(cases(source.caseMaterials) !== undefined ? { caseMaterials: cases(source.caseMaterials) } : {}),
+    ...(faqs(source.faqs) !== undefined ? { faqs: faqs(source.faqs) } : {}),
+    ...(text(source.productNotes, "产品补充说明", 8_000) !== undefined ? { productNotes: text(source.productNotes, "产品补充说明", 8_000) } : {}),
   };
 }
 

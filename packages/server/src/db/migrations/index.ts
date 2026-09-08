@@ -19,6 +19,7 @@ import { repeatableManualOpportunityDiscovery } from "./0017-repeatable-manual-o
 import { managedNewApiKey } from "./0018-managed-new-api-key.js";
 import { userPhone } from "./0019-user-phone.js";
 import { cohortAutomationSettings } from "./0020-cohort-automation-settings.js";
+import { marketingProductFaqNotes } from "./0021-marketing-product-faq-notes.js";
 
 // Static array (no fs scan — dynamic directory scanning isn't reliable once
 // this ships through tsup's bundling). To add a migration: create
@@ -44,4 +45,5 @@ export const migrations: Migration[] = [
   managedNewApiKey,
   userPhone,
   cohortAutomationSettings,
+  marketingProductFaqNotes,
 ];

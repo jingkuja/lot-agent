@@ -266,11 +266,12 @@ function composerPayload(
   }
   if (assetType === "poster") {
     const imageSettings = settings as ImageSettings | undefined;
+    // Prefer higher poster defaults when the composer still has generic image presets.
+    const size = imageSettings?.size === "1024x1024" || !imageSettings?.size ? "1536x1024" : imageSettings.size;
+    const quality = !imageSettings?.quality || imageSettings.quality === "auto" ? "high" : imageSettings.quality;
     return {
       attachments: uploaded.map((item) => item.uploaded),
-      mediaSettings: imageSettings
-        ? { size: imageSettings.size, n: imageSettings.n, quality: imageSettings.quality }
-        : undefined,
+      mediaSettings: { size, n: imageSettings?.n ?? 1, quality },
     };
   }
   const videoSettings = settings as VideoSettings | undefined;

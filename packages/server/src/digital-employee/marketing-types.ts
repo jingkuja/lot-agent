@@ -3,6 +3,11 @@ export interface MarketingFact {
   evidence?: string;
 }
 
+export interface MarketingFaq {
+  question: string;
+  answer: string;
+}
+
 export interface MarketingObjection {
   objection: string;
   response: string;
@@ -39,6 +44,8 @@ export interface MarketingProduct {
   currentBenefits: MarketingBenefit[];
   prohibitedExpressions: string[];
   caseMaterials: MarketingCaseMaterial[];
+  faqs: MarketingFaq[];
+  productNotes: string;
   status: "active" | "archived";
   version: number;
   archivedAt: string | null;
@@ -66,6 +73,8 @@ export interface MarketingProductInput {
   currentBenefits?: MarketingBenefit[];
   prohibitedExpressions?: string[];
   caseMaterials?: MarketingCaseMaterial[];
+  faqs?: MarketingFaq[];
+  productNotes?: string;
 }
 
 export interface MarketingProductUpdateInput extends Partial<MarketingProductInput> {

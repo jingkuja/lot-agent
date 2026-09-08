@@ -203,6 +203,11 @@ export interface MarketingFact {
   evidence?: string;
 }
 
+export interface MarketingFaq {
+  question: string;
+  answer: string;
+}
+
 export interface MarketingObjection {
   objection: string;
   response: string;
@@ -239,6 +244,8 @@ export interface MarketingProduct {
   currentBenefits: MarketingBenefit[];
   prohibitedExpressions: string[];
   caseMaterials: MarketingCaseMaterial[];
+  faqs: MarketingFaq[];
+  productNotes: string;
   status: "active" | "archived";
   version: number;
   archivedAt: string | null;
@@ -258,7 +265,7 @@ export interface MarketingBrandAssets {
 }
 
 export type MarketingProductInput = Pick<MarketingProduct, "name"> & Partial<Pick<MarketingProduct,
-  "positioning" | "coreValues" | "verifiableFacts" | "commonObjections" | "currentBenefits" | "prohibitedExpressions" | "caseMaterials"
+  "positioning" | "coreValues" | "verifiableFacts" | "commonObjections" | "currentBenefits" | "prohibitedExpressions" | "caseMaterials" | "faqs" | "productNotes"
 >>;
 
 export interface MarketingProductListResponse {

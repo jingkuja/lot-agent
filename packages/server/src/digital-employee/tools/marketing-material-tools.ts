@@ -32,6 +32,11 @@ const caseMaterial = {
   properties: { title: { type: "string" }, summary: { type: "string" }, result: { type: "string" }, assetUrl: { type: "string" } },
   required: ["title", "summary"],
 };
+const faq = {
+  type: "object",
+  properties: { question: { type: "string" }, answer: { type: "string" } },
+  required: ["question", "answer"],
+};
 const productProperties = {
   name: { type: "string" },
   positioning: { type: "string" },
@@ -41,12 +46,14 @@ const productProperties = {
   currentBenefits: { type: "array", items: benefit, maxItems: 50 },
   prohibitedExpressions: { type: "array", items: { type: "string" }, maxItems: 50 },
   caseMaterials: { type: "array", items: caseMaterial, maxItems: 50 },
+  faqs: { type: "array", items: faq, maxItems: 50, description: "产品FAQ，供获客文案/海报引用" },
+  productNotes: { type: "string", description: "自由文本产品说明/卖点补充，非 PDF 知识库替代" },
 };
 
 export function createMarketingMaterialTools(service: MarketingMaterialsService): Tool[] {
   const search: Tool = {
     name: "search_marketing_materials",
-    description: "查询当前账号的产品与品牌事实。需要回答产品卖点、可验证事实、异议、有效权益、禁用表达、案例、品牌语气、视觉资产或行动号召时先调用。",
+    description: "查询当前账号的产品与品牌事实。需要回答产品卖点、可验证事实、异议、有效权益、禁用表达、案例、FAQ、产品补充说明、品牌语气、视觉资产或行动号召时先调用。",
     parameters: {
       type: "object",
       properties: { query: { type: "string", description: "产品名称或定位关键词；留空返回全部" }, includeBrand: { type: "boolean" } },

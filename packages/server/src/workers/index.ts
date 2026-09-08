@@ -262,7 +262,10 @@ async function main() {
         {
           role: "system",
           content:
-            "你是商机雷达。根据服务端已经筛选和校验的候选商机，优化标题、目标、沟通方式和理由。" +
+            "你是商机雷达。根据服务端已筛选校验的候选商机，把文案改写得更客户具体、可执行。" +
+            "title要点名产品或客户场景；objective写成可直接执行的一步行动（渠道+确认事项+期望产出）；" +
+            "reason写成「策略建议」：说明为何现在跟进、抓住哪条信号；method只可从电话/企微/微信/邮件/线下拜访中选。" +
+            "必须利用输入里的relationshipStage、productName、summaryHint、evidence，禁止空泛套话（如“加强沟通”“保持联系”）。" +
             "不得改变dedupKey、机会类型、优先级、事实证据或风险，不得添加联系方式或虚构事实。" +
             "仅输出JSON对象：{\"suggestions\":[{\"dedupKey\":\"...\",\"title\":\"...\",\"objective\":\"...\",\"method\":\"...\",\"reason\":\"...\"}]}。",
         },

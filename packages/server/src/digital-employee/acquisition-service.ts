@@ -290,9 +290,9 @@ export class CustomerAcquisitionService {
       mediaModelId = resolveCampaignModel(availability, isPoster ? "image" : "video", resolvedInput.modelId);
       if (isPoster) {
         const invalid = validateImageGenerationSettings({
-          size: resolvedInput.mediaSettings?.size ?? "1024x1024",
+          size: resolvedInput.mediaSettings?.size ?? "1536x1024",
           n: resolvedInput.mediaSettings?.n ?? 1,
-          quality: resolvedInput.mediaSettings?.quality ?? "auto",
+          quality: resolvedInput.mediaSettings?.quality ?? "high",
         }, mediaModelId);
         if (invalid) throw new InputError(invalid);
       }
@@ -389,9 +389,9 @@ export class CustomerAcquisitionService {
           ? {
               prompt: mediaPrompt,
               modelId,
-              size: resolvedInput.mediaSettings?.size ?? "1024x1024",
+              size: resolvedInput.mediaSettings?.size ?? "1536x1024",
               n: resolvedInput.mediaSettings?.n ?? 1,
-              quality: resolvedInput.mediaSettings?.quality ?? "auto",
+              quality: resolvedInput.mediaSettings?.quality ?? "high",
               ...(media?.length ? { media } : {}),
               featureScope: "customer-acquisition",
               requireUserModelKey: true,
@@ -1331,6 +1331,7 @@ function marketingProductSnapshot(row: any) {
     id: row.id, name: row.name, positioning: row.positioning ?? "", coreValues: row.core_values ?? [],
     verifiableFacts: row.verifiable_facts ?? [], currentBenefits: validBenefits,
     commonObjections: row.common_objections ?? [], prohibitedExpressions: row.prohibited_expressions ?? [],
+    faqs: row.faqs ?? [], productNotes: row.product_notes ?? "",
     version: Number(row.version),
   };
 }
@@ -1370,39 +1371,83 @@ function fallbackFit(audience: { description?: string; metrics?: SegmentMetrics 
   };
 }
 
-function fallbackCopy(input: CreateCampaignAssetInput, snapshot: any, product: any): string {
-  const value = (product.core_values ?? [])[0] || product.positioning || product.name;
+export function fallbackCopy(input: CreateCampaignAssetInput, snapshot: any, product: any): string {
+  const values = (product.core_values ?? []).filter(Boolean).slice(0, 3);
+  const value = values[0] || product.positioning || product.name;
+  const facts = (product.verifiable_facts ?? []).map((item: any) => item.statement).filter(Boolean).slice(0, 2);
+  const faqs = (product.faqs ?? []).slice(0, 2).map((item: any) => `Q:${item.question} A:${item.answer}`);
+  const notes = typeof product.product_notes === "string" ? product.product_notes.trim().slice(0, 160) : "";
   const audience = snapshot.audienceDescription || "目标客群";
-  return `${input.title || product.name}\n\n面向${audience}，本次内容聚焦“${value}”。${input.prompt}\n\n${input.callToAction}`;
+  const benefit = (product.current_benefits ?? [])[0]?.title;
+  const lines = [
+    input.title || `${product.name}｜${value}`,
+    "",
+    `写给${audience}：`,
+    `核心价值：${value}${values.length > 1 ? `；还可强调：${values.slice(1).join("、")}` : ""}`,
+    facts.length ? `可信依据：${facts.join("；")}` : "可信依据：仅使用已确认产品资料，不编造数据。",
+    benefit ? `当前权益：${benefit}` : "",
+    faqs.length ? `常见问答：${faqs.join(" | ")}` : "",
+    notes ? `补充说明：${notes}` : "",
+    input.prompt ? `创作要点：${input.prompt}` : "",
+    "",
+    `行动号召：${input.callToAction}`,
+  ].filter((line) => line !== "");
+  return lines.join("\n");
 }
 
-function campaignMediaPrompt(input: CreateCampaignAssetInput, snapshot: any, product: any, brand: any, kind: "poster" | "video") {
+export function campaignMediaPrompt(input: CreateCampaignAssetInput, snapshot: any, product: any, brand: any, kind: "poster" | "video") {
   const facts = (product.verifiable_facts ?? []).map((item: any) => item.statement).filter(Boolean).slice(0, 4);
   const forbidden = product.prohibited_expressions ?? [];
+  const faqs = (product.faqs ?? []).slice(0, 3).map((item: any) => `${item.question} → ${item.answer}`);
+  const notes = typeof product.product_notes === "string" ? product.product_notes.trim().slice(0, 240) : "";
+  const benefit = (product.current_benefits ?? []).map((item: any) => item.title).filter(Boolean).slice(0, 2);
+  const size = input.mediaSettings?.size ?? (kind === "poster" ? "1536x1024" : undefined);
   return [
-    kind === "poster" ? "生成一张专业营销海报，不要绘制任何真实客户或个人身份信息。" : `生成${input.mediaSettings?.durationSec ?? input.durationSeconds ?? 5}秒营销视频，画面不得包含真实客户身份。`,
+    kind === "poster"
+      ? "生成一张高分辨率专业营销海报（印刷级清晰），不要绘制任何真实客户或个人身份信息。"
+      : `生成${input.mediaSettings?.durationSec ?? input.durationSeconds ?? 5}秒营销视频，画面不得包含真实客户身份。`,
+    kind === "poster"
+      ? `版式要求：${size || "1536x1024"}；大标题+副标题+一个核心价值+明确CTA；留白克制；中文文字锐利可读，禁止错字乱码；主体居中偏上，底部放行动号召条。`
+      : "镜头节奏：问题场景→价值证明→行动号召，字幕简短准确。",
     `目标客群：${snapshot.audienceDescription || "已确认客群快照"}（仅作为聚合受众描述）`,
     `产品：${product.name}`, `定位：${product.positioning || "未填写"}`,
     `已确认价值：${(product.core_values ?? []).join("；") || "无"}`,
     `可信事实：${facts.join("；") || "无，不得虚构数字或案例"}`,
+    benefit.length ? `当前权益：${benefit.join("；")}` : "",
+    faqs.length ? `产品FAQ可转化为文案锚点：${faqs.join("；")}` : "",
+    notes ? `产品补充说明：${notes}` : "",
     `活动目标：${input.objective}`, `行动号召：${input.callToAction}`,
     `品牌语气：${(brand?.tone ?? []).join("、") || "专业、克制"}`,
+    `视觉参考：${(brand?.visual_assets ?? []).map((item: any) => item.name).filter(Boolean).slice(0, 3).join("、") || "无；保持简洁商务风"}`,
     `禁用表述：${forbidden.join("、") || "无；仍禁止夸大承诺"}`,
     `创作要求：${input.prompt}`,
-    kind === "poster" ? "确保核心标题、价值点和行动号召清晰，中文文字准确可读。" : "保持主题、价值点与行动号召一致，给出完整可播放成片。",
-  ].join("\n");
+    kind === "poster"
+      ? "确保核心标题、价值点和行动号召清晰分层；主文案不超过3行；CTA按钮感明确；避免密集段落。"
+      : "保持主题、价值点与行动号召一致，给出完整可播放成片。",
+  ].filter(Boolean).join("\n");
 }
 
-function fallbackRecommendations(segments: Array<any>, products: Array<any>): CampaignRecommendationDraft[] {
+export function fallbackRecommendations(segments: Array<any>, products: Array<any>): CampaignRecommendationDraft[] {
   const segment = segments[0];
   const product = products[0];
   const audience = segment?.name ?? "当前整体客户群";
   const theme = product?.coreValues?.[0] || product?.positioning || product?.name || "产品价值";
-  const base = { segmentId: segment?.id ?? null, productId: product?.id ?? null, targetSegmentDescription: audience, corePoints: (product?.coreValues ?? []).slice(0, 3), reasoning: ["基于当前客群聚合画像与已确认产品资料生成", "投放前请确认客群差异、权益期限和排除项"] };
+  const faqHook = product?.faqs?.[0]?.question;
+  const base = {
+    segmentId: segment?.id ?? null,
+    productId: product?.id ?? null,
+    targetSegmentDescription: audience,
+    corePoints: (product?.coreValues ?? []).slice(0, 3),
+    reasoning: [
+      "基于当前客群聚合画像与已确认产品资料生成",
+      "投放前请确认客群差异、权益期限和排除项",
+      faqHook ? `可借FAQ切入：${faqHook}` : "补充产品FAQ后文案会更具体",
+    ],
+  };
   return [
-    { ...base, type: "copy", theme: `${theme}：客群营销文案`, suggestedChannels: ["朋友圈", "公众号"] },
-    { ...base, type: "copy", theme: `${product?.name ?? "产品"}场景价值解读`, suggestedChannels: ["私域群", "公众号"] },
-    { ...base, type: "poster", theme: `${theme}主视觉海报`, suggestedChannels: ["朋友圈", "公众号"], creativeDirection: "克制留白，用一个核心价值和明确CTA完成表达" },
+    { ...base, type: "copy", theme: `${theme}：给${audience}的转化文案`, suggestedChannels: ["朋友圈", "公众号"], creativeDirection: "开头点名客群痛点，中段给1个可验证证据，结尾单一CTA" },
+    { ...base, type: "copy", theme: `${product?.name ?? "产品"}场景价值解读`, suggestedChannels: ["私域群", "公众号"], creativeDirection: "用具体使用场景代替空泛卖点，引用已确认事实" },
+    { ...base, type: "poster", theme: `${theme}主视觉海报`, suggestedChannels: ["朋友圈", "公众号"], creativeDirection: "高清横版；克制留白；大标题+单一价值+明确CTA；中文锐利可读" },
     { ...base, type: "video_script", theme: `${theme} 15秒短视频`, suggestedChannels: ["视频号", "抖音/快手"], creativeDirection: "问题场景—价值证明—行动号召", durationSeconds: 15 },
   ];
 }
