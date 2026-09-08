@@ -33,6 +33,7 @@ export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfi
   const [error, setError] = useState<string | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [discoverProgress, setDiscoverProgress] = useState(0);
+  const [discoverNotice, setDiscoverNotice] = useState<string | null>(null);
   const [active, setActive] = useState<OpportunityItem | null>(null);
   const [dialog, setDialog] = useState<"accept" | "snooze" | "dismiss" | "reschedule" | "result" | "create" | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -46,18 +47,30 @@ export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfi
   useEffect(() => { void load(); }, [load]);
 
   const discover = async () => {
-    setDiscovering(true); setDiscoverProgress(2); setError(null);
+    if (discovering) return;
+    setDiscovering(true); setDiscoverProgress(2); setError(null); setDiscoverNotice(null);
     try {
       const { taskId } = await api.discoverOpportunities();
+      let createdCount: number | null = null;
       for (;;) {
         const task = await api.getTask(taskId);
         setDiscoverProgress(task.progress);
-        if (task.status === "succeeded") break;
+        if (task.status === "succeeded") {
+          const raw = task.output?.created;
+          const parsed = typeof raw === "number" ? raw : Number(raw);
+          createdCount = Number.isFinite(parsed) ? parsed : null;
+          break;
+        }
         if (task.status === "failed" || task.status === "cancelled") throw new Error(task.error || "商机发现未完成");
         await new Promise((resolve) => window.setTimeout(resolve, 800));
       }
       setView("pending");
       await load();
+      if (createdCount != null && createdCount > 0) {
+        setDiscoverNotice(`发现了 ${createdCount} 条新商机，已刷新「待判断」列表`);
+      } else {
+        setDiscoverNotice("暂无新商机（已有建议可能因去重未重复创建）");
+      }
     } catch (reason) { setError(reason instanceof Error ? reason.message : "商机发现失败"); }
     finally { setDiscovering(false); setDiscoverProgress(0); }
   };
@@ -100,6 +113,7 @@ export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfi
       {data && <Summary summary={data.summary} />}
       {data && <Automation settings={data.settings} lastDiscoveredAt={data.lastDiscoveredAt} saving={savingSettings} onSave={saveSettings} />}
       {error && <div className="de-inline-error" role="alert"><span>{error}</span><button onClick={() => setError(null)}>关闭</button></div>}
+      {discoverNotice && <div className="de-inline-notice" role="status"><span>{discoverNotice}</span><button onClick={() => setDiscoverNotice(null)}>关闭</button></div>}
 
       <div className="de-opportunity-tabs" role="tablist">
         {VIEWS.map((item) => <button key={item.id} role="tab" aria-selected={view === item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
@@ -324,6 +338,7 @@ function CreateActionDialog({ onClose, onSave }: { onClose: () => void; onSave: 
   const [profiles, setProfiles] = useState<Array<{ id: string; displayName: string; organization: string | null }>>([]);
   const [profileId, setProfileId] = useState("");
   const [profileName, setProfileName] = useState("");
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [opportunityType, setOpportunityType] = useState<OpportunityType>("event_invitation");
   const [title, setTitle] = useState("");
   const [objective, setObjective] = useState("");
@@ -346,11 +361,27 @@ function CreateActionDialog({ onClose, onSave }: { onClose: () => void; onSave: 
     return () => window.clearTimeout(id);
   }, [query]);
 
-  const pickProfile = (id: string, name: string) => { setProfileId(id); setProfileName(name); setQuery(""); setProfiles([]); };
+  const pickProfile = (id: string, name: string) => {
+    setProfileId(id);
+    setProfileName(name);
+    setQuery("");
+    setProfiles([]);
+    setProfileError(null);
+  };
+
+  const clearProfile = () => {
+    setProfileId("");
+    setProfileName("");
+    setProfileError(null);
+  };
 
   return <DialogFrame title="手动添加跟进行动" onClose={onClose}>
     <form className="de-form" onSubmit={(e) => {
       e.preventDefault();
+      if (!profileId.trim()) {
+        setProfileError("请从搜索结果中选择一位客户后再创建");
+        return;
+      }
       onSave({ profileId, opportunityType, title, objective, followUpMethod: method, priority,
         scheduledAt: new Date(scheduledAt).toISOString(), resultCriteria: criteria || undefined,
         productName: productName || undefined });
@@ -358,17 +389,46 @@ function CreateActionDialog({ onClose, onSave }: { onClose: () => void; onSave: 
       <div className="de-form-grid">
         <label className="de-form-full"><span>客户</span>
           {profileId ? (
-            <div className="de-selected-profile">{profileName}<button type="button" className="de-quiet-button" onClick={() => { setProfileId(""); setProfileName(""); }}>更换</button></div>
+            <div className="de-selected-profile" data-profile-id={profileId}>
+              <div>
+                <strong>{profileName}</strong>
+                <small>已绑定客户画像</small>
+              </div>
+              <button type="button" className="de-quiet-button" onClick={clearProfile}>更换</button>
+            </div>
           ) : (
             <div className="de-profile-search">
-              <input placeholder="输入客户姓名搜索" value={query} onChange={(e) => setQuery(e.target.value)} required={!profileId} />
-              {searching && <small>搜索中…</small>}
-              {profiles.length > 0 && <ul className="de-profile-dropdown">
-                {profiles.map((p) => <li key={p.id}><button type="button" onClick={() => pickProfile(p.id, p.displayName)}>{p.displayName}{p.organization && <small>{p.organization}</small>}</button></li>)}
+              <input
+                placeholder="输入客户姓名搜索并选择"
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); setProfileError(null); }}
+                autoComplete="off"
+                aria-autocomplete="list"
+                aria-expanded={profiles.length > 0}
+                aria-controls="de-create-action-profile-options"
+              />
+              {searching && <small className="de-profile-search-status">搜索中…</small>}
+              {!searching && query.trim() && profiles.length === 0 && (
+                <small className="de-profile-search-status">未找到匹配客户，请换个关键词</small>
+              )}
+              {profiles.length > 0 && <ul id="de-create-action-profile-options" className="de-profile-dropdown" role="listbox">
+                {profiles.map((p) => (
+                  <li key={p.id} role="option">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pickProfile(p.id, p.displayName)}
+                    >
+                      <span>{p.displayName}</span>
+                      {p.organization && <small>{p.organization}</small>}
+                    </button>
+                  </li>
+                ))}
               </ul>}
             </div>
           )}
-          <input type="hidden" value={profileId} required />
+          {profileError && <p className="de-field-error" role="alert">{profileError}</p>}
+          {!profileId && !profileError && <p className="de-field-hint">必须点选搜索结果中的客户，仅输入姓名不会绑定画像。</p>}
         </label>
         <label><span>机会类型</span>
           <select value={opportunityType} onChange={(e) => setOpportunityType(e.target.value as OpportunityType)}>
@@ -391,7 +451,10 @@ function CreateActionDialog({ onClose, onSave }: { onClose: () => void; onSave: 
         <label><span>结果口径（选填）</span><input value={criteria} onChange={(e) => setCriteria(e.target.value)} /></label>
         <label><span>关联产品（选填）</span><input value={productName} onChange={(e) => setProductName(e.target.value)} /></label>
       </div>
-      <div className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>取消</button><button className="de-primary-button">创建行动</button></div>
+      <div className="de-modal-actions">
+        <button type="button" className="de-secondary-button" onClick={onClose}>取消</button>
+        <button type="submit" className="de-primary-button" disabled={!profileId} title={!profileId ? "请先选择客户" : undefined}>创建行动</button>
+      </div>
     </form>
   </DialogFrame>;
 }

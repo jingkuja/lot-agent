@@ -51,6 +51,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
   const [prompt, setPrompt] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseRef[]>([]);
   const composerRef = useRef<InputBoxHandle>(null);
+  const canvasRef = useRef<HTMLElement | null>(null);
   const [recommendationId, setRecommendationId] = useState<string | undefined>();
   const [parentAssetId, setParentAssetId] = useState<string | undefined>();
   const [creating, setCreating] = useState(false);
@@ -165,6 +166,10 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
       });
       setResult(created);
       setParentAssetId(undefined);
+      window.requestAnimationFrame(() => {
+        canvasRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        canvasRef.current?.focus({ preventScroll: true });
+      });
       if (created.campaignId) {
         setCampaignId(created.campaignId);
         const next = await api.getMarketingCampaign(created.campaignId);
@@ -244,7 +249,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
         {mediaBlocked && <p className="de-creation-blocker">当前没有可用的{assetType === "poster" ? "图像" : "视频"}模型，请稍后重试或联系管理员。</p>}
         <button className="de-primary-button de-create-submit" disabled={!canSubmit} onClick={() => void submit()}>{creating ? (assetType === "copy" ? "正在撰写文案…" : "正在创建生成任务…") : campaignId ? `追加生成${assetType === "copy" ? "文案" : assetType === "poster" ? "海报" : "视频"}` : `创建活动并生成${assetType === "copy" ? "文案" : assetType === "poster" ? "海报" : "视频"}`}</button>
       </div>
-      <aside className="de-creation-canvas"><header><div><p>活动内容包</p><h3>{campaign?.name || result?.title || "预览与版本"}</h3></div>{campaign && <span>{campaign.assetCount} 项素材</span>}</header>{campaign ? <CampaignPack campaign={campaign} focusId={result?.id} onSelect={selectVersion} onOpenAssets={onOpenAssets} /> : !result ? <div className="de-canvas-empty"><span>✦</span><strong>确认左侧简报后开始生成</strong><p>第一次生成会创建活动；文案、海报和视频可以追加到同一活动。</p></div> : <CreationResult asset={result} onOpenAssets={onOpenAssets} />}</aside>
+      <aside ref={canvasRef} className={`de-creation-canvas${result && result.generationStatus === "ready" ? " has-result" : ""}`} tabIndex={-1} aria-label="活动内容包预览"><header><div><p>活动内容包</p><h3>{campaign?.name || result?.title || "预览与版本"}</h3></div><div className="de-creation-canvas-meta">{campaign && <span>{campaign.assetCount} 项素材</span>}{result?.generationStatus === "ready" && <span className="de-canvas-ready-badge">已生成</span>}</div></header>{campaign ? <CampaignPack campaign={campaign} focusId={result?.id} onSelect={selectVersion} onOpenAssets={onOpenAssets} /> : !result ? <div className="de-canvas-empty"><span>✦</span><strong>确认左侧简报后开始生成</strong><p>第一次生成会创建活动；文案、海报和视频可以追加到同一活动。</p></div> : <CreationResult asset={result} onOpenAssets={onOpenAssets} />}</aside>
     </div>
   </section>;
 }
@@ -313,5 +318,10 @@ function CampaignPack({ campaign, focusId, onSelect, onOpenAssets }: {
 function CreationResult({ asset, onOpenAssets, compact }: { asset: MarketingAsset; onOpenAssets: () => void; compact?: boolean }) {
   if (["pending", "running"].includes(asset.generationStatus)) return <div className="de-canvas-generating"><span>◌</span><strong>正在生成{asset.assetType === "video" ? "视频" : asset.assetType === "text" ? "文案" : "海报"}</strong><p>任务已保存到当前活动。</p></div>;
   if (["failed", "cancelled"].includes(asset.generationStatus)) return <div className="de-canvas-generating failed"><span>!</span><strong>生成未完成</strong><p>请检查模型配置后重新生成。</p></div>;
-  return <div className={`de-canvas-result${compact ? " compact" : ""}`}>{asset.assetType === "text" ? <pre>{asset.content}</pre> : asset.assetType === "video" && asset.fileUrl ? <video src={asset.fileUrl} controls /> : asset.fileUrl ? <img src={asset.fileUrl} alt={asset.title} /> : null}<div><span>模型 {asset.modelId} · v{asset.version}</span><span>客群内容 · 不含单客身份</span></div>{!compact && <footer>{asset.fileUrl && <a className="de-secondary-button" href={asset.fileUrl} download>下载文件</a>}<button className="de-primary-button" onClick={onOpenAssets}>前往资产库管理投放</button></footer>}</div>;
+  return <div className={`de-canvas-result${compact ? " compact" : " emphasized"}`}>
+    {!compact && <div className="de-canvas-result-banner"><strong>{asset.assetType === "text" ? "文案已生成" : asset.assetType === "video" ? "视频已生成" : "海报已生成"}</strong><span>{asset.title}</span></div>}
+    {asset.assetType === "text" ? <pre>{asset.content}</pre> : asset.assetType === "video" && asset.fileUrl ? <video src={asset.fileUrl} controls /> : asset.fileUrl ? <img src={asset.fileUrl} alt={asset.title} /> : null}
+    <div><span>模型 {asset.modelId} · v{asset.version}</span><span>客群内容 · 不含单客身份</span></div>
+    {!compact && <footer>{asset.fileUrl && <a className="de-secondary-button" href={asset.fileUrl} download>下载文件</a>}<button className="de-primary-button" onClick={onOpenAssets}>前往资产库管理投放</button></footer>}
+  </div>;
 }

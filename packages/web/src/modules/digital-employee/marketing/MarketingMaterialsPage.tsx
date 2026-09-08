@@ -184,7 +184,7 @@ function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduc
       <TextRows label="核心价值" hint="每行一条" value={form.coreValues} onChange={(value) => change("coreValues", value)} />
       <TextRows label="可验证事实" hint="事实｜依据" value={form.facts} onChange={(value) => change("facts", value)} />
       <TextRows label="常见异议" hint="异议｜标准回应" value={form.objections} onChange={(value) => change("objections", value)} />
-      <TextRows label="当前权益" hint="权益｜说明｜开始日期｜结束日期" value={form.benefits} onChange={(value) => change("benefits", value)} />
+      <TextRows label="当前权益" hint="权益｜说明｜开始日期｜结束日期；日期可用 YYYY-MM / YYYY-MM-DD，留空表示不限" value={form.benefits} onChange={(value) => change("benefits", value)} />
       <TextRows label="禁用表达" hint="每行一条" value={form.prohibited} onChange={(value) => change("prohibited", value)} />
       <TextRows label="案例素材" hint="标题｜摘要｜结果｜素材链接" value={form.cases} onChange={(value) => change("cases", value)} />
     </div>{error && <p className="de-form-error">{error}</p>}<footer className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>取消</button><button className="de-primary-button" disabled={saving}>{saving ? "保存中…" : "保存产品资料"}</button></footer></form>

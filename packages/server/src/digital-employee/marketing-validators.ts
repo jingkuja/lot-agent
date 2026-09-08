@@ -45,10 +45,31 @@ function structured<T>(
   return value.map((item) => parser(object(item, `${label}项`)));
 }
 
-function date(value: unknown, label: string): string | null | undefined {
+/** Accept YYYY-MM-DD, YYYY-MM, or ISO datetime; blank → null. Month-only
+ *  normalizes to first day (from) or last day (until) of that month (UTC). */
+function date(value: unknown, label: string, bound: "from" | "until" = "from"): string | null | undefined {
   if (value === undefined || value === null || value === "") return value === undefined ? undefined : null;
-  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) throw new InputError(`${label}日期无效`);
-  return new Date(value).toISOString();
+  if (typeof value !== "string") throw new InputError(`${label}日期无效`);
+  const trimmed = value.trim();
+  const monthOnly = /^(\d{4})-(\d{2})$/.exec(trimmed);
+  if (monthOnly) {
+    const year = Number(monthOnly[1]);
+    const month = Number(monthOnly[2]);
+    if (month < 1 || month > 12) throw new InputError(`${label}日期无效`);
+    if (bound === "until") return new Date(Date.UTC(year, month, 0)).toISOString();
+    return new Date(Date.UTC(year, month - 1, 1)).toISOString();
+  }
+  // YYYY-MM-DD, optionally followed by a time / timezone suffix (tool ISO payloads).
+  const dayMatch = /^(\d{4})-(\d{2})-(\d{2})(?:[Tt\s].*)?$/.exec(trimmed);
+  if (!dayMatch) throw new InputError(`${label}日期无效`);
+  const year = Number(dayMatch[1]);
+  const month = Number(dayMatch[2]);
+  const day = Number(dayMatch[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    throw new InputError(`${label}日期无效`);
+  }
+  return parsed.toISOString();
 }
 
 function optionalAssetUrl(value: unknown, label: string): string | undefined {
@@ -92,8 +113,8 @@ function objections(value: unknown): MarketingObjection[] | undefined {
 
 function benefits(value: unknown): MarketingBenefit[] | undefined {
   return structured(value, "currentBenefits", 50, (item) => {
-    const validFrom = date(item.validFrom, "权益开始");
-    const validUntil = date(item.validUntil, "权益结束");
+    const validFrom = date(item.validFrom, "权益开始", "from");
+    const validUntil = date(item.validUntil, "权益结束", "until");
     if (validFrom && validUntil && new Date(validFrom) > new Date(validUntil)) throw new InputError("权益结束时间不能早于开始时间");
     return {
       title: text(item.title, "权益名称", 500, true)!,

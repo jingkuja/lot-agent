@@ -51,6 +51,41 @@ describe("parseMarketingProduct", () => {
     expect(result.currentBenefits).toEqual([{ title: "长期折扣", validFrom: null, validUntil: null }]);
   });
 
+  it("接受 YYYY-MM 并把开始/结束归一到当月首末日", () => {
+    const result = parseMarketingProduct({
+      name: "会员版",
+      currentBenefits: [{ title: "暑期活动", validFrom: "2026-08", validUntil: "2026-09" }],
+    });
+    expect(result.currentBenefits).toEqual([{
+      title: "暑期活动",
+      validFrom: "2026-08-01T00:00:00.000Z",
+      validUntil: "2026-09-30T00:00:00.000Z",
+    }]);
+  });
+
+  it("接受完整日与带时间的 ISO，拒绝无法识别的近似写法", () => {
+    expect(parseMarketingProduct({
+      name: "会员版",
+      currentBenefits: [{ title: "首月免单", validFrom: "2026-08-01T12:30:00.000Z", validUntil: "2026-08-31" }],
+    }).currentBenefits).toEqual([{
+      title: "首月免单",
+      validFrom: "2026-08-01T00:00:00.000Z",
+      validUntil: "2026-08-31T00:00:00.000Z",
+    }]);
+    expect(() => parseMarketingProduct({
+      name: "会员版",
+      currentBenefits: [{ title: "首月免单", validFrom: "本月", validUntil: "下月" }],
+    })).toThrow("权益开始日期无效");
+    expect(() => parseMarketingProduct({
+      name: "会员版",
+      currentBenefits: [{ title: "首月免单", validFrom: "2026-13" }],
+    })).toThrow("权益开始日期无效");
+    expect(() => parseMarketingProduct({
+      name: "会员版",
+      currentBenefits: [{ title: "首月免单", validFrom: "2026-02-30" }],
+    })).toThrow("权益开始日期无效");
+  });
+
   it("只允许HTTP(S)或站内路径的素材与视觉资产链接", () => {
     expect(parseMarketingProduct({
       name: "会员版",
