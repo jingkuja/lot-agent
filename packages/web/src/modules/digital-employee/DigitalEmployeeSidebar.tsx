@@ -81,6 +81,17 @@ export function DigitalEmployeeSidebar({
 
       <div className="de-history-anchor">
         <button
+          type="button"
+          className="de-new-chat-button"
+          onClick={() => {
+            onNewConversation();
+            setHistoryOpen(false);
+          }}
+        >
+          <span aria-hidden>＋</span>
+          {activeFeature === "acquisition" ? "与商机雷达对话" : activeFeature === "copy" ? "与获客宝对话" : "新对话"}
+        </button>
+        <button
           className={`de-history-trigger ${historyOpen ? "active" : ""}`}
           onClick={() => setHistoryOpen((open) => !open)}
           aria-expanded={historyOpen}

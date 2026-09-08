@@ -4299,6 +4299,40 @@ html, body, #root {
 }
 
 .de-home-card-heading > button:hover { color: var(--de-accent-strong); }
+.de-recent-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.de-recent-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px !important;
+  border: 1px solid color-mix(in srgb, var(--de-accent) 35%, var(--border)) !important;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--de-accent) 12%, var(--bg-card)) !important;
+  color: var(--de-accent-strong) !important;
+  font-size: 11px !important;
+  font-weight: 700;
+  box-shadow: var(--neu-raise-sm);
+}
+.de-recent-create:hover {
+  border-color: var(--de-accent) !important;
+  background: color-mix(in srgb, var(--de-accent) 18%, var(--bg-card)) !important;
+}
+.de-recent-all {
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.de-recent-all:hover { color: var(--de-accent-strong); }
 .de-cohort-heading-actions {
   display: flex;
   align-items: center;
@@ -5245,7 +5279,7 @@ html, body, #root {
   flex-direction: column;
   padding: 0 12px 12px;
 }
-.de-module-groups { min-height: 0; overflow-y: auto; padding: 2px 2px 84px; }
+.de-module-groups { min-height: 0; overflow-y: auto; padding: 2px 2px 128px; }
 .de-module-group + .de-module-group { margin-top: 12px; }
 .de-module-group h2 {
   margin: 0;
@@ -5293,7 +5327,36 @@ html, body, #root {
 .de-module-feature strong { font-size: 13px; }
 .de-module-feature small { overflow: hidden; color: var(--text-muted); font-size: 10px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .de-module-feature-arrow { color: var(--text-muted); font-size: 20px; }
-.de-history-anchor { position: absolute; right: 14px; bottom: 14px; left: 14px; z-index: 20; }
+.de-history-anchor {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+}
+.de-new-chat-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  box-shadow: var(--neu-raise-sm);
+  cursor: pointer;
+}
+.de-new-chat-button:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-card));
+}
 .de-history-trigger {
   display: flex;
   align-items: center;
@@ -5568,7 +5631,20 @@ html, body, #root {
 .de-switch i::after { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg-card); box-shadow: var(--shadow-sm); content: ""; transition: transform .15s; }
 .de-switch input:checked + i { background: var(--accent); }
 .de-switch input:checked + i::after { transform: translateX(14px); }
-.de-opportunity-tabs { display: flex; gap: 5px; margin-bottom: 12px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
+.de-opportunity-later-trail {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.de-opportunity-later-trail strong { color: var(--accent); font-size: 11px; font-weight: 750; letter-spacing: .02em; }
+.de-opportunity-later-trail time, .de-opportunity-later-trail small { color: var(--text-muted); font-size: 11px; }
+.de-opportunity-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
 .de-opportunity-tabs button { display: flex; align-items: center; justify-content: center; flex: 1; gap: 7px; min-height: 38px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
 .de-opportunity-tabs button:hover { color: var(--text); background: var(--bg-hover); }
 .de-opportunity-tabs button.active { background: color-mix(in srgb, var(--accent) 11%, var(--bg-card)); color: var(--accent); box-shadow: var(--neu-inset); }

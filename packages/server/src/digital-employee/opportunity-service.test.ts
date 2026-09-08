@@ -188,10 +188,11 @@ describe("OpportunityService personal work queue", () => {
     const summarySql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("AS high_priority")) ?? "";
     expect(summarySql).toContain("profile.status = 'active'");
     expect(summarySql).toContain("AS pending_count");
+    expect(summarySql).toContain("AS snoozed_count");
     expect(summarySql).toContain("AS in_progress_count");
     expect(summarySql).toContain("AS completed_count");
     expect(result.summary.viewCounts).toEqual({
-      today: 4, pending: 5, in_progress: 6, awaiting_result: 2, completed: 7,
+      today: 4, pending: 5, snoozed: 0, in_progress: 6, awaiting_result: 2, completed: 7,
     });
   });
 
@@ -208,8 +209,27 @@ describe("OpportunityService personal work queue", () => {
     const result = await service.list("u1", { view: "today" });
 
     expect(result.summary.viewCounts).toEqual({
-      today: 0, pending: 0, in_progress: 0, awaiting_result: 0, completed: 0,
+      today: 0, pending: 0, snoozed: 0, in_progress: 0, awaiting_result: 0, completed: 0,
     });
+  });
+
+  it("lists currently snoozed suggestions in the later queue", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM de_follow_up_automation_settings")) return { rows: [] };
+      if (sql.includes("FROM de_follow_up_suggestion_runs")) return { rows: [] };
+      if (sql.includes("count(*)::int AS count FROM de_customer_profiles")) return { rows: [{ count: 1 }] };
+      if (sql.includes("AS high_priority")) return { rows: [{
+        high_priority: 0, due_today: 0, overdue: 0, awaiting_result: 0,
+        today_count: 0, pending_count: 0, snoozed_count: 2, in_progress_count: 0, completed_count: 0,
+      }] };
+      return { rows: [] };
+    });
+    const service = new OpportunityService({ pool: { query } } as any);
+    await service.list("u1", { view: "snoozed" });
+    const snoozedSql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("suggestion.snoozed_until > now()")) ?? "";
+    expect(snoozedSql).toContain("suggestion.status = 'suggested'");
+    expect(snoozedSql).toContain("profile.status = 'active'");
+    expect(snoozedSql).toContain("suggestion.snoozed_until IS NOT NULL");
   });
 
   it("cancels open tasks and dismisses suggestions when a profile is archived", async () => {

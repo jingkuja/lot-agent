@@ -271,7 +271,7 @@ export interface MarketingProductListResponse {
 export type OpportunityType = "prospect_progress" | "silent_reengage" | "event_invitation" | "renewal" | "risk_recovery" |
   "new_lead_contact" | "trial_conversion" | "repurchase" | "referral";
 export type StoredOpportunityType = OpportunityType | "cohort_marketing";
-export type OpportunityView = "today" | "pending" | "in_progress" | "awaiting_result" | "completed";
+export type OpportunityView = "today" | "pending" | "snoozed" | "in_progress" | "awaiting_result" | "completed";
 export type OpportunityReadiness = "actionable" | "tryable" | "needs_info" | "paused";
 export type OpportunityPriority = "low" | "normal" | "high";
 export type TalkTrackIntent = "maintenance" | "follow_up" | "sales";
@@ -305,6 +305,8 @@ export interface OpportunityItem {
   productName: string | null;
   status: string;
   snoozedUntil: string | null;
+  decisionReason: string | null;
+  updatedAt: string | null;
   resultCriteria: string | null;
   executedAt: string | null;
   completedAt: string | null;

@@ -11,7 +11,7 @@ export const READINESS_VALUES = ["actionable", "tryable", "needs_info", "paused"
 export type OpportunityReadiness = typeof READINESS_VALUES[number];
 export const PRIORITY_VALUES = ["low", "normal", "high"] as const;
 export type OpportunityPriority = typeof PRIORITY_VALUES[number];
-export const OPPORTUNITY_VIEWS = ["today", "pending", "in_progress", "awaiting_result", "completed"] as const;
+export const OPPORTUNITY_VIEWS = ["today", "pending", "snoozed", "in_progress", "awaiting_result", "completed"] as const;
 export type OpportunityView = typeof OPPORTUNITY_VIEWS[number];
 
 export interface OpportunityEvidence {
@@ -52,6 +52,8 @@ export interface OpportunityListItem {
   productName: string | null;
   status: string;
   snoozedUntil: string | null;
+  decisionReason: string | null;
+  updatedAt: string | null;
   resultCriteria: string | null;
   executedAt: string | null;
   completedAt: string | null;
@@ -94,7 +96,7 @@ export interface OpportunitySettings {
 }
 
 export interface OpportunityDecisionInput {
-  decision: "accept" | "snooze" | "dismiss";
+  decision: "accept" | "snooze" | "dismiss" | "resume";
   reason?: string;
   snoozedUntil?: string;
   scheduledAt?: string;

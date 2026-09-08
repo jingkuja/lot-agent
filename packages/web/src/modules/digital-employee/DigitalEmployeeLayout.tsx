@@ -93,6 +93,7 @@ export function DigitalEmployeeLayout({ pathname, user, llmModels, onLogout, onN
             llmModels={llmModels}
             onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
             onCreateProfile={goProfiles}
+            onOpenChat={openFeatureChat}
           />}
           {view === "copy" && <CustomerAcquisitionPage
             onOpenChat={openFeatureChat}

@@ -55,6 +55,15 @@ export function ProfileListPage({ onOpenProfile, onBackToConversation }: Profile
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("de-profile-create") === "1") {
+        sessionStorage.removeItem("de-profile-create");
+        setNewOpen(true);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   const pages = Math.max(1, Math.ceil(total / limit));
   const range = useMemo(() => `${total ? (page - 1) * limit + 1 : 0}–${Math.min(page * limit, total)} / ${total}`, [page, total]);
 

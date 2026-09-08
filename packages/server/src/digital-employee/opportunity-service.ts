@@ -54,7 +54,9 @@ export class OpportunityService {
     await this.closeStaleActions(userId);
     const rows = filters.view === "pending"
       ? await this.pendingRows(userId)
-      : await this.actionRows(userId, filters.view);
+      : filters.view === "snoozed"
+        ? await this.snoozedRows(userId)
+        : await this.actionRows(userId, filters.view);
     const items = rows.map(toItem).filter((item) => matches(item, filters));
     const [summary, profileCount, settings, lastRun] = await Promise.all([
       this.summary(userId), this.profileCount(userId), this.getSettings(userId), this.lastRun(userId),
@@ -172,12 +174,27 @@ export class OpportunityService {
       if (!row) throw new NotFoundError("未找到该商机");
       if (row.status !== "suggested") throw new ConflictError("该商机已经处理");
       if (input.decision === "snooze") {
+        const until = input.snoozedUntil!;
+        const trail = input.reason?.trim()
+          || `稍后处理，计划 ${new Date(until).toISOString().slice(0, 10)} 恢复`;
         await client.query(
           `UPDATE de_follow_up_suggestions SET snoozed_until = $3, decision_reason = $4, version = version + 1
            WHERE id = $1 AND user_id = $2`,
-          [opportunityId, userId, input.snoozedUntil, input.reason ?? null]
+          [opportunityId, userId, until, trail]
         );
-        return { opportunityId, status: "snoozed", snoozedUntil: input.snoozedUntil };
+        return { opportunityId, status: "snoozed", snoozedUntil: until };
+      }
+      if (input.decision === "resume") {
+        if (!row.snoozed_until || new Date(row.snoozed_until).getTime() <= Date.now()) {
+          throw new ConflictError("该商机当前不在稍后处理队列");
+        }
+        const trail = input.reason?.trim() || "提前恢复稍后处理";
+        await client.query(
+          `UPDATE de_follow_up_suggestions SET snoozed_until = NULL, decision_reason = $3, version = version + 1
+           WHERE id = $1 AND user_id = $2`,
+          [opportunityId, userId, trail]
+        );
+        return { opportunityId, status: "suggested", snoozedUntil: null };
       }
       if (input.decision === "dismiss") {
         await client.query(
@@ -937,6 +954,23 @@ export class OpportunityService {
     return result.rows;
   }
 
+  private async snoozedRows(userId: string, profileId?: string) {
+    const params: unknown[] = [userId];
+    const profileFilter = profileId ? (params.push(profileId), " AND suggestion.profile_id = $2") : "";
+    const result = await this.pool.query(
+      `${baseSelect()}
+       WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested'
+         AND suggestion.opportunity_type <> 'cohort_marketing'
+         AND profile.status = 'active'
+         AND suggestion.snoozed_until IS NOT NULL
+         AND suggestion.snoozed_until > now()
+         AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now())${profileFilter}
+       ORDER BY suggestion.snoozed_until ASC,
+         CASE suggestion.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END`, params
+    );
+    return result.rows;
+  }
+
   private async actionRows(userId: string, view?: string, actionId?: string, profileId?: string) {
     const conditions = ["task.user_id = $1", "profile.status = 'active'"];
     const params: unknown[] = [userId];
@@ -1091,14 +1125,21 @@ export class OpportunityService {
     const result = await this.pool.query(
       `WITH suggestion_counts AS (
         SELECT
-          count(*) FILTER (WHERE suggestion.priority = 'high')::int AS high_priority,
-          count(*)::int AS pending_count
+          count(*) FILTER (
+            WHERE suggestion.priority = 'high'
+              AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
+          )::int AS high_priority,
+          count(*) FILTER (
+            WHERE suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now()
+          )::int AS pending_count,
+          count(*) FILTER (
+            WHERE suggestion.snoozed_until IS NOT NULL AND suggestion.snoozed_until > now()
+          )::int AS snoozed_count
         FROM de_follow_up_suggestions suggestion
         JOIN de_customer_profiles profile ON profile.id = suggestion.profile_id AND profile.user_id = suggestion.user_id
         WHERE suggestion.user_id = $1 AND suggestion.status = 'suggested'
           AND suggestion.opportunity_type <> 'cohort_marketing'
           AND profile.status = 'active'
-          AND (suggestion.snoozed_until IS NULL OR suggestion.snoozed_until <= now())
           AND (suggestion.valid_until IS NULL OR suggestion.valid_until >= now())
       ), task_counts AS (
         SELECT
@@ -1126,6 +1167,7 @@ export class OpportunityService {
       viewCounts: {
         today: Number(row.today_count ?? 0),
         pending: Number(row.pending_count ?? 0),
+        snoozed: Number(row.snoozed_count ?? 0),
         in_progress: Number(row.in_progress_count ?? 0),
         awaiting_result: Number(row.awaiting_result ?? 0),
         completed: Number(row.completed_count ?? 0),
@@ -1184,7 +1226,8 @@ function actionSelect() {
     COALESCE(suggestion.risk_flags, '[]'::jsonb) AS risk_flags,
     COALESCE(suggestion.product_key, task.product_key) AS product_key,
     COALESCE(suggestion.product_name, task.product_name) AS product_name,
-    suggestion.status, suggestion.snoozed_until,
+    suggestion.status, suggestion.snoozed_until, suggestion.decision_reason,
+    suggestion.updated_at AS suggestion_updated_at,
     profile.display_name, profile.organization, profile.relationship_stage,
     task.id AS action_id, task.status AS action_status, task.scheduled_at, task.result_criteria,
     task.source AS action_source,
@@ -1200,7 +1243,9 @@ function actionSelect() {
 }
 
 function toItem(row: any): OpportunityListItem & { actionVersion?: number } {
-  const view = !row.action_id ? "pending" : row.action_status === "pending" ? "in_progress" :
+  const snoozedUntil = iso(row.snoozed_until);
+  const snoozedActive = !row.action_id && Boolean(snoozedUntil) && Date.parse(snoozedUntil!) > Date.now();
+  const view = snoozedActive ? "snoozed" : !row.action_id ? "pending" : row.action_status === "pending" ? "in_progress" :
     row.action_status === "awaiting_result" ? "awaiting_result" : "completed";
   return {
     id: row.action_id ?? row.id, view, opportunityId: row.id, actionId: row.action_id ?? null,
@@ -1211,7 +1256,9 @@ function toItem(row: any): OpportunityListItem & { actionVersion?: number } {
     suggestedAt: iso(row.suggested_at)!, scheduledAt: iso(row.scheduled_at), priority: row.priority,
     reason: row.reason, evidence: array(row.evidence), readiness: row.readiness, riskFlags: array(row.risk_flags),
     productKey: row.product_key ?? null, productName: row.product_name ?? null,
-    status: row.action_status ?? row.status, snoozedUntil: iso(row.snoozed_until),
+    status: row.action_status ?? row.status, snoozedUntil,
+    decisionReason: row.decision_reason ?? null,
+    updatedAt: iso(row.suggestion_updated_at ?? row.updated_at),
     resultCriteria: row.result_criteria ?? null, executedAt: iso(row.executed_at), completedAt: iso(row.completed_at),
     closeReason: row.close_reason ?? null, outcome: row.outcome ?? null, customerQuote: row.customer_quote ?? null,
     nextAction: row.next_action ?? null, overdue: row.action_status === "pending" && Date.parse(row.scheduled_at) < Date.now(),

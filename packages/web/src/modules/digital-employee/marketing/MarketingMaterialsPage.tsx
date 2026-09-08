@@ -128,8 +128,8 @@ function ProductCard({ product, onEdit, onArchive }: { product: MarketingProduct
   return <article className="marketing-product-card">
     <header><div><h3>{product.name}</h3><p>{product.positioning || "待补充产品定位"}</p></div><div><button className="de-row-action" onClick={onEdit}>编辑</button><button className="de-quiet-button" onClick={onArchive}>归档</button></div></header>
     <div className="marketing-product-stats">
-      <span><strong>{product.coreValues.length}</strong>核心价值</span>
-      <span><strong>{product.verifiableFacts.length}</strong>可验证事实</span>
+      <span><strong>{product.coreValues.length}</strong>客户最在意</span>
+      <span><strong>{product.verifiableFacts.length}</strong>能说出口的证据</span>
       <span><strong>{activeBenefits.length}</strong>当前权益</span>
       <span><strong>{product.caseMaterials.length}</strong>案例素材</span>
     </div>
@@ -181,8 +181,8 @@ function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduc
     <form className="de-form" onSubmit={submit}><div className="de-form-grid">
       <label><span>产品名称 *</span><input autoFocus value={form.name} onChange={(e) => change("name", e.target.value)} maxLength={200} /></label>
       <label className="marketing-form-wide"><span>产品定位</span><textarea value={form.positioning} onChange={(e) => change("positioning", e.target.value)} rows={2} /></label>
-      <TextRows label="核心价值" hint="每行一条" value={form.coreValues} onChange={(value) => change("coreValues", value)} />
-      <TextRows label="可验证事实" hint="事实｜依据" value={form.facts} onChange={(value) => change("facts", value)} />
+      <TextRows label="客户最在意的点" hint="每行一条，客户真正关心什么" value={form.coreValues} onChange={(value) => change("coreValues", value)} />
+      <TextRows label="能说出口的证据" hint="说法｜依据来源" value={form.facts} onChange={(value) => change("facts", value)} />
       <TextRows label="常见异议" hint="异议｜标准回应" value={form.objections} onChange={(value) => change("objections", value)} />
       <TextRows label="当前权益" hint="权益｜说明｜开始日期｜结束日期；日期可用 YYYY-MM / YYYY-MM-DD，留空表示不限" value={form.benefits} onChange={(value) => change("benefits", value)} />
       <TextRows label="禁用表达" hint="每行一条" value={form.prohibited} onChange={(value) => change("prohibited", value)} />

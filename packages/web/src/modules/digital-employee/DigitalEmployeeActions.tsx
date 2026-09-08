@@ -24,7 +24,7 @@ export function DigitalEmployeeActions({
       : isAcquisition
         ? "获客宝对话只处理客群：保存客群、创建活动、改写素材、标记投放并回填群体结果"
         : "直接在下方对话中快速创建、查询、补充和更新客户画像";
-  const management = isMarketing ? ["◆", "营销资料管理"] : isOpportunity ? ["◇", "商机雷达工作台"] : isAcquisition ? ["✎", "获客宝工作台"] : ["◎", "客户画像管理"];
+  const management = isMarketing ? ["◆", "营销资料管理"] : isOpportunity ? ["◇", "商机雷达工作台"] : isAcquisition ? ["✎", "获客宝工作台"] : ["◎", "新建 / 管理画像"];
   return (
     <div className="de-chat-actions" aria-label="数字员工快捷操作">
       <p className="de-chat-actions-hint">

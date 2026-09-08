@@ -177,12 +177,31 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
               <p className="de-home-card-kicker">最近更新</p>
               <h2>客户画像</h2>
             </div>
-            <button type="button" onClick={onOpenProfiles}>全部画像 <span aria-hidden>→</span></button>
+            <div className="de-recent-heading-actions">
+              <button
+                type="button"
+                className="de-recent-create"
+                onClick={() => {
+                  try { sessionStorage.setItem("de-profile-create", "1"); } catch { /* ignore */ }
+                  onOpenProfiles();
+                }}
+              >
+                <span aria-hidden>＋</span> 新建画像
+              </button>
+              <button type="button" className="de-recent-all" onClick={onOpenProfiles}>全部画像 <span aria-hidden>→</span></button>
+            </div>
           </div>
 
           {!overview && !error && <RecentSkeleton />}
           {overview && overview.recentProfiles.length === 0 && (
-            <button className="de-recent-empty" type="button" onClick={onOpenProfiles}>
+            <button
+              className="de-recent-empty"
+              type="button"
+              onClick={() => {
+                try { sessionStorage.setItem("de-profile-create", "1"); } catch { /* ignore */ }
+                onOpenProfiles();
+              }}
+            >
               <span aria-hidden>＋</span>
               <strong>创建第一位客户</strong>
               <small>手工新建，或直接在下方对话中记录</small>

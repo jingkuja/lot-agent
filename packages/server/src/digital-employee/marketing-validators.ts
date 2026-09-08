@@ -99,7 +99,7 @@ function requiredAssetUrl(value: unknown, label: string): string {
 
 function facts(value: unknown): MarketingFact[] | undefined {
   return structured(value, "verifiableFacts", 50, (item) => ({
-    statement: text(item.statement, "可验证事实", 1_000, true)!,
+    statement: text(item.statement, "能说出口的证据", 1_000, true)!,
     ...(text(item.evidence, "事实依据", 2_000) !== undefined ? { evidence: text(item.evidence, "事实依据", 2_000) } : {}),
   }));
 }
@@ -147,7 +147,7 @@ function productFields(source: Record<string, unknown>, requireName: boolean): M
   return {
     ...(name !== undefined ? { name } : {}),
     ...(text(source.positioning, "产品定位", 4_000) !== undefined ? { positioning: text(source.positioning, "产品定位", 4_000) } : {}),
-    ...(strings(source.coreValues, "核心价值", 30, 500) !== undefined ? { coreValues: strings(source.coreValues, "核心价值", 30, 500) } : {}),
+    ...(strings(source.coreValues, "客户最在意的点", 30, 500) !== undefined ? { coreValues: strings(source.coreValues, "客户最在意的点", 30, 500) } : {}),
     ...(facts(source.verifiableFacts) !== undefined ? { verifiableFacts: facts(source.verifiableFacts) } : {}),
     ...(objections(source.commonObjections) !== undefined ? { commonObjections: objections(source.commonObjections) } : {}),
     ...(benefits(source.currentBenefits) !== undefined ? { currentBenefits: benefits(source.currentBenefits) } : {}),

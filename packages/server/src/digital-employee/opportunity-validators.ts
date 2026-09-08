@@ -50,7 +50,7 @@ export function parseOpportunityList(query: Record<string, string>): Opportunity
 
 export function parseOpportunityDecision(value: unknown): OpportunityDecisionInput {
   const source = object(value);
-  const decision = choice(source.decision, ["accept", "snooze", "dismiss"] as const, "decision", true)!;
+  const decision = choice(source.decision, ["accept", "snooze", "dismiss", "resume"] as const, "decision", true)!;
   const reason = text(source.reason, "reason", 500);
   const snoozedUntil = date(source.snoozedUntil, "snoozedUntil", decision === "snooze");
   if (decision === "snooze" && snoozedUntil! <= new Date().toISOString()) throw new InputError("恢复日期必须晚于当前时间");

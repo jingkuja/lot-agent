@@ -13,19 +13,23 @@ interface Props {
   llmModels: CatalogModel[];
   onOpenProfile: (id: string) => void;
   onCreateProfile: () => void;
+  onOpenChat?: () => void;
 }
 
 const VIEWS: Array<{ id: OpportunityView; label: string }> = [
   { id: "today", label: "今日经营" },
-  { id: "pending", label: "待判断" }, { id: "in_progress", label: "跟进中" },
-  { id: "awaiting_result", label: "待回填" }, { id: "completed", label: "已完成" },
+  { id: "pending", label: "待判断" },
+  { id: "snoozed", label: "稍后处理" },
+  { id: "in_progress", label: "跟进中" },
+  { id: "awaiting_result", label: "待回填" },
+  { id: "completed", label: "已完成" },
 ];
 const PRIORITY_LABELS = { high: "高优先", normal: "中优先", low: "低优先" } as const;
 const FIRST_TYPES: OpportunityType[] = ["prospect_progress", "silent_reengage", "event_invitation", "renewal", "risk_recovery"];
 const DISMISS_REASONS = ["当前不合适", "已经处理", "客户明确拒绝", "信息不准确", "不再跟进"];
 type FilterValues = { readiness: string; priority: string; opportunityType: string; relationshipStage: string; product: string; suggestedFrom: string; suggestedTo: string };
 
-export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfile }: Props) {
+export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfile, onOpenChat }: Props) {
   const [view, setView] = useState<OpportunityView>("today");
   const [data, setData] = useState<OpportunityListResponse | null>(null);
   const [filters, setFilters] = useState<FilterValues>({ readiness: "", priority: "", opportunityType: "", relationshipStage: "", product: "", suggestedFrom: "", suggestedTo: "" });
@@ -103,6 +107,11 @@ export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfi
           <p>盯住每个客户：今天该联系谁、为什么、下一步做什么。</p>
         </div>
         <div className="de-opportunity-header-actions">
+          {onOpenChat && (
+            <button type="button" className="de-secondary-button" onClick={onOpenChat}>
+              与商机雷达对话
+            </button>
+          )}
           <button className="de-primary-button" disabled={discovering} onClick={() => void discover()}>
             {discovering ? `发现中 ${discoverProgress}%` : "✦ 发现新商机"}
           </button>
@@ -128,6 +137,7 @@ export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfi
       ) : (
         <section className="de-opportunity-list" aria-label={VIEWS.find((item) => item.id === view)?.label}>
           {data.items.map((item) => <OpportunityCard key={item.id} item={item} llmModels={llmModels} onOpenProfile={onOpenProfile} onAction={openDialog}
+            onResume={() => void mutate(() => api.decideOpportunity(item.opportunityId, { decision: "resume" }))}
             onExecute={() => void mutate(() => api.updateOpportunityAction(item.actionId!, { operation: "execute", version: item.actionVersion }))}
             onCancel={() => void mutate(() => api.updateOpportunityAction(item.actionId!, { operation: "cancel", reason: "user_cancelled", version: item.actionVersion }))} />)}
         </section>
@@ -136,7 +146,18 @@ export function OpportunityAdvisorPage({ llmModels, onOpenProfile, onCreateProfi
       {active && dialog === "accept" && <AcceptDialog item={active} onClose={closeDialog} onSave={(input) => void mutate(() =>
         api.decideOpportunity(active.opportunityId, { decision: "accept", ...input })
       )} />}
-      {active && dialog === "snooze" && <SnoozeDialog onClose={closeDialog} onSave={(snoozedUntil) => void mutate(() => api.decideOpportunity(active.opportunityId, { decision: "snooze", snoozedUntil }))} />}
+      {active && dialog === "snooze" && <SnoozeDialog onClose={closeDialog} onSave={(snoozedUntil) => {
+        void (async () => {
+          setError(null);
+          try {
+            await api.decideOpportunity(active.opportunityId, { decision: "snooze", snoozedUntil });
+            closeDialog();
+            setView("snoozed");
+          } catch (reason) {
+            setError(reason instanceof Error ? reason.message : "操作失败");
+          }
+        })();
+      }} />}
       {active && dialog === "dismiss" && <DismissDialog onClose={closeDialog} onSave={(reason) => {
         if (reason === "信息不准确") {
           const profileId = active.profileId;
@@ -184,10 +205,10 @@ function Filters({ values, onChange }: { values: FilterValues; onChange: (value:
   </section>;
 }
 
-function OpportunityCard({ item, llmModels, onOpenProfile, onAction, onExecute, onCancel }: {
+function OpportunityCard({ item, llmModels, onOpenProfile, onAction, onResume, onExecute, onCancel }: {
   item: OpportunityItem; llmModels: CatalogModel[]; onOpenProfile: (id: string) => void;
   onAction: (item: OpportunityItem, action: "accept" | "snooze" | "dismiss" | "reschedule" | "result") => void;
-  onExecute: () => void; onCancel: () => void;
+  onResume: () => void; onExecute: () => void; onCancel: () => void;
 }) {
   const [talkOpen, setTalkOpen] = useState(false);
   const blocked = item.riskFlags.some((risk) => risk.blocking);
@@ -208,11 +229,20 @@ function OpportunityCard({ item, llmModels, onOpenProfile, onAction, onExecute, 
         <h3>为什么现在</h3>
         <ul>{item.evidence.map((evidence, index) => <li key={`${evidence.sourceId ?? evidence.sourceType}-${index}`}><time>{shortDate(evidence.occurredAt)}</time><span>{evidence.fact}</span></li>)}</ul>
         {item.riskFlags.map((risk) => <div key={risk.code} className={`de-opportunity-risk ${risk.blocking ? "blocking" : ""}`}>⚠ {risk.message}</div>)}
+        {(item.view === "snoozed" || item.snoozedUntil) && item.view !== "pending" && (
+          <div className="de-opportunity-later-trail">
+            <strong>稍后处理轨迹</strong>
+            <span>{item.decisionReason || "已标记稍后处理"}</span>
+            {item.snoozedUntil && <time>恢复：{formatTime(item.snoozedUntil)}</time>}
+            {item.updatedAt && <small>记录于 {formatTime(item.updatedAt)}</small>}
+          </div>
+        )}
       </div>
-      <aside><span>建议怎么做</span><strong>{item.followUpMethod || "根据客户偏好"}</strong><p>{item.scheduledAt ? formatTime(item.scheduledAt) : formatTime(item.suggestedAt)}</p>{item.productName && <small>关联：{item.productName}</small>}{item.resultCriteria && <small>结果口径：{item.resultCriteria}</small>}</aside>
+      <aside><span>建议怎么做</span><strong>{item.followUpMethod || "根据客户偏好"}</strong><p>{item.view === "snoozed" && item.snoozedUntil ? `稍后至 ${formatTime(item.snoozedUntil)}` : item.scheduledAt ? formatTime(item.scheduledAt) : formatTime(item.suggestedAt)}</p>{item.productName && <small>关联：{item.productName}</small>}{item.resultCriteria && <small>结果口径：{item.resultCriteria}</small>}</aside>
     </div>
     <footer>
       {item.view === "pending" && <><button className="de-primary-button" disabled={blocked} onClick={() => onAction(item, "accept")}>采纳并确认行动</button><button className="de-secondary-button" onClick={() => onAction(item, "snooze")}>稍后</button><button className="de-quiet-button" onClick={() => onAction(item, "dismiss")}>忽略</button></>}
+      {item.view === "snoozed" && <><button className="de-primary-button" onClick={onResume}>提前恢复</button><button className="de-secondary-button" disabled={blocked} onClick={() => onAction(item, "accept")}>采纳并确认行动</button><button className="de-quiet-button" onClick={() => onAction(item, "dismiss")}>忽略</button></>}
       {item.view === "in_progress" && <><button className="de-primary-button" onClick={onExecute}>标记已执行</button><button className="de-secondary-button" onClick={() => onAction(item, "reschedule")}>改时间</button><button className="de-quiet-button" onClick={onCancel}>取消</button></>}
       {item.view === "awaiting_result" && <button className="de-primary-button" onClick={() => onAction(item, "result")}>回填结果</button>}
       {item.view === "completed" && <><span className="de-opportunity-outcome">{item.closeReason === "overdue_closed" ? "已逾期关闭" : OUTCOME_LABELS[item.outcome ?? ""] || "已取消"}</span>{item.customerQuote && <q>{item.customerQuote}</q>}</>}
@@ -286,7 +316,7 @@ function TalkTrackAssistant({ item, open, llmModels, onClose }: { item: Opportun
 }
 
 function Empty({ view, hasProfiles, hasFilters, onCreateProfile, onDiscover }: { view: OpportunityView; hasProfiles: boolean; hasFilters: boolean; onCreateProfile: () => void; onDiscover: () => void }) {
-  const content = !hasProfiles ? ["还没有可经营的客户画像", "商机雷达只围绕已建档的单个客户工作，请先建立客户画像。"] : hasFilters ? ["没有符合筛选条件的客户事项", "清除或调整筛选条件后再看。"] : view === "today" ? ["今天没有必须处理的客户事项", "可以查看待判断商机，或手动安排一次回访和维护。"] : view === "pending" ? ["当前没有需要判断的新商机", "可以立即运行一次发现；确定性提醒仍会按计划出现在今日经营。"] : ["这个视图目前为空", "行动采纳、执行和结果回填后会自动流转到对应视图。"];
+  const content = !hasProfiles ? ["还没有可经营的客户画像", "商机雷达只围绕已建档的单个客户工作，请先建立客户画像。"] : hasFilters ? ["没有符合筛选条件的客户事项", "清除或调整筛选条件后再看。"] : view === "today" ? ["今天没有必须处理的客户事项", "可以查看待判断商机，或手动安排一次回访和维护。"] : view === "pending" ? ["当前没有需要判断的新商机", "可以立即运行一次发现；确定性提醒仍会按计划出现在今日经营。"] : view === "snoozed" ? ["稍后处理队列为空", "在「待判断」里点「稍后」的商机会出现在这里，到期后自动回到待判断。"] : ["这个视图目前为空", "行动采纳、执行和结果回填后会自动流转到对应视图。"];
   return <div className="de-state de-empty-state de-opportunity-empty"><span className="de-empty-icon">◇</span><strong>{content[0]}</strong><p>{content[1]}</p>{!hasProfiles ? <button className="de-primary-button" onClick={onCreateProfile}>新建客户</button> : view === "pending" && <button className="de-secondary-button" onClick={onDiscover}>发现新商机</button>}</div>;
 }
 
@@ -307,7 +337,7 @@ function AcceptDialog({ item, onClose, onSave }: { item: OpportunityItem; onClos
 
 function SnoozeDialog({ onClose, onSave }: { onClose: () => void; onSave: (value: string) => void }) {
   const tomorrow = new Date(Date.now() + 86_400_000); const [value, setValue] = useState(tomorrow.toISOString().slice(0, 10));
-  return <DialogFrame title="稍后处理" onClose={onClose}><form className="de-form" onSubmit={(e) => { e.preventDefault(); onSave(new Date(`${value}T09:00:00`).toISOString()); }}><label><span>恢复日期</span><input type="date" min={new Date().toISOString().slice(0,10)} value={value} onChange={(e) => setValue(e.target.value)} required /></label><p className="de-field-hint">到期后商机会自动回到“待判断”。</p><div className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>取消</button><button className="de-primary-button">确认稍后</button></div></form></DialogFrame>;
+  return <DialogFrame title="稍后处理" onClose={onClose}><form className="de-form" onSubmit={(e) => { e.preventDefault(); onSave(new Date(`${value}T09:00:00`).toISOString()); }}><label><span>恢复日期</span><input type="date" min={new Date().toISOString().slice(0,10)} value={value} onChange={(e) => setValue(e.target.value)} required /></label><p className="de-field-hint">确认后会出现在「稍后处理」队列，可随时提前恢复；到期后自动回到“待判断”。</p><div className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>取消</button><button className="de-primary-button">确认稍后</button></div></form></DialogFrame>;
 }
 
 function DismissDialog({ onClose, onSave }: { onClose: () => void; onSave: (value: string) => void }) {
