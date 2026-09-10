@@ -31,6 +31,17 @@ export function isKlingModel(id: string | null | undefined): boolean {
   return (id ?? "").toLowerCase().startsWith("kling");
 }
 
+/** MiniMax H3 Max (ids like `h3-max` / `minimax-video-h3-max`) uses 480P / 768P. */
+export function isH3MaxModel(id: string | null | undefined): boolean {
+  return /h3[-_ ]?max/i.test(id ?? "");
+}
+
+/** MiniMax H3 (ids like `minimax-video-h3`) uses 768P / 2K. Excludes H3 Max. */
+export function isMinimaxH3Model(id: string | null | undefined): boolean {
+  if (isH3MaxModel(id)) return false;
+  return /minimax[-_ ]?(video[-_ ]?)?h3/i.test(id ?? "");
+}
+
 /** Seedance 2.5 (ids like `doubao-seedance-2.5` / `doubao-seedance-2-5`). */
 export function isSeedance25Model(id: string | null | undefined): boolean {
   return /seedance[^a-z0-9]*2[\.\-_]?5(?!\d)/i.test(id ?? "");

@@ -35,7 +35,13 @@ export const VIDEO_RATIOS: Ratio[] = [
 ];
 
 export type Quality = VideoQuality;
-export { VIDEO_QUALITIES, KLING_VIDEO_QUALITIES, videoQualitiesForModel } from "../lib/video-settings.js";
+export {
+  VIDEO_QUALITIES,
+  KLING_VIDEO_QUALITIES,
+  MINIMAX_H3_VIDEO_QUALITIES,
+  H3_MAX_VIDEO_QUALITIES,
+  videoQualitiesForModel,
+} from "../lib/video-settings.js";
 
 export const VIDEO_DURATIONS = ["5秒", "10秒"];
 
@@ -323,7 +329,7 @@ export function VideoSettingsPicker({
   lockAdaptive?: boolean;
   /** 有参考音频时供应商必须生成声音，页面不可改。 */
   hasReferenceAudio?: boolean;
-  /** 当前视频模型；Kling 使用 720p / 1080p / 4k。 */
+  /** 当前视频模型；Kling / MiniMax H3 / H3 Max 使用各自的分辨率档位。 */
   selectedModel?: string | null;
   onChange?: (s: VideoSettings) => void;
   /** 时长选项，默认 5秒 / 10秒；获客宝使用 10秒 / 15秒。 */

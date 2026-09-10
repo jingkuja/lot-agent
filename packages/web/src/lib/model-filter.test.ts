@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   filterModels,
   isGptImage15,
+  isH3MaxModel,
   isKlingModel,
+  isMinimaxH3Model,
   isSeedance25Model,
   isSeedanceModel,
   missingSeedanceMentions,
@@ -84,6 +86,39 @@ describe("isKlingModel", () => {
     expect(isKlingModel("")).toBe(false);
     expect(isKlingModel(null)).toBe(false);
     expect(isKlingModel(undefined)).toBe(false);
+  });
+});
+
+describe("isH3MaxModel", () => {
+  it("matches h3-max ids across separators", () => {
+    expect(isH3MaxModel("h3-max")).toBe(true);
+    expect(isH3MaxModel("minimax-video-h3-max")).toBe(true);
+    expect(isH3MaxModel("MiniMax-H3-Max")).toBe(true);
+    expect(isH3MaxModel("h3_max")).toBe(true);
+  });
+
+  it("does not match MiniMax H3 or empty ids", () => {
+    expect(isH3MaxModel("minimax-video-h3")).toBe(false);
+    expect(isH3MaxModel("kling-standard")).toBe(false);
+    expect(isH3MaxModel(null)).toBe(false);
+    expect(isH3MaxModel(undefined)).toBe(false);
+  });
+});
+
+describe("isMinimaxH3Model", () => {
+  it("matches MiniMax H3 ids and excludes H3 Max", () => {
+    expect(isMinimaxH3Model("minimax-video-h3")).toBe(true);
+    expect(isMinimaxH3Model("MiniMax-H3")).toBe(true);
+    expect(isMinimaxH3Model("minimax-h3")).toBe(true);
+    expect(isMinimaxH3Model("h3-max")).toBe(false);
+    expect(isMinimaxH3Model("minimax-video-h3-max")).toBe(false);
+  });
+
+  it("does not match other video models or empty ids", () => {
+    expect(isMinimaxH3Model("kling-video-v3-omni")).toBe(false);
+    expect(isMinimaxH3Model("doubao-seedance-2.0")).toBe(false);
+    expect(isMinimaxH3Model(null)).toBe(false);
+    expect(isMinimaxH3Model(undefined)).toBe(false);
   });
 });
 
