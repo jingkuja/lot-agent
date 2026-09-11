@@ -1,3 +1,4 @@
+import { visibleImageModels } from "../../../lib/model-filter.js";
 import type { AcquisitionModelConfiguration, AcquisitionModelOption } from "../types.js";
 
 export const ACQUISITION_MODELS_KEY = "lot:acquisition-media-models";
@@ -31,9 +32,9 @@ export function listedAcquisitionModels(
 ): AcquisitionModelOption[] {
   if (!configuration) return [];
   const listed = kind === "llm" ? configuration.llmModels : kind === "image" ? configuration.imageModels : configuration.videoModels;
-  if (listed?.length) return listed;
   const selected = kind === "llm" ? configuration.llmModelId : kind === "image" ? configuration.imageModelId : configuration.videoModelId;
-  return selected ? [{ id: selected }] : [];
+  const models = listed?.length ? listed : (selected ? [{ id: selected }] : []);
+  return kind === "image" ? visibleImageModels(models) : models;
 }
 
 export function pickAcquisitionModel(

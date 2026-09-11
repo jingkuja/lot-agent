@@ -46,11 +46,11 @@ const IMAGE_FLAGSHIP_LABEL = "旗舰";
  * Prefer flare (默认) + sunburst (旗舰); if both are absent, gpt-image-2 as 默认;
  * if none of the three exist, return empty (UI shows 暂无模型).
  */
-export function visibleImageModels(models: CatalogModel[]): CatalogModel[] {
-  const labeled = (model: CatalogModel, label: string): CatalogModel => ({ ...model, label });
+export function visibleImageModels<T extends { id: string }>(models: T[]): Array<T & { label: string }> {
+  const labeled = (model: T, label: string): T & { label: string } => ({ ...model, label });
   const flare = models.find((model) => isGptImage25Flare(model.id));
   const sunburst = models.find((model) => isGptImage25Sunburst(model.id));
-  const out: CatalogModel[] = [];
+  const out: Array<T & { label: string }> = [];
   if (flare) out.push(labeled(flare, IMAGE_DEFAULT_LABEL));
   if (sunburst) out.push(labeled(sunburst, IMAGE_FLAGSHIP_LABEL));
   if (out.length > 0) return out;

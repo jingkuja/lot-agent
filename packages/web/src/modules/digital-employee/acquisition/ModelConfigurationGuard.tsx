@@ -35,7 +35,7 @@ export function ModelConfigurationGuard({
         label="图像模型"
         value={imageModelId}
         models={imageModels}
-        emptyLabel="暂无可用图像模型"
+        emptyLabel="暂无模型"
         onChange={onImageModelChange}
       />
       <ModelSelect

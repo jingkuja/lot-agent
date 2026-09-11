@@ -161,7 +161,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const handleImageSettingsError = useCallback((error: string | null) => { setImageSettingsError(error); }, []);
   const pickerSelected = pickerModels.some((m) => m.id === selectedModel)
     ? selectedModel
-    : (pickerModels[0]?.id ?? null);
+    : pickerModels[0]?.id ?? (!onModelChange ? selectedModel : null) ?? null;
   const effectiveImageModel = mode === "image" ? pickerSelected : (selectedModel ?? models[0]?.id ?? null);
 
   useEffect(() => {
