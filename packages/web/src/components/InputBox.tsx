@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
 import { DEFAULT_IMAGE_QUALITY, DEFAULT_IMAGE_SIZE, imageSizeError } from "../lib/image-settings.js";
 import { ModelPicker } from "./ModelPicker.js";
@@ -7,6 +7,7 @@ import {
   isSeedanceModel,
   missingSeedanceMentions,
   seedanceAssetMention,
+  visibleImageModels,
   type CatalogModel,
 } from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
@@ -95,7 +96,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [internalValue, setInternalValue] = useState("");
   const promptValue = value !== undefined ? value : internalValue;
   const setPromptValue = onChange ?? setInternalValue;
-  const noModels = !!onModelChange && models.length === 0;
+  const pickerModels = useMemo(
+    () => (mode === "image" ? visibleImageModels(models) : models),
+    [mode, models]
+  );
+  const noModels = !!onModelChange && pickerModels.length === 0;
   const [noModelNotice, setNoModelNotice] = useState(false);
   const [uploadLimitNotice, setUploadLimitNotice] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -154,7 +159,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [imageSettingsError, setImageSettingsError] = useState<string | null>(null);
   const handleSettingsChange = useCallback((s: ImageSettings | VideoSettings) => { settingsRef.current = s; }, []);
   const handleImageSettingsError = useCallback((error: string | null) => { setImageSettingsError(error); }, []);
-  const effectiveImageModel = selectedModel ?? models[0]?.id ?? null;
+  const pickerSelected = pickerModels.some((m) => m.id === selectedModel)
+    ? selectedModel
+    : (pickerModels[0]?.id ?? null);
+  const effectiveImageModel = mode === "image" ? pickerSelected : (selectedModel ?? models[0]?.id ?? null);
+
+  useEffect(() => {
+    if (mode !== "image" || !onModelChange) return;
+    if (!pickerSelected || pickerSelected === selectedModel) return;
+    onModelChange(pickerSelected);
+  }, [mode, onModelChange, pickerSelected, selectedModel]);
 
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
@@ -789,10 +803,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           )}
           {onModelChange && (
             <ModelPicker
-              models={models}
-              value={selectedModel}
+              models={pickerModels}
+              value={pickerSelected}
               onChange={onModelChange}
               disabled={disabled}
+              emptyLabel={mode === "image" ? "暂无模型" : undefined}
             />
           )}
           {mode === "image" && (

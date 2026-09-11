@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   filterModels,
   isGptImage15,
+  isGptImage2,
+  isGptImage25Flare,
+  isGptImage25Sunburst,
   isH3MaxModel,
   isKlingModel,
   isMinimaxH3Model,
@@ -10,6 +13,7 @@ import {
   missingSeedanceMentions,
   moveClaudeModelsToEnd,
   seedanceAssetMention,
+  visibleImageModels,
 } from "./model-filter.js";
 
 const models = [
@@ -53,6 +57,60 @@ describe("moveClaudeModelsToEnd", () => {
       "deepseek-v4",
       "claude-haiku-4.5",
     ]);
+  });
+});
+
+const img = (id: string) => ({ id, type: "image" as const, provider: "tokenhub" });
+
+describe("isGptImage25Flare / Sunburst / 2", () => {
+  it("matches flare and sunburst across separators", () => {
+    expect(isGptImage25Flare("gpt-image-2.5-flare")).toBe(true);
+    expect(isGptImage25Flare("GPT-Image-2-5-Flare")).toBe(true);
+    expect(isGptImage25Sunburst("gpt-image-2.5-sunburst")).toBe(true);
+    expect(isGptImage25Flare("gpt-image-2.5-sunburst")).toBe(false);
+    expect(isGptImage25Sunburst("gpt-image-2.5-flare")).toBe(false);
+  });
+
+  it("matches gpt-image-2 without treating 2.5 variants as version 2", () => {
+    expect(isGptImage2("gpt-image-2")).toBe(true);
+    expect(isGptImage2("gpt-image-2-token")).toBe(true);
+    expect(isGptImage2("gpt-image-2.5-flare")).toBe(false);
+    expect(isGptImage2("gpt-image-2.5-sunburst")).toBe(false);
+    expect(isGptImage2("gpt-image-1.5")).toBe(false);
+  });
+});
+
+describe("visibleImageModels", () => {
+  it("shows flare as 默认 and sunburst as 旗舰, hiding other catalog ids", () => {
+    const out = visibleImageModels([
+      img("wanx-standard"),
+      img("gpt-image-2.5-sunburst"),
+      img("gpt-image-2"),
+      img("gpt-image-2.5-flare"),
+    ]);
+    expect(out.map((m) => ({ id: m.id, label: m.label }))).toEqual([
+      { id: "gpt-image-2.5-flare", label: "默认" },
+      { id: "gpt-image-2.5-sunburst", label: "旗舰" },
+    ]);
+  });
+
+  it("falls back to gpt-image-2 as 默认 when both 2.5 models are missing", () => {
+    expect(visibleImageModels([img("wanx-standard"), img("gpt-image-2")])).toEqual([
+      { id: "gpt-image-2", type: "image", provider: "tokenhub", label: "默认" },
+    ]);
+  });
+
+  it("does not fall back to gpt-image-2 when either 2.5 model is present", () => {
+    expect(visibleImageModels([img("gpt-image-2.5-sunburst"), img("gpt-image-2")]).map((m) => m.id)).toEqual([
+      "gpt-image-2.5-sunburst",
+    ]);
+    expect(visibleImageModels([img("gpt-image-2.5-flare"), img("gpt-image-2")]).map((m) => m.label)).toEqual([
+      "默认",
+    ]);
+  });
+
+  it("returns empty when none of the three allowed models exist", () => {
+    expect(visibleImageModels([img("wanx-standard"), img("qwen-image-2.0")])).toEqual([]);
   });
 });
 

@@ -13,7 +13,7 @@ import type { ModelCatalog } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
-import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveLlmSelection } from "../lib/model-defaults.js";
+import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveImageSelection, resolveLlmSelection } from "../lib/model-defaults.js";
 import { digitalEmployeeConversations as filterDigitalEmployeeConversations, withoutDigitalEmployee } from "../lib/product-agent-scope.js";
 import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
 import { DigitalEmployeeHome } from "../modules/digital-employee/DigitalEmployeeHome.js";
@@ -284,7 +284,10 @@ export function Workspace({
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
-          generateMedia(content, kind as "image" | "video", settings, files, selectedModels[kind as "image" | "video"] ?? undefined);
+          const modelId = kind === "image"
+            ? resolveImageSelection(selectedModels.image, modelCatalog.image)
+            : selectedModels.video;
+          generateMedia(content, kind as "image" | "video", settings, files, modelId ?? undefined);
         } else {
           send(content, files, undefined, selectedModels.llm ?? undefined, knowledgeBases);
         }
@@ -310,7 +313,7 @@ export function Workspace({
       }
       dispatch();
     },
-    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, digitalEmployeeFeature]
+    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, digitalEmployeeFeature, modelCatalog]
   );
 
   const handleDelete = useCallback(

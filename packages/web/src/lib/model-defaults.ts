@@ -1,4 +1,4 @@
-import type { CatalogModel } from "./model-filter.js";
+import { visibleImageModels, type CatalogModel } from "./model-filter.js";
 
 export type ModelGroup = "llm" | "image" | "video";
 
@@ -12,16 +12,27 @@ export function groupForKind(kind: string | undefined): ModelGroup {
   return kind === "image" || kind === "video" ? kind : "llm";
 }
 
-/** 只填补还未选择(null)的槽位:取各组接口返回的第一个模型;已有选择保持不变。 */
+/** 只填补还未选择(null)的槽位:取各组接口返回的第一个模型;已有选择保持不变。
+ * 图像组只认输入框展示的 flare / sunburst（或 gpt-image-2 兜底），避免选中被隐藏的目录项。 */
 export function fillModelDefaults(
   prev: SelectedModels,
   catalog: { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] }
 ): SelectedModels {
   return {
     llm: prev.llm ?? catalog.llm[0]?.id ?? null,
-    image: prev.image ?? catalog.image[0]?.id ?? null,
+    image: resolveImageSelection(prev.image, catalog.image),
     video: prev.video ?? catalog.video[0]?.id ?? null,
   };
+}
+
+/** 图像输入框可见模型:已选且仍可见则沿用,否则回落到「默认」。 */
+export function resolveImageSelection(
+  persisted: string | null,
+  imageCatalog: CatalogModel[]
+): string | null {
+  const visible = visibleImageModels(imageCatalog);
+  if (persisted && visible.some((model) => model.id === persisted)) return persisted;
+  return visible[0]?.id ?? null;
 }
 
 /**

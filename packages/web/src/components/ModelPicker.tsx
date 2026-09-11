@@ -8,11 +8,13 @@ export function ModelPicker({
   value,
   onChange,
   disabled,
+  emptyLabel = "模型目录暂时不可用，请稍后重试",
 }: {
   models: CatalogModel[];
   value: string | null;
   onChange: (id: string) => void;
   disabled?: boolean;
+  emptyLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -33,8 +35,10 @@ export function ModelPicker({
   }, [open]);
 
   const isEmpty = models.length === 0;
-  const current = isEmpty ? "暂无模型" : value ?? models[0]?.id ?? "选择模型";
+  const currentModel = (!isEmpty && value && models.find((m) => m.id === value)) || models[0];
+  const current = isEmpty ? "暂无模型" : (currentModel?.label ?? currentModel?.id ?? "选择模型");
   const filtered = filterModels(models, query);
+  const showSearch = models.length > 2;
 
   return (
     <div className="media-picker model-picker" ref={wrapRef}>
@@ -56,16 +60,18 @@ export function ModelPicker({
         <div className="media-popup model-popup">
           {isEmpty ? (
             /* 目录为空:仅一行灰色提示,不可选;沿用 model-empty 样式 */
-            <div className="model-empty">模型目录暂时不可用，请稍后重试</div>
+            <div className="model-empty">{emptyLabel}</div>
           ) : (
             <>
-              <input
-                className="model-search"
-                autoFocus
-                placeholder="输入字母快速筛选…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
+              {showSearch && (
+                <input
+                  className="model-search"
+                  autoFocus
+                  placeholder="输入字母快速筛选…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              )}
               <div className="model-list">
                 {filtered.map((m) => (
                   <button

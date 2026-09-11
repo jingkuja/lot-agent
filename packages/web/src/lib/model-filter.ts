@@ -21,6 +21,43 @@ export function isGptImage15(id: string | null | undefined): boolean {
   return /gpt[-_ ]?image[-_ ]?1[\.\-_]?5(?!\d)/i.test(id ?? "");
 }
 
+/** gpt-image 2.5 flare — image picker displays this as 默认. */
+export function isGptImage25Flare(id: string | null | undefined): boolean {
+  return /gpt[-_ ]?image[-_ ]?2[\.\-_]?5[-_ ]?flare/i.test(id ?? "");
+}
+
+/** gpt-image 2.5 sunburst — image picker displays this as 旗舰. */
+export function isGptImage25Sunburst(id: string | null | undefined): boolean {
+  return /gpt[-_ ]?image[-_ ]?2[\.\-_]?5[-_ ]?sunburst/i.test(id ?? "");
+}
+
+/** gpt-image 2 (not 2.5). Fallback 默认 when flare/sunburst are both missing. */
+export function isGptImage2(id: string | null | undefined): boolean {
+  const value = id ?? "";
+  if (isGptImage25Flare(value) || isGptImage25Sunburst(value)) return false;
+  return /gpt[-_ ]?image[-_ ]?2(?![\.\-_]?5)/i.test(value);
+}
+
+const IMAGE_DEFAULT_LABEL = "默认";
+const IMAGE_FLAGSHIP_LABEL = "旗舰";
+
+/**
+ * Image-generation picker: never show vendor ids.
+ * Prefer flare (默认) + sunburst (旗舰); if both are absent, gpt-image-2 as 默认;
+ * if none of the three exist, return empty (UI shows 暂无模型).
+ */
+export function visibleImageModels(models: CatalogModel[]): CatalogModel[] {
+  const labeled = (model: CatalogModel, label: string): CatalogModel => ({ ...model, label });
+  const flare = models.find((model) => isGptImage25Flare(model.id));
+  const sunburst = models.find((model) => isGptImage25Sunburst(model.id));
+  const out: CatalogModel[] = [];
+  if (flare) out.push(labeled(flare, IMAGE_DEFAULT_LABEL));
+  if (sunburst) out.push(labeled(sunburst, IMAGE_FLAGSHIP_LABEL));
+  if (out.length > 0) return out;
+  const gpt2 = models.find((model) => isGptImage2(model.id));
+  return gpt2 ? [labeled(gpt2, IMAGE_DEFAULT_LABEL)] : [];
+}
+
 /** Seedance (and only Seedance) auto-adapts duration/ratio from a reference video. */
 export function isSeedanceModel(id: string | null | undefined): boolean {
   return (id ?? "").toLowerCase().includes("seedance");
