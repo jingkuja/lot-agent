@@ -1,0 +1,59 @@
+.mine {
+  padding: 32rpx;
+}
+
+.card {
+  display: flex;
+  gap: 20rpx;
+  align-items: center;
+  margin-bottom: 36rpx;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: var(--cyan);
+  color: var(--ink);
+  font-size: 40rpx;
+  font-weight: 700;
+}
+
+.who {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.stat {
+  padding: 28rpx;
+  margin-bottom: 28rpx;
+  background: var(--plate);
+  box-shadow: inset 0 8rpx 0 var(--cyan);
+}
+
+.points {
+  display: block;
+  margin: 8rpx 0;
+  font-size: 64rpx;
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
+  border-top: 1rpx solid rgba(244, 239, 228, 0.08);
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  padding: 28rpx 0;
+  border-bottom: 1rpx solid rgba(244, 239, 228, 0.08);
+}
+
+.logout {
+  margin-top: 48rpx;
+}

@@ -1,0 +1,71 @@
+.edit {
+  padding: 28rpx;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-bottom: 28rpx;
+}
+
+.drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280rpx;
+  margin-bottom: 20rpx;
+  border: 2rpx dashed rgba(244, 239, 228, 0.2);
+  background: var(--plate);
+}
+
+.thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  padding: 16rpx;
+}
+
+.thumb {
+  position: relative;
+  width: 160rpx;
+  height: 160rpx;
+}
+
+.thumb image {
+  width: 160rpx;
+  height: 160rpx;
+}
+
+.x {
+  position: absolute;
+  top: -8rpx;
+  right: -8rpx;
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  text-align: center;
+  line-height: 36rpx;
+}
+
+.row {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+
+.row .btn {
+  flex: 1;
+}
+
+.status {
+  margin-top: 16rpx;
+}
+
+.result {
+  width: 100%;
+  margin-top: 24rpx;
+  background: var(--paper);
+}

@@ -1,0 +1,50 @@
+.gallery {
+  padding: 24rpx;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  padding: 80rpx 20rpx;
+}
+
+.wall {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.cell {
+  width: calc(50% - 8rpx);
+  background: var(--plate);
+}
+
+.cell image, .cell-empty {
+  width: 100%;
+  height: 280rpx;
+  background: var(--paper);
+}
+
+.cell-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #5c5346;
+  font-size: 22rpx;
+}
+
+.cell-title {
+  display: block;
+  padding: 12rpx 14rpx 16rpx;
+  overflow: hidden;
+  color: var(--mist);
+  font-size: 22rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more {
+  padding: 28rpx 0 48rpx;
+  text-align: center;
+}

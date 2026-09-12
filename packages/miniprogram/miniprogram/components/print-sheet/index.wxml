@@ -1,0 +1,11 @@
+<view class="sheet {{busy ? 'busy' : ''}}" bindtap="onPreview">
+  <view class="sheet-marks tl"></view>
+  <view class="sheet-marks tr"></view>
+  <view class="sheet-marks bl"></view>
+  <view class="sheet-marks br"></view>
+  <image wx:if="{{src}}" class="print" src="{{src}}" mode="aspectFit" />
+  <view wx:else class="empty">
+    <slot></slot>
+  </view>
+  <view wx:if="{{caption}}" class="caption">{{caption}}</view>
+</view>

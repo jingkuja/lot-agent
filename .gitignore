@@ -20,4 +20,6 @@ config/*.tmp
 *.db
 *.log
 packages/desktop/release/
+packages/miniprogram/project.private.config.json
+packages/miniprogram/miniprogram/miniprogram_npm/
 design/

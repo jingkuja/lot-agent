@@ -1,0 +1,24 @@
+<view class="page gallery">
+  <view wx:if="{{empty}}" class="empty">
+    <text class="eyebrow">ARCHIVE</text>
+    <text class="h1">印台上还是空的</text>
+    <text class="muted">去生一张，稿会落在这里。</text>
+  </view>
+
+  <view class="wall">
+    <view
+      class="cell"
+      wx:for="{{items}}"
+      wx:key="id"
+      data-src="{{item.preview}}"
+      data-title="{{item.title}}"
+      bindtap="open"
+    >
+      <image wx:if="{{item.preview}}" src="{{item.preview}}" mode="aspectFill" />
+      <view wx:else class="cell-empty">无预览</view>
+      <text class="cell-title">{{item.title}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{nextCursor}}" class="more muted" bindtap="loadMore">继续翻稿</view>
+</view>

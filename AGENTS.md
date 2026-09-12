@@ -18,6 +18,7 @@ TypeScript monorepo using **npm workspaces** (not pnpm). Node ≥ 18, ESM.
 | `packages/server` | `@lot-agent/server` | Hono HTTP API + PostgreSQL (`pg`) + BullMQ worker + doc/PPT tooling | tsup |
 | `packages/web` | `@lot-agent/web` | React 19 + Vite single-page Workspace UI | vite |
 | `packages/desktop` | `@lot-agent/desktop` | Electron shell over the web app (macOS arm64/x64 + Windows); loopback static+proxy server, native window/downloads/notifications/tray, safeStorage token | tsup + electron-builder |
+| `packages/miniprogram` | `@lot-agent/miniprogram` | WeChat mini program for image generation / marketing posters / photo editing; talks to the same server image Agent | WeChat DevTools (TypeScript) |
 
 External infra: **PostgreSQL** (business data), **Redis** (BullMQ queue, model-catalog cache,
 gen-cache, session-tier memory, progress pub/sub), **tokenhub** (auth + model gateway). Object
@@ -35,6 +36,7 @@ npm run build      # all workspaces
 npm test           # vitest (root) — or: npm test -w @lot-agent/core | -w @lot-agent/server
 npm run dev:desktop   # web(vite HMR) + Electron dev window
 npm run dist:desktop  # build web + package desktop installers (see docs/desktop.md)
+# WeChat mini program: open packages/miniprogram in WeChat DevTools (see docs/miniprogram.md)
 ```
 
 Tests use **Vitest**, colocated as `*.test.ts`. Web dev proxies `/api` and `/static` to

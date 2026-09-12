@@ -1,0 +1,22 @@
+.preview {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.hero {
+  flex: 1;
+  width: 100%;
+  background: var(--paper);
+}
+
+.bar {
+  display: flex;
+  gap: 12rpx;
+  padding: 20rpx;
+  background: var(--plate);
+}
+
+.bar .btn {
+  flex: 1;
+}

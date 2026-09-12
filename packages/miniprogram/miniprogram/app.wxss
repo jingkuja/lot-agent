@@ -1,0 +1,195 @@
+page {
+  --ink: #12161c;
+  --plate: #1a212b;
+  --plate-2: #222b38;
+  --paper: #f4efe4;
+  --cyan: #3ee0c2;
+  --magenta: #e23e8c;
+  --fog: #8b95a7;
+  --mist: #c5ccd6;
+  --white: #f7f4ee;
+  --danger: #ff6b6b;
+  background: var(--ink);
+  color: var(--white);
+  font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-size: 28rpx;
+  min-height: 100%;
+}
+
+.page {
+  min-height: 100vh;
+  background:
+    radial-gradient(1200rpx 700rpx at 80% -10%, rgba(62, 224, 194, 0.08), transparent 60%),
+    var(--ink);
+}
+
+.eyebrow {
+  color: var(--cyan);
+  font-size: 20rpx;
+  font-weight: 650;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+
+.h1 {
+  margin: 8rpx 0 0;
+  font-size: 44rpx;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.muted {
+  color: var(--fog);
+  font-size: 24rpx;
+  line-height: 1.55;
+}
+
+.stamp {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: var(--cyan);
+  color: var(--ink);
+  font-size: 36rpx;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.stamp[disabled] {
+  opacity: 0.45;
+}
+
+.btn {
+  min-height: 88rpx;
+  padding: 0 28rpx;
+  border-radius: 16rpx;
+  font-size: 28rpx;
+}
+
+.btn-primary {
+  background: var(--cyan);
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.btn-ghost {
+  border: 1rpx solid rgba(62, 224, 194, 0.35);
+  background: transparent;
+  color: var(--white);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.field text {
+  color: var(--fog);
+  font-size: 22rpx;
+  letter-spacing: 0.08em;
+}
+
+.input, .area {
+  padding: 22rpx 24rpx;
+  border: 1rpx solid rgba(244, 239, 228, 0.12);
+  border-radius: 16rpx;
+  background: var(--plate);
+  color: var(--white);
+  font-size: 28rpx;
+}
+
+.area {
+  min-height: 140rpx;
+  line-height: 1.55;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.chip {
+  padding: 10rpx 18rpx;
+  border: 1rpx solid rgba(244, 239, 228, 0.12);
+  border-radius: 999rpx;
+  background: var(--plate);
+  color: var(--mist);
+  font-size: 22rpx;
+}
+
+.chip.on {
+  border-color: var(--cyan);
+  background: rgba(62, 224, 194, 0.12);
+  color: var(--cyan);
+}
+
+.sheet {
+  position: relative;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 0 24rpx 80rpx rgba(0, 0, 0, 0.35);
+}
+
+.sheet-marks {
+  position: absolute;
+  z-index: 2;
+  width: 28rpx;
+  height: 28rpx;
+  pointer-events: none;
+}
+
+.sheet-marks::before, .sheet-marks::after {
+  position: absolute;
+  background: var(--magenta);
+  content: "";
+}
+
+.sheet-marks.tl { top: 12rpx; left: 12rpx; }
+.sheet-marks.tr { top: 12rpx; right: 12rpx; }
+.sheet-marks.bl { bottom: 12rpx; left: 12rpx; }
+.sheet-marks.br { bottom: 12rpx; right: 12rpx; }
+
+.sheet-marks.tl::before, .sheet-marks.bl::before, .sheet-marks.tr::before, .sheet-marks.br::before {
+  width: 28rpx;
+  height: 2rpx;
+  top: 13rpx;
+  left: 0;
+}
+
+.sheet-marks.tl::after, .sheet-marks.bl::after, .sheet-marks.tr::after, .sheet-marks.br::after {
+  width: 2rpx;
+  height: 28rpx;
+  left: 13rpx;
+  top: 0;
+}
+
+.sheet.busy .sheet-marks::before, .sheet.busy .sheet-marks::after {
+  animation: pulse-mark 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-mark {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.safe-bottom {
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+}
+
+button {
+  margin: 0;
+  padding: 0;
+  line-height: 88rpx;
+  border: none;
+  border-radius: 16rpx;
+  font-size: 28rpx;
+}
+
+button::after {
+  border: none;
+}

@@ -1,0 +1,33 @@
+<view class="page mine">
+  <view class="card">
+    <view class="avatar">{{initial}}</view>
+    <view class="who">
+      <text class="h1">{{user ? (user.name || user.username) : '未登录'}}</text>
+      <text class="muted">{{user.phone || user.username || ''}}</text>
+    </view>
+  </view>
+
+  <view class="stat">
+    <text class="eyebrow">BALANCE</text>
+    <text class="points">{{balanceText}}</text>
+    <text class="muted">与网页端、桌面端同一账户额度</text>
+  </view>
+
+  <view class="list">
+    <view class="row" bindtap="goEdit">
+      <text>个人修图</text>
+      <text class="muted">用照片当参考去改</text>
+    </view>
+    <view class="row" bindtap="toggleServer">
+      <text>服务器</text>
+      <text class="muted">{{apiBase}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{editingServer}}" class="field">
+    <input class="input" value="{{apiBase}}" bindinput="onServer" />
+    <button class="btn btn-ghost" bindtap="saveServer">保存</button>
+  </view>
+
+  <button class="btn btn-ghost logout" bindtap="logout">退出</button>
+</view>

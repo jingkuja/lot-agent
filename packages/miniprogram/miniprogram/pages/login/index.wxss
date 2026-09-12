@@ -1,0 +1,72 @@
+.login {
+  padding: 80rpx 40rpx 40rpx;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-bottom: 56rpx;
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96rpx;
+  height: 96rpx;
+  margin-bottom: 12rpx;
+  border-radius: 50%;
+  background: var(--cyan);
+  color: var(--ink);
+  font-size: 40rpx;
+  font-weight: 700;
+}
+
+.tabs {
+  display: flex;
+  gap: 24rpx;
+  margin-bottom: 28rpx;
+}
+
+.tab {
+  color: var(--fog);
+  font-size: 28rpx;
+}
+
+.tab.on {
+  color: var(--cyan);
+  box-shadow: inset 0 -4rpx 0 var(--cyan);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.code-row {
+  display: flex;
+  gap: 12rpx;
+  align-items: center;
+}
+
+.code-row .input {
+  flex: 1;
+}
+
+.err {
+  display: block;
+  margin: 16rpx 0;
+  color: var(--danger);
+  font-size: 24rpx;
+}
+
+.enter {
+  margin-top: 32rpx;
+}
+
+.server {
+  margin-top: 40rpx;
+  font-size: 20rpx;
+}

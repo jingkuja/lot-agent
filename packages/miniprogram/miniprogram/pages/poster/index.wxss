@@ -1,0 +1,53 @@
+.poster {
+  padding: 28rpx 28rpx 48rpx;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  margin-bottom: 28rpx;
+}
+
+.head .input {
+  margin-top: 12rpx;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20rpx;
+}
+
+.card {
+  position: relative;
+  min-height: 240rpx;
+  padding: 28rpx 22rpx 24rpx;
+  border: 1rpx solid rgba(244, 239, 228, 0.12);
+  background: var(--plate);
+}
+
+.card-ratio {
+  color: var(--fog);
+  font-size: 18rpx;
+  letter-spacing: 0.16em;
+}
+
+.card-title {
+  display: block;
+  margin-top: 18rpx;
+  font-size: 32rpx;
+  font-weight: 650;
+}
+
+.card-blurb {
+  display: block;
+  margin-top: 8rpx;
+  color: var(--fog);
+  font-size: 22rpx;
+}
+
+.tone-cyan { box-shadow: inset 0 8rpx 0 var(--cyan); }
+.tone-magenta { box-shadow: inset 0 8rpx 0 var(--magenta); }
+.tone-paper { box-shadow: inset 0 8rpx 0 var(--paper); }
+.tone-night { box-shadow: inset 0 8rpx 0 #4d5d78; }

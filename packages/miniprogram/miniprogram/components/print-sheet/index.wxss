@@ -1,0 +1,65 @@
+.sheet {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 520rpx;
+  padding: 36rpx 28rpx;
+  background: var(--paper);
+}
+
+.print {
+  width: 100%;
+  height: 620rpx;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  min-height: 420rpx;
+  color: #5c5346;
+  text-align: center;
+}
+
+.caption {
+  position: absolute;
+  right: 28rpx;
+  bottom: 20rpx;
+  color: #5c5346;
+  font-size: 20rpx;
+  letter-spacing: 0.12em;
+}
+
+.sheet-marks {
+  position: absolute;
+  z-index: 2;
+  width: 28rpx;
+  height: 28rpx;
+}
+
+.sheet-marks::before,
+.sheet-marks::after {
+  position: absolute;
+  background: var(--magenta);
+  content: "";
+}
+
+.sheet-marks.tl { top: 12rpx; left: 12rpx; }
+.sheet-marks.tr { top: 12rpx; right: 12rpx; }
+.sheet-marks.bl { bottom: 12rpx; left: 12rpx; }
+.sheet-marks.br { bottom: 12rpx; right: 12rpx; }
+.sheet-marks::before { top: 13rpx; left: 0; width: 28rpx; height: 2rpx; }
+.sheet-marks::after { top: 0; left: 13rpx; width: 2rpx; height: 28rpx; }
+
+.sheet.busy .sheet-marks::before,
+.sheet.busy .sheet-marks::after {
+  animation: pulse-mark 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-mark {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}

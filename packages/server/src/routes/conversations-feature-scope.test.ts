@@ -16,6 +16,24 @@ function app() {
   return { instance, createConversation };
 }
 
+describe("conversation list filters", () => {
+  it("forwards agentId and includePreview to listConversations", async () => {
+    const listConversations = vi.fn(async () => []);
+    const service = { db: { listConversations } } as any;
+    const instance = new Hono<{ Variables: { userId: string } }>();
+    instance.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
+    instance.route("/conversations", createConversationRoutes(service));
+    const res = await instance.request("/conversations?limit=20&agentId=image&includePreview=1");
+    expect(res.status).toBe(200);
+    expect(listConversations).toHaveBeenCalledWith("u1", {
+      agentId: "image",
+      includePreview: true,
+      limit: 20,
+      cursorId: undefined,
+    });
+  });
+});
+
 describe("conversation feature scope", () => {
   it("persists a valid digital employee scope on creation", async () => {
     const { instance, createConversation } = app();

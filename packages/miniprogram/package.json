@@ -1,0 +1,11 @@
+{
+  "name": "@lot-agent/miniprogram",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lot Agent WeChat mini program — image generation, marketing posters, photo editing",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "icons": "node scripts/make-tab-icons.mjs",
+    "clean": "rm -rf miniprogram/miniprogram_npm"
+  }
+}

@@ -1,0 +1,111 @@
+.studio {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.canvas {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16rpx 24rpx 0;
+}
+
+.empty-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  max-width: 420rpx;
+}
+
+.status {
+  margin-top: 16rpx;
+  color: var(--magenta);
+  font-size: 22rpx;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 16rpx;
+}
+
+.dock {
+  padding: 16rpx 20rpx 8rpx;
+  border-top: 1rpx solid rgba(244, 239, 228, 0.08);
+  background: linear-gradient(180deg, rgba(26, 33, 43, 0.92), #1a212b);
+}
+
+.dock-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-bottom: 16rpx;
+}
+
+.refs {
+  white-space: nowrap;
+  margin-bottom: 16rpx;
+}
+
+.ref {
+  position: relative;
+  display: inline-block;
+  width: 88rpx;
+  height: 88rpx;
+  margin-right: 12rpx;
+}
+
+.ref image {
+  width: 88rpx;
+  height: 88rpx;
+  border: 2rpx solid var(--paper);
+}
+
+.ref-x {
+  position: absolute;
+  top: -8rpx;
+  right: -8rpx;
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 22rpx;
+  line-height: 32rpx;
+  text-align: center;
+}
+
+.ideas {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  max-height: 280rpx;
+  margin-bottom: 16rpx;
+  overflow: auto;
+}
+
+.idea {
+  padding: 16rpx 18rpx;
+  border-left: 4rpx solid var(--magenta);
+  background: var(--plate-2);
+  color: var(--mist);
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 16rpx;
+}
+
+.composer .area {
+  flex: 1;
+  min-height: 88rpx;
+  max-height: 220rpx;
+  background: #151b24;
+  border-color: rgba(62, 224, 194, 0.2);
+}

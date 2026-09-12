@@ -1,0 +1,6 @@
+{
+  "desc": "LOT 印社 sitemap",
+  "rules": [
+    { "action": "allow", "page": "*" }
+  ]
+}

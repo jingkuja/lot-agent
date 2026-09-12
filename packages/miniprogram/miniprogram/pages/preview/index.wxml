@@ -1,0 +1,8 @@
+<view class="page preview">
+  <image class="hero" src="{{src}}" mode="aspectFit" bindtap="preview" />
+  <view class="bar safe-bottom">
+    <button class="btn btn-primary" bindtap="save">存相册</button>
+    <button class="btn btn-ghost" bindtap="share">转发</button>
+    <button class="btn btn-ghost" bindtap="retouch">再改一版</button>
+  </view>
+</view>

@@ -17,6 +17,7 @@ TypeScript monorepo using **npm workspaces** (not pnpm). Node ≥ 18, ESM.
 | `packages/core` | `@lot-agent/core` | Agent engine + reusable abstractions (no HTTP/DB deps) | tsup |
 | `packages/server` | `@lot-agent/server` | Hono HTTP API + PostgreSQL (`pg`) + BullMQ worker + doc/PPT tooling | tsup |
 | `packages/web` | `@lot-agent/web` | React 19 + Vite single-page Workspace UI | vite |
+| `packages/miniprogram` | `@lot-agent/miniprogram` | WeChat mini program for image generation / marketing posters / photo editing; talks to the same server image Agent | WeChat DevTools (TypeScript) |
 
 External infra: **PostgreSQL** (business data), **Redis** (BullMQ queue, model-catalog cache,
 gen-cache, session-tier memory, progress pub/sub), **tokenhub** (auth + model gateway). Object

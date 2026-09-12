@@ -248,6 +248,8 @@ async function main() {
   app.on("POST", "/api/auth/phone-binding", loginRateLimit);
   app.on("POST", "/api/auth/register", loginRateLimit);
   app.on("POST", "/api/auth/token-login", loginRateLimit);
+  app.on("POST", "/api/auth/wechat-login", loginRateLimit);
+  app.on("POST", "/api/auth/wechat-bind", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
 
   // Auth guard for all other /api/* routes

@@ -60,9 +60,14 @@ export function createConversationRoutes(service: AgentService): Hono {
   // (back-compat).
   app.get("/", async (c) => {
     const userId = c.get("userId");
+    const agentIdRaw = c.req.query("agentId");
+    const agentId = agentIdRaw && /^[a-zA-Z0-9_-]{1,64}$/.test(agentIdRaw) ? agentIdRaw : undefined;
+    const includePreview =
+      c.req.query("includePreview") === "1" || c.req.query("includePreview") === "true";
+    const listOpts = { agentId, includePreview };
     const limitRaw = c.req.query("limit");
     if (limitRaw == null) {
-      const conversations = await service.db.listConversations(userId);
+      const conversations = await service.db.listConversations(userId, listOpts);
       return c.json(conversations);
     }
     const limit = Number(limitRaw);
@@ -71,7 +76,11 @@ export function createConversationRoutes(service: AgentService): Hono {
     }
     const clamped = Math.min(Math.max(Math.trunc(limit), 1), 100);
     const cursorId = c.req.query("cursor") || undefined;
-    const items = await service.db.listConversations(userId, { limit: clamped, cursorId });
+    const items = await service.db.listConversations(userId, {
+      ...listOpts,
+      limit: clamped,
+      cursorId,
+    });
     // nextCursor: id of the last row when a full page came back (more may
     // exist); null once a short page signals the end.
     const nextCursor =

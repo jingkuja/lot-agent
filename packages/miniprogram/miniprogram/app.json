@@ -1,0 +1,57 @@
+{
+  "pages": [
+    "pages/login/index",
+    "pages/studio/index",
+    "pages/poster/index",
+    "pages/gallery/index",
+    "pages/mine/index",
+    "pages/edit/index",
+    "pages/preview/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "LOT 印社",
+    "navigationBarBackgroundColor": "#12161C",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#12161C",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#8B95A7",
+    "selectedColor": "#3EE0C2",
+    "backgroundColor": "#1A212B",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/studio/index",
+        "text": "生图",
+        "iconPath": "assets/tab-studio.png",
+        "selectedIconPath": "assets/tab-studio-active.png"
+      },
+      {
+        "pagePath": "pages/poster/index",
+        "text": "海报",
+        "iconPath": "assets/tab-poster.png",
+        "selectedIconPath": "assets/tab-poster-active.png"
+      },
+      {
+        "pagePath": "pages/gallery/index",
+        "text": "相册",
+        "iconPath": "assets/tab-gallery.png",
+        "selectedIconPath": "assets/tab-gallery-active.png"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的",
+        "iconPath": "assets/tab-mine.png",
+        "selectedIconPath": "assets/tab-mine-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "permission": {
+    "scope.writePhotosAlbum": {
+      "desc": "把印好的图存进手机相册"
+    }
+  }
+}

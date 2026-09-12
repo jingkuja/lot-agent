@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { createAuthRoutes } from "./auth.js";
 import { TokenhubClientError } from "../tokenhub/client.js";
 
@@ -357,12 +357,19 @@ describe("managed contact verification", () => {
 
 describe("auth mode", () => {
   it("reports debug off when the service is not in debug mode", async () => {
+    vi.stubEnv("WECHAT_MP_APPID", "");
+    vi.stubEnv("WECHAT_MP_SECRET", "");
     const svc = fakeService();
     (svc as { debug: boolean }).debug = false;
     const app = createAuthRoutes(svc);
     const res = await app.request("/mode");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ debug: false, user: null });
+    expect(await res.json()).toEqual({
+      debug: false,
+      user: null,
+      managedRegistration: false,
+      wechatLogin: false,
+    });
   });
 
   it("returns the sanitized debug user when in debug mode", async () => {
@@ -381,5 +388,105 @@ describe("auth mode", () => {
     const json = await res.json();
     expect(json.debug).toBe(true);
     expect(json.user).toMatchObject({ id: "u-debug", username: "debug" });
+  });
+});
+
+describe("wechat mini program login", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("returns 404 when WeChat credentials are not configured", async () => {
+    vi.stubEnv("WECHAT_MP_APPID", "");
+    vi.stubEnv("WECHAT_MP_SECRET", "");
+    const res = await createAuthRoutes(fakeService()).request("/wechat-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "abc" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns a bind ticket for an unknown openid", async () => {
+    vi.stubEnv("WECHAT_MP_APPID", "wxapp");
+    vi.stubEnv("WECHAT_MP_SECRET", "secret");
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ openid: "o-new" }),
+    })));
+    const svc = fakeService();
+    (svc.db as { getUserByWechatOpenid?: ReturnType<typeof vi.fn> }).getUserByWechatOpenid = vi
+      .fn()
+      .mockResolvedValue(null);
+    const res = await createAuthRoutes(svc).request("/wechat-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "fresh" }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.needBind).toBe(true);
+    expect(typeof json.ticket).toBe("string");
+    expect(json.token).toBeUndefined();
+  });
+
+  it("mints a session when the openid is already bound", async () => {
+    vi.stubEnv("WECHAT_MP_APPID", "wxapp");
+    vi.stubEnv("WECHAT_MP_SECRET", "secret");
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ openid: "o-known" }),
+    })));
+    const svc = fakeService();
+    (svc.db as { getUserByWechatOpenid?: ReturnType<typeof vi.fn> }).getUserByWechatOpenid = vi
+      .fn()
+      .mockResolvedValue({
+        id: "u1", email: null, name: "138", created_at: "t",
+        external_user_id: 2, username: "138", api_key: null, api_keys: [],
+      });
+    const res = await createAuthRoutes(svc).request("/wechat-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "fresh" }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.token).toBe("tok-1");
+    expect(json.user).toMatchObject({ id: "u1", username: "138" });
+  });
+
+  it("binds a ticket to the current session", async () => {
+    vi.stubEnv("WECHAT_MP_APPID", "wxapp");
+    vi.stubEnv("WECHAT_MP_SECRET", "secret");
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ openid: "o-bind" }),
+    })));
+    const svc = fakeManagedService();
+    (svc.db as { getUserByWechatOpenid: ReturnType<typeof vi.fn> }).getUserByWechatOpenid = vi
+      .fn()
+      .mockResolvedValue(null);
+    const login = await createAuthRoutes(svc).request("/wechat-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "fresh" }),
+    });
+    const { ticket } = await login.json() as { ticket: string };
+    (svc.db as { bindUserWechat?: ReturnType<typeof vi.fn> }).bindUserWechat = vi
+      .fn()
+      .mockResolvedValue("ok");
+    const res = await createAuthRoutes(svc).request("/wechat-bind", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
+      body: JSON.stringify({ ticket }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect((svc.db as { bindUserWechat: ReturnType<typeof vi.fn> }).bindUserWechat)
+      .toHaveBeenCalledWith("u7", "o-bind", undefined);
   });
 });

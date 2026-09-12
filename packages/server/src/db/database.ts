@@ -23,6 +23,8 @@ export interface Conversation {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  /** Last completed image generation URL when listed with includePreview. */
+  preview_url?: string | null;
 }
 
 export interface StoredMessage {
@@ -140,6 +142,8 @@ export interface StoredUser {
   username?: string | null;
   /** Display-safe phone value; the raw number is never persisted locally. */
   phone?: string | null;
+  wechat_openid?: string | null;
+  wechat_unionid?: string | null;
   api_key?: string | null;
   api_keys?: (RawApiKeyEntry | string)[] | null;
   managed_token_id?: number | null;
@@ -329,7 +333,7 @@ export class DB {
 
   async listConversations(
     userId?: string,
-    opts?: { limit?: number; cursorId?: string }
+    opts?: { limit?: number; cursorId?: string; agentId?: string; includePreview?: boolean }
   ): Promise<Conversation[]> {
     // Keyset pagination over (updated_at DESC, id DESC). Omitting `limit`
     // returns the full list (back-compat for non-paginated callers); the id
@@ -350,6 +354,10 @@ export class DB {
       params.push(userId);
       where.push(`user_id = $${params.length}`);
     }
+    if (opts?.agentId) {
+      params.push(opts.agentId);
+      where.push(`agent_id = $${params.length}`);
+    }
     if (hasPaging && opts?.cursorId) {
       params.push(opts.cursorId);
       // The subquery reads the cursor row's exact stored timestamp, so the
@@ -360,7 +368,20 @@ export class DB {
       );
     }
 
-    let sql = `SELECT * FROM conversations WHERE ${where.join(
+    const previewSelect = opts?.includePreview
+      ? `, (
+           SELECT m.metadata->'assets'->0->>'url'
+           FROM messages m
+           WHERE m.conversation_id = conversations.id
+             AND COALESCE(m.metadata->>'kind', '') = 'generation'
+             AND COALESCE(m.metadata->>'mediaType', 'image') = 'image'
+             AND COALESCE(m.metadata->>'status', m.status) = 'completed'
+           ORDER BY m.seq DESC NULLS LAST, m.created_at DESC
+           LIMIT 1
+         ) AS preview_url`
+      : "";
+
+    let sql = `SELECT conversations.*${previewSelect} FROM conversations WHERE ${where.join(
       " AND "
     )} ORDER BY updated_at DESC, id DESC`;
     if (hasPaging) {
@@ -974,6 +995,48 @@ export class DB {
       [id]
     );
     return rows[0] ? this.openUserRow(rows[0]) : null;
+  }
+
+  async getUserByWechatOpenid(openid: string): Promise<StoredUser | null> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM users WHERE wechat_openid = $1",
+      [openid]
+    );
+    return rows[0] ? this.openUserRow(rows[0]) : null;
+  }
+
+  async bindUserWechat(
+    userId: string,
+    openid: string,
+    unionid?: string | null
+  ): Promise<"ok" | "taken" | "conflict"> {
+    const user = await this.getUserById(userId);
+    if (!user) return "conflict";
+    if (user.wechat_openid && user.wechat_openid !== openid) return "conflict";
+    if (user.wechat_openid === openid) {
+      if (unionid && !user.wechat_unionid) {
+        await this.pool.query(
+          "UPDATE users SET wechat_unionid = $2 WHERE id = $1",
+          [userId, unionid]
+        );
+      }
+      return "ok";
+    }
+    const existing = await this.getUserByWechatOpenid(openid);
+    if (existing && existing.id !== userId) return "taken";
+    try {
+      await this.pool.query(
+        `UPDATE users
+            SET wechat_openid = $2,
+                wechat_unionid = COALESCE($3, wechat_unionid)
+          WHERE id = $1`,
+        [userId, openid, unionid ?? null]
+      );
+      return "ok";
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") return "taken";
+      throw err;
+    }
   }
 
   async upsertUserByExternalId(args: {

@@ -1,0 +1,23 @@
+<view class="page poster">
+  <view class="head">
+    <text class="eyebrow">SPECIMEN</text>
+    <text class="h1">营销样张</text>
+    <text class="muted">先写产品或活动名，再选一张样张。印社会按印刷比例把稿发到印台。</text>
+    <input class="input" placeholder="主题，比如：春日新茶上市" value="{{topic}}" bindinput="onTopic" />
+  </view>
+
+  <view class="grid">
+    <view
+      class="card tone-{{item.tone}}"
+      wx:for="{{templates}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="useTemplate"
+    >
+      <view class="card-marks"></view>
+      <text class="card-ratio">{{item.ratio}}</text>
+      <text class="card-title">{{item.title}}</text>
+      <text class="card-blurb">{{item.blurb}}</text>
+    </view>
+  </view>
+</view>

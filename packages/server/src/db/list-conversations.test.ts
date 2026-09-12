@@ -38,4 +38,20 @@ describe("listConversations", () => {
     expect(sql).toMatch(/EXISTS\s*\(\s*SELECT 1 FROM messages/i);
     expect(sql).not.toMatch(/LIMIT/);
   });
+
+  it("filters by agentId when requested", async () => {
+    const { db, query } = mockDb();
+    await db.listConversations("u1", { limit: 20, agentId: "image" });
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toMatch(/agent_id = \$2/);
+    expect(params).toEqual(["u1", "image", 20]);
+  });
+
+  it("adds a last-image preview subquery only when asked", async () => {
+    const { db, query } = mockDb();
+    await db.listConversations("u1", { limit: 20, includePreview: true });
+    const [sql] = query.mock.calls[0];
+    expect(sql).toMatch(/AS preview_url/);
+    expect(sql).toMatch(/metadata->>'kind'/);
+  });
 });

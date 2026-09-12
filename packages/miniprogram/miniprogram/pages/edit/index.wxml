@@ -1,0 +1,27 @@
+<view class="page edit">
+  <view class="head">
+    <text class="eyebrow">RETOUCH</text>
+    <text class="h1">个人修图</text>
+    <text class="muted">从相册或相机放入原片，写下要改的地方。同一套图片 Agent 会按参考图去印。</text>
+  </view>
+
+  <view class="drop" bindtap="addRef">
+    <view class="thumbs" wx:if="{{refs.length}}">
+      <view class="thumb" wx:for="{{refs}}" wx:key="*this">
+        <image src="{{item}}" mode="aspectFill" />
+        <view class="x" data-index="{{index}}" catchtap="removeRef">×</view>
+      </view>
+    </view>
+    <text wx:else class="muted">点这里放入照片</text>
+  </view>
+
+  <textarea class="area" placeholder="例如：换成夜景、去掉路人、保留我的脸" value="{{prompt}}" bindinput="onPrompt" />
+
+  <view class="row">
+    <button class="btn btn-primary" loading="{{busy}}" bindtap="print">开印</button>
+    <button class="btn btn-ghost" bindtap="sendToStudio">拿到印台细调</button>
+  </view>
+
+  <view wx:if="{{statusText}}" class="muted status">{{statusText}}</view>
+  <image wx:if="{{resultUrl}}" class="result" src="{{resultUrl}}" mode="widthFix" bindtap="preview" />
+</view>

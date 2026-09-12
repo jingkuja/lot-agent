@@ -24,6 +24,7 @@ real business logic into.
 - **Review + publish (stubs)** — review hook runs before publish; connectors for 小红书 / 微信公众号.
 - **Tooling** — built-in tools, Markdown skills, MCP client, full trace/span logging.
 - **Web UI** — React 19 chat/workspace with light/dark theming, file upload, task progress.
+- **WeChat mini program** — independent image-studio client (`packages/miniprogram`, see [`docs/miniprogram.md`](./docs/miniprogram.md)).
 
 ## Stack
 
@@ -34,6 +35,7 @@ TypeScript monorepo, **npm workspaces** (not pnpm), Node ≥ 18, ESM.
 | `packages/core` | `@lot-agent/core` | Agent engine + reusable abstractions (no HTTP/DB) |
 | `packages/server` | `@lot-agent/server` | Hono HTTP API + PostgreSQL (`pg`) + BullMQ worker |
 | `packages/web` | `@lot-agent/web` | React 19 + Vite chat/workspace UI |
+| `packages/miniprogram` | `@lot-agent/miniprogram` | WeChat mini program (image / poster / photo edit) |
 
 External infra: **PostgreSQL** (business data) and **Redis** (BullMQ queue, gen-cache, progress
 pub/sub). Object storage is local disk (`data/assets/`) behind an `ObjectStorage` interface.

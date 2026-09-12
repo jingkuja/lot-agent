@@ -6,6 +6,12 @@ import { toPublicUser } from "../db/user-sanitize.js";
 import { maskPhone } from "../db/phone.js";
 import { randomUUID } from "node:crypto";
 import { TokenhubClientError } from "../tokenhub/client.js";
+import {
+  consumeWechatTicket,
+  exchangeWechatCode,
+  issueWechatTicket,
+  wechatConfigured,
+} from "../auth/wechat.js";
 
 // Ephemeral per-process keypair used to decrypt login passwords.
 const keypair = generateRsaKeypair();
@@ -71,11 +77,15 @@ export function createAuthRoutes(service: AgentService): Hono {
   // GET /mode — public. Lets the web decide whether to skip login before it has
   // a token: in debug mode it returns the seeded debug user to enter directly.
   app.get("/mode", async (c) => {
+    const extras = {
+      managedRegistration: Boolean(service.managedKeysEnabled),
+      wechatLogin: wechatConfigured(),
+    };
     if (!service.debug || !service.debugUserId) {
-      return c.json({ debug: false, user: null, managedRegistration: service.managedKeysEnabled });
+      return c.json({ debug: false, user: null, ...extras });
     }
     const user = await service.db.getUserById(service.debugUserId);
-    return c.json({ debug: true, user: user ? toPublicUser(user) : null, managedRegistration: service.managedKeysEnabled });
+    return c.json({ debug: true, user: user ? toPublicUser(user) : null, ...extras });
   });
 
   // POST /login — public. RSA-encrypted password → tokenhub → local session.
@@ -422,6 +432,78 @@ export function createAuthRoutes(service: AgentService): Hono {
       // Same opacity as /login — client sees one message; cause is logged.
       logger.warn("token-login failed", { route: "token-login", err });
       return c.json({ error: LOGIN_FAIL }, 401);
+    }
+  });
+
+  // POST /wechat-login — public. Exchanges a mini-program wx.login code.
+  // Known openid → session. Unknown → one-time ticket the client binds after
+  // phone/password login (wx.login codes are single-use, so we cannot ask for
+  // another code after the account exists).
+  app.post("/wechat-login", async (c) => {
+    if (!wechatConfigured()) {
+      return c.json({ error: "微信登录未启用" }, 404);
+    }
+    let body: { code?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const code = body.code?.trim();
+    if (!code) return c.json({ error: LOGIN_FAIL }, 401);
+    try {
+      const wechat = await exchangeWechatCode(code);
+      const user = await service.db.getUserByWechatOpenid(wechat.openid);
+      if (user) {
+        const token = await service.sessions.createSession(user.id);
+        return c.json({ token, user: toPublicUser(user) });
+      }
+      const ticket = issueWechatTicket(wechat);
+      return c.json({ needBind: true, ticket });
+    } catch (err) {
+      logger.warn("wechat-login failed", { route: "wechat-login", err });
+      return c.json({ error: LOGIN_FAIL }, 401);
+    }
+  });
+
+  // POST /wechat-bind — authenticated. Attaches the mini-program identity
+  // from a wechat-login ticket (or a fresh wx.login code) to the current user.
+  app.post("/wechat-bind", async (c) => {
+    if (!wechatConfigured()) {
+      return c.json({ error: "微信登录未启用" }, 404);
+    }
+    const resolved = await resolveSessionUser(c.req.header("Authorization"));
+    if (!resolved) return c.json({ error: "Unauthorized" }, 401);
+    let body: { ticket?: string; code?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    try {
+      const wechat = body.ticket?.trim()
+        ? consumeWechatTicket(body.ticket.trim())
+        : body.code?.trim()
+          ? await exchangeWechatCode(body.code.trim())
+          : null;
+      if (!wechat) {
+        return c.json({ error: "微信登录已过期，请重试" }, 400);
+      }
+      const result = await service.db.bindUserWechat(
+        resolved.session.userId,
+        wechat.openid,
+        wechat.unionid
+      );
+      if (result === "taken") {
+        return c.json({ error: "该微信已绑定其他账号" }, 409);
+      }
+      if (result === "conflict") {
+        return c.json({ error: "当前账号已绑定其他微信" }, 409);
+      }
+      return c.json({ ok: true });
+    } catch (err) {
+      logger.warn("wechat-bind failed", { route: "wechat-bind", userId: resolved.session.userId, err });
+      return c.json({ error: LOGIN_FAIL }, 400);
     }
   });
 

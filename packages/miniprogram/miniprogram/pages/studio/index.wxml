@@ -1,0 +1,49 @@
+<view class="page studio">
+  <view class="canvas">
+    <print-sheet src="{{resultUrl}}" busy="{{busy}}" caption="LOT PRESS">
+      <view class="empty-copy">
+        <text class="eyebrow">LOT PRESS</text>
+        <text class="h1">印台空着</text>
+        <text class="muted">写下要印的画面，或拍一张去改。</text>
+      </view>
+    </print-sheet>
+    <view wx:if="{{busy || statusText}}" class="status">{{statusText}}</view>
+    <view wx:if="{{resultUrl && !busy}}" class="actions">
+      <view class="btn btn-ghost" bindtap="save">看大图 / 保存</view>
+    </view>
+  </view>
+
+  <view class="dock safe-bottom">
+    <view class="dock-top">
+      <view class="chip {{refs.length ? 'on' : ''}}" bindtap="addRef">{{refs.length ? '参考 ' + refs.length : '以图修图'}}</view>
+      <view class="chip" bindtap="toggleIdeas">灵感</view>
+      <view class="chip" bindtap="pickRatio">{{ratioLabel}}</view>
+      <view class="chip" bindtap="pickQuality">{{qualityLabel}}</view>
+      <view class="chip" bindtap="pickModel">{{modelLabel}}</view>
+      <view class="chip" bindtap="newSheet">新的一张</view>
+    </view>
+
+    <scroll-view wx:if="{{refs.length}}" class="refs" scroll-x>
+      <view class="ref" wx:for="{{refs}}" wx:key="*this">
+        <image src="{{item}}" mode="aspectFill" />
+        <view class="ref-x" data-index="{{index}}" catchtap="removeRef">×</view>
+      </view>
+    </scroll-view>
+
+    <view wx:if="{{showIdeas}}" class="ideas">
+      <view class="idea" wx:for="{{ideas}}" wx:key="*this" data-text="{{item}}" bindtap="pickIdea">{{item}}</view>
+    </view>
+
+    <view class="composer">
+      <textarea
+        class="area"
+        value="{{prompt}}"
+        maxlength="800"
+        auto-height
+        placeholder="输入画面、海报文案，或说你的想法"
+        bindinput="onPrompt"
+      />
+      <view class="stamp" bindtap="print">印</view>
+    </view>
+  </view>
+</view>
