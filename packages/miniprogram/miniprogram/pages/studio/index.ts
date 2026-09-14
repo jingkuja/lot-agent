@@ -15,7 +15,7 @@ Page({
     quality: "auto",
     qualityLabel: "自动",
     modelId: "",
-    modelLabel: "默认模型",
+    modelLabel: "默认",
     models: [] as string[],
     refs: [] as string[],
     resultUrl: "",
@@ -23,6 +23,7 @@ Page({
     statusText: "",
     ideas: IDEAS,
     showIdeas: false,
+    showMore: false,
   },
 
   onShow() {
@@ -78,7 +79,7 @@ Page({
       const current = ids.includes(this.data.modelId) ? this.data.modelId : ids[0];
       this.setData({ models: ids, modelId: current, modelLabel: current });
     } catch {
-      // Keep the server default when the catalog is unavailable.
+      // 目录不可用时沿用服务端默认模型
     }
   },
 
@@ -92,6 +93,10 @@ Page({
 
   toggleIdeas() {
     this.setData({ showIdeas: !this.data.showIdeas });
+  },
+
+  toggleMore() {
+    this.setData({ showMore: !this.data.showMore });
   },
 
   pickRatio() {
@@ -155,11 +160,11 @@ Page({
     if (this.data.busy) return;
     const prompt = this.data.prompt.trim();
     if (!prompt) {
-      wx.showToast({ title: "先写一句要印的内容", icon: "none" });
+      wx.showToast({ title: "先说说想要什么样的图", icon: "none" });
       return;
     }
     if (!(await getApp().ensureSession())) return;
-    this.setData({ busy: true, statusText: "正在发稿" });
+    this.setData({ busy: true, statusText: "正在提交" });
     try {
       const result = await runImageGeneration({
         prompt,
@@ -173,10 +178,10 @@ Page({
           this.setData({ statusText: `${text}${suffix}` });
         },
       });
-      this.setData({ resultUrl: result.imageUrl, statusText: "印好了" });
+      this.setData({ resultUrl: result.imageUrl, statusText: "做好啦" });
     } catch (err) {
       toastError(err);
-      this.setData({ statusText: err instanceof Error ? err.message : "失败" });
+      this.setData({ statusText: err instanceof Error ? err.message : "失败了,请再试一次" });
     } finally {
       this.setData({ busy: false });
     }

@@ -8,6 +8,17 @@ function saveToAlbum(filePath: string): Promise<void> {
   });
 }
 
+function download(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url,
+      success: (res) =>
+        res.statusCode === 200 ? resolve(res.tempFilePath) : reject(new Error("下载失败")),
+      fail: (err) => reject(new Error(err.errMsg)),
+    });
+  });
+}
+
 Page({
   data: {
     src: "",
@@ -21,6 +32,14 @@ Page({
     });
   },
 
+  onShareAppMessage() {
+    return {
+      title: this.data.title || "看看我做的图",
+      imageUrl: this.data.src || undefined,
+      path: "/pages/studio/index",
+    };
+  },
+
   preview() {
     if (!this.data.src) return;
     wx.previewImage({ urls: [this.data.src], current: this.data.src });
@@ -30,14 +49,7 @@ Page({
     if (!this.data.src) return;
     wx.showLoading({ title: "保存中", mask: true });
     try {
-      const filePath = await new Promise<string>((resolve, reject) => {
-        wx.downloadFile({
-          url: this.data.src,
-          success: (res) =>
-            res.statusCode === 200 ? resolve(res.tempFilePath) : reject(new Error("下载失败")),
-          fail: (err) => reject(new Error(err.errMsg)),
-        });
-      });
+      const filePath = await download(this.data.src);
       try {
         await saveToAlbum(filePath);
       } catch {
@@ -63,15 +75,9 @@ Page({
 
   async share() {
     if (!this.data.src) return;
+    wx.showLoading({ title: "准备中", mask: true });
     try {
-      const filePath = await new Promise<string>((resolve, reject) => {
-        wx.downloadFile({
-          url: this.data.src,
-          success: (res) =>
-            res.statusCode === 200 ? resolve(res.tempFilePath) : reject(new Error("下载失败")),
-          fail: (err) => reject(new Error(err.errMsg)),
-        });
-      });
+      const filePath = await download(this.data.src);
       if (wx.showShareImageMenu) {
         wx.showShareImageMenu({ path: filePath });
       } else {
@@ -79,6 +85,8 @@ Page({
       }
     } catch {
       wx.showToast({ title: "分享失败", icon: "none" });
+    } finally {
+      wx.hideLoading();
     }
   },
 

@@ -1,8 +1,16 @@
 <view class="page preview">
-  <image class="hero" src="{{src}}" mode="aspectFit" bindtap="preview" />
-  <view class="bar safe-bottom">
-    <button class="btn btn-primary" bindtap="save">存相册</button>
-    <button class="btn btn-ghost" bindtap="share">转发</button>
-    <button class="btn btn-ghost" bindtap="retouch">再改一版</button>
+  <view class="stage">
+    <image class="hero card" src="{{src}}" mode="aspectFit" bindtap="preview" />
+    <text class="muted tip">点图片可放大查看</text>
+  </view>
+
+  <view class="panel safe-bottom">
+    <button class="btn btn-primary main" bindtap="save">💾 保存到相册</button>
+    <view class="row">
+      <button class="btn btn-ghost half" open-type="share">↗️ 分享给朋友</button>
+      <button class="btn btn-ghost half" bindtap="share">🌈 发朋友圈</button>
+    </view>
+    <button class="btn btn-soft full" bindtap="retouch">🎨 再修一版</button>
+    <text class="muted note">「发朋友圈」会唤起系统分享,选择朋友圈即可</text>
   </view>
 </view>

@@ -1,23 +1,50 @@
 <view class="page poster">
   <view class="head">
-    <text class="eyebrow">SPECIMEN</text>
-    <text class="h1">营销样张</text>
-    <text class="muted">先写产品或活动名，再选一张样张。印社会按印刷比例把稿发到印台。</text>
-    <input class="input" placeholder="主题，比如：春日新茶上市" value="{{topic}}" bindinput="onTopic" />
+    <text class="h1">做一张海报</text>
+    <text class="muted">写上你的店名/产品/活动,挑一个模板,一键生成</text>
+    <view class="topic card">
+      <text class="topic-ico">✏️</text>
+      <input
+        class="topic-input"
+        placeholder="比如:春日新茶上市、美甲店开业…"
+        placeholder-class="ph"
+        value="{{topic}}"
+        bindinput="onTopic"
+      />
+    </view>
   </view>
+
+  <scroll-view class="cats" scroll-x enhanced show-scrollbar="{{false}}">
+    <view class="cats-inner">
+      <view
+        class="cat {{cat === item.key ? 'on' : ''}}"
+        wx:for="{{cats}}"
+        wx:key="key"
+        data-key="{{item.key}}"
+        bindtap="pickCat"
+      >{{item.label}}</view>
+    </view>
+  </scroll-view>
 
   <view class="grid">
     <view
-      class="card tone-{{item.tone}}"
-      wx:for="{{templates}}"
+      class="tpl tone-{{item.tone}}"
+      wx:for="{{shown}}"
       wx:key="id"
       data-id="{{item.id}}"
       bindtap="useTemplate"
     >
-      <view class="card-marks"></view>
-      <text class="card-ratio">{{item.ratio}}</text>
-      <text class="card-title">{{item.title}}</text>
-      <text class="card-blurb">{{item.blurb}}</text>
+      <view class="tpl-cover">
+        <text class="tpl-icon">{{item.icon}}</text>
+        <text class="tpl-ratio">{{item.ratio}}</text>
+      </view>
+      <view class="tpl-body">
+        <text class="tpl-title">{{item.title}}</text>
+        <text class="tpl-blurb">{{item.blurb}}</text>
+      </view>
+      <view class="tpl-go">用这张 →</view>
     </view>
   </view>
+
+  <view class="foot muted">选中模板后会跳到「修图」页生成,可随时改文案</view>
 </view>

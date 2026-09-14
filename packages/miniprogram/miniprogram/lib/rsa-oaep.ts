@@ -1,5 +1,6 @@
 import { decodeBase64, encodeBase64 } from "./base64";
 import { sha256 } from "./sha256";
+import { encodeUtf8 } from "./utf8";
 
 const HASH_LEN = 32;
 
@@ -162,7 +163,7 @@ async function randomBytes(length: number): Promise<Uint8Array> {
 /** RSA-OAEP/SHA-256 encrypt a password with an SPKI PEM public key. */
 export async function encryptPassword(pemPublicKey: string, password: string): Promise<string> {
   const { n, e, k } = parseSpkiPem(pemPublicKey);
-  const message = new TextEncoder().encode(password);
+  const message = encodeUtf8(password);
   const seed = await randomBytes(HASH_LEN);
   const em = oaepEncode(message, k, seed);
   const m = bytesToBigInt(em);

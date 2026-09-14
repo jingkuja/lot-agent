@@ -4,47 +4,101 @@
   min-height: 100vh;
 }
 
-.canvas {
+/* ---------- 结果区 ---------- */
+.stage {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 16rpx 24rpx 0;
+  padding: 20rpx 24rpx 8rpx;
 }
 
-.empty-copy {
+.frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 560rpx;
+  overflow: hidden;
+}
+
+.frame-img {
+  width: 100%;
+  height: 640rpx;
+  background: #f6efe9;
+}
+
+.frame-empty {
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
-  max-width: 420rpx;
-}
-
-.status {
-  margin-top: 16rpx;
-  color: var(--magenta);
-  font-size: 22rpx;
-  letter-spacing: 0.12em;
+  align-items: center;
+  gap: 14rpx;
+  padding: 80rpx 40rpx;
   text-align: center;
 }
 
-.actions {
+.frame-emoji {
+  font-size: 96rpx;
+}
+
+.frame-title {
+  font-size: 36rpx;
+  font-weight: 700;
+}
+
+.frame-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22rpx;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.spinner {
+  width: 72rpx;
+  height: 72rpx;
+  border: 8rpx solid var(--brand-soft);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.frame-status {
+  color: var(--brand-deep);
+  font-size: 26rpx;
+}
+
+.stage-actions {
   display: flex;
   justify-content: center;
+  margin-top: 18rpx;
+}
+
+.stage-save {
+  width: 60%;
+}
+
+.stage-tip {
   margin-top: 16rpx;
+  text-align: center;
 }
 
+/* ---------- 底部操作区 ---------- */
 .dock {
-  padding: 16rpx 20rpx 8rpx;
-  border-top: 1rpx solid rgba(244, 239, 228, 0.08);
-  background: linear-gradient(180deg, rgba(26, 33, 43, 0.92), #1a212b);
+  padding: 14rpx 24rpx 6rpx;
+  border-top-left-radius: 36rpx;
+  border-top-right-radius: 36rpx;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 -8rpx 30rpx rgba(90, 60, 70, 0.06);
 }
 
-.dock-top {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10rpx;
-  margin-bottom: 16rpx;
-}
-
+/* 参考图 */
 .refs {
   white-space: nowrap;
   margin-bottom: 16rpx;
@@ -53,59 +107,159 @@
 .ref {
   position: relative;
   display: inline-block;
-  width: 88rpx;
-  height: 88rpx;
-  margin-right: 12rpx;
+  width: 96rpx;
+  height: 96rpx;
+  margin-right: 14rpx;
+  vertical-align: top;
 }
 
 .ref image {
-  width: 88rpx;
-  height: 88rpx;
-  border: 2rpx solid var(--paper);
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 20rpx;
 }
 
 .ref-x {
   position: absolute;
-  top: -8rpx;
-  right: -8rpx;
-  width: 32rpx;
-  height: 32rpx;
+  top: -10rpx;
+  right: -10rpx;
+  width: 36rpx;
+  height: 36rpx;
   border-radius: 50%;
   background: var(--ink);
-  color: var(--paper);
-  font-size: 22rpx;
-  line-height: 32rpx;
+  color: #fff;
+  font-size: 24rpx;
+  line-height: 36rpx;
   text-align: center;
 }
 
-.ideas {
+.ref-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 96rpx;
+  height: 96rpx;
+  border: 2rpx dashed #e5d8d2;
+  border-radius: 20rpx;
+  color: var(--muted);
+  font-size: 44rpx;
+  box-sizing: border-box;
+}
+
+/* 快捷入口 */
+.quick {
+  display: flex;
+  gap: 14rpx;
+  margin-bottom: 16rpx;
+}
+
+.quick-item {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
-  max-height: 280rpx;
+  align-items: center;
+  gap: 6rpx;
+  padding: 16rpx 4rpx;
+  border-radius: 22rpx;
+  background: #fbf6f2;
+  color: var(--ink);
+  font-size: 22rpx;
+}
+
+.quick-item.on {
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  font-weight: 600;
+}
+
+.quick-ico {
+  font-size: 36rpx;
+}
+
+/* 灵感 */
+.ideas {
+  max-height: 300rpx;
   margin-bottom: 16rpx;
+  padding: 10rpx 20rpx;
   overflow: auto;
 }
 
 .idea {
-  padding: 16rpx 18rpx;
-  border-left: 4rpx solid var(--magenta);
-  background: var(--plate-2);
-  color: var(--mist);
+  padding: 18rpx 0;
+  border-bottom: 2rpx solid var(--line);
+  color: #6f655f;
   font-size: 24rpx;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
+.idea:last-child {
+  border-bottom: none;
+}
+
+/* 更多选项 */
+.more {
+  margin-bottom: 16rpx;
+  padding: 6rpx 24rpx;
+}
+
+.more-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  border-bottom: 2rpx solid var(--line);
+}
+
+.more-row:last-child {
+  border-bottom: none;
+}
+
+.more-k {
+  font-size: 28rpx;
+}
+
+.more-v {
+  color: var(--brand-deep);
+  font-size: 26rpx;
+}
+
+/* 输入 + 生成 */
 .composer {
   display: flex;
   align-items: flex-end;
   gap: 16rpx;
 }
 
-.composer .area {
+.composer-input {
   flex: 1;
-  min-height: 88rpx;
+  min-height: 96rpx;
   max-height: 220rpx;
-  background: #151b24;
-  border-color: rgba(62, 224, 194, 0.2);
+  border-radius: 26rpx;
+}
+
+.ph {
+  color: #c6bab4;
+}
+
+.go {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 168rpx;
+  height: 96rpx;
+  padding: 0 28rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: 700;
+  box-shadow: 0 12rpx 28rpx rgba(240, 67, 106, 0.32);
+}
+
+.go:active {
+  transform: scale(0.96);
+}
+
+.go.going {
+  opacity: 0.7;
 }

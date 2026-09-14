@@ -1,16 +1,22 @@
 page {
-  --ink: #12161c;
-  --plate: #1a212b;
-  --plate-2: #222b38;
-  --paper: #f4efe4;
-  --cyan: #3ee0c2;
-  --magenta: #e23e8c;
-  --fog: #8b95a7;
-  --mist: #c5ccd6;
-  --white: #f7f4ee;
-  --danger: #ff6b6b;
-  background: var(--ink);
-  color: var(--white);
+  /* 暖白奶油底 + 桃粉主色,面向大众的轻快风格 */
+  --bg: #faf7f4;
+  --card: #ffffff;
+  --ink: #33302e;
+  --muted: #9a8f8a;
+  --line: #f1e9e4;
+  --brand: #ff5c7a;
+  --brand-deep: #f0436a;
+  --brand-soft: #ffe9ee;
+  --peach: #ffb26b;
+  --lavender: #a78bfa;
+  --mint: #4ed3a5;
+  --sky: #5bb6f0;
+  --gold: #f5b942;
+  --radius: 28rpx;
+  --shadow: 0 8rpx 30rpx rgba(90, 60, 70, 0.08);
+  background: var(--bg);
+  color: var(--ink);
   font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
   font-size: 28rpx;
   min-height: 100%;
@@ -19,175 +25,165 @@ page {
 .page {
   min-height: 100vh;
   background:
-    radial-gradient(1200rpx 700rpx at 80% -10%, rgba(62, 224, 194, 0.08), transparent 60%),
-    var(--ink);
+    radial-gradient(900rpx 500rpx at 90% -5%, rgba(255, 92, 122, 0.07), transparent 60%),
+    radial-gradient(700rpx 420rpx at -10% 12%, rgba(255, 178, 107, 0.08), transparent 55%),
+    var(--bg);
 }
 
+/* ---------- 文本 ---------- */
 .eyebrow {
-  color: var(--cyan);
+  color: var(--brand);
   font-size: 20rpx;
-  font-weight: 650;
-  letter-spacing: 0.28em;
+  font-weight: 600;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
 }
 
 .h1 {
-  margin: 8rpx 0 0;
-  font-size: 44rpx;
-  font-weight: 650;
-  letter-spacing: 0.04em;
+  margin: 6rpx 0 0;
+  font-size: 48rpx;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.h2 {
+  font-size: 34rpx;
+  font-weight: 700;
 }
 
 .muted {
-  color: var(--fog);
+  color: var(--muted);
   font-size: 24rpx;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
-.stamp {
+/* ---------- 按钮 ---------- */
+.btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-  background: var(--cyan);
-  color: var(--ink);
-  font-size: 36rpx;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  min-height: 96rpx;
+  padding: 0 32rpx;
+  border-radius: 999rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  transition: transform 0.12s ease;
 }
 
-.stamp[disabled] {
-  opacity: 0.45;
-}
-
-.btn {
-  min-height: 88rpx;
-  padding: 0 28rpx;
-  border-radius: 16rpx;
-  font-size: 28rpx;
+.btn:active {
+  transform: scale(0.97);
 }
 
 .btn-primary {
-  background: var(--cyan);
-  color: var(--ink);
-  font-weight: 650;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+  color: #fff;
+  box-shadow: 0 12rpx 28rpx rgba(240, 67, 106, 0.32);
+}
+
+.btn-primary[disabled] {
+  opacity: 0.5;
+  box-shadow: none;
 }
 
 .btn-ghost {
-  border: 1rpx solid rgba(62, 224, 194, 0.35);
-  background: transparent;
-  color: var(--white);
+  border: 2rpx solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow);
 }
 
+.btn-soft {
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+}
+
+/* ---------- 卡片 ---------- */
+.card {
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+/* ---------- 表单 ---------- */
 .field {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
 }
 
-.field text {
-  color: var(--fog);
-  font-size: 22rpx;
-  letter-spacing: 0.08em;
+.field > text {
+  color: var(--muted);
+  font-size: 24rpx;
 }
 
-.input, .area {
-  padding: 22rpx 24rpx;
-  border: 1rpx solid rgba(244, 239, 228, 0.12);
-  border-radius: 16rpx;
-  background: var(--plate);
-  color: var(--white);
+.input,
+.area {
+  padding: 26rpx 28rpx;
+  border: 2rpx solid var(--line);
+  border-radius: 24rpx;
+  background: var(--card);
+  color: var(--ink);
   font-size: 28rpx;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.input:focus,
+.area:focus {
+  border-color: rgba(255, 92, 122, 0.5);
 }
 
 .area {
-  min-height: 140rpx;
-  line-height: 1.55;
+  min-height: 150rpx;
+  line-height: 1.6;
 }
 
+/* ---------- 小标签 chip ---------- */
 .chip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 12rpx;
+  gap: 14rpx;
 }
 
 .chip {
-  padding: 10rpx 18rpx;
-  border: 1rpx solid rgba(244, 239, 228, 0.12);
+  padding: 14rpx 26rpx;
+  border: 2rpx solid var(--line);
   border-radius: 999rpx;
-  background: var(--plate);
-  color: var(--mist);
-  font-size: 22rpx;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 24rpx;
 }
 
 .chip.on {
-  border-color: var(--cyan);
-  background: rgba(62, 224, 194, 0.12);
-  color: var(--cyan);
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+  color: #fff;
+  font-weight: 600;
 }
 
+/* ---------- 生成中的纸面(print-sheet 组件用全局变量即可) ---------- */
 .sheet {
   position: relative;
   overflow: hidden;
-  background: var(--paper);
-  box-shadow: 0 24rpx 80rpx rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
 }
 
-.sheet-marks {
-  position: absolute;
-  z-index: 2;
-  width: 28rpx;
-  height: 28rpx;
-  pointer-events: none;
-}
-
-.sheet-marks::before, .sheet-marks::after {
-  position: absolute;
-  background: var(--magenta);
-  content: "";
-}
-
-.sheet-marks.tl { top: 12rpx; left: 12rpx; }
-.sheet-marks.tr { top: 12rpx; right: 12rpx; }
-.sheet-marks.bl { bottom: 12rpx; left: 12rpx; }
-.sheet-marks.br { bottom: 12rpx; right: 12rpx; }
-
-.sheet-marks.tl::before, .sheet-marks.bl::before, .sheet-marks.tr::before, .sheet-marks.br::before {
-  width: 28rpx;
-  height: 2rpx;
-  top: 13rpx;
-  left: 0;
-}
-
-.sheet-marks.tl::after, .sheet-marks.bl::after, .sheet-marks.tr::after, .sheet-marks.br::after {
-  width: 2rpx;
-  height: 28rpx;
-  left: 13rpx;
-  top: 0;
-}
-
-.sheet.busy .sheet-marks::before, .sheet.busy .sheet-marks::after {
-  animation: pulse-mark 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse-mark {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
-}
-
+/* ---------- 底部安全区 ---------- */
 .safe-bottom {
-  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
 }
 
+/* ---------- 原生 button 复位 ---------- */
 button {
   margin: 0;
   padding: 0;
-  line-height: 88rpx;
   border: none;
-  border-radius: 16rpx;
-  font-size: 28rpx;
+  border-radius: 999rpx;
+  background: transparent;
+  line-height: 1.4;
+  font-size: 30rpx;
 }
 
 button::after {

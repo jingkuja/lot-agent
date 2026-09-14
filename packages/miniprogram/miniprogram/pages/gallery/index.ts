@@ -49,10 +49,14 @@ Page({
     }
   },
 
+  goStudio() {
+    wx.switchTab({ url: "/pages/studio/index" });
+  },
+
   open(e: { currentTarget: { dataset: { src: string; title: string } } }) {
     const { src, title } = e.currentTarget.dataset;
     if (!src) {
-      wx.showToast({ title: "这张还没有印出来", icon: "none" });
+      wx.showToast({ title: "这张还没生成好", icon: "none" });
       return;
     }
     wx.navigateTo({

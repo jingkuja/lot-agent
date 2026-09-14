@@ -44,7 +44,7 @@ async function pollTask(
   let failures = 0;
   const deadline = Date.now() + 3 * 60 * 1000;
   for (;;) {
-    if (Date.now() > deadline) throw new Error("生成超时，请稍后在相册查看");
+    if (Date.now() > deadline) throw new Error("生成超时,请稍后在「作品」里查看");
     let task;
     try {
       task = await api.getTask(taskId);
@@ -58,7 +58,7 @@ async function pollTask(
       continue;
     }
     if (task.status === "pending" || task.status === "running") {
-      onStatus?.("印台上，油墨还在干", task.progress);
+      onStatus?.("AI 正在画,请稍等", task.progress);
       await sleep(1400);
       continue;
     }
@@ -88,7 +88,7 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
       media.push({ type: "reference_image", url: uploaded.url });
     }
   }
-  input.onStatus?.("正在发稿");
+  input.onStatus?.("正在提交");
   let started: GenerationResult;
   try {
     started = await api.generate(conversationId, {
@@ -100,11 +100,11 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
     });
   } catch (err) {
     if (err instanceof ApiError && err.status === 402) {
-      throw new Error("额度不足，请先充值后再印");
+      throw new Error("额度不足,请先充值");
     }
     throw err;
   }
-  input.onStatus?.("印台上，油墨还在干");
+  input.onStatus?.("AI 正在画,请稍等");
   const { url } = await pollTask(started.taskId, input.onStatus);
   return {
     conversationId,
@@ -116,7 +116,7 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
 }
 
 function onUpload(input: GenerateInput) {
-  input.onStatus?.("正在上传参考图");
+  input.onStatus?.("正在上传图片");
 }
 
 export function toastError(err: unknown): void {

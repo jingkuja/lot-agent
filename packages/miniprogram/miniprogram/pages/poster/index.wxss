@@ -1,53 +1,141 @@
 .poster {
-  padding: 28rpx 28rpx 48rpx;
+  padding: 24rpx 24rpx 60rpx;
 }
 
 .head {
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
-  margin-bottom: 28rpx;
+  gap: 12rpx;
+  margin-bottom: 24rpx;
 }
 
-.head .input {
+.topic {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
   margin-top: 12rpx;
+  padding: 6rpx 24rpx;
 }
 
+.topic-ico {
+  font-size: 32rpx;
+}
+
+.topic-input {
+  flex: 1;
+  height: 88rpx;
+  font-size: 28rpx;
+}
+
+.ph {
+  color: #c6bab4;
+}
+
+/* 分类 */
+.cats {
+  margin-bottom: 24rpx;
+  white-space: nowrap;
+}
+
+.cats-inner {
+  display: inline-flex;
+  gap: 16rpx;
+  padding: 4rpx 2rpx;
+}
+
+.cat {
+  padding: 14rpx 30rpx;
+  border: 2rpx solid var(--line);
+  border-radius: 999rpx;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 26rpx;
+}
+
+.cat.on {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 模板网格 */
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20rpx;
 }
 
-.card {
+.tpl {
   position: relative;
-  min-height: 240rpx;
-  padding: 28rpx 22rpx 24rpx;
-  border: 1rpx solid rgba(244, 239, 228, 0.12);
-  background: var(--plate);
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
 }
 
-.card-ratio {
-  color: var(--fog);
-  font-size: 18rpx;
-  letter-spacing: 0.16em;
+.tpl:active {
+  transform: scale(0.98);
 }
 
-.card-title {
+.tpl-cover {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200rpx;
+}
+
+.tpl-icon {
+  font-size: 84rpx;
+}
+
+.tpl-ratio {
+  position: absolute;
+  top: 16rpx;
+  right: 16rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.6);
+  color: #6b5d57;
+  font-size: 20rpx;
+}
+
+.tpl-body {
+  padding: 18rpx 20rpx 8rpx;
+}
+
+.tpl-title {
   display: block;
-  margin-top: 18rpx;
-  font-size: 32rpx;
-  font-weight: 650;
+  font-size: 30rpx;
+  font-weight: 700;
 }
 
-.card-blurb {
+.tpl-blurb {
   display: block;
-  margin-top: 8rpx;
-  color: var(--fog);
+  margin-top: 6rpx;
+  color: var(--muted);
   font-size: 22rpx;
 }
 
-.tone-cyan { box-shadow: inset 0 8rpx 0 var(--cyan); }
-.tone-magenta { box-shadow: inset 0 8rpx 0 var(--magenta); }
-.tone-paper { box-shadow: inset 0 8rpx 0 var(--paper); }
-.tone-night { box-shadow: inset 0 8rpx 0 #4d5d78; }
+.tpl-go {
+  padding: 8rpx 20rpx 20rpx;
+  color: var(--brand-deep);
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+/* 封面配色 */
+.tone-pink .tpl-cover { background: linear-gradient(135deg, #ffe3ec, #ffd0de); }
+.tone-peach .tpl-cover { background: linear-gradient(135deg, #ffe9d6, #ffd9bd); }
+.tone-lavender .tpl-cover { background: linear-gradient(135deg, #ece4ff, #ddd0ff); }
+.tone-mint .tpl-cover { background: linear-gradient(135deg, #d7f7e9, #bdefd9); }
+.tone-sky .tpl-cover { background: linear-gradient(135deg, #dcecfd, #c6dfff); }
+.tone-gold .tpl-cover { background: linear-gradient(135deg, #fdf0d0, #fbe3a8); }
+.tone-night .tpl-cover { background: linear-gradient(135deg, #3a3350, #241f38); }
+.tone-night .tpl-ratio { background: rgba(255, 255, 255, 0.18); color: #efe9ff; }
+
+.foot {
+  margin-top: 32rpx;
+  text-align: center;
+}

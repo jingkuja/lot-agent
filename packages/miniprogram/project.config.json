@@ -2,14 +2,21 @@
   "miniprogramRoot": "miniprogram/",
   "projectname": "lot-agent-miniprogram",
   "description": "LOT 印社 — Lot Agent 图片生成小程序",
-  "appid": "touristappid",
+  "appid": "wxc2f217b8f5759723",
   "compileType": "miniprogram",
   "libVersion": "3.5.8",
   "packOptions": {
     "ignore": [
-      { "type": "suffix", "value": ".map" },
-      { "type": "suffix", "value": ".test.ts" }
-    ]
+      {
+        "value": ".map",
+        "type": "suffix"
+      },
+      {
+        "value": ".test.ts",
+        "type": "suffix"
+      }
+    ],
+    "include": []
   },
   "setting": {
     "es6": true,
@@ -21,14 +28,24 @@
     "coverView": true,
     "ignoreUploadUnusedFiles": true,
     "compileWorklet": false,
-    "useCompilerPlugins": ["typescript"],
+    "useCompilerPlugins": [
+      "typescript"
+    ],
     "urlCheck": false,
     "babelSetting": {
       "ignore": [],
       "disablePlugins": [],
       "outputPath": ""
-    }
+    },
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "condition": false
   },
   "simulatorPluginLibVersion": {},
-  "condition": {}
+  "condition": {},
+  "editorSetting": {}
 }

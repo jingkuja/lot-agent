@@ -4,7 +4,7 @@ import { getApiBase, getUser, setApiBase, clearSession } from "../../services/se
 Page({
   data: {
     user: null as LotUser | null,
-    initial: "印",
+    initial: "美",
     balanceText: "—",
     apiBase: "",
     editingServer: false,
@@ -13,7 +13,7 @@ Page({
   onShow() {
     this.setData({
       user: getUser(),
-      initial: (getUser()?.name || getUser()?.username || "印").slice(0, 1),
+      initial: (getUser()?.name || getUser()?.username || "美").slice(0, 1),
       apiBase: getApiBase(),
     });
     void this.loadBalance();
@@ -30,8 +30,16 @@ Page({
     }
   },
 
-  goEdit() {
-    wx.navigateTo({ url: "/pages/edit/index" });
+  goStudio() {
+    wx.switchTab({ url: "/pages/studio/index" });
+  },
+
+  goPoster() {
+    wx.switchTab({ url: "/pages/poster/index" });
+  },
+
+  goGallery() {
+    wx.switchTab({ url: "/pages/gallery/index" });
   },
 
   toggleServer() {
@@ -57,7 +65,7 @@ Page({
     try {
       await api.logout();
     } catch {
-      // local clear still happens
+      // 本地仍会清理
     }
     clearSession();
     wx.reLaunch({ url: "/pages/login/index" });

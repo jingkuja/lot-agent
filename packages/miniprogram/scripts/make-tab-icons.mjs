@@ -107,13 +107,13 @@ function mine(px, py) {
 }
 
 const glyphs = { studio, poster, gallery, mine };
-const fog = [0x8b, 0x95, 0xa7, 255];
-const cyan = [0x3e, 0xe0, 0xc2, 255];
+const fog = [0xb8, 0xac, 0xa6, 255];
+const brand = [0xf0, 0x43, 0x6a, 255];
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const [name, hit] of Object.entries(glyphs)) {
   const paint = (color) => (x, y) => (hit(x, y) ? color : [0, 0, 0, 0]);
   fs.writeFileSync(path.join(outDir, `tab-${name}.png`), encodePng(81, 81, paint(fog)));
-  fs.writeFileSync(path.join(outDir, `tab-${name}-active.png`), encodePng(81, 81, paint(cyan)));
+  fs.writeFileSync(path.join(outDir, `tab-${name}-active.png`), encodePng(81, 81, paint(brand)));
 }
 console.log("tab icons written to", outDir);

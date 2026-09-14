@@ -1,6 +1,4 @@
 {
-  "navigationBarTitleText": "印台",
-  "usingComponents": {
-    "print-sheet": "../../components/print-sheet/index"
-  }
+  "navigationBarTitleText": "修图",
+  "usingComponents": {}
 }

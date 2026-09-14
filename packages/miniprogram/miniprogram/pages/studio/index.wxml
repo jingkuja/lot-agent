@@ -1,49 +1,92 @@
 <view class="page studio">
-  <view class="canvas">
-    <print-sheet src="{{resultUrl}}" busy="{{busy}}" caption="LOT PRESS">
-      <view class="empty-copy">
-        <text class="eyebrow">LOT PRESS</text>
-        <text class="h1">印台空着</text>
-        <text class="muted">写下要印的画面，或拍一张去改。</text>
+  <!-- 结果区 -->
+  <view class="stage">
+    <view class="frame card" bindtap="save">
+      <image wx:if="{{resultUrl}}" class="frame-img" src="{{resultUrl}}" mode="aspectFit" />
+      <view wx:else class="frame-empty">
+        <view class="frame-emoji">🎨</view>
+        <text class="frame-title">开始你的创作</text>
+        <text class="muted">传一张照片修一修,或写句话生成一张图</text>
       </view>
-    </print-sheet>
-    <view wx:if="{{busy || statusText}}" class="status">{{statusText}}</view>
-    <view wx:if="{{resultUrl && !busy}}" class="actions">
-      <view class="btn btn-ghost" bindtap="save">看大图 / 保存</view>
+      <view wx:if="{{busy}}" class="frame-busy">
+        <view class="spinner"></view>
+        <text class="frame-status">{{statusText || '正在生成'}}</text>
+      </view>
     </view>
+
+    <view wx:if="{{resultUrl && !busy}}" class="stage-actions">
+      <view class="btn btn-primary stage-save" bindtap="save">保存 / 分享</view>
+    </view>
+    <view wx:elif="{{statusText && !busy}}" class="stage-tip muted">{{statusText}}</view>
   </view>
 
+  <!-- 操作区 -->
   <view class="dock safe-bottom">
-    <view class="dock-top">
-      <view class="chip {{refs.length ? 'on' : ''}}" bindtap="addRef">{{refs.length ? '参考 ' + refs.length : '以图修图'}}</view>
-      <view class="chip" bindtap="toggleIdeas">灵感</view>
-      <view class="chip" bindtap="pickRatio">{{ratioLabel}}</view>
-      <view class="chip" bindtap="pickQuality">{{qualityLabel}}</view>
-      <view class="chip" bindtap="pickModel">{{modelLabel}}</view>
-      <view class="chip" bindtap="newSheet">新的一张</view>
-    </view>
-
-    <scroll-view wx:if="{{refs.length}}" class="refs" scroll-x>
+    <!-- 参考图 -->
+    <scroll-view wx:if="{{refs.length}}" class="refs" scroll-x enhanced show-scrollbar="{{false}}">
       <view class="ref" wx:for="{{refs}}" wx:key="*this">
         <image src="{{item}}" mode="aspectFill" />
         <view class="ref-x" data-index="{{index}}" catchtap="removeRef">×</view>
       </view>
+      <view class="ref ref-add" bindtap="addRef">＋</view>
     </scroll-view>
 
-    <view wx:if="{{showIdeas}}" class="ideas">
+    <!-- 快捷入口 -->
+    <view class="quick">
+      <view class="quick-item {{refs.length ? 'on' : ''}}" bindtap="addRef">
+        <text class="quick-ico">🖼️</text>
+        <text>{{refs.length ? '已选 ' + refs.length + ' 张' : '相册选图'}}</text>
+      </view>
+      <view class="quick-item {{showIdeas ? 'on' : ''}}" bindtap="toggleIdeas">
+        <text class="quick-ico">💡</text>
+        <text>灵感</text>
+      </view>
+      <view class="quick-item {{showMore ? 'on' : ''}}" bindtap="toggleMore">
+        <text class="quick-ico">⚙️</text>
+        <text>选项</text>
+      </view>
+      <view class="quick-item" bindtap="newSheet">
+        <text class="quick-ico">🗑️</text>
+        <text>清空</text>
+      </view>
+    </view>
+
+    <!-- 灵感 -->
+    <view wx:if="{{showIdeas}}" class="ideas card">
       <view class="idea" wx:for="{{ideas}}" wx:key="*this" data-text="{{item}}" bindtap="pickIdea">{{item}}</view>
     </view>
 
+    <!-- 更多选项 -->
+    <view wx:if="{{showMore}}" class="more card">
+      <view class="more-row" bindtap="pickRatio">
+        <text class="more-k">画面比例</text>
+        <text class="more-v">{{ratioLabel}} ›</text>
+      </view>
+      <view class="more-row" bindtap="pickQuality">
+        <text class="more-k">清晰度</text>
+        <text class="more-v">{{qualityLabel}} ›</text>
+      </view>
+      <view class="more-row" bindtap="pickModel">
+        <text class="more-k">模型</text>
+        <text class="more-v">{{modelLabel}} ›</text>
+      </view>
+    </view>
+
+    <!-- 输入 + 生成 -->
     <view class="composer">
       <textarea
-        class="area"
+        class="area composer-input"
         value="{{prompt}}"
         maxlength="800"
         auto-height
-        placeholder="输入画面、海报文案，或说你的想法"
+        placeholder="想修哪里?或想要什么画面?"
+        placeholder-class="ph"
         bindinput="onPrompt"
       />
-      <view class="stamp" bindtap="print">印</view>
+      <view class="go {{busy ? 'going' : ''}}" bindtap="print">
+        <text wx:if="{{!busy}}">✨ 生成</text>
+        <text wx:else>…</text>
+      </view>
     </view>
   </view>
 </view>
