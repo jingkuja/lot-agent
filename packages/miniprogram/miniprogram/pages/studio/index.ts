@@ -75,11 +75,15 @@ Page({
   },
 
   toggleIdeas() {
-    this.setData({ showIdeas: !this.data.showIdeas });
+    this.setData({ showIdeas: !this.data.showIdeas, showMore: false });
+  },
+
+  closePopovers() {
+    this.setData({ showIdeas: false, showMore: false });
   },
 
   toggleMore() {
-    this.setData({ showMore: !this.data.showMore });
+    this.setData({ showMore: !this.data.showMore, showIdeas: false });
   },
 
   pickRatio() {

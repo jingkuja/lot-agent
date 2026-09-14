@@ -91,11 +91,19 @@
 
 /* ---------- 底部操作区 ---------- */
 .dock {
+  position: relative;
+  z-index: 20;
   padding: 14rpx 24rpx 6rpx;
   border-top-left-radius: 36rpx;
   border-top-right-radius: 36rpx;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 -8rpx 30rpx rgba(90, 60, 70, 0.06);
+}
+
+.pop-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
 }
 
 /* 参考图 */
@@ -147,10 +155,14 @@
 }
 
 /* 快捷入口 */
+.quick-anchor {
+  position: relative;
+  margin-bottom: 16rpx;
+}
+
 .quick {
   display: flex;
   gap: 14rpx;
-  margin-bottom: 16rpx;
 }
 
 .quick-item {
@@ -176,12 +188,21 @@
   font-size: 36rpx;
 }
 
-/* 灵感 */
+/* 灵感 / 选项：贴着快捷入口向上浮出 */
+.pop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 21;
+  margin-bottom: 12rpx;
+  overflow-y: auto;
+  box-shadow: 0 16rpx 48rpx rgba(90, 60, 70, 0.16);
+}
+
 .ideas {
-  max-height: 300rpx;
-  margin-bottom: 16rpx;
+  max-height: 480rpx;
   padding: 10rpx 20rpx;
-  overflow: auto;
 }
 
 .idea {
@@ -198,7 +219,6 @@
 
 /* 更多选项 */
 .more {
-  margin-bottom: 16rpx;
   padding: 6rpx 24rpx;
 }
 
@@ -223,18 +243,51 @@
   font-size: 26rpx;
 }
 
-/* 输入 + 生成 */
+/* 输入 + 清空 / 生成 */
 .composer {
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 16rpx;
 }
 
-.composer-input {
+.composer .area {
   flex: 1;
-  min-height: 96rpx;
-  max-height: 220rpx;
+  width: auto;
+  min-width: 0;
+  height: 220rpx;
+  min-height: 220rpx;
+  max-height: 360rpx;
   border-radius: 26rpx;
+}
+
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16rpx;
+  width: 168rpx;
+}
+
+.clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6rpx;
+  flex: 1;
+  border-radius: 999rpx;
+  background: #fbf6f2;
+  color: var(--muted);
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+.clear-ico {
+  font-size: 32rpx;
+  line-height: 1;
+}
+
+.clear:active {
+  transform: scale(0.96);
 }
 
 .ph {
@@ -245,7 +298,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 168rpx;
   height: 96rpx;
   padding: 0 28rpx;
   border-radius: 999rpx;
