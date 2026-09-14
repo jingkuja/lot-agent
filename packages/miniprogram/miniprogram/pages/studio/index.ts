@@ -1,6 +1,5 @@
 import { IDEAS, QUALITIES, RATIOS } from "../../services/config";
 import { runImageGeneration, toastError } from "../../services/generate";
-import { api } from "../../services/api";
 import { clearStudioConversationId } from "../../services/session";
 import { fillTemplate, POSTER_TEMPLATES } from "../../services/templates";
 
@@ -14,9 +13,6 @@ Page({
     ratioLabel: RATIOS[0].label,
     quality: "auto",
     qualityLabel: "自动",
-    modelId: "",
-    modelLabel: "默认",
-    models: [] as string[],
     refs: [] as string[],
     resultUrl: "",
     busy: false,
@@ -46,7 +42,6 @@ Page({
         });
       }
     }
-    void this.loadModels();
   },
 
   onLoad(query: { prompt?: string; size?: string; topic?: string; template?: string }) {
@@ -68,18 +63,6 @@ Page({
         size: query.size || this.data.size,
         ratioLabel: ratio?.label || this.data.ratioLabel,
       });
-    }
-  },
-
-  async loadModels() {
-    try {
-      const catalog = await api.models();
-      const ids = (catalog.image || []).map((m) => m.id);
-      if (!ids.length) return;
-      const current = ids.includes(this.data.modelId) ? this.data.modelId : ids[0];
-      this.setData({ models: ids, modelId: current, modelLabel: current });
-    } catch {
-      // 目录不可用时沿用服务端默认模型
     }
   },
 
@@ -115,20 +98,6 @@ Page({
       success: (res) => {
         const item = QUALITIES[res.tapIndex];
         if (item) this.setData({ quality: item.value, qualityLabel: item.label });
-      },
-    });
-  },
-
-  pickModel() {
-    if (!this.data.models.length) {
-      wx.showToast({ title: "暂无可用模型", icon: "none" });
-      return;
-    }
-    wx.showActionSheet({
-      itemList: this.data.models.slice(0, 6),
-      success: (res) => {
-        const id = this.data.models[res.tapIndex];
-        if (id) this.setData({ modelId: id, modelLabel: id });
       },
     });
   },
@@ -170,7 +139,6 @@ Page({
         prompt,
         size: this.data.size,
         quality: this.data.quality,
-        model: this.data.modelId || undefined,
         localRefs: this.data.refs,
         reuseStudioConversation: true,
         onStatus: (text, progress) => {

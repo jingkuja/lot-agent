@@ -336,6 +336,58 @@ describe("POST /conversations/:id/generations", () => {
     expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
   });
 
+  it("maps mini program slot 1/2 to gpt-image-2.5 models", async () => {
+    const service = fakeService();
+    const fast = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Lot-Client": "miniprogram" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "1" }),
+    });
+    const quality = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Lot-Client": "miniprogram" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "2" }),
+    });
+    expect(fast.status).toBe(202);
+    expect(quality.status).toBe(202);
+    expect(service.jobQueue.enqueue.mock.calls[0][1].modelId).toBe("gpt-image-2.5-flare");
+    expect(service.jobQueue.enqueue.mock.calls[1][1].modelId).toBe("gpt-image-2.5-sunburst");
+    expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], {
+      userId: "u1",
+      digitalEmployee: false,
+      modelId: "deepseek-v4-flash",
+    });
+  });
+
+  it("falls back to gpt-image-2 then seedream when both 2.5 models are missing", async () => {
+    const service = fakeService();
+    service.db.getUserApiKey = vi.fn(async () => "sk");
+    service.getUserModelCatalog = vi.fn(async () => ({
+      llm: [],
+      image: [{ id: "gpt-image-2" }, { id: "doubao-seedream-5-0-pro" }],
+      video: [],
+    }));
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "1" }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue.mock.calls[0][1].modelId).toBe("gpt-image-2");
+
+    service.getUserModelCatalog = vi.fn(async () => ({
+      llm: [],
+      image: [{ id: "doubao-seedream-5-0-pro" }],
+      video: [],
+    }));
+    await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "2" }),
+    });
+    expect(service.jobQueue.enqueue.mock.calls[1][1].modelId).toBe("doubao-seedream-5-0-pro");
+  });
+
   it("rejects a custom size on gpt-image 1.5", async () => {
     const service = fakeService();
     const res = await app(service).request("/conversations/c1/generations", {

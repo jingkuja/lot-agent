@@ -1,4 +1,5 @@
 import { api, absoluteMedia, ApiError, type GenerationResult } from "./api";
+import { imageModelForQuality } from "./config";
 import {
   getStudioConversationId,
   setStudioConversationId,
@@ -8,7 +9,6 @@ export interface GenerateInput {
   prompt: string;
   size: string;
   quality: string;
-  model?: string;
   localRefs?: string[];
   title?: string;
   reuseStudioConversation?: boolean;
@@ -96,7 +96,7 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
       mediaType: "image",
       settings: { size: input.size, quality: input.quality, n: 1 },
       media: media.length ? media : undefined,
-      model: input.model,
+      model: imageModelForQuality(input.quality),
     });
   } catch (err) {
     if (err instanceof ApiError && err.status === 402) {

@@ -66,10 +66,6 @@
         <text class="more-k">清晰度</text>
         <text class="more-v">{{qualityLabel}} ›</text>
       </view>
-      <view class="more-row" bindtap="pickModel">
-        <text class="more-k">模型</text>
-        <text class="more-v">{{modelLabel}} ›</text>
-      </view>
     </view>
 
     <!-- 输入 + 生成 -->

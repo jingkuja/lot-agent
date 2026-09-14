@@ -71,6 +71,10 @@ import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
 import { RagClient, type KnowledgeBase, type KnowledgeBaseRef, type RagIdentity, type RagRecord } from "./rag-client.js";
 import { DigitalEmployeeService } from "../digital-employee/service.js";
+import {
+  parseMiniprogramConfig,
+  type MiniprogramConfig,
+} from "../miniprogram/models.js";
 import { createCustomerCaptureTools } from "../digital-employee/tools/customer-capture-tools.js";
 import { createCustomerProfileTools } from "../digital-employee/tools/customer-profile-tools.js";
 import { cohortLlmMetrics } from "../digital-employee/profile/cohort-summary.js";
@@ -255,6 +259,8 @@ export interface ServiceConfig {
   debug?: boolean;
   /** Test-only/runtime override. Production defaults to managed subscription keys. */
   managedKeysEnabled?: boolean;
+  /** Mini program slot→model mapping and dedicated LLM. */
+  miniprogram?: MiniprogramConfig;
   db?: {
     host?: string;
     port?: number;
@@ -318,6 +324,8 @@ export class AgentService {
   uploadStorage!: LocalStorage;
   /** Customer profiles are a separate business module, not an AgentDefinition. */
   digitalEmployee!: DigitalEmployeeService;
+  /** Mini program image slots ("1"/"2") and LLM; change mapping in config. */
+  readonly miniprogram: MiniprogramConfig;
   private llmConfig: LLMConfig;
   private configModels: ModelConfig[];
   private agentConfig: Partial<AgentConfig>;
@@ -348,6 +356,7 @@ export class AgentService {
     this.mcpConfigPath = config.mcpConfigPath;
     this.skillsDir = config.skillsDir;
     this.modelCatalog = config.modelCatalog;
+    this.miniprogram = parseMiniprogramConfig(config.miniprogram);
     this.debug = config.debug ?? false;
     this.managedKeysEnabled = config.managedKeysEnabled ?? (!this.debug || process.env.NEW_API_MANAGED_KEYS === "1");
     if (this.managedKeysEnabled) {

@@ -66,6 +66,19 @@ describe("conversation feature scope", () => {
     expect(createConversation).not.toHaveBeenCalled();
   });
 
+  it("uses the configured mini program LLM when X-Lot-Client is miniprogram", async () => {
+    const { instance, createConversation } = app();
+    const response = await instance.request("/conversations", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-lot-client": "miniprogram" },
+      body: JSON.stringify({ title: "新对话", agentId: "image" }),
+    });
+    expect(response.status).toBe(201);
+    expect(createConversation).toHaveBeenCalledWith(
+      expect.any(String), "新对话", "deepseek-v4-flash", "openai", "image", "u1", undefined
+    );
+  });
+
   it("does not persist a feature scope for another agent", async () => {
     const { instance, createConversation } = app();
     await instance.request("/conversations", {

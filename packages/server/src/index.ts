@@ -27,6 +27,7 @@ import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
 import { AppConfigSchema } from "@lot-agent/core";
 import { loadLlmConfig } from "./config.js";
+import { parseMiniprogramConfig } from "./miniprogram/models.js";
 import { rateLimit, clientIp } from "./middleware/rate-limit.js";
 import { RedisRateLimitStore } from "./middleware/redis-rate-limit-store.js";
 
@@ -49,6 +50,7 @@ async function loadConfig(): Promise<ServiceConfig> {
   // `modelCatalog` is read directly from the raw JSON (like `generation`) since
   // AppConfigSchema strips unknown keys.
   const modelCatalog = (raw as { modelCatalog: ServiceConfig["modelCatalog"] }).modelCatalog;
+  const miniprogram = parseMiniprogramConfig((raw as { miniprogram?: unknown }).miniprogram);
 
   const pgPassword = process.env.PG_PASSWORD;
   if (!pgPassword) throw new Error("PG_PASSWORD is required");
@@ -57,6 +59,7 @@ async function loadConfig(): Promise<ServiceConfig> {
     llm,
     models: config.models ?? [],
     modelCatalog,
+    miniprogram,
     debug: process.env.DEBUG === "1",
     agent: config.agent as ServiceConfig["agent"],
     mcpConfigPath: resolve(ROOT, "config/mcp-servers.json"),

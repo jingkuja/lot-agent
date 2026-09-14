@@ -74,6 +74,7 @@ function request<T>(path: string, init?: { method?: string; data?: unknown }): P
       data: init?.data,
       header: {
         "Content-Type": "application/json",
+        "X-Lot-Client": "miniprogram",
         ...authHeader(),
       },
       success(res) {
@@ -195,7 +196,7 @@ export const api = {
         url: joinUrl(getApiBase(), "/api/uploads"),
         filePath,
         name: "file",
-        header: { ...authHeader() },
+        header: { "X-Lot-Client": "miniprogram", ...authHeader() },
         success(res) {
           if (res.statusCode === 401) {
             clearSession();

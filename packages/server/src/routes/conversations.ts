@@ -7,6 +7,13 @@ import { attachmentKind, type AttachmentRef } from "../services/attachment-extra
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
 import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
+import {
+  DEFAULT_MINIPROGRAM_CONFIG,
+  isMiniprogramClient,
+  isMiniprogramImageSlot,
+  resolveMiniprogramImageModel,
+  type MiniprogramConfig,
+} from "../miniprogram/models.js";
 
 type Variables = { userId: string };
 
@@ -35,6 +42,28 @@ function validateKnowledgeBaseIds(value: unknown): value is string[] {
     value.every((item) => typeof item === "string" && item.length > 0) &&
     new Set(value).size === value.length
   );
+}
+
+function miniprogramCfg(service: AgentService): MiniprogramConfig {
+  return service.miniprogram ?? DEFAULT_MINIPROGRAM_CONFIG;
+}
+
+async function resolveImageModelId(
+  service: AgentService,
+  userId: string,
+  selectedModel: string | undefined
+): Promise<string | undefined> {
+  const cfg = miniprogramCfg(service);
+  if (!isMiniprogramImageSlot(selectedModel, cfg)) return selectedModel;
+  let catalogIds: string[] | undefined;
+  try {
+    const apiKey = await service.db.getUserApiKey?.(userId, service.managedKeysEnabled);
+    const catalog = await service.getUserModelCatalog?.(userId, apiKey ?? null);
+    catalogIds = catalog?.image?.map((model) => model.id);
+  } catch {
+    catalogIds = undefined;
+  }
+  return resolveMiniprogramImageModel(selectedModel, catalogIds, cfg);
 }
 
 function storedKnowledgeBases(metadata: Record<string, unknown> | undefined): KnowledgeBaseRef[] {
@@ -96,11 +125,14 @@ export function createConversationRoutes(service: AgentService): Hono {
     const title = body.title ?? "新对话";
     const agentId = body.agentId ?? "general";
     const isDigitalEmployee = agentId === "digital_employee";
+    const isMiniprogram = isMiniprogramClient(c.req.header("x-lot-client"));
     const model = isDigitalEmployee
       ? undefined
-      : service["llmConfig"].default === "openai"
-        ? service["llmConfig"].openai.model
-        : service["llmConfig"].anthropic.model;
+      : isMiniprogram
+        ? miniprogramCfg(service).llm
+        : service["llmConfig"].default === "openai"
+          ? service["llmConfig"].openai.model
+          : service["llmConfig"].anthropic.model;
     const provider = isDigitalEmployee ? undefined : service["llmConfig"].default;
     let metadata: Record<string, unknown> | undefined;
     if (isDigitalEmployee) {
@@ -457,9 +489,12 @@ export function createGenerationRoutes(service: AgentService) {
     // Client settings pass a per-media whitelist so identity fields
     // (conversationId/assistantMessageId/userId) can never ride along.
     const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
+    const resolvedModel = mediaType === "image"
+      ? await resolveImageModelId(service, userId, selectedModel)
+      : selectedModel;
     let settings = pickGenerationSettings(mediaType, body.settings);
     if (mediaType === "image") {
-      const finalized = finalizeImageSettings(settings, selectedModel);
+      const finalized = finalizeImageSettings(settings, resolvedModel);
       if (finalized.error) return c.json({ error: finalized.error }, 400);
       settings = finalized.settings;
     }
@@ -490,7 +525,7 @@ export function createGenerationRoutes(service: AgentService) {
     // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
     const modelId = mediaType === "image"
       ? "gpt-image-2"
-      : selectedModel ?? "kling-video-v3-omni";
+      : resolvedModel ?? "kling-video-v3-omni";
     const cfg = service.modelRegistry.getConfig(modelId);
     const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : billedVideoSeconds(settings.durationSec);
     const estimatedCost = cfg ? estimateCost(cfg, { outputCount }) : 0;
@@ -510,7 +545,7 @@ export function createGenerationRoutes(service: AgentService) {
     const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress };
     await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
       metadata: { ...baseMeta, status: "generating" },
-      model: modelId,
+      model: resolvedModel ?? modelId,
       status: "generating",
     });
 
@@ -524,7 +559,7 @@ export function createGenerationRoutes(service: AgentService) {
         ...settings,
         ...videoReferences,
         ...(media ? { media } : {}),
-        ...(selectedModel ? { modelId: selectedModel } : {}),
+        ...(resolvedModel ? { modelId: resolvedModel } : {}),
         prompt,
         conversationId,
         assistantMessageId,
@@ -549,6 +584,9 @@ export function createGenerationRoutes(service: AgentService) {
       title = await service.generateTitle(conversationId, prompt, [], {
         userId,
         digitalEmployee: conv.agent_id === "digital_employee",
+        ...(isMiniprogramClient(c.req.header("x-lot-client"))
+          ? { modelId: miniprogramCfg(service).llm }
+          : {}),
       });
     } catch {
       // title generation is best-effort

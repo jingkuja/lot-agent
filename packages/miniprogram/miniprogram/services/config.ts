@@ -16,6 +16,14 @@ export const QUALITIES = [
   { label: "快速", value: "low" },
 ] as const;
 
+/** 传给后台的槽位：1=快速，2=其余清晰度。具体模型由服务端 miniprogram.image 映射。 */
+export const IMAGE_MODEL_FAST = "1";
+export const IMAGE_MODEL_QUALITY = "2";
+
+export function imageModelForQuality(quality: string): string {
+  return quality === "low" ? IMAGE_MODEL_FAST : IMAGE_MODEL_QUALITY;
+}
+
 export const IDEAS = [
   "暖黄街灯下的深夜面馆，蒸汽和霓虹映在湿沥青上",
   "极简产品静物：陶瓷瓶与一枝洋桔梗，柔光，胶片颗粒",
