@@ -1,5 +1,6 @@
 import { api } from "../../services/api";
 import { getToken, getUser, setSession } from "../../services/session";
+import { formatPoints, yuanToPoints } from "../../lib/points";
 
 Page({
   data: {
@@ -24,8 +25,8 @@ Page({
     if (!(await getApp().ensureSession())) return;
     try {
       const bal = await api.balance();
-      const n = Number(bal.balance);
-      this.setData({ balanceText: Number.isFinite(n) ? n.toFixed(2) : "—" });
+      // 接口返回元，按 1 元 = 100 积分换算展示
+      this.setData({ balanceText: formatPoints(yuanToPoints(Number(bal.balance))) });
     } catch {
       this.setData({ balanceText: "—" });
     }
@@ -129,8 +130,8 @@ Page({
 });
 
 function formatAmount(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0";
-  return value.toFixed(2).replace(/\.?0+$/, "") || "0";
+  // 接口返回元，统一按 1 元 = 100 积分展示
+  return formatPoints(yuanToPoints(value));
 }
 
 function confirmPhoneMerge(merge: {
@@ -144,7 +145,7 @@ function confirmPhoneMerge(merge: {
   const lines = [
     `该手机号已是账号「${merge.targetName || "已有用户"}」。`,
     "确认后将转入：",
-    `· 托管额度 ${formatAmount(merge.managedRemainAmount)}`,
+    `· 托管积分 ${formatAmount(merge.managedRemainAmount)}`,
     `· 账户积分 ${formatAmount(merge.quotaAmount)}`,
     `· 对话 ${merge.conversations} 条`,
     `· 作品 ${merge.assets} 个`,

@@ -1,4 +1,5 @@
 import { api } from "../../services/api";
+import { formatPoints, yuanToPoints } from "../../lib/points";
 
 interface Tier {
   points: number;
@@ -47,8 +48,8 @@ Page({
   async loadBalance() {
     try {
       const bal = await api.balance();
-      const n = Number(bal.balance);
-      this.setData({ balanceText: Number.isFinite(n) ? n.toFixed(2) : "—" });
+      // 接口返回元，按 1 元 = 100 积分换算展示
+      this.setData({ balanceText: formatPoints(yuanToPoints(Number(bal.balance))) });
     } catch {
       this.setData({ balanceText: "—" });
     }
@@ -155,7 +156,7 @@ Page({
   pollTimer: 0 as number,
   pollCount: 0,
 
-  /** 支付完成后轮询订单，直到托管额度入账。 */
+  /** 支付完成后轮询订单，直到积分入账。 */
   pollOrder(transactionId: string) {
     this.stopPolling();
     this.pollCount = 0;

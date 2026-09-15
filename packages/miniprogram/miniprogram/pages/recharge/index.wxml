@@ -1,8 +1,8 @@
 <view class="page recharge">
-  <!-- 余额卡 -->
+  <!-- 积分卡 -->
   <view class="bal card">
     <view class="bal-l">
-      <text class="bal-label">当前余额</text>
+      <text class="bal-label">当前积分</text>
       <text class="bal-value">{{balanceText}}</text>
       <text class="muted">与网页端、桌面端同一账户</text>
     </view>
