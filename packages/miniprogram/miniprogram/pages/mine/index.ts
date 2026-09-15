@@ -1,5 +1,5 @@
 import { api } from "../../services/api";
-import { getApiBase, getUser, setApiBase, clearSession } from "../../services/session";
+import { getApiBase, getToken, getUser, setApiBase, setSession, clearSession } from "../../services/session";
 
 Page({
   data: {
@@ -8,6 +8,7 @@ Page({
     balanceText: "—",
     apiBase: "",
     editingServer: false,
+    bindingPhone: false,
   },
 
   onShow() {
@@ -61,6 +62,37 @@ Page({
     wx.showToast({ title: "已保存", icon: "success" });
   },
 
+  async onGetPhoneNumber(e: { detail: { code?: string; errMsg?: string } }) {
+    if (this.data.bindingPhone) return;
+    if (!e.detail.code) {
+      wx.showToast({ title: e.detail.errMsg?.includes("deny") ? "需要授权手机号" : "未获取到手机号", icon: "none" });
+      return;
+    }
+    if (!(await getApp().ensureSession())) return;
+    this.setData({ bindingPhone: true });
+    try {
+      const result = await api.wechatPhoneBind(e.detail.code);
+      if (result.token && result.user) {
+        setSession(result.token, result.user);
+      } else if (result.user) {
+        setSession(getToken(), result.user);
+      }
+      this.setData({
+        user: getUser(),
+        initial: (getUser()?.name || getUser()?.username || "美").slice(0, 1),
+      });
+      wx.showToast({
+        title: result.adopted ? "已切换到该手机号账号" : "手机号已绑定",
+        icon: "success",
+      });
+      void this.loadBalance();
+    } catch (err) {
+      wx.showToast({ title: err instanceof Error ? err.message : "绑定失败", icon: "none" });
+    } finally {
+      this.setData({ bindingPhone: false });
+    }
+  },
+
   async logout() {
     try {
       await api.logout();
@@ -68,6 +100,6 @@ Page({
       // 本地仍会清理
     }
     clearSession();
-    wx.reLaunch({ url: "/pages/login/index" });
+    wx.reLaunch({ url: "/pages/boot/index" });
   },
 });

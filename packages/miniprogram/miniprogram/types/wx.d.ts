@@ -20,8 +20,10 @@ interface LotApp {
     pendingRefs: string[];
     posterJob: { id: string; topic: string } | null;
   };
+  ready: Promise<void> | null;
+  bootstrap(): Promise<void>;
   ensureSession(): Promise<boolean>;
-  bindPendingWechat(): Promise<void>;
+  tryWechatLogin(): Promise<boolean>;
 }
 
 interface WxRequestSuccess {
@@ -70,6 +72,10 @@ declare const wx: {
     success?: (res: { code: string }) => void;
     fail?: (err: WxGeneralCallbackResult) => void;
   }): void;
+  getPhoneNumber?: (opts: {
+    success?: (res: { code?: string; errMsg: string }) => void;
+    fail?: (err: WxGeneralCallbackResult) => void;
+  }) => void;
   getRandomValues?(opts: {
     length: number;
     success?: (res: WxGetRandomValuesSuccess) => void;

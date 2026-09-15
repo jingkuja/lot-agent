@@ -6,6 +6,13 @@
       <text class="name">{{user ? (user.name || user.username) : '未登录'}}</text>
       <text class="muted">{{user.phone || user.username || '欢迎使用'}}</text>
     </view>
+    <button
+      wx:if="{{user && !user.phone}}"
+      class="bind-phone"
+      open-type="getPhoneNumber"
+      bindgetphonenumber="onGetPhoneNumber"
+      loading="{{bindingPhone}}"
+    >绑定手机号</button>
   </view>
 
   <!-- 余额 -->

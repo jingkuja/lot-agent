@@ -3,7 +3,6 @@ import { DEFAULT_API_BASE } from "./config";
 const TOKEN_KEY = "lot:token";
 const USER_KEY = "lot:user";
 const BASE_KEY = "lot:apiBase";
-const TICKET_KEY = "lot:wechatTicket";
 const CONV_KEY = "lot:studioConversationId";
 
 export interface SessionUser {
@@ -31,7 +30,6 @@ export function setSession(token: string, user: SessionUser): void {
 export function clearSession(): void {
   wx.removeStorageSync(TOKEN_KEY);
   wx.removeStorageSync(USER_KEY);
-  wx.removeStorageSync(TICKET_KEY);
   wx.removeStorageSync(CONV_KEY);
   const app = getApp();
   app.globalData.user = null;
@@ -46,18 +44,6 @@ export function setApiBase(url: string): void {
   wx.setStorageSync(BASE_KEY, url.replace(/\/+$/, ""));
 }
 
-export function getWechatTicket(): string {
-  return String(wx.getStorageSync(TICKET_KEY) || "");
-}
-
-export function setWechatTicket(ticket: string): void {
-  wx.setStorageSync(TICKET_KEY, ticket);
-}
-
-export function clearWechatTicket(): void {
-  wx.removeStorageSync(TICKET_KEY);
-}
-
 export function getStudioConversationId(): string {
   return String(wx.getStorageSync(CONV_KEY) || "");
 }
@@ -70,8 +56,8 @@ export function clearStudioConversationId(): void {
   wx.removeStorageSync(CONV_KEY);
 }
 
-export function isLoginPage(): boolean {
+export function isBootPage(): boolean {
   const pages = getCurrentPages();
   const cur = pages[pages.length - 1];
-  return cur?.route === "pages/login/index";
+  return cur?.route === "pages/boot/index";
 }

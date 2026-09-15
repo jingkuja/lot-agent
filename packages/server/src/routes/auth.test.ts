@@ -22,6 +22,8 @@ function fakeManagedService() {
       resetAgentPassword: vi.fn(),
       sendAgentPhoneVerification: vi.fn(),
       authenticateAgentUserByPhone: vi.fn(),
+      authenticateWechatMiniUser: vi.fn(),
+      bindWechatMiniPhone: vi.fn(),
       sendAgentPhoneBindingVerification: vi.fn(),
       bindAgentPhone: vi.fn(),
     },
@@ -29,6 +31,8 @@ function fakeManagedService() {
       upsertManagedUser: vi.fn(),
       updateUserPhone: vi.fn(),
       getUserById: vi.fn().mockResolvedValue({ external_user_id: 7 }),
+      bindUserWechat: vi.fn().mockResolvedValue("ok"),
+      reassignWechatOpenid: vi.fn().mockResolvedValue("ok"),
     },
     sessions: {
       createSession: vi.fn().mockResolvedValue("tok-managed"),
@@ -400,7 +404,7 @@ describe("wechat mini program login", () => {
   it("returns 404 when WeChat credentials are not configured", async () => {
     vi.stubEnv("WECHAT_MP_APPID", "");
     vi.stubEnv("WECHAT_MP_SECRET", "");
-    const res = await createAuthRoutes(fakeService()).request("/wechat-login", {
+    const res = await createAuthRoutes(fakeManagedService()).request("/wechat-login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: "abc" }),
@@ -408,85 +412,127 @@ describe("wechat mini program login", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns a bind ticket for an unknown openid", async () => {
+  it("creates a tokenhub wx_mini account for an unknown openid", async () => {
     vi.stubEnv("WECHAT_MP_APPID", "wxapp");
     vi.stubEnv("WECHAT_MP_SECRET", "secret");
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ openid: "o-new" }),
-    })));
-    const svc = fakeService();
-    (svc.db as { getUserByWechatOpenid?: ReturnType<typeof vi.fn> }).getUserByWechatOpenid = vi
-      .fn()
-      .mockResolvedValue(null);
-    const res = await createAuthRoutes(svc).request("/wechat-login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: "fresh" }),
-    });
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.needBind).toBe(true);
-    expect(typeof json.ticket).toBe("string");
-    expect(json.token).toBeUndefined();
-  });
-
-  it("mints a session when the openid is already bound", async () => {
-    vi.stubEnv("WECHAT_MP_APPID", "wxapp");
-    vi.stubEnv("WECHAT_MP_SECRET", "secret");
-    vi.stubGlobal("fetch", vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ openid: "o-known" }),
-    })));
-    const svc = fakeService();
-    (svc.db as { getUserByWechatOpenid?: ReturnType<typeof vi.fn> }).getUserByWechatOpenid = vi
-      .fn()
-      .mockResolvedValue({
-        id: "u1", email: null, name: "138", created_at: "t",
-        external_user_id: 2, username: "138", api_key: null, api_keys: [],
-      });
-    const res = await createAuthRoutes(svc).request("/wechat-login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: "fresh" }),
-    });
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.token).toBe("tok-1");
-    expect(json.user).toMatchObject({ id: "u1", username: "138" });
-  });
-
-  it("binds a ticket to the current session", async () => {
-    vi.stubEnv("WECHAT_MP_APPID", "wxapp");
-    vi.stubEnv("WECHAT_MP_SECRET", "secret");
-    vi.stubGlobal("fetch", vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ openid: "o-bind" }),
+      json: async () => ({ openid: "o-new", unionid: "u-new" }),
     })));
     const svc = fakeManagedService();
-    (svc.db as { getUserByWechatOpenid: ReturnType<typeof vi.fn> }).getUserByWechatOpenid = vi
-      .fn()
-      .mockResolvedValue(null);
-    const login = await createAuthRoutes(svc).request("/wechat-login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: "fresh" }),
+    (svc.tokenhub.authenticateWechatMiniUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...managedResult,
+      username: "wx_mini_8",
+      name: "wx_mini",
+      created: true,
     });
-    const { ticket } = await login.json() as { ticket: string };
+    (svc.db.upsertManagedUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...storedManagedUser,
+      username: "wx_mini_8",
+      name: "wx_mini",
+    });
     (svc.db as { bindUserWechat?: ReturnType<typeof vi.fn> }).bindUserWechat = vi
       .fn()
       .mockResolvedValue("ok");
-    const res = await createAuthRoutes(svc).request("/wechat-bind", {
+    const res = await createAuthRoutes(svc).request("/wechat-login", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
-      body: JSON.stringify({ ticket }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "fresh" }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    const json = await res.json();
+    expect(json.token).toBe("tok-managed");
+    expect(json.user).toMatchObject({ username: "wx_mini_8", name: "wx_mini" });
+    expect(json.needBind).toBeUndefined();
+    expect(svc.tokenhub.authenticateWechatMiniUser).toHaveBeenCalledWith("o-new", "u-new");
     expect((svc.db as { bindUserWechat: ReturnType<typeof vi.fn> }).bindUserWechat)
-      .toHaveBeenCalledWith("u7", "o-bind", undefined);
+      .toHaveBeenCalledWith("u7", "o-new", "u-new");
+  });
+
+  it("binds a WeChat phone number onto the current mini-program user", async () => {
+    vi.stubEnv("WECHAT_MP_APPID", "wxapp");
+    vi.stubEnv("WECHAT_MP_SECRET", "secret");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("cgi-bin/token")) {
+        return { ok: true, status: 200, json: async () => ({ access_token: "at", expires_in: 7200 }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ phone_info: { purePhoneNumber: "13800138000" } }),
+      };
+    }));
+    const svc = fakeManagedService();
+    (svc.db.getUserById as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...storedManagedUser,
+      wechat_openid: "o-mini",
+    });
+    (svc.tokenhub.bindWechatMiniPhone as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...managedResult,
+      adopted: false,
+    });
+    const res = await createAuthRoutes(svc).request("/wechat-phone-bind", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
+      body: JSON.stringify({ code: "phone-code" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, adopted: false });
+    expect(svc.tokenhub.bindWechatMiniPhone).toHaveBeenCalledWith(7, "13800138000");
+    expect(svc.db.updateUserPhone).toHaveBeenCalledWith("u7", "13800138000");
+  });
+
+  it("switches session when the phone already belongs to another account", async () => {
+    vi.stubEnv("WECHAT_MP_APPID", "wxapp");
+    vi.stubEnv("WECHAT_MP_SECRET", "secret");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("cgi-bin/token")) {
+        return { ok: true, status: 200, json: async () => ({ access_token: "at", expires_in: 7200 }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ phone_info: { purePhoneNumber: "13900139000" } }),
+      };
+    }));
+    const svc = fakeManagedService();
+    (svc.db.getUserById as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...storedManagedUser,
+      wechat_openid: "o-mini",
+    });
+    (svc.tokenhub.bindWechatMiniPhone as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...managedResult,
+      userId: 99,
+      username: "phone-owner",
+      name: "Phone Owner",
+      phone: "13900139000",
+      adopted: true,
+      fromUserId: 7,
+    });
+    (svc.db.upsertManagedUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...storedManagedUser,
+      id: "u99",
+      external_user_id: 99,
+      username: "phone-owner",
+      name: "Phone Owner",
+    });
+    (svc.db as { reassignWechatOpenid?: ReturnType<typeof vi.fn> }).reassignWechatOpenid = vi
+      .fn()
+      .mockResolvedValue("ok");
+    (svc.sessions as { revoke?: ReturnType<typeof vi.fn> }).revoke = vi.fn().mockResolvedValue(undefined);
+    const res = await createAuthRoutes(svc).request("/wechat-phone-bind", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
+      body: JSON.stringify({ code: "phone-code" }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.adopted).toBe(true);
+    expect(json.token).toBe("tok-managed");
+    expect(json.user).toMatchObject({ id: "u99", username: "phone-owner" });
+    expect((svc.db as { reassignWechatOpenid: ReturnType<typeof vi.fn> }).reassignWechatOpenid)
+      .toHaveBeenCalledWith("u99", "o-mini", undefined);
+    expect((svc.sessions as { revoke: ReturnType<typeof vi.fn> }).revoke).toHaveBeenCalledWith("tok-managed");
   });
 });

@@ -141,6 +141,64 @@ describe("TokenhubClient", () => {
     });
   });
 
+  it("logs in or registers a wechat mini-program openid through the signed control plane", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      user_id: 8,
+      username: "wx_mini_8",
+      display_name: "wx_mini",
+      managed_key: { token_id: 9, api_key: "managed-secret", credential_version: 1, remain_quota: 0 },
+      created: true,
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.authenticateWechatMiniUser("o-mini", "union-1")).resolves.toMatchObject({
+      userId: 8,
+      username: "wx_mini_8",
+      name: "wx_mini",
+      created: true,
+    });
+    expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-users/wechat-mini/login");
+    expect(JSON.parse(String((f.mock.calls[0][1] as RequestInit).body))).toMatchObject({
+      owner_app: "lot-agent",
+      openid: "o-mini",
+      unionid: "union-1",
+    });
+  });
+
+  it("binds a wechat mini-program phone and reports account adoption", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      user_id: 99,
+      username: "phone-owner",
+      display_name: "Phone Owner",
+      phone: "13900139000",
+      managed_key: { token_id: 9, api_key: "managed-secret", credential_version: 2, remain_quota: 0 },
+      created: false,
+      adopted: true,
+      from_user_id: 8,
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.bindWechatMiniPhone(8, "13900139000")).resolves.toMatchObject({
+      userId: 99,
+      adopted: true,
+      fromUserId: 8,
+      phone: "13900139000",
+    });
+    expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-users/wechat-mini/bind-phone");
+  });
+
   it("sends and confirms a phone binding for the authenticated managed user", async () => {
     const f = vi.fn()
       .mockResolvedValueOnce(ok({ expires_in: 600, resend_after: 60 }))

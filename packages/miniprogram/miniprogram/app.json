@@ -1,6 +1,6 @@
 {
   "pages": [
-    "pages/login/index",
+    "pages/boot/index",
     "pages/studio/index",
     "pages/poster/index",
     "pages/gallery/index",

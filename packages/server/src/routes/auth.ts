@@ -5,11 +5,11 @@ import { generateRsaKeypair } from "../auth/rsa.js";
 import { toPublicUser } from "../db/user-sanitize.js";
 import { maskPhone } from "../db/phone.js";
 import { randomUUID } from "node:crypto";
-import { TokenhubClientError } from "../tokenhub/client.js";
+import { TokenhubClientError, type ManagedUserResult } from "../tokenhub/client.js";
 import {
   consumeWechatTicket,
   exchangeWechatCode,
-  issueWechatTicket,
+  exchangeWechatPhoneCode,
   wechatConfigured,
 } from "../auth/wechat.js";
 
@@ -32,6 +32,9 @@ const CONTACT_ERROR_MESSAGES: Record<string, string> = {
   password_reset_code_invalid: "重置链接无效或已过期",
   password_invalid: "密码至少需要 8 位",
   password_mismatch: "两次输入的密码不一致",
+  wechat_openid_taken: "该微信已绑定其他账号",
+  wechat_openid_empty: "当前账号未绑定微信",
+  phone_already_bound: "当前账号已绑定其他手机号",
 };
 
 function contactError(err: unknown, fallback: string): { message: string; code?: string } {
@@ -51,6 +54,33 @@ function passwordResetPageUrl(c: { req: { header(name: string): string | undefin
   } catch {
     return "http://localhost:5173/reset-password";
   }
+}
+
+async function upsertManagedSession(
+  service: AgentService,
+  result: ManagedUserResult,
+  wechat?: { openid: string; unionid?: string; reassign?: boolean }
+) {
+  const user = await service.db.upsertManagedUser({
+    externalUserId: result.userId,
+    username: result.username,
+    name: result.name,
+    email: result.email,
+    phone: result.phone,
+    tokenId: result.managedKey.tokenId,
+    apiKey: result.managedKey.apiKey,
+    credentialVersion: result.managedKey.credentialVersion,
+  });
+  if (wechat) {
+    const bind = wechat.reassign
+      ? await service.db.reassignWechatOpenid(user.id, wechat.openid, wechat.unionid)
+      : await service.db.bindUserWechat(user.id, wechat.openid, wechat.unionid);
+    if (bind === "taken" || bind === "conflict") {
+      logger.warn("local wechat cache bind skipped", { bind, userId: user.id });
+    }
+  }
+  const token = await service.sessions.createSession(user.id);
+  return { token, user: toPublicUser(user) };
 }
 
 export function createAuthRoutes(service: AgentService): Hono {
@@ -435,12 +465,11 @@ export function createAuthRoutes(service: AgentService): Hono {
     }
   });
 
-  // POST /wechat-login — public. Exchanges a mini-program wx.login code.
-  // Known openid → session. Unknown → one-time ticket the client binds after
-  // phone/password login (wx.login codes are single-use, so we cannot ask for
-  // another code after the account exists).
+  // POST /wechat-login — public. Exchanges a mini-program wx.login code for a
+  // tokenhub account keyed by wechat_mp_openid (separate from web QR wechat_id).
+  // Unknown openids are created as username prefix wx_mini_.
   app.post("/wechat-login", async (c) => {
-    if (!wechatConfigured()) {
+    if (!wechatConfigured() || !service.managedKeysEnabled) {
       return c.json({ error: "微信登录未启用" }, 404);
     }
     let body: { code?: string };
@@ -453,16 +482,65 @@ export function createAuthRoutes(service: AgentService): Hono {
     if (!code) return c.json({ error: LOGIN_FAIL }, 401);
     try {
       const wechat = await exchangeWechatCode(code);
-      const user = await service.db.getUserByWechatOpenid(wechat.openid);
-      if (user) {
-        const token = await service.sessions.createSession(user.id);
-        return c.json({ token, user: toPublicUser(user) });
-      }
-      const ticket = issueWechatTicket(wechat);
-      return c.json({ needBind: true, ticket });
+      const result = await service.tokenhub.authenticateWechatMiniUser(wechat.openid, wechat.unionid);
+      const session = await upsertManagedSession(service, result, wechat);
+      return c.json(session);
     } catch (err) {
       logger.warn("wechat-login failed", { route: "wechat-login", err });
       return c.json({ error: LOGIN_FAIL }, 401);
+    }
+  });
+
+  // POST /wechat-phone-bind — authenticated. Uses the mini-program getPhoneNumber
+  // code. Free phone → bind. Existing phone account → this openid moves onto it.
+  app.post("/wechat-phone-bind", async (c) => {
+    if (!wechatConfigured() || !service.managedKeysEnabled) {
+      return c.json({ error: "微信登录未启用" }, 404);
+    }
+    const authorization = c.req.header("Authorization");
+    const resolved = await resolveSessionUser(authorization);
+    const externalUserId = resolved?.user.external_user_id ?? null;
+    if (!resolved || externalUserId == null) return c.json({ error: "Unauthorized" }, 401);
+    let body: { code?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const code = body.code?.trim();
+    if (!code) return c.json({ error: "请授权获取手机号" }, 400);
+    try {
+      const phone = await exchangeWechatPhoneCode(code);
+      const result = await service.tokenhub.bindWechatMiniPhone(externalUserId, phone);
+      const openid = result.wechatMpOpenid || resolved.user.wechat_openid || "";
+      const wechat = openid
+        ? {
+            openid,
+            unionid: result.wechatUnionid || resolved.user.wechat_unionid || undefined,
+            reassign: result.adopted === true,
+          }
+        : undefined;
+      if (result.adopted) {
+        const session = await upsertManagedSession(service, result, wechat);
+        const oldToken = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
+        if (oldToken) await service.sessions.revoke(oldToken).catch(() => {});
+        return c.json({ ok: true, adopted: true, ...session });
+      }
+      try {
+        await service.db.updateUserPhone(resolved.session.userId, result.phone ?? phone);
+      } catch (err) {
+        logger.warn("local phone cache update failed", { route: "wechat-phone-bind", userId: resolved.session.userId, err });
+      }
+      const user = await service.db.getUserById(resolved.session.userId);
+      return c.json({
+        ok: true,
+        adopted: false,
+        user: user ? toPublicUser(user) : toPublicUser(resolved.user),
+      });
+    } catch (err) {
+      logger.warn("wechat-phone-bind failed", { route: "wechat-phone-bind", externalUserId, err });
+      const mapped = contactError(err, "手机号绑定失败，请稍后重试");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
     }
   });
 

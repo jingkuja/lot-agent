@@ -28,6 +28,10 @@ export interface ManagedUserResult {
   phone?: string;
   managedKey: ManagedKeyCredential;
   created: boolean;
+  adopted?: boolean;
+  fromUserId?: number;
+  wechatMpOpenid?: string;
+  wechatUnionid?: string;
 }
 
 export interface ManagedBalanceResult {
@@ -214,6 +218,28 @@ export class TokenhubClient {
       { owner_app: "lot-agent", phone, verification_code: verificationCode },
       "agent:user.authenticate",
       "new_api_managed_phone_auth_failed"
+    );
+    return mapManagedUser(data);
+  }
+
+  async authenticateWechatMiniUser(openid: string, unionid?: string): Promise<ManagedUserResult> {
+    const data = await this.internalRequest<ManagedUserWire>(
+      "POST",
+      "/agent-users/wechat-mini/login",
+      { owner_app: "lot-agent", openid, unionid: unionid ?? "" },
+      "agent:user.authenticate",
+      "new_api_wechat_mini_login_failed"
+    );
+    return mapManagedUser(data);
+  }
+
+  async bindWechatMiniPhone(userId: number, phone: string): Promise<ManagedUserResult> {
+    const data = await this.internalRequest<ManagedUserWire>(
+      "POST",
+      "/agent-users/wechat-mini/bind-phone",
+      { owner_app: "lot-agent", user_id: userId, phone },
+      "agent:user.authenticate",
+      "new_api_wechat_mini_bind_phone_failed"
     );
     return mapManagedUser(data);
   }
@@ -585,6 +611,10 @@ interface ManagedUserWire {
     remain_quota: number;
   };
   created: boolean;
+  adopted?: boolean;
+  from_user_id?: number;
+  wechat_mp_openid?: string;
+  wechat_unionid?: string;
 }
 
 function mapManagedUser(data: ManagedUserWire): ManagedUserResult {
@@ -601,6 +631,10 @@ function mapManagedUser(data: ManagedUserWire): ManagedUserResult {
       remainQuota: data.managed_key.remain_quota,
     },
     created: data.created,
+    adopted: data.adopted === true,
+    fromUserId: typeof data.from_user_id === "number" ? data.from_user_id : undefined,
+    wechatMpOpenid: typeof data.wechat_mp_openid === "string" ? data.wechat_mp_openid.trim() || undefined : undefined,
+    wechatUnionid: typeof data.wechat_unionid === "string" ? data.wechat_unionid.trim() || undefined : undefined,
   };
 }
 

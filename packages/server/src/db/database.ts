@@ -1039,6 +1039,21 @@ export class DB {
     }
   }
 
+  async reassignWechatOpenid(
+    userId: string,
+    openid: string,
+    unionid?: string | null
+  ): Promise<"ok" | "taken" | "conflict"> {
+    await this.pool.query(
+      `UPDATE users
+          SET wechat_openid = NULL,
+              wechat_unionid = NULL
+        WHERE wechat_openid = $1 AND id <> $2`,
+      [openid, userId]
+    );
+    return this.bindUserWechat(userId, openid, unionid);
+  }
+
   async upsertUserByExternalId(args: {
     externalUserId: number;
     username: string;

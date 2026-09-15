@@ -5,7 +5,7 @@ import {
   clearSession,
   getApiBase,
   getToken,
-  isLoginPage,
+  isBootPage,
 } from "./session";
 
 export class ApiError extends Error {
@@ -79,9 +79,15 @@ function request<T>(path: string, init?: { method?: string; data?: unknown }): P
       },
       success(res) {
         if (res.statusCode === 401) {
-          clearSession();
-          if (!isLoginPage() && !getApp().globalData.debug) {
-            wx.reLaunch({ url: "/pages/login/index" });
+          const publicAuth = path.startsWith("/auth/wechat-login")
+            || path.startsWith("/auth/login")
+            || path.startsWith("/auth/phone-login")
+            || path.startsWith("/auth/mode");
+          if (!publicAuth) {
+            clearSession();
+            if (!isBootPage() && !getApp().globalData.debug) {
+              wx.reLaunch({ url: "/pages/boot/index" });
+            }
           }
           reject(new ApiError("请先登录", 401));
           return;
@@ -135,13 +141,16 @@ export const api = {
     }),
 
   wechatLogin: (code: string) =>
-    request<{ token?: string; user?: LotUser; needBind?: boolean; ticket?: string }>(
+    request<{ token?: string; user?: LotUser }>(
       "/auth/wechat-login",
       { method: "POST", data: { code } }
     ),
 
-  wechatBind: (body: { ticket?: string; code?: string }) =>
-    request<{ ok: true }>("/auth/wechat-bind", { method: "POST", data: body }),
+  wechatPhoneBind: (code: string) =>
+    request<{ ok: true; adopted: boolean; token?: string; user: LotUser }>(
+      "/auth/wechat-phone-bind",
+      { method: "POST", data: { code } }
+    ),
 
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
 
@@ -200,7 +209,7 @@ export const api = {
         success(res) {
           if (res.statusCode === 401) {
             clearSession();
-            if (!isLoginPage()) wx.reLaunch({ url: "/pages/login/index" });
+            if (!isBootPage()) wx.reLaunch({ url: "/pages/boot/index" });
             reject(new ApiError("请先登录", 401));
             return;
           }
