@@ -35,6 +35,7 @@ const CONTACT_ERROR_MESSAGES: Record<string, string> = {
   wechat_openid_taken: "该微信已绑定其他账号",
   wechat_openid_empty: "当前账号未绑定微信",
   phone_already_bound: "当前账号已绑定其他手机号",
+  invalid_display_name: "请输入 1 到 20 个字的昵称",
 };
 
 function contactError(err: unknown, fallback: string): { message: string; code?: string } {
@@ -595,6 +596,35 @@ export function createAuthRoutes(service: AgentService): Hono {
       }
     }
     return c.json({ ok: true });
+  });
+
+  // PATCH /profile — authenticated. Updates tokenhub display_name and the local cache.
+  app.patch("/profile", async (c) => {
+    const resolved = await resolveSessionUser(c.req.header("Authorization"));
+    if (!resolved) return c.json({ error: "Unauthorized" }, 401);
+    let body: { displayName?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const displayName = body.displayName?.trim() ?? "";
+    if (!displayName || [...displayName].length > 20) {
+      return c.json({ error: "请输入 1 到 20 个字的昵称", code: "invalid_display_name" }, 400);
+    }
+    const externalUserId = resolved.user.external_user_id ?? null;
+    if (service.managedKeysEnabled && externalUserId != null) {
+      try {
+        await service.tokenhub.updateAgentDisplayName(externalUserId, displayName);
+      } catch (err) {
+        logger.warn("display name update failed", { route: "profile", externalUserId, err });
+        const mapped = contactError(err, "昵称修改失败，请稍后重试");
+        return c.json({ error: mapped.message, code: mapped.code }, 400);
+      }
+    }
+    const user = await service.db.updateUserDisplayName(resolved.session.userId, displayName);
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    return c.json({ ok: true, user: toPublicUser(user) });
   });
 
   // GET /me — requires valid Bearer token

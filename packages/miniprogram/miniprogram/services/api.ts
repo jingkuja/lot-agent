@@ -156,6 +156,12 @@ export const api = {
 
   me: () => request<LotUser>("/auth/me"),
 
+  updateProfile: (displayName: string) =>
+    request<{ ok: true; user: LotUser }>("/auth/profile", {
+      method: "PATCH",
+      data: { displayName },
+    }),
+
   models: () => request<{ llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] }>("/models"),
 
   balance: () => request<{ balance: number; totalUsed?: number }>("/usage/balance"),

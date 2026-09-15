@@ -9,6 +9,9 @@ Page({
     apiBase: "",
     editingServer: false,
     bindingPhone: false,
+    editingName: false,
+    nameDraft: "",
+    savingName: false,
   },
 
   onShow() {
@@ -41,6 +44,43 @@ Page({
 
   goGallery() {
     wx.switchTab({ url: "/pages/gallery/index" });
+  },
+
+  startEditName() {
+    if (!this.data.user || this.data.savingName) return;
+    this.setData({
+      editingName: true,
+      nameDraft: this.data.user.name || this.data.user.username || "",
+    });
+  },
+
+  onNameDraft(e: { detail: { value: string } }) {
+    this.setData({ nameDraft: e.detail.value });
+  },
+
+  async saveName() {
+    if (this.data.savingName) return;
+    const displayName = this.data.nameDraft.trim();
+    if (!displayName || [...displayName].length > 20) {
+      wx.showToast({ title: "请输入 1 到 20 个字", icon: "none" });
+      return;
+    }
+    if (!(await getApp().ensureSession())) return;
+    this.setData({ savingName: true });
+    try {
+      const result = await api.updateProfile(displayName);
+      setSession(getToken(), result.user);
+      this.setData({
+        user: result.user,
+        initial: (result.user.name || result.user.username || "美").slice(0, 1),
+        editingName: false,
+      });
+      wx.showToast({ title: "昵称已更新", icon: "success" });
+    } catch (err) {
+      wx.showToast({ title: err instanceof Error ? err.message : "修改失败", icon: "none" });
+    } finally {
+      this.setData({ savingName: false });
+    }
   },
 
   toggleServer() {

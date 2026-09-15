@@ -1124,6 +1124,14 @@ export class DB {
     return rows[0] ? this.openUserRow(rows[0]) : null;
   }
 
+  async updateUserDisplayName(id: string, name: string): Promise<StoredUser | null> {
+    const { rows } = await this.pool.query(
+      "UPDATE users SET name = $2 WHERE id = $1 RETURNING *",
+      [id, name]
+    );
+    return rows[0] ? this.openUserRow(rows[0]) : null;
+  }
+
   async getUserApiKey(userId: string, managedOnly = false): Promise<string | null> {
     const { rows } = await this.pool.query(
       "SELECT managed_api_key, api_key FROM users WHERE id = $1",

@@ -3,7 +3,22 @@
   <view class="user card">
     <view class="avatar">{{initial}}</view>
     <view class="who">
-      <text class="name">{{user ? (user.name || user.username) : '未登录'}}</text>
+      <view wx:if="{{!editingName}}" class="name-row" bindtap="startEditName">
+        <text class="name">{{user ? (user.name || user.username) : '未登录'}}</text>
+        <text wx:if="{{user}}" class="edit-hint">修改</text>
+      </view>
+      <view wx:else class="name-edit">
+        <input
+          class="name-input"
+          value="{{nameDraft}}"
+          maxlength="20"
+          focus
+          confirm-type="done"
+          bindinput="onNameDraft"
+          bindconfirm="saveName"
+        />
+        <text class="edit-hint" bindtap="saveName">保存</text>
+      </view>
       <text class="muted">{{user.phone || user.username || '欢迎使用'}}</text>
     </view>
     <button

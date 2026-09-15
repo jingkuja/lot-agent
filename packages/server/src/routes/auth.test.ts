@@ -24,12 +24,14 @@ function fakeManagedService() {
       authenticateAgentUserByPhone: vi.fn(),
       authenticateWechatMiniUser: vi.fn(),
       bindWechatMiniPhone: vi.fn(),
+      updateAgentDisplayName: vi.fn(),
       sendAgentPhoneBindingVerification: vi.fn(),
       bindAgentPhone: vi.fn(),
     },
     db: {
       upsertManagedUser: vi.fn(),
       updateUserPhone: vi.fn(),
+      updateUserDisplayName: vi.fn(),
       getUserById: vi.fn().mockResolvedValue({ external_user_id: 7 }),
       bindUserWechat: vi.fn().mockResolvedValue("ok"),
       reassignWechatOpenid: vi.fn().mockResolvedValue("ok"),
@@ -356,6 +358,30 @@ describe("managed contact verification", () => {
     });
     expect(res.status).toBe(401);
     expect(svc.tokenhub.bindAgentPhone).not.toHaveBeenCalled();
+  });
+
+  it("updates tokenhub display_name and the local name cache", async () => {
+    const svc = fakeManagedService();
+    (svc.db.getUserById as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...storedManagedUser,
+      external_user_id: 7,
+    });
+    (svc.tokenhub.updateAgentDisplayName as ReturnType<typeof vi.fn>).mockResolvedValue({
+      userId: 7, username: "alice", displayName: "印社老板",
+    });
+    (svc.db.updateUserDisplayName as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...storedManagedUser,
+      name: "印社老板",
+    });
+    const res = await createAuthRoutes(svc).request("/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
+      body: JSON.stringify({ displayName: "  印社老板  " }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, user: { name: "印社老板" } });
+    expect(svc.tokenhub.updateAgentDisplayName).toHaveBeenCalledWith(7, "印社老板");
+    expect(svc.db.updateUserDisplayName).toHaveBeenCalledWith("u7", "印社老板");
   });
 });
 

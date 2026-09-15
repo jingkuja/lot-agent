@@ -47,9 +47,37 @@
   border: none;
 }
 
+.name-row,
+.name-edit {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
 .name {
+  min-width: 0;
+  overflow: hidden;
   font-size: 38rpx;
   font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name-input {
+  flex: 1;
+  min-width: 0;
+  height: 56rpx;
+  padding: 0 8rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.edit-hint {
+  flex-shrink: 0;
+  color: var(--brand-deep);
+  font-size: 22rpx;
+  font-weight: 600;
 }
 
 .stat {

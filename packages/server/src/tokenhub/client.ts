@@ -233,6 +233,20 @@ export class TokenhubClient {
     return mapManagedUser(data);
   }
 
+  async updateAgentDisplayName(
+    userId: number,
+    displayName: string
+  ): Promise<{ userId: number; username: string; displayName: string }> {
+    const data = await this.internalRequest<{ user_id: number; username: string; display_name: string }>(
+      "POST",
+      "/agent-users/display-name",
+      { owner_app: "lot-agent", user_id: userId, display_name: displayName },
+      "agent:user.authenticate",
+      "new_api_update_display_name_failed"
+    );
+    return { userId: data.user_id, username: data.username, displayName: data.display_name };
+  }
+
   async bindWechatMiniPhone(userId: number, phone: string): Promise<ManagedUserResult> {
     const data = await this.internalRequest<ManagedUserWire>(
       "POST",

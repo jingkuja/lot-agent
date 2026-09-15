@@ -2,7 +2,7 @@
   "miniprogramRoot": "miniprogram/",
   "projectname": "lot-agent-miniprogram",
   "description": "LOT 印社 — Lot Agent 图片生成小程序",
-  "appid": "wxc2f217b8f5759723",
+  "appid": "wxa652cfc194bdf1ea",
   "compileType": "miniprogram",
   "libVersion": "3.5.8",
   "packOptions": {
@@ -47,5 +47,6 @@
   },
   "simulatorPluginLibVersion": {},
   "condition": {},
-  "editorSetting": {}
+  "editorSetting": {},
+  "isGameTourist": false
 }

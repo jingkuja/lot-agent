@@ -199,6 +199,33 @@ describe("TokenhubClient", () => {
     expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-users/wechat-mini/bind-phone");
   });
 
+  it("updates a managed user's display name through the signed control plane", async () => {
+    const f = vi.fn().mockResolvedValue(ok({
+      user_id: 7,
+      username: "alice",
+      display_name: "印社老板",
+    }));
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.updateAgentDisplayName(7, "印社老板")).resolves.toEqual({
+      userId: 7,
+      username: "alice",
+      displayName: "印社老板",
+    });
+    expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-users/display-name");
+    expect(JSON.parse(String((f.mock.calls[0][1] as RequestInit).body))).toMatchObject({
+      owner_app: "lot-agent",
+      user_id: 7,
+      display_name: "印社老板",
+    });
+  });
+
   it("sends and confirms a phone binding for the authenticated managed user", async () => {
     const f = vi.fn()
       .mockResolvedValueOnce(ok({ expires_in: 600, resend_after: 60 }))
