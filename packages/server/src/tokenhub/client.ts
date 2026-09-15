@@ -55,9 +55,18 @@ export interface ManagedRechargeOrder {
   currency?: string;
   orderSource?: string;
   paymentMethod?: string;
-  paymentKind?: "qrcode" | "redirect";
+  paymentKind?: "qrcode" | "redirect" | "miniprogram";
   codeUrl?: string;
   payUrl?: string;
+  /** wx.requestPayment parameters, present when paymentKind === "miniprogram". */
+  miniprogramPay?: {
+    appId: string;
+    timeStamp: string;
+    nonceStr: string;
+    package: string;
+    signType: string;
+    paySign: string;
+  };
 }
 
 export interface ManagedRechargeInfo {
@@ -420,6 +429,8 @@ export class TokenhubClient {
     userId: number;
     points: number;
     paymentMethod: string;
+    client?: string;
+    openid?: string;
   }): Promise<ManagedRechargeOrder> {
     const data = await this.internalRequest<{
       transaction_id: string;
@@ -432,6 +443,12 @@ export class TokenhubClient {
       payment_kind?: string;
       code_url?: string;
       pay_url?: string;
+      appId?: string;
+      timeStamp?: string;
+      nonceStr?: string;
+      package?: string;
+      signType?: string;
+      paySign?: string;
     }>(
       "POST",
       "/agent-managed-recharge/orders",
@@ -440,6 +457,8 @@ export class TokenhubClient {
         user_id: args.userId,
         points: args.points,
         payment_method: args.paymentMethod,
+        ...(args.client ? { client: args.client } : {}),
+        ...(args.openid ? { openid: args.openid } : {}),
       },
       "agent:recharge.create",
       "new_api_managed_recharge_create_failed"
@@ -730,8 +749,17 @@ function mapManagedRechargeOrder(data: {
   payment_kind?: string;
   code_url?: string;
   pay_url?: string;
+  appId?: string;
+  timeStamp?: string;
+  nonceStr?: string;
+  package?: string;
+  signType?: string;
+  paySign?: string;
 }): ManagedRechargeOrder {
-  return {
+  const paymentKind = data.payment_kind === "qrcode" || data.payment_kind === "redirect" || data.payment_kind === "miniprogram"
+    ? data.payment_kind
+    : undefined;
+  const order: ManagedRechargeOrder = {
     transactionId: data.transaction_id,
     status: data.status === "success"
       ? "credited"
@@ -742,10 +770,21 @@ function mapManagedRechargeOrder(data: {
     currency: data.currency,
     orderSource: data.order_source,
     paymentMethod: data.payment_method,
-    paymentKind: data.payment_kind === "qrcode" || data.payment_kind === "redirect" ? data.payment_kind : undefined,
+    paymentKind,
     codeUrl: data.code_url,
     payUrl: data.pay_url,
   };
+  if (paymentKind === "miniprogram") {
+    order.miniprogramPay = {
+      appId: data.appId ?? "",
+      timeStamp: data.timeStamp ?? "",
+      nonceStr: data.nonceStr ?? "",
+      package: data.package ?? "",
+      signType: data.signType ?? "",
+      paySign: data.paySign ?? "",
+    };
+  }
+  return order;
 }
 
 function unixSecondsToIso(value: number): string {

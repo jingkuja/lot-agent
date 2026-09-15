@@ -6,7 +6,8 @@
     "pages/gallery/index",
     "pages/mine/index",
     "pages/edit/index",
-    "pages/preview/index"
+    "pages/preview/index",
+    "pages/recharge/index"
   ],
   "window": {
     "navigationBarTitleText": "美图海报",

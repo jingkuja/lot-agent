@@ -1,0 +1,45 @@
+<view class="page recharge">
+  <!-- 余额卡 -->
+  <view class="bal card">
+    <view class="bal-l">
+      <text class="bal-label">当前余额</text>
+      <text class="bal-value">{{balanceText}}</text>
+      <text class="muted">与网页端、桌面端同一账户</text>
+    </view>
+    <text class="bal-emoji">💎</text>
+  </view>
+
+  <!-- 面额选择 -->
+  <view class="sect">
+    <text class="sect-title">选择充值面额</text>
+    <view class="grid">
+      <view
+        wx:for="{{tiers}}"
+        wx:key="points"
+        class="tier {{selected === item.points ? 'tier-on' : ''}}"
+        bindtap="selectTier"
+        data-points="{{item.points}}"
+      >
+        <text class="tier-points">{{item.points}}</text>
+        <text class="tier-label">积分</text>
+        <text class="tier-price">¥{{item.priceText}}</text>
+        <text wx:if="{{item.discountText}}" class="tier-discount">{{item.discountText}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 说明 -->
+  <view class="note card">
+    <text class="note-line">· 充值到账为积分，1 元 = 100 积分</text>
+    <text class="note-line">· 支付通过微信完成，到账后自动入账</text>
+    <text class="note-line">· 积分与网页端、桌面端通用</text>
+  </view>
+
+  <!-- 支付按钮 -->
+  <button
+    class="pay-btn"
+    bindtap="pay"
+    loading="{{paying}}"
+    disabled="{{paying || !selected}}"
+  >{{paying ? '正在调起支付…' : '微信支付 ¥' + currentPriceText}}</button>
+</view>

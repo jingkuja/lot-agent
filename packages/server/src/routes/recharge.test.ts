@@ -2,6 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { createRechargeRoutes } from "./recharge.js";
 import type { AgentService } from "../services/agent-service.js";
+import { exchangeWechatCode, wechatConfigured } from "../auth/wechat.js";
+
+vi.mock("../auth/wechat.js", () => ({
+  exchangeWechatCode: vi.fn(),
+  wechatConfigured: vi.fn(),
+}));
+
+const mockedExchange = vi.mocked(exchangeWechatCode);
+const mockedConfigured = vi.mocked(wechatConfigured);
 
 function mount() {
   const service = {
@@ -61,15 +70,32 @@ describe("managed recharge routes", () => {
     });
   });
 
-  it("rejects points that cannot map to a whole-yuan payment", async () => {
+  it("rejects non-integer or out-of-range points", async () => {
+    const { app, service } = mount();
+    for (const points of [0, -100, 1.5, 10_000_001]) {
+      const response = await app.request("/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ points, paymentMethod: "alipay" }),
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(service.tokenhub.createManagedRechargeOrder).not.toHaveBeenCalled();
+  });
+
+  it("accepts a single point for smoke-test payments", async () => {
     const { app, service } = mount();
     const response = await app.request("/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ points: 150, paymentMethod: "alipay" }),
+      body: JSON.stringify({ points: 1, paymentMethod: "alipay" }),
     });
-    expect(response.status).toBe(400);
-    expect(service.tokenhub.createManagedRechargeOrder).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(service.tokenhub.createManagedRechargeOrder).toHaveBeenCalledWith({
+      userId: 7,
+      points: 1,
+      paymentMethod: "alipay",
+    });
   });
 
   it("requires an explicit payment method", async () => {
@@ -113,5 +139,49 @@ describe("managed recharge routes", () => {
       pageSize: 20,
       total: 21,
     });
+  });
+
+  it("creates a miniprogram order by exchanging wxCode for the payer openid", async () => {
+    mockedConfigured.mockReturnValue(true);
+    mockedExchange.mockResolvedValue({ openid: "oMiniUser123" });
+    const { app, service } = mount();
+    const response = await app.request("/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ points: 1_000, paymentMethod: "wxpay", client: "miniprogram", wxCode: "wxcode-1" }),
+    });
+    expect(response.status).toBe(200);
+    expect(mockedExchange).toHaveBeenCalledWith("wxcode-1");
+    expect(service.tokenhub.createManagedRechargeOrder).toHaveBeenCalledWith({
+      userId: 7,
+      points: 1_000,
+      paymentMethod: "wxpay",
+      client: "miniprogram",
+      openid: "oMiniUser123",
+    });
+  });
+
+  it("rejects miniprogram orders without a wxCode", async () => {
+    mockedConfigured.mockReturnValue(true);
+    const { app, service } = mount();
+    const response = await app.request("/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ points: 1_000, paymentMethod: "wxpay", client: "miniprogram" }),
+    });
+    expect(response.status).toBe(400);
+    expect(service.tokenhub.createManagedRechargeOrder).not.toHaveBeenCalled();
+  });
+
+  it("rejects miniprogram orders that do not use wxpay", async () => {
+    mockedConfigured.mockReturnValue(true);
+    const { app, service } = mount();
+    const response = await app.request("/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ points: 1_000, paymentMethod: "alipay", client: "miniprogram", wxCode: "wxcode-1" }),
+    });
+    expect(response.status).toBe(400);
+    expect(service.tokenhub.createManagedRechargeOrder).not.toHaveBeenCalled();
   });
 });

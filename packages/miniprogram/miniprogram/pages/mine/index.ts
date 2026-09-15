@@ -43,6 +43,10 @@ Page({
     wx.switchTab({ url: "/pages/gallery/index" });
   },
 
+  goRecharge() {
+    wx.navigateTo({ url: "/pages/recharge/index" });
+  },
+
   startEditName() {
     if (!this.data.user || this.data.savingName) return;
     this.setData({

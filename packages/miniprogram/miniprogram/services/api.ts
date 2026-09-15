@@ -60,6 +60,23 @@ export interface GenerationResult {
   title?: string;
 }
 
+export interface RechargeOrder {
+  transactionId: string;
+  status: "pending" | "payment_failed" | "credited";
+  amount?: number;
+  points?: number;
+  paymentMethod?: string;
+  paymentKind?: "qrcode" | "redirect" | "miniprogram";
+  miniprogramPay?: {
+    appId: string;
+    timeStamp: string;
+    nonceStr: string;
+    package: string;
+    signType: string;
+    paySign: string;
+  };
+}
+
 function authHeader(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -185,6 +202,27 @@ export const api = {
   models: () => request<{ llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] }>("/models"),
 
   balance: () => request<{ balance: number; totalUsed?: number }>("/usage/balance"),
+
+  rechargeInfo: () =>
+    request<{
+      enabled: boolean;
+      paymentMethods: Array<{ name: string; type: string }>;
+      amountDiscount: Record<string, number>;
+    }>("/recharge/info"),
+
+  createRechargeOrder: (body: {
+    points: number;
+    paymentMethod: "wxpay";
+    client: "miniprogram";
+    wxCode: string;
+  }) =>
+    request<RechargeOrder>("/recharge/orders", {
+      method: "POST",
+      data: body,
+    }),
+
+  getRechargeOrder: (transactionId: string) =>
+    request<RechargeOrder>(`/recharge/orders/${encodeURIComponent(transactionId)}`),
 
   createConversation: (title?: string) =>
     request<Conversation>("/conversations", {

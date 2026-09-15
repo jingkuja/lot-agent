@@ -59,6 +59,15 @@ declare const wx: {
     success?: (res: { statusCode: number; data: string }) => void;
     fail?: (err: WxGeneralCallbackResult) => void;
   }): void;
+  requestPayment(opts: {
+    timeStamp: string;
+    nonceStr: string;
+    package: string;
+    signType?: "MD5" | "HMAC-SHA256" | "RSA";
+    paySign: string;
+    success?: (res: WxGeneralCallbackResult) => void;
+    fail?: (err: WxGeneralCallbackResult) => void;
+  }): void;
   downloadFile(opts: {
     url: string;
     header?: Record<string, string>;

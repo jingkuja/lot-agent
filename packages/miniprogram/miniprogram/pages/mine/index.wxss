@@ -90,8 +90,27 @@
 
 .stat-l {
   display: flex;
+  flex: 1;
+  min-width: 0;
   flex-direction: column;
   gap: 6rpx;
+}
+
+.recharge-btn {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 32rpx;
+  min-height: 64rpx;
+  line-height: 64rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+  color: #fff;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.recharge-btn::after {
+  border: none;
 }
 
 .stat-label {
@@ -107,6 +126,7 @@
 }
 
 .stat-emoji {
+  margin-left: 16rpx;
   font-size: 84rpx;
 }
 

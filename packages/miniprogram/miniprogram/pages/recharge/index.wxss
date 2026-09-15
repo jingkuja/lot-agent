@@ -1,0 +1,139 @@
+.recharge {
+  padding: 24rpx;
+  padding-bottom: 60rpx;
+}
+
+/* ---------- 余额卡 ---------- */
+.bal {
+  display: flex;
+  align-items: center;
+  gap: 22rpx;
+  padding: 36rpx 32rpx;
+}
+
+.bal-l {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.bal-label {
+  color: var(--muted);
+  font-size: 24rpx;
+}
+
+.bal-value {
+  font-size: 56rpx;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.bal-emoji {
+  font-size: 72rpx;
+}
+
+/* ---------- 区块标题 ---------- */
+.sect {
+  margin-top: 36rpx;
+}
+
+.sect-title {
+  display: block;
+  margin-bottom: 20rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+/* ---------- 面额网格 ---------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20rpx;
+}
+
+.tier {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+  padding: 28rpx 12rpx 24rpx;
+  border-radius: var(--radius);
+  background: var(--card);
+  border: 2rpx solid var(--line);
+  box-sizing: border-box;
+}
+
+.tier-on {
+  border-color: var(--brand-deep);
+  background: var(--brand-soft);
+}
+
+.tier-points {
+  font-size: 38rpx;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.tier-label {
+  font-size: 20rpx;
+  color: var(--muted);
+}
+
+.tier-price {
+  margin-top: 6rpx;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--brand-deep);
+}
+
+.tier-discount {
+  position: absolute;
+  top: -14rpx;
+  right: 10rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+  color: #fff;
+  font-size: 18rpx;
+  font-weight: 700;
+}
+
+/* ---------- 说明卡 ---------- */
+.note {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  margin-top: 36rpx;
+  padding: 28rpx 32rpx;
+}
+
+.note-line {
+  color: var(--muted);
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+/* ---------- 支付按钮 ---------- */
+.pay-btn {
+  margin-top: 48rpx;
+  height: 96rpx;
+  line-height: 96rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+  color: #fff;
+  font-size: 32rpx;
+  font-weight: 700;
+  box-shadow: var(--shadow);
+}
+
+.pay-btn::after {
+  border: none;
+}
+
+.pay-btn[disabled] {
+  opacity: 0.6;
+}

@@ -37,6 +37,7 @@
       <text class="points">{{balanceText}}</text>
       <text class="muted">与网页端、桌面端同一账户</text>
     </view>
+    <button class="recharge-btn" bindtap="goRecharge">充值</button>
     <text class="stat-emoji">💎</text>
   </view>
 
