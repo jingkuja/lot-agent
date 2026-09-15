@@ -1,13 +1,11 @@
 import { api } from "../../services/api";
-import { getApiBase, getToken, getUser, setApiBase, setSession, clearSession } from "../../services/session";
+import { getToken, getUser, setSession } from "../../services/session";
 
 Page({
   data: {
     user: null as LotUser | null,
     initial: "美",
     balanceText: "—",
-    apiBase: "",
-    editingServer: false,
     bindingPhone: false,
     editingName: false,
     nameDraft: "",
@@ -18,7 +16,6 @@ Page({
     this.setData({
       user: getUser(),
       initial: (getUser()?.name || getUser()?.username || "美").slice(0, 1),
-      apiBase: getApiBase(),
     });
     void this.loadBalance();
   },
@@ -83,25 +80,6 @@ Page({
     }
   },
 
-  toggleServer() {
-    this.setData({ editingServer: !this.data.editingServer });
-  },
-
-  onServer(e: { detail: { value: string } }) {
-    this.setData({ apiBase: e.detail.value });
-  },
-
-  saveServer() {
-    const url = this.data.apiBase.trim().replace(/\/+$/, "");
-    if (!/^https?:\/\//.test(url)) {
-      wx.showToast({ title: "需要 http(s) 地址", icon: "none" });
-      return;
-    }
-    setApiBase(url);
-    this.setData({ editingServer: false });
-    wx.showToast({ title: "已保存", icon: "success" });
-  },
-
   async onGetPhoneNumber(e: { detail: { code?: string; errMsg?: string } }) {
     if (this.data.bindingPhone) return;
     if (!e.detail.code) {
@@ -131,15 +109,5 @@ Page({
     } finally {
       this.setData({ bindingPhone: false });
     }
-  },
-
-  async logout() {
-    try {
-      await api.logout();
-    } catch {
-      // 本地仍会清理
-    }
-    clearSession();
-    wx.reLaunch({ url: "/pages/boot/index" });
   },
 });

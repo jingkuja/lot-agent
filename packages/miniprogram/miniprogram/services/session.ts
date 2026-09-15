@@ -1,8 +1,5 @@
-import { DEFAULT_API_BASE } from "./config";
-
 const TOKEN_KEY = "lot:token";
 const USER_KEY = "lot:user";
-const BASE_KEY = "lot:apiBase";
 const CONV_KEY = "lot:studioConversationId";
 
 export interface SessionUser {
@@ -33,15 +30,6 @@ export function clearSession(): void {
   wx.removeStorageSync(CONV_KEY);
   const app = getApp();
   app.globalData.user = null;
-}
-
-export function getApiBase(): string {
-  const stored = String(wx.getStorageSync(BASE_KEY) || "").trim();
-  return stored || DEFAULT_API_BASE;
-}
-
-export function setApiBase(url: string): void {
-  wx.setStorageSync(BASE_KEY, url.replace(/\/+$/, ""));
 }
 
 export function getStudioConversationId(): string {

@@ -144,13 +144,3 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.server-edit {
-  margin-top: 20rpx;
-  gap: 16rpx;
-}
-
-.logout {
-  width: 100%;
-  margin-top: 40rpx;
-}

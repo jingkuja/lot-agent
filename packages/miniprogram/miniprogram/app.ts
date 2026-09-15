@@ -47,7 +47,7 @@ App({
         this.enterStudio();
       }
     } catch {
-      // Boot page shows retry + server URL.
+      // Boot page shows retry.
     }
   },
 

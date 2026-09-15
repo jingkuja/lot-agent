@@ -7,10 +7,4 @@
 
   <text wx:if="{{error}}" class="err">{{error}}</text>
   <button class="btn btn-primary enter" loading="{{loading}}" bindtap="retry">重新连接</button>
-
-  <view class="server muted" bindtap="toggleServer">服务器 {{apiBase}}</view>
-  <view wx:if="{{showServer}}" class="field server-edit">
-    <input class="input" data-key="apiBase" value="{{apiBase}}" bindinput="onField" />
-    <button class="btn btn-ghost" bindtap="saveServer">保存地址</button>
-  </view>
 </view>

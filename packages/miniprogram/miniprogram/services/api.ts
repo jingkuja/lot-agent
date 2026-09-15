@@ -1,9 +1,8 @@
 import { encryptPassword } from "../lib/rsa-oaep";
 import { joinUrl, mediaUrl } from "../lib/url";
-import { IMAGE_AGENT_ID } from "./config";
+import { API_BASE, IMAGE_AGENT_ID } from "./config";
 import {
   clearSession,
-  getApiBase,
   getToken,
   isBootPage,
 } from "./session";
@@ -69,7 +68,7 @@ function authHeader(): Record<string, string> {
 function request<T>(path: string, init?: { method?: string; data?: unknown }): Promise<T> {
   return new Promise((resolve, reject) => {
     wx.request({
-      url: joinUrl(getApiBase(), `/api${path}`),
+      url: joinUrl(API_BASE, `/api${path}`),
       method: init?.method ?? "GET",
       data: init?.data,
       header: {
@@ -208,7 +207,7 @@ export const api = {
   uploadLocalImage(filePath: string): Promise<{ url: string; assetId: string }> {
     return new Promise((resolve, reject) => {
       wx.uploadFile({
-        url: joinUrl(getApiBase(), "/api/uploads"),
+        url: joinUrl(API_BASE, "/api/uploads"),
         filePath,
         name: "file",
         header: { "X-Lot-Client": "miniprogram", ...authHeader() },
@@ -241,5 +240,5 @@ export const api = {
 };
 
 export function absoluteMedia(path: string | undefined | null): string {
-  return mediaUrl(getApiBase(), path);
+  return mediaUrl(API_BASE, path);
 }

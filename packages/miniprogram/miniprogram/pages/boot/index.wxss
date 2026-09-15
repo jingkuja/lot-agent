@@ -39,14 +39,3 @@
   width: 100%;
   margin-top: 36rpx;
 }
-
-.server {
-  margin-top: 48rpx;
-  font-size: 20rpx;
-  text-align: center;
-}
-
-.server-edit {
-  margin-top: 20rpx;
-  gap: 16rpx;
-}

@@ -17,9 +17,11 @@ Lot Agent server  /api  /static
     图片 Agent 会话 + BullMQ image.generate + 同一套额度
 ```
 
+- 服务端地址写死在 `miniprogram/services/config.ts` 的 `API_BASE`，必须和服务端环境变量
+  `PUBLIC_BASE_URL` 一致；小程序**没有**运行时改地址的入口（正式版受微信合法域名限制，改了也发不出去）。
 - 合法域名（正式版）：request / uploadFile / downloadFile 都要配服务器主机名。
-- 开发版：微信开发者工具可勾选「不校验合法域名」，服务器地址在连接页或「我的」里改。
-- 相对路径 `/static/...` 会拼到当前配置的 API 根地址。
+- 本地联调：在微信开发者工具里勾选「不校验合法域名」，并把 `API_BASE` 临时指向本机。
+- 相对路径 `/static/...` 会拼到 `API_BASE` 上。
 
 ## 功能
 
@@ -28,7 +30,7 @@ Lot Agent server  /api  /static
 | 印台（生图） | 画布 + 底部发稿条。比例 / 清晰度 / 模型，可选参考图。生成按钮是圆形「印」 |
 | 样张（海报） | 营销海报模板，填主题后把稿送到印台 |
 | 印稿（相册） | `GET /conversations?agentId=image&includePreview=1` |
-| 账房（我的） | 同一账户额度、绑定手机号、服务器地址、重新连接 |
+| 账房（我的） | 同一账户额度、绑定手机号、修改昵称、退出登录 |
 | 修图 | 先选照片再改；也可把参考图丢回印台 |
 
 微信静默登录：配置 `WECHAT_MP_APPID` + `WECHAT_MP_SECRET` 后，启动时 `wx.login`
@@ -44,7 +46,8 @@ Web 微信扫码登录继续用原来的 `wechat_id`，两套身份互不覆盖�
 1. 本机先起 Lot Agent 服务端（`npm run dev:server` 等）。
 2. 用[微信开发者工具](https://developers.weixin.qq.com/miniprogram/dev/devtools/download.html)
    打开目录 `packages/miniprogram`（`miniprogramRoot` 已指向 `miniprogram/`）。
-3. 启动失败时可在连接页或「我的」把服务器改成 `http://127.0.0.1:3000`（或你的盒子地址），勾选不校验域名。
+3. 连不上服务器时，先把 `miniprogram/services/config.ts` 的 `API_BASE` 改成
+   `http://127.0.0.1:3000`（或你的盒子地址），并勾选不校验域名。
 4. `DEBUG=1` 时服务端跳过登录，小程序也会直接进印台。
 
 ```bash
