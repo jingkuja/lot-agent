@@ -21,6 +21,7 @@ import type { Retriever } from "../retrieval/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 import { isMalformedToolCallError } from "../llm/retry.js";
+import { formatLLMError } from "../llm/errors.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
@@ -427,7 +428,7 @@ export class Agent {
             type: "error",
             message: isMalformedToolCallError(streamError)
               ? MALFORMED_FALLBACK_MESSAGE
-              : `LLM error: ${streamError instanceof Error ? streamError.message : String(streamError)}`,
+              : formatLLMError(streamError),
           };
           yield done();
           return;
