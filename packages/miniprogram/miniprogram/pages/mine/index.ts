@@ -90,15 +90,18 @@ Page({
     this.setData({ bindingPhone: true });
     try {
       const result = await api.wechatPhoneBind(e.detail.code);
-      if (result.token && result.user) {
-        setSession(result.token, result.user);
-      } else if (result.user) {
-        setSession(getToken(), result.user);
+      if (result.needConfirm && result.ticket && result.merge) {
+        this.setData({ bindingPhone: false });
+        const confirmed = await confirmPhoneMerge(result.merge);
+        if (!confirmed) return;
+        this.setData({ bindingPhone: true });
+        const merged = await api.wechatPhoneMerge(result.ticket);
+        this.applyBoundUser(merged.token, merged.user);
+        wx.showToast({ title: "已合并到该手机号账号", icon: "success" });
+        void this.loadBalance();
+        return;
       }
-      this.setData({
-        user: getUser(),
-        initial: (getUser()?.name || getUser()?.username || "美").slice(0, 1),
-      });
+      this.applyBoundUser(result.token, result.user);
       wx.showToast({
         title: result.adopted ? "已切换到该手机号账号" : "手机号已绑定",
         icon: "success",
@@ -110,4 +113,46 @@ Page({
       this.setData({ bindingPhone: false });
     }
   },
+
+  applyBoundUser(token: string | undefined, user: LotUser | undefined) {
+    if (token && user) setSession(token, user);
+    else if (user) setSession(getToken(), user);
+    this.setData({
+      user: getUser(),
+      initial: (getUser()?.name || getUser()?.username || "美").slice(0, 1),
+    });
+  },
 });
+
+function formatAmount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  return value.toFixed(2).replace(/\.?0+$/, "") || "0";
+}
+
+function confirmPhoneMerge(merge: {
+  targetName: string;
+  quotaAmount: number;
+  managedRemainAmount: number;
+  conversations: number;
+  assets: number;
+  tasks: number;
+}): Promise<boolean> {
+  const lines = [
+    `该手机号已是账号「${merge.targetName || "已有用户"}」。`,
+    "确认后将转入：",
+    `· 托管额度 ${formatAmount(merge.managedRemainAmount)}`,
+    `· 账户积分 ${formatAmount(merge.quotaAmount)}`,
+    `· 对话 ${merge.conversations} 条`,
+    `· 作品 ${merge.assets} 个`,
+    "当前小程序账号将注销。",
+  ];
+  return new Promise((resolve) => {
+    wx.showModal({
+      title: "合并到已有账号",
+      content: lines.join("\n"),
+      confirmText: "确认合并",
+      cancelText: "取消",
+      success: (res) => resolve(res.confirm === true),
+    });
+  });
+}

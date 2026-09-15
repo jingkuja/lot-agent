@@ -56,6 +56,36 @@ export function consumeWechatTicket(id: string): WechatSession | null {
   return row.value;
 }
 
+export interface PhoneMergeTicket {
+  phone: string;
+  fromExternalUserId: number;
+  fromLocalUserId: string;
+}
+
+const phoneMergeTickets = new Map<string, { value: PhoneMergeTicket; expiresAt: number }>();
+
+export function issuePhoneMergeTicket(ticket: PhoneMergeTicket): string {
+  const id = randomUUID();
+  phoneMergeTickets.set(id, { value: ticket, expiresAt: Date.now() + TICKET_TTL_MS });
+  return id;
+}
+
+export function peekPhoneMergeTicket(id: string): PhoneMergeTicket | null {
+  const row = phoneMergeTickets.get(id);
+  if (!row || row.expiresAt < Date.now()) {
+    if (row) phoneMergeTickets.delete(id);
+    return null;
+  }
+  return row.value;
+}
+
+export function consumePhoneMergeTicket(id: string): PhoneMergeTicket | null {
+  const value = peekPhoneMergeTicket(id);
+  if (!value) return null;
+  phoneMergeTickets.delete(id);
+  return value;
+}
+
 let cachedAccessToken: { token: string; expiresAt: number } | null = null;
 
 export function clearWechatAccessTokenCache(): void {

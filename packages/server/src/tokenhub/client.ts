@@ -89,9 +89,33 @@ interface Envelope<T> {
 }
 
 export class TokenhubClientError extends Error {
-  constructor(message: string, readonly code?: string) {
+  constructor(message: string, readonly code?: string, readonly data?: unknown) {
     super(message);
     this.name = "TokenhubClientError";
+  }
+}
+
+export interface WeChatMiniAccountSnapshot {
+  userId: number;
+  username: string;
+  displayName: string;
+  quota: number;
+  quotaAmount: number;
+  managedRemainQuota: number;
+  managedRemainAmount: number;
+}
+
+export interface WeChatMiniMergePreview {
+  needsConfirm: boolean;
+  phone: string;
+  from: WeChatMiniAccountSnapshot;
+  to: WeChatMiniAccountSnapshot;
+}
+
+export class TokenhubMergeRequiredError extends TokenhubClientError {
+  constructor(readonly preview: WeChatMiniMergePreview) {
+    super("merge_required", "merge_required", preview);
+    this.name = "TokenhubMergeRequiredError";
   }
 }
 
@@ -248,12 +272,29 @@ export class TokenhubClient {
   }
 
   async bindWechatMiniPhone(userId: number, phone: string): Promise<ManagedUserResult> {
+    try {
+      const data = await this.internalRequest<ManagedUserWire>(
+        "POST",
+        "/agent-users/wechat-mini/bind-phone",
+        { owner_app: "lot-agent", user_id: userId, phone },
+        "agent:user.authenticate",
+        "new_api_wechat_mini_bind_phone_failed"
+      );
+      return mapManagedUser(data);
+    } catch (err) {
+      const preview = mergePreviewFromError(err);
+      if (preview) throw new TokenhubMergeRequiredError(preview);
+      throw err;
+    }
+  }
+
+  async mergeWechatMiniPhone(userId: number, phone: string): Promise<ManagedUserResult> {
     const data = await this.internalRequest<ManagedUserWire>(
       "POST",
-      "/agent-users/wechat-mini/bind-phone",
+      "/agent-users/wechat-mini/merge-phone",
       { owner_app: "lot-agent", user_id: userId, phone },
       "agent:user.authenticate",
-      "new_api_wechat_mini_bind_phone_failed"
+      "new_api_wechat_mini_merge_phone_failed"
     );
     return mapManagedUser(data);
   }
@@ -606,7 +647,7 @@ export class TokenhubClient {
         status: res.status,
         message: env?.message,
       });
-      throw new TokenhubClientError(errCode, env?.code);
+      throw new TokenhubClientError(errCode, env?.code, env?.data);
     }
     return env.data;
   }
@@ -629,6 +670,31 @@ interface ManagedUserWire {
   from_user_id?: number;
   wechat_mp_openid?: string;
   wechat_unionid?: string;
+}
+
+function mapAccountSnapshot(raw: Record<string, unknown> | undefined): WeChatMiniAccountSnapshot {
+  return {
+    userId: Number(raw?.user_id ?? 0),
+    username: typeof raw?.username === "string" ? raw.username : "",
+    displayName: typeof raw?.display_name === "string" ? raw.display_name : "",
+    quota: Number(raw?.quota ?? 0),
+    quotaAmount: Number(raw?.quota_amount ?? 0),
+    managedRemainQuota: Number(raw?.managed_remain_quota ?? 0),
+    managedRemainAmount: Number(raw?.managed_remain_amount ?? 0),
+  };
+}
+
+function mergePreviewFromError(err: unknown): WeChatMiniMergePreview | null {
+  if (!(err instanceof TokenhubClientError) || err.code !== "merge_required" || !err.data || typeof err.data !== "object") {
+    return null;
+  }
+  const raw = err.data as Record<string, unknown>;
+  return {
+    needsConfirm: true,
+    phone: typeof raw.phone === "string" ? raw.phone : "",
+    from: mapAccountSnapshot(raw.from as Record<string, unknown> | undefined),
+    to: mapAccountSnapshot(raw.to as Record<string, unknown> | undefined),
+  };
 }
 
 function mapManagedUser(data: ManagedUserWire): ManagedUserResult {

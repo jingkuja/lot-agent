@@ -1132,6 +1132,71 @@ export class DB {
     return rows[0] ? this.openUserRow(rows[0]) : null;
   }
 
+  async getUserByExternalId(externalUserId: number): Promise<StoredUser | null> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM users WHERE external_user_id = $1",
+      [externalUserId]
+    );
+    return rows[0] ? this.openUserRow(rows[0]) : null;
+  }
+
+  async countUserOwnedRecords(userId: string): Promise<{ conversations: number; assets: number; tasks: number }> {
+    const { rows } = await this.pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM conversations WHERE user_id = $1) AS conversations,
+         (SELECT COUNT(*)::int FROM assets WHERE user_id = $1) AS assets,
+         (SELECT COUNT(*)::int FROM tasks WHERE user_id = $1) AS tasks`,
+      [userId]
+    );
+    return {
+      conversations: Number(rows[0]?.conversations ?? 0),
+      assets: Number(rows[0]?.assets ?? 0),
+      tasks: Number(rows[0]?.tasks ?? 0),
+    };
+  }
+
+  async reassignUserOwnedData(fromUserId: string, toUserId: string): Promise<void> {
+    if (!fromUserId || !toUserId || fromUserId === toUserId) return;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO user_balance (user_id, balance, daily_limit, monthly_limit)
+         SELECT $1, balance, daily_limit, monthly_limit FROM user_balance WHERE user_id = $2
+         ON CONFLICT (user_id) DO UPDATE SET
+           balance = user_balance.balance + EXCLUDED.balance,
+           updated_at = now()`,
+        [toUserId, fromUserId]
+      );
+      await client.query("DELETE FROM user_balance WHERE user_id = $1", [fromUserId]);
+      const { rows } = await client.query<{ table_name: string; column_name: string }>(
+        `SELECT c.table_name, c.column_name
+           FROM information_schema.columns c
+           JOIN information_schema.tables t
+             ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+          WHERE c.table_schema = 'public'
+            AND t.table_type = 'BASE TABLE'
+            AND c.column_name IN ('user_id', 'owner_user_id')
+            AND c.table_name NOT IN ('users', 'sessions', 'schema_migrations', 'user_balance')`
+      );
+      for (const row of rows) {
+        await reassignUserColumn(client, row.table_name, row.column_name, fromUserId, toUserId);
+      }
+      await client.query("DELETE FROM sessions WHERE user_id = $1", [fromUserId]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteLocalUser(userId: string): Promise<void> {
+    await this.pool.query("DELETE FROM sessions WHERE user_id = $1", [userId]);
+    await this.pool.query("DELETE FROM users WHERE id = $1", [userId]);
+  }
+
   async getUserApiKey(userId: string, managedOnly = false): Promise<string | null> {
     const { rows } = await this.pool.query(
       "SELECT managed_api_key, api_key FROM users WHERE id = $1",
@@ -1607,5 +1672,46 @@ export class DB {
        WHERE id = $2 AND status IN ('pending','running')`,
       [error, id]
     );
+  }
+}
+
+function quoteIdent(name: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/.test(name)) {
+    throw new Error(`unsafe sql identifier: ${name}`);
+  }
+  return `"${name}"`;
+}
+
+async function reassignUserColumn(
+  client: pg.PoolClient,
+  table: string,
+  column: string,
+  fromUserId: string,
+  toUserId: string
+): Promise<void> {
+  const tableIdent = quoteIdent(table);
+  const columnIdent = quoteIdent(column);
+  try {
+    await client.query(
+      `UPDATE ${tableIdent} SET ${columnIdent} = $1 WHERE ${columnIdent} = $2`,
+      [toUserId, fromUserId]
+    );
+  } catch (err) {
+    if ((err as { code?: string }).code !== "23505") throw err;
+    const { rows } = await client.query(
+      `SELECT ctid FROM ${tableIdent} WHERE ${columnIdent} = $1`,
+      [fromUserId]
+    );
+    for (const row of rows as Array<{ ctid: unknown }>) {
+      try {
+        await client.query(
+          `UPDATE ${tableIdent} SET ${columnIdent} = $1 WHERE ctid = $2`,
+          [toUserId, row.ctid]
+        );
+      } catch (inner) {
+        if ((inner as { code?: string }).code !== "23505") throw inner;
+      }
+    }
+    await client.query(`DELETE FROM ${tableIdent} WHERE ${columnIdent} = $1`, [fromUserId]);
   }
 }

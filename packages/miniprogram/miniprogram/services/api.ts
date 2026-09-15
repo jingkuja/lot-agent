@@ -146,9 +146,30 @@ export const api = {
     ),
 
   wechatPhoneBind: (code: string) =>
+    request<{
+      ok: boolean;
+      adopted?: boolean;
+      needConfirm?: boolean;
+      ticket?: string;
+      token?: string;
+      user?: LotUser;
+      merge?: {
+        phone: string | null;
+        targetName: string;
+        targetUsername: string;
+        quotaAmount: number;
+        managedRemainAmount: number;
+        conversations: number;
+        assets: number;
+        tasks: number;
+        currentAccountWillBeDisabled: boolean;
+      };
+    }>("/auth/wechat-phone-bind", { method: "POST", data: { code } }),
+
+  wechatPhoneMerge: (ticket: string) =>
     request<{ ok: true; adopted: boolean; token?: string; user: LotUser }>(
-      "/auth/wechat-phone-bind",
-      { method: "POST", data: { code } }
+      "/auth/wechat-phone-bind/confirm",
+      { method: "POST", data: { ticket } }
     ),
 
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),

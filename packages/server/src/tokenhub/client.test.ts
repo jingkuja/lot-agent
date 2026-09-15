@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { TokenhubClient, TokenhubClientError } from "./client.js";
+import { TokenhubClient, TokenhubClientError, TokenhubMergeRequiredError } from "./client.js";
 import { createHash, createHmac } from "node:crypto";
 
 const ok = (data: unknown) =>
@@ -197,6 +197,39 @@ describe("TokenhubClient", () => {
       phone: "13900139000",
     });
     expect(f.mock.calls[0][0]).toBe("https://h/api/internal/agent-users/wechat-mini/bind-phone");
+  });
+
+  it("surfaces a merge-required preview when the phone already has an account", async () => {
+    const f = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        success: false,
+        code: "merge_required",
+        data: {
+          needs_confirm: true,
+          phone: "13900139000",
+          from: { user_id: 8, username: "wx_mini_8", display_name: "wx_mini", quota: 2000, quota_amount: 0.004, managed_remain_quota: 1500, managed_remain_amount: 0.003 },
+          to: { user_id: 99, username: "phone-owner", display_name: "Phone Owner", quota: 5000, quota_amount: 0.01, managed_remain_quota: 0, managed_remain_amount: 0 },
+        },
+      }),
+    } as Response);
+    const c = new TokenhubClient(
+      "https://h/api/agent-market",
+      f as unknown as typeof fetch,
+      "",
+      "https://h/api/internal",
+      "lot-agent",
+      "control-secret"
+    );
+    await expect(c.bindWechatMiniPhone(8, "13900139000")).rejects.toBeInstanceOf(TokenhubMergeRequiredError);
+    await expect(c.bindWechatMiniPhone(8, "13900139000")).rejects.toMatchObject({
+      code: "merge_required",
+      preview: {
+        phone: "13900139000",
+        from: { userId: 8, managedRemainQuota: 1500 },
+        to: { userId: 99, displayName: "Phone Owner" },
+      },
+    });
   });
 
   it("updates a managed user's display name through the signed control plane", async () => {

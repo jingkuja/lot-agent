@@ -5,11 +5,14 @@ import { generateRsaKeypair } from "../auth/rsa.js";
 import { toPublicUser } from "../db/user-sanitize.js";
 import { maskPhone } from "../db/phone.js";
 import { randomUUID } from "node:crypto";
-import { TokenhubClientError, type ManagedUserResult } from "../tokenhub/client.js";
+import { TokenhubClientError, TokenhubMergeRequiredError, type ManagedUserResult } from "../tokenhub/client.js";
 import {
+  consumePhoneMergeTicket,
   consumeWechatTicket,
   exchangeWechatCode,
   exchangeWechatPhoneCode,
+  issuePhoneMergeTicket,
+  peekPhoneMergeTicket,
   wechatConfigured,
 } from "../auth/wechat.js";
 
@@ -512,35 +515,93 @@ export function createAuthRoutes(service: AgentService): Hono {
     if (!code) return c.json({ error: "请授权获取手机号" }, 400);
     try {
       const phone = await exchangeWechatPhoneCode(code);
-      const result = await service.tokenhub.bindWechatMiniPhone(externalUserId, phone);
+      try {
+        const result = await service.tokenhub.bindWechatMiniPhone(externalUserId, phone);
+        try {
+          await service.db.updateUserPhone(resolved.session.userId, result.phone ?? phone);
+        } catch (err) {
+          logger.warn("local phone cache update failed", { route: "wechat-phone-bind", userId: resolved.session.userId, err });
+        }
+        const user = await service.db.getUserById(resolved.session.userId);
+        return c.json({
+          ok: true,
+          adopted: false,
+          user: user ? toPublicUser(user) : toPublicUser(resolved.user),
+        });
+      } catch (err) {
+        if (!(err instanceof TokenhubMergeRequiredError)) throw err;
+        const counts = await service.db.countUserOwnedRecords(resolved.session.userId).catch(() => ({
+          conversations: 0, assets: 0, tasks: 0,
+        }));
+        const ticket = issuePhoneMergeTicket({
+          phone,
+          fromExternalUserId: externalUserId,
+          fromLocalUserId: resolved.session.userId,
+        });
+        return c.json({
+          ok: false,
+          needConfirm: true,
+          ticket,
+          merge: {
+            phone: maskPhone(phone),
+            targetName: err.preview.to.displayName || err.preview.to.username,
+            targetUsername: err.preview.to.username,
+            quotaAmount: err.preview.from.quotaAmount,
+            managedRemainAmount: err.preview.from.managedRemainAmount,
+            conversations: counts.conversations,
+            assets: counts.assets,
+            tasks: counts.tasks,
+            currentAccountWillBeDisabled: true,
+          },
+        });
+      }
+    } catch (err) {
+      logger.warn("wechat-phone-bind failed", { route: "wechat-phone-bind", externalUserId, err });
+      const mapped = contactError(err, "手机号绑定失败，请稍后重试");
+      return c.json({ error: mapped.message, code: mapped.code }, 400);
+    }
+  });
+
+  app.post("/wechat-phone-bind/confirm", async (c) => {
+    if (!wechatConfigured() || !service.managedKeysEnabled) {
+      return c.json({ error: "微信登录未启用" }, 404);
+    }
+    const authorization = c.req.header("Authorization");
+    const resolved = await resolveSessionUser(authorization);
+    const externalUserId = resolved?.user.external_user_id ?? null;
+    if (!resolved || externalUserId == null) return c.json({ error: "Unauthorized" }, 401);
+    let body: { ticket?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const pending = peekPhoneMergeTicket(body.ticket?.trim() || "");
+    if (!pending || pending.fromExternalUserId !== externalUserId || pending.fromLocalUserId !== resolved.session.userId) {
+      return c.json({ error: "确认已过期，请重新绑定手机号" }, 400);
+    }
+    try {
+      const result = await service.tokenhub.mergeWechatMiniPhone(pending.fromExternalUserId, pending.phone);
+      consumePhoneMergeTicket(body.ticket!.trim());
       const openid = result.wechatMpOpenid || resolved.user.wechat_openid || "";
       const wechat = openid
         ? {
             openid,
             unionid: result.wechatUnionid || resolved.user.wechat_unionid || undefined,
-            reassign: result.adopted === true,
+            reassign: true,
           }
         : undefined;
-      if (result.adopted) {
-        const session = await upsertManagedSession(service, result, wechat);
-        const oldToken = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
-        if (oldToken) await service.sessions.revoke(oldToken).catch(() => {});
-        return c.json({ ok: true, adopted: true, ...session });
+      const session = await upsertManagedSession(service, result, wechat);
+      if (pending.fromLocalUserId !== session.user.id) {
+        await service.db.reassignUserOwnedData(pending.fromLocalUserId, session.user.id);
+        await service.db.deleteLocalUser(pending.fromLocalUserId);
       }
-      try {
-        await service.db.updateUserPhone(resolved.session.userId, result.phone ?? phone);
-      } catch (err) {
-        logger.warn("local phone cache update failed", { route: "wechat-phone-bind", userId: resolved.session.userId, err });
-      }
-      const user = await service.db.getUserById(resolved.session.userId);
-      return c.json({
-        ok: true,
-        adopted: false,
-        user: user ? toPublicUser(user) : toPublicUser(resolved.user),
-      });
+      const oldToken = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
+      if (oldToken) await service.sessions.revoke(oldToken).catch(() => {});
+      return c.json({ ok: true, adopted: true, ...session });
     } catch (err) {
-      logger.warn("wechat-phone-bind failed", { route: "wechat-phone-bind", externalUserId, err });
-      const mapped = contactError(err, "手机号绑定失败，请稍后重试");
+      logger.warn("wechat-phone-merge failed", { route: "wechat-phone-bind/confirm", externalUserId, err });
+      const mapped = contactError(err, "账号合并失败，请稍后重试");
       return c.json({ error: mapped.message, code: mapped.code }, 400);
     }
   });

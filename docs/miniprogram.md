@@ -58,15 +58,15 @@ npm run build -w @lot-agent/miniprogram                # tsc --noEmit
 `project.config.json` 里 `appid` 先是 `touristappid`。正式发版换成微信后台的 AppID，
 并把同一对 AppID/Secret 写入服务端环境变量。
 
-## 账号合并待办
+## 账号合并
 
-手机号命中已有账号时，当前实现只把小程序 `wechat_mp_openid`（及 unionid）挪到该账号，并切换会话。以下尚未处理：
+手机号命中已有账号时，会先弹出确认，列出将转入的托管额度、账户积分、对话和作品；确认后：
 
-- 积分 / 额度：`wx_mini_*` 账号上的 tokenhub quota、托管订阅 key 余额不会并入手机号账号。
-- 本地资料：lot-agent 侧对话、作品、上传、任务仍挂在被放弃的本地 user id 上。
-- 展示资料：用户名 / 邮箱 / 邀请关系 / 已有 `wechat_id` 保持手机号账号原值。
-- 被放弃的 `wx_mini_*` 用户没有回收或注销流程。
-- 手机号账号若已绑定另一个小程序 openid，绑定会失败，不会强制抢绑。
+- tokenhub 把 `wx_mini_*` 的 wallet quota 和托管 key 余额转入手机号账号
+- lot-agent 把本地 `user_id` 资料改挂到该账号
+- 当前 `wx_mini_*` 账号注销（tokenhub 禁用，本地用户删除）
+
+用户名、邮箱、邀请关系和已有 `wechat_id` 仍保留手机号账号原值。若该手机号账号已绑定另一个小程序 openid，绑定会失败。
 
 ## 设计
 

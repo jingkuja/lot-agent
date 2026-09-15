@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { createAuthRoutes } from "./auth.js";
-import { TokenhubClientError } from "../tokenhub/client.js";
+import { TokenhubClientError, TokenhubMergeRequiredError } from "../tokenhub/client.js";
 
 function fakeService() {
   return {
@@ -24,6 +24,7 @@ function fakeManagedService() {
       authenticateAgentUserByPhone: vi.fn(),
       authenticateWechatMiniUser: vi.fn(),
       bindWechatMiniPhone: vi.fn(),
+      mergeWechatMiniPhone: vi.fn(),
       updateAgentDisplayName: vi.fn(),
       sendAgentPhoneBindingVerification: vi.fn(),
       bindAgentPhone: vi.fn(),
@@ -35,6 +36,10 @@ function fakeManagedService() {
       getUserById: vi.fn().mockResolvedValue({ external_user_id: 7 }),
       bindUserWechat: vi.fn().mockResolvedValue("ok"),
       reassignWechatOpenid: vi.fn().mockResolvedValue("ok"),
+      countUserOwnedRecords: vi.fn().mockResolvedValue({ conversations: 0, assets: 0, tasks: 0 }),
+      reassignUserOwnedData: vi.fn().mockResolvedValue(undefined),
+      deleteLocalUser: vi.fn().mockResolvedValue(undefined),
+      getUserByExternalId: vi.fn(),
     },
     sessions: {
       createSession: vi.fn().mockResolvedValue("tok-managed"),
@@ -509,7 +514,7 @@ describe("wechat mini program login", () => {
     expect(svc.db.updateUserPhone).toHaveBeenCalledWith("u7", "13800138000");
   });
 
-  it("switches session when the phone already belongs to another account", async () => {
+  it("asks for confirmation when the phone belongs to another account", async () => {
     vi.stubEnv("WECHAT_MP_APPID", "wxapp");
     vi.stubEnv("WECHAT_MP_SECRET", "secret");
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
@@ -527,7 +532,80 @@ describe("wechat mini program login", () => {
       ...storedManagedUser,
       wechat_openid: "o-mini",
     });
-    (svc.tokenhub.bindWechatMiniPhone as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (svc.tokenhub.bindWechatMiniPhone as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new TokenhubMergeRequiredError({
+        needsConfirm: true,
+        phone: "13900139000",
+        from: {
+          userId: 7, username: "wx_mini_8", displayName: "wx_mini",
+          quota: 2000, quotaAmount: 0.004, managedRemainQuota: 1500, managedRemainAmount: 0.003,
+        },
+        to: {
+          userId: 99, username: "phone-owner", displayName: "Phone Owner",
+          quota: 5000, quotaAmount: 0.01, managedRemainQuota: 0, managedRemainAmount: 0,
+        },
+      })
+    );
+    (svc.db.countUserOwnedRecords as ReturnType<typeof vi.fn>).mockResolvedValue({
+      conversations: 2, assets: 1, tasks: 0,
+    });
+    const res = await createAuthRoutes(svc).request("/wechat-phone-bind", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
+      body: JSON.stringify({ code: "phone-code" }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json() as { needConfirm: boolean; ticket: string; merge: Record<string, unknown> };
+    expect(json.needConfirm).toBe(true);
+    expect(typeof json.ticket).toBe("string");
+    expect(json.merge).toMatchObject({
+      targetName: "Phone Owner",
+      conversations: 2,
+      assets: 1,
+      currentAccountWillBeDisabled: true,
+    });
+    expect(svc.tokenhub.mergeWechatMiniPhone).not.toHaveBeenCalled();
+  });
+
+  it("merges quota, local data and disables the wx_mini account after confirm", async () => {
+    vi.stubEnv("WECHAT_MP_APPID", "wxapp");
+    vi.stubEnv("WECHAT_MP_SECRET", "secret");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("cgi-bin/token")) {
+        return { ok: true, status: 200, json: async () => ({ access_token: "at", expires_in: 7200 }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ phone_info: { purePhoneNumber: "13900139000" } }),
+      };
+    }));
+    const svc = fakeManagedService();
+    (svc.db.getUserById as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...storedManagedUser,
+      wechat_openid: "o-mini",
+    });
+    (svc.tokenhub.bindWechatMiniPhone as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new TokenhubMergeRequiredError({
+        needsConfirm: true,
+        phone: "13900139000",
+        from: {
+          userId: 7, username: "wx_mini_8", displayName: "wx_mini",
+          quota: 2000, quotaAmount: 0.004, managedRemainQuota: 1500, managedRemainAmount: 0.003,
+        },
+        to: {
+          userId: 99, username: "phone-owner", displayName: "Phone Owner",
+          quota: 5000, quotaAmount: 0.01, managedRemainQuota: 0, managedRemainAmount: 0,
+        },
+      })
+    );
+    const preview = await createAuthRoutes(svc).request("/wechat-phone-bind", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
+      body: JSON.stringify({ code: "phone-code" }),
+    });
+    const { ticket } = await preview.json() as { ticket: string };
+    (svc.tokenhub.mergeWechatMiniPhone as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...managedResult,
       userId: 99,
       username: "phone-owner",
@@ -535,6 +613,7 @@ describe("wechat mini program login", () => {
       phone: "13900139000",
       adopted: true,
       fromUserId: 7,
+      wechatMpOpenid: "o-mini",
     });
     (svc.db.upsertManagedUser as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...storedManagedUser,
@@ -543,22 +622,23 @@ describe("wechat mini program login", () => {
       username: "phone-owner",
       name: "Phone Owner",
     });
-    (svc.db as { reassignWechatOpenid?: ReturnType<typeof vi.fn> }).reassignWechatOpenid = vi
-      .fn()
-      .mockResolvedValue("ok");
+    (svc.db.getUserByExternalId as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...storedManagedUser,
+      id: "u99",
+      external_user_id: 99,
+    });
     (svc.sessions as { revoke?: ReturnType<typeof vi.fn> }).revoke = vi.fn().mockResolvedValue(undefined);
-    const res = await createAuthRoutes(svc).request("/wechat-phone-bind", {
+    const res = await createAuthRoutes(svc).request("/wechat-phone-bind/confirm", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
-      body: JSON.stringify({ code: "phone-code" }),
+      body: JSON.stringify({ ticket }),
     });
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.adopted).toBe(true);
-    expect(json.token).toBe("tok-managed");
     expect(json.user).toMatchObject({ id: "u99", username: "phone-owner" });
-    expect((svc.db as { reassignWechatOpenid: ReturnType<typeof vi.fn> }).reassignWechatOpenid)
-      .toHaveBeenCalledWith("u99", "o-mini", undefined);
-    expect((svc.sessions as { revoke: ReturnType<typeof vi.fn> }).revoke).toHaveBeenCalledWith("tok-managed");
+    expect(svc.tokenhub.mergeWechatMiniPhone).toHaveBeenCalledWith(7, "13900139000");
+    expect(svc.db.reassignUserOwnedData).toHaveBeenCalledWith("u7", "u99");
+    expect(svc.db.deleteLocalUser).toHaveBeenCalledWith("u7");
   });
 });

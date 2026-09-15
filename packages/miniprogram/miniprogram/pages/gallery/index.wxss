@@ -28,13 +28,13 @@
 }
 
 .wall {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16rpx;
 }
 
 .cell {
-  width: calc(50% - 8rpx);
+  min-width: 0;
   overflow: hidden;
   border-radius: 24rpx;
   background: var(--card);
