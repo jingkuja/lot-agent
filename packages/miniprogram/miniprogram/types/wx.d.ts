@@ -19,6 +19,14 @@ interface LotApp {
     managedRegistration: boolean;
     pendingRefs: string[];
     posterJob: { id: string; topic: string } | null;
+    activeImageJob: {
+      conversationId: string;
+      taskId: string;
+      title: string;
+      progress: number;
+      statusText: string;
+      imageUrl?: string;
+    } | null;
   };
   ready: Promise<void> | null;
   bootstrap(): Promise<void>;

@@ -14,15 +14,31 @@
 
     <view class="wall">
       <view
-        class="cell"
+        class="cell {{item.generating ? 'cell-generating' : ''}}"
         wx:for="{{items}}"
         wx:key="id"
         data-src="{{item.preview}}"
         data-title="{{item.title}}"
+        data-generating="{{item.generating}}"
         bindtap="open"
       >
-        <image wx:if="{{item.preview}}" src="{{item.preview}}" mode="aspectFill" />
-        <view wx:else class="cell-empty">生成中…</view>
+        <block wx:if="{{item.generating}}">
+          <view class="cell-busy">
+            <view class="dots">
+              <view class="dot dot-1"></view>
+              <view class="dot dot-2"></view>
+              <view class="dot dot-3"></view>
+              <view class="dot dot-4"></view>
+              <view class="dot dot-5"></view>
+            </view>
+            <text class="cell-progress">{{item.progress || 0}}%</text>
+            <text class="cell-status">{{item.statusText || '正在生成'}}</text>
+          </view>
+        </block>
+        <block wx:else>
+          <image wx:if="{{item.preview}}" src="{{item.preview}}" mode="aspectFill" />
+          <view wx:else class="cell-empty">生成中…</view>
+        </block>
         <text class="cell-title">{{item.title}}</text>
       </view>
     </view>

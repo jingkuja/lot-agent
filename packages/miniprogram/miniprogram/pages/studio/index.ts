@@ -17,6 +17,7 @@ Page({
     resultUrl: "",
     busy: false,
     statusText: "",
+    progress: 0,
     ideas: IDEAS,
     showIdeas: false,
     showMore: false,
@@ -137,23 +138,39 @@ Page({
       return;
     }
     if (!(await getApp().ensureSession())) return;
-    this.setData({ busy: true, statusText: "正在提交" });
+    const app = getApp();
+    this.setData({ busy: true, statusText: "正在提交", progress: 0 });
     try {
       const result = await runImageGeneration({
         prompt,
         size: this.data.size,
         quality: this.data.quality,
         localRefs: this.data.refs,
-        reuseStudioConversation: true,
         onStatus: (text, progress) => {
-          const suffix = typeof progress === "number" && progress > 0 ? ` ${progress}%` : "";
-          this.setData({ statusText: `${text}${suffix}` });
+          const pct = typeof progress === "number" && progress >= 0 ? Math.min(100, Math.round(progress)) : 0;
+          this.setData({ statusText: text, progress: pct });
+          // 同步到全局在途任务,让 gallery 页能看到
+          if (app.globalData.activeImageJob) {
+            app.globalData.activeImageJob.progress = pct;
+            app.globalData.activeImageJob.statusText = text;
+          }
+        },
+        onTask: (info) => {
+          app.globalData.activeImageJob = {
+            conversationId: info.conversationId,
+            taskId: info.taskId,
+            title: info.title || prompt.slice(0, 24) || "未命名",
+            progress: 0,
+            statusText: "AI 正在画,请稍等",
+          };
         },
       });
-      this.setData({ resultUrl: result.imageUrl, statusText: "做好啦" });
+      this.setData({ resultUrl: result.imageUrl, statusText: "做好啦", progress: 100 });
+      app.globalData.activeImageJob = null;
     } catch (err) {
       toastError(err);
       this.setData({ statusText: err instanceof Error ? err.message : "失败了,请再试一次" });
+      app.globalData.activeImageJob = null;
     } finally {
       this.setData({ busy: false });
     }

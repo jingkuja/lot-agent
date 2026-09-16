@@ -14,6 +14,18 @@ App({
     managedRegistration: false,
     pendingRefs: [] as string[],
     posterJob: null as { id: string; topic: string } | null,
+    /**
+     * 当前在途的图片生成任务(studio 提交后写入)。
+     * gallery 页 onShow 时读取并展示"生成中"封面。
+     */
+    activeImageJob: null as {
+      conversationId: string;
+      taskId: string;
+      title: string;
+      progress: number;
+      statusText: string;
+      imageUrl?: string;
+    } | null,
   },
   ready: null as Promise<void> | null,
 

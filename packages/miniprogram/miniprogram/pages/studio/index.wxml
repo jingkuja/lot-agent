@@ -11,7 +11,14 @@
         <text class="muted">传一张照片修一修,或写句话生成一张图</text>
       </view>
       <view wx:if="{{busy}}" class="frame-busy">
-        <view class="spinner"></view>
+        <view class="dots">
+          <view class="dot dot-1"></view>
+          <view class="dot dot-2"></view>
+          <view class="dot dot-3"></view>
+          <view class="dot dot-4"></view>
+          <view class="dot dot-5"></view>
+        </view>
+        <text class="frame-progress">{{progress}}%</text>
         <text class="frame-status">{{statusText || '正在生成'}}</text>
       </view>
     </view>

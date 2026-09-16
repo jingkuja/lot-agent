@@ -52,26 +52,57 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 22rpx;
-  background: rgba(255, 255, 255, 0.82);
+  gap: 26rpx;
+  background: rgba(255, 255, 255, 0.88);
 }
 
-.spinner {
-  width: 72rpx;
-  height: 72rpx;
-  border: 8rpx solid var(--brand-soft);
-  border-top-color: var(--brand);
+/* 波点动画:5 个圆点依次缩放 + 变淡,像波浪一样扩散 */
+.dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18rpx;
+  height: 60rpx;
+}
+
+.dot {
+  width: 22rpx;
+  height: 22rpx;
   border-radius: 50%;
-  animation: spin 0.9s linear infinite;
+  background: var(--brand);
+  animation: dot-pulse 1.4s ease-in-out infinite;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.dot-1 { animation-delay: 0s; }
+.dot-2 { animation-delay: 0.15s; }
+.dot-3 { animation-delay: 0.3s; }
+.dot-4 { animation-delay: 0.45s; }
+.dot-5 { animation-delay: 0.6s; }
+
+@keyframes dot-pulse {
+  0%, 100% {
+    transform: scale(0.6);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+}
+
+/* 居中的百分比数字 */
+.frame-progress {
+  color: var(--brand-deep);
+  font-size: 64rpx;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2rpx;
+  line-height: 1.1;
 }
 
 .frame-status {
-  color: var(--brand-deep);
-  font-size: 26rpx;
+  color: var(--muted);
+  font-size: 24rpx;
 }
 
 .stage-actions {
