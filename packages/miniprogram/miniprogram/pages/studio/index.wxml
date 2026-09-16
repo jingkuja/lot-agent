@@ -4,7 +4,15 @@
   <!-- 结果区 -->
   <view class="stage">
     <view class="frame card" bindtap="save">
-      <image wx:if="{{resultUrl}}" class="frame-img" src="{{resultUrl}}" mode="aspectFit" />
+      <image
+        wx:if="{{resultUrl}}"
+        class="frame-img"
+        src="{{resultUrl}}"
+        mode="widthFix"
+        show-menu-by-longpress
+        bindload="onImgLoad"
+        binderror="onImgError"
+      />
       <view wx:else class="frame-empty">
         <view class="frame-emoji">🎨</view>
         <text class="frame-title">开始你的创作</text>

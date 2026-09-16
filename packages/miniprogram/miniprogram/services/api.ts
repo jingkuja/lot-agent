@@ -230,6 +230,11 @@ export const api = {
       data: { title: title ?? "新对话", agentId: IMAGE_AGENT_ID },
     }),
 
+  deleteConversation: (id: string) =>
+    request<{ ok: boolean }>(`/conversations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
   listImageConversations: (limit = 20, cursor?: string) => {
     const q = [
       `limit=${limit}`,

@@ -15,6 +15,7 @@ Page({
     qualityLabel: "自动",
     refs: [] as string[],
     resultUrl: "",
+    remoteUrl: "",
     busy: false,
     statusText: "",
     progress: 0,
@@ -127,7 +128,7 @@ Page({
 
   newSheet() {
     clearStudioConversationId();
-    this.setData({ prompt: "", refs: [], resultUrl: "", statusText: "" });
+    this.setData({ prompt: "", refs: [], resultUrl: "", remoteUrl: "", statusText: "" });
   },
 
   async print() {
@@ -165,7 +166,23 @@ Page({
           };
         },
       });
-      this.setData({ resultUrl: result.imageUrl, statusText: "做好啦", progress: 100 });
+      // 先把图片下载到本地再渲染 —— 16:9 等大图直接给 <image> 用远程 URL 偶尔会加载失败,
+      // 本地临时路径稳定。失败时退回远程 URL。displayUrl 用于渲染,remoteUrl 用于预览/保存/分享。
+      const remoteUrl = result.imageUrl;
+      let displayUrl = remoteUrl;
+      try {
+        const local = await new Promise<string>((resolve, reject) => {
+          wx.downloadFile({
+            url: remoteUrl,
+            success: (res) => (res.statusCode === 200 ? resolve(res.tempFilePath) : reject(new Error("download failed"))),
+            fail: () => reject(new Error("download failed")),
+          });
+        });
+        if (local) displayUrl = local;
+      } catch {
+        /* 退回远程 URL */
+      }
+      this.setData({ resultUrl: displayUrl, remoteUrl, statusText: "做好啦", progress: 100 });
       app.globalData.activeImageJob = null;
     } catch (err) {
       toastError(err);
@@ -177,9 +194,20 @@ Page({
   },
 
   save() {
-    if (!this.data.resultUrl) return;
+    // 预览/保存走远程 URL,本地临时路径只在当前页有效,跨页传会失效
+    const url = this.data.remoteUrl || this.data.resultUrl;
+    if (!url) return;
     wx.navigateTo({
-      url: `/pages/preview/index?src=${encodeURIComponent(this.data.resultUrl)}`,
+      url: `/pages/preview/index?src=${encodeURIComponent(url)}`,
     });
+  },
+
+  onImgLoad() {
+    /* 图片加载成功,无需额外动作 */
+  },
+
+  onImgError() {
+    // 远程 URL 偶发加载失败时,退回到一个明确的提示而不是空白
+    this.setData({ statusText: "图片加载失败,请到「作品」里查看" });
   },
 });

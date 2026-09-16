@@ -1,4 +1,4 @@
-import { api, absoluteMedia, ApiError, type GenerationResult } from "./api";
+import { api, absoluteMedia, type GenerationResult } from "./api";
 import { imageModelForQuality } from "./config";
 import {
   getStudioConversationId,
@@ -57,6 +57,19 @@ function simulatedProgress(startedAt: number): number {
   return Math.min(SIM_CAP, Math.round(eased * SIM_CAP));
 }
 
+/** 服务端 4xx/5xx 或网络错误的统一提示,不透出后端细节 */
+const GENERIC_ERROR = "服务暂时不可用,请稍后再试,也可查看剩余积分是否充足";
+
+/** 把内部错误收敛成对外文案;已知用户友好的文案(超时/取消)原样保留 */
+function toPublicError(err: unknown): Error {
+  if (err instanceof Error) {
+    // 这几种是面向用户的明确提示,不要替换成通用文案
+    const keep = ["生成超时", "已取消"];
+    if (keep.some((k) => err.message.includes(k))) return err;
+  }
+  return new Error(GENERIC_ERROR);
+}
+
 async function pollTask(
   taskId: string,
   onStatus?: GenerateInput["onStatus"],
@@ -73,7 +86,7 @@ async function pollTask(
     } catch (err) {
       failures += 1;
       if (failures >= 8) {
-        throw err instanceof Error ? err : new Error("任务查询失败");
+        throw toPublicError(err);
       }
       onStatus?.("AI 正在画,请稍等", simulatedProgress(startedAt));
       await sleep(1500);
@@ -85,15 +98,15 @@ async function pollTask(
       continue;
     }
     if (task.status === "cancelled") throw new Error("已取消");
-    if (task.status === "failed") throw new Error(task.error || "生成失败");
+    if (task.status === "failed") throw new Error(GENERIC_ERROR);
     if (task.status === "succeeded") {
-      if (task.output?.downloadFailed) throw new Error("图片下载失败，请到网页端重试");
+      if (task.output?.downloadFailed) throw new Error(GENERIC_ERROR);
       const url = task.output?.assets?.[0]?.url;
-      if (!url) throw new Error("没有生成结果");
+      if (!url) throw new Error(GENERIC_ERROR);
       onStatus?.("做好啦", 100);
       return { url: absoluteMedia(url) };
     }
-    throw new Error("任务状态异常");
+    throw new Error(GENERIC_ERROR);
   }
 }
 
@@ -101,16 +114,26 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
   const startedAt = Date.now();
   const conversationId = await ensureConversation(input.title, input.reuseStudioConversation);
   const media: Array<{ type: "reference_image"; url: string }> = [];
-  if (input.localRefs?.length) {
-    onUpload(input);
-    for (const path of input.localRefs) {
-      if (/^https?:\/\//i.test(path) || path.startsWith("/static/")) {
-        media.push({ type: "reference_image", url: path });
-        continue;
+  try {
+    if (input.localRefs?.length) {
+      onUpload(input);
+      for (const path of input.localRefs) {
+        if (/^https?:\/\//i.test(path) || path.startsWith("/static/")) {
+          media.push({ type: "reference_image", url: path });
+          continue;
+        }
+        const uploaded = await api.uploadLocalImage(path);
+        media.push({ type: "reference_image", url: uploaded.url });
       }
-      const uploaded = await api.uploadLocalImage(path);
-      media.push({ type: "reference_image", url: uploaded.url });
     }
+  } catch {
+    // 上传失败也清理刚建的空会话
+    try {
+      await api.deleteConversation(conversationId);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(GENERIC_ERROR);
   }
   input.onStatus?.("正在提交", 0);
   let started: GenerationResult;
@@ -123,10 +146,14 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
       model: imageModelForQuality(input.quality),
     });
   } catch (err) {
-    if (err instanceof ApiError && err.status === 402) {
-      throw new Error("额度不足,请先充值");
+    // 提交失败(401/400/402/5xx 等):清理刚创建的会话,让作品区不出现空壳条目;
+    // 错误信息统一收敛,不透出后端细节。
+    try {
+      await api.deleteConversation(conversationId);
+    } catch {
+      // 删除失败也无所谓 —— 服务端那条只是空会话,会被 listConversations 的"必须有 message"过滤掉
     }
-    throw err;
+    throw toPublicError(err);
   }
   input.onStatus?.("AI 正在画,请稍等", simulatedProgress(startedAt));
   input.onTask?.({
@@ -134,7 +161,14 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
     taskId: started.taskId,
     title: started.title,
   });
-  const { url } = await pollTask(started.taskId, input.onStatus, startedAt);
+  let url: string;
+  try {
+    ({ url } = await pollTask(started.taskId, input.onStatus, startedAt));
+  } catch (err) {
+    // 任务进行中被后台标 failed 时,服务端那条会话里其实有失败消息记录,保留供"作品"页排查;
+    // 但错误文案仍然要统一。
+    throw toPublicError(err);
+  }
   return {
     conversationId,
     messageId: started.assistantMessage.id,

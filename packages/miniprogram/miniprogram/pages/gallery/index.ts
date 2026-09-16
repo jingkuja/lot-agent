@@ -130,10 +130,15 @@ Page({
     this.setData({ loading: true });
     try {
       const page = await api.listImageConversations(20);
-      const items = page.items.map((item) => ({
-        ...item,
-        preview: absoluteMedia(item.preview_url),
-      }));
+      const activeJobId = getApp().globalData.activeImageJob?.conversationId ?? null;
+      const items = page.items
+        .map((item) => ({
+          ...item,
+          preview: absoluteMedia(item.preview_url),
+        }))
+        // 没有 preview 的条目是失败/未完成的会话,不要展示;
+        // 唯一的例外是当前在途任务 —— 它由 mergeActiveJob 接管展示"生成中"封面。
+        .filter((item) => item.preview || item.id === activeJobId);
       const merged = this.mergeActiveJob(items);
       this.setData({
         items: merged,
@@ -151,9 +156,11 @@ Page({
     this.setData({ loading: true });
     try {
       const page = await api.listImageConversations(20, this.data.nextCursor);
-      const items = this.data.items.concat(
-        page.items.map((item) => ({ ...item, preview: absoluteMedia(item.preview_url) }))
-      );
+      const activeJobId = getApp().globalData.activeImageJob?.conversationId ?? null;
+      const extra = page.items
+        .map((item) => ({ ...item, preview: absoluteMedia(item.preview_url) }))
+        .filter((item) => item.preview || item.id === activeJobId);
+      const items = this.data.items.concat(extra);
       const merged = this.mergeActiveJob(items);
       this.setData({
         items: merged,

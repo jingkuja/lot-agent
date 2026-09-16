@@ -123,7 +123,7 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     id: "wide-banner",
     title: "活动横幅",
     blurb: "16:9 推文头图",
-    size: "2560x1440",
+    size: "1920x1088",
     ratio: "16:9",
     tone: "sky",
     icon: "🖼️",
