@@ -34,11 +34,12 @@
   <view class="stat card">
     <view class="stat-l">
       <text class="stat-label">剩余积分</text>
-      <text class="points">{{balanceText}}</text>
-      <text class="muted">1 元 = 100 积分，与网页端、桌面端通用</text>
+      <view class="stat-num">
+        <text class="points">{{balanceText}}</text>
+        <text class="stat-emoji">💎</text>
+      </view>
     </view>
     <button class="recharge-btn" bindtap="goRecharge">充值</button>
-    <text class="stat-emoji">💎</text>
   </view>
 
   <!-- 功能 -->

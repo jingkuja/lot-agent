@@ -84,8 +84,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 24rpx;
   margin-top: 20rpx;
-  padding: 32rpx 28rpx;
+  padding: 36rpx 28rpx;
 }
 
 .stat-l {
@@ -93,20 +94,21 @@
   flex: 1;
   min-width: 0;
   flex-direction: column;
-  gap: 6rpx;
+  gap: 10rpx;
 }
 
 .recharge-btn {
   flex-shrink: 0;
   margin: 0;
-  padding: 0 32rpx;
-  min-height: 64rpx;
-  line-height: 64rpx;
+  padding: 0 48rpx;
+  min-height: 72rpx;
+  line-height: 72rpx;
   border-radius: 999rpx;
   background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
   color: #fff;
-  font-size: 26rpx;
+  font-size: 28rpx;
   font-weight: 700;
+  box-shadow: 0 8rpx 20rpx rgba(240, 67, 106, 0.28);
 }
 
 .recharge-btn::after {
@@ -118,16 +120,24 @@
   font-size: 24rpx;
 }
 
+.stat-num {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+}
+
 .points {
-  font-size: 72rpx;
+  font-size: 64rpx;
   font-weight: 700;
   color: var(--brand-deep);
+  line-height: 1.05;
   font-variant-numeric: tabular-nums;
 }
 
 .stat-emoji {
-  margin-left: 16rpx;
-  font-size: 84rpx;
+  font-size: 36rpx;
+  line-height: 1;
+  transform: translateY(-4rpx);
 }
 
 .menu {
