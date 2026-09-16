@@ -11,8 +11,8 @@ export const RATIOS = [
   { label: "1:1", size: "1024x1024", w: 1, h: 1 },
   { label: "3:2", size: "1536x1024", w: 3, h: 2 },
   { label: "2:3", size: "1024x1536", w: 2, h: 3 },
-  { label: "16:9", size: "1536x864", w: 16, h: 9 },
-  { label: "9:16", size: "864x1536", w: 9, h: 16 },
+  { label: "16:9", size: "2560x1440", w: 16, h: 9 },
+  { label: "9:16", size: "1440x2560", w: 9, h: 16 },
 ] as const;
 
 export const QUALITIES = [
