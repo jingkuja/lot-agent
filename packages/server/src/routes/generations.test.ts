@@ -336,22 +336,29 @@ describe("POST /conversations/:id/generations", () => {
     expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
   });
 
-  it("maps mini program slot 1/2 to gpt-image-2.5 models", async () => {
+  it("maps mini program slots to their per-tier vendor models", async () => {
     const service = fakeService();
     const fast = await app(service).request("/conversations/c1/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Lot-Client": "miniprogram" },
       body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "1" }),
     });
-    const quality = await app(service).request("/conversations/c1/generations", {
+    const high = await app(service).request("/conversations/c1/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Lot-Client": "miniprogram" },
       body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "2" }),
     });
+    const standard = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Lot-Client": "miniprogram" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "3" }),
+    });
     expect(fast.status).toBe(202);
-    expect(quality.status).toBe(202);
-    expect(service.jobQueue.enqueue.mock.calls[0][1].modelId).toBe("gpt-image-2.5-flare");
+    expect(high.status).toBe(202);
+    expect(standard.status).toBe(202);
+    expect(service.jobQueue.enqueue.mock.calls[0][1].modelId).toBe("doubao-seedream-5-0-pro");
     expect(service.jobQueue.enqueue.mock.calls[1][1].modelId).toBe("gpt-image-2.5-sunburst");
+    expect(service.jobQueue.enqueue.mock.calls[2][1].modelId).toBe("gpt-image-2.5-flare");
     expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], {
       userId: "u1",
       digitalEmployee: false,
@@ -359,7 +366,51 @@ describe("POST /conversations/:id/generations", () => {
     });
   });
 
-  it("falls back to gpt-image-2 then seedream when both 2.5 models are missing", async () => {
+  it("downshifts mini program sizes by quality tier before validation", async () => {
+    const service = fakeService();
+    const post = (model: string, size: string) =>
+      app(service).request("/conversations/c1/generations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Lot-Client": "miniprogram" },
+        body: JSON.stringify({ prompt: "菊花", mediaType: "image", model, settings: { size } }),
+      });
+
+    // 快速: every ratio drops to the smallest Seedream-legal size for the ratio.
+    await post("1", "1024x1024");
+    expect(service.jobQueue.enqueue.mock.calls.at(-1)![1].size).toBe("960x960");
+    await post("1", "1920x1088");
+    expect(service.jobQueue.enqueue.mock.calls.at(-1)![1].size).toBe("1280x720");
+
+    // 自动/标准: only the wide ratios drop.
+    await post("3", "1920x1088");
+    expect(service.jobQueue.enqueue.mock.calls.at(-1)![1].size).toBe("1536x864");
+    await post("3", "1088x1920");
+    expect(service.jobQueue.enqueue.mock.calls.at(-1)![1].size).toBe("864x1536");
+    await post("3", "1024x1024");
+    expect(service.jobQueue.enqueue.mock.calls.at(-1)![1].size).toBe("1024x1024");
+
+    // 高清: untouched.
+    await post("2", "1920x1088");
+    expect(service.jobQueue.enqueue.mock.calls.at(-1)![1].size).toBe("1920x1088");
+  });
+
+  it("does not downshift sizes for non-mini-program models", async () => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "菊花",
+        mediaType: "image",
+        model: "gpt-image-2",
+        settings: { size: "1920x1088" },
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue.mock.calls.at(-1)![1].size).toBe("1920x1088");
+  });
+
+  it("falls back to gpt-image-2 when the preferred model is missing from the catalog", async () => {
     const service = fakeService();
     service.db.getUserApiKey = vi.fn(async () => "sk");
     service.getUserModelCatalog = vi.fn(async () => ({
@@ -367,23 +418,20 @@ describe("POST /conversations/:id/generations", () => {
       image: [{ id: "gpt-image-2" }, { id: "doubao-seedream-5-0-pro" }],
       video: [],
     }));
+    // Slot 2 (高清 → sunburst) is missing → shared backup gpt-image-2.
     const res = await app(service).request("/conversations/c1/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "1" }),
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "2" }),
     });
     expect(res.status).toBe(202);
     expect(service.jobQueue.enqueue.mock.calls[0][1].modelId).toBe("gpt-image-2");
 
-    service.getUserModelCatalog = vi.fn(async () => ({
-      llm: [],
-      image: [{ id: "doubao-seedream-5-0-pro" }],
-      video: [],
-    }));
+    // Slot 1 (快速 → seedream) resolves directly when present.
     await app(service).request("/conversations/c1/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "2" }),
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image", model: "1" }),
     });
     expect(service.jobQueue.enqueue.mock.calls[1][1].modelId).toBe("doubao-seedream-5-0-pro");
   });

@@ -9,6 +9,7 @@ import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pick
 import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
 import {
   DEFAULT_MINIPROGRAM_CONFIG,
+  downshiftMiniprogramImageSize,
   isMiniprogramClient,
   isMiniprogramImageSlot,
   resolveMiniprogramImageModel,
@@ -489,10 +490,19 @@ export function createGenerationRoutes(service: AgentService) {
     // Client settings pass a per-media whitelist so identity fields
     // (conversationId/assistantMessageId/userId) can never ride along.
     const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
+    let settings = pickGenerationSettings(mediaType, body.settings);
+    // Mini program quality tiers shift the requested resolution before
+    // validation: 快速 drops every ratio one step, 自动/标准 only the wide
+    // ones. Applied while `selectedModel` is still the slot id.
+    if (mediaType === "image" && typeof settings.size === "string") {
+      const cfg = miniprogramCfg(service);
+      if (isMiniprogramImageSlot(selectedModel, cfg)) {
+        settings = { ...settings, size: downshiftMiniprogramImageSize(selectedModel, settings.size as string) };
+      }
+    }
     const resolvedModel = mediaType === "image"
       ? await resolveImageModelId(service, userId, selectedModel)
       : selectedModel;
-    let settings = pickGenerationSettings(mediaType, body.settings);
     if (mediaType === "image") {
       const finalized = finalizeImageSettings(settings, resolvedModel);
       if (finalized.error) return c.json({ error: finalized.error }, 400);

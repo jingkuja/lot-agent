@@ -22,12 +22,21 @@ export const QUALITIES = [
   { label: "快速", value: "low" },
 ] as const;
 
-/** 传给后台的槽位：1=快速，2=其余清晰度。具体模型由服务端 miniprogram.image 映射。 */
-export const IMAGE_MODEL_FAST = "1";
-export const IMAGE_MODEL_QUALITY = "2";
+/**
+ * 传给后台的槽位，服务端按 `miniprogram.image` 映射到具体模型：
+ *   "1" = 快速   → doubao-seedream-5-0-pro，且所有分辨率降一档
+ *   "2" = 高清   → gpt-image-2.5-sunburst，原始分辨率
+ *   "3" = 自动/标准 → gpt-image-2.5-flare，16:9 / 9:16 降一档
+ * 所有档位的共同 backup 是 gpt-image-2（服务端 catalog 缺首选模型时启用）。
+ */
+export const IMAGE_SLOT_FAST = "1";
+export const IMAGE_SLOT_HIGH = "2";
+export const IMAGE_SLOT_STANDARD = "3";
 
 export function imageModelForQuality(quality: string): string {
-  return quality === "low" ? IMAGE_MODEL_FAST : IMAGE_MODEL_QUALITY;
+  if (quality === "low") return IMAGE_SLOT_FAST;
+  if (quality === "high") return IMAGE_SLOT_HIGH;
+  return IMAGE_SLOT_STANDARD; // auto / medium 及未知值都走标准档
 }
 
 export const IDEAS = [
