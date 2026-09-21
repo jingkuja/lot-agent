@@ -22,6 +22,11 @@
 .tip {
   font-size: 22rpx;
 }
+.share-error { width: 100%; box-sizing: border-box; padding: 40rpx; text-align: center; line-height: 1.8; }
+.share-error button { margin-top: 24rpx; }
+.work-title { font-size: 28rpx; line-height: 1.6; word-break: break-all; }
+.revoke { background: transparent; color: var(--muted); font-size: 24rpx; margin-top: 12rpx; }
+.revoke::after { border: none; }
 
 .panel {
   padding: 22rpx 24rpx 6rpx;

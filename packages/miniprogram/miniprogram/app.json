@@ -5,6 +5,7 @@
     "pages/poster/index",
     "pages/gallery/index",
     "pages/mine/index",
+    "pages/about/index",
     "pages/edit/index",
     "pages/preview/index",
     "pages/recharge/index"

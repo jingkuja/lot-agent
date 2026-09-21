@@ -7,6 +7,7 @@ Page({
     user: null as LotUser | null,
     initial: "美",
     balanceText: "—",
+    fallbackState: "loading",
     bindingPhone: false,
     editingName: false,
     nameDraft: "",
@@ -23,13 +24,24 @@ Page({
 
   async loadBalance() {
     if (!(await getApp().ensureSession())) return;
+    this.setData({ fallbackState: "loading", balanceText: "—" });
+    const accountId = getUser()?.id;
     try {
       const bal = await api.balance();
+      if (getUser()?.id !== accountId) return;
       // 接口返回元，按 1 元 = 100 积分换算展示
-      this.setData({ balanceText: formatPoints(yuanToPoints(Number(bal.balance))) });
+      this.setData({
+        balanceText: formatPoints(yuanToPoints(Number(bal.balance))),
+        fallbackState: typeof bal.allowBalanceFallback === "boolean" ? (bal.allowBalanceFallback ? "enabled" : "disabled") : "unavailable",
+        user: getUser(),
+      });
     } catch {
-      this.setData({ balanceText: "—" });
+      if (getUser()?.id === accountId) this.setData({ balanceText: "—", fallbackState: "error" });
     }
+  },
+
+  goAbout() {
+    wx.navigateTo({ url: "/pages/about/index" });
   },
 
   goStudio() {
@@ -120,12 +132,16 @@ Page({
   },
 
   applyBoundUser(token: string | undefined, user: LotUser | undefined) {
+    const previousId = getUser()?.id;
     if (token && user) setSession(token, user);
     else if (user) setSession(getToken(), user);
     this.setData({
       user: getUser(),
       initial: (getUser()?.name || getUser()?.username || "美").slice(0, 1),
     });
+    // Clear cached tab pages too: they may still contain the previous account's
+    // gallery, rendered images and form drafts even after global data is reset.
+    if (previousId !== getUser()?.id) wx.reLaunch({ url: "/pages/mine/index" });
   },
 });
 

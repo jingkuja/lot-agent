@@ -2,6 +2,9 @@
   padding: 24rpx;
 }
 
+.account-tip { display: block; padding: 18rpx 8rpx 0; font-size: 24rpx; line-height: 1.6; }
+.stat-fallback { display: block; margin-top: 20rpx; font-size: 24rpx; line-height: 1.5; }
+
 .user {
   display: flex;
   align-items: center;
@@ -81,12 +84,15 @@
 }
 
 .stat {
+  margin-top: 20rpx;
+  padding: 36rpx 28rpx;
+}
+
+.stat-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24rpx;
-  margin-top: 20rpx;
-  padding: 36rpx 28rpx;
 }
 
 .stat-l {

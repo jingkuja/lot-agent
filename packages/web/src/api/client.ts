@@ -265,6 +265,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getProductLinks: () => request<{ webUrl: string; tokenhubUrl: string }>("/public/product"),
   // ── Auth ────────────────────────────────────────────────────────────────────
   getPublicKey: () => request<{ publicKey: string }>("/auth/public-key"),
 

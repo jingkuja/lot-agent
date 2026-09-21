@@ -26,6 +26,48 @@ describe("summarizeBalance", () => {
 });
 
 describe("GET /balance", () => {
+  it("shares one preference between web and mini-program without leaking another account's state", async () => {
+    const preferences = new Map([[7, false], [8, false]]);
+    const service = {
+      managedKeysEnabled: true,
+      db: {
+        getUserById: vi.fn(async (id: string) => ({ external_user_id: id === "u1" ? 7 : 8 })),
+        getDailySpend: vi.fn().mockResolvedValue(0), getMonthlySpend: vi.fn().mockResolvedValue(0),
+      },
+      tokenhub: {
+        getManagedBalance: vi.fn(async (id: number) => ({ remainAmount: id, usedAmount: 0, allowBalanceFallback: preferences.get(id) })),
+        setManagedBalanceFallback: vi.fn(async (id: number, enabled: boolean) => { preferences.set(id, enabled); return enabled; }),
+      },
+    } as unknown as AgentService;
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", c.req.header("x-user") ?? "u1"); await next(); });
+    app.route("/", createUsageRoutes(service));
+    const update = await app.request("/balance-fallback", {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true, userId: "u2" }),
+    });
+    expect(update.status).toBe(200);
+    for (const client of ["web", "miniprogram"]) {
+      const result = await app.request("/balance", { headers: { "X-Lot-Client": client } });
+      expect(await result.json()).toMatchObject({ balance: 7, allowBalanceFallback: true });
+    }
+    const other = await app.request("/balance", { headers: { "x-user": "u2", "X-Lot-Client": "miniprogram" } });
+    expect(await other.json()).toMatchObject({ balance: 8, allowBalanceFallback: false });
+  });
+
+  it("reports an upstream save failure instead of acknowledging a successful toggle", async () => {
+    const service = {
+      managedKeysEnabled: true,
+      db: { getUserById: vi.fn().mockResolvedValue({ external_user_id: 7 }) },
+      tokenhub: { setManagedBalanceFallback: vi.fn().mockRejectedValue(new Error("private upstream detail")) },
+    } as unknown as AgentService;
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
+    app.route("/", createUsageRoutes(service));
+    const result = await app.request("/balance-fallback", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+    expect(result.status).toBe(502);
+    expect(await result.json()).toEqual({ error: "余额补扣设置保存失败" });
+  });
+
   it("returns monetary history from the managed recharge ledger", async () => {
     const service = {
       managedKeysEnabled: true,
@@ -46,7 +88,7 @@ describe("GET /balance", () => {
         }),
       },
     } as unknown as AgentService;
-    const app = new Hono();
+    const app = new Hono<{ Variables: { userId: string } }>();
     app.use("*", async (c, next) => {
       c.set("userId", "local-1");
       await next();
@@ -74,7 +116,7 @@ describe("GET /balance", () => {
         setManagedBalanceFallback: vi.fn().mockResolvedValue(true),
       },
     } as unknown as AgentService;
-    const app = new Hono();
+    const app = new Hono<{ Variables: { userId: string } }>();
     app.use("*", async (c, next) => {
       c.set("userId", "local-1");
       await next();

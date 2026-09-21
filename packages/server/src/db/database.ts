@@ -919,6 +919,43 @@ export class DB {
 
   // ── Assets ──
 
+  async getOwnedImageShare(storageKey: string, userId: string): Promise<{ token: string | null } | null> {
+    const { rows } = await this.pool.query(
+      `SELECT share_token AS token FROM assets WHERE storage_key = $1 AND user_id = $2
+       AND type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')`,
+      [storageKey, userId]
+    );
+    return rows[0] ?? null;
+  }
+
+  async createImageShare(storageKey: string, userId: string, token: string, title: string): Promise<{ token: string; title: string; url: string } | null> {
+    const { rows } = await this.pool.query(
+      `UPDATE assets SET share_token = COALESCE(share_token, $3), share_title = $4
+       WHERE storage_key = $1 AND user_id = $2 AND type = 'image'
+         AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')
+       RETURNING share_token AS token, share_title AS title, url`,
+      [storageKey, userId, token, title]
+    );
+    return rows[0] ?? null;
+  }
+
+  async getSharedImage(token: string): Promise<{ title: string; url: string; mime: string } | null> {
+    const { rows } = await this.pool.query(
+      `SELECT share_title AS title, url, mime FROM assets WHERE share_token = $1
+       AND type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')`,
+      [token]
+    );
+    return rows[0] ?? null;
+  }
+
+  async revokeImageShare(token: string, userId: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      "UPDATE assets SET share_token = NULL, share_title = NULL WHERE share_token = $1 AND user_id = $2",
+      [token, userId]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
   async createAsset(a: {
     id: string;
     taskId?: string | null;

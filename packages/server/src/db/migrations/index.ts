@@ -21,6 +21,7 @@ import { userPhone } from "./0019-user-phone.js";
 import { cohortAutomationSettings } from "./0020-cohort-automation-settings.js";
 import { marketingProductFaqNotes } from "./0021-marketing-product-faq-notes.js";
 import { userWechat } from "./0022-user-wechat.js";
+import { imageShare } from "./0023-image-share.js";
 
 // Static array (no fs scan — dynamic directory scanning isn't reliable once
 // this ships through tsup's bundling). To add a migration: create
@@ -48,4 +49,5 @@ export const migrations: Migration[] = [
   cohortAutomationSettings,
   marketingProductFaqNotes,
   userWechat,
+  imageShare,
 ];

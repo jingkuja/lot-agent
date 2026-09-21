@@ -25,6 +25,8 @@ import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
 import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
+import { createProductRoutes } from "./routes/product.js";
+import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
 import { AppConfigSchema } from "@lot-agent/core";
 import { loadLlmConfig } from "./config.js";
 import { parseMiniprogramConfig } from "./miniprogram/models.js";
@@ -257,6 +259,8 @@ async function main() {
   app.on("POST", "/api/auth/wechat-phone-bind/confirm", loginRateLimit);
   app.on("PATCH", "/api/auth/profile", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
+  app.route("/api/public/product", createProductRoutes());
+  app.route("/api/public/shares", createPublicImageShareRoutes(service));
 
   // Auth guard for all other /api/* routes
   const authMw = createAuthMiddleware(service.sessions, {
@@ -306,6 +310,7 @@ async function main() {
   app.route("/api/agents", createAgentRoutes(service));
   app.route("/api/models", createModelRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
+  app.route("/api/assets/shares", createImageShareRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));
   app.route("/api/usage", createUsageRoutes(service));

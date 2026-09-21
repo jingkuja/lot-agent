@@ -1,16 +1,27 @@
 <view class="page preview">
   <view class="stage">
-    <image class="hero card" src="{{src}}" mode="aspectFit" bindtap="preview" />
-    <text class="muted tip">点图片可放大查看</text>
+    <text wx:if="{{loading}}" class="muted tip">作品加载中…</text>
+    <view wx:elif="{{error}}" class="card share-error">
+      <text>{{error}}</text>
+      <button wx:if="{{shared}}" class="btn btn-soft" bindtap="loadShared">重新加载</button>
+      <button class="btn btn-ghost" bindtap="goStudio">去创作</button>
+    </view>
+    <block wx:else>
+      <image class="hero card" src="{{src}}" mode="aspectFit" bindtap="preview" />
+      <text wx:if="{{title}}" class="work-title">{{title}}</text>
+      <text class="muted tip">点图片可放大查看</text>
+    </block>
   </view>
 
-  <view class="panel safe-bottom">
+  <view wx:if="{{src}}" class="panel safe-bottom">
     <button class="btn btn-primary main" bindtap="save">💾 保存到相册</button>
     <view class="row">
-      <button class="btn btn-ghost half" open-type="share">↗️ 分享给朋友</button>
-      <button class="btn btn-ghost half" bindtap="share">🌈 发朋友圈</button>
+      <button wx:if="{{shareToken}}" class="btn btn-ghost half" open-type="share" disabled="{{sharing}}">↗️ 发送作品卡片</button>
+      <button wx:elif="{{!shared}}" class="btn btn-ghost half" bindtap="prepareShare" loading="{{sharing}}" disabled="{{sharing}}">↗️ 创建分享卡片</button>
+      <button class="btn btn-ghost half" bindtap="share">🌈 分享原图</button>
     </view>
     <button class="btn btn-soft full" bindtap="retouch">🎨 再修一版</button>
-    <text class="muted note">「发朋友圈」会唤起系统分享,选择朋友圈即可</text>
+    <button wx:if="{{!shared}}" hidden="{{!shareToken}}" class="revoke" disabled="{{sharing}}" bindtap="revokeShare">撤销作品分享</button>
+    <text class="muted note">{{shared ? '分享卡片可打开这件作品；保存图片后可自行分享。' : '创建卡片后，获得卡片的人可查看这件作品。可随时撤销分享。'}}</text>
   </view>
 </view>

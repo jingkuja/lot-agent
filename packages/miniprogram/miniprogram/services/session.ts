@@ -19,6 +19,7 @@ export function getUser(): SessionUser | null {
 }
 
 export function setSession(token: string, user: SessionUser): void {
+  if (getUser()?.id !== user.id) clearAccountDrafts();
   wx.setStorageSync(TOKEN_KEY, token);
   wx.setStorageSync(USER_KEY, user);
   getApp().globalData.user = user;
@@ -27,9 +28,17 @@ export function setSession(token: string, user: SessionUser): void {
 export function clearSession(): void {
   wx.removeStorageSync(TOKEN_KEY);
   wx.removeStorageSync(USER_KEY);
-  wx.removeStorageSync(CONV_KEY);
+  clearAccountDrafts();
   const app = getApp();
   app.globalData.user = null;
+}
+
+function clearAccountDrafts(): void {
+  wx.removeStorageSync(CONV_KEY);
+  const app = getApp();
+  app.globalData.pendingRefs = [];
+  app.globalData.posterJob = null;
+  app.globalData.activeImageJob = null;
 }
 
 export function getStudioConversationId(): string {

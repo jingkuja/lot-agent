@@ -49,6 +49,21 @@ interface WxGetRandomValuesSuccess {
 }
 
 declare const wx: {
+  hideShareMenu(opts: { menus: string[] }): void;
+  showShareMenu(opts: { menus: string[] }): void;
+  createCanvasContext(canvasId: string, component?: unknown): {
+    setFillStyle(color: string): void;
+    setFontSize(size: number): void;
+    fillRect(x: number, y: number, width: number, height: number): void;
+    fillText(text: string, x: number, y: number): void;
+    measureText(text: string): { width: number };
+    draw(reserve: boolean, callback: () => void): void;
+  };
+  canvasToTempFilePath(opts: {
+    canvasId: string; width: number; height: number; destWidth: number; destHeight: number;
+    success: (res: { tempFilePath: string }) => void;
+    fail: (err: WxGeneralCallbackResult) => void;
+  }, component?: unknown): void;
   request(opts: {
     url: string;
     method?: string;

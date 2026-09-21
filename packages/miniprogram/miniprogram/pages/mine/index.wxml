@@ -30,16 +30,21 @@
     >绑定手机号</button>
   </view>
 
+  <text class="account-tip muted">{{user.phone ? '在网页使用同一手机号登录，可查看同一账户的数据和积分。' : '绑定网页账户使用的手机号，可将两端数据归到同一账户。'}}</text>
+
   <!-- 积分 -->
   <view class="stat card">
-    <view class="stat-l">
-      <text class="stat-label">剩余积分</text>
-      <view class="stat-num">
-        <text class="points">{{balanceText}}</text>
-        <text class="stat-emoji">💎</text>
+    <view class="stat-main">
+      <view class="stat-l">
+        <text class="stat-label">剩余积分</text>
+        <view class="stat-num">
+          <text class="points">{{balanceText}}</text>
+          <text class="stat-emoji">💎</text>
+        </view>
       </view>
+      <button class="recharge-btn" bindtap="goRecharge">充值</button>
     </view>
-    <button class="recharge-btn" bindtap="goRecharge">充值</button>
+    <text wx:if="{{fallbackState === 'enabled'}}" class="stat-fallback muted">积分不足时使用灵渠 AI 余额</text>
   </view>
 
   <!-- 功能 -->
@@ -57,6 +62,11 @@
     <view class="mrow" bindtap="goGallery">
       <text class="mico">🖼️</text>
       <text class="mtitle">我的作品</text>
+      <text class="marrow">›</text>
+    </view>
+    <view class="mrow" bindtap="goAbout">
+      <text class="mico">💡</text>
+      <text class="mtitle">了解更多 · 灵渠claw</text>
       <text class="marrow">›</text>
     </view>
   </view>

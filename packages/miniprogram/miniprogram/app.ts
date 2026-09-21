@@ -41,23 +41,20 @@ App({
       this.globalData.wechatLogin = mode.wechatLogin === true;
       this.globalData.managedRegistration = mode.managedRegistration === true;
       if (mode.debug) {
-        this.enterStudio();
         return;
       }
       if (getToken()) {
         try {
           const user = await api.me();
           setSession(getToken(), user);
-          this.enterStudio();
           return;
         } catch {
           clearSession();
         }
       }
-      const signedIn = await this.tryWechatLogin();
-      if (signedIn) {
-        this.enterStudio();
-      }
+      // Only the boot page navigates after login. A cold launch from a shared
+      // work must stay on that work, including for first-time visitors.
+      await this.tryWechatLogin();
     } catch {
       // Boot page shows retry.
     }
@@ -71,10 +68,6 @@ App({
     if (signedIn) return true;
     this.sendToBoot();
     return false;
-  },
-
-  enterStudio() {
-    wx.switchTab({ url: "/pages/studio/index" });
   },
 
   sendToBoot() {

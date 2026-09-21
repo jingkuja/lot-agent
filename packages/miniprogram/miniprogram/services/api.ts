@@ -82,7 +82,7 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function request<T>(path: string, init?: { method?: string; data?: unknown }): Promise<T> {
+function request<T>(path: string, init?: { method?: string; data?: unknown; anonymous?: boolean }): Promise<T> {
   return new Promise((resolve, reject) => {
     wx.request({
       url: joinUrl(API_BASE, `/api${path}`),
@@ -91,17 +91,18 @@ function request<T>(path: string, init?: { method?: string; data?: unknown }): P
       header: {
         "Content-Type": "application/json",
         "X-Lot-Client": "miniprogram",
-        ...authHeader(),
+        ...(init?.anonymous ? {} : authHeader()),
       },
       success(res) {
         if (res.statusCode === 401) {
-          const publicAuth = path.startsWith("/auth/wechat-login")
+          const publicAuth = init?.anonymous || path.startsWith("/auth/wechat-login")
             || path.startsWith("/auth/login")
             || path.startsWith("/auth/phone-login")
             || path.startsWith("/auth/mode");
           if (!publicAuth) {
             clearSession();
-            if (!isBootPage() && !getApp().globalData.debug) {
+            const current = getCurrentPages().slice(-1)[0]?.route;
+            if (!isBootPage() && current !== "pages/preview/index" && !getApp().globalData.debug) {
               wx.reLaunch({ url: "/pages/boot/index" });
             }
           }
@@ -125,6 +126,14 @@ function request<T>(path: string, init?: { method?: string; data?: unknown }): P
 }
 
 export const api = {
+  sharedImage: (token: string) => request<{ title: string; url: string; mime: string }>(
+    `/public/shares/${encodeURIComponent(token)}`, { anonymous: true }
+  ),
+  imageShareStatus: (url: string) => request<{ token: string | null }>(`/assets/shares?url=${encodeURIComponent(url)}`),
+  createImageShare: (url: string, title: string) => request<{ token: string; title: string; url: string }>(
+    "/assets/shares", { method: "POST", data: { url, title } }
+  ),
+  revokeImageShare: (token: string) => request<{ ok: boolean }>(`/assets/shares/${encodeURIComponent(token)}`, { method: "DELETE" }),
   mode: () =>
     request<{
       debug: boolean;
@@ -201,7 +210,7 @@ export const api = {
 
   models: () => request<{ llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] }>("/models"),
 
-  balance: () => request<{ balance: number; totalUsed?: number }>("/usage/balance"),
+  balance: () => request<{ balance: number; totalUsed?: number; allowBalanceFallback?: boolean }>("/usage/balance"),
 
   rechargeInfo: () =>
     request<{

@@ -1,0 +1,17 @@
+<view class="page about">
+  <view class="card intro">
+    <text class="eyebrow">灵渠claw</text>
+    <view class="heading">从手机创作，到网页继续</view>
+    <text class="description">小程序随手修图、制作海报；网页提供 AI 对话、图片与视频生成、文档及 PPT 创作。</text>
+    <text class="description muted">在网页使用与小程序绑定的同一手机号登录，查看同一账户的数据与积分。</text>
+  </view>
+  <view class="card destination">
+    <view class="section-title">灵渠claw 网页版</view>
+    <text class="url" selectable>{{webUrl}}</text>
+    <text class="description muted">复制地址后，在手机或电脑浏览器打开。余额兜底开关位于网页侧栏的积分区域。</text>
+    <button class="btn btn-primary" disabled="{{!webUrl}}" bindtap="copyWeb">复制网页地址</button>
+  </view>
+  <button class="btn btn-ghost save-poster" disabled="{{!webUrl || saving}}" loading="{{saving}}" bindtap="savePoster">保存产品介绍海报</button>
+  <text class="muted poster-note">海报包含产品介绍和网页地址，可保存后分享给朋友。</text>
+  <canvas canvas-id="introPoster" class="poster-canvas" style="width:600px;height:760px" />
+</view>

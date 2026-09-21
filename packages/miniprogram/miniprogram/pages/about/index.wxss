@@ -1,0 +1,10 @@
+.about { padding: 24rpx; }
+.intro, .destination { padding: 32rpx; margin-bottom: 24rpx; }
+.eyebrow { color: var(--brand-deep); font-size: 28rpx; font-weight: 600; }
+.heading { margin: 20rpx 0; font-size: 42rpx; font-weight: 700; line-height: 1.4; }
+.description { display: block; margin: 20rpx 0; font-size: 27rpx; line-height: 1.8; }
+.section-title { font-size: 30rpx; font-weight: 600; }
+.url { display: block; margin: 16rpx 0; word-break: break-all; color: var(--brand-deep); font-size: 26rpx; }
+.save-poster { width: 100%; }
+.poster-note { display: block; padding: 20rpx; font-size: 24rpx; line-height: 1.6; }
+.poster-canvas { position: fixed; left: -10000px; top: 0; }

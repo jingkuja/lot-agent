@@ -4882,6 +4882,15 @@ html, body, #root {
   box-shadow: var(--shadow-sm);
   border-radius: 8px;
 }
+
+.brand-tokenhub-link {
+  display: block;
+  padding-top: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-decoration: none;
+}
+.brand-tokenhub-link:hover { color: var(--accent); text-decoration: underline; }
 .brand-points-action:hover {
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
   color: var(--text);
