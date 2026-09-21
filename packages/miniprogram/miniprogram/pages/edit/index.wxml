@@ -1,5 +1,6 @@
 <view class="page edit">
-  <view class="head">
+  <view class="page-heading">
+    <text class="eyebrow">照片微调</text>
     <text class="h1">以图修图</text>
     <text class="muted">放入原片,告诉我哪里要改</text>
   </view>
@@ -13,8 +14,8 @@
       <view class="thumb add">＋</view>
     </view>
     <view wx:else class="drop-empty">
-      <text class="drop-emoji">📷</text>
-      <text class="muted">点这里放入照片</text>
+      <view class="photo-mark"></view>
+      <text class="muted">添加一张想修的照片</text>
     </view>
   </view>
 
@@ -27,8 +28,8 @@
   />
 
   <view class="row">
-    <button class="btn btn-primary" loading="{{busy}}" bindtap="print">✨ 开始修</button>
-    <button class="btn btn-ghost" bindtap="sendToStudio">去修图页细调</button>
+    <button class="btn btn-primary" loading="{{busy}}" bindtap="print">开始修图</button>
+    <button class="btn btn-ghost" bindtap="sendToStudio">到工作室细调</button>
   </view>
 
   <view wx:if="{{statusText}}" class="muted status">{{statusText}}</view>

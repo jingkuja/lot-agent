@@ -1,57 +1,61 @@
 .recharge {
-  padding: 24rpx;
-  padding-bottom: 60rpx;
+  padding: 16rpx 32rpx calc(40rpx + env(safe-area-inset-bottom));
 }
 
-/* ---------- 余额卡 ---------- */
+.recharge .h1 {
+  font-size: 40rpx;
+}
+
 .bal {
   display: flex;
   align-items: center;
-  gap: 22rpx;
-  padding: 36rpx 32rpx;
+  gap: 24rpx;
+  padding: 30rpx;
+  border: none;
+  background: var(--surface);
 }
 
 .bal-l {
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 12rpx;
   flex: 1;
   min-width: 0;
 }
 
 .bal-label {
   color: var(--muted);
-  font-size: 24rpx;
+  font-size: 22rpx;
 }
 
 .bal-value {
-  font-size: 56rpx;
-  font-weight: 800;
-  color: var(--ink);
+  font-size: 64rpx;
+  font-weight: 500;
   line-height: 1.1;
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
 }
 
-.bal-emoji {
-  font-size: 72rpx;
+.bal-l .muted, .bal-unit {
+  color: var(--muted);
+  font-size: 22rpx;
 }
 
-/* ---------- 区块标题 ---------- */
 .sect {
   margin-top: 36rpx;
 }
 
 .sect-title {
   display: block;
-  margin-bottom: 20rpx;
-  font-size: 28rpx;
-  font-weight: 700;
+  margin-bottom: 24rpx;
+  font-size: 27rpx;
+  font-weight: 500;
 }
 
-/* ---------- 面额网格 ---------- */
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20rpx;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16rpx;
 }
 
 .tier {
@@ -59,23 +63,22 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4rpx;
-  padding: 28rpx 12rpx 24rpx;
-  border-radius: var(--radius);
+  gap: 6rpx;
+  padding: 28rpx 8rpx 22rpx;
+  border-radius: 14rpx;
   background: var(--card);
   border: 2rpx solid var(--line);
   box-sizing: border-box;
 }
 
 .tier-on {
-  border-color: var(--brand-deep);
+  border-color: var(--brand);
   background: var(--brand-soft);
 }
 
 .tier-points {
-  font-size: 38rpx;
-  font-weight: 800;
-  color: var(--ink);
+  font-size: 34rpx;
+  font-weight: 600;
 }
 
 .tier-label {
@@ -84,56 +87,45 @@
 }
 
 .tier-price {
-  margin-top: 6rpx;
+  margin-top: 12rpx;
   font-size: 26rpx;
-  font-weight: 700;
   color: var(--brand-deep);
 }
 
 .tier-discount {
   position: absolute;
   top: -14rpx;
-  right: 10rpx;
-  padding: 2rpx 12rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
-  color: #fff;
+  right: 8rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 5rpx;
+  background: var(--brand);
+  color: var(--inverse);
   font-size: 18rpx;
-  font-weight: 700;
 }
 
-/* ---------- 说明卡 ---------- */
 .note {
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
-  margin-top: 36rpx;
-  padding: 28rpx 32rpx;
+  gap: 12rpx;
+  margin-top: 32rpx;
+  padding: 24rpx 0;
+  border-width: 1rpx 0 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .note-line {
   color: var(--muted);
-  font-size: 24rpx;
-  line-height: 1.5;
+  font-size: 22rpx;
+  line-height: 1.6;
 }
 
-/* ---------- 支付按钮 ---------- */
 .pay-btn {
-  margin-top: 48rpx;
-  height: 96rpx;
-  line-height: 96rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
-  color: #fff;
-  font-size: 32rpx;
-  font-weight: 700;
-  box-shadow: var(--shadow);
-}
-
-.pay-btn::after {
-  border: none;
-}
-
-.pay-btn[disabled] {
-  opacity: 0.6;
+  margin-top: 24rpx;
+  height: 92rpx;
+  line-height: 92rpx;
+  background: var(--brand);
+  color: var(--inverse);
+  font-size: 28rpx;
+  font-weight: 500;
 }

@@ -107,8 +107,8 @@ function mine(px, py) {
 }
 
 const glyphs = { studio, poster, gallery, mine };
-const fog = [0xb8, 0xac, 0xa6, 255];
-const brand = [0xf0, 0x43, 0x6a, 255];
+const fog = [0x82, 0x76, 0x6c, 255];
+const brand = [0xc8, 0x6b, 0x4b, 255];
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const [name, hit] of Object.entries(glyphs)) {

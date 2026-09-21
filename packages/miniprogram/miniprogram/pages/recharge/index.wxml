@@ -1,4 +1,5 @@
 <view class="page recharge">
+  <view class="page-heading"><text class="eyebrow">创作积分</text><text class="h1">为下一张好图准备。</text></view>
   <!-- 积分卡 -->
   <view class="bal card">
     <view class="bal-l">
@@ -6,7 +7,7 @@
       <text class="bal-value">{{balanceText}}</text>
       <text class="muted">与网页端、桌面端同一账户</text>
     </view>
-    <text class="bal-emoji">💎</text>
+    <text class="bal-unit">积分</text>
   </view>
 
   <!-- 面额选择 -->

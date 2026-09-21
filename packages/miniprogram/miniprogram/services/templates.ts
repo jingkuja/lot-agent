@@ -5,7 +5,8 @@ export interface PosterTemplate {
   size: string;
   ratio: string;
   tone: "pink" | "peach" | "lavender" | "mint" | "sky" | "gold" | "night";
-  icon: string;
+  coverTitle: string;
+  coverCaption: string;
   cat: "store" | "ecom" | "social";
   prompt: string;
 }
@@ -18,7 +19,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1024x1536",
     ratio: "2:3",
     tone: "pink",
-    icon: "🛍️",
+    coverTitle: "好物\n好价",
+    coverCaption: "小店好消息",
     cat: "store",
     prompt:
       "一张中文营销海报,竖构图。主题:{{topic}}。上三分之一大标题,中间产品或场景主视觉,底部活动时间和一句行动号召。印刷海报质感,干净排版,不要英文乱码,不要水印。",
@@ -30,7 +32,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1024x1536",
     ratio: "2:3",
     tone: "gold",
-    icon: "🎉",
+    coverTitle: "开门\n见喜",
+    coverCaption: "新店开业",
     cat: "store",
     prompt:
       "中式开业海报,主题:{{topic}}。红金配色但克制,主标题「开业志禧」,辅以门店外观或室内氛围,留出地址和开业日期位置。喜庆、专业,像印刷厂打样。",
@@ -42,7 +45,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1024x1536",
     ratio: "2:3",
     tone: "peach",
-    icon: "🍜",
+    coverTitle: "好好\n吃饭",
+    coverCaption: "今日推荐",
     cat: "store",
     prompt:
       "美食海报,竖构图。主题:{{topic}}。食物特写,蒸汽与高光,菜单式中文标题,价格用大号数字,背景深色让食物跳出来,食欲感强。",
@@ -54,7 +58,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1024x1536",
     ratio: "2:3",
     tone: "night",
-    icon: "📣",
+    coverTitle: "一起\n做点事",
+    coverCaption: "伙伴招募",
     cat: "store",
     prompt:
       "招聘海报。主题:{{topic}}。深色背景,粉色强调色,大标题「我们在找你」,中部岗位要点三条,底部投递方式位置。现代、克制、可直接发朋友圈。",
@@ -66,7 +71,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1024x1024",
     ratio: "1:1",
     tone: "sky",
-    icon: "🆕",
+    coverTitle: "新鲜\n登场",
+    coverCaption: "发现新好物",
     cat: "ecom",
     prompt:
       "电商主图海报,正方形。主题:{{topic}}。产品居中,柔和影棚光,浅色无缝背景,左上角小标签「NEW」,中文品牌感排版,高级而不廉价。",
@@ -78,7 +84,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1024x1536",
     ratio: "2:3",
     tone: "lavender",
-    icon: "💄",
+    coverTitle: "美好\n日常",
+    coverCaption: "给自己一点宠爱",
     cat: "ecom",
     prompt:
       "美妆营销海报。主题:{{topic}}。干净化妆台与自然光,产品特写,柔雾皮肤质感,中文短标题,杂志内页排版,不要夸张滤镜脸。",
@@ -90,7 +97,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1024x1536",
     ratio: "2:3",
     tone: "mint",
-    icon: "📚",
+    coverTitle: "学点\n新东西",
+    coverCaption: "把好奇心留下",
     cat: "ecom",
     prompt:
       "教育培训招生海报。主题:{{topic}}。理性配色,清晰中文层级:主标题、适合人群、开课时间。插画或教室场景,专业可信,不要卡通乱。",
@@ -102,7 +110,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1024x1024",
     ratio: "1:1",
     tone: "peach",
-    icon: "🏮",
+    coverTitle: "把祝福\n送给你",
+    coverCaption: "日子里的小心意",
     cat: "social",
     prompt:
       "品牌节日祝福海报,正方形。主题:{{topic}}。中国节气美学,留白与一枚主视觉(花、月、灯),中文祝福短句,像一张可装裱的贺卡。",
@@ -114,7 +123,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1536x1024",
     ratio: "3:2",
     tone: "night",
-    icon: "🎬",
+    coverTitle: "今晚\n见一面",
+    coverCaption: "直播预告",
     cat: "social",
     prompt:
       "直播预告封面,横构图。主题:{{topic}}。主播或产品在右侧,左侧大号中文开播时间,底部平台名位置。舞台灯光,能量感,不要文字堆砌。",
@@ -126,7 +136,8 @@ export const POSTER_TEMPLATES: PosterTemplate[] = [
     size: "1920x1088",
     ratio: "16:9",
     tone: "sky",
-    icon: "🖼️",
+    coverTitle: "好事\n即将发生",
+    coverCaption: "下一场相遇",
     cat: "social",
     prompt:
       "活动横幅,16:9。主题:{{topic}}。左对齐中文主标题,背景是与主题相关的场景虚化,右侧留空。适合做公众号头图。",

@@ -1,12 +1,5 @@
 .edit {
-  padding: 24rpx;
-}
-
-.head {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-  margin-bottom: 24rpx;
+  padding: 16rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
 }
 
 .drop {
@@ -14,26 +7,36 @@
   align-items: center;
   justify-content: center;
   min-height: 320rpx;
-  margin-bottom: 20rpx;
+  margin-bottom: 24rpx;
+  border-style: dashed;
+  border-color: var(--muted);
 }
 
 .drop-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12rpx;
+  gap: 24rpx;
   padding: 60rpx 0;
+  color: var(--brand);
 }
 
-.drop-emoji {
-  font-size: 96rpx;
+.drop-empty .photo-mark {
+  width: 64rpx;
+  height: 52rpx;
+}
+
+.drop-empty .photo-mark::after {
+  width: 46rpx;
+  height: 46rpx;
+  top: 30rpx;
 }
 
 .thumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: 14rpx;
-  padding: 20rpx;
+  gap: 18rpx;
+  padding: 24rpx;
 }
 
 .thumb {
@@ -45,38 +48,35 @@
 .thumb image {
   width: 160rpx;
   height: 160rpx;
-  border-radius: 20rpx;
+  border-radius: 10rpx;
 }
 
 .thumb.add {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2rpx dashed #e5d8d2;
-  border-radius: 20rpx;
+  border: 1rpx dashed var(--line);
+  border-radius: 10rpx;
   color: var(--muted);
-  font-size: 52rpx;
+  font-size: 40rpx;
+  box-sizing: border-box;
 }
 
 .x {
   position: absolute;
-  top: -10rpx;
-  right: -10rpx;
-  width: 36rpx;
-  height: 36rpx;
+  top: -12rpx;
+  right: -12rpx;
+  width: 40rpx;
+  height: 40rpx;
   border-radius: 50%;
   background: var(--ink);
-  color: #fff;
+  color: var(--inverse);
   text-align: center;
-  line-height: 36rpx;
+  line-height: 40rpx;
 }
 
 .prompt {
-  margin-bottom: 8rpx;
-}
-
-.ph {
-  color: #c6bab4;
+  height: 220rpx;
 }
 
 .row {
@@ -87,15 +87,17 @@
 
 .row .btn {
   flex: 1;
+  padding: 0 12rpx;
+  font-size: 25rpx;
 }
 
 .status {
-  margin-top: 16rpx;
+  margin-top: 20rpx;
   text-align: center;
 }
 
 .result {
   width: 100%;
   margin-top: 24rpx;
-  background: #f6efe9;
+  background: var(--surface);
 }

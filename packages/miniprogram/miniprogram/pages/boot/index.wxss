@@ -1,13 +1,15 @@
 .login {
-  padding: 100rpx 44rpx 44rpx;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 80rpx 48rpx;
 }
 
 .brand {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12rpx;
-  margin-bottom: 64rpx;
+  gap: 16rpx;
   text-align: center;
 }
 
@@ -16,26 +18,40 @@
   align-items: center;
   justify-content: center;
   width: 128rpx;
-  height: 128rpx;
-  margin-bottom: 12rpx;
-  border-radius: 36rpx;
-  background: linear-gradient(135deg, var(--brand) 0%, var(--peach) 100%);
-  font-size: 64rpx;
-  box-shadow: 0 16rpx 36rpx rgba(240, 67, 106, 0.28);
+  height: 148rpx;
+  margin-bottom: 24rpx;
+  border-radius: 16rpx;
+  background: var(--brand-soft);
+  color: var(--brand);
+  transform: rotate(-7deg);
 }
 
-.ph {
-  color: #c6bab4;
+.logo .photo-mark {
+  width: 68rpx;
+  height: 54rpx;
+}
+
+.logo .photo-mark::after {
+  width: 48rpx;
+  height: 48rpx;
+  top: 30rpx;
+}
+
+.tagline {
+  color: var(--ink);
+  font-size: 26rpx;
+  margin-bottom: 36rpx;
 }
 
 .err {
   display: block;
-  margin: 20rpx 0 0;
+  margin: 40rpx 0 0;
   color: var(--brand-deep);
   font-size: 24rpx;
+  text-align: center;
 }
 
 .enter {
   width: 100%;
-  margin-top: 36rpx;
+  margin-top: 32rpx;
 }

@@ -1,4 +1,5 @@
 <view class="page mine">
+  <view class="page-heading"><text class="eyebrow">个人空间</text><text class="h1">我的创作日常</text></view>
   <!-- 用户卡 -->
   <view class="user card">
     <view class="avatar">{{initial}}</view>
@@ -23,6 +24,7 @@
     </view>
     <button
       wx:if="{{user && !user.phone}}"
+      size="mini"
       class="bind-phone"
       open-type="getPhoneNumber"
       bindgetphonenumber="onGetPhoneNumber"
@@ -39,33 +41,33 @@
         <text class="stat-label">剩余积分</text>
         <view class="stat-num">
           <text class="points">{{balanceText}}</text>
-          <text class="stat-emoji">💎</text>
+          <text class="stat-unit">积分</text>
         </view>
       </view>
-      <button class="recharge-btn" bindtap="goRecharge">充值</button>
+      <button size="mini" class="recharge-btn" bindtap="goRecharge">充值</button>
     </view>
     <text wx:if="{{fallbackState === 'enabled'}}" class="stat-fallback muted">积分不足时使用灵渠 AI 余额</text>
   </view>
 
-  <!-- 功能 -->
+  <text class="section-label">常用入口</text>
   <view class="menu card">
     <view class="mrow" bindtap="goStudio">
-      <text class="mico">🎨</text>
-      <text class="mtitle">AI 修图</text>
+      <text class="mico">01</text>
+      <text class="mtitle">图片工作室</text>
       <text class="marrow">›</text>
     </view>
     <view class="mrow" bindtap="goPoster">
-      <text class="mico">🪧</text>
-      <text class="mtitle">做海报</text>
+      <text class="mico">02</text>
+      <text class="mtitle">海报灵感</text>
       <text class="marrow">›</text>
     </view>
     <view class="mrow" bindtap="goGallery">
-      <text class="mico">🖼️</text>
+      <text class="mico">03</text>
       <text class="mtitle">我的作品</text>
       <text class="marrow">›</text>
     </view>
     <view class="mrow" bindtap="goAbout">
-      <text class="mico">💡</text>
+      <text class="mico">04</text>
       <text class="mtitle">了解更多 · 灵渠claw</text>
       <text class="marrow">›</text>
     </view>

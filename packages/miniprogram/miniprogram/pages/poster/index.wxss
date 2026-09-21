@@ -1,141 +1,277 @@
 .poster {
-  padding: 24rpx 24rpx 60rpx;
+  padding: 16rpx 32rpx 48rpx;
 }
 
-.head {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-  margin-bottom: 24rpx;
+.poster .h1 {
+  font-size: 40rpx;
 }
 
 .topic {
   display: flex;
-  align-items: center;
-  gap: 14rpx;
-  margin-top: 12rpx;
-  padding: 6rpx 24rpx;
+  flex-direction: column;
+  padding: 20rpx 24rpx 12rpx;
 }
 
-.topic-ico {
-  font-size: 32rpx;
+.topic-label {
+  font-size: 20rpx;
+  color: var(--brand-deep);
 }
 
 .topic-input {
-  flex: 1;
-  height: 88rpx;
-  font-size: 28rpx;
+  width: 100%;
+  height: 68rpx;
+  font-size: 27rpx;
 }
 
-.ph {
-  color: #c6bab4;
-}
-
-/* 分类 */
 .cats {
-  margin-bottom: 24rpx;
+  margin: 28rpx 0 24rpx;
   white-space: nowrap;
+  border-bottom: 1rpx solid var(--line);
 }
 
 .cats-inner {
   display: inline-flex;
-  gap: 16rpx;
-  padding: 4rpx 2rpx;
+  gap: 34rpx;
 }
 
 .cat {
-  padding: 14rpx 30rpx;
-  border: 2rpx solid var(--line);
-  border-radius: 999rpx;
-  background: var(--card);
+  padding: 16rpx 0 20rpx;
+  border-bottom: 4rpx solid transparent;
   color: var(--muted);
-  font-size: 26rpx;
+  font-size: 25rpx;
 }
 
 .cat.on {
-  border-color: transparent;
-  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
-  color: #fff;
+  border-bottom-color: var(--brand);
+  color: var(--ink);
   font-weight: 600;
 }
 
-/* 模板网格 */
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20rpx;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32rpx 20rpx;
 }
 
 .tpl {
-  position: relative;
-  overflow: hidden;
-  border-radius: var(--radius);
-  background: var(--card);
-  box-shadow: var(--shadow);
+  min-width: 0;
 }
 
 .tpl:active {
-  transform: scale(0.98);
+  opacity: 0.8;
 }
 
 .tpl-cover {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 200rpx;
+  height: 380rpx;
+  overflow: hidden;
+  border-radius: 12rpx;
+  background: var(--poster-rose);
+  color: var(--ink);
+  padding: 28rpx 24rpx;
+  box-sizing: border-box;
 }
 
-.tpl-icon {
-  font-size: 84rpx;
+.tpl-kicker {
+  position: relative;
+  z-index: 1;
+  display: block;
+  font-size: 18rpx;
+  letter-spacing: 3rpx;
+}
+
+.tpl-cover-title {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: 18rpx;
+  white-space: pre-line;
+  font-size: 46rpx;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 2rpx;
+}
+
+.tpl-art {
+  position: absolute;
+  inset: 0;
+}
+
+.tpl-orbit {
+  position: absolute;
+  width: 200rpx;
+  height: 200rpx;
+  right: -28rpx;
+  bottom: 28rpx;
+  border: 1rpx solid currentColor;
+  border-radius: 50%;
+  opacity: 0.25;
+}
+
+.tpl-shape {
+  position: absolute;
+  width: 116rpx;
+  height: 144rpx;
+  right: 36rpx;
+  bottom: 46rpx;
+  background: var(--card);
+  border-radius: 58rpx 58rpx 8rpx 8rpx;
+  transform: rotate(14deg);
+  opacity: 0.8;
+}
+
+.tpl-line {
+  position: absolute;
+  width: 80rpx;
+  height: 1rpx;
+  bottom: 46rpx;
+  left: 24rpx;
+  background: currentColor;
+  opacity: 0.4;
+}
+
+.tpl-ratio, .tpl-sample {
+  position: absolute;
+  bottom: 14rpx;
+  font-size: 17rpx;
+  opacity: 0.7;
 }
 
 .tpl-ratio {
-  position: absolute;
-  top: 16rpx;
-  right: 16rpx;
-  padding: 4rpx 14rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.6);
-  color: #6b5d57;
-  font-size: 20rpx;
+  right: 20rpx;
+}
+
+.tpl-sample {
+  left: 24rpx;
 }
 
 .tpl-body {
-  padding: 18rpx 20rpx 8rpx;
+  padding: 16rpx 2rpx 0;
+}
+
+.tpl-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8rpx;
 }
 
 .tpl-title {
-  display: block;
-  font-size: 30rpx;
-  font-weight: 700;
+  font-size: 27rpx;
+  font-weight: 500;
+}
+
+.tpl-go {
+  font-size: 26rpx;
+  color: var(--brand);
 }
 
 .tpl-blurb {
   display: block;
-  margin-top: 6rpx;
+  margin-top: 4rpx;
   color: var(--muted);
-  font-size: 22rpx;
+  font-size: 21rpx;
+  line-height: 1.5;
 }
 
-.tpl-go {
-  padding: 8rpx 20rpx 20rpx;
-  color: var(--brand-deep);
-  font-size: 22rpx;
-  font-weight: 600;
+.tone-gold .tpl-cover {
+  background: var(--poster-gold);
 }
 
-/* 封面配色 */
-.tone-pink .tpl-cover { background: linear-gradient(135deg, #ffe3ec, #ffd0de); }
-.tone-peach .tpl-cover { background: linear-gradient(135deg, #ffe9d6, #ffd9bd); }
-.tone-lavender .tpl-cover { background: linear-gradient(135deg, #ece4ff, #ddd0ff); }
-.tone-mint .tpl-cover { background: linear-gradient(135deg, #d7f7e9, #bdefd9); }
-.tone-sky .tpl-cover { background: linear-gradient(135deg, #dcecfd, #c6dfff); }
-.tone-gold .tpl-cover { background: linear-gradient(135deg, #fdf0d0, #fbe3a8); }
-.tone-night .tpl-cover { background: linear-gradient(135deg, #3a3350, #241f38); }
-.tone-night .tpl-ratio { background: rgba(255, 255, 255, 0.18); color: #efe9ff; }
+.tone-peach .tpl-cover {
+  background: var(--poster-peach);
+}
+
+.tone-lavender .tpl-cover {
+  background: var(--poster-lavender);
+}
+
+.tone-mint .tpl-cover {
+  background: var(--poster-mint);
+}
+
+.tone-sky .tpl-cover {
+  background: var(--poster-sky);
+}
+
+.tone-night .tpl-cover {
+  background: var(--ink);
+  color: var(--inverse);
+}
+
+.cover-grand-open .tpl-cover-title {
+  font-size: 58rpx;
+}
+
+.cover-grand-open .tpl-shape {
+  border-radius: 50%;
+  width: 126rpx;
+  height: 126rpx;
+  background: var(--brand);
+}
+
+.cover-food-set .tpl-shape {
+  width: 160rpx;
+  height: 100rpx;
+  border-radius: 50%;
+  border: 8rpx double var(--ink);
+}
+
+.cover-hiring .tpl-shape {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 0;
+  background: var(--poster-gold);
+  transform: rotate(-18deg);
+}
+
+.cover-new-product .tpl-shape {
+  width: 86rpx;
+  border-radius: 12rpx;
+  transform: rotate(-12deg);
+}
+
+.cover-beauty .tpl-shape {
+  width: 70rpx;
+  height: 138rpx;
+  border-radius: 35rpx 35rpx 6rpx 6rpx;
+  background: var(--brand);
+}
+
+.cover-edu .tpl-shape {
+  border-radius: 3rpx;
+  transform: rotate(-12deg);
+  border-left: 8rpx solid var(--brand);
+}
+
+.cover-festival .tpl-orbit {
+  width: 150rpx;
+  height: 150rpx;
+  right: 24rpx;
+  bottom: 54rpx;
+}
+
+.cover-festival .tpl-shape {
+  border-radius: 50%;
+  width: 112rpx;
+  height: 112rpx;
+  background: var(--poster-gold);
+}
+
+.cover-live .tpl-shape {
+  border-radius: 50% 50% 0 0;
+  background: var(--poster-lavender);
+}
+
+.cover-wide-banner .tpl-shape {
+  width: 180rpx;
+  height: 76rpx;
+  border-radius: 4rpx;
+  transform: rotate(-20deg);
+}
 
 .foot {
-  margin-top: 32rpx;
+  margin-top: 40rpx;
   text-align: center;
+  font-size: 22rpx;
 }

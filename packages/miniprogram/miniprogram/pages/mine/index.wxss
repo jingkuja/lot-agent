@@ -1,57 +1,51 @@
 .mine {
-  padding: 24rpx;
+  padding: 16rpx 32rpx 48rpx;
 }
 
-.account-tip { display: block; padding: 18rpx 8rpx 0; font-size: 24rpx; line-height: 1.6; }
-.stat-fallback { display: block; margin-top: 20rpx; font-size: 24rpx; line-height: 1.5; }
+.mine .h1 {
+  font-size: 40rpx;
+}
 
 .user {
   display: flex;
   align-items: center;
-  gap: 22rpx;
-  padding: 32rpx 28rpx;
+  flex-wrap: wrap;
+  gap: 20rpx;
+  padding: 24rpx 0;
+  border: none;
+  background: transparent;
 }
 
 .avatar {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 104rpx;
-  height: 104rpx;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--brand) 0%, var(--peach) 100%);
-  color: #fff;
-  font-size: 44rpx;
-  font-weight: 700;
+  flex-shrink: 0;
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 28rpx;
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  font-size: 36rpx;
+  font-weight: 500;
 }
 
 .who {
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 6rpx;
   flex: 1;
-  min-width: 0;
+  min-width: 180rpx;
 }
 
-.bind-phone {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 0 20rpx;
-  min-height: 64rpx;
-  line-height: 64rpx;
-  border-radius: 999rpx;
-  background: var(--brand-soft);
-  color: var(--brand-deep);
-  font-size: 24rpx;
-  font-weight: 600;
+.who .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 22rpx;
 }
 
-.bind-phone::after {
-  border: none;
-}
-
-.name-row,
-.name-edit {
+.name-row, .name-edit {
   display: flex;
   align-items: center;
   gap: 12rpx;
@@ -61,8 +55,8 @@
 .name {
   min-width: 0;
   overflow: hidden;
-  font-size: 38rpx;
-  font-weight: 700;
+  font-size: 32rpx;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -70,29 +64,49 @@
 .name-input {
   flex: 1;
   min-width: 0;
-  height: 56rpx;
+  height: 60rpx;
   padding: 0 8rpx;
-  font-size: 34rpx;
-  font-weight: 700;
+  border-bottom: 1rpx solid var(--brand);
+  font-size: 30rpx;
 }
 
 .edit-hint {
   flex-shrink: 0;
+  padding: 12rpx 0;
   color: var(--brand-deep);
   font-size: 22rpx;
-  font-weight: 600;
+}
+
+.user .bind-phone {
+  width: auto;
+  flex-shrink: 0;
+  padding: 0 18rpx;
+  min-height: 64rpx;
+  line-height: 64rpx;
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 22rpx;
+}
+
+.account-tip {
+  display: block;
+  padding: 0 0 28rpx;
+  font-size: 22rpx;
 }
 
 .stat {
-  margin-top: 20rpx;
-  padding: 36rpx 28rpx;
+  position: relative;
+  padding: 30rpx;
+  background: var(--brand-soft);
+  border-color: transparent;
 }
 
 .stat-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24rpx;
+  gap: 20rpx;
 }
 
 .stat-l {
@@ -100,29 +114,11 @@
   flex: 1;
   min-width: 0;
   flex-direction: column;
-  gap: 10rpx;
-}
-
-.recharge-btn {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 0 48rpx;
-  min-height: 72rpx;
-  line-height: 72rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
-  color: #fff;
-  font-size: 28rpx;
-  font-weight: 700;
-  box-shadow: 0 8rpx 20rpx rgba(240, 67, 106, 0.28);
-}
-
-.recharge-btn::after {
-  border: none;
+  gap: 16rpx;
 }
 
 .stat-label {
-  color: var(--muted);
+  color: var(--ink);
   font-size: 24rpx;
 }
 
@@ -130,33 +126,53 @@
   display: flex;
   align-items: baseline;
   gap: 12rpx;
+  flex-wrap: wrap;
 }
 
 .points {
+  max-width: 100%;
+  word-break: break-all;
+  color: var(--ink);
   font-size: 64rpx;
-  font-weight: 700;
-  color: var(--brand-deep);
-  line-height: 1.05;
+  font-weight: 500;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 
-.stat-emoji {
-  font-size: 36rpx;
-  line-height: 1;
-  transform: translateY(-4rpx);
+.stat-unit {
+  color: var(--muted);
+  font-size: 22rpx;
+}
+
+.stat-main .recharge-btn {
+  width: 144rpx;
+  flex-shrink: 0;
+  padding: 0 30rpx;
+  min-height: 72rpx;
+  line-height: 72rpx;
+  background: var(--card);
+  color: var(--brand-deep);
+  font-size: 26rpx;
+}
+
+.stat-fallback {
+  display: block;
+  margin-top: 24rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid var(--line);
+  font-size: 22rpx;
 }
 
 .menu {
-  margin-top: 20rpx;
-  padding: 4rpx 28rpx;
+  padding: 0 24rpx;
 }
 
 .mrow {
   display: flex;
   align-items: center;
-  gap: 18rpx;
-  padding: 30rpx 0;
-  border-bottom: 2rpx solid var(--line);
+  gap: 20rpx;
+  min-height: 108rpx;
+  border-bottom: 1rpx solid var(--line);
 }
 
 .mrow:last-child {
@@ -164,19 +180,17 @@
 }
 
 .mico {
-  font-size: 36rpx;
+  color: var(--brand);
+  font-size: 20rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 .mtitle {
   flex: 1;
-  font-size: 30rpx;
+  font-size: 27rpx;
 }
 
 .marrow {
-  max-width: 320rpx;
-  overflow: hidden;
   color: var(--muted);
-  font-size: 24rpx;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 32rpx;
 }

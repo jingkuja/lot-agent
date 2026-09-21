@@ -14,13 +14,13 @@
   </view>
 
   <view wx:if="{{src}}" class="panel safe-bottom">
-    <button class="btn btn-primary main" bindtap="save">💾 保存到相册</button>
+    <button class="btn btn-primary main" bindtap="save">保存到相册</button>
     <view class="row">
-      <button wx:if="{{shareToken}}" class="btn btn-ghost half" open-type="share" disabled="{{sharing}}">↗️ 发送作品卡片</button>
-      <button wx:elif="{{!shared}}" class="btn btn-ghost half" bindtap="prepareShare" loading="{{sharing}}" disabled="{{sharing}}">↗️ 创建分享卡片</button>
-      <button class="btn btn-ghost half" bindtap="share">🌈 分享原图</button>
+      <button wx:if="{{shareToken}}" class="btn btn-ghost half" open-type="share" disabled="{{sharing}}">发送作品卡片</button>
+      <button wx:elif="{{!shared}}" class="btn btn-ghost half" bindtap="prepareShare" loading="{{sharing}}" disabled="{{sharing}}">创建分享卡片</button>
+      <button class="btn btn-ghost half" bindtap="share">分享原图</button>
     </view>
-    <button class="btn btn-soft full" bindtap="retouch">🎨 再修一版</button>
+    <button class="btn btn-soft full" bindtap="retouch">再修一版</button>
     <button wx:if="{{!shared}}" hidden="{{!shareToken}}" class="revoke" disabled="{{sharing}}" bindtap="revokeShare">撤销作品分享</button>
     <text class="muted note">{{shared ? '分享卡片可打开这件作品；保存图片后可自行分享。' : '创建卡片后，获得卡片的人可查看这件作品。可随时撤销分享。'}}</text>
   </view>

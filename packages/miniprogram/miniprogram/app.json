@@ -12,15 +12,15 @@
   ],
   "window": {
     "navigationBarTitleText": "美图海报",
-    "navigationBarBackgroundColor": "#faf7f4",
+    "navigationBarBackgroundColor": "#faf6f0",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#faf7f4",
+    "backgroundColor": "#faf6f0",
     "backgroundTextStyle": "dark"
   },
   "tabBar": {
-    "color": "#b8aca6",
-    "selectedColor": "#f0436a",
-    "backgroundColor": "#ffffff",
+    "color": "#82766c",
+    "selectedColor": "#c86b4b",
+    "backgroundColor": "#faf6f0",
     "borderStyle": "white",
     "list": [
       {

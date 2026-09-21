@@ -7,27 +7,27 @@ Page({
     this.setData({ saving: true });
     try {
       const ctx = wx.createCanvasContext("introPoster", this);
-      ctx.setFillStyle("#faf7f4");
+      ctx.setFillStyle("#faf6f0");
       ctx.fillRect(0, 0, 600, 760);
-      ctx.setFillStyle("#c52b50");
+      ctx.setFillStyle("#a84e33");
       ctx.setFontSize(34);
       ctx.fillText("灵渠claw", 48, 88);
-      ctx.setFillStyle("#29252b");
+      ctx.setFillStyle("#403931");
       ctx.setFontSize(38);
       ctx.fillText("从手机创作", 48, 162);
       ctx.fillText("到网页继续", 48, 216);
       ctx.setFontSize(24);
       ctx.fillText("AI 对话 · 图片与视频生成", 48, 296);
       ctx.fillText("文档 · PPT · 知识库资料引用", 48, 338);
-      ctx.setFillStyle("#70656c");
+      ctx.setFillStyle("#82766c");
       ctx.setFontSize(22);
       ctx.fillText("小程序修图、做海报，网页继续创作。", 48, 408);
       ctx.fillText("使用同一手机号登录，连接同一账户。", 48, 446);
       const link = (label: string, url: string, y: number) => {
-        ctx.setFillStyle("#29252b");
+        ctx.setFillStyle("#403931");
         ctx.setFontSize(24);
         ctx.fillText(label, 48, y);
-        ctx.setFillStyle("#c52b50");
+        ctx.setFillStyle("#a84e33");
         ctx.setFontSize(19);
         let line = "";
         let lineY = y + 40;
@@ -42,7 +42,7 @@ Page({
         ctx.fillText(line, 48, lineY);
       };
       link("灵渠claw 网页版", this.data.webUrl, 544);
-      ctx.setFillStyle("#70656c");
+      ctx.setFillStyle("#82766c");
       ctx.setFontSize(19);
       ctx.fillText("在小程序「我的 → 了解更多」复制网页地址", 48, 708);
       await new Promise<void>((resolve) => ctx.draw(false, resolve));

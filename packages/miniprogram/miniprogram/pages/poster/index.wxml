@@ -1,50 +1,39 @@
 <view class="page poster">
-  <view class="head">
-    <text class="h1">做一张海报</text>
-    <text class="muted">写上你的店名/产品/活动,挑一个模板,一键生成</text>
-    <view class="topic card">
-      <text class="topic-ico">✏️</text>
-      <input
-        class="topic-input"
-        placeholder="比如:春日新茶上市、美甲店开业…"
-        placeholder-class="ph"
-        value="{{topic}}"
-        bindinput="onTopic"
-      />
-    </view>
+  <view class="page-heading">
+    <text class="eyebrow">海报灵感</text>
+    <text class="h1">好消息，值得一张海报。</text>
+    <text class="muted">为小店、上新和生活里的特别时刻。</text>
   </view>
-
+  <view class="topic card">
+    <text class="topic-label">这次想说</text>
+    <input class="topic-input" placeholder="春日新茶上市、小店开业…" placeholder-class="ph" value="{{topic}}" bindinput="onTopic" />
+  </view>
   <scroll-view class="cats" scroll-x enhanced show-scrollbar="{{false}}">
     <view class="cats-inner">
-      <view
-        class="cat {{cat === item.key ? 'on' : ''}}"
-        wx:for="{{cats}}"
-        wx:key="key"
-        data-key="{{item.key}}"
-        bindtap="pickCat"
-      >{{item.label}}</view>
+      <view class="cat {{cat === item.key ? 'on' : ''}}" wx:for="{{cats}}" wx:key="key" data-key="{{item.key}}" bindtap="pickCat">{{item.label}}</view>
     </view>
   </scroll-view>
-
   <view class="grid">
-    <view
-      class="tpl tone-{{item.tone}}"
-      wx:for="{{shown}}"
-      wx:key="id"
-      data-id="{{item.id}}"
-      bindtap="useTemplate"
-    >
+    <view class="tpl tone-{{item.tone}} cover-{{item.id}}" wx:for="{{shown}}" wx:key="id" data-id="{{item.id}}" bindtap="useTemplate">
       <view class="tpl-cover">
-        <text class="tpl-icon">{{item.icon}}</text>
+        <text class="tpl-kicker">{{item.coverCaption}}</text>
+        <text class="tpl-cover-title">{{item.coverTitle}}</text>
+        <view class="tpl-art">
+          <view class="tpl-orbit"></view>
+          <view class="tpl-shape"></view>
+          <view class="tpl-line"></view>
+        </view>
+        <text class="tpl-sample">风格示意</text>
         <text class="tpl-ratio">{{item.ratio}}</text>
       </view>
       <view class="tpl-body">
-        <text class="tpl-title">{{item.title}}</text>
+        <view class="tpl-title-row">
+          <text class="tpl-title">{{item.title}}</text>
+          <text class="tpl-go">↗</text>
+        </view>
         <text class="tpl-blurb">{{item.blurb}}</text>
       </view>
-      <view class="tpl-go">用这张 →</view>
     </view>
   </view>
-
-  <view class="foot muted">选中模板后会跳到「修图」页生成,可随时改文案</view>
+  <view class="foot muted">选个喜欢的风格，再到修图页慢慢调整。</view>
 </view>
