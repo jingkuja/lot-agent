@@ -41,6 +41,20 @@ function app(service: any) {
 }
 
 describe("POST /conversations/:id/generations", () => {
+  it("returns the queued task before a slow title model finishes", async () => {
+    const service = fakeService();
+    let finish!: (title: string) => void;
+    service.generateTitle = vi.fn(() => new Promise<string>((resolve) => { finish = resolve; }));
+    let responded = false;
+    const response = app(service).request("/conversations/c1/generations", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "菊花", mediaType: "image" }),
+    }).then((r) => { responded = true; return r; });
+    try {
+      await vi.waitFor(() => expect(responded).toBe(true), { timeout: 200 });
+      expect((await response).status).toBe(202);
+    } finally { finish("菊花特写"); await response; }
+  });
   it("persists user + assistant messages and enqueues a task", async () => {
     const service = fakeService();
     const res = await app(service).request("/conversations/c1/generations", {
@@ -77,7 +91,7 @@ describe("POST /conversations/:id/generations", () => {
       userId: "u1",
       digitalEmployee: false,
     });
-    expect(body.title).toBe("菊花特写");
+    expect(body.title).toBeUndefined(); // Title is persisted asynchronously, not awaited by submission.
   });
 
   it("marks digital-employee generation titles as user-TokenHub-only", async () => {

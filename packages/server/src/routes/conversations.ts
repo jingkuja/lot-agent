@@ -587,17 +587,18 @@ export function createGenerationRoutes(service: AgentService) {
     // Auto-title the conversation from the prompt (first message only, gated
     // inside generateTitle). The chat SSE path does this too; without it,
     // image/video conversations stay stuck on the "新对话" placeholder.
-    let title: string | null = null;
     try {
       // 本回合的模型是图片/视频模型，标题改用 LLM。数字员工会话仍严格
       // 限定为用户 TokenHub key，不允许标题请求回退环境模型。
-      title = await service.generateTitle(conversationId, prompt, [], {
+      // The task is already running. Never hold its 202 response behind a
+      // separate LLM request: a proxy timeout would look like submission failed.
+      void service.generateTitle(conversationId, prompt, [], {
         userId,
         digitalEmployee: conv.agent_id === "digital_employee",
         ...(isMiniprogramClient(c.req.header("x-lot-client"))
           ? { modelId: miniprogramCfg(service).llm }
           : {}),
-      });
+      }).catch(() => {});
     } catch {
       // title generation is best-effort
     }
@@ -607,7 +608,6 @@ export function createGenerationRoutes(service: AgentService) {
         userMessage: { id: userMessageId, role: "user", content: prompt },
         assistantMessage: { id: assistantMessageId, role: "assistant", status: "generating", metadata },
         taskId,
-        ...(title ? { title } : {}),
       },
       202
     );

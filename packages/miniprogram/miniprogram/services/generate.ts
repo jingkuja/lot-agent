@@ -110,6 +110,31 @@ async function pollTask(
   }
 }
 
+/** Only recover from a freshly created conversation: an older conversation
+ * might contain a previous run that must not be mistaken for this submission. */
+async function recoverSubmission(conversationId: string): Promise<GenerationResult | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await sleep(500);
+    try {
+      const conv = await api.getConversation(conversationId);
+      for (const message of [...conv.messages].reverse()) {
+        if (message.role !== "assistant") continue;
+        const metadata = typeof message.metadata === "string" ? JSON.parse(message.metadata) : message.metadata;
+        if (!metadata || typeof metadata !== "object") continue;
+        const meta = metadata as Record<string, unknown>;
+        if (meta.kind !== "generation" || meta.mediaType !== "image" || typeof meta.taskId !== "string" || !meta.taskId) continue;
+        return {
+          userMessage: { id: "", content: "" },
+          assistantMessage: { id: message.id, status: "generating", metadata: {} },
+          taskId: meta.taskId,
+          title: conv.title,
+        };
+      }
+    } catch { /* The next read may reach the server after a brief proxy outage. */ }
+  }
+  return null;
+}
+
 export async function runImageGeneration(input: GenerateInput): Promise<GenerateOutput> {
   const startedAt = Date.now();
   const conversationId = await ensureConversation(input.title, input.reuseStudioConversation);
@@ -129,7 +154,7 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
   } catch {
     // 上传失败也清理刚建的空会话
     try {
-      await api.deleteConversation(conversationId);
+      if (!input.reuseStudioConversation) await api.deleteConversation(conversationId);
     } catch {
       /* ignore */
     }
@@ -146,14 +171,19 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
       model: imageModelForQuality(input.quality),
     });
   } catch (err) {
-    // 提交失败(401/400/402/5xx 等):清理刚创建的会话,让作品区不出现空壳条目;
-    // 错误信息统一收敛,不透出后端细节。
-    try {
-      await api.deleteConversation(conversationId);
-    } catch {
-      // 删除失败也无所谓 —— 服务端那条只是空会话,会被 listConversations 的"必须有 message"过滤掉
+    const status = typeof err === "object" && err !== null && "status" in err ? Number(err.status) : 0;
+    if (!status || status >= 500 || status === 408) {
+      input.onStatus?.("正在确认提交结果", 0);
+      const recovered = !input.reuseStudioConversation ? await recoverSubmission(conversationId) : null;
+      if (!recovered) throw new Error("提交结果暂未确认，请稍后到「作品」查看，勿重复提交");
+      started = recovered;
+    } else {
+      // A definite rejection can clean up only a newly created empty conversation.
+      try {
+        if (!input.reuseStudioConversation) await api.deleteConversation(conversationId);
+      } catch { /* Best-effort cleanup. */ }
+      throw toPublicError(err);
     }
-    throw toPublicError(err);
   }
   input.onStatus?.("AI 正在画,请稍等", simulatedProgress(startedAt));
   input.onTask?.({
