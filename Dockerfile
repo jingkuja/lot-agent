@@ -7,13 +7,16 @@
 # ---------- Stage 1: build ----------
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
+RUN corepack enable
 
 # Install deps first (better layer caching). Copy only manifests + lockfile.
-COPY package.json package-lock.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/web/package.json packages/web/package.json
-RUN npm ci
+COPY packages/desktop/package.json packages/desktop/package.json
+COPY packages/miniprogram/package.json packages/miniprogram/package.json
+RUN pnpm --filter @lot-agent/server... install --frozen-lockfile
 
 # Copy sources needed to build the Node app (web is built in Dockerfile.web).
 COPY tsconfig.base.json ./
@@ -21,21 +24,23 @@ COPY packages/core packages/core
 COPY packages/server packages/server
 
 # Build order matters: server imports @lot-agent/core's compiled dist.
-RUN npm run build -w @lot-agent/core \
- && npm run build -w @lot-agent/server
+RUN pnpm --filter @lot-agent/core run build \
+ && pnpm --filter @lot-agent/server run build
 
 # ---------- Stage 2: production runtime ----------
 FROM node:20-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+RUN corepack enable
 
 # Reinstall production-only dependencies from the lockfile (deterministic, slim).
-COPY package.json package-lock.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/web/package.json packages/web/package.json
-RUN npm ci --omit=dev --ignore-scripts \
- && npm cache clean --force
+COPY packages/desktop/package.json packages/desktop/package.json
+COPY packages/miniprogram/package.json packages/miniprogram/package.json
+RUN pnpm --filter @lot-agent/server... install --prod --frozen-lockfile --ignore-scripts
 
 # Compiled output + runtime assets (config + skills are read at startup).
 COPY --from=builder /app/packages/core/dist packages/core/dist

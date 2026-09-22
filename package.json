@@ -1,25 +1,24 @@
 {
   "name": "lot-agent",
   "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
   "scripts": {
-    "dev": "concurrently -n core,server,worker,web -c blue,green,cyan,magenta \"npm run dev -w @lot-agent/core\" \"npm run dev -w @lot-agent/server\" \"npm run dev:worker -w @lot-agent/server\" \"npm run dev -w @lot-agent/web\"",
-    "dev:server": "npm run dev -w @lot-agent/server",
-    "dev:web": "npm run dev -w @lot-agent/web",
-    "dev:desktop": "npm run build -w @lot-agent/desktop && concurrently -n web,electron -c magenta,yellow \"npm run dev:web\" \"wait-on http://localhost:5173 && npm run dev -w @lot-agent/desktop\"",
-    "dist:desktop": "npm run build -w @lot-agent/web && npm run dist -w @lot-agent/desktop",
-    "dist:desktop:win": "npm run build -w @lot-agent/web && npm run dist:win -w @lot-agent/desktop",
-    "dist:desktop:mac": "npm run build -w @lot-agent/web && npm run dist:mac -w @lot-agent/desktop",
-    "build": "npm run build --workspaces --if-present",
-    "clean": "npm run clean --workspaces --if-present",
+    "dev": "concurrently -n core,server,worker,web -c blue,green,cyan,magenta \"pnpm --filter @lot-agent/core run dev\" \"pnpm --filter @lot-agent/server run dev\" \"pnpm --filter @lot-agent/server run dev:worker\" \"pnpm --filter @lot-agent/web run dev\"",
+    "dev:server": "pnpm --filter @lot-agent/server run dev",
+    "dev:web": "pnpm --filter @lot-agent/web run dev",
+    "dev:desktop": "pnpm --filter @lot-agent/desktop run build && concurrently -n web,electron -c magenta,yellow \"pnpm run dev:web\" \"wait-on http://localhost:5173 && pnpm --filter @lot-agent/desktop run dev\"",
+    "dist:desktop": "pnpm --filter @lot-agent/web run build && pnpm --filter @lot-agent/desktop run dist",
+    "dist:desktop:win": "pnpm --filter @lot-agent/web run build && pnpm --filter @lot-agent/desktop run dist:win",
+    "dist:desktop:mac": "pnpm --filter @lot-agent/web run build && pnpm --filter @lot-agent/desktop run dist:mac",
+    "build": "pnpm -r run build",
+    "clean": "pnpm -r run clean",
     "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "concurrently": "^9.0.0",
     "typescript": "^5.7.0",
-    "wait-on": "^9.1.0"
-  }
+    "wait-on": "^9.1.0",
+    "vitest": "^2.0.0"
+  },
+  "packageManager": "pnpm@10.33.0"
 }

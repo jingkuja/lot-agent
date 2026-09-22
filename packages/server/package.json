@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.0.0",
-    "@lot-agent/core": "*",
+    "@lot-agent/core": "workspace:*",
     "bullmq": "^5.0.0",
     "docx": "^9.7.1",
     "hono": "^4.0.0",

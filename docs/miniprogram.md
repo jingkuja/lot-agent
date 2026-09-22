@@ -43,7 +43,7 @@ Web 微信扫码登录继续用原来的 `wechat_id`，两套身份互不覆盖�
 
 ## 开发
 
-1. 本机先起 Lot Agent 服务端（`npm run dev:server` 等）。
+1. 本机先起 Lot Agent 服务端（`pnpm run dev:server` 等）。
 2. 用[微信开发者工具](https://developers.weixin.qq.com/miniprogram/dev/devtools/download.html)
    打开目录 `packages/miniprogram`（`miniprogramRoot` 已指向 `miniprogram/`）。
 3. 连不上服务器时，先把 `miniprogram/services/config.ts` 的 `API_BASE` 改成
@@ -52,7 +52,7 @@ Web 微信扫码登录继续用原来的 `wechat_id`，两套身份互不覆盖�
 
 ```bash
 node packages/miniprogram/scripts/make-tab-icons.mjs   # 重新生成 tab 图标
-npm run build -w @lot-agent/miniprogram                # tsc --noEmit
+pnpm --filter @lot-agent/miniprogram run build                # tsc --noEmit
 ```
 
 `project.config.json` 里 `appid` 先是 `touristappid`。正式发版换成微信后台的 AppID，
@@ -95,7 +95,7 @@ npm run build -w @lot-agent/miniprogram                # tsc --noEmit
 - 修图页：可伸展画布、参考图 / 灵感 / 画面设置工具栏、完整宽度的描述输入区。
 - 海报页：主题输入、下划线分类导航、原生文字与几何插画组成的风格示意封面；示意封面不是生成效果承诺。
 - 作品页：图片与轻量标题组成的双列布局，生成中的封面和修图页共用全幅动态颗粒、正中百分比。
-- 个人页、充值、预览、修图及启动页使用相同的文字层级、间距、按钮和配色；导航图标可通过 `npm run icons -w @lot-agent/miniprogram` 重建。
+- 个人页、充值、预览、修图及启动页使用相同的文字层级、间距、按钮和配色；导航图标可通过 `pnpm --filter @lot-agent/miniprogram run icons` 重建。
 
 本轮验证：小程序类型检查、19 项现有测试通过；微信开发者工具已检查修图、海报和个人页显示。
 后台接口在检查时返回 502，未完成依赖在线数据的生成、作品和充值流程联调，也未进行真实支付。

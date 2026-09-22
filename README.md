@@ -28,7 +28,7 @@ real business logic into.
 
 ## Stack
 
-TypeScript monorepo, **npm workspaces** (not pnpm), Node ≥ 18, ESM.
+TypeScript monorepo, **pnpm workspaces**, Node ≥ 18, ESM.
 
 | Package | Name | Role |
 |---|---|---|
@@ -44,7 +44,7 @@ pub/sub). Object storage is local disk (`data/assets/`) behind an `ObjectStorage
 
 ### 1. Prerequisites
 
-- Node.js ≥ 18, npm ≥ 9
+- Node.js ≥ 18, pnpm 10.33.0
 - A running **PostgreSQL** (the server auto-migrates tables on startup)
 - A running **Redis** (required by the queue / worker / cache)
 - At least one LLM key (OpenAI-compatible or Anthropic) to exercise the chat path
@@ -59,8 +59,12 @@ docker run -d --name lot-redis -p 6379:6379 redis:7
 ### 2. Install
 
 ```bash
-npm install
+corepack enable
+pnpm install
 ```
+
+The pnpm version is pinned in `package.json`; CI and Docker use `pnpm install --frozen-lockfile`.
+When switching an existing npm checkout, remove the root and package-level `node_modules` directories before installing.
 
 ### 3. Configure
 
@@ -96,7 +100,7 @@ Non-secret structure (models, pricing, agent prompt, context budget) lives in
 
 ```bash
 # Start everything: core(watch) + server + worker + web
-npm run dev
+pnpm run dev
 ```
 
 This launches four processes via `concurrently`:
@@ -113,9 +117,9 @@ Then open **http://localhost:5173**.
 Run pieces individually if you prefer:
 
 ```bash
-npm run dev:server                      # API only
-npm run dev:web                         # web only
-npm run dev:worker -w @lot-agent/server # worker only (needed for image/video tasks)
+pnpm run dev:server                      # API only
+pnpm run dev:web                         # web only
+pnpm --filter @lot-agent/server run dev:worker # worker only (needed for image/video tasks)
 ```
 
 ### 5. Try it from the CLI
@@ -148,8 +152,8 @@ curl -N http://localhost:3000/api/conversations/$CONV/messages \
 ## Build & Test
 
 ```bash
-npm run build   # build all workspaces
-npm test        # vitest (root) — or: npm test -w @lot-agent/core | -w @lot-agent/server
+pnpm run build   # build all workspaces
+pnpm test        # vitest (root) — or: pnpm --filter @lot-agent/core test | pnpm --filter @lot-agent/server test
 ```
 
 Tests are Vitest, colocated as `*.test.ts`.

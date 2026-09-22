@@ -30,7 +30,7 @@ Windows（x64）。
 ## 开发
 
 ```bash
-npm run dev:desktop        # 根目录：web(vite HMR) + electron，加载 localhost:5173
+pnpm run dev:desktop        # 根目录：web(vite HMR) + electron，加载 localhost:5173
 ```
 
 dev 模式下 vite 代理会按请求读取桌面端保存的 `userData/config.json`
@@ -41,17 +41,17 @@ dev 模式下 vite 代理会按请求读取桌面端保存的 `userData/config.j
 生产模式本地验证（走回环服务器 + 设置页全流程）：
 
 ```bash
-npm run build -w @lot-agent/web
-npm run build -w @lot-agent/desktop
-npm run start -w @lot-agent/desktop
+pnpm --filter @lot-agent/web run build
+pnpm --filter @lot-agent/desktop run build
+pnpm --filter @lot-agent/desktop run start
 ```
 
 ## 打包
 
 ```bash
-npm run dist:desktop         # 根目录：构建 web + 出【当前平台】安装包
-npm run dist:desktop:win     # 根目录：构建 web + 出 Windows NSIS（macOS 上交叉构建亦可）
-npm run dist:desktop:mac     # 根目录：构建 web + 出 macOS dmg/zip（arm64 + x64）
+pnpm run dist:desktop         # 根目录：构建 web + 出【当前平台】安装包
+pnpm run dist:desktop:win     # 根目录：构建 web + 出 Windows NSIS（macOS 上交叉构建亦可）
+pnpm run dist:desktop:mac     # 根目录：构建 web + 出 macOS dmg/zip（arm64 + x64）
 ```
 
 产物在 `packages/desktop/release/`：
@@ -65,8 +65,8 @@ npm run dist:desktop:mac     # 根目录：构建 web + 出 macOS dmg/zip（arm6
 
 ```powershell
 git clone <repo> && cd lot-agent
-npm install
-npm run dist:desktop         # Windows 上默认即出 NSIS x64
+pnpm install
+pnpm run dist:desktop         # Windows 上默认即出 NSIS x64
 ```
 
 国内网络拉不动 Electron / electron-builder 二进制时先设镜像：
@@ -76,7 +76,7 @@ $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
 $env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
 ```
 
-图标为脚本生成的占位图（`npm run icons -w @lot-agent/desktop`），替换正式
+图标为脚本生成的占位图（`pnpm --filter @lot-agent/desktop run icons`），替换正式
 美术稿时覆盖 `packages/desktop/build/icon.png` / `tray-icon.png` 即可。
 
 ## 签名与公证（macOS）

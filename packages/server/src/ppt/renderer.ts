@@ -4,7 +4,7 @@ import { BUILDERS } from "./layouts/index.js";
 import type { BuildCtx } from "./layouts/ctx.js";
 
 // pptxgenjs ships a dual CJS/ESM package.json "exports" map. Under tsx's dev
-// loader (used by `npm run dev`), a plain `import PptxGenJS from "pptxgenjs"`
+// loader (used by `pnpm run dev`), a plain `import PptxGenJS from "pptxgenjs"`
 // resolves through a path that trips Node's ERR_REQUIRE_CYCLE_MODULE — the
 // loader ends up synchronously require()-ing the ESM build mid-evaluation.
 // Forcing a genuine CJS require via createRequire sidesteps that resolution

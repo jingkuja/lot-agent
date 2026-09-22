@@ -6,17 +6,20 @@
 # ---------- Stage 1: build web/dist ----------
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
+RUN corepack enable
 
 # Workspace lockfile install needs every workspace manifest present.
-COPY package.json package-lock.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/web/package.json packages/web/package.json
-RUN npm ci
+COPY packages/desktop/package.json packages/desktop/package.json
+COPY packages/miniprogram/package.json packages/miniprogram/package.json
+RUN pnpm --filter @lot-agent/web install --frozen-lockfile
 
 COPY tsconfig.base.json ./
 COPY packages/web packages/web
-RUN npm run build -w @lot-agent/web
+RUN pnpm --filter @lot-agent/web run build
 
 # ---------- Stage 2: nginx static host + reverse proxy ----------
 FROM nginx:1.27-alpine AS runtime

@@ -10,7 +10,7 @@ consult them for history/roadmap, not current behavior.
 
 ## Stack
 
-TypeScript monorepo using **npm workspaces** (not pnpm). Node ≥ 18, ESM.
+TypeScript monorepo using **pnpm workspaces**. Node ≥ 18, ESM.
 
 | Package | Name | Tech | Builds with |
 |---|---|---|---|
@@ -26,13 +26,13 @@ storage is local-disk (`data/assets|documents|uploads`) behind an `ObjectStorage
 ## Commands
 
 ```bash
-npm install
-npm run dev        # core(watch) + server + worker + web(vite) via concurrently
-npm run dev:server
-npm run dev:web
-npm run dev:worker -w @lot-agent/server   # background job worker (separate process)
-npm run build      # all workspaces
-npm test           # vitest (root) — or: npm test -w @lot-agent/core | -w @lot-agent/server
+pnpm install
+pnpm run dev        # core(watch) + server + worker + web(vite) via concurrently
+pnpm run dev:server
+pnpm run dev:web
+pnpm --filter @lot-agent/server run dev:worker   # background job worker (separate process)
+pnpm run build      # all workspaces
+pnpm test           # vitest (root) — or: pnpm --filter @lot-agent/core test | pnpm --filter @lot-agent/server test
 ```
 
 Tests use **Vitest**, colocated as `*.test.ts`. Web dev proxies `/api` and `/static` to
