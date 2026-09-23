@@ -15,7 +15,10 @@
     "test:knowledge": "pnpm --filter @lot-agent/core run build && vitest run packages/core/src/knowledge packages/server/src/knowledge packages/server/src/services/agent-service.knowledge-source.test.ts packages/server/src/services/rag-client.test.ts",
     "check:knowledge:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-db.ts",
     "check:knowledge:parsers": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-parsers.ts",
-    "check:knowledge:integration": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-integration.ts"
+    "check:knowledge:integration": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-integration.ts",
+    "dev:knowledge": "pnpm --filter @lot-agent/server run dev:knowledge",
+    "check:knowledge:live": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-live.ts",
+    "knowledge:reindex": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reindex-knowledge.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

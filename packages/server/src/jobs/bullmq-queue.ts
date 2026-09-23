@@ -1,3 +1,4 @@
+import { publishPersistedJob } from "./persisted-job.js";
 import { randomUUID } from "node:crypto";
 import { Queue, Worker } from "bullmq";
 import type Redis from "ioredis";
@@ -41,18 +42,7 @@ export class BullmqJobQueue implements JobQueue {
   ): Promise<string> {
     const id = randomUUID();
     await this.db.createTask(id, type, input, userId);
-    await this.queue.add(
-      type,
-      { taskId: id },
-      {
-        // Use our task id as the BullMQ job id so cancel() can target it, and
-        // so a duplicate enqueue with the same id is a no-op on the queue side.
-        jobId: id,
-        priority: opts?.priority,
-        delay: opts?.delayMs,
-        attempts: opts?.maxAttempts,
-      }
-    );
+    await publishPersistedJob(this.queue, id, type, opts);
     return id;
   }
 

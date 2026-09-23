@@ -1664,7 +1664,7 @@ export class DB {
   async failStalePendingTasks(staleMs: number, error: string): Promise<StoredTask[]> {
     const { rows } = await this.pool.query(
       `UPDATE tasks SET status = 'failed', error = $2, updated_at = now()
-       WHERE status = 'pending' AND attempts = 0
+       WHERE status = 'pending' AND attempts = 0 AND queue_name = 'lot-tasks'
          AND created_at < now() - make_interval(secs => $1::double precision / 1000)
        RETURNING *`,
       [staleMs, error]

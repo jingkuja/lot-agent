@@ -1,3 +1,4 @@
+import { prepareIngestion, supersedeIngestion } from "./ingestion/prepare.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { PrivateKnowledgeObject } from "@lot-agent/core";
@@ -20,7 +21,7 @@ export interface NewKnowledgeItem {
 export interface KnowledgeItemView {
   id: string; title: string; sourceType: string; version: number; generation: number;
   activeRevisionId: string | null; pendingRevisionId: string | null;
-  revisionId: string; storageStatus: string; indexStatus: string;
+  taskId: string | null; revisionId: string; storageStatus: string; indexStatus: string;
   description: string; content: string | null; sourceUrl: string | null; mime: string | null;
   size: number; collectionIds: string[]; tags: string[]; createdAt: string;
 }
@@ -30,7 +31,7 @@ export interface KnowledgeFile {
 export interface KnowledgeCursor { createdAt: string; id: string }
 
 export class KnowledgeRepository {
-  constructor(readonly pool: Pool) {}
+  constructor(readonly pool: Pool, private readonly ingestionQueue?: string) {}
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
@@ -108,7 +109,7 @@ export class KnowledgeRepository {
     if (result.rows.length !== ids.length) throw notFound();
   }
 
-  async createItem(owner: string, input: NewKnowledgeItem, key: string): Promise<{ id: string; revisionId: string }> {
+  async createItem(owner: string, input: NewKnowledgeItem, key: string): Promise<{ id: string; revisionId: string; taskId?: string }> {
     return this.idempotent(owner, "items", key, input, async (client) => {
       await this.lockCollections(client, owner, input.collectionIds);
       const id = randomUUID(); const revisionId = randomUUID();
@@ -123,13 +124,15 @@ export class KnowledgeRepository {
         VALUES ($1,$2,$3,$4,1,1,$5,$6,$7,$8,$9,'stored')`, [revisionId, owner, id, objectId, input.mime ?? null, input.object ? input.title : null, input.content ?? null, input.description, input.sourceUrl ?? null]);
       for (const collectionId of input.collectionIds) await client.query("INSERT INTO rag_collection_items (owner_id,collection_id,item_id) VALUES ($1,$2,$3)", [owner, collectionId, id]);
       for (const tag of input.tags) await client.query("INSERT INTO rag_item_tags (owner_id,item_id,tag) VALUES ($1,$2,$3)", [owner, id, tag]);
-      return { id, revisionId };
+      const taskId = this.ingestionQueue ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation: 1, queueName: this.ingestionQueue }) : undefined;
+      return { id, revisionId, ...(taskId ? { taskId } : {}) };
     });
   }
 
   async getItem(owner: string, id: string): Promise<KnowledgeItemView> {
     const { rows } = await this.pool.query(`SELECT i.*,r.id AS revision_id,r.storage_status,r.index_status,r.description,r.content,r.source_url,r.mime,
       COALESCE(o.byte_size,0) AS byte_size,
+      (SELECT task_id FROM rag_ingestion_runs g WHERE g.owner_id=i.owner_id AND g.revision_id=r.id ORDER BY g.generation DESC LIMIT 1) AS task_id,
       ARRAY(SELECT ci.collection_id FROM rag_collection_items ci JOIN rag_collections c ON c.owner_id=ci.owner_id AND c.id=ci.collection_id
         WHERE ci.owner_id=i.owner_id AND ci.item_id=i.id AND c.deleted_at IS NULL ORDER BY ci.collection_id) AS collection_ids,
       ARRAY(SELECT tag FROM rag_item_tags t WHERE t.owner_id=i.owner_id AND t.item_id=i.id ORDER BY tag) AS tags
@@ -138,7 +141,7 @@ export class KnowledgeRepository {
       WHERE i.owner_id=$1 AND i.id=$2 AND i.deleted_at IS NULL`, [owner, id]);
     const row = rows[0]; if (!row) throw notFound();
     return { id: row.id, title: row.title, sourceType: row.source_type, version: row.version, generation: row.generation,
-      activeRevisionId: row.active_revision_id, pendingRevisionId: row.pending_revision_id, revisionId: row.revision_id,
+      taskId: row.task_id ?? null, activeRevisionId: row.active_revision_id, pendingRevisionId: row.pending_revision_id, revisionId: row.revision_id,
       storageStatus: row.storage_status, indexStatus: row.index_status, description: row.description, content: row.content,
       sourceUrl: row.source_url, mime: row.mime, size: Number(row.byte_size), collectionIds: row.collection_ids, tags: row.tags, createdAt: row.created_at.toISOString() };
   }
@@ -173,6 +176,7 @@ export class KnowledgeRepository {
       if (row.source_type === "note" && input.content !== undefined && !input.content.trim()) throw new KnowledgeError("INVALID_REQUEST", 400, "笔记正文不能为空");
       if (input.sourceUrl !== undefined && row.source_type !== "bookmark") throw new KnowledgeError("INVALID_REQUEST", 400, "仅书签可编辑地址");
       const revisionId = randomUUID();
+      await supersedeIngestion(client, owner, id);
       await client.query(`INSERT INTO rag_item_revisions
         (id,owner_id,item_id,object_id,revision_number,generation,mime,original_name,content,description,source_url,storage_status)
         SELECT $4,r.owner_id,r.item_id,r.object_id,
@@ -186,7 +190,8 @@ export class KnowledgeRepository {
       await client.query("DELETE FROM rag_item_tags WHERE owner_id=$1 AND item_id=$2", [owner, id]);
       for (const tag of input.tags) await client.query("INSERT INTO rag_item_tags (owner_id,item_id,tag) VALUES ($1,$2,$3)", [owner, id, tag]);
       await client.query("DELETE FROM rag_preview_tickets WHERE owner_id=$1 AND item_id=$2", [owner, id]);
-      return { id, revisionId, version: row.version + 1 };
+      const taskId = this.ingestionQueue ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation: row.generation + 1, queueName: this.ingestionQueue }) : undefined;
+      return { id, revisionId, version: row.version + 1, ...(taskId ? { taskId } : {}) };
     });
   }
 
@@ -204,6 +209,7 @@ export class KnowledgeRepository {
     return this.transaction(async (client) => {
       const item = await client.query("SELECT version FROM rag_items WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE", [owner, id]);
       if (!item.rows[0]) throw notFound(); if (item.rows[0].version !== version) throw conflict();
+      await supersedeIngestion(client, owner, id);
       const affected = await client.query("DELETE FROM rag_collection_items WHERE owner_id=$1 AND item_id=$2 RETURNING collection_id", [owner, id]);
       await client.query("UPDATE rag_items SET deleted_at=now(),version=version+1,generation=generation+1,active_revision_id=NULL,pending_revision_id=NULL WHERE owner_id=$1 AND id=$2", [owner, id]);
       await client.query("UPDATE rag_item_revisions SET index_status='cancelled' WHERE owner_id=$1 AND item_id=$2", [owner, id]);

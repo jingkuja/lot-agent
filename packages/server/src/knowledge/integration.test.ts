@@ -61,7 +61,7 @@ describe.skipIf(!enabled)("knowledge PostgreSQL and authenticated HTTP", () => {
       for (const migration of migrations) await migration.up(client);
       const tables = await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema=$1 AND table_name LIKE 'rag_%'", [schema]);
       expect(tables.rows.map((row) => row.table_name)).toContain("rag_item_revisions");
-      expect(tables.rows.length).toBe(8);
+      expect(tables.rows.map((row) => row.table_name)).toEqual(expect.arrayContaining(["rag_outbox", "rag_ingestion_runs"]));
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
   it("requires session auth and does not accept forged ownership", async () => {

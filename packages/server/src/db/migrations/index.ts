@@ -1,3 +1,5 @@
+import { knowledgeIndex } from "./0026-knowledge-index.js";
+import { knowledgeJobs } from "./0025-knowledge-jobs.js";
 import { knowledgeFoundation } from "./0024-knowledge-foundation.js";
 import type { Migration } from "../migration-runner.js";
 import { baseline } from "./0001-baseline.js";
@@ -52,4 +54,6 @@ export const migrations: Migration[] = [
   userWechat,
   imageShare,
   knowledgeFoundation,
+  knowledgeJobs,
+  knowledgeIndex,
 ];

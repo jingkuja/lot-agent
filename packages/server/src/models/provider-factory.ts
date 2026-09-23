@@ -1,3 +1,4 @@
+import { TokenhubEmbeddingProvider } from "../knowledge/ingestion/embedding.js";
 import { OpenAIProvider, type LLMProvider, type ImageGenerationProvider, type VideoGenerationProvider } from "@lot-agent/core";
 import { makeImageProvider, makeVideoProvider, type MediaGenerationConfig } from "../generation/config.js";
 import { resolveProvider, type ModelCatalogConfig } from "./catalog.js";
@@ -17,6 +18,10 @@ export class ProviderFactory {
 
   llm(modelId: string, apiKey: string): LLMProvider {
     return new OpenAIProvider({ apiKey, baseUrl: this.deps.llmBaseUrl, model: modelId });
+  }
+
+  embedding(modelId: string, apiKey: string, dimensions: number, onUsage: (tokens: number) => Promise<void>) {
+    return new TokenhubEmbeddingProvider({ baseUrl: this.deps.llmBaseUrl, apiKey, model: modelId, dimensions, onUsage });
   }
 
   image(modelId: string, apiKey: string): ImageGenerationProvider {

@@ -1,3 +1,7 @@
+import { KnowledgeRetriever } from "./knowledge/retrieval.js";
+import { indexProfile } from "./knowledge/ingestion/profile.js";
+import { createUserEmbedder } from "./knowledge/ingestion/runtime.js";
+import { knowledgeQueueConfig } from "./knowledge/ingestion/config.js";
 import { KnowledgeRepository } from "./knowledge/repository.js";
 import { LocalKnowledgeStorage } from "./knowledge/private-storage.js";
 import { createKnowledgeManageRoutes, createKnowledgePreviewRoutes } from "./knowledge/routes.js";
@@ -326,11 +330,13 @@ async function main() {
   app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
   // Management can be developed independently while chat remains explicitly remote.
   if (process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1") {
-    const repository = new KnowledgeRepository(service.db.pool);
+    const repository = new KnowledgeRepository(service.db.pool, process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? knowledgeQueueConfig().queueName : undefined);
     const storage = new LocalKnowledgeStorage(resolve(ROOT, "data/knowledge"));
     app.use("/api/rag/manage/*", authMw);
     app.on("POST", "/api/rag/manage/uploads", uploadRateLimit);
-    app.route("/api/rag/manage", createKnowledgeManageRoutes(repository, storage));
+    const profile = indexProfile(process.env.OPENAI_BASE_URL ?? "https://tokenhub.wetok.ai/v1");
+    const retriever = process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? new KnowledgeRetriever(service.db.pool, profile, (owner) => createUserEmbedder(service.db, profile, owner)) : undefined;
+    app.route("/api/rag/manage", createKnowledgeManageRoutes(repository, storage, retriever));
     app.route("/api/rag/preview", createKnowledgePreviewRoutes(repository, storage));
   }
   app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));

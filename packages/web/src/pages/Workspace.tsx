@@ -1,3 +1,5 @@
+import { KnowledgePanel } from "../modules/knowledge/KnowledgePanel.js";
+import { knowledgeApi } from "../modules/knowledge/api.js";
 import { useEffect, useCallback, useRef, useState, useMemo } from "react";
 import { Sidebar } from "../components/Sidebar.js";
 import { ChatPanel } from "../components/ChatPanel.js";
@@ -111,6 +113,9 @@ export function Workspace({
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const [knowledgeAvailable, setKnowledgeAvailable] = useState(false);
+  useEffect(() => { let live = true; void knowledgeApi.status().then(() => { if (live) setKnowledgeAvailable(true); }).catch(() => {}); return () => { live = false; }; }, [user.id]);
   const [centerOpen, setCenterOpen] = useState(false);
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
   const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
@@ -397,6 +402,7 @@ export function Workspace({
 
   return (
     <div className="workspace">
+      {knowledgeOpen && <KnowledgePanel onClose={() => setKnowledgeOpen(false)} />}
       <div className={`workspace-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
         <BrandHeader
           user={user}
@@ -407,6 +413,7 @@ export function Workspace({
           onOpenDigitalEmployee={isDigitalEmployeeMode ? () => {} : onNavigateDigitalEmployee}
           activeModule={isDigitalEmployeeMode ? "digitalEmployee" : "assistant"}
           balanceRefreshKey={balanceRefreshKey}
+          onOpenLocalKnowledge={knowledgeAvailable ? () => setKnowledgeOpen(true) : undefined}
           onOpenKnowledgeBase={() => {
             const popup = window.open("about:blank", "_blank");
             void api.getKnowledgeBaseLink()

@@ -1,3 +1,8 @@
+import { parseKnowledgeRetrievalRequest } from "@lot-agent/core";
+import { resolveKnowledgeScope } from "./scope.js";
+import type { KnowledgeRetriever } from "./retrieval.js";
+import { KnowledgeJobs } from "./ingestion/jobs.js";
+import { knowledgeQueueConfig } from "./ingestion/config.js";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
@@ -82,9 +87,17 @@ async function content(c: Context, storage: PrivateKnowledgeStorage, file: Knowl
 }
 
 /** Mount ONLY below existing session auth. No caller-controlled owner field is accepted. */
-export function createKnowledgeManageRoutes(repository: KnowledgeRepository, storage: PrivateKnowledgeStorage) {
+export function createKnowledgeManageRoutes(repository: KnowledgeRepository, storage: PrivateKnowledgeStorage, retriever?: KnowledgeRetriever) {
   const app = new Hono<Env>(); errorHandler(app);
   app.use("*", async (c, next) => { if (!c.get("userId")) throw new KnowledgeError("UNAUTHORIZED", 401, "请先登录"); await next(); });
+  app.get("/status", (c) => c.json({ ingestionEnabled: process.env.KNOWLEDGE_INGESTION_ENABLED === "1" }));
+  app.post("/retrieval", async (c) => {
+    if (!retriever) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "本地检索尚未启用");
+    const input = parseKnowledgeRetrievalRequest(await jsonBody(c));
+    input.collectionIds.forEach(uuid);
+    const scope = await resolveKnowledgeScope({ kind: "internal", userId: c.get("userId"), collectionIds: input.collectionIds }, input.collectionIds, "retrieval:read", (owner, ids) => repository.findOwnedCollections(owner, ids));
+    return c.json(await retriever.retrieve(scope, input));
+  });
   app.get("/collections", async (c) => { const p = pagination(c); return c.json(encodePage(await repository.listCollections(c.get("userId"), p.limit, p.cursor))); });
   app.post("/collections", async (c) => {
     const idempotencyKey = key(c);
@@ -134,6 +147,11 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
     const token = c.req.header("Authorization")?.replace(/^Bearer /, "") ?? "";
     const ticket = await repository.createPreviewTicket(c.get("userId"), token, uuid(c.req.param("id")), uuid(c.req.param("revisionId")));
     return c.json({ url: `/api/rag/preview/${ticket.token}`, expiresAt: ticket.expiresAt });
+  });
+  app.post("/items/:id/retry", async (c) => {
+    if (process.env.KNOWLEDGE_INGESTION_ENABLED !== "1") throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "知识入库尚未启用");
+    const { version } = KnowledgeDeleteSchema.parse(await jsonBody(c));
+    return c.json(await new KnowledgeJobs(repository.pool).retry(c.get("userId"), uuid(c.req.param("id")), version, knowledgeQueueConfig().queueName), 202);
   });
   app.get("/storage", async (c) => c.json({ storedBytes: await repository.storageUsage(c.get("userId")) }));
   return app;

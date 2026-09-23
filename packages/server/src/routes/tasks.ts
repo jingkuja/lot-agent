@@ -1,3 +1,4 @@
+import { KnowledgeJobs } from "../knowledge/ingestion/jobs.js";
 import { Hono } from "hono";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
@@ -109,7 +110,9 @@ export function createTaskRoutes(service: AgentService) {
     if (!job || (job as unknown as { userId?: string }).userId !== userId) {
       return c.json({ error: "Task not found" }, 404);
     }
-    const changed = await service.jobQueue.cancel(id);
+    const changed = job.type === "knowledge.ingest"
+      ? await new KnowledgeJobs(service.db.pool).cancel(userId, id)
+      : await service.jobQueue.cancel(id);
     if (changed) {
       // Reflect the cancel on the linked chat message right away (a job that
       // never starts — cancelled while queued — has no worker to do it).

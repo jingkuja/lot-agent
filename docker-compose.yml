@@ -61,13 +61,16 @@ x-app-env: &app-env
   RAG_API_URL: ${RAG_API_URL:-https://ai-rag.gafz.com.cn}
   RAG_INTEGRATION_KEY: ${RAG_INTEGRATION_KEY:-}
   KNOWLEDGE_MANAGEMENT_ENABLED: ${KNOWLEDGE_MANAGEMENT_ENABLED:-0}
+  KNOWLEDGE_INGESTION_ENABLED: ${KNOWLEDGE_INGESTION_ENABLED:-0}
+  KNOWLEDGE_QUEUE: ${KNOWLEDGE_QUEUE:-lot-knowledge}
+  KNOWLEDGE_CONCURRENCY: ${KNOWLEDGE_CONCURRENCY:-2}
   WECHAT_MP_APPID: ${WECHAT_MP_APPID:-}
   WECHAT_MP_SECRET: ${WECHAT_MP_SECRET:-}
   DEBUG_LLM: ${DEBUG_LLM:-}
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PG_USER:-postgres}
@@ -138,6 +141,23 @@ services:
       - app_data:/app/data
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  knowledge-worker:
+    image: lot-agent-app:1.0
+    profiles: [knowledge]
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      ROLE: knowledge-worker
+    healthcheck:
+      disable: true
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      server:
         condition: service_healthy
       redis:
         condition: service_healthy

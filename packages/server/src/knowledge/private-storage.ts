@@ -43,6 +43,9 @@ export class LocalKnowledgeStorage implements PrivateKnowledgeStorage {
     return resolve(this.root, key);
   }
 
+  /** Server-only parser access; this path is never serialized into API responses. */
+  localPath(key: string): string { return this.path(key); }
+
   async put(ownerId: string, body: NodeJS.ReadableStream, mime: string): Promise<PrivateKnowledgeObject> {
     if (!UUID.test(ownerId)) throw new KnowledgeError("INVALID_REQUEST", 400, "资料归属无效");
     const cap = KNOWLEDGE_MIME_LIMITS[mime];

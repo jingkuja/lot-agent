@@ -47,8 +47,12 @@ case "${ROLE}" in
     echo "[entrypoint] starting job worker"
     exec node packages/server/dist/workers/index.js
     ;;
+  knowledge-worker)
+    echo "[entrypoint] starting knowledge worker"
+    exec node packages/server/dist/workers/knowledge.js
+    ;;
   *)
-    echo "[entrypoint] ERROR: unknown ROLE='${ROLE}' (expected 'server' or 'worker')" >&2
+    echo "[entrypoint] ERROR: unknown ROLE='${ROLE}' (expected 'server', 'worker' or 'knowledge-worker')" >&2
     exit 1
     ;;
 esac

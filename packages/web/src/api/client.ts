@@ -240,7 +240,7 @@ export class ApiClientError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const { headers: callerHeaders, ...restInit } = init ?? {};
   const res = await fetch(`${BASE}${path}`, {
     ...restInit,
@@ -259,7 +259,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiClientError(err.error ?? res.statusText, res.status, err.code, err);
+    throw new ApiClientError(typeof err.error === "object" ? err.error?.message ?? res.statusText : err.error ?? res.statusText, res.status, err.error?.code ?? err.code, err);
   }
   return res.json();
 }
