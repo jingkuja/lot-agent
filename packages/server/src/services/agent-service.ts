@@ -1,3 +1,6 @@
+import { createKnowledgeModule, type KnowledgeConfig, type KnowledgeModule } from "../knowledge/module.js";
+import { KnowledgeError } from "../knowledge/errors.js";
+import type { KnowledgeService } from "@lot-agent/core";
 import {
   Agent,
   ToolRegistry,
@@ -249,6 +252,9 @@ export async function completeTalkTrackReply(
 }
 
 export interface ServiceConfig {
+  knowledge?: KnowledgeConfig;
+  /** Server-owned local implementation, injected only when fully available. */
+  knowledgeService?: KnowledgeService;
   llm: LLMConfig;
   models: ModelConfig[];
   modelCatalog: ModelCatalogConfig;
@@ -309,6 +315,7 @@ export class AgentService {
   readonly debug: boolean;
   readonly managedKeysEnabled: boolean;
   readonly ragClient: RagClient;
+  readonly knowledge: KnowledgeModule;
   /** Id of the seeded debug user (set in index.ts on startup when debug). */
   debugUserId?: string;
   /** Shared Redis connection (also caches the per-user model catalog). */
@@ -337,6 +344,7 @@ export class AgentService {
   private traceRecorderFactory!: (modelId?: string, provider?: string) => TraceRecorder;
 
   constructor(config: ServiceConfig) {
+    this.knowledge = createKnowledgeModule(config.knowledge, config.knowledgeService);
     this.db = new DB(config.db);
     this.traceManager = new TraceManager();
     this.traceManager.addSink(new ConsoleSink());
@@ -818,10 +826,20 @@ export class AgentService {
   }
 
   async listKnowledgeBases(userId: string): Promise<KnowledgeBase[]> {
+    if (this.knowledge.source === "local") {
+      const collections = await this.knowledge.service.listCollections(userId);
+      return collections.map((item) => ({
+        id: item.id, name: item.name, description: item.description,
+        documentCount: item.storedCount, availableDocumentCount: item.searchableCount,
+      }));
+    }
     return this.ragClient.listKnowledgeBases(await this.ragIdentity(userId));
   }
 
   async createKnowledgeBaseLink(userId: string): Promise<string> {
+    if (this.knowledge.source === "local") {
+      throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "内置知识管理入口尚未启用");
+    }
     return this.ragClient.createKnowledgeBaseLink(await this.ragIdentity(userId));
   }
 
@@ -958,6 +976,11 @@ export class AgentService {
     knowledgeBases: KnowledgeBaseRef[],
     query: string
   ): Promise<RagRecord[]> {
+    if (this.knowledge.source === "local") {
+      // S3 will consume versioned evidence directly. Do not discard citations by
+      // adapting local results to the legacy RagRecord format in the meantime.
+      throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "内置知识会话检索尚未启用");
+    }
     return this.ragClient.retrieve(
       await this.ragIdentity(userId),
       knowledgeBases.map((item) => item.id),

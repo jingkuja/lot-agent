@@ -1,3 +1,4 @@
+import { knowledgeFoundation } from "./0024-knowledge-foundation.js";
 import type { Migration } from "../migration-runner.js";
 import { baseline } from "./0001-baseline.js";
 import { messageSeq } from "./0002-message-seq.js";
@@ -50,4 +51,5 @@ export const migrations: Migration[] = [
   marketingProductFaqNotes,
   userWechat,
   imageShare,
+  knowledgeFoundation,
 ];

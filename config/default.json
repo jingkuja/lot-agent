@@ -1,4 +1,7 @@
 {
+  "knowledge": {
+    "source": "remote"
+  },
   "llm": {
     "default": "openai",
     "openai": {

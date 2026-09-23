@@ -11,7 +11,11 @@
     "dist:desktop:mac": "pnpm --filter @lot-agent/web run build && pnpm --filter @lot-agent/desktop run dist:mac",
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:knowledge": "pnpm --filter @lot-agent/core run build && vitest run packages/core/src/knowledge packages/server/src/knowledge packages/server/src/services/agent-service.knowledge-source.test.ts packages/server/src/services/rag-client.test.ts",
+    "check:knowledge:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-db.ts",
+    "check:knowledge:parsers": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-parsers.ts",
+    "check:knowledge:integration": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-integration.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

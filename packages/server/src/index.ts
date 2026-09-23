@@ -1,3 +1,7 @@
+import { KnowledgeRepository } from "./knowledge/repository.js";
+import { LocalKnowledgeStorage } from "./knowledge/private-storage.js";
+import { createKnowledgeManageRoutes, createKnowledgePreviewRoutes } from "./knowledge/routes.js";
+import { KnowledgeConfigSchema } from "./knowledge/module.js";
 import "./load-env.js";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
@@ -59,6 +63,7 @@ async function loadConfig(): Promise<ServiceConfig> {
 
   return {
     llm,
+    knowledge: KnowledgeConfigSchema.parse(raw.knowledge),
     models: config.models ?? [],
     modelCatalog,
     miniprogram,
@@ -233,7 +238,8 @@ async function main() {
     ...RATE_LIMITS.digitalEmployee,
   });
 
-  app.use("*", logger());
+  const requestLogger = logger();
+  app.use("*", (c, next) => c.req.path.startsWith("/api/rag/preview/") ? next() : requestLogger(c, next));
   app.use("*", cors({
     origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
     credentials: true,
@@ -318,6 +324,15 @@ async function main() {
   app.route("/api/platform", createPlatformRoutes(service));
   app.route("/api/publish", createPublishRoutes(service));
   app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
+  // Management can be developed independently while chat remains explicitly remote.
+  if (process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1") {
+    const repository = new KnowledgeRepository(service.db.pool);
+    const storage = new LocalKnowledgeStorage(resolve(ROOT, "data/knowledge"));
+    app.use("/api/rag/manage/*", authMw);
+    app.on("POST", "/api/rag/manage/uploads", uploadRateLimit);
+    app.route("/api/rag/manage", createKnowledgeManageRoutes(repository, storage));
+    app.route("/api/rag/preview", createKnowledgePreviewRoutes(repository, storage));
+  }
   app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
 
   // /api/balance alias → same balance logic, user-scoped
