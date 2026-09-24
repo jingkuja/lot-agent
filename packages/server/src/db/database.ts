@@ -296,6 +296,30 @@ export class DB {
     `);
   }
 
+  async listConversationProjects(userId: string) {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM conversation_projects WHERE user_id = $1 ORDER BY created_at DESC, id DESC", [userId]);
+    return rows;
+  }
+
+  async createConversationProject(id: string, userId: string, name: string) {
+    const { rows } = await this.pool.query(
+      "INSERT INTO conversation_projects (id, user_id, name) VALUES ($1, $2, $3) RETURNING *", [id, userId, name]);
+    return rows[0];
+  }
+
+  async ownsConversationProject(id: string, userId: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      "SELECT id FROM conversation_projects WHERE id = $1 AND user_id = $2", [id, userId]);
+    return rows.length > 0;
+  }
+
+  async setConversationProject(id: string, userId: string, projectId: string | null) {
+    const { rows } = await this.pool.query(
+      "UPDATE conversations SET project_id = $3 WHERE id = $1 AND user_id = $2 RETURNING *", [id, userId, projectId]);
+    return rows[0];
+  }
+
   // ── Conversations ──
 
   async createConversation(
@@ -305,13 +329,14 @@ export class DB {
     provider?: string,
     agentId?: string,
     userId?: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    projectId?: string | null
   ): Promise<Conversation> {
     const { rows } = await this.pool.query(
-      `INSERT INTO conversations (id, title, model, provider, agent_id, user_id, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      `INSERT INTO conversations (id, title, model, provider, agent_id, user_id, metadata, project_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
        RETURNING *`,
-      [id, title, model ?? null, provider ?? null, agentId ?? "general", userId ?? "default", JSON.stringify(metadata ?? {})]
+      [id, title, model ?? null, provider ?? null, agentId ?? "general", userId ?? "default", JSON.stringify(metadata ?? {}), projectId ?? null]
     );
     return rows[0];
   }
@@ -334,7 +359,7 @@ export class DB {
 
   async listConversations(
     userId?: string,
-    opts?: { limit?: number; cursorId?: string; agentId?: string; includePreview?: boolean }
+    opts?: { limit?: number; cursorId?: string; agentId?: string; includePreview?: boolean; projectId?: string }
   ): Promise<Conversation[]> {
     // Keyset pagination over (updated_at DESC, id DESC). Omitting `limit`
     // returns the full list (back-compat for non-paginated callers); the id
@@ -354,6 +379,10 @@ export class DB {
     if (userId) {
       params.push(userId);
       where.push(`user_id = $${params.length}`);
+    }
+    if (opts?.projectId) {
+      params.push(opts.projectId);
+      where.push(`project_id = $${params.length}`);
     }
     if (opts?.agentId) {
       params.push(opts.agentId);

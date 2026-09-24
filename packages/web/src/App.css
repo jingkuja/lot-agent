@@ -5898,3 +5898,26 @@ html, body, #root {
   .de-talk-track-message { max-width: 96%; }
   .de-result-options { grid-template-columns: 1fr; }
 }
+
+/* Project groups precede unassigned recent conversations. */
+.sidebar-recent-header .sidebar-create-project { margin-left: 0; }
+.project-section-label { padding: 12px 10px 8px; }
+.sidebar-project-header { display: flex; align-items: center; border-radius: 8px; }
+.sidebar-project-header:hover { background: var(--bg-hover); }
+.sidebar-project-toggle, .sidebar-project-add, .sidebar-project-empty, .sidebar-conversation-link {
+  border: 0; background: transparent; color: var(--text); cursor: pointer; font: inherit; text-align: left;
+}
+.sidebar-project-toggle { display: flex; align-items: center; gap: 8px; padding: 9px 6px; min-width: 0; flex: 1; }
+.sidebar-project-toggle span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-project-toggle svg { flex-shrink: 0; }
+.sidebar-project-add { padding: 6px 10px; font-size: 20px; }
+.sidebar-project-conversations { padding-left: 22px; }
+.sidebar-project-empty { padding: 8px 12px; font-size: 12px; color: var(--text-muted); }
+.sidebar-conversation-link { padding: 0; flex: 1; min-width: 0; }
+.sidebar-project-move { width: 22px; flex-shrink: 0; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; opacity: 0; }
+.sidebar-item:hover .sidebar-project-move, .sidebar-item:focus-within .sidebar-project-move { opacity: 1; }
+.sidebar-project-form { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 14px; }
+.sidebar-project-form input { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); color: var(--text); }
+.sidebar-project-form button { background: var(--bg-hover); color: var(--text); border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.sidebar-project-error { padding: 8px 14px; color: var(--text-muted); font-size: 12px; }
+@media (hover: none) { .sidebar-project-move { opacity: 1; } }

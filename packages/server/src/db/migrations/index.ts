@@ -1,3 +1,4 @@
+import { conversationProjects } from "./0031-conversation-projects.js";
 import { knowledgeReviewFixes } from "./0030-knowledge-review-fixes.js";
 import { knowledgeAccess } from "./0029-knowledge-access.js";
 import { knowledgeIndexSpaces } from "./0028-knowledge-index-spaces.js";
@@ -64,4 +65,5 @@ export const migrations: Migration[] = [
   knowledgeIndexSpaces,
   knowledgeAccess,
   knowledgeReviewFixes,
+  conversationProjects,
 ];

@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api, type Conversation } from "../api/client.js";
 
 const PAGE_SIZE = 20;
+async function listWithProjects(limit: number) {
+  const [page, projects] = await Promise.all([api.listConversations(limit), api.listProjects()]);
+  const groups = await Promise.all(projects.map((project) => api.projectConversations(project.id)));
+  const items = [...new Map([...page.items, ...groups.flat()].map((conv) => [conv.id, conv])).values()];
+  return { ...page, items };
+}
 
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -25,7 +31,7 @@ export function useConversations() {
     setLoading(true);
     try {
       const count = Math.min(Math.max(conversations.length, PAGE_SIZE), 100);
-      const { items, nextCursor } = await api.listConversations(count);
+      const { items, nextCursor } = await listWithProjects(count);
       if (seq !== refreshSeq.current) return; // superseded by a newer refresh
       setConversations(items);
       setNextCursor(nextCursor);
@@ -59,8 +65,7 @@ export function useConversations() {
       initialized.current = true;
       // First load: exactly one page.
       setLoading(true);
-      api
-        .listConversations(PAGE_SIZE)
+      listWithProjects(PAGE_SIZE)
         .then(({ items, nextCursor }) => {
           setConversations(items);
           setNextCursor(nextCursor);

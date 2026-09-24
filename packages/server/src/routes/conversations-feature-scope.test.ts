@@ -45,7 +45,7 @@ describe("conversation feature scope", () => {
     expect(response.status).toBe(201);
     expect(createConversation).toHaveBeenCalledWith(
       expect.any(String), "新对话", undefined, undefined, "digital_employee", "u1",
-      { digitalEmployeeFeatureScope: "customer-acquisition" }
+      { digitalEmployeeFeatureScope: "customer-acquisition" }, undefined
     );
   });
 
@@ -75,7 +75,7 @@ describe("conversation feature scope", () => {
     });
     expect(response.status).toBe(201);
     expect(createConversation).toHaveBeenCalledWith(
-      expect.any(String), "新对话", "deepseek-v4-flash", "openai", "image", "u1", undefined
+      expect.any(String), "新对话", "deepseek-v4-flash", "openai", "image", "u1", undefined, undefined
     );
   });
 

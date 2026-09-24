@@ -39,7 +39,10 @@ import type {
 } from "../modules/digital-employee/types.js";
 export type { CatalogModel };
 
+export interface ConversationProject { id: string; name: string; }
+
 export interface Conversation {
+  project_id?: string | null;
   id: string;
   title: string;
   agent_id: string;
@@ -396,16 +399,20 @@ export const api = {
   promoteAgent: (id: string) =>
     request<{ ok: true }>(`/agents/${id}/promote`, { method: "POST" }),
 
+  listProjects: () => request<ConversationProject[]>("/conversations/projects"),
+  createProject: (name: string) => request<ConversationProject>("/conversations/projects", { method: "POST", body: JSON.stringify({ name }) }),
+  projectConversations: (id: string) => request<Conversation[]>(`/conversations/projects/${id}/conversations`),
+  moveConversation: (id: string, projectId: string | null) => request<Conversation>(`/conversations/${id}/project`, { method: "PUT", body: JSON.stringify({ projectId }) }),
   // ── Conversations ───────────────────────────────────────────────────────────
   listConversations: (limit: number, cursor?: string) =>
     request<{ items: Conversation[]; nextCursor: string | null }>(
       `/conversations?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ),
 
-  createConversation: (title?: string, agentId?: string, featureScope?: string) =>
+  createConversation: (title?: string, agentId?: string, featureScope?: string, projectId?: string) =>
     request<Conversation>("/conversations", {
       method: "POST",
-      body: JSON.stringify({ title, agentId, featureScope }),
+      body: JSON.stringify({ title, agentId, featureScope, projectId }),
     }),
 
   getConversation: (id: string) =>

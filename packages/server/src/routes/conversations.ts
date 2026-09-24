@@ -85,6 +85,29 @@ function storedKnowledgeBases(metadata: Record<string, unknown> | undefined): Kn
 export function createConversationRoutes(service: AgentService): Hono {
   const app = new Hono<{ Variables: Variables }>();
 
+  app.get("/projects", async (c) => c.json(await service.db.listConversationProjects(c.get("userId"))));
+  app.post("/projects", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.name !== "string" || !body.name.trim() || body.name.trim().length > 80) {
+      return c.json({ error: "项目名称需为 1–80 个字符" }, 400);
+    }
+    return c.json(await service.db.createConversationProject(randomUUID(), c.get("userId"), body.name.trim()), 201);
+  });
+  app.get("/projects/:projectId/conversations", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!await service.db.ownsConversationProject(projectId, c.get("userId"))) return c.json({ error: "Not found" }, 404);
+    return c.json(await service.db.listConversations(c.get("userId"), { projectId }));
+  });
+  app.put("/:id/project", async (c) => {
+    const userId = c.get("userId");
+    const conversation = await service.db.getConversation(c.req.param("id"));
+    if (!conversation || conversation.user_id !== userId) return c.json({ error: "Not found" }, 404);
+    const body = await c.req.json().catch(() => null);
+    if (!body || (body.projectId !== null && typeof body.projectId !== "string")) return c.json({ error: "Invalid projectId" }, 400);
+    if (body.projectId !== null && !await service.db.ownsConversationProject(body.projectId, userId)) return c.json({ error: "Not found" }, 404);
+    return c.json(await service.db.setConversationProject(conversation.id, userId, body.projectId));
+  });
+
   // List conversations — scoped to current user, keyset-paginated (latest
   // first) over updated_at. ?limit=20&cursor=<id> ; the cursor is the id of the
   // last row from the previous page. Omitting limit returns the full list
@@ -122,7 +145,10 @@ export function createConversationRoutes(service: AgentService): Hono {
   // Create conversation — owned by current user
   app.post("/", async (c) => {
     const userId = c.get("userId");
-    const body = await c.req.json<{ title?: string; agentId?: string; featureScope?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ title?: string; agentId?: string; featureScope?: string; projectId?: string }>().catch(() => ({}));
+    if (body.projectId !== undefined && (typeof body.projectId !== "string" || !await service.db.ownsConversationProject(body.projectId, userId))) {
+      return c.json({ error: "Not found" }, 404);
+    }
     const id = randomUUID();
     const title = body.title ?? "新对话";
     const agentId = body.agentId ?? "general";
@@ -145,7 +171,7 @@ export function createConversationRoutes(service: AgentService): Hono {
       metadata = { digitalEmployeeFeatureScope: featureScope };
     }
     const conversation = await service.db.createConversation(
-      id, title, model, provider, agentId, userId, metadata
+      id, title, model, provider, agentId, userId, metadata, body.projectId
     );
     return c.json(conversation, 201);
   });

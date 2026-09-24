@@ -210,6 +210,8 @@ export function Workspace({
   }, [defaultAgentId]);
 
   // 侧边栏 tab:纯筛选历史列表,任何状态下都不碰当前对话 / hero。
+  const [newProjectId, setNewProjectId] = useState<string | null>(null);
+
   const handleFilterAgent = useCallback((agentId: string) => {
     setActiveAgentId(agentId);
   }, []);
@@ -217,6 +219,7 @@ export function Workspace({
   // 输入框上方 pill:无条件开一个该 Agent 的新对话;侧边栏筛选不动。
   const handleStartNewChat = useCallback(
     (agentId: string) => {
+      setNewProjectId(null);
       setNewAgentId(agentId);
       // Sync the ref BEFORE the next render so in-flight stream events stop
       // rendering into the (now empty) new-chat view immediately.
@@ -312,7 +315,7 @@ export function Workspace({
               ? "opportunity-advisor"
               : digitalEmployeeFeature
           : undefined;
-        const conv = await api.createConversation(undefined, newAgentId, featureScope);
+        const conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined);
         activeIdRef.current = conv.id;
         setActiveId(conv.id);
         setNewAgentId(null);
@@ -325,7 +328,7 @@ export function Workspace({
       }
       dispatch();
     },
-    [newAgentId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, digitalEmployeeFeature, modelCatalog]
+    [newAgentId, newProjectId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, digitalEmployeeFeature, modelCatalog]
   );
 
   const handleDelete = useCallback(
@@ -380,10 +383,10 @@ export function Workspace({
     const filtered = conversations.filter((c) => c.agent_id === activeAgentId);
     if (!newAgentId) return filtered;
     return [
-      { id: "__new__", title: "新对话", agent_id: newAgentId, created_at: "", updated_at: "" },
+      { id: "__new__", title: "新对话", project_id: newProjectId, agent_id: newAgentId, created_at: "", updated_at: "" },
       ...filtered,
     ];
-  }, [newAgentId, conversations, activeAgentId]);
+  }, [newAgentId, newProjectId, conversations, activeAgentId]);
   const digitalEmployeeConversations = useMemo(
     () => filterDigitalEmployeeConversations(conversations),
     [conversations]
@@ -462,6 +465,14 @@ export function Workspace({
             onSelect={handleSelect}
             onDelete={handleDelete}
             onCreate={handleCreate}
+            onCreateInProject={(projectId) => {
+              handleStartNewChat(activeAgentId);
+              setNewProjectId(projectId);
+            }}
+            onMove={async (id, projectId) => {
+              await api.moveConversation(id, projectId);
+              await refresh();
+            }}
             onLoadMore={loadMore}
             hasMore={hasMore}
             loadingMore={loadingMore}
