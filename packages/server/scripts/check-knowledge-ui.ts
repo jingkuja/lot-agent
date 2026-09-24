@@ -41,7 +41,7 @@ const embed = async () => ({ tokens: 8, vector: Array.from({ length: 1024 }, (_,
 let apiServer: ReturnType<typeof serve> | undefined; let vite: any; let browser: any; let desktop: any; let session: string | undefined;
 try {
   await runMigrations(db.pool, migrations); await db.pool.query("INSERT INTO users(id,name) VALUES($1,'UI fixture')", [owner]); session = await sessions.createSession(owner);
-  const app = new Hono(); app.route("/api/rag/preview", createKnowledgePreviewRoutes(repo, storage));
+  const app = new Hono(); app.get("/api/auth/mode", (c) => c.json({ debug: false })); app.route("/api/rag/preview", createKnowledgePreviewRoutes(repo, storage));
   app.use("/api/*", createAuthMiddleware(sessions));
   app.route("/api/rag/manage", createKnowledgeManageRoutes(repo, storage, new KnowledgeRetriever(db.pool, profile, () => embed), new KnowledgeMaterials(repo, storage, temp)));
   app.get("/api/tasks/:id", async (c) => { const row = (await db.pool.query("SELECT progress,stage,error FROM tasks WHERE id=$1 AND user_id=$2", [c.req.param("id"), owner])).rows[0]; return c.json(row ?? {}, row ? 200 : 404); });
@@ -51,6 +51,8 @@ try {
   await writeFile(join(temp, "main.tsx"), `import React from "react"; import {createRoot} from "react-dom/client"; import {KnowledgePanel} from ${JSON.stringify(resolve(root, "packages/web/src/modules/knowledge/KnowledgePanel.tsx"))}; import ${JSON.stringify(resolve(root, "packages/web/src/App.css"))}; createRoot(document.getElementById('root')).render(<KnowledgePanel onClose={()=>{}} onUse={file=>document.body.dataset.usedFile=file.name}/>);`);
   await writeFile(join(temp, "sources.html"), '<div id="root"></div><script type="module" src="/sources.tsx"></script>');
   await writeFile(join(temp, "sources.tsx"), `import React from "react"; import {createRoot} from "react-dom/client"; import {KnowledgeSources} from ${JSON.stringify(resolve(root, "packages/web/src/modules/knowledge/KnowledgeSources.tsx"))}; createRoot(document.getElementById('root')).render(<KnowledgeSources sources={window.sourceEvidence}/>);`);
+  await writeFile(join(temp, "selection.html"), '<div id="root"></div><script type="module" src="/selection.tsx"></script>');
+  await writeFile(join(temp, "selection.tsx"), `import React from "react"; import {createRoot} from "react-dom/client"; import {KnowledgeBaseModal} from ${JSON.stringify(resolve(root, "packages/web/src/components/KnowledgeBaseModal.tsx"))}; createRoot(document.getElementById('root')).render(<KnowledgeBaseModal items={[{id:"fixture",name:"Fixture",source:"local",documentCount:1,availableDocumentCount:1}]} selected={[{id:"fixture",name:"Fixture",source:"local"}]} loading={false} error={null} onConfirm={items=>document.body.dataset.selection=JSON.stringify(items)} onClose={()=>{}} onRetry={()=>{}}/>);`);
   vite = await createServer({ configFile: false, root: temp, esbuild: { jsx: "automatic", jsxImportSource: "react" }, optimizeDeps: { include: ["react", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime"] }, resolve: { alias: { react: resolve(root, "packages/web/node_modules/react"), "react-dom": resolve(root, "packages/web/node_modules/react-dom") } }, server: { host: "127.0.0.1", port: 0, fs: { allow: [root, temp] }, proxy: { "/api": `http://127.0.0.1:${address.port}` } } }); await vite.listen();
   const port = vite.httpServer.address().port;
   let context: any; let page: any;
@@ -61,6 +63,8 @@ try {
     desktop = await _electron.launch({ executablePath: process.env.ELECTRON_PATH, args: [entry], env: { ...process.env, LOT_DESKTOP_DEV: "1", LOT_DEV_SERVER_URL: `http://127.0.0.1:${port}` } });
     context = desktop.context(); page = await desktop.firstWindow();
     await page.evaluate((token: string) => (window as any).lotDesktop.setToken(token), session);
+    const configured = await page.evaluate((url: string) => (window as any).lotDesktop.setServerUrl(url), `http://127.0.0.1:${address.port}`);
+    assert.equal(configured.ok, true);
     await page.waitForFunction((token: string) => (window as any).lotDesktop.getToken() === token, session);
   } else {
     browser = await chromium.launch({ headless: true, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: "chrome" }) });
@@ -75,12 +79,16 @@ try {
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
   const wav = Buffer.alloc(16044); wav.write("RIFF"); wav.writeUInt32LE(16036, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(16000, 40);
   files.push({ name: "验收.pdf", mimeType: "application/pdf", buffer: await pdf }, { name: "验收.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph("DOCX fixture")] }] })) }, { name: "验收.png", mimeType: "image/png", buffer: png }, { name: "验收.wav", mimeType: "audio/wav", buffer: wav });
+  await page.getByLabel("选择文件，或拖放到这里").setInputFiles([{ name: "移除草稿.txt", mimeType: "text/plain", buffer: Buffer.from("discard") }]);
+  await page.getByRole("button", { name: "移除", exact: true }).click(); assert.equal(await page.getByText("移除草稿.txt", { exact: true }).count(), 0);
   await page.getByLabel("选择文件，或拖放到这里").setInputFiles([...files, { name: "失败.exe", mimeType: "application/octet-stream", buffer: Buffer.from("invalid") }]);
   await page.getByLabel("创建新知识库并导入").check(); await page.getByLabel("知识库名称", { exact: true }).fill("界面验收库");
   await page.getByRole("button", { name: "创建并导入", exact: true }).click();
   await page.getByText("批次已处理。已保存文件的后台处理会继续，可关闭面板。", { exact: true }).waitFor();
   assert.equal((await repo.listItems(owner, 100)).data.length, 19);
   assert.equal(await page.getByRole("button", { name: "仅重试上传失败项", exact: true }).count(), 1);
+  const media = (await repo.listItems(owner, 100)).data.filter((item) => ["image", "audio"].includes(item.sourceType));
+  assert.equal(media.length, 2); assert(media.every((item) => item.indexStatus === "stored_only" && !item.taskId));
   const collection = (await repo.listCollections(owner)).data[0];
   // Compile parser workers are real; vector values are deterministic and never billed.
   const jobs = new KnowledgeJobs(db.pool); const item = (await repo.listItems(owner)).data.find((i) => i.title === "验收-0.txt")!;
@@ -98,8 +106,16 @@ try {
   await sourcePage.addInitScript((token: string) => localStorage.setItem("lot_token", token), session);
   await sourcePage.addInitScript((sources: unknown) => { (window as any).sourceEvidence = sources; }, evidence);
   await sourcePage.goto(`http://127.0.0.1:${port}/sources.html`);
+  await sourcePage.goto(`http://127.0.0.1:${port}/selection.html`);
+  assert.equal(await sourcePage.getByRole("checkbox", { name: "文档", exact: true }).isChecked(), true);
+  assert.equal(await sourcePage.getByRole("checkbox", { name: "图片说明", exact: true }).isChecked(), false);
+  await sourcePage.getByRole("checkbox", { name: "图片说明", exact: true }).check();
+  await sourcePage.getByRole("checkbox", { name: "有效个人信息", exact: true }).check();
+  await sourcePage.getByRole("button", { name: "确定", exact: true }).click();
+  assert.deepEqual(await sourcePage.evaluate(() => JSON.parse(document.body.dataset.selection!)[0].sourceTypes), ["document", "note", "image", "profile_fact"]);
+  await sourcePage.goto(`http://127.0.0.1:${port}/sources.html`);
   await sourcePage.getByText(/知识库出处（/).click(); await sourcePage.getByRole("button", { name: /验收-0.txt/ }).click();
-  await sourcePage.getByRole("button", { name: "收起出处" }).waitFor(); assert.match(await sourcePage.locator("pre").innerText(), /AB-123/);
+  await sourcePage.getByRole("button", { name: "收起", exact: true }).waitFor(); assert.match(await sourcePage.locator("pre").innerText(), /AB-123/);
 
   await page.getByLabel("方式", { exact: true }).selectOption("keyword"); await page.getByPlaceholder("输入问题或关键词").fill("AB-123"); await page.getByRole("button", { name: "检索", exact: true }).click();
   await page.getByRole("button", { name: "查看出处", exact: true }).click(); await page.locator(".knowledge-source mark").waitFor();
@@ -123,6 +139,9 @@ try {
   await legacy.getByRole("button", { name: "用于当前对话", exact: true }).click();
   await page.waitForFunction(() => document.body.dataset.usedFile === "旧素材验收.png");
   assert.equal((await repo.listItems(owner, 100)).data.some((i) => i.title === "旧素材验收.png"), false);
+  await legacy.getByRole("button", { name: "预览原件", exact: true }).click();
+  await page.waitForFunction(() => { const img = document.querySelector<HTMLImageElement>(".knowledge-preview img"); return img?.complete && img.naturalWidth > 0; });
+  await page.getByRole("button", { name: "收起", exact: true }).click();
   await legacy.getByRole("button", { name: "保存个人素材", exact: true }).click(); await legacy.getByRole("button", { name: "预览私有副本", exact: true }).click();
   await page.locator(".knowledge-preview img").waitFor(); await page.waitForFunction(() => { const img = document.querySelector<HTMLImageElement>(".knowledge-preview img"); return img?.complete && img.naturalWidth > 0; });
   await page.getByRole("button", { name: "收起", exact: true }).click();
@@ -138,10 +157,12 @@ try {
   assert.equal(errors.length, 0, errors.join("\n"));
   const removed = await repo.getItem(owner, item.id); await repo.deleteItem(owner, item.id, removed.version);
   await page.locator(".knowledge-source").waitFor({ state: "detached", timeout: 12000 });
+  await sourcePage.getByRole("alert").waitFor({ timeout: 12000 }); // evicted automatically, without reopening
   await sourcePage.getByRole("button", { name: /验收-0.txt/ }).click(); await sourcePage.getByRole("alert").waitFor();
   assert.equal(await sourcePage.locator("pre").count(), 0); await sourcePage.close();
 
   await page.getByRole("button", { name: "外部接入", exact: true }).click();
+  if (desktop) await page.getByText(`http://127.0.0.1:${address.port}/api/rag/v1`, { exact: true }).waitFor();
   await page.getByLabel("应用名称", { exact: true }).fill("S3 UI client");
   await page.getByRole("group", { name: "授权知识库（1–10 个）" }).getByRole("checkbox").first().check();
   await page.getByRole("button", { name: "创建密钥", exact: true }).click();
@@ -155,7 +176,13 @@ try {
   await page.getByRole("button", { name: "已保存，关闭", exact: true }).click();
   await page.getByRole("button", { name: "撤销", exact: true }).click(); await page.getByText(/已撤销/).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  console.log(JSON.stringify({ tests: ["chat source open/revocation", "key create/one-time secret/rotate/revoke", "20 mixed files partial failure", "material reuse without archive", "private archive image preview", "private audio playback/seek", "create/import", "duplicate reuse", "collection edit", "real parser citation", "confirmed fact correction", "mobile dark search", "revoked citation eviction"], artifacts: temp, runtime: desktop ? "Electron actual main/preload" : "Chrome", embedding: "deterministic fixture; no model bill", collectionId: collection.id }));
+  const failed = await repo.createItem(owner, { sourceType: "note", title: "故障诊断验收", description: "", content: "text", tags: [], collectionIds: [] }, randomUUID());
+  await jobs.fail((await jobs.claim(failed.taskId!, queue))!, "OCR_REQUIRED", false);
+  await db.pool.query("UPDATE rag_item_revisions SET diagnostics=$2 WHERE id=$1", [failed.revisionId, JSON.stringify({ warnings: ["OCR_REQUIRED_PAGE_2"] })]);
+  await page.reload();
+  await page.getByText("错误代码：OCR_REQUIRED", { exact: true }).waitFor();
+  await page.getByText("第 2 页需要 OCR，本次尚未索引该页内容。", { exact: true }).waitFor();
+  console.log(JSON.stringify({ tests: ["pending upload removal", "stored-only media", "unarchived original preview", "explicit chat source types", "persisted errors and PDF diagnostics", "chat source open/automatic revocation", "key create/one-time secret/rotate/revoke", "20 mixed files partial failure", "material reuse without archive", "private archive image preview", "private audio playback/seek", "create/import", "duplicate reuse", "collection edit", "real parser citation", "confirmed fact correction", "mobile dark search", "revoked citation eviction"], artifacts: temp, runtime: desktop ? "Electron actual main/preload" : "Chrome", embedding: "deterministic fixture; no model bill", collectionId: collection.id }));
 } finally {
   await desktop?.close(); await browser?.close(); await vite?.close(); if (apiServer) await new Promise<void>((r) => apiServer!.close(() => r()));
   if (session) await sessions.revoke(session);

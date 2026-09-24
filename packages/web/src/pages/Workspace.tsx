@@ -164,7 +164,7 @@ export function Workspace({
       const seq = ++knowledgeUpdateSeq.current;
       setConversationKnowledgeBases(items);
       if (!conversationId) return;
-      void api.setConversationKnowledgeBases(conversationId, items.map((item) => item.id)).catch(() => {
+      void api.setConversationKnowledgeBases(conversationId, items.map((item) => item.id), items[0]?.sourceTypes).catch(() => {
         // Revert only if this is still the latest edit for the same open chat.
         if (seq === knowledgeUpdateSeq.current && activeIdRef.current === conversationId) {
           setConversationKnowledgeBases(previous);

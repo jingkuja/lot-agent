@@ -1,3 +1,4 @@
+import { parseChatSourceTypes } from "@lot-agent/core";
 import { createLocalKnowledgeService } from "../knowledge/local-service.js";
 import { FactAwareMemory } from "../knowledge/profile/memory.js";
 import { KnowledgeFacts } from "../knowledge/profile/repository.js";
@@ -990,7 +991,7 @@ export class AgentService {
       if (knowledgeBases.some((base) => base.source !== "local")) throw new KnowledgeError("INVALID_REQUEST", 400, "旧知识库尚未映射，请重新选择本地知识库");
       const ids = knowledgeBases.map((base) => base.id);
       const result = await this.knowledge.service.retrieve({ ownerId: userId, callerKind: "internal", permission: "retrieval:read", collectionIds: ids },
-        { query, collectionIds: ids, topK: 5, mode: "hybrid", allowDegraded: false, sourceTypes: ["document", "note"], tags: [] });
+        { query, collectionIds: ids, topK: 5, mode: "hybrid", allowDegraded: false, sourceTypes: parseChatSourceTypes(knowledgeBases[0]?.sourceTypes), tags: [] });
       return result.results.map((evidence) => ({ evidence, datasetId: evidence.collectionIds[0],
         datasetName: knowledgeBases.filter((base) => evidence.collectionIds.includes(base.id)).map((base) => base.name).join("、"),
         segmentId: evidence.chunkId, documentName: evidence.title, content: evidence.content, answer: "", score: evidence.score.value }));

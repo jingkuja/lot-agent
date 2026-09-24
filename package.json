@@ -19,6 +19,7 @@
     "dev:knowledge": "pnpm --filter @lot-agent/server run dev:knowledge",
     "check:knowledge:live": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-live.ts",
     "knowledge:reindex": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reindex-knowledge.ts",
+    "knowledge:billing": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-billing.ts",
     "knowledge:gc": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/collect-knowledge-garbage.ts",
     "knowledge:index": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-index.ts",
     "check:knowledge:ui": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-ui.ts",

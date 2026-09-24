@@ -1,3 +1,5 @@
+import { Hono } from "hono";
+import { createKnowledgeManageRoutes } from "./routes.js";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, rm, utimes } from "node:fs/promises";
@@ -70,6 +72,51 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("knowledge management compl
     await rm(resolve(root, "uploads", "fixture.txt")); await pool.query("DELETE FROM assets WHERE id=$1", [id]);
     const item = await repo.getItem(owner, a.id); const file = await repo.getFile(owner, a.id, item.revisionId);
     expect(await readFile(storage.localPath(file.key), "utf8")).toBe("independent copy");
+  });
+  it("excludes business-scoped tasks without a conversation from list, content and archive", async () => {
+    const task = randomUUID(); const id = randomUUID();
+    await pool.query("INSERT INTO tasks(id,user_id,type,input) VALUES ($1,$2,'image.generate',$3)", [task, owner, JSON.stringify({ featureScope: "customer-acquisition", campaignId: randomUUID() })]);
+    await pool.query("INSERT INTO assets(id,user_id,type,task_id,storage_key,url,mime,size_bytes) VALUES ($1,$2,'image',$3,'business.png','/static/assets/business.png','image/png',20)", [id, owner, task]);
+    const materials = new KnowledgeMaterials(repo, storage, root);
+    expect((await materials.list(owner)).some((m) => m.id === id)).toBe(false);
+    await expect(materials.read(owner, id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(materials.archive(owner, id, "business", "", [], [], randomUUID())).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  it("replays an upload before duplicate detection and rejects a different request", async () => {
+    const app = new Hono<{ Variables: { userId: string } }>(); app.use("*", async (c, next) => { c.set("userId", owner); await next(); }); app.route("/", createKnowledgeManageRoutes(repo, storage));
+    const key = randomUUID();
+    const upload = (id: string) => app.request("/uploads", { method: "POST", headers: { "Idempotency-Key": id, "Content-Type": "text/plain", "X-Knowledge-Duplicate-Policy": "ask", "X-Knowledge-Metadata": encodeURIComponent(JSON.stringify({ title: "retry.txt" })) }, body: "unique replay fixture" });
+    const first = await upload(key); const again = await upload(key);
+    expect(first.status).toBe(201); expect(again.status).toBe(201); expect(await again.json()).toEqual(await first.json());
+    expect((await upload(randomUUID())).status).toBe(409);
+  });
+  it("stores undescribed media without a job, starts indexing on description and withdraws cleared descriptions", async () => {
+    const item = await repo.createItem(owner, { sourceType: "bookmark", title: "Link", sourceUrl: "https://fixture.invalid", description: "", collectionIds: [], tags: [] }, randomUUID());
+    expect(item.taskId).toBeUndefined(); expect(await repo.getItem(owner, item.id)).toMatchObject({ indexStatus: "stored_only", pendingRevisionId: null, activeRevisionId: item.revisionId });
+    const described = await repo.updateItem(owner, item.id, { version: 1, title: "Link", description: "Product", tags: [] });
+    expect(described.taskId).toBeTruthy(); const jobs = new KnowledgeJobs(pool); await jobs.publish((await jobs.claim(described.taskId!, queue))!, async () => {});
+    const cleared = await repo.updateItem(owner, item.id, { version: 2, title: "Link", description: "  ", tags: [] });
+    expect(cleared.taskId).toBeUndefined(); expect(await repo.getItem(owner, item.id)).toMatchObject({ indexStatus: "stored_only", activeRevisionId: cleared.revisionId, pendingRevisionId: null });
+    await expect(jobs.retry(owner, item.id, 3, queue)).rejects.toThrow();
+  });
+  it("returns durable error codes and partial parser diagnostics when reopening", async () => {
+    const item = await repo.createItem(owner, { sourceType: "note", title: "failure", content: "text", description: "", collectionIds: [], tags: [] }, randomUUID());
+    const jobs = new KnowledgeJobs(pool); await jobs.fail((await jobs.claim(item.taskId!, queue))!, "OCR_REQUIRED", false);
+    await pool.query("UPDATE rag_item_revisions SET diagnostics=$2 WHERE id=$1", [item.revisionId, JSON.stringify({ warnings: ["OCR_REQUIRED_PAGE_2"] })]);
+    expect(await repo.getItem(owner, item.id)).toMatchObject({ errorCode: "OCR_REQUIRED", diagnostics: { warnings: ["OCR_REQUIRED_PAGE_2"] } });
+  });
+  it("filters materials before pagination and retains generated origin after original deletion", async () => {
+    const materials = new KnowledgeMaterials(repo, storage, root);
+    await mkdir(resolve(root, "assets"), { recursive: true }); await writeFile(resolve(root, "assets", "generated.txt"), "generated");
+    const id = randomUUID();
+    await pool.query("INSERT INTO assets(id,user_id,type,storage_key,url,mime,size_bytes,original_name,created_at) VALUES($1,$2,'image','generated.txt','/static/assets/generated.txt','text/plain',9,'needle',now()-interval '1 day')", [id, owner]);
+    for (let n=0;n<31;n++) await pool.query("INSERT INTO assets(user_id,type,storage_key,url,mime,size_bytes,original_name) VALUES($1,'upload','unused','unused','text/plain',1,'hay')", [owner]);
+    expect((await materials.list(owner, 30, undefined, undefined, { query: "needle", source: "generated" })).map((m) => m.id)).toEqual([id]);
+    const archived = await materials.archive(owner, id, "generated", "", [], ["fixture"], randomUUID());
+    expect((await materials.list(owner, 30, undefined, undefined, { tag: "fixture" })).map((m) => m.id)).toEqual([id]);
+    await pool.query("DELETE FROM assets WHERE id=$1", [id]);
+    expect(await repo.getItem(owner, archived.id)).toMatchObject({ materialSource: "generated" });
+    expect((await repo.listItems(owner, 30, undefined, undefined, { materialSource: "generated" })).data.map((i) => i.id)).toContain(archived.id);
   });
   it("holds physical GC for uploads/backups and never deletes referenced originals", async () => {
     const orphan = await storage.put(owner, Readable.from(["orphan fixture"]), "text/plain"); const old = new Date("2020-01-01T00:00:00Z"); await utimes(storage.localPath(orphan.key), old, old);

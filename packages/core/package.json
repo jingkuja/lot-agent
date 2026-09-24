@@ -8,6 +8,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./knowledge": {
+      "types": "./dist/knowledge/browser.d.ts",
+      "import": "./dist/knowledge/browser.js"
     }
   },
   "scripts": {

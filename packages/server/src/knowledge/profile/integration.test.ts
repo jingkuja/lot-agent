@@ -53,6 +53,14 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("confirmed personal facts",
     expect(await facts.exact(scope, ["employer"])).toHaveLength(1);
     expect(await facts.exact({ ...scope, ownerId: other }, ["employer"])).toHaveLength(0);
   });
+  it("excludes expired and inactive facts from the collection searchable count", async () => {
+    const library = (await new KnowledgeRepository(pool).createCollection(owner, { name: "count", description: "" }, randomUUID())).id;
+    await facts.save(owner, { key: "count_expired", value: "old", validUntil: "2020-01-01T00:00:00Z", collectionIds: [library] });
+    await facts.save(owner, { key: "count_active", value: "current", collectionIds: [library] });
+    await pool.query("UPDATE rag_items SET active_revision_id=pending_revision_id WHERE owner_id=$1 AND id IN(SELECT item_id FROM rag_collection_items WHERE collection_id=$2)", [owner, library]);
+    await pool.query("UPDATE rag_item_revisions SET index_status='ready' WHERE owner_id=$1 AND item_id IN(SELECT item_id FROM rag_collection_items WHERE collection_id=$2)", [owner, library]);
+    expect((await new KnowledgeRepository(pool).listCollections(owner)).data.find((c) => c.id === library)).toMatchObject({ storedCount: 2, searchableCount: 1 });
+  });
   it("invalidates semantic projections immediately when a confirmed value changes and fences the old worker", async () => {
     const created = await facts.save(owner, { key: "preferred_language", value: "中文", collectionIds: [collection] });
     const jobs = new KnowledgeJobs(pool); const lease = (await jobs.claim(created.taskId!, queue))!;

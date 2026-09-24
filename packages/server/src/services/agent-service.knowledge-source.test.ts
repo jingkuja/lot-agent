@@ -28,10 +28,15 @@ describe("AgentService knowledge source", () => {
     await expect(s.retrieveKnowledge("u1", [{ id: "old-id", name: "old" }], "query")).rejects.toMatchObject({ status: 400 });
     const records = await s.retrieveKnowledge("u1", [{ id: "local", name: "资料", source: "local" }], "query");
     expect(records[0].evidence).toMatchObject({ revisionId: "revision", chunkId: "chunk", citation: { startLine: 1, endLine: 2 } });
-    expect(s.knowledge.service.retrieve).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "u1", callerKind: "internal", collectionIds: ["local"] }), expect.objectContaining({ query: "query", allowDegraded: false }));
+    expect(s.knowledge.service.retrieve).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "u1", callerKind: "internal", collectionIds: ["local"] }), expect.objectContaining({ query: "query", allowDegraded: false, sourceTypes: ["document", "note"] }));
     expect(s.ragIdentity).not.toHaveBeenCalled();
     expect(s.ragClient.retrieve).not.toHaveBeenCalled();
     expect(s.ragClient.createKnowledgeBaseLink).not.toHaveBeenCalled();
+  });
+  it("passes explicit media and profile types to local retrieval", async () => {
+    const s = service("local");
+    await s.retrieveKnowledge("u1", [{ id: "local", name: "资料", source: "local", sourceTypes: ["image", "bookmark", "profile_fact"] }], "query");
+    expect(s.knowledge.service.retrieve).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ sourceTypes: ["image", "bookmark", "profile_fact"] }));
   });
   it("propagates local failures without remote fallback", async () => {
     const s = service("local");

@@ -15,7 +15,8 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.0",
     "rehype-highlight": "^7.0.0",
-    "remark-gfm": "^4.0.0"
+    "remark-gfm": "^4.0.0",
+    "@lot-agent/core": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

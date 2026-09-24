@@ -142,3 +142,7 @@ pnpm run check:knowledge:live --live --latest-user
 验证记录见 [S1/S2 验收记录](knowledge-s1-s2-verification.md)。数据库、Redis 与浏览器验证均复用现有本地基础设施，只创建并清理隔离测试账号/队列/临时文件，不创建容器。真实模型测试保留其实际用量记录。
 
 已接受的设计调整：采用“字节候选 + 返回 usage 硬校验”，不将其描述为精确 token 切分，也不再将匹配 tokenizer 列为阶段阻塞项。其他边界：Worker 内存限制是 JS heap 而非总 RSS；大规模中文质量和容量指标留待 S4。S3 的 Agent 本地检索工具及外部知识 Key / Dify API 尚未接入，S1/S2 不开放外部入口。
+
+## 2026-09-24 Review 修复升级
+
+本版要求 schema 0030，并引入短行合并 v2 profile、仅保存状态与按凭证隔离的回执对账。旧索引保留原规则；升级步骤、显式重建和账单恢复见 [RAG Review 修复记录](knowledge-review-fixes.md)。

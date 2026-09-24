@@ -10,7 +10,8 @@ export function IntegrationsPanel({ collections }: { collections: Collection[] }
   const load = async () => setKeys((await knowledgeApi.keys()).data);
   useEffect(() => { void load().catch((e) => setError(e.message)); void knowledgeApi.status().then((s) => setEnabled(s.externalEnabled)).catch((e) => setError(e.message)); }, []);
   const act = async (fn: () => Promise<unknown>) => { setBusy(true); setError(""); setNotice(""); setSecret(""); try { await fn(); await load(); } catch (e) { setError(e instanceof Error ? e.message : "操作失败，请重试"); } finally { setBusy(false); } };
-  const base = `${window.location.origin}/api/rag/v1`;
+  const serverUrl = window.lotDesktop ? window.lotDesktop.getServerUrl() : window.location.origin;
+  const base = serverUrl ? `${serverUrl.replace(/\/$/, "")}/api/rag/v1` : "请先配置服务器地址";
   const curl = `curl "$KNOWLEDGE_BASE_URL/retrieval" -H "Authorization: Bearer $KNOWLEDGE_KEY" -H 'Content-Type: application/json' --data '${JSON.stringify({ query: "查询内容", collection_ids: ids.length ? ids : ["COLLECTION_UUID"], mode: "hybrid", top_k: 5 })}'`;
   return <section aria-label="外部接入"><h3>外部接入</h3><p>仅允许读取所选知识库。模型费用记入你的账号；个人信息还需逐条开启共享。</p>
     {!enabled && <p role="status">外部接口尚未启用。可以配置授权，启用后再连接客户端。</p>}

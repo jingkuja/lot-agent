@@ -1,3 +1,4 @@
+import { knowledgeReviewFixes } from "./0030-knowledge-review-fixes.js";
 import { knowledgeAccess } from "./0029-knowledge-access.js";
 import { knowledgeIndexSpaces } from "./0028-knowledge-index-spaces.js";
 import { knowledgeManagementCompletion } from "./0027-knowledge-management-completion.js";
@@ -62,4 +63,5 @@ export const migrations: Migration[] = [
   knowledgeManagementCompletion,
   knowledgeIndexSpaces,
   knowledgeAccess,
+  knowledgeReviewFixes,
 ];

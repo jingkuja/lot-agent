@@ -6,3 +6,4 @@ export * from "./manage.js";
 
 export * from "./profile.js";
 export * from "./access.js";
+export * from "./chat-scope.js";

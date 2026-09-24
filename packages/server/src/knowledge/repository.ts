@@ -2,10 +2,11 @@ import { prepareIngestion, supersedeIngestion } from "./ingestion/prepare.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { PrivateKnowledgeObject } from "@lot-agent/core";
-import { KnowledgeError } from "./errors.js";
+import { KnowledgeError, KnowledgeDuplicateError } from "./errors.js";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const notFound = () => new KnowledgeError("NOT_FOUND", 404, "资料或知识库不存在");
+const storedOnly = (type: string, description: string) => ["bookmark", "image", "audio", "video"].includes(type) && !description.trim();
 const conflict = () => new KnowledgeError("CONFLICT", 409, "资料已更新，请刷新后重试");
 export interface NewKnowledgeItem {
   title: string;
@@ -16,11 +17,15 @@ export interface NewKnowledgeItem {
   mime?: string;
   object?: PrivateKnowledgeObject;
   sourceAssetId?: string;
+  materialSource?: "upload" | "generated";
+  duplicatePolicy?: "ask" | "copy";
   collectionIds: string[];
   tags: string[];
 }
 export interface KnowledgeItemView {
   sourceAssetId: string | null;
+  materialSource: "upload" | "generated";
+  diagnostics: { warnings?: string[] }; errorCode: string | null;
   id: string; title: string; sourceType: string; version: number; generation: number;
   activeRevisionId: string | null; pendingRevisionId: string | null;
   taskId: string | null; revisionId: string; storageStatus: string; indexStatus: string;
@@ -76,7 +81,9 @@ export class KnowledgeRepository {
         WHERE ci.owner_id=c.owner_id AND ci.collection_id=c.id AND i.deleted_at IS NULL) AS stored_count,
       (SELECT count(*)::int FROM rag_collection_items ci JOIN rag_items i ON i.owner_id=ci.owner_id AND i.id=ci.item_id
         JOIN rag_item_revisions r ON r.owner_id=i.owner_id AND r.item_id=i.id AND r.id=i.active_revision_id
-        WHERE ci.owner_id=c.owner_id AND ci.collection_id=c.id AND i.deleted_at IS NULL AND r.index_status='ready') AS searchable_count
+        WHERE ci.owner_id=c.owner_id AND ci.collection_id=c.id AND i.deleted_at IS NULL AND r.index_status='ready'
+          AND (i.source_type<>'profile_fact' OR EXISTS (SELECT 1 FROM rag_profile_facts f WHERE f.owner_id=i.owner_id AND f.item_id=i.id AND f.active
+            AND (f.valid_from IS NULL OR f.valid_from<=now()) AND (f.valid_until IS NULL OR f.valid_until>now())))) AS searchable_count
       FROM rag_collections c WHERE c.owner_id=$1 AND c.deleted_at IS NULL
         AND ($2::timestamptz IS NULL OR (c.created_at,c.id)<($2::timestamptz,$3::uuid))
       ORDER BY c.created_at DESC,c.id DESC LIMIT $4`, [owner, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1]);
@@ -122,6 +129,12 @@ export class KnowledgeRepository {
           return { id: existing.id, revisionId: existing.revision_id, reused: true };
         }
       }
+      if (input.object && input.duplicatePolicy === "ask") {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`upload:${owner}:${input.object.sha256}`]);
+        const duplicate = await this.duplicate(owner, input.object.sha256, client);
+        if (duplicate) throw new KnowledgeDuplicateError(duplicate);
+      }
+      const onlyStored = storedOnly(input.sourceType, input.description);
       const id = randomUUID(); const revisionId = randomUUID();
       let objectId: string | null = null;
       if (input.object) {
@@ -132,15 +145,18 @@ export class KnowledgeRepository {
       await client.query("INSERT INTO rag_items (id,owner_id,source_type,title,pending_revision_id,source_asset_id) VALUES ($1,$2,$3,$4,$5,$6)", [id, owner, input.sourceType, input.title, revisionId, input.sourceAssetId ?? null]);
       await client.query(`INSERT INTO rag_item_revisions (id,owner_id,item_id,object_id,revision_number,generation,mime,original_name,content,description,source_url,storage_status)
         VALUES ($1,$2,$3,$4,1,1,$5,$6,$7,$8,$9,'stored')`, [revisionId, owner, id, objectId, input.mime ?? null, input.object ? input.title : null, input.content ?? null, input.description, input.sourceUrl ?? null]);
+      await client.query("UPDATE rag_items SET material_source=$3 WHERE owner_id=$1 AND id=$2", [owner, id, input.materialSource ?? "upload"]);
+      if (onlyStored) await this.publishStoredOnly(client, owner, id, revisionId);
       for (const collectionId of input.collectionIds) await client.query("INSERT INTO rag_collection_items (owner_id,collection_id,item_id) VALUES ($1,$2,$3)", [owner, collectionId, id]);
       for (const tag of input.tags) await client.query("INSERT INTO rag_item_tags (owner_id,item_id,tag) VALUES ($1,$2,$3)", [owner, id, tag]);
-      const taskId = this.ingestionQueue ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation: 1, queueName: this.ingestionQueue }) : undefined;
+      const taskId = this.ingestionQueue && !onlyStored ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation: 1, queueName: this.ingestionQueue }) : undefined;
       return { id, revisionId, ...(taskId ? { taskId } : {}) };
     });
   }
 
   async getItem(owner: string, id: string): Promise<KnowledgeItemView> {
-    const { rows } = await this.pool.query(`SELECT i.*,r.id AS revision_id,r.storage_status,r.index_status,r.description,r.content,r.source_url,r.mime,
+    const { rows } = await this.pool.query(`SELECT i.*,r.id AS revision_id,r.storage_status,r.index_status,r.description,r.content,r.source_url,r.mime,r.diagnostics,
+      (SELECT error_code FROM rag_ingestion_runs g WHERE g.owner_id=i.owner_id AND g.revision_id=r.id ORDER BY g.generation DESC LIMIT 1) AS error_code,
       COALESCE(o.byte_size,0) AS byte_size,
       (SELECT task_id FROM rag_ingestion_runs g WHERE g.owner_id=i.owner_id AND g.revision_id=r.id ORDER BY g.generation DESC LIMIT 1) AS task_id,
       ARRAY(SELECT ci.collection_id FROM rag_collection_items ci JOIN rag_collections c ON c.owner_id=ci.owner_id AND c.id=ci.collection_id
@@ -150,13 +166,13 @@ export class KnowledgeRepository {
       LEFT JOIN rag_objects o ON o.owner_id=r.owner_id AND o.id=r.object_id
       WHERE i.owner_id=$1 AND i.id=$2 AND i.deleted_at IS NULL`, [owner, id]);
     const row = rows[0]; if (!row) throw notFound();
-    return { sourceAssetId: row.source_asset_id, id: row.id, title: row.title, sourceType: row.source_type, version: row.version, generation: row.generation,
+    return { materialSource: row.material_source, diagnostics: row.diagnostics, errorCode: row.error_code ?? null, sourceAssetId: row.source_asset_id, id: row.id, title: row.title, sourceType: row.source_type, version: row.version, generation: row.generation,
       taskId: row.task_id ?? null, activeRevisionId: row.active_revision_id, pendingRevisionId: row.pending_revision_id, revisionId: row.revision_id,
       storageStatus: row.storage_status, indexStatus: row.index_status, description: row.description, content: row.content,
       sourceUrl: row.source_url, mime: row.mime, size: Number(row.byte_size), collectionIds: row.collection_ids, tags: row.tags, createdAt: row.created_at.toISOString() };
   }
 
-  async listItems(owner: string, limit = 30, cursor?: KnowledgeCursor, collectionId?: string, filter?: { inbox?: boolean; sourceTypes?: string[]; tags?: string[]; query?: string }) {
+  async listItems(owner: string, limit = 30, cursor?: KnowledgeCursor, collectionId?: string, filter?: { inbox?: boolean; sourceTypes?: string[]; tags?: string[]; query?: string; materialSource?: string }) {
     if (collectionId && !(await this.findOwnedCollections(owner, [collectionId])).length) throw notFound();
     const { rows } = await this.pool.query(`SELECT id,created_at,created_at::text AS cursor_created_at FROM rag_items i WHERE owner_id=$1 AND deleted_at IS NULL
       AND ($2::timestamptz IS NULL OR (created_at,id)<($2::timestamptz,$3::uuid))
@@ -165,7 +181,8 @@ export class KnowledgeRepository {
       AND ($7::text[] IS NULL OR source_type=ANY($7::text[]))
       AND NOT EXISTS(SELECT 1 FROM unnest($8::text[]) wanted(tag) WHERE NOT EXISTS(SELECT 1 FROM rag_item_tags t WHERE t.owner_id=i.owner_id AND t.item_id=i.id AND t.tag=wanted.tag))
       AND ($9::text IS NULL OR title ILIKE '%'||$9||'%')
-      ORDER BY created_at DESC,id DESC LIMIT $5`, [owner, cursor?.createdAt ?? null, cursor?.id ?? null, collectionId ?? null, limit + 1, filter?.inbox ?? false, filter?.sourceTypes ?? null, filter?.tags ?? [], filter?.query ?? null]);
+      AND ($10::text IS NULL OR ($10='archived' AND source_asset_id IS NOT NULL) OR material_source=$10)
+      ORDER BY created_at DESC,id DESC LIMIT $5`, [owner, cursor?.createdAt ?? null, cursor?.id ?? null, collectionId ?? null, limit + 1, filter?.inbox ?? false, filter?.sourceTypes ?? null, filter?.tags ?? [], filter?.query ?? null, filter?.materialSource || null]);
     const selected = rows.slice(0, limit);
     // getItem rechecks ownership/deletion after the listing snapshot.
     const data = await Promise.all(selected.map((row) => this.getItem(owner, row.id)));
@@ -205,7 +222,9 @@ export class KnowledgeRepository {
       await client.query("DELETE FROM rag_item_tags WHERE owner_id=$1 AND item_id=$2", [owner, id]);
       for (const tag of input.tags) await client.query("INSERT INTO rag_item_tags (owner_id,item_id,tag) VALUES ($1,$2,$3)", [owner, id, tag]);
       await client.query("DELETE FROM rag_preview_tickets WHERE owner_id=$1 AND item_id=$2", [owner, id]);
-      const taskId = this.ingestionQueue ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation: row.generation + 1, queueName: this.ingestionQueue }) : undefined;
+      const onlyStored = storedOnly(row.source_type, input.description);
+      if (onlyStored) await this.publishStoredOnly(client, owner, id, revisionId);
+      const taskId = this.ingestionQueue && !onlyStored ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation: row.generation + 1, queueName: this.ingestionQueue }) : undefined;
       return { id, revisionId, version: row.version + 1, ...(taskId ? { taskId } : {}) };
     });
   }
@@ -247,8 +266,8 @@ export class KnowledgeRepository {
     });
   }
 
-  async duplicate(owner: string, hash: string) {
-    const { rows } = await this.pool.query(`SELECT i.id,i.title FROM rag_objects o JOIN rag_item_revisions r ON r.owner_id=o.owner_id AND r.object_id=o.id
+  async duplicate(owner: string, hash: string, client: Pick<Pool, "query"> = this.pool) {
+    const { rows } = await client.query(`SELECT i.id,i.title FROM rag_objects o JOIN rag_item_revisions r ON r.owner_id=o.owner_id AND r.object_id=o.id
       JOIN rag_items i ON i.owner_id=r.owner_id AND i.id=r.item_id WHERE o.owner_id=$1 AND o.sha256=$2 AND i.deleted_at IS NULL
       AND r.id IN (i.active_revision_id,i.pending_revision_id) ORDER BY i.created_at LIMIT 1`, [owner, hash]);
     return rows[0] ?? null;
@@ -270,9 +289,17 @@ export class KnowledgeRepository {
       await client.query("UPDATE rag_item_revisions SET index_status='cancelled' WHERE owner_id=$1 AND item_id=$2 AND id=$3 AND id IS DISTINCT FROM $4", [owner, id, item.pending_revision_id, item.active_revision_id]);
       await client.query("UPDATE rag_items SET pending_revision_id=$3,generation=$4,version=version+1,updated_at=now() WHERE owner_id=$1 AND id=$2", [owner, id, revisionId, generation]);
       await client.query("DELETE FROM rag_preview_tickets WHERE owner_id=$1 AND item_id=$2", [owner, id]);
-      const taskId = this.ingestionQueue ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation, queueName: this.ingestionQueue }) : undefined;
+      const revision = (await client.query("SELECT description FROM rag_item_revisions WHERE id=$1", [revisionId])).rows[0];
+      const onlyStored = storedOnly(item.source_type, revision.description);
+      if (onlyStored) await this.publishStoredOnly(client, owner, id, revisionId);
+      const taskId = this.ingestionQueue && !onlyStored ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation, queueName: this.ingestionQueue }) : undefined;
       return { id, revisionId, version: version + 1, taskId };
     });
+  }
+
+  private async publishStoredOnly(client: PoolClient, owner: string, item: string, revision: string) {
+    await client.query("UPDATE rag_item_revisions SET index_status='stored_only' WHERE owner_id=$1 AND item_id=$2 AND id=$3", [owner, item, revision]);
+    await client.query("UPDATE rag_items SET active_revision_id=$3,pending_revision_id=NULL WHERE owner_id=$1 AND id=$2", [owner, item, revision]);
   }
 
   async revisionText(owner: string, itemId: string, revisionId: string) {

@@ -23,11 +23,13 @@ try {
   let gated = false; try { await assertKnowledgeJobsReady(target); } catch { gated = true; } if (!gated) throw new Error("Old schema was accepted by worker");
   await runMigrations(target,migrations.filter((m) => m.version <= 28));
   gated = false; try { await assertKnowledgeJobsReady(target); } catch { gated = true; } if (!gated) throw new Error("Schema 28 incorrectly accepted for schema-29 billing");
+  await runMigrations(target,migrations.filter((m) => m.version <= 29));
+  gated = false; try { await assertKnowledgeJobsReady(target); } catch { gated = true; } if (!gated) throw new Error("Schema 29 incorrectly accepted for schema-30 receipts");
   await runMigrations(target,migrations); await runMigrations(target,migrations); await assertKnowledgeJobsReady(target);
   const row = (await target.query("SELECT c.metadata,m.content,t.status,a.storage_key,u.total_cost FROM conversations c JOIN messages m ON m.conversation_id=c.id JOIN tasks t ON t.user_id=c.user_id JOIN assets a ON a.task_id=t.id JOIN usage_logs u ON u.task_id=t.id WHERE c.id=$1",[conversation])).rows[0];
   if (row.content !== "legacy answer" || row.status !== "succeeded" || row.storage_key !== "fixture.png" || Number(row.total_cost) !== .25 || row.metadata.knowledgeBases[0].id !== "legacy-library") throw new Error("Legacy data changed");
   const vector = (await target.query("SELECT extversion FROM pg_extension WHERE extname='vector'")).rows[0]?.extversion;
-  const report = { finished:new Date().toISOString(), baselineVersion:23, upgradedVersion:29, freshDatabase:true, existingPG:true, newContainers:0, consumerRejects23And28:true, migrationsIdempotent:true, legacyChatGenerationAssetBillingUnchanged:true, vector };
+  const report = { finished:new Date().toISOString(), baselineVersion:23, upgradedVersion:30, freshDatabase:true, existingPG:true, newContainers:0, consumerRejects23And28And29:true, migrationsIdempotent:true, legacyChatGenerationAssetBillingUnchanged:true, vector };
   const root=fileURLToPath(new URL("../../../",import.meta.url)); await mkdir(resolve(root,"tests/eval/results"),{recursive:true}); await writeFile(resolve(root,"tests/eval/results/upgrade.json"),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report));
 } finally { await target?.end(); if(created) await source.query(`DROP DATABASE "${name}"`); await source.end(); }

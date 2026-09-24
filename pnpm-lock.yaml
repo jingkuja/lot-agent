@@ -141,6 +141,9 @@ importers:
 
   packages/web:
     dependencies:
+      '@lot-agent/core':
+        specifier: workspace:*
+        version: link:../core
       node-forge:
         specifier: ^1.4.0
         version: 1.4.0

@@ -66,6 +66,13 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("published knowledge index"
     const allowed = { ...req, allowDegraded: true }; const result = await down.retrieve(scope(allowed), allowed);
     expect(result.degraded).toBe(true); expect(result.modeUsed).toBe("keyword"); expect(result.warnings).toEqual(["QUERY_EMBEDDING_UNAVAILABLE"]);
   });
+  it("retrieves terms across adjacent lines without a chunk per line", async () => {
+    const item = await create("跨行型号", "AB-123\n支持离线查看");
+    await indexArtifact(jobs, item.lease, profile, item.artifact, embed);
+    const req = request({ query: "AB-123 离线查看", mode: "keyword" });
+    const result = await retriever.retrieve(scope(req), req);
+    expect(result.results.find((hit) => hit.itemId === item.item.id)?.citation).toEqual({ kind: "text", startLine: 1, endLine: 2 });
+  });
   it("rejects bad dimensions and actual usage above budget without publishing", async () => {
     const item = await create("invalid", "invalid body");
     await expect(indexArtifact(jobs, item.lease, profile, item.artifact, async () => ({ vector: [1], tokens: 2 }))).rejects.toThrow("INVALID_EMBEDDING_RESPONSE");
@@ -73,7 +80,7 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("published knowledge index"
     const state = await pool.query("SELECT active_revision_id FROM rag_items WHERE id=$1", [item.item.id]); expect(state.rows[0].active_revision_id).toBeNull();
   });
   it("reuses completed vectors on retry and never resurrects a deleted item", async () => {
-    const a = await create("retry", "first line\nsecond line"); let calls = 0;
+    const a = await create("retry", "a".repeat(300) + "\n" + "b".repeat(300)); let calls = 0;
     await expect(indexArtifact(jobs, a.lease, profile, a.artifact, async () => { if (++calls === 2) throw new Error("TRANSIENT"); return { vector, tokens: 2 }; })).rejects.toThrow("TRANSIENT");
     await jobs.fail(a.lease, "TRANSIENT", false);
     const retried = await jobs.retry(owner, a.item.id, 1, queueName);

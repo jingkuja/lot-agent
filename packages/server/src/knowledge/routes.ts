@@ -17,7 +17,7 @@ import {
   type PrivateKnowledgeStorage,
 } from "@lot-agent/core";
 import { parseRange } from "../static-files.js";
-import { KnowledgeError } from "./errors.js";
+import { KnowledgeError, KnowledgeDuplicateError } from "./errors.js";
 import { knowledgeContentPolicy } from "./content-policy.js";
 import { KNOWLEDGE_MIME_LIMITS } from "./private-storage.js";
 import type { KnowledgeRepository, KnowledgeCursor, KnowledgeFile } from "./repository.js";
@@ -34,6 +34,7 @@ const key = (c: Context) => {
 export function errorHandler<E extends Env>(app: Hono<E>) {
   app.onError((error, c) => {
     const requestId = randomUUID();
+    if (error instanceof KnowledgeDuplicateError) return c.json({ error: { code: error.code, message: error.message, retryable: false }, duplicate: error.duplicate, request_id: requestId }, 409);
     if (error instanceof KnowledgeError && error.status === 429) c.header("Retry-After", "60");
     if (error instanceof KnowledgeError) return c.json({ error: { code: error.code, message: error.message, retryable: error.retryable }, request_id: requestId }, error.status);
     if (error.name === "ZodError" || error instanceof SyntaxError) return c.json({ error: { code: "INVALID_REQUEST", message: "请求参数无效", retryable: false }, request_id: requestId }, 400);
@@ -136,7 +137,7 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
     if (!materials) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "素材服务未配置");
     const before = c.req.query("before");
     if (before && !Number.isFinite(Date.parse(before))) throw invalid();
-    return c.json({ data: await materials.list(c.get("userId"), 30, before, c.req.query("beforeId") ? uuid(c.req.query("beforeId")!) : undefined) });
+    return c.json({ data: await materials.list(c.get("userId"), 30, before, c.req.query("beforeId") ? uuid(c.req.query("beforeId")!) : undefined, { type: c.req.query("type"), source: c.req.query("source"), tag: c.req.query("tag"), query: c.req.query("q")?.slice(0, 255) }) });
   });
   app.get("/materials/:id/content", async (c) => {
     if (!materials) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "素材服务未配置");
@@ -154,7 +155,7 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
   });
   app.get("/items", async (c) => {
     const p = pagination(c); const collectionId = c.req.query("collectionId");
-    return c.json(encodePage(await repository.listItems(c.get("userId"), p.limit, p.cursor, collectionId ? uuid(collectionId) : undefined, { inbox: c.req.query("inbox") === "true", sourceTypes: c.req.query("types")?.split(","), tags: c.req.queries("tag"), query: c.req.query("q")?.slice(0, 255) })));
+    return c.json(encodePage(await repository.listItems(c.get("userId"), p.limit, p.cursor, collectionId ? uuid(collectionId) : undefined, { inbox: c.req.query("inbox") === "true", sourceTypes: c.req.query("types")?.split(","), tags: c.req.queries("tag"), query: c.req.query("q")?.slice(0, 255), materialSource: c.req.query("source") })));
   });
   app.post("/items", async (c) => {
     const idempotencyKey = key(c);
@@ -187,9 +188,8 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
     const sourceType = mime.startsWith("image/") ? "image" : mime.startsWith("audio/") ? "audio" : mime.startsWith("video/") ? "video" : "document";
     return withKnowledgeStorageLease(repository.pool, owner, async () => {
       const object = await storage.put(owner, Readable.fromWeb(c.req.raw.body as import("node:stream/web").ReadableStream), mime);
-      const duplicate = c.req.header("X-Knowledge-Duplicate-Policy") === "ask" ? await repository.duplicate(owner, object.sha256) : null;
-      if (duplicate) return c.json({ error: { code: "DUPLICATE_FILE", message: "已存在相同原件", retryable: false }, duplicate }, 409);
-      return c.json(await repository.createItem(owner, { ...input, sourceType, mime, object }, idempotencyKey), 201);
+      const duplicatePolicy = c.req.header("X-Knowledge-Duplicate-Policy") === "ask" ? "ask" : "copy";
+      return c.json(await repository.createItem(owner, { ...input, sourceType, mime, object, duplicatePolicy }, idempotencyKey), 201);
     });
   });
   app.put("/items/:id/file", async (c) => {

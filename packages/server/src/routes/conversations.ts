@@ -1,3 +1,4 @@
+import { parseChatSourceTypes } from "@lot-agent/core";
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
@@ -203,15 +204,18 @@ export function createConversationRoutes(service: AgentService): Hono {
     if (!conversation || conversation.user_id !== userId) {
       return c.json({ error: "Not found" }, 404);
     }
-    const body = await c.req.json<{ knowledgeBaseIds?: unknown }>().catch(() => ({}));
+    const body: { knowledgeBaseIds?: unknown; knowledgeSourceTypes?: unknown } = await c.req.json().catch(() => ({}));
     if (!validateKnowledgeBaseIds(body.knowledgeBaseIds)) {
       return c.json({ error: `invalid knowledgeBaseIds (max ${MAX_KNOWLEDGE_BASES})` }, 400);
     }
     if (body.knowledgeBaseIds.length && conversation.agent_id !== "general") {
       return c.json({ error: "knowledge bases are only available in the general assistant" }, 400);
     }
+    let sourceTypes;
+    try { sourceTypes = parseChatSourceTypes(body.knowledgeSourceTypes); }
+    catch { return c.json({ error: "invalid knowledgeSourceTypes" }, 400); }
     try {
-      const knowledgeBases = await service.resolveKnowledgeBases(userId, body.knowledgeBaseIds);
+      const knowledgeBases = (await service.resolveKnowledgeBases(userId, body.knowledgeBaseIds)).map((base) => ({ ...base, sourceTypes }));
       await service.db.mergeConversationMetadata(id, { knowledgeBases });
       return c.json({ knowledgeBases });
     } catch (error) {
@@ -283,6 +287,7 @@ export function createConversationRoutes(service: AgentService): Hono {
       attachments?: AttachmentRef[];
       modelId?: string;
       knowledgeBaseIds?: string[];
+      knowledgeSourceTypes?: unknown;
     }>();
     if (!body.content && !(body.attachments && body.attachments.length)) {
       return c.json({ error: "content or attachments required" }, 400);
@@ -310,7 +315,12 @@ export function createConversationRoutes(service: AgentService): Hono {
         );
       }
     }
-    if (suppliedKnowledgeBaseIds !== undefined) {
+    try {
+      const sameSelection = suppliedKnowledgeBaseIds === undefined || JSON.stringify(knowledgeBaseIds) === JSON.stringify(storedKnowledgeBases(conversation.metadata).map((item) => item.id));
+      const sourceTypes = parseChatSourceTypes(body.knowledgeSourceTypes ?? (sameSelection ? storedKnowledgeBases(conversation.metadata)[0]?.sourceTypes : undefined));
+      knowledgeBases = knowledgeBases.map((base) => ({ ...base, sourceTypes }));
+    } catch { return c.json({ error: "invalid knowledgeSourceTypes" }, 400); }
+    if (suppliedKnowledgeBaseIds !== undefined || body.knowledgeSourceTypes !== undefined) {
       await service.db.mergeConversationMetadata(id, { knowledgeBases });
     }
 

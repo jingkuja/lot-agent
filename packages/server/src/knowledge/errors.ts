@@ -1,6 +1,6 @@
 export class KnowledgeError extends Error {
   constructor(
-    readonly code: "INVALID_REQUEST" | "UNAUTHORIZED" | "SCOPE_FORBIDDEN" | "NOT_FOUND" | "KNOWLEDGE_UNAVAILABLE" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "UNSUPPORTED_MEDIA" | "RATE_LIMITED" | "REQUEST_TIMEOUT" | "QUOTA_EXCEEDED",
+    readonly code: "DUPLICATE_FILE" | "INVALID_REQUEST" | "UNAUTHORIZED" | "SCOPE_FORBIDDEN" | "NOT_FOUND" | "KNOWLEDGE_UNAVAILABLE" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "UNSUPPORTED_MEDIA" | "RATE_LIMITED" | "REQUEST_TIMEOUT" | "QUOTA_EXCEEDED",
     readonly status: 400 | 401 | 402 | 403 | 404 | 409 | 413 | 415 | 429 | 503 | 504,
     message: string,
     readonly retryable = false,
@@ -8,4 +8,8 @@ export class KnowledgeError extends Error {
     super(message);
     this.name = "KnowledgeError";
   }
+}
+
+export class KnowledgeDuplicateError extends KnowledgeError {
+  constructor(readonly duplicate: { id: string; title: string }) { super("DUPLICATE_FILE", 409, "已存在相同原件"); }
 }

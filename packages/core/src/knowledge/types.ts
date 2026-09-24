@@ -4,13 +4,13 @@ export type KnowledgeOrigin = "extracted_text" | "manual_description" | "confirm
 export type KnowledgePermission = "retrieval:read" | "profile:read" | "assets:read";
 export type KnowledgeRetrievalMode = "keyword" | "semantic" | "hybrid";
 export type KnowledgeStorageStatus = "uploading" | "stored" | "failed";
-export type KnowledgeIndexStatus = "pending" | "processing" | "ready" | "failed" | "cancelled";
+export type KnowledgeIndexStatus = "pending" | "processing" | "ready" | "failed" | "cancelled" | "stored_only";
 
 /** Omit citation when the parser has no genuine locator. DOCX has no page number. */
 export type KnowledgeCitation =
   | { kind: "pdf"; page: number }
   | { kind: "text"; startLine: number; endLine: number }
-  | { kind: "docx"; paragraph: number; heading?: string }
+  | { kind: "docx"; paragraph: number; endParagraph?: number; heading?: string }
   | { kind: "media"; startSeconds: number; endSeconds?: number };
 
 export interface KnowledgeCollection {

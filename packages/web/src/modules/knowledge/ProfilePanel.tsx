@@ -24,7 +24,7 @@ export function ProfilePanel({ collections }: { collections: Collection[] }) {
       <label>失效时间（留空长期有效）<input type="datetime-local" value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} /></label>
       <label className="knowledge-checkbox"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />启用</label>
       <label className="knowledge-checkbox"><input type="checkbox" checked={form.shareWithApi} onChange={(e) => setForm({ ...form, shareWithApi: e.target.checked })} />允许已获个人信息权限的外部应用读取</label>
-      <small>外部知识 API 尚未开放，此开关不会单独授予任何应用权限。</small>
+      <small>外部读取还需在“外部接入”中授予应用 profile:read 权限和对应知识库范围，此开关不会单独授予权限。</small>
       <fieldset><legend>加入知识库（用于语义检索）</legend>{collections.map((c) => <label key={c.id} className="knowledge-checkbox"><input type="checkbox" checked={form.collectionIds.includes(c.id)} onChange={(e) => setForm({ ...form, collectionIds: e.target.checked ? [...form.collectionIds, c.id].slice(0, 10) : form.collectionIds.filter((id) => id !== c.id) })} />{c.name}</label>)}</fieldset>
       <div className="knowledge-actions"><button disabled={busy}>确认保存</button><button type="button" disabled={busy} onClick={() => setForm(empty())}>新建字段</button></div>
     </form>

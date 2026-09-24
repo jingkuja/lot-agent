@@ -1,3 +1,4 @@
+import { KNOWLEDGE_SOURCE_LABELS, DEFAULT_CHAT_SOURCE_TYPES, type KnowledgeSourceType } from "@lot-agent/core/knowledge";
 import { useMemo, useState } from "react";
 import type { KnowledgeBase, KnowledgeBaseRef } from "../api/client.js";
 
@@ -25,10 +26,11 @@ export function KnowledgeBaseModal({
   onManage,
 }: KnowledgeBaseModalProps) {
   const [selectedIds, setSelectedIds] = useState(() => new Set(selected.map((item) => item.id)));
+  const [sourceTypes, setSourceTypes] = useState<KnowledgeSourceType[]>(selected[0]?.sourceTypes ?? DEFAULT_CHAT_SOURCE_TYPES);
   const selectedCount = selectedIds.size;
   const selectedItems = useMemo(
-    () => items.filter((item) => selectedIds.has(item.id)).map(({ id, name, source }) => ({ id, name, source })),
-    [items, selectedIds]
+    () => items.filter((item) => selectedIds.has(item.id)).map(({ id, name, source }) => ({ id, name, source, sourceTypes })),
+    [items, selectedIds, sourceTypes]
   );
 
   return (
@@ -49,6 +51,10 @@ export function KnowledgeBaseModal({
         </div>
         <div className="knowledge-modal-body">
           {onManage && <button type="button" onClick={onManage}>管理个人知识库</button>}
+          {items.some((item) => item.source === "local") && <fieldset><legend>检索资料类型</legend>
+            {Object.entries(KNOWLEDGE_SOURCE_LABELS).map(([type, label]) => <label key={type} className="knowledge-checkbox"><input type="checkbox" checked={sourceTypes.includes(type as KnowledgeSourceType)} onChange={(e) => setSourceTypes((old) => e.target.checked ? [...old, type as KnowledgeSourceType] : old.filter((v) => v !== type))} />{label}</label>)}
+            <small>媒体仅检索手工说明。个人信息须主动勾选。</small>
+          </fieldset>}
           {loading && <div className="knowledge-modal-state">正在加载知识库…</div>}
           {!loading && error && (
             <div className="knowledge-modal-state knowledge-modal-error">
@@ -96,7 +102,7 @@ export function KnowledgeBaseModal({
               className="knowledge-modal-confirm"
               type="button"
               onClick={() => { onConfirm(selectedItems); onClose(); }}
-              disabled={loading || !!error}
+              disabled={loading || !!error || !sourceTypes.length}
             >
               确定
             </button>

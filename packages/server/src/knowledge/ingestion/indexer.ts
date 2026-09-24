@@ -9,7 +9,7 @@ export interface IndexedChunk extends TextChunk { vector: number[] }
 const validVector = (vector: number[], dimensions: number) => vector.length === dimensions && vector.every(Number.isFinite) && vector.reduce((sum, n) => sum + n * n, 0) > 0 && Number.isFinite(vector.reduce((sum, n) => sum + n * n, 0));
 /** Candidate byte budget, followed by actual provider usage validation. */
 export async function embedArtifact(profile: IndexProfile, artifact: ParsedArtifact, embed: EmbedOne, prior: IndexedChunk[], checkpoint: (chunks: IndexedChunk[]) => Promise<void>, progress: (percentage: number) => Promise<void>, signal?: AbortSignal) {
-  const candidates = splitBlocks(artifact.blocks, { count: (text) => Buffer.byteLength(text, "utf8") }, 512, 64);
+  const candidates = splitBlocks(artifact.blocks, { count: (text) => Buffer.byteLength(text, "utf8") }, 512, 64, profile.chunkerVersion === "utf8-packed-512-overlap64-v2");
   if (candidates.length > 2000) throw new Error("TOO_MANY_CHUNKS");
   const chunks = [...prior];
   if (chunks.length > candidates.length || chunks.some((chunk, index) => chunk.text !== candidates[index].text || !validVector(chunk.vector, profile.dimensions) || chunk.tokenCount < 1 || chunk.tokenCount > 512)) throw new Error("INVALID_INDEX_CHECKPOINT");

@@ -50,14 +50,14 @@ describe("conversation knowledge-base persistence", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       knowledgeBases: [
-        { id: "kb1", name: "知识库 kb1" },
-        { id: "kb2", name: "知识库 kb2" },
+        { id: "kb1", name: "知识库 kb1", sourceTypes: ["document", "note"] },
+        { id: "kb2", name: "知识库 kb2", sourceTypes: ["document", "note"] },
       ],
     });
     expect(service.db.mergeConversationMetadata).toHaveBeenCalledWith("c1", {
       knowledgeBases: [
-        { id: "kb1", name: "知识库 kb1" },
-        { id: "kb2", name: "知识库 kb2" },
+        { id: "kb1", name: "知识库 kb1", sourceTypes: ["document", "note"] },
+        { id: "kb2", name: "知识库 kb2", sourceTypes: ["document", "note"] },
       ],
     });
   });
@@ -77,7 +77,7 @@ describe("conversation knowledge-base persistence", () => {
     expect(service.resolveKnowledgeBases).toHaveBeenCalledWith("u1", ["kb1"], "remote");
     expect(service.streamAgentResponse.mock.calls[0][6]).toEqual({
       modelId: undefined,
-      knowledgeBases: [{ id: "kb1", name: "知识库 kb1" }],
+      knowledgeBases: [{ id: "kb1", name: "知识库 kb1", sourceTypes: ["document", "note"] }],
     });
     expect(service.db.mergeConversationMetadata).not.toHaveBeenCalled();
   });
@@ -87,6 +87,16 @@ describe("conversation knowledge-base persistence", () => {
     const response = await app(service).request("/conversations/c1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "继续", knowledgeBaseIds: ["kb1"] }) });
     await response.text();
     expect(service.resolveKnowledgeBases).toHaveBeenCalledWith("u1", ["kb1"], "local");
+  });
+  it("persists explicitly selected types and restores them on the next message", async () => {
+    const selection = { id: "kb1", name: "Local", source: "local", sourceTypes: ["bookmark", "image", "profile_fact"] };
+    const service = fakeService({ knowledgeBases: [selection] });
+    const put = await app(service).request("/conversations/c1/knowledge-bases", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ knowledgeBaseIds: ["kb1"], knowledgeSourceTypes: selection.sourceTypes }) });
+    expect(put.status).toBe(200); expect((await put.json() as { knowledgeBases: Array<{ sourceTypes: string[] }> }).knowledgeBases[0].sourceTypes).toEqual(selection.sourceTypes);
+    const response = await app(service).request("/conversations/c1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "引用说明" }) });
+    await response.text(); expect(service.streamAgentResponse.mock.calls[0][6].knowledgeBases[0].sourceTypes).toEqual(selection.sourceTypes);
+    const invalid = await app(service).request("/conversations/c1/knowledge-bases", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ knowledgeBaseIds: ["kb1"], knowledgeSourceTypes: ["unknown"] }) });
+    expect(invalid.status).toBe(400);
   });
   it("treats an explicit empty selection as manual removal", async () => {
     const service = fakeService({

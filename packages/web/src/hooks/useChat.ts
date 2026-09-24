@@ -389,7 +389,7 @@ export function useChat(
           };
           if (isCurrent()) dispatch({ type: "turn_finalized", message: assistantMsg });
         }
-      }, uploaded, controller, modelId, knowledgeBases.map((item) => item.id));
+      }, uploaded, controller, modelId, knowledgeBases.map((item) => item.id), knowledgeBases[0]?.sourceTypes);
       })();
     },
     [conversationId, state.isStreaming, loadMessages]

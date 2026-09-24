@@ -7,14 +7,14 @@ export function lexicalText(text: string): string {
   const identifiers = text.match(/[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)+/g) ?? [];
   return [...Array.from(segmenter.segment(text.normalize("NFKC"))).filter((part) => part.isWordLike).map((part) => part.segment.toLowerCase()), ...identifiers.map((id) => id.toLowerCase())].join(" ");
 }
-export function indexProfile(baseUrl: string, options: { modelId?: string; dimensions?: number } = {}) {
+export function indexProfile(baseUrl: string, options: { modelId?: string; dimensions?: number; chunkerVersion?: "utf8-budget-512-overlap64-v1" | "utf8-packed-512-overlap64-v2" } = {}) {
   const url = new URL(baseUrl);
   if (url.username || url.password || url.search || url.hash || !["https:", "http:"].includes(url.protocol)) throw new Error("INVALID_EMBEDDING_ROUTE");
   if (!process.versions.icu || Intl.Segmenter.supportedLocalesOf(["zh"]).length !== 1) throw new Error("CHINESE_SEGMENTER_UNAVAILABLE");
   if (options.dimensions !== undefined && (!Number.isInteger(options.dimensions) || options.dimensions < 1 || options.dimensions > 8192)) throw new Error("INVALID_INDEX_DIMENSIONS");
   const config = {
     modelId: options.modelId ?? "qwen3.7-text-embedding", providerRoute: baseUrl.replace(/\/$/, ""), dimensions: options.dimensions ?? 1024,
-    distance: "cosine", normalized: true, chunkerVersion: "utf8-budget-512-overlap64-v1", tokenizerVersion: "provider-usage-per-chunk-v1",
+    distance: "cosine", normalized: true, chunkerVersion: options.chunkerVersion ?? "utf8-packed-512-overlap64-v2", tokenizerVersion: "provider-usage-per-chunk-v1",
     dictionaryVersion: `intl-zh-icu-${process.versions.icu}-identifiers-v1`, maxTokens: 512,
   } as const;
   return { id: createHash("sha256").update(JSON.stringify(config)).digest("hex"), ...config };

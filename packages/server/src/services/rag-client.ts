@@ -1,3 +1,4 @@
+import type { KnowledgeSourceType } from "@lot-agent/core";
 import type { KnowledgeEvidence } from "@lot-agent/core";
 export interface RagIdentity {
   externalUserId: string;
@@ -5,6 +6,7 @@ export interface RagIdentity {
 }
 
 export interface KnowledgeBaseRef {
+  sourceTypes?: KnowledgeSourceType[];
   source?: "local" | "remote";
   id: string;
   name: string;

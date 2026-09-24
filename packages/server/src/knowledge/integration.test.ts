@@ -64,6 +64,27 @@ describe.skipIf(!enabled)("knowledge PostgreSQL and authenticated HTTP", () => {
       expect(tables.rows.map((row) => row.table_name)).toEqual(expect.arrayContaining(["rag_outbox", "rag_ingestion_runs"]));
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
+  it("upgrades queued undescribed media and retains legacy pending receipts without inventing credentials", async () => {
+    const client = await pool.connect(); const schema = `rag_upgrade_${randomUUID().replaceAll("-", "")}`;
+    const item = randomUUID(); const revision = randomUUID(); const task = randomUUID(); const asset = randomUUID();
+    try {
+      await client.query("BEGIN"); await client.query(`CREATE SCHEMA ${schema}`); await client.query(`SET LOCAL search_path TO ${schema},pg_catalog`);
+      for (const migration of migrations.filter((m) => m.version < 30)) await migration.up(client);
+      await client.query("INSERT INTO users(id,name) VALUES($1,'upgrade')", [owner]);
+      await client.query("INSERT INTO tasks(id,user_id,type) VALUES($1,$2,'knowledge.ingest')", [task, owner]);
+      await client.query("INSERT INTO assets(id,user_id,type,storage_key,url,mime) VALUES($1,$2,'image','image.png','unused','image/png')", [asset, owner]);
+      await client.query("INSERT INTO rag_items(id,owner_id,source_type,title,pending_revision_id,source_asset_id) VALUES($1,$2,'image','stored',$3,$4)", [item, owner, revision, asset]);
+      await client.query("INSERT INTO rag_item_revisions(id,owner_id,item_id,revision_number,generation,storage_status,description) VALUES($1,$2,$3,1,1,'stored',E' \t\n')", [revision, owner, item]);
+      await client.query("INSERT INTO rag_ingestion_runs(task_id,owner_id,item_id,revision_id,generation) VALUES($1,$2,$3,$4,1)", [task, owner, item, revision]);
+      await client.query("INSERT INTO rag_embedding_charges(owner_id,request_id,model_id,input_tokens,quota_per_unit,exchange_rate) VALUES($1,'legacy-request','model',8,500000,7.3)", [owner]);
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await migrations.find((m) => m.version === 30)!.up(client);
+      expect((await client.query("SELECT material_source,active_revision_id,pending_revision_id FROM rag_items WHERE id=$1", [item])).rows[0]).toEqual({ material_source: "generated", active_revision_id: revision, pending_revision_id: null });
+      expect((await client.query("SELECT index_status FROM rag_item_revisions WHERE id=$1", [revision])).rows[0].index_status).toBe("stored_only");
+      expect((await client.query("SELECT status FROM tasks WHERE id=$1", [task])).rows[0].status).toBe("cancelled");
+      expect((await client.query("SELECT total_cost,credential_fingerprint FROM rag_embedding_charges WHERE owner_id=$1", [owner])).rows).toEqual([{ total_cost: null, credential_fingerprint: null }]);
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
   it("requires session auth and does not accept forged ownership", async () => {
     expect((await app.request("/api/rag/manage/collections", { headers: { "X-Lot-User-Id": owner } })).status).toBe(401);
     expect((await app.request("/api/rag/manage/collections", { method: "POST", ...json({ name: "库", owner_id: other }) })).status).toBe(400);

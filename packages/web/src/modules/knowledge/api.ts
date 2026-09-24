@@ -1,14 +1,15 @@
+import type { KnowledgeCitation, KnowledgeEvidence } from "@lot-agent/core";
 import { getToken, request } from "../../api/client.js";
 export interface AccessKey { id: string; name: string; prefix: string; scopes: string[]; collection_ids: string[]; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; version: number }
 export interface Collection { id: string; name: string; description: string; tags: string[]; storedCount: number; searchableCount: number; version: number }
-export interface Item { sourceAssetId: string | null; id: string; title: string; description: string; tags: string[]; sourceUrl: string | null; version: number; sourceType: string; indexStatus: string; activeRevisionId: string | null; pendingRevisionId: string | null; revisionId: string; taskId: string | null; content: string | null; mime: string | null; size: number; collectionIds: string[] }
-export interface Evidence { itemId: string; revisionId: string; chunkId: string; title: string; content: string; origin: string; sourceType: string; citation?: { kind: string; page?: number; paragraph?: number; heading?: string; startLine?: number; endLine?: number } }
+export interface Item { materialSource: "upload" | "generated"; diagnostics: { warnings?: string[] }; errorCode: string | null; sourceAssetId: string | null; id: string; title: string; description: string; tags: string[]; sourceUrl: string | null; version: number; sourceType: string; indexStatus: string; activeRevisionId: string | null; pendingRevisionId: string | null; revisionId: string; taskId: string | null; content: string | null; mime: string | null; size: number; collectionIds: string[] }
+export type Evidence = Pick<KnowledgeEvidence, "itemId" | "revisionId" | "chunkId" | "title" | "content" | "origin" | "sourceType" | "citation">;
 export interface Results { modeUsed: string; degraded: boolean; warnings: string[]; results: Evidence[] }
 export interface Page<T> { data: T[]; nextCursor: string | null }
 export interface Fact { id: string; key: string; value: string | number | boolean | string[]; value_type: string; category: string; source: string; active: boolean; current: boolean; share_with_api: boolean; valid_from: string | null; valid_until: string | null; version: number; collection_ids: string[] }
 export interface Candidate { id: string; key: string; value: string | null; operation: string }
-export interface Material { id: string; type: string; mime: string; original_name: string | null; size_bytes: number; created_at: string; cursor_time: string; archived_item_id: string | null }
-export interface Source { content: string | null; description: string; blocks: Array<{ text: string; citation?: Evidence["citation"] }>; diagnostics: unknown }
+export interface Material { width: number | null; height: number | null; duration_sec: number | null; id: string; type: string; mime: string; original_name: string | null; size_bytes: number; created_at: string; cursor_time: string; archived_item_id: string | null }
+export interface Source { content: string | null; description: string; blocks: Array<{ text: string; citation?: KnowledgeCitation }>; diagnostics: { warnings?: string[] } }
 export class DuplicateFileError extends Error { constructor(readonly duplicate: { id: string; title: string }) { super("已存在相同原件"); } }
 export const fileMime = (file: File) => ({ txt: "text/plain", md: "text/markdown", pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", mp4: "video/mp4", webm: "video/webm" } as Record<string, string>)[file.name.split(".").at(-1)?.toLowerCase() ?? ""] ?? file.type;
 const base = "/rag/manage";
@@ -26,9 +27,10 @@ export const knowledgeApi = {
   createCollection: (name: string) => request<Collection>(`${base}/collections`, { method: "POST", headers: headers(), body: json({ name }) }),
   updateCollection: (collection: Collection, value: { name: string; description: string; tags: string[] }) => request(`${base}/collections/${collection.id}`, { method: "PATCH", body: json({ name: value.name, description: value.description, tags: value.tags, version: collection.version }) }),
   deleteCollection: (collection: Collection) => request(`${base}/collections/${collection.id}`, { method: "DELETE", body: json({ version: collection.version }) }),
-  items: (scope: string, cursor?: string, type = "", tag = "", query = "") => {
+  items: (scope: string, cursor?: string, type = "", tag = "", query = "", source = "") => {
     const params = new URLSearchParams();
     if (scope === "inbox") params.set("inbox", "true"); else if (scope && scope !== "all") params.set("collectionId", scope);
+    if (source) params.set("source", source);
     if (cursor) params.set("cursor", cursor); if (type) params.set("types", type); if (tag) params.set("tag", tag); if (query) params.set("q", query);
     return request<Page<Item>>(`${base}/items?${params}`);
   },
@@ -64,7 +66,12 @@ export const knowledgeApi = {
   candidates: () => request<{ data: Candidate[] }>(`${base}/profile/candidates`),
   resolveCandidate: (id: string, accept: boolean, version: number) => request(`${base}/profile/candidates/${id}`, { method: "POST", body: json({ accept, version }) }),
   history: (id: string) => request<{ data: Array<{ version: number; snapshot: Fact; created_at: string }> }>(`${base}/profile/${id}/history`),
-  materials: (before?: string, beforeId?: string) => request<{ data: Material[] }>(`${base}/materials${before ? `?before=${encodeURIComponent(before)}${beforeId ? `&beforeId=${encodeURIComponent(beforeId)}` : ""}` : ""}`),
+  materials: (before?: string, beforeId?: string, type = "", source = "", tag = "", query = "") => {
+    const params = new URLSearchParams();
+    if (before) params.set("before", before); if (beforeId) params.set("beforeId", beforeId);
+    if (type) params.set("type", type); if (source) params.set("source", source); if (tag) params.set("tag", tag); if (query) params.set("q", query);
+    return request<{ data: Material[] }>(`${base}/materials?${params}`);
+  },
   materialFile: async (asset: Material) => { const response = await fetch(`/api${base}/materials/${asset.id}/content`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } }); if (!response.ok) throw new Error("原件不可用，请刷新后重试"); return new File([await response.blob()], asset.original_name || `素材-${asset.id}`, { type: asset.mime }); },
   archive: (asset: Material, collectionIds: string[]) => request<{ id: string }>(`${base}/materials/archive`, { method: "POST", headers: headers(), body: json({ assetId: asset.id, title: asset.original_name || `素材-${asset.id}`, collectionIds }) }),
 };

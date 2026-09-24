@@ -1,3 +1,4 @@
+import type { KnowledgeSourceType } from "@lot-agent/core";
 import type { CatalogModel } from "../lib/model-filter.js";
 import type {
   CustomerObservation,
@@ -204,6 +205,7 @@ export interface UploadedAttachment {
 }
 
 export interface KnowledgeBaseRef {
+  sourceTypes?: KnowledgeSourceType[];
   source?: "local" | "remote";
   id: string;
   name: string;
@@ -411,10 +413,10 @@ export const api = {
       `/conversations/${id}`
     ),
 
-  setConversationKnowledgeBases: (id: string, knowledgeBaseIds: string[]) =>
+  setConversationKnowledgeBases: (id: string, knowledgeBaseIds: string[], knowledgeSourceTypes?: KnowledgeSourceType[]) =>
     request<{ knowledgeBases: KnowledgeBaseRef[] }>(`/conversations/${id}/knowledge-bases`, {
       method: "PUT",
-      body: JSON.stringify({ knowledgeBaseIds }),
+      body: JSON.stringify({ knowledgeBaseIds, knowledgeSourceTypes }),
     }),
 
   deleteConversation: (id: string) =>
@@ -456,7 +458,8 @@ export const api = {
     // file-upload phase and the SSE stream.
     controller: AbortController = new AbortController(),
     modelId?: string,
-    knowledgeBaseIds?: string[]
+    knowledgeBaseIds?: string[],
+    knowledgeSourceTypes?: KnowledgeSourceType[]
   ): AbortController => {
     (async () => {
       try {
@@ -468,7 +471,7 @@ export const api = {
               "Content-Type": "application/json",
               ...authHeaders(),
             },
-            body: JSON.stringify({ content, attachments, modelId, knowledgeBaseIds }),
+            body: JSON.stringify({ content, attachments, modelId, knowledgeBaseIds, knowledgeSourceTypes }),
             signal: controller.signal,
           }
         );

@@ -1,3 +1,4 @@
+import { reconcilePendingEmbeddingReceipts } from "../knowledge/ingestion/receipts.js";
 import { activeProfile } from "../knowledge/ingestion/spaces.js";
 import "../load-env.js";
 import { resolve, dirname } from "node:path";
@@ -59,9 +60,20 @@ async function main() {
   };
   await dispatch();
   const timer = setInterval(() => void dispatch(), 5000);
+  let reconciling: Promise<void> | undefined;
+  const receiptAbort = new AbortController();
+  const reconcile = () => {
+    if (reconciling) return;
+    reconciling = reconcilePendingEmbeddingReceipts(db, receiptAbort.signal).catch(() => {
+      console.warn("[knowledge] receipt reconciliation deferred");
+    }).finally(() => { reconciling = undefined; });
+  };
+  reconcile();
+  const receiptTimer = setInterval(reconcile, 30000);
   let closing = false;
   const close = async () => {
-    if (closing) return; closing = true; clearInterval(timer);
+    if (closing) return; closing = true; clearInterval(timer); clearInterval(receiptTimer); receiptAbort.abort();
+    await reconciling;
     await worker.close(); await queue.close(); await db.close();
   };
   process.once("SIGINT", () => void close()); process.once("SIGTERM", () => void close());
