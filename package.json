@@ -2,7 +2,7 @@
   "name": "lot-agent",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n core,server,worker,web -c blue,green,cyan,magenta \"pnpm --filter @lot-agent/core run dev\" \"pnpm --filter @lot-agent/server run dev\" \"pnpm --filter @lot-agent/server run dev:worker\" \"pnpm --filter @lot-agent/web run dev\"",
+    "dev": "concurrently -n core,server,worker,knowledge,web -c blue,green,cyan,yellow,magenta \"pnpm --filter @lot-agent/core run dev\" \"pnpm --filter @lot-agent/server run dev\" \"pnpm --filter @lot-agent/server run dev:worker\" \"pnpm --filter @lot-agent/server run dev:knowledge\" \"pnpm --filter @lot-agent/web run dev\"",
     "dev:server": "pnpm --filter @lot-agent/server run dev",
     "dev:web": "pnpm --filter @lot-agent/web run dev",
     "dev:desktop": "pnpm --filter @lot-agent/desktop run build && concurrently -n web,electron -c magenta,yellow \"pnpm run dev:web\" \"wait-on http://localhost:5173 && pnpm --filter @lot-agent/desktop run dev\"",

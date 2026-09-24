@@ -18,11 +18,23 @@ import { createUserEmbedder } from "../knowledge/ingestion/runtime.js";
 import type { ParsedArtifact } from "../knowledge/ingestion/parsers.js";
 
 async function main() {
+  if (process.env.KNOWLEDGE_INGESTION_ENABLED !== "1") {
+    console.log("Knowledge ingestion disabled; worker not started");
+    return;
+  }
   const config = knowledgeQueueConfig();
   const defaultProfile = indexProfile(process.env.OPENAI_BASE_URL ?? "https://tokenhub.wetok.ai/v1");
   const db = new DB({ max: config.poolMax, host: process.env.PG_HOST, port: Number(process.env.PG_PORT ?? 5432), user: process.env.PG_USER, password: process.env.PG_PASSWORD, database: process.env.PG_DATABASE });
   // Server owns migrations. Do not consume anything before the required schema is present.
-  await assertKnowledgeJobsReady(db.pool);
+  // `pnpm dev` starts server and workers together. Allow the server to finish
+  // its migrations before claiming any tasks on a fresh installation.
+  for (let attempt = 0; ; attempt++) {
+    try { await assertKnowledgeJobsReady(db.pool); break; }
+    catch (error) {
+      if (attempt >= 29) { await db.close(); throw error; }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
   const root = resolve(dirname(process.argv[1]), "../../../..");
   const parserPath = resolve(dirname(process.argv[1]), `knowledge-parser.${process.argv[1].endsWith(".ts") ? "ts" : "js"}`);
   const storage = new LocalKnowledgeStorage(resolve(root, "data/knowledge"));

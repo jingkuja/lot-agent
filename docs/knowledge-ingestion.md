@@ -16,7 +16,7 @@ pnpm run dev:web
 
 `.env` 的 `KNOWLEDGE_MANAGEMENT_ENABLED=1` 开启管理入口，`KNOWLEDGE_INGESTION_ENABLED=1` 开启新资料的入库及本地检索；本次已在本地启用。仓库默认仍关闭。不会自动将此前保存的资料全部计费入库：无任务的待处理资料可调用 retry；新建资料才自动排队。
 
-`KNOWLEDGE_QUEUE` 默认 `lot-knowledge`，禁止设为 `lot-tasks`；`KNOWLEDGE_CONCURRENCY` 默认 2，范围 1–8。原生成/记忆 Worker 保持原队列。所有消费者使用同一份代码、Node/ICU、模型路由配置和私有存储目录。`pnpm dev` 保留原启动集合，知识 Worker 用上面的独立命令启动。
+`KNOWLEDGE_QUEUE` 默认 `lot-knowledge`，禁止设为 `lot-tasks`；`KNOWLEDGE_CONCURRENCY` 默认 2，范围 1–8。原生成/记忆 Worker 保持原队列。所有消费者使用同一份代码、Node/ICU、模型路由配置和私有存储目录。`pnpm dev` 同时启动知识 Worker；仅在 `KNOWLEDGE_INGESTION_ENABLED=1` 时消费，启动时最多等待 30 秒让 server 完成迁移。单独启动时使用 `pnpm dev:knowledge`。
 
 前端侧栏“本地知识库”提供收件箱、全部资料搜索、个人信息、个人素材和知识库列表。默认收集到收件箱；库内收集默认关联当前库。可拖放或选择最多 20 个文件、粘贴笔记、保存书签；新建库自动建议名称并提供“创建并导入”。批次保留逐项状态，可仅重试失败项，重复文件可使用已有资料或保存独立副本。
 

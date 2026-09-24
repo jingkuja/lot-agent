@@ -1,3 +1,4 @@
+import { waitForEmbeddingReceipts } from "./receipt-wait.js";
 import { credentialFingerprint, reconcileEmbeddingReceipts } from "./receipts.js";
 import { PreflightCache } from "./preflight-cache.js";
 import type { DB } from "../../db/database.js";
@@ -8,7 +9,7 @@ import type { IndexProfile } from "./profile.js";
 const preflight = new PreflightCache<[{ data?: Array<{ id: string }> }, { data?: { quota_per_unit: number; usd_exchange_rate: number } }]>();
 
 /** Resolve only the owner's credential. No platform/environment-key fallback. */
-export function createUserEmbedder(db: DB, profile: IndexProfile, ownerId: string, taskId?: string, attribution?: { keyId?: string; application?: string }) {
+export function createUserEmbedder(db: DB, profile: IndexProfile, ownerId: string, taskId?: string, attribution?: { keyId?: string; application?: string }, options?: { receiptWaitMs?: number }) {
   return async (text: string, signal?: AbortSignal): Promise<{ vector: number[]; tokens: number }> => {
     if (signal?.aborted) throw new Error("INGESTION_CANCELLED");
     const apiKey = await db.getUserApiKey(ownerId, process.env.NEW_API_MANAGED_KEYS !== "0");
@@ -30,7 +31,7 @@ export function createUserEmbedder(db: DB, profile: IndexProfile, ownerId: strin
     const quotaUnit = status.data?.quota_per_unit; const exchangeRate = status.data?.usd_exchange_rate;
     if (typeof quotaUnit !== "number" || typeof exchangeRate !== "number" || !Number.isFinite(quotaUnit) || quotaUnit <= 0 || !Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new Error("EMBEDDING_METER_UNAVAILABLE");
     const reconcile = () => reconcileEmbeddingReceipts(db, ownerId, profile.providerRoute, apiKey, signal);
-    if (!await reconcile()) throw Object.assign(new Error("EMBEDDING_BILLING_PENDING"), { retryable: true });
+    await waitForEmbeddingReceipts(reconcile, signal, options?.receiptWaitMs);
     // A conservative per-call admission budget, never used as the reported charge.
     if (!(await new UsageMeter(db, () => undefined).checkQuota(ownerId, 0.01 * Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 512)))).ok) throw new Error("EMBEDDING_QUOTA_EXCEEDED");
     let tokens = 0;

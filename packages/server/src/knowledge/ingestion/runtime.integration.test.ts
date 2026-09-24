@@ -49,7 +49,7 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("embedding receipt accounti
   });
   it("keeps delayed receipts durable and blocks another charge while reconciliation is pending", async () => {
     credential("owner-key"); const calls = { calls: 0 }; gateway(randomUUID(), false, calls);
-    const embed = createUserEmbedder(db, profile, other);
+    const embed = createUserEmbedder(db, profile, other, undefined, undefined, { receiptWaitMs: 0 });
     await expect(embed("synthetic input")).resolves.toMatchObject({ tokens: 40 });
     await expect(embed("another input")).rejects.toThrow("EMBEDDING_BILLING_PENDING");
     expect(calls.calls).toBe(1);
