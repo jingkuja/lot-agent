@@ -10,9 +10,9 @@ export function ProfilePanel({ collections }: { collections: Collection[] }) {
   const act = async (work: () => Promise<unknown>) => { setBusy(true); setError(""); try { await work(); await reload(); } catch (e) { setError(e instanceof Error ? e.message : "保存失败"); } finally { setBusy(false); } };
   useEffect(() => { void act(reload); }, []);
   const edit = (f: Fact) => { setHistory(null); setForm({ key: f.key, value: Array.isArray(f.value) ? f.value.join("\n") : String(f.value), type: f.value_type, category: f.category, active: f.active, shareWithApi: f.share_with_api, validFrom: localDate(f.valid_from), validUntil: localDate(f.valid_until), version: f.version, collectionIds: f.collection_ids }); };
-  return <section aria-label="个人信息"><h3>已确认的个人信息</h3><p>手动确认的信息优先用于聊天。自动提取仅生成候选，未经确认不会覆盖这里的内容。</p>
+  return <section className="knowledge-profile" aria-label="个人信息"><h3>已确认的个人信息</h3><p>手动确认的信息优先用于聊天。自动提取仅生成候选，未经确认不会覆盖这里的内容。</p>
     {error && <p role="alert">{error}</p>}
-    <form className="knowledge-collect" onSubmit={(e) => { e.preventDefault(); void act(async () => {
+    <form className="knowledge-collect knowledge-profile-form" onSubmit={(e) => { e.preventDefault(); void act(async () => {
       const value = form.type === "number" ? Number(form.value) : form.type === "boolean" ? form.value === "true" : form.type === "list" ? form.value.split("\n").filter(Boolean) : form.value;
       await knowledgeApi.saveFact({ ...form, value, validFrom: form.validFrom ? new Date(form.validFrom).toISOString() : null, validUntil: form.validUntil ? new Date(form.validUntil).toISOString() : null }); setForm(empty());
     }); }}>
@@ -23,12 +23,10 @@ export function ProfilePanel({ collections }: { collections: Collection[] }) {
       <label>生效时间（留空立即生效）<input type="datetime-local" value={form.validFrom} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} /></label>
       <label>失效时间（留空长期有效）<input type="datetime-local" value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} /></label>
       <label className="knowledge-checkbox"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />启用</label>
-      <label className="knowledge-checkbox"><input type="checkbox" checked={form.shareWithApi} onChange={(e) => setForm({ ...form, shareWithApi: e.target.checked })} />允许已获个人信息权限的外部应用读取</label>
-      <small>外部读取还需在“外部接入”中授予应用 profile:read 权限和对应知识库范围，此开关不会单独授予权限。</small>
       <fieldset><legend>加入知识库（用于语义检索）</legend>{collections.map((c) => <label key={c.id} className="knowledge-checkbox"><input type="checkbox" checked={form.collectionIds.includes(c.id)} onChange={(e) => setForm({ ...form, collectionIds: e.target.checked ? [...form.collectionIds, c.id].slice(0, 10) : form.collectionIds.filter((id) => id !== c.id) })} />{c.name}</label>)}</fieldset>
-      <div className="knowledge-actions"><button disabled={busy}>确认保存</button><button type="button" disabled={busy} onClick={() => setForm(empty())}>新建字段</button></div>
+      <div className="knowledge-actions"><button className="knowledge-primary" disabled={busy}>确认保存</button><button type="button" disabled={busy} onClick={() => setForm(empty())}>新建字段</button></div>
     </form>
-    {facts.map((f) => <article className="knowledge-item" key={f.id}><div><strong>{f.key}</strong><p>{JSON.stringify(f.value)} · {f.category} · {f.current ? "生效中" : "未生效"} · 第 {f.version} 版</p><small>来源：{f.source === "manual" ? "手动确认" : "候选确认"} · 外部{f.share_with_api ? "可见" : "不可见"}</small></div><div className="knowledge-actions"><button disabled={busy} onClick={() => edit(f)}>编辑 / 停用</button><button disabled={busy} onClick={() => void act(async () => setHistory((await knowledgeApi.history(f.id)).data))}>历史</button></div></article>)}
+    {facts.map((f) => <article className="knowledge-item" key={f.id}><div><strong>{f.key}</strong><p>{JSON.stringify(f.value)} · {f.category} · {f.current ? "生效中" : "未生效"} · 第 {f.version} 版</p><small>来源：{f.source === "manual" ? "手动确认" : "候选确认"}</small></div><div className="knowledge-actions"><button disabled={busy} onClick={() => edit(f)}>编辑 / 停用</button><button disabled={busy} onClick={() => void act(async () => setHistory((await knowledgeApi.history(f.id)).data))}>历史</button></div></article>)}
     {history && <details open><summary>修改历史</summary>{history.map((row) => <p key={row.version}>第 {row.version} 版 · {new Date(row.created_at).toLocaleString()} · {JSON.stringify(row.snapshot.value)} · {row.snapshot.active ? "启用" : "停用"}</p>)}</details>}
     <h3>待确认候选</h3>{!candidates.length && <p>暂无待确认信息。</p>}{candidates.map((c) => <article className="knowledge-item" key={c.id}><div><strong>{c.key}</strong><p>{c.operation === "delete" ? "建议停用" : c.value}</p>{facts.find((f) => f.key === c.key) && <small>当前：{JSON.stringify(facts.find((f) => f.key === c.key)?.value)}</small>}</div><div className="knowledge-actions"><button disabled={busy} onClick={() => void act(() => knowledgeApi.resolveCandidate(c.id, true, facts.find((f) => f.key === c.key)?.version ?? 0))}>确认{c.operation === "delete" ? "停用" : "更新"}</button><button disabled={busy} onClick={() => void act(() => knowledgeApi.resolveCandidate(c.id, false, 0))}>忽略</button></div></article>)}
   </section>;
