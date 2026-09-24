@@ -82,12 +82,13 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function request<T>(path: string, init?: { method?: string; data?: unknown; anonymous?: boolean }): Promise<T> {
+function request<T>(path: string, init?: { method?: string; data?: unknown; anonymous?: boolean; timeout?: number }): Promise<T> {
   return new Promise((resolve, reject) => {
     wx.request({
       url: joinUrl(API_BASE, `/api${path}`),
       method: init?.method ?? "GET",
       data: init?.data,
+      timeout: init?.timeout,
       header: {
         "Content-Type": "application/json",
         "X-Lot-Client": "miniprogram",
@@ -233,10 +234,12 @@ export const api = {
   getRechargeOrder: (transactionId: string) =>
     request<RechargeOrder>(`/recharge/orders/${encodeURIComponent(transactionId)}`),
 
-  createConversation: (title?: string) =>
+  videoCopy: (topic: string) => request<{ script: string; mainTitle: string; subtitle: string; publishTitle: string; tags: string }>("/video-drafts", { method: "POST", data: { topic }, timeout: 120000 }),
+
+  createConversation: (title?: string, agentId = IMAGE_AGENT_ID) =>
     request<Conversation>("/conversations", {
       method: "POST",
-      data: { title: title ?? "新对话", agentId: IMAGE_AGENT_ID },
+      data: { title: title ?? "新对话", agentId },
     }),
 
   deleteConversation: (id: string) =>
@@ -244,10 +247,10 @@ export const api = {
       method: "DELETE",
     }),
 
-  listImageConversations: (limit = 20, cursor?: string) => {
+  listImageConversations: (limit = 20, cursor?: string, agentId = "image") => {
     const q = [
       `limit=${limit}`,
-      "agentId=image",
+      `agentId=${encodeURIComponent(agentId)}`,
       "includePreview=1",
       cursor ? `cursor=${encodeURIComponent(cursor)}` : "",
     ]
@@ -263,10 +266,11 @@ export const api = {
 
   generate: (conversationId: string, body: {
     prompt: string;
-    mediaType: "image";
-    settings?: { size?: string; quality?: string; n?: number };
+    mediaType: "image" | "video";
+    settings?: { size?: string; resolution?: string; quality?: string; n?: number; ratio?: string; durationSec?: number; generate_audio?: boolean };
     media?: Array<{ type: "reference_image"; url: string }>;
     model?: string;
+    first_frame?: string;
   }) =>
     request<GenerationResult>(`/conversations/${conversationId}/generations`, {
       method: "POST",

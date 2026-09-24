@@ -33,6 +33,12 @@ describe("pickGenerationSettings", () => {
     ).toEqual({ size: "720x1280", durationSec: 5, ratio: "16:9", quality: "720p", generate_audio: false });
   });
 
+  it("accepts string video resolution without exposing it to image requests", () => {
+    expect(pickGenerationSettings("video", { resolution: "1080p" })).toEqual({ resolution: "1080p" });
+    expect(pickGenerationSettings("video", { resolution: 1080 })).toEqual({});
+    expect(pickGenerationSettings("image", { resolution: "1080p" })).toEqual({});
+  });
+
   it("drops a video audio flag carrying the wrong type", () => {
     expect(pickGenerationSettings("video", { generate_audio: "false" })).toEqual({});
   });

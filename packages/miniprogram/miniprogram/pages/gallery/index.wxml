@@ -7,12 +7,13 @@
     </view>
     <text class="muted">喜欢的画面，都收在这里。</text>
   </view>
+  <view class="chip-row gallery-types"><button class="chip {{mediaType === 'image' ? 'on' : ''}}" data-type="image" bindtap="selectType">图片</button><button class="chip {{mediaType === 'video' ? 'on' : ''}}" data-type="video" bindtap="selectType">视频</button></view>
   <view wx:if="{{empty}}" class="empty">
     <view class="empty-art">
       <view class="photo-mark"></view>
     </view>
-    <text class="h2">第一张作品，等你开始</text>
-    <text class="muted">修一张照片，或把脑海里的画面变成图片。</text>
+    <text class="h2">第一件作品，等你开始</text>
+    <text class="muted">{{mediaType === 'video' ? '把灵感拍成你的第一条视频。' : '修一张照片，或把脑海里的画面变成图片。'}}</text>
     <view class="btn btn-primary empty-btn" bindtap="goStudio">开始创作 ↗</view>
   </view>
   <block wx:else>
@@ -29,7 +30,8 @@
           <text class="generation-status cell-status">{{item.statusText || '正在生成'}}</text>
         </view>
         <block wx:else>
-          <image wx:if="{{item.preview}}" src="{{item.preview}}" mode="aspectFill" lazy-load />
+          <view wx:if="{{mediaType === 'video'}}" class="video-cover"><text>▷</text><text>视频作品</text></view>
+          <image wx:elif="{{item.preview}}" src="{{item.preview}}" mode="aspectFill" lazy-load />
           <view wx:else class="cell-empty">画面准备中</view>
         </block>
         <view class="cell-caption">

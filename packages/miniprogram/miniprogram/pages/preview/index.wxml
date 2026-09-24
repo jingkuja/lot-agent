@@ -7,21 +7,28 @@
       <button class="btn btn-ghost" bindtap="goStudio">去创作</button>
     </view>
     <block wx:else>
-      <image class="hero card" src="{{src}}" mode="aspectFit" bindtap="preview" />
+      <video wx:if="{{isVideo}}" class="hero card" src="{{src}}" controls show-center-play-btn />
+      <image wx:else class="hero card" src="{{src}}" mode="aspectFit" bindtap="preview" />
       <text wx:if="{{title}}" class="work-title">{{title}}</text>
-      <text class="muted tip">点图片可放大查看</text>
+      <text class="muted tip">{{isVideo ? '预览画面与声音，确认后再发布' : '点图片可放大查看'}}</text>
     </block>
   </view>
 
   <view wx:if="{{src}}" class="panel safe-bottom">
-    <button class="btn btn-primary main" bindtap="save">保存到相册</button>
+    <button class="btn btn-primary main" bindtap="save" disabled="{{saving}}" loading="{{saving}}">{{isVideo ? '保存视频' : '保存到相册'}}</button>
     <view class="row">
-      <button wx:if="{{shareToken}}" class="btn btn-ghost half" open-type="share" disabled="{{sharing}}">发送作品卡片</button>
-      <button wx:elif="{{!shared}}" class="btn btn-ghost half" bindtap="prepareShare" loading="{{sharing}}" disabled="{{sharing}}">创建分享卡片</button>
-      <button class="btn btn-ghost half" bindtap="share">分享原图</button>
+      <button wx:if="{{shareToken}}" class="btn btn-ghost half" open-type="share" disabled="{{sharing}}">分享微信好友</button>
+      <button wx:elif="{{!shared}}" class="btn btn-ghost half" bindtap="prepareShare" loading="{{sharing}}" disabled="{{sharing}}">准备微信分享</button>
+      <button wx:if="{{isVideo}}" class="btn btn-ghost half" bindtap="timeline" disabled="{{sharing}}">朋友圈</button>
+      <button wx:else class="btn btn-ghost half" bindtap="share">分享原图</button>
     </view>
-    <button class="btn btn-soft full" bindtap="retouch">再修一版</button>
+    <view wx:if="{{isVideo}}" class="row">
+      <button class="btn btn-soft half" data-platform="抖音" bindtap="publishTo" disabled="{{saving}}">发布抖音 ↗</button>
+      <button class="btn btn-soft half" data-platform="小红书" bindtap="publishTo" disabled="{{saving}}">发布小红书 ↗</button>
+    </view>
+    <text wx:if="{{isVideo}}" class="muted note">抖音、小红书：保存视频并复制文案后，前往对应 App 完成发布。</text>
+    <button wx:else class="btn btn-soft full" bindtap="retouch">再修一版</button>
     <button wx:if="{{!shared}}" hidden="{{!shareToken}}" class="revoke" disabled="{{sharing}}" bindtap="revokeShare">撤销作品分享</button>
-    <text class="muted note">{{shared ? '分享卡片可打开这件作品；保存图片后可自行分享。' : '创建卡片后，获得卡片的人可查看这件作品。可随时撤销分享。'}}</text>
+    <text class="muted note">{{shared ? '分享卡片可打开这件作品；保存作品后可自行分享。' : '创建卡片后，获得卡片的人可查看这件作品。可随时撤销分享。'}}</text>
   </view>
 </view>

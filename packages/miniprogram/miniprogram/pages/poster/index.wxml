@@ -1,4 +1,5 @@
 <view class="page poster">
+  <button class="back-studio" bindtap="goStudio">‹ 返回自由创作</button>
   <view class="page-heading">
     <text class="eyebrow">海报灵感</text>
     <text class="h1">好消息，值得一张海报。</text>

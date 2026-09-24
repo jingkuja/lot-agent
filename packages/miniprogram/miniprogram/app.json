@@ -3,6 +3,7 @@
     "pages/boot/index",
     "pages/studio/index",
     "pages/poster/index",
+    "pages/video/index",
     "pages/gallery/index",
     "pages/mine/index",
     "pages/about/index",
@@ -30,10 +31,10 @@
         "selectedIconPath": "assets/tab-studio-active.png"
       },
       {
-        "pagePath": "pages/poster/index",
-        "text": "海报",
-        "iconPath": "assets/tab-poster.png",
-        "selectedIconPath": "assets/tab-poster-active.png"
+        "pagePath": "pages/video/index",
+        "text": "视频",
+        "iconPath": "assets/tab-video.png",
+        "selectedIconPath": "assets/tab-video-active.png"
       },
       {
         "pagePath": "pages/gallery/index",
@@ -53,7 +54,7 @@
   "sitemapLocation": "sitemap.json",
   "permission": {
     "scope.writePhotosAlbum": {
-      "desc": "把做好的图片保存到你的手机相册"
+      "desc": "把做好的图片和视频保存到你的手机相册"
     }
   }
 }

@@ -66,6 +66,21 @@ describe("runGenerationJob", () => {
     expect(provider.create).toHaveBeenLastCalledWith(expect.objectContaining({ quality: "high" }));
   });
 
+  it("preserves video resolution in provider requests, messages and separate cache entries", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://video.example/clip.mp4" })),
+    };
+    const { deps, calls } = fakeDeps(provider);
+    for (const resolution of ["480p", "720p", "1080p"]) {
+      await runGenerationJob(deps, { ...job, input: { ...job.input, resolution } }, "video");
+      expect(provider.create).toHaveBeenLastCalledWith(expect.objectContaining({ resolution }));
+      expect(calls.message.at(-1).metadata.settings.resolution).toBe(resolution);
+    }
+    const cacheKeys = vi.mocked(deps.cache.get).mock.calls.map(([key]) => key);
+    expect(new Set(cacheKeys).size).toBe(3);
+  });
+
   it("marks message failed and rethrows when poll returns failed", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),

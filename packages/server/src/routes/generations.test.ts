@@ -262,6 +262,19 @@ describe("POST /conversations/:id/generations", () => {
     );
   });
 
+  it.each(["480p", "720p", "1080p"])("preserves video resolution %s in the queued task", async (resolution) => {
+    const service = fakeService();
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "视频", mediaType: "video", settings: { resolution, ratio: "1:1" } }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.assistantMessage.metadata.settings).toMatchObject({ resolution, ratio: "1:1" });
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith("video.generate", expect.objectContaining({ resolution, ratio: "1:1" }), "u1");
+  });
+
   it("defaults video generation audio to false when no reference audio is supplied", async () => {
     const service = fakeService();
     const res = await app(service).request("/conversations/c1/generations", {

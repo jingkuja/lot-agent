@@ -14,6 +14,8 @@ export interface VideoGenerationRequest {
   prompt: string;
   model?: string;
   size?: string;
+  /** Explicit output tier, forwarded as TokenHub metadata for generation and billing. */
+  resolution?: string;
   durationSec?: number;
   ratio?: string;
   quality?: string;
@@ -80,6 +82,8 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
   buildCreateBody(req: VideoGenerationRequest, model: string): unknown {
     const body: Record<string, unknown> = { model, prompt: req.prompt };
     body.generate_audio = resolveGenerateAudio(req);
+    // TokenHub reads resolution from metadata, not a top-level resolution or quality.
+    if (req.resolution) body.metadata = { resolution: req.resolution };
     if (req.size) body.size = req.size;
     if (req.durationSec != null) body.duration = req.durationSec;
     if (req.ratio) body.ratio = req.ratio;
@@ -143,6 +147,8 @@ export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
   override buildCreateBody(req: VideoGenerationRequest, model: string): unknown {
     const body: Record<string, unknown> = { model, prompt: req.prompt };
     body.generate_audio = resolveGenerateAudio(req);
+    // TokenHub reads resolution from metadata, not a top-level resolution or quality.
+    if (req.resolution) body.metadata = { resolution: req.resolution };
     if (usesSeedanceReferenceVideoAdaptive(model, req.reference_video)) {
       // Seedance rejects a caller-chosen duration/ratio when a reference
       // video is present — the output must match the reference clip.

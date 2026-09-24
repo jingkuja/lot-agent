@@ -48,3 +48,27 @@ describe("shared work landing", () => {
     expect(page.onShareAppMessage().path).not.toContain("src=");
   });
 });
+
+describe("video share and save", () => {
+  it("uses the shared asset MIME, and shares token-only links without treating video as an image", async () => {
+    api.sharedImage.mockResolvedValue({ title: "短片", url: "/static/assets/video.mp4", mime: "video/mp4" });
+    page.onLoad({ share: "a".repeat(48) }); await page.onShow();
+    expect(page.data.isVideo).toBe(true);
+    expect(page.onShareAppMessage().imageUrl).toBeUndefined();
+    expect(page.onShareTimeline()).toMatchObject({ query: `share=${"a".repeat(48)}`, imageUrl: undefined });
+  });
+  it("saves a video through the video album API", async () => {
+    Object.assign(wx, { downloadFile: vi.fn(({ success }) => success({ statusCode: 200, tempFilePath: "local.mp4" })),
+      saveVideoToPhotosAlbum: vi.fn(({ success }) => success()), saveImageToPhotosAlbum: vi.fn(), showLoading: vi.fn(), hideLoading: vi.fn() });
+    page.onLoad({ type: "video", src: encodeURIComponent("https://media.example.com/static/assets/video.mp4") });
+    expect(await page.save()).toBe(true);
+    expect(wx.saveVideoToPhotosAlbum).toHaveBeenCalledWith(expect.objectContaining({ filePath: "local.mp4" }));
+    expect(wx.saveImageToPhotosAlbum).not.toHaveBeenCalled();
+  });
+  it("does not claim publishing succeeded when video saving failed", async () => {
+    page.setData({ isVideo: true, src: "video.mp4" }); page.save = vi.fn().mockResolvedValue(false);
+    Object.assign(wx, { setClipboardData: vi.fn(), showModal: vi.fn() });
+    await page.publishTo({ currentTarget: { dataset: { platform: "抖音" } } });
+    expect(wx.setClipboardData).not.toHaveBeenCalled(); expect(wx.showModal).not.toHaveBeenCalled();
+  });
+});

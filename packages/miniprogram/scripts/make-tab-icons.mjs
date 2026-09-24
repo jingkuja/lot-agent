@@ -106,7 +106,11 @@ function mine(px, py) {
   return inCircle(px, py, 40, 28, 10) || (inCircle(px, py, 40, 62, 20) && py > 44 && py < 68 && px > 22 && px < 58);
 }
 
-const glyphs = { studio, poster, gallery, mine };
+function video(px, py) {
+  return stroke(px, py, 15, 22, 50, 38, 4) || (px >= 34 && px <= 49 && Math.abs(py - 41) <= (49 - px) * 0.7);
+}
+
+const glyphs = { studio, poster, video, gallery, mine };
 const fog = [0x82, 0x76, 0x6c, 255];
 const brand = [0xc8, 0x6b, 0x4b, 255];
 

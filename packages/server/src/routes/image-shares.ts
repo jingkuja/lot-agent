@@ -23,7 +23,7 @@ export function createImageShareRoutes(service: Pick<AgentService, "db">) {
 
   app.get("/", async (c) => {
     const key = imageStorageKey(c.req.query("url"));
-    if (!key) return c.json({ error: "仅支持分享生成的图片" }, 400);
+    if (!key) return c.json({ error: "仅支持分享生成的图片或视频" }, 400);
     const share = await service.db.getOwnedImageShare(key, c.get("userId"));
     return share ? c.json(share) : c.json({ error: "作品不存在或无权访问" }, 404);
   });
@@ -37,9 +37,9 @@ export function createImageShareRoutes(service: Pick<AgentService, "db">) {
       return c.json({ error: "请求格式不正确" }, 400);
     }
     const key = imageStorageKey(body.url);
-    if (!key) return c.json({ error: "仅支持分享生成的图片" }, 400);
+    if (!key) return c.json({ error: "仅支持分享生成的图片或视频" }, 400);
     const title = typeof body.title === "string" ? body.title.trim().slice(0, 80) : "";
-    const share = await service.db.createImageShare(key, c.get("userId"), randomBytes(24).toString("hex"), title || "我用灵渠claw创作的图片");
+    const share = await service.db.createImageShare(key, c.get("userId"), randomBytes(24).toString("hex"), title || "我用灵渠claw创作的作品");
     return share ? c.json(share) : c.json({ error: "作品不存在或无权访问" }, 404);
   });
 
@@ -53,7 +53,7 @@ export function createImageShareRoutes(service: Pick<AgentService, "db">) {
   return app;
 }
 
-/** Anonymous access is limited to a deliberately shared image, never its conversation. */
+/** Anonymous access is limited to a deliberately shared image/video, never its conversation. */
 export function createPublicImageShareRoutes(service: Pick<AgentService, "db">) {
   const app = new Hono();
   app.get("/:token", async (c) => {

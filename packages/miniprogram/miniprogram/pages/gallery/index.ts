@@ -10,6 +10,7 @@ const POLL_INTERVAL = 1200;
 
 Page({
   data: {
+    mediaType: "image",
     items: [] as GalleryItem[],
     nextCursor: null as string | null,
     loading: false,
@@ -35,6 +36,11 @@ Page({
     void this.reload().finally(() => wx.stopPullDownRefresh());
   },
 
+  selectType(e: { currentTarget: { dataset: { type: string } } }) {
+    this.setData({ mediaType: e.currentTarget.dataset.type, items: [], nextCursor: null, empty: false });
+    void this.reload();
+  },
+
   startPolling() {
     this.stopPolling();
     this.pollTimer = setInterval(() => {
@@ -51,6 +57,7 @@ Page({
 
   /** 跟随全局在途任务:更新进度;若已完成则从列表里移除占位并刷新 */
   async tickActiveJob() {
+    if (this.data.mediaType !== "image") return;
     const app = getApp();
     const job = app.globalData.activeImageJob;
     if (!job) return;
@@ -95,6 +102,7 @@ Page({
    * - 列表里没有该 conversation(服务端 message 还没落库的窗口期) → 前插一个占位
    */
   mergeActiveJob(items: GalleryItem[]): GalleryItem[] {
+    if (this.data.mediaType !== "image") return items;
     const app = getApp();
     const job = app.globalData.activeImageJob;
     if (!job) return items;
@@ -129,7 +137,9 @@ Page({
     if (!(await getApp().ensureSession())) return;
     this.setData({ loading: true });
     try {
-      const page = await api.listImageConversations(20);
+      const type = this.data.mediaType;
+      const page = await api.listImageConversations(20, undefined, type);
+      if (type !== this.data.mediaType) return;
       const activeJobId = getApp().globalData.activeImageJob?.conversationId ?? null;
       const items = page.items
         .map((item) => ({
@@ -155,7 +165,9 @@ Page({
     if (!this.data.nextCursor || this.data.loading) return;
     this.setData({ loading: true });
     try {
-      const page = await api.listImageConversations(20, this.data.nextCursor);
+      const type = this.data.mediaType;
+      const page = await api.listImageConversations(20, this.data.nextCursor, type);
+      if (type !== this.data.mediaType) return;
       const activeJobId = getApp().globalData.activeImageJob?.conversationId ?? null;
       const extra = page.items
         .map((item) => ({ ...item, preview: absoluteMedia(item.preview_url) }))
@@ -173,7 +185,7 @@ Page({
   },
 
   goStudio() {
-    wx.switchTab({ url: "/pages/studio/index" });
+    wx.switchTab({ url: this.data.mediaType === "video" ? "/pages/video/index" : "/pages/studio/index" });
   },
 
   open(e: { currentTarget: { dataset: { src: string; title: string; generating?: boolean } } }) {
@@ -187,7 +199,7 @@ Page({
       return;
     }
     wx.navigateTo({
-      url: `/pages/preview/index?src=${encodeURIComponent(src)}&title=${encodeURIComponent(title || "")}`,
+      url: `/pages/preview/index?type=${this.data.mediaType}&src=${encodeURIComponent(src)}&title=${encodeURIComponent(title || "")}`,
     });
   },
 });

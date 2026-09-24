@@ -121,6 +121,11 @@ declare const wx: {
     fail?: (err: WxGeneralCallbackResult) => void;
   }): void;
   previewImage(opts: { urls: string[]; current?: string }): void;
+  saveVideoToPhotosAlbum(opts: {
+    filePath: string;
+    success?: () => void;
+    fail?: (err: WxGeneralCallbackResult) => void;
+  }): void;
   saveImageToPhotosAlbum(opts: {
     filePath: string;
     success?: () => void;

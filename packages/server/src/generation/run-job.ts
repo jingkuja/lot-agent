@@ -16,6 +16,7 @@ export interface JobGenerationProvider {
     prompt: string;
     model?: string;
     size?: string;
+    resolution?: string;
     n?: number;
     durationSec?: number;
     ratio?: string;
@@ -131,7 +132,10 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
       durationSec: input.durationSec,
       ratio: input.ratio,
       ...(mediaType === "video"
-        ? { generate_audio: resolveVideoGenerateAudio(input.generate_audio, referenceAudio) }
+        ? {
+            generate_audio: resolveVideoGenerateAudio(input.generate_audio, referenceAudio),
+            ...(typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
+          }
         : {}),
     },
   };
@@ -221,6 +225,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     const cacheKey = genCacheKey(`${mediaType}.generate`, {
       userId: job.userId,
       prompt, size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
+      ...(mediaType === "video" && typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
       input_reference: inputReference,
       reference_video: referenceVideo,
       reference_audio: referenceAudio,
@@ -250,6 +255,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       const createRequest = {
         prompt,
         size: input.size as string | undefined,
+        ...(mediaType === "video" && typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
         n: input.n as number | undefined,
         quality: (input.quality as string | undefined) ?? (mediaType === "image" ? "auto" : undefined),
         durationSec: input.durationSec as number | undefined,

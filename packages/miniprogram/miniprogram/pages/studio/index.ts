@@ -68,6 +68,8 @@ Page({
     }
   },
 
+  openPoster() { wx.navigateTo({ url: "/pages/poster/index" }); },
+
   onPrompt(e: { detail: { value: string } }) {
     this.setData({ prompt: e.detail.value });
   },

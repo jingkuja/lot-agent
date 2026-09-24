@@ -956,6 +956,33 @@ export class AgentService {
       .catch((err) => console.warn(`[UsageMeter] ${label} metering failed:`, err));
   }
 
+  async generateVideoCopy(topic: string, userId: string, signal?: AbortSignal): Promise<{ script: string; mainTitle: string; subtitle: string; publishTitle: string; tags: string }> {
+    const quota = await this.usageMeter.checkQuota(userId, 0);
+    if (!quota.ok) throw new Error("insufficient balance");
+    const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, modelId: this.miniprogram.llm });
+    let text = "";
+    let usage: { promptTokens: number; completionTokens: number } | undefined;
+    try {
+      for await (const chunk of llm.chat([
+        { role: "system", content: '为用户的视频主题创作5至10秒短片的中文文案与标题。不虚构价格、销量、资质等事实。输出JSON对象，字段均为字符串：script（简短分镜与旁白，最多800字）、mainTitle（封面主标题，最多40字）、subtitle（副标题，最多60字）、publishTitle（发布标题，最多100字）、tags（以空格分隔的#标签，最多160字）。只输出JSON。' },
+        { role: "user", content: topic },
+      ], undefined, { signal, params: { maxTokens: 1600 } })) {
+        if (chunk.type === "text") text += chunk.content;
+        if (chunk.type === "done" && chunk.usage) usage = chunk.usage;
+      }
+    } finally { this.meterUtilityUsage("video copy", usedModelId, userId, usage); }
+    const value = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")) as Record<string, unknown>;
+    if (!value || typeof value !== "object") throw new Error("invalid video copy");
+    const limits = { script: 4000, mainTitle: 40, subtitle: 60, publishTitle: 100, tags: 160 };
+    const result = {} as { script: string; mainTitle: string; subtitle: string; publishTitle: string; tags: string };
+    for (const key of Object.keys(limits) as Array<keyof typeof limits>) {
+      if (typeof value[key] !== "string") throw new Error("invalid video copy");
+      result[key] = (value[key] as string).trim().slice(0, limits[key]);
+    }
+    if (!result.script) throw new Error("empty video copy");
+    return result;
+  }
+
   async rewriteKnowledgeQuery(
     userMessage: string,
     opts?: { userId?: string; modelId?: string }

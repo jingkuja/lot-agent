@@ -9,6 +9,8 @@ Page({
     shown: POSTER_TEMPLATES,
   },
 
+  goStudio() { wx.switchTab({ url: "/pages/studio/index" }); },
+
   onTopic(e: { detail: { value: string } }) {
     this.setData({ topic: e.detail.value });
   },

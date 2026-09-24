@@ -23,7 +23,7 @@ export interface Conversation {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-  /** Last completed image generation URL when listed with includePreview. */
+  /** Last completed image/video generation URL when listed with includePreview. */
   preview_url?: string | null;
 }
 
@@ -404,7 +404,7 @@ export class DB {
            FROM messages m
            WHERE m.conversation_id = conversations.id
              AND COALESCE(m.metadata->>'kind', '') = 'generation'
-             AND COALESCE(m.metadata->>'mediaType', 'image') = 'image'
+             AND COALESCE(m.metadata->>'mediaType', 'image') = CASE WHEN conversations.agent_id = 'video' THEN 'video' ELSE 'image' END
              AND COALESCE(m.metadata->>'status', m.status) = 'completed'
            ORDER BY m.seq DESC NULLS LAST, m.created_at DESC
            LIMIT 1
@@ -952,7 +952,7 @@ export class DB {
   async getOwnedImageShare(storageKey: string, userId: string): Promise<{ token: string | null } | null> {
     const { rows } = await this.pool.query(
       `SELECT share_token AS token FROM assets WHERE storage_key = $1 AND user_id = $2
-       AND type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')`,
+       AND ((type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')) OR (type = 'video' AND mime = 'video/mp4'))`,
       [storageKey, userId]
     );
     return rows[0] ?? null;
@@ -961,8 +961,8 @@ export class DB {
   async createImageShare(storageKey: string, userId: string, token: string, title: string): Promise<{ token: string; title: string; url: string } | null> {
     const { rows } = await this.pool.query(
       `UPDATE assets SET share_token = COALESCE(share_token, $3), share_title = $4
-       WHERE storage_key = $1 AND user_id = $2 AND type = 'image'
-         AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')
+       WHERE storage_key = $1 AND user_id = $2
+         AND ((type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')) OR (type = 'video' AND mime = 'video/mp4'))
        RETURNING share_token AS token, share_title AS title, url`,
       [storageKey, userId, token, title]
     );
@@ -972,7 +972,7 @@ export class DB {
   async getSharedImage(token: string): Promise<{ title: string; url: string; mime: string } | null> {
     const { rows } = await this.pool.query(
       `SELECT share_title AS title, url, mime FROM assets WHERE share_token = $1
-       AND type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')`,
+       AND ((type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')) OR (type = 'video' AND mime = 'video/mp4'))`,
       [token]
     );
     return rows[0] ?? null;

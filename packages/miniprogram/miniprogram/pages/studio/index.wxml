@@ -5,8 +5,7 @@
       <text class="eyebrow">图片工作室</text>
       <text class="h1">让想法成像。</text>
     </view>
-    <text class="studio-caption">修一张照片
-或创造新画面</text>
+    <button class="poster-entry" bindtap="openPoster"><text>海报创作</text><text>模板灵感 ↗</text></button>
   </view>
   <view class="stage">
     <view class="frame card" bindtap="save">

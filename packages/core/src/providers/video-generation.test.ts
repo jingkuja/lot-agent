@@ -63,6 +63,11 @@ describe("OpenaiVideoAdapter", () => {
     expect(body).toMatchObject({ model: "doubao-seedance-2.0", prompt: "A cinematic drone shot", seconds: "4", size: "720x1280", ratio: "9:16", quality: "720p", generate_audio: false });
     expect("duration" in body).toBe(false);
   });
+  it.each(["480p", "720p", "1080p"])("sends %s through TokenHub pricing metadata", (resolution) => {
+    const body = a.buildCreateBody({ prompt: "clip", resolution, ratio: "1:1" }, "doubao-seedance-2-5") as Record<string, unknown>;
+    expect(body.metadata).toEqual({ resolution });
+    expect(body.ratio).toBe("1:1");
+  });
   it("seedance + reference video forces duration -1 and ratio adaptive", () => {
     const body = a.buildCreateBody(
       {

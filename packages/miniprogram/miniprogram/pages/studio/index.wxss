@@ -373,3 +373,7 @@
   font-size: 32rpx;
   color: var(--inverse);
 }
+
+.poster-entry { padding: 14rpx 22rpx; background: var(--brand-soft); color: var(--brand-deep); font-size: 25rpx; text-align: left; flex-shrink: 0; }
+.poster-entry text { display: block; }
+.poster-entry text + text { font-size: 20rpx; margin-top: 4rpx; }

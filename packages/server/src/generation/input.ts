@@ -12,9 +12,9 @@ type GenerationSettingValue = string | number | boolean;
 
 const SETTING_TYPES: Record<"image" | "video", Record<string, "string" | "number" | "boolean">> = {
   image: { size: "string", n: "number", quality: "string" },
-  // `size` (WxH) is required by the openai-video `/videos` endpoint; `ratio` is
-  // also forwarded because Kling feature-video references need it explicitly.
-  video: { size: "string", durationSec: "number", ratio: "string", quality: "string", generate_audio: "boolean" },
+  // TokenHub billing needs an explicit resolution tier or size (WxH).
+  // Keep ratio independent so square/portrait videos retain the selected tier.
+  video: { resolution: "string", size: "string", durationSec: "number", ratio: "string", quality: "string", generate_audio: "boolean" },
 };
 
 export const IMAGE_PRESET_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;

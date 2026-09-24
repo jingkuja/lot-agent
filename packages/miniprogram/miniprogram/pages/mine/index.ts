@@ -49,7 +49,7 @@ Page({
   },
 
   goPoster() {
-    wx.switchTab({ url: "/pages/poster/index" });
+    wx.navigateTo({ url: "/pages/poster/index" });
   },
 
   goGallery() {
