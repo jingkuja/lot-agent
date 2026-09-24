@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
@@ -44,6 +44,35 @@ function timeGreeting(): string {
   if (h < 12) return "早上好";
   if (h < 18) return "下午好";
   return "晚上好";
+}
+
+function InputBranding() {
+  const [copyStatus, setCopyStatus] = useState("");
+
+  useEffect(() => {
+    if (!copyStatus) return;
+    const timer = window.setTimeout(() => setCopyStatus(""), 2500);
+    return () => window.clearTimeout(timer);
+  }, [copyStatus]);
+
+  async function copyAddress() {
+    try {
+      await navigator.clipboard.writeText("https://wetok.ai");
+      setCopyStatus("已复制");
+    } catch {
+      setCopyStatus("复制失败，请选中地址手动复制");
+    }
+  }
+
+  return (
+    <div className="input-branding">
+      <a href="https://wetok.ai" target="_blank" rel="noopener noreferrer">灵渠AI</a>
+      <button type="button" onClick={copyAddress} title="复制网址" aria-label="复制网址 https://wetok.ai">
+        https://wetok.ai
+      </button>
+      <span className="input-branding-status" role="status">{copyStatus}</span>
+    </div>
+  );
 }
 
 function Seedance25Hint() {
@@ -162,6 +191,7 @@ export function ChatPanel({
         knowledgeBases={knowledgeBases}
         onKnowledgeBasesChange={onKnowledgeBasesChange}
       />
+      <InputBranding />
     </>
   );
 
