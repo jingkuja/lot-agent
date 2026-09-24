@@ -25,6 +25,7 @@ import { formatLLMError } from "../llm/errors.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
+  | { type: "knowledge_sources"; sources: import("../knowledge/types.js").KnowledgeEvidence[] }
   | { type: "text"; content: string }
   | { type: "thinking"; content: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }

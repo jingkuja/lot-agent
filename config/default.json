@@ -1,6 +1,6 @@
 {
   "knowledge": {
-    "source": "remote"
+    "source": "local"
   },
   "llm": {
     "default": "openai",

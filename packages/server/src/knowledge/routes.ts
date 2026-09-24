@@ -1,4 +1,9 @@
-import { parseKnowledgeRetrievalRequest } from "@lot-agent/core";
+import { KnowledgeKeys } from "./access/keys.js";
+import { withKnowledgeStorageLease } from "./storage-lease.js";
+import type { KnowledgeMaterials } from "./materials.js";
+import { KnowledgeCandidateResolutionSchema, KnowledgeBulkMembershipSchema, KnowledgeArchiveSchema } from "@lot-agent/core";
+import { KnowledgeFacts } from "./profile/repository.js";
+import { parseKnowledgeGlobalRequest, parseKnowledgeRetrievalRequest } from "@lot-agent/core";
 import { resolveKnowledgeScope } from "./scope.js";
 import type { KnowledgeRetriever } from "./retrieval.js";
 import { KnowledgeJobs } from "./ingestion/jobs.js";
@@ -26,9 +31,10 @@ const key = (c: Context) => {
   return value;
 };
 
-function errorHandler(app: Hono<Env>) {
+export function errorHandler<E extends Env>(app: Hono<E>) {
   app.onError((error, c) => {
     const requestId = randomUUID();
+    if (error instanceof KnowledgeError && error.status === 429) c.header("Retry-After", "60");
     if (error instanceof KnowledgeError) return c.json({ error: { code: error.code, message: error.message, retryable: error.retryable }, request_id: requestId }, error.status);
     if (error.name === "ZodError" || error instanceof SyntaxError) return c.json({ error: { code: "INVALID_REQUEST", message: "请求参数无效", retryable: false }, request_id: requestId }, 400);
     // Do not expose DB/vendor errors, original text, session tokens or storage keys.
@@ -53,7 +59,7 @@ const encodePage = (page: { data: unknown[]; nextCursor: KnowledgeCursor | null 
 });
 
 /** Limit JSON before buffering; uploads use a separate stream with MIME-specific caps. */
-async function jsonBody(c: Context): Promise<unknown> {
+export async function jsonBody(c: Context): Promise<unknown> {
   const body = c.req.raw.body;
   if (!body) throw invalid();
   const reader = body.getReader(); const parts: Uint8Array[] = []; let size = 0;
@@ -68,7 +74,7 @@ async function jsonBody(c: Context): Promise<unknown> {
   return JSON.parse(Buffer.concat(parts).toString("utf8"));
 }
 
-async function content(c: Context, storage: PrivateKnowledgeStorage, file: KnowledgeFile): Promise<Response> {
+export async function content(c: Context, storage: Pick<PrivateKnowledgeStorage, "size" | "open">, file: Pick<KnowledgeFile, "key" | "size" | "mime" | "title">): Promise<Response> {
   const size = await storage.size(file.key);
   if (size !== file.size) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "原件校验失败");
   const range = parseRange(c.req.header("Range"), size);
@@ -87,10 +93,30 @@ async function content(c: Context, storage: PrivateKnowledgeStorage, file: Knowl
 }
 
 /** Mount ONLY below existing session auth. No caller-controlled owner field is accepted. */
-export function createKnowledgeManageRoutes(repository: KnowledgeRepository, storage: PrivateKnowledgeStorage, retriever?: KnowledgeRetriever) {
+export function createKnowledgeManageRoutes(repository: KnowledgeRepository, storage: PrivateKnowledgeStorage, retriever?: KnowledgeRetriever, materials?: KnowledgeMaterials) {
   const app = new Hono<Env>(); errorHandler(app);
   app.use("*", async (c, next) => { if (!c.get("userId")) throw new KnowledgeError("UNAUTHORIZED", 401, "请先登录"); await next(); });
-  app.get("/status", (c) => c.json({ ingestionEnabled: process.env.KNOWLEDGE_INGESTION_ENABLED === "1" }));
+  const keys = new KnowledgeKeys(repository.pool);
+  app.get("/keys", async (c) => c.json({ data: await keys.list(c.get("userId")) }));
+  app.post("/keys", async (c) => c.json(await keys.create(c.get("userId"), await jsonBody(c)), 201));
+  app.patch("/keys/:id", async (c) => c.json(await keys.update(c.get("userId"), uuid(c.req.param("id")), await jsonBody(c))));
+  app.post("/keys/:id/rotate", async (c) => c.json(await keys.rotate(c.get("userId"), uuid(c.req.param("id")), KnowledgeDeleteSchema.parse(await jsonBody(c)).version)));
+  app.delete("/keys/:id", async (c) => c.json(await keys.revoke(c.get("userId"), uuid(c.req.param("id")), KnowledgeDeleteSchema.parse(await jsonBody(c)).version)));
+  const facts = new KnowledgeFacts(repository.pool, process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? knowledgeQueueConfig().queueName : undefined);
+  app.get("/profile", async (c) => c.json({ data: await facts.list(c.get("userId")) }));
+  app.put("/profile", async (c) => c.json(await facts.save(c.get("userId"), await jsonBody(c))));
+  app.get("/profile/:id/history", async (c) => c.json({ data: await facts.history(c.get("userId"), uuid(c.req.param("id"))) }));
+  app.get("/profile/candidates", async (c) => c.json({ data: await facts.candidates(c.get("userId")) }));
+  app.post("/profile/candidates/:id", async (c) => {
+    const input = KnowledgeCandidateResolutionSchema.parse(await jsonBody(c));
+    return c.json(await facts.resolve(c.get("userId"), uuid(c.req.param("id")), input.accept, input.version));
+  });
+  app.get("/status", (c) => c.json({ ingestionEnabled: process.env.KNOWLEDGE_INGESTION_ENABLED === "1", externalEnabled: process.env.KNOWLEDGE_EXTERNAL_ENABLED === "1" && !!retriever }));
+  app.post("/search", async (c) => {
+    if (!retriever) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "本地检索尚未启用");
+    const input = parseKnowledgeGlobalRequest(await jsonBody(c));
+    return c.json(await retriever.retrieve({ ownerId: c.get("userId"), collectionIds: [], callerKind: "internal", permission: "retrieval:read", allOwned: true }, input));
+  });
   app.post("/retrieval", async (c) => {
     if (!retriever) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "本地检索尚未启用");
     const input = parseKnowledgeRetrievalRequest(await jsonBody(c));
@@ -106,9 +132,29 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
   app.patch("/collections/:id", async (c) => c.json(await repository.updateCollection(c.get("userId"), uuid(c.req.param("id")), KnowledgeCollectionUpdateSchema.parse(await jsonBody(c)))));
   app.delete("/collections/:id", async (c) => c.json(await repository.deleteCollection(c.get("userId"), uuid(c.req.param("id")), KnowledgeDeleteSchema.parse(await jsonBody(c)).version)));
   app.patch("/items/:id", async (c) => c.json(await repository.updateItem(c.get("userId"), uuid(c.req.param("id")), KnowledgeItemUpdateSchema.parse(await jsonBody(c)))));
+  app.get("/materials", async (c) => {
+    if (!materials) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "素材服务未配置");
+    const before = c.req.query("before");
+    if (before && !Number.isFinite(Date.parse(before))) throw invalid();
+    return c.json({ data: await materials.list(c.get("userId"), 30, before, c.req.query("beforeId") ? uuid(c.req.query("beforeId")!) : undefined) });
+  });
+  app.get("/materials/:id/content", async (c) => {
+    if (!materials) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "素材服务未配置");
+    const source = await materials.read(c.get("userId"), uuid(c.req.param("id")));
+    return content(c, source.storage, source.file);
+  });
+  app.post("/materials/archive", async (c) => {
+    if (!materials) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "素材服务未配置");
+    const input = KnowledgeArchiveSchema.parse(await jsonBody(c));
+    return c.json(await materials.archive(c.get("userId"), input.assetId, input.title, input.description, input.collectionIds, input.tags, key(c)), 201);
+  });
+  app.post("/memberships", async (c) => {
+    const input = KnowledgeBulkMembershipSchema.parse(await jsonBody(c));
+    return c.json(await repository.bulkMembership(c.get("userId"), input.itemIds, input.collectionIds, input.add));
+  });
   app.get("/items", async (c) => {
     const p = pagination(c); const collectionId = c.req.query("collectionId");
-    return c.json(encodePage(await repository.listItems(c.get("userId"), p.limit, p.cursor, collectionId ? uuid(collectionId) : undefined)));
+    return c.json(encodePage(await repository.listItems(c.get("userId"), p.limit, p.cursor, collectionId ? uuid(collectionId) : undefined, { inbox: c.req.query("inbox") === "true", sourceTypes: c.req.query("types")?.split(","), tags: c.req.queries("tag"), query: c.req.query("q")?.slice(0, 255) })));
   });
   app.post("/items", async (c) => {
     const idempotencyKey = key(c);
@@ -139,9 +185,25 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
     const owner = c.get("userId");
     if (input.collectionIds.length !== (await repository.findOwnedCollections(owner, input.collectionIds)).length) throw new KnowledgeError("NOT_FOUND", 404, "知识库不存在");
     const sourceType = mime.startsWith("image/") ? "image" : mime.startsWith("audio/") ? "audio" : mime.startsWith("video/") ? "video" : "document";
-    const object = await storage.put(owner, Readable.fromWeb(c.req.raw.body as import("node:stream/web").ReadableStream), mime);
-    return c.json(await repository.createItem(owner, { ...input, sourceType, mime, object }, idempotencyKey), 201);
+    return withKnowledgeStorageLease(repository.pool, owner, async () => {
+      const object = await storage.put(owner, Readable.fromWeb(c.req.raw.body as import("node:stream/web").ReadableStream), mime);
+      const duplicate = c.req.header("X-Knowledge-Duplicate-Policy") === "ask" ? await repository.duplicate(owner, object.sha256) : null;
+      if (duplicate) return c.json({ error: { code: "DUPLICATE_FILE", message: "已存在相同原件", retryable: false }, duplicate }, 409);
+      return c.json(await repository.createItem(owner, { ...input, sourceType, mime, object }, idempotencyKey), 201);
+    });
   });
+  app.put("/items/:id/file", async (c) => {
+    const id = uuid(c.req.param("id")); const version = Number(c.req.header("X-Knowledge-Version"));
+    if (!Number.isSafeInteger(version) || version < 1 || !c.req.raw.body) throw invalid();
+    await repository.getItem(c.get("userId"), id);
+    const mime = (c.req.header("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
+    const idempotencyKey = key(c);
+    return withKnowledgeStorageLease(repository.pool, c.get("userId"), async () => {
+      const object = await storage.put(c.get("userId"), Readable.fromWeb(c.req.raw.body as import("node:stream/web").ReadableStream), mime);
+      return c.json(await repository.replaceFile(c.get("userId"), id, version, object, mime, idempotencyKey));
+    });
+  });
+  app.get("/items/:id/revisions/:revisionId/text", async (c) => c.json(await repository.revisionText(c.get("userId"), uuid(c.req.param("id")), uuid(c.req.param("revisionId")))));
   app.get("/items/:id/revisions/:revisionId/content", async (c) => content(c, storage, await repository.getFile(c.get("userId"), uuid(c.req.param("id")), uuid(c.req.param("revisionId")))));
   app.post("/items/:id/revisions/:revisionId/preview-ticket", async (c) => {
     const token = c.req.header("Authorization")?.replace(/^Bearer /, "") ?? "";
@@ -153,7 +215,7 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
     const { version } = KnowledgeDeleteSchema.parse(await jsonBody(c));
     return c.json(await new KnowledgeJobs(repository.pool).retry(c.get("userId"), uuid(c.req.param("id")), version, knowledgeQueueConfig().queueName), 202);
   });
-  app.get("/storage", async (c) => c.json({ storedBytes: await repository.storageUsage(c.get("userId")) }));
+  app.get("/storage", async (c) => c.json({ storedBytes: storage.usage ? await storage.usage(c.get("userId")) : await repository.storageUsage(c.get("userId")) }));
   return app;
 }
 

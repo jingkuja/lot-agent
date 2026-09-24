@@ -1,9 +1,11 @@
+import type { KnowledgeEvidence } from "@lot-agent/core";
 export interface RagIdentity {
   externalUserId: string;
   name: string;
 }
 
 export interface KnowledgeBaseRef {
+  source?: "local" | "remote";
   id: string;
   name: string;
 }
@@ -15,6 +17,7 @@ export interface KnowledgeBase extends KnowledgeBaseRef {
 }
 
 export interface RagRecord {
+  evidence?: KnowledgeEvidence;
   datasetId: string;
   datasetName: string;
   segmentId: string;

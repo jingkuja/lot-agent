@@ -12,6 +12,6 @@ describe("cohort automation settings migration", () => {
     expect(ddl).toContain("de_cohort_automation_settings");
     expect(ddl).toContain("enabled      BOOLEAN NOT NULL DEFAULT false");
     expect(cohortAutomationSettings.version).toBe(20);
-    expect(migrations.at(-1)).toBe(cohortAutomationSettings);
+    expect(migrations.find((migration) => migration.version === 20)).toBe(cohortAutomationSettings);
   });
 });

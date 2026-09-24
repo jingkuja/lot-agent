@@ -161,7 +161,8 @@ export class MessageRepository {
     conversationId: string,
     content: string,
     toolCalls: { id: string; name: string; arguments: unknown }[],
-    thinking?: string
+    thinking?: string,
+    knowledgeSources?: import("@lot-agent/core").KnowledgeEvidence[]
   ): Promise<void> {
     if (!content && toolCalls.length === 0) return;
     const assistantMsgId = randomUUID();
@@ -170,7 +171,7 @@ export class MessageRepository {
       conversationId,
       "assistant",
       content,
-      { metadata: thinking ? { thinking } : {} }
+      { metadata: { ...(thinking ? { thinking } : {}), ...(knowledgeSources?.length ? { knowledgeSources } : {}) } }
     );
     for (const tc of toolCalls) {
       await this.db.addToolCall(assistantMsgId, tc.id, tc.name, tc.arguments);

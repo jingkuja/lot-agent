@@ -1,3 +1,4 @@
+import { KnowledgeSources } from "../modules/knowledge/KnowledgeSources.js";
 import React, { useState, useCallback } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -166,6 +167,7 @@ export function MessageBubble({
             <pre className="tool-output">{message.thinking}</pre>
           </CollapsibleToolCard>
         )}
+        {message.knowledgeSources?.length ? <KnowledgeSources sources={message.knowledgeSources} /> : null}
         {/* Message content — click to open in preview */}
         {(() => {
           const canPreview =

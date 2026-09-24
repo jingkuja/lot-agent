@@ -15,10 +15,12 @@ export interface NewKnowledgeItem {
   sourceUrl?: string;
   mime?: string;
   object?: PrivateKnowledgeObject;
+  sourceAssetId?: string;
   collectionIds: string[];
   tags: string[];
 }
 export interface KnowledgeItemView {
+  sourceAssetId: string | null;
   id: string; title: string; sourceType: string; version: number; generation: number;
   activeRevisionId: string | null; pendingRevisionId: string | null;
   taskId: string | null; revisionId: string; storageStatus: string; indexStatus: string;
@@ -61,15 +63,15 @@ export class KnowledgeRepository {
     });
   }
 
-  async createCollection(owner: string, input: { name: string; description: string }, key: string) {
+  async createCollection(owner: string, input: { name: string; description: string; tags?: string[] }, key: string) {
     return this.idempotent(owner, "collections", key, input, async (client) => {
-      const result = await client.query("INSERT INTO rag_collections (owner_id,name,description) VALUES ($1,$2,$3) RETURNING id,name,description,version", [owner, input.name, input.description]);
+      const result = await client.query("INSERT INTO rag_collections (owner_id,name,description,tags) VALUES ($1,$2,$3,$4) RETURNING id,name,description,tags,version", [owner, input.name, input.description, input.tags ?? []]);
       return result.rows[0];
     });
   }
 
   async listCollections(owner: string, limit = 30, cursor?: KnowledgeCursor) {
-    const { rows } = await this.pool.query(`SELECT c.id,c.name,c.description,c.version,c.created_at,c.created_at::text AS cursor_created_at,
+    const { rows } = await this.pool.query(`SELECT c.id,c.name,c.description,c.tags,c.version,c.created_at,c.created_at::text AS cursor_created_at,
       (SELECT count(*)::int FROM rag_collection_items ci JOIN rag_items i ON i.owner_id=ci.owner_id AND i.id=ci.item_id
         WHERE ci.owner_id=c.owner_id AND ci.collection_id=c.id AND i.deleted_at IS NULL) AS stored_count,
       (SELECT count(*)::int FROM rag_collection_items ci JOIN rag_items i ON i.owner_id=ci.owner_id AND i.id=ci.item_id
@@ -79,7 +81,7 @@ export class KnowledgeRepository {
         AND ($2::timestamptz IS NULL OR (c.created_at,c.id)<($2::timestamptz,$3::uuid))
       ORDER BY c.created_at DESC,c.id DESC LIMIT $4`, [owner, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1]);
     const data = rows.slice(0, limit);
-    return { data: data.map((row) => ({ id: row.id, name: row.name, description: row.description, version: row.version,
+    return { data: data.map((row) => ({ id: row.id, name: row.name, description: row.description, tags: row.tags, version: row.version,
       storedCount: row.stored_count, searchableCount: row.searchable_count, createdAt: row.created_at.toISOString() })),
       nextCursor: rows.length > limit ? this.cursor(data.at(-1)) : null };
   }
@@ -88,12 +90,12 @@ export class KnowledgeRepository {
     return { createdAt: row.cursor_created_at, id: row.id };
   }
 
-  async updateCollection(owner: string, id: string, input: { name: string; description: string; version: number }) {
+  async updateCollection(owner: string, id: string, input: { name: string; description: string; version: number; tags?: string[] }) {
     return this.transaction(async (client) => {
       const current = await client.query("SELECT version FROM rag_collections WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE", [owner, id]);
       if (!current.rows[0]) throw notFound();
       if (current.rows[0].version !== input.version) throw conflict();
-      const result = await client.query("UPDATE rag_collections SET name=$3,description=$4,version=version+1,updated_at=now() WHERE owner_id=$1 AND id=$2 RETURNING id,name,description,version", [owner, id, input.name, input.description]);
+      const result = await client.query("UPDATE rag_collections SET name=$3,description=$4,tags=COALESCE($5,tags),version=version+1,updated_at=now() WHERE owner_id=$1 AND id=$2 RETURNING id,name,description,tags,version", [owner, id, input.name, input.description, input.tags ?? null]);
       return result.rows[0];
     });
   }
@@ -109,9 +111,17 @@ export class KnowledgeRepository {
     if (result.rows.length !== ids.length) throw notFound();
   }
 
-  async createItem(owner: string, input: NewKnowledgeItem, key: string): Promise<{ id: string; revisionId: string; taskId?: string }> {
+  async createItem(owner: string, input: NewKnowledgeItem, key: string): Promise<{ id: string; revisionId: string; taskId?: string; reused?: boolean }>  {
     return this.idempotent(owner, "items", key, input, async (client) => {
       await this.lockCollections(client, owner, input.collectionIds);
+      if (input.sourceAssetId) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`archive:${owner}:${input.sourceAssetId}`]);
+        const existing = (await client.query("SELECT id,COALESCE(pending_revision_id,active_revision_id) AS revision_id FROM rag_items WHERE owner_id=$1 AND source_asset_id=$2 AND deleted_at IS NULL FOR UPDATE", [owner, input.sourceAssetId])).rows[0];
+        if (existing) {
+          for (const collection of input.collectionIds) await client.query("INSERT INTO rag_collection_items(owner_id,collection_id,item_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [owner, collection, existing.id]);
+          return { id: existing.id, revisionId: existing.revision_id, reused: true };
+        }
+      }
       const id = randomUUID(); const revisionId = randomUUID();
       let objectId: string | null = null;
       if (input.object) {
@@ -119,7 +129,7 @@ export class KnowledgeRepository {
           ON CONFLICT (owner_id,sha256) DO UPDATE SET sha256=EXCLUDED.sha256 RETURNING id`, [owner, input.object.sha256, input.object.key, input.object.size]);
         objectId = object.rows[0].id;
       }
-      await client.query("INSERT INTO rag_items (id,owner_id,source_type,title,pending_revision_id) VALUES ($1,$2,$3,$4,$5)", [id, owner, input.sourceType, input.title, revisionId]);
+      await client.query("INSERT INTO rag_items (id,owner_id,source_type,title,pending_revision_id,source_asset_id) VALUES ($1,$2,$3,$4,$5,$6)", [id, owner, input.sourceType, input.title, revisionId, input.sourceAssetId ?? null]);
       await client.query(`INSERT INTO rag_item_revisions (id,owner_id,item_id,object_id,revision_number,generation,mime,original_name,content,description,source_url,storage_status)
         VALUES ($1,$2,$3,$4,1,1,$5,$6,$7,$8,$9,'stored')`, [revisionId, owner, id, objectId, input.mime ?? null, input.object ? input.title : null, input.content ?? null, input.description, input.sourceUrl ?? null]);
       for (const collectionId of input.collectionIds) await client.query("INSERT INTO rag_collection_items (owner_id,collection_id,item_id) VALUES ($1,$2,$3)", [owner, collectionId, id]);
@@ -140,18 +150,22 @@ export class KnowledgeRepository {
       LEFT JOIN rag_objects o ON o.owner_id=r.owner_id AND o.id=r.object_id
       WHERE i.owner_id=$1 AND i.id=$2 AND i.deleted_at IS NULL`, [owner, id]);
     const row = rows[0]; if (!row) throw notFound();
-    return { id: row.id, title: row.title, sourceType: row.source_type, version: row.version, generation: row.generation,
+    return { sourceAssetId: row.source_asset_id, id: row.id, title: row.title, sourceType: row.source_type, version: row.version, generation: row.generation,
       taskId: row.task_id ?? null, activeRevisionId: row.active_revision_id, pendingRevisionId: row.pending_revision_id, revisionId: row.revision_id,
       storageStatus: row.storage_status, indexStatus: row.index_status, description: row.description, content: row.content,
       sourceUrl: row.source_url, mime: row.mime, size: Number(row.byte_size), collectionIds: row.collection_ids, tags: row.tags, createdAt: row.created_at.toISOString() };
   }
 
-  async listItems(owner: string, limit = 30, cursor?: KnowledgeCursor, collectionId?: string) {
+  async listItems(owner: string, limit = 30, cursor?: KnowledgeCursor, collectionId?: string, filter?: { inbox?: boolean; sourceTypes?: string[]; tags?: string[]; query?: string }) {
     if (collectionId && !(await this.findOwnedCollections(owner, [collectionId])).length) throw notFound();
     const { rows } = await this.pool.query(`SELECT id,created_at,created_at::text AS cursor_created_at FROM rag_items i WHERE owner_id=$1 AND deleted_at IS NULL
       AND ($2::timestamptz IS NULL OR (created_at,id)<($2::timestamptz,$3::uuid))
       AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM rag_collection_items ci WHERE ci.owner_id=i.owner_id AND ci.item_id=i.id AND ci.collection_id=$4))
-      ORDER BY created_at DESC,id DESC LIMIT $5`, [owner, cursor?.createdAt ?? null, cursor?.id ?? null, collectionId ?? null, limit + 1]);
+      AND (NOT $6::boolean OR NOT EXISTS(SELECT 1 FROM rag_collection_items ci JOIN rag_collections co ON co.owner_id=ci.owner_id AND co.id=ci.collection_id WHERE ci.owner_id=i.owner_id AND ci.item_id=i.id AND co.deleted_at IS NULL))
+      AND ($7::text[] IS NULL OR source_type=ANY($7::text[]))
+      AND NOT EXISTS(SELECT 1 FROM unnest($8::text[]) wanted(tag) WHERE NOT EXISTS(SELECT 1 FROM rag_item_tags t WHERE t.owner_id=i.owner_id AND t.item_id=i.id AND t.tag=wanted.tag))
+      AND ($9::text IS NULL OR title ILIKE '%'||$9||'%')
+      ORDER BY created_at DESC,id DESC LIMIT $5`, [owner, cursor?.createdAt ?? null, cursor?.id ?? null, collectionId ?? null, limit + 1, filter?.inbox ?? false, filter?.sourceTypes ?? null, filter?.tags ?? [], filter?.query ?? null]);
     const selected = rows.slice(0, limit);
     // getItem rechecks ownership/deletion after the listing snapshot.
     const data = await Promise.all(selected.map((row) => this.getItem(owner, row.id)));
@@ -172,6 +186,7 @@ export class KnowledgeRepository {
     return this.transaction(async (client) => {
       const item = await client.query("SELECT * FROM rag_items WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE", [owner, id]);
       const row = item.rows[0]; if (!row) throw notFound(); if (row.version !== input.version) throw conflict();
+      if (row.source_type === "profile_fact") throw new KnowledgeError("INVALID_REQUEST", 400, "请在个人信息中编辑确认事实");
       if (input.content !== undefined && row.source_type !== "note") throw new KnowledgeError("INVALID_REQUEST", 400, "仅笔记可编辑正文");
       if (row.source_type === "note" && input.content !== undefined && !input.content.trim()) throw new KnowledgeError("INVALID_REQUEST", 400, "笔记正文不能为空");
       if (input.sourceUrl !== undefined && row.source_type !== "bookmark") throw new KnowledgeError("INVALID_REQUEST", 400, "仅书签可编辑地址");
@@ -207,8 +222,9 @@ export class KnowledgeRepository {
 
   async deleteItem(owner: string, id: string, version: number) {
     return this.transaction(async (client) => {
-      const item = await client.query("SELECT version FROM rag_items WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE", [owner, id]);
+      const item = await client.query("SELECT version,source_type FROM rag_items WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE", [owner, id]);
       if (!item.rows[0]) throw notFound(); if (item.rows[0].version !== version) throw conflict();
+      if (item.rows[0].source_type === "profile_fact") throw new KnowledgeError("INVALID_REQUEST", 400, "请在个人信息中停用确认事实");
       await supersedeIngestion(client, owner, id);
       const affected = await client.query("DELETE FROM rag_collection_items WHERE owner_id=$1 AND item_id=$2 RETURNING collection_id", [owner, id]);
       await client.query("UPDATE rag_items SET deleted_at=now(),version=version+1,generation=generation+1,active_revision_id=NULL,pending_revision_id=NULL WHERE owner_id=$1 AND id=$2", [owner, id]);
@@ -217,6 +233,59 @@ export class KnowledgeRepository {
       // Retain immutable objects/revisions. Physical GC is separate and must check ALL references.
       return { affectedCollectionIds: affected.rows.map((row) => row.collection_id) };
     });
+  }
+
+  async bulkMembership(owner: string, itemIds: string[], collectionIds: string[], add: boolean) {
+    return this.transaction(async (client) => {
+      await this.lockCollections(client, owner, [...collectionIds].sort());
+      const items = await client.query("SELECT id FROM rag_items WHERE owner_id=$1 AND id=ANY($2::uuid[]) AND deleted_at IS NULL ORDER BY id FOR SHARE", [owner, itemIds]);
+      if (items.rows.length !== itemIds.length) throw notFound();
+      if (add) await client.query(`INSERT INTO rag_collection_items(owner_id,collection_id,item_id)
+        SELECT $1,c,i FROM unnest($2::uuid[]) c CROSS JOIN unnest($3::uuid[]) i ON CONFLICT DO NOTHING`, [owner, collectionIds, itemIds]);
+      else await client.query("DELETE FROM rag_collection_items WHERE owner_id=$1 AND collection_id=ANY($2::uuid[]) AND item_id=ANY($3::uuid[])", [owner, collectionIds, itemIds]);
+      return { changedItems: itemIds.length };
+    });
+  }
+
+  async duplicate(owner: string, hash: string) {
+    const { rows } = await this.pool.query(`SELECT i.id,i.title FROM rag_objects o JOIN rag_item_revisions r ON r.owner_id=o.owner_id AND r.object_id=o.id
+      JOIN rag_items i ON i.owner_id=r.owner_id AND i.id=r.item_id WHERE o.owner_id=$1 AND o.sha256=$2 AND i.deleted_at IS NULL
+      AND r.id IN (i.active_revision_id,i.pending_revision_id) ORDER BY i.created_at LIMIT 1`, [owner, hash]);
+    return rows[0] ?? null;
+  }
+
+  async replaceFile(owner: string, id: string, version: number, object: PrivateKnowledgeObject, mime: string, key: string) {
+    return this.idempotent(owner, `replace:${id}`, key, { version, object, mime }, async (client) => {
+      const item = (await client.query("SELECT * FROM rag_items WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE", [owner, id])).rows[0];
+      if (!item) throw notFound(); if (item.version !== version) throw conflict();
+      const kind = mime.startsWith("image/") ? "image" : mime.startsWith("audio/") ? "audio" : mime.startsWith("video/") ? "video" : "document";
+      if (kind !== item.source_type) throw new KnowledgeError("INVALID_REQUEST", 400, "替换原件必须保持资料类型");
+      const stored = (await client.query(`INSERT INTO rag_objects(owner_id,sha256,storage_key,byte_size) VALUES ($1,$2,$3,$4)
+        ON CONFLICT(owner_id,sha256) DO UPDATE SET sha256=EXCLUDED.sha256 RETURNING id`, [owner, object.sha256, object.key, object.size])).rows[0];
+      await supersedeIngestion(client, owner, id);
+      const revisionId = randomUUID(); const generation = item.generation + 1;
+      await client.query(`INSERT INTO rag_item_revisions(id,owner_id,item_id,object_id,revision_number,generation,mime,original_name,description,storage_status)
+        SELECT $4,owner_id,item_id,$5,(SELECT max(revision_number)+1 FROM rag_item_revisions WHERE owner_id=$1 AND item_id=$2),$6,$7,original_name,description,'stored'
+        FROM rag_item_revisions WHERE owner_id=$1 AND item_id=$2 AND id=$3`, [owner, id, item.pending_revision_id ?? item.active_revision_id, revisionId, stored.id, generation, mime]);
+      await client.query("UPDATE rag_item_revisions SET index_status='cancelled' WHERE owner_id=$1 AND item_id=$2 AND id=$3 AND id IS DISTINCT FROM $4", [owner, id, item.pending_revision_id, item.active_revision_id]);
+      await client.query("UPDATE rag_items SET pending_revision_id=$3,generation=$4,version=version+1,updated_at=now() WHERE owner_id=$1 AND id=$2", [owner, id, revisionId, generation]);
+      await client.query("DELETE FROM rag_preview_tickets WHERE owner_id=$1 AND item_id=$2", [owner, id]);
+      const taskId = this.ingestionQueue ? await prepareIngestion(client, { ownerId: owner, itemId: id, revisionId, generation, queueName: this.ingestionQueue }) : undefined;
+      return { id, revisionId, version: version + 1, taskId };
+    });
+  }
+
+  async revisionText(owner: string, itemId: string, revisionId: string) {
+    const row = (await this.pool.query(`SELECT i.title,i.source_type,r.content,r.description,r.diagnostics FROM rag_items i
+      JOIN rag_item_revisions r ON r.owner_id=i.owner_id AND r.item_id=i.id
+      WHERE i.owner_id=$1 AND i.id=$2 AND i.deleted_at IS NULL AND r.id=$3 AND r.id IN(i.active_revision_id,i.pending_revision_id)
+      AND (i.source_type<>'profile_fact' OR EXISTS(SELECT 1 FROM rag_profile_facts f WHERE f.owner_id=i.owner_id AND f.item_id=i.id AND f.active
+        AND (f.valid_from IS NULL OR f.valid_from<=now()) AND (f.valid_until IS NULL OR f.valid_until>now())))`, [owner, itemId, revisionId])).rows[0];
+    if (!row) throw notFound();
+    const parsed = await this.pool.query(`SELECT artifact,artifact_version FROM rag_ingestion_runs WHERE owner_id=$1 AND item_id=$2 AND revision_id=$3 AND artifact IS NOT NULL ORDER BY generation DESC LIMIT 1`, [owner, itemId, revisionId]);
+    const artifact = parsed.rows[0]?.artifact;
+    const blocks = artifact?.parser?.blocks ?? artifact?.blocks ?? [];
+    return { title: row.title, sourceType: row.source_type, content: row.content, description: row.description, blocks, diagnostics: row.diagnostics };
   }
 
   async getFile(owner: string, itemId: string, revisionId: string): Promise<KnowledgeFile> {

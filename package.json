@@ -18,7 +18,17 @@
     "check:knowledge:integration": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-integration.ts",
     "dev:knowledge": "pnpm --filter @lot-agent/server run dev:knowledge",
     "check:knowledge:live": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-live.ts",
-    "knowledge:reindex": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reindex-knowledge.ts"
+    "knowledge:reindex": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reindex-knowledge.ts",
+    "knowledge:gc": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/collect-knowledge-garbage.ts",
+    "knowledge:index": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-index.ts",
+    "check:knowledge:ui": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-ui.ts",
+    "knowledge:backup": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-backup.ts",
+    "check:knowledge:restore": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-restore.ts",
+    "check:knowledge:upgrade": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-upgrade.ts",
+    "check:knowledge:chat": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-chat.ts",
+    "check:knowledge:eval": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/evaluate-knowledge.ts",
+    "check:knowledge:release": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-release.ts",
+    "check:knowledge:persistence": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-persistence.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -1,0 +1,6279 @@
+{
+  "admission": "50/min average, bursts up to concurrency",
+  "started": "2026-09-24T03:01:58.815Z",
+  "finished": "2026-09-24T03:06:32.158Z",
+  "dataset": "synthetic-zh-v1-20260924",
+  "sha256": "20f6d3e17c96af9724dd64e5141595cf6d5d0c51556e276474c55aed36bf39f4",
+  "provenance": "Synthetic documents authored for this evaluation. No customer documents or personal data. Frozen before first model evaluation; not a production corpus or an independent human annotation study.",
+  "model": "qwen3.7-text-embedding",
+  "dimensions": 1024,
+  "profile": {
+    "id": "9b136cf1dfcf0006782530026ed5d06364b405c5c7630f83b202d7bdeda7ffac",
+    "modelId": "qwen3.7-text-embedding",
+    "providerRoute": "http://localhost:4000/v1",
+    "dimensions": 1024,
+    "distance": "cosine",
+    "normalized": true,
+    "chunkerVersion": "utf8-budget-512-overlap64-v1",
+    "tokenizerVersion": "provider-usage-per-chunk-v1",
+    "dictionaryVersion": "intl-zh-icu-76.1-identifiers-v1",
+    "maxTokens": 512
+  },
+  "node": "v22.14.0",
+  "hardware": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4 Max",
+    "logicalCpus": 14,
+    "memoryBytes": 38654705664
+  },
+  "versions": {
+    "version": "PostgreSQL 16.15 (Debian 16.15-1.pgdg12+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit",
+    "vector": "0.8.6"
+  },
+  "quality": [
+    {
+      "mode": "keyword",
+      "answerable": 80,
+      "recallAt5": 0.5,
+      "citationCorrectness": 1
+    },
+    {
+      "mode": "semantic",
+      "answerable": 80,
+      "recallAt5": 1,
+      "citationCorrectness": 1
+    },
+    {
+      "mode": "hybrid",
+      "answerable": 80,
+      "recallAt5": 1,
+      "citationCorrectness": 1
+    }
+  ],
+  "unauthorizedLeaks": 0,
+  "samples": [
+    {
+      "id": "semantic-0",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.306291999999985,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-0",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "returned": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.45049999999992,
+      "embeddingMs": 208.99108400000114
+    },
+    {
+      "id": "semantic-0",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "returned": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.226458999999977,
+      "embeddingMs": 208.99108400000114
+    },
+    {
+      "id": "exact-0",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "returned": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.8316670000000386,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-0",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "returned": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.174167000000011,
+      "embeddingMs": 363.7293750000008
+    },
+    {
+      "id": "exact-0",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "returned": [
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.567957999999976,
+      "embeddingMs": 363.7293750000008
+    },
+    {
+      "id": "semantic-1",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.035792000000015,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-1",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "returned": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.559167000000002,
+      "embeddingMs": 126.62591599999905
+    },
+    {
+      "id": "semantic-1",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "returned": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.001708000000008,
+      "embeddingMs": 126.62591599999905
+    },
+    {
+      "id": "exact-1",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "returned": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.4179169999999885,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-1",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "returned": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.4675829999999905,
+      "embeddingMs": 346.6084159999991
+    },
+    {
+      "id": "exact-1",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "returned": [
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.569000000000074,
+      "embeddingMs": 346.6084159999991
+    },
+    {
+      "id": "semantic-2",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.5389999999999873,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-2",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "returned": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.744000000000028,
+      "embeddingMs": 150.72720800000025
+    },
+    {
+      "id": "semantic-2",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "returned": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.103541999999948,
+      "embeddingMs": 150.72720800000025
+    },
+    {
+      "id": "exact-2",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "returned": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.452292000000057,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-2",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "returned": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.690665999999965,
+      "embeddingMs": 142.60295899999983
+    },
+    {
+      "id": "exact-2",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "returned": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.023707999999942,
+      "embeddingMs": 142.60295899999983
+    },
+    {
+      "id": "semantic-3",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.7808330000000296,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-3",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "returned": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.595458999999892,
+      "embeddingMs": 235.04891699999826
+    },
+    {
+      "id": "semantic-3",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "returned": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.164458999999965,
+      "embeddingMs": 235.04891699999826
+    },
+    {
+      "id": "exact-3",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "returned": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.142582999999945,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-3",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "returned": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.265375000000063,
+      "embeddingMs": 186.90612500000134
+    },
+    {
+      "id": "exact-3",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "returned": [
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.891208000000006,
+      "embeddingMs": 186.90612500000134
+    },
+    {
+      "id": "semantic-4",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.912042000000042,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-4",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "returned": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.198750000000018,
+      "embeddingMs": 163.70850000000064
+    },
+    {
+      "id": "semantic-4",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "returned": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.033166000000051,
+      "embeddingMs": 163.70850000000064
+    },
+    {
+      "id": "exact-4",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "returned": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.9122089999999616,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-4",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "returned": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.8980410000000347,
+      "embeddingMs": 183.07808300000033
+    },
+    {
+      "id": "exact-4",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "returned": [
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.930958000000032,
+      "embeddingMs": 183.07808300000033
+    },
+    {
+      "id": "semantic-5",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.6825830000000224,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-5",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "returned": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.4057920000000195,
+      "embeddingMs": 263.0830839999999
+    },
+    {
+      "id": "semantic-5",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "returned": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.286583000000064,
+      "embeddingMs": 263.0830839999999
+    },
+    {
+      "id": "exact-5",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "returned": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.76366599999983,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-5",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "returned": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.8244580000000497,
+      "embeddingMs": 246.61712500000067
+    },
+    {
+      "id": "exact-5",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "returned": [
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.925415999999814,
+      "embeddingMs": 246.61712500000067
+    },
+    {
+      "id": "semantic-6",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.635875000000169,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-6",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "returned": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.643291999999974,
+      "embeddingMs": 206.74716699999954
+    },
+    {
+      "id": "semantic-6",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "returned": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.542041000000154,
+      "embeddingMs": 206.74716699999954
+    },
+    {
+      "id": "exact-6",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "returned": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.717416000000185,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-6",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "returned": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.041625000000067,
+      "embeddingMs": 235.7001249999994
+    },
+    {
+      "id": "exact-6",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45"
+      ],
+      "returned": [
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.028792000000067,
+      "embeddingMs": 235.7001249999994
+    },
+    {
+      "id": "semantic-7",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.293292000000065,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-7",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "returned": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.790499999999838,
+      "embeddingMs": 373.7559170000004
+    },
+    {
+      "id": "semantic-7",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "returned": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.729624999999942,
+      "embeddingMs": 373.7559170000004
+    },
+    {
+      "id": "exact-7",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "returned": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.498499999999922,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-7",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "returned": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9697499999999764,
+      "embeddingMs": 166.1843340000014
+    },
+    {
+      "id": "exact-7",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c"
+      ],
+      "returned": [
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.458084000000099,
+      "embeddingMs": 166.1843340000014
+    },
+    {
+      "id": "semantic-8",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.9956660000000284,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-8",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "returned": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.467458000000079,
+      "embeddingMs": 228.45716700000048
+    },
+    {
+      "id": "semantic-8",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "returned": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.518540999999914,
+      "embeddingMs": 228.45716700000048
+    },
+    {
+      "id": "exact-8",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "returned": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.3331660000001193,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-8",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "returned": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.850208000000066,
+      "embeddingMs": 154.83841699999903
+    },
+    {
+      "id": "exact-8",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "returned": [
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.896208000000115,
+      "embeddingMs": 154.83841699999903
+    },
+    {
+      "id": "semantic-9",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.619625000000042,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-9",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "returned": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.1814999999999145,
+      "embeddingMs": 170.20395900000221
+    },
+    {
+      "id": "semantic-9",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "returned": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.416124999999965,
+      "embeddingMs": 170.20395900000221
+    },
+    {
+      "id": "exact-9",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "returned": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9291670000000067,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-9",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "returned": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9421669999999267,
+      "embeddingMs": 261.90820800000074
+    },
+    {
+      "id": "exact-9",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "returned": [
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.23758399999997,
+      "embeddingMs": 261.90820800000074
+    },
+    {
+      "id": "semantic-10",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.104665999999952,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-10",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "returned": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.540209000000004,
+      "embeddingMs": 233.7570420000011
+    },
+    {
+      "id": "semantic-10",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "returned": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.8501249999999345,
+      "embeddingMs": 233.7570420000011
+    },
+    {
+      "id": "exact-10",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "returned": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.100999999999885,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-10",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "returned": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.083208999999897,
+      "embeddingMs": 279.89787499999875
+    },
+    {
+      "id": "exact-10",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "returned": [
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.29320800000005,
+      "embeddingMs": 279.89787499999875
+    },
+    {
+      "id": "semantic-11",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.8171250000000327,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-11",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "returned": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.164459000000079,
+      "embeddingMs": 158.2744160000002
+    },
+    {
+      "id": "semantic-11",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "returned": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.3524170000000595,
+      "embeddingMs": 158.2744160000002
+    },
+    {
+      "id": "exact-11",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "returned": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.751500000000078,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-11",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "returned": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.142166999999972,
+      "embeddingMs": 248.06316700000025
+    },
+    {
+      "id": "exact-11",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "returned": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.756667000000107,
+      "embeddingMs": 248.06316700000025
+    },
+    {
+      "id": "semantic-12",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.5859169999998812,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-12",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "returned": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.90362499999992,
+      "embeddingMs": 187.0611659999995
+    },
+    {
+      "id": "semantic-12",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "returned": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.632249999999885,
+      "embeddingMs": 187.0611659999995
+    },
+    {
+      "id": "exact-12",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "returned": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.4824169999999413,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-12",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "returned": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.892166999999972,
+      "embeddingMs": 152.94450000000143
+    },
+    {
+      "id": "exact-12",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "returned": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.339249999999993,
+      "embeddingMs": 152.94450000000143
+    },
+    {
+      "id": "semantic-13",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.8509579999999914,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-13",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8"
+      ],
+      "returned": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.3286659999998847,
+      "embeddingMs": 322.7737500000003
+    },
+    {
+      "id": "semantic-13",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8"
+      ],
+      "returned": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.5845419999998285,
+      "embeddingMs": 322.7737500000003
+    },
+    {
+      "id": "exact-13",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8"
+      ],
+      "returned": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.429792000000134,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-13",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8"
+      ],
+      "returned": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.6958340000001044,
+      "embeddingMs": 164.83170800000153
+    },
+    {
+      "id": "exact-13",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8"
+      ],
+      "returned": [
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.661207999999988,
+      "embeddingMs": 164.83170800000153
+    },
+    {
+      "id": "semantic-14",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.068875000000162,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-14",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "returned": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 7.1369170000000395,
+      "embeddingMs": 169.43004099999962
+    },
+    {
+      "id": "semantic-14",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "returned": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 5.807708000000048,
+      "embeddingMs": 169.43004099999962
+    },
+    {
+      "id": "exact-14",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "returned": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.483208999999988,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-14",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "returned": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9492499999998927,
+      "embeddingMs": 154.56150000000343
+    },
+    {
+      "id": "exact-14",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "returned": [
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.752415999999812,
+      "embeddingMs": 154.56150000000343
+    },
+    {
+      "id": "semantic-15",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.6669580000000224,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-15",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "returned": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.532666000000063,
+      "embeddingMs": 150.28800000000047
+    },
+    {
+      "id": "semantic-15",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "returned": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.512040999999954,
+      "embeddingMs": 150.28800000000047
+    },
+    {
+      "id": "exact-15",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "returned": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.6912079999999605,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-15",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "returned": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.117292000000134,
+      "embeddingMs": 210.78020800000013
+    },
+    {
+      "id": "exact-15",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8"
+      ],
+      "returned": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.176290999999992,
+      "embeddingMs": 210.78020800000013
+    },
+    {
+      "id": "semantic-16",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.1800000000000637,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-16",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "returned": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.815083000000186,
+      "embeddingMs": 289.13083299999926
+    },
+    {
+      "id": "semantic-16",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "returned": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.550291999999899,
+      "embeddingMs": 289.13083299999926
+    },
+    {
+      "id": "exact-16",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "returned": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.6684999999999945,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-16",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "returned": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.6377919999999904,
+      "embeddingMs": 164.59158399999797
+    },
+    {
+      "id": "exact-16",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "returned": [
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.075666999999839,
+      "embeddingMs": 164.59158399999797
+    },
+    {
+      "id": "semantic-17",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.1493330000000697,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-17",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "returned": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.3836670000000595,
+      "embeddingMs": 182.45695900000283
+    },
+    {
+      "id": "semantic-17",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "returned": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "f9805f98-714a-478b-8ed2-4d5eff7c9810"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.761833000000024,
+      "embeddingMs": 182.45695900000283
+    },
+    {
+      "id": "exact-17",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "returned": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.5255829999998696,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-17",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "returned": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.748500000000149,
+      "embeddingMs": 348.7057909999967
+    },
+    {
+      "id": "exact-17",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "returned": [
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.515333000000055,
+      "embeddingMs": 348.7057909999967
+    },
+    {
+      "id": "semantic-18",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.7392919999999776,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-18",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba"
+      ],
+      "returned": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.003167000000076,
+      "embeddingMs": 139.88416599999982
+    },
+    {
+      "id": "semantic-18",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba"
+      ],
+      "returned": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.781082999999853,
+      "embeddingMs": 139.88416599999982
+    },
+    {
+      "id": "exact-18",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba"
+      ],
+      "returned": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.5344579999998587,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-18",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba"
+      ],
+      "returned": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.1074579999999514,
+      "embeddingMs": 180.25524999999834
+    },
+    {
+      "id": "exact-18",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba"
+      ],
+      "returned": [
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "6a48a10c-075a-4381-9127-ff4f1d9e08ef",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.33504199999993,
+      "embeddingMs": 180.25524999999834
+    },
+    {
+      "id": "semantic-19",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.3940419999998994,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-19",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "returned": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.771165999999994,
+      "embeddingMs": 488.2384170000005
+    },
+    {
+      "id": "semantic-19",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "returned": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "e5e332ad-fc2f-4e69-92d9-c28f829173c8",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.208458000000064,
+      "embeddingMs": 488.2384170000005
+    },
+    {
+      "id": "exact-19",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "returned": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.7130420000000868,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-19",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "returned": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.198874999999816,
+      "embeddingMs": 144.83950000000186
+    },
+    {
+      "id": "exact-19",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6"
+      ],
+      "returned": [
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.831583000000137,
+      "embeddingMs": 144.83950000000186
+    },
+    {
+      "id": "semantic-20",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.0452500000001237,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-20",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "returned": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.221125000000029,
+      "embeddingMs": 149.63866599999892
+    },
+    {
+      "id": "semantic-20",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "returned": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.338083000000097,
+      "embeddingMs": 149.63866599999892
+    },
+    {
+      "id": "exact-20",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "returned": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.6986249999999927,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-20",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "returned": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.3285419999999704,
+      "embeddingMs": 343.3829590000023
+    },
+    {
+      "id": "exact-20",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "returned": [
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.353624999999965,
+      "embeddingMs": 343.3829590000023
+    },
+    {
+      "id": "semantic-21",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.3118749999998727,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-21",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "returned": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.5387080000000424,
+      "embeddingMs": 164.56708399999843
+    },
+    {
+      "id": "semantic-21",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "returned": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.088833000000022,
+      "embeddingMs": 164.56708399999843
+    },
+    {
+      "id": "exact-21",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "returned": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.395375000000058,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-21",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "returned": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9025420000000395,
+      "embeddingMs": 222.45279200000004
+    },
+    {
+      "id": "exact-21",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "returned": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9921249999999873,
+      "embeddingMs": 222.45279200000004
+    },
+    {
+      "id": "semantic-22",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.6092089999999644,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-22",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "returned": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.3969999999999345,
+      "embeddingMs": 181.67570799999885
+    },
+    {
+      "id": "semantic-22",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "returned": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.829334000000017,
+      "embeddingMs": 181.67570799999885
+    },
+    {
+      "id": "exact-22",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "returned": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.8940000000000055,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-22",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "returned": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.1375840000000608,
+      "embeddingMs": 194.5704590000023
+    },
+    {
+      "id": "exact-22",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "returned": [
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.449083999999857,
+      "embeddingMs": 194.5704590000023
+    },
+    {
+      "id": "semantic-23",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.468208999999888,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-23",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "returned": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.3541250000000673,
+      "embeddingMs": 182.885542
+    },
+    {
+      "id": "semantic-23",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "returned": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.215749999999844,
+      "embeddingMs": 182.885542
+    },
+    {
+      "id": "exact-23",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "returned": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.419834000000037,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-23",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "returned": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9816659999999047,
+      "embeddingMs": 165.36912500000108
+    },
+    {
+      "id": "exact-23",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "returned": [
+        "8662c28f-c00e-4b23-9756-b09aca785e3b",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.840833999999859,
+      "embeddingMs": 165.36912500000108
+    },
+    {
+      "id": "semantic-24",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.2967499999999745,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-24",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "returned": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.884165999999823,
+      "embeddingMs": 214.03845799999908
+    },
+    {
+      "id": "semantic-24",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "returned": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.8981670000000577,
+      "embeddingMs": 214.03845799999908
+    },
+    {
+      "id": "exact-24",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "returned": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.08662500000014,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-24",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "returned": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.4961249999998927,
+      "embeddingMs": 343.3938750000016
+    },
+    {
+      "id": "exact-24",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4"
+      ],
+      "returned": [
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.359208000000081,
+      "embeddingMs": 343.3938750000016
+    },
+    {
+      "id": "semantic-25",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.7209589999999935,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-25",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.490833000000066,
+      "embeddingMs": 180.62283300000126
+    },
+    {
+      "id": "semantic-25",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.567082999999911,
+      "embeddingMs": 180.62283300000126
+    },
+    {
+      "id": "exact-25",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.47725000000014,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-25",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.129458999999997,
+      "embeddingMs": 459.31554099999994
+    },
+    {
+      "id": "exact-25",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.860292000000072,
+      "embeddingMs": 459.31554099999994
+    },
+    {
+      "id": "semantic-26",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.6301249999999072,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-26",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "returned": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.4318339999999807,
+      "embeddingMs": 226.7390000000014
+    },
+    {
+      "id": "semantic-26",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "returned": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9073329999998805,
+      "embeddingMs": 226.7390000000014
+    },
+    {
+      "id": "exact-26",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "returned": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.8983749999999873,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-26",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "returned": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.2070830000000115,
+      "embeddingMs": 177.28420900000128
+    },
+    {
+      "id": "exact-26",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "returned": [
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.4057500000001255,
+      "embeddingMs": 177.28420900000128
+    },
+    {
+      "id": "semantic-27",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.4212079999999787,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-27",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "returned": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.3417919999999413,
+      "embeddingMs": 235.5797910000001
+    },
+    {
+      "id": "semantic-27",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "returned": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.452125000000024,
+      "embeddingMs": 235.5797910000001
+    },
+    {
+      "id": "exact-27",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "returned": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.3701250000001437,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-27",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "returned": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.8141249999998763,
+      "embeddingMs": 188.33158300000287
+    },
+    {
+      "id": "exact-27",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474"
+      ],
+      "returned": [
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.7716660000000957,
+      "embeddingMs": 188.33158300000287
+    },
+    {
+      "id": "semantic-28",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.4906250000001364,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-28",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "returned": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.5257500000000164,
+      "embeddingMs": 215.6392909999995
+    },
+    {
+      "id": "semantic-28",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "returned": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.7978330000000824,
+      "embeddingMs": 215.6392909999995
+    },
+    {
+      "id": "exact-28",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "returned": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.8804999999999836,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-28",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "returned": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.306707999999844,
+      "embeddingMs": 182.96137499999895
+    },
+    {
+      "id": "exact-28",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932"
+      ],
+      "returned": [
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.8634170000000267,
+      "embeddingMs": 182.96137499999895
+    },
+    {
+      "id": "semantic-29",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.695500000000038,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-29",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "returned": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.333125000000109,
+      "embeddingMs": 407.56854199999725
+    },
+    {
+      "id": "semantic-29",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "returned": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.4225830000000315,
+      "embeddingMs": 407.56854199999725
+    },
+    {
+      "id": "exact-29",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "returned": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.422625000000153,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-29",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "returned": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.6259580000000824,
+      "embeddingMs": 131.1428330000017
+    },
+    {
+      "id": "exact-29",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2"
+      ],
+      "returned": [
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9745829999999387,
+      "embeddingMs": 131.1428330000017
+    },
+    {
+      "id": "semantic-30",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.341374999999971,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-30",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "returned": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.970458000000008,
+      "embeddingMs": 210.1702499999992
+    },
+    {
+      "id": "semantic-30",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "returned": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.672790999999961,
+      "embeddingMs": 210.1702499999992
+    },
+    {
+      "id": "exact-30",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "returned": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.4557499999998527,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-30",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "returned": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.9945000000000164,
+      "embeddingMs": 137.19362499999988
+    },
+    {
+      "id": "exact-30",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "returned": [
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.7975830000000315,
+      "embeddingMs": 137.19362499999988
+    },
+    {
+      "id": "semantic-31",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.6879999999998745,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-31",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "returned": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.4197090000000117,
+      "embeddingMs": 427.97141700000066
+    },
+    {
+      "id": "semantic-31",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "returned": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.821541000000025,
+      "embeddingMs": 427.97141700000066
+    },
+    {
+      "id": "exact-31",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "returned": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.6030000000000655,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-31",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "returned": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.209957999999915,
+      "embeddingMs": 138.51316700000098
+    },
+    {
+      "id": "exact-31",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695"
+      ],
+      "returned": [
+        "69677d0f-4927-4f44-96ea-87a5e69be695",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "f3318e57-09ae-4abf-9605-8858f90343b7"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.010582999999997,
+      "embeddingMs": 138.51316700000098
+    },
+    {
+      "id": "semantic-32",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.270625000000109,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-32",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "returned": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.464040999999952,
+      "embeddingMs": 173.37970900000073
+    },
+    {
+      "id": "semantic-32",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "returned": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "64c81695-3005-42fe-946e-7ebe0fd0d7c5"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.540666000000101,
+      "embeddingMs": 173.37970900000073
+    },
+    {
+      "id": "exact-32",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "returned": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.7055410000000393,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-32",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "returned": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.5305410000000848,
+      "embeddingMs": 207.32425000000148
+    },
+    {
+      "id": "exact-32",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630"
+      ],
+      "returned": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.7186669999998685,
+      "embeddingMs": 207.32425000000148
+    },
+    {
+      "id": "semantic-33",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.621375000000171,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-33",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.398041999999805,
+      "embeddingMs": 202.04095799999777
+    },
+    {
+      "id": "semantic-33",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "e1d6ddde-a094-4032-9a6a-57602c886da2",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.0219999999999345,
+      "embeddingMs": 202.04095799999777
+    },
+    {
+      "id": "exact-33",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.468708000000106,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-33",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.445500000000038,
+      "embeddingMs": 289.71008300000176
+    },
+    {
+      "id": "exact-33",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c"
+      ],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.516792000000123,
+      "embeddingMs": 289.71008300000176
+    },
+    {
+      "id": "semantic-34",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.5305410000000848,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-34",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.30600000000004,
+      "embeddingMs": 154.12666699999681
+    },
+    {
+      "id": "semantic-34",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "1015c905-9a34-4890-a8da-5d171d9f89df"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.670041000000083,
+      "embeddingMs": 154.12666699999681
+    },
+    {
+      "id": "exact-34",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "returned": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.438458999999966,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-34",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "returned": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.619999999999891,
+      "embeddingMs": 187.75212499999907
+    },
+    {
+      "id": "exact-34",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93"
+      ],
+      "returned": [
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.8115409999998064,
+      "embeddingMs": 187.75212499999907
+    },
+    {
+      "id": "semantic-35",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.646874999999909,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-35",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "returned": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.964374999999791,
+      "embeddingMs": 260.8159169999999
+    },
+    {
+      "id": "semantic-35",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "returned": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.141667000000098,
+      "embeddingMs": 260.8159169999999
+    },
+    {
+      "id": "exact-35",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "returned": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.9028749999999945,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-35",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "returned": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.226083000000017,
+      "embeddingMs": 580.9156660000008
+    },
+    {
+      "id": "exact-35",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "returned": [
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.839541999999938,
+      "embeddingMs": 580.9156660000008
+    },
+    {
+      "id": "semantic-36",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.495166000000154,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-36",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "returned": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.7604579999999714,
+      "embeddingMs": 253.14887499999895
+    },
+    {
+      "id": "semantic-36",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "returned": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.281000000000176,
+      "embeddingMs": 253.14887499999895
+    },
+    {
+      "id": "exact-36",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "returned": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.919458000000077,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-36",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "returned": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.083834000000024,
+      "embeddingMs": 157.28916700000264
+    },
+    {
+      "id": "exact-36",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "returned": [
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.5496250000001055,
+      "embeddingMs": 157.28916700000264
+    },
+    {
+      "id": "semantic-37",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.219584000000168,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-37",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "returned": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.6646670000000086,
+      "embeddingMs": 144.56195899999875
+    },
+    {
+      "id": "semantic-37",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "returned": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "92ca6c3e-4f7b-4612-991e-29b3f2084932",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b",
+        "f90dbcac-315e-4be9-99e3-f5d4b7d04764"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.682708000000048,
+      "embeddingMs": 144.56195899999875
+    },
+    {
+      "id": "exact-37",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "returned": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.637457999999924,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-37",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "returned": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.823457999999846,
+      "embeddingMs": 199.1828340000029
+    },
+    {
+      "id": "exact-37",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "returned": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "3af96de6-7f6f-47f5-b06a-2dabf31fea93",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.800208999999995,
+      "embeddingMs": 199.1828340000029
+    },
+    {
+      "id": "semantic-38",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.8516249999997854,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-38",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "returned": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.253082999999833,
+      "embeddingMs": 196.88704199999847
+    },
+    {
+      "id": "semantic-38",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "returned": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "09c4b04e-c140-49a3-ad1e-e6e4a30a2870",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.581082999999808,
+      "embeddingMs": 196.88704199999847
+    },
+    {
+      "id": "exact-38",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "returned": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.9683330000000296,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-38",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "returned": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.511209000000008,
+      "embeddingMs": 246.51987500000178
+    },
+    {
+      "id": "exact-38",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95"
+      ],
+      "returned": [
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.62295899999981,
+      "embeddingMs": 246.51987500000178
+    },
+    {
+      "id": "semantic-39",
+      "category": "answerable",
+      "mode": "keyword",
+      "relevant": [
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.5040420000000267,
+      "embeddingMs": 0
+    },
+    {
+      "id": "semantic-39",
+      "category": "answerable",
+      "mode": "semantic",
+      "relevant": [
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "returned": [
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.032459000000017,
+      "embeddingMs": 230.8114170000008
+    },
+    {
+      "id": "semantic-39",
+      "category": "answerable",
+      "mode": "hybrid",
+      "relevant": [
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "returned": [
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "8aad9fcf-528f-446b-bb24-ed62949e1cb2",
+        "b941622e-27f8-40a0-b9e6-a87b092b385f",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.239249999999856,
+      "embeddingMs": 230.8114170000008
+    },
+    {
+      "id": "exact-39",
+      "category": "exact",
+      "mode": "keyword",
+      "relevant": [
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "returned": [
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 2.7845420000001013,
+      "embeddingMs": 0
+    },
+    {
+      "id": "exact-39",
+      "category": "exact",
+      "mode": "semantic",
+      "relevant": [
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "returned": [
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 3.816958999999997,
+      "embeddingMs": 196.86891699999978
+    },
+    {
+      "id": "exact-39",
+      "category": "exact",
+      "mode": "hybrid",
+      "relevant": [
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "returned": [
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "124b54f9-55cd-4d03-a6f8-f90fe6249474",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "8662c28f-c00e-4b23-9756-b09aca785e3b"
+      ],
+      "hit": true,
+      "citationCorrect": true,
+      "sqlMs": 4.329875000000129,
+      "embeddingMs": 196.86891699999978
+    },
+    {
+      "id": "none-0",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.650250000000142,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-0",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.701625000000149,
+      "embeddingMs": 146.64945799999987
+    },
+    {
+      "id": "none-0",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "b6b61581-a134-4ace-8e66-d3136b220dba",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.932250000000067,
+      "embeddingMs": 146.64945799999987
+    },
+    {
+      "id": "none-1",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.6325420000000577,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-1",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "69677d0f-4927-4f44-96ea-87a5e69be695",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.27108300000009,
+      "embeddingMs": 154.46162499999627
+    },
+    {
+      "id": "none-1",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "f3318e57-09ae-4abf-9605-8858f90343b7",
+        "907dee91-5ec3-405a-8d6f-a170400e588a",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "69677d0f-4927-4f44-96ea-87a5e69be695",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.251915999999937,
+      "embeddingMs": 154.46162499999627
+    },
+    {
+      "id": "none-2",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.1809160000000247,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-2",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.921624999999949,
+      "embeddingMs": 188.33420800000022
+    },
+    {
+      "id": "none-2",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "b74012e7-6790-4c78-aae6-ae25445c5a6c",
+        "bac3782b-bda3-41a3-8388-8b7447550526",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 5.284792000000152,
+      "embeddingMs": 188.33420800000022
+    },
+    {
+      "id": "none-3",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.9762909999999465,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-3",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.678957999999966,
+      "embeddingMs": 140.70629200000258
+    },
+    {
+      "id": "none-3",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.503917000000001,
+      "embeddingMs": 140.70629200000258
+    },
+    {
+      "id": "none-4",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.264667000000145,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-4",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.956959000000097,
+      "embeddingMs": 207.67441600000166
+    },
+    {
+      "id": "none-4",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "b6d9a9ca-70b2-4223-89c6-f2461c9fa10c",
+        "feb8529f-1d5b-42e5-b98d-532694764c45",
+        "cc2e1cd1-a5ed-466f-845d-4d8d49cc6d5e",
+        "07db45cd-dee4-4a5d-85a7-e93065ea1bae"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.986124999999902,
+      "embeddingMs": 207.67441600000166
+    },
+    {
+      "id": "none-5",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.752999999999929,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-5",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.050875000000133,
+      "embeddingMs": 281.112000000001
+    },
+    {
+      "id": "none-5",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "5011cb27-cdcc-46ed-84ea-66f1c7e30630",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3",
+        "a7d86741-9646-4822-95d5-1682f2bbeac3",
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.632875000000013,
+      "embeddingMs": 281.112000000001
+    },
+    {
+      "id": "none-6",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.7780830000001515,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-6",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.9898749999999836,
+      "embeddingMs": 170.16066599999613
+    },
+    {
+      "id": "none-6",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "502909f2-f863-4e5d-8797-8fd194d848b6",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "f3cfe537-97be-4a4c-821d-572945bdf88f",
+        "bac3782b-bda3-41a3-8388-8b7447550526"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.928957999999966,
+      "embeddingMs": 170.16066599999613
+    },
+    {
+      "id": "none-7",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.0299170000000686,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-7",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.821374999999989,
+      "embeddingMs": 143.73183399999834
+    },
+    {
+      "id": "none-7",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "cf4b3f46-5b13-42e9-9b4d-bdf7c57e17c8",
+        "51d81d3c-92db-4ce6-beaf-fc2fa0627099",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "8e5ea89b-bd25-434b-8f86-193bc8bd5f1f",
+        "556a06f7-a3e9-4f1c-ab17-88c6aef644b3"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 5.570166999999856,
+      "embeddingMs": 143.73183399999834
+    },
+    {
+      "id": "none-8",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.636959000000161,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-8",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.182042000000138,
+      "embeddingMs": 266.0362920000043
+    },
+    {
+      "id": "none-8",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "9199b14d-a638-40a6-bead-e8bde41c0e2c",
+        "319fe77a-2f91-497d-bb5a-75cb79ca5e95",
+        "bb4a603a-7a65-4611-bfa9-1558bdd94ccc",
+        "1015c905-9a34-4890-a8da-5d171d9f89df",
+        "907dee91-5ec3-405a-8d6f-a170400e588a"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.513584000000037,
+      "embeddingMs": 266.0362920000043
+    },
+    {
+      "id": "none-9",
+      "category": "unanswerable",
+      "mode": "keyword",
+      "relevant": [],
+      "returned": [],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 2.854957999999897,
+      "embeddingMs": 0
+    },
+    {
+      "id": "none-9",
+      "category": "unanswerable",
+      "mode": "semantic",
+      "relevant": [],
+      "returned": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 3.643041999999923,
+      "embeddingMs": 178.03349999999773
+    },
+    {
+      "id": "none-9",
+      "category": "unanswerable",
+      "mode": "hybrid",
+      "relevant": [],
+      "returned": [
+        "3a99ba4b-0bf8-4e08-af68-0c54ec7f7b3e",
+        "2a1afd94-5f05-4227-bff3-20540bb77c91",
+        "7af97136-e724-4b29-8f13-23e4291b29c4",
+        "d9dcba0e-5d0b-4e3f-99fe-e30d7d23fcc8",
+        "6005ddf7-fc8d-45a2-8526-a8771162aacb"
+      ],
+      "hit": false,
+      "citationCorrect": true,
+      "sqlMs": 4.777667000000065,
+      "embeddingMs": 178.03349999999773
+    },
+    {
+      "id": "denied-40",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-41",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-42",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-43",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-44",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-45",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-46",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-47",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-48",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    },
+    {
+      "id": "denied-49",
+      "category": "unauthorized",
+      "mode": "hybrid",
+      "status": 404
+    }
+  ],
+  "performance": [
+    {
+      "count": 10000,
+      "concurrency": 1,
+      "mode": "keyword",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 20.65058399999998,
+        "p95": 23.365708000001177
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 20.655166999999892,
+        "p95": 23.37220900000102
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0
+      },
+      "errors": 0,
+      "rssBytes": 129941504
+    },
+    {
+      "count": 10000,
+      "concurrency": 1,
+      "mode": "semantic",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 300.6672089999993,
+        "p95": 605.2501660000016
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 92.39208399999916,
+        "p95": 98.31387499999983
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 207.86499999999796,
+        "p95": 507.68066700000054
+      },
+      "errors": 0,
+      "rssBytes": 147128320
+    },
+    {
+      "count": 10000,
+      "concurrency": 1,
+      "mode": "hybrid",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 277.06437500000175,
+        "p95": 510.01524999999674
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 56.09449999999924,
+        "p95": 100.28991600000154
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 217.38445800000045,
+        "p95": 452.95816699999705
+      },
+      "errors": 0,
+      "rssBytes": 153026560
+    },
+    {
+      "count": 10000,
+      "concurrency": 5,
+      "mode": "keyword",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 16.292708000008133,
+        "p95": 17.421000000002095
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 16.292499999995925,
+        "p95": 17.41987500000687
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0
+      },
+      "errors": 0,
+      "rssBytes": 119734272
+    },
+    {
+      "count": 10000,
+      "concurrency": 5,
+      "mode": "semantic",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 938.7087089999986,
+        "p95": 1069.7328330000018
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 116.01641699999163,
+        "p95": 196.91825000000244
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 747.0626250000059,
+        "p95": 974.6542500000069
+      },
+      "errors": 0,
+      "rssBytes": 121585664
+    },
+    {
+      "count": 10000,
+      "concurrency": 5,
+      "mode": "hybrid",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 895.3595829999977,
+        "p95": 1255.9707079999935
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 114.03716600000917,
+        "p95": 198.97995799999626
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 740.1574580000015,
+        "p95": 1148.9002919999912
+      },
+      "errors": 0,
+      "rssBytes": 123043840
+    },
+    {
+      "count": 100000,
+      "concurrency": 1,
+      "mode": "keyword",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 32.14499999998952,
+        "p95": 47.05583300002036
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 32.14454099998693,
+        "p95": 47.05558300000848
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0
+      },
+      "errors": 0,
+      "rssBytes": 121126912
+    },
+    {
+      "count": 100000,
+      "concurrency": 1,
+      "mode": "semantic",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 620.5693329999922,
+        "p95": 783.3525410000002
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 395.25654199998826,
+        "p95": 412.7241670000076
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 222.6355840000033,
+        "p95": 398.75520800001686
+      },
+      "errors": 0,
+      "rssBytes": 122339328
+    },
+    {
+      "count": 100000,
+      "concurrency": 1,
+      "mode": "hybrid",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 614.0897089999926,
+        "p95": 972.6157919999969
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 395.0762500000128,
+        "p95": 405.63595899997745
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 224.75558399999863,
+        "p95": 571.1839579999796
+      },
+      "errors": 0,
+      "rssBytes": 128106496
+    },
+    {
+      "count": 100000,
+      "concurrency": 5,
+      "mode": "keyword",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 7.418666999990819,
+        "p95": 23.145542000012938
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 7.418458000000101,
+        "p95": 23.145499999984168
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0
+      },
+      "errors": 0,
+      "rssBytes": 127860736
+    },
+    {
+      "count": 100000,
+      "concurrency": 5,
+      "mode": "semantic",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 2409.8789170000236,
+        "p95": 2711.187874999974
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 1726.5490829999908,
+        "p95": 2025.523749999993
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 715.5059159999946,
+        "p95": 767.6688330000034
+      },
+      "errors": 0,
+      "rssBytes": 130793472
+    },
+    {
+      "count": 100000,
+      "concurrency": 5,
+      "mode": "hybrid",
+      "inclusiveMs": {
+        "n": 20,
+        "p50": 2606.5984590000007,
+        "p95": 2639.2800419999985
+      },
+      "excludingEmbeddingMs": {
+        "n": 20,
+        "p50": 1838.6717089999584,
+        "p95": 1915.942791999987
+      },
+      "embeddingMs": {
+        "n": 20,
+        "p50": 765.6859169999952,
+        "p95": 804.570665999956
+      },
+      "errors": 0,
+      "rssBytes": 119521280
+    }
+  ],
+  "performanceRaw": [
+    {
+      "count": 10000,
+      "concurrency": 1,
+      "mode": "keyword",
+      "samples": [
+        {
+          "totalMs": 4.623417000000245,
+          "modelMs": 0,
+          "dbMs": 4.632375000000138
+        },
+        {
+          "totalMs": 17.31366700000035,
+          "modelMs": 0,
+          "dbMs": 17.316625000000386
+        },
+        {
+          "totalMs": 20.65058399999998,
+          "modelMs": 0,
+          "dbMs": 20.655166999999892
+        },
+        {
+          "totalMs": 14.95458299999973,
+          "modelMs": 0,
+          "dbMs": 14.957334000000628
+        },
+        {
+          "totalMs": 22.27850000000035,
+          "modelMs": 0,
+          "dbMs": 22.283042000000933
+        },
+        {
+          "totalMs": 23.477458999999726,
+          "modelMs": 0,
+          "dbMs": 23.48070799999914
+        },
+        {
+          "totalMs": 21.793499999999767,
+          "modelMs": 0,
+          "dbMs": 21.796124999998938
+        },
+        {
+          "totalMs": 23.365708000001177,
+          "modelMs": 0,
+          "dbMs": 23.37220900000102
+        },
+        {
+          "totalMs": 9.070708000001105,
+          "modelMs": 0,
+          "dbMs": 9.073959000001196
+        },
+        {
+          "totalMs": 20.068333999999595,
+          "modelMs": 0,
+          "dbMs": 20.070874999999432
+        },
+        {
+          "totalMs": 20.9910830000008,
+          "modelMs": 0,
+          "dbMs": 20.990916999999172
+        },
+        {
+          "totalMs": 22.938958000002458,
+          "modelMs": 0,
+          "dbMs": 22.938207999999577
+        },
+        {
+          "totalMs": 15.056916999998066,
+          "modelMs": 0,
+          "dbMs": 15.057082999999693
+        },
+        {
+          "totalMs": 22.750542000001587,
+          "modelMs": 0,
+          "dbMs": 22.75041699999929
+        },
+        {
+          "totalMs": 21.885166000000027,
+          "modelMs": 0,
+          "dbMs": 21.881459000000177
+        },
+        {
+          "totalMs": 19.419208000002982,
+          "modelMs": 0,
+          "dbMs": 19.41912500000035
+        },
+        {
+          "totalMs": 23.134500000000116,
+          "modelMs": 0,
+          "dbMs": 23.134291999998823
+        },
+        {
+          "totalMs": 20.393917000001238,
+          "modelMs": 0,
+          "dbMs": 20.39362500000061
+        },
+        {
+          "totalMs": 18.239833999999973,
+          "modelMs": 0,
+          "dbMs": 18.23924999999872
+        },
+        {
+          "totalMs": 21.775832999999693,
+          "modelMs": 0,
+          "dbMs": 21.776084000000992
+        }
+      ]
+    },
+    {
+      "count": 10000,
+      "concurrency": 1,
+      "mode": "semantic",
+      "samples": [
+        {
+          "totalMs": 605.2501660000016,
+          "modelMs": 507.68066700000054,
+          "dbMs": 97.5838330000006
+        },
+        {
+          "totalMs": 384.96520800000144,
+          "modelMs": 292.38833299999897,
+          "dbMs": 92.5791250000002
+        },
+        {
+          "totalMs": 369.7435000000005,
+          "modelMs": 271.41612499999974,
+          "dbMs": 98.31387499999983
+        },
+        {
+          "totalMs": 276.5069160000021,
+          "modelMs": 185.2634590000016,
+          "dbMs": 91.23920799999905
+        },
+        {
+          "totalMs": 547.7675000000017,
+          "modelMs": 452.9293340000004,
+          "dbMs": 94.83629199999996
+        },
+        {
+          "totalMs": 312.5871659999975,
+          "modelMs": 216.3728749999973,
+          "dbMs": 96.21120800000062
+        },
+        {
+          "totalMs": 257.70708300000115,
+          "modelMs": 159.47791699999652,
+          "dbMs": 98.22637499999837
+        },
+        {
+          "totalMs": 300.6672089999993,
+          "modelMs": 207.86499999999796,
+          "dbMs": 92.79912499999773
+        },
+        {
+          "totalMs": 270.8050000000003,
+          "modelMs": 175.53195899999992,
+          "dbMs": 95.27066699999705
+        },
+        {
+          "totalMs": 314.40329100000235,
+          "modelMs": 226.3504999999932,
+          "dbMs": 88.04970799999865
+        },
+        {
+          "totalMs": 239.48800000000483,
+          "modelMs": 147.6924579999977,
+          "dbMs": 91.79220799999894
+        },
+        {
+          "totalMs": 271.84500000000116,
+          "modelMs": 184.1285829999979,
+          "dbMs": 87.71395900000061
+        },
+        {
+          "totalMs": 292.97525000000314,
+          "modelMs": 198.095917000006,
+          "dbMs": 94.87554199999431
+        },
+        {
+          "totalMs": 286.45379200000025,
+          "modelMs": 202.0254169999971,
+          "dbMs": 84.42570900000283
+        },
+        {
+          "totalMs": 525.2990839999984,
+          "modelMs": 443.002708,
+          "dbMs": 82.29383300000336
+        },
+        {
+          "totalMs": 263.8929169999974,
+          "modelMs": 175.84704200000124,
+          "dbMs": 88.04449999999633
+        },
+        {
+          "totalMs": 260.1794169999994,
+          "modelMs": 167.78416699999798,
+          "dbMs": 92.39208399999916
+        },
+        {
+          "totalMs": 380.096375000001,
+          "modelMs": 290.77666699999827,
+          "dbMs": 89.31679200000508
+        },
+        {
+          "totalMs": 377.518333,
+          "modelMs": 285.4257499999949,
+          "dbMs": 92.09016700000211
+        },
+        {
+          "totalMs": 703.2722500000018,
+          "modelMs": 600.0604170000006,
+          "dbMs": 103.20733299999847
+        }
+      ]
+    },
+    {
+      "count": 10000,
+      "concurrency": 1,
+      "mode": "hybrid",
+      "samples": [
+        {
+          "totalMs": 793.8111250000002,
+          "modelMs": 678.1734579999975,
+          "dbMs": 115.63120799999888
+        },
+        {
+          "totalMs": 317.6772090000013,
+          "modelMs": 217.38445800000045,
+          "dbMs": 100.28991600000154
+        },
+        {
+          "totalMs": 250.07866600000125,
+          "modelMs": 191.12695800000074,
+          "dbMs": 58.947957999997016
+        },
+        {
+          "totalMs": 237.84179199999926,
+          "modelMs": 182.81091700000252,
+          "dbMs": 55.0291670000006
+        },
+        {
+          "totalMs": 239.94295799999963,
+          "modelMs": 183.84566600000107,
+          "dbMs": 56.09449999999924
+        },
+        {
+          "totalMs": 510.01524999999674,
+          "modelMs": 452.95816699999705,
+          "dbMs": 57.052999999999884
+        },
+        {
+          "totalMs": 227.31929200000013,
+          "modelMs": 171.56054200000654,
+          "dbMs": 55.7570840000044
+        },
+        {
+          "totalMs": 282.2334999999948,
+          "modelMs": 240.21925000000192,
+          "dbMs": 42.012290999999095
+        },
+        {
+          "totalMs": 326.4934579999972,
+          "modelMs": 275.0305420000004,
+          "dbMs": 51.46125000000029
+        },
+        {
+          "totalMs": 227.79245900000387,
+          "modelMs": 169.25466600000073,
+          "dbMs": 58.53549999999814
+        },
+        {
+          "totalMs": 262.0797909999965,
+          "modelMs": 204.9696249999979,
+          "dbMs": 57.1050000000032
+        },
+        {
+          "totalMs": 410.5516659999994,
+          "modelMs": 357.32162500000413,
+          "dbMs": 53.228125000001455
+        },
+        {
+          "totalMs": 202.94700000000012,
+          "modelMs": 159.9780830000018,
+          "dbMs": 42.968957999997656
+        },
+        {
+          "totalMs": 242.88600000001315,
+          "modelMs": 185.12045899999794,
+          "dbMs": 57.761083000004874
+        },
+        {
+          "totalMs": 298.4214579999971,
+          "modelMs": 243.20737499999814,
+          "dbMs": 55.20991700000013
+        },
+        {
+          "totalMs": 277.06437500000175,
+          "modelMs": 221.76954199999454,
+          "dbMs": 55.29020799999125
+        },
+        {
+          "totalMs": 232.93162499999744,
+          "modelMs": 181.15866699999606,
+          "dbMs": 51.76866600000358
+        },
+        {
+          "totalMs": 277.65333299999475,
+          "modelMs": 219.6770419999957,
+          "dbMs": 57.972291999991285
+        },
+        {
+          "totalMs": 336.16554200000246,
+          "modelMs": 275.8559580000001,
+          "dbMs": 60.305666999993264
+        },
+        {
+          "totalMs": 289.87237499999173,
+          "modelMs": 233.34654199999932,
+          "dbMs": 56.51970900000015
+        }
+      ]
+    },
+    {
+      "count": 10000,
+      "concurrency": 5,
+      "mode": "keyword",
+      "samples": [
+        {
+          "totalMs": 9.108625000008033,
+          "modelMs": 0,
+          "dbMs": 9.10829200000444
+        },
+        {
+          "totalMs": 16.292708000008133,
+          "modelMs": 0,
+          "dbMs": 16.292499999995925
+        },
+        {
+          "totalMs": 15.883249999998952,
+          "modelMs": 0,
+          "dbMs": 15.883249999998952
+        },
+        {
+          "totalMs": 17.15725000000384,
+          "modelMs": 0,
+          "dbMs": 17.15725000000384
+        },
+        {
+          "totalMs": 16.176250000004075,
+          "modelMs": 0,
+          "dbMs": 16.17604200000642
+        },
+        {
+          "totalMs": 16.450207999994745,
+          "modelMs": 0,
+          "dbMs": 16.450417000000016
+        },
+        {
+          "totalMs": 16.43879200000083,
+          "modelMs": 0,
+          "dbMs": 16.438916999992216
+        },
+        {
+          "totalMs": 16.92287499998929,
+          "modelMs": 0,
+          "dbMs": 16.922624999991967
+        },
+        {
+          "totalMs": 17.421000000002095,
+          "modelMs": 0,
+          "dbMs": 17.41987500000687
+        },
+        {
+          "totalMs": 16.84937500000524,
+          "modelMs": 0,
+          "dbMs": 16.84954199999629
+        },
+        {
+          "totalMs": 15.474916000006488,
+          "modelMs": 0,
+          "dbMs": 15.474915999991936
+        },
+        {
+          "totalMs": 16.468999999997322,
+          "modelMs": 0,
+          "dbMs": 16.468542000002344
+        },
+        {
+          "totalMs": 16.374958000000333,
+          "modelMs": 0,
+          "dbMs": 16.374832999994396
+        },
+        {
+          "totalMs": 16.906042000002344,
+          "modelMs": 0,
+          "dbMs": 16.90525000001071
+        },
+        {
+          "totalMs": 17.854667000006884,
+          "modelMs": 0,
+          "dbMs": 17.852833000011742
+        },
+        {
+          "totalMs": 9.664541999998619,
+          "modelMs": 0,
+          "dbMs": 9.66425000000163
+        },
+        {
+          "totalMs": 9.58887500000128,
+          "modelMs": 0,
+          "dbMs": 9.589082999998936
+        },
+        {
+          "totalMs": 9.931875000009313,
+          "modelMs": 0,
+          "dbMs": 9.932000000000698
+        },
+        {
+          "totalMs": 10.273207999998704,
+          "modelMs": 0,
+          "dbMs": 10.273291000004974
+        },
+        {
+          "totalMs": 10.33408299999428,
+          "modelMs": 0,
+          "dbMs": 10.334083000008832
+        }
+      ]
+    },
+    {
+      "count": 10000,
+      "concurrency": 5,
+      "mode": "semantic",
+      "samples": [
+        {
+          "totalMs": 762.6367089999985,
+          "modelMs": 675.4845830000122,
+          "dbMs": 87.15154200000688
+        },
+        {
+          "totalMs": 762.6760419999919,
+          "modelMs": 675.1186670000025,
+          "dbMs": 87.55566699999326
+        },
+        {
+          "totalMs": 841.869417000009,
+          "modelMs": 725.9016249999986,
+          "dbMs": 115.96675000000687
+        },
+        {
+          "totalMs": 841.8420409999962,
+          "modelMs": 731.5610000000015,
+          "dbMs": 110.27995900000678
+        },
+        {
+          "totalMs": 841.9089999999997,
+          "modelMs": 725.8924999999872,
+          "dbMs": 116.01641699999163
+        },
+        {
+          "totalMs": 293.1815840000054,
+          "modelMs": 215.8227909999987,
+          "dbMs": 77.35508400000981
+        },
+        {
+          "totalMs": 292.8718329999974,
+          "modelMs": 215.9887080000044,
+          "dbMs": 76.88108300000022
+        },
+        {
+          "totalMs": 1069.7328330000018,
+          "modelMs": 974.6542500000069,
+          "dbMs": 95.07824999999139
+        },
+        {
+          "totalMs": 1069.6088339999988,
+          "modelMs": 974.1283750000002,
+          "dbMs": 95.47804200000246
+        },
+        {
+          "totalMs": 1069.9016670000128,
+          "modelMs": 975.3188749999972,
+          "dbMs": 94.58216700000048
+        },
+        {
+          "totalMs": 936.404291999992,
+          "modelMs": 752.3984999999957,
+          "dbMs": 184.00420799999847
+        },
+        {
+          "totalMs": 938.7087089999986,
+          "modelMs": 751.5161669999943,
+          "dbMs": 187.1906250000029
+        },
+        {
+          "totalMs": 938.5752920000086,
+          "modelMs": 749.9080000000104,
+          "dbMs": 188.6646250000049
+        },
+        {
+          "totalMs": 940.5782500000059,
+          "modelMs": 750.5830419999984,
+          "dbMs": 189.99462499999208
+        },
+        {
+          "totalMs": 950.0422910000052,
+          "modelMs": 809.1494999999995,
+          "dbMs": 140.88979200000176
+        },
+        {
+          "totalMs": 942.7227089999942,
+          "modelMs": 747.0626250000059,
+          "dbMs": 195.65883299999405
+        },
+        {
+          "totalMs": 943.0726670000004,
+          "modelMs": 746.9382500000065,
+          "dbMs": 196.13312500000757
+        },
+        {
+          "totalMs": 943.2147089999926,
+          "modelMs": 747.6625000000058,
+          "dbMs": 195.55183399999805
+        },
+        {
+          "totalMs": 944.3063749999856,
+          "modelMs": 747.3870420000021,
+          "dbMs": 196.91825000000244
+        },
+        {
+          "totalMs": 945.3417500000069,
+          "modelMs": 746.7363340000011,
+          "dbMs": 198.60245900000155
+        }
+      ]
+    },
+    {
+      "count": 10000,
+      "concurrency": 5,
+      "mode": "hybrid",
+      "samples": [
+        {
+          "totalMs": 923.432541999995,
+          "modelMs": 858.1182499999995,
+          "dbMs": 65.31108300000778
+        },
+        {
+          "totalMs": 1240.3708329999936,
+          "modelMs": 1132.9699160000018,
+          "dbMs": 107.3842500000028
+        },
+        {
+          "totalMs": 1255.3413329999894,
+          "modelMs": 1141.3023329999996,
+          "dbMs": 114.03716600000917
+        },
+        {
+          "totalMs": 1255.9707079999935,
+          "modelMs": 1148.9002919999912,
+          "dbMs": 107.06820800001151
+        },
+        {
+          "totalMs": 1274.0644589999865,
+          "modelMs": 1184.1924160000053,
+          "dbMs": 89.86991700000362
+        },
+        {
+          "totalMs": 885.5690420000028,
+          "modelMs": 703.257792000004,
+          "dbMs": 182.30962500000896
+        },
+        {
+          "totalMs": 886.7066250000062,
+          "modelMs": 704.2664589999913,
+          "dbMs": 182.43908399999782
+        },
+        {
+          "totalMs": 887.2993340000103,
+          "modelMs": 704.8706249999959,
+          "dbMs": 182.42820900000515
+        },
+        {
+          "totalMs": 888.0991250000079,
+          "modelMs": 705.0507079999952,
+          "dbMs": 183.04674999999406
+        },
+        {
+          "totalMs": 895.3595829999977,
+          "modelMs": 743.8563330000034,
+          "dbMs": 151.49829200000386
+        },
+        {
+          "totalMs": 938.3747089999961,
+          "modelMs": 739.3945410000015,
+          "dbMs": 198.9766249999957
+        },
+        {
+          "totalMs": 938.6623330000002,
+          "modelMs": 740.1574580000015,
+          "dbMs": 198.50300000001153
+        },
+        {
+          "totalMs": 939.6510419999977,
+          "modelMs": 740.6219999999885,
+          "dbMs": 199.02720799999952
+        },
+        {
+          "totalMs": 939.320292000004,
+          "modelMs": 741.853500000012,
+          "dbMs": 197.4651670000021
+        },
+        {
+          "totalMs": 940.3969580000121,
+          "modelMs": 741.4151249999995,
+          "dbMs": 198.97995799999626
+        },
+        {
+          "totalMs": 271.2392080000136,
+          "modelMs": 173.38612500000454,
+          "dbMs": 97.85133400000632
+        },
+        {
+          "totalMs": 270.49970799998846,
+          "modelMs": 171.5961249999964,
+          "dbMs": 98.90037500001199
+        },
+        {
+          "totalMs": 271.50458300000173,
+          "modelMs": 174.13891700000386,
+          "dbMs": 97.36458399999538
+        },
+        {
+          "totalMs": 824.533334000007,
+          "modelMs": 741.7337079999998,
+          "dbMs": 82.79699999999139
+        },
+        {
+          "totalMs": 823.166750000004,
+          "modelMs": 739.2496249999967,
+          "dbMs": 83.91358300000138
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "concurrency": 1,
+      "mode": "keyword",
+      "samples": [
+        {
+          "totalMs": 11.319208000000799,
+          "modelMs": 0,
+          "dbMs": 11.31912500000908
+        },
+        {
+          "totalMs": 26.301542000001064,
+          "modelMs": 0,
+          "dbMs": 26.30145800000173
+        },
+        {
+          "totalMs": 33.29987499999697,
+          "modelMs": 0,
+          "dbMs": 33.29995799998869
+        },
+        {
+          "totalMs": 32.14499999998952,
+          "modelMs": 0,
+          "dbMs": 32.14454099998693
+        },
+        {
+          "totalMs": 47.87229200001457,
+          "modelMs": 0,
+          "dbMs": 47.87187500001164
+        },
+        {
+          "totalMs": 27.86495799999102,
+          "modelMs": 0,
+          "dbMs": 27.864499999996042
+        },
+        {
+          "totalMs": 37.35183300002245,
+          "modelMs": 0,
+          "dbMs": 37.351124999986496
+        },
+        {
+          "totalMs": 20.76141700000153,
+          "modelMs": 0,
+          "dbMs": 20.761292000010144
+        },
+        {
+          "totalMs": 33.227624999999534,
+          "modelMs": 0,
+          "dbMs": 33.22729199999594
+        },
+        {
+          "totalMs": 33.35212500000489,
+          "modelMs": 0,
+          "dbMs": 33.351542000018526
+        },
+        {
+          "totalMs": 39.044458999997005,
+          "modelMs": 0,
+          "dbMs": 39.043416999978945
+        },
+        {
+          "totalMs": 12.852958000003127,
+          "modelMs": 0,
+          "dbMs": 12.853000000002794
+        },
+        {
+          "totalMs": 40.27258299998357,
+          "modelMs": 0,
+          "dbMs": 40.27191700000549
+        },
+        {
+          "totalMs": 24.246291999996174,
+          "modelMs": 0,
+          "dbMs": 24.245667000010144
+        },
+        {
+          "totalMs": 27.77858300000662,
+          "modelMs": 0,
+          "dbMs": 27.778332999994745
+        },
+        {
+          "totalMs": 23.549957999988692,
+          "modelMs": 0,
+          "dbMs": 23.549208000011276
+        },
+        {
+          "totalMs": 47.05583300002036,
+          "modelMs": 0,
+          "dbMs": 47.05558300000848
+        },
+        {
+          "totalMs": 34.89212500001304,
+          "modelMs": 0,
+          "dbMs": 34.891499999997905
+        },
+        {
+          "totalMs": 42.67508299998008,
+          "modelMs": 0,
+          "dbMs": 42.67437500000233
+        },
+        {
+          "totalMs": 31.15633299999172,
+          "modelMs": 0,
+          "dbMs": 31.15587499999674
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "concurrency": 1,
+      "mode": "semantic",
+      "samples": [
+        {
+          "totalMs": 615.0283329999947,
+          "modelMs": 228.4040419999801,
+          "dbMs": 386.62166699999943
+        },
+        {
+          "totalMs": 571.5446250000095,
+          "modelMs": 170.8217500000028,
+          "dbMs": 400.7175419999985
+        },
+        {
+          "totalMs": 595.4363749999902,
+          "modelMs": 190.3537499999802,
+          "dbMs": 405.0804160000116
+        },
+        {
+          "totalMs": 1036.8884580000013,
+          "modelMs": 658.8864159999939,
+          "dbMs": 377.9971669999941
+        },
+        {
+          "totalMs": 783.3525410000002,
+          "modelMs": 398.75520800001686,
+          "dbMs": 384.59437499998603
+        },
+        {
+          "totalMs": 690.5172909999965,
+          "modelMs": 305.22649999998976,
+          "dbMs": 385.28737499998533
+        },
+        {
+          "totalMs": 747.1772500000079,
+          "modelMs": 365.5535830000008,
+          "dbMs": 381.6209169999929
+        },
+        {
+          "totalMs": 582.4292080000159,
+          "modelMs": 187.17050000000745,
+          "dbMs": 395.25654199998826
+        },
+        {
+          "totalMs": 579.727332999988,
+          "modelMs": 185.35487499999,
+          "dbMs": 394.3678340000042
+        },
+        {
+          "totalMs": 747.8880409999983,
+          "modelMs": 347.7121669999906,
+          "dbMs": 400.17316700000083
+        },
+        {
+          "totalMs": 568.0641670000041,
+          "modelMs": 170.79562499999884,
+          "dbMs": 397.266082999995
+        },
+        {
+          "totalMs": 632.1143750000047,
+          "modelMs": 235.9315840000054,
+          "dbMs": 396.17962499998976
+        },
+        {
+          "totalMs": 620.5693329999922,
+          "modelMs": 222.6355840000033,
+          "dbMs": 397.9314580000064
+        },
+        {
+          "totalMs": 684.0725840000086,
+          "modelMs": 285.021665999986,
+          "dbMs": 399.04770899997675
+        },
+        {
+          "totalMs": 629.9392080000252,
+          "modelMs": 221.41037500000675,
+          "dbMs": 408.52637499998673
+        },
+        {
+          "totalMs": 543.2699169999978,
+          "modelMs": 158.68087499999092,
+          "dbMs": 384.5877080000064
+        },
+        {
+          "totalMs": 632.8447499999893,
+          "modelMs": 241.93483400001423,
+          "dbMs": 390.90600000001723
+        },
+        {
+          "totalMs": 577.5607080000045,
+          "modelMs": 185.26020900000003,
+          "dbMs": 392.29725000000326
+        },
+        {
+          "totalMs": 578.4132500000123,
+          "modelMs": 165.68841699999757,
+          "dbMs": 412.7241670000076
+        },
+        {
+          "totalMs": 720.5962080000027,
+          "modelMs": 235.9271670000162,
+          "dbMs": 484.6679160000058
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "concurrency": 1,
+      "mode": "hybrid",
+      "samples": [
+        {
+          "totalMs": 609.9860829999961,
+          "modelMs": 219.21679100001347,
+          "dbMs": 390.76895800000057
+        },
+        {
+          "totalMs": 576.4127919999883,
+          "modelMs": 170.67466699998477,
+          "dbMs": 405.7345840000198
+        },
+        {
+          "totalMs": 854.4742079999996,
+          "modelMs": 455.34183299998404,
+          "dbMs": 399.1291669999773
+        },
+        {
+          "totalMs": 557.993541999982,
+          "modelMs": 173.44383299999754,
+          "dbMs": 384.54766599999857
+        },
+        {
+          "totalMs": 648.5880829999805,
+          "modelMs": 255.8822499999951,
+          "dbMs": 392.70462500001304
+        },
+        {
+          "totalMs": 592.8814589999965,
+          "modelMs": 195.032916999975,
+          "dbMs": 397.8438749999914
+        },
+        {
+          "totalMs": 638.45762500001,
+          "modelMs": 243.37937499998952,
+          "dbMs": 395.0762500000128
+        },
+        {
+          "totalMs": 602.271207999991,
+          "modelMs": 207.26883300000918,
+          "dbMs": 394.998666999978
+        },
+        {
+          "totalMs": 583.9947920000122,
+          "modelMs": 188.28095800001756,
+          "dbMs": 395.7105830000073
+        },
+        {
+          "totalMs": 614.0897089999926,
+          "modelMs": 226.15700000000652,
+          "dbMs": 387.93083299999125
+        },
+        {
+          "totalMs": 975.5497079999768,
+          "modelMs": 571.1839579999796,
+          "dbMs": 404.3605840000091
+        },
+        {
+          "totalMs": 677.8469590000168,
+          "modelMs": 282.75183399999514,
+          "dbMs": 395.09016600000905
+        },
+        {
+          "totalMs": 568.7344169999997,
+          "modelMs": 170.5772500000021,
+          "dbMs": 398.15366699997685
+        },
+        {
+          "totalMs": 647.0882920000004,
+          "modelMs": 261.30133300001035,
+          "dbMs": 385.7842079999973
+        },
+        {
+          "totalMs": 579.3412910000188,
+          "modelMs": 173.70483299999614,
+          "dbMs": 405.63595899997745
+        },
+        {
+          "totalMs": 629.5966659999976,
+          "modelMs": 229.41045900000609,
+          "dbMs": 400.18249999999534
+        },
+        {
+          "totalMs": 615.1188749999856,
+          "modelMs": 211.44054199999664,
+          "dbMs": 403.6758329999866
+        },
+        {
+          "totalMs": 972.6157919999969,
+          "modelMs": 582.3587499999849,
+          "dbMs": 390.2549589999835
+        },
+        {
+          "totalMs": 613.9985000000161,
+          "modelMs": 224.75558399999863,
+          "dbMs": 389.2397920000076
+        },
+        {
+          "totalMs": 682.0627910000039,
+          "modelMs": 287.94612500001676,
+          "dbMs": 394.11370800001896
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "concurrency": 5,
+      "mode": "keyword",
+      "samples": [
+        {
+          "totalMs": 13.185958000016399,
+          "modelMs": 0,
+          "dbMs": 13.185458000021754
+        },
+        {
+          "totalMs": 23.145542000012938,
+          "modelMs": 0,
+          "dbMs": 23.145499999984168
+        },
+        {
+          "totalMs": 23.050791999994544,
+          "modelMs": 0,
+          "dbMs": 23.05070799999521
+        },
+        {
+          "totalMs": 22.965915999986464,
+          "modelMs": 0,
+          "dbMs": 22.965624999982538
+        },
+        {
+          "totalMs": 23.721000000019558,
+          "modelMs": 0,
+          "dbMs": 23.720375000004424
+        },
+        {
+          "totalMs": 13.824042000022018,
+          "modelMs": 0,
+          "dbMs": 13.823957999993581
+        },
+        {
+          "totalMs": 14.089666999992914,
+          "modelMs": 0,
+          "dbMs": 14.089666999992914
+        },
+        {
+          "totalMs": 14.086458999983734,
+          "modelMs": 0,
+          "dbMs": 14.086540999996942
+        },
+        {
+          "totalMs": 14.52424999998766,
+          "modelMs": 0,
+          "dbMs": 14.524459000007482
+        },
+        {
+          "totalMs": 15.675250000000233,
+          "modelMs": 0,
+          "dbMs": 15.67287499998929
+        },
+        {
+          "totalMs": 5.796166999993147,
+          "modelMs": 0,
+          "dbMs": 5.796124999993481
+        },
+        {
+          "totalMs": 6.180207999976119,
+          "modelMs": 0,
+          "dbMs": 6.1793329999782145
+        },
+        {
+          "totalMs": 5.111791000002995,
+          "modelMs": 0,
+          "dbMs": 5.111499999999069
+        },
+        {
+          "totalMs": 5.392250000004424,
+          "modelMs": 0,
+          "dbMs": 5.392374999995809
+        },
+        {
+          "totalMs": 6.741458000004059,
+          "modelMs": 0,
+          "dbMs": 6.7700000000186265
+        },
+        {
+          "totalMs": 7.000790999998571,
+          "modelMs": 0,
+          "dbMs": 7.0008749999979045
+        },
+        {
+          "totalMs": 7.14558300000499,
+          "modelMs": 0,
+          "dbMs": 7.1454999999841675
+        },
+        {
+          "totalMs": 7.418666999990819,
+          "modelMs": 0,
+          "dbMs": 7.418458000000101
+        },
+        {
+          "totalMs": 7.158458999998402,
+          "modelMs": 0,
+          "dbMs": 7.1582909999997355
+        },
+        {
+          "totalMs": 7.193708000006154,
+          "modelMs": 0,
+          "dbMs": 7.193584000022383
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "concurrency": 5,
+      "mode": "semantic",
+      "samples": [
+        {
+          "totalMs": 2392.700458999985,
+          "modelMs": 673.64633399999,
+          "dbMs": 1719.0535419999796
+        },
+        {
+          "totalMs": 2392.4495419999876,
+          "modelMs": 672.6846249999944,
+          "dbMs": 1719.7628330000152
+        },
+        {
+          "totalMs": 2394.572749999992,
+          "modelMs": 673.1923330000136,
+          "dbMs": 1721.3801250000251
+        },
+        {
+          "totalMs": 2399.8291249999893,
+          "modelMs": 673.2799579999992,
+          "dbMs": 1726.5490829999908
+        },
+        {
+          "totalMs": 2409.8789170000236,
+          "modelMs": 715.5059159999946,
+          "dbMs": 1694.3712920000253
+        },
+        {
+          "totalMs": 628.8470840000082,
+          "modelMs": 209.6667080000043,
+          "dbMs": 419.1789169999829
+        },
+        {
+          "totalMs": 2141.4876670000085,
+          "modelMs": 734.5113340000098,
+          "dbMs": 1406.9765840000182
+        },
+        {
+          "totalMs": 2141.6654160000035,
+          "modelMs": 734.5503339999996,
+          "dbMs": 1407.1140000000014
+        },
+        {
+          "totalMs": 2141.6117920000106,
+          "modelMs": 733.8595830000122,
+          "dbMs": 1407.7504999999946
+        },
+        {
+          "totalMs": 2159.6849590000056,
+          "modelMs": 767.6688330000034,
+          "dbMs": 1392.015417000017
+        },
+        {
+          "totalMs": 2694.1834159999853,
+          "modelMs": 668.6573330000101,
+          "dbMs": 2025.523749999993
+        },
+        {
+          "totalMs": 2694.401541999978,
+          "modelMs": 669.1707089999982,
+          "dbMs": 2025.2305420000048
+        },
+        {
+          "totalMs": 2694.3507079999836,
+          "modelMs": 668.8403749999998,
+          "dbMs": 2025.5092919999734
+        },
+        {
+          "totalMs": 2711.187874999974,
+          "modelMs": 669.2042500000098,
+          "dbMs": 2041.9844589999993
+        },
+        {
+          "totalMs": 2786.897958000016,
+          "modelMs": 978.8442910000158,
+          "dbMs": 1808.0519170000043
+        },
+        {
+          "totalMs": 2620.0885830000043,
+          "modelMs": 729.9410420000204,
+          "dbMs": 1890.1469170000055
+        },
+        {
+          "totalMs": 2620.8621660000063,
+          "modelMs": 730.7499580000003,
+          "dbMs": 1890.111917000002
+        },
+        {
+          "totalMs": 2620.451708000008,
+          "modelMs": 729.3667079999868,
+          "dbMs": 1891.0832079999964
+        },
+        {
+          "totalMs": 2636.5409579999978,
+          "modelMs": 731.6640830000106,
+          "dbMs": 1904.8767919999955
+        },
+        {
+          "totalMs": 2638.0717920000025,
+          "modelMs": 755.7472920000146,
+          "dbMs": 1882.3234170000069
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "concurrency": 5,
+      "mode": "hybrid",
+      "samples": [
+        {
+          "totalMs": 2594.6721249999828,
+          "modelMs": 681.6519170000101,
+          "dbMs": 1913.0187920000171
+        },
+        {
+          "totalMs": 2594.5373749999853,
+          "modelMs": 679.0147500000021,
+          "dbMs": 1915.5220839999965
+        },
+        {
+          "totalMs": 2594.715333,
+          "modelMs": 678.7712499999907,
+          "dbMs": 1915.942791999987
+        },
+        {
+          "totalMs": 2611.633375000005,
+          "modelMs": 678.1947909999872,
+          "dbMs": 1933.4363329999906
+        },
+        {
+          "totalMs": 2669.680000000022,
+          "modelMs": 880.513042000006,
+          "dbMs": 1789.164334000001
+        },
+        {
+          "totalMs": 2628.273999999976,
+          "modelMs": 765.6859169999952,
+          "dbMs": 1862.5878329999978
+        },
+        {
+          "totalMs": 2628.527000000002,
+          "modelMs": 766.2254170000087,
+          "dbMs": 1862.3013329999812
+        },
+        {
+          "totalMs": 2629.735416999989,
+          "modelMs": 766.35487499999,
+          "dbMs": 1863.3763750000217
+        },
+        {
+          "totalMs": 2629.0614589999896,
+          "modelMs": 765.887167000008,
+          "dbMs": 1863.1732920000213
+        },
+        {
+          "totalMs": 2639.2800419999985,
+          "modelMs": 764.3885000000009,
+          "dbMs": 1874.8905420000083
+        },
+        {
+          "totalMs": 2558.0695410000044,
+          "modelMs": 737.0352079999866,
+          "dbMs": 1821.0212499999907
+        },
+        {
+          "totalMs": 2557.5317919999943,
+          "modelMs": 737.7010419999715,
+          "dbMs": 1819.8298749999958
+        },
+        {
+          "totalMs": 2557.319415999984,
+          "modelMs": 736.531874999986,
+          "dbMs": 1820.7867500000284
+        },
+        {
+          "totalMs": 2570.6131249999744,
+          "modelMs": 735.6915000000154,
+          "dbMs": 1834.9192499999772
+        },
+        {
+          "totalMs": 2580.0705830000225,
+          "modelMs": 804.570665999956,
+          "dbMs": 1775.4982919999748
+        },
+        {
+          "totalMs": 2605.758833000029,
+          "modelMs": 768.4879580000415,
+          "dbMs": 1837.2692910000333
+        },
+        {
+          "totalMs": 2606.858666999964,
+          "modelMs": 769.7089169999817,
+          "dbMs": 1837.1485000000102
+        },
+        {
+          "totalMs": 2606.6517910000402,
+          "modelMs": 767.9780409999657,
+          "dbMs": 1838.6717089999584
+        },
+        {
+          "totalMs": 2606.5984590000007,
+          "modelMs": 771.1535830000066,
+          "dbMs": 1835.4434589999728
+        },
+        {
+          "totalMs": 2610.398749999993,
+          "modelMs": 771.3750420000288,
+          "dbMs": 1839.023583000002
+        }
+      ]
+    }
+  ]
+}

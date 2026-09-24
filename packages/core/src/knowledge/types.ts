@@ -47,11 +47,14 @@ export interface KnowledgeRetrievalRequest {
 
 /** Constructed on the server after authenticating and checking every requested collection. */
 export interface KnowledgeReadScope {
+  /** Server-only internal global search. Never accepted from wire input. */
+  readonly allOwned?: boolean;
   readonly ownerId: string;
   readonly collectionIds: readonly string[];
   readonly callerKind: "session" | "internal" | "access_key";
   readonly permission: KnowledgePermission;
   readonly keyId?: string;
+  readonly keyVersion?: number;
   readonly application?: string;
 }
 
@@ -79,5 +82,5 @@ export interface KnowledgeRetrievalResult {
 /** Local implementation belongs in server/knowledge; never calls the remote RAG as fallback. */
 export interface KnowledgeService {
   listCollections(ownerId: string): Promise<KnowledgeCollection[]>;
-  retrieve(scope: KnowledgeReadScope, request: KnowledgeRetrievalRequest): Promise<KnowledgeRetrievalResult>;
+  retrieve(scope: KnowledgeReadScope, request: KnowledgeRetrievalRequest, signal?: AbortSignal): Promise<KnowledgeRetrievalResult>;
 }

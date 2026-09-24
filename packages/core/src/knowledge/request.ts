@@ -27,3 +27,10 @@ export function parseKnowledgeRetrievalRequest(input: unknown): KnowledgeRetriev
     sourceTypes: value.filters.source_types, tags: value.filters.tags,
   };
 }
+
+/** Session-only global-search route; an empty list never expands an external scope. */
+export function parseKnowledgeGlobalRequest(input: unknown): KnowledgeRetrievalRequest {
+  const value = schema.extend({ collection_ids: z.array(id).max(0).default([]) }).parse(input);
+  return { query: value.query, collectionIds: [], topK: value.top_k, mode: value.mode,
+    sourceTypes: value.filters.source_types, tags: value.filters.tags, allowDegraded: value.allow_degraded };
+}

@@ -9,4 +9,5 @@ export interface PrivateKnowledgeStorage {
   put(ownerId: string, body: NodeJS.ReadableStream, mime: string): Promise<PrivateKnowledgeObject>;
   open(key: string, range?: { start: number; end: number }): NodeJS.ReadableStream;
   size(key: string): Promise<number>;
+  usage?(ownerId: string): Promise<number>;
 }

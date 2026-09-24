@@ -68,6 +68,7 @@ export class KnowledgeJobs {
   /** The index writer must validate chunk/vector completeness, and only use this transaction. */
   async publish(lease: IngestionLease, writeIndex: (client: PoolClient) => Promise<void>): Promise<boolean> {
     return this.transaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`index-owner:${lease.ownerId}`]);
       const state = await this.lock(client, lease.taskId);
       if (!state || !this.current(state) || !state.run.leased || state.run.lease_token !== lease.token) return false;
       await writeIndex(client);

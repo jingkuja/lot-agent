@@ -113,7 +113,14 @@ export function Workspace({
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(() => new URLSearchParams(window.location.search).get("knowledge") === "1");
+  const [knowledgeAttachment, setKnowledgeAttachment] = useState<{ id: string; file: File }>();
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !(event.target instanceof HTMLElement && event.target.closest("input,textarea,select,[contenteditable=true]"))) { event.preventDefault(); setKnowledgeOpen(true); }
+    };
+    window.addEventListener("keydown", shortcut); return () => window.removeEventListener("keydown", shortcut);
+  }, []);
   const [knowledgeAvailable, setKnowledgeAvailable] = useState(false);
   useEffect(() => { let live = true; void knowledgeApi.status().then(() => { if (live) setKnowledgeAvailable(true); }).catch(() => {}); return () => { live = false; }; }, [user.id]);
   const [centerOpen, setCenterOpen] = useState(false);
@@ -402,7 +409,7 @@ export function Workspace({
 
   return (
     <div className="workspace">
-      {knowledgeOpen && <KnowledgePanel onClose={() => setKnowledgeOpen(false)} />}
+      {knowledgeOpen && <KnowledgePanel onClose={() => setKnowledgeOpen(false)} onUse={(file) => { setKnowledgeAttachment({ id: crypto.randomUUID(), file }); setKnowledgeOpen(false); }} />}
       <div className={`workspace-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
         <BrandHeader
           user={user}
@@ -418,6 +425,7 @@ export function Workspace({
             const popup = window.open("about:blank", "_blank");
             void api.getKnowledgeBaseLink()
               .then(({ url }) => {
+                if (url === "/?knowledge=1") { popup?.close(); setKnowledgeOpen(true); return; }
                 if (popup) {
                   popup.opener = null;
                   popup.location.href = url;
@@ -474,6 +482,9 @@ export function Workspace({
         )}
         <div className="workspace-chat">
           <ChatPanel
+            attachment={knowledgeAttachment}
+            onAttachmentConsumed={() => setKnowledgeAttachment(undefined)}
+            onManageKnowledge={knowledgeAvailable ? () => setKnowledgeOpen(true) : undefined}
             messages={messages}
             onSend={doSend}
             onStop={stop}

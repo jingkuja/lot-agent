@@ -68,8 +68,9 @@ export interface Rating {
 }
 
 export interface AgentEvent {
-  type: "text" | "thinking" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact" | "title";
+  type: "knowledge_sources" | "text" | "thinking" | "tool_call" | "tool_result" | "done" | "error" | "stream_end" | "artifact" | "title";
   id?: string;
+  sources?: import("../modules/knowledge/api.js").Evidence[];
   /** tool_result variant: id of the tool_call this result answers. */
   toolCallId?: string;
   content?: string;
@@ -203,6 +204,7 @@ export interface UploadedAttachment {
 }
 
 export interface KnowledgeBaseRef {
+  source?: "local" | "remote";
   id: string;
   name: string;
 }

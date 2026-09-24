@@ -1,21 +1,30 @@
+import { createHash } from "node:crypto";
+import { PreflightCache } from "./preflight-cache.js";
 import type { DB } from "../../db/database.js";
 import { UsageMeter } from "../../billing/meter.js";
 import { TokenhubEmbeddingProvider } from "./embedding.js";
 import type { IndexProfile } from "./profile.js";
 
+const receipts = new PreflightCache<unknown>(500);
+const preflight = new PreflightCache<[{ data?: Array<{ id: string }> }, { data?: { quota_per_unit: number; usd_exchange_rate: number } }]>();
+
 /** Resolve only the owner's credential. No platform/environment-key fallback. */
-export function createUserEmbedder(db: DB, profile: IndexProfile, ownerId: string, taskId?: string) {
+export function createUserEmbedder(db: DB, profile: IndexProfile, ownerId: string, taskId?: string, attribution?: { keyId?: string; application?: string }) {
   return async (text: string, signal?: AbortSignal): Promise<{ vector: number[]; tokens: number }> => {
     if (signal?.aborted) throw new Error("INGESTION_CANCELLED");
     const apiKey = await db.getUserApiKey(ownerId, process.env.NEW_API_MANAGED_KEYS !== "0");
     if (!apiKey) throw new Error("EMBEDDING_CREDENTIAL_REQUIRED");
+    const cacheKey = createHash("sha256").update(`${ownerId}\0${profile.providerRoute}\0${apiKey}`).digest("hex");
     const headers = { Authorization: `Bearer ${apiKey}` };
     const get = async <T>(path: string, billing = false): Promise<T> => {
+      const request = async () => {
       const response = await fetch(new URL(path, profile.providerRoute), { headers, signal: signal && !billing ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error("EMBEDDING_PREFLIGHT_FAILED");
+      if (!response.ok) throw Object.assign(new Error("EMBEDDING_PREFLIGHT_FAILED"), { status: response.status, stage: billing ? "receipt" : "capabilities" });
       return response.json() as Promise<T>;
+      };
+      return billing ? await receipts.get(cacheKey, request) as T : request();
     };
-    const [models, status] = await Promise.all([get<{ data?: Array<{ id: string }> }>(`${new URL(profile.providerRoute).pathname}/models`), get<{ data?: { quota_per_unit: number; usd_exchange_rate: number } }>("/api/status")]);
+    const [models, status] = await preflight.get(cacheKey, () => Promise.all([get<{ data?: Array<{ id: string }> }>(`${new URL(profile.providerRoute).pathname}/models`), get<{ data?: { quota_per_unit: number; usd_exchange_rate: number } }>("/api/status")]));
     if (!models.data?.some((model: { id: string }) => model.id === profile.modelId)) throw new Error("EMBEDDING_MODEL_UNAVAILABLE");
     const quotaUnit = status.data?.quota_per_unit; const exchangeRate = status.data?.usd_exchange_rate;
     if (typeof quotaUnit !== "number" || typeof exchangeRate !== "number" || !Number.isFinite(quotaUnit) || quotaUnit <= 0 || !Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new Error("EMBEDDING_METER_UNAVAILABLE");
@@ -31,8 +40,8 @@ export function createUserEmbedder(db: DB, profile: IndexProfile, ownerId: strin
         try {
           await client.query("BEGIN");
           const updated = await client.query("UPDATE rag_embedding_charges SET total_cost=$2 WHERE id=$1 AND total_cost IS NULL RETURNING id", [charge.id, cost]);
-          if (updated.rows.length) await client.query(`INSERT INTO usage_logs(user_id,task_id,model_id,model_type,input_count,output_count,total_cost)
-            VALUES ($1,$2,$3,'embedding',$4,0,$5)`, [ownerId, charge.task_id, charge.model_id, charge.input_tokens, cost]);
+          if (updated.rows.length) await client.query(`INSERT INTO usage_logs(user_id,task_id,model_id,model_type,input_count,output_count,total_cost,knowledge_key_id,application)
+            VALUES ($1,$2,$3,'embedding',$4,0,$5,$6,$7)`, [ownerId, charge.task_id, charge.model_id, charge.input_tokens, cost, charge.knowledge_key_id, charge.application]);
           await client.query("COMMIT");
         } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
       }
@@ -45,8 +54,8 @@ export function createUserEmbedder(db: DB, profile: IndexProfile, ownerId: strin
     const provider = new TokenhubEmbeddingProvider({ baseUrl: profile.providerRoute, apiKey, model: profile.modelId, dimensions: profile.dimensions,
       onUsage: async (count, requestId) => {
         tokens = count;
-        await db.pool.query(`INSERT INTO rag_embedding_charges(owner_id,task_id,request_id,model_id,input_tokens,quota_per_unit,exchange_rate)
-          VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(owner_id,request_id) DO NOTHING`, [ownerId, taskId ?? null, requestId ?? null, profile.modelId, count, quotaUnit, exchangeRate]);
+        await db.pool.query(`INSERT INTO rag_embedding_charges(owner_id,task_id,request_id,model_id,input_tokens,quota_per_unit,exchange_rate,knowledge_key_id,application)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(owner_id,request_id) DO NOTHING`, [ownerId, taskId ?? null, requestId ?? null, profile.modelId, count, quotaUnit, exchangeRate, attribution?.keyId ?? null, attribution?.application ?? null]);
         // Persist the receipt first; delayed gateway logs must not become zero-cost usage.
         for (let attempt = 0; attempt < 4; attempt++) {
           if (await reconcile()) return;

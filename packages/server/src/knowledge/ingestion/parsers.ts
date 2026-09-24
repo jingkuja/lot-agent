@@ -10,7 +10,12 @@ export { PARSER_VERSION } from "./version.js";
 /** Runs inside a resource-limited worker, never on the HTTP event loop. */
 export async function parseKnowledge(input: ParseInput): Promise<ParsedArtifact> {
   const blocks: ParsedBlock[] = []; const diagnostics: string[] = [];
-  const add = (block: ParsedBlock) => { if (block.text.trim()) blocks.push(block); };
+  let extracted = 0;
+  const add = (block: ParsedBlock) => {
+    extracted += block.text.length;
+    if (extracted > MAX_EXTRACTED_CHARACTERS) throw new Error("TEXT_LIMIT_EXCEEDED");
+    if (block.text.trim()) blocks.push(block);
+  };
   if ((input.bytes?.byteLength ?? 0) > 50 * 1024 * 1024) throw new Error("DOCUMENT_TOO_LARGE");
   if (input.mime === "text/plain" || input.mime === "text/markdown") {
     const text = input.content ?? new TextDecoder("utf-8", { fatal: true }).decode(input.bytes);

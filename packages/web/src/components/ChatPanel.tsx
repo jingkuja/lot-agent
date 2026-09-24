@@ -8,6 +8,9 @@ import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile } from "../api/c
 import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
 
 interface ChatPanelProps {
+  attachment?: { id: string; file: File };
+  onAttachmentConsumed?: () => void;
+  onManageKnowledge?: () => void;
   messages: DisplayMessage[];
   onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings, knowledgeBases?: KnowledgeBaseRef[]) => void;
   onStop: () => void;
@@ -70,6 +73,7 @@ function Seedance25Hint() {
 }
 
 export function ChatPanel({
+  attachment, onAttachmentConsumed, onManageKnowledge,
   messages,
   onSend,
   onStop,
@@ -134,6 +138,9 @@ export function ChatPanel({
       {isEmpty && mode === "video" && <Seedance25Hint />}
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
       <InputBox
+        attachment={attachment}
+        onAttachmentConsumed={onAttachmentConsumed}
+        onManageKnowledge={onManageKnowledge}
         onSend={onSend}
         onStop={onStop}
         disabled={isStreaming}

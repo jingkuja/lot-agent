@@ -26,6 +26,9 @@ export interface InputBoxHandle {
 }
 
 interface InputBoxProps {
+  attachment?: { id: string; file: File };
+  onAttachmentConsumed?: () => void;
+  onManageKnowledge?: () => void;
   onSend?: (
     content: string,
     files: PickedFile[],
@@ -76,6 +79,7 @@ const SUPPORTED_TYPES: { label: string; exts: string }[] = [
 ];
 
 export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox({
+  attachment, onAttachmentConsumed, onManageKnowledge,
   onSend,
   onStop,
   disabled = false,
@@ -177,7 +181,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   }, []);
   useEffect(() => revokeAll, [revokeAll]);
 
-  const addFiles = useCallback((picked: FileList | null) => {
+  const addFiles = useCallback((picked: FileList | File[] | null) => {
     if (!picked) return;
     const incoming = Array.from(picked);
     setFiles((prev) => {
@@ -198,6 +202,28 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       }
     }
   }, [maxFiles, mode]);
+
+  const consumedAttachment = useRef("");
+  const [attachmentError, setAttachmentError] = useState("");
+  useEffect(() => {
+    if (!attachment || attachment.id === consumedAttachment.current) return;
+    consumedAttachment.current = attachment.id;
+    const file = attachment.file; setAttachmentError("");
+    if (mediaMode && !/^(image|audio|video)\//.test(file.type) || mode === "image" && !file.type.startsWith("image/")) setAttachmentError("当前助手不支持此附件类型，请切换到通用助手后选择。");
+    else if (videoMode && file.type.startsWith("audio/")) {
+      if (referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS) setAttachmentError("参考音频已满，请移除附件后重试。");
+      else setReferenceAudioFiles((old) => [...old, file]);
+    } else if (videoMode && file.type.startsWith("video/")) {
+      if (referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS) setAttachmentError("参考视频已满，请移除附件后重试。");
+      else setReferenceVideoFiles((old) => [...old, file]);
+    } else if (contractMode) {
+      if (!oldContractFile) setOldContractFile(file);
+      else if (!newContractFile) setNewContractFile(file);
+      else setAttachmentError("新旧合同附件已齐，请移除附件后重试。");
+    } else if (files.length >= maxFiles) setAttachmentError("附件数量已满，请移除附件后重试。");
+    else addFiles([file]);
+    onAttachmentConsumed?.();
+  }, [attachment, onAttachmentConsumed, onManageKnowledge, addFiles, mode, mediaMode, videoMode, contractMode, files.length, maxFiles, oldContractFile, newContractFile, referenceAudioFiles.length, referenceVideoFiles.length]);
 
   const removeFile = useCallback((idx: number) => {
     setFiles((prev) => {
@@ -337,6 +363,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   return (
     <div className={`input-box${embedded ? " input-box--embedded" : ""}`}>
+      {attachmentError && <p className="input-modal-hint" role="alert">{attachmentError}</p>}
       {!mediaMode && files.some((f) => f.type.startsWith("image/")) && (
         <div className="input-modal-hint" role="note">
           <span aria-hidden>🖼️</span>
@@ -858,6 +885,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           onConfirm={onKnowledgeBasesChange}
           onClose={() => setKnowledgeOpen(false)}
           onRetry={() => void loadKnowledgeBases()}
+          onManage={onManageKnowledge ? () => { setKnowledgeOpen(false); onManageKnowledge(); } : undefined}
         />
       )}
     </div>

@@ -1,3 +1,7 @@
+import { KnowledgeKeys } from "./knowledge/access/keys.js";
+import { RedisKnowledgeLimiter } from "./knowledge/access/limiter.js";
+import { createKnowledgeAccessRoutes } from "./knowledge/access/routes.js";
+import { KnowledgeMaterials } from "./knowledge/materials.js";
 import { KnowledgeRetriever } from "./knowledge/retrieval.js";
 import { indexProfile } from "./knowledge/ingestion/profile.js";
 import { createUserEmbedder } from "./knowledge/ingestion/runtime.js";
@@ -335,9 +339,16 @@ async function main() {
     app.use("/api/rag/manage/*", authMw);
     app.on("POST", "/api/rag/manage/uploads", uploadRateLimit);
     const profile = indexProfile(process.env.OPENAI_BASE_URL ?? "https://tokenhub.wetok.ai/v1");
-    const retriever = process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? new KnowledgeRetriever(service.db.pool, profile, (owner) => createUserEmbedder(service.db, profile, owner)) : undefined;
-    app.route("/api/rag/manage", createKnowledgeManageRoutes(repository, storage, retriever));
+    const retriever = process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? new KnowledgeRetriever(service.db.pool, profile, (owner, selectedProfile) => createUserEmbedder(service.db, selectedProfile, owner)) : undefined;
+    app.route("/api/rag/manage", createKnowledgeManageRoutes(repository, storage, retriever, new KnowledgeMaterials(repository, storage, resolve(ROOT, "data"))));
     app.route("/api/rag/preview", createKnowledgePreviewRoutes(repository, storage));
+    if (process.env.KNOWLEDGE_EXTERNAL_ENABLED === "1" && retriever) {
+      const keys = new KnowledgeKeys(service.db.pool);
+      const external = new KnowledgeRetriever(service.db.pool, profile,
+        (owner, selectedProfile, scope) => createUserEmbedder(service.db, selectedProfile, owner, undefined, scope),
+        (scope, request) => keys.authorize(scope, request));
+      app.route("/api/rag/v1", createKnowledgeAccessRoutes(keys, external, storage, new RedisKnowledgeLimiter(service.redis)));
+    }
   }
   app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
 

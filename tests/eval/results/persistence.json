@@ -1,0 +1,8 @@
+{
+  "finished": "2026-09-24T03:12:31.003Z",
+  "existingContainer": "postgres",
+  "newContainers": 0,
+  "databaseRowPersisted": true,
+  "hostPrivateFilePersisted": true,
+  "schemaVersion": 29
+}

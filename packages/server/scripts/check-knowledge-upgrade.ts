@@ -1,0 +1,33 @@
+import "../src/load-env.js";
+import pg from "pg";
+import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { runMigrations } from "../src/db/migration-runner.js";
+import { migrations } from "../src/db/migrations/index.js";
+import { assertKnowledgeJobsReady } from "../src/knowledge/ingestion/outbox.js";
+if (!process.argv.includes("--local") || !["localhost","127.0.0.1","::1"].includes(process.env.PG_HOST ?? "localhost")) throw new Error("Local check only");
+const config = { host: process.env.PG_HOST, port: Number(process.env.PG_PORT ?? 5432), user: process.env.PG_USER, password: process.env.PG_PASSWORD, database: process.env.PG_DATABASE };
+const source = new pg.Pool(config); const name = `lot_rag_upgrade_${randomUUID().replaceAll("-","")}`; let target: pg.Pool | undefined; let created = false;
+try {
+  await source.query(`CREATE DATABASE "${name}" TEMPLATE template0`); created = true; target = new pg.Pool({ ...config, database: name });
+  await runMigrations(target, migrations.filter((m) => m.version <= 23));
+  const user = randomUUID(), conversation = randomUUID(), message = randomUUID(), task = randomUUID(), asset = randomUUID();
+  await target.query("INSERT INTO users(id,name) VALUES($1,'upgrade fixture')",[user]);
+  await target.query("INSERT INTO conversations(id,user_id,title,agent_id,metadata) VALUES($1,$2,'legacy chat','general',$3)",[conversation,user,JSON.stringify({ knowledgeBases:[{id:"legacy-library",name:"legacy"}] })]);
+  await target.query("INSERT INTO messages(id,conversation_id,role,content) VALUES($1,$2,'assistant','legacy answer')",[message,conversation]);
+  await target.query("INSERT INTO tasks(id,user_id,type,status,input) VALUES($1,$2,'image.generate','succeeded','{}')",[task,user]);
+  await target.query("INSERT INTO assets(id,user_id,task_id,type,url,storage_key,mime) VALUES($1,$2,$3,'image','/static/assets/fixture.png','fixture.png','image/png')",[asset,user,task]);
+  await target.query("INSERT INTO usage_logs(user_id,task_id,model_id,model_type,input_count,output_count,total_cost) VALUES($1,$2,'fixture-image','image',1,1,0.25)",[user,task]);
+  let gated = false; try { await assertKnowledgeJobsReady(target); } catch { gated = true; } if (!gated) throw new Error("Old schema was accepted by worker");
+  await runMigrations(target,migrations.filter((m) => m.version <= 28));
+  gated = false; try { await assertKnowledgeJobsReady(target); } catch { gated = true; } if (!gated) throw new Error("Schema 28 incorrectly accepted for schema-29 billing");
+  await runMigrations(target,migrations); await runMigrations(target,migrations); await assertKnowledgeJobsReady(target);
+  const row = (await target.query("SELECT c.metadata,m.content,t.status,a.storage_key,u.total_cost FROM conversations c JOIN messages m ON m.conversation_id=c.id JOIN tasks t ON t.user_id=c.user_id JOIN assets a ON a.task_id=t.id JOIN usage_logs u ON u.task_id=t.id WHERE c.id=$1",[conversation])).rows[0];
+  if (row.content !== "legacy answer" || row.status !== "succeeded" || row.storage_key !== "fixture.png" || Number(row.total_cost) !== .25 || row.metadata.knowledgeBases[0].id !== "legacy-library") throw new Error("Legacy data changed");
+  const vector = (await target.query("SELECT extversion FROM pg_extension WHERE extname='vector'")).rows[0]?.extversion;
+  const report = { finished:new Date().toISOString(), baselineVersion:23, upgradedVersion:29, freshDatabase:true, existingPG:true, newContainers:0, consumerRejects23And28:true, migrationsIdempotent:true, legacyChatGenerationAssetBillingUnchanged:true, vector };
+  const root=fileURLToPath(new URL("../../../",import.meta.url)); await mkdir(resolve(root,"tests/eval/results"),{recursive:true}); await writeFile(resolve(root,"tests/eval/results/upgrade.json"),JSON.stringify(report,null,2));
+  console.log(JSON.stringify(report));
+} finally { await target?.end(); if(created) await source.query(`DROP DATABASE "${name}"`); await source.end(); }

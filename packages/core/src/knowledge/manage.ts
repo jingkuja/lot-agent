@@ -4,7 +4,7 @@ const ids = z.array(uuid).max(10).refine((value) => new Set(value).size === valu
 const tags = z.array(z.string().trim().min(1).max(100)).max(20).refine((value) => new Set(value).size === value.length).default([]);
 const description = z.string().max(5000).default("");
 const title = z.string().trim().min(1).max(255).refine((value) => !/[\x00-\x1f\x7f/\\]/.test(value));
-export const KnowledgeCollectionInputSchema = z.object({ name: z.string().trim().min(1).max(100), description: z.string().max(2000).default("") }).strict();
+export const KnowledgeCollectionInputSchema = z.object({ name: z.string().trim().min(1).max(100), description: z.string().max(2000).default(""), tags }).strict();
 export const KnowledgeCollectionUpdateSchema = KnowledgeCollectionInputSchema.extend({ version: z.number().int().positive() });
 export const KnowledgeItemInputSchema = z.object({
   title, sourceType: z.enum(["note", "bookmark"]), description,
@@ -23,3 +23,7 @@ export const KnowledgeItemUpdateSchema = z.object({
   content: z.string().max(200_000).optional(),
   sourceUrl: z.string().max(2000).url().refine((value) => ["http:", "https:"].includes(new URL(value).protocol)).optional(),
 }).strict();
+
+export const KnowledgeBulkMembershipSchema = z.object({ itemIds: z.array(uuid).min(1).max(100).refine((ids) => new Set(ids).size === ids.length), collectionIds: z.array(uuid).min(1).max(10).refine((ids) => new Set(ids).size === ids.length), add: z.boolean() }).strict();
+
+export const KnowledgeArchiveSchema = KnowledgeUploadMetadataSchema.extend({ assetId: uuid });

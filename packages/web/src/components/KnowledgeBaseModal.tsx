@@ -9,6 +9,7 @@ interface KnowledgeBaseModalProps {
   onConfirm: (items: KnowledgeBaseRef[]) => void;
   onClose: () => void;
   onRetry: () => void;
+  onManage?: () => void;
 }
 
 const MAX_SELECTED = 5;
@@ -21,11 +22,12 @@ export function KnowledgeBaseModal({
   onConfirm,
   onClose,
   onRetry,
+  onManage,
 }: KnowledgeBaseModalProps) {
   const [selectedIds, setSelectedIds] = useState(() => new Set(selected.map((item) => item.id)));
   const selectedCount = selectedIds.size;
   const selectedItems = useMemo(
-    () => items.filter((item) => selectedIds.has(item.id)).map(({ id, name }) => ({ id, name })),
+    () => items.filter((item) => selectedIds.has(item.id)).map(({ id, name, source }) => ({ id, name, source })),
     [items, selectedIds]
   );
 
@@ -46,6 +48,7 @@ export function KnowledgeBaseModal({
           <button className="agent-center-close" type="button" onClick={onClose} aria-label="关闭">×</button>
         </div>
         <div className="knowledge-modal-body">
+          {onManage && <button type="button" onClick={onManage}>管理个人知识库</button>}
           {loading && <div className="knowledge-modal-state">正在加载知识库…</div>}
           {!loading && error && (
             <div className="knowledge-modal-state knowledge-modal-error">

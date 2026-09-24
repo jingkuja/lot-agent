@@ -74,7 +74,7 @@ describe("conversation knowledge-base persistence", () => {
     expect(response.status).toBe(200);
     await response.text();
 
-    expect(service.resolveKnowledgeBases).toHaveBeenCalledWith("u1", ["kb1"]);
+    expect(service.resolveKnowledgeBases).toHaveBeenCalledWith("u1", ["kb1"], "remote");
     expect(service.streamAgentResponse.mock.calls[0][6]).toEqual({
       modelId: undefined,
       knowledgeBases: [{ id: "kb1", name: "知识库 kb1" }],
@@ -82,6 +82,12 @@ describe("conversation knowledge-base persistence", () => {
     expect(service.db.mergeConversationMetadata).not.toHaveBeenCalled();
   });
 
+  it("preserves explicit local source when resending the same selected IDs", async () => {
+    const service = fakeService({ knowledgeBases: [{ id: "kb1", name: "Local", source: "local" }] });
+    const response = await app(service).request("/conversations/c1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "继续", knowledgeBaseIds: ["kb1"] }) });
+    await response.text();
+    expect(service.resolveKnowledgeBases).toHaveBeenCalledWith("u1", ["kb1"], "local");
+  });
   it("treats an explicit empty selection as manual removal", async () => {
     const service = fakeService({
       knowledgeBases: [{ id: "kb1", name: "已保存名称" }],

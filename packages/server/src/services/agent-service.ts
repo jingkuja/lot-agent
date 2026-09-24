@@ -1,3 +1,6 @@
+import { createLocalKnowledgeService } from "../knowledge/local-service.js";
+import { FactAwareMemory } from "../knowledge/profile/memory.js";
+import { KnowledgeFacts } from "../knowledge/profile/repository.js";
 import { createKnowledgeModule, type KnowledgeConfig, type KnowledgeModule } from "../knowledge/module.js";
 import { KnowledgeError } from "../knowledge/errors.js";
 import type { KnowledgeService } from "@lot-agent/core";
@@ -344,8 +347,8 @@ export class AgentService {
   private traceRecorderFactory!: (modelId?: string, provider?: string) => TraceRecorder;
 
   constructor(config: ServiceConfig) {
-    this.knowledge = createKnowledgeModule(config.knowledge, config.knowledgeService);
     this.db = new DB(config.db);
+    this.knowledge = createKnowledgeModule(config.knowledge, config.knowledgeService ?? (config.knowledge?.source === "local" ? createLocalKnowledgeService(this.db) : undefined));
     this.traceManager = new TraceManager();
     this.traceManager.addSink(new ConsoleSink());
     this.toolRegistry = new ToolRegistry();
@@ -829,7 +832,7 @@ export class AgentService {
     if (this.knowledge.source === "local") {
       const collections = await this.knowledge.service.listCollections(userId);
       return collections.map((item) => ({
-        id: item.id, name: item.name, description: item.description,
+        id: item.id, name: item.name, description: item.description, source: "local" as const,
         documentCount: item.storedCount, availableDocumentCount: item.searchableCount,
       }));
     }
@@ -838,18 +841,25 @@ export class AgentService {
 
   async createKnowledgeBaseLink(userId: string): Promise<string> {
     if (this.knowledge.source === "local") {
-      throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "内置知识管理入口尚未启用");
+      return "/?knowledge=1";
     }
     return this.ragClient.createKnowledgeBaseLink(await this.ragIdentity(userId));
   }
 
-  async resolveKnowledgeBases(userId: string, ids: string[]): Promise<KnowledgeBaseRef[]> {
+  async resolveKnowledgeBases(userId: string, ids: string[], source?: "remote" | "local"): Promise<KnowledgeBaseRef[]> {
     if (ids.length === 0) return [];
+    if (source && source !== this.knowledge.source) {
+      if (source !== "remote" || this.knowledge.source !== "local") throw new Error("知识库来源已变化，请重新选择");
+      const mapped = await this.db.pool.query("SELECT legacy_id,collection_id FROM rag_legacy_collection_mappings WHERE owner_id=$1 AND legacy_id=ANY($2::text[])", [userId, ids]);
+      const mapping = new Map(mapped.rows.map((row) => [row.legacy_id, row.collection_id]));
+      if (ids.some((id) => !mapping.has(id))) throw new Error("旧知识库尚未映射，请重新选择本地知识库");
+      ids = ids.map((id) => mapping.get(id)!);
+    }
     const available = await this.listKnowledgeBases(userId);
     const byId = new Map(available.map((item) => [item.id, item]));
     const resolved = ids.map((id) => byId.get(id)).filter((item): item is KnowledgeBase => !!item);
     if (resolved.length !== ids.length) throw new Error("选择的知识库不存在或无权访问");
-    return resolved.map(({ id, name }) => ({ id, name }));
+    return resolved.map(({ id, name }) => ({ id, name, source: this.knowledge.source }));
   }
 
   private async resolveDigitalEmployeeLLM(
@@ -977,9 +987,13 @@ export class AgentService {
     query: string
   ): Promise<RagRecord[]> {
     if (this.knowledge.source === "local") {
-      // S3 will consume versioned evidence directly. Do not discard citations by
-      // adapting local results to the legacy RagRecord format in the meantime.
-      throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "内置知识会话检索尚未启用");
+      if (knowledgeBases.some((base) => base.source !== "local")) throw new KnowledgeError("INVALID_REQUEST", 400, "旧知识库尚未映射，请重新选择本地知识库");
+      const ids = knowledgeBases.map((base) => base.id);
+      const result = await this.knowledge.service.retrieve({ ownerId: userId, callerKind: "internal", permission: "retrieval:read", collectionIds: ids },
+        { query, collectionIds: ids, topK: 5, mode: "hybrid", allowDegraded: false, sourceTypes: ["document", "note"], tags: [] });
+      return result.results.map((evidence) => ({ evidence, datasetId: evidence.collectionIds[0],
+        datasetName: knowledgeBases.filter((base) => evidence.collectionIds.includes(base.id)).map((base) => base.name).join("、"),
+        segmentId: evidence.chunkId, documentName: evidence.title, content: evidence.content, answer: "", score: evidence.score.value }));
     }
     return this.ragClient.retrieve(
       await this.ragIdentity(userId),
@@ -1210,7 +1224,8 @@ export class AgentService {
     // Fresh per-request memory store — ephemeral/session state is request-scoped,
     // so concurrent users/sessions never clobber each other.
     const memory = new AgentMemoryStore({
-      persistent: this.pgAdapter,
+      persistent: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1" && def.id !== "digital_employee"
+        ? new FactAwareMemory(this.pgAdapter, new KnowledgeFacts(this.db.pool)) : this.pgAdapter,
       userId: userId ?? "default",
       sessionBackend: this.sessionBackend,
       conversationId,
@@ -1234,12 +1249,15 @@ export class AgentService {
       memory,
     };
 
+    let knowledgeSources: import("@lot-agent/core").KnowledgeEvidence[] = [];
     if (opts?.knowledgeBases?.length && userId) {
       const rewrittenQuery = await this.rewriteKnowledgeQuery(userMessage, {
         userId,
         modelId: opts.modelId,
       });
       const records = await this.retrieveKnowledge(userId, opts.knowledgeBases, rewrittenQuery);
+      knowledgeSources = records.flatMap((record) => record.evidence ? [record.evidence] : []);
+      if (knowledgeSources.length) yield { type: "knowledge_sources", sources: knowledgeSources };
       context.retrievalNamespace = `rag:${userId}`;
       context.retriever = {
         retrieve: async () => [
@@ -1257,9 +1275,10 @@ export class AgentService {
             text:
               `[知识库: ${record.datasetName}]` +
               `${record.documentName ? ` [文档: ${record.documentName}]` : ""}` +
-              ` [相关度: ${record.score.toFixed(4)}]\n${record.content}` +
+              ` [排序分数: ${record.score.toFixed(4)}]` +
+              `${record.evidence ? ` [证据: ${JSON.stringify({ itemId: record.evidence.itemId, revisionId: record.evidence.revisionId, chunkId: record.evidence.chunkId, citation: record.evidence.citation })}]` : ""}\n${record.content}` +
               `${record.answer ? `\n参考答案: ${record.answer}` : ""}`,
-            meta: record,
+            meta: { ...record },
           })),
         ],
       };
@@ -1364,7 +1383,8 @@ export class AgentService {
         conversationId,
         finalContent,
         currentToolCalls,
-        currentThinking || undefined
+        currentThinking || undefined,
+        knowledgeSources.length ? knowledgeSources : undefined
       );
 
       // Fire-and-forget: extract durable user memory from this turn in the

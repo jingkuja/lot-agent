@@ -192,6 +192,7 @@ export interface StoredPublishRecord {
 }
 
 export interface DBConfig {
+  max?: number;
   host: string;
   port: number;
   user: string;
@@ -236,7 +237,7 @@ export class DB {
       user: cfg.user,
       password: cfg.password,
       database: cfg.database,
-      max: 20,
+      max: cfg.max ?? 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
     });

@@ -90,6 +90,6 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("published knowledge index"
     const racing = new KnowledgeRetriever(pool, profile, () => async () => { await repo.deleteItem(owner, a.item.id, 1); return { vector, tokens: 1 }; });
     const req = request({ mode: "semantic" }); expect((await racing.retrieve(scope(req), req)).results.some((row) => row.itemId === a.item.id)).toBe(false);
     const changed = new KnowledgeRetriever(pool, indexProfile("https://new-route.invalid/v1"), () => embed);
-    await expect(changed.retrieve(scope(req), req)).rejects.toThrow("索引规则已变化");
+    expect((await changed.retrieve(scope(req), req)).modeUsed).toBe("semantic"); // Owner profile stays pinned until explicit cutover.
   });
 });

@@ -1,0 +1,14 @@
+{
+  "finished": "2026-09-24T03:15:10.471Z",
+  "target": "/var/folders/jg/lz1pnn694_1dbn_l77vdlw0m0000gn/T/lot-clean-release-CAgqif",
+  "source": "current tracked + nonignored untracked files; no data, personal config or .env",
+  "lockedInstall": true,
+  "offline": true,
+  "installScripts": false,
+  "build": true,
+  "testSummary": [
+    " Test Files  202 passed | 10 skipped (212)",
+    "      Tests  1378 passed | 45 skipped (1423)"
+  ],
+  "node": "v22.14.0"
+}

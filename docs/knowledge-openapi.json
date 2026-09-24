@@ -1,0 +1,1220 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Lot Knowledge API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/api/rag/v1"
+    }
+  ],
+  "security": [
+    {
+      "KnowledgeKey": []
+    }
+  ],
+  "paths": {
+    "/collections": {
+      "get": {
+        "summary": "List granted live collections",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "description"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "request_id",
+                    "data",
+                    "next_cursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid/expired/revoked key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Owner quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or invisible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "60/min or 5 concurrent exceeded; Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; no automatic fallback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "60-second deadline exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/retrieval": {
+      "post": {
+        "summary": "Retrieve only explicitly granted collections",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid/expired/revoked key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Owner quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or invisible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "60/min or 5 concurrent exceeded; Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; no automatic fallback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "60-second deadline exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string",
+                      "enum": [
+                        "document",
+                        "note",
+                        "bookmark",
+                        "image",
+                        "audio",
+                        "video",
+                        "profile_fact"
+                      ]
+                    },
+                    "revision_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "source_type",
+                    "revision_id",
+                    "request_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid/expired/revoked key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Owner quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or invisible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "60/min or 5 concurrent exceeded; Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; no automatic fallback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "60-second deadline exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/{id}/content": {
+      "get": {
+        "description": "id is the knowledge item UUID, not the legacy asset ID. Requires assets:read. Current published revision only. Range is reauthorized on every request.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private original bytes"
+          },
+          "206": {
+            "description": "Partial content with Content-Range"
+          },
+          "416": {
+            "description": "Invalid byte range"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid/expired/revoked key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Owner quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or invisible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "60/min or 5 concurrent exceeded; Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; no automatic fallback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "60-second deadline exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "description": "id is the knowledge item UUID, not the legacy asset ID. Requires assets:read. Current published revision only. Range is reauthorized on every request.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private original bytes"
+          },
+          "206": {
+            "description": "Partial content with Content-Range"
+          },
+          "416": {
+            "description": "Invalid byte range"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid/expired/revoked key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Owner quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or invisible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "60/min or 5 concurrent exceeded; Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; no automatic fallback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "60-second deadline exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile": {
+      "get": {
+        "description": "Requires profile:read; only current explicitly shared facts. Does not return history or suggestions.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keys",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "1–50 comma-separated canonical field names"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean",
+                              "array"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "value_type": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value",
+                          "value_type",
+                          "category",
+                          "version"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "request_id",
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid/expired/revoked key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Owner quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or invisible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "60/min or 5 concurrent exceeded; Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; no automatic fallback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "60-second deadline exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "KnowledgeKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Independent lotk_ knowledge key; never a login token or TokenHub key"
+      }
+    },
+    "schemas": {
+      "RetrievalRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "collection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": true
+          },
+          "top_k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "keyword",
+              "semantic",
+              "hybrid"
+            ],
+            "default": "hybrid"
+          },
+          "allow_degraded": {
+            "type": "boolean",
+            "default": false
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "source_types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "document",
+                    "note",
+                    "bookmark",
+                    "image",
+                    "audio",
+                    "video",
+                    "profile_fact"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 7,
+                "default": [
+                  "document",
+                  "note"
+                ]
+              },
+              "tags": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "query",
+          "collection_ids"
+        ],
+        "additionalProperties": false
+      },
+      "Evidence": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chunk_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": true
+          },
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "document",
+              "note",
+              "bookmark",
+              "image",
+              "audio",
+              "video",
+              "profile_fact"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "extracted_text",
+              "manual_description",
+              "confirmed_fact",
+              "ocr",
+              "transcript",
+              "generated_description"
+            ]
+          },
+          "score": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "rrf",
+                  "cosine",
+                  "ts_rank_cd"
+                ]
+              },
+              "value": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          "citation": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "pdf"
+                  },
+                  "page": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "page"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "text"
+                  },
+                  "startLine": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "endLine": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "startLine",
+                  "endLine"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "docx"
+                  },
+                  "paragraph": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "heading": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "paragraph"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "media"
+                  },
+                  "startSeconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "endSeconds": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "kind",
+                  "startSeconds"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "item_id",
+          "revision_id",
+          "chunk_id",
+          "collection_ids",
+          "title",
+          "content",
+          "source_type",
+          "origin",
+          "score"
+        ],
+        "additionalProperties": false
+      },
+      "RetrievalResult": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode_used": {
+            "type": "string",
+            "enum": [
+              "keyword",
+              "semantic",
+              "hybrid"
+            ]
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "request_id",
+          "mode_used",
+          "degraded",
+          "results",
+          "warnings"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "request_id",
+          "error"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

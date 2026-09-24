@@ -120,6 +120,12 @@ importers:
       '@types/pg':
         specifier: ^8.0.0
         version: 8.20.0
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+      ajv-formats:
+        specifier: 3.0.1
+        version: 3.0.1(ajv@8.20.0)
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)
@@ -4636,6 +4642,14 @@ snapshots:
     optionalDependencies:
       vite: 5.4.21(@types/node@22.19.19)
 
+  '@vitest/mocker@2.1.9(vite@5.4.21(@types/node@25.9.4))':
+    dependencies:
+      '@vitest/spy': 2.1.9
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 5.4.21(@types/node@25.9.4)
+
   '@vitest/pretty-format@2.1.9':
     dependencies:
       tinyrainbow: 1.2.0
@@ -7364,7 +7378,7 @@ snapshots:
   vitest@2.1.9(@types/node@25.9.4):
     dependencies:
       '@vitest/expect': 2.1.9
-      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@22.19.19))
+      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@25.9.4))
       '@vitest/pretty-format': 2.1.9
       '@vitest/runner': 2.1.9
       '@vitest/snapshot': 2.1.9

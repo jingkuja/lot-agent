@@ -1,0 +1,12 @@
+{
+  "finished": "2026-09-24T03:04:36.051Z",
+  "baselineVersion": 23,
+  "upgradedVersion": 29,
+  "freshDatabase": true,
+  "existingPG": true,
+  "newContainers": 0,
+  "consumerRejects23And28": true,
+  "migrationsIdempotent": true,
+  "legacyChatGenerationAssetBillingUnchanged": true,
+  "vector": "0.8.6"
+}

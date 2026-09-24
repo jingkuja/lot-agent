@@ -26,3 +26,7 @@ design/
 
 # Private knowledge originals must never be committed or served as static files.
 data/knowledge/
+
+# Backups contain credentials/business data; evaluation vector caches are reproducible.
+data/backups/
+tests/eval/results/vectors-*.json

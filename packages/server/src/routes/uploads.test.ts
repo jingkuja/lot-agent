@@ -54,11 +54,11 @@ describe("POST /uploads", () => {
     const app = appFor(service);
     const res = await app.request("/", {
       method: "POST",
-      headers: { "content-length": String(22 * 1024 * 1024) },
+      headers: { "content-length": String(152 * 1024 * 1024) },
       body: fileBody("note.txt", "text/plain", new Uint8Array([104, 105])),
     });
     expect(res.status).toBe(413);
-    expect(await res.json()).toEqual({ error: "payload too large" });
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("payload too large") });
     // Rejected before parseBody ever ran, so no asset was created.
     expect(service.created.length).toBe(0);
   });

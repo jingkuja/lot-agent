@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import { agentEventToSse } from "./sse-adapter.js";
 
 describe("agentEventToSse", () => {
+  it("retains source identities and citation positions through SSE", () => {
+    const evidence = { itemId: "item", revisionId: "revision", chunkId: "chunk", collectionIds: ["collection"], title: "source", content: "reference", sourceType: "note" as const, origin: "extracted_text" as const, score: { kind: "rrf" as const, value: 0.03 }, citation: { kind: "text" as const, startLine: 2, endLine: 5 } };
+    expect(agentEventToSse({ type: "knowledge_sources", sources: [evidence] })).toEqual({ type: "knowledge_sources", sources: [evidence] });
+  });
   it("maps text event", () => {
     expect(agentEventToSse({ type: "text", content: "hi" })).toEqual({
       type: "text",

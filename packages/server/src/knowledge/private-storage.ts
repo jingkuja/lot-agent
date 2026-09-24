@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { link, mkdir, stat, unlink } from "node:fs/promises";
+import { link, mkdir, stat, unlink, readdir, lstat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -53,7 +53,7 @@ export class LocalKnowledgeStorage implements PrivateKnowledgeStorage {
     const limit = Math.min(cap, this.maxBytes ?? cap);
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     await mkdir(resolve(this.root, ".staging"), { recursive: true, mode: 0o700 });
-    const stagingKey = `.staging/${randomUUID()}`;
+    const stagingKey = `.staging/${ownerId}-${randomUUID()}`;
     const stagingPath = resolve(this.root, stagingKey);
     const hash = createHash("sha256");
     let size = 0;
@@ -95,6 +95,20 @@ export class LocalKnowledgeStorage implements PrivateKnowledgeStorage {
     } finally {
       await unlink(stagingPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
     }
+  }
+
+  async usage(ownerId: string): Promise<number> {
+    if (!UUID.test(ownerId)) throw new KnowledgeError("INVALID_REQUEST", 400, "资料归属无效");
+    let bytes = 0;
+    for (const folder of [ownerId, ".staging"]) {
+      const entries = await readdir(resolve(this.root, folder)).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
+      for (const name of entries) {
+        if (folder === ".staging" && !name.startsWith(ownerId + "-")) continue;
+        const info = await lstat(resolve(this.root, folder, name)).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+        if (info?.isFile()) bytes += info.size;
+      }
+    }
+    return bytes;
   }
 
   open(key: string, range?: { start: number; end: number }) {

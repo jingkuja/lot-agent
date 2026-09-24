@@ -14,6 +14,7 @@ export interface GenerationView {
 }
 
 export interface DisplayMessage {
+  knowledgeSources?: import("../modules/knowledge/api.js").Evidence[];
   id: string;
   dbId?: string;
   role: "user" | "assistant" | "tool";

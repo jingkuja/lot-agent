@@ -66,6 +66,11 @@ function upstreamHandler(
     }, 30);
     return;
   }
+  if (req.url?.startsWith("/api/rag/")) {
+    if (req.headers.authorization !== "Bearer knowledge-fixture" && !req.url.startsWith("/api/rag/preview/")) { res.writeHead(401); res.end(); return; }
+    if (req.headers.range === "bytes=1-3") { res.writeHead(206, { "content-range": "bytes 1-3/5", "accept-ranges": "bytes", "cache-control": "no-store" }); res.end("bcd"); return; }
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify({ path: req.url })); return;
+  }
   if (req.url?.startsWith("/static/assets/")) {
     res.writeHead(200, { "content-type": "image/png" });
     res.end(Buffer.from([1, 2, 3]));
@@ -258,5 +263,19 @@ describe("setup flow", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("knowledge forwarding", () => {
+  it("preserves independent bearer authorization, preview query and private Range responses", async () => {
+    for (const path of ["/api/rag/manage/collections", "/api/rag/v1/collections"]) {
+      expect((await fetch(`${base}${path}`)).status).toBe(401);
+      const response = await fetch(`${base}${path}`, { headers: { Authorization: "Bearer knowledge-fixture" } });
+      expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toBe("no-store");
+    }
+    const ranged = await fetch(`${base}/api/rag/v1/assets/fixture/content`, { headers: { Authorization: "Bearer knowledge-fixture", Range: "bytes=1-3" } });
+    expect(ranged.status).toBe(206); expect(ranged.headers.get("content-range")).toBe("bytes 1-3/5"); expect(await ranged.text()).toBe("bcd");
+    const preview = await fetch(`${base}/api/rag/preview/fixture?token=synthetic-ticket`);
+    expect(await preview.json()).toEqual({ path: "/api/rag/preview/fixture?token=synthetic-ticket" });
   });
 });

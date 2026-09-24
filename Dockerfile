@@ -52,7 +52,7 @@ COPY assets assets
 
 # Runtime data dir (assets/documents/uploads). Mounted as a named volume in
 # compose; chown so the unprivileged `node` user can write to the empty volume.
-RUN mkdir -p data/assets data/documents data/uploads data/tmp \
+RUN mkdir -p data/assets data/documents data/uploads data/knowledge data/tmp \
  && chown -R node:node /app/data
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

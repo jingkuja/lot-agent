@@ -149,6 +149,7 @@ export function useChat(
         role,
         content: m.content,
         thinking: parsedMeta?.thinking as string | undefined,
+        knowledgeSources: parsedMeta?.knowledgeSources as DisplayMessage["knowledgeSources"],
         attachments:
           role === "user"
             ? (parsedMeta?.attachments as UploadedAttachment[] | undefined)
@@ -298,6 +299,10 @@ export function useChat(
         };
 
         api.sendMessage(cid, content, async (event) => {
+        if (event.type === "knowledge_sources" && event.sources) {
+          assistantMsg = { ...assistantMsg, knowledgeSources: event.sources };
+          if (isCurrent()) dispatch({ type: "assistant_upserted", message: assistantMsg });
+        }
         if (event.type === "thinking" && event.content) {
           assistantMsg = {
             ...assistantMsg,

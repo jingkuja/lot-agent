@@ -302,7 +302,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     let knowledgeBases: Awaited<ReturnType<typeof service.resolveKnowledgeBases>> = [];
     if (knowledgeBaseIds.length) {
       try {
-        knowledgeBases = await service.resolveKnowledgeBases(userId, knowledgeBaseIds);
+        knowledgeBases = await service.resolveKnowledgeBases(userId, knowledgeBaseIds, (suppliedKnowledgeBaseIds === undefined || JSON.stringify(knowledgeBaseIds) === JSON.stringify(storedKnowledgeBases(conversation.metadata).map((item) => item.id))) ? (storedKnowledgeBases(conversation.metadata).every((item) => item.source === "local") ? "local" : "remote") : undefined);
       } catch (error) {
         return c.json(
           { error: error instanceof Error ? error.message : "知识库不可用" },

@@ -7,6 +7,7 @@ import type { AgentEvent } from "@lot-agent/core";
  */
 export function agentEventToSse(event: AgentEvent): Record<string, unknown> {
   switch (event.type) {
+    case "knowledge_sources": return { type: event.type, sources: event.sources };
     case "text":
       return { type: "text", content: event.content };
     case "thinking":

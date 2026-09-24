@@ -1,3 +1,5 @@
+import { KnowledgeFacts } from "../knowledge/profile/repository.js";
+import { FactAwareMemory } from "../knowledge/profile/memory.js";
 import "../load-env.js";
 import { resolve, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -322,7 +324,8 @@ async function main() {
       return { upserts: 0, deletes: 0 };
     }
 
-    const existing = await memAdapter.list(userId);
+    const facts = new KnowledgeFacts(db.pool);
+    const existing = await (process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1" ? new FactAwareMemory(memAdapter, facts) : memAdapter).list(userId);
 
     const apiKey = await db.getUserApiKey(userId, managedKeysEnabled);
     if (managedKeysEnabled && !apiKey) {
@@ -353,7 +356,8 @@ async function main() {
     }
 
     const ext = parseExtraction(raw);
-    await applyExtraction(memAdapter, userId, ext);
+    if (process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1") await facts.suggest(userId, ext, job.id);
+    else await applyExtraction(memAdapter, userId, ext);
 
     if (inputTokens + outputTokens > 0) {
       try {

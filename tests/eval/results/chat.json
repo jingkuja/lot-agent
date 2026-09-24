@@ -1,0 +1,12 @@
+{
+  "finished": "2026-09-24T03:01:01.056Z",
+  "model": "deepseek-v4-flash",
+  "source": "local",
+  "realEmbedding": true,
+  "realLLM": true,
+  "HTTPBearerSession": true,
+  "SSEStreamEnd": true,
+  "answerContainsSyntheticNonce": true,
+  "versionedCitationPersisted": true,
+  "noReplyOrCredentialsInReport": true
+}

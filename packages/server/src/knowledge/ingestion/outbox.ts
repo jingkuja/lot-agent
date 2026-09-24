@@ -4,7 +4,7 @@ import { publishPersistedJob } from "../../jobs/persisted-job.js";
 import { KNOWLEDGE_JOB_TYPE } from "./config.js";
 
 export async function assertKnowledgeJobsReady(pool: Pool): Promise<void> {
-  const { rows } = await pool.query("SELECT version FROM schema_migrations WHERE version=26");
+  const { rows } = await pool.query("SELECT version FROM schema_migrations WHERE version=29");
   if (!rows.length) throw new Error("Knowledge schema is not ready; start the server migrations first");
 }
 
