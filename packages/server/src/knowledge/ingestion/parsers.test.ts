@@ -42,3 +42,40 @@ it("preserves a DOCX beyond the old attachment cap and enforces extracted output
   expect(parsed.blocks.at(-1)?.citation).toEqual({ kind: "docx", paragraph: 350 });
   await expect(parseKnowledge({ mime: "text/plain", content: "x".repeat(2_000_001) })).rejects.toThrow("INVALID_TEXT");
 });
+it("OCRs images and keeps manual descriptions as separate evidence", async () => {
+  const bytes = new Uint8Array([1, 2, 3]);
+  const parsed = await parseKnowledge({ mime: "image/png", bytes, description: "人工说明" }, async (image) => {
+    expect(image.bytes).toEqual(bytes); return "图片文字";
+  });
+  expect(parsed.blocks).toEqual([{ text: "图片文字", origin: "ocr" }, { text: "人工说明", origin: "manual_description" }]);
+});
+it("renders only PDF pages without text and retains page numbers for OCR", async () => {
+  const doc = new PDFDocument({ autoFirstPage: false }); const buffers: Buffer[] = [];
+  const bytes = new Promise<Buffer>((resolve) => { doc.on("data", (b) => buffers.push(b)); doc.on("end", () => resolve(Buffer.concat(buffers))); });
+  doc.addPage().text("TEXT_PAGE"); doc.addPage(); doc.end();
+  const parsed = await parseKnowledge({ mime: "application/pdf", bytes: await bytes }, async (image) => {
+    expect(image.page).toBe(2); expect(image.mime).toBe("image/png"); expect(image.bytes.length).toBeGreaterThan(0); return "扫描文字";
+  });
+  expect(parsed.blocks).toEqual([expect.objectContaining({ origin: "extracted_text", citation: { kind: "pdf", page: 1 } }), { text: "扫描文字", origin: "ocr", citation: { kind: "pdf", page: 2 } }]);
+  expect(parsed.diagnostics).toEqual([]);
+});
+it("rejects an empty description instead of publishing an empty index", async () => {
+  await expect(parseKnowledge({ mime: "image/png", bytes: new Uint8Array([1]) }, async () => "")).rejects.toThrow("IMAGE_DESCRIPTION_EMPTY");
+});
+it("describes a text-free image and exposes the description for persistence and retrieval", async () => {
+  const modes: Array<string | undefined> = [];
+  const parsed = await parseKnowledge({ mime: "image/png", bytes: new Uint8Array([1]) }, async (image) => {
+    modes.push(image.mode);
+    return image.mode === "describe" ? "白色背景上的蓝色陶瓷杯，杯口朝上，手柄位于右侧。" : "";
+  });
+  expect(modes).toEqual([undefined, "describe"]);
+  expect(parsed.generatedDescription).toBe("白色背景上的蓝色陶瓷杯，杯口朝上，手柄位于右侧。");
+  expect(parsed.blocks).toEqual([{ text: parsed.generatedDescription, origin: "generated_description" }]);
+});
+it("uses an existing description for a text-free image without overwriting it or another model call", async () => {
+  let calls = 0;
+  const parsed = await parseKnowledge({ mime: "image/png", bytes: new Uint8Array([1]), description: "用户填写的产品说明" }, async () => { calls++; return ""; });
+  expect(calls).toBe(1);
+  expect(parsed.generatedDescription).toBeUndefined();
+  expect(parsed.blocks).toEqual([{ text: "用户填写的产品说明", origin: "manual_description" }]);
+});

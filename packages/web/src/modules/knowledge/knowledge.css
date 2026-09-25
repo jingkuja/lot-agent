@@ -80,6 +80,10 @@
 .knowledge-dialog input[type="checkbox"]:checked::after { content: ""; width: 7px; height: 4px; margin-top: -2px; border-left: 1.5px solid var(--text-on-accent); border-bottom: 1.5px solid var(--text-on-accent); transform: rotate(-45deg); }
 .knowledge-checkbox { display: flex !important; align-items: center; gap: 8px; }
 .knowledge-checkbox input { flex: 0 0 auto; width: auto; }
+.knowledge-scope-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.knowledge-scope-filter button { padding: 6px 16px; border-radius: 8px; }
+.knowledge-scope-filter button[aria-pressed="true"] { color: var(--accent); background: var(--bg-active); border-color: var(--accent); font-weight: 600; }
+.knowledge-scope-filter span { color: var(--text-muted); font-size: 12px; }
 .knowledge-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0 14px; }
 .knowledge-search { grid-template-columns: minmax(0, 1fr) 104px auto; align-items: end; padding: 16px; margin: 14px 0 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); }
 .knowledge-search .knowledge-checkbox { grid-column: 1 / -1; margin-top: 4px; font-size: 11px; color: var(--text-muted); }

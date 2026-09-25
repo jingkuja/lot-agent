@@ -27,13 +27,6 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [fallbackSaving, setFallbackSaving] = useState(false);
   const [fallbackError, setFallbackError] = useState(false);
-  const [tokenhubUrl, setTokenhubUrl] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    void api.getProductLinks().then((links) => { if (active) setTokenhubUrl(links.tokenhubUrl); }).catch(() => {});
-    return () => { active = false; };
-  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -105,7 +98,6 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
           </label>
         )}
         {fallbackError && <small className="brand-balance-fallback-error">设置保存失败，请重试</small>}
-        {tokenhubUrl && <a className="brand-tokenhub-link" href={tokenhubUrl} target="_blank" rel="noopener noreferrer">灵渠 AI 中转站 ↗</a>}
       </div>
 
       {detailsOpen && createPortal(

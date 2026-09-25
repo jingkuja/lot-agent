@@ -1,1 +1,1 @@
-export const PARSER_VERSION = "knowledge-parser-v1";
+export const PARSER_VERSION = "knowledge-parser-v3-image-description";

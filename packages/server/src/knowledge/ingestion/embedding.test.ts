@@ -21,3 +21,17 @@ it("does not expose upstream messages or accept a missing user key", async () =>
   const provider = new TokenhubEmbeddingProvider({ baseUrl: "https://gateway/v1", apiKey: "key", model: "m", dimensions: 2, onUsage: async () => {}, fetcher: async () => new Response("secret provider text", { status: 429 }) });
   await expect(provider.embed(["a"])).rejects.toThrow("EMBEDDING_RATE_LIMITED");
 });
+it.each([
+  [401, "EMBEDDING_AUTH_FAILED", false],
+  [403, "EMBEDDING_ACCESS_DENIED", false],
+  [404, "EMBEDDING_MODEL_UNAVAILABLE", false],
+  [400, "EMBEDDING_INVALID_REQUEST", false],
+  [429, "EMBEDDING_RATE_LIMITED", true],
+  [503, "EMBEDDING_PROVIDER_UNAVAILABLE", true],
+])("classifies HTTP %s without exposing credentials or billing a rejected call", async (status, code, retryable) => {
+  const usage = vi.fn(async () => {});
+  const provider = new TokenhubEmbeddingProvider({ baseUrl: "https://gateway/v1", apiKey: "key", model: "model", dimensions: 2, onUsage: usage,
+    fetcher: async () => new Response("private upstream API key details", { status }) });
+  await expect(provider.embed(["test"])).rejects.toMatchObject({ message: code, retryable });
+  expect(usage).not.toHaveBeenCalled();
+});

@@ -6,7 +6,7 @@ import { KnowledgeError, KnowledgeDuplicateError } from "./errors.js";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const notFound = () => new KnowledgeError("NOT_FOUND", 404, "资料或知识库不存在");
-const storedOnly = (type: string, description: string) => ["bookmark", "image", "audio", "video"].includes(type) && !description.trim();
+const storedOnly = (type: string, description: string) => ["bookmark", "audio", "video"].includes(type) && !description.trim();
 const conflict = () => new KnowledgeError("CONFLICT", 409, "资料已更新，请刷新后重试");
 export interface NewKnowledgeItem {
   title: string;

@@ -21,7 +21,17 @@ export class TokenhubEmbeddingProvider implements EmbeddingProvider {
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000),
       });
     } catch { throw new EmbeddingError("EMBEDDING_UNAVAILABLE", !signal?.aborted); }
-    if (!response.ok) throw new EmbeddingError(response.status === 429 ? "EMBEDDING_RATE_LIMITED" : "EMBEDDING_REJECTED", response.status === 429 || response.status >= 500);
+    if (!response.ok) {
+      const code = response.status === 401 ? "EMBEDDING_AUTH_FAILED"
+        : response.status === 403 ? "EMBEDDING_ACCESS_DENIED"
+        : response.status === 404 ? "EMBEDDING_MODEL_UNAVAILABLE"
+        : response.status === 400 ? "EMBEDDING_INVALID_REQUEST"
+        : response.status === 429 ? "EMBEDDING_RATE_LIMITED"
+        : response.status >= 500 ? "EMBEDDING_PROVIDER_UNAVAILABLE" : "EMBEDDING_REJECTED";
+      console.warn("[knowledge] embedding request rejected", { model: this.options.model, status: response.status, code });
+      await response.body?.cancel().catch(() => {});
+      throw new EmbeddingError(code, response.status === 429 || response.status >= 500);
+    }
     const payload = await response.json().catch(() => null) as { usage?: { total_tokens?: number; prompt_tokens?: number }; data?: Array<{ index: number; embedding: number[] }> } | null;
     const tokens = payload?.usage?.total_tokens ?? payload?.usage?.prompt_tokens;
     if (!Number.isSafeInteger(tokens) || (tokens ?? 0) <= 0) throw new EmbeddingError("EMBEDDING_USAGE_MISSING");

@@ -13,7 +13,7 @@ export function matchesCitation(block: Source["blocks"][number], hit: Evidence) 
   return block.text.includes(hit.content);
 }
 export function Diagnostics({ warnings = [] }: { warnings?: string[] }) {
-  return <>{warnings.map((warning) => <p key={warning} role="status">{/^OCR_REQUIRED_PAGE_\d+$/.test(warning) ? `第 ${warning.slice("OCR_REQUIRED_PAGE_".length)} 页需要 OCR，本次尚未索引该页内容。` : `解析提示：${warning}`}</p>)}</>;
+  return <>{warnings.map((warning) => <p key={warning} role="status">{/^OCR_REQUIRED_PAGE_\d+$/.test(warning) ? `第 ${warning.slice("OCR_REQUIRED_PAGE_".length)} 页需要 OCR，本次尚未索引该页内容。` : /^OCR_EMPTY_PAGE_\d+$/.test(warning) ? `第 ${warning.slice("OCR_EMPTY_PAGE_".length)} 页未识别到文字。` : `解析提示：${warning}`}</p>)}</>;
 }
 export function SourcePreview({ value, onClose }: { value: Preview; onClose: () => void }) {
   const sourceRef = useRef<HTMLElement>(null);

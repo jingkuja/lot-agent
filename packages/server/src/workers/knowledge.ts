@@ -1,6 +1,12 @@
 import { reconcilePendingEmbeddingReceipts } from "../knowledge/ingestion/receipts.js";
 import { activeProfile } from "../knowledge/ingestion/spaces.js";
 import "../load-env.js";
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { calcCost, type ModelConfig } from "@lot-agent/core";
+import { UsageMeter } from "../billing/meter.js";
+import { resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
+import { createUserOcr, OCR_MODEL, OCR_MAX_TOKENS } from "../knowledge/ingestion/ocr.js";
 import { resolve, dirname } from "node:path";
 import { Queue } from "bullmq";
 import { DB } from "../db/database.js";
@@ -36,6 +42,13 @@ async function main() {
     }
   }
   const root = resolve(dirname(process.argv[1]), "../../../..");
+  const rawConfig = JSON.parse(await readFile(resolve(root, "config/default.json"), "utf8")) as { models?: ModelConfig[]; modelCatalog: ModelCatalogConfig; llm?: { openai?: { baseUrl?: string } } };
+  const ocrModel: ModelConfig = rawConfig.models?.find((model) => model.id === OCR_MODEL) ?? {
+    id: OCR_MODEL, type: "llm", provider: "openai", billingUnit: "token", enabled: true,
+    ...resolvePricing(rawConfig.modelCatalog, OCR_MODEL, "llm"),
+  };
+  const ocrMeter = new UsageMeter(db, (id) => id === OCR_MODEL ? ocrModel : undefined);
+  const ocrBaseUrl = process.env.OPENAI_BASE_URL ?? rawConfig.llm?.openai?.baseUrl ?? "https://tokenhub.wetok.ai/v1";
   const parserPath = resolve(dirname(process.argv[1]), `knowledge-parser.${process.argv[1].endsWith(".ts") ? "ts" : "js"}`);
   const storage = new LocalKnowledgeStorage(resolve(root, "data/knowledge"));
   const connection = { ...knowledgeRedisOptions(), maxRetriesPerRequest: null };
@@ -51,11 +64,23 @@ async function main() {
         WHERE r.owner_id=$1 AND r.item_id=$2 AND r.id=$3`, [lease.ownerId, lease.itemId, lease.revisionId]);
       if (!rows[0]) throw new Error("REVISION_NOT_FOUND");
       const row = rows[0];
+      const ocrVersion = `${PARSER_VERSION}-${OCR_MODEL}-pages`;
+      const ocrPages = await jobs.readCheckpoint(lease, ocrVersion) as Record<string, string> | null ?? {};
+      const recognize = createUserOcr({ db, meter: ocrMeter, ownerId: lease.ownerId, taskId: lease.taskId, baseUrl: ocrBaseUrl,
+        estimatedCost: calcCost(ocrModel, { inputCount: 4096, outputCount: OCR_MAX_TOKENS }) });
       artifact = await parseIsolated(parserPath, {
         mime: row.source_type === "note" ? "text/plain" : row.source_type === "bookmark" ? "bookmark" : row.mime,
         content: row.content ?? undefined, description: row.description,
-        path: row.storage_key && row.source_type === "document" ? storage.localPath(row.storage_key) : undefined,
-      }, signal);
+        path: row.storage_key && ["document", "image"].includes(row.source_type) ? storage.localPath(row.storage_key) : undefined,
+      }, signal, 30000, async (image, ocrSignal) => {
+        const key = `${image.mode ?? "ocr"}-${image.page ?? "image"}-${createHash("sha256").update(image.bytes).digest("hex")}`;
+        if (Object.hasOwn(ocrPages, key)) return ocrPages[key];
+        if (!await jobs.heartbeat(lease, "ocr", 10)) throw new Error("INGESTION_CANCELLED");
+        const text = await recognize(image, ocrSignal);
+        ocrPages[key] = text;
+        if (!await jobs.checkpoint(lease, ocrVersion, ocrPages)) throw new Error("INGESTION_CANCELLED");
+        return text;
+      });
       if (row.source_type === "profile_fact") artifact.blocks = artifact.blocks.map((block) => ({ ...block, origin: "confirmed_fact" }));
       if (!await jobs.checkpoint(lease, PARSER_VERSION, artifact)) throw new Error("INGESTION_CANCELLED");
     }

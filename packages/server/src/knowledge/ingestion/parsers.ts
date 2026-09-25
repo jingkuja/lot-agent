@@ -1,16 +1,17 @@
+import type { RecognizeImage } from "./ocr.js";
 import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 import { MAX_EXTRACTED_CHARACTERS, textBlocks, type ParsedBlock } from "./text.js";
 
 export interface ParseInput { mime: string; bytes?: Uint8Array; content?: string; description?: string }
-export interface ParsedArtifact { blocks: ParsedBlock[]; diagnostics: string[]; parserVersion: string }
+export interface ParsedArtifact { blocks: ParsedBlock[]; diagnostics: string[]; parserVersion: string; generatedDescription?: string }
 import { PARSER_VERSION } from "./version.js";
 export { PARSER_VERSION } from "./version.js";
 
 /** Runs inside a resource-limited worker, never on the HTTP event loop. */
-export async function parseKnowledge(input: ParseInput): Promise<ParsedArtifact> {
+export async function parseKnowledge(input: ParseInput, ocr?: RecognizeImage): Promise<ParsedArtifact> {
   const blocks: ParsedBlock[] = []; const diagnostics: string[] = [];
-  let extracted = 0;
+  let extracted = 0; let generatedDescription: string | undefined;
   const add = (block: ParsedBlock) => {
     extracted += block.text.length;
     if (extracted > MAX_EXTRACTED_CHARACTERS) throw new Error("TEXT_LIMIT_EXCEEDED");
@@ -27,11 +28,21 @@ export async function parseKnowledge(input: ParseInput): Promise<ParsedArtifact>
       const info = await parser.getInfo();
       if (info.total > 500) throw new Error("TOO_MANY_PAGES");
       const parsed = await parser.getText();
+      if (ocr && parsed.pages.filter((page) => !page.text.trim()).length > 50) throw new Error("OCR_PAGE_LIMIT_EXCEEDED");
       for (const page of parsed.pages) {
-        if (!page.text.trim()) diagnostics.push(`OCR_REQUIRED_PAGE_${page.num}`);
-        add({ text: page.text, origin: "extracted_text", citation: { kind: "pdf", page: page.num } });
+        if (page.text.trim()) {
+          add({ text: page.text, origin: "extracted_text", citation: { kind: "pdf", page: page.num } });
+        } else if (ocr) {
+          // Render one page at a time to bound memory; preserve the actual PDF locator.
+          const rendered = await parser.getScreenshot({ partial: [page.num], desiredWidth: 1800, imageDataUrl: false, imageBuffer: true });
+          const image = rendered.pages[0];
+          if (!image) throw new Error("OCR_RENDER_FAILED");
+          const text = await ocr({ mime: "image/png", bytes: image.data, page: page.num });
+          add({ text, origin: "ocr", citation: { kind: "pdf", page: page.num } });
+          if (!text.trim()) diagnostics.push(`OCR_EMPTY_PAGE_${page.num}`);
+        } else diagnostics.push(`OCR_REQUIRED_PAGE_${page.num}`);
       }
-      if (!blocks.length) throw new Error("OCR_REQUIRED");
+      if (!blocks.length) throw new Error(ocr ? "OCR_EMPTY_TEXT" : "OCR_REQUIRED");
     } finally { await parser.destroy(); }
   } else if (input.mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
     if (!input.bytes) throw new Error("DOCUMENT_MISSING");
@@ -47,6 +58,15 @@ export async function parseKnowledge(input: ParseInput): Promise<ParsedArtifact>
     };
     await mammoth.convertToHtml({ buffer: Buffer.from(input.bytes) }, { transformDocument(document: Element) { visit(document); return document; } });
     if (!blocks.length) throw new Error("EMPTY_TEXT");
+  } else if (input.mime.startsWith("image/") && ocr) {
+    if (!input.bytes) throw new Error("DOCUMENT_MISSING");
+    add({ text: await ocr({ mime: input.mime, bytes: input.bytes }), origin: "ocr" });
+    if (!blocks.length && !input.description?.trim()) {
+      generatedDescription = (await ocr({ mime: input.mime, bytes: input.bytes, mode: "describe" })).trim();
+      if (!generatedDescription || generatedDescription === "<NO_TEXT>") throw new Error("IMAGE_DESCRIPTION_EMPTY");
+      if (generatedDescription.length > 5000) throw new Error("IMAGE_DESCRIPTION_TOO_LONG");
+      add({ text: generatedDescription, origin: "generated_description" });
+    }
   } else if (!/^(image|audio|video)\//.test(input.mime) && input.mime !== "bookmark") {
     throw new Error("UNSUPPORTED_DOCUMENT");
   }
@@ -55,5 +75,5 @@ export async function parseKnowledge(input: ParseInput): Promise<ParsedArtifact>
   const length = blocks.reduce((sum, block) => sum + block.text.length, 0);
   if (length > MAX_EXTRACTED_CHARACTERS) throw new Error("TEXT_LIMIT_EXCEEDED");
   if (blocks.some((block) => block.text.includes("\u0000") || block.text.includes("\ufffd"))) throw new Error("INVALID_TEXT");
-  return { blocks, diagnostics, parserVersion: PARSER_VERSION };
+  return { blocks, diagnostics, parserVersion: PARSER_VERSION, ...(generatedDescription ? { generatedDescription } : {}) };
 }

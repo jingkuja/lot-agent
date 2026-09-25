@@ -4931,14 +4931,6 @@ html, body, #root {
   border-radius: 8px;
 }
 
-.brand-tokenhub-link {
-  display: block;
-  padding-top: 6px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  text-decoration: none;
-}
-.brand-tokenhub-link:hover { color: var(--accent); text-decoration: underline; }
 .brand-points-action:hover {
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
   color: var(--text);
@@ -5953,7 +5945,10 @@ html, body, #root {
 .sidebar-project-header { display: flex; align-items: center; border-radius: 8px; }
 .sidebar-project-header:hover { background: var(--bg-hover); }
 .sidebar-project-toggle, .sidebar-project-add, .sidebar-project-empty, .sidebar-conversation-link {
-  border: 0; background: transparent; color: var(--text); cursor: pointer; font: inherit; text-align: left;
+  border: 0; background: transparent; color: var(--text); cursor: pointer; font-family: inherit; text-align: left;
+}
+.sidebar-project-toggle, .sidebar-project-add, .sidebar-project-empty {
+  font: inherit;
 }
 .sidebar-project-toggle { display: flex; align-items: center; gap: 8px; padding: 9px 6px; min-width: 0; flex: 1; }
 .sidebar-project-toggle span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -17,6 +17,7 @@ import { withKnowledgeStorageLease } from "./storage-lease.js";
 import { KnowledgeJobs } from "./ingestion/jobs.js";
 import { indexArtifact } from "./ingestion/indexer.js";
 import { indexProfile } from "./ingestion/profile.js";
+import { parseKnowledge } from "./ingestion/parsers.js";
 import { textBlocks } from "./ingestion/text.js";
 import { KnowledgeRetriever } from "./retrieval.js";
 
@@ -98,6 +99,25 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("knowledge management compl
     const cleared = await repo.updateItem(owner, item.id, { version: 2, title: "Link", description: "  ", tags: [] });
     expect(cleared.taskId).toBeUndefined(); expect(await repo.getItem(owner, item.id)).toMatchObject({ indexStatus: "stored_only", activeRevisionId: cleared.revisionId, pendingRevisionId: null });
     await expect(jobs.retry(owner, item.id, 3, queue)).rejects.toThrow();
+  });
+  it("queues an undescribed image for OCR instead of publishing it as stored-only", async () => {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=", "base64");
+    const object = await storage.put(owner, Readable.from(png), "image/png");
+    const item = await repo.createItem(owner, { sourceType: "image", title: "OCR image", mime: "image/png", object, description: "", collectionIds: [], tags: [] }, randomUUID());
+    expect(item.taskId).toBeTruthy();
+    expect(await repo.getItem(owner, item.id)).toMatchObject({ indexStatus: "pending", pendingRevisionId: item.revisionId, activeRevisionId: null });
+    const description = "蓝色陶瓷杯，杯柄位于右侧，白色背景。";
+    const artifact = await parseKnowledge({ mime: "image/png", bytes: png }, async (image) => image.mode === "describe" ? description : "");
+    const jobs = new KnowledgeJobs(pool); const lease = (await jobs.claim(item.taskId!, queue))!;
+    const profile = indexProfile("https://global-fixture.invalid/v1"); const vector = Array.from({ length: 1024 }, (_, n) => n ? 0 : 1);
+    await indexArtifact(jobs, lease, profile, artifact, async () => ({ vector, tokens: 20 }));
+    expect(await repo.getItem(owner, item.id)).toMatchObject({ indexStatus: "ready", description });
+    const source = await repo.revisionText(owner, item.id, item.revisionId);
+    expect(source.blocks).toEqual([{ text: description, origin: "generated_description" }]);
+    const retriever = new KnowledgeRetriever(pool, profile, () => async () => ({ vector, tokens: 8 }));
+    const result = await retriever.retrieve({ ownerId: owner, collectionIds: [], allOwned: true, callerKind: "internal", permission: "retrieval:read" },
+      { query: "陶瓷杯", collectionIds: [], mode: "keyword", sourceTypes: ["image"], tags: [], topK: 5, allowDegraded: false });
+    expect(result.results[0]).toMatchObject({ itemId: item.id, origin: "generated_description" });
   });
   it("returns durable error codes and partial parser diagnostics when reopening", async () => {
     const item = await repo.createItem(owner, { sourceType: "note", title: "failure", content: "text", description: "", collectionIds: [], tags: [] }, randomUUID());

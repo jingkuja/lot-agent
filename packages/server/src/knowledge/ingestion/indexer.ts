@@ -50,6 +50,6 @@ export async function indexArtifact(jobs: KnowledgeJobs, lease: IngestionLease, 
     const state = (await client.query("SELECT active_profile_id FROM rag_user_index_state WHERE owner_id=$1 FOR UPDATE", [lease.ownerId])).rows[0];
     if (state.active_profile_id !== profile.id) throw new Error("INDEX_PROFILE_CHANGED");
     await writeIndex(client, lease, profile, chunks);
-    await client.query("UPDATE rag_item_revisions SET index_profile_id=$4,diagnostics=$5 WHERE owner_id=$1 AND item_id=$2 AND id=$3", [lease.ownerId, lease.itemId, lease.revisionId, profile.id, JSON.stringify({ warnings: artifact.diagnostics })]);
+    await client.query("UPDATE rag_item_revisions SET index_profile_id=$4,diagnostics=$5,description=CASE WHEN $6::text IS NOT NULL AND btrim(COALESCE(description,''))='' THEN $6 ELSE description END WHERE owner_id=$1 AND item_id=$2 AND id=$3", [lease.ownerId, lease.itemId, lease.revisionId, profile.id, JSON.stringify({ warnings: artifact.diagnostics }), artifact.generatedDescription ?? null]);
   });
 }
