@@ -29,7 +29,7 @@ export const knowledgeApi = {
   deleteCollection: (collection: Collection) => request(`${base}/collections/${collection.id}`, { method: "DELETE", body: json({ version: collection.version }) }),
   items: (scope: string, cursor?: string, type = "", tag = "", query = "", source = "") => {
     const params = new URLSearchParams();
-    if (scope === "inbox") params.set("inbox", "true"); else if (scope && scope !== "all") params.set("collectionId", scope);
+    if (scope === "inbox") params.set("inbox", "true"); else if (scope && scope !== "all" && scope !== "libraries") params.set("collectionId", scope);
     if (source) params.set("source", source);
     if (cursor) params.set("cursor", cursor); if (type) params.set("types", type); if (tag) params.set("tag", tag); if (query) params.set("q", query);
     return request<Page<Item>>(`${base}/items?${params}`);
