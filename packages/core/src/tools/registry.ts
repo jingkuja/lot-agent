@@ -8,6 +8,7 @@ import type {
 } from "../types/index.js";
 import { DEFAULT_TOOL_EXEC_CONFIG } from "../types/index.js";
 import { validateToolInput } from "./validate.js";
+import { createDeadline, withAbort, abortableDelay } from "../runtime/abort.js";
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
@@ -44,8 +45,11 @@ export class ToolRegistry {
     name: string,
     input: unknown,
     context: ToolContext,
-    opts: { signal?: AbortSignal } = {}
+    opts: { signal?: AbortSignal; allowedToolNames?: readonly string[] } = {}
   ): Promise<ToolResult> {
+    if (opts.allowedToolNames && !opts.allowedToolNames.includes(name)) {
+      return { content: `Tool not permitted: ${name}`, isError: true, errorKind: "permission" };
+    }
     const tool = this.tools.get(name);
     if (!tool) {
       return {
@@ -72,7 +76,7 @@ export class ToolRegistry {
       ? { ...context, signal: opts.signal }
       : context;
 
-    return this.executeWithRetry(tool, input, execContext, config, opts.signal);
+    return this.executeWithRetry(tool, input, execContext, config, opts.signal ?? context.signal);
   }
 
   private mergeConfig(tool: Tool): ToolExecConfig {
@@ -81,7 +85,7 @@ export class ToolRegistry {
       timeoutMs: overrides.timeoutMs ?? this.defaultConfig.timeoutMs,
       retry: {
         maxRetries:
-          overrides.retry?.maxRetries ?? this.defaultConfig.retry.maxRetries,
+          tool.retrySafe === true ? (overrides.retry?.maxRetries ?? this.defaultConfig.retry.maxRetries) : 0,
         baseDelayMs:
           overrides.retry?.baseDelayMs ??
           this.defaultConfig.retry.baseDelayMs,
@@ -132,7 +136,9 @@ export class ToolRegistry {
       const delay =
         config.retry.baseDelayMs * Math.pow(2, attempt) +
         Math.random() * 500;
-      await sleep(Math.min(delay, 10_000));
+      try {
+        await abortableDelay(Math.min(result.retryAfterMs ?? delay, 10_000), signal);
+      } catch { return abortedResult(tool.name); }
     }
 
     // All retries exhausted — return last error with structured info
@@ -146,32 +152,36 @@ export class ToolRegistry {
     timeoutMs: number,
     signal?: AbortSignal
   ): Promise<ToolResult> {
-    const timeoutRace = timeout(timeoutMs);
-    // Stop waiting on a tool that ignores the signal the moment the run aborts;
-    // its work is discarded so the loop can wind down promptly.
-    const abortRaceHandle = signal ? abortRace(signal) : undefined;
-    const races: Promise<ToolResult>[] = [tool.execute(input, context), timeoutRace.promise];
-    if (abortRaceHandle) races.push(abortRaceHandle.promise);
+    const attempt = createDeadline(timeoutMs, signal);
     try {
-      return await Promise.race(races);
+      attempt.signal.throwIfAborted();
+      const result = await withAbort(Promise.resolve().then(() => {
+        attempt.signal.throwIfAborted();
+        return tool.execute(input, { ...context, signal: attempt.signal });
+      }), attempt.signal);
+      if (!result || typeof result.content !== "string") throw new Error("Invalid tool result");
+      if (result.isError && tool.retrySafe !== true && ["network", "timeout"].includes(result.errorKind ?? "")) {
+        return { ...result, content: `${result.content}. Outcome unknown; verify before repeating this write.`, errorKind: "unknown_outcome" };
+      }
+      return result;
     } catch (error) {
-      if (error instanceof AbortError) return abortedResult(tool.name);
-      if (error instanceof TimeoutError) {
+      if (attempt.signal.aborted) {
+        const uncertain = tool.retrySafe !== true;
         return {
-          content: `Tool '${tool.name}' timed out after ${timeoutMs}ms`,
+          content: uncertain
+            ? `Tool '${tool.name}' ${attempt.timedOut ? "timed out" : "was cancelled"}; outcome unknown, do not repeat this write without verifying its result.`
+            : `Tool '${tool.name}' ${attempt.timedOut ? "timed out" : "was cancelled"}`,
           isError: true,
-          errorKind: "timeout",
-          retryAfterMs: timeoutMs,
+          errorKind: uncertain ? "unknown_outcome" : attempt.timedOut ? "timeout" : "cancelled",
         };
       }
-      return this.classifyError(error, tool.name);
+      const result = this.classifyError(error, tool.name);
+      if (tool.retrySafe !== true && result.errorKind === "network") {
+        return { ...result, content: `${result.content}. Outcome unknown; verify before repeating this write.`, errorKind: "unknown_outcome" };
+      }
+      return result;
     } finally {
-      // Whichever racer won, the losers' pending timer/listener must not
-      // outlive this call — otherwise every tool call leaves a live setTimeout
-      // hanging until timeoutMs (and, for the abort racer, a listener stuck on
-      // the run's shared AbortSignal for its whole lifetime).
-      timeoutRace.cancel();
-      abortRaceHandle?.cancel();
+      attempt.dispose();
     }
   }
 
@@ -222,63 +232,6 @@ export class ToolRegistry {
   }
 }
 
-class TimeoutError extends Error {
-  constructor(ms: number) {
-    super(`Timeout after ${ms}ms`);
-    this.name = "TimeoutError";
-  }
-}
-
-class AbortError extends Error {
-  constructor() {
-    super("Aborted");
-    this.name = "AbortError";
-  }
-}
-
 function abortedResult(toolName: string): ToolResult {
-  return {
-    content: `Tool '${toolName}' aborted`,
-    isError: true,
-    errorKind: "unknown",
-  };
-}
-
-interface RaceHandle {
-  promise: Promise<never>;
-  /** Releases the timer/listener backing this racer — call once the race is settled. */
-  cancel(): void;
-}
-
-function abortRace(signal: AbortSignal): RaceHandle {
-  let onAbort: (() => void) | undefined;
-  const promise = new Promise<never>((_, reject) => {
-    if (signal.aborted) {
-      reject(new AbortError());
-      return;
-    }
-    onAbort = () => reject(new AbortError());
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  return {
-    promise,
-    cancel: () => {
-      if (onAbort) signal.removeEventListener("abort", onAbort);
-    },
-  };
-}
-
-function timeout(ms: number): RaceHandle {
-  let timer: ReturnType<typeof setTimeout>;
-  const promise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError(ms)), ms);
-  });
-  return {
-    promise,
-    cancel: () => clearTimeout(timer),
-  };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return { content: `Tool '${toolName}' cancelled before execution`, isError: true, errorKind: "cancelled" };
 }

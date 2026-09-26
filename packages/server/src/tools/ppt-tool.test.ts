@@ -174,3 +174,12 @@ describe("generate_ppt", () => {
     expect(r.isError).toBeFalsy(); // 忽略该背景，仍成功
   });
 });
+
+it("does not render or publish a presentation after template loading was cancelled", async () => {
+  const deps = makeDeps();
+  const controller = new AbortController();
+  deps.db.getAsset.mockImplementationOnce(async () => { controller.abort(); return null; });
+  await expect(createPptTool(deps).execute({ ...validInput, templateAssetId: "template" }, { ...ctx, signal: controller.signal })).rejects.toThrow();
+  expect(deps.storage.put).not.toHaveBeenCalled();
+  expect(deps.db.createAsset).not.toHaveBeenCalled();
+});

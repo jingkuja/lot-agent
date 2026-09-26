@@ -29,7 +29,14 @@ const BULLET_LIST_RE = /^\s*(?:[-*+]\s+|\d+[.)]\s+)\S/m;
 /** ask_user 工具调用的结构化提问卡片：问题 + 选项按钮 + 自由输入。 */
 export function AskUserCard({ input, interactive, answer, onReply }: AskUserCardProps) {
   const compositionActiveRef = useRef(false);
-  const parsed = (input ?? {}) as AskUserInput;
+  const raw = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const optionsSafe = Array.isArray(raw.options) ? raw.options.filter((item): item is string => typeof item === "string") : [];
+  const parsed: AskUserInput = {
+    question: typeof raw.question === "string" ? raw.question : "问题格式无效，请直接补充你的需求。",
+    options: optionsSafe,
+    allowFreeText: raw.allowFreeText !== false || optionsSafe.length === 0,
+    multiSelect: raw.multiSelect === true,
+  };
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const options = (parsed.options ?? []).slice(0, 6);

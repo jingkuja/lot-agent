@@ -28,8 +28,33 @@ function summary(s: OutlineSlide): string {
   return s.subtitle ?? "";
 }
 
+/** Tool arguments and persisted history are untrusted at the rendering boundary. */
+function parseOutline(input: unknown): OutlineInput {
+  const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const string = (value: unknown): string => typeof value === "string" ? value : "";
+  const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  const raw = object(input);
+  return {
+    title: string(raw.title),
+    slides: Array.isArray(raw.slides) ? raw.slides.filter(s => s && typeof s === "object").map(value => {
+      const s = object(value);
+      const left = object(s.left), right = object(s.right), quote = object(s.quote);
+      return {
+        layout: string(s.layout), title: string(s.title), subtitle: string(s.subtitle), bullets: strings(s.bullets),
+        items: Array.isArray(s.items) ? s.items.map(value => {
+          const item = object(value);
+          return { label: string(item.label), value: string(item.value), desc: string(item.desc) };
+        }) : [],
+        left: s.left ? { title: string(left.title), bullets: strings(left.bullets) } : undefined,
+        right: s.right ? { title: string(right.title), bullets: strings(right.bullets) } : undefined,
+        quote: s.quote ? { text: string(quote.text), author: string(quote.author) } : undefined,
+      };
+    }) : [],
+  };
+}
+
 export function OutlineCard({ input, interactive, answer, onReply }: OutlineCardProps) {
-  const parsed = (input ?? {}) as OutlineInput;
+  const parsed = parseOutline(input);
   const slides = parsed.slides ?? [];
   return (
     <div className={`outline-card${interactive ? "" : " answered"}`}>

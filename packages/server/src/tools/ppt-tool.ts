@@ -138,6 +138,7 @@ export function createPptTool(deps: PptToolDeps): Tool {
       required: ["title", "slides"],
     },
     async execute(input, context): Promise<ToolResult> {
+      context.signal?.throwIfAborted();
       const { title = "", templateAssetId, themePreset, slides, backgrounds } =
         (input as {
           title?: string;
@@ -250,6 +251,7 @@ export function createPptTool(deps: PptToolDeps): Tool {
       }
       if (ignoredBg > 0) themeNote += `\n（有 ${ignoredBg} 张背景图无法读取，已忽略。）`;
 
+      context.signal?.throwIfAborted();
       if (!buffer) {
         try {
           buffer = await renderPptx({ title, slides: slides! }, theme);
@@ -261,9 +263,15 @@ export function createPptTool(deps: PptToolDeps): Tool {
         }
       }
 
+      context.signal?.throwIfAborted();
       const id = randomUUID();
       const key = `${id}.pptx`;
       const { url } = await storage.put({ key, body: buffer, contentType: PPTX_MIME });
+      if (context.signal?.aborted) {
+        // This key belongs only to this attempt; no asset row has been published.
+        await storage.delete(key).catch(() => {});
+        context.signal.throwIfAborted();
+      }
       await db.createAsset({
         id,
         userId,

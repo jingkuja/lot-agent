@@ -1,3 +1,4 @@
+import { LLMResponseError } from "@lot-agent/core";
 import type { ChatChunk, ChatOptions, LLMProvider, LLMTool, Message } from "@lot-agent/core";
 
 export type LLMUsage = NonNullable<ChatChunk["usage"]>;
@@ -15,9 +16,18 @@ export function meterLLM(llm: LLMProvider, onUsage: (usage: LLMUsage) => void): 
       tools?: LLMTool[],
       opts?: ChatOptions
     ): AsyncIterable<ChatChunk> {
-      for await (const chunk of llm.chat(messages, tools, opts)) {
-        if (chunk.type === "done" && chunk.usage) onUsage(chunk.usage);
-        yield chunk;
+      let reported = false;
+      try {
+        for await (const chunk of llm.chat(messages, tools, opts)) {
+          if (chunk.type === "done" && chunk.usage && !reported) {
+            reported = true;
+            onUsage(chunk.usage);
+          }
+          yield chunk;
+        }
+      } catch (error) {
+        if (!reported && error instanceof LLMResponseError && error.usage) onUsage(error.usage);
+        throw error;
       }
     },
   };

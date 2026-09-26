@@ -110,12 +110,12 @@ export class MCPClientManager {
       // may have side effects and its result can change between calls).
       execConfig: { timeoutMs: CONNECT_TIMEOUT_MS },
       cacheable: false,
-      execute: async (input: unknown, _ctx: ToolContext): Promise<ToolResult> => {
+      execute: async (input: unknown, ctx: ToolContext): Promise<ToolResult> => {
         try {
           const result = await client.callTool({
             name: t.name,
             arguments: input as Record<string, unknown>,
-          });
+          }, undefined, { signal: ctx.signal, timeout: CONNECT_TIMEOUT_MS });
           const content = Array.isArray(result.content)
             ? result.content
                 .map((c: { type: string; text?: string }) =>
@@ -128,6 +128,7 @@ export class MCPClientManager {
           return {
             content: `MCP tool error: ${error instanceof Error ? error.message : error}`,
             isError: true,
+            errorKind: "unknown_outcome",
           };
         }
       },

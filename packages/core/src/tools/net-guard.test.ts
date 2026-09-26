@@ -72,3 +72,8 @@ describe("assertPublicUrl", () => {
     ).rejects.toThrow(SsrfError);
   });
 });
+
+it("rejects hexadecimal IPv4-mapped loopback URLs and unspecified IPv6", async () => {
+  await expect(assertPublicUrl("http://[::ffff:7f00:1]/")).rejects.toThrow(SsrfError);
+  await expect(assertPublicUrl("http://[::]/")).rejects.toThrow(SsrfError);
+});

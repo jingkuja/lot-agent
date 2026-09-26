@@ -30,6 +30,7 @@ export function createLoadSkillTool(loader: SkillLoader): Tool {
       required: ["name"],
     },
     cacheable: true,
+    retrySafe: true,
     parallelSafe: true,
     async execute(input): Promise<ToolResult> {
       const { name } = (input as LoadSkillInput) ?? {};

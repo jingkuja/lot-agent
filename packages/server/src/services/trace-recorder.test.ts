@@ -32,3 +32,19 @@ describe("TraceRecorder.finish", () => {
     expect(db.traces[0].metadata.cachedPromptTokens).toBeUndefined();
   });
 });
+
+it("pairs parallel same-name spans by call id and retains independent errors", async () => {
+  const db = fakeDb();
+  const spans: any[] = [];
+  db.addSpan = async (span: any) => { spans.push(span); };
+  const recorder = new TraceRecorder(new TraceManager(), db, "m", "p");
+  recorder.start("c", "m");
+  recorder.startToolSpan("read", "first");
+  recorder.startToolSpan("read", "second");
+  recorder.endToolSpan("error", "first");
+  recorder.endToolSpan("ok", "second");
+  await recorder.finish({ totalTokens: 0 });
+  expect(spans.map(s => [s.attributes.toolCallId, s.status, !!s.end_time])).toEqual([
+    ["first", "error", true], ["second", "ok", true],
+  ]);
+});

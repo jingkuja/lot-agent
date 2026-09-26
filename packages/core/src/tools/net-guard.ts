@@ -1,4 +1,5 @@
 import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 export interface ResolvedAddress {
   address: string;
@@ -29,14 +30,21 @@ function isPrivateIPv4(ip: string): boolean {
   if (a === 192 && b === 168) return true;
   if (a === 127) return true;
   if (a === 169 && b === 254) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a >= 224) return true;
   return false;
 }
 
 function isPrivateIPv6(ip: string): boolean {
   const lower = ip.toLowerCase();
-  if (lower === "::1") return true;
+  if (lower === "::1" || lower === "::") return true;
+  const mapped = lower.match(/^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mapped) {
+    const value = parseInt(mapped[1], 16) * 65536 + parseInt(mapped[2], 16);
+    if (isPrivateIPv4([value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join("."))) return true;
+  }
   if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7
-  if (lower.startsWith("fe80")) return true; // link-local
+  if (/^fe[89ab]/.test(lower)) return true; // link-local
   // IPv4-mapped (::ffff:a.b.c.d) / IPv4-compatible (::a.b.c.d) embeddings —
   // otherwise ::ffff:127.0.0.1 would sail past the checks above as "public".
   const embeddedV4 = lower.match(/(?:^|:)((?:\d{1,3}\.){3}\d{1,3})$/);
@@ -57,23 +65,29 @@ async function defaultResolve(hostname: string): Promise<ResolvedAddress[]> {
  * Resolves `url`'s host and throws `SsrfError` if any resolved address is
  * private/loopback/link-local, unless the hostname is explicitly allow-listed.
  */
-export async function assertPublicUrl(
+export async function resolvePublicUrl(
   url: string,
   opts: NetGuardOptions = {}
-): Promise<void> {
+): Promise<ResolvedAddress[]> {
   const parsed = new URL(url);
-  if (opts.allowHosts?.includes(parsed.hostname)) return;
-
+  if (!["http:", "https:"].includes(parsed.protocol)) throw new SsrfError("unsupported protocol");
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  const family = isIP(host);
   const resolve = opts.resolve ?? defaultResolve;
-  const addrs = await resolve(parsed.hostname);
+  const addrs = family ? [{ address: host, family }] : await resolve(host);
   if (addrs.length === 0) {
     throw new SsrfError(`could not resolve host: ${parsed.hostname}`);
   }
   for (const { address, family } of addrs) {
-    if (isPrivateAddress(address, family)) {
+    if (!opts.allowHosts?.includes(parsed.hostname) && isPrivateAddress(address, family)) {
       throw new SsrfError(
         `refusing to fetch private/internal address: ${address} (host: ${parsed.hostname})`
       );
     }
   }
+  return addrs;
+}
+
+export async function assertPublicUrl(url: string, opts: NetGuardOptions = {}): Promise<void> {
+  await resolvePublicUrl(url, opts);
 }

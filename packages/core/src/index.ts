@@ -17,3 +17,5 @@ export * from "./storage/index.js";
 export * from "./billing/index.js";
 export * from "./publish/index.js";
 export * from "./knowledge/index.js";
+
+export { createDeadline, withAbort } from "./runtime/abort.js";

@@ -211,3 +211,26 @@ describe("OpenAIProvider.chat retry", () => {
     expect(out).toEqual(["ok"]);
   });
 });
+
+describe("OpenAI stream integrity", () => {
+  it("rejects EOF without a finish frame instead of dropping a pending tool", async () => {
+    await expect(collect(mapOpenAIStream(chunkStream([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "write", arguments: "{}" } }] } }] },
+    ])))).rejects.toThrow(/completion|finish/i);
+  });
+  it("ignores intermediate empty choices and preserves the final usage", async () => {
+    const out = await collect(mapOpenAIStream(chunkStream([
+      { choices: [{ delta: {}, finish_reason: "stop" }] },
+      { choices: [] },
+      { choices: [], usage: { prompt_tokens: 50, completion_tokens: 20 } },
+    ])));
+    expect(out.filter(c => c.type === "done")).toEqual([
+      expect.objectContaining({ usage: { promptTokens: 50, completionTokens: 20 } }),
+    ]);
+  });
+  it("rejects invalid JSON at the provider boundary", async () => {
+    await expect(collect(mapOpenAIStream(chunkStream([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "write", arguments: '{"v":' } }] }, finish_reason: "tool_calls" }] },
+    ])))).rejects.toThrow(/malformed tool_call/);
+  });
+});

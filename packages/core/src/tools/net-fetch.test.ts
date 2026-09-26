@@ -157,3 +157,13 @@ describe("fetchPublicBinary", () => {
     ).rejects.toThrow();
   });
 });
+
+it("cancels an uncooperative response body when the deadline expires", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+  await expect(fetchPublicBinary("http://public.example/hang", {
+    maxBytes: 100, timeoutMs: 10, resolve: publicResolve,
+    fetchImpl: (async () => fakeResponse({ body })) as typeof fetch,
+  })).rejects.toThrow(/timed out/i);
+  expect(cancelled).toBe(true);
+});

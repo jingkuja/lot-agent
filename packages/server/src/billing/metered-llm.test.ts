@@ -36,3 +36,13 @@ describe("meterLLM", () => {
     expect(onUsage).not.toHaveBeenCalled();
   });
 });
+
+it("retains known usage when malformed protocol data prevents a done chunk", async () => {
+  const { LLMResponseError } = await import("@lot-agent/core");
+  const usage = { promptTokens: 7, completionTokens: 3 };
+  const onUsage = vi.fn();
+  const llm = { async *chat(): AsyncIterable<ChatChunk> { throw new LLMResponseError("malformed tool_call", usage); } };
+  await expect(drain(meterLLM(llm, onUsage).chat([]))).rejects.toThrow("malformed");
+  expect(onUsage).toHaveBeenCalledTimes(1);
+  expect(onUsage).toHaveBeenCalledWith(usage);
+});

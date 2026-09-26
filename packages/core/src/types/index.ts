@@ -94,6 +94,8 @@ export type ToolErrorKind =
   | "not_found"   // Resource not found (non-retryable)
   | "permission"  // Permission denied (non-retryable)
   | "validation"  // Invalid input (non-retryable)
+  | "cancelled"
+  | "unknown_outcome" // A write may have committed; never automatically replay.
   | "unknown";    // Unclassified
 
 /** Tool execution result */
@@ -149,6 +151,8 @@ export interface Tool {
   parameters: JSONSchema;
   /** Per-tool execution config overrides */
   execConfig?: Partial<ToolExecConfig>;
+  /** Explicit opt-in: safe to retry after an ambiguous failure (normally reads only). */
+  retrySafe?: boolean;
   /**
    * When true, an identical call (same name + args) that already succeeded in
    * the current run is reused instead of re-executed. Only safe for pure /

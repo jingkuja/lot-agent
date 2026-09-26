@@ -5,7 +5,9 @@ import { promisify } from "node:util";
 import { resolve, sep, dirname, basename } from "node:path";
 import type { Tool, ToolContext, ToolResult, ToolErrorKind } from "../types/index.js";
 import { askUserTool } from "./ask-user.js";
-import { assertPublicUrl } from "./net-guard.js";
+import { SsrfError } from "./net-guard.js";
+import { fetchPublicBinary } from "./net-fetch.js";
+import { runCommand } from "./process.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -233,7 +235,7 @@ export const executeCommandTool: Tool = {
       args?: string[];
     };
     try {
-      const { stdout, stderr } = await execFileAsync(command, args, {
+      const { stdout, stderr } = await runCommand(command, args, {
         cwd: context.workingDirectory,
         timeout: 30_000,
         maxBuffer: 1024 * 1024,
@@ -350,83 +352,25 @@ function htmlToText(html: string): string {
     .trim();
 }
 
-const MAX_REDIRECTS = 3;
-
 function webFetchAllowHosts(): string[] {
-  return (process.env.WEB_FETCH_ALLOW_HOSTS ?? "")
-    .split(",")
-    .map((h) => h.trim())
-    .filter(Boolean);
+  return (process.env.WEB_FETCH_ALLOW_HOSTS ?? "").split(",").map(h => h.trim()).filter(Boolean);
 }
 
-/**
- * Combines the per-call timeout with an optional external cancellation
- * `signal` (the run's abort signal) into a single AbortController, mirroring
- * `net-fetch.ts`'s `fetchPublicBinary` — so a run cancellation stops an
- * in-flight web_fetch immediately instead of it running to completion (or
- * the full timeout) regardless of the run having ended.
- */
-async function fetchWithTimeout(
-  url: string,
-  timeoutMs: number,
-  redirect: "manual" | "follow" | "error" = "follow",
-  externalSignal?: AbortSignal
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("request timed out")), timeoutMs);
-  const onExternalAbort = () => controller.abort(externalSignal?.reason);
-  if (externalSignal) {
-    if (externalSignal.aborted) controller.abort(externalSignal.reason);
-    else externalSignal.addEventListener("abort", onExternalAbort);
-  }
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      redirect,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; LotAgent/0.1; +https://github.com/lot-agent)",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-    });
-    return res;
-  } finally {
-    clearTimeout(timer);
-    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
-  }
-}
-
-/**
- * Fetches `url`, re-checking the SSRF guard on every hop of up to
- * `MAX_REDIRECTS` manual redirects (a same-origin-looking redirect to an
- * internal address is the classic SSRF bypass — following redirects
- * automatically would skip the guard on the final, real destination).
- *
- * TODO(ssrf): this is check-then-fetch — `assertPublicUrl` and the subsequent
- * `fetch` each resolve DNS independently, leaving a TOCTOU / DNS-rebinding
- * window (a short-TTL attacker domain can answer the guard's lookup with a
- * public IP and fetch's lookup with an internal one). Closing it requires
- * resolving once and connecting to the validated IP (pin the address, or
- * re-validate the socket's peer). Tracked separately from the E0/E1 pass.
- */
-async function fetchPublic(url: string, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
-  let currentUrl = url;
-  const allowHosts = webFetchAllowHosts();
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    if (signal?.aborted) throw signal.reason ?? new Error("aborted");
-    await assertPublicUrl(currentUrl, { allowHosts });
-    const res = await fetchWithTimeout(currentUrl, timeoutMs, "manual", signal);
-    const location = res.headers.get("location");
-    if (res.status >= 300 && res.status < 400 && location) {
-      if (hop === MAX_REDIRECTS) {
-        throw new Error(`too many redirects (>${MAX_REDIRECTS})`);
-      }
-      currentUrl = new URL(location, currentUrl).toString();
-      continue;
-    }
-    return res;
-  }
-  throw new Error("unreachable");
+function networkFailure(error: unknown, prefix: string, signal?: AbortSignal): ToolResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = (error as { status?: number })?.status;
+  const retryAfter = (error as { retryAfter?: string })?.retryAfter;
+  const seconds = retryAfter ? Number(retryAfter) : NaN;
+  const retryAfterMs = retryAfter
+    ? Math.max(0, Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now()) : undefined;
+  const errorKind: ToolErrorKind = signal?.aborted ? "cancelled"
+    : error instanceof SsrfError ? "permission"
+    : /timed? ?out|timeout/i.test(message) ? "timeout"
+    : status === 429 || (status !== undefined && status >= 500) || /fetch failed|network|ECONN|ENOTFOUND|socket/i.test(message) ? "network"
+    : status === 401 || status === 403 ? "permission"
+    : status === 404 ? "not_found" : "unknown";
+  return { content: `${prefix}: ${message}`, isError: true, errorKind,
+    ...(retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? { retryAfterMs } : {}) };
 }
 
 export const webFetchTool: Tool = {
@@ -436,6 +380,7 @@ export const webFetchTool: Tool = {
   // Pure external read — the same URL within a run yields the same content, so
   // an identical repeat call is reused instead of re-fetched.
   cacheable: true,
+  retrySafe: true,
   execConfig: {
     timeoutMs: 20_000,
     retry: { maxRetries: 2, baseDelayMs: 2000, retryableKinds: ["timeout", "network"] },
@@ -471,16 +416,12 @@ export const webFetchTool: Tool = {
     }
 
     try {
-      const res = await fetchPublic(url, 15_000, context?.signal);
-      if (!res.ok) {
-        return {
-          content: `HTTP ${res.status}: ${res.statusText}`,
-          isError: true,
-        };
-      }
-
-      const contentType = res.headers.get("content-type") ?? "";
-      const body = await res.text();
+      const downloaded = await fetchPublicBinary(url, {
+        maxBytes: 2 * 1024 * 1024, timeoutMs: 15_000, signal: context?.signal,
+        allowHosts: webFetchAllowHosts(),
+      });
+      const contentType = downloaded.mime;
+      const body = downloaded.body.toString("utf8");
 
       let text: string;
       if (contentType.includes("json")) {
@@ -502,12 +443,7 @@ export const webFetchTool: Tool = {
 
       return { content: text || "(empty response)" };
     } catch (error) {
-      const msg =
-        error instanceof Error ? error.message : String(error);
-      return {
-        content: `Failed to fetch URL: ${msg}`,
-        isError: true,
-      };
+      return networkFailure(error, "Failed to fetch URL", context.signal);
     }
   },
 };
@@ -517,6 +453,7 @@ export const webSearchTool: Tool = {
   description:
     "Search the web using 智谱 BigModel web search. Returns results with titles, URLs, content, and publish dates. Use content directly — only fall back to web_fetch when content is empty but a link is present.",
   cacheable: false,
+  retrySafe: true,
   execConfig: {
     timeoutMs: 20_000,
     retry: { maxRetries: 2, baseDelayMs: 2000, retryableKinds: ["timeout", "network"] },
@@ -566,10 +503,9 @@ export const webSearchTool: Tool = {
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => "");
-        return {
-          content: `Search failed: HTTP ${res.status}${errBody ? ` - ${errBody.slice(0, 200)}` : ""}`,
-          isError: true,
-        };
+        return networkFailure(Object.assign(new Error(`HTTP ${res.status}${errBody ? ` - ${errBody.slice(0, 200)}` : ""}`), {
+          status: res.status, retryAfter: res.headers.get("retry-after"),
+        }), "Search failed", context.signal);
       }
 
       const data = (await res.json()) as {
@@ -610,23 +546,21 @@ export const webSearchTool: Tool = {
 
       return { content: formatted };
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      return {
-        content: `Search failed: ${msg}`,
-        isError: true,
-      };
+      return networkFailure(error, "Search failed", context.signal);
     }
   },
 };
 
 export function registerBuiltinTools(registry: {
   register(tool: Tool): void;
-}): void {
+}, options: { includeHostTools?: boolean } = {}): void {
+  if (options.includeHostTools !== false) {
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(listFilesTool);
   registry.register(executeCommandTool);
   registry.register(searchFilesTool);
+  }
   registry.register(webFetchTool);
   registry.register(webSearchTool);
   registry.register(askUserTool);

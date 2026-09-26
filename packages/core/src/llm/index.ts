@@ -4,3 +4,5 @@ export { createLLMProvider, type LLMConfig, type ProviderType } from "./factory.
 export { withLLMRetry, isMalformedToolCallError, type LLMRetryConfig } from "./retry.js";
 export { complete } from "./complete.js";
 export { formatLLMError, isUnauthorizedLLMError, LLM_QUOTA_HINT } from "./errors.js";
+
+export { LLMResponseError, LLMIncompleteError } from "./errors.js";

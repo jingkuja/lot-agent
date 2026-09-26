@@ -156,11 +156,11 @@ describe("streamAgentResponse usage metering", () => {
       })
     );
 
-    expect(usageMeter.record).toHaveBeenCalledTimes(1);
+    expect(usageMeter.record).toHaveBeenCalledTimes(2);
     expect(usageMeter.record.mock.calls[0][0]).toMatchObject({
       userId: "u1",
       modelId: "m-explicit",
-      usage: { inputCount: 12, outputCount: 5 },
+      usage: { inputCount: 7, outputCount: 3 },
     });
   });
 
@@ -209,4 +209,15 @@ describe("streamAgentResponse digital employee scope", () => {
     expect(resolveDigitalEmployeeLLM).toHaveBeenCalledWith("u1", null);
     expect((fake as any).jobQueue.enqueue).not.toHaveBeenCalled();
   });
+});
+
+
+it("records known usage even when final message persistence fails", async () => {
+  const { fake, repo, usageMeter } = fakeService({ script: [[
+    { type: "text", content: "finished" },
+    { type: "done", usage: { promptTokens: 12, completionTokens: 5 } },
+  ]] });
+  repo.saveFinalAssistant.mockRejectedValueOnce(new Error("save failed"));
+  await expect(drain(fake.streamAgentResponse("c1", "hi", "general", "u1"))).rejects.toThrow("save failed");
+  expect(usageMeter.record).toHaveBeenCalledWith(expect.objectContaining({ usage: { inputCount: 12, outputCount: 5 } }));
 });

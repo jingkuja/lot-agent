@@ -46,3 +46,14 @@ describe("completeTalkTrackReply", () => {
     expect(requests[1]?.opts?.params?.maxTokens).toBe(3_200);
   });
 });
+
+it("does not return or silently retry a visibly truncated talk track", async () => {
+  let calls = 0;
+  const llm: LLMProvider = { async *chat() {
+    calls++;
+    yield { type: "text", content: "truncated reply" };
+    yield { type: "done", finishReason: "length" };
+  } };
+  await expect(completeTalkTrackReply(llm, [])).rejects.toThrow(/incomplete/);
+  expect(calls).toBe(1);
+});

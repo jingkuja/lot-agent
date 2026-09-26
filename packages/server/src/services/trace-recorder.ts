@@ -11,7 +11,7 @@ import type { DB } from "../db/database.js";
 export class TraceRecorder {
   private trace!: Trace;
   private llmSpanId: string | undefined;
-  private toolSpanId: string | undefined;
+  private toolSpanIds = new Map<string, string>();
   private requestStart = Date.now();
 
   constructor(
@@ -48,20 +48,23 @@ export class TraceRecorder {
   }
 
   /** Start a tool span (called on tool_call event). */
-  startToolSpan(toolName: string): void {
-    this.toolSpanId = this.traceManager.startSpan(
+  startToolSpan(toolName: string, toolCallId = toolName): void {
+    const span = this.traceManager.startSpan(
       this.trace.id,
       "tool.execute",
       undefined,
-      { toolName }
-    ).id;
+      { toolName, toolCallId }
+    );
+    this.toolSpanIds.set(toolCallId, span.id);
   }
 
   /** End the current tool span (called on tool_result event). */
-  endToolSpan(status: "ok" | "error"): void {
-    if (this.toolSpanId) {
-      this.traceManager.endSpan(this.toolSpanId, status);
-      this.toolSpanId = undefined;
+  endToolSpan(status: "ok" | "error", toolCallId?: string): void {
+    const key = toolCallId ?? (this.toolSpanIds.size === 1 ? this.toolSpanIds.keys().next().value : undefined);
+    const spanId = key ? this.toolSpanIds.get(key) : undefined;
+    if (key && spanId) {
+      this.traceManager.endSpan(spanId, status);
+      this.toolSpanIds.delete(key);
     }
   }
 
@@ -81,7 +84,8 @@ export class TraceRecorder {
   }): Promise<void> {
     // Close any still-open spans
     if (this.llmSpanId) this.traceManager.endSpan(this.llmSpanId);
-    if (this.toolSpanId) this.traceManager.endSpan(this.toolSpanId);
+    for (const id of this.toolSpanIds.values()) this.traceManager.endSpan(id, "error");
+    this.toolSpanIds.clear();
 
     const hasError = params.errorMessage !== undefined;
     const latencyMs = Date.now() - this.requestStart;

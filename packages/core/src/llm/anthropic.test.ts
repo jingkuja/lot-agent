@@ -268,3 +268,24 @@ describe("mapAnthropicStream structured output", () => {
     expect(out.some((c) => c.type === "tool_call" && c.toolCall?.name === "read_file")).toBe(true);
   });
 });
+
+describe("Anthropic stream integrity", () => {
+  it("preserves max_tokens instead of reporting a complete answer", async () => {
+    const out = await collect(mapAnthropicStream(eventStream([
+      { type: "message_delta", delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 10 } },
+      { type: "message_stop" },
+    ])));
+    expect(out.find(c => c.type === "done")?.finishReason).toBe("max_tokens");
+  });
+  it("rejects incomplete tool JSON without adding invalid calls to history", async () => {
+    await expect(collect(mapAnthropicStream(eventStream([
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "a", name: "write" } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"v":' } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_stop" },
+    ])))).rejects.toThrow(/malformed tool_call/);
+  });
+  it("rejects a stream with no message_stop", async () => {
+    await expect(collect(mapAnthropicStream(eventStream([])))).rejects.toThrow(/completion/);
+  });
+});

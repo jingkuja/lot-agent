@@ -1,3 +1,4 @@
+import { LLMResponseError } from "./errors.js";
 import Anthropic, {
   RateLimitError,
   InternalServerError,
@@ -34,7 +35,7 @@ export class AnthropicProvider implements LLMProvider {
   private model: string;
 
   constructor(config: AnthropicProviderConfig) {
-    this.client = new Anthropic({ apiKey: config.apiKey });
+    this.client = new Anthropic({ apiKey: config.apiKey, maxRetries: 0 });
     this.model = config.model;
   }
 
@@ -115,6 +116,7 @@ export class AnthropicProvider implements LLMProvider {
 }
 
 function isAnthropicRetryable(err: unknown): boolean {
+  if (err instanceof LLMResponseError) return false;
   return (
     err instanceof RateLimitError ||
     err instanceof InternalServerError ||
@@ -149,6 +151,8 @@ export async function* mapAnthropicStream(
   let promptTokens = 0;
   let cachedPromptTokens = 0;
   let completionTokens = 0;
+  let stopped = false;
+  let finishReason = "stop";
 
   for await (const event of events) {
     if (event.type === "message_start") {
@@ -184,40 +188,24 @@ export async function* mapAnthropicStream(
       }
     }
 
-    if (event.type === "content_block_stop") {
-      const buf = toolBuffers.get(event.index);
-      if (buf && (buf.input || buf.name)) {
-        if (structuredToolName && buf.name === structuredToolName) {
-          // Forced structured-output tool: surface its JSON as the final text.
-          yield { type: "text", content: buf.input || "{}" };
-          toolBuffers.delete(event.index);
-        } else {
-          let parsedArgs: unknown;
-          try {
-            parsedArgs = JSON.parse(buf.input || "{}");
-          } catch {
-            parsedArgs = buf.input;
-          }
-          yield {
-            type: "tool_call",
-            toolCall: { id: buf.id, name: buf.name, arguments: parsedArgs },
-          };
-          toolBuffers.delete(event.index);
-        }
-      }
-    }
-
     if (event.type === "message_delta") {
       completionTokens = event.usage.output_tokens;
+      finishReason = event.delta.stop_reason ?? finishReason;
     }
 
     if (event.type === "message_stop") {
+      stopped = true;
       for (const buf of toolBuffers.values()) {
+        if (!["stop", "end_turn", "tool_use", "stop_sequence"].includes(finishReason)) continue;
         let parsedArgs: unknown;
         try {
           parsedArgs = JSON.parse(buf.input || "{}");
         } catch {
-          parsedArgs = buf.input;
+          throw new LLMResponseError("malformed tool_call arguments", { promptTokens, completionTokens, cachedPromptTokens });
+        }
+        if (structuredToolName && buf.name === structuredToolName) {
+          yield { type: "text", content: JSON.stringify(parsedArgs) };
+          continue;
         }
         yield {
           type: "tool_call",
@@ -228,11 +216,12 @@ export async function* mapAnthropicStream(
 
       yield {
         type: "done",
-        finishReason: "stop",
+        finishReason,
         usage: { promptTokens, completionTokens, cachedPromptTokens },
       };
     }
   }
+  if (!stopped) throw new LLMResponseError("LLM stream ended before completion (missing message_stop)", { promptTokens, completionTokens, cachedPromptTokens });
 }
 
 /**

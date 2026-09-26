@@ -21,10 +21,12 @@ export function agentEventToSse(event: AgentEvent): Record<string, unknown> {
         name: event.name,
         output: event.output,
         isError: event.isError,
+        ...(event.errorKind ? { errorKind: event.errorKind } : {}),
       };
     case "done":
       return {
         type: "done",
+        ...(event.status ? { status: event.status } : {}),
         iterations: event.iterations,
         totalTokens: event.totalTokens,
         inputTokens: event.inputTokens,

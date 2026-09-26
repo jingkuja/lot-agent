@@ -29,8 +29,20 @@ describe("validateToolInput", () => {
     expect(validateToolInput(schema, { path: "a.txt", extra: true })).toEqual([]);
   });
 
-  it("treats non-object input as an empty object for property checks", () => {
+  it("rejects a non-object root", () => {
     const errors = validateToolInput(schema, "not an object");
-    expect(errors).toContain('missing required field "path"');
+    expect(errors.some(e => e.includes("object"))).toBe(true);
   });
+});
+
+it("validates nested required, enum, numeric bounds and array length without coercion", () => {
+  const nested = { type: "object", additionalProperties: false, properties: {
+    items: { type: "array", maxItems: 1, items: { type: "object", required: ["n", "kind"], properties: {
+      n: { type: "integer", minimum: 1 }, kind: { enum: ["a", "b"] },
+    } } },
+  }, required: ["items"] };
+  expect(validateToolInput(nested, { items: [{ n: 1, kind: "a" }] })).toEqual([]);
+  for (const invalid of [null, { items: [{}] }, { items: [{ n: "1", kind: "a" }] }, { items: [{ n: 0, kind: "c" }] }, { items: [{ n: 1, kind: "a" }, { n: 2, kind: "b" }] }]) {
+    expect(validateToolInput(nested, invalid).length).toBeGreaterThan(0);
+  }
 });

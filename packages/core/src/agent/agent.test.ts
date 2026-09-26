@@ -211,7 +211,7 @@ const MALFORMED = () =>
   );
 
 describe("Agent.run malformed tool-call recovery", () => {
-  it("silently retries a malformed tool-call error even after a preamble streamed", async () => {
+  it("does not transparently retry after visible output has streamed", async () => {
     const llm = stepLLM([
       // preamble text THEN the vendor rejects the truncated tool call
       { chunks: [{ type: "text", content: "好的，我来生成" }], error: MALFORMED() },
@@ -221,8 +221,9 @@ describe("Agent.run malformed tool-call recovery", () => {
 
     const events = await collect(agent.run("hi", makeContext(llm)));
 
-    expect(events.some((e) => e.type === "error")).toBe(false);
-    expect(llm.calls.length).toBe(2); // retried the generation
+    expect(events.some((e) => e.type === "error")).toBe(true);
+    expect(llm.calls.length).toBe(1);
+    expect(events.filter(e => e.type === "text").map(e => e.content).join("")).toBe("好的，我来生成");
   });
 
   it("feeds the failure back to the model after silent retries are exhausted", async () => {

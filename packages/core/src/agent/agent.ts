@@ -7,6 +7,7 @@ import type {
   ToolCall,
   ToolContext,
   ToolResult,
+  ToolErrorKind,
 } from "../types/index.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { validateToolInput } from "../tools/validate.js";
@@ -21,7 +22,9 @@ import type { Retriever } from "../retrieval/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 import { isMalformedToolCallError } from "../llm/retry.js";
-import { formatLLMError } from "../llm/errors.js";
+import { LLMResponseError, formatLLMError } from "../llm/errors.js";
+import { createDeadline, withAbort, abortableStream, abortableDelay } from "../runtime/abort.js";
+import { estimateTokens } from "../context/tokenizer.js";
 
 /** Events emitted during agent execution */
 export type AgentEvent =
@@ -29,9 +32,10 @@ export type AgentEvent =
   | { type: "text"; content: string }
   | { type: "thinking"; content: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; toolCallId: string; name: string; output: string; isError: boolean }
+  | { type: "tool_result"; toolCallId: string; name: string; output: string; isError: boolean; errorKind?: ToolErrorKind }
   | {
       type: "done";
+      status?: "completed" | "awaiting_input" | "failed" | "cancelled" | "timed_out" | "budget_exhausted" | "unknown_outcome";
       iterations: number;
       totalTokens: number;
       inputTokens: number;
@@ -43,7 +47,9 @@ export type AgentEvent =
 
 export interface AgentConfig {
   maxIterations: number;
-  /** Wall-clock timeout for the entire agent run in ms. Default: 300000 (5 min) */
+  maxToolCalls: number;
+  maxParallelTools: number;
+  /** Wall-clock timeout for the entire agent run in ms. Default: 600000 (10 min) */
   maxRunTimeMs: number;
   systemPrompt: string;
   dynamicPromptParts?: string[];
@@ -85,23 +91,11 @@ export interface AgentRunOptions {
   signal?: AbortSignal;
 }
 
-/** Combine signals into one that aborts when any input aborts. */
-function anySignal(...signals: (AbortSignal | undefined)[]): AbortSignal {
-  const controller = new AbortController();
-  for (const s of signals) {
-    if (!s) continue;
-    if (s.aborted) {
-      controller.abort();
-      break;
-    }
-    s.addEventListener("abort", () => controller.abort(), { once: true });
-  }
-  return controller.signal;
-}
-
 const DEFAULT_CONFIG: AgentConfig = {
   maxIterations: 20,
-  maxRunTimeMs: 600_000, // 5 minutes
+  maxToolCalls: 100,
+  maxParallelTools: 4,
+  maxRunTimeMs: 600_000, // 10 minutes
   systemPrompt: "You are a helpful AI assistant.",
 };
 
@@ -109,8 +103,8 @@ const DEFAULT_CONFIG: AgentConfig = {
  * When a generation is rejected because the model emitted truncated/garbled
  * tool-call JSON (a sampling artifact — see `isMalformedToolCallError`), retry
  * the same generation this many times before giving up on a fresh sample. The
- * provider's `withLLMRetry` only retries when *no* chunk streamed, so a turn
- * that emits a preamble before the bad tool call escapes it and lands here.
+ * provider retries transport failures; recovery here is allowed only before
+ * visible text/thinking has escaped, so retries cannot corrupt the answer.
  */
 const MAX_GEN_RETRIES = 2;
 
@@ -132,25 +126,9 @@ const MALFORMED_RECOVERY_NOTE =
 const MALFORMED_FALLBACK_MESSAGE =
   "生成失败：模型多次返回不完整的结果（可能是内容过多被截断）。请稍后重试，或减少内容规模后再试。";
 
-/** Abortable delay used to back off between retried generations. */
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    (timer as { unref?: () => void }).unref?.();
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true }
-    );
-  });
-}
-
 /**
  * Validate the final answer text against an outputSchema: JSON.parse then
- * shallow schema check (reusing the tool-input validator). Returns an error
+ * full schema check (reusing the tool-input validator). Returns an error
  * message, or null when valid.
  */
 function validateStructuredOutput(text: string, schema: JSONSchema): string | null {
@@ -192,6 +170,9 @@ export class Agent {
 
   constructor(config: Partial<AgentConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    for (const key of ["maxIterations", "maxRunTimeMs", "maxToolCalls", "maxParallelTools"] as const) {
+      if (!Number.isSafeInteger(this.config[key]) || this.config[key] <= 0) throw new Error(`Invalid ${key}`);
+    }
     // Push outputSchema down to the provider as a constrained-generation hint,
     // unless the caller already set an explicit responseSchema.
     if (this.config.outputSchema) {
@@ -214,64 +195,8 @@ export class Agent {
     history: Message[] = [],
     opts: AgentRunOptions = {}
   ): AsyncIterable<AgentEvent> {
-    // Clear ephemeral memory at the start of each run
-    context.memory?.clearEphemeral();
-
-    // Build system prompt parts
-    const systemParts = [this.config.systemPrompt];
-    if (this.config.dynamicPromptParts?.length) {
-      systemParts.push(...this.config.dynamicPromptParts);
-    }
-
-    // Inject memory usage policy when this agent can use memory tools
-    if (context.memory && hasMemoryTools(this.config.allowedToolNames)) {
-      systemParts.push(MEMORY_POLICY_PROMPT);
-    }
-
-    // Inject the ask-user policy when this agent can use the ask_user tool
-    if (
-      context.toolRegistry.get("ask_user") &&
-      hasAskUserTool(this.config.allowedToolNames)
-    ) {
-      systemParts.push(ASK_USER_POLICY_PROMPT);
-    }
-
-    // Inject memory into system prompt
-    if (context.memory) {
-      const memoryPrompt = context.memory.formatForPrompt();
-      if (memoryPrompt) {
-        systemParts.push(memoryPrompt);
-      }
-
-      // Also load user memory (async) — bounded like the other memory blocks.
-      const userEntries = await context.memory.listUserMemory();
-      const userMem = formatEntriesForPrompt(userEntries);
-      if (userMem) {
-        systemParts.push(`[User Memory]\n${userMem}`);
-      }
-    }
-
-    // Retrieval (E4): fetch context for the user's message once — the query is
-    // the constant user message, so re-retrieving each ReAct iteration would
-    // only repeat work. Formatted into a stable `[Retrieved Context]` block and
-    // fed to every assemble() (bounded by budget.retrieval). Best-effort: a
-    // retriever failure must not abort the run.
-    let retrievalBlock: string | undefined;
-    if (context.retriever && context.retrievalNamespace) {
-      const query = messageQueryText(userMessage);
-      if (query) {
-        try {
-          const docs = await context.retriever.retrieve(context.retrievalNamespace, query);
-          if (docs.length > 0) {
-            retrievalBlock = docs.map((d) => `- ${d.text}`).join("\n");
-          }
-        } catch {
-          // swallow — retrieval is an enhancement, not a hard dependency
-        }
-      }
-    }
-
-    const tools = context.toolRegistry.toLLMTools(this.config.allowedToolNames);
+    const deadline = createDeadline(this.config.maxRunTimeMs, opts.signal);
+    const signal = deadline.signal;
     let iterations = 0;
     let totalTokens = 0;
     let inputTokens = 0;
@@ -281,55 +206,98 @@ export class Agent {
     // model for recovery (bounded by MAX_MALFORMED_RECOVERIES).
     let malformedRecoveries = 0;
 
-    // Working message log (accumulates during this run). The user message is
-    // part of the conversation exactly once, in turn order — re-appending it
-    // each iteration would push it *after* the assistant's tool calls/results,
-    // confusing the model into re-doing work.
-    const workingHistory: Message[] = [
-      ...history,
-      { role: "user", content: userMessage },
-    ];
-
-    // Dedup successful tool calls within this run, but ONLY for tools marked
-    // `cacheable` (pure/idempotent reads). A model that re-issues an identical
-    // cacheable call reuses the prior result instead of re-executing — avoids
-    // wasteful repeats (e.g. the same web fetch). Failed calls are NOT cached,
-    // so the model can still retry after a transient failure.
-    const successfulCalls = new Map<string, ToolResult>();
-
-    // Hard, cancellable deadline: abort in-flight LLM/tool work at the timeout,
-    // and honor a caller-supplied signal (e.g. SSE client disconnect) so we
-    // stop the moment nobody is listening — not just between iterations.
-    const timeoutController = new AbortController();
-    const timer = setTimeout(
-      () => timeoutController.abort(),
-      this.config.maxRunTimeMs
-    );
-    (timer as { unref?: () => void }).unref?.();
-    const signal = anySignal(opts.signal, timeoutController.signal);
-
-    const abortReason = (): "timeout" | "cancelled" | null => {
-      if (timeoutController.signal.aborted) return "timeout";
-      if (opts.signal?.aborted) return "cancelled";
-      return null;
-    };
-    const done = (): AgentEvent => ({
-      type: "done",
-      iterations,
-      totalTokens,
-      inputTokens,
-      outputTokens,
-      cachedPromptTokens,
+    let toolCount = 0;
+    let uncertainOutcome = false;
+    const abortReason = () => deadline.timedOut ? "timeout" : signal.aborted ? "cancelled" : null;
+    const done = (status: "completed" | "awaiting_input" | "failed" | "cancelled" | "timed_out" | "budget_exhausted" = "completed"): AgentEvent => ({
+      type: "done", iterations, totalTokens, inputTokens, outputTokens, cachedPromptTokens,
+      status: uncertainOutcome ? "unknown_outcome" : deadline.timedOut ? "timed_out" : signal.aborted ? "cancelled" : status,
     });
-    const abortError = (kind: "timeout" | "cancelled"): AgentEvent =>
-      kind === "timeout"
-        ? {
-            type: "error",
-            message: `Agent run timed out after ${Math.round(this.config.maxRunTimeMs / 1000)}s`,
-          }
-        : { type: "error", message: "Agent run cancelled" };
-
+    const abortError = (kind: "timeout" | "cancelled"): AgentEvent => ({
+      type: "error", message: kind === "timeout"
+        ? `Agent run timed out after ${Math.round(this.config.maxRunTimeMs / 1000)}s`
+        : "Agent run cancelled",
+    });
     try {
+      signal.throwIfAborted();
+      // Clear ephemeral memory at the start of each run
+      context.memory?.clearEphemeral();
+
+      // Build system prompt parts
+      const systemParts = [this.config.systemPrompt];
+      if (this.config.dynamicPromptParts?.length) {
+        systemParts.push(...this.config.dynamicPromptParts);
+      }
+
+      // Inject memory usage policy when this agent can use memory tools
+      if (context.memory && hasMemoryTools(this.config.allowedToolNames)) {
+        systemParts.push(MEMORY_POLICY_PROMPT);
+      }
+
+      // Inject the ask-user policy when this agent can use the ask_user tool
+      if (
+        context.toolRegistry.get("ask_user") &&
+        hasAskUserTool(this.config.allowedToolNames)
+      ) {
+        systemParts.push(ASK_USER_POLICY_PROMPT);
+      }
+
+      // Inject memory into system prompt
+      if (context.memory) {
+        const memoryPrompt = context.memory.formatForPrompt();
+        if (memoryPrompt) {
+          systemParts.push(memoryPrompt);
+        }
+
+        // Also load user memory (async) — bounded like the other memory blocks.
+        const userEntries = await withAbort(context.memory.listUserMemory(), signal);
+        const userMem = formatEntriesForPrompt(userEntries);
+        if (userMem) {
+          systemParts.push(`[User Memory]\n${userMem}`);
+        }
+      }
+
+      // Retrieval (E4): fetch context for the user's message once — the query is
+      // the constant user message, so re-retrieving each ReAct iteration would
+      // only repeat work. Formatted into a stable `[Retrieved Context]` block and
+      // fed to every assemble() (bounded by budget.retrieval). Best-effort: a
+      // retriever failure must not abort the run.
+      let retrievalBlock: string | undefined;
+      if (context.retriever && context.retrievalNamespace) {
+        const query = messageQueryText(userMessage);
+        if (query) {
+          try {
+            const docs = await withAbort(context.retriever.retrieve(context.retrievalNamespace, query), signal);
+            if (docs.length > 0) {
+              retrievalBlock = docs.map((d) => `- ${d.text}`).join("\n");
+            }
+          } catch (error) {
+            if (signal.aborted) throw error;
+            // swallow — retrieval is an enhancement, not a hard dependency
+          }
+        }
+      }
+
+      const tools = context.toolRegistry.toLLMTools(this.config.allowedToolNames);
+      const allowedToolNames = tools.map(tool => tool.name);
+      const toolTokens = estimateTokens(JSON.stringify(tools));
+      // Working message log (accumulates during this run). The user message is
+      // part of the conversation exactly once, in turn order — re-appending it
+      // each iteration would push it *after* the assistant's tool calls/results,
+      // confusing the model into re-doing work.
+      const workingHistory: Message[] = [
+        ...history,
+        { role: "user", content: userMessage },
+      ];
+
+      // Dedup successful tool calls within this run, but ONLY for tools marked
+      // `cacheable` (pure/idempotent reads). A model that re-issues an identical
+      // cacheable call reuses the prior result instead of re-executing — avoids
+      // wasteful repeats (e.g. the same web fetch). Failed calls are NOT cached,
+      // so the model can still retry after a transient failure.
+      const successfulCalls = new Map<string, ToolResult>();
+      const pendingCalls = new Map<string, Promise<ToolResult>>();
+
       while (iterations < this.config.maxIterations) {
         const aborted = abortReason();
         if (aborted) {
@@ -344,14 +312,14 @@ export class Agent {
         let toolCalls: ToolCall[] = [];
 
         // Assemble messages with context management (budget + sliding window + summary)
-        const messages = await this.contextManager.assemble(
+        const messages = await withAbort(this.contextManager.assemble(
           systemParts,
           undefined, // memory — could be wired to a memory store
           workingHistory,
           undefined, // user message already lives in workingHistory
-          context.llm, // use same LLM as compressor for summaries
-          { signal, retrieval: retrievalBlock } // honor timeout + inject retrieved context
-        );
+          this.config.contextConfig?.compressor ?? context.llm,
+          { signal, retrieval: retrievalBlock, toolTokens, generationTokens: this.config.modelParams?.maxTokens }
+        ), signal);
 
         // Stream LLM response — surface any failure as an event so the run
         // always terminates cleanly with a `done` (for billing/trace closure)
@@ -359,21 +327,25 @@ export class Agent {
         // tool-call rejection is a sampling artifact: retry the generation a
         // couple times (a fresh sample usually parses) before giving up.
         let streamError: unknown;
+        let emittedOutput = false;
         for (let genAttempt = 0; ; genAttempt++) {
           // Reset per-attempt accumulators so a retry doesn't inherit partial
           // output from the failed attempt.
           hasToolCalls = false;
           assistantContent = "";
           toolCalls = [];
+          let sawDone = false;
           try {
-            for await (const chunk of context.llm.chat(messages, tools, {
+            for await (const chunk of abortableStream(context.llm.chat(messages, tools, {
               signal,
               params: this.config.modelParams,
-            })) {
+            }), signal)) {
               if (chunk.type === "thinking" && chunk.content) {
+                emittedOutput = true;
                 yield { type: "thinking", content: chunk.content };
               }
               if (chunk.type === "text" && chunk.content) {
+                emittedOutput = true;
                 assistantContent += chunk.content;
                 yield { type: "text", content: chunk.content };
               }
@@ -388,17 +360,32 @@ export class Agent {
                 outputTokens += chunk.usage.completionTokens;
                 cachedPromptTokens += chunk.usage.cachedPromptTokens ?? 0;
               }
+              if (chunk.type === "done") {
+                if (sawDone) throw new Error("Duplicate LLM completion");
+                sawDone = true;
+                if (chunk.finishReason && !["stop", "end_turn", "tool_calls", "tool_use", "stop_sequence"].includes(chunk.finishReason)) {
+                  throw new Error(`LLM generation incomplete: ${chunk.finishReason}`);
+                }
+              }
             }
+            if (!sawDone) throw new Error("LLM stream ended before completion");
+            signal.throwIfAborted();
             streamError = undefined;
             break;
           } catch (err) {
+            if (err instanceof LLMResponseError && err.usage && !sawDone) {
+              inputTokens += err.usage.promptTokens;
+              outputTokens += err.usage.completionTokens;
+              totalTokens += err.usage.promptTokens + err.usage.completionTokens;
+              cachedPromptTokens += err.usage.cachedPromptTokens ?? 0;
+            }
             // Cancellation/timeout is terminal — never retry it as an artifact.
             if (abortReason()) {
               streamError = err;
               break;
             }
-            if (isMalformedToolCallError(err) && genAttempt < MAX_GEN_RETRIES) {
-              await delay(200 * (genAttempt + 1), signal);
+            if (!emittedOutput && isMalformedToolCallError(err) && genAttempt < MAX_GEN_RETRIES) {
+              await abortableDelay(200 * (genAttempt + 1), signal);
               continue;
             }
             streamError = err;
@@ -418,7 +405,7 @@ export class Agent {
           // call, or ask_user how to split the work) — bounded so a model that
           // keeps producing malformed output can't loop forever.
           if (
-            isMalformedToolCallError(streamError) &&
+            !emittedOutput && isMalformedToolCallError(streamError) &&
             malformedRecoveries < MAX_MALFORMED_RECOVERIES
           ) {
             malformedRecoveries++;
@@ -431,7 +418,7 @@ export class Agent {
               ? MALFORMED_FALLBACK_MESSAGE
               : formatLLMError(streamError),
           };
-          yield done();
+          yield done("failed");
           return;
         }
 
@@ -442,12 +429,27 @@ export class Agent {
           // decides what to do), then the run closes cleanly with `done`.
           if (this.config.outputSchema) {
             const err = validateStructuredOutput(assistantContent, this.config.outputSchema);
-            if (err) yield { type: "error", message: err };
+            if (err) {
+              yield { type: "error", message: err };
+              yield done("failed");
+              return;
+            }
           }
           yield done();
           return;
         }
 
+        if (toolCount + toolCalls.length > this.config.maxToolCalls) {
+          yield { type: "error", message: `Reached maximum tool calls (${this.config.maxToolCalls})` };
+          yield done("budget_exhausted");
+          return;
+        }
+        toolCount += toolCalls.length;
+        const ids = new Set<string>();
+        for (const tc of toolCalls) {
+          if (!tc.id || ids.has(tc.id) || !tc.name) throw new Error("Invalid or duplicate tool call identity");
+          ids.add(tc.id);
+        }
         // Record assistant message with tool calls
         const assistantMsg: Message = {
           role: "assistant",
@@ -458,6 +460,10 @@ export class Agent {
 
         // Execute a single tool call, honoring the cacheable dedup cache.
         const executeOne = async (tc: ToolCall): Promise<ToolResult> => {
+          signal.throwIfAborted();
+          if (!allowedToolNames.includes(tc.name)) {
+            return { content: `Tool not permitted: ${tc.name}`, isError: true, errorKind: "permission" };
+          }
           const cacheable = context.toolRegistry.get(tc.name)?.cacheable ?? false;
           const dedupKey = `${tc.name}:${stableStringify(tc.arguments)}`;
           const cached = cacheable ? successfulCalls.get(dedupKey) : undefined;
@@ -469,14 +475,22 @@ export class Agent {
               isError: false,
             };
           }
-          const result = await context.toolRegistry.execute(
+          const pending = cacheable ? pendingCalls.get(dedupKey) : undefined;
+          if (pending) return pending;
+          const work = context.toolRegistry.execute(
             tc.name,
             tc.arguments,
             context.toolContext,
-            { signal }
+            { signal, allowedToolNames }
           );
-          if (cacheable && !result.isError) successfulCalls.set(dedupKey, result);
-          return result;
+          if (cacheable) pendingCalls.set(dedupKey, work);
+          try {
+            const result = await work;
+            if (cacheable && !result.isError) successfulCalls.set(dedupKey, result);
+            return result;
+          } finally {
+            pendingCalls.delete(dedupKey);
+          }
         };
 
         // Record a completed call's result: emit the event, append to history,
@@ -491,12 +505,18 @@ export class Agent {
             name: tc.name,
             output: result.content,
             isError: result.isError ?? false,
+            ...(result.errorKind ? { errorKind: result.errorKind } : {}),
           };
           workingHistory.push({
             role: "tool",
             content: result.content,
             toolCallId: tc.id,
           });
+          if (result.errorKind === "unknown_outcome") {
+            uncertainOutcome = true;
+            throw new Error(result.content);
+          }
+          signal.throwIfAborted();
           // An endsTurn tool that succeeded hands control back to the user
           // (e.g. ask_user). Remaining batched calls are skipped; the model
           // re-plans after the user's reply next turn.
@@ -513,7 +533,7 @@ export class Agent {
           if (parallelSafe(toolCalls[ci])) {
             // Gather the run of consecutive parallel-safe calls.
             const group: ToolCall[] = [];
-            while (ci < toolCalls.length && parallelSafe(toolCalls[ci])) {
+            while (ci < toolCalls.length && parallelSafe(toolCalls[ci]) && group.length < this.config.maxParallelTools) {
               group.push(toolCalls[ci]);
               ci++;
             }
@@ -526,7 +546,7 @@ export class Agent {
               if (yield* recordResult(group[k], results[k])) ended = true;
             }
             if (ended) {
-              yield done();
+              yield done("awaiting_input");
               return;
             }
           } else {
@@ -535,7 +555,7 @@ export class Agent {
             yield { type: "tool_call", id: tc.id, name: tc.name, input: tc.arguments };
             const result = await executeOne(tc);
             if (yield* recordResult(tc, result)) {
-              yield done();
+              yield done("awaiting_input");
               return;
             }
           }
@@ -547,9 +567,13 @@ export class Agent {
         type: "error",
         message: `Reached maximum iterations (${this.config.maxIterations})`,
       };
-      yield done();
+      yield done("budget_exhausted");
+    } catch (error) {
+      const reason = abortReason();
+      yield reason ? abortError(reason) : { type: "error", message: formatLLMError(error) };
+      yield done("failed");
     } finally {
-      clearTimeout(timer);
+      deadline.dispose();
     }
   }
 }

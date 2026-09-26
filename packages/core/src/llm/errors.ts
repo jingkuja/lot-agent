@@ -17,3 +17,18 @@ export function formatLLMError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
   return `LLM error: ${raw}`;
 }
+
+/** Preserve known usage when the wire protocol fails after a paid generation. */
+export class LLMResponseError extends Error {
+  constructor(message: string, readonly usage?: import("../types/index.js").ChatChunk["usage"]) {
+    super(message);
+    this.name = "LLMResponseError";
+  }
+}
+
+export class LLMIncompleteError extends Error {
+  constructor(readonly finishReason: string, readonly partialText: string) {
+    super(`LLM generation incomplete: ${finishReason}`);
+    this.name = "LLMIncompleteError";
+  }
+}

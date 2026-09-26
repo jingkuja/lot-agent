@@ -62,6 +62,7 @@ export function createDocTool(deps: DocToolDeps): Tool {
       required: ["content"],
     },
     async execute(input, context): Promise<ToolResult> {
+      context.signal?.throwIfAborted();
       const {
         title = "",
         content = "",
@@ -101,9 +102,15 @@ export function createDocTool(deps: DocToolDeps): Tool {
         };
       }
 
+      context.signal?.throwIfAborted();
       const key = `${id}.${actualFmt}`;
       const mime = MIME[actualFmt] ?? "application/octet-stream";
       const { url } = await storage.put({ key, body: buffer, contentType: mime });
+      if (context.signal?.aborted) {
+        // This key belongs only to this attempt; no asset row has been published.
+        await storage.delete(key).catch(() => {});
+        context.signal.throwIfAborted();
+      }
       await db.createAsset({
         id,
         userId,

@@ -37,3 +37,8 @@ describe("complete", () => {
     expect(result).toBe("");
   });
 });
+
+it("does not return a truncated or unterminated response as a complete answer", async () => {
+  await expect(complete(fakeLLM([{ type: "text", content: "partial" }]), [])).rejects.toThrow(/completion/);
+  await expect(complete(fakeLLM([{ type: "done", finishReason: "length" }]), [])).rejects.toThrow(/incomplete/);
+});

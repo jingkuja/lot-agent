@@ -193,7 +193,7 @@ export class ContextManager {
     history: Message[],
     currentMessage?: Message,
     compressor?: LLMProvider,
-    opts?: { signal?: AbortSignal; retrieval?: string }
+    opts?: { signal?: AbortSignal; retrieval?: string; toolTokens?: number; generationTokens?: number }
   ): Promise<Message[]> {
     const result: Message[] = [];
 
@@ -252,6 +252,10 @@ export class ContextManager {
     //    omit it to avoid duplicating the turn).
     if (currentMessage) result.push(currentMessage);
 
+    const reserve = Math.max(this.budget.generation, opts?.generationTokens ?? 0);
+    if (this.countTotalTokens(result) + (opts?.toolTokens ?? 0) + reserve > this.budget.total) {
+      throw new Error("Context budget exceeded; reduce document/tool argument size or split the task");
+    }
     return result;
   }
 
