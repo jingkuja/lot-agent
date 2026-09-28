@@ -15,11 +15,13 @@ COPY packages/server/package.json packages/server/package.json
 COPY packages/web/package.json packages/web/package.json
 COPY packages/desktop/package.json packages/desktop/package.json
 COPY packages/miniprogram/package.json packages/miniprogram/package.json
-RUN pnpm --filter @lot-agent/web install --frozen-lockfile
+RUN pnpm --filter @lot-agent/web... install --frozen-lockfile
 
 COPY tsconfig.base.json ./
+COPY packages/core packages/core
 COPY packages/web packages/web
-RUN pnpm --filter @lot-agent/web run build
+# Build workspace dependencies first: web imports core's compiled JS and types.
+RUN pnpm --filter @lot-agent/web... run build
 
 # ---------- Stage 2: nginx static host + reverse proxy ----------
 FROM nginx:1.27-alpine AS runtime
