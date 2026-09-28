@@ -23,7 +23,7 @@ export function IntegrationsPanel({ collections }: { collections: Collection[] }
       <label>{t("应用名称")}<input required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
       <fieldset disabled={busy}><legend>{t("授权知识库（1–10 个）")}</legend>{!collections.length && <p>{t("请先创建知识库。")}</p>}{collections.map((c) => <label key={c.id} className="knowledge-checkbox"><input type="checkbox" checked={ids.includes(c.id)} onChange={(e) => setIds((old) => e.target.checked ? [...old, c.id] : old.filter((id) => id !== c.id))} />{c.name}</label>)}</fieldset>
       <fieldset disabled={busy}><legend>{t("读取权限")}</legend>{Object.entries(permissions).map(([scope, label]) => <label key={scope} className="knowledge-checkbox"><input type="checkbox" checked={scopes.includes(scope)} onChange={(e) => setScopes((old) => e.target.checked ? [...old, scope] : old.filter((s) => s !== scope))} />{t(label)}</label>)}</fieldset>
-      <label>{t("到期时间（可选）")}<input type="datetime-local" value={expires} onChange={(e) => setExpires(e.target.value)} /></label>
+      <label>{t("到期时间（可选）")}<input type="datetime-local" value={expires} onChange={(event) => setExpires(event.target.value)} /></label>
       <button disabled={busy || !name.trim() || !ids.length || ids.length > 10 || !scopes.length}>{editing ? t("保存授权") : t("创建密钥")}</button>
       {editing && <button type="button" onClick={() => { setEditing(undefined); setName(""); setIds([]); setScopes(["retrieval:read"]); setExpires(""); }}>{t("取消编辑")}</button>}
     </form>

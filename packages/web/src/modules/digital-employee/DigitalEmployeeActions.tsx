@@ -31,7 +31,7 @@ export function DigitalEmployeeActions({
     <div className="de-chat-actions" aria-label={t("数字员工快捷操作")}>
       <p className="de-chat-actions-hint">
         <span className="de-chat-actions-hint-icon" aria-hidden>✦</span>
-        <span>{hint}</span>
+        <span>{t(hint)}</span>
       </p>
       <div className="de-chat-actions-row">
         <button type="button" className="de-chat-management-button" onClick={onOpenProfiles}>

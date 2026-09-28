@@ -1,5 +1,7 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
+  "旗舰": {"en": "Flagship", "id": "Unggulan"},
+  "默认": {"en": "Default", "id": "Default"},
   "取消": {"en": "Cancel", "id": "Batal"},
   "自动登录失败，请手动登录": {"en": "Automatic sign-in failed. Please sign in manually.", "id": "Login otomatis gagal. Silakan login secara manual."},
   "加载中...": {"en": "Loading...", "id": "Memuat..."},
