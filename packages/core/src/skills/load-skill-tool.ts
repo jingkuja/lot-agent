@@ -17,14 +17,13 @@ export function createLoadSkillTool(loader: SkillLoader): Tool {
   return {
     name: LOAD_SKILL_TOOL_NAME,
     description:
-      "按名称加载一个技能文档的完整内容。系统提示中的 [可用技能索引] 列出了可加载的技能名称与用途；" +
-      "当当前任务与某个技能相关时，先调用本工具加载它，再按其中的方法执行任务。",
+      "Load a skill document by name. [Available skills] lists names and purposes. Load a relevant skill before following its workflow.",
     parameters: {
       type: "object",
       properties: {
         name: {
           type: "string",
-          description: "要加载的技能名称（必须来自 [可用技能索引] 中列出的名称）",
+          description: "Skill name from [Available skills].",
         },
       },
       required: ["name"],
@@ -43,7 +42,7 @@ export function createLoadSkillTool(loader: SkillLoader): Tool {
           .map((s) => s.name)
           .join(", ");
         return {
-          content: `未找到技能 "${name}"。可用技能: ${available || "（无）"}`,
+          content: `Skill not found "${name}". Available skills: ${available || "(none)"}`,
           isError: true,
           errorKind: "not_found",
         };
@@ -62,9 +61,9 @@ export function formatSkillIndex(skills: Skill[]): string {
   if (skills.length === 0) return "";
   const lines = skills.map((s) => (s.description ? `- ${s.name}: ${s.description}` : `- ${s.name}`));
   return (
-    "[可用技能索引]\n" +
-    "以下技能的完整内容尚未加载。当当前任务与某个技能相关时，" +
-    `先调用 ${LOAD_SKILL_TOOL_NAME} 工具加载它，再继续执行；与任务无关时不要加载。\n` +
+    "[Available skills]\n" +
+    "The following skills are not loaded. When a skill is relevant, " +
+    `call ${LOAD_SKILL_TOOL_NAME} to load it before continuing. Do not load irrelevant skills.\n` +
     lines.join("\n")
   );
 }

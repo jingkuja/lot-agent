@@ -32,7 +32,7 @@ describe("extractAttachment", () => {
   it("reads plain text and wraps with filename", async () => {
     const s = fakeStorage(Buffer.from("hello world"));
     const part = await extractAttachment({ ...base, filename: "note.txt", mime: "text/plain" }, s);
-    expect(part).toEqual({ type: "text", text: "[附件: note.txt]\nhello world\n[/附件: note.txt]" });
+    expect(part).toEqual({ type: "text", text: "[Attachment: note.txt]\nhello world\n[/Attachment: note.txt]" });
   });
 
   it("makes a base64 data-url image part", async () => {
@@ -45,7 +45,7 @@ describe("extractAttachment", () => {
     const s = fakeStorage(Buffer.from("x".repeat(MAX_DOC_CHARS + 100)));
     const part = await extractAttachment({ ...base, filename: "big.txt", mime: "text/plain" }, s);
     expect(part.type).toBe("text");
-    expect((part.text as string).includes("[内容过长已截断]")).toBe(true);
+    expect((part.text as string).includes("[Content truncated]")).toBe(true);
   });
 
   it("parses an Excel workbook into CSV text per sheet", async () => {
@@ -63,7 +63,7 @@ describe("extractAttachment", () => {
       s
     );
     expect(part.type).toBe("text");
-    expect(part.text as string).toContain("工作表: 库存");
+    expect(part.text as string).toContain("Worksheet: 库存");
     expect(part.text as string).toContain("名称,数量");
     expect(part.text as string).toContain("苹果,3");
   });
@@ -71,7 +71,7 @@ describe("extractAttachment", () => {
   it("degrades gracefully on unsupported type", async () => {
     const s = fakeStorage(Buffer.from("zzz"));
     const part = await extractAttachment({ ...base, filename: "a.bin", mime: "application/octet-stream" }, s);
-    expect(part).toEqual({ type: "text", text: "[附件 a.bin 无法解析，已忽略内容]" });
+    expect(part).toEqual({ type: "text", text: "[Attachment a.bin could not be parsed; content omitted]" });
   });
 
   it("strips an absolute PUBLIC_BASE_URL prefix from the upload url", async () => {
@@ -82,7 +82,7 @@ describe("extractAttachment", () => {
       { ...base, filename: "n.txt", mime: "text/plain", url: "http://1.2.3.4:3000/static/uploads/abc.txt" },
       s
     );
-    expect(part).toEqual({ type: "text", text: "[附件: n.txt]\nhello\n[/附件: n.txt]" });
+    expect(part).toEqual({ type: "text", text: "[Attachment: n.txt]\nhello\n[/Attachment: n.txt]" });
   });
 
   it("rejects path-traversal urls without reading from storage", async () => {
@@ -101,7 +101,7 @@ describe("extractAttachment", () => {
       s
     );
     expect(read).toBe(false);
-    expect(part).toEqual({ type: "text", text: "[附件 x 无法访问，已忽略内容]" });
+    expect(part).toEqual({ type: "text", text: "[Attachment x inaccessible; content omitted]" });
   });
 
   it("degrades gracefully when the stored file is missing", async () => {
@@ -114,7 +114,7 @@ describe("extractAttachment", () => {
       },
     };
     const part = await extractAttachment({ ...base, filename: "gone.txt", mime: "text/plain" }, s);
-    expect(part).toEqual({ type: "text", text: "[附件 gone.txt 无法读取，已忽略内容]" });
+    expect(part).toEqual({ type: "text", text: "[Attachment gone.txt unreadable; content omitted]" });
   });
 });
 
@@ -134,7 +134,7 @@ describe("extractAttachment: ppt slots", () => {
     );
     expect(part).toEqual({
       type: "text",
-      text: "[PPT模版已上传: 公司模版.pptx (templateAssetId: tpl-1)]",
+      text: "[PPT template uploaded: 公司模版.pptx (templateAssetId: tpl-1)]",
     });
     expect(storage.get).not.toHaveBeenCalled();
   });
@@ -175,7 +175,7 @@ describe("ppt_background slot", () => {
     };
     const part = await extractAttachment(att, storage);
     expect(part.type).toBe("text");
-    expect((part as any).text).toContain("PPT背景图已上传");
+    expect((part as any).text).toContain("PPT background uploaded");
     expect((part as any).text).toContain("backgroundAssetId: bg1");
     expect(storage.get).not.toHaveBeenCalled();
   });
@@ -186,7 +186,7 @@ describe("extractAttachment: contract slots", () => {
     assetId: "c-old", size: 10, kind: "doc" as const,
   };
 
-  it("wraps contract_old text with 旧版合同 markers", async () => {
+  it("wraps contract_old text with Old contract markers", async () => {
     const storage = { get: vi.fn(async () => Buffer.from("第一条 甲方为A公司")) } as any;
     const part = await extractAttachment(
       {
@@ -197,11 +197,11 @@ describe("extractAttachment: contract slots", () => {
     );
     expect(part).toEqual({
       type: "text",
-      text: "[旧版合同: old.txt]\n第一条 甲方为A公司\n[/旧版合同: old.txt]",
+      text: "[Old contract: old.txt]\n第一条 甲方为A公司\n[/Old contract: old.txt]",
     });
   });
 
-  it("wraps contract_new text with 新版合同 markers", async () => {
+  it("wraps contract_new text with New contract markers", async () => {
     const storage = { get: vi.fn(async () => Buffer.from("第一条 甲方为B公司")) } as any;
     const part = await extractAttachment(
       {
@@ -212,7 +212,7 @@ describe("extractAttachment: contract slots", () => {
     );
     expect(part).toEqual({
       type: "text",
-      text: "[新版合同: new.txt]\n第一条 甲方为B公司\n[/新版合同: new.txt]",
+      text: "[New contract: new.txt]\n第一条 甲方为B公司\n[/New contract: new.txt]",
     });
   });
 
@@ -229,7 +229,7 @@ describe("extractAttachment: contract slots", () => {
       },
       storage
     );
-    expect(part).toEqual({ type: "text", text: "[附件 gone.pdf 无法读取，已忽略内容]" });
+    expect(part).toEqual({ type: "text", text: "[Attachment gone.pdf unreadable; content omitted]" });
   });
 });
 

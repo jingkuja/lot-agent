@@ -11,12 +11,11 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
   const search: Tool = {
     name: "search_customer_profiles",
     description:
-      "查询或统计当前账号的客户画像。支持名称/别名关键词、总体关系、健康度和标签筛选。" +
-      "返回的 total 是数据库匹配总数，items 只是当前页；回答数量问题必须使用 total。此工具不返回联系方式。",
+      "Search or count the current account's customer profiles by name/alias, relationship, health or tags. total is the database match count; items is only the current page. Use total for counts. No contact details are returned.",
     parameters: {
       type: "object",
       properties: {
-        query: { type: "string", description: "客户姓名、称呼或别名关键词" },
+        query: { type: "string", description: "Customer name, form of address or alias keyword." },
         relationshipStage: { type: "string", enum: RELATIONSHIP_ENUM },
         health: { type: "string", enum: HEALTH_ENUM },
         tag: { type: "string" },
@@ -62,8 +61,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
   const get: Tool = {
     name: "get_customer_profiles",
     description:
-      "读取1到6条已经由 search_customer_profiles 确认的画像详情、分产品状态和最多5条近期观察。" +
-      "多匹配只读请求可在用户明确选择“全部匹配画像”后传入多个候选 ID；不得用于批量更新，也不返回联系方式。",
+      "Read 1–6 profiles confirmed by search_customer_profiles, including per-product state and up to five recent observations. Multiple IDs are allowed only after explicit selection of all matching profiles for a read request. Never use for bulk updates. No contact details are returned.",
     parameters: {
       type: "object",
       properties: {
@@ -94,24 +92,22 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
   const prepare: Tool = {
     name: "prepare_customer_profile_change",
     description:
-      "准备对话式新建或更新客户主档。一句话建档时尽量一次抽出：姓名/称呼、别名、组织、部门、职位、客户区域、来源、总体关系、健康度、标签；" +
-      "原话里出现的字段都要填，不要只传姓名。联系方式、归档、人工锁定请引导至“客户画像管理”。" +
-      "此工具不写正式画像，返回 needs_confirmation 时必须先调用 ask_user。",
+      "Prepare creation or update of a customer master record. Extract every stated name/alias, organization, department, title, region, source, relationship, health and tag on the first call, not just the name. Direct contact details, archiving and manual locks to profile management. This does not write the official record. needs_confirmation requires ask_user first.",
     parameters: {
       type: "object",
       properties: {
         operation: { type: "string", enum: ["create", "update"] },
-        customerMention: { type: "string", description: "更新目标在用户原话中的称呼" },
+        customerMention: { type: "string", description: "User's original name or reference for the update target." },
         displayName: { type: "string" },
         aliases: { type: "array", items: { type: "string" }, maxItems: 20 },
-        organization: { type: ["string", "null"], description: "公司/组织名称，原话出现时必填" },
-        department: { type: ["string", "null"], description: "部门，原话出现时必填" },
-        title: { type: ["string", "null"], description: "职位/头衔，如经理、老师、负责人" },
-        customerRegion: { type: ["string", "null"], description: "客户区域，自由文本，不拆分省市区" },
-        source: { type: ["string", "null"], description: "来源渠道，如转介绍、展会、朋友圈" },
+        organization: { type: ["string", "null"], description: "Company/organization, required when stated by the user." },
+        department: { type: ["string", "null"], description: "Department, required when stated by the user." },
+        title: { type: ["string", "null"], description: "Job title, such as manager, teacher or lead." },
+        customerRegion: { type: ["string", "null"], description: "Customer region as free text; do not split into administrative levels." },
+        source: { type: ["string", "null"], description: "Source channel, such as referral, trade show or social feed." },
         relationshipStage: { type: "string", enum: RELATIONSHIP_ENUM },
         overallHealth: { type: "string", enum: HEALTH_ENUM },
-        tags: { type: "array", items: { type: "string" }, maxItems: 30, description: "从原话提炼的短标签，如行业/角色/意向" },
+        tags: { type: "array", items: { type: "string" }, maxItems: 30, description: "Short tags grounded in the original message, such as industry, role or intent." },
       },
       required: ["operation"],
     },
@@ -126,7 +122,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
           return {
             content:
               `画像变更草稿已准备好。draftId: ${prepared.draftId}\n` +
-              "现在立即调用 commit_customer_profile_change，只传 draftId；不要追加字段。",
+              "Call commit_customer_profile_change immediately with draftId only; add no fields.",
           };
         }
         const mapping = prepared.candidates
@@ -134,11 +130,11 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
           .join("\n");
         return {
           content:
-            `画像变更需要用户确认。draftId: ${prepared.draftId}\n` +
-            `请调用 ask_user，question 必须为：${prepared.question ?? "请确认本次画像变更"}\n` +
-            `options 必须为：${JSON.stringify(prepared.options ?? [])}\n` +
+            `画像变更User confirmation required. draftId: ${prepared.draftId}\n` +
+            `Call ask_user. Translate this question into the user's language without changing its meaning: ${prepared.question ?? "Please confirm this profile change"}\n` +
+            `Translate these options into the user's language, preserving order, meaning and candidate mapping: ${JSON.stringify(prepared.options ?? [])}\n` +
             (mapping ? `候选映射：\n${mapping}\n` : "") +
-            "确认后再调用 commit_customer_profile_change；取消时不要提交。",
+            "Call commit_customer_profile_change only after confirmation; do not commit on cancellation.",
         };
       } catch (error) {
         return toolError("准备画像变更失败", error);
@@ -149,8 +145,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
   const commit: Tool = {
     name: "commit_customer_profile_change",
     description:
-      "提交 prepare_customer_profile_change 产生的服务端草稿。不得附加新字段。" +
-      "多候选更新传用户选择对应的 profileId；继续新建传 continueCreate=true；关键字段经用户确认后传 confirm=true。",
+      "Commit the server draft from prepare_customer_profile_change without additional fields. For multiple update candidates pass the selected profileId; for confirmed creation pass continueCreate=true; for confirmed critical fields pass confirm=true.",
     parameters: {
       type: "object",
       properties: {

@@ -243,7 +243,7 @@ describe("Agent.run malformed tool-call recovery", () => {
     const fourth = llm.calls[3];
     expect(
       fourth.some(
-        (m) => m.role === "user" && String(m.content).includes("[系统自动提示]")
+        (m) => m.role === "user" && String(m.content).includes("[Automatic system notice]")
       )
     ).toBe(true);
   });

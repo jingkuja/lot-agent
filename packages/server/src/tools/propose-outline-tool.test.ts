@@ -9,7 +9,7 @@ describe("propose_outline", () => {
   it("validates and returns a waiting placeholder", async () => {
     const r = await proposeOutlineTool.execute({ title: "T", slides: [{ layout: "cover", title: "封面" }] }, {} as any);
     expect(r.isError).toBeFalsy();
-    expect(r.content).toContain("大纲");
+    expect(r.content).toContain("Outline shown");
   });
   it("rejects invalid slides with validation errorKind", async () => {
     const r = await proposeOutlineTool.execute({ title: "T", slides: [{ layout: "stats", title: "t", items: [{ label: "x" }] }] }, {} as any);

@@ -11,7 +11,7 @@ describe("customer capture tools", () => {
       commitCustomerCapture: vi.fn(),
     } as any;
     const [prepare] = createCustomerCaptureTools(service);
-    expect(JSON.stringify(prepare.parameters)).toContain("即使营销资料未匹配也不能省略");
+    expect(JSON.stringify(prepare.parameters)).toContain("Preserve the original name even without a marketing match");
     const result = await prepare.execute(
       {
         customerMention: "李姐",
@@ -81,8 +81,8 @@ describe("customer capture tools", () => {
     );
 
     expect(result.isError).toBeUndefined();
-    expect(result.content).toContain("请调用 ask_user");
+    expect(result.content).toContain("Call ask_user");
     expect(result.content).toContain("中转站");
-    expect(result.content).toContain("再次带上同一个 profileId 或 createProfile");
+    expect(result.content).toContain("include the same profileId or createProfile again");
   });
 });

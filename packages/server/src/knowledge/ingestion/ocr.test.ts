@@ -70,7 +70,7 @@ it("uses a separate image description prompt on fallback and meters the call", a
   expect(await run({ ...image, mode: "describe" })).toBe("蓝色陶瓷杯，白色背景。");
   const body = JSON.parse(fetcher.mock.calls[0][1].body);
   expect(body.model).toBe(OCR_MODEL);
-  expect(body.messages[0].content).toContain("图片说明");
+  expect(body.messages[0].content).toContain("Describe the image in English");
   expect(body.messages[0].content).not.toBe(OCR_PROMPT);
   expect(meter.record).toHaveBeenCalledTimes(1);
 });

@@ -41,7 +41,7 @@ describe("completeTalkTrackReply", () => {
     expect(reply).toBe("李姐，机房运维方案您看得怎么样？");
     expect(reply).not.toContain("private reasoning");
     expect(requests).toHaveLength(2);
-    expect(requests[1]?.messages.at(-1)?.content).toContain("正文不能为空");
+    expect(requests[1]?.messages.at(-1)?.content).toContain("nonempty draft");
     expect(requests[0]?.opts?.params?.maxTokens).toBe(1_600);
     expect(requests[1]?.opts?.params?.maxTokens).toBe(3_200);
   });

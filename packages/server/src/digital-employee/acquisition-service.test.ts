@@ -598,7 +598,7 @@ describe("acquisition prompt quality helpers", () => {
       "poster",
     );
     expect(prompt).toContain("1536x1024");
-    expect(prompt).toContain("印刷级清晰");
+    expect(prompt).toContain("print-quality clarity");
     expect(prompt).toContain("多久上线？");
     expect(prompt).toContain("适合华东制造产线改造");
   });
@@ -608,7 +608,7 @@ describe("acquisition prompt quality helpers", () => {
       [{ id: "s1", name: "制造业潜客" }],
       [{ id: "p1", name: "边缘算力", coreValues: ["部署简单"], faqs: [{ question: "多久上线？", answer: "两周内" }] }],
     );
-    expect(drafts.some((item) => item.type === "poster" && item.creativeDirection?.includes("高清"))).toBe(true);
+    expect(drafts.some((item) => item.type === "poster" && item.creativeDirection?.includes("High-resolution"))).toBe(true);
     expect(drafts[0].reasoning?.some((line) => line.includes("多久上线"))).toBe(true);
   });
 });

@@ -22,8 +22,8 @@ const benefit = {
   type: "object",
   properties: {
     title: { type: "string" }, description: { type: "string" },
-    validFrom: { type: ["string", "null"], description: "ISO 8601 日期" },
-    validUntil: { type: ["string", "null"], description: "ISO 8601 日期" },
+    validFrom: { type: ["string", "null"], description: "ISO 8601 date." },
+    validUntil: { type: ["string", "null"], description: "ISO 8601 date." },
   },
   required: ["title"],
 };
@@ -46,17 +46,17 @@ const productProperties = {
   currentBenefits: { type: "array", items: benefit, maxItems: 50 },
   prohibitedExpressions: { type: "array", items: { type: "string" }, maxItems: 50 },
   caseMaterials: { type: "array", items: caseMaterial, maxItems: 50 },
-  faqs: { type: "array", items: faq, maxItems: 50, description: "产品FAQ，供获客文案/海报引用" },
-  productNotes: { type: "string", description: "自由文本产品说明/卖点补充，非 PDF 知识库替代" },
+  faqs: { type: "array", items: faq, maxItems: 50, description: "Product FAQs for acquisition copy/posters." },
+  productNotes: { type: "string", description: "Additional free-text product details/benefits; not a replacement for a PDF knowledge base." },
 };
 
 export function createMarketingMaterialTools(service: MarketingMaterialsService): Tool[] {
   const search: Tool = {
     name: "search_marketing_materials",
-    description: "查询当前账号的产品与品牌事实。需要回答产品卖点、可验证事实、异议、有效权益、禁用表达、案例、FAQ、产品补充说明、品牌语气、视觉资产或行动号召时先调用。",
+    description: "Search the current account's product and brand facts first when answering about benefits, verified facts, objections, valid offers, prohibited phrases, cases, FAQs, product notes, brand tone, visual assets or calls to action.",
     parameters: {
       type: "object",
-      properties: { query: { type: "string", description: "产品名称或定位关键词；留空返回全部" }, includeBrand: { type: "boolean" } },
+      properties: { query: { type: "string", description: "Product name or positioning keyword; leave empty to return all." }, includeBrand: { type: "boolean" } },
     },
     async execute(input, context) {
       try {
@@ -80,7 +80,7 @@ export function createMarketingMaterialTools(service: MarketingMaterialsService)
 
   const create: Tool = {
     name: "create_marketing_product",
-    description: "新建一条产品营销资料。只保存用户明确提供的事实；不得臆造可验证事实、权益期限或案例结果。",
+    description: "Create product marketing materials using only explicit user-provided facts. Do not invent verifiable facts, offer validity or case outcomes.",
     parameters: { type: "object", properties: productProperties, required: ["name"] },
     async execute(input, context) {
       try {
@@ -94,7 +94,7 @@ export function createMarketingMaterialTools(service: MarketingMaterialsService)
 
   const update: Tool = {
     name: "update_marketing_product",
-    description: "更新 search_marketing_materials 已确认的单个产品资料。数组字段会整体替换，因此只应在用户明确给出完整新值时传入。",
+    description: "Update one product confirmed by search_marketing_materials. Array fields replace the entire array; pass only complete confirmed new values.",
     parameters: {
       type: "object",
       properties: { productId: { type: "string" }, ...productProperties },
@@ -116,7 +116,7 @@ export function createMarketingMaterialTools(service: MarketingMaterialsService)
 
   const brand: Tool = {
     name: "update_marketing_brand_assets",
-    description: "新建或更新当前账号唯一的品牌资料，包括品牌语气、视觉资产与标准行动号召。数组字段会整体替换。",
+    description: "Create or update the account's single brand record, including tone, visual assets and standard calls to action. Arrays are replaced in full.",
     parameters: {
       type: "object",
       properties: {

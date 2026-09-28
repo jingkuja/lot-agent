@@ -11,13 +11,13 @@ export interface MemoryExtraction {
   deletes: string[];
 }
 
-const SYSTEM_PROMPT = `你是用户记忆抽取器。从一段对话回合中抽取可长期复用的用户事实与稳定偏好（称呼、语言偏好、行业/品牌背景、长期约束）。
-不要抽取一次性请求、临时上下文或敏感信息（密码、支付信息）。
-你会拿到该用户的现有记忆。请产出：
-- upserts：需要新增或值发生变化的记忆，key 用稳定的英文 snake_case（如 preferred_language、brand_name）。
-- deletes：被用户更正、推翻或明显过时、应删除的现有 key。
-没有任何可记内容时，两个数组都为空。
-严格只输出 JSON，不要解释、不要 markdown：{"upserts":[{"key":"","value":""}],"deletes":[""]}`;
+const SYSTEM_PROMPT = `You extract reusable user facts and stable preferences from one conversation turn: preferred name/language, industry/brand background and lasting constraints.
+Do not extract one-off requests, transient context or sensitive information such as passwords/payment details.
+Given existing memories, return:
+- upserts: new or changed facts, using stable English snake_case keys such as preferred_language or brand_name. Preserve the user's language in values.
+- deletes: existing keys corrected, contradicted or clearly obsolete.
+When there is nothing to remember, return empty arrays.
+Output only JSON, with no explanation or Markdown: {"upserts":[{"key":"","value":""}],"deletes":[""]}`;
 
 export function buildExtractionMessages(
   turn: MemoryTurn,
@@ -25,10 +25,10 @@ export function buildExtractionMessages(
 ): Message[] {
   const existingText = existing.length
     ? existing.map((e) => `- ${e.key}: ${e.value}`).join("\n")
-    : "（无）";
+    : "(none)";
   const userContent =
-    `[现有记忆]\n${existingText}\n\n` +
-    `[本回合对话]\n用户: ${turn.userMessage}\n助手: ${turn.assistantText}`;
+    `[Existing memories]\n${existingText}\n\n` +
+    `[Current turn]\nUser: ${turn.userMessage}\nAssistant: ${turn.assistantText}`;
   return [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: userContent },

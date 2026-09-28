@@ -22,13 +22,12 @@ const SLIDE_ITEMS = {
 export const proposeOutlineTool: Tool = {
   name: "propose_outline",
   description:
-    "在生成 PPT 前，把逐页大纲（每页 layout + 标题 + 要点/数据/对比等）展示给用户确认或修改。" +
-    "调用后本轮结束，用户会确认或提出修改意见。slides 结构与 generate_ppt 完全一致。",
+    "Before generating a presentation, show the per-slide outline (layout, title, points, data or comparisons) for user approval or revision. This ends the turn. slides has the same structure as generate_ppt.",
   parameters: {
     type: "object",
     properties: {
-      title: { type: "string", description: "演示文稿标题" },
-      slides: { type: "array", description: "逐页大纲，结构同 generate_ppt", items: SLIDE_ITEMS },
+      title: { type: "string", description: "Presentation title." },
+      slides: { type: "array", description: "Per-slide outline, using the generate_ppt schema.", items: SLIDE_ITEMS },
     },
     required: ["title", "slides"],
   },
@@ -36,7 +35,7 @@ export const proposeOutlineTool: Tool = {
   async execute(input): Promise<ToolResult> {
     const { slides } = (input as { slides?: PptSlide[] }) ?? {};
     const err = validateSlides(slides);
-    if (err) return { content: `propose_outline 校验失败：${err}`, isError: true, errorKind: "validation" };
-    return { content: "[大纲已展示给用户，等待确认或修改意见；用户的回复将作为下一条消息出现]" };
+    if (err) return { content: `propose_outline validation failed: ${err}`, isError: true, errorKind: "validation" };
+    return { content: "[Outline shown; waiting for approval or revisions in the next user message]" };
   },
 };

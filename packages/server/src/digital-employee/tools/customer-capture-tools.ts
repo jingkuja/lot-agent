@@ -20,7 +20,7 @@ const FACTS_SCHEMA = {
 const PREPARE_PARAMETERS = {
   type: "object",
   properties: {
-    customerMention: { type: "string", description: "用户原话里的客户称呼，如“李姐”或“张总”" },
+    customerMention: { type: "string", description: "Customer name or form of address exactly as stated by the user." },
     eventType: {
       type: "string",
       enum: ["contact", "requirement", "purchase_intent", "trial", "purchase", "product_feedback", "complaint", "delivery", "renewal", "churn", "note"],
@@ -28,15 +28,14 @@ const PREPARE_PARAMETERS = {
     productName: {
       type: "string",
       description:
-        "用户原话中的产品/服务对象。出现“咨询X、对X感兴趣、了解X、试用/购买X、担心X价格/门槛”等表达时必须填写 X；" +
-        "即使营销资料未匹配也不能省略，保留原话名称让服务端发起人工确认。",
+        "Product/service named in the user's message. Inquiry about, interest in, trial/purchase of or concern over X's price/threshold requires productName=X. Preserve the original name even without a marketing match so the server can request confirmation.",
     },
     marketingProductId: {
       type: "string",
       description:
-        "仅在 search_marketing_materials 已唯一确认产品时填写其 id；未匹配或不确定时不要猜 ID，只填写 productName。",
+        "Product ID only after a unique search_marketing_materials match. Otherwise pass productName without guessing an ID.",
     },
-    occurredAt: { type: "string", description: "只有原话明确给出时才填写 ISO 时间" },
+    occurredAt: { type: "string", description: "ISO timestamp only when explicitly supplied by the user." },
     facts: FACTS_SCHEMA,
     proposedStatePatch: FACTS_SCHEMA,
     uncertainties: { type: "array", items: { type: "string" }, maxItems: 8 },
@@ -54,13 +53,7 @@ export function createCustomerCaptureTools(service: DigitalEmployeeService): Too
   const prepare: Tool = {
     name: "prepare_customer_capture",
     description:
-      "当用户在记录客户、潜客、购买、试用、投诉、反馈或沟通结果时调用。根据当前用户消息匹配客户并创建可提交的采集草稿。" +
-      "第一次调用就要尽量抽全：eventType、productName、facts（needs/objections/currentIssues/journeyStage/relationshipStage/sentiment/satisfaction/health）和 proposedStatePatch；能从原话推断的不要留空，以减少澄清回合。" +
-      "也用于把客户关联到营销资料中的产品；涉及产品时先调用 search_marketing_materials，唯一匹配时同时传产品 id 与规范名称。" +
-      "“某客户咨询/了解某对象、对某对象感兴趣、因某对象价格或门槛犹豫”都属于产品关系信号，必须传 productName；" +
-      "搜索无匹配时只传原话 productName，工具会要求用户选择已有产品、新建产品或不关联。" +
-      "它不直接写入画像；若返回 needs_clarification，必须使用 ask_user 询问其中给出的一个问题后，再调用 commit_customer_capture。" +
-      "不要把客户事实写入用户记忆来替代此工具。",
+      "Capture customer/prospect communications, purchases, trials, complaints, feedback or outcomes. Resolve the customer from the current message and prepare a draft. Extract all supported eventType, productName, facts (needs/objections/currentIssues/journeyStage/relationshipStage/sentiment/satisfaction/health) and proposedStatePatch in the first call to minimize clarification. Search marketing materials first when a product is involved; pass its ID and canonical name only on a unique match. Inquiry, interest or hesitation over pricing/thresholds still require productName. Without a match retain the original name; the tool offers existing/new/no-association choices. This does not write the profile. needs_clarification requires asking the supplied question with ask_user before commit_customer_capture. Never substitute user memory for this tool.",
     parameters: PREPARE_PARAMETERS,
     async execute(input, context): Promise<ToolResult> {
       try {
@@ -72,9 +65,9 @@ export function createCustomerCaptureTools(service: DigitalEmployeeService): Too
         if (prepared.status === "ready") {
           return {
             content:
-              `客户记录草稿已准备好。draftId: ${prepared.draftId}\n` +
-              `已唯一匹配：${prepared.profile?.displayName ?? "客户"}（profileId: ${prepared.profile?.id ?? ""}）。\n` +
-              "现在立即调用 commit_customer_capture，传入该 draftId；不要自行改写或重复输入用户原文。",
+              `Customer capture draft ready. draftId: ${prepared.draftId}\n` +
+              `Unique match: ${prepared.profile?.displayName ?? "客户"}（profileId: ${prepared.profile?.id ?? ""}）。\n` +
+              "Call commit_customer_capture immediately with this draftId. Do not rewrite or repeat the original user text.",
           };
         }
         const candidates = prepared.candidates
@@ -85,16 +78,16 @@ export function createCustomerCaptureTools(service: DigitalEmployeeService): Too
           .join("\n");
         return {
           content:
-            `客户记录需要用户确认。draftId: ${prepared.draftId}\n` +
-            `确认类型：${prepared.clarification?.kind}\n` +
-            `请调用 ask_user，question 必须为：${prepared.clarification?.question ?? "请确认客户信息"}\n` +
-            `options 必须为：${JSON.stringify(prepared.clarification?.options ?? [])}\n` +
-            (candidates ? `候选映射（仅用于用户回答后调用 commit_customer_capture）：\n${candidates}\n` : "") +
-            (productCandidates ? `产品候选映射：\n${productCandidates}\n` : "") +
+            `客户记录User confirmation required. draftId: ${prepared.draftId}\n` +
+            `Confirmation type: ${prepared.clarification?.kind}\n` +
+            `Call ask_user. Translate this question into the user's language without changing its meaning: ${prepared.clarification?.question ?? "Please confirm the customer details"}\n` +
+            `Translate these options into the user's language, preserving order, meaning and candidate mapping: ${JSON.stringify(prepared.clarification?.options ?? [])}\n` +
+            (candidates ? `Candidate mapping (only for commit_customer_capture after the user answers): \n${candidates}\n` : "") +
+            (productCandidates ? `Product candidate mapping: \n${productCandidates}\n` : "") +
             (prepared.clarification?.kind === "marketing_product"
-              ? `调用 ask_user 时 allowFreeText 必须为 false。选择已有产品时传 marketingProductId；选择“将…添加为新产品”时传 createMarketingProduct=true；选择“不关联产品”时传 skipProduct=true。\n`
+              ? `Set allowFreeText=false in ask_user. For an existing product pass marketingProductId; for adding a new product pass createMarketingProduct=true; for explicitly no association pass skipProduct=true.\n`
               : "") +
-            "不要提交草稿，直到用户给出明确回答。",
+            "Do not commit until the user gives an explicit answer.",
         };
       } catch (error) {
         return toolError(error);
@@ -105,10 +98,7 @@ export function createCustomerCaptureTools(service: DigitalEmployeeService): Too
   const commit: Tool = {
     name: "commit_customer_capture",
     description:
-      "提交 prepare_customer_capture 已创建的客户采集草稿。仅在草稿 ready 时立即调用，或在 ask_user 收到明确回答后调用。" +
-      "profileId 只能使用 prepare 返回的候选 ID；新客户需传 createProfile；产品阶段歧义需传 confirmedJourneyStage。" +
-      "产品关联歧义只能三选一：传候选 marketingProductId、createMarketingProduct=true 或 skipProduct=true。" +
-      "成功后会保存用户原文快照、结构化抽取版本和允许的动态状态变化。",
+      "Commit a prepare_customer_capture draft immediately only when ready, or after an explicit ask_user answer. profileId must come from the returned candidates; new customers require createProfile; ambiguous product stage requires confirmedJourneyStage. Product ambiguity allows exactly one of a candidate marketingProductId, createMarketingProduct=true, or skipProduct=true. Saves the original-message snapshot, structured extraction version and permitted state changes.",
     parameters: {
       type: "object",
       properties: {
@@ -122,9 +112,9 @@ export function createCustomerCaptureTools(service: DigitalEmployeeService): Too
           type: "string",
           enum: ["unknown", "evaluating", "trial", "purchased", "using", "renewal", "paused", "lost", "churned"],
         },
-        marketingProductId: { type: "string", description: "prepare 返回的候选营销产品 id" },
-        createMarketingProduct: { type: "boolean", description: "用户明确选择将原话产品名添加到营销资料时为 true" },
-        skipProduct: { type: "boolean", description: "用户明确选择本次不关联产品时为 true" },
+        marketingProductId: { type: "string", description: "Candidate marketing product ID returned by prepare." },
+        createMarketingProduct: { type: "boolean", description: "True only if the user explicitly chooses to add the original product name to marketing materials." },
+        skipProduct: { type: "boolean", description: "True only if the user explicitly chooses no product association for this capture." },
       },
       required: ["draftId"],
     },
@@ -181,14 +171,14 @@ function productSelectionResult(draftId: string, error: ProductSelectionRequired
     .join("\n");
   return {
     content:
-      `客户身份已确认，但产品关联仍需用户确认。draftId: ${draftId}\n` +
-      `请调用 ask_user，question 必须为：“${error.productName}”要关联到哪个营销产品？\n` +
-      `options 必须为：${JSON.stringify(options)}\n` +
-      "allowFreeText 必须为 false。\n" +
-      (mapping ? `产品候选映射：\n${mapping}\n` : "") +
-      "用户选择已有产品后，再次调用 commit_customer_capture 并传 marketingProductId；" +
-      "选择添加为新产品时传 createMarketingProduct=true；选择不关联时传 skipProduct=true。" +
-      "如先前已确认过客户身份，必须再次带上同一个 profileId 或 createProfile。",
+      `Customer identity confirmed; product association still requires confirmation. draftId: ${draftId}\n` +
+      `Call ask_user. Translate this question into the user's language without changing its meaning: Which marketing product should "${error.productName}" be associated with?\n` +
+      `Translate these options into the user's language, preserving order, meaning and candidate mapping: ${JSON.stringify(options)}\n` +
+      "allowFreeText must be false.\n" +
+      (mapping ? `Product candidate mapping: \n${mapping}\n` : "") +
+      "After selecting an existing product call commit_customer_capture again with marketingProductId. " +
+      "For adding a new product pass createMarketingProduct=true; for no association pass skipProduct=true. " +
+      "If the identity was already confirmed, include the same profileId or createProfile again.",
   };
 }
 

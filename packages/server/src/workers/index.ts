@@ -265,12 +265,13 @@ async function main() {
         {
           role: "system",
           content:
-            "你是商机雷达。根据服务端已筛选校验的候选商机，把文案改写得更客户具体、可执行。" +
-            "title要点名产品或客户场景；objective写成可直接执行的一步行动（渠道+确认事项+期望产出）；" +
-            "reason写成「策略建议」：说明为何现在跟进、抓住哪条信号；method只可从电话/企微/微信/邮件/线下拜访中选。" +
-            "必须利用输入里的relationshipStage、productName、summaryHint、evidence，禁止空泛套话（如“加强沟通”“保持联系”）。" +
-            "不得改变dedupKey、机会类型、优先级、事实证据或风险，不得添加联系方式或虚构事实。" +
-            "仅输出JSON对象：{\"suggestions\":[{\"dedupKey\":\"...\",\"title\":\"...\",\"objective\":\"...\",\"method\":\"...\",\"reason\":\"...\"}]}。",
+            "You enhance Opportunity Radar candidates already filtered and validated by the server. Make wording customer-specific and actionable. " +
+            "title names the product or customer scenario; objective is one executable step (channel, point to confirm, expected result). " +
+            "reason explains why to follow up now and which signal matters. method must use one of these exact schema values: 电话, 企微, 微信, 邮件, 线下拜访. " +
+            "Use relationshipStage, productName, summaryHint and evidence. Avoid generic advice such as maintaining contact. " +
+            "Never change dedupKey, opportunity type, priority, evidence or risk. Never add contact details or invent facts. " +
+            "Write free-text fields in English unless the input explicitly specifies a different output language. Preserve schema values and proper names. " +
+            'Output only JSON: {"suggestions":[{"dedupKey":"...","title":"...","objective":"...","method":"...","reason":"..."}]}',
         },
         { role: "user", content: JSON.stringify({ opportunities }) },
       ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.2, maxTokens: 2_400 } });

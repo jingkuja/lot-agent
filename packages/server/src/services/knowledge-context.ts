@@ -4,8 +4,8 @@ import type { RagRecord } from "./rag-client.js";
 export function formatKnowledgeRecord(record: RagRecord): string {
   const evidence = record.evidence;
   const context = (position: "before" | "after") => evidence?.context?.filter((chunk) => chunk.position === position).map((chunk) =>
-    `[相邻原文；证据: ${JSON.stringify({ itemId: evidence.itemId, revisionId: evidence.revisionId, chunkId: chunk.chunkId, citation: chunk.citation })}]\n${chunk.content}`) ?? [];
-  const anchor = `${evidence ? `[证据: ${JSON.stringify({ itemId: evidence.itemId, revisionId: evidence.revisionId, chunkId: evidence.chunkId, citation: evidence.citation })}]\n` : ""}${record.content}`;
-  return `[知识库: ${record.datasetName}]${record.documentName ? ` [文档: ${record.documentName}]` : ""} [排序分数: ${record.score.toFixed(4)}]\n` +
-    [...context("before"), anchor, ...context("after")].join("\n") + (record.answer ? `\n参考答案: ${record.answer}` : "");
+    `[Adjacent source; evidence: ${JSON.stringify({ itemId: evidence.itemId, revisionId: evidence.revisionId, chunkId: chunk.chunkId, citation: chunk.citation })}]\n${chunk.content}`) ?? [];
+  const anchor = `${evidence ? `[Evidence: ${JSON.stringify({ itemId: evidence.itemId, revisionId: evidence.revisionId, chunkId: evidence.chunkId, citation: evidence.citation })}]\n` : ""}${record.content}`;
+  return `[Knowledge base: ${record.datasetName}]${record.documentName ? ` [Document: ${record.documentName}]` : ""} [Ranking score: ${record.score.toFixed(4)}]\n` +
+    [...context("before"), anchor, ...context("after")].join("\n") + (record.answer ? `\nReference answer: ${record.answer}` : "");
 }

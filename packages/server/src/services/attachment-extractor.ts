@@ -20,7 +20,7 @@ function excelToText(bytes: Buffer): string {
   const parts: string[] = [];
   for (const name of wb.SheetNames) {
     const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]);
-    parts.push(`### 工作表: ${name}\n${csv}`);
+    parts.push(`### Worksheet: ${name}\n${csv}`);
   }
   return parts.join("\n\n");
 }
@@ -38,7 +38,7 @@ async function pptxToText(bytes: Buffer): Promise<string> {
       .map((m) => m[1])
       .filter(Boolean);
     const num = n.match(/(\d+)/)![1];
-    if (texts.length) pages.push(`### 第${num}页\n${texts.join("\n")}`);
+    if (texts.length) pages.push(`### Slide ${num}\n${texts.join("\n")}`);
   }
   return pages.join("\n\n");
 }
@@ -50,7 +50,7 @@ export interface AttachmentRef {
   size: number;
   url: string;
   kind: "image" | "doc";
-  /** 附件角色：PPT 模版 / PPT 背景图（只传引用，不进正文）/ 撰写素材 / 合同对比的旧版与新版正文。 */
+  /** Attachment角色：PPT 模版 / PPT 背景图（只传引用，不进正文）/ 撰写素材 / 合同对比的旧版与新版正文。 */
   slot?: "ppt_template" | "ppt_background" | "content" | "contract_old" | "contract_new";
 }
 
@@ -69,7 +69,7 @@ export function isSafeUploadKey(key: string): boolean {
   return key.length > 0 && !key.includes("/") && !key.includes("\\") && !key.includes("..");
 }
 
-/** 把附件转成发给模型的 ContentPart；图片→base64 data URL，文档→解析文本，失败降级。 */
+/** 把Attachment转成发给模型的 ContentPart；图片→base64 data URL，文档→解析文本，失败降级。 */
 export async function extractAttachment(
   att: AttachmentRef,
   storage: ObjectStorage
@@ -79,7 +79,7 @@ export async function extractAttachment(
   if (att.slot === "ppt_template") {
     return {
       type: "text",
-      text: `[PPT模版已上传: ${att.filename} (templateAssetId: ${att.assetId})]`,
+      text: `[PPT template uploaded: ${att.filename} (templateAssetId: ${att.assetId})]`,
     };
   }
 
@@ -87,7 +87,7 @@ export async function extractAttachment(
   if (att.slot === "ppt_background") {
     return {
       type: "text",
-      text: `[PPT背景图已上传: ${att.filename} (backgroundAssetId: ${att.assetId})]`,
+      text: `[PPT background uploaded: ${att.filename} (backgroundAssetId: ${att.assetId})]`,
     };
   }
 
@@ -99,7 +99,7 @@ export async function extractAttachment(
   const idx = att.url.lastIndexOf(marker);
   const key = idx >= 0 ? att.url.slice(idx + marker.length) : att.url;
   if (!isSafeUploadKey(key)) {
-    return { type: "text", text: `[附件 ${att.filename} 无法访问，已忽略内容]` };
+    return { type: "text", text: `[Attachment ${att.filename} inaccessible; content omitted]` };
   }
   // A missing/unreadable file (e.g. deleted upload) must degrade gracefully —
   // never reject, or it would abort the whole conversation turn.
@@ -107,7 +107,7 @@ export async function extractAttachment(
   try {
     bytes = await storage.get(key);
   } catch {
-    return { type: "text", text: `[附件 ${att.filename} 无法读取，已忽略内容]` };
+    return { type: "text", text: `[Attachment ${att.filename} unreadable; content omitted]` };
   }
 
   if (attachmentKind(att.mime) === "image") {
@@ -141,15 +141,15 @@ export async function extractAttachment(
   }
 
   if (text == null) {
-    return { type: "text", text: `[附件 ${att.filename} 无法解析，已忽略内容]` };
+    return { type: "text", text: `[Attachment ${att.filename} could not be parsed; content omitted]` };
   }
 
   let body = text;
   if (body.length > MAX_DOC_CHARS) {
-    body = body.slice(0, MAX_DOC_CHARS) + "\n…[内容过长已截断]";
+    body = body.slice(0, MAX_DOC_CHARS) + "\n…[Content truncated]";
   }
   // 合同对比 slot：用角色化标记包裹正文，让 LLM 分清哪份是旧版/新版。
   const label =
-    att.slot === "contract_old" ? "旧版合同" : att.slot === "contract_new" ? "新版合同" : "附件";
+    att.slot === "contract_old" ? "Old contract" : att.slot === "contract_new" ? "New contract" : "Attachment";
   return { type: "text", text: `[${label}: ${att.filename}]\n${body}\n[/${label}: ${att.filename}]` };
 }

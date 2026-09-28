@@ -30,11 +30,11 @@ export function assertScope(context: ToolContext, expected: string, label: strin
 
 export function confirmationContent(draft: ConversationActionDraft, commitTool: string): string {
   return (
-    `需要用户确认。draftId: ${draft.id}\n` +
-    `请调用 ask_user，question 必须为：${draft.question ?? "请确认本次操作"}\n` +
-    `options 必须为：${JSON.stringify(draft.options)}\n` +
-    `预览：${JSON.stringify(draft.preview)}\n` +
-    `用户确认后再调用 ${commitTool}，只传 draftId；取消时不要提交。`
+    `User confirmation required. draftId: ${draft.id}\n` +
+    `Call ask_user. Translate this question into the user's language without changing its meaning: ${draft.question ?? "Please confirm this operation"}\n` +
+    `Translate these options into the user's language, preserving order, meaning and candidate mapping: ${JSON.stringify(draft.options)}\n` +
+    `Preview: ${JSON.stringify(draft.preview)}\n` +
+    `Only after confirmation call ${commitTool} with draftId only. Do not commit on cancellation.`
   );
 }
 

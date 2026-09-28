@@ -451,7 +451,7 @@ export const webFetchTool: Tool = {
 export const webSearchTool: Tool = {
   name: "web_search",
   description:
-    "Search the web using 智谱 BigModel web search. Returns results with titles, URLs, content, and publish dates. Use content directly — only fall back to web_fetch when content is empty but a link is present.",
+    "Search the web using Zhipu BigModel web search. Returns titles, URLs, content and publication dates. Use content directly; use web_fetch only when content is empty and a link is available.",
   cacheable: false,
   retrySafe: true,
   execConfig: {

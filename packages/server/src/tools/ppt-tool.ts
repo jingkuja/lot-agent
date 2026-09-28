@@ -78,52 +78,51 @@ export function createPptTool(deps: PptToolDeps): Tool {
   return {
     name: "generate_ppt",
     description:
-      "根据大纲生成 .pptx 演示文稿并返回下载链接。" +
-      "可传 templateAssetId（用户上传的 PPT 模版，见消息中的 [PPT模版已上传…] 标记）以套用其配色与字体；没有模版就不要传。",
+      "Generate a .pptx presentation from the outline and return a download link. Pass templateAssetId only for a user-uploaded template identified by an upload marker; otherwise omit it.",
     parameters: {
       type: "object",
       properties: {
-        title: { type: "string", description: "演示文稿标题（用于文件名、页脚与提示）" },
-        templateAssetId: { type: "string", description: "用户上传模版的 assetId，仅在消息里出现过模版标记时传入。" },
+        title: { type: "string", description: "Presentation title, used in the filename, footer and notices." },
+        templateAssetId: { type: "string", description: "Asset ID of the user-uploaded template; provide only when its upload marker is present." },
         themePreset: {
           type: "string",
           enum: ["business", "tech-dark", "warm", "mono", "academic"],
-          description: "内置主题预设（无模版时用）：商务蓝/科技深色/暖橙创意/极简黑白/学术绿。",
+          description: "Built-in theme without a template: business, tech-dark, warm, mono or academic.",
         },
         slides: {
           type: "array",
-          description: "每页一个条目，按顺序渲染。按 layout 选择字段。",
+          description: "One entry per slide in rendering order. Choose fields according to layout.",
           items: {
             type: "object",
             properties: {
               layout: { type: "string", enum: ["cover", "agenda", "section", "content", "keypoints", "stats", "compare", "timeline", "quote", "closing"] },
               title: { type: "string" },
-              subtitle: { type: "string", description: "cover/section/closing 的副标题" },
-              bullets: { type: "array", items: { type: "string" }, description: "content 用，1-8 条" },
+              subtitle: { type: "string", description: "Subtitle for cover/section/closing." },
+              bullets: { type: "array", items: { type: "string" }, description: "For content: 1–8 bullet points." },
               items: {
                 type: "array",
-                description: "agenda/keypoints/stats/timeline 用",
+                description: "For agenda/keypoints/stats/timeline.",
                 items: {
                   type: "object",
                   properties: {
                     label: { type: "string" },
-                    value: { type: "string", description: "stats 的大字数值" },
-                    desc: { type: "string", description: "一句话补充" },
+                    value: { type: "string", description: "Large numeric value for stats." },
+                    desc: { type: "string", description: "One supplementary sentence." },
                   },
                   required: ["label"],
                 },
               },
-              left: { type: "object", description: "compare 左栏", properties: { title: { type: "string" }, bullets: { type: "array", items: { type: "string" } } }, required: ["title", "bullets"] },
-              right: { type: "object", description: "compare 右栏", properties: { title: { type: "string" }, bullets: { type: "array", items: { type: "string" } } }, required: ["title", "bullets"] },
-              quote: { type: "object", description: "quote 用", properties: { text: { type: "string" }, author: { type: "string" } }, required: ["text"] },
-              notes: { type: "string", description: "演讲者备注" },
+              left: { type: "object", description: "Left column for compare.", properties: { title: { type: "string" }, bullets: { type: "array", items: { type: "string" } } }, required: ["title", "bullets"] },
+              right: { type: "object", description: "Right column for compare.", properties: { title: { type: "string" }, bullets: { type: "array", items: { type: "string" } } }, required: ["title", "bullets"] },
+              quote: { type: "object", description: "For quote.", properties: { text: { type: "string" }, author: { type: "string" } }, required: ["text"] },
+              notes: { type: "string", description: "Speaker notes." },
             },
             required: ["layout", "title"],
           },
         },
         backgrounds: {
           type: "array",
-          description: "用户上传的背景图（见 [PPT背景图已上传…] 标记）。role 缺省按序 cover/body/section。",
+          description: "User-uploaded background images identified by upload markers. Default roles in sequence: cover/body/section.",
           items: {
             type: "object",
             properties: {
@@ -150,7 +149,7 @@ export function createPptTool(deps: PptToolDeps): Tool {
 
       const validationError = validateSlides(slides);
       if (validationError) {
-        return { content: `generate_ppt 校验失败：${validationError}`, isError: true, errorKind: "validation" };
+        return { content: `generate_ppt validation failed: ${validationError}`, isError: true, errorKind: "validation" };
       }
 
       const userId = context.userId ?? "default";

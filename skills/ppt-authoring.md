@@ -1,47 +1,41 @@
 ---
 name: ppt-authoring
-description: PPT 制作 Agent 的叙事结构与版式选择工艺
+description: Narrative structure, layout selection and production workflow for the presentation Agent
 agents:
   - ppt
 ---
 
-你在制作可下载的 .pptx 演示文稿。素材盘点、提问、出大纲、生成、修改的流程如下。
+Create a downloadable .pptx. Write slide content and user-facing questions in the user's requested language, otherwise the language of their request.
 
-## 输入盘点
-用户消息里可能含：
-- `[PPT模版已上传: 文件名 (templateAssetId: xxx)]` —— 记下 templateAssetId，生成时原样传给 generate_ppt；
-- `[PPT背景图已上传: 文件名 (backgroundAssetId: xxx)]` —— 记下 backgroundAssetId，作为 generate_ppt 的 backgrounds 素材；
-- `[附件: …]` 包裹的正文 —— 撰写素材；
-- 用户的文字描述。
+## Inventory
+- Uploaded PPT template markers include a templateAssetId; pass that exact ID to generate_ppt.
+- Uploaded background-image markers include a backgroundAssetId; use it in backgrounds.
+- Attachment text and the user's description provide source material.
+- Legacy markers may be in Chinese; recognize the asset field names without changing IDs.
 
-## 补齐信息
-缺少「主题 / 受众 / 篇幅」等影响成稿的关键信息时用 ask_user 提问（一次一个）。
-**没有模版也没有背景图时**，用 ask_user 让用户选内置主题，options 固定为：
-["商务蓝", "科技深色", "暖橙创意", "极简黑白", "学术绿"]，
-对应 generate_ppt 的 themePreset：business / tech-dark / warm / mono / academic。
-能合理推断的不要问（篇幅默认 8-12 页）。
+## Clarify essentials
+Use ask_user, one question at a time, for missing topic, audience or length that materially affects the presentation. Do not ask for reasonably inferable details; default to 8–12 slides.
+If there is no template or background image, offer these themes in the user's language: Business blue, Dark technology, Warm creative, Minimal monochrome, Academic green. Map them respectively to themePreset business / tech-dark / warm / mono / academic.
 
-## 叙事骨架
-cover → agenda（目录）→ 2-4 个章节（每章 section 分隔 + 2-3 页正文）→ closing（结尾/致谢）。
+## Narrative
+cover → agenda → 2–4 chapters (each with a section divider and 2–3 body slides) → closing.
 
-## 版式选择（硬规则，避免通篇 bullet）
-- 连续 content 页不超过 2 页；
-- 有数字/百分比/指标 → **stats**（每个 item 的 value 必须来自用户素材，禁止编造）；
-- 方案/新旧/竞品对比 → **compare**；
-- 阶段/步骤/里程碑/时间 → **timeline**；
-- 金句/定位语/愿景 → **quote**；
-- 并列的要点、优势、模块（成组）→ **keypoints**；
-- 只有线性要点时才用 **content**。
+## Layout rules
+- No more than two consecutive content slides.
+- Numbers, percentages or metrics → stats. Values must come from the source; never invent them.
+- Alternatives, before/after or competitors → compare.
+- Phases, steps, milestones or time → timeline.
+- A memorable statement, positioning or vision → quote.
+- Parallel benefits, points or modules → keypoints.
+- Use content only for genuinely linear bullet points.
 
-## 文案规范
-- bullets 每条 ≤ 20 字，观点先行；
-- keypoints/timeline 的 desc 一句话；
-- stats 的 value 简短（如 65%、3x、2.1w）。
+## Writing
+Keep each bullet concise and point-first (approximately 20 characters or an equivalent short phrase in the output language). Use one sentence for keypoints/timeline descriptions. Keep stats values short, such as 65%, 3x or 21k.
 
-## 流程
-1. 盘点输入；2. ask_user 补关键信息（无风格来源时选主题）；
-3. 调 **propose_outline** 出结构化大纲，等用户确认或修改；
-4. 用户认可后调 **generate_ppt**（把 templateAssetId / backgrounds / themePreset 按盘点结果传入），把下载链接交给用户；
-5. 修改时只改对应页，重新 propose_outline 再 generate_ppt。
+## Workflow
+1. Inventory inputs and clarify essentials, including theme when needed.
+2. Call propose_outline with a structured outline and wait for approval or edits.
+3. On approval call generate_ppt with the confirmed templateAssetId/backgrounds/themePreset. Provide the generated download through the frontend.
+4. For revisions, change only affected slides, propose the revised outline, then generate after approval.
 
-不要编造 templateAssetId / backgroundAssetId；没有对应标记就不传该参数。不要向用户展示 assetId 等内部细节。
+Never invent asset IDs. Omit an asset parameter without its upload marker. Do not expose internal IDs to the user.

@@ -118,9 +118,9 @@ const MAX_MALFORMED_RECOVERIES = 1;
 
 /** Synthetic turn appended so the model recovers instead of the run dying. */
 const MALFORMED_RECOVERY_NOTE =
-  "[系统自动提示] 上一次工具调用的参数不完整或过长，已被网关拒绝，且多次自动重试仍失败。" +
-  "请不要重复完全相同的调用：如果可能是生成内容过多导致截断，请显著精简规模后重试；" +
-  "如果需要用户决定如何取舍或分批处理，请调用 ask_user 询问用户。";
+  "[Automatic system notice] The previous tool call had incomplete or oversized arguments and was rejected by the gateway despite retries. " +
+  "Do not repeat the identical call. If excessive output may have caused truncation, significantly reduce its scope before retrying. " +
+  "If scope or batching requires a user decision, call ask_user.";
 
 /** User-facing message when even the guided recovery keeps failing. */
 const MALFORMED_FALLBACK_MESSAGE =

@@ -28,13 +28,12 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
   const searchQueue: Tool = {
     name: "search_customer_work_queue",
     description:
-      "查询商机雷达今日经营队列、逾期行动、跟进中或待回填事项。只返回单个客户事项，不含客群营销。" +
-      "回答“今天该跟谁”优先用 view=today；逾期未完成也包含在 today 中。",
+      "Search Opportunity Radar's daily work queue, overdue actions, ongoing follow-ups or outcomes awaiting entry. Only individual-customer items; no cohort marketing. Use view=today for who to contact today, including unfinished overdue actions.",
     parameters: {
       type: "object",
       properties: {
         view: { type: "string", enum: [...OPPORTUNITY_VIEWS] },
-        query: { type: "string", description: "客户姓名或机构关键词" },
+        query: { type: "string", description: "Customer name or organization keyword." },
         profileId: { type: "string" },
       },
     },
@@ -62,7 +61,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
 
   const searchOpportunities: Tool = {
     name: "search_customer_opportunities",
-    description: "查询尚未决定的单客户商机。采纳、稍后或忽略请使用 prepare_follow_up_action。",
+    description: "Search undecided individual-customer opportunities. Use prepare_follow_up_action to accept, snooze or dismiss.",
     parameters: {
       type: "object",
       properties: {
@@ -92,8 +91,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
   const businessContext: Tool = {
     name: "get_customer_business_context",
     description:
-      "读取一位已确认客户的经营上下文：关系阶段、近期事实、待判断商机、跟进行动和最近话术。" +
-      "必须先确定唯一 profileId；多位候选时用 ask_user 让用户选择。不返回联系方式。",
+      "Read one confirmed customer's business context: relationship stage, recent facts, undecided opportunities, follow-up actions and recent scripts. First resolve a unique profileId; ask_user when multiple candidates exist. No contact details are returned.",
     parameters: {
       type: "object",
       properties: {
@@ -118,9 +116,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
   const prepareAction: Tool = {
     name: "prepare_follow_up_action",
     description:
-      "准备创建、采纳、稍后、忽略、改期、取消或标记执行一次单客户行动。不直接改正式状态。" +
-      "返回 needs_confirmation 时必须 ask_user，确认后再 commit_follow_up_action。" +
-      "create 需要唯一客户；accept/snooze/dismiss 需要 opportunityId；reschedule/cancel/execute 需要 actionId。",
+      "Prepare creation, acceptance, snoozing, dismissal, rescheduling, cancellation or execution of an individual-customer action without changing official state. needs_confirmation requires ask_user before commit_follow_up_action. create requires a unique customer; accept/snooze/dismiss require opportunityId; reschedule/cancel/execute require actionId.",
     parameters: {
       type: "object",
       properties: {
@@ -134,7 +130,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
         objective: { type: "string" },
         followUpMethod: { type: "string" },
         priority: { type: "string", enum: ["low", "normal", "high"] },
-        scheduledAt: { type: "string", description: "ISO 时间" },
+        scheduledAt: { type: "string", description: "ISO timestamp." },
         resultCriteria: { type: "string" },
         productName: { type: "string" },
         reason: { type: "string" },
@@ -157,7 +153,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
 
   const commitAction: Tool = {
     name: "commit_follow_up_action",
-    description: "提交 prepare_follow_up_action 产生的草稿。不得附加新字段。用户选择客户时传入对应 profileId。",
+    description: "Commit a draft from prepare_follow_up_action. Do not add new fields. Pass the profileId corresponding to the user's selected customer.",
     parameters: {
       type: "object",
       properties: {
@@ -181,8 +177,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
   const prepareResult: Tool = {
     name: "prepare_follow_up_result",
     description:
-      "准备回填一次已执行行动的结果、客户原话和下一步。不直接写记录。" +
-      "行动必须处于待回填。确认后调用 commit_follow_up_result。",
+      "Prepare an executed action's outcome, customer quote and next step without writing the record. The action must be awaiting an outcome. After confirmation call commit_follow_up_result.",
     parameters: {
       type: "object",
       properties: {
@@ -212,7 +207,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
 
   const commitResult: Tool = {
     name: "commit_follow_up_result",
-    description: "提交 prepare_follow_up_result 产生的草稿。不得附加新字段。",
+    description: "Commit a draft from prepare_follow_up_result. Do not add new fields.",
     parameters: { type: "object", properties: { draftId: { type: "string" } }, required: ["draftId"] },
     async execute(input, context) {
       return run(context, "提交结果回填失败", async (userId) =>
@@ -223,17 +218,16 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
   const generateOutreach: Tool = {
     name: "generate_individual_outreach",
     description:
-      "为当前单客户行动或已确认客户生成个性化联系、维护或销售话术，并保存到该行动/客户。" +
-      "不得用于客群广告。需要 itemId（行动或商机）或唯一 profileId。",
+      "Generate and save a personalized contact, maintenance or sales script for one customer/action. Never use for cohort advertising. Requires itemId (action/opportunity) or a unique profileId.",
     parameters: {
       type: "object",
       properties: {
-        itemId: { type: "string", description: "行动 ID 或商机 ID" },
+        itemId: { type: "string", description: "Action ID or opportunity ID." },
         profileId: { type: "string" },
-        customerMention: { type: "string", description: "没有 itemId 时用于匹配唯一客户" },
+        customerMention: { type: "string", description: "Identify one customer when itemId is absent." },
         intent: { type: "string", enum: ["maintenance", "follow_up", "sales"] },
         channel: { type: "string", enum: ["wechat", "phone", "email", "visit"] },
-        message: { type: "string", description: "用户对语气、长度或目标的要求" },
+        message: { type: "string", description: "User requirements for tone, length or objective." },
       },
       required: ["message"],
     },
@@ -249,7 +243,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
         }));
         return {
           outreach: draft,
-          message: "已生成个性化话术。复制或改写后，只有用户明确说已使用才调用 mark_individual_outreach_used。",
+          message: "Personalized script generated. Call mark_individual_outreach_used only after the user explicitly says it was used, not merely copied or rewritten.",
           managementUrl: "/digital-employee/acquisition",
         };
       });
@@ -258,7 +252,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
 
   const rewriteOutreach: Tool = {
     name: "rewrite_individual_outreach",
-    description: "按用户要求改写已生成的单客户话术，例如更短、更像熟人、不要提价格。保存为新版本。",
+    description: "Rewrite an existing individual-customer script as requested, for example shorter, more familiar or without prices. Save a new version.",
     parameters: {
       type: "object",
       properties: {
@@ -282,7 +276,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
 
   const markUsed: Tool = {
     name: "mark_individual_outreach_used",
-    description: "在用户明确表示已经使用或发送某条话术后，标记该版本为已使用。不自动发送消息。",
+    description: "Mark a script version used only after the user explicitly says it was used or sent. Never send messages automatically.",
     parameters: {
       type: "object",
       properties: { outreachId: { type: "string" } },
@@ -291,7 +285,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
     async execute(input, context) {
       return run(context, "标记话术使用失败", async (userId) => ({
         outreach: await opportunities.markOutreachUsed(userId, parseEntityId(object(input).outreachId, "outreachId")),
-        message: "已标记实际使用。生成话术本身不等于已联系客户。",
+        message: "Marked as actually used. Generating a script alone does not mean the customer was contacted.",
         managementUrl: "/digital-employee/acquisition",
       }));
     },
@@ -317,7 +311,7 @@ async function resolveProfileId(
   if (candidates.length === 1) return candidates[0].id;
   if (candidates.length === 0) throw new InputError(`未找到“${mention}”的客户画像，请先在客户画像中建档`);
   throw new InputError(
-    `“${mention}”匹配到多位客户，请先调用 ask_user 让用户选择后再传入 profileId。候选：` +
+    `Multiple customers match "${mention}". First use ask_user to select one, then pass profileId. Candidates: ` +
     candidates.map((item) => `${item.displayName}${item.customerRegion ? `（${item.customerRegion}）` : ""} | profileId: ${item.id}`).join("；")
   );
 }

@@ -4,10 +4,11 @@ import type { ChatChunk, Message } from "@lot-agent/core";
 import { AgentService } from "./agent-service.js";
 
 /** LLM that replays a script of chunk-lists; one list per chat() call. */
-function scriptedLLM(script: ChatChunk[][]) {
+function scriptedLLM(script: ChatChunk[][], calls: Message[][] = []) {
   let i = 0;
   return {
     async *chat(_messages: Message[]): AsyncIterable<ChatChunk> {
+      calls.push(structuredClone(_messages));
       const chunks =
         script[i++] ?? [{ type: "done", usage: { promptTokens: 1, completionTokens: 1 } }];
       for (const c of chunks) yield c;
@@ -35,6 +36,7 @@ function fakeService(opts: {
   script: ChatChunk[][];
   conversationModel?: string | null;
 }) {
+  const calls: Message[][] = [];
   const registry = new ToolRegistry();
   registry.register({
     name: "fetchy",
@@ -90,7 +92,7 @@ function fakeService(opts: {
     },
     providerFactory: { llm: vi.fn() },
     modelRegistry: {
-      getProvider: () => scriptedLLM(opts.script),
+      getProvider: () => scriptedLLM(opts.script, calls),
       getConfig: () => undefined,
     },
     agentConfig: {},
@@ -113,7 +115,7 @@ function fakeService(opts: {
     traceRecorderFactory: () => recorder,
     streamAgentResponse: AgentService.prototype.streamAgentResponse,
   };
-  return { fake: fake as unknown as AgentService, repo, usageMeter };
+  return { fake: fake as unknown as AgentService, repo, usageMeter, calls };
 }
 
 async function drain(events: AsyncIterable<unknown>): Promise<unknown[]> {
@@ -220,4 +222,15 @@ it("records known usage even when final message persistence fails", async () => 
   repo.saveFinalAssistant.mockRejectedValueOnce(new Error("save failed"));
   await expect(drain(fake.streamAgentResponse("c1", "hi", "general", "u1"))).rejects.toThrow("save failed");
   expect(usageMeter.record).toHaveBeenCalledWith(expect.objectContaining({ usage: { inputCount: 12, outputCount: 5 } }));
+});
+
+
+it("includes response language policy even with an overridden agent prompt", async () => {
+  const { fake, calls } = fakeService({ script: [[{ type: "done", usage: { promptTokens: 1, completionTokens: 1 } }]] });
+  await drain(fake.streamAgentResponse("c1", "Tolong bantu saya membuat presentasi", "general", "u1"));
+  const system = calls[0].filter((message) => message.role === "system").map((message) => message.content).join("\n");
+  expect(system).toContain("sys");
+  expect(system).toContain("match the latest substantive user request");
+  expect(system).toContain("Do not choose Chinese just because tool results");
+  expect(calls[0].some((message) => message.role === "user" && String(message.content).includes("Tolong bantu saya"))).toBe(true);
 });

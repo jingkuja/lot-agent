@@ -1343,7 +1343,7 @@ function buildBrief(input: CreateCampaignAssetInput, snapshot: any, product: any
     brand: brand ? { tone: brand.tone ?? [], standardCallsToAction: brand.standard_calls_to_action ?? [], version: Number(brand.version) } : null,
     campaign: { objective: input.objective, channels: input.channels, callToAction: input.callToAction },
     request: input.prompt,
-    privacyRule: "只面向聚合客群表达，不得出现单个客户身份或联系方式",
+    privacyRule: "Address aggregate audiences only; never include individual customer identities or contact details",
   };
 }
 
@@ -1403,27 +1403,28 @@ export function campaignMediaPrompt(input: CreateCampaignAssetInput, snapshot: a
   const benefit = (product.current_benefits ?? []).map((item: any) => item.title).filter(Boolean).slice(0, 2);
   const size = input.mediaSettings?.size ?? (kind === "poster" ? "1536x1024" : undefined);
   return [
+    "Follow the language explicitly requested in the creative request; otherwise use its language for visible text and narration. Do not default to Chinese because reference facts contain Chinese. Preserve proper names and verified facts.",
     kind === "poster"
-      ? "生成一张高分辨率专业营销海报（印刷级清晰），不要绘制任何真实客户或个人身份信息。"
-      : `生成${input.mediaSettings?.durationSec ?? input.durationSeconds ?? 5}秒营销视频，画面不得包含真实客户身份。`,
+      ? "Generate a high-resolution professional marketing poster with print-quality clarity. Never depict real customer identities or personal information."
+      : `Generate a ${input.mediaSettings?.durationSec ?? input.durationSeconds ?? 5}-second marketing video without real customer identities.`,
     kind === "poster"
-      ? `版式要求：${size || "1536x1024"}；大标题+副标题+一个核心价值+明确CTA；留白克制；中文文字锐利可读，禁止错字乱码；主体居中偏上，底部放行动号召条。`
-      : "镜头节奏：问题场景→价值证明→行动号召，字幕简短准确。",
-    `目标客群：${snapshot.audienceDescription || "已确认客群快照"}（仅作为聚合受众描述）`,
-    `产品：${product.name}`, `定位：${product.positioning || "未填写"}`,
-    `已确认价值：${(product.core_values ?? []).join("；") || "无"}`,
-    `可信事实：${facts.join("；") || "无，不得虚构数字或案例"}`,
-    benefit.length ? `当前权益：${benefit.join("；")}` : "",
-    faqs.length ? `产品FAQ可转化为文案锚点：${faqs.join("；")}` : "",
-    notes ? `产品补充说明：${notes}` : "",
-    `活动目标：${input.objective}`, `行动号召：${input.callToAction}`,
-    `品牌语气：${(brand?.tone ?? []).join("、") || "专业、克制"}`,
-    `视觉参考：${(brand?.visual_assets ?? []).map((item: any) => item.name).filter(Boolean).slice(0, 3).join("、") || "无；保持简洁商务风"}`,
-    `禁用表述：${forbidden.join("、") || "无；仍禁止夸大承诺"}`,
-    `创作要求：${input.prompt}`,
+      ? `Layout: ${size || "1536x1024"}; headline, subtitle, one core benefit and clear CTA. Restrained whitespace, sharp legible text without typos or gibberish. Center the subject slightly above the midpoint and place a CTA bar at the bottom.`
+      : "Shot sequence: problem scenario → evidence of value → call to action. Use short, accurate subtitles.",
+    `Target audience: ${snapshot.audienceDescription || "confirmed cohort snapshot"} (aggregate audience description only)`,
+    `Product: ${product.name}`, `Positioning: ${product.positioning || "not supplied"}`,
+    `Confirmed benefits: ${(product.core_values ?? []).join("; ") || "none"}`,
+    `Verified facts: ${facts.join("; ") || "none; do not invent figures or cases"}`,
+    benefit.length ? `Current offers: ${benefit.join("; ")}` : "",
+    faqs.length ? `Product FAQs usable as copy anchors: ${faqs.join("; ")}` : "",
+    notes ? `Additional product notes: ${notes}` : "",
+    `Campaign objective: ${input.objective}`, `Call to action: ${input.callToAction}`,
+    `Brand tone: ${(brand?.tone ?? []).join(", ") || "professional and restrained"}`,
+    `Visual references: ${(brand?.visual_assets ?? []).map((item: any) => item.name).filter(Boolean).slice(0, 3).join(", ") || "none; use a clean professional style"}`,
+    `Prohibited expressions: ${forbidden.join(", ") || "none specified; exaggerated promises remain prohibited"}`,
+    `Creative request: ${input.prompt}`,
     kind === "poster"
-      ? "确保核心标题、价值点和行动号召清晰分层；主文案不超过3行；CTA按钮感明确；避免密集段落。"
-      : "保持主题、价值点与行动号召一致，给出完整可播放成片。",
+      ? "Clearly separate headline, benefit and CTA. Use at most three lines of main copy, a recognizable CTA button and no dense paragraphs."
+      : "Keep the theme, benefit and CTA consistent. Produce a complete playable video.",
   ].filter(Boolean).join("\n");
 }
 
@@ -1445,10 +1446,10 @@ export function fallbackRecommendations(segments: Array<any>, products: Array<an
     ],
   };
   return [
-    { ...base, type: "copy", theme: `${theme}：给${audience}的转化文案`, suggestedChannels: ["朋友圈", "公众号"], creativeDirection: "开头点名客群痛点，中段给1个可验证证据，结尾单一CTA" },
-    { ...base, type: "copy", theme: `${product?.name ?? "产品"}场景价值解读`, suggestedChannels: ["私域群", "公众号"], creativeDirection: "用具体使用场景代替空泛卖点，引用已确认事实" },
-    { ...base, type: "poster", theme: `${theme}主视觉海报`, suggestedChannels: ["朋友圈", "公众号"], creativeDirection: "高清横版；克制留白；大标题+单一价值+明确CTA；中文锐利可读" },
-    { ...base, type: "video_script", theme: `${theme} 15秒短视频`, suggestedChannels: ["视频号", "抖音/快手"], creativeDirection: "问题场景—价值证明—行动号召", durationSeconds: 15 },
+    { ...base, type: "copy", theme: `${theme}：给${audience}的转化文案`, suggestedChannels: ["朋友圈", "公众号"], creativeDirection: "Open with the cohort pain point, give one verified supporting fact, and end with a single CTA." },
+    { ...base, type: "copy", theme: `${product?.name ?? "产品"}场景价值解读`, suggestedChannels: ["私域群", "公众号"], creativeDirection: "Use concrete scenarios instead of generic benefits; cite confirmed facts." },
+    { ...base, type: "poster", theme: `${theme}主视觉海报`, suggestedChannels: ["朋友圈", "公众号"], creativeDirection: "High-resolution landscape; restrained whitespace; headline, one benefit and clear CTA; sharp legible text in the requested language." },
+    { ...base, type: "video_script", theme: `${theme} 15秒短视频`, suggestedChannels: ["视频号", "抖音/快手"], creativeDirection: "Problem scenario → evidence of value → call to action.", durationSeconds: 15 },
   ];
 }
 

@@ -1,19 +1,20 @@
 ---
 name: marketing-material-management
-description: 通过数字员工查询和维护产品卖点、品牌口径、权益期限及案例素材。
-triggers: [营销资料, 产品资料, 产品卖点, 品牌资料, 品牌语气, 权益, 优惠, 案例素材, 禁用表达, 行动号召, CTA]
+description: Search and maintain product benefits, brand messaging, offer validity and case materials.
+triggers: [营销资料, 产品资料, 产品卖点, 品牌资料, 品牌语气, 权益, 优惠, 案例素材, 禁用表达, 行动号召, CTA, marketing materials, product details, brand voice, materi pemasaran, produk]
 agents: [digital_employee]
 ---
 
-# 对话式营销资料管理
+# Conversational marketing materials
 
-营销资料是产品与品牌事实库，不是客户画像。涉及产品能说什么、品牌怎么说时，先调用 `search_marketing_materials`。
+Marketing materials contain product and brand facts, not customer profiles. Call search_marketing_materials first when discussing product claims or brand messaging.
 
-- 新产品用 `create_marketing_product`，已存在产品先查询确认唯一 ID 后用 `update_marketing_product`。
-- 在客户画像对话中，用户只是提到一个尚未匹配的产品/服务时，不要直接调用 `create_marketing_product`；应把原话名称交给 `prepare_customer_capture`，由用户在确认卡中选择已有产品、添加为新产品或不关联。
-- 品牌语气、视觉资产和标准行动号召用 `update_marketing_brand_assets`。
-- 只保存用户明确提供的事实。不得补写未经用户确认的产品能力、效果数字、案例结果或权益期限。
-- 可验证事实应同时记录事实陈述和依据；当前权益应记录有效期，无法确认期限时保持为空。
-- 禁用表达是硬约束，生成营销文案时必须遵守。
-- 数组更新为整体替换。用户仅要求追加一项时，先查询现值，再带上合并后的完整数组更新。
-- 工具失败或未调用工具时，不得声称已保存。
+- Create new products with create_marketing_product; update only a uniquely confirmed existing ID with update_marketing_product.
+- When a customer-profile conversation merely mentions an unmatched product/service, do not create it directly. Pass the original name to prepare_customer_capture so the confirmation card can offer an existing product, a new product or no association.
+- Maintain tone, visual assets and standard calls to action with update_marketing_brand_assets.
+- Save only explicitly supplied facts. Never invent product capabilities, performance figures, case outcomes or offer validity.
+- Record verifiable claims with their evidence. Leave uncertain offer dates empty.
+- Prohibited expressions are hard constraints for generated copy.
+- Array updates replace the whole array. Read existing values and merge before appending.
+- Never claim a save after a failed or missing tool call.
+- Match the user's language in explanations and confirmation questions; retain product names and source facts.

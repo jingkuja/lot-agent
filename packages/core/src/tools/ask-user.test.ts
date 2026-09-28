@@ -40,7 +40,7 @@ describe("ask_user tool", () => {
     expect(ASK_USER_POLICY_PROMPT).toContain("multiSelect");
     // 必须显式禁止把候选项内联进 question（老提示词鼓励「换行列表呈现」是根因）
     expect(ASK_USER_POLICY_PROMPT).not.toContain("换行列表呈现");
-    expect(ASK_USER_POLICY_PROMPT).toMatch(/禁止|不要把候选项写进 question/);
+    expect(ASK_USER_POLICY_PROMPT).toMatch(/Never embed choices.*inside question/);
   });
 
   it("hasAskUserTool follows whitelist semantics", () => {
