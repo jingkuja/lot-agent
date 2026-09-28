@@ -127,10 +127,23 @@ describe("pickGenerationSettings", () => {
     });
   });
 
+  it("accepts the maximum reference counts and one image per frame", () => {
+    const references = {
+      input_reference: Array.from({ length: 9 }, (_, i) => `image${i}`),
+      reference_video: ["v1", "v2", "v3"],
+      reference_audio: ["a1", "a2", "a3"],
+      first_frame: "first",
+      last_frame: "last",
+    };
+    expect(pickVideoReferenceInputs(references)).toEqual(references);
+    expect(() => pickVideoReferenceInputs({ first_frame: ["a", "b"] })).toThrow();
+    expect(() => pickVideoReferenceInputs({ last_frame: ["a", "b"] })).toThrow();
+  });
+
   it("enforces the product limits for video references", () => {
-    expect(() => pickVideoReferenceInputs({ input_reference: ["1", "2", "3", "4", "5", "6"] })).toThrow(/at most 5/);
-    expect(() => pickVideoReferenceInputs({ reference_video: ["1", "2", "3"] })).toThrow(/at most 2/);
-    expect(() => pickVideoReferenceInputs({ reference_audio: ["1", "2", "3"] })).toThrow(/at most 2/);
+    expect(() => pickVideoReferenceInputs({ input_reference: Array.from({ length: 10 }, (_, i) => String(i)) })).toThrow(/at most 9/);
+    expect(() => pickVideoReferenceInputs({ reference_video: ["1", "2", "3", "4"] })).toThrow(/at most 3/);
+    expect(() => pickVideoReferenceInputs({ reference_audio: ["1", "2", "3", "4"] })).toThrow(/at most 3/);
   });
 
   it("enables generated audio when a reference audio is present", () => {

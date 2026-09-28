@@ -1,3 +1,4 @@
+import { VIDEO_REFERENCE_LIMITS } from "../generation/input.js";
 import { InputError } from "./errors.js";
 import {
   SEGMENT_HEALTH_VALUES,
@@ -236,7 +237,7 @@ function parseOptionalUrlField(
 ): Partial<Pick<CreateCampaignAssetInput, "input_reference" | "reference_video" | "reference_audio">> {
   if (value === undefined || value === null || value === "") return {};
   if (typeof value === "string") return { [field]: text(value, field, 1, 500) };
-  if (!Array.isArray(value) || value.length > 8) throw new InputError(`${field}数量无效`);
+  if (!Array.isArray(value) || value.length > VIDEO_REFERENCE_LIMITS[field]) throw new InputError(`${field}数量无效`);
   return { [field]: value.map((item) => text(item, field, 1, 500)) };
 }
 

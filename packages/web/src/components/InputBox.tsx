@@ -13,6 +13,7 @@ import {
 import type { PickedFile } from "../api/client.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
+import { MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, validateReferenceMedia, readMediaDuration } from "../lib/video-references.js";
 import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
@@ -53,15 +54,12 @@ interface InputBoxProps {
   embedded?: boolean;
   value?: string;
   onChange?: (value: string) => void;
-  /** 视频时长选项；不传则沿用项目默认 5秒 / 10秒。 */
+  /** 视频时长选项；不传则沿用项目默认 4～15秒。 */
   videoDurations?: readonly string[];
 }
 
 const MAX_FILES = 5;
 const MAX_IMAGE_REFERENCE_IMAGES = 5;
-const MAX_VIDEO_REFERENCE_IMAGES = 5;
-const MAX_VIDEO_REFERENCE_VIDEOS = 2;
-const MAX_VIDEO_REFERENCE_AUDIOS = 2;
 const ACCEPT =
   "image/jpeg,image/png,image/webp,image/gif,.txt,.md,.csv,.json,application/pdf,.docx,.xlsx,.xls";
 /** ppt 模式内容文件的可选类型（不含图片；旧 pptx 可作素材）。 */
@@ -187,6 +185,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     setFiles((prev) => {
       const room = Math.max(0, maxFiles - prev.length);
       if (mode === "image" && incoming.length > room) setUploadLimitNotice(true);
+      if (mode === "video" && incoming.length > room) setAttachmentError(`参考图最多 ${maxFiles} 张`);
       const next = [...prev];
       for (const f of incoming) {
         if (next.length >= maxFiles) break;
@@ -205,17 +204,39 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   const consumedAttachment = useRef("");
   const [attachmentError, setAttachmentError] = useState("");
+  const [checkingMedia, setCheckingMedia] = useState(false);
+  const checkingMediaRef = useRef(false);
+  const addReferenceMedia = useCallback(async (picked: File[], kind: "video" | "audio") => {
+    if (!picked.length) return;
+    if (checkingMediaRef.current) {
+      setAttachmentError("正在检查附件时长，请稍后重试");
+      return;
+    }
+    checkingMediaRef.current = true;
+    setCheckingMedia(true);
+    setAttachmentError("");
+    try {
+      const next = [...(kind === "video" ? referenceVideoFiles : referenceAudioFiles), ...picked];
+      await validateReferenceMedia(next, kind === "video" ? "视频" : "音频", readMediaDuration);
+      if (kind === "video") setReferenceVideoFiles(next);
+      else setReferenceAudioFiles(next);
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : "无法读取附件时长");
+    } finally {
+      checkingMediaRef.current = false;
+      setCheckingMedia(false);
+    }
+  }, [referenceVideoFiles, referenceAudioFiles]);
+
   useEffect(() => {
     if (!attachment || attachment.id === consumedAttachment.current) return;
     consumedAttachment.current = attachment.id;
     const file = attachment.file; setAttachmentError("");
     if (mediaMode && !/^(image|audio|video)\//.test(file.type) || mode === "image" && !file.type.startsWith("image/")) setAttachmentError("当前助手不支持此附件类型，请切换到通用助手后选择。");
     else if (videoMode && file.type.startsWith("audio/")) {
-      if (referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS) setAttachmentError("参考音频已满，请移除附件后重试。");
-      else setReferenceAudioFiles((old) => [...old, file]);
+      void addReferenceMedia([file], "audio");
     } else if (videoMode && file.type.startsWith("video/")) {
-      if (referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS) setAttachmentError("参考视频已满，请移除附件后重试。");
-      else setReferenceVideoFiles((old) => [...old, file]);
+      void addReferenceMedia([file], "video");
     } else if (contractMode) {
       if (!oldContractFile) setOldContractFile(file);
       else if (!newContractFile) setNewContractFile(file);
@@ -223,7 +244,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     } else if (files.length >= maxFiles) setAttachmentError("附件数量已满，请移除附件后重试。");
     else addFiles([file]);
     onAttachmentConsumed?.();
-  }, [attachment, onAttachmentConsumed, onManageKnowledge, addFiles, mode, mediaMode, videoMode, contractMode, files.length, maxFiles, oldContractFile, newContractFile, referenceAudioFiles.length, referenceVideoFiles.length]);
+  }, [attachment, addReferenceMedia, onAttachmentConsumed, onManageKnowledge, addFiles, mode, mediaMode, videoMode, contractMode, files.length, maxFiles, oldContractFile, newContractFile, referenceAudioFiles.length, referenceVideoFiles.length]);
 
   const removeFile = useCallback((idx: number) => {
     setFiles((prev) => {
@@ -273,6 +294,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   const collectPickedFiles = useCallback((): PickedFile[] => {
     if (videoMode) {
+      if (checkingMediaRef.current) throw new Error("正在检查附件时长，请稍后重试");
       return [
         ...files.map((f) => ({ file: f, slot: "video_reference_image" as const })),
         ...referenceVideoFiles.map((f) => ({ file: f, slot: "video_reference_video" as const })),
@@ -305,6 +327,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   }), [collectPickedFiles, mediaMode, imageSettingsError, missingMentions]);
 
   const handleSend = useCallback(() => {
+    if (checkingMediaRef.current) return;
     const trimmed = promptValue.trim();
     if (noModels) {
       setNoModelNotice(true);
@@ -388,6 +411,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           参考图最多 {MAX_IMAGE_REFERENCE_IMAGES} 张，不能再上传
         </div>
       )}
+      {videoMode && <div className="input-modal-hint">参考图最多 9 张；首帧、尾帧各 1 张；参考视频、参考音频各最多 3 段，各自总时长不超过 15 秒{checkingMedia ? " · 正在检查时长…" : ""}</div>}
       {lockAdaptive && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
@@ -453,7 +477,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               </span>
               <span className="attachment-attachment-icon" aria-hidden>🎞️</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
-              <button type="button" className="attachment-remove" onClick={() => setReferenceVideoFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+              <button type="button" className="attachment-remove" disabled={checkingMedia} onClick={() => setReferenceVideoFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
             </div>
           ))}
           {videoMode && referenceAudioFiles.map((f, i) => (
@@ -463,7 +487,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               </span>
               <span className="attachment-attachment-icon" aria-hidden>🔊</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
-              <button type="button" className="attachment-remove" onClick={() => setReferenceAudioFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+              <button type="button" className="attachment-remove" disabled={checkingMedia} onClick={() => setReferenceAudioFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
             </div>
           ))}
           {videoMode && firstFrameFile && (
@@ -549,11 +573,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           style={{ display: "none" }}
           onChange={(e) => {
             const picked = Array.from(e.target.files ?? []);
-            const next = [...referenceVideoFiles, ...picked].slice(0, MAX_VIDEO_REFERENCE_VIDEOS);
-            if (seedanceVideo && referenceVideoFiles.length === 0 && next.length > 0) {
-              window.alert("提供参考视频后视频时长和比例不能选择，自动适配参考视频");
-            }
-            setReferenceVideoFiles(next);
+            void addReferenceMedia(picked, "video");
             e.target.value = "";
           }}
         />
@@ -565,7 +585,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           style={{ display: "none" }}
           onChange={(e) => {
             const picked = Array.from(e.target.files ?? []);
-            setReferenceAudioFiles((prev) => [...prev, ...picked].slice(0, MAX_VIDEO_REFERENCE_AUDIOS));
+            void addReferenceMedia(picked, "audio");
             e.target.value = "";
           }}
         />
@@ -667,7 +687,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 className="btn-reference"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES}
-                title={seedance25Video ? "最多5张；提示词须按上传顺序写出 @Image1、@Image2…" : "最多5张"}
+                title={seedance25Video ? "最多9张；提示词须按上传顺序写出 @Image1、@Image2…" : "最多9张"}
               >
                 🖼️ 参考图
               </button>
@@ -675,8 +695,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 type="button"
                 className="btn-reference"
                 onClick={() => referenceVideoInputRef.current?.click()}
-                disabled={disabled || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS}
-                title={seedance25Video ? "最多2个；提示词须按上传顺序写出 @Video1、@Video2…" : "最多2个"}
+                disabled={disabled || checkingMedia || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS}
+                title={seedance25Video ? "最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Video1、@Video2…" : "最多3段，总时长不超过15秒"}
               >
                 🎞️ 参考视频
               </button>
@@ -684,8 +704,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 type="button"
                 className="btn-reference"
                 onClick={() => referenceAudioInputRef.current?.click()}
-                disabled={disabled || referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS}
-                title={seedance25Video ? "最多2个；提示词须按上传顺序写出 @Audio1、@Audio2…" : "最多2个"}
+                disabled={disabled || checkingMedia || referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS}
+                title={seedance25Video ? "最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Audio1、@Audio2…" : "最多3段，总时长不超过15秒"}
               >
                 🔊 参考音频
               </button>
@@ -865,7 +885,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             <button
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={(mode === "image" && !!imageSettingsError) || (!promptValue.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile)}
+              disabled={checkingMedia || (mode === "image" && !!imageSettingsError) || (!promptValue.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile)}
               title="发送"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

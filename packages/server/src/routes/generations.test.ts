@@ -485,7 +485,7 @@ describe("POST /conversations/:id/generations", () => {
     const res = await app(service).request("/conversations/c1/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: "x", mediaType: "video", reference_video: ["1", "2", "3"] }),
+      body: JSON.stringify({ prompt: "x", mediaType: "video", reference_video: ["1", "2", "3", "4"] }),
     });
     expect(res.status).toBe(400);
     expect(service.jobQueue.enqueue).not.toHaveBeenCalled();

@@ -43,7 +43,7 @@ export {
   videoQualitiesForModel,
 } from "../lib/video-settings.js";
 
-export const VIDEO_DURATIONS = ["5秒", "10秒"];
+export const VIDEO_DURATIONS = Array.from({ length: 12 }, (_, i) => `${i + 4}秒`);
 
 export interface VideoSettings {
   size: string;
@@ -312,7 +312,7 @@ export function ImageSettingsPicker({
 const lastVideo = {
   quality: VIDEO_QUALITIES[0].short,
   ratio: VIDEO_RATIOS[0].label,
-  duration: VIDEO_DURATIONS[0],
+  duration: "5秒",
   generateAudio: false,
 };
 
@@ -332,7 +332,7 @@ export function VideoSettingsPicker({
   /** 当前视频模型；Kling / MiniMax H3 / H3 Max 使用各自的分辨率档位。 */
   selectedModel?: string | null;
   onChange?: (s: VideoSettings) => void;
-  /** 时长选项，默认 5秒 / 10秒；获客宝使用 10秒 / 15秒。 */
+  /** 时长选项，默认 4～15秒；获客宝使用 10秒 / 15秒。 */
   durations?: readonly string[];
 }) {
   const [open, setOpen] = useState(false);
@@ -466,17 +466,20 @@ export function VideoSettingsPicker({
                 <span>自动</span>
               </button>
             ) : (
-              durationOptions.map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  className={`seg ${d === duration ? "active" : ""}`}
-                  onClick={() => pickDuration(d)}
-                >
-                  <TimerIcon />
-                  <span>{d}</span>
-                </button>
-              ))
+              <label className="video-duration-slider">
+                <span className="video-duration-labels"><span>{durationOptions[0]}</span><output>{duration}</output><span>{durationOptions[durationOptions.length - 1]}</span></span>
+                <input
+                  type="range"
+                  aria-label="视频时长"
+                  aria-valuetext={duration}
+                  min={0}
+                  max={durationOptions.length - 1}
+                  step={1}
+                  value={Math.max(0, durationOptions.indexOf(duration))}
+                  disabled={disabled}
+                  onChange={(e) => pickDuration(durationOptions[Number(e.target.value)])}
+                />
+              </label>
             )}
           </div>
           <div className="media-section-title">视频声音</div>

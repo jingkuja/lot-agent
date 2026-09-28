@@ -5964,3 +5964,8 @@ html, body, #root {
 .sidebar-project-form button { background: var(--bg-hover); color: var(--text); border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
 .sidebar-project-error { padding: 8px 14px; color: var(--text-muted); font-size: 12px; }
 @media (hover: none) { .sidebar-project-move { opacity: 1; } }
+
+.video-duration-slider { display: grid; gap: 8px; width: 100%; padding: 8px; }
+.video-duration-labels { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 12px; }
+.video-duration-labels output { color: var(--accent); font-weight: 600; }
+.video-duration-slider input { width: 100%; margin: 0; accent-color: var(--accent); cursor: pointer; }

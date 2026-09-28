@@ -67,9 +67,9 @@ export function validateImageGenerationSettings(
 }
 
 export const VIDEO_REFERENCE_LIMITS = {
-  input_reference: 5,
-  reference_video: 2,
-  reference_audio: 2,
+  input_reference: 9,
+  reference_video: 3,
+  reference_audio: 3,
 } as const;
 
 /** A reference audio input requires the generated video to contain audio. */
