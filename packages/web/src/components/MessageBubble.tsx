@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { KnowledgeSources } from "../modules/knowledge/KnowledgeSources.js";
 import React, { useState, useCallback } from "react";
 import Markdown from "react-markdown";
@@ -37,6 +38,7 @@ export function MessageBubble({
   failedToolNames,
   onRedownloadGeneration,
 }: MessageBubbleProps) {
+  const { t } = useI18n();
   if (message.generation) {
     return (
       <div className="message-wrapper message-assistant">
@@ -80,7 +82,7 @@ export function MessageBubble({
             <div className="message-attachments">
               {message.knowledgeBases.map((item) => (
                 <span className="attachment-chip knowledge-chip" key={item.id}>
-                  <span className="attachment-slot-badge badge-knowledge">知识库</span>
+                  <span className="attachment-slot-badge badge-knowledge">{t("知识库")}</span>
                   <span aria-hidden>▤</span>
                   <span className="attachment-name" title={item.name}>{item.name}</span>
                 </span>
@@ -124,8 +126,7 @@ export function MessageBubble({
                 target="_blank"
                 rel="noreferrer"
               >
-                下载
-              </a>
+                {t("下载")}</a>
             </div>
           </div>
         </div>
@@ -160,7 +161,7 @@ export function MessageBubble({
       <div className="message-wrapper-inner">
         {message.thinking && (
           <CollapsibleToolCard
-            title="思考过程"
+            title={t("思考过程")}
             type="thinking"
             defaultCollapsed={!!message.dbId}
           >
@@ -176,7 +177,7 @@ export function MessageBubble({
         <div
           className={`message-content markdown-body${canPreview ? " clickable" : ""}`}
           onClick={canPreview ? () => onSelectForPreview!(message.content) : undefined}
-          title={canPreview ? "点击预览" : undefined}
+          title={canPreview ? t("点击预览") : undefined}
         >
           {message.content ? (
             <>
@@ -207,9 +208,7 @@ export function MessageBubble({
               if (failedToolNames?.includes(tc.name)) {
                 return (
                   <div key={i} className="interactive-failed-note">
-                    {tc.name === "propose_outline"
-                      ? "大纲未通过布局校验，已自动调整重试"
-                      : "提问未成功发出，已自动重试"}
+                    {tc.name === "propose_outline" ? t("大纲未通过布局校验，已自动调整重试") : t("提问未成功发出，已自动重试")}
                   </div>
                 );
               }
@@ -259,7 +258,7 @@ export function MessageBubble({
           <div className="tool-running" role="status">
             <TypingDots />
             <span className="tool-running-label">
-              正在执行工具 {message.toolCalls![message.toolCalls!.length - 1].name}…
+              {t("正在执行工具")}{message.toolCalls![message.toolCalls!.length - 1].name}…
             </span>
           </div>
         )}
@@ -298,6 +297,7 @@ function CollapsibleToolCard({
   defaultCollapsed?: boolean;
   children: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const hasContent = React.Children.count(children) > 0;
 
@@ -315,7 +315,7 @@ function CollapsibleToolCard({
         </span>
         <span className="tool-card-title">{title}</span>
         <span className="tool-card-type">
-          {type === "call" ? "calling" : type === "thinking" ? "thinking" : "result"}
+          {t(type === "call" ? "calling" : type === "thinking" ? "thinking" : "result")}
         </span>
       </div>
       {!collapsed && hasContent && (

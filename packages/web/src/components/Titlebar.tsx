@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useEffect, useState } from "react";
 
 /**
@@ -11,6 +12,7 @@ import { useEffect, useState } from "react";
  * Double-clicking the drag region toggles maximize, matching native behavior.
  */
 export function Titlebar() {
+  const { t } = useI18n();
   const desktop = typeof window !== "undefined" ? window.lotDesktop : undefined;
   const [maximized, setMaximized] = useState(false);
 
@@ -32,14 +34,14 @@ export function Titlebar() {
       }}
     >
       <div className="titlebar-drag">
-        <span className="titlebar-title">借势智算</span>
+        <span className="titlebar-title">{t("借势智算")}</span>
       </div>
       {!isMac && (
         <div className="titlebar-controls">
           <button
             type="button"
             className="titlebar-btn"
-            aria-label="最小化"
+            aria-label={t("最小化")}
             onClick={() => desktop.windowMinimize()}
           >
             <svg width="12" height="12" viewBox="0 0 12 12">
@@ -49,7 +51,7 @@ export function Titlebar() {
           <button
             type="button"
             className="titlebar-btn"
-            aria-label={maximized ? "还原" : "最大化"}
+            aria-label={maximized ? t("还原") : t("最大化")}
             onClick={() => desktop.windowToggleMaximize()}
           >
             {maximized ? (
@@ -66,7 +68,7 @@ export function Titlebar() {
           <button
             type="button"
             className="titlebar-btn titlebar-btn-close"
-            aria-label="关闭"
+            aria-label={t("关闭")}
             onClick={() => desktop.windowClose()}
           >
             <svg width="12" height="12" viewBox="0 0 12 12">

@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Agent } from "../api/client.js";
 import { GENERAL_ID, sortedSubAgents } from "../lib/agent-order.js";
@@ -15,6 +16,7 @@ interface SidebarAgentTabsProps {
 const EDGE_EPSILON = 1;
 
 export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: SidebarAgentTabsProps) {
+  const { t } = useI18n();
   const stripRef = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   const [canPrev, setCanPrev] = useState(false);
@@ -62,13 +64,13 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
         className={`agent-tab ${pinned ? "agent-tab--general" : ""} ${a.id === activeId ? "active" : ""}`}
         onClick={() => onSwitch(a.id)}
         disabled={disabled}
-        title={pinned ? a.name : a.description}
-        aria-label={pinned ? a.name : undefined}
+        title={pinned ? t(a.name) : t(a.description)}
+        aria-label={pinned ? t(a.name) : undefined}
       >
         <span className={`agent-tab-icon agent-tab-icon--${kind}`} aria-hidden>
           {AGENT_ICONS[kind]}
         </span>
-        {!pinned && <span className="agent-tab-label">{a.name}</span>}
+        {!pinned && <span className="agent-tab-label">{t(a.name)}</span>}
       </button>
     );
   };
@@ -82,8 +84,8 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
           className="agent-tab-arrow"
           onClick={() => nudge(-1)}
           disabled={disabled || !canPrev}
-          title="向前滚动"
-          aria-label="向前滚动"
+          title={t("向前滚动")}
+          aria-label={t("向前滚动")}
         >
           ‹
         </button>
@@ -101,8 +103,8 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
           className="agent-tab-arrow"
           onClick={() => nudge(1)}
           disabled={disabled || !canNext}
-          title="向后滚动"
-          aria-label="向后滚动"
+          title={t("向后滚动")}
+          aria-label={t("向后滚动")}
         >
           ›
         </button>

@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 export interface Artifact {
   assetId: string;
   url: string;
@@ -9,17 +10,18 @@ interface ArtifactGalleryProps {
 }
 
 export function ArtifactGallery({ artifacts }: ArtifactGalleryProps) {
+  const { t } = useI18n();
   if (artifacts.length === 0) {
     return (
       <div className="artifact-gallery artifact-gallery--empty">
-        <span>暂无素材</span>
+        <span>{t("暂无素材")}</span>
       </div>
     );
   }
 
   return (
     <div className="artifact-gallery">
-      <div className="artifact-gallery-title">素材</div>
+      <div className="artifact-gallery-title">{t("素材")}</div>
       <div className="artifact-grid">
         {artifacts.map((a) => (
           <div key={a.assetId} className="artifact-item">

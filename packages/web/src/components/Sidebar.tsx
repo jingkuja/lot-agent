@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ConversationProject, type Agent, type Conversation } from "../api/client.js";
 import { SidebarAgentTabs } from "./SidebarAgentTabs.js";
@@ -39,6 +40,7 @@ export function Sidebar({
   hasMore = false,
   loadingMore = false,
 }: SidebarProps) {
+  const { t } = useI18n();
   const [projects, setProjects] = useState<ConversationProject[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
@@ -52,14 +54,14 @@ export function Sidebar({
   }, [activeId, conversations]);
   const renderConversation = (conv: Conversation) => (
     <div key={conv.id} className={`sidebar-item ${conv.id === activeId ? "active" : ""}`}>
-      <button className="sidebar-conversation-link sidebar-item-title" onClick={() => onSelect(conv.id)} title={conv.title}>{conv.title}</button>
+      <button className="sidebar-conversation-link sidebar-item-title" onClick={() => onSelect(conv.id)} title={conv.id === "__new__" ? t("新对话") : conv.title}>{conv.id === "__new__" ? t("新对话") : conv.title}</button>
       {conv.id !== "__new__" && <>
-        <select className="sidebar-project-move" aria-label={`移动“${conv.title}”到项目`} title="移入项目" value={conv.project_id ?? ""}
+        <select className="sidebar-project-move" aria-label={t("移动“{0}”到项目", [conv.title])} title={t("移入项目")} value={conv.project_id ?? ""}
           onChange={(e) => { setError(""); void onMove(conv.id, e.target.value || null).catch(() => setError("移动失败，请重试")); }}>
-          <option value="">最近（无项目）</option>
+          <option value="">{t("最近（无项目）")}</option>
           {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
         </select>
-        <button className="btn-delete" aria-label="删除对话" onClick={() => onDelete(conv.id)}>×</button>
+        <button className="btn-delete" aria-label={t("删除对话")} onClick={() => onDelete(conv.id)}>×</button>
       </>}
     </div>
   );
@@ -105,14 +107,13 @@ export function Sidebar({
         disabled={switchDisabled}
       />
       <div className="sidebar-recent-header">
-        <button className="btn-new sidebar-create-project" onClick={() => { setCreating(true); setError(""); }} title="创建项目">创建项目</button>
-        <button className="btn-new" onClick={onCreate} title="新建对话">
+        <button className="btn-new sidebar-create-project" onClick={() => { setCreating(true); setError(""); }} title={t("创建项目")}>{t("创建项目")}</button>
+        <button className="btn-new" onClick={onCreate} title={t("新建对话")}>
           <svg className="btn-new-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden>
             <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
             <path d="M12 8.5v7M8.5 12h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
-          新对话
-        </button>
+          {t("新对话")}</button>
       </div>
       {creating && <form className="sidebar-project-form" onSubmit={async (e) => {
         e.preventDefault(); if (!name.trim() || busy) return;
@@ -120,13 +121,13 @@ export function Sidebar({
         try { const project = await api.createProject(name.trim()); setProjects((prev) => [project, ...prev]); setName(""); setCreating(false); }
         catch { setError("创建失败，请重试"); } finally { setBusy(false); }
       }}>
-        <input autoFocus aria-label="项目名称" placeholder="项目名称" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setCreating(false); }} />
-        <button type="submit" disabled={busy || !name.trim()}>{busy ? "创建中…" : "创建"}</button>
-        <button type="button" disabled={busy} onClick={() => setCreating(false)}>取消</button>
+        <input autoFocus aria-label={t("项目名称")} placeholder={t("项目名称")} maxLength={80} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setCreating(false); }} />
+        <button type="submit" disabled={busy || !name.trim()}>{busy ? t("创建中…") : t("创建")}</button>
+        <button type="button" disabled={busy} onClick={() => setCreating(false)}>{t("取消")}</button>
       </form>}
-      {error && <div className="sidebar-project-error" role="alert">{error}</div>}
+      {error && <div className="sidebar-project-error" role="alert">{t(error)}</div>}
       <div className="sidebar-list" ref={listRef} onScroll={handleScroll}>
-        {projects.length > 0 && <div className="sidebar-section-label project-section-label">项目</div>}
+        {projects.length > 0 && <div className="sidebar-section-label project-section-label">{t("项目")}</div>}
         {projects.map((project) => {
           const items = conversations.filter((conv) => conv.project_id === project.id);
           const expanded = !collapsed.has(project.id);
@@ -139,17 +140,17 @@ export function Sidebar({
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
                 <span>{project.name}</span>
               </button>
-              <button className="sidebar-project-add" aria-label={`在${project.name}中新建对话`} title="项目内新建对话" onClick={() => onCreateInProject(project.id)}>+</button>
+              <button className="sidebar-project-add" aria-label={t("在{0}中新建对话", [project.name])} title={t("项目内新建对话")} onClick={() => onCreateInProject(project.id)}>+</button>
             </div>
             {expanded && <div className="sidebar-project-conversations">
               {items.map(renderConversation)}
-              {items.length === 0 && <button className="sidebar-project-empty" onClick={() => onCreateInProject(project.id)}>开始新对话</button>}
+              {items.length === 0 && <button className="sidebar-project-empty" onClick={() => onCreateInProject(project.id)}>{t("开始新对话")}</button>}
             </div>}
           </section>;
         })}
-        <div className="sidebar-section-label project-section-label">最近</div>
+        <div className="sidebar-section-label project-section-label">{t("最近")}</div>
         {conversations.filter((conv) => !conv.project_id).map(renderConversation)}
-        {loadingMore && <div className="sidebar-loading-more">加载中…</div>}
+        {loadingMore && <div className="sidebar-loading-more">{t("加载中…")}</div>}
       </div>
     </aside>
   );

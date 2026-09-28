@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useEffect, useRef, useState } from "react";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputMode } from "./InputBox.js";
@@ -47,6 +48,7 @@ function timeGreeting(): string {
 }
 
 function InputBranding() {
+  const { t } = useI18n();
   const [copyStatus, setCopyStatus] = useState("");
 
   useEffect(() => {
@@ -66,16 +68,17 @@ function InputBranding() {
 
   return (
     <div className="input-branding">
-      <a href="https://wetok.ai" target="_blank" rel="noopener noreferrer">灵渠AI</a>
-      <button type="button" onClick={copyAddress} title="复制网址" aria-label="复制网址 https://wetok.ai">
+      <a href="https://wetok.ai" target="_blank" rel="noopener noreferrer">{t("灵渠AI")}</a>
+      <button type="button" onClick={copyAddress} title={t("复制网址")} aria-label={t("复制网址 https://wetok.ai")}>
         https://wetok.ai
       </button>
-      <span className="input-branding-status" role="status">{copyStatus}</span>
+      <span className="input-branding-status" role="status">{t(copyStatus)}</span>
     </div>
   );
 }
 
 function Seedance25Hint() {
+  const { t } = useI18n();
   return (
     <div className="input-seedance-hint" role="note">
       <span className="input-seedance-hint-icon" aria-hidden>⚠</span>
@@ -83,18 +86,14 @@ function Seedance25Hint() {
         <strong>Seedance 2.5</strong>
         <ul>
           <li>
-            使用参考图 / 参考视频 / 参考音频时，提示词必须按上传顺序显式写出
-            {" "}
+            {t("使用参考图 / 参考视频 / 参考音频时，提示词必须按上传顺序显式写出")}{" "}
             <code>@Image1</code>、<code>@Video1</code>、<code>@Audio1</code>
-            ，否则参考视频/音频会被静默降级为「风格暗示」甚至忽略。
-          </li>
+            {t("，否则参考视频/音频会被静默降级为「风格暗示」甚至忽略。")}</li>
           <li>
-            若参考图或参考视频涉及真人，必须先到火山方舟官方完成真人认证；不支持直接使用含真人人脸的公网 URL。
-          </li>
-          <li>首帧图、尾帧图比例需要和生成视频比例一致。</li>
+            {t("若参考图或参考视频涉及真人，必须先到火山方舟官方完成真人认证；不支持直接使用含真人人脸的公网 URL。")}</li>
+          <li>{t("首帧图、尾帧图比例需要和生成视频比例一致。")}</li>
           <li>
-            提示词案例：<code>@Video1</code> 中增加一条鱼从湖面上跳出来
-          </li>
+            {t("提示词案例：")}<code>@Video1</code> {t("中增加一条鱼从湖面上跳出来")}</li>
         </ul>
       </div>
     </div>
@@ -120,6 +119,7 @@ export function ChatPanel({
   onKnowledgeBasesChange,
   emptyDashboard,
 }: ChatPanelProps) {
+  const { t } = useI18n();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // While streaming, the assistant bubble only enters the list once its first
@@ -176,13 +176,7 @@ export function ChatPanel({
         autoFocus={isEmpty}
         mode={mode}
         placeholder={
-          mode === "ppt"
-            ? "描述要制作的 PPT，可上传模版与内容文件"
-            : mode === "contract"
-              ? "上传旧版与新版合同，我来找出条款与主体差异"
-              : mode !== "default"
-                ? "请输入内容"
-                : undefined
+          mode === "ppt" ? t("描述要制作的 PPT，可上传模版与内容文件") : mode === "contract" ? t("上传旧版与新版合同，我来找出条款与主体差异") : mode !== "default" ? t("请输入内容") : undefined
         }
         models={modelList ?? []}
         selectedModel={selectedModel ?? null}
@@ -211,12 +205,12 @@ export function ChatPanel({
       <div className="chat-panel chat-panel--empty">
         <div className="chat-empty-hero">
           <p className="chat-empty-greeting">
-            {timeGreeting()}
+            {t(timeGreeting())}
             {userName ? `，${userName}` : ""}
           </p>
-          <h1 className="chat-empty-title">{agent?.name ?? "借势智算"}</h1>
+          <h1 className="chat-empty-title">{t(agent?.name) ?? t("借势智算")}</h1>
           {agent?.description && (
-            <p className="chat-empty-desc">{agent.description}</p>
+            <p className="chat-empty-desc">{t(agent.description)}</p>
           )}
           <div className="input-area input-area--centered">{inputEl}</div>
         </div>

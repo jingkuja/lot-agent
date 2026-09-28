@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useReducer, useCallback, useRef, useState } from "react";
 import { api, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
@@ -22,6 +23,9 @@ export function useChat(
   // All view state lives in the pure reducer (chat-reducer.ts). This hook only
   // translates async events (SSE, generation polling, user actions) into
   // ChatActions and owns the IO side effects (streams, uploads, polling).
+  const { t: translateUi } = useI18n();
+  const translateRef = useRef(translateUi);
+  translateRef.current = translateUi;
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [conversationKnowledgeBases, setConversationKnowledgeBases] = useState<KnowledgeBaseRef[]>([]);
   // One live SSE stream per conversation id. Switching away must NOT kill the
@@ -89,11 +93,11 @@ export function useChat(
             // browser, and the shell suppresses it while the window is focused).
             const mediaLabel = mediaType === "image" ? "图片" : "视频";
             if (finalStatus === "completed") {
-              notifyDesktop(`${mediaLabel}生成完成`, "点击查看结果");
+              notifyDesktop(translateRef.current(`${mediaLabel}生成完成`), translateRef.current("点击查看结果"));
             } else if (finalStatus !== "cancelled") {
               notifyDesktop(
-                `${mediaLabel}生成失败`,
-                downloadFailed ? "媒体下载失败，可重试下载" : t.error
+                translateRef.current(`${mediaLabel}生成失败`),
+                translateRef.current(downloadFailed ? "媒体下载失败，可重试下载" : t.error)
               );
             }
             if (genPollRef.current === token) genPollRef.current = null;
@@ -261,7 +265,7 @@ export function useChat(
             if (isCurrent()) dispatch({ type: "stream_stopped" });
             if (controller.signal.aborted) return; // user pressed Stop — silent
             showAlert(
-              `文件上传失败：${e instanceof Error ? e.message : String(e)}`
+              translateRef.current(`文件上传失败：${e instanceof Error ? e.message : String(e)}`)
             );
             return;
           }
@@ -419,7 +423,7 @@ export function useChat(
       // 409. Same "surface it, don't invent new UI" pattern as the file-
       // upload failure alert above.
       showAlert(
-        `重新生成失败：${error instanceof Error ? error.message : String(error)}`
+        translateRef.current(`重新生成失败：${error instanceof Error ? error.message : String(error)}`)
       );
       return;
     }

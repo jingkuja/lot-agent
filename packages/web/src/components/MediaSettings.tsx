@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useState, useRef, useEffect } from "react";
 import { isGptImage15 } from "../lib/model-filter.js";
 import {
@@ -148,6 +149,7 @@ export function ImageSettingsPicker({
   onChange?: (s: ImageSettings) => void;
   onError?: (error: string | null) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
   const allowCustom = !isGptImage15(selectedModel);
@@ -220,15 +222,15 @@ export function ImageSettingsPicker({
         disabled={disabled}
         aria-haspopup="true"
         aria-expanded={open}
-        title="图片设置"
+        title={t("图片设置")}
       >
         <RatioGlyph w={triggerGlyph.w} h={triggerGlyph.h} size={14} />
-        <span className="media-trigger-label">{sizeLabel} · {qualityMeta.label}</span>
+        <span className="media-trigger-label">{t(sizeLabel)} · {t(qualityMeta.label)}</span>
         <ChevronIcon />
       </button>
       {open && (
         <div className="media-popup">
-          <div className="media-section-title">分辨率</div>
+          <div className="media-section-title">{t("分辨率")}</div>
           <div className="seg-track">
             {IMAGE_PRESETS.map((p) => (
               <button
@@ -238,12 +240,12 @@ export function ImageSettingsPicker({
                 onClick={() => pickPreset(p.size)}
               >
                 <RatioGlyph w={p.w} h={p.h} size={20} />
-                <span>{p.label}</span>
+                <span>{t(p.label)}</span>
                 <small>{p.size.replace("x", "×")}</small>
               </button>
             ))}
           </div>
-          <div className="media-section-title">自定义分辨率</div>
+          <div className="media-section-title">{t("自定义分辨率")}</div>
           {allowCustom ? (
             <>
               <div className="res-row">
@@ -257,7 +259,7 @@ export function ImageSettingsPicker({
                     value={widthStr}
                     onChange={(e) => onDimChange(e.target.value, heightStr)}
                     aria-invalid={widthInvalid}
-                    aria-label="宽度"
+                    aria-label={t("宽度")}
                   />
                 </label>
                 <span className="res-link" aria-hidden>
@@ -276,17 +278,17 @@ export function ImageSettingsPicker({
                     value={heightStr}
                     onChange={(e) => onDimChange(widthStr, e.target.value)}
                     aria-invalid={heightInvalid}
-                    aria-label="高度"
+                    aria-label={t("高度")}
                   />
                 </label>
               </div>
-              <div className="media-hint">宽和高都必须能被 16 整除，总像素不能低于 655360，宽高比不能超过 1:3 或 3:1</div>
-              {error && <div className="media-hint media-hint--error">{error}</div>}
+              <div className="media-hint">{t("宽和高都必须能被 16 整除，总像素不能低于 655360，宽高比不能超过 1:3 或 3:1")}</div>
+              {error && <div className="media-hint media-hint--error">{t(error)}</div>}
             </>
           ) : (
-            <div className="media-hint">当前模型不支持自定义分辨率</div>
+            <div className="media-hint">{t("当前模型不支持自定义分辨率")}</div>
           )}
-          <div className="media-section-title">质量</div>
+          <div className="media-section-title">{t("质量")}</div>
           <div className="seg-track">
             {IMAGE_QUALITIES.map((q) => (
               <button
@@ -295,7 +297,7 @@ export function ImageSettingsPicker({
                 className={`seg ${q.value === quality ? "active" : ""}`}
                 onClick={() => pickQuality(q.value)}
               >
-                {q.label}
+                {t(q.label)}
               </button>
             ))}
           </div>
@@ -335,6 +337,7 @@ export function VideoSettingsPicker({
   /** 时长选项，默认 4～15秒；获客宝使用 10秒 / 15秒。 */
   durations?: readonly string[];
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
   const durationOptions = durations.length ? durations : VIDEO_DURATIONS;
@@ -410,22 +413,22 @@ export function VideoSettingsPicker({
         disabled={disabled}
         aria-haspopup="true"
         aria-expanded={open}
-        title={lockAdaptive ? "提供参考视频后视频时长和比例不能选择，自动适配参考视频" : "视频设置"}
+        title={lockAdaptive ? t("提供参考视频后视频时长和比例不能选择，自动适配参考视频") : t("视频设置")}
       >
         <ResBarIcon />
         <span className="media-trigger-label">
-          {quality.short} · {lockAdaptive ? "自适应" : ratio.label}
+          {quality.short} · {lockAdaptive ? t("自适应") : t(ratio.label)}
         </span>
         <TimerIcon />
-        <span className="media-trigger-label">{lockAdaptive ? "自动" : duration}</span>
-        <span className="media-trigger-audio" aria-label={effectiveGenerateAudio ? "有声音" : "无声音"}>
+        <span className="media-trigger-label">{lockAdaptive ? t("自动") : t(duration)}</span>
+        <span className="media-trigger-audio" aria-label={effectiveGenerateAudio ? t("有声音") : t("无声音")}>
           {effectiveGenerateAudio ? "🔊" : "🔇"}
         </span>
         <ChevronIcon />
       </button>
       {open && (
         <div className="media-popup">
-          <div className="media-section-title">视频质量</div>
+          <div className="media-section-title">{t("视频质量")}</div>
           <div className="seg-track">
             {qualityOptions.map((q) => (
               <button
@@ -434,16 +437,15 @@ export function VideoSettingsPicker({
                 className={`seg ${q.short === quality.short ? "active" : ""}`}
                 onClick={() => pickQuality(q)}
               >
-                {q.label}
+                {t(q.label)}
               </button>
             ))}
           </div>
-          <div className="media-section-title">视频比例</div>
+          <div className="media-section-title">{t("视频比例")}</div>
           <div className="seg-track">
             {lockAdaptive ? (
-              <button type="button" className="seg active" disabled title="提供参考视频后自动适配参考视频">
-                自适应
-              </button>
+              <button type="button" className="seg active" disabled title={t("提供参考视频后自动适配参考视频")}>
+                {t("自适应")}</button>
             ) : (
               VIDEO_RATIOS.map((r) => (
                 <button
@@ -453,25 +455,25 @@ export function VideoSettingsPicker({
                   onClick={() => pickRatio(r)}
                 >
                   <RatioGlyph w={r.w} h={r.h} size={16} />
-                  <span>{r.label}</span>
+                  <span>{t(r.label)}</span>
                 </button>
               ))
             )}
           </div>
-          <div className="media-section-title">视频时长</div>
+          <div className="media-section-title">{t("视频时长")}</div>
           <div className="seg-track">
             {lockAdaptive ? (
-              <button type="button" className="seg active" disabled title="提供参考视频后自动适配参考视频">
+              <button type="button" className="seg active" disabled title={t("提供参考视频后自动适配参考视频")}>
                 <TimerIcon />
-                <span>自动</span>
+                <span>{t("自动")}</span>
               </button>
             ) : (
               <label className="video-duration-slider">
-                <span className="video-duration-labels"><span>{durationOptions[0]}</span><output>{duration}</output><span>{durationOptions[durationOptions.length - 1]}</span></span>
+                <span className="video-duration-labels"><span>{t(durationOptions[0])}</span><output>{t(duration)}</output><span>{t(durationOptions[durationOptions.length - 1])}</span></span>
                 <input
                   type="range"
-                  aria-label="视频时长"
-                  aria-valuetext={duration}
+                  aria-label={t("视频时长")}
+                  aria-valuetext={t(duration)}
                   min={0}
                   max={durationOptions.length - 1}
                   step={1}
@@ -482,7 +484,7 @@ export function VideoSettingsPicker({
               </label>
             )}
           </div>
-          <div className="media-section-title">视频声音</div>
+          <div className="media-section-title">{t("视频声音")}</div>
           <div className="seg-track">
             {[
               { value: true, label: "有" },
@@ -493,15 +495,15 @@ export function VideoSettingsPicker({
                 type="button"
                 className={`seg ${option.value === effectiveGenerateAudio ? "active" : ""}`}
                 disabled={disabled || hasReferenceAudio}
-                title={hasReferenceAudio ? "存在参考音频时固定为有" : undefined}
+                title={hasReferenceAudio ? t("存在参考音频时固定为有") : undefined}
                 onClick={() => pickGenerateAudio(option.value)}
               >
                 <span aria-hidden>{option.value ? "🔊" : "🔇"}</span>
-                <span>{option.label}</span>
+                <span>{t(option.label)}</span>
               </button>
             ))}
           </div>
-          {hasReferenceAudio && <div className="media-hint">已上传参考音频，视频声音固定为有</div>}
+          {hasReferenceAudio && <div className="media-hint">{t("已上传参考音频，视频声音固定为有")}</div>}
         </div>
       )}
     </div>

@@ -19,6 +19,7 @@
 # Shared app environment for server & worker (YAML anchor, merged per service).
 x-app-env: &app-env
   NODE_ENV: production
+  globle: ${globle:-0}
   PG_HOST: postgres
   PG_PORT: "5432"
   PG_USER: ${PG_USER:-postgres}

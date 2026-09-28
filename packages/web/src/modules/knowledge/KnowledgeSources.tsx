@@ -1,8 +1,10 @@
+import { useI18n } from "../../i18n/index.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { knowledgeApi, type Evidence } from "./api.js";
 import { locator, SourcePreview, type Preview } from "./SourcePreview.js";
 import "./knowledge.css";
 export function KnowledgeSources({ sources }: { sources: Evidence[] }) {
+  const { t } = useI18n();
   const visibleSources = useMemo(() => {
     const seen = new Set<string>();
     return sources.flatMap((hit) => [hit, ...(hit.context ?? []).map((chunk) => ({
@@ -42,8 +44,8 @@ export function KnowledgeSources({ sources }: { sources: Evidence[] }) {
     } catch (e) { if (attempt === generation.current) setError(e instanceof Error ? e.message : "出处不可用"); }
     finally { if (attempt === generation.current) setBusy(false); }
   };
-  return <section aria-label="知识库出处"><details><summary>知识库出处（{visibleSources.length}）</summary>
-    {visibleSources.map((hit) => <button key={hit.chunkId} disabled={busy} onClick={() => void open(hit)}>{hit.title} · {locator(hit)}</button>)}
-    {error && <p role="alert">{error}</p>}{opened && <SourcePreview value={opened} onClose={() => { generation.current++; setOpened(undefined); }} />}
+  return <section aria-label={t("知识库出处")}><details><summary>{t("知识库出处（")}{visibleSources.length}）</summary>
+    {visibleSources.map((hit) => <button key={hit.chunkId} disabled={busy} onClick={() => void open(hit)}>{hit.title} · {t(locator(hit))}</button>)}
+    {error && <p role="alert">{t(error)}</p>}{opened && <SourcePreview value={opened} onClose={() => { generation.current++; setOpened(undefined); }} />}
   </details></section>;
 }

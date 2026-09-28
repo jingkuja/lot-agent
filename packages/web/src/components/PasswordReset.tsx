@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n/index.js";
+import { LanguageSelect } from "../i18n/index.js";
 import { useEffect, useState } from "react";
 import { api } from "../api/client.js";
 
@@ -16,6 +18,7 @@ export function PasswordReset({
   token = "",
   onBack,
 }: PasswordResetProps) {
+  const { t } = useI18n();
   const [mode, setMode] = useState(initialMode);
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
@@ -94,27 +97,28 @@ export function PasswordReset({
   return (
     <main className="password-reset-page">
       <section className="password-reset-card" aria-labelledby="password-reset-title">
-        <div className="password-reset-brand"><span aria-hidden>✦</span> 借势智算</div>
+        <LanguageSelect />
+        <div className="password-reset-brand"><span aria-hidden>✦</span> {t("借势智算")}</div>
         <p className="password-reset-kicker">ACCOUNT SECURITY</p>
-        <h1 id="password-reset-title">{isConfirm ? "重置密码" : "忘记密码"}</h1>
+        <h1 id="password-reset-title">{isConfirm ? t("重置密码") : t("忘记密码")}</h1>
         <p className="password-reset-subtitle">
-          {isConfirm ? "请输入新密码并确认，完成账号恢复。" : "输入注册邮箱，我们会发送重置密码的链接。"}
+          {isConfirm ? t("请输入新密码并确认，完成账号恢复。") : t("输入注册邮箱，我们会发送重置密码的链接。")}
         </p>
 
         {completed ? (
           <div className="password-reset-complete">
-            <p>{notice}</p>
-            <button type="button" className="password-reset-button" onClick={onBack}>返回登录</button>
+            <p>{t(notice)}</p>
+            <button type="button" className="password-reset-button" onClick={onBack}>{t("返回登录")}</button>
           </div>
         ) : (
           <form className="password-reset-form" onSubmit={isConfirm ? confirmReset : sendResetEmail}>
             <label className="password-reset-field">
-              <span>邮箱</span>
+              <span>{t("邮箱")}</span>
               <input
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="请输入注册邮箱"
+                placeholder={t("请输入注册邮箱")}
                 autoComplete="email"
                 required
                 disabled={loading || isConfirm}
@@ -125,12 +129,12 @@ export function PasswordReset({
             {isConfirm && (
               <>
                 <label className="password-reset-field">
-                  <span>新密码</span>
+                  <span>{t("新密码")}</span>
                   <input
                     type="password"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
-                    placeholder="请输入新密码"
+                    placeholder={t("请输入新密码")}
                     autoComplete="new-password"
                     minLength={8}
                     required
@@ -139,12 +143,12 @@ export function PasswordReset({
                   />
                 </label>
                 <label className="password-reset-field">
-                  <span>确认密码</span>
+                  <span>{t("确认密码")}</span>
                   <input
                     type="password"
                     value={confirmPassword}
                     onChange={(event) => setConfirmPassword(event.target.value)}
-                    placeholder="请再次输入新密码"
+                    placeholder={t("请再次输入新密码")}
                     autoComplete="new-password"
                     minLength={8}
                     required
@@ -154,14 +158,14 @@ export function PasswordReset({
               </>
             )}
 
-            {error && <p className="password-reset-message error" role="alert">{error}</p>}
-            {notice && <p className="password-reset-message success" role="status">{notice}</p>}
+            {error && <p className="password-reset-message error" role="alert">{t(error)}</p>}
+            {notice && <p className="password-reset-message success" role="status">{t(notice)}</p>}
             <button
               type="submit"
               className="password-reset-button"
               disabled={loading || (!isConfirm && countdown > 0)}
             >
-              {loading ? "处理中..." : isConfirm ? "确认重置密码" : countdown > 0 ? `${countdown}s 后可重新发送` : "发送重置邮件"}
+              {loading ? t("处理中...") : isConfirm ? t("确认重置密码") : countdown > 0 ? t("{0}s 后可重新发送", [countdown]) : t("发送重置邮件")}
             </button>
           </form>
         )}
@@ -176,8 +180,7 @@ export function PasswordReset({
             onBack();
           }}
         >
-          返回登录
-        </button>
+          {t("返回登录")}</button>
       </section>
     </main>
   );

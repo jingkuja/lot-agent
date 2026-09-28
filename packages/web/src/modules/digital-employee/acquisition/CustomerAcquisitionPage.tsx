@@ -1,3 +1,4 @@
+import { useI18n } from "../../../i18n/index.js";
 import { useState } from "react";
 import type { CampaignRecommendation, CustomerSegment, MarketingAsset, MarketingCampaignSummary } from "../types.js";
 import { MarketingAssetLibraryPage } from "./MarketingAssetLibraryPage.js";
@@ -19,6 +20,7 @@ const WORKSPACES: Array<{ id: Workspace; label: string; description: string }> =
 ];
 
 export function CustomerAcquisitionPage({ onOpenChat, onOpenMarketingMaterials }: { onOpenChat?: () => void; onOpenMarketingMaterials?: () => void }) {
+  const { t } = useI18n();
   const [workspace, setWorkspace] = useState<Workspace>("assets");
   const [seed, setSeed] = useState<CreationSeed | undefined>();
 
@@ -59,19 +61,19 @@ export function CustomerAcquisitionPage({ onOpenChat, onOpenMarketingMaterials }
   return <div className="de-page de-acquisition-page">
     <header className="de-acquisition-header">
       <div>
-        <p className="de-eyebrow">数字员工 / 获客宝</p>
-        <h1>获客宝</h1>
-        <p>看懂整体客群，匹配已确认产品资料，生成可管理、可投放、可复盘的营销内容。</p>
+        <p className="de-eyebrow">{t("数字员工 / 获客宝")}</p>
+        <h1>{t("获客宝")}</h1>
+        <p>{t("看懂整体客群，匹配已确认产品资料，生成可管理、可投放、可复盘的营销内容。")}</p>
       </div>
       <div className="de-acquisition-header-actions">
-        {onOpenChat && <button type="button" className="de-secondary-button" onClick={onOpenChat}>与获客宝对话</button>}
-        <div className="de-acquisition-scope"><span>经营对象</span><strong>客群 / 公开受众</strong><small>不使用单个客户隐私</small></div>
+        {onOpenChat && <button type="button" className="de-secondary-button" onClick={onOpenChat}>{t("与获客宝对话")}</button>}
+        <div className="de-acquisition-scope"><span>{t("经营对象")}</span><strong>{t("客群 / 公开受众")}</strong><small>{t("不使用单个客户隐私")}</small></div>
       </div>
     </header>
 
-    <nav className="de-acquisition-tabs" aria-label="获客宝工作区">
+    <nav className="de-acquisition-tabs" aria-label={t("获客宝工作区")}>
       {WORKSPACES.map((item) => <button key={item.id} className={workspace === item.id ? "active" : ""} onClick={() => setWorkspace(item.id)}>
-        <strong>{item.label}</strong><small>{item.description}</small>
+        <strong>{t(item.label)}</strong><small>{t(item.description)}</small>
       </button>)}
     </nav>
 

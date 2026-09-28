@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useState } from "react";
 
 type Platform = "xiaohongshu" | "wechat";
@@ -8,28 +9,27 @@ interface PreviewPanelProps {
 }
 
 export function PreviewPanel({ content, onClose }: PreviewPanelProps) {
+  const { t } = useI18n();
   const [platform, setPlatform] = useState<Platform>("xiaohongshu");
 
   return (
     <div className="preview-panel">
       <div className="preview-header">
-        <span className="preview-title">预览</span>
+        <span className="preview-title">{t("预览")}</span>
         <div className="preview-header-right">
           <div className="platform-toggle">
             <button
               className={`platform-btn ${platform === "xiaohongshu" ? "active" : ""}`}
               onClick={() => setPlatform("xiaohongshu")}
             >
-              小红书
-            </button>
+              {t("小红书")}</button>
             <button
               className={`platform-btn ${platform === "wechat" ? "active" : ""}`}
               onClick={() => setPlatform("wechat")}
             >
-              公众号
-            </button>
+              {t("公众号")}</button>
           </div>
-          <button className="preview-close" onClick={onClose} title="关闭预览">
+          <button className="preview-close" onClick={onClose} title={t("关闭预览")}>
             ✕
           </button>
         </div>
@@ -51,22 +51,19 @@ export function PreviewPanel({ content, onClose }: PreviewPanelProps) {
       </div>
 
       <div className="preview-actions">
-        <button className="preview-action-btn" title="编辑" disabled>
-          编辑
-        </button>
+        <button className="preview-action-btn" title={t("编辑")} disabled>
+          {t("编辑")}</button>
         <button
           className="preview-action-btn"
-          title="换平台"
+          title={t("换平台")}
           onClick={() =>
             setPlatform((p) => (p === "xiaohongshu" ? "wechat" : "xiaohongshu"))
           }
         >
-          换平台
-        </button>
+          {t("换平台")}</button>
         {/* TODO: wire real publish */}
-        <button className="preview-action-btn preview-action-btn--primary" title="发布" disabled>
-          发布
-        </button>
+        <button className="preview-action-btn preview-action-btn--primary" title={t("发布")} disabled>
+          {t("发布")}</button>
       </div>
     </div>
   );

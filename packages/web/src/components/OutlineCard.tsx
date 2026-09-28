@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { layoutMeta } from "../lib/layout-icons.js";
 
 interface OutlineSlide {
@@ -54,13 +55,14 @@ function parseOutline(input: unknown): OutlineInput {
 }
 
 export function OutlineCard({ input, interactive, answer, onReply }: OutlineCardProps) {
+  const { t } = useI18n();
   const parsed = parseOutline(input);
   const slides = parsed.slides ?? [];
   return (
     <div className={`outline-card${interactive ? "" : " answered"}`}>
       <div className="outline-head">
-        <span className="outline-title">{parsed.title || "演示大纲"}</span>
-        <span className="outline-count">共 {slides.length} 页</span>
+        <span className="outline-title">{parsed.title || t("演示大纲")}</span>
+        <span className="outline-count">{t("共")}{slides.length} {t("页")}</span>
       </div>
       <ol className="outline-list">
         {slides.map((s, i) => {
@@ -69,9 +71,9 @@ export function OutlineCard({ input, interactive, answer, onReply }: OutlineCard
           return (
             <li key={i} className="outline-row">
               <span className="outline-index">{i + 1}</span>
-              <span className="outline-layout" title={m.label}>{m.icon}</span>
+              <span className="outline-layout" title={t(m.label)}>{m.icon}</span>
               <span className="outline-body">
-                <span className="outline-slide-title">{s.title || m.label}</span>
+                <span className="outline-slide-title">{s.title || t(m.label)}</span>
                 {sum && <span className="outline-slide-sum">{sum}</span>}
               </span>
             </li>
@@ -81,12 +83,11 @@ export function OutlineCard({ input, interactive, answer, onReply }: OutlineCard
       {interactive ? (
         <div className="outline-actions">
           <button type="button" className="outline-confirm" onClick={() => onReply?.("确认，按此大纲生成")}>
-            ✓ 确认生成
-          </button>
-          <span className="outline-hint">或直接在下方输入修改意见（如「第 3 页改成对比」）</span>
+            {t("✓ 确认生成")}</button>
+          <span className="outline-hint">{t("或直接在下方输入修改意见（如「第 3 页改成对比」）")}</span>
         </div>
       ) : (
-        answer && <div className="outline-answered-note">已回复：{answer}</div>
+        answer && <div className="outline-answered-note">{t("已回复：")}{answer}</div>
       )}
     </div>
   );

@@ -1,7 +1,9 @@
+import { useI18n } from "../../i18n/index.js";
 import { useEffect, useRef, useState } from "react";
 import { knowledgeApi, type Material } from "./api.js";
 
 export function MaterialThumbnail({ material, onClick }: { material: Material; onClick: () => void }) {
+  const { t } = useI18n();
   const button = useRef<HTMLButtonElement>(null);
   const [url, setUrl] = useState("");
   const [failed, setFailed] = useState(false);
@@ -22,8 +24,8 @@ export function MaterialThumbnail({ material, onClick }: { material: Material; o
     if (button.current) observer.observe(button.current);
     return () => { stopped = true; observer.disconnect(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [id, mime, name]);
-  return <button ref={button} type="button" className="knowledge-material-thumbnail" onClick={onClick} aria-label={`预览 ${name ?? "素材"}`}>
-    {url && !failed ? <img src={url} alt={name ?? "素材缩略图"} onError={() => setFailed(true)} /> :
-      <span>{mime.startsWith("image/") ? (failed ? "图片加载失败，点击重试" : "正在加载图片…") : mime.startsWith("video/") ? "▷ 视频" : mime.startsWith("audio/") ? "♫ 音频" : "▤ 文件"}</span>}
+  return <button ref={button} type="button" className="knowledge-material-thumbnail" onClick={onClick} aria-label={t("预览 {0}", [name ?? "素材"])}>
+    {url && !failed ? <img src={url} alt={name ?? t("素材缩略图")} onError={() => setFailed(true)} /> :
+      <span>{mime.startsWith("image/") ? (failed ? t("图片加载失败，点击重试") : t("正在加载图片…")) : mime.startsWith("video/") ? t("▷ 视频") : mime.startsWith("audio/") ? t("♫ 音频") : t("▤ 文件")}</span>}
   </button>;
 }

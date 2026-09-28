@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useEffect, useState } from "react";
 import type { DesktopDownloadEvent } from "../types/desktop.js";
 
@@ -24,6 +25,7 @@ const AUTO_DISMISS_MS: Record<string, number> = {
  * Renders nothing in a plain browser (where `<a download>` just works).
  */
 export function DownloadToast() {
+  const { t } = useI18n();
   const desktop = typeof window !== "undefined" ? window.lotDesktop : undefined;
   const [items, setItems] = useState<DesktopDownloadEvent[]>([]);
 
@@ -74,7 +76,7 @@ export function DownloadToast() {
               <button
                 type="button"
                 className="download-toast-close"
-                aria-label="关闭"
+                aria-label={t("关闭")}
                 onClick={() => dismiss(item.id)}
               >
                 ✕
@@ -103,22 +105,20 @@ export function DownloadToast() {
                   type="button"
                   onClick={() => item.path && desktop.openPath(item.path)}
                 >
-                  打开
-                </button>
+                  {t("打开")}</button>
                 <button
                   type="button"
                   onClick={() => item.path && desktop.showInFolder(item.path)}
                 >
-                  所在文件夹
-                </button>
+                  {t("所在文件夹")}</button>
               </div>
             )}
 
             {item.state === "interrupted" && (
-              <div className="download-toast-status is-error">下载中断</div>
+              <div className="download-toast-status is-error">{t("下载中断")}</div>
             )}
             {item.state === "cancelled" && (
-              <div className="download-toast-status">已取消</div>
+              <div className="download-toast-status">{t("已取消")}</div>
             )}
           </div>
         );

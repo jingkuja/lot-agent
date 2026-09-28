@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n/index.js";
+import { LanguageSelect } from "../i18n/index.js";
 import { BRAND_LOGO_SRC } from "../assets/brand-logo.js";
 import type { User } from "../api/client.js";
 import { AccountMenu } from "./AccountMenu.js";
@@ -28,6 +30,7 @@ export function BrandHeader({
   activeModule = "assistant",
   balanceRefreshKey,
 }: BrandHeaderProps) {
+  const { t } = useI18n();
   return (
     <div className="brand-header">
       <div className="brand-card">
@@ -39,15 +42,16 @@ export function BrandHeader({
         </span>
 
         <div className="brand-meta">
-          <span className="brand-title">灵渠claw</span>
-          <span className="brand-subtitle">借势智算</span>
+          <span className="brand-title">{t("灵渠claw")}</span>
+          <span className="brand-subtitle">{t("借势智算")}</span>
         </div>
 
+        <LanguageSelect />
         <button
           className="brand-collapse"
           onClick={onCollapse}
-          title="收起侧栏"
-          aria-label="收起侧栏"
+          title={t("收起侧栏")}
+          aria-label={t("收起侧栏")}
         >
           ‹
         </button>
@@ -63,7 +67,7 @@ export function BrandHeader({
           {(onOpenAgentCenter || onOpenKnowledgeBase) && (
             <div className="brand-quick-actions">
               {onOpenAgentCenter && (
-                <button className="brand-quick-action" onClick={onOpenAgentCenter} title="Studio 管理">
+                <button className="brand-quick-action" onClick={onOpenAgentCenter} title={t("Studio 管理")}>
                   <span className="brand-action-icon" aria-hidden>
                     <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -72,11 +76,11 @@ export function BrandHeader({
                       <path d="M17.5 14v7M14 17.5h7" />
                     </svg>
                   </span>
-                  <span>Studio 管理</span>
+                  <span>{t("Studio 管理")}</span>
                 </button>
               )}
               {onOpenKnowledgeBase && (
-                <button className="brand-knowledge-btn" onClick={onOpenKnowledgeBase} title="个人知识库">
+                <button className="brand-knowledge-btn" onClick={onOpenKnowledgeBase} title={t("个人知识库")}>
                   <span className="brand-action-icon brand-knowledge-icon" aria-hidden>
                     <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                       <ellipse cx="12" cy="5" rx="7" ry="3" />
@@ -85,15 +89,15 @@ export function BrandHeader({
                     </svg>
                   </span>
                   <span className="brand-knowledge-copy">
-                    <strong>个人知识库</strong>
-                    <small>沉淀资料与专属知识</small>
+                    <strong>{t("个人知识库")}</strong>
+                    <small>{t("沉淀资料与专属知识")}</small>
                   </span>
                 </button>
               )}
             </div>
           )}
           {(onOpenAssistant || onOpenDigitalEmployee) && (
-            <div className="brand-module-switch" role="tablist" aria-label="工作区导航">
+            <div className="brand-module-switch" role="tablist" aria-label={t("工作区导航")}>
               <button
                 type="button"
                 role="tab"
@@ -119,8 +123,7 @@ export function BrandHeader({
                   <path d="M5.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6" />
                   <path d="M18.5 5.5h2M19.5 4.5v2" />
                 </svg>
-                数字员工
-              </button>
+                {t("数字员工")}</button>
             </div>
           )}
         </div>

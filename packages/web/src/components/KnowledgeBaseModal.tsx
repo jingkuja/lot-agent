@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { KNOWLEDGE_SOURCE_LABELS, DEFAULT_CHAT_SOURCE_TYPES, type KnowledgeSourceType } from "@lot-agent/core/knowledge";
 import { useMemo, useState } from "react";
 import type { KnowledgeBase, KnowledgeBaseRef } from "../api/client.js";
@@ -25,6 +26,7 @@ export function KnowledgeBaseModal({
   onRetry,
   onManage,
 }: KnowledgeBaseModalProps) {
+  const { t } = useI18n();
   const [selectedIds, setSelectedIds] = useState(() => new Set(selected.map((item) => item.id)));
   const [sourceTypes, setSourceTypes] = useState<KnowledgeSourceType[]>(selected[0]?.sourceTypes ?? DEFAULT_CHAT_SOURCE_TYPES);
   const selectedCount = selectedIds.size;
@@ -44,33 +46,33 @@ export function KnowledgeBaseModal({
       >
         <div className="agent-center-head">
           <div>
-            <div className="agent-center-title" id="knowledge-modal-title">选择知识库</div>
-            <div className="knowledge-modal-subtitle">为本次对话添加参考资料，让回答更有依据</div>
+            <div className="agent-center-title" id="knowledge-modal-title">{t("选择知识库")}</div>
+            <div className="knowledge-modal-subtitle">{t("为本次对话添加参考资料，让回答更有依据")}</div>
           </div>
-          <button className="agent-center-close" type="button" onClick={onClose} aria-label="关闭">×</button>
+          <button className="agent-center-close" type="button" onClick={onClose} aria-label={t("关闭")}>×</button>
         </div>
         <div className="knowledge-modal-body">
-          {items.some((item) => item.source === "local") && <fieldset className="knowledge-source-filter"><legend>检索资料类型</legend>
+          {items.some((item) => item.source === "local") && <fieldset className="knowledge-source-filter"><legend>{t("检索资料类型")}</legend>
             <div className="knowledge-source-options">
-              {Object.entries(KNOWLEDGE_SOURCE_LABELS).map(([type, label]) => <label key={type} className="knowledge-source-option"><input type="checkbox" checked={sourceTypes.includes(type as KnowledgeSourceType)} onChange={(e) => setSourceTypes((old) => e.target.checked ? [...old, type as KnowledgeSourceType] : old.filter((v) => v !== type))} /><span>{label}</span></label>)}
+              {Object.entries(KNOWLEDGE_SOURCE_LABELS).map(([type, label]) => <label key={type} className="knowledge-source-option"><input type="checkbox" checked={sourceTypes.includes(type as KnowledgeSourceType)} onChange={(e) => setSourceTypes((old) => e.target.checked ? [...old, type as KnowledgeSourceType] : old.filter((v) => v !== type))} /><span>{t(label)}</span></label>)}
             </div>
-            <p className="knowledge-source-hint">媒体仅检索手工说明，个人信息需主动勾选。</p>
-            {!sourceTypes.length && <p className="knowledge-source-validation" role="status">请至少选择一种资料类型</p>}
+            <p className="knowledge-source-hint">{t("媒体仅检索手工说明，个人信息需主动勾选。")}</p>
+            {!sourceTypes.length && <p className="knowledge-source-validation" role="status">{t("请至少选择一种资料类型")}</p>}
           </fieldset>}
           <div className="knowledge-list-heading">
-            <div><h3>可用知识库</h3><span>最多选择 {MAX_SELECTED} 个</span></div>
-            {onManage && <button className="knowledge-manage-link" type="button" onClick={onManage}>管理个人知识库 <span aria-hidden="true">↗</span></button>}
+            <div><h3>{t("可用知识库")}</h3><span>{t("最多选择")}{MAX_SELECTED} {t("个")}</span></div>
+            {onManage && <button className="knowledge-manage-link" type="button" onClick={onManage}>{t("管理个人知识库")}<span aria-hidden="true">↗</span></button>}
           </div>
           <div className="knowledge-list">
-          {loading && <div className="knowledge-modal-state">正在加载知识库…</div>}
+          {loading && <div className="knowledge-modal-state">{t("正在加载知识库…")}</div>}
           {!loading && error && (
             <div className="knowledge-modal-state knowledge-modal-error">
-              <span>{error}</span>
-              <button type="button" onClick={onRetry}>重新加载</button>
+              <span>{t(error)}</span>
+              <button type="button" onClick={onRetry}>{t("重新加载")}</button>
             </div>
           )}
           {!loading && !error && items.length === 0 && (
-            <div className="knowledge-modal-state">暂无知识库，请先前往个人知识库创建并导入资料</div>
+            <div className="knowledge-modal-state">{t("暂无知识库，请先前往个人知识库创建并导入资料")}</div>
           )}
           {!loading && !error && items.map((item) => {
             const checked = selectedIds.has(item.id);
@@ -94,9 +96,9 @@ export function KnowledgeBaseModal({
                 <span className="knowledge-row-main">
                   <span className="knowledge-row-name">{item.name}</span>
                   <span className="knowledge-row-desc">
-                    {item.description || "暂无描述"}
+                    {item.description || t("暂无描述")}
                   </span>
-                  <span className="knowledge-row-meta">{item.availableDocumentCount} / {item.documentCount} 个文档可召回</span>
+                  <span className="knowledge-row-meta">{item.availableDocumentCount} / {item.documentCount} {t("个文档可召回")}</span>
                 </span>
               </label>
             );
@@ -104,17 +106,16 @@ export function KnowledgeBaseModal({
           </div>
         </div>
         <div className="knowledge-modal-footer">
-          <span className="knowledge-selection-count">已选择 <strong>{selectedCount}</strong> / {MAX_SELECTED} 个</span>
+          <span className="knowledge-selection-count">{t("已选择")}<strong>{selectedCount}</strong> / {MAX_SELECTED} {t("个")}</span>
           <div>
-            <button className="knowledge-modal-cancel" type="button" onClick={onClose}>取消</button>
+            <button className="knowledge-modal-cancel" type="button" onClick={onClose}>{t("取消")}</button>
             <button
               className="knowledge-modal-confirm"
               type="button"
               onClick={() => { onConfirm(selectedItems); onClose(); }}
               disabled={loading || !!error || !sourceTypes.length}
             >
-              确定
-            </button>
+              {t("确定")}</button>
           </div>
         </div>
       </div>

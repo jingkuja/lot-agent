@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useState, useRef, useEffect } from "react";
 import { filterModels, type CatalogModel } from "../lib/model-filter.js";
 
@@ -16,6 +17,7 @@ export function ModelPicker({
   disabled?: boolean;
   emptyLabel?: string;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -49,9 +51,9 @@ export function ModelPicker({
         disabled={disabled}
         aria-haspopup="true"
         aria-expanded={open}
-        title="选择模型"
+        title={t("选择模型")}
       >
-        <span className="media-trigger-label">{current}</span>
+        <span className="media-trigger-label">{t(current)}</span>
         <svg className="media-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="6 9 12 15 18 9" />
         </svg>
@@ -60,14 +62,14 @@ export function ModelPicker({
         <div className="media-popup model-popup">
           {isEmpty ? (
             /* 目录为空:仅一行灰色提示,不可选;沿用 model-empty 样式 */
-            <div className="model-empty">{emptyLabel}</div>
+            <div className="model-empty">{t(emptyLabel)}</div>
           ) : (
             <>
               {showSearch && (
                 <input
                   className="model-search"
                   autoFocus
-                  placeholder="输入字母快速筛选…"
+                  placeholder={t("输入字母快速筛选…")}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
@@ -87,7 +89,7 @@ export function ModelPicker({
                     {m.description && <span className="model-row-desc">{m.description}</span>}
                   </button>
                 ))}
-                {filtered.length === 0 && <div className="model-empty">无匹配模型</div>}
+                {filtered.length === 0 && <div className="model-empty">{t("无匹配模型")}</div>}
               </div>
             </>
           )}

@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -28,6 +29,7 @@ const BULLET_LIST_RE = /^\s*(?:[-*+]\s+|\d+[.)]\s+)\S/m;
 
 /** ask_user 工具调用的结构化提问卡片：问题 + 选项按钮 + 自由输入。 */
 export function AskUserCard({ input, interactive, answer, onReply }: AskUserCardProps) {
+  const { t } = useI18n();
   const compositionActiveRef = useRef(false);
   const raw = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const optionsSafe = Array.isArray(raw.options) ? raw.options.filter((item): item is string => typeof item === "string") : [];
@@ -93,18 +95,14 @@ export function AskUserCard({ input, interactive, answer, onReply }: AskUserCard
         </div>
       )}
       {interactive && inlinedChoices && (
-        <div className="ask-user-hint">请在下方直接输入你的选择，可填多项。</div>
+        <div className="ask-user-hint">{t("请在下方直接输入你的选择，可填多项。")}</div>
       )}
       {interactive && (allowFree || inlinedChoices) && (
         <input
           className={`ask-user-free${inlinedChoices ? " emphasized" : ""}`}
           value={text}
           placeholder={
-            inlinedChoices
-              ? "输入你的选择后按 Enter 发送"
-              : multi
-                ? "可补充其他回答，与所选项一并发送"
-                : "或输入其他回答，Enter 发送"
+            inlinedChoices ? t("输入你的选择后按 Enter 发送") : multi ? t("可补充其他回答，与所选项一并发送") : t("或输入其他回答，Enter 发送")
           }
           onChange={(e) => setText(e.target.value)}
           onCompositionStart={() => { compositionActiveRef.current = true; }}
@@ -132,7 +130,7 @@ export function AskUserCard({ input, interactive, answer, onReply }: AskUserCard
           disabled={selected.length === 0 && !text.trim()}
           onClick={submitMulti}
         >
-          发送{selected.length > 0 ? `（已选 ${selected.length} 项）` : ""}
+          {t("发送")}{selected.length > 0 ? t("（已选 {0} 项）", [selected.length]) : ""}
         </button>
       )}
     </div>

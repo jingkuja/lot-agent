@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useEffect, useMemo, useState } from "react";
 import { api, type RechargeInfo, type RechargeOrder } from "../api/client.js";
 import {
@@ -70,6 +71,7 @@ function formatDiscount(discount: number): string {
 }
 
 export function RechargeModal({ onClose, onBalanceChange }: RechargeModalProps) {
+  const { t } = useI18n();
   const [pointsInput, setPointsInput] = useState("1000");
   const [balance, setBalance] = useState<number | null>(null);
   const [order, setOrder] = useState<RechargeOrder | null>(null);
@@ -152,21 +154,21 @@ export function RechargeModal({ onClose, onBalanceChange }: RechargeModalProps) 
       <section className="account-dialog recharge-dialog" role="dialog" aria-modal="true" aria-labelledby="recharge-title" onClick={(event) => event.stopPropagation()}>
         <header className="account-dialog-head">
           <span>
-            <h2 id="recharge-title">积分充值</h2>
-            <p>输入充值积分，系统按 {POINTS_PER_YUAN} 积分 = 1 元自动计算应付金额。</p>
+            <h2 id="recharge-title">{t("积分充值")}</h2>
+            <p>{t("输入充值积分，系统按")}{POINTS_PER_YUAN} {t("积分 = 1 元自动计算应付金额。")}</p>
           </span>
-          <button type="button" onClick={onClose} aria-label="关闭">×</button>
+          <button type="button" onClick={onClose} aria-label={t("关闭")}>×</button>
         </header>
 
         <div className="recharge-body">
           <div className="recharge-balance">
-            <small>我的剩余积分</small>
+            <small>{t("我的剩余积分")}</small>
             <strong>{balance == null ? "—" : formatPoints(yuanToPoints(balance))}</strong>
           </div>
 
           {!order && (
             <div className="recharge-form">
-              <label htmlFor="recharge-points">充值积分</label>
+              <label htmlFor="recharge-points">{t("充值积分")}</label>
               <div className={`recharge-points-input ${pointsInput && !validPoints ? "invalid" : ""}`}>
                 <input
                   id="recharge-points"
@@ -178,12 +180,12 @@ export function RechargeModal({ onClose, onBalanceChange }: RechargeModalProps) 
                   onChange={(event) => setPointsInput(event.target.value)}
                   aria-describedby="recharge-points-hint"
                 />
-                <span>积分</span>
+                <span>{t("积分")}</span>
               </div>
-              <small id="recharge-points-hint">最低充值 {MIN_RECHARGE_POINTS} 积分，请输入 {RECHARGE_POINTS_STEP} 的整数倍</small>
+              <small id="recharge-points-hint">{t("最低充值")}{MIN_RECHARGE_POINTS} {t("积分，请输入")}{RECHARGE_POINTS_STEP} {t("的整数倍")}</small>
 
               <fieldset className="recharge-payment-methods">
-                <legend>收款方式</legend>
+                <legend>{t("收款方式")}</legend>
                 <div>
                   {rechargeInfo?.paymentMethods.map((method) => (
                     <button
@@ -193,70 +195,70 @@ export function RechargeModal({ onClose, onBalanceChange }: RechargeModalProps) 
                       aria-pressed={paymentMethod === method.type}
                       onClick={() => setPaymentMethod(method.type)}
                     >
-                      <span aria-hidden>{method.type === "alipay" ? "支" : method.type === "wxpay" ? "微" : "付"}</span>
-                      {method.name}
+                      <span aria-hidden>{method.type === "alipay" ? t("支") : method.type === "wxpay" ? t("微") : t("付")}</span>
+                      {t(method.name)}
                     </button>
                   ))}
                 </div>
               </fieldset>
 
               {rechargeInfo && (!rechargeInfo.enabled || rechargeInfo.paymentMethods.length === 0) && (
-                <div className="recharge-notice error">暂时没有可用的收款方式</div>
+                <div className="recharge-notice error">{t("暂时没有可用的收款方式")}</div>
               )}
 
               {displayDiscountTiers.length > 0 && (
-                <div className="recharge-discount-list" aria-label="充值优惠">
+                <div className="recharge-discount-list" aria-label={t("充值优惠")}>
                   {displayDiscountTiers.map((tier) => (
                     <div className="recharge-discount-hint" key={tier.threshold}>
-                      充值满 {formatPoints(tier.threshold)} 积分享 {formatDiscount(tier.discount)}
+                      {t("充值满")}{formatPoints(tier.threshold)} {t("积分享")}{t(formatDiscount(tier.discount))}
                     </div>
                   ))}
                 </div>
               )}
 
               <div className="recharge-payable">
-                <span>需要付款</span>
+                <span>{t("需要付款")}</span>
                 <span className="recharge-payable-price">
                   {appliedDiscount < 1 && <del>¥ {originalPayable.toFixed(2)}</del>}
                   <strong>¥ {payable.toFixed(2)}</strong>
                 </span>
               </div>
 
-              {error && <div className="recharge-notice error">{error}</div>}
+              {error && <div className="recharge-notice error">{t(error)}</div>}
               <button type="button" className="recharge-submit" disabled={!validPoints || !rechargeInfo?.enabled || !paymentMethod || submitting} onClick={() => void createOrder()}>
-                {submitting ? "正在创建支付订单…" : `立即充值 ${validPoints ? formatPoints(points) : ""} 积分`}
+                {submitting ? t("正在创建支付订单…") : t("立即充值 {0} 积分", [validPoints ? formatPoints(points) : ""])}
               </button>
             </div>
           )}
 
           {order && (
             <div className="recharge-checkout">
-              <div className={`recharge-status ${order.status}`}>{statusText(order.status)}</div>
+              <div className={`recharge-status ${order.status}`}>{t(statusText(order.status))}</div>
               <div className="recharge-order-summary">
-                <span>{formatPoints(order.points ?? points)} 积分</span>
+                <span>{formatPoints(order.points ?? points)} {t("积分")}</span>
                 <strong>¥ {(order.amount ?? payable).toFixed(2)}</strong>
               </div>
               {order.status !== "credited" && order.paymentKind === "qrcode" && order.codeUrl && (
                 <div className="recharge-wechat-payment">
                   <img
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(order.codeUrl)}`}
-                    alt="微信支付二维码"
+                    alt={t("微信支付二维码")}
                   />
-                  <strong>请使用微信扫码支付</strong>
-                  <small>支付完成后，本页会自动刷新积分余额</small>
+                  <strong>{t("请使用微信扫码支付")}</strong>
+                  <small>{t("支付完成后，本页会自动刷新积分余额")}</small>
                 </div>
               )}
               {order.status !== "credited" && order.paymentKind === "redirect" && (
                 <div className="recharge-alipay-payment">
-                  <p>支付宝支付页已在新标签中打开，请在支付完成后返回此页面。</p>
+                  <p>{t("支付宝支付页已在新标签中打开，请在支付完成后返回此页面。")}</p>
                   <button type="button" className="recharge-open-window" onClick={() => {
                     if (!openPaymentPage(order.payUrl)) setError("无法打开支付宝支付地址");
-                  }}>重新打开支付宝支付页</button>
+                  }}>{t("重新打开支付宝支付页")}</button>
                 </div>
               )}
-              {error && <div className="recharge-notice error">{error}</div>}
+              {error && <div className="recharge-notice error">{t(error)}</div>}
               {order.status === "credited" && (
-                <button type="button" className="recharge-submit" onClick={() => setOrder(null)}>继续充值</button>
+                <button type="button" className="recharge-submit" onClick={() => setOrder(null)}>{t("继续充值")}</button>
               )}
             </div>
           )}

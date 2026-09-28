@@ -1,13 +1,15 @@
+import { useI18n } from "../../i18n/index.js";
 import { useEffect, useRef, type ReactNode } from "react";
 
 export function PreviewDialog({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
     return () => element?.close();
   }, []);
-  return <dialog ref={dialog} className="knowledge-preview-dialog" aria-label="素材预览"
+  return <dialog ref={dialog} className="knowledge-preview-dialog" aria-label={t("素材预览")}
     onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose(); }}
     onClick={(event) => {
       if (event.target !== event.currentTarget) return;

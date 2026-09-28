@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useState } from "react";
 import type { Agent } from "../api/client.js";
 import { splitInstalledAgents } from "../lib/agent-order.js";
@@ -14,6 +15,7 @@ interface AgentSwitcherProps {
 }
 
 export function AgentSwitcher({ agents, activeId, onSwitch, onPickOverflow, disabled }: AgentSwitcherProps) {
+  const { t } = useI18n();
   const [overflowOpen, setOverflowOpen] = useState(false);
   const { general, visible, overflow } = splitInstalledAgents(agents);
   const pills = general ? [general, ...visible] : visible;
@@ -27,12 +29,12 @@ export function AgentSwitcher({ agents, activeId, onSwitch, onPickOverflow, disa
         className={`agent-pill ${a.id === activeId ? "active" : ""}`}
         onClick={() => onSwitch(a.id)}
         disabled={disabled}
-        title={a.description}
+        title={t(a.description)}
       >
         <span className={`agent-pill-icon agent-pill-icon--${kind}`} aria-hidden>
           {AGENT_ICONS[kind]}
         </span>
-        <span className="agent-pill-label">{a.name}</span>
+        <span className="agent-pill-label">{t(a.name)}</span>
       </button>
     );
   };
@@ -47,9 +49,9 @@ export function AgentSwitcher({ agents, activeId, onSwitch, onPickOverflow, disa
             className="agent-pill agent-more"
             onClick={() => setOverflowOpen((v) => !v)}
             disabled={disabled}
-            title="更多已安装 Agent"
+            title={t("更多已安装 Agent")}
           >
-            <span className="agent-pill-label">更多</span>
+            <span className="agent-pill-label">{t("更多")}</span>
           </button>
           {overflowOpen && (
             <AgentOverflowPopover

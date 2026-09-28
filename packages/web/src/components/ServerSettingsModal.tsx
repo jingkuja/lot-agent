@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useEffect, useState } from "react";
 
 interface ServerSettingsModalProps {
@@ -20,6 +21,7 @@ type SaveStatus =
  * vite.config.ts), so saving here also retargets the dev window immediately.
  */
 export function ServerSettingsModal({ onClose }: ServerSettingsModalProps) {
+  const { t } = useI18n();
   const desktop = window.lotDesktop;
   const [url, setUrl] = useState(() => desktop?.getServerUrl() ?? "");
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
@@ -57,19 +59,18 @@ export function ServerSettingsModal({ onClose }: ServerSettingsModalProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="agent-center-head">
-          <h2 className="agent-center-title">服务器设置</h2>
-          <button className="agent-center-close" onClick={onClose} aria-label="关闭">
+          <h2 className="agent-center-title">{t("服务器设置")}</h2>
+          <button className="agent-center-close" onClick={onClose} aria-label={t("关闭")}>
             ✕
           </button>
         </div>
         <form className="server-settings-form" onSubmit={handleSave}>
           <label className="server-settings-label" htmlFor="server-url-input">
-            服务器地址
-          </label>
+            {t("服务器地址")}</label>
           <input
             id="server-url-input"
             type="text"
-            placeholder="http://192.168.1.10 或 https://agent.example.com"
+            placeholder={t("http://192.168.1.10 或 https://agent.example.com")}
             value={url}
             onChange={(e) => {
               setUrl(e.target.value);
@@ -79,17 +80,17 @@ export function ServerSettingsModal({ onClose }: ServerSettingsModalProps) {
             disabled={status.kind === "saving"}
           />
           {status.kind === "err" && (
-            <p className="server-settings-msg is-error">{status.message}</p>
+            <p className="server-settings-msg is-error">{t(status.message)}</p>
           )}
           {status.kind === "ok" && (
-            <p className="server-settings-msg is-ok">已保存，连接成功</p>
+            <p className="server-settings-msg is-ok">{t("已保存，连接成功")}</p>
           )}
           <button
             type="submit"
             className="login-btn"
             disabled={status.kind === "saving" || !url.trim()}
           >
-            {status.kind === "saving" ? "正在连接…" : "保存并连接"}
+            {status.kind === "saving" ? t("正在连接…") : t("保存并连接")}
           </button>
         </form>
       </div>

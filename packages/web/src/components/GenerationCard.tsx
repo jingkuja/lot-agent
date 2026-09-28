@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useState } from "react";
 import { api } from "../api/client.js";
 import type { GenerationView } from "../hooks/useChat.js";
@@ -10,6 +11,7 @@ const LABELS = {
 type Asset = { url: string; mime: string; durationSec?: number };
 
 function DownloadLink({ href, name }: { href: string; name: string }) {
+  const { t } = useI18n();
   return (
     <a className="gen-asset-download" href={href} download={name} target="_blank" rel="noreferrer">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -17,14 +19,14 @@ function DownloadLink({ href, name }: { href: string; name: string }) {
         <path d="m7 11 5 5 5-5" />
         <path d="M5 21h14" />
       </svg>
-      下载
-    </a>
+      {t("下载")}</a>
   );
 }
 
 /** One generated asset: preview (img/video) + download link, with a graceful
     fallback so a load error never looks like a bare broken-image icon. */
 function AssetView({ asset, mediaType, index }: { asset: Asset; mediaType: "image" | "video"; index: number }) {
+  const { t } = useI18n();
   const [errored, setErrored] = useState(false);
   const ext = (asset.url.split("?")[0].split(".").pop() || "bin").toLowerCase();
   const name = `生成结果${index + 1}.${ext}`;
@@ -41,7 +43,7 @@ function AssetView({ asset, mediaType, index }: { asset: Asset; mediaType: "imag
             <circle cx="8.5" cy="8.5" r="1.6" />
             <path d="m21 15-4.5-4.5L5 21" />
           </svg>
-          <span>结果文件（无法预览）</span>
+          <span>{t("结果文件（无法预览）")}</span>
         </div>
       ) : (
         <img className="gen-asset" src={asset.url} alt={name} onError={() => setErrored(true)} />
@@ -80,6 +82,7 @@ export function GenerationCard({
    * succeeded). Undefined disables the re-download button. */
   onRedownload?: (messageId: string, mediaType: "image" | "video") => void;
 }) {
+  const { t } = useI18n();
   const { mediaType, status, assets, error, taskId } = generation;
   const [cancelRequested, setCancelRequested] = useState(false);
 
@@ -118,18 +121,17 @@ export function GenerationCard({
   };
 
   return (
-    <div className={`gen-card ${mediaType} ${generating ? "gen-card--loading" : "gen-card--failed"}`} title={error ?? undefined}>
+    <div className={`gen-card ${mediaType} ${generating ? "gen-card--loading" : "gen-card--failed"}`} title={t(error) ?? undefined}>
       <MediaIcon mediaType={mediaType} />
-      <div className="gen-card-label">{label}</div>
+      <div className="gen-card-label">{t(label)}</div>
       {generating && taskId && (
         <button type="button" className="gen-card-cancel" onClick={onCancel} disabled={cancelRequested}>
-          {cancelRequested ? "取消中…" : "取消"}
+          {cancelRequested ? t("取消中…") : t("取消")}
         </button>
       )}
       {downloadFailed && messageId && onRedownload && (
         <button type="button" className="gen-card-retry" onClick={() => onRedownload(messageId, mediaType)}>
-          重新下载
-        </button>
+          {t("重新下载")}</button>
       )}
     </div>
   );

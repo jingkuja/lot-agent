@@ -1,3 +1,4 @@
+import { useI18n } from "../../i18n/index.js";
 import { useState } from "react";
 import type { User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
@@ -37,6 +38,7 @@ function profileIdFor(pathname: string): string | null {
 }
 
 export function DigitalEmployeeLayout({ pathname, user, llmModels, onLogout, onNavigate, onOpenDigitalEmployee, onNavigateAssistant, onOpenConversation }: DigitalEmployeeLayoutProps) {
+  const { t } = useI18n();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { conversations, loadingMore, hasMore, loadMore } = useConversations();
   const view = viewFor(pathname);
@@ -80,7 +82,7 @@ export function DigitalEmployeeLayout({ pathname, user, llmModels, onLogout, onN
       </aside>
 
       <main className="workspace-main de-workspace-main">
-        {sidebarCollapsed && <button className="sidebar-expand" onClick={() => setSidebarCollapsed(false)} title="展开侧栏" aria-label="展开侧栏">›</button>}
+        {sidebarCollapsed && <button className="sidebar-expand" onClick={() => setSidebarCollapsed(false)} title={t("展开侧栏")} aria-label={t("展开侧栏")}>›</button>}
         <div className="de-main-surface">
           {view === "profiles" && (profileId
             ? <ProfileDetailPage profileId={profileId} onBack={goProfiles} />

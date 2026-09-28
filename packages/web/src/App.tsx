@@ -1,3 +1,4 @@
+import { useI18n } from "./i18n/index.js";
 import { useEffect, useState, useCallback } from "react";
 import { Login } from "./components/Login.js";
 import { ProductShell } from "./shell/ProductShell.js";
@@ -13,6 +14,7 @@ type View = "loading" | "login" | "ready";
 const AUTO_LOGIN_FAIL = "自动登录失败，请手动登录";
 
 export default function App() {
+  const { t } = useI18n();
   const [view, setView] = useState<View>("loading");
   const [user, setUser] = useState<User | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export default function App() {
   if (view === "loading") {
     content = (
       <div className="app-loading">
-        <span>加载中...</span>
+        <span>{t("加载中...")}</span>
       </div>
     );
   } else if (view === "ready" && user) {

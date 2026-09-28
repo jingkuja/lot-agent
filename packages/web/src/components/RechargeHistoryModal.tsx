@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useCallback, useEffect, useState } from "react";
 import { api, type RechargeRecord } from "../api/client.js";
 
@@ -5,7 +6,7 @@ interface RechargeHistoryModalProps {
   onClose: () => void;
 }
 
-const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
+const dateOptions: Intl.DateTimeFormatOptions = {
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
@@ -13,11 +14,11 @@ const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
   minute: "2-digit",
   second: "2-digit",
   hour12: false,
-});
+};
 
-function formatRechargeTime(value: string) {
+function formatRechargeTime(value: string, locale: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : dateFormatter.format(date);
+  return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(locale, dateOptions).format(date);
 }
 
 function paymentMethodLabel(value: string) {
@@ -26,10 +27,10 @@ function paymentMethodLabel(value: string) {
   return value || "—";
 }
 
-function formatAmount(record: RechargeRecord) {
+function formatAmount(record: RechargeRecord, locale = "zh-CN") {
   if (!Number.isFinite(record.amount)) return "—";
   try {
-    return new Intl.NumberFormat("zh-CN", {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: record.currency || "CNY",
       minimumFractionDigits: 2,
@@ -41,6 +42,7 @@ function formatAmount(record: RechargeRecord) {
 }
 
 export function RechargeHistoryModal({ onClose }: RechargeHistoryModalProps) {
+  const { t, locale } = useI18n();
   const [records, setRecords] = useState<RechargeRecord[]>([]);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
@@ -81,24 +83,24 @@ export function RechargeHistoryModal({ onClose }: RechargeHistoryModalProps) {
       <section className="account-dialog recharge-history-dialog" role="dialog" aria-modal="true" aria-labelledby="recharge-history-title" onClick={(event) => event.stopPropagation()}>
         <header className="account-dialog-head">
           <div>
-            <h2 id="recharge-history-title">充值明细</h2>
-            <p>仅显示当前账号充值成功的记录</p>
+            <h2 id="recharge-history-title">{t("充值明细")}</h2>
+            <p>{t("仅显示当前账号充值成功的记录")}</p>
           </div>
-          <button type="button" aria-label="关闭" onClick={onClose}>×</button>
+          <button type="button" aria-label={t("关闭")} onClick={onClose}>×</button>
         </header>
         <div className="recharge-history-body">
-          {loading && <div className="account-dialog-state">正在加载充值明细…</div>}
+          {loading && <div className="account-dialog-state">{t("正在加载充值明细…")}</div>}
           {!loading && error && (
             <div className="account-dialog-state error">
-              <span>{error}</span>
-              <button type="button" onClick={() => void load(1)}>重新加载</button>
+              <span>{t(error)}</span>
+              <button type="button" onClick={() => void load(1)}>{t("重新加载")}</button>
             </div>
           )}
           {!loading && !error && records.length === 0 && (
             <div className="account-dialog-state">
               <span className="recharge-history-empty-icon" aria-hidden>≡</span>
-              <strong>暂无充值明细</strong>
-              <small>充值成功后的记录会显示在这里</small>
+              <strong>{t("暂无充值明细")}</strong>
+              <small>{t("充值成功后的记录会显示在这里")}</small>
             </div>
           )}
           {!loading && !error && records.length > 0 && (
@@ -106,27 +108,27 @@ export function RechargeHistoryModal({ onClose }: RechargeHistoryModalProps) {
               <table className="recharge-history-table">
                 <thead>
                   <tr>
-                    <th scope="col">充值时间</th>
-                    <th scope="col">充值渠道</th>
-                    <th scope="col">充值金额</th>
+                    <th scope="col">{t("充值时间")}</th>
+                    <th scope="col">{t("充值渠道")}</th>
+                    <th scope="col">{t("充值金额")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {records.map((record) => (
                     <tr key={record.transactionId}>
-                      <td data-label="充值时间">{formatRechargeTime(record.rechargedAt)}</td>
-                      <td data-label="充值渠道">{paymentMethodLabel(record.paymentMethod)}</td>
-                      <td data-label="充值金额" className="recharge-history-amount">{formatAmount(record)}</td>
+                      <td data-label={t("充值时间")}>{formatRechargeTime(record.rechargedAt, locale)}</td>
+                      <td data-label={t("充值渠道")}>{t(paymentMethodLabel(record.paymentMethod))}</td>
+                      <td data-label={t("充值金额")} className="recharge-history-amount">{formatAmount(record, locale)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               {records.length < total && (
                 <button type="button" className="recharge-history-more" disabled={loadingMore} onClick={() => void load(page + 1)}>
-                  {loadingMore ? "正在加载…" : "加载更多"}
+                  {loadingMore ? t("正在加载…") : t("加载更多")}
                 </button>
               )}
-              {loadMoreError && <div className="recharge-history-more-error">加载失败，请重试</div>}
+              {loadMoreError && <div className="recharge-history-more-error">{t("加载失败，请重试")}</div>}
             </div>
           )}
         </div>

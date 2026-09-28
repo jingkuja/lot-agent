@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useEffect, useRef } from "react";
 import type { Agent } from "../api/client.js";
 
@@ -10,6 +11,7 @@ interface Props {
 
 /** 「更多」轻量浮层:列出未显示的已安装 Agent,点选即快速切换。 */
 export function AgentOverflowPopover({ agents, activeId, onPick, onClose }: Props) {
+  const { t } = useI18n();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -29,7 +31,7 @@ export function AgentOverflowPopover({ agents, activeId, onPick, onClose }: Prop
           className={`agent-overflow-item ${a.id === activeId ? "active" : ""}`}
           onClick={() => onPick(a.id)}
         >
-          {a.name}
+          {t(a.name)}
         </button>
       ))}
     </div>

@@ -12,8 +12,12 @@ function publicUrl(value: string | undefined, fallback: string): string {
 
 /** Public destinations only; never derive these from internal gateway credentials. */
 export function createProductRoutes() {
+  // dotenv values are strings. Only a finite positive number opts in.
+  const value = Number(process.env.globle);
+  const globle = Number.isFinite(value) && value > 0 ? 1 : 0;
   const app = new Hono();
   app.get("/", (c) => c.json({
+    globle,
     webUrl: publicUrl(process.env.LOT_AGENT_PUBLIC_URL, "https://aigc.todoucloud.com/"),
     tokenhubUrl: publicUrl(process.env.TOKENHUB_PUBLIC_URL, "https://tokenhub.todoucloud.com/"),
   }));

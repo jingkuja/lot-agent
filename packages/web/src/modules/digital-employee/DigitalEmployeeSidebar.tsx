@@ -1,3 +1,4 @@
+import { useI18n } from "../../i18n/index.js";
 import { useState } from "react";
 import type { Conversation } from "../../api/client.js";
 
@@ -51,14 +52,15 @@ export function DigitalEmployeeSidebar({
   hasMore = false,
   onLoadMore,
 }: DigitalEmployeeSidebarProps) {
+  const { t } = useI18n();
   const [historyOpen, setHistoryOpen] = useState(false);
 
   return (
     <div className="de-module-sidebar">
-      <nav className="de-module-groups" aria-label="数字员工能力">
+      <nav className="de-module-groups" aria-label={t("数字员工能力")}>
         {DIGITAL_EMPLOYEE_GROUPS.map((group) => (
           <section key={group.id} className="de-module-group">
-            <h2>{group.label}</h2>
+            <h2>{t(group.label)}</h2>
             <div className="de-module-feature-list">
               {group.features.map((feature) => (
                 <button
@@ -68,8 +70,8 @@ export function DigitalEmployeeSidebar({
                 >
                   <span className="de-module-feature-icon" aria-hidden>{feature.icon}</span>
                   <span>
-                    <strong>{feature.label}</strong>
-                    <small>{feature.description}</small>
+                    <strong>{t(feature.label)}</strong>
+                    <small>{t(feature.description)}</small>
                   </span>
                   <span className="de-module-feature-arrow" aria-hidden>›</span>
                 </button>
@@ -89,7 +91,7 @@ export function DigitalEmployeeSidebar({
           }}
         >
           <span aria-hidden>＋</span>
-          {activeFeature === "acquisition" ? "与商机雷达对话" : activeFeature === "copy" ? "与获客宝对话" : "新对话"}
+          {activeFeature === "acquisition" ? t("与商机雷达对话") : activeFeature === "copy" ? t("与获客宝对话") : t("新对话")}
         </button>
         <button
           className={`de-history-trigger ${historyOpen ? "active" : ""}`}
@@ -97,18 +99,17 @@ export function DigitalEmployeeSidebar({
           aria-expanded={historyOpen}
         >
           <span aria-hidden>◷</span>
-          历史对话
-          {conversations.length > 0 && <b>{conversations.length}</b>}
+          {t("历史对话")}{conversations.length > 0 && <b>{conversations.length}</b>}
         </button>
 
         {historyOpen && (
-          <div className="de-history-popover" role="dialog" aria-label="数字员工历史对话">
+          <div className="de-history-popover" role="dialog" aria-label={t("数字员工历史对话")}>
             <header>
               <div>
-                <strong>历史对话</strong>
-                <small>仅显示数字员工会话</small>
+                <strong>{t("历史对话")}</strong>
+                <small>{t("仅显示数字员工会话")}</small>
               </div>
-              <button onClick={() => setHistoryOpen(false)} aria-label="关闭">×</button>
+              <button onClick={() => setHistoryOpen(false)} aria-label={t("关闭")}>×</button>
             </header>
             <button
               className="de-history-new"
@@ -117,10 +118,9 @@ export function DigitalEmployeeSidebar({
                 setHistoryOpen(false);
               }}
             >
-              <span aria-hidden>＋</span> 新对话
-            </button>
+              <span aria-hidden>＋</span> {t("新对话")}</button>
             <div className="de-history-list">
-              {conversations.length === 0 && <p>暂无数字员工对话</p>}
+              {conversations.length === 0 && <p>{t("暂无数字员工对话")}</p>}
               {conversations.map((conversation) => (
                 <div
                   key={conversation.id}
@@ -133,21 +133,21 @@ export function DigitalEmployeeSidebar({
                       setHistoryOpen(false);
                     }}
                   >
-                    {conversation.title || "新对话"}
+                    {conversation.title || t("新对话")}
                   </button>
                   {onDeleteConversation && (
                     <button
                       className="de-history-delete"
-                      aria-label="删除对话"
+                      aria-label={t("删除对话")}
                       onClick={() => onDeleteConversation(conversation.id)}
                     >×</button>
                   )}
                 </div>
               ))}
-              {loadingMore && <p>加载中…</p>}
+              {loadingMore && <p>{t("加载中…")}</p>}
             </div>
             {hasMore && onLoadMore && (
-              <button className="de-history-more" disabled={loadingMore} onClick={onLoadMore}>加载更多</button>
+              <button className="de-history-more" disabled={loadingMore} onClick={onLoadMore}>{t("加载更多")}</button>
             )}
           </div>
         )}

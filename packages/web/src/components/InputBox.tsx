@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
 import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
 import { DEFAULT_IMAGE_QUALITY, DEFAULT_IMAGE_SIZE, imageSizeError } from "../lib/image-settings.js";
@@ -95,6 +96,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   onChange,
   videoDurations,
 }: InputBoxProps, ref) {
+  const { t } = useI18n();
   const [internalValue, setInternalValue] = useState("");
   const promptValue = value !== undefined ? value : internalValue;
   const setPromptValue = onChange ?? setInternalValue;
@@ -386,43 +388,38 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   return (
     <div className={`input-box${embedded ? " input-box--embedded" : ""}`}>
-      {attachmentError && <p className="input-modal-hint" role="alert">{attachmentError}</p>}
+      {attachmentError && <p className="input-modal-hint" role="alert">{t(attachmentError)}</p>}
       {!mediaMode && files.some((f) => f.type.startsWith("image/")) && (
         <div className="input-modal-hint" role="note">
           <span aria-hidden>🖼️</span>
-          图片需所选模型支持多模态（视觉）能力才能识别
-        </div>
+          {t("图片需所选模型支持多模态（视觉）能力才能识别")}</div>
       )}
       {noModelNotice && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
-          模型目录暂时不可用，请稍后重试或联系管理员
-        </div>
+          {t("模型目录暂时不可用，请稍后重试或联系管理员")}</div>
       )}
       {mode === "image" && imageSettingsError && (
         <div className="input-modal-hint input-modal-hint--error" role="alert">
           <span aria-hidden>⚠️</span>
-          {imageSettingsError}
+          {t(imageSettingsError)}
         </div>
       )}
       {mode === "image" && (uploadLimitNotice || files.length >= MAX_IMAGE_REFERENCE_IMAGES) && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
-          参考图最多 {MAX_IMAGE_REFERENCE_IMAGES} 张，不能再上传
-        </div>
+          {t("参考图最多")}{MAX_IMAGE_REFERENCE_IMAGES} {t("张，不能再上传")}</div>
       )}
-      {videoMode && <div className="input-modal-hint">参考图最多 9 张；首帧、尾帧各 1 张；参考视频、参考音频各最多 3 段，各自总时长不超过 15 秒{checkingMedia ? " · 正在检查时长…" : ""}</div>}
+      {videoMode && <div className="input-modal-hint">{t("参考图最多 9 张；首帧、尾帧各 1 张；参考视频、参考音频各最多 3 段，各自总时长不超过 15 秒")}{checkingMedia ? t(" · 正在检查时长…") : ""}</div>}
       {lockAdaptive && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
-          提供参考视频后视频时长和比例不能选择，自动适配参考视频
-        </div>
+          {t("提供参考视频后视频时长和比例不能选择，自动适配参考视频")}</div>
       )}
       {seedance25Video && missingMentions.length > 0 && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
-          当前提示词尚未写出
-          {missingMentions.map((tag) => (
+          {t("当前提示词尚未写出")}{missingMentions.map((tag) => (
             <code key={tag} className="input-seedance-mention">{tag}</code>
           ))}
         </div>
@@ -431,93 +428,89 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         <div className="input-attachments">
           {knowledgeBases.map((item) => (
             <div className="attachment-chip knowledge-chip" key={`kb:${item.id}`}>
-              <span className="attachment-slot-badge badge-knowledge">知识库</span>
+              <span className="attachment-slot-badge badge-knowledge">{t("知识库")}</span>
               <span aria-hidden>▤</span>
               <span className="attachment-name" title={item.name}>{item.name}</span>
               <button
                 className="attachment-remove"
                 onClick={() => onKnowledgeBasesChange(knowledgeBases.filter((kb) => kb.id !== item.id))}
-                title="移除"
+                title={t("移除")}
                 type="button"
               >✕</button>
             </div>
           ))}
           {templateFile && (
             <div className="attachment-chip" key="__template">
-              <span className="attachment-slot-badge badge-template">模版</span>
+              <span className="attachment-slot-badge badge-template">{t("模版")}</span>
               <span className="attachment-name" title={templateFile.name}>{templateFile.name}</span>
-              <button className="attachment-remove" onClick={() => setTemplateFile(null)} title="移除" type="button">✕</button>
+              <button className="attachment-remove" onClick={() => setTemplateFile(null)} title={t("移除")} type="button">✕</button>
             </div>
           )}
           {backgroundFiles.map((f, i) => (
             <div className="attachment-chip" key={`__bg${i}`}>
-              <span className="attachment-slot-badge badge-background">背景</span>
+              <span className="attachment-slot-badge badge-background">{t("背景")}</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
-              <button type="button" className="attachment-remove" onClick={() => setBackgroundFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+              <button type="button" className="attachment-remove" onClick={() => setBackgroundFiles((p) => p.filter((_, j) => j !== i))} title={t("移除")}>✕</button>
             </div>
           ))}
           {oldContractFile && (
             <div className="attachment-chip" key="__contract_old">
-              <span className="attachment-slot-badge badge-old">旧版</span>
+              <span className="attachment-slot-badge badge-old">{t("旧版")}</span>
               <span className="attachment-name" title={oldContractFile.name}>{oldContractFile.name}</span>
-              <button className="attachment-remove" onClick={() => setOldContractFile(null)} title="移除" type="button">✕</button>
+              <button className="attachment-remove" onClick={() => setOldContractFile(null)} title={t("移除")} type="button">✕</button>
             </div>
           )}
           {newContractFile && (
             <div className="attachment-chip" key="__contract_new">
-              <span className="attachment-slot-badge badge-new">新版</span>
+              <span className="attachment-slot-badge badge-new">{t("新版")}</span>
               <span className="attachment-name" title={newContractFile.name}>{newContractFile.name}</span>
-              <button className="attachment-remove" onClick={() => setNewContractFile(null)} title="移除" type="button">✕</button>
+              <button className="attachment-remove" onClick={() => setNewContractFile(null)} title={t("移除")} type="button">✕</button>
             </div>
           )}
           {videoMode && referenceVideoFiles.map((f, i) => (
             <div className="attachment-chip" key={`__video${i}`}>
               <span className="attachment-slot-badge badge-video-reference">
-                {seedance25Video ? `参考视频 ${seedanceAssetMention("Video", i)}` : "参考视频"}
+                {seedance25Video ? t("参考视频 {0}", [seedanceAssetMention("Video", i)]) : t("参考视频")}
               </span>
               <span className="attachment-attachment-icon" aria-hidden>🎞️</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
-              <button type="button" className="attachment-remove" disabled={checkingMedia} onClick={() => setReferenceVideoFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+              <button type="button" className="attachment-remove" disabled={checkingMedia} onClick={() => setReferenceVideoFiles((p) => p.filter((_, j) => j !== i))} title={t("移除")}>✕</button>
             </div>
           ))}
           {videoMode && referenceAudioFiles.map((f, i) => (
             <div className="attachment-chip" key={`__audio${i}`}>
               <span className="attachment-slot-badge badge-audio-reference">
-                {seedance25Video ? `参考音频 ${seedanceAssetMention("Audio", i)}` : "参考音频"}
+                {seedance25Video ? t("参考音频 {0}", [seedanceAssetMention("Audio", i)]) : t("参考音频")}
               </span>
               <span className="attachment-attachment-icon" aria-hidden>🔊</span>
               <span className="attachment-name" title={f.name}>{f.name}</span>
-              <button type="button" className="attachment-remove" disabled={checkingMedia} onClick={() => setReferenceAudioFiles((p) => p.filter((_, j) => j !== i))} title="移除">✕</button>
+              <button type="button" className="attachment-remove" disabled={checkingMedia} onClick={() => setReferenceAudioFiles((p) => p.filter((_, j) => j !== i))} title={t("移除")}>✕</button>
             </div>
           ))}
           {videoMode && firstFrameFile && (
             <div className="attachment-chip" key="__first_frame">
-              <span className="attachment-slot-badge badge-frame">首帧</span>
+              <span className="attachment-slot-badge badge-frame">{t("首帧")}</span>
               {urlsRef.current.get(firstFrameFile) && <img className="attachment-thumb" src={urlsRef.current.get(firstFrameFile)} alt={firstFrameFile.name} />}
               <span className="attachment-name" title={firstFrameFile.name}>{firstFrameFile.name}</span>
-              <button type="button" className="attachment-remove" onClick={() => setFrameFile(setFirstFrameFile, firstFrameFile, null)} title="移除">✕</button>
+              <button type="button" className="attachment-remove" onClick={() => setFrameFile(setFirstFrameFile, firstFrameFile, null)} title={t("移除")}>✕</button>
             </div>
           )}
           {videoMode && lastFrameFile && (
             <div className="attachment-chip" key="__last_frame">
-              <span className="attachment-slot-badge badge-frame">尾帧</span>
+              <span className="attachment-slot-badge badge-frame">{t("尾帧")}</span>
               {urlsRef.current.get(lastFrameFile) && <img className="attachment-thumb" src={urlsRef.current.get(lastFrameFile)} alt={lastFrameFile.name} />}
               <span className="attachment-name" title={lastFrameFile.name}>{lastFrameFile.name}</span>
-              <button type="button" className="attachment-remove" onClick={() => setFrameFile(setLastFrameFile, lastFrameFile, null)} title="移除">✕</button>
+              <button type="button" className="attachment-remove" onClick={() => setFrameFile(setLastFrameFile, lastFrameFile, null)} title={t("移除")}>✕</button>
             </div>
           )}
           {files.map((f, i) => (
             <div className="attachment-chip" key={i}>
               {mediaMode && (
                 <span className="attachment-slot-badge badge-image-reference">
-                  {seedance25Video
-                    ? `参考图 ${seedanceAssetMention("Image", i)}`
-                    : mode === "image" && files.length > 1
-                      ? `参考图${i + 1}`
-                      : "参考图"}
+                  {seedance25Video ? t("参考图 {0}", [seedanceAssetMention("Image", i)]) : mode === "image" && files.length > 1 ? t("参考图{0}", [i + 1]) : t("参考图")}
                 </span>
               )}
-              {pptMode && <span className="attachment-slot-badge badge-content">内容</span>}
+              {pptMode && <span className="attachment-slot-badge badge-content">{t("内容")}</span>}
               {f.type.startsWith("image/") && urlsRef.current.get(f) ? (
                 <img className="attachment-thumb" src={urlsRef.current.get(f)} alt={f.name} />
               ) : (
@@ -527,7 +520,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               <button
                 className="attachment-remove"
                 onClick={() => removeFile(i)}
-                title="移除"
+                title={t("移除")}
                 type="button"
               >
                 ✕
@@ -545,9 +538,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         onCompositionEnd={() => { compositionActiveRef.current = false; }}
         onInput={handleInput}
         placeholder={
-          disabled && !embedded
-            ? "Agent 正在思考…"
-            : placeholder ?? "输入消息，Enter 发送，Shift+Enter 换行"
+          disabled && !embedded ? t("Agent 正在思考…") : t(placeholder) ?? t("输入消息，Enter 发送，Shift+Enter 换行")
         }
         disabled={disabled}
         rows={1}
@@ -669,7 +660,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 fileInputRef.current?.click();
               }}
               disabled={disabled}
-              title="最多5张"
+              title={t("最多5张")}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="14" height="14" rx="2.5" />
@@ -677,8 +668,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 <path d="m17 13-4-4-7 7" />
                 <path d="M18.5 16.5v5M16 19h5" />
               </svg>
-              参考图
-            </button>
+              {t("参考图")}</button>
           )}
           {videoMode && (
             <>
@@ -687,46 +677,41 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 className="btn-reference"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES}
-                title={seedance25Video ? "最多9张；提示词须按上传顺序写出 @Image1、@Image2…" : "最多9张"}
+                title={seedance25Video ? t("最多9张；提示词须按上传顺序写出 @Image1、@Image2…") : t("最多9张")}
               >
-                🖼️ 参考图
-              </button>
+                {t("🖼️ 参考图")}</button>
               <button
                 type="button"
                 className="btn-reference"
                 onClick={() => referenceVideoInputRef.current?.click()}
                 disabled={disabled || checkingMedia || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS}
-                title={seedance25Video ? "最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Video1、@Video2…" : "最多3段，总时长不超过15秒"}
+                title={seedance25Video ? t("最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Video1、@Video2…") : t("最多3段，总时长不超过15秒")}
               >
-                🎞️ 参考视频
-              </button>
+                {t("🎞️ 参考视频")}</button>
               <button
                 type="button"
                 className="btn-reference"
                 onClick={() => referenceAudioInputRef.current?.click()}
                 disabled={disabled || checkingMedia || referenceAudioFiles.length >= MAX_VIDEO_REFERENCE_AUDIOS}
-                title={seedance25Video ? "最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Audio1、@Audio2…" : "最多3段，总时长不超过15秒"}
+                title={seedance25Video ? t("最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Audio1、@Audio2…") : t("最多3段，总时长不超过15秒")}
               >
-                🔊 参考音频
-              </button>
+                {t("🔊 参考音频")}</button>
               <button
                 type="button"
                 className="btn-reference"
                 onClick={() => firstFrameInputRef.current?.click()}
                 disabled={disabled}
-                title={seedance25Video ? "首帧图比例需与生成视频比例一致" : undefined}
+                title={seedance25Video ? t("首帧图比例需与生成视频比例一致") : undefined}
               >
-                首帧图
-              </button>
+                {t("首帧图")}</button>
               <button
                 type="button"
                 className="btn-reference"
                 onClick={() => lastFrameInputRef.current?.click()}
                 disabled={disabled}
-                title={seedance25Video ? "尾帧图比例需与生成视频比例一致" : undefined}
+                title={seedance25Video ? t("尾帧图比例需与生成视频比例一致") : undefined}
               >
-                尾帧图
-              </button>
+                {t("尾帧图")}</button>
             </>
           )}
           {pptMode && (
@@ -741,8 +726,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                   <rect x="3" y="4" width="18" height="13" rx="2" />
                   <path d="M8 21h8M12 17v4" />
                 </svg>
-                PPT 模版
-              </button>
+                {t("PPT 模版")}</button>
               <button
                 type="button"
                 className="btn-reference"
@@ -754,8 +738,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                   <circle cx="8.5" cy="8.5" r="1.5" />
                   <path d="m21 15-5-5L5 21" />
                 </svg>
-                背景图
-              </button>
+                {t("背景图")}</button>
               <button
                 type="button"
                 className="btn-reference"
@@ -766,8 +749,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                   <path d="M14 2v6h6" />
                 </svg>
-                内容文件
-              </button>
+                {t("内容文件")}</button>
             </>
           )}
           {contractMode && (
@@ -783,8 +765,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                   <path d="M14 2v6h6" />
                   <path d="M9 15h6M9 11h6" />
                 </svg>
-                旧版合同
-              </button>
+                {t("旧版合同")}</button>
               <button
                 type="button"
                 className="btn-reference"
@@ -796,8 +777,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                   <path d="M14 2v6h6" />
                   <path d="M12 11v6M9 14h6" />
                 </svg>
-                新版合同
-              </button>
+                {t("新版合同")}</button>
             </>
           )}
         </div>
@@ -810,14 +790,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 className={`btn-knowledge${knowledgeBases.length ? " active" : ""}`}
                 onClick={openKnowledgeBases}
                 disabled={disabled}
-                title="选择个人知识库"
+                title={t("选择个人知识库")}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <ellipse cx="12" cy="5" rx="7" ry="3" />
                   <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
                   <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
                 </svg>
-                <span>知识库</span>
+                <span>{t("知识库")}</span>
               </button>
             )}
             <div className="upload-wrap">
@@ -826,7 +806,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 className="btn-upload"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || files.length >= MAX_FILES}
-                aria-label="上传文件"
+                aria-label={t("上传文件")}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="12" y1="5" x2="12" y2="19" />
@@ -834,16 +814,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 </svg>
               </button>
               <div className="upload-tooltip" role="tooltip">
-                <div className="upload-tooltip-title">📎 支持上传的文件</div>
+                <div className="upload-tooltip-title">{t("📎 支持上传的文件")}</div>
                 <ul className="upload-tooltip-list">
-                  {SUPPORTED_TYPES.map((t) => (
-                    <li key={t.label}>
-                      <span className="upload-tooltip-tag">{t.label}</span>
-                      <span className="upload-tooltip-exts">{t.exts}</span>
+                  {SUPPORTED_TYPES.map((fileType) => (
+                    <li key={fileType.label}>
+                      <span className="upload-tooltip-tag">{t(fileType.label)}</span>
+                      <span className="upload-tooltip-exts">{fileType.exts}</span>
                     </li>
                   ))}
                 </ul>
-                <div className="upload-tooltip-hint">最多 {MAX_FILES} 个文件</div>
+                <div className="upload-tooltip-hint">{t("最多")}{MAX_FILES} {t("个文件")}</div>
               </div>
             </div>
             </>
@@ -876,7 +856,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             />
           )}
           {!embedded && (disabled ? (
-            <button onClick={onStop} className="btn-stop" title="停止">
+            <button onClick={onStop} className="btn-stop" title={t("停止")}>
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
@@ -886,7 +866,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
               disabled={checkingMedia || (mode === "image" && !!imageSettingsError) || (!promptValue.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile)}
-              title="发送"
+              title={t("发送")}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="19" x2="12" y2="5" />

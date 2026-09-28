@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "../hooks/useTheme.js";
 import type { Theme } from "../lib/theme.js";
@@ -40,6 +41,7 @@ function clampToViewport(left: number, top: number, w: number, h: number): Pos {
 }
 
 export function ThemeToggle() {
+  const { t } = useI18n();
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
   // null = default (CSS top/right anchor); once dragged, an explicit left/top.
@@ -173,10 +175,10 @@ export function ThemeToggle() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        aria-label="切换主题"
+        aria-label={t("切换主题")}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="切换主题（可拖动）"
+        title={t("切换主题（可拖动）")}
       >
         {theme === "dark" ? (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -211,7 +213,7 @@ export function ThemeToggle() {
               className={`theme-menu-item ${theme === opt.value ? "active" : ""}`}
               onClick={() => choose(opt.value)}
             >
-              <span>{opt.label}</span>
+              <span>{t(opt.label)}</span>
               {theme === opt.value && (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />

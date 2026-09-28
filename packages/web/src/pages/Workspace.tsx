@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { KnowledgePanel } from "../modules/knowledge/KnowledgePanel.js";
 import { knowledgeApi } from "../modules/knowledge/api.js";
 import { useEffect, useCallback, useRef, useState, useMemo } from "react";
@@ -54,6 +55,7 @@ export function Workspace({
   requestedConversationId,
   onRequestedConversationHandled,
 }: WorkspaceProps) {
+  const { t } = useI18n();
   const { agents, installed, install, uninstall, promote } = useAgents(true);
   const isDigitalEmployeeMode = mode === "digitalEmployee";
   const assistantAgents = useMemo(
@@ -484,8 +486,8 @@ export function Workspace({
           <button
             className="sidebar-expand"
             onClick={() => setSidebarCollapsed(false)}
-            title="展开侧栏"
-            aria-label="展开侧栏"
+            title={t("展开侧栏")}
+            aria-label={t("展开侧栏")}
           >
             ›
           </button>

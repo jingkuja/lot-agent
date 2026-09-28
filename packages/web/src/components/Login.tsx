@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n/index.js";
+import { LanguageSelect } from "../i18n/index.js";
 import { useEffect, useRef, useState } from "react";
 import { api, setToken, type User } from "../api/client.js";
 import { encryptPassword } from "../lib/rsa.js";
@@ -21,6 +23,7 @@ function initialLoginScreen(): LoginScreen {
 }
 
 export function Login({ onLogin, initialError = null }: LoginProps) {
+  const { t, enabled: international } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
@@ -32,6 +35,9 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   const [screen, setScreen] = useState<LoginScreen>(initialLoginScreen);
   const [loginMethod, setLoginMethod] = useState<"password" | "phone">("password");
   const [bindPhone, setBindPhone] = useState(false);
+  const phoneEnabled = !international;
+  const effectiveLoginMethod = phoneEnabled ? loginMethod : "password";
+  const shouldBindPhone = phoneEnabled && bindPhone;
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const registrationRequestId = useRef(crypto.randomUUID());
   const [error, setError] = useState<string | null>(initialError);
@@ -86,6 +92,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   };
 
   const sendPhoneCode = async () => {
+    if (!phoneEnabled) return;
     if (!phone.trim()) {
       setError("请先填写手机号");
       return;
@@ -106,7 +113,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === "login" && loginMethod === "phone") {
+    if (mode === "login" && effectiveLoginMethod === "phone") {
       if (!phone.trim() || !phoneCode.trim()) return;
     } else if (!username.trim() || !password) {
       return;
@@ -119,7 +126,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
       setError("请填写邮箱并输入邮箱验证码");
       return;
     }
-    if (mode === "register" && bindPhone && (!phone.trim() || !phoneCode.trim())) {
+    if (mode === "register" && shouldBindPhone && (!phone.trim() || !phoneCode.trim())) {
       setError("请填写手机号并输入手机验证码");
       return;
     }
@@ -128,7 +135,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
     setLoading(true);
     try {
       let res: Awaited<ReturnType<typeof api.login>>;
-      if (mode === "login" && loginMethod === "phone") {
+      if (mode === "login" && effectiveLoginMethod === "phone") {
         res = await api.phoneLogin(phone.trim(), phoneCode.trim());
       } else {
         const { publicKey } = await api.getPublicKey();
@@ -139,8 +146,8 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
               encryptedPassword: encrypted,
               email: email.trim(),
               emailVerificationCode: emailCode.trim(),
-              phone: bindPhone ? phone.trim() : undefined,
-              phoneVerificationCode: bindPhone ? phoneCode.trim() : undefined,
+              phone: shouldBindPhone ? phone.trim() : undefined,
+              phoneVerificationCode: shouldBindPhone ? phoneCode.trim() : undefined,
               requestId: registrationRequestId.current,
             })
           : await api.login(username.trim(), encrypted);
@@ -160,8 +167,8 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
     mode === "register"
       ? !username.trim() || !password || !confirmPassword
         || !email.trim() || !emailCode.trim()
-        || (bindPhone && (!phone.trim() || !phoneCode.trim()))
-      : loginMethod === "password"
+        || (shouldBindPhone && (!phone.trim() || !phoneCode.trim()))
+      : effectiveLoginMethod === "password"
         ? !username.trim() || !password
         : !phone.trim() || !phoneCode.trim()
   );
@@ -185,7 +192,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
 
   return (
     <div className={`login-page login-page-${mode}`}>
-      <section className="login-showcase" aria-label="借势智算产品介绍">
+      <section className="login-showcase" aria-label={t("借势智算产品介绍")}>
         <div className="login-showcase-glow login-showcase-glow-one" aria-hidden />
         <div className="login-showcase-glow login-showcase-glow-two" aria-hidden />
         <div className="login-showcase-grid" aria-hidden />
@@ -208,75 +215,74 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
               <path d="M20 28.5h8M24 24.5v8" stroke="var(--login-hero)" strokeWidth="2.4" strokeLinecap="round" />
             </svg>
           </span>
-          <span>借势智算</span>
+          <span>{t("借势智算")}</span>
         </div>
 
         <div className="login-showcase-content">
-          <p className="login-eyebrow"><span /> AI 原生工作空间</p>
-          <h1>让每一个想法<br />都有一支 <em>AI 团队</em></h1>
+          <p className="login-eyebrow"><span /> {t("AI 原生工作空间")}</p>
+          <h1>{t("让每一个想法")}<br />{t("都有一支")} <em>{t("AI 团队")}</em></h1>
           <p className="login-showcase-copy">
-            汇集创作、图像、视频与办公智能体，让复杂工作在一个流畅的工作空间里完成。
-          </p>
+            {t("汇集创作、图像、视频与办公智能体，让复杂工作在一个流畅的工作空间里完成。")}</p>
 
-          <div className="login-agent-stage" aria-label="多智能体能力展示">
+          <div className="login-agent-stage" aria-label={t("多智能体能力展示")}>
             <div className="login-orbit login-orbit-large" aria-hidden />
             <div className="login-orbit login-orbit-small" aria-hidden />
-            <div className="login-agent-core"><span>AI</span><small>协作中</small></div>
-            <div className="login-agent-pill login-agent-pill-copy"><span>✦</span> 文案创作</div>
-            <div className="login-agent-pill login-agent-pill-image"><span>◈</span> 图片生成</div>
-            <div className="login-agent-pill login-agent-pill-ppt"><span>▤</span> PPT 制作</div>
-            <div className="login-agent-pill login-agent-pill-video"><span>▷</span> 视频生成</div>
+            <div className="login-agent-core"><span>AI</span><small>{t("协作中")}</small></div>
+            <div className="login-agent-pill login-agent-pill-copy"><span>✦</span> {t("文案创作")}</div>
+            <div className="login-agent-pill login-agent-pill-image"><span>◈</span> {t("图片生成")}</div>
+            <div className="login-agent-pill login-agent-pill-ppt"><span>▤</span> {t("PPT 制作")}</div>
+            <div className="login-agent-pill login-agent-pill-video"><span>▷</span> {t("视频生成")}</div>
           </div>
 
           <div className="login-showcase-points">
-            <span><i>01</i> 多模型，按需调用</span>
-            <span><i>02</i> 多智能体，协同交付</span>
+            <span><i>01</i> {t("多模型，按需调用")}</span>
+            <span><i>02</i> {t("多智能体，协同交付")}</span>
           </div>
         </div>
 
-        <p className="login-showcase-note">借势而为 · 智算未来</p>
+        <p className="login-showcase-note">{t("借势而为 · 智算未来")}</p>
       </section>
 
       <section className="login-access">
-        <div className="login-mobile-brand" aria-label="借势智算">
+        <div className="login-mobile-brand" aria-label={t("借势智算")}>
           <span aria-hidden>✦</span>
-          借势智算
-        </div>
+          {t("借势智算")}</div>
         <div className="login-card">
+          <LanguageSelect />
           <div className="login-card-heading">
-            <p className="login-card-kicker">{mode === "login" ? "WELCOME BACK" : "CREATE ACCOUNT"}</p>
-            <h2>{mode === "login" ? "欢迎回来" : "创建账号"}</h2>
-            <p>{mode === "login" ? "登录后继续你的智能工作流" : "注册后即可使用托管 AI 订阅"}</p>
+            <p className="login-card-kicker">{mode === "login" ? t("WELCOME BACK") : t("CREATE ACCOUNT")}</p>
+            <h2>{mode === "login" ? t("欢迎回来") : t("创建账号")}</h2>
+            <p>{mode === "login" ? t("登录后继续你的智能工作流") : t("注册后即可使用托管 AI 订阅")}</p>
           </div>
           <form className="login-form" onSubmit={handleSubmit}>
-            {mode === "login" && registrationEnabled && (
-              <div className="login-method-tabs" role="tablist" aria-label="登录方式">
+            {mode === "login" && registrationEnabled && phoneEnabled && (
+              <div className="login-method-tabs" role="tablist" aria-label={t("登录方式")}>
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={loginMethod === "password"}
-                  className={loginMethod === "password" ? "active" : ""}
+                  aria-selected={effectiveLoginMethod === "password"}
+                  className={effectiveLoginMethod === "password" ? "active" : ""}
                   onClick={() => { setLoginMethod("password"); setError(null); setNotice(null); }}
                   disabled={loading}
-                >用户名密码</button>
+                >{t("用户名密码")}</button>
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={loginMethod === "phone"}
-                  className={loginMethod === "phone" ? "active" : ""}
+                  aria-selected={effectiveLoginMethod === "phone"}
+                  className={effectiveLoginMethod === "phone" ? "active" : ""}
                   onClick={() => { setLoginMethod("phone"); setError(null); setNotice(null); }}
                   disabled={loading}
-                >手机号验证码</button>
+                >{t("手机号验证码")}</button>
               </div>
             )}
 
-            {(mode === "register" || loginMethod === "password") && (
+            {(mode === "register" || effectiveLoginMethod === "password") && (
               <div className="login-field">
-                <label htmlFor="login-username">用户名</label>
+                <label htmlFor="login-username">{t("用户名")}</label>
                 <input
                   id="login-username"
                   type="text"
-                  placeholder="请输入用户名"
+                  placeholder={t("请输入用户名")}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
@@ -289,28 +295,28 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
 
             {mode === "register" && (
               <div className="login-bindings">
-                <span className="login-required-binding"><span aria-hidden>✓</span> 邮箱（必填）</span>
-                <label className="login-checkbox">
+                <span className="login-required-binding"><span aria-hidden>✓</span> {t("邮箱（必填）")}</span>
+                {phoneEnabled && <label className="login-checkbox">
                   <input
                     type="checkbox"
                     checked={bindPhone}
                     onChange={(e) => { setBindPhone(e.target.checked); setError(null); setNotice(null); }}
                     disabled={loading}
                   />
-                  <span>绑定手机号</span>
-                </label>
+                  <span>{t("绑定手机号")}</span>
+                </label>}
               </div>
             )}
 
             {mode === "register" && (
               <div className="login-verification-group">
                 <div className="login-field">
-                  <label htmlFor="register-email">邮箱</label>
+                  <label htmlFor="register-email">{t("邮箱")}</label>
                   <div className="login-code-row">
                     <input
                       id="register-email"
                       type="email"
-                      placeholder="请输入邮箱地址"
+                      placeholder={t("请输入邮箱地址")}
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
@@ -318,42 +324,42 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
                       disabled={loading}
                     />
                     <button type="button" onClick={sendEmailCode} disabled={loading || sendingCode !== null || emailCountdown > 0 || !email.trim()}>
-                      {sendingCode === "email" ? "发送中..." : emailCountdown > 0 ? `${emailCountdown}s` : "发送验证码"}
+                      {sendingCode === "email" ? t("发送中...") : emailCountdown > 0 ? `${emailCountdown}s` : t("发送验证码")}
                     </button>
                   </div>
                 </div>
                 <div className="login-field">
-                  <label htmlFor="register-email-code">邮箱验证码</label>
-                  <input id="register-email-code" inputMode="numeric" maxLength={6} placeholder="请输入 6 位验证码" value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} required disabled={loading} />
+                  <label htmlFor="register-email-code">{t("邮箱验证码")}</label>
+                  <input id="register-email-code" inputMode="numeric" maxLength={6} placeholder={t("请输入 6 位验证码")} value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} required disabled={loading} />
                 </div>
               </div>
             )}
 
-            {((mode === "register" && bindPhone) || (mode === "login" && loginMethod === "phone")) && (
+            {((mode === "register" && shouldBindPhone) || (mode === "login" && effectiveLoginMethod === "phone")) && (
               <div className="login-verification-group">
                 <div className="login-field">
-                  <label htmlFor="login-phone">手机号</label>
+                  <label htmlFor="login-phone">{t("手机号")}</label>
                   <div className="login-code-row">
-                    <input id="login-phone" type="tel" inputMode="tel" placeholder="请输入中国大陆手机号" value={phone} onChange={(e) => setPhone(e.target.value)} required autoFocus={mode === "login"} autoComplete="tel" disabled={loading} />
+                    <input id="login-phone" type="tel" inputMode="tel" placeholder={t("请输入中国大陆手机号")} value={phone} onChange={(e) => setPhone(e.target.value)} required autoFocus={mode === "login"} autoComplete="tel" disabled={loading} />
                     <button type="button" onClick={sendPhoneCode} disabled={loading || sendingCode !== null || phoneCountdown > 0 || !phone.trim()}>
-                      {sendingCode === "phone" ? "发送中..." : phoneCountdown > 0 ? `${phoneCountdown}s` : "发送验证码"}
+                      {sendingCode === "phone" ? t("发送中...") : phoneCountdown > 0 ? `${phoneCountdown}s` : t("发送验证码")}
                     </button>
                   </div>
                 </div>
                 <div className="login-field">
-                  <label htmlFor="login-phone-code">手机验证码</label>
-                  <input id="login-phone-code" inputMode="numeric" maxLength={6} placeholder="请输入 6 位验证码" value={phoneCode} onChange={(e) => setPhoneCode(e.target.value.replace(/\D/g, ""))} required autoComplete="one-time-code" disabled={loading} />
+                  <label htmlFor="login-phone-code">{t("手机验证码")}</label>
+                  <input id="login-phone-code" inputMode="numeric" maxLength={6} placeholder={t("请输入 6 位验证码")} value={phoneCode} onChange={(e) => setPhoneCode(e.target.value.replace(/\D/g, ""))} required autoComplete="one-time-code" disabled={loading} />
                 </div>
               </div>
             )}
 
-            {(mode === "register" || loginMethod === "password") && (
+            {(mode === "register" || effectiveLoginMethod === "password") && (
               <div className="login-field">
-                <label htmlFor="login-password">密码</label>
-                <input id="login-password" type="password" placeholder="请输入密码" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete={mode === "register" ? "new-password" : "current-password"} disabled={loading} />
+                <label htmlFor="login-password">{t("密码")}</label>
+                <input id="login-password" type="password" placeholder={t("请输入密码")} value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete={mode === "register" ? "new-password" : "current-password"} disabled={loading} />
               </div>
             )}
-            {mode === "login" && loginMethod === "password" && registrationEnabled && (
+            {mode === "login" && effectiveLoginMethod === "password" && registrationEnabled && (
               <button
                 type="button"
                 className="login-forgot-link"
@@ -364,23 +370,22 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
                 }}
                 disabled={loading}
               >
-                忘记密码？
-              </button>
+                {t("忘记密码？")}</button>
             )}
             {mode === "register" && (
               <div className="login-field">
-                <label htmlFor="register-confirm-password">确认密码</label>
-                <input id="register-confirm-password" type="password" placeholder="请再次输入密码" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required autoComplete="new-password" disabled={loading} />
+                <label htmlFor="register-confirm-password">{t("确认密码")}</label>
+                <input id="register-confirm-password" type="password" placeholder={t("请再次输入密码")} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required autoComplete="new-password" disabled={loading} />
               </div>
             )}
-            {error && <p className="login-error">{error}</p>}
-            {notice && <p className="login-notice">{notice}</p>}
+            {error && <p className="login-error">{t(error)}</p>}
+            {notice && <p className="login-notice">{t(notice)}</p>}
             <button
               type="submit"
               className="login-btn"
               disabled={submitDisabled}
             >
-              {loading ? (mode === "login" ? "正在进入..." : "正在创建...") : (mode === "login" ? "进入工作空间" : "创建并进入")}
+              {loading ? (mode === "login" ? t("正在进入...") : t("正在创建...")) : (mode === "login" ? t("进入工作空间") : t("创建并进入"))}
               {!loading && <span aria-hidden>→</span>}
             </button>
           </form>
@@ -394,7 +399,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
                 setError(null);
               }}
             >
-              {mode === "login" ? "没有账号？立即注册" : "已有账号？返回登录"}
+              {mode === "login" ? t("没有账号？立即注册") : t("已有账号？返回登录")}
             </button>
           )}
           {desktop && (
@@ -403,19 +408,18 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
               className="login-server-link"
               onClick={() => setServerModalOpen(true)}
             >
-              服务器设置{serverUrl ? ` · ${serverUrl}` : ""}
+              {t("服务器设置")}{serverUrl ? ` · ${serverUrl}` : ""}
             </button>
           )}
         </div>
-        <footer className="login-compliance" aria-label="网站备案与许可信息">
+        <footer className="login-compliance" aria-label={t("网站备案与许可信息")}>
           <a
             href="https://beian.miit.gov.cn/"
             target="_blank"
             rel="noreferrer"
           >
-            蜀ICP备2025156360号-2
-          </a>
-          <span>增值电信业务经营许可证：川B2-20260779</span>
+            {t("蜀ICP备2025156360号-2")}</a>
+          <span>{t("增值电信业务经营许可证：川B2-20260779")}</span>
         </footer>
       </section>
       {serverModalOpen && desktop && (

@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api/client.js";
@@ -19,6 +20,7 @@ interface PointsBalanceProps {
 }
 
 export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
+  const { t } = useI18n();
   const [summary, setSummary] = useState<BalanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -62,7 +64,7 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
               setDetailsOpen(true);
               load();
             }}
-            title="查看我的积分"
+            title={t("查看我的积分")}
           >
             <span className="brand-action-icon" aria-hidden>
               <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -70,24 +72,24 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
                 <path d="M9 9.5h6M9 14.5h6M12 8v8" />
               </svg>
             </span>
-            <span className="brand-points-label">剩余积分</span>
-            <strong className="brand-points-value">{loading && !summary ? "加载中" : error && !summary ? "--" : formatPoints(yuanToPoints(summary?.balance ?? 0))}</strong>
+            <span className="brand-points-label">{t("剩余积分")}</span>
+            <strong className="brand-points-value">{loading && !summary ? t("加载中") : error && !summary ? "--" : formatPoints(yuanToPoints(summary?.balance ?? 0))}</strong>
           </button>
           <button
             type="button"
             className="brand-points-recharge"
             onClick={() => setRechargeOpen(true)}
-            title="充值积分"
+            title={t("充值积分")}
           >
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
             </svg>
-            <span>充值</span>
+            <span>{t("充值")}</span>
           </button>
         </div>
         {summary?.allowBalanceFallback !== undefined && (
-          <label className="brand-balance-fallback" title="订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费">
-            <span>积分不足时使用灵渠 AI 余额</span>
+          <label className="brand-balance-fallback" title={t("订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费")}>
+            <span>{t("积分不足时使用灵渠 AI 余额")}</span>
             <input
               type="checkbox"
               checked={summary.allowBalanceFallback}
@@ -97,7 +99,7 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
             <i aria-hidden />
           </label>
         )}
-        {fallbackError && <small className="brand-balance-fallback-error">设置保存失败，请重试</small>}
+        {fallbackError && <small className="brand-balance-fallback-error">{t("设置保存失败，请重试")}</small>}
       </div>
 
       {detailsOpen && createPortal(
@@ -105,34 +107,33 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
           <section className="account-dialog points-dialog" role="dialog" aria-modal="true" aria-labelledby="points-title" onClick={(event) => event.stopPropagation()}>
             <header className="account-dialog-head">
               <span>
-                <h2 id="points-title">我的积分</h2>
-                <p>积分仅用于 lot-agent 服务消费，{formatPoints(100)} 积分 = 1 元。</p>
+                <h2 id="points-title">{t("我的积分")}</h2>
+                <p>{t("积分仅用于 lot-agent 服务消费，")}{formatPoints(100)} {t("积分 = 1 元。")}</p>
               </span>
-              <button type="button" onClick={() => setDetailsOpen(false)} aria-label="关闭">×</button>
+              <button type="button" onClick={() => setDetailsOpen(false)} aria-label={t("关闭")}>×</button>
             </header>
 
             <div className="points-dialog-body">
-              {loading && !summary && <div className="account-dialog-state">正在加载积分…</div>}
+              {loading && !summary && <div className="account-dialog-state">{t("正在加载积分…")}</div>}
               {error && !summary && (
                 <div className="account-dialog-state error">
-                  积分加载失败
-                  <button type="button" onClick={load}>重试</button>
+                  {t("积分加载失败")}<button type="button" onClick={load}>{t("重试")}</button>
                 </div>
               )}
               {summary && (
                 <>
                   <div className="points-remaining-card">
-                    <small>我的剩余积分</small>
+                    <small>{t("我的剩余积分")}</small>
                     <strong>{formatPoints(yuanToPoints(summary.balance))}</strong>
                   </div>
 
                   <div className="points-history-row">
                     <div>
-                      <small>历史累计使用积分</small>
+                      <small>{t("历史累计使用积分")}</small>
                       <strong>{formatPoints(yuanToPoints(summary.totalUsed))}</strong>
                     </div>
                     <div>
-                      <small>历史充值积分</small>
+                      <small>{t("历史充值积分")}</small>
                       <strong>{formatPoints(yuanToPoints(summary.totalRecharged))}</strong>
                     </div>
                   </div>
@@ -146,8 +147,7 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
                         setRechargeOpen(true);
                       }}
                     >
-                      充值积分
-                    </button>
+                      {t("充值积分")}</button>
                     <button
                       type="button"
                       className="points-history-button"
@@ -156,8 +156,7 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
                         setHistoryOpen(true);
                       }}
                     >
-                      充值明细
-                    </button>
+                      {t("充值明细")}</button>
                   </div>
                 </>
               )}

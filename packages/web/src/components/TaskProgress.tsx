@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import { useEffect, useRef, useState } from "react";
 import { api, type TaskStatus } from "../api/client.js";
 
@@ -8,6 +9,7 @@ interface TaskProgressProps {
 const POLL_INTERVAL_MS = 800;
 
 export function TaskProgress({ jobId }: TaskProgressProps) {
+  const { t } = useI18n();
   const [task, setTask] = useState<TaskStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -40,11 +42,11 @@ export function TaskProgress({ jobId }: TaskProgressProps) {
   }, [jobId]);
 
   if (error) {
-    return <div className="task-progress task-progress--error">任务错误: {error}</div>;
+    return <div className="task-progress task-progress--error">{t("任务错误:")}{t(error)}</div>;
   }
 
   if (!task) {
-    return <div className="task-progress">加载任务中...</div>;
+    return <div className="task-progress">{t("加载任务中...")}</div>;
   }
 
   const isTerminal = task.status === "succeeded" || task.status === "failed";
@@ -53,10 +55,10 @@ export function TaskProgress({ jobId }: TaskProgressProps) {
   return (
     <div className={`task-progress task-progress--${task.status}`}>
       <div className="task-progress-label">
-        {task.status === "pending" && "等待中..."}
-        {task.status === "running" && `处理中 ${progress}%`}
-        {task.status === "succeeded" && "完成"}
-        {task.status === "failed" && `失败: ${task.error ?? ""}`}
+        {task.status === "pending" && t("等待中...")}
+        {task.status === "running" && t("处理中 {0}%", [progress])}
+        {task.status === "succeeded" && t("完成")}
+        {task.status === "failed" && t("失败: {0}", [task.error ?? ""])}
       </div>
       {!isTerminal && (
         <div className="task-progress-bar">
@@ -73,8 +75,7 @@ export function TaskProgress({ jobId }: TaskProgressProps) {
           target="_blank"
           rel="noopener noreferrer"
         >
-          查看结果
-        </a>
+          {t("查看结果")}</a>
       )}
     </div>
   );
