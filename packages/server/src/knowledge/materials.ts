@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { realpath, stat } from "node:fs/promises";
+import { realpath, stat, unlink } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import type { PrivateKnowledgeStorage } from "@lot-agent/core";
 import { KnowledgeRepository } from "./repository.js";
@@ -32,6 +32,19 @@ export class KnowledgeMaterials {
     const resolvedRoot = await realpath(root); const resolvedPath = await realpath(path);
     if (!resolvedPath.startsWith(resolvedRoot + sep)) throw new KnowledgeError("NOT_FOUND", 404, "素材原件不可用");
     return { materialSource: row.type === "upload" ? "upload" as const : "generated" as const, path: resolvedPath, mime: row.mime as string, title: row.original_name || `素材-${row.id}`, size: Number(row.size_bytes) };
+  }
+  async remove(owner: string, assetId: string) {
+    try {
+      const source = await this.source(owner, assetId);
+      await unlink(source.path);
+    } catch (error) {
+      // A missing original should not prevent removal of its stale metadata.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const result = await this.repository.pool.query(`DELETE FROM assets a WHERE ${personal} AND a.id=$2 RETURNING a.id`, [owner, assetId]);
+    if (!result.rows.length) throw new KnowledgeError("NOT_FOUND", 404, "素材不存在");
+    // Knowledge archives are independent private copies and remain available.
+    return { ok: true };
   }
   async read(owner: string, assetId: string) {
     const source = await this.source(owner, assetId);

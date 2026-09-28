@@ -423,7 +423,6 @@ export function Workspace({
           onOpenDigitalEmployee={isDigitalEmployeeMode ? () => {} : onNavigateDigitalEmployee}
           activeModule={isDigitalEmployeeMode ? "digitalEmployee" : "assistant"}
           balanceRefreshKey={balanceRefreshKey}
-          onOpenLocalKnowledge={knowledgeAvailable ? () => setKnowledgeOpen(true) : undefined}
           onOpenKnowledgeBase={() => {
             const popup = window.open("about:blank", "_blank");
             void api.getKnowledgeBaseLink()

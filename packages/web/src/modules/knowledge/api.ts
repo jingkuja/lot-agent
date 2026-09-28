@@ -72,6 +72,7 @@ export const knowledgeApi = {
     if (type) params.set("type", type); if (source) params.set("source", source); if (tag) params.set("tag", tag); if (query) params.set("q", query);
     return request<{ data: Material[] }>(`${base}/materials?${params}`);
   },
+  deleteMaterial: (id: string) => request(`${base}/materials/${id}`, { method: "DELETE" }),
   materialFile: async (asset: Pick<Material, "id" | "mime" | "original_name">) => { const response = await fetch(`/api${base}/materials/${asset.id}/content`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } }); if (!response.ok) throw new Error("原件不可用，请刷新后重试"); return new File([await response.blob()], asset.original_name || `素材-${asset.id}`, { type: asset.mime }); },
   archive: (asset: Material, collectionIds: string[]) => request<{ id: string }>(`${base}/materials/archive`, { method: "POST", headers: headers(), body: json({ assetId: asset.id, title: asset.original_name || `素材-${asset.id}`, collectionIds }) }),
 };

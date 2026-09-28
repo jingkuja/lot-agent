@@ -36,6 +36,7 @@ export interface RunJobDeps {
   provider: JobGenerationProvider;
   storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }> };
   db: {
+    getAsset(id: string): Promise<{ user_id: string } | null | undefined>;
     createAsset(a: Record<string, unknown>): Promise<void>;
     updateMessageGeneration(
       id: string,
@@ -235,7 +236,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       media: media?.map((m) => m.url), model: deps.vendorModel,
     });
     const cached = await deps.cache.get(cacheKey) as GenOut | null;
-    if (cached) {
+    const cachedAssets = cached ? await Promise.all(cached.assetIds.map((id) => deps.db.getAsset(id))) : [];
+    if (cached && cachedAssets.length > 0 && cachedAssets.every((asset) => asset?.user_id === job.userId)) {
       await setMsg("completed", { assets: cached.assets });
       await deps.updateProgress(job.id, 100);
       return cached;

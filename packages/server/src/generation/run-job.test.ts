@@ -18,6 +18,7 @@ function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {
       getTaskVendorId: vi.fn(async () => null),
       setTaskVendorId: vi.fn(async (_id, v) => { calls.vendorIdSet = v; }),
       getTaskStatus: vi.fn(async () => "running"),
+      getAsset: vi.fn(async () => ({ user_id: "u1" })),
     },
     meter: { record: vi.fn(async () => { calls.metered = true; }) },
     cache: { get: vi.fn(async () => null), set: vi.fn(async (_k, v) => { calls.cacheSet = v; }) },
@@ -307,6 +308,18 @@ describe("runGenerationJob", () => {
     const { deps } = fakeDeps(provider, { signal: controller.signal });
     await runGenerationJob(deps, job, "image");
     expect(deps.urlToBytes).toHaveBeenCalledWith("https://vendor.example/out.png", { signal: controller.signal });
+  });
+
+  it("regenerates when a cached material has been permanently deleted", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "new-vendor", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/svg+xml;base64,Zm9v" })),
+    };
+    const { deps } = fakeDeps(provider, { cache: { get: vi.fn(async () => ({ assetIds: ["deleted"], assets: [{ url: "/static/assets/deleted.svg", mime: "image/svg+xml" }] })), set: vi.fn() } });
+    deps.db.getAsset = vi.fn(async () => undefined);
+    const result = await runGenerationJob(deps, job, "image");
+    expect(provider.create).toHaveBeenCalledOnce();
+    expect(result.assetIds).not.toContain("deleted");
   });
 
   it("uses cache hit without creating/polling", async () => {

@@ -139,6 +139,10 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
     if (before && !Number.isFinite(Date.parse(before))) throw invalid();
     return c.json({ data: await materials.list(c.get("userId"), 30, before, c.req.query("beforeId") ? uuid(c.req.query("beforeId")!) : undefined, { type: c.req.query("type"), source: c.req.query("source"), tag: c.req.query("tag"), query: c.req.query("q")?.slice(0, 255) }) });
   });
+  app.delete("/materials/:id", async (c) => {
+    if (!materials) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "素材服务未配置");
+    return c.json(await materials.remove(c.get("userId"), uuid(c.req.param("id"))));
+  });
   app.get("/materials/:id/content", async (c) => {
     if (!materials) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "素材服务未配置");
     const source = await materials.read(c.get("userId"), uuid(c.req.param("id")));

@@ -10,7 +10,6 @@ interface BrandHeaderProps {
   onOpenAgentCenter?: () => void;
   onOpenAssistant?: () => void;
   onOpenDigitalEmployee?: () => void;
-  onOpenLocalKnowledge?: () => void;
   onOpenKnowledgeBase?: () => void;
   activeModule?: "assistant" | "digitalEmployee";
   balanceRefreshKey?: number;
@@ -26,7 +25,6 @@ export function BrandHeader({
   onOpenAssistant,
   onOpenDigitalEmployee,
   onOpenKnowledgeBase,
-  onOpenLocalKnowledge,
   activeModule = "assistant",
   balanceRefreshKey,
 }: BrandHeaderProps) {
@@ -94,7 +92,6 @@ export function BrandHeader({
               )}
             </div>
           )}
-          {onOpenLocalKnowledge && <button className="brand-quick-action" onClick={onOpenLocalKnowledge}>本地知识库</button>}
           {(onOpenAssistant || onOpenDigitalEmployee) && (
             <div className="brand-module-switch" role="tablist" aria-label="工作区导航">
               <button
