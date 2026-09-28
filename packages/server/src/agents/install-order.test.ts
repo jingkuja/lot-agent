@@ -8,7 +8,7 @@ import {
 
 describe("install-order", () => {
   it("keeps the independent digital-employee module out of user Agent installs", () => {
-    expect(DEFAULT_INSTALLED_AGENT_IDS).toEqual(["image", "video"]);
+    expect(DEFAULT_INSTALLED_AGENT_IDS).toEqual(["image", "video", "ppt"]);
     expect(DEFAULT_INSTALLED_AGENT_IDS).not.toContain("digital_employee");
     expect(DEFAULT_INSTALLED_AGENT_IDS).not.toContain(GENERAL_AGENT_ID);
   });

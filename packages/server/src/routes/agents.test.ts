@@ -7,6 +7,7 @@ function fakeService(installed: Map<string, number>) {
     { id: "general", name: "通用助手", type: "general", description: "", toolNames: [], defaultModelId: "m" },
     { id: "digital_employee", name: "数字员工", type: "digital_employee", description: "", toolNames: [], defaultModelId: "m" },
     { id: "image", name: "图片生成", type: "image", description: "", toolNames: [], defaultModelId: "m" },
+    { id: "ppt", name: "PPT 制作", type: "ppt", description: "", toolNames: [], defaultModelId: "m" },
     { id: "contract", name: "合同审核", type: "contract", description: "", toolNames: [], defaultModelId: "m" },
     { id: "copywriting", name: "文案创作", type: "copywriting", description: "", toolNames: [], defaultModelId: "m", hidden: true },
   ];
@@ -42,6 +43,13 @@ describe("agents routes", () => {
     expect(byId.digital_employee).toMatchObject({ installed: true, sortOrder: -1 });
     expect(byId.image).toMatchObject({ installed: true, sortOrder: 1 });
     expect(byId.contract).toMatchObject({ installed: false, sortOrder: null });
+  });
+
+  it("GET exposes default-installed PPT as ready to use", async () => {
+    const res = await app(fakeService(new Map([["image", 0], ["video", 1], ["ppt", 2]]))).request("/agents");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.find((agent: any) => agent.id === "ppt")).toMatchObject({ installed: true, sortOrder: 2 });
   });
 
   it("GET omits hidden agents (even if previously installed)", async () => {

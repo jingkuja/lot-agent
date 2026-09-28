@@ -116,7 +116,7 @@ uploads `/static/uploads/…`.
   config prompt + all registered tools minus `DISABLED_HOST_TOOLS` (file/shell tools stay
   registered but hidden on the deployed box — only web + document tools are exposed).
   Install state lives in `user_agents` (per-user, `sort_order`, MRU promote); `general` is always
-  installed and not uninstallable; `image`+`video` are seeded on first access
+  installed and not uninstallable; `image`+`video`+`ppt` are seeded on first access
   (`server/agents/install-order.ts`); `hidden` defs (copywriting) are invisible/uninstallable.
 - **Interactive tools end the turn**: `ask_user` (core) and `propose_outline` (server) set
   `endsTurn: true` — the loop stops and the web renders AskUserCard/OutlineCard for the user's

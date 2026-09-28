@@ -1557,7 +1557,7 @@ export class DB {
 
     let rows = await read();
     if (rows.length === 0) {
-      // 懒播种默认安装集(digital employee/image/video),sort_order 按数组下标。
+      // 懒播种默认安装集(image/video/ppt),sort_order 按数组下标。
       for (let i = 0; i < DEFAULT_INSTALLED_AGENT_IDS.length; i++) {
         await this.pool.query(
           `INSERT INTO user_agents (user_id, agent_id, sort_order) VALUES ($1, $2, $3)
