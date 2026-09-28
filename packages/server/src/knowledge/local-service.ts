@@ -17,6 +17,6 @@ export function createLocalKnowledgeService(db: DB): KnowledgeService {
       } while (cursor);
       return result;
     },
-    retrieve: (scope, request, signal) => retriever.retrieve(scope, request, signal),
+    retrieve: (scope, request, signal) => retriever.retrieve(scope, request, signal, { includeNeighbors: scope.callerKind === "internal" }),
   };
 }

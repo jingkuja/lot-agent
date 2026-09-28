@@ -16,6 +16,7 @@
     "check:knowledge:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-db.ts",
     "check:knowledge:parsers": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-parsers.ts",
     "check:knowledge:integration": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-integration.ts",
+    "check:knowledge:retrieval": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-retrieval.ts",
     "dev:knowledge": "pnpm --filter @lot-agent/server run dev:knowledge",
     "check:knowledge:live": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-live.ts",
     "knowledge:reindex": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reindex-knowledge.ts",

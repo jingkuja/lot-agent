@@ -3,7 +3,7 @@ import { getToken, request } from "../../api/client.js";
 export interface AccessKey { id: string; name: string; prefix: string; scopes: string[]; collection_ids: string[]; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; version: number }
 export interface Collection { id: string; name: string; description: string; tags: string[]; storedCount: number; searchableCount: number; version: number }
 export interface Item { materialSource: "upload" | "generated"; diagnostics: { warnings?: string[] }; errorCode: string | null; sourceAssetId: string | null; id: string; title: string; description: string; tags: string[]; sourceUrl: string | null; version: number; sourceType: string; indexStatus: string; activeRevisionId: string | null; pendingRevisionId: string | null; revisionId: string; taskId: string | null; content: string | null; mime: string | null; size: number; collectionIds: string[] }
-export type Evidence = Pick<KnowledgeEvidence, "itemId" | "revisionId" | "chunkId" | "title" | "content" | "origin" | "sourceType" | "citation">;
+export type Evidence = Pick<KnowledgeEvidence, "itemId" | "revisionId" | "chunkId" | "title" | "content" | "origin" | "sourceType" | "citation" | "context">;
 export interface Results { modeUsed: string; degraded: boolean; warnings: string[]; results: Evidence[] }
 export interface Page<T> { data: T[]; nextCursor: string | null }
 export interface Fact { id: string; key: string; value: string | number | boolean | string[]; value_type: string; category: string; source: string; active: boolean; current: boolean; share_with_api: boolean; valid_from: string | null; valid_until: string | null; version: number; collection_ids: string[] }

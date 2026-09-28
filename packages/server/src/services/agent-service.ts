@@ -80,6 +80,7 @@ import { meterLLM } from "../billing/metered-llm.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
 import { RagClient, type KnowledgeBase, type KnowledgeBaseRef, type RagIdentity, type RagRecord } from "./rag-client.js";
+import { formatKnowledgeRecord } from "./knowledge-context.js";
 import { DigitalEmployeeService } from "../digital-employee/service.js";
 import {
   parseMiniprogramConfig,
@@ -1305,12 +1306,7 @@ export class AgentService {
             },
             ...records.map((record) => ({
               id: record.segmentId || `${record.datasetId}:${record.documentName}`,
-              text:
-                `[知识库: ${record.datasetName}]` +
-                `${record.documentName ? ` [文档: ${record.documentName}]` : ""}` +
-                ` [排序分数: ${record.score.toFixed(4)}]` +
-                `${record.evidence ? ` [证据: ${JSON.stringify({ itemId: record.evidence.itemId, revisionId: record.evidence.revisionId, chunkId: record.evidence.chunkId, citation: record.evidence.citation })}]` : ""}\n${record.content}` +
-                `${record.answer ? `\n参考答案: ${record.answer}` : ""}`,
+              text: formatKnowledgeRecord(record),
               meta: { ...record },
             })),
           ],

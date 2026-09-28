@@ -7,6 +7,7 @@ import { indexArtifact } from "./ingestion/indexer.js";
 import { indexProfile } from "./ingestion/profile.js";
 import { textBlocks } from "./ingestion/text.js";
 import { PARSER_VERSION } from "./ingestion/version.js";
+import type { ParsedArtifact } from "./ingestion/parsers.js";
 import { KnowledgeRetriever } from "./retrieval.js";
 import { runMigrations } from "../db/migration-runner.js";
 import { migrations } from "../db/migrations/index.js";
@@ -40,7 +41,7 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("published knowledge index"
   const create = async (title: string, content: string, tags: string[] = []) => {
     const item = await repo.createItem(owner, { sourceType: "note", title, content, tags, description: "", collectionIds: [collection, second] }, randomUUID());
     const lease = await jobs.claim(item.taskId!, queueName);
-    return { item, lease: lease!, artifact: { blocks: textBlocks(content), diagnostics: [], parserVersion: PARSER_VERSION } };
+    return { item, lease: lease!, artifact: { blocks: textBlocks(content), diagnostics: [], parserVersion: PARSER_VERSION } as ParsedArtifact };
   };
   it("publishes actual pgvector and Chinese FTS, with AND tags, OR types and deduplicated collections", async () => {
     const a = await create("AB-123 帮助", "离线查看资料 AB-123", ["手册", "产品"]);
@@ -72,6 +73,100 @@ describe.skipIf(process.env.RAG_INTEGRATION !== "1")("published knowledge index"
     const req = request({ query: "AB-123 离线查看", mode: "keyword" });
     const result = await retriever.retrieve(scope(req), req);
     expect(result.results.find((hit) => hit.itemId === item.item.id)?.citation).toEqual({ kind: "text", startLine: 1, endLine: 2 });
+  });
+  it("finds a filename-only identifier and a chapter title without rebuilding vectors", async () => {
+    const a = await create("ZX-842 采购合同.pdf", "验收后十五天支付尾款。", ["metadata-test"]);
+    a.artifact.blocks[0].citation = { kind: "docx", paragraph: 8, heading: "终止协议" };
+    await indexArtifact(jobs, a.lease, profile, a.artifact, embed);
+    for (const query of ["ZX-842", "请问 ZX-842 尾款什么时候支付？", "终止协议"]) {
+      const req = request({ query, mode: "keyword", tags: ["metadata-test"] });
+      const result = await retriever.retrieve(scope(req), req);
+      expect(result.results[0]?.itemId, query).toBe(a.item.id);
+      expect(result.results[0].content).toBe("验收后十五天支付尾款。");
+    }
+    const wrong = request({ query: "ZX-8420 尾款", mode: "keyword", tags: ["metadata-test"] });
+    expect((await retriever.retrieve(scope(wrong), wrong)).results).toHaveLength(0);
+    const missingTag = request({ query: "ZX-842", mode: "keyword", tags: ["absent"] });
+    expect((await retriever.retrieve(scope(missingTag), missingTag)).results).toHaveLength(0);
+    await repo.deleteItem(owner, a.item.id, 1);
+    const deleted = request({ query: "ZX-842", mode: "keyword" });
+    expect((await retriever.retrieve(scope(deleted), deleted)).results).toHaveLength(0);
+  });
+  it("retrieves content words in natural questions but preserves explicit identifiers", async () => {
+    const a = await create("出行指南", "差旅报销提交发票和审批单。型号 AB-731。", ["natural-test"]);
+    await indexArtifact(jobs, a.lease, profile, a.artifact, embed);
+    const req = request({ query: "请问差旅报销需要哪些材料？", mode: "keyword", tags: ["natural-test"] });
+    expect((await retriever.retrieve(scope(req), req)).results[0]?.itemId).toBe(a.item.id);
+    const wrong = { ...req, query: "AB-732 差旅报销" };
+    expect((await retriever.retrieve(scope(wrong), wrong)).results).toHaveLength(0);
+    const punctuation = { ...req, query: "？请问一下" };
+    expect((await retriever.retrieve(scope(punctuation), punctuation)).results).toHaveLength(0);
+  });
+  it("selects relevant body chunks within title matches instead of filling results with the start of a file", async () => {
+    const a = await create("蓝鲸项目手册", "placeholder", ["long-title-test"]);
+    a.artifact.blocks = Array.from({ length: 12 }, (_, index) => ({
+      text: index === 10 ? "违约赔偿上限为合同金额的百分之十。" : `第${index}页为背景信息。`,
+      origin: "extracted_text" as const, citation: { kind: "pdf" as const, page: index + 1 },
+    }));
+    await indexArtifact(jobs, a.lease, profile, a.artifact, embed);
+    const req = request({ query: "蓝鲸项目手册的违约赔偿上限", mode: "keyword", tags: ["long-title-test"] });
+    const result = await retriever.retrieve(scope(req), req);
+    expect(result.results[0]?.citation).toEqual({ kind: "pdf", page: 11 });
+  });
+  it("optionally reads bounded neighbors with their own citations and no duplicate anchor text", async () => {
+    const a = await create("上下文资料", "placeholder", ["neighbor-test"]);
+    a.artifact.blocks = ["前提是先完成验收。", "付款期限为十五天。", "例外是有书面争议时暂停付款。"].map((text, n) => ({
+      text, origin: "extracted_text" as const, citation: { kind: "pdf" as const, page: n + 1 },
+    }));
+    await indexArtifact(jobs, a.lease, profile, a.artifact, embed);
+    const req = request({ query: "付款期限", mode: "keyword", topK: 1, tags: ["neighbor-test"] });
+    const plain = await retriever.retrieve(scope(req), req);
+    expect(plain.results).toHaveLength(1); expect(plain.results[0].context).toBeUndefined();
+    const enriched = await retriever.retrieve(scope(req), req, undefined, { includeNeighbors: true });
+    expect(enriched.results).toHaveLength(1);
+    expect(enriched.results[0].citation).toEqual({ kind: "pdf", page: 2 });
+    expect(enriched.results[0].content).toBe("付款期限为十五天。");
+    expect(enriched.results[0].context?.map((c) => c.citation)).toEqual([{ kind: "pdf", page: 1 }, { kind: "pdf", page: 3 }]);
+    expect(enriched.results[0].context?.every((c) => c.chunkId !== enriched.results[0].chunkId)).toBe(true);
+    await expect(retriever.retrieve({ ...scope(req), callerKind: "session" }, req, undefined, { includeNeighbors: true })).rejects.toMatchObject({ status: 403 });
+    const wrongType = { ...req, sourceTypes: ["document" as const] };
+    expect((await retriever.retrieve(scope(wrongType), wrongType, undefined, { includeNeighbors: true })).results).toHaveLength(0);
+    const racedPool = { query: async (sql: string, values: unknown[]) => {
+      if (sql.includes("jsonb_to_recordset")) await repo.deleteItem(owner, a.item.id, 1);
+      return pool.query(sql, values);
+    } } as unknown as pg.Pool;
+    const racing = new KnowledgeRetriever(racedPool, profile, () => embed);
+    expect((await racing.retrieve(scope(req), req, undefined, { includeNeighbors: true })).results).toHaveLength(0);
+  });
+  it("does not reveal filename matches belonging to another owner or an unselected collection", async () => {
+    const otherItem = await repo.createItem(other, { sourceType: "note", title: "FN-900 文件", content: "普通正文", description: "", tags: [], collectionIds: [foreign] }, randomUUID());
+    await indexArtifact(jobs, (await jobs.claim(otherItem.taskId!, queueName))!, profile, { blocks: textBlocks("普通正文"), diagnostics: [], parserVersion: PARSER_VERSION }, embed);
+    const mine = await create("FN-900 私有文件", "普通正文");
+    await indexArtifact(jobs, mine.lease, profile, mine.artifact, embed);
+    await repo.changeMembership(owner, mine.item.id, collection, false);
+    const req = request({ query: "FN-900", mode: "keyword", collectionIds: [collection] });
+    expect((await retriever.retrieve(scope(req), req, undefined, { includeNeighbors: true })).results).toHaveLength(0);
+  });
+  it("does not double-count weak title and body overlaps ahead of a relevant semantic hit", async () => {
+    const relevant = await create("离线指南", "下载后断网也能阅读。", ["fusion-test"]);
+    const distractor = await create("网络资料", "网络设备资料保留三十天。", ["fusion-test"]);
+    await indexArtifact(jobs, relevant.lease, profile, relevant.artifact, embed);
+    const tilted = vector.map((_, n) => n === 0 ? 0.7 : n === 1 ? Math.sqrt(0.51) : 0);
+    await indexArtifact(jobs, distractor.lease, profile, distractor.artifact, async () => ({ vector: tilted, tokens: 8 }));
+    const req = request({ query: "网络断开后怎样查看资料？", mode: "hybrid", tags: ["fusion-test"] });
+    expect((await retriever.retrieve(scope(req), req)).results[0]?.itemId).toBe(relevant.item.id);
+  });
+  it("uses an explicitly named file even when its body ranks below the semantic top five", async () => {
+    for (let n = 0; n < 6; n++) {
+      const noise = await create(`背景资料${n}`, "这是无关的背景介绍。", ["named-file-test"]);
+      await indexArtifact(jobs, noise.lease, profile, noise.artifact, embed);
+    }
+    const target = await create("紫藤项目合同.pdf", "验收后十五日支付余款。", ["named-file-test"]);
+    await indexArtifact(jobs, target.lease, profile, target.artifact, async () => ({ vector: vector.map((_, n) => n === 1 ? 1 : 0), tokens: 8 }));
+    const req = request({ query: "紫藤项目合同的付款条件", mode: "semantic", topK: 5, tags: ["named-file-test"] });
+    expect((await retriever.retrieve(scope(req), req)).results.some((row) => row.itemId === target.item.id)).toBe(false);
+    const hybrid = { ...req, mode: "hybrid" as const };
+    expect((await retriever.retrieve(scope(hybrid), hybrid)).results[0]?.itemId).toBe(target.item.id);
   });
   it("rejects bad dimensions and actual usage above budget without publishing", async () => {
     const item = await create("invalid", "invalid body");

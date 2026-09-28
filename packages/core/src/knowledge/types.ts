@@ -69,6 +69,14 @@ export interface KnowledgeEvidence {
   origin: KnowledgeOrigin;
   score: { kind: "rrf" | "cosine" | "ts_rank_cd"; value: number };
   citation?: KnowledgeCitation;
+  /** Optional original neighboring chunks, for internal chat only; not independently ranked. */
+  context?: Array<{
+    chunkId: string;
+    content: string;
+    origin: KnowledgeOrigin;
+    citation?: KnowledgeCitation;
+    position: "before" | "after";
+  }>;
 }
 
 export interface KnowledgeRetrievalResult {

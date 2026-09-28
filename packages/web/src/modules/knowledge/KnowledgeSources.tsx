@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { knowledgeApi, type Evidence } from "./api.js";
 import { locator, SourcePreview, type Preview } from "./SourcePreview.js";
 import "./knowledge.css";
 export function KnowledgeSources({ sources }: { sources: Evidence[] }) {
+  const visibleSources = useMemo(() => {
+    const seen = new Set<string>();
+    return sources.flatMap((hit) => [hit, ...(hit.context ?? []).map((chunk) => ({
+      ...hit, ...chunk, citation: chunk.citation, context: undefined,
+    }))]).filter((hit) => { if (seen.has(hit.chunkId)) return false; seen.add(hit.chunkId); return true; });
+  }, [sources]);
   const [opened, setOpened] = useState<Preview>();
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   const generation = useRef(0);
@@ -36,8 +42,8 @@ export function KnowledgeSources({ sources }: { sources: Evidence[] }) {
     } catch (e) { if (attempt === generation.current) setError(e instanceof Error ? e.message : "出处不可用"); }
     finally { if (attempt === generation.current) setBusy(false); }
   };
-  return <section aria-label="知识库出处"><details><summary>知识库出处（{sources.length}）</summary>
-    {sources.map((hit) => <button key={hit.chunkId} disabled={busy} onClick={() => void open(hit)}>{hit.title} · {locator(hit)}</button>)}
+  return <section aria-label="知识库出处"><details><summary>知识库出处（{visibleSources.length}）</summary>
+    {visibleSources.map((hit) => <button key={hit.chunkId} disabled={busy} onClick={() => void open(hit)}>{hit.title} · {locator(hit)}</button>)}
     {error && <p role="alert">{error}</p>}{opened && <SourcePreview value={opened} onClose={() => { generation.current++; setOpened(undefined); }} />}
   </details></section>;
 }
