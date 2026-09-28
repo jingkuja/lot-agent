@@ -1132,7 +1132,7 @@ export class AgentService {
     signal?: AbortSignal,
     opts?: { modelId?: string; knowledgeBases?: KnowledgeBaseRef[] }
   ): AsyncIterable<AgentEvent> {
-    const deadline = createDeadline(this.agentConfig.maxRunTimeMs ?? 600_000, signal);
+    const deadline = createDeadline(this.agentConfig.maxRunTimeMs ?? 1_800_000, signal);
     signal = deadline.signal;
     const usageWrites: Promise<unknown>[] = [];
     let recordedTokens = 0;

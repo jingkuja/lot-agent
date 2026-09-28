@@ -49,7 +49,7 @@ export interface AgentConfig {
   maxIterations: number;
   maxToolCalls: number;
   maxParallelTools: number;
-  /** Wall-clock timeout for the entire agent run in ms. Default: 600000 (10 min) */
+  /** Wall-clock timeout for the entire agent run in ms. Default: 1800000 (30 min) */
   maxRunTimeMs: number;
   systemPrompt: string;
   dynamicPromptParts?: string[];
@@ -95,7 +95,7 @@ const DEFAULT_CONFIG: AgentConfig = {
   maxIterations: 20,
   maxToolCalls: 100,
   maxParallelTools: 4,
-  maxRunTimeMs: 600_000, // 10 minutes
+  maxRunTimeMs: 1_800_000, // 30 minutes
   systemPrompt: "You are a helpful AI assistant.",
 };
 

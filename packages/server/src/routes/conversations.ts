@@ -30,7 +30,7 @@ const MAX_KNOWLEDGE_BASES = 5;
  * never reached its `finally` release, so this should never fire in the
  * ordinary "still running" case; it's purely a dead-holder fallback.
  */
-const RUN_LEASE_STALE_MS = 600_000;
+const RUN_LEASE_STALE_MS = 1_800_000;
 
 const RUN_CONFLICT_MESSAGE = "对话正在处理另一条消息，请稍候再试";
 
