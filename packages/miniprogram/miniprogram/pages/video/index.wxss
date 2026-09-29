@@ -103,3 +103,9 @@
   .step-footer { position: static; margin-top: 24rpx; }
   .video-studio { padding-bottom: env(safe-area-inset-bottom); }
 }
+
+.duration-control { padding: 24rpx 28rpx 12rpx; border-radius: var(--radius); background: var(--surface); }
+.duration-labels { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 24rpx; }
+.duration-current { color: var(--brand-deep); font-weight: 600; }
+.duration-slider { margin: 16rpx 0 0; }
+.duration-disabled { opacity: 0.45; }

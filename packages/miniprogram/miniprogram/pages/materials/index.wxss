@@ -1,0 +1,13 @@
+.materials { padding: 16rpx 32rpx 48rpx; }
+.h1 { font-size: 38rpx; }
+.collection-bar { display: flex; justify-content: space-between; padding: 20rpx 0; margin-bottom: 16rpx; border-top: 1rpx solid var(--line); color: var(--muted); font-size: 24rpx; }
+.wall { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20rpx; }
+.material { min-width: 0; overflow: hidden; padding: 0; }
+.thumbnail { display: block; width: 100%; height: 280rpx; background: var(--surface); }
+.caption { padding: 12rpx 16rpx; }
+.filename { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 24rpx; }
+.delete { margin-top: 10rpx; min-height: 44px; width: 100%; padding: 8rpx; background: var(--surface); color: var(--brand-deep); font-size: 24rpx; }
+.delete[disabled] { opacity: 0.5; }
+.state { display: flex; flex-direction: column; gap: 24rpx; align-items: center; text-align: center; padding: 60rpx 28rpx; }
+.state .muted { line-height: 1.8; }
+.state .btn { width: 240rpx; }

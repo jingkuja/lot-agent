@@ -1,6 +1,6 @@
 import { api } from "../../services/api";
 import {
-  VIDEO_MODELS, VIDEO_STEPS, LAST_VIDEO_STEP, VIDEO_VOICES, VIDEO_MUSIC, VIDEO_RATIOS, VIDEO_DURATIONS,
+  VIDEO_MODELS, VIDEO_STEPS, LAST_VIDEO_STEP, VIDEO_VOICES, VIDEO_MUSIC, VIDEO_RATIOS, VIDEO_DURATION_MIN, VIDEO_DURATION_MAX,
   VIDEO_SUBMIT_GRACE_MS, VIDEO_TASK_STALE_MS, createVideoDraft, restoreVideoDraft, submitVideo, findVideoGeneration,
   videoResult, videoSignature, videoErrorText, isDefinitiveVideoRejection, type VideoDraft,
 } from "../../services/video";
@@ -25,7 +25,7 @@ function idleState() {
 Page({
   data: {
     steps: VIDEO_STEPS, lastStep: LAST_VIDEO_STEP, models: VIDEO_MODELS,
-    voices: VIDEO_VOICES, music: VIDEO_MUSIC, ratios: VIDEO_RATIOS, durations: VIDEO_DURATIONS,
+    voices: VIDEO_VOICES, music: VIDEO_MUSIC, ratios: VIDEO_RATIOS, durationMin: VIDEO_DURATION_MIN, durationMax: VIDEO_DURATION_MAX,
     /** busy || writing || pending — kept as one flag so the template has a single source of truth. */
     locked: false,
     ...idleState(),
@@ -59,6 +59,7 @@ Page({
       }
     }
     this.refreshState();
+    if (this.data.resultUrl || this.data.downloadFailed) this.setData({ step: LAST_VIDEO_STEP });
     if (this.data.pending) { this.update({ step: LAST_VIDEO_STEP }); this.startTipRotation(); void this.checkTask(); }
   },
   onHide() { this.visible = false; this.stopPolling(); this.stopTipRotation(); this.persist(); },
@@ -118,9 +119,16 @@ Page({
     const { field, value } = e.currentTarget.dataset;
     this.setData({ [`draft.${field}`]: field === "modelIndex" || field === "durationSec" ? Number(value) : value }); this.persist();
   },
+  changeDuration(e: { detail: { value: number } }) {
+    if (this.locked()) return;
+    const value = e.detail.value;
+    if (!Number.isInteger(value) || value < VIDEO_DURATION_MIN || value > VIDEO_DURATION_MAX) return;
+    this.setData({ "draft.durationSec": value });
+    this.persistSoon();
+  },
   toggleSubtitles(e: { detail: { value: boolean } }) { if (this.locked()) return; this.setData({ "draft.subtitles": e.detail.value }); this.persist(); },
   goStep(e: { currentTarget: { dataset: { step: number } } }) {
-    if (this.locked()) return;
+    if (this.locked() || this.data.resultUrl || this.data.downloadFailed) return;
     const step = Number(e.currentTarget.dataset.step);
     if (step > 0 && !this.data.draft.script.trim()) { wx.showToast({ title: "请先填写或生成文案", icon: "none" }); return; }
     this.setData({ step: Math.max(0, Math.min(LAST_VIDEO_STEP, step)) }); this.persist();

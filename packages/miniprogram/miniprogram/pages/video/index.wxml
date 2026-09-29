@@ -1,13 +1,13 @@
 <view class="page video-studio">
   <view class="page-heading"><text class="eyebrow">视频工作室</text><text class="h1">把灵感，拍成故事。</text><text class="muted">从一句文案，到你的下一条视频。</text></view>
   <scroll-view class="steps" scroll-x show-scrollbar="{{false}}" scroll-into-view="step-{{step}}" scroll-with-animation>
-    <view class="steps-inner"><view id="step-{{index}}" class="step {{locked ? 'locked' : ''}} {{step === index ? 'active' : ''}} {{index < step ? 'done' : ''}}" wx:for="{{steps}}" wx:key="*this" data-step="{{index}}" bindtap="goStep"><text class="step-number">{{index + 1}}</text><text>{{item}}</text></view></view>
+    <view class="steps-inner"><view id="step-{{index}}" class="step {{locked || ((resultUrl || downloadFailed) && index !== step) ? 'locked' : ''}} {{step === index ? 'active' : ''}} {{index < step ? 'done' : ''}}" wx:for="{{steps}}" wx:key="*this" data-step="{{index}}" bindtap="goStep"><text class="step-number">{{index + 1}}</text><text>{{item}}</text></view></view>
   </scroll-view>
   <view class="workspace card">
     <view class="section-top"><text class="h2">{{steps[step]}}</text><text class="muted">{{step + 1}} / {{steps.length}}</text></view>
     <view wx:if="{{step === 0}}">
       <text class="label">这次想拍什么</text><textarea class="area topic" value="{{draft.topic}}" data-field="topic" bindinput="field" maxlength="1000" placeholder="例如：为新开的咖啡店拍一条温暖的探店短片" disabled="{{locked}}" />
-      <button class="btn btn-soft write" bindtap="writeCopy" loading="{{writing}}" disabled="{{locked}}">{{draft.script ? '重新生成文案与标题' : '生成文案与标题'}} ✧</button>
+      <button class="btn btn-soft write" bindtap="writeCopy" loading="{{writing}}" disabled="{{locked}}">{{draft.script ? '重新生成文案与标题' : '智能生成文案与标题'}} ✧</button>
       <text wx:if="{{copyError}}" class="error">{{copyError}}</text>
       <text class="label">视频文案 / 分镜</text><textarea class="area script" value="{{draft.script}}" data-field="script" bindinput="field" maxlength="4000" placeholder="也可以直接写下镜头、动作和旁白…" disabled="{{locked}}" />
     </view>
@@ -24,7 +24,11 @@
     <view wx:elif="{{step === 3}}">
       <text class="label">选择模型</text><view class="model-list"><button wx:for="{{models}}" wx:key="id" class="model option {{draft.modelIndex === index ? 'selected' : ''}}" data-field="modelIndex" data-value="{{index}}" bindtap="choose" disabled="{{locked}}"><view><text class="model-name">{{item.label}} · {{item.resolution}}</text><text class="model-id">{{item.description}}</text></view><text>{{draft.modelIndex === index ? '●' : '○'}}</text></button></view>
       <text class="label">画面比例</text><view class="choices"><button class="option {{draft.ratio === item ? 'selected' : ''}}" wx:for="{{ratios}}" wx:key="*this" data-field="ratio" data-value="{{item}}" bindtap="choose" disabled="{{locked}}">{{item}}</button></view>
-      <text class="label">视频时长</text><view class="choices"><button class="option {{draft.durationSec === item ? 'selected' : ''}}" wx:for="{{durations}}" wx:key="*this" data-field="durationSec" data-value="{{item}}" bindtap="choose" disabled="{{locked}}">{{item}} 秒</button></view>
+      <text class="label">视频时长</text>
+      <view class="duration-control {{locked ? 'duration-disabled' : ''}}">
+        <view class="duration-labels"><text>{{durationMin}}秒</text><text class="duration-current">{{draft.durationSec}}秒</text><text>{{durationMax}}秒</text></view>
+        <slider class="duration-slider" min="{{durationMin}}" max="{{durationMax}}" step="1" value="{{draft.durationSec}}" bindchanging="changeDuration" bindchange="changeDuration" disabled="{{locked}}" activeColor="#c86b4b" backgroundColor="#e7dfd5" block-color="#c86b4b" block-size="24" />
+      </view>
       <text class="label">参考图（选填）</text><image wx:if="{{draft.reference}}" class="reference" src="{{draft.reference}}" mode="aspectFit" /><button class="btn btn-soft" data-field="reference" bindtap="chooseImage" disabled="{{locked}}">{{draft.reference ? '更换参考图' : '＋ 添加参考图'}}</button><button wx:if="{{draft.reference}}" class="remove" data-field="reference" bindtap="removeImage" disabled="{{locked}}">移除参考图</button>
     </view>
     <view wx:elif="{{step === 4}}"><text class="label">背景音乐</text><view class="choices"><button class="option {{draft.bgm === item ? 'selected' : ''}}" wx:for="{{music}}" wx:key="*this" data-field="bgm" data-value="{{item}}" bindtap="choose" disabled="{{locked}}">{{item}}</button></view><view class="switch-row"><text>中文字幕</text><switch checked="{{draft.subtitles}}" bindchange="toggleSubtitles" disabled="{{locked}}" /></view><text class="hint">配乐与字幕作为创作要求随视频生成，暂不支持生成后单独混音或修改字幕；发布前请检查文字和声音。</text></view>
@@ -57,7 +61,7 @@
       <text wx:else class="hint">{{status || '请检查以上设置。视频生成将消耗账户积分，耗时可能较长。'}}</text>
       <button wx:if="{{pending}}" class="btn btn-soft" bindtap="checkTask" loading="{{checking}}" disabled="{{checking || busy}}">{{checking ? '正在查询' : '刷新进度'}}</button>
       <button wx:elif="{{!downloadFailed}}" class="btn {{resultUrl ? 'btn-soft' : 'btn-primary'}}" loading="{{busy}}" disabled="{{locked || unchanged}}" bindtap="generate">{{unchanged ? '当前设置已生成' : (resultUrl ? '按修改后的设置生成' : '确认设置并生成视频')}} ↗</button>
-      <text wx:if="{{unchanged && resultUrl}}" class="hint">成片已保留，可直接保存或分享。需要调整效果时，可通过顶部步骤修改创作设置，或开始新视频。</text>
+      <text wx:if="{{unchanged && resultUrl}}" class="hint">成片已保留，可直接保存或分享。需要重新创作时，请点击「开始新视频」。</text>
       <button wx:if="{{resultUrl}}" class="btn btn-primary publish" bindtap="openResult" disabled="{{busy}}">发布 / 分享 / 保存 ↗</button>
       <text wx:if="{{resultUrl}}" class="hint">抖音 · 小红书 · 微信好友 · 朋友圈 · 保存相册</text>
       <button wx:if="{{pending && stale}}" class="remove" bindtap="stopWaiting" disabled="{{busy || checking}}">等太久了？不再等待，去看「作品」</button>

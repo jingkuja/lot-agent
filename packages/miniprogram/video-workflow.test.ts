@@ -36,8 +36,16 @@ describe("video duplicate identity", () => {
 });
 
 describe("video draft restore", () => {
+  it.each([4, 5, 6, 10, 14, 15])("preserves %s seconds through storage and generation settings", (durationSec) => {
+    const draft = restoreVideoDraft({ durationSec });
+    expect(draft.durationSec).toBe(durationSec);
+    expect(videoSettings(draft).durationSec).toBe(durationSec);
+  });
+  it.each([3, 16, 4.5, NaN, Infinity])("resets invalid duration %s to five seconds", (durationSec) => {
+    expect(restoreVideoDraft({ durationSec }).durationSec).toBe(5);
+  });
   it("falls back to defaults for retired options, wrong types and unknown keys", () => {
-    const restored = restoreVideoDraft({ script: "分镜", voice: "已下线音色", bgm: 3, ratio: "4:3", durationSec: 15, modelIndex: 9, subtitles: "yes", extra: true });
+    const restored = restoreVideoDraft({ script: "分镜", voice: "已下线音色", bgm: 3, ratio: "4:3", durationSec: 16, modelIndex: 9, subtitles: "yes", extra: true });
     expect(restored).toMatchObject({ script: "分镜", voice: "自然旁白", bgm: "无配乐", ratio: "9:16", durationSec: 5, modelIndex: 0, subtitles: true });
     expect("extra" in restored).toBe(false);
     expect(restoreVideoDraft("junk")).toEqual(createVideoDraft());

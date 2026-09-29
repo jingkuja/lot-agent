@@ -48,8 +48,12 @@ Page({
     wx.switchTab({ url: "/pages/studio/index" });
   },
 
-  goPoster() {
-    wx.navigateTo({ url: "/pages/poster/index" });
+  goVideo() {
+    wx.switchTab({ url: "/pages/video/index" });
+  },
+
+  goMaterials() {
+    wx.navigateTo({ url: "/pages/materials/index" });
   },
 
   goGallery() {

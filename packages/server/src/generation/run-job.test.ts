@@ -99,8 +99,9 @@ describe("runGenerationJob", () => {
       poll: vi.fn(async () => ({ status: "failed", progress: 50, error: "boom" })),
     };
     const { deps, calls } = fakeDeps(provider);
-    await expect(runGenerationJob(deps, job, "image")).rejects.toThrow(/boom/);
+    await expect(runGenerationJob(deps, job, "video")).rejects.toThrow(/boom/);
     expect(calls.message.at(-1)).toMatchObject({ id: "m1", status: "failed" });
+    expect(deps.meter.record).not.toHaveBeenCalled();
   });
 
   it("marks the message failed and preserves the create response for the UI tooltip", async () => {
@@ -114,6 +115,7 @@ describe("runGenerationJob", () => {
     expect(provider.poll).not.toHaveBeenCalled();
     expect(calls.message.at(-1)).toMatchObject({ id: "m1", status: "failed" });
     expect(calls.message.at(-1).metadata.error).toContain(rawResponse);
+    expect(deps.meter.record).not.toHaveBeenCalled();
   });
 
   it("uses PUBLIC_BASE_URL for every local video reference sent to the provider", async () => {

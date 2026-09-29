@@ -10,14 +10,16 @@ export const LAST_VIDEO_STEP = VIDEO_STEPS.length - 1;
 export const VIDEO_VOICES = ["自然旁白", "温柔女声", "沉稳男声", "活力讲述", "无配音"];
 export const VIDEO_MUSIC = ["无配乐", "轻快", "舒缓", "电影感", "动感"];
 export const VIDEO_RATIOS = ["9:16", "16:9", "1:1"];
-export const VIDEO_DURATIONS = [5, 10];
+export const VIDEO_DURATION_MIN = 4;
+export const VIDEO_DURATION_MAX = 15;
+export const VIDEO_DURATION_DEFAULT = 5;
 /** After this delay explain the uncertainty; it is never proof of an unbilled submission. */
 export const VIDEO_SUBMIT_GRACE_MS = 3 * 60_000;
 /** After this long the user may stop waiting on this page; the task itself keeps running. */
 export const VIDEO_TASK_STALE_MS = 30 * 60_000;
 
 export function createVideoDraft() {
-  return { topic: "", script: "", mainTitle: "", subtitle: "", publishTitle: "", tags: "", voice: VIDEO_VOICES[0], bgm: VIDEO_MUSIC[0], subtitles: true, modelIndex: 0, ratio: VIDEO_RATIOS[0], durationSec: VIDEO_DURATIONS[0], reference: "", cover: "" };
+  return { topic: "", script: "", mainTitle: "", subtitle: "", publishTitle: "", tags: "", voice: VIDEO_VOICES[0], bgm: VIDEO_MUSIC[0], subtitles: true, modelIndex: 0, ratio: VIDEO_RATIOS[0], durationSec: VIDEO_DURATION_DEFAULT, reference: "", cover: "" };
 }
 export type VideoDraft = ReturnType<typeof createVideoDraft>;
 
@@ -31,7 +33,7 @@ export function restoreVideoDraft(stored: unknown): VideoDraft {
   }
   if (!VIDEO_MODELS[draft.modelIndex]) draft.modelIndex = 0;
   if (!VIDEO_RATIOS.includes(draft.ratio)) draft.ratio = VIDEO_RATIOS[0];
-  if (!VIDEO_DURATIONS.includes(draft.durationSec)) draft.durationSec = VIDEO_DURATIONS[0];
+  if (!Number.isInteger(draft.durationSec) || draft.durationSec < VIDEO_DURATION_MIN || draft.durationSec > VIDEO_DURATION_MAX) draft.durationSec = VIDEO_DURATION_DEFAULT;
   if (!VIDEO_VOICES.includes(draft.voice)) draft.voice = VIDEO_VOICES[0];
   if (!VIDEO_MUSIC.includes(draft.bgm)) draft.bgm = VIDEO_MUSIC[0];
   return draft;

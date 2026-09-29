@@ -102,6 +102,17 @@ export function GenerationCard({
   const downloadFailed = status === "download_failed";
   const failed = status === "failed" || status === "completed";
   const generating = !failed && !cancelled && !downloadFailed;
+  // Local polling/submission failures do not establish the vendor's outcome.
+  const resultUnknown = error === "生成状态获取失败" || status === "completed";
+  const videoFailed = mediaType === "video" && failed;
+  // Works for both nested tokenhub envelopes and their extracted leaf message.
+  const realPersonRejected = /InputImageSensitiveContentDetected\.PrivacyInformation|may contain (?:a )?real person/i.test(error ?? "");
+  const videoFailureHint = resultUnknown
+    ? "暂时无法确认视频生成结果，请刷新会话查看，或联系客服。"
+    : realPersonRejected
+      ? "请检查是否使用了真人图片，建议更换图片后重试。如仍失败，请稍后再试或联系客服。"
+      : "请稍后再试，或联系客服。";
+  const showNoCharge = videoFailed && status === "failed" && !!taskId && !resultUnknown;
   const label = cancelled
     ? LABELS[mediaType].cancelled
     : downloadFailed
@@ -124,6 +135,12 @@ export function GenerationCard({
     <div className={`gen-card ${mediaType} ${generating ? "gen-card--loading" : "gen-card--failed"}`} title={t(error) ?? undefined}>
       <MediaIcon mediaType={mediaType} />
       <div className="gen-card-label">{t(label)}</div>
+      {videoFailed && (
+        <div className="gen-card-error" role="status">
+          <p>{t(videoFailureHint)}</p>
+          {showNoCharge && <p>{t("温馨提示：视频未成功生成，不会扣除积分。")}</p>}
+        </div>
+      )}
       {generating && taskId && (
         <button type="button" className="gen-card-cancel" onClick={onCancel} disabled={cancelRequested}>
           {cancelRequested ? t("取消中…") : t("取消")}

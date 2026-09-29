@@ -56,9 +56,9 @@
       <text class="mtitle">图片工作室</text>
       <text class="marrow">›</text>
     </view>
-    <view class="mrow" bindtap="goPoster">
+    <view class="mrow" bindtap="goVideo">
       <text class="mico">02</text>
-      <text class="mtitle">海报灵感</text>
+      <text class="mtitle">音影创作室</text>
       <text class="marrow">›</text>
     </view>
     <view class="mrow" bindtap="goGallery">
@@ -66,8 +66,13 @@
       <text class="mtitle">我的作品</text>
       <text class="marrow">›</text>
     </view>
-    <view class="mrow" bindtap="goAbout">
+    <view class="mrow" bindtap="goMaterials">
       <text class="mico">04</text>
+      <text class="mtitle">我的素材</text>
+      <text class="marrow">›</text>
+    </view>
+    <view class="mrow" bindtap="goAbout">
+      <text class="mico">05</text>
       <text class="mtitle">了解更多 · 灵渠claw</text>
       <text class="marrow">›</text>
     </view>

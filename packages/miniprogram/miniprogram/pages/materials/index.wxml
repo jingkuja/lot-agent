@@ -1,0 +1,28 @@
+<view class="page materials">
+  <view class="page-heading">
+    <text class="eyebrow">我的素材</text>
+    <text class="h1">收好每一份创作素材。</text>
+    <text class="muted">上传过的图片都在这里，轻点预览，随时整理。</text>
+  </view>
+  <view wx:if="{{error}}" class="state card">
+    <text class="muted">{{error}}</text>
+    <button class="btn btn-soft" bindtap="reload">重新加载</button>
+  </view>
+  <view wx:elif="{{loading && !items.length}}" class="state"><text class="muted">正在整理素材…</text></view>
+  <view wx:elif="{{!items.length}}" class="state card">
+    <text class="h2">还没有上传的图片</text>
+    <text class="muted">创作时上传的参考图、封面图等，会自动收在这里。</text>
+  </view>
+  <block wx:else>
+    <view class="collection-bar"><text>{{loading ? '正在刷新…' : '已上传图片'}}</text><text>{{items.length}} 张</text></view>
+    <view class="wall">
+      <view class="material card" wx:for="{{items}}" wx:key="id">
+        <image class="thumbnail" src="{{item.url}}" mode="aspectFill" lazy-load data-id="{{item.id}}" bindtap="preview" />
+        <view class="caption">
+          <text class="filename">{{item.filename || '未命名图片'}}</text>
+          <button class="delete" data-id="{{item.id}}" bindtap="remove" disabled="{{loading || deletingId}}" loading="{{deletingId === item.id}}">删除</button>
+        </view>
+      </view>
+    </view>
+  </block>
+</view>

@@ -19,6 +19,15 @@ export class ApiError extends Error {
   }
 }
 
+export interface UploadedAsset {
+  id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  url: string;
+  createdAt: string;
+}
+
 export interface CatalogModel {
   id: string;
   type: string;
@@ -284,6 +293,10 @@ export const api = {
   getTask: (id: string) => request<TaskStatus>(`/tasks/${id}`),
 
   cancelTask: (id: string) => request<{ ok: boolean }>(`/tasks/${id}/cancel`, { method: "POST" }),
+
+  listUploads: () => request<{ data: UploadedAsset[] }>("/assets"),
+
+  deleteUpload: (id: string) => request<{ ok: boolean }>(`/assets/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   uploadLocalImage(filePath: string): Promise<{ url: string; assetId: string }> {
     return new Promise((resolve, reject) => {

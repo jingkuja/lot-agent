@@ -295,3 +295,23 @@ describe("video wait-tip lifecycle", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+
+describe("completed video step navigation", () => {
+  it.each([{ resultUrl: "result.mp4" }, { downloadFailed: true }])("keeps completed videos on the result step: %o", async (completion) => {
+    saved["lot:video:owner"] = { draft: { script: "分镜" }, step: 3, ...completion };
+    await page.onShow();
+    expect(page.data.step).toBe(6);
+    for (let step = 0; step < 6; step++) {
+      page.goStep({ currentTarget: { dataset: { step } } });
+      expect(page.data.step).toBe(6);
+    }
+    page.previous();
+    expect(page.data.step).toBe(6);
+    page.newDraft();
+    expect(page.data).toMatchObject({ step: 0, resultUrl: "", downloadFailed: false, locked: false });
+    page.data.draft.script = "新分镜";
+    page.goStep({ currentTarget: { dataset: { step: 3 } } });
+    expect(page.data.step).toBe(3);
+  });
+});

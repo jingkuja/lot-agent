@@ -4763,6 +4763,10 @@ html, body, #root {
 .gen-card-icon { width: 40px; height: 40px; }
 .gen-card-label { font-size: 16px; font-weight: 600; color: var(--accent); }
 .gen-card--failed { color: var(--accent); opacity: 0.92; }
+.gen-card.video.gen-card--failed { aspect-ratio: auto; min-height: 240px; padding: 24px 20px; box-sizing: border-box; }
+.gen-card-error { max-width: 100%; color: var(--text-secondary); font-size: 14px; line-height: 1.6; text-align: center; overflow-wrap: anywhere; }
+.gen-card-error p { margin: 0; }
+.gen-card-error p + p { margin-top: 8px; }
 .gen-card-cancel {
   padding: 5px 16px;
   border: 1px solid var(--accent);
