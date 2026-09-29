@@ -122,10 +122,14 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
   const assistantMessageId = input.assistantMessageId as string | undefined;
   const conversationId = input.conversationId as string | undefined;
   const referenceAudio = input.reference_audio as ReferenceInput | undefined;
+  // Keep the task id on every status write: the enqueue route stores it, and a
+  // client that lost the submit response (mini program) recovers the task from
+  // this message — including after the worker has already finished it.
   const baseMeta = {
     kind: "generation",
     mediaType,
     prompt,
+    taskId: job.id,
     settings: {
       size: input.size,
       n: input.n,

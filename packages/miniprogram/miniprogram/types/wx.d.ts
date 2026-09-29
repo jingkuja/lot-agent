@@ -154,6 +154,7 @@ declare const wx: {
     confirmText?: string;
     cancelText?: string;
     success?: (res: { confirm: boolean; cancel: boolean }) => void;
+    fail?: () => void;
   }): void;
   showLoading(opts: { title: string; mask?: boolean }): void;
   hideLoading(): void;

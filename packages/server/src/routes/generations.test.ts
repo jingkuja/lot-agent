@@ -7,11 +7,14 @@ function fakeService() {
   return {
     messages,
     db: {
+      claimConversationRun: vi.fn(async () => true),
+      releaseConversationRun: vi.fn(async () => {}),
+      getMessages: vi.fn(async () => messages),
       getConversation: vi.fn(async () => ({ id: "c1", user_id: "u1" })),
       addMessage: vi.fn(async (id: string, _cid: string, role: string, content: string, opts: any) => {
         messages.push({ id, role, content, ...opts });
       }),
-      updateMessageGeneration: vi.fn(async () => {}),
+      updateMessageGeneration: vi.fn(async (id: string, patch: any) => { const message = messages.find(m => m.id === id); if (message) Object.assign(message, patch); }),
       getGenerationMessage: vi.fn(async () => ({
         status: "download_failed",
         metadata: {
@@ -538,5 +541,55 @@ describe("POST /conversations/:id/generations/:messageId/redownload", () => {
     const res = await app(service).request("/conversations/c1/generations/m1/redownload", { method: "POST" });
     expect(res.status).toBe(409);
     expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe("mini program video duplicate protection", () => {
+  const submit = (a: Hono) => a.request("/conversations/c1/generations", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Lot-Client": "miniprogram" },
+    body: JSON.stringify({ prompt: "视频", mediaType: "video" }),
+  });
+  it("replays an existing task without enqueueing or checking quota again", async () => {
+    const service = fakeService(); const a = app(service);
+    expect((await submit(a)).status).toBe(202);
+    const replay = await submit(a);
+    expect(replay.status).toBe(202); expect((await replay.json()).taskId).toBe("task-1");
+    expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(1);
+    expect(service.usageMeter.checkQuota).toHaveBeenCalledTimes(1);
+    expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(2);
+  });
+  it("rejects a concurrent submission before any paid work", async () => {
+    const service = fakeService(); service.db.claimConversationRun.mockResolvedValue(false);
+    expect((await submit(app(service))).status).toBe(409);
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    expect(service.db.releaseConversationRun).not.toHaveBeenCalled();
+  });
+  it("serializes two concurrent requests through the database lease", async () => {
+    const service = fakeService(); let claimed = false;
+    service.db.claimConversationRun.mockImplementation(async () => {
+      if (claimed) return false;
+      claimed = true; return true;
+    });
+    service.db.releaseConversationRun.mockImplementation(async () => { claimed = false; });
+    const a = app(service);
+    const responses = await Promise.all([submit(a), submit(a)]);
+    expect(responses.map(r => r.status).sort()).toEqual([202, 409]);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(1);
+  });
+  it("releases the lease after a quota rejection so a funded user can submit", async () => {
+    const service = fakeService(); service.usageMeter.checkQuota.mockResolvedValueOnce({ ok: false, reason: "积分不足" });
+    const a = app(service);
+    expect((await submit(a)).status).toBe(402);
+    expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(1);
+    expect((await submit(a)).status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(1);
+  });
+  it("never re-enqueues when the first enqueue result was lost", async () => {
+    const service = fakeService(); service.jobQueue.enqueue.mockRejectedValue(new Error("lost response"));
+    const a = app(service); a.onError(() => new Response("unavailable", { status: 500 }));
+    expect((await submit(a)).status).toBe(500);
+    expect((await submit(a)).status).toBe(409);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(1);
+    expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(2);
   });
 });

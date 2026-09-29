@@ -523,130 +523,153 @@ export function createGenerationRoutes(service: AgentService) {
     if (!prompt || (mediaType !== "image" && mediaType !== "video")) {
       return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
     }
-    // Client settings pass a per-media whitelist so identity fields
-    // (conversationId/assistantMessageId/userId) can never ride along.
-    const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
-    let settings = pickGenerationSettings(mediaType, body.settings);
-    // Mini program quality tiers shift the requested resolution before
-    // validation: 快速 drops every ratio one step, 自动/标准 only the wide
-    // ones. Applied while `selectedModel` is still the slot id.
-    if (mediaType === "image" && typeof settings.size === "string") {
-      const cfg = miniprogramCfg(service);
-      if (isMiniprogramImageSlot(selectedModel, cfg)) {
-        settings = { ...settings, size: downshiftMiniprogramImageSize(selectedModel, settings.size as string) };
-      }
+    // The mini program creates one conversation per paid video attempt. Use a
+    // database lease (shared across server processes) plus its durable message
+    // to replay retries, including a retry after enqueue returned no response.
+    const videoRunId = mediaType === "video" && isMiniprogramClient(c.req.header("x-lot-client"))
+      ? randomUUID() : null;
+    if (videoRunId && !await service.db.claimConversationRun(conversationId, videoRunId, RUN_LEASE_STALE_MS)) {
+      return c.json({ error: "视频提交结果待确认，请查询原任务，勿重复生成" }, 409);
     }
-    const resolvedModel = mediaType === "image"
-      ? await resolveImageModelId(service, userId, selectedModel)
-      : selectedModel;
-    if (mediaType === "image") {
-      const finalized = finalizeImageSettings(settings, resolvedModel);
-      if (finalized.error) return c.json({ error: finalized.error }, 400);
-      settings = finalized.settings;
-    }
-    let videoReferences: Record<string, string | string[]> = {};
-    if (mediaType === "video") {
-      try {
-        videoReferences = pickVideoReferenceInputs(body as Record<string, unknown>);
-      } catch (err) {
-        return c.json({ error: err instanceof Error ? err.message : "invalid video references" }, 400);
-      }
-      settings = {
-        ...settings,
-        generate_audio: resolveVideoGenerateAudio(settings.generate_audio, videoReferences.reference_audio),
-      };
-    }
-    const media = Array.isArray(body.media) ? body.media : undefined;
-    if (mediaType === "image" && media && media.length > MAX_IMAGE_EDIT_REFERENCES) {
-      return c.json({ error: `image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images` }, 400);
-    }
-    if (mediaType === "video" && media) {
-      const legacyImages = media.filter((m) => m?.type === "reference_image");
-      if (legacyImages.length > 5) {
-        return c.json({ error: "input_reference supports at most 5 references" }, 400);
-      }
-    }
-    const type = mediaType === "image" ? "image.generate" : "video.generate";
-
-    // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
-    const modelId = mediaType === "image"
-      ? "gpt-image-2"
-      : resolvedModel ?? "kling-video-v3-omni";
-    const cfg = service.modelRegistry.getConfig(modelId);
-    const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : billedVideoSeconds(settings.durationSec);
-    const estimatedCost = cfg ? estimateCost(cfg, { outputCount }) : 0;
-    const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
-    if (!quota.ok) return c.json({ error: quota.reason, estimatedCost }, 402);
-
-    // Persist user message.
-    const userMessageId = randomUUID();
-    await service.db.addMessage(userMessageId, conversationId, "user", prompt);
-
-    // Persist pending assistant generation message, born 'generating' (the
-    // status column would otherwise default to 'completed'). Setting it at
-    // insert time closes the race where a cache-hit worker completes the
-    // message before a follow-up status write could land.
-    const assistantMessageId = randomUUID();
-    const supportsProgress = service.generationSupportsProgress[mediaType];
-    const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress };
-    await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
-      metadata: { ...baseMeta, status: "generating" },
-      model: resolvedModel ?? modelId,
-      status: "generating",
-    });
-
-    // Enqueue, then record the taskId on the message so a client that reloads
-    // mid-generation can re-poll the task to resume progress / completion.
-    // Identity fields are spread LAST: they are server-created and must win
-    // over anything a client could try to smuggle into the payload.
-    const taskId = await service.jobQueue.enqueue(
-      type,
-      {
-        ...settings,
-        ...videoReferences,
-        ...(media ? { media } : {}),
-        ...(resolvedModel ? { modelId: resolvedModel } : {}),
-        prompt,
-        conversationId,
-        assistantMessageId,
-        requireUserModelKey: conv.agent_id === "digital_employee",
-      },
-      userId
-    );
-    const metadata = { ...baseMeta, status: "generating", taskId };
-    await service.db.updateMessageGeneration(
-      assistantMessageId,
-      { status: "generating", metadata },
-      { conversationId, userId }
-    );
-
-    // Auto-title the conversation from the prompt (first message only, gated
-    // inside generateTitle). The chat SSE path does this too; without it,
-    // image/video conversations stay stuck on the "新对话" placeholder.
     try {
-      // 本回合的模型是图片/视频模型，标题改用 LLM。数字员工会话仍严格
-      // 限定为用户 TokenHub key，不允许标题请求回退环境模型。
-      // The task is already running. Never hold its 202 response behind a
-      // separate LLM request: a proxy timeout would look like submission failed.
-      void service.generateTitle(conversationId, prompt, [], {
-        userId,
-        digitalEmployee: conv.agent_id === "digital_employee",
-        ...(isMiniprogramClient(c.req.header("x-lot-client"))
-          ? { modelId: miniprogramCfg(service).llm }
-          : {}),
-      }).catch(() => {});
-    } catch {
-      // title generation is best-effort
-    }
+      if (videoRunId) {
+        const messages = await service.db.getMessages(conversationId);
+        const existing = messages.find((m) => m.role === "assistant" && m.metadata?.kind === "generation" && m.metadata?.mediaType === "video");
+        if (existing) {
+          const taskId = existing.metadata.taskId;
+          if (typeof taskId !== "string" || !taskId) {
+            return c.json({ error: "视频提交结果待确认，请查询原任务，勿重复生成" }, 409);
+          }
+          return c.json({ userMessage: messages.find((m) => m.role === "user"), assistantMessage: existing, taskId }, 202);
+        }
+      }
+      // Client settings pass a per-media whitelist so identity fields
+      // (conversationId/assistantMessageId/userId) can never ride along.
+      const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
+      let settings = pickGenerationSettings(mediaType, body.settings);
+      // Mini program quality tiers shift the requested resolution before
+      // validation: 快速 drops every ratio one step, 自动/标准 only the wide
+      // ones. Applied while `selectedModel` is still the slot id.
+      if (mediaType === "image" && typeof settings.size === "string") {
+        const cfg = miniprogramCfg(service);
+        if (isMiniprogramImageSlot(selectedModel, cfg)) {
+          settings = { ...settings, size: downshiftMiniprogramImageSize(selectedModel, settings.size as string) };
+        }
+      }
+      const resolvedModel = mediaType === "image"
+        ? await resolveImageModelId(service, userId, selectedModel)
+        : selectedModel;
+      if (mediaType === "image") {
+        const finalized = finalizeImageSettings(settings, resolvedModel);
+        if (finalized.error) return c.json({ error: finalized.error }, 400);
+        settings = finalized.settings;
+      }
+      let videoReferences: Record<string, string | string[]> = {};
+      if (mediaType === "video") {
+        try {
+          videoReferences = pickVideoReferenceInputs(body as Record<string, unknown>);
+        } catch (err) {
+          return c.json({ error: err instanceof Error ? err.message : "invalid video references" }, 400);
+        }
+        settings = {
+          ...settings,
+          generate_audio: resolveVideoGenerateAudio(settings.generate_audio, videoReferences.reference_audio),
+        };
+      }
+      const media = Array.isArray(body.media) ? body.media : undefined;
+      if (mediaType === "image" && media && media.length > MAX_IMAGE_EDIT_REFERENCES) {
+        return c.json({ error: `image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images` }, 400);
+      }
+      if (mediaType === "video" && media) {
+        const legacyImages = media.filter((m) => m?.type === "reference_image");
+        if (legacyImages.length > 5) {
+          return c.json({ error: "input_reference supports at most 5 references" }, 400);
+        }
+      }
+      const type = mediaType === "image" ? "image.generate" : "video.generate";
 
-    return c.json(
-      {
-        userMessage: { id: userMessageId, role: "user", content: prompt },
-        assistantMessage: { id: assistantMessageId, role: "assistant", status: "generating", metadata },
-        taskId,
-      },
-      202
-    );
+      // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
+      const modelId = mediaType === "image"
+        ? "gpt-image-2"
+        : resolvedModel ?? "kling-video-v3-omni";
+      const cfg = service.modelRegistry.getConfig(modelId);
+      const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : billedVideoSeconds(settings.durationSec);
+      const estimatedCost = cfg ? estimateCost(cfg, { outputCount }) : 0;
+      const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
+      if (!quota.ok) return c.json({ error: quota.reason, estimatedCost }, 402);
+
+      // Persist user message.
+      const userMessageId = randomUUID();
+      await service.db.addMessage(userMessageId, conversationId, "user", prompt);
+
+      // Persist pending assistant generation message, born 'generating' (the
+      // status column would otherwise default to 'completed'). Setting it at
+      // insert time closes the race where a cache-hit worker completes the
+      // message before a follow-up status write could land.
+      const assistantMessageId = randomUUID();
+      const supportsProgress = service.generationSupportsProgress[mediaType];
+      const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress };
+      await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
+        metadata: { ...baseMeta, status: "generating" },
+        model: resolvedModel ?? modelId,
+        status: "generating",
+      });
+
+      // Enqueue, then record the taskId on the message so a client that reloads
+      // mid-generation can re-poll the task to resume progress / completion.
+      // Identity fields are spread LAST: they are server-created and must win
+      // over anything a client could try to smuggle into the payload.
+      const taskId = await service.jobQueue.enqueue(
+        type,
+        {
+          ...settings,
+          ...videoReferences,
+          ...(media ? { media } : {}),
+          ...(resolvedModel ? { modelId: resolvedModel } : {}),
+          prompt,
+          conversationId,
+          assistantMessageId,
+          requireUserModelKey: conv.agent_id === "digital_employee",
+        },
+        userId
+      );
+      const metadata = { ...baseMeta, status: "generating", taskId };
+      await service.db.updateMessageGeneration(
+        assistantMessageId,
+        { status: "generating", metadata },
+        { conversationId, userId }
+      );
+
+      // Auto-title the conversation from the prompt (first message only, gated
+      // inside generateTitle). The chat SSE path does this too; without it,
+      // image/video conversations stay stuck on the "新对话" placeholder.
+      try {
+        // 本回合的模型是图片/视频模型，标题改用 LLM。数字员工会话仍严格
+        // 限定为用户 TokenHub key，不允许标题请求回退环境模型。
+        // The task is already running. Never hold its 202 response behind a
+        // separate LLM request: a proxy timeout would look like submission failed.
+        void service.generateTitle(conversationId, prompt, [], {
+          userId,
+          digitalEmployee: conv.agent_id === "digital_employee",
+          ...(isMiniprogramClient(c.req.header("x-lot-client"))
+            ? { modelId: miniprogramCfg(service).llm }
+            : {}),
+        }).catch(() => {});
+      } catch {
+        // title generation is best-effort
+      }
+
+      return c.json(
+        {
+          userMessage: { id: userMessageId, role: "user", content: prompt },
+          assistantMessage: { id: assistantMessageId, role: "assistant", status: "generating", metadata },
+          taskId,
+        },
+        202
+      );
+    } finally {
+      if (videoRunId) await service.db.releaseConversationRun(conversationId, videoRunId);
+    }
   });
 
   // POST /:id/generations/:messageId/redownload — retry ONLY the download of a

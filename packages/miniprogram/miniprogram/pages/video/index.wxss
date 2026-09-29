@@ -6,6 +6,7 @@
 .step-number { display: flex; align-items: center; justify-content: center; border: 1rpx solid var(--line); border-radius: 50%; width: 40rpx; height: 40rpx; }
 .step.active { color: var(--brand); font-weight: 600; }
 .active .step-number { background: var(--brand); color: var(--inverse); border-color: var(--brand); }
+.done .step-number { background: var(--brand-soft); border-color: var(--brand-soft); color: var(--brand-deep); }
 .workspace { padding: 30rpx; min-height: 630rpx; }
 .section-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32rpx; }
 .label { display: block; margin: 28rpx 0 16rpx; font-size: 26rpx; font-weight: 500; }
@@ -14,6 +15,7 @@
 .topic { height: 170rpx; }
 .script { height: 340rpx; }
 .write { margin-top: 20rpx; color: var(--brand-deep); }
+.error { display: block; margin-top: 16rpx; color: var(--brand-deep); font-size: 24rpx; line-height: 1.7; }
 .choices { display: flex; flex-wrap: wrap; gap: 16rpx; }
 .option { padding: 20rpx 26rpx; border: 1rpx solid var(--line); font-size: 26rpx; color: var(--muted); background: var(--card); }
 .option.selected { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-deep); }
@@ -38,3 +40,15 @@
 .step-footer .btn { font-size: 25rpx; min-height: 80rpx; }
 .progress-track { flex: 1; height: 8rpx; border-radius: 8rpx; background: var(--line); overflow: hidden; }
 .progress-track view { height: 100%; background: var(--brand); }
+
+.step.locked { opacity: 0.55; }
+.brief { padding: 22rpx; border-radius: var(--radius); background: var(--bg); margin-top: 24rpx; }
+.brief-row { display: flex; justify-content: space-between; gap: 20rpx; padding: 10rpx 0; font-size: 23rpx; }
+.brief-row text:first-child { color: var(--muted); flex-shrink: 0; }
+.brief-row text:last-child { text-align: right; }
+.task-notice { padding: 24rpx; margin: 24rpx 0; border-radius: var(--radius); background: var(--brand-soft); color: var(--muted); font-size: 24rpx; line-height: 1.8; }
+.task-notice text { display: block; margin-top: 10rpx; }
+.task-notice .notice-title { margin-top: 0; color: var(--brand-deep); font-weight: 600; }
+.option[disabled], .remove[disabled] { opacity: 0.45; }
+.working { animation: breathe 2s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: 0.4; } }

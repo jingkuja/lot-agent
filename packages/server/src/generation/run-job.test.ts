@@ -82,6 +82,17 @@ describe("runGenerationJob", () => {
     expect(new Set(cacheKeys).size).toBe(3);
   });
 
+  it("keeps the task id on the message through completion so lost submissions stay recoverable", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://video.example/clip.mp4" })),
+    };
+    const { deps, calls } = fakeDeps(provider);
+    await runGenerationJob(deps, job, "video");
+    for (const write of calls.message) expect(write.metadata.taskId).toBe("job1");
+    expect(calls.message.at(-1)).toMatchObject({ status: "completed", metadata: { taskId: "job1" } });
+  });
+
   it("marks message failed and rethrows when poll returns failed", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),

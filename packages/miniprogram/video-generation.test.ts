@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ createConversation: vi.fn(), generate: vi.fn(), getConversation: vi.fn(), deleteConversation: vi.fn(), uploadLocalImage: vi.fn() }));
 vi.mock("./miniprogram/services/api", () => ({ api, absoluteMedia: (s: string) => s }));
-import { createVideoDraft, submitVideo, recoverVideoTask, videoResult } from "./miniprogram/services/video";
+import { createVideoDraft, submitVideo, recoverVideoTask, findVideoGeneration, videoResult } from "./miniprogram/services/video";
 beforeEach(() => {
   vi.resetAllMocks(); api.createConversation.mockResolvedValue({ id: "video-conv" }); api.deleteConversation.mockResolvedValue({ ok: true });
   api.generate.mockResolvedValue({ taskId: "job1" }); api.uploadLocalImage.mockResolvedValue({ url: "/static/uploads/cover.png" });
@@ -30,9 +30,9 @@ describe("video task submission", () => {
     await expect(submitVideo(createVideoDraft(), vi.fn())).rejects.toThrow("勿重复生成");
     expect(api.deleteConversation).not.toHaveBeenCalled();
   });
-  it("cleans up only definitively rejected submissions", async () => {
-    api.generate.mockRejectedValue({ status: 402 });
-    await expect(submitVideo(createVideoDraft(), vi.fn())).rejects.toEqual({ status: 402 });
+  it.each([400, 401, 402, 403, 422, 429])("cleans up definitively rejected submissions (%s)", async (status) => {
+    api.generate.mockRejectedValue({ status });
+    await expect(submitVideo(createVideoDraft(), vi.fn())).rejects.toEqual({ status });
     expect(api.deleteConversation).toHaveBeenCalledWith("video-conv");
   });
   it("keeps an upload failure from leaving a pending paid submission", async () => {
@@ -44,5 +44,20 @@ describe("video task submission", () => {
     api.getConversation.mockResolvedValue({ messages: [{ role: "assistant", metadata: "bad json" }] });
     expect(await recoverVideoTask("video-conv")).toBeNull();
     expect(videoResult({ id: "job", progress: 100, status: "succeeded", output: { downloadFailed: true, assets: [{ url: "vendor-video", mime: "video/mp4" }] } })).toBe("");
+  });
+  it("reads a finished generation from the conversation when the task id was never received", async () => {
+    api.getConversation.mockResolvedValue({ messages: [
+      { id: "m1", role: "user", content: "prompt" },
+      { id: "m2", role: "assistant", status: "completed", metadata: JSON.stringify({ kind: "generation", mediaType: "video", taskId: "job3", status: "completed", assets: [{ url: "/static/assets/v.mp4" }] }) },
+    ] });
+    expect(await findVideoGeneration("video-conv")).toEqual({ messageId: "m2", taskId: "job3", status: "completed", url: "/static/assets/v.mp4", downloadFailed: false });
+  });
+  it("reports a download failure and a missing conversation distinctly", async () => {
+    api.getConversation.mockResolvedValue({ messages: [{ id: "m2", role: "assistant", metadata: { kind: "generation", mediaType: "video", taskId: "job3", status: "download_failed", sourceUrl: "vendor" } }] });
+    expect(await findVideoGeneration("video-conv")).toMatchObject({ downloadFailed: true, url: "" });
+    api.getConversation.mockRejectedValue({ status: 404 });
+    expect(await findVideoGeneration("gone")).toBeNull();
+    api.getConversation.mockRejectedValue({ status: 0 });
+    await expect(findVideoGeneration("offline")).rejects.toEqual({ status: 0 });
   });
 });
