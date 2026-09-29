@@ -26,13 +26,13 @@
     "list": [
       {
         "pagePath": "pages/studio/index",
-        "text": "修图",
+        "text": "创图",
         "iconPath": "assets/tab-studio.png",
         "selectedIconPath": "assets/tab-studio-active.png"
       },
       {
         "pagePath": "pages/video/index",
-        "text": "视频",
+        "text": "创影",
         "iconPath": "assets/tab-video.png",
         "selectedIconPath": "assets/tab-video-active.png"
       },
