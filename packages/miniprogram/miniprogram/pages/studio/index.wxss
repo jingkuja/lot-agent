@@ -1,6 +1,7 @@
 @import "../../styles/generation-loading.wxss";
 
 .studio {
+  --muted: var(--muted-strong);
   display: flex;
   flex-direction: column;
 }
@@ -9,46 +10,50 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 20rpx;
-  padding: 28rpx 36rpx 24rpx;
+  gap: 16rpx;
+  padding: 40rpx 32rpx 24rpx;
+}
+
+.studio-heading .eyebrow {
+  color: var(--brand-deep);
 }
 
 .studio-heading .h1 {
+  margin-top: 8rpx;
   margin-bottom: 0;
   font-size: 44rpx;
-}
-
-.studio-caption {
-  flex-shrink: 0;
-  white-space: pre-line;
-  text-align: right;
-  color: var(--muted);
-  font-size: 21rpx;
-  line-height: 1.7;
 }
 
 .stage {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 0 36rpx 12rpx;
+  padding: 0 32rpx;
 }
 
 .frame {
-  flex: 1;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 430rpx;
   overflow: hidden;
   border-radius: 16rpx;
+}
+
+/* Absorb spare viewport space while leaving the composer in normal flow. */
+.frame-placeholder {
+  flex: 1;
+  min-height: 280rpx;
+}
+
+.frame-result {
+  display: block;
 }
 
 .frame-img {
   display: block;
   width: 100%;
-  height: 560rpx;
+  height: auto;
   background: var(--surface);
 }
 
@@ -56,16 +61,16 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10rpx;
-  padding: 44rpx 28rpx;
+  gap: 8rpx;
+  padding: 24rpx;
   text-align: center;
 }
 
 .canvas-art {
   position: relative;
-  width: 136rpx;
-  height: 160rpx;
-  margin-bottom: 24rpx;
+  width: 104rpx;
+  height: 120rpx;
+  margin-bottom: 16rpx;
   overflow: hidden;
   background: var(--surface);
   border: 1rpx solid var(--line);
@@ -74,10 +79,10 @@
 
 .art-sun {
   position: absolute;
-  top: 28rpx;
-  right: 24rpx;
-  width: 36rpx;
-  height: 36rpx;
+  top: 16rpx;
+  right: 16rpx;
+  width: 28rpx;
+  height: 28rpx;
   border-radius: 50%;
   background: var(--brand);
 }
@@ -86,7 +91,7 @@
   position: absolute;
   width: 160rpx;
   height: 130rpx;
-  top: 88rpx;
+  top: 64rpx;
   left: -28rpx;
   border-radius: 50% 50% 0 0;
   background: var(--poster-mint);
@@ -132,30 +137,32 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 64rpx;
-  gap: 20rpx;
+  min-height: 56rpx;
+  gap: 16rpx;
 }
 
-.stage-meta .muted, .canvas-ratio {
-  font-size: 20rpx;
+.stage-meta .muted {
+  font-size: 22rpx;
   color: var(--muted);
 }
 
 .stage-save {
   padding: 12rpx 0 12rpx 20rpx;
-  color: var(--brand);
+  color: var(--brand-deep);
   font-size: 24rpx;
 }
 
 .stage-tip {
-  margin-bottom: 12rpx;
+  margin-top: 16rpx;
   font-size: 22rpx;
 }
 
 .dock {
   position: relative;
   z-index: 20;
-  padding: 0 28rpx calc(24rpx + env(safe-area-inset-bottom));
+  margin-top: 16rpx;
+  /* The native tab bar already owns the bottom safe area. */
+  padding: 0 32rpx 24rpx;
   background: var(--bg);
 }
 
@@ -217,20 +224,26 @@
 .quick {
   display: flex;
   align-items: center;
-  gap: 8rpx;
-  margin-bottom: 12rpx;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
 }
 
 .quick-item {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10rpx;
-  flex: 1;
-  min-height: 76rpx;
+  gap: 8rpx;
+  min-height: 44px;
+  padding: 0 16rpx;
+  box-sizing: border-box;
+  border: 1rpx solid var(--line);
+  background: var(--card);
   color: var(--muted);
-  font-size: 24rpx;
-  border-radius: 8rpx;
+  font-size: 22rpx;
+  white-space: nowrap;
+  border-radius: 48rpx;
 }
 
 .quick-item.on {
@@ -238,9 +251,12 @@
   color: var(--brand-deep);
 }
 
-.quick-photo {
-  width: 30rpx;
-  height: 26rpx;
+.tool-icon {
+  position: relative;
+  flex-shrink: 0;
+  width: 28rpx;
+  height: 28rpx;
+  box-sizing: border-box;
 }
 
 .quick-photo::before {
@@ -256,13 +272,53 @@
   top: 15rpx;
 }
 
-.quick-symbol {
-  font-size: 32rpx;
-  line-height: 1;
+.idea-mark::before {
+  content: "";
+  position: absolute;
+  inset: 0 4rpx 8rpx;
+  border: 2rpx solid currentColor;
+  border-radius: 50% 50% 6rpx 6rpx;
 }
 
-.settings-symbol {
-  font-size: 36rpx;
+.idea-mark::after {
+  content: "";
+  position: absolute;
+  bottom: 2rpx;
+  left: 9rpx;
+  width: 10rpx;
+  border-top: 2rpx solid currentColor;
+}
+
+.settings-mark > view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 7rpx;
+  border-top: 2rpx solid currentColor;
+}
+
+.settings-mark > view + view {
+  top: 21rpx;
+}
+
+.settings-mark > view::after {
+  content: "";
+  position: absolute;
+  left: 6rpx;
+  top: -5rpx;
+  width: 6rpx;
+  height: 6rpx;
+  border: 2rpx solid currentColor;
+  border-radius: 50%;
+  background: var(--card);
+}
+
+.settings-mark > view + view::after {
+  left: 16rpx;
+}
+
+.quick-item.on .settings-mark > view::after {
+  background: var(--brand-soft);
 }
 
 .pop {
@@ -302,7 +358,7 @@
 }
 
 .idea-arrow {
-  color: var(--brand);
+  color: var(--brand-deep);
 }
 
 .more {
@@ -323,7 +379,7 @@
 }
 
 .more-v {
-  color: var(--brand);
+  color: var(--brand-deep);
 }
 
 .composer {
@@ -334,10 +390,10 @@
 }
 
 .composer .area {
-  height: 152rpx;
-  min-height: 152rpx;
+  height: 136rpx;
+  min-height: 136rpx;
   border: none;
-  padding: 22rpx 24rpx 8rpx;
+  padding: 24rpx 24rpx 8rpx;
   background: transparent;
   font-size: 27rpx;
 }
@@ -346,11 +402,14 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12rpx 16rpx 16rpx 24rpx;
+  padding: 8rpx 16rpx 16rpx 24rpx;
 }
 
 .clear {
-  padding: 14rpx 24rpx 14rpx 0;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding-right: 24rpx;
   color: var(--muted);
   font-size: 24rpx;
 }
@@ -359,21 +418,29 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 32rpx;
-  margin: 0;
+  margin: 0 0 0 auto;
   width: 260rpx;
   height: 76rpx;
+  min-height: 44px;
   padding: 0 24rpx;
-  background: var(--brand);
+  background: var(--brand-deep);
   color: var(--inverse);
   font-size: 26rpx;
 }
 
-.go-arrow {
-  font-size: 32rpx;
-  color: var(--inverse);
+.composer-actions .go[disabled] {
+  background: var(--brand-soft);
+  color: var(--muted);
+  opacity: 1;
 }
 
-.poster-entry { padding: 14rpx 22rpx; background: var(--brand-soft); color: var(--brand-deep); font-size: 25rpx; text-align: left; flex-shrink: 0; }
-.poster-entry text { display: block; }
-.poster-entry text + text { font-size: 20rpx; margin-top: 4rpx; }
+.poster-entry {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 16rpx 24rpx;
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  font-size: 24rpx;
+  flex-shrink: 0;
+}

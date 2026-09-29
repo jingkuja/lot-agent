@@ -5,10 +5,10 @@
       <text class="eyebrow">图片工作室</text>
       <text class="h1">让想法成像。</text>
     </view>
-    <button class="poster-entry" bindtap="openPoster"><text>海报创作</text><text>模板灵感 ↗</text></button>
+    <button class="poster-entry" bindtap="openPoster"><text>海报创作 ↗</text></button>
   </view>
   <view class="stage">
-    <view class="frame card" bindtap="save">
+    <view class="frame card {{resultUrl ? 'frame-result' : 'frame-placeholder'}}" bindtap="save">
       <image wx:if="{{resultUrl}}" class="frame-img" src="{{resultUrl}}" mode="widthFix" show-menu-by-longpress bindload="onImgLoad" binderror="onImgError" />
       <view wx:else class="frame-empty">
         <view class="canvas-art">
@@ -26,14 +26,13 @@
         <text class="generation-status frame-status">{{statusText || '正在生成'}}</text>
       </view>
     </view>
-    <view class="stage-meta">
-      <text class="muted">{{busy ? '正在让画面成形' : resultUrl ? '你的最新创作' : '画布已就绪'}}</text>
-      <view wx:if="{{resultUrl && !busy}}" class="stage-save" bindtap="save">保存 / 分享 ↗</view>
-      <text wx:else class="canvas-ratio">{{ratioLabel}}</text>
+    <view wx:if="{{resultUrl && !busy}}" class="stage-meta">
+      <text class="muted">你的最新创作</text>
+      <view class="stage-save" bindtap="save">保存 / 分享 ↗</view>
     </view>
     <view wx:if="{{statusText && !busy && !resultUrl}}" class="stage-tip muted">{{statusText}}</view>
   </view>
-  <view class="dock safe-bottom">
+  <view class="dock">
     <scroll-view wx:if="{{refs.length}}" class="refs" scroll-x enhanced show-scrollbar="{{false}}">
       <view class="ref" wx:for="{{refs}}" wx:key="*this">
         <image src="{{item}}" mode="aspectFill" />
@@ -61,26 +60,25 @@
       </view>
       <view class="quick">
         <view class="quick-item {{refs.length ? 'on' : ''}}" bindtap="addRef">
-          <view class="photo-mark quick-photo"></view>
+          <view class="tool-icon photo-mark quick-photo" aria-hidden="true"></view>
           <text>{{refs.length ? '参考图 ' + refs.length : '参考图'}}</text>
         </view>
         <view class="quick-item {{showIdeas ? 'on' : ''}}" bindtap="toggleIdeas">
-          <text class="quick-symbol">✳</text>
+          <view class="tool-icon idea-mark" aria-hidden="true"></view>
           <text>灵感</text>
         </view>
         <view class="quick-item {{showMore ? 'on' : ''}}" bindtap="toggleMore">
-          <text class="quick-symbol settings-symbol">☷</text>
-          <text>画面设置</text>
+          <view class="tool-icon settings-mark" aria-hidden="true"><view></view><view></view></view>
+          <text>画面设置 · {{ratioLabel}}</text>
         </view>
       </view>
     </view>
     <view class="composer">
       <textarea class="area composer-input" value="{{prompt}}" maxlength="800" placeholder="描述你想要的画面，细节也可以慢慢补充…" placeholder-class="ph" bindinput="onPrompt" />
       <view class="composer-actions">
-        <view class="clear" bindtap="newSheet">清空</view>
-        <button size="mini" class="go" disabled="{{busy}}" bindtap="print">
+        <view wx:if="{{!busy && (prompt.length || refs.length || resultUrl)}}" class="clear" bindtap="newSheet">清空</view>
+        <button size="mini" class="go" disabled="{{busy || !hasPrompt}}" bindtap="print">
           <text>{{busy ? '生成中' : '生成图片'}}</text>
-          <text class="go-arrow">{{busy ? '···' : '↗'}}</text>
         </button>
       </view>
     </view>

@@ -9,6 +9,7 @@ const qualityItems = QUALITIES.map((item) => item.label);
 Page({
   data: {
     prompt: "",
+    hasPrompt: false,
     size: RATIOS[0].size,
     ratioLabel: RATIOS[0].label,
     quality: "auto",
@@ -36,8 +37,10 @@ Page({
       const tpl = POSTER_TEMPLATES.find((item) => item.id === job.id);
       if (tpl) {
         const ratio = RATIOS.find((item) => item.size === tpl.size);
+        const prompt = fillTemplate(tpl.prompt, job.topic);
         this.setData({
-          prompt: fillTemplate(tpl.prompt, job.topic),
+          prompt,
+          hasPrompt: Boolean(prompt.trim()),
           size: tpl.size,
           ratioLabel: ratio?.label || tpl.ratio,
           resultUrl: "",
@@ -54,14 +57,17 @@ Page({
         const ratio = RATIOS.find((item) => item.size === tpl.size);
         this.setData({
           prompt,
+          hasPrompt: Boolean(prompt.trim()),
           size: tpl.size,
           ratioLabel: ratio?.label || tpl.ratio,
         });
       }
     } else if (query.prompt) {
       const ratio = RATIOS.find((item) => item.size === query.size);
+      const prompt = decodeURIComponent(query.prompt);
       this.setData({
-        prompt: decodeURIComponent(query.prompt),
+        prompt,
+        hasPrompt: Boolean(prompt.trim()),
         size: query.size || this.data.size,
         ratioLabel: ratio?.label || this.data.ratioLabel,
       });
@@ -71,11 +77,13 @@ Page({
   openPoster() { wx.navigateTo({ url: "/pages/poster/index" }); },
 
   onPrompt(e: { detail: { value: string } }) {
-    this.setData({ prompt: e.detail.value });
+    const prompt = e.detail.value;
+    this.setData({ prompt, hasPrompt: Boolean(prompt.trim()) });
   },
 
   pickIdea(e: { currentTarget: { dataset: { text: string } } }) {
-    this.setData({ prompt: e.currentTarget.dataset.text, showIdeas: false });
+    const prompt = e.currentTarget.dataset.text;
+    this.setData({ prompt, hasPrompt: Boolean(prompt.trim()), showIdeas: false });
   },
 
   toggleIdeas() {
@@ -129,8 +137,9 @@ Page({
   },
 
   newSheet() {
+    if (this.data.busy) return;
     clearStudioConversationId();
-    this.setData({ prompt: "", refs: [], resultUrl: "", remoteUrl: "", statusText: "" });
+    this.setData({ prompt: "", hasPrompt: false, refs: [], resultUrl: "", remoteUrl: "", statusText: "" });
   },
 
   async print() {

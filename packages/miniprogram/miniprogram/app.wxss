@@ -3,6 +3,7 @@ page {
   --card: #fffdf9;
   --ink: #403931;
   --muted: #82766c;
+  --muted-strong: #71665c;
   --line: #e7dfd5;
   --brand: #c86b4b;
   --brand-deep: #a84e33;
