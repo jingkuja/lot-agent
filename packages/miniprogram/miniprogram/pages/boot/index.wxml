@@ -3,7 +3,7 @@
     <view class="logo"><view class="photo-mark"></view></view>
     <text class="h1">美图海报</text>
     <text class="tagline">把日常，做成喜欢的模样。</text>
-    <text class="muted">正在连接账号…</text>
+    <text class="muted">{{loading ? "正在连接账号…" : "连接未完成"}}</text>
   </view>
 
   <text wx:if="{{error}}" class="err">{{error}}</text>

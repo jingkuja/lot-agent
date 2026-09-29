@@ -30,3 +30,6 @@ data/knowledge/
 # Backups contain credentials/business data; evaluation vector caches are reproducible.
 data/backups/
 tests/eval/results/vectors-*.json
+
+# WeChat DevTools local settings when importing the repository root.
+/project.private.config.json

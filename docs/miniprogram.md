@@ -45,7 +45,7 @@ Web 微信扫码登录继续用原来的 `wechat_id`，两套身份互不覆盖�
 
 1. 本机先起 Lot Agent 服务端（`pnpm run dev:server` 等）。
 2. 用[微信开发者工具](https://developers.weixin.qq.com/miniprogram/dev/devtools/download.html)
-   打开目录 `packages/miniprogram`（`miniprogramRoot` 已指向 `miniprogram/`）。
+   打开目录 `packages/miniprogram`（`miniprogramRoot` 已指向 `miniprogram/`），也可导入仓库根目录（根配置指向 `packages/miniprogram/miniprogram/`）。
 3. 连不上服务器时，先把 `miniprogram/services/config.ts` 的 `API_BASE` 改成
    `http://127.0.0.1:3000`（或你的盒子地址），并勾选不校验域名。
 4. `DEBUG=1` 时服务端跳过登录，小程序也会直接进印台。
@@ -55,8 +55,9 @@ node packages/miniprogram/scripts/make-tab-icons.mjs   # 重新生成 tab 图标
 pnpm --filter @lot-agent/miniprogram run build                # tsc --noEmit
 ```
 
-`project.config.json` 里 `appid` 先是 `touristappid`。正式发版换成微信后台的 AppID，
-并把同一对 AppID/Secret 写入服务端环境变量。
+两处 `project.config.json` 的 AppID 必须与服务端 `WECHAT_MP_APPID` 一致；切换小程序时同步修改，并将对应 Secret 配置在服务端。
+
+迁移目录后请确认开发者工具读取了正确的 `miniprogramRoot` 和 TypeScript 编译插件；本地的 `project.private.config.json` 会覆盖工程设置，需检查「详情 → 本地设置」的域名校验选项。启动页会区分请求域名、网络连接、微信授权和服务端 HTTP 错误。打开开发者工具的「调试器 → Console」，启用 Warn 级别并搜索 `[lot-login]`，再点击「重新连接」即可查看本次失败；「Network」中可检查 `/api/auth/mode` 和 `/api/auth/wechat-login` 的状态。日志不输出登录 code、token 或服务端响应正文。
 
 ## 账号合并
 

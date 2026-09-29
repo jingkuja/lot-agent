@@ -1,3 +1,4 @@
+import { loginDiagnostic } from "./services/login-diagnostic";
 import { api } from "./services/api";
 import {
   clearSession,
@@ -9,6 +10,7 @@ import {
 App({
   globalData: {
     user: null as LotUser | null,
+    loginError: "",
     debug: false,
     wechatLogin: false,
     managedRegistration: false,
@@ -35,6 +37,7 @@ App({
   },
 
   async bootstrap() {
+    this.globalData.loginError = "";
     try {
       const mode = await api.mode();
       this.globalData.debug = mode.debug === true;
@@ -55,8 +58,9 @@ App({
       // Only the boot page navigates after login. A cold launch from a shared
       // work must stay on that work, including for first-time visitors.
       await this.tryWechatLogin();
-    } catch {
-      // Boot page shows retry.
+    } catch (err) {
+      this.globalData.loginError = loginDiagnostic("mode", err);
+      console.warn("[lot-login]", this.globalData.loginError);
     }
   },
 
@@ -76,12 +80,17 @@ App({
   },
 
   async tryWechatLogin(): Promise<boolean> {
+    this.globalData.loginError = "";
     const code = await new Promise<string>((resolve, reject) => {
       wx.login({
         success: (res) => (res.code ? resolve(res.code) : reject(new Error("no code"))),
         fail: (err) => reject(new Error(err.errMsg)),
       });
-    }).catch(() => "");
+    }).catch((err) => {
+      this.globalData.loginError = loginDiagnostic("wechat", err);
+      console.warn("[lot-login]", this.globalData.loginError);
+      return "";
+    });
     if (!code) return false;
     try {
       const result = await api.wechatLogin(code);
@@ -89,9 +98,11 @@ App({
         setSession(result.token, result.user);
         return true;
       }
-    } catch {
-      // Boot page / ensureSession handle the miss.
+      this.globalData.loginError = "登录响应不完整，请稍后重试";
+    } catch (err) {
+      this.globalData.loginError = loginDiagnostic("server", err);
     }
+    console.warn("[lot-login]", this.globalData.loginError);
     return false;
   },
 });

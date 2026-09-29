@@ -24,7 +24,7 @@ Page({
         wx.switchTab({ url: "/pages/studio/index" });
         return;
       }
-      this.setData({ error: "微信登录失败，请稍后重试", loading: false });
+      this.setData({ error: app.globalData.loginError || "微信登录失败，请稍后重试", loading: false });
     } catch {
       this.setData({ error: "无法连接服务器，请稍后重试", loading: false });
     }

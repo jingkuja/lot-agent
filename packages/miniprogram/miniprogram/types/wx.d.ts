@@ -1,3 +1,5 @@
+declare const console: { warn(...args: unknown[]): void };
+
 declare function App<T>(options: T & ThisType<any>): void;
 declare function Page<T>(options: T & ThisType<any>): void;
 declare function Component<T>(options: T & ThisType<any>): void;
@@ -14,6 +16,7 @@ interface LotUser {
 interface LotApp {
   globalData: {
     user: LotUser | null;
+    loginError: string;
     debug: boolean;
     wechatLogin: boolean;
     managedRegistration: boolean;
