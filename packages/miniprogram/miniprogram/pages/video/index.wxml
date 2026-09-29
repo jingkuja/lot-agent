@@ -32,9 +32,16 @@
     <view wx:elif="{{step === lastStep}}">
       <video wx:if="{{resultUrl}}" class="result-video" src="{{resultUrl}}" controls show-center-play-btn />
       <view wx:else class="ready">
-        <text class="ready-mark {{pending || busy ? 'working' : ''}}">{{pending || busy ? '◷' : '▷'}}</text>
+        <view wx:if="{{pending || busy}}" class="spinner-wrap">
+          <view class="spinner-ring"></view>
+          <view class="spinner-ring spinner-ring-inner"></view>
+        </view>
+        <text wx:else class="ready-mark">{{downloadFailed ? '↯' : '▷'}}</text>
         <text class="h2">{{pending ? '你的故事正在成片' : (busy ? '正在准备提交' : (downloadFailed ? '成片等待下载' : '准备好，让故事动起来'))}}</text>
-        <text wx:if="{{pending}}" class="muted">{{elapsed || '任务已保留'}} · 无需停留在此页面</text>
+        <block wx:if="{{pending}}">
+          <text wx:for="{{[waitTip]}}" wx:key="*this" class="wait-tip">{{item}}</text>
+        </block>
+        <text wx:if="{{pending}}" class="muted small">{{elapsed || '任务已保留'}} · 无需停留在此页面</text>
       </view>
       <view class="brief">
         <view class="brief-row"><text>模型与画面</text><text>{{models[draft.modelIndex].label}} · {{models[draft.modelIndex].resolution}}</text></view>

@@ -105,7 +105,7 @@ pnpm --filter @lot-agent/miniprogram run build                # tsc --noEmit
 
 底部第二个导航为「视频」。海报模板入口移到「修图」页右上角，海报页可「返回自由创作」；「我的」中的海报入口也使用普通页面跳转。
 
-视频按文案、标题标签、声音、画面、BGM/字幕、封面、发布分享七步编辑。模型档位固定为旗舰 `doubao-seedance-2-5`（1080p）、质量 `doubao-seedance-2-0`（720p）、快速 `minimax-video-h3`（480p），生成走原有 video Agent、用户 TokenHub key 和任务队列。模型 ID 需在实际 TokenHub 账户中可用。文案通过受鉴权、限流的 `POST /api/video-drafts` 生成，使用小程序配置的 LLM 并计入用量。
+视频按文案、标题标签、声音、画面、BGM/字幕、封面、发布分享七步编辑。模型档位固定为旗舰 `doubao-seedance-2-5`（1080p）、质量 `doubao-seedance-2-0`（720p）、快速 `doubao-seedance-2-0-fast`（480p），生成走原有 video Agent、用户 TokenHub key 和任务队列。模型 ID 需在实际 TokenHub 账户中可用。文案通过受鉴权、限流的 `POST /api/video-drafts` 生成，使用小程序配置的 LLM 并计入用量。
 
 声音、配乐、字幕、封面文字目前均为视频模型的生成要求，没有独立 TTS 或后期合成；封面图作为首帧替代参考图，页面文字叠层只是示意。生成后需预览检查效果。草稿和未完成任务按用户 ID 保存在本地，切回页面可恢复查询；提交响应丢失时只查询原会话，不自动重提。历史成片在「作品 → 视频」中查看。
 

@@ -13,7 +13,7 @@ describe("video task submission", () => {
     expect(api.createConversation).toHaveBeenCalledWith(expect.any(String), "video", { copy: "开业", tags: "#探店" });
     expect(api.uploadLocalImage).toHaveBeenCalledTimes(1);
     expect(api.uploadLocalImage).toHaveBeenCalledWith("cover.png");
-    expect(api.generate).toHaveBeenCalledWith("video-conv", expect.objectContaining({ mediaType: "video", model: "minimax-video-h3", settings: expect.objectContaining({ resolution: "480p" }), first_frame: "/static/uploads/cover.png" }));
+    expect(api.generate).toHaveBeenCalledWith("video-conv", expect.objectContaining({ mediaType: "video", model: "doubao-seedance-2-0-fast", settings: expect.objectContaining({ resolution: "480p" }), first_frame: "/static/uploads/cover.png" }));
     expect(onConversation).toHaveBeenCalledWith("video-conv");
   });
   it("recovers only this video's task after an uncertain response without resubmitting", async () => {

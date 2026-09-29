@@ -3,7 +3,7 @@ import { api, absoluteMedia, type GenerationResult } from "./api";
 export const VIDEO_MODELS = [
   { label: "旗舰", id: "doubao-seedance-2-5", description: "旗舰创作", resolution: "1080p" },
   { label: "质量", id: "doubao-seedance-2-0", description: "精细画面", resolution: "720p" },
-  { label: "快速", id: "minimax-video-h3", description: "快速出片", resolution: "480p" },
+  { label: "快速", id: "doubao-seedance-2-0-fast", description: "快速出片", resolution: "480p" },
 ];
 export const VIDEO_STEPS = ["文案创作", "标题标签", "声音设置", "视频画面", "BGM·字幕", "视频封面", "生成与分享"];
 export const LAST_VIDEO_STEP = VIDEO_STEPS.length - 1;

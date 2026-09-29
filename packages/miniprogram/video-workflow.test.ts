@@ -4,7 +4,7 @@ import { VIDEO_MODELS, buildVideoPrompt, createVideoDraft, restoreVideoDraft, vi
 describe("video creative brief", () => {
   it("maps all three tiers to the exact requested model IDs", () => {
     expect(VIDEO_MODELS.map(({ label, id }) => [label, id])).toEqual([
-      ["旗舰", "doubao-seedance-2-5"], ["质量", "doubao-seedance-2-0"], ["快速", "minimax-video-h3"],
+      ["旗舰", "doubao-seedance-2-5"], ["质量", "doubao-seedance-2-0"], ["快速", "doubao-seedance-2-0-fast"],
     ]);
   });
   it.each([[0, "1080p"], [1, "720p"], [2, "480p"]] as const)("sends resolution for tier %s independently of aspect ratio", (modelIndex, resolution) => {

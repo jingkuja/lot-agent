@@ -123,7 +123,7 @@ describe("video operation guards", () => {
     expect(page.data.pending).toBe(true);
     expect(api.generate).toHaveBeenCalledTimes(1);
     expect(api.deleteConversation).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
   });
 });
 
@@ -142,7 +142,7 @@ describe("video lost-submission resolution", () => {
     expect(page.data).toMatchObject({ pending: true, conversationId: "conv" });
     expect(page.data.status).toContain("无法确认");
     expect(api.deleteConversation).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
   });
   it("keeps waiting inside the grace period and when the conversation cannot be read", async () => {
     saved["lot:video:owner"] = { conversationId: "conv", pending: true, startedAt: Date.now() - 30_000 };
@@ -191,7 +191,7 @@ describe("video waiting controls", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(page.data.pending).toBe(true);
     expect(api.getTask).toHaveBeenCalledTimes(2);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
   });
   it("does not offer recharge for a spending limit", async () => {
     await page.onShow(); page.data.draft.script = "分镜";
@@ -235,5 +235,63 @@ describe("video waiting controls", () => {
     expect(modal.title).toBe("积分不足");
     modal.success?.({ confirm: true, cancel: false });
     expect(wx.navigateTo).toHaveBeenCalledWith({ url: "/pages/recharge/index" });
+  });
+});
+
+
+describe("video wait-tip lifecycle", () => {
+  it.each([
+    { status: "failed" },
+    { status: "cancelled" },
+    { status: "succeeded", output: { downloadFailed: true } },
+    { status: "succeeded", output: { assets: [{ url: "result.mp4" }] } },
+  ])("stops all timers when a task ends: %j", async (task) => {
+    saved["lot:video:owner"] = { conversationId: "conv", taskId: "task", pending: true };
+    api.getTask.mockResolvedValue(task);
+    await page.onShow(); await vi.advanceTimersByTimeAsync(0);
+    expect(page.data.pending).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(["failed", "cancelled", "download_failed"])("cleans up recovered terminal state: %s", async (status) => {
+    saved["lot:video:owner"] = { conversationId: "conv", pending: true };
+    api.getConversation.mockResolvedValue({ messages: [{ id: "m", role: "assistant", metadata: { kind: "generation", mediaType: "video", status } }] });
+    await page.onShow(); await vi.advanceTimersByTimeAsync(0);
+    expect(page.data.pending).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("stops tips after a rejected submission", async () => {
+    await page.onShow(); page.data.draft.script = "分镜";
+    api.createConversation.mockResolvedValue({ id: "conv" });
+    api.generate.mockRejectedValue({ status: 402 });
+    await page.generate();
+    expect(page.data.pending).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("does not restart tips when conversation creation finishes after hiding", async () => {
+    await page.onShow(); page.data.draft.script = "分镜";
+    let finish!: (value: unknown) => void;
+    api.createConversation.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    api.generate.mockResolvedValue({ taskId: "task" });
+    api.getTask.mockResolvedValue({ status: "running" });
+    const generation = page.generate(); await vi.advanceTimersByTimeAsync(0);
+    page.onHide(); finish({ id: "conv" }); await generation; await vi.advanceTimersByTimeAsync(0);
+    expect(page.data.pending).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    await page.onShow(); await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(2);
+  });
+  it("resets the tip on return and stops updating on account switch", async () => {
+    saved["lot:video:owner"] = { conversationId: "conv", taskId: "task", pending: true };
+    api.getTask.mockResolvedValue({ status: "running" });
+    await page.onShow(); await vi.advanceTimersByTimeAsync(0);
+    const firstTip = page.data.waitTip;
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(page.data.waitTip).not.toBe(firstTip);
+    page.onHide(); await page.onShow(); await vi.advanceTimersByTimeAsync(0);
+    expect(page.data.waitTip).toBe(firstTip);
+    app.globalData.user.id = "other";
+    await page.onShow(); await vi.advanceTimersByTimeAsync(8000);
+    expect(page.data.waitTip).toBe(firstTip);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -5,13 +5,21 @@ import {
   videoResult, videoSignature, videoErrorText, isDefinitiveVideoRejection, type VideoDraft,
 } from "../../services/video";
 
+const WAIT_TIPS = [
+  "视频制作可能需要数分钟",
+  "可以先忙别的，回来继续查看进度",
+  "完成后可在「作品 → 视频」查看",
+  "发布前，记得预览并检查成片效果",
+];
+
 const DOWNLOAD_FAILED_TEXT = "视频已生成，但下载失败。请在网页版作品中重试下载，无需再次付费生成。";
 const POLL_INTERVAL_MS = 5000;
 const PERSIST_DEBOUNCE_MS = 400;
+const TIP_INTERVAL_MS = 4000;
 
 /** Everything about the current attempt; reset together on account switch / new draft. */
 function idleState() {
-  return { step: 0, draft: createVideoDraft(), busy: false, writing: false, pending: false, checking: false, unchanged: false, stale: false, downloadFailed: false, submittedSignature: "", startedAt: 0, elapsed: "", status: "", copyError: "", resultUrl: "", conversationId: "", taskId: "" };
+  return { step: 0, draft: createVideoDraft(), busy: false, writing: false, pending: false, checking: false, unchanged: false, stale: false, downloadFailed: false, submittedSignature: "", startedAt: 0, elapsed: "", status: "", copyError: "", resultUrl: "", conversationId: "", taskId: "", waitTip: WAIT_TIPS[0] };
 }
 
 Page({
@@ -24,6 +32,8 @@ Page({
   },
   timer: null as ReturnType<typeof setTimeout> | null,
   persistTimer: null as ReturnType<typeof setTimeout> | null,
+  tipTimer: null as ReturnType<typeof setInterval> | null,
+  tipIndex: 0,
   storageKey: "", visible: false, unloaded: false,
 
   async onShow() {
@@ -49,14 +59,16 @@ Page({
       }
     }
     this.refreshState();
-    if (this.data.pending) { this.update({ step: LAST_VIDEO_STEP }); void this.checkTask(); }
+    if (this.data.pending) { this.update({ step: LAST_VIDEO_STEP }); this.startTipRotation(); void this.checkTask(); }
   },
-  onHide() { this.visible = false; this.stopPolling(); this.persist(); },
-  onUnload() { this.unloaded = true; this.visible = false; this.stopPolling(); this.persist(); },
+  onHide() { this.visible = false; this.stopPolling(); this.stopTipRotation(); this.persist(); },
+  onUnload() { this.unloaded = true; this.visible = false; this.stopPolling(); this.stopTipRotation(); this.persist(); },
 
   /** setData plus the derived `locked` flag. */
   update(patch: Record<string, unknown>) {
     this.setData(patch);
+    // Every terminal path (including rejection and account reset) releases timers.
+    if (!this.data.pending) { this.stopPolling(); this.stopTipRotation(); }
     const locked = !!(this.data.busy || this.data.writing || this.data.pending);
     if (locked !== this.data.locked) this.setData({ locked });
   },
@@ -86,6 +98,17 @@ Page({
     this.persistTimer = setTimeout(() => { this.persistTimer = null; this.persist(); }, PERSIST_DEBOUNCE_MS);
   },
   stopPolling() { if (this.timer) clearTimeout(this.timer); this.timer = null; },
+  startTipRotation() {
+    this.stopTipRotation();
+    if (!this.visible || this.unloaded || !this.data.pending) return;
+    this.tipIndex = 0;
+    this.setData({ waitTip: WAIT_TIPS[0] });
+    this.tipTimer = setInterval(() => {
+      this.tipIndex = (this.tipIndex + 1) % WAIT_TIPS.length;
+      this.setData({ waitTip: WAIT_TIPS[this.tipIndex] });
+    }, TIP_INTERVAL_MS);
+  },
+  stopTipRotation() { if (this.tipTimer) { clearInterval(this.tipTimer); this.tipTimer = null; } },
   field(e: { currentTarget: { dataset: { field: keyof VideoDraft } }; detail: { value: string } }) {
     if (this.locked()) return;
     this.setData({ [`draft.${e.currentTarget.dataset.field}`]: e.detail.value }); this.persistSoon();
@@ -163,6 +186,7 @@ Page({
         if (this.unloaded || owner !== this.storageKey) throw new Error("页面或登录账户已切换，请重新操作");
         this.update({ conversationId: id, taskId: "", pending: true, resultUrl: "", downloadFailed: false,
           submittedSignature: videoSignature(draft), startedAt: Date.now() });
+        this.startTipRotation();
         // This must be durable before the paid request is sent.
         this.persist();
       });
