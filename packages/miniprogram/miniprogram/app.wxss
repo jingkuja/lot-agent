@@ -72,16 +72,21 @@ page {
   letter-spacing: 2rpx;
 }
 
-.btn {
+.page .btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 88rpx;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
   padding: 0 28rpx;
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 28rpx;
   font-weight: 500;
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .btn:active {
@@ -157,6 +162,12 @@ button[disabled], .btn[disabled] {
 }
 
 .chip {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 12rpx 24rpx;
   border: 1rpx solid var(--line);
   border-radius: 8rpx;
@@ -228,3 +239,15 @@ button::after {
   border: 2rpx solid currentColor;
   transform: rotate(45deg);
 }
+
+/* Override style-v2's platform button width, including on narrow phones. */
+button:not([size="mini"]) {
+  width: auto;
+  margin-left: 0;
+  margin-right: 0;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+button::after { pointer-events: none; }
+.page .field, .page .input, .page .area { min-width: 0; }
+.page .input { min-height: 44px; }

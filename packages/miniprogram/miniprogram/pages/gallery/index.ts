@@ -188,8 +188,8 @@ Page({
     wx.switchTab({ url: this.data.mediaType === "video" ? "/pages/video/index" : "/pages/studio/index" });
   },
 
-  open(e: { currentTarget: { dataset: { src: string; title: string; generating?: boolean } } }) {
-    const { src, title, generating } = e.currentTarget.dataset;
+  open(e: { currentTarget: { dataset: { id?: string; src: string; title: string; generating?: boolean } } }) {
+    const { id, src, title, generating } = e.currentTarget.dataset;
     if (generating) {
       wx.showToast({ title: "这张还在生成中", icon: "none" });
       return;
@@ -198,8 +198,20 @@ Page({
       wx.showToast({ title: "这张还没生成好", icon: "none" });
       return;
     }
+    let publication = this.data.items.find((item: GalleryItem) => item.id === id)?.metadata?.videoPublication;
+    if (this.data.mediaType === "video") {
+      // Older attempts only kept publication fields in the account's local draft.
+      const saved = wx.getStorageSync(`lot:video:${getApp().globalData.user?.id || "debug"}`) as { conversationId?: unknown; draft?: { publishTitle?: unknown; mainTitle?: unknown; tags?: unknown } } | undefined;
+      if (id && saved?.conversationId === id && saved.draft) {
+        const draft = saved.draft;
+        publication = { copy: typeof draft.publishTitle === "string" && draft.publishTitle ? draft.publishTitle : (typeof draft.mainTitle === "string" ? draft.mainTitle : ""), tags: typeof draft.tags === "string" ? draft.tags : "" };
+        void api.saveVideoPublication(id, publication).catch(() => {});
+      }
+    }
+    const displayTitle = publication ? [publication.copy, publication.tags].filter(Boolean).join(" ") : title || "";
+    const extra = publication ? `&copy=${encodeURIComponent(publication.copy)}&tags=${encodeURIComponent(publication.tags)}` : "";
     wx.navigateTo({
-      url: `/pages/preview/index?type=${this.data.mediaType}&src=${encodeURIComponent(src)}&title=${encodeURIComponent(title || "")}`,
+      url: `/pages/preview/index?type=${this.data.mediaType}&src=${encodeURIComponent(src)}&title=${encodeURIComponent(displayTitle)}${extra}`,
     });
   },
 });

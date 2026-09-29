@@ -9,8 +9,8 @@ beforeEach(() => {
 describe("video task submission", () => {
   it("uses video agent, exact tier model, and cover as first frame", async () => {
     const onConversation = vi.fn();
-    expect(await submitVideo({ ...createVideoDraft(), script: "镜头", modelIndex: 2, cover: "cover.png", reference: "reference.png" }, onConversation)).toEqual({ conversationId: "video-conv", taskId: "job1" });
-    expect(api.createConversation).toHaveBeenCalledWith(expect.any(String), "video");
+    expect(await submitVideo({ ...createVideoDraft(), script: "镜头", publishTitle: "开业", tags: "#探店", modelIndex: 2, cover: "cover.png", reference: "reference.png" }, onConversation)).toEqual({ conversationId: "video-conv", taskId: "job1" });
+    expect(api.createConversation).toHaveBeenCalledWith(expect.any(String), "video", { copy: "开业", tags: "#探店" });
     expect(api.uploadLocalImage).toHaveBeenCalledTimes(1);
     expect(api.uploadLocalImage).toHaveBeenCalledWith("cover.png");
     expect(api.generate).toHaveBeenCalledWith("video-conv", expect.objectContaining({ mediaType: "video", model: "minimax-video-h3", settings: expect.objectContaining({ resolution: "480p" }), first_frame: "/static/uploads/cover.png" }));

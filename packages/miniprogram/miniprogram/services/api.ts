@@ -30,6 +30,7 @@ export interface Conversation {
   agent_id: string;
   updated_at: string;
   preview_url?: string | null;
+  metadata?: { videoPublication?: { copy: string; tags: string } };
 }
 
 export interface TaskStatus {
@@ -236,11 +237,14 @@ export const api = {
 
   videoCopy: (topic: string) => request<{ script: string; mainTitle: string; subtitle: string; publishTitle: string; tags: string }>("/video-drafts", { method: "POST", data: { topic }, timeout: 120000 }),
 
-  createConversation: (title?: string, agentId = IMAGE_AGENT_ID) =>
+  createConversation: (title?: string, agentId = IMAGE_AGENT_ID, videoPublication?: { copy: string; tags: string }) =>
     request<Conversation>("/conversations", {
       method: "POST",
-      data: { title: title ?? "新对话", agentId },
+      data: { title: title ?? "新对话", agentId, ...(videoPublication ? { videoPublication } : {}) },
     }),
+
+  saveVideoPublication: (id: string, publication: { copy: string; tags: string }) =>
+    request<{ ok: boolean }>(`/conversations/${encodeURIComponent(id)}/video-publication`, { method: "PUT", data: publication }),
 
   deleteConversation: (id: string) =>
     request<{ ok: boolean }>(`/conversations/${encodeURIComponent(id)}`, {

@@ -86,3 +86,15 @@
   text-align: left;
   font-size: 20rpx;
 }
+
+/* Equal columns must not inherit the full-width primary button rule. */
+.page .row .half { flex: 1 1 0%; width: 0; min-width: 0; min-height: 44px; padding: 8rpx; }
+.revoke { min-height: 44px; }
+@media (max-width: 360px) {
+  .panel { padding-left: 24rpx; padding-right: 24rpx; }
+  .row { gap: 12rpx; }
+  .half { font-size: 24rpx; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .hero { height: 55vh; }
+}

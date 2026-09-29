@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
+import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
@@ -18,6 +19,14 @@ import {
 } from "../miniprogram/models.js";
 
 type Variables = { userId: string };
+
+function validVideoPublication(value: unknown): value is { copy: string; tags: string } {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Record<string, unknown>;
+  return typeof data.copy === "string" && data.copy.length <= 10000
+    && typeof data.tags === "string" && data.tags.length <= 2000;
+}
+
 
 /** Server-side cap (the InputBox MAX_FILES=5 is only a client hint). */
 const MAX_ATTACHMENTS = 5;
@@ -145,7 +154,7 @@ export function createConversationRoutes(service: AgentService): Hono {
   // Create conversation — owned by current user
   app.post("/", async (c) => {
     const userId = c.get("userId");
-    const body = await c.req.json<{ title?: string; agentId?: string; featureScope?: string; projectId?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ title?: string; agentId?: string; featureScope?: string; projectId?: string; videoPublication?: unknown }>().catch(() => ({}));
     if (body.projectId !== undefined && (typeof body.projectId !== "string" || !await service.db.ownsConversationProject(body.projectId, userId))) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -163,6 +172,12 @@ export function createConversationRoutes(service: AgentService): Hono {
           : service["llmConfig"].anthropic.model;
     const provider = isDigitalEmployee ? undefined : service["llmConfig"].default;
     let metadata: Record<string, unknown> | undefined;
+    if (body.videoPublication !== undefined) {
+      if (agentId !== "video" || !validVideoPublication(body.videoPublication)) {
+        return c.json({ error: "Invalid video publication" }, 400);
+      }
+      metadata = { videoPublication: { copy: body.videoPublication.copy, tags: body.videoPublication.tags } };
+    }
     if (isDigitalEmployee) {
       const featureScope = parseDigitalEmployeeFeatureScope(body.featureScope);
       if (!featureScope) {
@@ -174,6 +189,16 @@ export function createConversationRoutes(service: AgentService): Hono {
       id, title, model, provider, agentId, userId, metadata, body.projectId
     );
     return c.json(conversation, 201);
+  });
+
+  app.put("/:id/video-publication", async (c) => {
+    const id = c.req.param("id");
+    const conv = await service.db.getConversation(id);
+    if (!conv || conv.user_id !== c.get("userId")) return c.json({ error: "Not found" }, 404);
+    const body: unknown = await c.req.json().catch(() => null);
+    if (conv.agent_id !== "video" || !validVideoPublication(body)) return c.json({ error: "Invalid video publication" }, 400);
+    await service.db.mergeConversationMetadata(id, { videoPublication: { copy: body.copy, tags: body.tags } });
+    return c.json({ ok: true });
   });
 
   // Get conversation with messages — ownership check
@@ -592,11 +617,11 @@ export function createGenerationRoutes(service: AgentService) {
       const modelId = mediaType === "image"
         ? "gpt-image-2"
         : resolvedModel ?? "kling-video-v3-omni";
-      const cfg = service.modelRegistry.getConfig(modelId);
+      const cfg = makePricingLookup((id) => service.modelRegistry.getConfig(id), service.modelCatalog, mediaType)(modelId);
       const outputCount = mediaType === "image" ? Number(settings.n ?? 1) : billedVideoSeconds(settings.durationSec);
       const estimatedCost = cfg ? estimateCost(cfg, { outputCount }) : 0;
       const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
-      if (!quota.ok) return c.json({ error: quota.reason, estimatedCost }, 402);
+      if (!quota.ok) return c.json({ error: quota.reason, code: quota.code, estimatedCost }, 402);
 
       // Persist user message.
       const userMessageId = randomUUID();

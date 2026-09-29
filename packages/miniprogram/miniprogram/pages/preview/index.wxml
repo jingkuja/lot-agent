@@ -23,11 +23,10 @@
       <button wx:else class="btn btn-ghost half" bindtap="share">分享原图</button>
     </view>
     <view wx:if="{{isVideo}}" class="row">
-      <button class="btn btn-soft half" data-platform="抖音" bindtap="publishTo" disabled="{{saving}}">发布抖音 ↗</button>
-      <button class="btn btn-soft half" data-platform="小红书" bindtap="publishTo" disabled="{{saving}}">发布小红书 ↗</button>
+      <button class="btn btn-soft half" bindtap="copyText">文案复制</button>
+      <button class="btn btn-soft half" bindtap="copyTags" disabled="{{!tags}}">标签复制</button>
     </view>
-    <text wx:if="{{isVideo}}" class="muted note">抖音、小红书：保存视频并复制文案后，前往对应 App 完成发布。</text>
-    <button wx:else class="btn btn-soft full" bindtap="retouch">再修一版</button>
+    <button wx:if="{{!isVideo}}" class="btn btn-soft full" bindtap="retouch">再修一版</button>
     <button wx:if="{{!shared}}" hidden="{{!shareToken}}" class="revoke" disabled="{{sharing}}" bindtap="revokeShare">撤销作品分享</button>
     <text class="muted note">{{shared ? '分享卡片可打开这件作品；保存作品后可自行分享。' : '创建卡片后，获得卡片的人可查看这件作品。可随时撤销分享。'}}</text>
   </view>

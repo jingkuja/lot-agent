@@ -102,7 +102,10 @@ Page({
     if (step > 0 && !this.data.draft.script.trim()) { wx.showToast({ title: "请先填写或生成文案", icon: "none" }); return; }
     this.setData({ step: Math.max(0, Math.min(LAST_VIDEO_STEP, step)) }); this.persist();
   },
-  previous() { if (this.locked()) return; this.setData({ step: Math.max(0, this.data.step - 1) }); this.persist(); },
+  previous() {
+    if (this.locked() || (this.data.step === LAST_VIDEO_STEP && (this.data.resultUrl || this.data.downloadFailed))) return;
+    this.setData({ step: Math.max(0, this.data.step - 1) }); this.persist();
+  },
   next() {
     if (this.locked()) return;
     if (this.data.step === 0 && !this.data.draft.script.trim()) { wx.showToast({ title: "请先填写或生成文案", icon: "none" }); return; }
@@ -169,9 +172,9 @@ Page({
       if (this.unloaded || owner !== this.storageKey) return;
       if (isDefinitiveVideoRejection(error)) this.update({ pending: false, conversationId: "", taskId: "" });
       this.update({ status: videoErrorText(error, "提交失败，请检查网络或账户积分") }); this.persist();
-      if ((error as { status?: number } | null)?.status === 402) {
+      if ((error as { code?: string } | null)?.code === "INSUFFICIENT_BALANCE") {
         wx.showModal({ title: "积分不足", content: "当前积分不足以生成这条视频，充值后可继续。", confirmText: "去充值", cancelText: "稍后再说",
-          success: ({ confirm }) => { if (confirm) wx.navigateTo({ url: "/pages/recharge/index" }); } });
+          success: ({ confirm }) => { if (confirm && !this.unloaded && owner === this.storageKey) wx.navigateTo({ url: "/pages/recharge/index" }); } });
       }
     } finally {
       if (!this.unloaded && owner === this.storageKey) {
@@ -195,9 +198,8 @@ Page({
         if (!current()) return;
         if (!generation) {
           if (this.data.startedAt && Date.now() - this.data.startedAt > VIDEO_SUBMIT_GRACE_MS) {
-            // Nothing was persisted server-side, so nothing was billed; the empty conversation is ours to drop.
-            this.update({ pending: false, conversationId: "", taskId: "", status: "上次提交未到达服务器，未消耗积分，可重新生成" });
-            api.deleteConversation(conversationId).catch(() => {});
+            // Absence of a message is not proof that a delayed request cannot still enqueue.
+            this.setData({ status: "暂时无法确认提交结果，请继续查询；原提交仍可能执行并消耗积分" });
           } else this.setData({ status: "提交结果仍待确认，请稍后查询进度" });
           return;
         }
@@ -231,15 +233,20 @@ Page({
     if (!this.data.pending || !this.data.stale || this.data.busy) return;
     const owner = this.storageKey;
     this.update({ busy: true });
-    wx.showModal({ title: "不再等待这条视频", content: "任务会在后台继续，完成后可在「作品 → 视频」查看。之后再点生成会是一次新的付费生成。", confirmText: "不再等待", cancelText: "继续等待", success: ({ confirm }) => {
+    const resume = () => {
+      if (this.unloaded || owner !== this.storageKey) return;
+      this.update({ busy: false });
+      if (this.data.pending && this.visible) void this.checkTask();
+    };
+    wx.showModal({ title: "不再等待这条视频", content: "停止等待不会取消原提交，原提交仍可能执行并消耗积分，完成后可在「作品 → 视频」查看。之后再点生成会是一次新的付费生成。", confirmText: "不再等待", cancelText: "继续等待", success: ({ confirm }) => {
       if (this.unloaded || owner !== this.storageKey) return;
       if (confirm) {
         this.stopPolling();
-        this.update({ pending: false, conversationId: "", taskId: "", startedAt: 0, status: "已停止等待，任务仍在后台进行，完成后见「作品」" });
+        this.update({ pending: false, conversationId: "", taskId: "", startedAt: 0, status: "已停止等待，原提交仍可能执行并消耗积分，完成后见「作品」" });
         this.persist();
       }
-      this.update({ busy: false });
-    }, fail: () => { if (!this.unloaded && owner === this.storageKey) this.update({ busy: false }); } });
+      resume();
+    }, fail: resume });
   },
   newDraft() {
     if (this.locked()) return;
@@ -256,9 +263,20 @@ Page({
     }, fail: () => { if (!this.unloaded && owner === this.storageKey) this.update({ busy: false }); } });
   },
 
-  openResult() {
+  async openResult() {
     if (!this.data.resultUrl) return;
-    const title = [this.data.draft.publishTitle || this.data.draft.mainTitle, this.data.draft.tags].filter(Boolean).join(" ");
-    wx.navigateTo({ url: `/pages/preview/index?type=video&src=${encodeURIComponent(this.data.resultUrl)}&title=${encodeURIComponent(title)}` });
+    const copy = this.data.draft.publishTitle || this.data.draft.mainTitle;
+    const tags = this.data.draft.tags;
+    const title = [copy, tags].filter(Boolean).join(" ");
+    const owner = this.storageKey;
+    const resultUrl = this.data.resultUrl;
+    if (this.data.conversationId) {
+      // Preview already receives these fields; syncing must not delay navigation.
+      void api.saveVideoPublication(this.data.conversationId, { copy, tags }).catch(() => {
+        if (!this.unloaded && owner === this.storageKey) wx.showToast({ title: "发布信息同步失败，本机草稿已保留", icon: "none" });
+      });
+    }
+    if (this.unloaded || owner !== this.storageKey || resultUrl !== this.data.resultUrl) return;
+    wx.navigateTo({ url: `/pages/preview/index?type=video&src=${encodeURIComponent(this.data.resultUrl)}&title=${encodeURIComponent(title)}&copy=${encodeURIComponent(copy)}&tags=${encodeURIComponent(tags)}` });
   },
 });

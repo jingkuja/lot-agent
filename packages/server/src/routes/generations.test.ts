@@ -44,6 +44,20 @@ function app(service: any) {
 }
 
 describe("POST /conversations/:id/generations", () => {
+  it("estimates dynamic video models with video catalog pricing and returns a quota code", async () => {
+    const service = fakeService();
+    service.modelRegistry.getConfig.mockReturnValue(undefined);
+    service.modelCatalog = { providerMap: {}, defaultProvider: { video: "openai-video" }, pricing: {}, defaultPricing: { video: { inputPrice: 0, outputPrice: 0, unitPrice: 0.7 } } };
+    service.usageMeter.checkQuota.mockResolvedValue({ ok: false, reason: "daily limit", code: "DAILY_LIMIT_EXCEEDED" });
+    const response = await app(service).request("/conversations/c1/generations", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "视频", mediaType: "video", model: "doubao-seedance-2-5", settings: { durationSec: 10 } }),
+    });
+    expect(service.usageMeter.checkQuota).toHaveBeenCalledWith("u1", 7);
+    expect(response.status).toBe(402);
+    expect(await response.json()).toMatchObject({ code: "DAILY_LIMIT_EXCEEDED", estimatedCost: 7 });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
   it("returns the queued task before a slow title model finishes", async () => {
     const service = fakeService();
     let finish!: (title: string) => void;

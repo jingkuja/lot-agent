@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ getTask: vi.fn(), getConversation: vi.fn(), videoCopy: vi.fn(), generate: vi.fn(), createConversation: vi.fn(), deleteConversation: vi.fn() }));
+const api = vi.hoisted(() => ({ getTask: vi.fn(), getConversation: vi.fn(), videoCopy: vi.fn(), generate: vi.fn(), createConversation: vi.fn(), deleteConversation: vi.fn(), saveVideoPublication: vi.fn() }));
 vi.mock("./miniprogram/services/api", () => ({ api, absoluteMedia: (url: string) => url || "" }));
 let page: any;
 let app: any;
@@ -135,14 +135,14 @@ describe("video lost-submission resolution", () => {
     expect(page.data).toMatchObject({ pending: false, resultUrl: "/static/assets/late.mp4" });
     expect(api.getTask).not.toHaveBeenCalled();
   });
-  it("unlocks a submission that never reached the server once the grace period is over", async () => {
+  it("keeps an uncertain submission recoverable beyond the grace period", async () => {
     saved["lot:video:owner"] = { conversationId: "conv", pending: true, startedAt: Date.now() - 4 * 60_000 };
     api.getConversation.mockResolvedValue({ messages: [] }); api.deleteConversation.mockResolvedValue({ ok: true });
     await page.onShow(); await vi.advanceTimersByTimeAsync(0);
-    expect(page.data).toMatchObject({ pending: false, conversationId: "" });
-    expect(page.data.status).toContain("未消耗积分");
-    expect(api.deleteConversation).toHaveBeenCalledWith("conv");
-    expect(vi.getTimerCount()).toBe(0);
+    expect(page.data).toMatchObject({ pending: true, conversationId: "conv" });
+    expect(page.data.status).toContain("无法确认");
+    expect(api.deleteConversation).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
   });
   it("keeps waiting inside the grace period and when the conversation cannot be read", async () => {
     saved["lot:video:owner"] = { conversationId: "conv", pending: true, startedAt: Date.now() - 30_000 };
@@ -152,6 +152,18 @@ describe("video lost-submission resolution", () => {
     api.getConversation.mockRejectedValue({ status: 0 });
     await vi.advanceTimersByTimeAsync(5000);
     expect(page.data.pending).toBe(true); expect(page.data.status).toContain("暂时无法查询");
+  });
+});
+
+describe("video preview navigation", () => {
+  it("opens immediately even when publication sync has not responded", async () => {
+    await page.onShow();
+    Object.assign(wx, { navigateTo: vi.fn() });
+    page.data.resultUrl = "result.mp4"; page.data.conversationId = "conv";
+    page.data.draft.publishTitle = "开业"; page.data.draft.tags = "#探店";
+    api.saveVideoPublication.mockImplementation(() => new Promise(() => {}));
+    await page.openResult();
+    expect(wx.navigateTo).toHaveBeenCalledWith(expect.objectContaining({ url: expect.stringContaining("/pages/preview/index?") }));
   });
 });
 
@@ -165,6 +177,29 @@ describe("video waiting controls", () => {
     expect(page.data).toMatchObject({ pending: false, conversationId: "", taskId: "", locked: false });
     expect(vi.getTimerCount()).toBe(0);
     expect(api.generate).not.toHaveBeenCalled();
+  });
+  it.each(["cancel", "fail"])("resumes polling after a delayed stop-waiting modal: %s", async (outcome) => {
+    saved["lot:video:owner"] = { conversationId: "conv", taskId: "task", pending: true, startedAt: Date.now() - 31 * 60_000 };
+    api.getTask.mockResolvedValue({ status: "running" });
+    await page.onShow(); await vi.advanceTimersByTimeAsync(0);
+    vi.mocked(wx.showModal).mockImplementation(() => {});
+    page.stopWaiting();
+    await vi.advanceTimersByTimeAsync(5000);
+    const modal = vi.mocked(wx.showModal).mock.calls.at(-1)![0];
+    if (outcome === "cancel") modal.success?.({ confirm: false, cancel: true });
+    else modal.fail?.({ errMsg: "failed" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(page.data.pending).toBe(true);
+    expect(api.getTask).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+  it("does not offer recharge for a spending limit", async () => {
+    await page.onShow(); page.data.draft.script = "分镜";
+    api.createConversation.mockResolvedValue({ id: "conv" }); api.deleteConversation.mockResolvedValue({ ok: true });
+    api.generate.mockRejectedValue(Object.assign(new Error("daily limit"), { status: 402, code: "DAILY_LIMIT_EXCEEDED" }));
+    await page.generate();
+    expect(page.data.status).toContain("每日消费限额");
+    expect(wx.showModal).toHaveBeenCalledTimes(1);
   });
   it("is not stale for a fresh task", async () => {
     saved["lot:video:owner"] = { conversationId: "conv", taskId: "task", pending: true, startedAt: Date.now() };
@@ -192,7 +227,7 @@ describe("video waiting controls", () => {
   it("points to recharge when the submission is rejected for quota", async () => {
     await page.onShow(); page.data.draft.script = "分镜";
     api.createConversation.mockResolvedValue({ id: "conv" }); api.deleteConversation.mockResolvedValue({ ok: true });
-    api.generate.mockRejectedValue(Object.assign(new Error("daily limit"), { status: 402 }));
+    api.generate.mockRejectedValue(Object.assign(new Error("balance"), { status: 402, code: "INSUFFICIENT_BALANCE" }));
     vi.stubGlobal("wx", { ...wx, navigateTo: vi.fn() });
     await page.generate();
     expect(page.data).toMatchObject({ pending: false, conversationId: "", status: "账户积分不足，请充值后再试" });

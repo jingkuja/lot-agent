@@ -1,6 +1,7 @@
 import { KnowledgeJobs } from "../knowledge/ingestion/jobs.js";
 import { Hono } from "hono";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
+import { makePricingLookup } from "../billing/pricing-lookup.js";
 import type { AgentService } from "../services/agent-service.js";
 import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 
@@ -87,12 +88,12 @@ export function createTaskRoutes(service: AgentService) {
       const selectedModel = typeof safeInput.modelId === "string" && safeInput.modelId
         ? safeInput.modelId
         : "kling-video-v3-omni";
-      const cfg = service.modelRegistry.getConfig(selectedModel);
+      const cfg = makePricingLookup((id) => service.modelRegistry.getConfig(id), service.modelCatalog, "video")(selectedModel);
       estimatedCost = cfg ? estimateCost(cfg, { outputCount: billedVideoSeconds(safeInput.durationSec) }) : 0;
     }
     const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
     if (!quota.ok) {
-      return c.json({ error: quota.reason, estimatedCost }, 402);
+      return c.json({ error: quota.reason, code: quota.code, estimatedCost }, 402);
     }
 
     const jobId = await service.jobQueue.enqueue(type, safeInput, userId);

@@ -54,7 +54,7 @@ describe("video prompt titles", () => {
 
 describe("video error text", () => {
   it("maps quota exhaustion and hides internal English messages", () => {
-    expect(videoErrorText(Object.assign(new Error("daily limit 5 would be exceeded"), { status: 402 }), "x")).toBe("账户积分不足，请充值后再试");
+    expect(videoErrorText(Object.assign(new Error("daily limit 5 would be exceeded"), { status: 402 }), "x")).toBe("暂时无法生成，请检查账户余额或消费限额");
     expect(videoErrorText(Object.assign(new Error("first_frame must be a non-empty URL string"), { status: 400 }), "提交失败")).toBe("提交失败");
     expect(videoErrorText(new Error("提交结果待确认，请点「查询进度」"), "x")).toBe("提交结果待确认，请点「查询进度」");
     expect(videoErrorText("boom", "回退")).toBe("回退");

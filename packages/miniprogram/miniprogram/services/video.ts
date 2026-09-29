@@ -11,8 +11,7 @@ export const VIDEO_VOICES = ["自然旁白", "温柔女声", "沉稳男声", "�
 export const VIDEO_MUSIC = ["无配乐", "轻快", "舒缓", "电影感", "动感"];
 export const VIDEO_RATIOS = ["9:16", "16:9", "1:1"];
 export const VIDEO_DURATIONS = [5, 10];
-/** The server finishes a submission it received even after the client disconnects, so a
- * conversation still without a generation message this long after submit was never submitted. */
+/** After this delay explain the uncertainty; it is never proof of an unbilled submission. */
 export const VIDEO_SUBMIT_GRACE_MS = 3 * 60_000;
 /** After this long the user may stop waiting on this page; the task itself keeps running. */
 export const VIDEO_TASK_STALE_MS = 30 * 60_000;
@@ -67,14 +66,20 @@ export function isDefinitiveVideoRejection(error: unknown): boolean {
 /** Page-facing text for a failed request. Server rejections are English/internal, so only
  * Chinese (already user-facing) messages pass through; quota exhaustion gets a specific hint. */
 export function videoErrorText(error: unknown, fallback: string): string {
-  if ((error as { status?: number } | null)?.status === 402) return "账户积分不足，请充值后再试";
+  if ((error as { status?: number } | null)?.status === 402) {
+    const code = (error as { code?: string }).code;
+    if (code === "DAILY_LIMIT_EXCEEDED") return "已达到每日消费限额，请调整限额或明日再试";
+    if (code === "MONTHLY_LIMIT_EXCEEDED") return "已达到每月消费限额，请调整限额或下月再试";
+    if (code === "INSUFFICIENT_BALANCE") return "账户积分不足，请充值后再试";
+    return "暂时无法生成，请检查账户余额或消费限额";
+  }
   const message = error instanceof Error ? error.message : "";
   return /[\u4e00-\u9fff]/.test(message) ? message : fallback;
 }
 
 /** Submission and polling are separate so hiding the page never loses a queued task. */
 export async function submitVideo(draft: VideoDraft, onConversation: (id: string) => void): Promise<{ conversationId: string; taskId: string }> {
-  const conv = await api.createConversation(draft.publishTitle || draft.mainTitle || draft.topic.slice(0, 24) || "视频创作", "video");
+  const conv = await api.createConversation(draft.publishTitle || draft.mainTitle || draft.topic.slice(0, 24) || "视频创作", "video", { copy: draft.publishTitle || draft.mainTitle, tags: draft.tags });
   let firstFrame: string | undefined;
   try {
     const ref = draft.cover || draft.reference;
@@ -119,8 +124,7 @@ export interface VideoGeneration {
   downloadFailed: boolean;
 }
 
-/** Returns null when the conversation has no video generation message (or no longer exists):
- * nothing was persisted, so nothing was billed. */
+/** Null only means no visible generation message; it does not prove the request cannot execute. */
 export async function findVideoGeneration(conversationId: string): Promise<VideoGeneration | null> {
   let conv: Awaited<ReturnType<typeof api.getConversation>>;
   try {

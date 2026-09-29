@@ -32,6 +32,8 @@ Page({
     saving: false,
     src: "",
     title: "",
+    publishingCopy: null as string | null,
+    tags: null as string | null,
     shareToken: "",
     shared: false,
     loading: false,
@@ -41,12 +43,14 @@ Page({
 
   sharedToken: "",
 
-  onLoad(query: { src?: string; title?: string; share?: string; type?: string }) {
+  onLoad(query: { src?: string; title?: string; share?: string; type?: string; copy?: string; tags?: string }) {
     wx.hideShareMenu({ menus: ["shareAppMessage", "shareTimeline"] });
     this.sharedToken = query.share || "";
     this.setData({
       src: query.share ? "" : decode(query.src),
       title: query.share ? "" : decode(query.title),
+      publishingCopy: !query.share && query.copy !== undefined ? decode(query.copy) : null,
+      tags: !query.share ? (query.tags !== undefined ? decode(query.tags) : (decode(query.title).match(/#[^\s#]+/g) || []).join(" ")) : "",
       shared: !!query.share,
       isVideo: !query.share && query.type === "video",
     });
@@ -79,7 +83,7 @@ Page({
     this.setData({ loading: true, error: "", src: "" });
     try {
       const work = await api.sharedImage(this.sharedToken);
-      this.setData({ src: absoluteMedia(work.url), title: work.title, isVideo: work.mime === "video/mp4" });
+      this.setData({ src: absoluteMedia(work.url), title: work.title, tags: (work.title.match(/#[^\s#]+/g) || []).join(" "), isVideo: work.mime === "video/mp4" });
       this.setShareToken(this.sharedToken);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "作品加载失败，请重试" });
@@ -136,13 +140,22 @@ Page({
     wx.showModal({ title: "分享到朋友圈", content: "请点击右上角「···」，选择「分享到朋友圈」。也可以保存视频后，在朋友圈选择相册中的视频发布。", showCancel: false });
   },
 
-  async publishTo(e: { currentTarget: { dataset: { platform: string } } }) {
-    const platform = e.currentTarget.dataset.platform;
-    if (!this.data.isVideo || !this.data.src || this.data.saving) return;
-    if (!await this.save()) return;
-    wx.setClipboardData({ data: this.data.title || "我的视频创作", success: () => {
-      wx.showModal({ title: `去${platform}发布`, content: `视频已保存，发布文案已复制。请打开${platform}，从相册选择视频并粘贴文案后发布。`, showCancel: false });
-    } });
+  copyText() { this.copyPublication("text"); },
+  copyTags() { this.copyPublication("tags"); },
+  copyPublication(kind: "text" | "tags") {
+    const title = this.data.title;
+    const value = kind === "text"
+      ? this.data.publishingCopy ?? title.replace(/#[^\s#]+/g, "").trim()
+      : this.data.tags ?? (title.match(/#[^\s#]+/g) || []).join(" ");
+    const label = kind === "text" ? "文案" : "标签";
+    if (!value.trim()) {
+      wx.showToast({ title: `暂无可复制的${label}`, icon: "none" });
+      return;
+    }
+    wx.setClipboardData({ data: value.trim(),
+      success: () => wx.showToast({ title: `${label}已复制`, icon: "success" }),
+      fail: () => wx.showToast({ title: "复制失败，请重试", icon: "none" }),
+    });
   },
 
   preview() {

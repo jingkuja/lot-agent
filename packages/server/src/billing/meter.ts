@@ -37,13 +37,14 @@ export class UsageMeter {
   async checkQuota(
     userId: string,
     estimatedCost: number
-  ): Promise<{ ok: boolean; reason?: string }> {
+  ): Promise<{ ok: boolean; reason?: string; code?: "DAILY_LIMIT_EXCEEDED" | "MONTHLY_LIMIT_EXCEEDED" }> {
     const bal = await this.db.ensureUserBalance(userId);
     if (bal.daily_limit != null) {
       const spent = await this.db.getDailySpend(userId);
       if (spent + estimatedCost > bal.daily_limit) {
         return {
           ok: false,
+          code: "DAILY_LIMIT_EXCEEDED",
           reason: `daily limit ${bal.daily_limit} would be exceeded (spent ${spent.toFixed(4)}, est +${estimatedCost.toFixed(4)})`,
         };
       }
@@ -53,6 +54,7 @@ export class UsageMeter {
       if (spent + estimatedCost > bal.monthly_limit) {
         return {
           ok: false,
+          code: "MONTHLY_LIMIT_EXCEEDED",
           reason: `monthly limit ${bal.monthly_limit} would be exceeded`,
         };
       }

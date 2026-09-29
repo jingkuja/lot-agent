@@ -225,12 +225,14 @@ async function main() {
       provider,
       storage,
       db,
-      meter,
+      meter: mediaType === "video"
+        ? new UsageMeter(db, makePricingLookup((id) => modelMap.get(id), modelCatalog, "video"))
+        : meter,
       cache,
       updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
       urlToBytes: (url, o) => urlToBytes(url, maxBytes, { ...o, timeoutMs: downloadTimeoutMs }),
       extFor,
-      modelId: base.modelId,
+      modelId: mediaType === "video" ? model : base.modelId,
       vendorModel: model,
       signal,
     };

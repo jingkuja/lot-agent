@@ -163,7 +163,7 @@ declare const wx: {
     success?: (res: { tapIndex: number }) => void;
   }): void;
   setNavigationBarTitle(opts: { title: string }): void;
-  setClipboardData(opts: { data: string; success?: () => void }): void;
+  setClipboardData(opts: { data: string; success?: () => void; fail?: (err: { errMsg: string }) => void }): void;
   navigateTo(opts: { url: string }): void;
   redirectTo(opts: { url: string }): void;
   reLaunch(opts: { url: string }): void;

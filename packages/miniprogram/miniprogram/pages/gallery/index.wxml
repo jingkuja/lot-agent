@@ -22,7 +22,7 @@
       <text>{{items.length}} 件</text>
     </view>
     <view class="wall">
-      <view class="cell {{item.generating ? 'cell-generating' : ''}}" wx:for="{{items}}" wx:key="id" data-src="{{item.preview}}" data-title="{{item.title}}" data-generating="{{item.generating}}" bindtap="open">
+      <view class="cell {{item.generating ? 'cell-generating' : ''}}" wx:for="{{items}}" wx:key="id" data-id="{{item.id}}" data-src="{{item.preview}}" data-title="{{item.title}}" data-generating="{{item.generating}}" bindtap="open">
         <view wx:if="{{item.generating}}" class="cell-busy">
           <view class="generation-grain"></view>
           <view class="generation-grain generation-grain-secondary"></view>

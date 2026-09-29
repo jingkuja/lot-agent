@@ -65,10 +65,23 @@ describe("video share and save", () => {
     expect(wx.saveVideoToPhotosAlbum).toHaveBeenCalledWith(expect.objectContaining({ filePath: "local.mp4" }));
     expect(wx.saveImageToPhotosAlbum).not.toHaveBeenCalled();
   });
-  it("does not claim publishing succeeded when video saving failed", async () => {
-    page.setData({ isVideo: true, src: "video.mp4" }); page.save = vi.fn().mockResolvedValue(false);
-    Object.assign(wx, { setClipboardData: vi.fn(), showModal: vi.fn() });
-    await page.publishTo({ currentTarget: { dataset: { platform: "抖音" } } });
-    expect(wx.setClipboardData).not.toHaveBeenCalled(); expect(wx.showModal).not.toHaveBeenCalled();
+  it("copies publishing text and tags separately without saving the video", () => {
+    Object.assign(wx, { setClipboardData: vi.fn() });
+    page.onLoad({ type: "video", src: "video.mp4", title: encodeURIComponent("开业啦 #火锅 #探店"), copy: encodeURIComponent("开业啦"), tags: encodeURIComponent("#火锅 #探店") });
+    page.save = vi.fn();
+    page.copyText(); page.copyTags();
+    expect(wx.setClipboardData).toHaveBeenNthCalledWith(1, expect.objectContaining({ data: "开业啦" }));
+    expect(wx.setClipboardData).toHaveBeenNthCalledWith(2, expect.objectContaining({ data: "#火锅 #探店" }));
+    expect(page.save).not.toHaveBeenCalled();
+  });
+  it("extracts tags from older combined titles and handles missing tags", () => {
+    Object.assign(wx, { setClipboardData: vi.fn() });
+    page.onLoad({ type: "video", title: encodeURIComponent("开业啦 #火锅 #探店") });
+    page.copyText(); page.copyTags();
+    expect(wx.setClipboardData).toHaveBeenNthCalledWith(1, expect.objectContaining({ data: "开业啦" }));
+    expect(wx.setClipboardData).toHaveBeenNthCalledWith(2, expect.objectContaining({ data: "#火锅 #探店" }));
+    page.onLoad({ type: "video", title: "开业啦" }); page.copyTags();
+    expect(wx.setClipboardData).toHaveBeenCalledTimes(2);
+    expect(wx.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "暂无可复制的标签" }));
   });
 });

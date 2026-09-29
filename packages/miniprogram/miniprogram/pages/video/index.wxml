@@ -50,12 +50,12 @@
       <text wx:else class="hint">{{status || '请检查以上设置。视频生成将消耗账户积分，耗时可能较长。'}}</text>
       <button wx:if="{{pending}}" class="btn btn-soft" bindtap="checkTask" loading="{{checking}}" disabled="{{checking || busy}}">{{checking ? '正在查询' : '刷新进度'}}</button>
       <button wx:elif="{{!downloadFailed}}" class="btn {{resultUrl ? 'btn-soft' : 'btn-primary'}}" loading="{{busy}}" disabled="{{locked || unchanged}}" bindtap="generate">{{unchanged ? '当前设置已生成' : (resultUrl ? '按修改后的设置生成' : '确认设置并生成视频')}} ↗</button>
-      <text wx:if="{{unchanged && resultUrl}}" class="hint">成片已保留，可直接保存或分享。需要调整效果时，请先返回修改创作设置。</text>
+      <text wx:if="{{unchanged && resultUrl}}" class="hint">成片已保留，可直接保存或分享。需要调整效果时，可通过顶部步骤修改创作设置，或开始新视频。</text>
       <button wx:if="{{resultUrl}}" class="btn btn-primary publish" bindtap="openResult" disabled="{{busy}}">发布 / 分享 / 保存 ↗</button>
       <text wx:if="{{resultUrl}}" class="hint">抖音 · 小红书 · 微信好友 · 朋友圈 · 保存相册</text>
       <button wx:if="{{pending && stale}}" class="remove" bindtap="stopWaiting" disabled="{{busy || checking}}">等太久了？不再等待，去看「作品」</button>
       <button wx:else class="remove" bindtap="newDraft" disabled="{{locked}}">开始新视频</button>
     </view>
   </view>
-  <view class="step-footer safe-bottom"><button class="btn btn-ghost" bindtap="previous" disabled="{{step === 0 || locked}}">‹ 上一步</button><view class="progress-track"><view style="width: {{(step + 1) / steps.length * 100}}%"></view></view><button class="btn btn-primary" bindtap="next" disabled="{{step === lastStep || locked}}">{{step === lastStep - 1 ? '检查生成设置' : '下一步'}} ›</button></view>
+  <view class="step-footer safe-bottom"><button class="btn btn-ghost" bindtap="previous" disabled="{{step === 0 || locked || (step === lastStep && (resultUrl || downloadFailed))}}">‹ 上一步</button><view class="progress-track"><view style="width: {{(step + 1) / steps.length * 100}}%"></view></view><button class="btn btn-primary" bindtap="next" disabled="{{step === lastStep || locked}}">{{step === lastStep - 1 ? '检查生成设置' : '下一步'}} ›</button></view>
 </view>
