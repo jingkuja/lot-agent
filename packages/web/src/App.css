@@ -924,6 +924,72 @@ html, body, #root {
   font-weight: 400;
 }
 
+.input-branding .input-mini-program {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 999px;
+  background: var(--bg-user-msg);
+  font-size: 13px;
+  white-space: nowrap;
+  user-select: none;
+  transition: background 150ms, border-color 150ms;
+}
+
+.input-branding .input-mini-program:hover {
+  border-color: var(--accent);
+  background: var(--bg-active);
+  text-decoration: none;
+}
+
+.input-branding .input-mini-program:focus-visible,
+.mini-program-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  text-decoration: none;
+}
+
+.mini-program-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(338px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 28px 24px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.mini-program-dialog::backdrop {
+  background: color-mix(in srgb, var(--login-hero) 55%, transparent);
+}
+
+.mini-program-dialog h2 { margin: 8px 0 20px; font-size: 18px; }
+.mini-program-dialog img { display: block; width: 258px; max-width: 100%; height: auto; margin: 0 auto; border-radius: var(--radius-sm); }
+.mini-program-dialog p { margin: 18px 0 0; color: var(--text-secondary); font-size: 13px; }
+.mini-program-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.mini-program-close:hover { background: var(--bg-hover); color: var(--text); }
+
 .input-box {
   border: 1px solid var(--border-input);
   border-radius: var(--radius-lg);

@@ -1,5 +1,5 @@
 import { useI18n } from "../i18n/index.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
@@ -7,6 +7,8 @@ import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile } from "../api/client.js";
 import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
+
+const miniProgramCode = new URL("../assets/mini-program-code.jpg", import.meta.url).href;
 
 interface ChatPanelProps {
   attachment?: { id: string; file: File };
@@ -50,6 +52,8 @@ function timeGreeting(): string {
 function InputBranding() {
   const { t } = useI18n();
   const [copyStatus, setCopyStatus] = useState("");
+  const miniProgramDialog = useRef<HTMLDialogElement>(null);
+  const miniProgramTitleId = useId();
 
   useEffect(() => {
     if (!copyStatus) return;
@@ -67,13 +71,52 @@ function InputBranding() {
   }
 
   return (
-    <div className="input-branding">
-      <a href="https://wetok.ai" target="_blank" rel="noopener noreferrer">{t("灵渠AI")}</a>
-      <button type="button" onClick={copyAddress} title={t("复制网址")} aria-label={t("复制网址 https://wetok.ai")}>
-        https://wetok.ai
-      </button>
-      <span className="input-branding-status" role="status">{t(copyStatus)}</span>
-    </div>
+    <>
+      <div className="input-branding">
+        <a href="https://wetok.ai" target="_blank" rel="noopener noreferrer">{t("灵渠AI")}</a>
+        <button type="button" onClick={copyAddress} title={t("复制网址")} aria-label={t("复制网址 https://wetok.ai")}>
+          https://wetok.ai
+        </button>
+        <button
+          type="button"
+          className="input-mini-program"
+          onClick={() => miniProgramDialog.current?.showModal()}
+          aria-haspopup="dialog"
+          title={t("查看小程序码")}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8 3H4a1 1 0 0 0-1 1v4m13-5h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4m8 0h4a1 1 0 0 0 1-1v-4" />
+            <rect x="8" y="8" width="8" height="8" rx="2" />
+          </svg>
+          {t("小程序")}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m9 5 7 7-7 7" />
+          </svg>
+        </button>
+        <span className="input-branding-status" role="status">{t(copyStatus)}</span>
+      </div>
+      <dialog
+        ref={miniProgramDialog}
+        className="mini-program-dialog"
+        aria-labelledby={miniProgramTitleId}
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+            event.currentTarget.close();
+          }
+        }}
+      >
+        <button type="button" className="mini-program-close" onClick={() => miniProgramDialog.current?.close()} aria-label={t("关闭")} autoFocus>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            <path d="m6 6 12 12M6 18 18 6" />
+          </svg>
+        </button>
+        <h2 id={miniProgramTitleId}>{t("灵渠claw小程序")}</h2>
+        <img src={miniProgramCode} alt={t("灵渠claw小程序码")} width="258" height="258" />
+        <p>{t("微信扫一扫，打开小程序")}</p>
+      </dialog>
+    </>
   );
 }
 
