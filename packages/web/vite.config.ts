@@ -112,7 +112,7 @@ export default defineConfig({
     host: "0.0.0.0",
     // Vite rejects unknown Host headers by default. Permit the deployment
     // domain when it is reverse-proxied to this local dev server.
-    allowedHosts: ["aigc.todoucloud.com"],
+    allowedHosts: ["aigc.todoucloud.com","todoucloud.com"],
     port: 5173,
   },
 });

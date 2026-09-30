@@ -18,7 +18,7 @@ export function createProductRoutes() {
   const app = new Hono();
   app.get("/", (c) => c.json({
     globle,
-    webUrl: publicUrl(process.env.LOT_AGENT_PUBLIC_URL, "https://aigc.todoucloud.com/"),
+    webUrl: publicUrl(process.env.LOT_AGENT_PUBLIC_URL, "https://todoucloud.com/"),
     tokenhubUrl: publicUrl(process.env.TOKENHUB_PUBLIC_URL, "https://tokenhub.todoucloud.com/"),
   }));
   return app;

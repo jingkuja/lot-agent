@@ -4,7 +4,11 @@
     <view class="steps-inner"><view id="step-{{index}}" class="step {{locked || ((resultUrl || downloadFailed) && index !== step) ? 'locked' : ''}} {{step === index ? 'active' : ''}} {{index < step ? 'done' : ''}}" wx:for="{{steps}}" wx:key="*this" data-step="{{index}}" bindtap="goStep"><text class="step-number">{{index + 1}}</text><text>{{item}}</text></view></view>
   </scroll-view>
   <view class="workspace card">
-    <view class="section-top"><text class="h2">{{steps[step]}}</text><text class="muted">{{step + 1}} / {{steps.length}}</text></view>
+    <view class="section-top">
+      <text class="h2">{{steps[step]}}</text>
+      <button wx:if="{{step === lastStep}}" class="remove section-new-video" bindtap="newDraft" disabled="{{locked}}">开始新视频</button>
+      <text class="muted">{{step + 1}} / {{steps.length}}</text>
+    </view>
     <view wx:if="{{step === 0}}">
       <text class="label">这次想拍什么</text><textarea class="area topic" value="{{draft.topic}}" data-field="topic" bindinput="field" maxlength="1000" placeholder="例如：为新开的咖啡店拍一条温暖的探店短片" disabled="{{locked}}" />
       <button class="btn btn-soft write" bindtap="writeCopy" loading="{{writing}}" disabled="{{locked}}">{{draft.script ? '重新生成文案与标题' : '智能生成文案与标题'}} ✧</button>

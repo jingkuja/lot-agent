@@ -82,6 +82,7 @@
 .section-top { gap: 16rpx; }
 .section-top .h2 { min-width: 0; }
 .section-top .muted { flex-shrink: 0; }
+.section-top .section-new-video { flex-shrink: 0; margin: 0 0 0 auto; padding: 12rpx; color: var(--brand-deep); white-space: nowrap; }
 .brief-row text:last-child { min-width: 0; word-break: break-word; }
 .step-footer {
   z-index: 5;

@@ -1,5 +1,6 @@
 import { api, absoluteMedia, type GenerationResult } from "./api";
 import { imageModelForQuality } from "./config";
+import { createImageGenerationStatus } from "./image-generation-status.js";
 import {
   getStudioConversationId,
   setStudioConversationId,
@@ -73,7 +74,7 @@ function toPublicError(err: unknown): Error {
 async function pollTask(
   taskId: string,
   onStatus?: GenerateInput["onStatus"],
-  startedAt: number = Date.now()
+  reportProgress?: () => void
 ): Promise<{ url: string }> {
   let failures = 0;
   const deadline = Date.now() + 3 * 60 * 1000;
@@ -88,12 +89,12 @@ async function pollTask(
       if (failures >= 8) {
         throw toPublicError(err);
       }
-      onStatus?.("AI 正在画,请稍等", simulatedProgress(startedAt));
+      reportProgress?.();
       await sleep(1500);
       continue;
     }
     if (task.status === "pending" || task.status === "running") {
-      onStatus?.("AI 正在画,请稍等", simulatedProgress(startedAt));
+      reportProgress?.();
       await sleep(1200);
       continue;
     }
@@ -143,7 +144,10 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
     if (input.localRefs?.length) {
       onUpload(input);
       for (const path of input.localRefs) {
-        if (/^https?:\/\//i.test(path) || path.startsWith("/static/")) {
+        // 微信本地文件也可能使用 http://tmp/ 或 http://usr/，服务端无法访问，
+        // 必须先交给 wx.uploadFile；不能仅凭 http(s) 前缀判断为远程图片。
+        const isWxLocalFile = /^https?:\/\/(?:tmp|usr)(?:\/|$)/i.test(path);
+        if ((!isWxLocalFile && /^https?:\/\//i.test(path)) || path.startsWith("/static/")) {
           media.push({ type: "reference_image", url: path });
           continue;
         }
@@ -185,15 +189,20 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
       throw toPublicError(err);
     }
   }
-  input.onStatus?.("AI 正在画,请稍等", simulatedProgress(startedAt));
+  const statusText = createImageGenerationStatus();
+  const reportProgress = () => {
+    const progress = simulatedProgress(startedAt);
+    input.onStatus?.(statusText(progress), progress);
+  };
   input.onTask?.({
     conversationId,
     taskId: started.taskId,
     title: started.title,
   });
+  reportProgress();
   let url: string;
   try {
-    ({ url } = await pollTask(started.taskId, input.onStatus, startedAt));
+    ({ url } = await pollTask(started.taskId, input.onStatus, reportProgress));
   } catch (err) {
     // 任务进行中被后台标 failed 时,服务端那条会话里其实有失败消息记录,保留供"作品"页排查;
     // 但错误文案仍然要统一。
