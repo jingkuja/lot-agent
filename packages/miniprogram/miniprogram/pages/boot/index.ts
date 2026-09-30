@@ -1,6 +1,8 @@
+import { pageShare } from "../../lib/page-share.js";
 import { getToken } from "../../services/session";
 
 Page({
+  ...pageShare("美图海报 · AI 创图、海报与视频", "/pages/studio/index"),
   data: {
     loading: true,
     error: "",

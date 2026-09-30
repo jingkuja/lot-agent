@@ -1,6 +1,8 @@
+import { pageShare } from "../../lib/page-share.js";
 import { POSTER_CATS, POSTER_TEMPLATES } from "../../services/templates";
 
 Page({
+  ...pageShare("美图海报 · 轻松制作营销海报", "/pages/poster/index"),
   data: {
     topic: "",
     cat: "all" as string,

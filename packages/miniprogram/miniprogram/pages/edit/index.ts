@@ -1,7 +1,9 @@
+import { pageShare } from "../../lib/page-share.js";
 import { RATIOS } from "../../services/config";
 import { runImageGeneration, toastError } from "../../services/generate";
 
 Page({
+  ...pageShare("美图海报 · AI 修图，让照片焕新", "/pages/edit/index"),
   data: {
     refs: [] as string[],
     prompt: "",

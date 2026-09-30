@@ -1,3 +1,4 @@
+import { pageShare } from "../../lib/page-share.js";
 import { api } from "../../services/api";
 import { formatPoints, yuanToPoints } from "../../lib/points";
 
@@ -11,6 +12,7 @@ interface Tier {
 const TIER_POINTS = [100, 500, 1000, 2000, 5000, 10000];
 
 Page({
+  ...pageShare("美图海报 · 充值积分，继续创作", "/pages/recharge/index"),
   data: {
     balanceText: "—",
     tiers: [] as Tier[],

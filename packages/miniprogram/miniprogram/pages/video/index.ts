@@ -1,3 +1,4 @@
+import { pageShare } from "../../lib/page-share.js";
 import { api } from "../../services/api";
 import {
   VIDEO_MODELS, VIDEO_STEPS, LAST_VIDEO_STEP, VIDEO_VOICES, VIDEO_MUSIC, VIDEO_RATIOS, VIDEO_DURATION_MIN, VIDEO_DURATION_MAX,
@@ -23,6 +24,7 @@ function idleState() {
 }
 
 Page({
+  ...pageShare("美图海报 · AI 视频创作", "/pages/video/index"),
   data: {
     steps: VIDEO_STEPS, lastStep: LAST_VIDEO_STEP, models: VIDEO_MODELS,
     voices: VIDEO_VOICES, music: VIDEO_MUSIC, ratios: VIDEO_RATIOS, durationMin: VIDEO_DURATION_MIN, durationMax: VIDEO_DURATION_MAX,

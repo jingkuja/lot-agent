@@ -1,3 +1,4 @@
+import { pageShare } from "../../lib/page-share.js";
 import { absoluteMedia, api, type Conversation } from "../../services/api";
 
 type GalleryItem = Conversation & { preview: string } & {
@@ -9,6 +10,7 @@ type GalleryItem = Conversation & { preview: string } & {
 const POLL_INTERVAL = 1200;
 
 Page({
+  ...pageShare("美图海报 · 管理你的图片与视频作品", "/pages/gallery/index"),
   data: {
     mediaType: "image",
     items: [] as GalleryItem[],

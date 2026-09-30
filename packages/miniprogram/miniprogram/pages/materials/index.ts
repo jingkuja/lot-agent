@@ -1,9 +1,11 @@
+import { pageShare } from "../../lib/page-share.js";
 import { absoluteMedia, api, type UploadedAsset } from "../../services/api";
 import { getUser } from "../../services/session";
 
 type ItemEvent = { currentTarget: { dataset: { id: string } } };
 
 Page({
+  ...pageShare("美图海报 · 管理创作素材", "/pages/materials/index"),
   data: { items: [] as UploadedAsset[], loading: true, error: "", deletingId: "" },
   requestId: 0,
   owner: "",

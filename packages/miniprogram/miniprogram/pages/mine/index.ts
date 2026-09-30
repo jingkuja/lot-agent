@@ -1,8 +1,10 @@
+import { pageShare } from "../../lib/page-share.js";
 import { api } from "../../services/api";
 import { getToken, getUser, setSession } from "../../services/session";
 import { formatPoints, yuanToPoints } from "../../lib/points";
 
 Page({
+  ...pageShare("美图海报 · 开启你的 AI 创作", "/pages/mine/index"),
   data: {
     user: null as LotUser | null,
     initial: "美",

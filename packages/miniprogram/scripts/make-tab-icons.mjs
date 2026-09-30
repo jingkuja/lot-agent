@@ -120,4 +120,18 @@ for (const [name, hit] of Object.entries(glyphs)) {
   fs.writeFileSync(path.join(outDir, `tab-${name}.png`), encodePng(81, 81, paint(fog)));
   fs.writeFileSync(path.join(outDir, `tab-${name}-active.png`), encodePng(81, 81, paint(brand)));
 }
-console.log("tab icons written to", outDir);
+// Public share cover: reuse the app's image/poster/video glyphs at card resolution.
+// Keep all artwork inside the central square for timeline's square thumbnail crop.
+fs.writeFileSync(path.join(outDir, "share-cover.png"), encodePng(500, 400, (x, y) => {
+  const background = [0xfa, 0xf6, 0xf0, 255];
+  const card = [0xff, 0xff, 0xff, 255];
+  const icons = [studio, poster, video];
+  for (let i = 0; i < icons.length; i++) {
+    const left = 70 + i * 125;
+    if (x >= left && x < left + 110 && y >= 140 && y < 260) {
+      return icons[i]((x - left - 1) / 1.35, (y - 145) / 1.35) ? brand : card;
+    }
+  }
+  return background;
+}));
+console.log("tab icons and share cover written to", outDir);

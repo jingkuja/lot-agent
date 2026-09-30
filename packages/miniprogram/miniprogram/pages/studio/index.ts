@@ -1,3 +1,4 @@
+import { pageShare } from "../../lib/page-share.js";
 import { IDEAS, QUALITIES, RATIOS } from "../../services/config";
 import { runImageGeneration, toastError } from "../../services/generate";
 import { clearStudioConversationId } from "../../services/session";
@@ -7,6 +8,7 @@ const ratioItems = RATIOS.map((item) => item.label);
 const qualityItems = QUALITIES.map((item) => item.label);
 
 Page({
+  ...pageShare("美图海报 · 用一句话创作好图", "/pages/studio/index"),
   data: {
     prompt: "",
     hasPrompt: false,

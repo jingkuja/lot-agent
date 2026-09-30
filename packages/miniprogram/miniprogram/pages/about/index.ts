@@ -1,4 +1,7 @@
+import { pageShare } from "../../lib/page-share.js";
+
 Page({
+  ...pageShare("灵渠claw · 从手机创作到网页继续", "/pages/about/index"),
   data: { webUrl: "https://todoucloud.com", saving: false },
   copyWeb() { if (this.data.webUrl) wx.setClipboardData({ data: this.data.webUrl }); },
 
