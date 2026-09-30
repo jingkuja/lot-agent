@@ -11,7 +11,7 @@ beforeEach(async () => {
   vi.resetModules();
   app = { globalData: {}, ensureSession: vi.fn() };
   vi.stubGlobal("getApp", () => app);
-  vi.stubGlobal("wx", { showToast: vi.fn() });
+  vi.stubGlobal("wx", { showToast: vi.fn(), getStorageSync: vi.fn(), setStorageSync: vi.fn() });
   vi.stubGlobal("Page", (definition: any) => {
     page = {
       ...definition,
@@ -70,4 +70,13 @@ describe("studio prompt availability", () => {
     page.newSheet();
     expect(page.data.prompt).toBe("清晨的森林");
   });
+});
+
+it("restores the failed image's full input without automatically generating", async () => {
+  const retry = { owner: "lot:attempts:debug", mediaType: "image", draft: { prompt: "山间小屋", size: "1536x1024", quality: "high", refs: ["/static/uploads/ref.png"] } };
+  vi.mocked(wx.getStorageSync).mockReturnValue(retry);
+  page.data.resultUrl = "old.png";
+  page.onShow();
+  expect(page.data).toMatchObject({ prompt: "山间小屋", hasPrompt: true, size: "1536x1024", quality: "high", refs: ["/static/uploads/ref.png"], resultUrl: "", busy: false });
+  expect(app.ensureSession).not.toHaveBeenCalled();
 });

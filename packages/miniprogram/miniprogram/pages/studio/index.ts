@@ -1,3 +1,4 @@
+import { takeRetry } from "../../services/creation-attempts.js";
 import { pageShare } from "../../lib/page-share.js";
 import { IDEAS, QUALITIES, RATIOS } from "../../services/config";
 import { runImageGeneration, toastError } from "../../services/generate";
@@ -29,6 +30,19 @@ Page({
 
   onShow() {
     const app = getApp();
+    const retry = !this.data.busy ? takeRetry("image") : null;
+    if (retry) {
+      const draft = retry.draft;
+      const prompt = typeof draft.prompt === "string" ? draft.prompt : "";
+      const ratio = RATIOS.find(item => item.size === draft.size) || RATIOS[0];
+      const quality = QUALITIES.find(item => item.value === draft.quality) || QUALITIES[0];
+      clearStudioConversationId();
+      this.setData({ prompt, hasPrompt: !!prompt.trim(), size: ratio.size, ratioLabel: ratio.label,
+        quality: quality.value, qualityLabel: quality.label,
+        refs: Array.isArray(draft.refs) ? draft.refs.filter((ref): ref is string => typeof ref === "string").slice(0, 5) : [],
+        resultUrl: "", remoteUrl: "", statusText: "已恢复失败作品，可修改后重新生成", progress: 0, showIdeas: false, showMore: false });
+      return;
+    }
     if (app.globalData.pendingRefs?.length) {
       this.setData({ refs: app.globalData.pendingRefs.slice() });
       app.globalData.pendingRefs = [];

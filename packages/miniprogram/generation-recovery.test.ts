@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ createConversation: vi.fn(), generate: vi.fn(), getConversation: vi.fn(), getTask: vi.fn(), deleteConversation: vi.fn(), uploadLocalImage: vi.fn() }));
 vi.mock("./miniprogram/services/api", () => ({ api, absoluteMedia: (url: string) => url, ApiError: class extends Error {} }));
+import { listAttempts } from "./miniprogram/services/creation-attempts";
 import { runImageGeneration } from "./miniprogram/services/generate";
 const input = { prompt: "图片", size: "1024x1024", quality: "auto" };
 beforeEach(() => {
+  const saved: Record<string, unknown> = {};
+  vi.stubGlobal("getApp", () => ({ globalData: { user: { id: "owner" } } }));
+  vi.stubGlobal("wx", { getStorageSync: (key: string) => saved[key], setStorageSync: (key: string, value: unknown) => { saved[key] = value; } });
   vi.resetAllMocks();
   api.createConversation.mockResolvedValue({ id: "c1" });
   api.generate.mockRejectedValue(Object.assign(new Error("Bad Gateway"), { status: 502 }));
@@ -44,7 +48,7 @@ describe("image reference uploads", () => {
     api.uploadLocalImage.mockRejectedValue(new Error("upload failed"));
     await expect(runImageGeneration({ ...input, localRefs: ["http://tmp/reference.jpeg"] })).rejects.toThrow("服务暂时不可用");
     expect(api.generate).not.toHaveBeenCalled();
-    expect(api.deleteConversation).toHaveBeenCalledWith("c1");
+    expect(api.deleteConversation).not.toHaveBeenCalled();
   });
 });
 describe("uncertain generation submission", () => {
@@ -81,15 +85,25 @@ describe("uncertain generation submission", () => {
     expect(api.deleteConversation).not.toHaveBeenCalled();
   });
   it("preserves the conversation when recovery is also unavailable", async () => {
+    api.generate.mockRejectedValue({ status: 0 });
     api.getConversation.mockRejectedValue(new Error("offline"));
     await expect(runImageGeneration(input)).rejects.toThrow("提交结果暂未确认");
     expect(api.deleteConversation).not.toHaveBeenCalled();
     expect(api.generate).toHaveBeenCalledTimes(1);
   });
-  it("cleans up a new conversation for a definite validation rejection", async () => {
+  it("retains a rejected conversation and its draft for retry", async () => {
     api.generate.mockRejectedValue(Object.assign(new Error("bad input"), { status: 400 }));
     await expect(runImageGeneration(input)).rejects.toThrow();
-    expect(api.deleteConversation).toHaveBeenCalledWith("c1");
+    expect(api.deleteConversation).not.toHaveBeenCalled();
     expect(api.getConversation).not.toHaveBeenCalled();
   });
+});
+
+it.each([400, 402, 409, 429, 500, 502])("retains failed image submission %s with its uploaded references and settings", async (status) => {
+  api.generate.mockRejectedValue({ status });
+  api.getConversation.mockResolvedValue({ messages: [] });
+  api.uploadLocalImage.mockResolvedValue({ url: "/static/uploads/ref.png" });
+  await expect(runImageGeneration({ ...input, localRefs: ["http://tmp/ref.png"] })).rejects.toThrow();
+  expect(listAttempts()[0]).toMatchObject({ status: "failed", conversationId: "c1", draft: { ...input, refs: ["/static/uploads/ref.png"] } });
+  expect(api.deleteConversation).not.toHaveBeenCalled();
 });

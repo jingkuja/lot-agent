@@ -117,7 +117,7 @@ describe("video operation guards", () => {
     expect(page.data).toMatchObject({ pending: false, downloadFailed: true, unchanged: true });
   });
   it("keeps a lost submission locked and polling without resubmission", async () => {
-    api.generate.mockRejectedValue({ status: 409 });
+    api.generate.mockRejectedValue({ status: 0 });
     api.getConversation.mockResolvedValue({ messages: [] });
     await page.generate(); await page.generate();
     expect(page.data.pending).toBe(true);
@@ -314,4 +314,22 @@ describe("completed video step navigation", () => {
     page.goStep({ currentTarget: { dataset: { step: 3 } } });
     expect(page.data.step).toBe(3);
   });
+});
+
+it("restores a failed video over the current idle draft and allows an explicit retry", async () => {
+  saved["lot:attempts:owner:retry"] = { owner: "lot:attempts:owner", mediaType: "video", draft: { script: "重试分镜", modelIndex: 2, durationSec: 8, ratio: "16:9", cover: "/static/uploads/cover.png", voice: "无配音", tags: "#重试" } };
+  await page.onShow();
+  expect(page.data).toMatchObject({ step: 6, pending: false, locked: false, resultUrl: "", draft: { script: "重试分镜", modelIndex: 2, durationSec: 8, ratio: "16:9", cover: "/static/uploads/cover.png", voice: "无配音", tags: "#重试" } });
+  expect(api.generate).not.toHaveBeenCalled();
+  expect(saved["lot:video:owner"].draft.script).toBe("重试分镜");
+});
+it.each([400, 402, 409, 500, 502])("unlocks failed video submission %s for an explicit retry", async (status) => {
+  await page.onShow(); page.data.draft.script = "重试";
+  api.createConversation.mockResolvedValue({ id: "failed-conv" });
+  api.generate.mockRejectedValue({ status }); api.getConversation.mockResolvedValue({ messages: [] });
+  await page.generate();
+  expect(page.data).toMatchObject({ busy: false, pending: false, locked: false });
+  expect(saved["lot:attempts:owner"][0]).toMatchObject({ status: "failed", draft: { script: "重试" } });
+  await page.generate();
+  expect(api.generate).toHaveBeenCalledTimes(2);
 });

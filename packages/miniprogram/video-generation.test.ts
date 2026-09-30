@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ createConversation: vi.fn(), generate: vi.fn(), getConversation: vi.fn(), deleteConversation: vi.fn(), uploadLocalImage: vi.fn() }));
 vi.mock("./miniprogram/services/api", () => ({ api, absoluteMedia: (s: string) => s }));
+import { listAttempts } from "./miniprogram/services/creation-attempts";
 import { createVideoDraft, submitVideo, recoverVideoTask, findVideoGeneration, videoResult } from "./miniprogram/services/video";
 beforeEach(() => {
+  const saved: Record<string, unknown> = {};
+  vi.stubGlobal("getApp", () => ({ globalData: { user: { id: "owner" } } }));
+  vi.stubGlobal("wx", { getStorageSync: (key: string) => saved[key], setStorageSync: (key: string, value: unknown) => { saved[key] = value; } });
   vi.resetAllMocks(); api.createConversation.mockResolvedValue({ id: "video-conv" }); api.deleteConversation.mockResolvedValue({ ok: true });
   api.generate.mockResolvedValue({ taskId: "job1" }); api.uploadLocalImage.mockResolvedValue({ url: "/static/uploads/cover.png" });
 });
@@ -30,15 +34,16 @@ describe("video task submission", () => {
     await expect(submitVideo(createVideoDraft(), vi.fn())).rejects.toThrow("勿重复生成");
     expect(api.deleteConversation).not.toHaveBeenCalled();
   });
-  it.each([400, 401, 402, 403, 422, 429])("cleans up definitively rejected submissions (%s)", async (status) => {
+  it.each([400, 401, 402, 403, 408, 409, 422, 429, 500, 502, 504])("retains rejected submissions (%s)", async (status) => {
     api.generate.mockRejectedValue({ status });
     await expect(submitVideo(createVideoDraft(), vi.fn())).rejects.toEqual({ status });
-    expect(api.deleteConversation).toHaveBeenCalledWith("video-conv");
+    expect(api.deleteConversation).not.toHaveBeenCalled();
+    expect(listAttempts()[0]).toMatchObject({ status: "failed", conversationId: "video-conv", draft: createVideoDraft() });
   });
   it("keeps an upload failure from leaving a pending paid submission", async () => {
     api.uploadLocalImage.mockRejectedValue(new Error("upload")); const onConversation = vi.fn();
     await expect(submitVideo({ ...createVideoDraft(), reference: "local" }, onConversation)).rejects.toThrow("upload");
-    expect(onConversation).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled(); expect(api.deleteConversation).toHaveBeenCalled();
+    expect(onConversation).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled(); expect(api.deleteConversation).not.toHaveBeenCalled();
   });
   it("ignores malformed metadata and does not expose failed downloads", async () => {
     api.getConversation.mockResolvedValue({ messages: [{ role: "assistant", metadata: "bad json" }] });

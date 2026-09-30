@@ -1,3 +1,4 @@
+import { beginAttempt, updateAttempt, removeAttempt, type CreationAttempt } from "./creation-attempts.js";
 import { api, absoluteMedia, type GenerationResult } from "./api";
 
 export const VIDEO_MODELS = [
@@ -62,7 +63,7 @@ export function videoSignature(draft: VideoDraft): string {
 
 export function isDefinitiveVideoRejection(error: unknown): boolean {
   const status = (error as { status?: number } | null)?.status;
-  return !!status && status < 500 && status !== 408 && status !== 409;
+  return !!status && status >= 400;
 }
 
 /** Page-facing text for a failed request. Server rejections are English/internal, so only
@@ -81,20 +82,33 @@ export function videoErrorText(error: unknown, fallback: string): string {
 
 /** Submission and polling are separate so hiding the page never loses a queued task. */
 export async function submitVideo(draft: VideoDraft, onConversation: (id: string) => void): Promise<{ conversationId: string; taskId: string }> {
-  const conv = await api.createConversation(draft.publishTitle || draft.mainTitle || draft.topic.slice(0, 24) || "视频创作", "video", { copy: draft.publishTitle || draft.mainTitle, tags: draft.tags });
-  let firstFrame: string | undefined;
+  const attempt = beginAttempt("video", draft);
   try {
-    const ref = draft.cover || draft.reference;
-    if (ref) firstFrame = (await api.uploadLocalImage(ref)).url;
+    return await executeVideoSubmission(draft, onConversation, attempt);
   } catch (error) {
-    await api.deleteConversation(conv.id).catch(() => {});
+    if (attempt.status === "submitting") updateAttempt(attempt, { status: "failed" });
     throw error;
+  }
+}
+
+async function executeVideoSubmission(draft: VideoDraft, onConversation: (id: string) => void, attempt: CreationAttempt): Promise<{ conversationId: string; taskId: string }> {
+  const conv = await api.createConversation(draft.publishTitle || draft.mainTitle || draft.topic.slice(0, 24) || "视频创作", "video", { copy: draft.publishTitle || draft.mainTitle, tags: draft.tags });
+  updateAttempt(attempt, { conversationId: conv.id });
+  let firstFrame: string | undefined;
+  {
+    const ref = draft.cover || draft.reference;
+    if (ref) {
+      const remote = (ref.startsWith("/static/") || /^https?:\/\//i.test(ref)) && !/^https?:\/\/(?:tmp|usr)(?:\/|$)/i.test(ref);
+      firstFrame = remote ? ref : (await api.uploadLocalImage(ref)).url;
+      updateAttempt(attempt, { draft: { ...draft, [draft.cover ? "cover" : "reference"]: firstFrame } });
+    }
   }
   try {
     onConversation(conv.id);
   } catch (error) {
     // No paid request has been sent when the page is gone or persistence fails.
     await api.deleteConversation(conv.id).catch(() => {});
+    removeAttempt(attempt.id, attempt.owner);
     throw error;
   }
   let started: GenerationResult;
@@ -104,15 +118,19 @@ export async function submitVideo(draft: VideoDraft, onConversation: (id: string
       model: VIDEO_MODELS[draft.modelIndex].id, settings: videoSettings(draft), first_frame: firstFrame,
     });
   } catch (error) {
-    if (isDefinitiveVideoRejection(error)) {
-      await api.deleteConversation(conv.id).catch(() => {});
-      throw error;
+    const status = Number((error as { status?: number } | null)?.status || 0);
+    // A proxy error can still refer to a task that was successfully queued.
+    const task = (!status || status >= 500 || status === 408 || status === 409)
+      ? await recoverVideoTask(conv.id).catch(() => null) : null;
+    if (!task) {
+      updateAttempt(attempt, { status: status >= 400 ? "failed" : "unknown" });
+      if (status >= 400) throw error;
+      throw new Error("提交结果待确认，请点「查询进度」，勿重复生成");
     }
-    // Never retry a paid submission after a lost response. Recover only from its own conversation.
-    const task = await recoverVideoTask(conv.id).catch(() => null);
-    if (!task) throw new Error("提交结果待确认，请点「查询进度」，勿重复生成");
+    updateAttempt(attempt, { status: "pending", taskId: task });
     return { conversationId: conv.id, taskId: task };
   }
+  updateAttempt(attempt, { status: "pending", taskId: started.taskId });
   return { conversationId: conv.id, taskId: started.taskId };
 }
 

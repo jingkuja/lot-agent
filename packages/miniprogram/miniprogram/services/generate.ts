@@ -1,3 +1,4 @@
+import { beginAttempt, updateAttempt, type CreationAttempt } from "./creation-attempts.js";
 import { api, absoluteMedia, type GenerationResult } from "./api";
 import { imageModelForQuality } from "./config";
 import { createImageGenerationStatus } from "./image-generation-status.js";
@@ -74,7 +75,8 @@ function toPublicError(err: unknown): Error {
 async function pollTask(
   taskId: string,
   onStatus?: GenerateInput["onStatus"],
-  reportProgress?: () => void
+  reportProgress?: () => void,
+  onTerminal?: (downloadFailed: boolean) => void
 ): Promise<{ url: string }> {
   let failures = 0;
   const deadline = Date.now() + 3 * 60 * 1000;
@@ -98,6 +100,7 @@ async function pollTask(
       await sleep(1200);
       continue;
     }
+    if (["failed", "cancelled"].includes(task.status) || (task.status === "succeeded" && (task.output?.downloadFailed || !task.output?.assets?.[0]?.url))) onTerminal?.(!!task.output?.downloadFailed);
     if (task.status === "cancelled") throw new Error("已取消");
     if (task.status === "failed") throw new Error(GENERIC_ERROR);
     if (task.status === "succeeded") {
@@ -137,8 +140,21 @@ async function recoverSubmission(conversationId: string): Promise<GenerationResu
 }
 
 export async function runImageGeneration(input: GenerateInput): Promise<GenerateOutput> {
+  const attempt = beginAttempt("image", { prompt: input.prompt, size: input.size, quality: input.quality, refs: input.localRefs || [] });
+  try {
+    const result = await executeImageGeneration(input, attempt);
+    updateAttempt(attempt, { status: "completed", preview: result.imageUrl });
+    return result;
+  } catch (error) {
+    if (attempt.status === "submitting") updateAttempt(attempt, { status: "failed" });
+    throw error;
+  }
+}
+
+async function executeImageGeneration(input: GenerateInput, attempt: CreationAttempt): Promise<GenerateOutput> {
   const startedAt = Date.now();
   const conversationId = await ensureConversation(input.title, input.reuseStudioConversation);
+  updateAttempt(attempt, { conversationId });
   const media: Array<{ type: "reference_image"; url: string }> = [];
   try {
     if (input.localRefs?.length) {
@@ -156,14 +172,9 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
       }
     }
   } catch {
-    // 上传失败也清理刚建的空会话
-    try {
-      if (!input.reuseStudioConversation) await api.deleteConversation(conversationId);
-    } catch {
-      /* ignore */
-    }
     throw new Error(GENERIC_ERROR);
   }
+  updateAttempt(attempt, { draft: { ...attempt.draft, refs: media.map(item => item.url) } });
   input.onStatus?.("正在提交", 0);
   let started: GenerationResult;
   try {
@@ -179,16 +190,16 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
     if (!status || status >= 500 || status === 408) {
       input.onStatus?.("正在确认提交结果", 0);
       const recovered = !input.reuseStudioConversation ? await recoverSubmission(conversationId) : null;
-      if (!recovered) throw new Error("提交结果暂未确认，请稍后到「作品」查看，勿重复提交");
+      if (!recovered) {
+        updateAttempt(attempt, { status: status >= 400 ? "failed" : "unknown" });
+        throw new Error(status >= 400 ? GENERIC_ERROR : "提交结果暂未确认，请稍后到「作品」查看，勿重复提交");
+      }
       started = recovered;
     } else {
-      // A definite rejection can clean up only a newly created empty conversation.
-      try {
-        if (!input.reuseStudioConversation) await api.deleteConversation(conversationId);
-      } catch { /* Best-effort cleanup. */ }
       throw toPublicError(err);
     }
   }
+  updateAttempt(attempt, { status: "pending", taskId: started.taskId });
   const statusText = createImageGenerationStatus();
   const reportProgress = () => {
     const progress = simulatedProgress(startedAt);
@@ -202,7 +213,7 @@ export async function runImageGeneration(input: GenerateInput): Promise<Generate
   reportProgress();
   let url: string;
   try {
-    ({ url } = await pollTask(started.taskId, input.onStatus, reportProgress));
+    ({ url } = await pollTask(started.taskId, input.onStatus, reportProgress, (downloadFailed) => updateAttempt(attempt, { status: downloadFailed ? "download_failed" : "failed" })));
   } catch (err) {
     // 任务进行中被后台标 failed 时,服务端那条会话里其实有失败消息记录,保留供"作品"页排查;
     // 但错误文案仍然要统一。

@@ -29,14 +29,20 @@
           <text class="generation-progress cell-progress">{{item.progress || 0}}%</text>
           <text class="generation-status cell-status">{{item.statusText || '正在生成'}}</text>
         </view>
+        <view wx:elif="{{item.failed}}" class="cell-failed">
+          <text class="failed-icon">!</text>
+          <text>生成失败</text>
+          <text class="failed-hint">点击恢复创作并重试</text>
+        </view>
         <block wx:else>
-          <view wx:if="{{mediaType === 'video'}}" class="video-cover"><text>▷</text><text>视频作品</text></view>
+          <view wx:if="{{mediaType === 'video' && item.preview}}" class="video-cover"><text>▷</text><text>视频作品</text></view>
           <image wx:elif="{{item.preview}}" src="{{item.preview}}" mode="aspectFill" lazy-load />
-          <view wx:else class="cell-empty">画面准备中</view>
+          <view wx:else class="cell-empty">{{item.statusText || '画面准备中'}}</view>
         </block>
         <view class="cell-caption">
           <text class="cell-title">{{item.title || '未命名作品'}}</text>
-          <text class="cell-arrow">{{item.generating ? '···' : '↗'}}</text>
+          <button wx:if="{{item.failed}}" class="delete-work" data-id="{{item.id}}" catchtap="remove">删除</button>
+          <text wx:else class="cell-arrow">{{item.generating ? '···' : '↗'}}</text>
         </view>
       </view>
     </view>

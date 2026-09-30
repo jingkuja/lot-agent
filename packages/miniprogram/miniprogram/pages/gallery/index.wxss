@@ -175,3 +175,20 @@
 .video-cover { height: 300rpx; background: var(--surface); color: var(--brand); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16rpx; }
 .video-cover text:first-child { font-size: 70rpx; }
 .video-cover text:last-child { font-size: 24rpx; }
+
+.cell-failed {
+  height: 350rpx;
+  border-radius: 12rpx;
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+}
+.failed-icon { width: 64rpx; height: 64rpx; line-height: 64rpx; text-align: center; border: 3rpx solid var(--brand-deep); border-radius: 50%; font-size: 44rpx; }
+.failed-hint { font-size: 22rpx; font-weight: 400; }
+.delete-work { margin: 0; padding: 12rpx; min-height: 44px; display: flex; align-items: center; color: var(--brand-deep); font-size: 24rpx; }

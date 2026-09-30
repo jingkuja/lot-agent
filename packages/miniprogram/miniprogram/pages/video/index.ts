@@ -1,3 +1,4 @@
+import { takeRetry, listAttempts, updateAttempt } from "../../services/creation-attempts.js";
 import { pageShare } from "../../lib/page-share.js";
 import { api } from "../../services/api";
 import {
@@ -58,6 +59,13 @@ Page({
           downloadFailed,
           status: downloadFailed ? DOWNLOAD_FAILED_TEXT : "",
           startedAt: typeof saved.startedAt === "number" ? saved.startedAt : 0 });
+      }
+    }
+    if (!this.locked()) {
+      const retry = takeRetry("video");
+      if (retry) {
+        this.update({ ...idleState(), draft: restoreVideoDraft(retry.draft), step: LAST_VIDEO_STEP, status: "已恢复失败作品，可修改后重新生成" });
+        this.persist();
       }
     }
     this.refreshState();
@@ -238,8 +246,8 @@ Page({
           return;
         }
         if (generation.url) { this.finishTask(generation.url); return; }
-        if (generation.downloadFailed) { this.update({ pending: false, downloadFailed: true, status: DOWNLOAD_FAILED_TEXT }); return; }
-        if (generation.status === "failed" || generation.status === "cancelled") { this.update({ pending: false, status: "生成未完成，请检查积分或调整内容后重试" }); return; }
+        if (generation.downloadFailed) { this.recordAttempt("download_failed"); this.update({ pending: false, downloadFailed: true, status: DOWNLOAD_FAILED_TEXT }); return; }
+        if (generation.status === "failed" || generation.status === "cancelled") { this.recordAttempt("failed"); this.update({ pending: false, status: "生成未完成，请检查积分或调整内容后重试" }); return; }
         if (!generation.taskId) { this.setData({ status: "提交结果仍待确认，请稍后查询进度" }); return; }
         taskId = generation.taskId;
         this.setData({ taskId }); this.persist();
@@ -250,6 +258,7 @@ Page({
       if (url) this.finishTask(url);
       else if (["failed", "cancelled", "succeeded"].includes(task.status)) {
         const downloadFailed = !!task.output?.downloadFailed;
+        this.recordAttempt(downloadFailed ? "download_failed" : "failed");
         this.update({ pending: false, downloadFailed, status: downloadFailed ? DOWNLOAD_FAILED_TEXT : "生成未完成，请检查积分或调整内容后重试" });
       } else this.setData({ status: task.status === "pending" ? "任务排队中，请耐心等待" : "视频制作中，请耐心等待" });
     } catch { if (current()) this.setData({ status: "暂时无法查询，任务仍保留，请稍后重试" }); }
@@ -258,7 +267,12 @@ Page({
       if (current() && this.data.pending && this.visible) this.timer = setTimeout(() => { void this.checkTask(); }, POLL_INTERVAL_MS);
     }
   },
+  recordAttempt(status: "failed" | "completed" | "download_failed", preview?: string) {
+    const attempt = listAttempts().find(item => item.conversationId === this.data.conversationId);
+    if (attempt) updateAttempt(attempt, { status, ...(preview ? { preview } : {}) });
+  },
   finishTask(resultUrl: string) {
+    this.recordAttempt("completed", resultUrl);
     this.update({ resultUrl, pending: false, downloadFailed: false, step: LAST_VIDEO_STEP, status: "视频已生成，请预览确认效果" });
   },
   /** Release the page from a long-running task without cancelling it; the result still lands in 作品. */
