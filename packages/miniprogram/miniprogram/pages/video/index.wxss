@@ -1,5 +1,18 @@
 .video-studio { padding: 26rpx 30rpx 200rpx; }
 .h1 { font-size: 44rpx; }
+.ai-disclaimer {
+  display: block;
+  box-sizing: border-box;
+  margin-top: 16rpx;
+  padding: 16rpx 20rpx;
+  border-left: 6rpx solid var(--brand-deep);
+  border-radius: 10rpx;
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 1.6;
+}
 .steps { width: 100%; margin: 0 0 28rpx; white-space: nowrap; }
 .steps-inner { display: inline-flex; gap: 24rpx; padding: 6rpx 0 18rpx; }
 .step { display: flex; align-items: center; gap: 10rpx; color: var(--muted); font-size: 23rpx; }
