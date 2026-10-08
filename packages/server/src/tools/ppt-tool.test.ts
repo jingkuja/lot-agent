@@ -183,3 +183,54 @@ it("does not render or publish a presentation after template loading was cancell
   expect(deps.storage.put).not.toHaveBeenCalled();
   expect(deps.db.createAsset).not.toHaveBeenCalled();
 });
+
+it("persists the exact deck and actual preview URLs in a reloadable artifact result", async () => {
+  const { parsePptArtifact } = await import("@lot-agent/core/presentation");
+  const deps = makeDeps();
+  const renderPreview = vi.fn(async () => [Buffer.from("png1"), Buffer.from("png2")]);
+  const input = { ...validInput, themePreset: "warm", brief: { audience: "管理团队", targetSlides: 2 } };
+  const result = await createPptTool({ ...deps, renderPreview }).execute(input, ctx);
+  const artifact = parsePptArtifact(result.content)!;
+  expect(artifact.deck).toEqual(input);
+  expect(artifact.previewStatus).toBe("ready");
+  expect(artifact.previewUrls).toHaveLength(2);
+  expect(deps.storage.put).toHaveBeenCalledTimes(3);
+});
+
+it("keeps PPT export usable when preview conversion fails", async () => {
+  const deps = makeDeps();
+  const result = await createPptTool({ ...deps, renderPreview: async () => { throw new Error("soffice missing"); } }).execute(validInput, ctx);
+  expect(result.isError).toBeFalsy();
+  expect(deps.created).toHaveLength(1);
+  expect(result.content).toContain('"previewStatus":"unavailable"');
+});
+
+it("cleans up exported PPT and thumbnails when publication fails", async () => {
+  const deps = makeDeps();
+  deps.db.createAsset = vi.fn(async () => { throw new Error("db unavailable"); });
+  await expect(createPptTool({ ...deps, renderPreview: async () => [Buffer.from("a"), Buffer.from("b")] }).execute(validInput, ctx)).rejects.toThrow("db unavailable");
+  expect(deps.storage.delete).toHaveBeenCalledTimes(3);
+});
+
+it("never reads another user's template bytes", async () => {
+  const deps = makeDeps();
+  deps.db.getAsset = vi.fn(async () => ({ id: "foreign", user_id: "other", storage_key: "secret.pptx" }));
+  const result = await createPptTool(deps).execute({ ...validInput, templateAssetId: "foreign" }, ctx);
+  expect(result.isError).toBeFalsy();
+  expect(deps.uploadStorage.get).not.toHaveBeenCalled();
+});
+
+it("preserves native chart and notes instead of flattening them into a template clone", async () => {
+  const deps = makeDeps();
+  let stored: Buffer | undefined;
+  deps.storage.put = vi.fn(async ({ body, key }: { body: Buffer; key: string }) => { stored = body; return { url: `/static/documents/${key}` }; });
+  deps.db.getAsset = vi.fn(async () => ({ user_id: "u1", storage_key: "a.pptx" }));
+  deps.uploadStorage.get = vi.fn(async () => buildTemplatePptxNoExtractableBg());
+  const result = await createPptTool(deps).execute({ title: "T", templateAssetId: "a", slides: [{ layout: "chart", title: "趋势", notes: "保留备注", chart: {
+    type: "line", categories: ["1", "2"], series: [{ name: "测试", values: [1, 2] }], unit: "次", source: "测试数据",
+  } }] }, ctx);
+  expect(result.isError).toBeFalsy();
+  const zip = await JSZip.loadAsync(stored!);
+  expect(zip.file("ppt/charts/chart1.xml")).not.toBeNull();
+  expect(await zip.file("ppt/notesSlides/notesSlide1.xml")!.async("string")).toContain("保留备注");
+});

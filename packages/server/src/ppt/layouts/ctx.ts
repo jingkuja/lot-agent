@@ -33,6 +33,17 @@ export function accentAt(c: PptTheme["colors"], i: number): string {
   return c[ACCENTS[((i % 6) + 6) % 6]];
 }
 
+/** Surface contrasts with the page while retaining the theme's text colors. */
+export function cardColor(c: PptTheme["colors"]): string {
+  const brightness = (hex: string) => [0, 2, 4].reduce((sum, i) => sum + parseInt(hex.slice(i, i + 2), 16), 0);
+  return brightness(c.lt2) < 300 ? darken(c.lt2, 0.25) : c.lt1;
+}
+
+export function contrastInk(hex: string): string {
+  const values = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722 > 0.179 ? "142033" : "FFFFFF";
+}
+
 /** 依主题装饰语言画角落装饰；minimal 不画。 */
 export function drawDecor(slide: PptxSlide, ctx: BuildCtx): void {
   const { c, W, H, theme } = ctx;
@@ -83,6 +94,7 @@ export function inkColors(ctx: BuildCtx): { title: string; body: string; onBg: b
 export function drawFooter(slide: PptxSlide, ctx: BuildCtx): void {
   const { c, f, W, H, index, total, presTitle } = ctx;
   slide.addShape("line", { x: W * 0.06, y: H * 0.93, w: W * 0.88, h: 0, line: { color: c.dk2, width: 0.75, transparency: 80 } });
-  slide.addText(presTitle, { x: W * 0.06, y: H * 0.935, w: W * 0.6, h: 0.3, fontFace: f.minor, fontSize: 9, color: c.dk2, valign: "middle" });
-  slide.addText(`${index + 1} / ${total}`, { x: W * 0.74, y: H * 0.935, w: W * 0.2, h: 0.3, fontFace: f.minor, fontSize: 9, color: c.dk2, align: "right", valign: "middle" });
+  const ink = inkColors(ctx);
+  slide.addText(presTitle, { x: W * 0.06, y: H * 0.935, w: W * 0.6, h: 0.3, fontFace: f.minor, fontSize: 9, color: ink.body, valign: "middle" });
+  slide.addText(`${index + 1} / ${total}`, { x: W * 0.74, y: H * 0.935, w: W * 0.2, h: 0.3, fontFace: f.minor, fontSize: 9, color: ink.body, align: "right", valign: "middle" });
 }

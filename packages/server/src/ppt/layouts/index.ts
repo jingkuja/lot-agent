@@ -10,6 +10,7 @@ import { buildCompare } from "./compare.js";
 import { buildTimeline } from "./timeline.js";
 import { buildQuote } from "./quote.js";
 import { buildClosing } from "./closing.js";
+import { buildChart } from "./chart.js";
 
 type Builder = (slide: PptxSlide, s: PptSlide, ctx: BuildCtx) => void;
 
@@ -24,4 +25,5 @@ export const BUILDERS: Record<PptLayout, Builder> = {
   timeline: buildTimeline,
   quote: buildQuote,
   closing: buildClosing,
+  chart: buildChart,
 };

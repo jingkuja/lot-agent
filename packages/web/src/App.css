@@ -6082,3 +6082,48 @@ html:not([lang="zh-CN"]) .agent-tab-strip .agent-tab-label {
 html:not([lang="zh-CN"]) .agent-tab-strip .agent-tab {
   gap: 5px;
 }
+
+/* Presentation planning, actual slide previews and structured revision. */
+.ppt-editor { max-width: 850px; width: 100%; box-sizing: border-box; }
+.ppt-editor.answered { opacity: 1; }
+.ppt-brief { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.ppt-brief > div { min-width: 0; }
+.ppt-brief dt { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.ppt-brief dd { margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.ppt-assumptions { padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--overlay-sink); font-size: 12px; color: var(--text-secondary); }
+.ppt-design-settings { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; font-size: 12px; color: var(--text-muted); }
+.ppt-design-settings label { display: flex; align-items: center; gap: 8px; }
+.ppt-design-settings select, .ppt-field input, .ppt-field textarea, .ppt-field select, .ppt-chart-editor input { box-sizing: border-box; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-input); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
+.ppt-field input:focus, .ppt-field textarea:focus, .ppt-chart-editor input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ppt-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; }
+.ppt-field textarea { resize: vertical; min-height: 66px; line-height: 1.6; }
+.ppt-editor .outline-body { flex: 1; }
+.ppt-slide-row { min-width: 0; list-style: none; }
+.ppt-slide-row details { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.ppt-slide-row summary { cursor: pointer; padding: 12px; list-style: none; }
+.ppt-slide-row summary::-webkit-details-marker { display: none; }
+.ppt-expand { flex-shrink: 0; color: var(--accent); font-size: 11px; }
+.ppt-slide-fields { border: 0; margin: 0; padding: 16px 14px 2px; min-width: 0; }
+.ppt-slide-fields:disabled input, .ppt-slide-fields:disabled textarea, .ppt-slide-fields:disabled select { opacity: 1; color: var(--text-secondary); }
+.ppt-item-fields { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+.ppt-page-actions { display: flex; gap: 8px; padding: 0 14px 14px; }
+.ppt-page-actions button, .ppt-design-settings button, .ppt-edit-toggle { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 12px; background: var(--bg-card); color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 12px; }
+.ppt-editor button:disabled { opacity: .5; cursor: not-allowed; }
+.ppt-warnings { padding-left: 20px; color: var(--text-muted); font-size: 12px; line-height: 1.65; }
+.ppt-validation { padding: 10px 12px; color: var(--error); background: var(--overlay-sink); border-radius: var(--radius-sm); font-size: 12px; }
+.ppt-data-scroll { overflow-x: auto; margin-bottom: 12px; }
+.ppt-chart-editor table { width: 100%; border-collapse: collapse; }
+.ppt-chart-editor th, .ppt-chart-editor td { padding: 4px; border: 1px solid var(--border); }
+.ppt-chart-editor input { width: 100%; min-width: 75px; }
+.ppt-artifact-card { max-width: 850px; width: 100%; }
+.ppt-edit-toggle { margin: 10px 0; color: var(--accent); }
+.ppt-preview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-height: 440px; overflow-y: auto; margin-top: 12px; }
+.ppt-preview-grid a { min-width: 0; text-decoration: none; color: var(--text-secondary); font-size: 11px; }
+.ppt-preview-grid img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-sm); box-sizing: border-box; background: var(--bg-card); }
+.ppt-preview-grid span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 4px 0; }
+.ppt-slide-preview { display: block; width: calc(100% - 28px); height: auto; margin: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+@media (max-width: 600px) {
+  .ppt-brief, .ppt-item-fields { grid-template-columns: 1fr; }
+  .ppt-preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ppt-editor { padding: 12px; }
+}

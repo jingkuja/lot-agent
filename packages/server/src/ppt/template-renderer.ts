@@ -64,7 +64,7 @@ function bodyPh(l: LayoutInfo): Placeholder | undefined {
 }
 
 /** 按 cover/section/content 选布局；模版千奇百怪，逐级回退。 */
-function pickLayouts(layouts: LayoutInfo[]): Record<PptSlide["layout"], LayoutInfo> {
+function pickLayouts(layouts: LayoutInfo[]): Partial<Record<PptSlide["layout"], LayoutInfo>> & Record<"cover" | "section" | "content", LayoutInfo> {
   if (!layouts.length) throw new Error("template has no slide layouts");
   const byKind = (...kinds: string[]) =>
     layouts.find((l) => l.kind && kinds.some((k) => l.kind!.toLowerCase() === k.toLowerCase()));

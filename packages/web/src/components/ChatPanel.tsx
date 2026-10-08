@@ -283,7 +283,7 @@ export function ChatPanel({
                 msg.id === lastAssistantId && !isStreaming ? onRegenerate : undefined
               }
               onSelectForPreview={onSelectForPreview}
-              onQuickReply={(text) => onSend(text, [])}
+              onQuickReply={isStreaming ? undefined : (text) => onSend(text, [])}
               askAnswer={askAnswer}
               askInteractive={hasInteractive && askAnswer === undefined && !isStreaming}
               failedToolNames={failedTools}

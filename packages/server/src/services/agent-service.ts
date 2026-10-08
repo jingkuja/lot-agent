@@ -1,4 +1,7 @@
 import { RESPONSE_LANGUAGE_POLICY } from "./response-language-policy.js";
+import { parsePptApproval, PPT_APPROVAL_PREFIX } from "@lot-agent/core/presentation";
+import { exportConfirmedPpt } from "./ppt-confirmation.js";
+import { renderPptPreview } from "../ppt/preview.js";
 import { parseChatSourceTypes } from "@lot-agent/core";
 import { createLocalKnowledgeService } from "../knowledge/local-service.js";
 import { FactAwareMemory } from "../knowledge/profile/memory.js";
@@ -673,6 +676,7 @@ export class AgentService {
     // PPT 生成工具：产出写 documents 仓，模版从用户上传仓读取。
     this.toolRegistry.register(
       createPptTool({
+        renderPreview: (buffer, count, signal) => renderPptPreview(buffer, count, signal, resolve(root, "assets/fonts")),
         storage: new LocalStorage(resolve(root, "data/documents"), staticPrefix("/static/documents")),
         uploadStorage: this.uploadStorage,
         db: this.db,
@@ -1143,6 +1147,22 @@ export class AgentService {
       const def =
         this.agentRegistry.get(agentId ?? "general") ??
         this.agentRegistry.get("general")!;
+
+      // Structured UI confirmation carries the exact reviewed slide data. Keep
+      // the existing authenticated chat endpoint, lease, cancellation and history,
+      // but bypass model rewriting and billing for deterministic local export.
+      if (userMessage.startsWith(PPT_APPROVAL_PREFIX)) {
+        if (!def.toolNames.includes("generate_ppt")) throw new Error("PPT export is unavailable in this agent.");
+        const deck = parsePptApproval(userMessage)!;
+        const sourceMessageId = await this.messageRepo.saveUserMessage(conversationId, userMessage);
+        const tool = this.toolRegistry.get("generate_ppt");
+        if (!tool) throw new Error("PPT export is unavailable.");
+        yield* exportConfirmedPpt(deck, tool, this.messageRepo, {
+          workingDirectory: process.cwd(),
+          userId, conversationId, sourceMessageId, signal,
+        });
+        return;
+      }
 
       // ── Persist user message, load history (orphan tool messages filtered) ──
       const userMsgId = await withAbort(this.messageRepo.saveUserMessage(

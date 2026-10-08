@@ -11,7 +11,7 @@ import {
   type OverlayMode,
 } from "../ppt/theme-extractor.js";
 import { renderPptx, type PptSlide } from "../ppt/renderer.js";
-import { validateSlides } from "../ppt/validation.js";
+import { PPT_DECK_SCHEMA, PPT_ARTIFACT_PREFIX, inspectDeck, validateDeck, type PptDeck } from "@lot-agent/core/presentation";
 import { getPreset } from "../ppt/themes.js";
 import {
   renderPptxFromTemplate,
@@ -27,6 +27,7 @@ interface PptToolDeps {
   /** 用户上传文件的存储（读取模版字节） */
   uploadStorage: ObjectStorage;
   db: DB;
+  renderPreview?: (buffer: Buffer, count: number, signal?: AbortSignal) => Promise<Buffer[] | null>;
 }
 
 /** 克隆路径只认 cover/section/content；把富版式文本化降级，避免 slideXml 丢内容。 */
@@ -36,6 +37,7 @@ function degradeForClone(slides: PptSlide[]): PptSlide[] {
       case "stats":
       case "keypoints":
         return {
+          ...s,
           layout: "content",
           title: s.title,
           bullets: (s.items ?? []).map((it) =>
@@ -46,22 +48,24 @@ function degradeForClone(slides: PptSlide[]): PptSlide[] {
         };
       case "timeline":
         return {
+          ...s,
           layout: "content",
           title: s.title,
           bullets: (s.items ?? []).map((it, i) => `${i + 1}. ${it.label}${it.desc ? `：${it.desc}` : ""}`),
         };
       case "compare":
         return {
+          ...s,
           layout: "content",
           title: s.title,
           bullets: [`【${s.left?.title}】`, ...(s.left?.bullets ?? []), `【${s.right?.title}】`, ...(s.right?.bullets ?? [])],
         };
       case "quote":
-        return { layout: "section", title: s.quote?.text ?? s.title, subtitle: s.quote?.author };
+        return { ...s, layout: "section", title: s.quote?.text ?? s.title, subtitle: s.quote?.author };
       case "agenda":
-        return { layout: "content", title: s.title, bullets: (s.items ?? []).map((it) => it.label) };
+        return { ...s, layout: "content", title: s.title, bullets: (s.items ?? slides.filter(slide => slide.layout === "section").map(slide => ({ label: slide.title }))).map((it) => it.label) };
       case "closing":
-        return { layout: "section", title: s.title, subtitle: s.subtitle };
+        return { ...s, layout: "section", title: s.title, subtitle: s.subtitle };
       default:
         return s;
     }
@@ -79,63 +83,8 @@ export function createPptTool(deps: PptToolDeps): Tool {
     name: "generate_ppt",
     description:
       "Generate a .pptx presentation from the outline and return a download link. Pass templateAssetId only for a user-uploaded template identified by an upload marker; otherwise omit it.",
-    parameters: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Presentation title, used in the filename, footer and notices." },
-        templateAssetId: { type: "string", description: "Asset ID of the user-uploaded template; provide only when its upload marker is present." },
-        themePreset: {
-          type: "string",
-          enum: ["business", "tech-dark", "warm", "mono", "academic"],
-          description: "Built-in theme without a template: business, tech-dark, warm, mono or academic.",
-        },
-        slides: {
-          type: "array",
-          description: "One entry per slide in rendering order. Choose fields according to layout.",
-          items: {
-            type: "object",
-            properties: {
-              layout: { type: "string", enum: ["cover", "agenda", "section", "content", "keypoints", "stats", "compare", "timeline", "quote", "closing"] },
-              title: { type: "string" },
-              subtitle: { type: "string", description: "Subtitle for cover/section/closing." },
-              bullets: { type: "array", items: { type: "string" }, description: "For content: 1–8 bullet points." },
-              items: {
-                type: "array",
-                description: "For agenda/keypoints/stats/timeline.",
-                items: {
-                  type: "object",
-                  properties: {
-                    label: { type: "string" },
-                    value: { type: "string", description: "Large numeric value for stats." },
-                    desc: { type: "string", description: "One supplementary sentence." },
-                  },
-                  required: ["label"],
-                },
-              },
-              left: { type: "object", description: "Left column for compare.", properties: { title: { type: "string" }, bullets: { type: "array", items: { type: "string" } } }, required: ["title", "bullets"] },
-              right: { type: "object", description: "Right column for compare.", properties: { title: { type: "string" }, bullets: { type: "array", items: { type: "string" } } }, required: ["title", "bullets"] },
-              quote: { type: "object", description: "For quote.", properties: { text: { type: "string" }, author: { type: "string" } }, required: ["text"] },
-              notes: { type: "string", description: "Speaker notes." },
-            },
-            required: ["layout", "title"],
-          },
-        },
-        backgrounds: {
-          type: "array",
-          description: "User-uploaded background images identified by upload markers. Default roles in sequence: cover/body/section.",
-          items: {
-            type: "object",
-            properties: {
-              assetId: { type: "string" },
-              role: { type: "string", enum: ["cover", "body", "section"] },
-              overlay: { type: "string", enum: ["dark", "light", "none"] },
-            },
-            required: ["assetId"],
-          },
-        },
-      },
-      required: ["title", "slides"],
-    },
+    parameters: PPT_DECK_SCHEMA,
+    execConfig: { timeoutMs: 90_000 },
     async execute(input, context): Promise<ToolResult> {
       context.signal?.throwIfAborted();
       const { title = "", templateAssetId, themePreset, slides, backgrounds } =
@@ -147,14 +96,15 @@ export function createPptTool(deps: PptToolDeps): Tool {
           backgrounds?: { assetId?: string; role?: "cover" | "body" | "section"; overlay?: OverlayMode }[];
         }) ?? {};
 
-      const validationError = validateSlides(slides);
+      const validationError = validateDeck(input);
       if (validationError) {
         return { content: `generate_ppt validation failed: ${validationError}`, isError: true, errorKind: "validation" };
       }
 
+      const deck = input as PptDeck;
       const userId = context.userId ?? "default";
 
-      let theme: PptTheme = getPreset(themePreset) ?? DEFAULT_THEME;
+      let theme: PptTheme = getPreset(themePreset ?? "business") ?? DEFAULT_THEME;
 
       // 上传背景图：读字节 → SlideBackground，按 role 装配（缺省按序 cover/body/section）
       const ROLE_ORDER: ("cover" | "body" | "section")[] = ["cover", "body", "section"];
@@ -222,7 +172,14 @@ export function createPptTool(deps: PptToolDeps): Tool {
               themeNote = "\n已提取模版的背景图与配色套用到全部版式。";
             } else {
               const rich = await templateHasReusableDesign(bytes);
-              if (rich) {
+              // A generic clone has no semantic slots for charts/cards. Keep the
+              // confirmed native layout instead of silently flattening its content.
+              const cloneCompatible = slides!.every(s => ["cover", "section", "content", "closing", "agenda"].includes(s.layout) && !s.notes && !s.source && !s.subtitle);
+              if (rich && !cloneCompatible) {
+                const extracted = await extractTheme(bytes);
+                if (extracted !== DEFAULT_THEME) theme = extracted;
+                themeNote = "\n已沿用模版配色与字体；复杂版式、来源及备注使用内置渲染，保留已确认内容。";
+              } else if (rich) {
                 try {
                   buffer = await renderPptxFromTemplate({ title, slides: degradeForClone(slides!) }, bytes);
                   themeNote = "\n已套用上传模版的版式、背景与母版样式。";
@@ -271,21 +228,44 @@ export function createPptTool(deps: PptToolDeps): Tool {
         await storage.delete(key).catch(() => {});
         context.signal.throwIfAborted();
       }
-      await db.createAsset({
-        id,
-        userId,
-        type: "document",
-        storageKey: key,
-        url,
-        mime: PPTX_MIME,
-        sizeBytes: buffer.byteLength,
-      });
+      const storedKeys = [key];
+      const previewUrls: string[] = [];
+      try {
+        let previews: Buffer[] | null = null;
+        try { previews = await deps.renderPreview?.(buffer, slides!.length, context.signal) ?? null; }
+        catch { context.signal?.throwIfAborted(); }
+        if (previews?.length === slides!.length) {
+          try {
+            for (let i = 0; i < previews.length; i++) {
+              context.signal?.throwIfAborted();
+              const previewKey = `${id}-slide-${i + 1}.png`;
+              storedKeys.push(previewKey);
+              const preview = await storage.put({ key: previewKey, body: previews[i], contentType: "image/png" });
+              previewUrls.push(preview.url);
+            }
+          } catch {
+            await Promise.allSettled(storedKeys.slice(1).map(k => storage.delete(k)));
+            previewUrls.length = 0;
+            context.signal?.throwIfAborted();
+          }
+        }
+        context.signal?.throwIfAborted();
+        await db.createAsset({
+          id, userId, type: "document", storageKey: key, url, mime: PPTX_MIME, sizeBytes: buffer.byteLength,
+        });
+      } catch (error) {
+        await Promise.allSettled(storedKeys.map(k => storage.delete(k)));
+        throw error;
+      }
+      const warnings = inspectDeck(deck);
+      if (themeNote.trim()) warnings.push({ code: "template", message: themeNote.trim() });
+      const artifact = { version: 1, deck, warnings, previewUrls, previewStatus: previewUrls.length ? "ready" : "unavailable" };
 
       return {
         content:
           `已生成演示文稿「${title || key}」（${slides!.length} 页）。\n` +
           `下载链接：${url}\nasset_id: ${id}${themeNote}\n` +
-          DOWNLOAD_RESULT_HINT,
+          DOWNLOAD_RESULT_HINT + "\n" + PPT_ARTIFACT_PREFIX + JSON.stringify(artifact),
       };
     },
   };

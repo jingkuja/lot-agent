@@ -9,6 +9,8 @@ import type { DisplayMessage } from "../hooks/useChat.js";
 import { GenerationCard } from "./GenerationCard.js";
 import { AskUserCard } from "./AskUserCard.js";
 import { OutlineCard } from "./OutlineCard.js";
+import { PptArtifactCard } from "./PptArtifactCard.js";
+import { parsePptArtifact, parsePptApproval } from "@lot-agent/core/presentation";
 import { parseDownloadArtifact } from "../lib/download-artifact.js";
 
 interface MessageBubbleProps {
@@ -54,10 +56,15 @@ export function MessageBubble({
   }
 
   if (message.role === "user") {
+    let userContent = message.content;
+    try {
+      const approved = parsePptApproval(userContent);
+      if (approved) userContent = t("已确认「{0}」的 {1} 页内容，按当前设置生成。", [approved.title, approved.slides.length]);
+    } catch { /* Retain malformed user text for diagnosis. */ }
     return (
       <div className="message-wrapper message-user">
         <div className="message-wrapper-inner">
-          {message.content && <div className="message-content">{message.content}</div>}
+          {userContent && <div className="message-content">{userContent}</div>}
           {message.attachments && message.attachments.length > 0 && (
             <div className="message-attachments">
               {message.attachments.map((a, i) => (
@@ -111,6 +118,8 @@ export function MessageBubble({
       message.toolResult?.isError
     );
     if (artifact) {
+      const ppt = message.toolResult?.name === "generate_ppt" ? parsePptArtifact(message.toolResult.output ?? "") : null;
+      if (ppt) return <div className="message-wrapper message-tool"><div className="message-wrapper-inner"><PptArtifactCard artifact={ppt} download={artifact} onReply={onQuickReply} /></div></div>;
       return (
         <div className="message-wrapper message-tool">
           <div className="message-wrapper-inner">
@@ -234,6 +243,7 @@ export function MessageBubble({
                   />
                 );
               }
+              if (tc.name === "generate_ppt") return null;
               const inputStr = JSON.stringify(tc.input, null, 2) ?? "";
               const hasInput =
                 inputStr && inputStr !== "{}" && inputStr !== "null";
