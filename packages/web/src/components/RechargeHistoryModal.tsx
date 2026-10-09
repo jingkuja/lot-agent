@@ -23,6 +23,7 @@ function formatRechargeTime(value: string, locale: string) {
 
 function paymentMethodLabel(value: string) {
   if (value === "alipay") return "支付宝";
+  if (value === "wxpay_virtual") return "微信虚拟支付";
   if (value === "wxpay") return "微信支付";
   return value || "—";
 }
@@ -84,7 +85,7 @@ export function RechargeHistoryModal({ onClose }: RechargeHistoryModalProps) {
         <header className="account-dialog-head">
           <div>
             <h2 id="recharge-history-title">{t("充值明细")}</h2>
-            <p>{t("仅显示当前账号充值成功的记录")}</p>
+            <p>{t("当前账号的充值与退款记录")}</p>
           </div>
           <button type="button" aria-label={t("关闭")} onClick={onClose}>×</button>
         </header>
@@ -118,7 +119,7 @@ export function RechargeHistoryModal({ onClose }: RechargeHistoryModalProps) {
                     <tr key={record.transactionId}>
                       <td data-label={t("充值时间")}>{formatRechargeTime(record.rechargedAt, locale)}</td>
                       <td data-label={t("充值渠道")}>{t(paymentMethodLabel(record.paymentMethod))}</td>
-                      <td data-label={t("充值金额")} className="recharge-history-amount">{formatAmount(record, locale)}</td>
+                      <td data-label={t("充值金额")} className="recharge-history-amount">{formatAmount(record, locale)}{(record.refundedAmount ?? 0) > 0 && <small> · {t("已退款")} {formatAmount({ ...record, amount: record.refundedAmount! }, locale)}</small>}</td>
                     </tr>
                   ))}
                 </tbody>

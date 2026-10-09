@@ -4,7 +4,7 @@
  * 小程序不再提供运行时改地址的入口：正式版受微信「合法域名」限制，用户改的地址也发不
  * 出去；本地联调直接在开发者工具里勾选「不校验合法域名」，并把这个常量临时指向本机。
  */
-export const API_BASE = "https://todoucloud.com";
+export const API_BASE = "https://aigc.todoucloud.com";
 export const IMAGE_AGENT_ID = "image";
 
 export const RATIOS = [

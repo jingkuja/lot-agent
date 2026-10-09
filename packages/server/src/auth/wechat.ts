@@ -14,6 +14,18 @@ export function wechatConfigured(): boolean {
 }
 
 export async function exchangeWechatCode(code: string): Promise<WechatSession> {
+  const session = await exchangeWechatSession(code);
+  return { openid: session.openid, unionid: session.unionid };
+}
+
+/** Payment-only secret. Never store in auth tickets or return to a client. */
+export async function exchangeWechatPaymentCode(code: string): Promise<WechatSession & { sessionKey: string }> {
+  const session = await exchangeWechatSession(code);
+  if (!session.sessionKey) throw new Error("wechat payment session unavailable");
+  return { ...session, sessionKey: session.sessionKey };
+}
+
+async function exchangeWechatSession(code: string): Promise<WechatSession & { sessionKey?: string }> {
   const appid = process.env.WECHAT_MP_APPID?.trim();
   const secret = process.env.WECHAT_MP_SECRET?.trim();
   if (!appid || !secret) {
@@ -25,8 +37,12 @@ export async function exchangeWechatCode(code: string): Promise<WechatSession> {
     `&secret=${encodeURIComponent(secret)}` +
     `&js_code=${encodeURIComponent(code)}` +
     `&grant_type=authorization_code`;
-  const res = await fetch(url);
-  let body: { openid?: string; unionid?: string; errcode?: number; errmsg?: string } = {};
+  // Avoid leaking the URL (which contains the app secret and login code) via
+  // network exception causes in route logs.
+  let res: Response;
+  try { res = await fetch(url, { signal: AbortSignal.timeout(10_000) }); }
+  catch { throw new Error("wechat session exchange failed"); }
+  let body: { openid?: string; unionid?: string; session_key?: string; errcode?: number; errmsg?: string } = {};
   try {
     body = (await res.json()) as typeof body;
   } catch {
@@ -39,7 +55,7 @@ export async function exchangeWechatCode(code: string): Promise<WechatSession> {
     });
     throw new Error("wechat session exchange failed");
   }
-  return { openid: body.openid, unionid: body.unionid || undefined };
+  return { openid: body.openid, unionid: body.unionid || undefined, sessionKey: body.session_key };
 }
 
 export function issueWechatTicket(session: WechatSession): string {

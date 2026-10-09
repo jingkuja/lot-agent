@@ -3,6 +3,7 @@ import {
   clearWechatAccessTokenCache,
   consumeWechatTicket,
   exchangeWechatCode,
+  exchangeWechatPaymentCode,
   exchangeWechatPhoneCode,
   issueWechatTicket,
   wechatConfigured,
@@ -63,4 +64,12 @@ describe("wechat mini program auth helpers", () => {
     expect(JSON.stringify(fetchMock.mock.calls)).toContain("getuserphonenumber");
     expect(JSON.stringify(fetchMock.mock.calls)).toContain("phone-code");
   });
+});
+
+it("uses session_key only in the payment exchange and rejects a missing key", async () => {
+  vi.stubEnv("WECHAT_MP_APPID", "wxapp"); vi.stubEnv("WECHAT_MP_SECRET", "secret");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ openid: "o", session_key: "key" })).mockResolvedValueOnce(Response.json({ openid: "o" })));
+  await expect(exchangeWechatPaymentCode("first")).resolves.toMatchObject({ openid: "o", sessionKey: "key" });
+  await expect(exchangeWechatPaymentCode("second")).rejects.toThrow("payment session unavailable");
+  vi.unstubAllEnvs(); vi.unstubAllGlobals();
 });

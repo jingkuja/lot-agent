@@ -37,6 +37,8 @@ import { createUsageRoutes, summarizeBalance } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
 import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
+import { VirtualPaymentService } from "./payments/service.js";
+import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
@@ -333,7 +335,9 @@ async function main() {
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));
   app.route("/api/usage", createUsageRoutes(service));
-  app.route("/api/recharge", createRechargeRoutes(service));
+  const virtualPayments = new VirtualPaymentService(new PgVirtualPaymentRepository(service.db.pool), service.tokenhub);
+  const stopVirtualPayments = service.managedKeysEnabled ? virtualPayments.start() : async () => {};
+  app.route("/api/recharge", createRechargeRoutes(service, virtualPayments));
   app.route("/api/platform", createPlatformRoutes(service));
   app.route("/api/publish", createPublishRoutes(service));
   app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
@@ -406,11 +410,14 @@ async function main() {
 
   const port = Number(process.env.PORT) || 3000;
 
-  process.on("SIGINT", async () => {
+  const shutdown = async () => {
     console.log("\nShutting down...");
+    await stopVirtualPayments();
     await service.shutdown();
     process.exit(0);
-  });
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 
   serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, (info) => {
     console.log(`Server listening on 0.0.0.0:${info.port}`);

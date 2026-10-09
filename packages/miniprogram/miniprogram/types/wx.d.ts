@@ -85,14 +85,15 @@ declare const wx: {
     success?: (res: { statusCode: number; data: string }) => void;
     fail?: (err: WxGeneralCallbackResult) => void;
   }): void;
-  requestPayment(opts: {
-    timeStamp: string;
-    nonceStr: string;
-    package: string;
-    signType?: "MD5" | "HMAC-SHA256" | "RSA";
-    paySign: string;
+  canIUse(schema: string): boolean;
+  getSystemInfoSync(): { platform: string; SDKVersion: string; version: string; system: string };
+  requestVirtualPayment(opts: {
+    mode: "short_series_goods";
+    signData: string;
+    paySig: string;
+    signature: string;
     success?: (res: WxGeneralCallbackResult) => void;
-    fail?: (err: WxGeneralCallbackResult) => void;
+    fail?: (err: WxGeneralCallbackResult & { errCode?: number }) => void;
   }): void;
   downloadFile(opts: {
     url: string;

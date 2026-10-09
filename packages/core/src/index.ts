@@ -19,3 +19,5 @@ export * from "./publish/index.js";
 export * from "./knowledge/index.js";
 
 export { createDeadline, withAbort } from "./runtime/abort.js";
+
+export type { VirtualPaymentOrder, VirtualPaymentRepository } from "./billing/virtual-payment.js";

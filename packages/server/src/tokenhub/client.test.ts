@@ -657,3 +657,23 @@ describe("TokenhubClient", () => {
     expect(JSON.parse(String(init.body))).toEqual({ owner_app: "lot-agent", enabled: true });
   });
 });
+
+it("reports only accounting facts, signed with the internal control-plane key", async () => {
+  const f = vi.fn().mockResolvedValue(ok({ transaction_id: "LV12345678", status: "success", refunded_fen: 300 }));
+  const client = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch, "", "https://h/api/internal", "lot-agent", "control-secret");
+  const receipt = await client.reportManagedRecharge({ userId: 7, transactionId: "LV12345678", points: 1000, paidAmountFen: 900, refundedFen: 300, providerTradeNo: "wx-paid", paidAt: 123 });
+  expect(receipt).toEqual({ transactionId: "LV12345678", status: "success", refundedFen: 300 });
+  const [url, init] = f.mock.calls[0];
+  expect(url).toBe("https://h/api/internal/agent-managed-recharge/receipts");
+  expect(JSON.parse(init.body)).toEqual({ owner_app: "lot-agent", user_id: 7, transaction_id: "LV12345678", points: 1000, paid_amount_fen: 900, refunded_fen: 300, payment_method: "wxpay_virtual", order_source: "lot-agent-miniprogram", provider_trade_no: "wx-paid", paid_at: 123 });
+  const headers = init.headers;
+  const canonical = `POST\n/api/internal/agent-managed-recharge/receipts\n${headers["X-Internal-Timestamp"]}\n${headers["X-Internal-Nonce"]}\n${createHash("sha256").update(init.body).digest("hex")}`;
+  expect(headers["X-Internal-Signature"]).toBe(createHmac("sha256", "control-secret").update(canonical).digest("hex"));
+  expect(init.signal).toBeInstanceOf(AbortSignal);
+});
+
+it.each(["refunded", "sandbox_paid"])("preserves %s without claiming a real credit", async (status) => {
+  const f = vi.fn().mockResolvedValue(ok({ transaction_id: "LOTvirtual123", status }));
+  const client = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch, "", "https://h/api/internal", "lot-agent", "control-secret");
+  expect((await client.getManagedRechargeOrder(7, "LOTvirtual123")).status).toBe(status);
+});

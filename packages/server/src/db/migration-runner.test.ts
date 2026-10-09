@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Pool } from "pg";
 import { runMigrations, type Migration, type QueryClient } from "./migration-runner.js";
+import { migrations as registeredMigrations } from "./migrations/index.js";
 
 /**
  * Fake `pg.Pool`/`PoolClient` pair that just records every `query()` call
@@ -86,7 +87,7 @@ describe("runMigrations", () => {
 
   it("skips already-applied versions and only runs the missing ones", async () => {
     const { pool } = fakePool({
-      "SELECT version FROM schema_migrations": [{ version: 1 }],
+      "SELECT version, name FROM schema_migrations": [{ version: 1, name: "baseline" }],
     });
     const ran: number[] = [];
     const migrations = [
@@ -101,6 +102,45 @@ describe("runMigrations", () => {
     await runMigrations(pool, migrations);
 
     expect(ran).toEqual([2]);
+  });
+
+  it("rejects a reused version before running any pending migration", async () => {
+    const { pool, calls, released } = fakePool({
+      "SELECT version, name FROM schema_migrations": [{ version: 32, name: "comic-drama" }],
+    });
+    const up = vi.fn(async () => {});
+    await expect(runMigrations(pool, [
+      migration(31, "earlier-pending", up),
+      migration(32, "virtual-payment", up),
+    ])).rejects.toThrow(/32.*comic-drama.*virtual-payment/);
+    expect(up).not.toHaveBeenCalled();
+    expect(calls.some(({ sql }) => sql === "BEGIN")).toBe(false);
+    expect(calls.some(({ sql }) => sql.includes("pg_advisory_unlock"))).toBe(true);
+    expect(released.count).toBe(1);
+  });
+
+  it("allows a new version after a migration belonging to another branch", async () => {
+    const { pool, calls } = fakePool({
+      "SELECT version, name FROM schema_migrations": [{ version: "32", name: "comic-drama" }],
+    });
+    const up = vi.fn(async () => {});
+    await runMigrations(pool, [migration(33, "virtual-payment", up)]);
+    expect(up).toHaveBeenCalledOnce();
+    expect(calls.filter(({ sql }) => sql.includes("INSERT INTO schema_migrations")).map(({ params }) => params))
+      .toEqual([[33, "virtual-payment"]]);
+  });
+
+  it.each(["comic-drama", "virtual-payment"])("runs payment version 33 when version 32 is already recorded as %s", async (name) => {
+    const { pool, calls } = fakePool({
+      "SELECT version, name FROM schema_migrations": [
+        ...registeredMigrations.filter(({ version }) => version < 32).map(({ version, name }) => ({ version, name })),
+        { version: 32, name },
+      ],
+    });
+    await runMigrations(pool, registeredMigrations);
+    expect(calls.filter(({ sql }) => sql.includes("INSERT INTO schema_migrations")).map(({ params }) => params))
+      .toEqual([[33, "virtual-payment"]]);
+    expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 
   it("rolls back, unlocks, and releases without recording when up() throws", async () => {

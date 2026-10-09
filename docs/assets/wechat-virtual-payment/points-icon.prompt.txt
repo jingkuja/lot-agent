@@ -1,0 +1,8 @@
+Use case: stylized-concept.
+Asset type: WeChat mini-program virtual payment goods icon for a creative AI app.
+Create one polished square PNG icon, intended for final export at exactly 200 × 200 pixels and under 200 KB.
+Reference the project's actual design language: warm paper-white backgrounds (#faf6f0), terracotta orange (#c86b4b), deeper terracotta (#a84e33), soft peach (#f5e6da), restrained cocoa (#403931); simple bold geometric symbols and a warm print-studio feel.
+Subject: one large terracotta-orange credit token with a clean cream four-point creative sparkle at its center, with two subtly offset token edges behind it suggesting a small stack of creative points. The front token is mostly face-on and dominates the composition.
+Style: minimal, sophisticated paper-cut / matte print illustration, crisp bold shapes, very subtle tactile paper texture and a small soft contact shadow. Keep the artwork close to a flat graphic; avoid glossy 3D rendering. Warm and friendly, not a casino coin or metallic currency.
+Composition: perfectly square opaque warm paper-white canvas, centered token stack occupying about 70% of the image, clear silhouette, ample safe margins, strong readability at 200 pixels. No border around the canvas.
+Constraints: no text, no letters, no numbers, no price, no currency symbol, no logo or watermark, no extra decorative objects. This single icon must work for every points tier. Background is opaque, not transparent.

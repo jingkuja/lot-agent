@@ -69,7 +69,7 @@ Hono API：鉴权、参数校验、限流、用户归属
 
 模型列表由 `models/catalog.ts` 结合用户可用模型与本地目录生成；`models/provider-factory.ts` 按用户凭证和选定模型创建提供器。托管凭证不可用时不能静默改用平台 Key。LLM 调用计量见 `billing/metered-llm.ts`，额度和用量见 `billing/meter.ts`；知识 embedding 另有真实网关回执核对流程。
 
-充值由 `routes/recharge.ts → tokenhub/client.ts` 调用 New API 内部控制面；支付回调和充值账本属于外部 New API，不能在本仓库另加一套直接改余额逻辑。
+网页/桌面充值由 `routes/recharge.ts → tokenhub/client.ts` 调用 New API 原有支付流程。小程序通过 `pages/recharge/index.ts` 调用 `wx.requestVirtualPayment`；Agent 的 `payments/service.ts` 负责报价、订单持久化、微信查单、退款同步和发货，`payments/wechat-virtual.ts` 持有微信配置和签名逻辑，`payments/repository.ts` 实现数据库租约。`index.ts` 启动并停止后台补偿任务。New API 仅接收 HMAC 记账通知，原子生成小程序来源订单并对托管 Key 入账或回退，不保存微信配置。完整边界、配置和验收见 [微信虚拟支付](wechat-virtual-payment.md)。
 
 ### 4.2 聊天与工具
 
@@ -154,11 +154,11 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本写入 `schema_migrations`。当前最新为 `0031-conversation-projects.ts`。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0033-virtual-payment.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪。
 
 新增表 / 字段应追加迁移文件并在 `migrations/index.ts` 注册，不能只修改历史迁移或依赖手工 SQL。普通业务查询集中在 `db/database.ts`；数字员工和知识库有自己的 repository。PG `NUMERIC` 返回字符串，计算前显式转换。
 
-主要数据域：账号 `users / sessions`；聊天 `conversations / messages / message_tool_calls`；运行 `traces / spans / tasks`；资产 `assets`；计量 `usage_logs`；Agent 安装 `user_agents`；知识表以 `rag_` 为主。数字员工与项目表的准确字段通过对应迁移和 repository 查找，不从旧表格复制。
+主要数据域：账号 `users / sessions`；聊天 `conversations / messages / message_tool_calls`；运行 `traces / spans / tasks`；资产 `assets`；支付 `virtual_payment_orders`；计量 `usage_logs`；Agent 安装 `user_agents`；知识表以 `rag_` 为主。数字员工与项目表的准确字段通过对应迁移和 repository 查找，不从旧表格复制。
 
 ### HTTP 与文件
 

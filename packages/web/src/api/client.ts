@@ -145,6 +145,8 @@ export interface RechargeInfo {
 }
 
 export interface RechargeRecord {
+  status?: string;
+  refundedAmount?: number;
   transactionId: string;
   rechargedAt: string;
   paymentMethod: string;

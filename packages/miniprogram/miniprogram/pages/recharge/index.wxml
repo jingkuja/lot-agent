@@ -32,15 +32,19 @@
   <!-- 说明 -->
   <view class="note card">
     <text class="note-line">· 充值到账为积分，1 元 = 100 积分</text>
-    <text class="note-line">· 支付通过微信完成，到账后自动入账</text>
+    <text class="note-line">· 使用小程序虚拟支付，iOS 由 Apple 支付</text>
     <text class="note-line">· 积分与网页端、桌面端通用</text>
+    <text wx:if="{{simulator}}" class="note-line">当前是开发者工具模拟器。请点击工具栏“预览”或“真机调试”，在手机微信中测试支付。</text>
+    <text wx:if="{{paymentError}}" class="note-line">{{paymentError}}</text>
   </view>
+
+  <text wx:if="{{status}}" class="muted">{{status}}</text>
 
   <!-- 支付按钮 -->
   <button
     class="pay-btn"
     bindtap="pay"
     loading="{{paying}}"
-    disabled="{{paying || !selected}}"
-  >{{paying ? '正在调起支付…' : '微信支付 ¥' + currentPriceText}}</button>
+    disabled="{{paying || !enabled || !selected}}"
+  >{{simulator ? '请使用手机微信支付' : paying ? '正在调起支付…' : '支付 ¥' + currentPriceText}}</button>
 </view>

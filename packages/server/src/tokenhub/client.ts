@@ -48,14 +48,15 @@ export interface ManagedBalanceResult {
 
 export interface ManagedRechargeOrder {
   transactionId: string;
-  status: "pending" | "payment_failed" | "credited";
+  status: "pending" | "payment_failed" | "credited" | "sandbox_paid" | "refunded";
   amount?: number;
   points?: number;
   quota?: number;
   currency?: string;
   orderSource?: string;
   paymentMethod?: string;
-  paymentKind?: "qrcode" | "redirect" | "miniprogram";
+  paymentKind?: "qrcode" | "redirect" | "miniprogram" | "virtual";
+  virtualPay?: { mode: "short_series_goods"; signData: string; paySig: string; signature?: string };
   codeUrl?: string;
   payUrl?: string;
   /** wx.requestPayment parameters, present when paymentKind === "miniprogram". */
@@ -69,13 +70,18 @@ export interface ManagedRechargeOrder {
   };
 }
 
+export interface ManagedRechargeOffer { points: number; productId: string; amountFen: number }
+
 export interface ManagedRechargeInfo {
+  offers?: ManagedRechargeOffer[];
   enabled: boolean;
   paymentMethods: Array<{ name: string; type: string }>;
   amountDiscount: Record<string, number>;
 }
 
 export interface ManagedRechargeRecord {
+  status?: string;
+  refundedAmount?: number;
   transactionId: string;
   rechargedAt: string;
   paymentMethod: string;
@@ -425,58 +431,39 @@ export class TokenhubClient {
     return data.allow_balance_fallback;
   }
 
+  async reportManagedRecharge(args: {
+    userId: number; transactionId: string; points: number; paidAmountFen: number;
+    refundedFen: number; providerTradeNo: string; paidAt: number;
+  }, signal?: AbortSignal): Promise<{ transactionId: string; status: string; refundedFen: number }> {
+    const data = await this.internalRequest<{ transaction_id: string; status: string; refunded_fen: number }>(
+      "POST", "/agent-managed-recharge/receipts", {
+        owner_app: "lot-agent", user_id: args.userId, transaction_id: args.transactionId,
+        points: args.points, paid_amount_fen: args.paidAmountFen, refunded_fen: args.refundedFen,
+        payment_method: "wxpay_virtual", order_source: "lot-agent-miniprogram",
+        provider_trade_no: args.providerTradeNo, paid_at: args.paidAt,
+      }, "agent:key.credit", "new_api_recharge_receipt_failed", {},
+      AbortSignal.any([AbortSignal.timeout(15_000), ...(signal ? [signal] : [])])
+    );
+    return { transactionId: data.transaction_id, status: data.status, refundedFen: data.refunded_fen };
+  }
+
   async createManagedRechargeOrder(args: {
-    userId: number;
-    points: number;
-    paymentMethod: string;
-    client?: string;
-    openid?: string;
+    userId: number; points: number; paymentMethod: string;
   }): Promise<ManagedRechargeOrder> {
-    const data = await this.internalRequest<{
-      transaction_id: string;
-      status: string;
-      amount?: number;
-      points?: number;
-      currency?: string;
-      order_source?: string;
-      payment_method?: string;
-      payment_kind?: string;
-      code_url?: string;
-      pay_url?: string;
-      appId?: string;
-      timeStamp?: string;
-      nonceStr?: string;
-      package?: string;
-      signType?: string;
-      paySign?: string;
-    }>(
-      "POST",
-      "/agent-managed-recharge/orders",
-      {
-        owner_app: "lot-agent",
-        user_id: args.userId,
-        points: args.points,
-        payment_method: args.paymentMethod,
-        ...(args.client ? { client: args.client } : {}),
-        ...(args.openid ? { openid: args.openid } : {}),
-      },
-      "agent:recharge.create",
-      "new_api_managed_recharge_create_failed"
+    const data = await this.internalRequest<Parameters<typeof mapManagedRechargeOrder>[0]>(
+      "POST", "/agent-managed-recharge/orders", {
+        owner_app: "lot-agent", user_id: args.userId, points: args.points, payment_method: args.paymentMethod,
+      }, "agent:recharge.create", "new_api_managed_recharge_create_failed"
     );
     return mapManagedRechargeOrder(data);
   }
 
   async getManagedRechargeInfo(userId: number): Promise<ManagedRechargeInfo> {
     const data = await this.internalRequest<{
-      enabled: boolean;
-      pay_methods?: Array<Record<string, string>>;
-      amount_discount?: unknown;
+      enabled: boolean; pay_methods?: Array<Record<string, string>>; amount_discount?: unknown;
     }>(
-      "GET",
-      `/agent-managed-recharge/info?owner_app=lot-agent&user_id=${userId}`,
-      undefined,
-      "agent:recharge.read",
-      "new_api_managed_recharge_info_failed"
+      "GET", `/agent-managed-recharge/info?owner_app=lot-agent&user_id=${userId}`, undefined,
+      "agent:recharge.read", "new_api_managed_recharge_info_failed"
     );
     return {
       enabled: data.enabled,
@@ -492,6 +479,8 @@ export class TokenhubClient {
   async getManagedRechargeHistory(userId: number, page = 1, pageSize = 20): Promise<ManagedRechargeHistory> {
     const data = await this.internalRequest<{
       records?: Array<{
+        status?: string;
+        refunded_amount?: number;
         transaction_id: string;
         recharged_at: number;
         payment_method: string;
@@ -509,6 +498,8 @@ export class TokenhubClient {
       "new_api_managed_recharge_history_failed"
     );
     const records = (data.records ?? []).map((record) => ({
+      ...(record.status ? { status: record.status } : {}),
+      ...(record.refunded_amount ? { refundedAmount: record.refunded_amount } : {}),
       transactionId: record.transaction_id,
       rechargedAt: unixSecondsToIso(record.recharged_at),
       paymentMethod: record.payment_method,
@@ -612,7 +603,8 @@ export class TokenhubClient {
     body: unknown,
     scope: string,
     errCode: string,
-    extraHeaders: Record<string, string> = {}
+    extraHeaders: Record<string, string> = {},
+    signal?: AbortSignal
   ): Promise<T> {
     if (!this.internalClientId || !this.internalClientSecret) {
       logger.warn("new-api internal client is not configured", { errCode, scope });
@@ -629,6 +621,7 @@ export class TokenhubClient {
     return this.unwrap<T>(
       () => this.fetchImpl(requestUrl.toString(), {
         method,
+        ...(signal ? { signal } : {}),
         headers: {
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
           "X-Internal-Client-Id": this.internalClientId,
@@ -763,6 +756,7 @@ function mapManagedRechargeOrder(data: {
     transactionId: data.transaction_id,
     status: data.status === "success"
       ? "credited"
+      : data.status === "sandbox_paid" || data.status === "refunded" ? data.status
       : data.status === "failed" || data.status === "expired" ? "payment_failed" : "pending",
     amount: data.amount,
     points: data.points,

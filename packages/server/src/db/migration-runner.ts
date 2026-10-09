@@ -60,8 +60,19 @@ export async function runMigrations(pool: Pool, migrations: Migration[]): Promis
         )
       `);
 
-      const { rows } = await client.query("SELECT version FROM schema_migrations");
-      const applied = new Set<number>(rows.map((r) => Number(r.version)));
+      const { rows } = await client.query("SELECT version, name FROM schema_migrations");
+      const applied = new Map<number, string>(rows.map((r) => [Number(r.version), r.name]));
+
+      // A version from another branch must never silently skip different DDL.
+      // Check all collisions before applying even an earlier pending migration.
+      for (const migration of migrations) {
+        if (applied.has(migration.version) && applied.get(migration.version) !== migration.name) {
+          throw new Error(
+            `migration version ${migration.version} conflict: database records "${applied.get(migration.version)}", ` +
+              `but code defines "${migration.name}"; use a new migration version`
+          );
+        }
+      }
 
       for (const migration of migrations) {
         if (applied.has(migration.version)) continue;

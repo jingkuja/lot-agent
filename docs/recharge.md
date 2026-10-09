@@ -2,11 +2,11 @@
 
 ## 方案
 
-Lot Agent 复用 New API 已配置的支付宝/微信直连支付网关和回调，不单独持有 MID、商户密钥或回调验签密钥。
+网页/桌面充值复用 New API 已配置的支付宝/微信直连支付网关和回调。小程序充值使用微信虚拟支付道具直购，由 Agent 完成订单、签名、查单和发货，再通知 New API 入账或回退，见 [微信虚拟支付接入](wechat-virtual-payment.md)。微信配置及支付 AppKey 仅在 Agent 后台。
 
 选择该方案的原因：
 
-- 支付订单、验签、补单和充值账本集中在 New API，避免两套资金逻辑。
+- 小程序支付闭环在 Agent，额度和充值账本在 New API；网页/桌面支付流程仍在 New API。
 - Lot Agent 与 New API 之间使用独立的 HMAC 内部控制面，不向浏览器暴露内部密钥。
 - Agent 充值通过订单来源和入账目标与普通 New API 充值隔离。
 
@@ -23,7 +23,7 @@ Lot Agent 复用 New API 已配置的支付宝/微信直连支付网关和回调
 5. 微信下单返回 `code_url`，Lot Agent 在弹窗内生成二维码；支付宝下单返回 `pay_url`，Lot Agent 在新标签中打开支付页。
 6. 支付网关验签并核对金额后调用 New API 的内部支付成功接口；New API 通过幂等账本给用户的 Lot Agent 托管 Key 入账。
 7. Lot Agent 轮询 `PaymentBusinessOrder` 状态；成功后刷新积分余额。
-8. 用户打开“充值明细”时，Lot Agent 使用当前登录账号对应的 New API 用户 ID 查询；New API 仅返回该用户 `lot-agent` 来源、托管 Key 入账且状态为成功的订单，并按到账时间倒序分页展示充值时间、渠道和金额。
+8. 用户打开“充值明细”时，Lot Agent 使用当前登录账号对应的 New API 用户 ID 查询；New API 仅返回该用户 `lot-agent` / `lot-agent-miniprogram` 来源、托管 Key 入账或已退款的订单，并按到账时间倒序分页展示充值时间、渠道和金额。
 
 普通 New API 充值使用 `order_source = new-api`、`billing_target = user_wallet`，不会进入 Agent 托管 Key。
 
@@ -36,7 +36,7 @@ Lot Agent 复用 New API 已配置的支付宝/微信直连支付网关和回调
 
 ## 配置
 
-支付配置仅放在 New API：
+网页/桌面网关配置放在 New API（小程序配置见虚拟支付文档）：
 
 - `PAY_URL`：支付网关地址。
 - `PAY_MERCHANT_ID`：商户标识；支付网关配置多个商户时必填。

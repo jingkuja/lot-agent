@@ -72,19 +72,11 @@ export interface GenerationResult {
 
 export interface RechargeOrder {
   transactionId: string;
-  status: "pending" | "payment_failed" | "credited";
+  status: "pending" | "payment_failed" | "credited" | "sandbox_paid" | "refunded";
   amount?: number;
   points?: number;
-  paymentMethod?: string;
-  paymentKind?: "qrcode" | "redirect" | "miniprogram";
-  miniprogramPay?: {
-    appId: string;
-    timeStamp: string;
-    nonceStr: string;
-    package: string;
-    signType: string;
-    paySign: string;
-  };
+  paymentKind?: "virtual";
+  virtualPay?: { mode: "short_series_goods"; signData: string; paySig: string; signature: string };
 }
 
 function authHeader(): Record<string, string> {
@@ -223,18 +215,21 @@ export const api = {
 
   balance: () => request<{ balance: number; totalUsed?: number; allowBalanceFallback?: boolean }>("/usage/balance"),
 
-  rechargeInfo: () =>
+  rechargeInfo: (platform: string) =>
     request<{
       enabled: boolean;
       paymentMethods: Array<{ name: string; type: string }>;
       amountDiscount: Record<string, number>;
-    }>("/recharge/info"),
+      offers?: Array<{ points: number; productId: string; amountFen: number }>;
+    }>(`/recharge/info?client=miniprogram&platform=${encodeURIComponent(platform)}`),
 
   createRechargeOrder: (body: {
     points: number;
-    paymentMethod: "wxpay";
+    paymentMethod: "wxpay_virtual";
     client: "miniprogram";
     wxCode: string;
+    platform: string;
+    expectedAmountFen: number;
   }) =>
     request<RechargeOrder>("/recharge/orders", {
       method: "POST",
