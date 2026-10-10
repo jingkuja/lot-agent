@@ -2,6 +2,7 @@ export * from "./generation-common.js";
 export * from "./image-generation.js";
 export * from "./openai-images-image.js";
 export * from "./video-generation.js";
+export * from "./kling-voices.js";
 export * from "./placeholder.js";
 export * from "./tts.js";
 export * from "./asr.js";

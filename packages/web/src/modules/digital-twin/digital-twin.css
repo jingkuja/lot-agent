@@ -1,0 +1,28 @@
+.digital-twin-panel h3 { margin: 0 0 8px; font-size: 20px; }
+.digital-twin-panel p { color: var(--text-secondary); line-height: 1.65; }
+.twin-libraries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.twin-library { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); }
+.twin-library > header { display: flex; align-items: flex-start; gap: 12px; }
+.twin-library h4 { margin: 0 0 5px; font-size: 16px; }
+.twin-library header p { margin: 0; font-size: 12px; }
+.twin-library-icon { display: grid; place-items: center; flex-shrink: 0; width: 42px; height: 42px; border-radius: 12px; color: var(--accent); background: var(--bg-active); }
+.twin-library-icon svg { width: 24px; height: 24px; }
+.twin-spec, .twin-footnote { font-size: 12px; }
+.twin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.twin-actions button { font-size: 12px; }
+.twin-capture { padding: 12px 0 18px; }
+.twin-recording, .twin-draft, .twin-camera { display: grid; gap: 12px; margin-top: 16px; padding: 14px; border-radius: 12px; background: var(--bg-tool); }
+.twin-draft img, .twin-camera video { width: 100%; max-height: 280px; object-fit: contain; border-radius: 8px; }
+.twin-draft audio, .twin-asset audio { width: 100%; min-width: 0; }
+[data-theme="dark"] .twin-library audio { color-scheme: dark; }
+.twin-empty { padding: 28px 16px; text-align: center; color: var(--text-muted); font-size: 12px; border: 1px dashed var(--border); border-radius: 12px; }
+.twin-assets { display: grid; gap: 12px; }
+.twin-asset { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; }
+.twin-asset strong { overflow-wrap: anywhere; font-size: 13px; }
+.twin-asset-preview { display: flex; align-items: center; justify-content: center; min-height: 60px; color: var(--text-muted); background: var(--bg-tool); border-radius: 8px; }
+.twin-asset-preview--portrait { height: 170px; }
+.twin-asset-preview img { width: 100%; height: 100%; object-fit: contain; border-radius: 8px; }
+.digital-twin-panel .twin-error { color: var(--error); font-size: 12px; overflow-wrap: anywhere; }
+.twin-picker .knowledge-main { flex: 1; }
+.twin-selection-notice { flex-shrink: 0; padding: 12px 26px; margin: 0; color: var(--accent); border-top: 1px solid var(--border); }
+@media (max-width: 850px) { .twin-libraries { grid-template-columns: minmax(0, 1fr); } }

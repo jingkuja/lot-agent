@@ -11,6 +11,7 @@ import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interacti
 const miniProgramCode = new URL("../assets/mini-program-code.jpg", import.meta.url).href;
 
 interface ChatPanelProps {
+  onDraftChange?: (hasDraft: boolean) => void;
   attachment?: { id: string; file: File };
   onAttachmentConsumed?: () => void;
   onManageKnowledge?: () => void;
@@ -24,7 +25,7 @@ interface ChatPanelProps {
   onSelectForPreview?: (content: string) => void;
   /** Current agent (for the empty-state hero). */
   agent?: Agent | null;
-  /** Content rendered directly above the input box (agent switcher). */
+  /** Product-specific actions rendered directly above the input box. */
   inputAbove?: React.ReactNode;
   /** Current user's name (for the empty-state greeting). */
   userName?: string;
@@ -153,6 +154,7 @@ export function ChatPanel({
   onSelectForPreview,
   agent,
   inputAbove,
+  onDraftChange,
   userName,
   modelCatalog,
   selectedModel,
@@ -210,6 +212,7 @@ export function ChatPanel({
       {isEmpty && mode === "video" && <Seedance25Hint />}
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
       <InputBox
+        onDraftChange={onDraftChange}
         attachment={attachment}
         onAttachmentConsumed={onAttachmentConsumed}
         onManageKnowledge={onManageKnowledge}

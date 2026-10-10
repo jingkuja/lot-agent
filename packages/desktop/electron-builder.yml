@@ -24,6 +24,9 @@ npmRebuild: false
 mac:
   category: public.app-category.productivity
   icon: build/icon.png
+  extendInfo:
+    NSMicrophoneUsageDescription: "录制个人声音样例，用于数字分身视频创作。 / Record voice samples for your digital twin videos."
+    NSCameraUsageDescription: "拍摄个人肖像，用于数字分身视频创作。 / Take portraits for your digital twin videos."
   # Unsigned by default so anyone can build. To sign + notarize, remove the
   # line below and provide CSC_LINK / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
   # APPLE_TEAM_ID — see docs/desktop.md.

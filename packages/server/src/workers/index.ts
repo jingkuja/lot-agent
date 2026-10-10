@@ -16,8 +16,10 @@ import {
   applyExtraction,
 } from "@lot-agent/core";
 import { loadLlmConfig } from "../config.js";
-import { loadGenerationConfig, makeImageProvider, makeVideoProvider } from "../generation/config.js";
+import { loadGenerationConfig, loadKlingVoiceConfig, makeKlingVoiceProvider, makeImageProvider, makeVideoProvider } from "../generation/config.js";
 import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
+import { KlingVoicePreparation } from "../generation/kling-voices.js";
+import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import {
   DIGITAL_EMPLOYEE_LLM_UNAVAILABLE,
@@ -117,6 +119,7 @@ async function main() {
   const cache = new GenCache(conn);
 
   const genConfig = await loadGenerationConfig(ROOT);
+  const klingVoiceConfig = loadKlingVoiceConfig();
   const imageProvider = makeImageProvider(genConfig.image);
   const videoProvider = makeVideoProvider(genConfig.video);
   // Per-user provider factory: generation calls use the owning user's api_key.
@@ -221,8 +224,21 @@ async function main() {
       : mediaType === "image"
         ? imageProvider
         : videoProvider;
+    const realVideo = mediaType === "video" && !!(apiKey || (!base.mock && base.apiKey));
     return {
       provider,
+      prepareKlingVoices: realVideo
+        ? async (input) => {
+            const voices = new KlingVoicePreparation({
+              provider: makeKlingVoiceProvider(klingVoiceConfig),
+              store: new PgKlingVoiceStore(db.pool),
+              // Only the dedicated voice service credential enters its fingerprint.
+              credentialScope: JSON.stringify([klingVoiceConfig.baseUrl, klingVoiceConfig.apiKey]),
+            });
+            return voices.prepare(input);
+          }
+        : async ({ referenceAudio }) => typeof referenceAudio === "string"
+          ? "mock-voice-1" : referenceAudio.map((_, index) => `mock-voice-${index + 1}`),
       storage,
       db,
       meter: mediaType === "video"

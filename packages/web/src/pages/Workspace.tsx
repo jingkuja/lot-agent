@@ -7,8 +7,8 @@ import { ChatPanel } from "../components/ChatPanel.js";
 import { BrandHeader } from "../components/BrandHeader.js";
 import { PreviewPanel } from "../components/PreviewPanel.js";
 import { ArtifactGallery, type Artifact } from "../components/ArtifactGallery.js";
-import { AgentCenterModal } from "../components/AgentCenterModal.js";
-import { AgentSwitcher } from "../components/AgentSwitcher.js";
+import { AgentSwitchDialog } from "../components/AgentSwitchDialog.js";
+import { AGENT_ICONS, agentIconKind } from "../lib/agent-icons.js";
 import { useConversations } from "../hooks/useConversations.js";
 import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
@@ -56,25 +56,21 @@ export function Workspace({
   onRequestedConversationHandled,
 }: WorkspaceProps) {
   const { t } = useI18n();
-  const { agents, installed, install, uninstall, promote } = useAgents(true);
+  const { agents } = useAgents(true);
   const isDigitalEmployeeMode = mode === "digitalEmployee";
   const assistantAgents = useMemo(
     () => withoutDigitalEmployee(agents),
     [agents]
   );
-  const assistantInstalled = useMemo(
-    () => withoutDigitalEmployee(installed),
-    [installed]
-  );
   const digitalEmployee = agents.find((agent) => agent.id === "digital_employee") ?? null;
 
-  // 已安装 agents;general 恒第一(仅用于 Sidebar 标签映射等需要全序的场景)。
+  // 所有可见 Agent 均可直接使用；通用助手作为默认入口。
   const orderedAgents = useMemo(() => {
     if (isDigitalEmployeeMode) return digitalEmployee ? [digitalEmployee] : [];
-    const general = assistantInstalled.find((a) => a.type === "general" || a.id === GENERAL_ID);
-    if (!general) return assistantInstalled;
-    return [general, ...assistantInstalled.filter((a) => a !== general)];
-  }, [assistantInstalled, digitalEmployee, isDigitalEmployeeMode]);
+    const general = assistantAgents.find((a) => a.type === "general" || a.id === GENERAL_ID);
+    if (!general) return assistantAgents;
+    return [general, ...assistantAgents.filter((a) => a !== general)];
+  }, [assistantAgents, digitalEmployee, isDigitalEmployeeMode]);
 
   const defaultAgentId = isDigitalEmployeeMode ? "digital_employee" : orderedAgents[0]?.id ?? GENERAL_ID;
   const [activeAgentId, setActiveAgentId] = useState(defaultAgentId);
@@ -96,13 +92,12 @@ export function Workspace({
     addLocal,
   } = useConversations();
 
-  // The agent of the chat currently on screen (drives the panel/input/model),
-  // decoupled from activeAgentId which only highlights the tab + filters the list.
+  // The open chat and sidebar always share the same selected Agent.
   const openConversation = conversations.find((c) => c.id === activeId);
   const openAgentId =
     newAgentId ??
     openConversation?.agent_id ??
-    defaultAgentId;
+    activeAgentId;
   const openAgent = agents.find((a) => a.id === openAgentId) ?? (isDigitalEmployeeMode ? digitalEmployee : null);
   const currentProfileValue = openConversation?.metadata?.digitalEmployeeCurrentProfile;
   const currentProfile = currentProfileValue && typeof currentProfileValue === "object"
@@ -116,17 +111,24 @@ export function Workspace({
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(() => new URLSearchParams(window.location.search).get("knowledge") === "1");
+  const [knowledgeSection, setKnowledgeSection] = useState<"libraries" | "digital-twin">("libraries");
+  const openKnowledge = useCallback((section: "libraries" | "digital-twin" = "libraries") => {
+    setKnowledgeSection(section);
+    setKnowledgeOpen(true);
+  }, []);
   const [knowledgeAttachment, setKnowledgeAttachment] = useState<{ id: string; file: File }>();
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !(event.target instanceof HTMLElement && event.target.closest("input,textarea,select,[contenteditable=true]"))) { event.preventDefault(); setKnowledgeOpen(true); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !(event.target instanceof HTMLElement && event.target.closest("input,textarea,select,[contenteditable=true]"))) { event.preventDefault(); openKnowledge(); }
     };
     window.addEventListener("keydown", shortcut); return () => window.removeEventListener("keydown", shortcut);
-  }, []);
+  }, [openKnowledge]);
   const [knowledgeAvailable, setKnowledgeAvailable] = useState(false);
   useEffect(() => { let live = true; void knowledgeApi.status().then(() => { if (live) setKnowledgeAvailable(true); }).catch(() => {}); return () => { live = false; }; }, [user.id]);
-  const [centerOpen, setCenterOpen] = useState(false);
-  const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
+  const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
+  const [hasDraft, setHasDraft] = useState(false);
+  const creatingConversation = useRef(false);
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
 
   const handleStreamEnd = useCallback(() => {
@@ -211,16 +213,13 @@ export function Workspace({
     setNewAgentId(defaultAgentId);
   }, [defaultAgentId]);
 
-  // 侧边栏 tab:纯筛选历史列表,任何状态下都不碰当前对话 / hero。
+  // Agent selection controls both history and the next conversation.
   const [newProjectId, setNewProjectId] = useState<string | null>(null);
 
-  const handleFilterAgent = useCallback((agentId: string) => {
-    setActiveAgentId(agentId);
-  }, []);
-
-  // 输入框上方 pill:无条件开一个该 Agent 的新对话;侧边栏筛选不动。
   const handleStartNewChat = useCallback(
     (agentId: string) => {
+      if (creatingConversation.current) return;
+      setActiveAgentId(agentId);
       setNewProjectId(null);
       setNewAgentId(agentId);
       // Sync the ref BEFORE the next render so in-flight stream events stop
@@ -250,17 +249,19 @@ export function Workspace({
     onNewChat: () => handleStartNewChat(openAgentId),
   });
 
-  const handlePickOverflow = useCallback(
-    async (agentId: string) => {
-      await promote(agentId); // 移到子 Agent 首位,持久化 sortOrder
-      handleStartNewChat(agentId);
-    },
-    [promote, handleStartNewChat]
-  );
+  const handleSwitchAgent = useCallback((agentId: string) => {
+    if (creatingConversation.current || agentId === openAgentId) return;
+    if (!assistantAgents.some((agent) => agent.id === agentId)) return;
+    if (activeId || messages.length > 0 || isStreaming || hasDraft) {
+      setPendingAgentId(agentId);
+      return;
+    }
+    handleStartNewChat(agentId);
+  }, [openAgentId, assistantAgents, activeId, messages.length, isStreaming, hasDraft, handleStartNewChat]);
 
   const handleSelect = useCallback(
     (id: string) => {
-      if (id === "__new__") return; // already in new-chat mode
+      if (creatingConversation.current || id === activeId || id === "__new__") return; // already in new-chat mode
       // A conversation is bound to one agent — sync the switcher to it.
       const conv = conversations.find((c) => c.id === id);
       if (conv) setActiveAgentId(conv.agent_id || defaultAgentId);
@@ -273,7 +274,7 @@ export function Workspace({
       loadMessages(id);
       setPreviewContent(null);
     },
-    [conversations, defaultAgentId, setActiveId, loadMessages, clear]
+    [conversations, activeId, defaultAgentId, setActiveId, loadMessages, clear]
   );
 
   const handledConversationRequest = useRef<string | null>(null);
@@ -285,10 +286,10 @@ export function Workspace({
     onRequestedConversationHandled?.();
   }, [handleSelect, isDigitalEmployeeMode, onRequestedConversationHandled, requestedConversationId]);
 
-  // 普通工作台新建通用对话；数字员工模块新建内部数字员工对话。
+  // New chats stay with the currently selected Agent.
   const handleCreate = useCallback(() => {
-    handleStartNewChat(defaultAgentId);
-  }, [handleStartNewChat, defaultAgentId]);
+    handleStartNewChat(openAgentId);
+  }, [handleStartNewChat, openAgentId]);
 
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
@@ -317,7 +318,16 @@ export function Workspace({
               ? "opportunity-advisor"
               : digitalEmployeeFeature
           : undefined;
-        const conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined);
+        if (creatingConversation.current) return;
+        creatingConversation.current = true;
+        setIsCreatingConversation(true);
+        let conv;
+        try {
+          conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined);
+        } finally {
+          creatingConversation.current = false;
+          setIsCreatingConversation(false);
+        }
         activeIdRef.current = conv.id;
         setActiveId(conv.id);
         setNewAgentId(null);
@@ -349,38 +359,7 @@ export function Workspace({
     [remove, activeId, clear, activeAgentId]
   );
 
-  const handleInstall = useCallback(
-    async (id: string) => {
-      setBusyAgentId(id);
-      try { await install(id); } finally { setBusyAgentId(null); }
-    },
-    [install]
-  );
-
-  const handleUninstall = useCallback(
-    async (id: string) => {
-      setBusyAgentId(id);
-      try {
-        await uninstall(id);
-        // 卸载当前激活的 Agent → 回落通用并进入新会话态
-        if (id === activeAgentId) {
-          setActiveAgentId(GENERAL_ID);
-          setNewAgentId(GENERAL_ID);
-          activeIdRef.current = null;
-          setActiveId(null);
-          clear();
-          setPreviewContent(null);
-        }
-      } finally {
-        setBusyAgentId(null);
-      }
-    },
-    [uninstall, activeAgentId, setActiveId, clear]
-  );
-
-  // Sidebar list: filtered to the active agent; prepend a virtual "新对话" entry
-  // when in new-chat mode (prepended unconditionally — the hero's agent may
-  // differ from the sidebar filter now that pills don't move the filter).
+  // History always belongs to the current Agent.
   const sidebarConversations = useMemo(() => {
     const filtered = conversations.filter((c) => c.agent_id === activeAgentId);
     if (!newAgentId) return filtered;
@@ -414,13 +393,13 @@ export function Workspace({
 
   return (
     <div className="workspace">
-      {knowledgeOpen && <KnowledgePanel onClose={() => setKnowledgeOpen(false)} onUse={(file) => { setKnowledgeAttachment({ id: crypto.randomUUID(), file }); setKnowledgeOpen(false); }} />}
+      {knowledgeOpen && <KnowledgePanel initialSection={knowledgeSection} onClose={() => setKnowledgeOpen(false)} onUse={(file) => { setKnowledgeAttachment({ id: crypto.randomUUID(), file }); setKnowledgeOpen(false); }} />}
       <div className={`workspace-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
         <BrandHeader
           user={user}
           onLogout={onLogout}
           onCollapse={() => setSidebarCollapsed(true)}
-          onOpenAgentCenter={() => setCenterOpen(true)}
+          onOpenDigitalTwin={() => openKnowledge("digital-twin")}
           onOpenAssistant={isDigitalEmployeeMode ? onNavigateAssistant : () => {}}
           onOpenDigitalEmployee={isDigitalEmployeeMode ? () => {} : onNavigateDigitalEmployee}
           activeModule={isDigitalEmployeeMode ? "digitalEmployee" : "assistant"}
@@ -429,7 +408,7 @@ export function Workspace({
             const popup = window.open("about:blank", "_blank");
             void api.getKnowledgeBaseLink()
               .then(({ url }) => {
-                if (url === "/?knowledge=1") { popup?.close(); setKnowledgeOpen(true); return; }
+                if (url === "/?knowledge=1") { popup?.close(); openKnowledge(); return; }
                 if (popup) {
                   popup.opener = null;
                   popup.location.href = url;
@@ -458,10 +437,10 @@ export function Workspace({
         ) : (
           <Sidebar
             conversations={sidebarConversations}
-            installedAgents={assistantInstalled}
+            agents={assistantAgents}
             activeAgentId={activeAgentId}
-            onSwitchAgent={handleFilterAgent}
-            switchDisabled={isStreaming}
+            onSwitchAgent={handleSwitchAgent}
+            switchDisabled={isCreatingConversation}
             activeId={newAgentId ? "__new__" : activeId}
             onSelect={handleSelect}
             onDelete={handleDelete}
@@ -493,10 +472,24 @@ export function Workspace({
           </button>
         )}
         <div className="workspace-chat">
+          {!isDigitalEmployeeMode && openAgent && (
+            <header className={`workspace-agent-header ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
+              <span className={`agent-pill-icon agent-pill-icon--${agentIconKind(openAgent)}`} aria-hidden>
+                {AGENT_ICONS[agentIconKind(openAgent)]}
+              </span>
+              <div className="workspace-agent-identity">
+                <span>{t("当前 Agent")}</span>
+                <strong>{t(openAgent.name)}</strong>
+              </div>
+              <span className="workspace-agent-description">{t(openAgent.description)}</span>
+            </header>
+          )}
           <ChatPanel
+            key={openAgentId}
+            onDraftChange={setHasDraft}
             attachment={knowledgeAttachment}
             onAttachmentConsumed={() => setKnowledgeAttachment(undefined)}
-            onManageKnowledge={knowledgeAvailable ? () => setKnowledgeOpen(true) : undefined}
+            onManageKnowledge={knowledgeAvailable ? () => openKnowledge() : undefined}
             messages={messages}
             onSend={doSend}
             onStop={stop}
@@ -511,17 +504,8 @@ export function Workspace({
                 : undefined
             }
             agent={openAgent}
-            inputAbove={
+            inputAbove={isDigitalEmployeeMode ? (
               <>
-                {!isDigitalEmployeeMode && (
-                  <AgentSwitcher
-                    agents={assistantInstalled}
-                    activeId={openAgentId}
-                    onSwitch={handleStartNewChat}
-                    onPickOverflow={handlePickOverflow}
-                    disabled={isStreaming}
-                  />
-                )}
                 {isDigitalEmployeeMode && onNavigateDigitalEmployee && (
                   <DigitalEmployeeActions
                     feature={digitalEmployeeFeature}
@@ -533,7 +517,7 @@ export function Workspace({
                   />
                 )}
               </>
-            }
+            ) : undefined}
             userName={user.name}
             modelCatalog={modelCatalog}
             selectedModel={selectedModels[modelGroup]}
@@ -572,13 +556,17 @@ export function Workspace({
           </div>
         )}
       </div>
-      {centerOpen && (
-        <AgentCenterModal
-          agents={assistantAgents}
-          onInstall={handleInstall}
-          onUninstall={handleUninstall}
-          onClose={() => setCenterOpen(false)}
-          busyId={busyAgentId}
+      {pendingAgentId && (
+        <AgentSwitchDialog
+          currentName={t(openAgent?.name ?? "通用助手")}
+          nextName={t(agents.find((agent) => agent.id === pendingAgentId)?.name ?? pendingAgentId)}
+          hasDraft={hasDraft}
+          isStreaming={isStreaming}
+          onCancel={() => setPendingAgentId(null)}
+          onConfirm={() => {
+            handleStartNewChat(pendingAgentId);
+            setPendingAgentId(null);
+          }}
         />
       )}
     </div>

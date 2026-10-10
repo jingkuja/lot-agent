@@ -38,11 +38,11 @@ export const knowledgeApi = {
   createItem: (value: unknown) => request(`${base}/items`, { method: "POST", headers: headers(), body: json(value) }),
   updateItem: (item: Item, value: unknown) => request(`${base}/items/${item.id}`, { method: "PATCH", body: json({ ...value as object, version: item.version }) }),
   memberships: (itemIds: string[], collectionIds: string[], add: boolean) => request(`${base}/memberships`, { method: "POST", body: json({ itemIds, collectionIds, add }) }),
-  upload: (collectionIds: string[], file: File, key: string, progress: (value: number) => void, copy = false) => new Promise<{ id: string }>((resolve, reject) => {
+  upload: (collectionIds: string[], file: File, key: string, progress: (value: number) => void, copy = false, tags: string[] = []) => new Promise<{ id: string }>((resolve, reject) => {
     const xhr = new XMLHttpRequest(); xhr.open("POST", `/api${base}/uploads`); xhr.timeout = 10 * 60 * 1000;
     xhr.setRequestHeader("Authorization", `Bearer ${getToken() ?? ""}`); xhr.setRequestHeader("Content-Type", fileMime(file));
     xhr.setRequestHeader("Idempotency-Key", key); xhr.setRequestHeader("X-Knowledge-Duplicate-Policy", copy ? "copy" : "ask");
-    xhr.setRequestHeader("X-Knowledge-Metadata", encodeURIComponent(json({ title: file.name, collectionIds })));
+    xhr.setRequestHeader("X-Knowledge-Metadata", encodeURIComponent(json({ title: file.name, collectionIds, tags })));
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) progress(Math.round(e.loaded / e.total * 100)); };
     xhr.onerror = () => reject(new Error("上传连接中断，请重试")); xhr.ontimeout = () => reject(new Error("上传超时，请重试"));
     xhr.onload = () => {
@@ -59,7 +59,7 @@ export const knowledgeApi = {
   remove: (item: Item) => request(`${base}/items/${item.id}`, { method: "DELETE", body: json({ version: item.version }) }),
   text: (itemId: string, revisionId: string) => request<Source>(`${base}/items/${itemId}/revisions/${revisionId}/text`),
   ticket: (itemId: string, revisionId: string) => request<{ url: string }>(`${base}/items/${itemId}/revisions/${revisionId}/preview-ticket`, { method: "POST" }),
-  file: async (item: Item) => { const response = await fetch(`/api${base}/items/${item.id}/revisions/${item.revisionId}/content`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } }); if (!response.ok) throw new Error("原件不可用，请刷新后重试"); return new File([await response.blob()], item.title, { type: item.mime ?? "application/octet-stream" }); },
+  file: async (item: Item, signal?: AbortSignal) => { const response = await fetch(`/api${base}/items/${item.id}/revisions/${item.revisionId}/content`, { signal, headers: { Authorization: `Bearer ${getToken() ?? ""}` } }); if (!response.ok) throw new Error("原件不可用，请刷新后重试"); return new File([await response.blob()], item.title, { type: item.mime ?? "application/octet-stream" }); },
   search: (collectionId: string, query: string, mode: string, allowDegraded: boolean, type = "", tag = "") => request<Results>(`${base}/${collectionId ? "retrieval" : "search"}`, { method: "POST", body: json({ query, collection_ids: collectionId ? [collectionId] : [], mode, allow_degraded: allowDegraded, filters: { source_types: type ? [type] : ["note", "document", "bookmark", "image", "audio", "video", "profile_fact"], ...(tag ? { tags: [tag] } : {}) } }) }),
   facts: () => request<{ data: Fact[] }>(`${base}/profile`),
   saveFact: (value: unknown) => request(`${base}/profile`, { method: "PUT", body: json(value) }),

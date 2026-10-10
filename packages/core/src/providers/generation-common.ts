@@ -16,7 +16,7 @@ export interface ReferenceMedia {
   url: string;
 }
 
-/** A vendor input may be a single URL or a list of URLs. */
+/** A vendor reference may be a URL or provider asset ID, singly or as a list. */
 export type ReferenceInput = string | string[];
 export interface CreateResult { taskId: string; status: string; progress: number }
 export interface PollResult {

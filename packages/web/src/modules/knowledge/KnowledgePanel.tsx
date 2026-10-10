@@ -7,6 +7,7 @@ import { MaterialPreview } from "./MaterialPreview.js";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { DuplicateFileError, knowledgeApi, type Collection, type Item, type Evidence, type Results, type Material } from "./api.js";
 import { ProfilePanel } from "./ProfilePanel.js";
+import { DigitalTwinPanel } from "../digital-twin/DigitalTwinPanel.js";
 import "./knowledge.css";
 
 const types: Record<string, string> = { document: "文档", note: "笔记", bookmark: "书签", image: "图片", audio: "音频", video: "视频", profile_fact: "个人信息" };
@@ -29,11 +30,12 @@ const ingestionErrors: Record<string, string> = {
 };
 const accept = ".txt,.md,.pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,.mp3,.wav,.m4a,.mp4,.webm";
 const tags = (value: string) => [...new Set(value.split(/[,，]/).map((v) => v.trim()).filter(Boolean))];
-const library = (scope: string) => !["inbox", "all", "profile", "materials", "libraries"].includes(scope) ? scope : "";
+const library = (scope: string) => !["inbox", "all", "profile", "materials", "libraries", "digital-twin"].includes(scope) ? scope : "";
 const navigation = [
   { id: "libraries", label: "知识库", path: "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z" },
   { id: "profile", label: "个人信息", path: "M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M4 21v-2a8 8 0 0 1 16 0v2" },
   { id: "materials", label: "个人素材", path: "M3 4h18v16H3z M3 16l5-5 4 4 3-3 6 6 M16 8h.01" },
+  { id: "digital-twin", label: "数字分身", path: "M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M4 21v-2a8 8 0 0 1 16 0v2 M3 6V3h3 M18 3h3v3" },
 ];
 const libraryIcons = [
   "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
@@ -48,11 +50,11 @@ function KnowledgeIcon({ path }: { path: string }) {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={path} /></svg>;
 }
 interface Upload { id: string; file: File; progress: number; status: "waiting" | "uploading" | "saved" | "failed" | "duplicate"; error?: string; duplicate?: { id: string; title: string }; collections?: string[] }
-export function KnowledgePanel({ onClose, onUse }: { onClose: () => void; onUse?: (file: File) => void }) {
+export function KnowledgePanel({ onClose, onUse, initialSection = "libraries" }: { onClose: () => void; onUse?: (file: File) => void; initialSection?: "libraries" | "digital-twin" }) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null); const searchInput = useRef<HTMLInputElement>(null);
   const [collections, setCollections] = useState<Collection[]>([]); const [collectionCursor, setCollectionCursor] = useState<string | null>(null);
-  const [selected, setSelected] = useState("libraries"); const selection = useRef(selected); selection.current = selected;
+  const [selected, setSelected] = useState<string>(initialSection); const selection = useRef(selected); selection.current = selected;
   const [items, setItems] = useState<Item[]>([]); const itemsRef = useRef(items); itemsRef.current = items; const [cursor, setCursor] = useState<string | null>(null);
   const [checked, setChecked] = useState<string[]>([]);
   const [name, setName] = useState(""); const [creatingLibrary, setCreatingLibrary] = useState(false);
@@ -84,7 +86,7 @@ export function KnowledgePanel({ onClose, onUse }: { onClose: () => void; onUse?
   const refresh = useCallback(async (preserve = false) => {
     if (selection.current !== selected) return;
     const generation = ++requestGeneration.current;
-    if (selected === "profile") return;
+    if (selected === "profile" || selected === "digital-twin") return;
     if (selected === "materials") {
       const page = await knowledgeApi.materials(undefined, undefined, type, materialSource, tag, filter);
       if (generation !== requestGeneration.current) return;
@@ -191,14 +193,14 @@ export function KnowledgePanel({ onClose, onUse }: { onClose: () => void; onUse?
   return <dialog ref={dialog} className="knowledge-dialog" onCancel={(event) => { event.preventDefault(); close(); }} aria-labelledby="knowledge-title">
     <header className="knowledge-head knowledge-header"><div className="knowledge-brand"><span className="knowledge-brand-icon"><KnowledgeIcon path="M4 3h14a2 2 0 0 1 2 2v16H6a3 3 0 0 1-3-3V5a2 2 0 0 1 2-2 M3 18a3 3 0 0 1 3-3h14 M8 7h7 M8 10h5" /></span><div><h2 id="knowledge-title">{t("个人知识库")}</h2><p>{t("保存有用的资料，让每次对话都有据可循")}</p></div></div><div className="knowledge-header-actions"><span className="knowledge-storage">{t("已存储")}{(bytes / 1024 / 1024).toFixed(1)} MB</span><button className="knowledge-close" onClick={close} disabled={busy} aria-label={t("关闭知识库")}>×</button></div></header>
     {error && <p className="knowledge-message" role="alert">{t(error)}</p>}{notice && <p className="knowledge-message" role="status">{t(notice)}</p>}
-    {!enabled && <p className="knowledge-message">{t("当前仅保存资料，后台索引尚未启用。")}</p>}
+    {!enabled && selected !== "digital-twin" && <p className="knowledge-message">{t("当前仅保存资料，后台索引尚未启用。")}</p>}
     <div className="knowledge-layout"><aside className="knowledge-libraries"><nav aria-label={t("知识导航")}>
       <span className="knowledge-nav-caption">{t("我的空间")}</span>
       {navigation.map(({ id, label, path }) => <button className="knowledge-nav-item" key={id} aria-current={selected === id || (id === "libraries" && (selected === "inbox" || !!library(selected))) ? "page" : undefined} disabled={busy} onClick={() => setSelected(id)}><KnowledgeIcon path={path} /><span>{t(label)}</span></button>)}
     </nav>
       <small>{t("搜索快捷键：⌘ / Ctrl + K")}</small>
     </aside><main className="knowledge-main">
-      {selected === "profile" ? <ProfilePanel collections={collections} /> : <>
+      {selected === "digital-twin" ? <DigitalTwinPanel onChanged={loadCollections} /> : selected === "profile" ? <ProfilePanel collections={collections} /> : <>
         <div className="knowledge-head knowledge-section-heading"><div><h3>{collection?.name ?? (selected === "materials" ? t("个人素材") : selected === "inbox" ? t("未分类资料") : t("知识库"))}</h3><p>{collection?.description || (selected === "materials" ? t("集中管理图片、音频和视频，随时用于对话。") : selected === "inbox" ? t("尚未加入任何知识库的资料，可批量加入知识库。") : selected === "libraries" ? t("共 {0} 个知识库，点击图标进入；下方是全部资料的检索与列表。", [collections.length]) : t("查找已保存的内容，检索相关片段与原文出处。"))}</p></div>{collection ? <div className="knowledge-heading-actions"><button disabled={busy} onClick={() => setSelected("libraries")}>{t("返回知识库")}</button><button disabled={busy} aria-expanded={!!editingCollection} onClick={() => setEditingCollection(editingCollection ? null : { ...collection })}>{editingCollection ? t("取消编辑") : t("编辑知识库")}</button></div> : selected !== "materials" && <button disabled={busy} onClick={() => setCreatingLibrary(true)}>{t("新建知识库")}</button>}</div>
         {selected === "libraries" && <>{creatingLibrary && <form className="knowledge-collect" aria-label={t("新建知识库")} onSubmit={(e) => { e.preventDefault(); void act(async () => { const created = await knowledgeApi.createCollection(name.trim()); setName(""); setCreatingLibrary(false); setSelected(created.id); }); }}><h3>{t("新建知识库")}</h3><label>{t("知识库名称")}<input required autoFocus maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label><div className="knowledge-actions"><button className="knowledge-primary" disabled={busy}>{t("创建知识库")}</button><button type="button" disabled={busy} onClick={() => setCreatingLibrary(false)}>{t("取消")}</button></div></form>}
         <section className="knowledge-library-grid" aria-label={t("我的知识库")}>

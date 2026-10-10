@@ -22,6 +22,7 @@ Lot Agent 是共用账号、模型网关和计费体系的 AI 内容与办公工
 | 办公 | 文档导出、合同对比、PPT 大纲确认、生成与修改 | `server/tools/`、`server/ppt/`、`core/presentation/` |
 | 数字员工 | 营销资料、客户画像、商机建议、客户获客、文案与素材生成 | `web/modules/digital-employee/`、`server/digital-employee/` |
 | 个人知识库 | 资料 / 事实 / 素材管理、索引、混合检索、聊天引用、外部知识密钥 | `web/modules/knowledge/`、`server/knowledge/` |
+| 数字分身 | 个人语音库 / 肖像库、麦克风录音、摄像头拍照、上传和视频参考素材选用 | `web/modules/digital-twin/`、`KnowledgePanel.tsx`、`InputBox.tsx` |
 | 项目组织 | 会话项目创建、列表、会话归入项目 | `routes/conversations.ts`、迁移 `0031`；不等同完整项目协作系统 |
 | 账号与积分 | 登录、注册、手机号 / 微信绑定、托管凭证、余额和充值记录 | `routes/auth.ts`、`routes/usage.ts`、`routes/recharge.ts` |
 
@@ -94,6 +95,12 @@ ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core
 `POST /api/conversations/:id/generations → 校验 / 额度预检 → pending 消息与 task → BullMQ → workers/index.ts → generation/run-job.ts → 提供器 → 下载并存储资产 → 计量 / 状态更新`。
 
 前端以消息中的 `taskId` 查询 `GET /api/tasks/:id`；刷新后可以恢复。生成缓存、失败状态、取消与下载重试都有独立语义。已有 `generation.redownload` 路径只重试产物下载，避免把下载失败直接变成再次收费生成。
+
+数字分身入口位于知识面板侧栏，`DigitalTwinPanel.tsx` 分别管理个人语音与肖像。复用知识管理的鉴权上传、原件读取、分页和删除，以 `digital-twin:voice` / `digital-twin:portrait` 标签和媒体类型筛选，无新增数据库表。`TwinCapture.tsx` 使用浏览器设备权限采集，录音经 `media.ts` 转为最长 15 秒的单声道 WAV，拍照输出 JPEG；关闭面板会释放设备。上传声音限 MP3/WAV、2–15 秒、15 MB，肖像限 JPG/PNG/WebP、20 MB，服务端沿用私有存储的归属、流式大小和文件签名校验。素材保存在私有库；视频输入框通过 `DigitalTwinPicker` 读取所选文件并加入既有 `video_reference_audio` / `video_reference_image` 上传链路，同时补充提示词，发送后按现有视频附件方式提供给模型。参考声音用于所选模型的视频生成，不提供独立的长片配音服务；真人肖像支持以所选模型为准。macOS 打包权限说明位于 `packages/desktop/electron-builder.yml`。
+
+Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务恢复检查后调用 `generation/kling-voices.ts`：将样例转为公网 URL → `POST /v1/wand/kling/custom-voices` → 每 2.5 秒查询至 `succeed` → 取 `task_result.voices[].voice_id` 作为内部参考音色，提供器将其写入请求的 `metadata.voice_id`（两个音色时为 `metadata.voice_ids`），不向网关发送 `reference_audio`，并开启视频音频。New API 网关需把上述 metadata 转为腾讯 `contents` 中的 `type=voice` / `voice_id` 项。创建接口的 `task_id` 不作为音色 ID。非 Kling 模型沿用音频 URL。自动音色名称使用 20 字符以内的短名称。音色 HTTP / 业务错误保留脱敏后的 message、code、request_id 供排查，不丢弃 400 的具体原因。单次最多两个音色；音色失败、超时或取消会阻止视频提交。
+
+`core/providers/kling-voices.ts` 定义音色 HTTP 协议和持久化接口；`generation/kling-voice-store.ts` 通过迁移 35 的 `generation_voice_tasks` 保存用户 / 视频任务 / 音频序号对应的外部请求 ID、音色任务 ID 和音色 ID。写请求前先保存外部请求 ID，未知创建结果仅查询，不重发 POST；凭证 / 来源指纹变化时拒绝复用。该记录只用于同一任务恢复，不跨视频任务缓存音色。Worker 通过 `generation/config.ts` 的 `loadKlingVoiceConfig` 读取独立服务端配置 `KLING_VOICE_BASE_URL`（默认 `https://tokenhub.tencentmaas.com/v1`）与 `KLING_VOICE_API_KEY`，不回退到 LLM、视频或用户推理 Key。客户端在基础地址后追加 `/wand/kling/custom-voices` 及查询路径；音色状态仍按用户 / 任务隔离，指纹绑定独立音色服务凭证。未配置 Key 时仅带参考声音的真实 Kling 任务报错；视频生成继续使用原有提供器配置，音频通过 `PUBLIC_BASE_URL` 对公网可读。Mock 视频不请求真实音色服务。协议依据：[腾讯 Kling 音色管理文档](https://cloud.tencent.com/document/product/1823/135742)。
 
 ### 4.4 文档与 PPT
 
@@ -221,6 +228,7 @@ API 默认 3000；Vite 默认 5173，代理 `/api` 和 `/static` 到 API。需�
 # 按实际改动选择测试范围；新纯逻辑按仓库约定先写 Vitest 测试
 pnpm exec vitest run packages/core/src/tools/registry.test.ts
 pnpm test:knowledge
+pnpm check:digital-twin:ui    # 需 Playwright（可用 PLAYWRIGHT_MODULE 指定路径）和 Chrome；模拟设备及 HTTP 数据，无付费调用
 pnpm --filter @lot-agent/web build
 pnpm --filter @lot-agent/miniprogram build  # 类型检查，真机行为另验
 pnpm test

@@ -16,6 +16,8 @@ import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
 import { MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, validateReferenceMedia, readMediaDuration } from "../lib/video-references.js";
 import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
+import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
+import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
@@ -28,6 +30,7 @@ export interface InputBoxHandle {
 }
 
 interface InputBoxProps {
+  onDraftChange?: (hasDraft: boolean) => void;
   attachment?: { id: string; file: File };
   onAttachmentConsumed?: () => void;
   onManageKnowledge?: () => void;
@@ -78,7 +81,7 @@ const SUPPORTED_TYPES: { label: string; exts: string }[] = [
 ];
 
 export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox({
-  attachment, onAttachmentConsumed, onManageKnowledge,
+  attachment, onAttachmentConsumed, onManageKnowledge, onDraftChange,
   onSend,
   onStop,
   disabled = false,
@@ -114,6 +117,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [referenceVideoFiles, setReferenceVideoFiles] = useState<File[]>([]);
   const [referenceAudioFiles, setReferenceAudioFiles] = useState<File[]>([]);
+  const [twinOpen, setTwinOpen] = useState(false);
+  const selectingTwin = useRef(false);
   const [firstFrameFile, setFirstFrameFile] = useState<File | null>(null);
   const [lastFrameFile, setLastFrameFile] = useState<File | null>(null);
   // 图像/视频生成共用「参考图」上传 + 渐变发送 + 设置选择器。
@@ -141,6 +146,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [backgroundFiles, setBackgroundFiles] = useState<File[]>([]);
   const [oldContractFile, setOldContractFile] = useState<File | null>(null);
   const [newContractFile, setNewContractFile] = useState<File | null>(null);
+  const hasDraft = !!(promptValue.trim() || files.length || referenceVideoFiles.length || referenceAudioFiles.length || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length || oldContractFile || newContractFile);
+  useEffect(() => { onDraftChange?.(hasDraft); }, [hasDraft, onDraftChange]);
+
   const templateInputRef = useRef<HTMLInputElement>(null);
   const backgroundInputRef = useRef<HTMLInputElement>(null);
   const oldContractInputRef = useRef<HTMLInputElement>(null);
@@ -229,6 +237,34 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       setCheckingMedia(false);
     }
   }, [referenceVideoFiles, referenceAudioFiles]);
+
+  async function selectTwin(file: File, kind: TwinKind) {
+    if (disabled || checkingMediaRef.current || selectingTwin.current) throw new Error(t("正在检查附件时长，请稍后重试"));
+    selectingTwin.current = true;
+    checkingMediaRef.current = true;
+    setCheckingMedia(true);
+    try {
+      await validateTwinFile(file, kind);
+      let instruction: string;
+      if (kind === "voice") {
+        await validateReferenceMedia([...referenceAudioFiles, file], "音频", readMediaDuration);
+        const reference = seedanceVideo ? seedanceAssetMention("Audio", referenceAudioFiles.length) : t("音频{0}", [referenceAudioFiles.length + 1]);
+        instruction = t("全片人声参考 {0} 的音色，按照以下文案配音。", [reference]);
+        setReferenceAudioFiles((old) => [...old, file]);
+      } else {
+        if (files.length >= MAX_VIDEO_REFERENCE_IMAGES) throw new Error(t("参考图最多 9 张"));
+        const reference = seedanceVideo ? seedanceAssetMention("Image", files.length) : t("图片{0}", [files.length + 1]);
+        instruction = t("视频主角的外貌参考 {0}，保持人物形象一致。", [reference]);
+        addFiles([file]);
+      }
+      setPromptValue([promptValue.trim(), instruction].filter(Boolean).join("\n"));
+      setAttachmentError("");
+    } finally {
+      selectingTwin.current = false;
+      checkingMediaRef.current = false;
+      setCheckingMedia(false);
+    }
+  }
 
   useEffect(() => {
     if (!attachment || attachment.id === consumedAttachment.current) return;
@@ -388,6 +424,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   return (
     <div className={`input-box${embedded ? " input-box--embedded" : ""}`}>
+      {videoMode && twinOpen && <DigitalTwinPicker onSelect={selectTwin} onClose={() => setTwinOpen(false)} />}
       {attachmentError && <p className="input-modal-hint" role="alert">{t(attachmentError)}</p>}
       {!mediaMode && files.some((f) => f.type.startsWith("image/")) && (
         <div className="input-modal-hint" role="note">
@@ -672,6 +709,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           )}
           {videoMode && (
             <>
+              <button type="button" className="btn-reference" disabled={disabled || checkingMedia} onClick={() => setTwinOpen(true)}>{t("数字分身")}</button>
               <button
                 type="button"
                 className="btn-reference"

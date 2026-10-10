@@ -8,6 +8,7 @@ import {
   HttpVideoGenerationProvider,
   MockVideoGenerationProvider,
   pickVideoAdapter,
+  HttpKlingVoiceProvider,
   type ImageGenerationProvider,
   type VideoGenerationProvider,
 } from "@lot-agent/core";
@@ -22,6 +23,25 @@ export interface MediaGenerationConfig {
   adapter: string;
   model: string;
   modelId: string;
+}
+
+/** Server-side custom voice service, independent of inference/video credentials. */
+export interface KlingVoiceConfig {
+  baseUrl: string;
+  apiKey: string;
+}
+
+export function loadKlingVoiceConfig(): KlingVoiceConfig {
+  return {
+    baseUrl: process.env.KLING_VOICE_BASE_URL?.trim() || "https://tokenhub.tencentmaas.com/v1",
+    apiKey: process.env.KLING_VOICE_API_KEY?.trim() || "",
+  };
+}
+
+/** Called lazily for real Kling audio jobs so other generation can still run. */
+export function makeKlingVoiceProvider(cfg: KlingVoiceConfig): HttpKlingVoiceProvider {
+  if (!cfg.apiKey) throw new Error("Kling 音色服务未配置 KLING_VOICE_API_KEY。");
+  return new HttpKlingVoiceProvider(cfg);
 }
 
 export interface GenerationConfig {

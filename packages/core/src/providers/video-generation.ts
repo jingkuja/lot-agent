@@ -25,7 +25,7 @@ export interface VideoGenerationRequest {
   input_reference?: ReferenceInput;
   /** Reference videos for the OpenAI-compatible `/videos` endpoint. */
   reference_video?: ReferenceInput;
-  /** Reference audio for the OpenAI-compatible `/videos` endpoint. */
+  /** Reference audio URLs, or prepared Kling voice IDs, for `/videos`. */
   reference_audio?: ReferenceInput;
   first_frame?: string;
   last_frame?: string;
@@ -69,6 +69,21 @@ export function usesSeedanceReferenceVideoAdaptive(
   return isSeedanceModel(model) && hasReferenceVideo(referenceVideo);
 }
 
+/** Kling's gateway rejects reference_audio even when its value is a voice ID. */
+function applyAudioReference(body: Record<string, unknown>, req: VideoGenerationRequest, model: string): void {
+  if (!hasReferenceAudio(req.reference_audio)) return;
+  if (!/kling/i.test(model)) {
+    body.reference_audio = req.reference_audio;
+    return;
+  }
+  const voices = typeof req.reference_audio === "string" ? [req.reference_audio] : req.reference_audio!;
+  if (voices.length > 2 || voices.some((id) => !id.trim() || /[:/\\]/.test(id))) {
+    throw new Error("Kling 参考声音必须先创建音色并取得 voice_id。");
+  }
+  const metadata = (body.metadata ?? {}) as Record<string, unknown>;
+  body.metadata = { ...metadata, ...(voices.length === 1 ? { voice_id: voices[0] } : { voice_ids: voices }) };
+}
+
 /** tokenhub "happyhorse" async create→poll format, video endpoints. */
 export class HappyhorseVideoAdapter implements VideoVendorAdapter {
   // Create is plural ("/video/generations"); poll is also plural
@@ -89,7 +104,7 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
     if (req.ratio) body.ratio = req.ratio;
     if (req.input_reference) body.input_reference = req.input_reference;
     if (req.reference_video) body.reference_video = req.reference_video;
-    if (req.reference_audio) body.reference_audio = req.reference_audio;
+    applyAudioReference(body, req, model);
     if (req.first_frame) body.first_frame = req.first_frame;
     if (req.last_frame) body.last_frame = req.last_frame;
     if (req.media && req.media.length > 0) body.media = req.media;
@@ -174,7 +189,7 @@ export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
       if (refs.length) body.input_reference = refs.length === 1 ? refs[0] : refs;
     }
     if (req.reference_video) body.reference_video = req.reference_video;
-    if (req.reference_audio) body.reference_audio = req.reference_audio;
+    applyAudioReference(body, req, model);
     if (req.first_frame) body.first_frame = req.first_frame;
     if (req.last_frame) body.last_frame = req.last_frame;
     return body;

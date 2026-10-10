@@ -6,7 +6,7 @@ import { shouldAutoLoadMore } from "../lib/auto-page.js";
 
 interface SidebarProps {
   conversations: Conversation[];
-  installedAgents: Agent[];
+  agents: Agent[];
   activeAgentId: string;
   onSwitchAgent: (agentId: string) => void;
   switchDisabled?: boolean;
@@ -26,7 +26,7 @@ const LOAD_MORE_THRESHOLD = 80;
 
 export function Sidebar({
   conversations,
-  installedAgents,
+  agents,
   activeAgentId,
   onSwitchAgent,
   switchDisabled,
@@ -101,7 +101,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <SidebarAgentTabs
-        agents={installedAgents}
+        agents={agents}
         activeId={activeAgentId}
         onSwitch={onSwitchAgent}
         disabled={switchDisabled}

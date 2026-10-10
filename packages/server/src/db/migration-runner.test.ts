@@ -139,7 +139,7 @@ describe("runMigrations", () => {
     });
     await runMigrations(pool, registeredMigrations);
     expect(calls.filter(({ sql }) => sql.includes("INSERT INTO schema_migrations")).map(({ params }) => params))
-      .toEqual([[33, "virtual-payment"], [34, "agent-run-state"]]);
+      .toEqual([[33, "virtual-payment"], [34, "agent-run-state"], [35, "kling-voice-tasks"]]);
     expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 

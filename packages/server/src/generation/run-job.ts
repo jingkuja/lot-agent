@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
 import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
+import type { PrepareKlingVoicesInput } from "./kling-voices.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
 /**
@@ -34,6 +35,7 @@ export interface JobGenerationProvider {
 
 export interface RunJobDeps {
   provider: JobGenerationProvider;
+  prepareKlingVoices?: (input: PrepareKlingVoicesInput) => Promise<ReferenceInput>;
   storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }> };
   db: {
     getAsset(id: string): Promise<{ user_id: string } | null | undefined>;
@@ -117,11 +119,11 @@ async function imageReferencesAsDataUrls(
 /** Build the message-status writer bound to this job's owner + base metadata.
  * Shared by the create→poll→download path and the download-only retry path so
  * both render the same generation card (kind/mediaType/prompt/settings). */
-function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt: string) {
+function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt: string, resolvedAudio?: ReferenceInput) {
   const input = job.input;
   const assistantMessageId = input.assistantMessageId as string | undefined;
   const conversationId = input.conversationId as string | undefined;
-  const referenceAudio = input.reference_audio as ReferenceInput | undefined;
+  const referenceAudio = resolvedAudio ?? input.reference_audio as ReferenceInput | undefined;
   // Keep the task id on every status write: the enqueue route stores it, and a
   // client that lost the submit response (mini program) recovers the task from
   // this message — including after the worker has already finished it.
@@ -203,7 +205,11 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   const media = input.media as ReferenceMedia[] | undefined;
   const inputReference = input.input_reference as ReferenceInput | undefined;
   const referenceVideo = input.reference_video as ReferenceInput | undefined;
-  const referenceAudio = input.reference_audio as ReferenceInput | undefined;
+  const klingVideo = mediaType === "video" && /kling/i.test(deps.vendorModel);
+  const legacyAudio = klingVideo ? media?.filter((item) => item.type === "reference_audio").map((item) => item.url) : undefined;
+  const referenceAudio = (input.reference_audio as ReferenceInput | undefined)
+    ?? (legacyAudio?.length ? legacyAudio : undefined);
+  const needsKlingVoices = klingVideo && (typeof referenceAudio === "string" ? !!referenceAudio : !!referenceAudio?.length);
   const generateAudio = mediaType === "video"
     ? resolveVideoGenerateAudio(input.generate_audio, referenceAudio)
     : undefined;
@@ -213,7 +219,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   const pollIntervalMs = deps.pollIntervalMs ?? 3000;
   const maxWaitMs = deps.maxWaitMs ?? 15 * 60 * 1000;
 
-  const setMsg = makeSetMsg(deps, job, mediaType, prompt);
+  const setMsg = makeSetMsg(deps, job, mediaType, prompt, referenceAudio);
 
   // Cancellation is observed at every pause point of the job: the in-process
   // abort signal is instant, the task row covers a cancel issued from another
@@ -234,6 +240,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       input_reference: inputReference,
       reference_video: referenceVideo,
       reference_audio: referenceAudio,
+      ...(needsKlingVoices ? { klingVoiceVersion: 1 } : {}),
       generate_audio: generateAudio,
       first_frame: firstFrame,
       last_frame: lastFrame,
@@ -258,6 +265,15 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       const publicMedia = mediaType === "image"
         ? await imageReferencesAsDataUrls(deps, media)
         : media?.map((item) => ({ ...item, url: publicStaticUrl(item.url) }));
+      let preparedAudio = publicReference(referenceAudio);
+      if (needsKlingVoices && preparedAudio) {
+        if (!deps.prepareKlingVoices) throw new Error("Kling 音色服务未配置，无法提交参考声音。");
+        preparedAudio = await deps.prepareKlingVoices({
+          taskId: job.id, userId: job.userId, referenceAudio: preparedAudio,
+          signal: deps.signal, assertNotCancelled,
+        });
+      }
+      await assertNotCancelled();
       const createRequest = {
         prompt,
         size: input.size as string | undefined,
@@ -268,11 +284,12 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
         ratio: input.ratio as string | undefined,
         input_reference: publicReference(inputReference),
         reference_video: publicReference(referenceVideo),
-        reference_audio: publicReference(referenceAudio),
+        reference_audio: preparedAudio,
         generate_audio: generateAudio,
         first_frame: firstFrame ? publicStaticUrl(firstFrame) : undefined,
         last_frame: lastFrame ? publicStaticUrl(lastFrame) : undefined,
-        media: publicMedia,
+        // Dedicated voice IDs replace all legacy audio URLs for Kling.
+        media: needsKlingVoices ? publicMedia?.filter((item) => item.type !== "reference_audio") : publicMedia,
       };
       // Keep the task id and resolved vendor model beside the request payload so
       // a video failure can be traced through the worker logs. Deliberately do
@@ -304,8 +321,9 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
 
     return await downloadAndFinalize(deps, job, mediaType, p.url, cacheKey, setMsg);
   } catch (err) {
-    if (err instanceof JobCancelledError) {
+    if (err instanceof JobCancelledError || deps.signal?.aborted) {
       await setMsg("cancelled", {});
+      throw new JobCancelledError();
     } else {
       await setMsg("failed", { error: err instanceof Error ? err.message : String(err) });
     }

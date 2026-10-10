@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { loadGenerationConfig, makeImageProvider, makeVideoProvider, mediaSupportsProgress, type MediaGenerationConfig } from "./config.js";
+import { loadGenerationConfig, loadKlingVoiceConfig, makeKlingVoiceProvider, makeImageProvider, makeVideoProvider, mediaSupportsProgress, type MediaGenerationConfig } from "./config.js";
 import {
   OpenAIImagesImageProvider,
   HttpImageGenerationProvider,
@@ -11,7 +11,7 @@ import {
 const imageBase: MediaGenerationConfig = { baseUrl: "https://api/v1", apiKey: "", mock: true, adapter: "happyhorse", model: "im", modelId: "wanx-standard" };
 const videoBase: MediaGenerationConfig = { baseUrl: "https://api/v1", apiKey: "", mock: true, adapter: "happyhorse", model: "vm", modelId: "kling-standard" };
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe("loadGenerationConfig", () => {
   it("uses OPENAI_BASE_URL for both image and video instead of config URLs", async () => {
@@ -69,5 +69,45 @@ describe("makeVideoProvider", () => {
   });
   it("mock:false + no key → falls back to mock", () => {
     expect(makeVideoProvider({ ...videoBase, mock: false, apiKey: "" })).toBeInstanceOf(MockVideoGenerationProvider);
+  });
+});
+
+
+describe("independent Kling voice configuration", () => {
+  it("defaults to Tencent and never inherits an inference or video key", () => {
+    vi.stubEnv("KLING_VOICE_BASE_URL", "");
+    vi.stubEnv("KLING_VOICE_API_KEY", "");
+    vi.stubEnv("OPENAI_BASE_URL", "https://inference.example/v1");
+    vi.stubEnv("OPENAI_API_KEY", "llm-secret");
+    vi.stubEnv("TOKENHUB_API_KEY", "shared-secret");
+    vi.stubEnv("VIDEO_GEN_API_KEY", "video-secret");
+    expect(loadKlingVoiceConfig()).toEqual({ baseUrl: "https://tokenhub.tencentmaas.com/v1", apiKey: "" });
+    expect(() => makeKlingVoiceProvider(loadKlingVoiceConfig())).toThrow("KLING_VOICE_API_KEY");
+  });
+
+  it("loads independent settings without changing image/video configuration", async () => {
+    vi.stubEnv("KLING_VOICE_BASE_URL", " https://voice.example/v1 ");
+    vi.stubEnv("KLING_VOICE_API_KEY", " voice-secret ");
+    vi.stubEnv("OPENAI_BASE_URL", "https://inference.example/v1");
+    vi.stubEnv("VIDEO_GEN_API_KEY", "video-secret");
+    expect(loadKlingVoiceConfig()).toEqual({ baseUrl: "https://voice.example/v1", apiKey: "voice-secret" });
+    const generation = await loadGenerationConfig(process.cwd());
+    expect(generation.video.baseUrl).toBe("https://inference.example/v1");
+    expect(generation.video.apiKey).toBe("video-secret");
+  });
+
+  it("uses only the voice service address and bearer for both create and query", async () => {
+    vi.stubEnv("KLING_VOICE_BASE_URL", "https://voice.example/v1/");
+    vi.stubEnv("KLING_VOICE_API_KEY", "voice-secret");
+    const fetcher = vi.fn().mockImplementation(async () => Response.json({ code: 0, data: { task_id: "t1", task_status: "submitted" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const provider = makeKlingVoiceProvider(loadKlingVoiceConfig());
+    await provider.create({ voiceName: "sample", voiceUrl: "https://media.example/sample.wav", externalTaskId: "e1" });
+    await provider.poll("t1");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "https://voice.example/v1/wand/kling/custom-voices",
+      "https://voice.example/v1/wand/kling/custom-voices/t1",
+    ]);
+    for (const [, init] of fetcher.mock.calls) expect(init.headers.Authorization).toBe("Bearer voice-secret");
   });
 });

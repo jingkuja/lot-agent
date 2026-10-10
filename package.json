@@ -24,6 +24,7 @@
     "knowledge:gc": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/collect-knowledge-garbage.ts",
     "knowledge:index": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-index.ts",
     "check:knowledge:ui": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-ui.ts",
+    "check:digital-twin:ui": "node packages/server/scripts/check-digital-twin-ui.mjs",
     "knowledge:backup": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-backup.ts",
     "check:knowledge:restore": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-restore.ts",
     "check:knowledge:upgrade": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-upgrade.ts",

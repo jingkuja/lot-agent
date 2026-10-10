@@ -9,7 +9,7 @@ interface BrandHeaderProps {
   user?: User;
   onLogout?: () => void;
   onCollapse: () => void;
-  onOpenAgentCenter?: () => void;
+  onOpenDigitalTwin?: () => void;
   onOpenAssistant?: () => void;
   onOpenDigitalEmployee?: () => void;
   onOpenKnowledgeBase?: () => void;
@@ -23,7 +23,7 @@ export function BrandHeader({
   user,
   onLogout,
   onCollapse,
-  onOpenAgentCenter,
+  onOpenDigitalTwin,
   onOpenAssistant,
   onOpenDigitalEmployee,
   onOpenKnowledgeBase,
@@ -61,22 +61,20 @@ export function BrandHeader({
         {user && <AccountMenu user={user} onLogout={onLogout} />}
       </div>
 
-      {(onOpenAgentCenter || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (
+      {(onOpenDigitalTwin || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (
         <div className="brand-navigation-actions">
           {user && <PointsBalance refreshKey={balanceRefreshKey} />}
-          {(onOpenAgentCenter || onOpenKnowledgeBase) && (
+          {(onOpenDigitalTwin || onOpenKnowledgeBase) && (
             <div className="brand-quick-actions">
-              {onOpenAgentCenter && (
-                <button className="brand-quick-action" onClick={onOpenAgentCenter} title={t("Studio 管理")}>
+              {onOpenDigitalTwin && (
+                <button className="brand-quick-action" onClick={onOpenDigitalTwin} title={t("数字分身")}>
                   <span className="brand-action-icon" aria-hidden>
                     <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-                      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-                      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-                      <path d="M17.5 14v7M14 17.5h7" />
+                      <circle cx="12" cy="8" r="4" />
+                      <path d="M5 21v-2a7 7 0 0 1 14 0v2M3 6V3h3M18 3h3v3" />
                     </svg>
                   </span>
-                  <span>{t("Studio 管理")}</span>
+                  <span>{t("数字分身")}</span>
                 </button>
               )}
               {onOpenKnowledgeBase && (

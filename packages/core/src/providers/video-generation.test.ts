@@ -284,3 +284,24 @@ describe("pickVideoAdapter", () => {
     expect(pickVideoAdapter("nope")).toBeInstanceOf(HappyhorseVideoAdapter);
   });
 });
+
+describe.each([new HappyhorseVideoAdapter(), new OpenaiVideoAdapter()])("Kling voice metadata (%o)", (adapter) => {
+  it.each(["917124264959582304", ["917124264959582304"]].map((voice) => ({ voice })))("maps a single prepared voice into metadata without reference_audio ($voice)", ({ voice }) => {
+    const body = adapter.buildCreateBody({ prompt: "p", resolution: "1080p", reference_audio: voice, generate_audio: false }, "kling-video-v3-omni") as Record<string, unknown>;
+    expect(body).toMatchObject({ metadata: { resolution: "1080p", voice_id: "917124264959582304" }, generate_audio: true });
+    expect(body).not.toHaveProperty("reference_audio");
+  });
+  it("preserves two voice IDs in order", () => {
+    const body = adapter.buildCreateBody({ prompt: "p", reference_audio: ["voice1", "voice2"] }, "kling-video-v3-omni") as Record<string, unknown>;
+    expect(body.metadata).toEqual({ voice_ids: ["voice1", "voice2"] });
+    expect(body).not.toHaveProperty("reference_audio");
+  });
+  it("rejects unprepared audio URLs before sending a Kling request", () => {
+    expect(() => adapter.buildCreateBody({ prompt: "p", reference_audio: "https://media.example/audio.wav" }, "kling-video-v3-omni")).toThrow("voice_id");
+  });
+  it("leaves Seedance audio URLs in reference_audio", () => {
+    const body = adapter.buildCreateBody({ prompt: "p", reference_audio: "https://media.example/audio.wav", resolution: "720p" }, "doubao-seedance-2.0") as Record<string, unknown>;
+    expect(body.reference_audio).toBe("https://media.example/audio.wav");
+    expect(body.metadata).toEqual({ resolution: "720p" });
+  });
+});

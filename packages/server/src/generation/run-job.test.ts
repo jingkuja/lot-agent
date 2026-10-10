@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { HttpKlingVoiceProvider, HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
+import { KlingVoicePreparation } from "./kling-voices.js";
 import {
   runGenerationJob,
   redownloadGenerationJob,
@@ -470,5 +472,139 @@ describe("redownloadGenerationJob", () => {
     const { deps } = fakeDeps(provider);
     const bad = { id: "job1", userId: "u1", input: { prompt: "x", conversationId: "c1", assistantMessageId: "m1" } };
     await expect(redownloadGenerationJob(deps, bad, "video")).rejects.toThrow(/sourceUrl/);
+  });
+});
+
+describe("Kling voice references", () => {
+  function setup() {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "video-vendor-1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://video.example/clip.mp4" })),
+    };
+    const prepareKlingVoices = vi.fn<NonNullable<RunJobDeps["prepareKlingVoices"]>>(async () => "917124264959582304");
+    const { deps, calls } = fakeDeps(provider, { vendorModel: "kling-video-v3-omni", prepareKlingVoices });
+    const voiceJob = { ...job, input: { ...job.input, reference_audio: "https://media.example/voice.wav", generate_audio: false } };
+    return { deps, calls, provider, prepareKlingVoices, voiceJob };
+  }
+
+  it("creates voice first and sends voice_id, not voice task ID or source URL", async () => {
+    const { deps, provider, prepareKlingVoices, voiceJob } = setup();
+    await runGenerationJob(deps, voiceJob, "video");
+    expect(prepareKlingVoices).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1", taskId: "job1", referenceAudio: voiceJob.input.reference_audio }));
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ reference_audio: "917124264959582304", generate_audio: true }));
+    expect(prepareKlingVoices.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(provider.create).mock.invocationCallOrder[0]);
+  });
+
+  it("runs the real HTTP adapters in voice POST → voice GET → video POST → video GET order", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ code: 0, data: { task_id: "voice-task", task_status: "submitted" } }))
+      .mockResolvedValueOnce(Response.json({ code: 0, data: { task_id: "voice-task", task_status: "succeed", task_result: { voices: [{ voice_id: "917124264959582304", status: "succeed" }] } } }))
+      .mockResolvedValueOnce(Response.json({ id: "video-task", status: "queued" }))
+      .mockResolvedValueOnce(Response.json({ id: "video-task", status: "completed", progress: 100, metadata: { url: "https://media.example/result.mp4" } }));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const options = { baseUrl: "https://gateway.example/v1", apiKey: "owner-key" };
+      const preparation = new KlingVoicePreparation({
+        provider: new HttpKlingVoiceProvider({ baseUrl: "https://voice.example/v1", apiKey: "voice-service-key" }),
+        store: {
+          claim: async (_scope, externalTaskId) => ({ created: true, checkpoint: { externalTaskId } }),
+          save: async () => {},
+        },
+        credentialScope: "voice-service-scope",
+        validateUrl: async () => {},
+        sleep: async () => {},
+      });
+      const { deps, voiceJob } = setup();
+      await runGenerationJob({
+        ...deps,
+        provider: new HttpVideoGenerationProvider({ ...options, model: deps.vendorModel, adapter: new OpenaiVideoAdapter() }),
+        prepareKlingVoices: (input) => preparation.prepare(input),
+      }, voiceJob, "video");
+      expect(fetcher.mock.calls.map(([url, init]) => [url, init.method ?? "GET"])).toEqual([
+        ["https://voice.example/v1/wand/kling/custom-voices", "POST"],
+        ["https://voice.example/v1/wand/kling/custom-voices/voice-task", "GET"],
+        ["https://gateway.example/v1/videos", "POST"],
+        ["https://gateway.example/v1/videos/video-task", "GET"],
+      ]);
+      const videoBody = JSON.parse(fetcher.mock.calls[2][1].body);
+      expect(videoBody).toMatchObject({ metadata: { voice_id: "917124264959582304" }, generate_audio: true });
+      expect(videoBody).not.toHaveProperty("reference_audio");
+      expect(JSON.parse(fetcher.mock.calls[0][1].body).voice_url).toBe(voiceJob.input.reference_audio);
+      expect(fetcher.mock.calls.map(([, init]) => init.headers.Authorization)).toEqual([
+        "Bearer voice-service-key", "Bearer voice-service-key", "Bearer owner-key", "Bearer owner-key",
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("resolves public URLs and converts legacy audio without leaking legacy URLs", async () => {
+    const previousBase = process.env.PUBLIC_BASE_URL;
+    process.env.PUBLIC_BASE_URL = "https://media.example";
+    try {
+      const { deps, provider, prepareKlingVoices } = setup();
+      await runGenerationJob(deps, { ...job, input: { ...job.input, media: [
+        { type: "reference_audio", url: "/static/uploads/voice.wav" },
+        { type: "reference_image", url: "/static/uploads/face.jpg" },
+      ] } }, "video");
+      expect(prepareKlingVoices).toHaveBeenCalledWith(expect.objectContaining({ referenceAudio: ["https://media.example/static/uploads/voice.wav"] }));
+      expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({
+        reference_audio: "917124264959582304",
+        media: [{ type: "reference_image", url: "https://media.example/static/uploads/face.jpg" }],
+      }));
+    } finally {
+      if (previousBase === undefined) delete process.env.PUBLIC_BASE_URL;
+      else process.env.PUBLIC_BASE_URL = previousBase;
+    }
+  });
+
+  it("keeps non-Kling references unchanged and skips preparation without audio", async () => {
+    const { deps, provider, prepareKlingVoices, voiceJob } = setup();
+    await runGenerationJob({ ...deps, vendorModel: "seedance-2.0" }, voiceJob, "video");
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ reference_audio: voiceJob.input.reference_audio }));
+    await runGenerationJob(deps, job, "video");
+    expect(prepareKlingVoices).not.toHaveBeenCalled();
+  });
+
+  it("skips voice creation for a resumed video task", async () => {
+    const { deps, provider, prepareKlingVoices, voiceJob } = setup();
+    vi.mocked(deps.db.getTaskVendorId).mockResolvedValue("existing-video");
+    await runGenerationJob(deps, voiceJob, "video");
+    expect(provider.poll).toHaveBeenCalledWith("existing-video");
+    expect(prepareKlingVoices).not.toHaveBeenCalled();
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("does not create video after failed or unconfigured voice preparation", async () => {
+    const { deps, calls, provider, prepareKlingVoices, voiceJob } = setup();
+    prepareKlingVoices.mockRejectedValue(new Error("voice failed"));
+    await expect(runGenerationJob(deps, voiceJob, "video")).rejects.toThrow("voice failed");
+    expect(calls.message.at(-1).status).toBe("failed");
+    await expect(runGenerationJob({ ...deps, prepareKlingVoices: undefined }, voiceJob, "video")).rejects.toThrow("音色服务未配置");
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("honors cancellation after voice creation and before video submission", async () => {
+    const { deps, calls, provider, prepareKlingVoices, voiceJob } = setup();
+    prepareKlingVoices.mockImplementation(async () => {
+      vi.mocked(deps.db.getTaskStatus).mockResolvedValue("cancelled");
+      return "voice-1";
+    });
+    await expect(runGenerationJob(deps, voiceJob, "video")).rejects.toBeInstanceOf(JobCancelledError);
+    expect(calls.message.at(-1).status).toBe("cancelled");
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("marks an interrupted voice HTTP request cancelled rather than failed", async () => {
+    const { deps, calls, provider, prepareKlingVoices, voiceJob } = setup();
+    const controller = new AbortController();
+    prepareKlingVoices.mockImplementation(async ({ signal }) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
+    });
+    await expect(runGenerationJob({ ...deps, signal: controller.signal }, voiceJob, "video")).rejects.toBeInstanceOf(JobCancelledError);
+    expect(calls.message.at(-1).status).toBe("cancelled");
+    expect(provider.create).not.toHaveBeenCalled();
   });
 });
