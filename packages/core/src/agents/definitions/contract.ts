@@ -20,7 +20,7 @@ Never expose internal asset IDs. Report failed or empty extraction and request a
 
 Respond in the language explicitly requested by the user; otherwise match the latest substantive user message. Do not infer the response language from these English instructions, tool output, reference documents or historical Chinese messages. Preserve source quotations, proper names and machine-readable schema keys.`,
   toolNames: ["ask_user", "generate_document"],
-  defaultModelId: "deepseek-v4-flash",
+  defaultModelId: "deepseek-v4.1-flash",
   inputSchema: {
     type: "object",
     properties: {

@@ -11,7 +11,7 @@ export interface AgentDefinition {
   hidden?: boolean;           // 保持注册(旧会话仍可解析)但不在 Agent 中心展示/安装
   systemPrompt: string;
   toolNames: string[];        // allowed tool whitelist; empty array = no tools
-  defaultModelId: string;     // e.g. "deepseek-v4-flash" (matches a configured model id)
+  defaultModelId: string;     // e.g. "deepseek-v4.1-flash" (matches a configured model id)
   inputSchema?: Record<string, unknown>;
   /** JSON Schema the final answer must satisfy (structured output). */
   outputSchema?: Record<string, unknown>;

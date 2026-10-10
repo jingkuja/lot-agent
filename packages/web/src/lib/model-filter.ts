@@ -6,14 +6,16 @@ export interface CatalogModel {
   description?: string;
 }
 
-/** Keep the catalog's existing order while grouping Claude LLMs at the end. */
-export function moveClaudeModelsToEnd(models: CatalogModel[]): CatalogModel[] {
+/** Prefer deepseek-v4.1-flash; keep other models stable and Claude last. */
+export function orderLlmModels(models: CatalogModel[]): CatalogModel[] {
+  const preferred: CatalogModel[] = [];
   const nonClaude: CatalogModel[] = [];
   const claude: CatalogModel[] = [];
   for (const model of models) {
-    (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
+    if (model.id === "deepseek-v4.1-flash") preferred.push(model);
+    else (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
   }
-  return [...nonClaude, ...claude];
+  return [...preferred, ...nonClaude, ...claude];
 }
 
 /** gpt-image 1.5 only accepts the three standard sizes; custom WxH is rejected. */

@@ -12,7 +12,7 @@ Never invent templateAssetId or backgroundAssetId; omit them without the corresp
 
 Respond in the language explicitly requested by the user; otherwise match the latest substantive user message. Do not infer the response language from these English instructions, tool output, reference documents or historical Chinese messages. Preserve source quotations, proper names and machine-readable schema keys.`,
   toolNames: ["ask_user", "propose_outline", "generate_ppt"],
-  defaultModelId: "deepseek-v4-flash",
+  defaultModelId: "deepseek-v4.1-flash",
   // generate_ppt emits a whole deck as one large tool-call JSON. Without an
   // explicit cap the gateway's default (~4k) truncates it mid-argument, which
   // surfaces as "incomplete/malformed tool_call arguments". Give it room.

@@ -69,7 +69,7 @@ Hono API：鉴权、参数校验、限流、用户归属
 
 密码登录经 RSA 公钥加密后发送，服务端解密并向网关认证；另外有 Token 登录、手机登录、微信登录和绑定流程。非 DEBUG 的服务默认启用托管 New API 凭证，所需配置在 `AgentService` 构造函数校验，凭证加密实现见 `auth/secret-box.ts`。
 
-模型列表由 `models/catalog.ts` 结合用户可用模型与本地目录生成；`models/provider-factory.ts` 按用户凭证和选定模型创建提供器。托管凭证不可用时不能静默改用平台 Key。LLM 调用计量见 `billing/metered-llm.ts`，额度和用量见 `billing/meter.ts`；知识 embedding 另有真实网关回执核对流程。
+模型列表由 `models/catalog.ts` 结合用户可用模型与本地目录生成；LLM 列表优先展示 `deepseek-v4.1-flash`，其余非 Claude 模型保持原顺序、Claude 排末尾。用户未选择时默认使用列表首项，已有会话或显式选择优先；配置和文字类 Agent 默认模型同为 `deepseek-v4.1-flash`。`models/provider-factory.ts` 按用户凭证和选定模型创建提供器。托管凭证不可用时不能静默改用平台 Key。LLM 调用计量见 `billing/metered-llm.ts`，额度和用量见 `billing/meter.ts`；知识 embedding 另有真实网关回执核对流程。
 
 网页/桌面充值由 `routes/recharge.ts → tokenhub/client.ts` 调用 New API 原有支付流程。小程序通过 `pages/recharge/index.ts` 调用 `wx.requestVirtualPayment`；Agent 的 `payments/service.ts` 负责报价、订单持久化、微信查单、退款同步和发货，`payments/wechat-virtual.ts` 持有微信配置和签名逻辑，`payments/repository.ts` 实现数据库租约。`index.ts` 启动并停止后台补偿任务。New API 仅接收 HMAC 记账通知，原子生成小程序来源订单并对托管 Key 入账或回退，不保存微信配置。完整边界、配置和验收见 [微信虚拟支付](wechat-virtual-payment.md)。
 

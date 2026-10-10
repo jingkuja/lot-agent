@@ -11,7 +11,7 @@ import {
   isSeedance25Model,
   isSeedanceModel,
   missingSeedanceMentions,
-  moveClaudeModelsToEnd,
+  orderLlmModels,
   seedanceAssetMention,
   visibleImageModels,
 } from "./model-filter.js";
@@ -33,7 +33,7 @@ describe("filterModels", () => {
   });
 });
 
-describe("moveClaudeModelsToEnd", () => {
+describe("orderLlmModels", () => {
   it("stably moves every Claude model behind all other models", () => {
     const input = [
       { id: "claude-opus-4.1", type: "llm" as const, provider: "openai" },
@@ -43,7 +43,7 @@ describe("moveClaudeModelsToEnd", () => {
       { id: "claude-haiku-4.5", type: "llm" as const, provider: "openai" },
     ];
 
-    expect(moveClaudeModelsToEnd(input).map((model) => model.id)).toEqual([
+    expect(orderLlmModels(input).map((model) => model.id)).toEqual([
       "gpt-5.4",
       "deepseek-v4",
       "claude-opus-4.1",

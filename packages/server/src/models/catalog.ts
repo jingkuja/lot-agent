@@ -16,17 +16,20 @@ export interface ModelCatalogConfig {
   defaultPricing: Record<string, Pricing>;
 }
 
-/** Keep tokenhub's relative order, but make non-Claude models the defaults.
+/** Prefer deepseek-v4.1-flash, then other non-Claude models, then Claude.
+ * Preserve relative order within each group and only use available models.
  * This lives on the server because background/utility LLM calls also choose
  * the catalog's first model; sorting only in the web picker makes the two
  * selections disagree. */
-export function moveClaudeModelsToEnd<T extends { id: string }>(models: T[]): T[] {
+export function orderLlmModels<T extends { id: string }>(models: T[]): T[] {
+  const preferred: T[] = [];
   const nonClaude: T[] = [];
   const claude: T[] = [];
   for (const model of models) {
-    (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
+    if (model.id === "deepseek-v4.1-flash") preferred.push(model);
+    else (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
   }
-  return [...nonClaude, ...claude];
+  return [...preferred, ...nonClaude, ...claude];
 }
 
 /** LLM and video always use their per-type default provider (all video models
@@ -55,7 +58,7 @@ export function enrichCatalog(
       pricing: resolvePricing(cfg, id, type),
     }));
   return {
-    llm: moveClaudeModelsToEnd(build(models.llm, "llm")),
+    llm: orderLlmModels(build(models.llm, "llm")),
     image: build(models.image, "image"),
     video: build(models.video, "video"),
   };

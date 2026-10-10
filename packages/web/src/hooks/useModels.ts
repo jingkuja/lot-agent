@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../api/client.js";
-import { moveClaudeModelsToEnd, type CatalogModel } from "../lib/model-filter.js";
+import { orderLlmModels, type CatalogModel } from "../lib/model-filter.js";
 
 export type ModelCatalog = { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] };
 const EMPTY: ModelCatalog = { llm: [], image: [], video: [] };
@@ -13,7 +13,7 @@ export function useModels() {
     setLoading(true);
     try {
       const next = await api.listModels();
-      const ordered = { ...next, llm: moveClaudeModelsToEnd(next.llm) };
+      const ordered = { ...next, llm: orderLlmModels(next.llm) };
       setModels(ordered);
       return ordered;
     } catch {

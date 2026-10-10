@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveImageSelection, resolveLlmSelection } from "./model-defaults.js";
-import type { CatalogModel } from "./model-filter.js";
+import { orderLlmModels, type CatalogModel } from "./model-filter.js";
 
 const m = (id: string, type: CatalogModel["type"]): CatalogModel => ({ id, type, provider: "p" });
 
@@ -11,6 +11,18 @@ const catalog = {
 };
 
 describe("fillModelDefaults", () => {
+  it("defaults to DeepSeek 4.1 Flash from the ordered catalog without overriding a user pick", () => {
+    const orderedCatalog = {
+      ...catalog,
+      llm: orderLlmModels([
+        m("claude-opus-4.1", "llm"), m("gpt-a", "llm"), m("deepseek-v4.1-flash", "llm"),
+      ]),
+    };
+    expect(fillModelDefaults(EMPTY_SELECTED, orderedCatalog).llm).toBe("deepseek-v4.1-flash");
+    expect(fillModelDefaults({ ...EMPTY_SELECTED, llm: "gpt-a" }, orderedCatalog).llm).toBe("gpt-a");
+    expect(resolveLlmSelection(null, orderedCatalog.llm)).toBe("deepseek-v4.1-flash");
+    expect(resolveLlmSelection("gpt-a", orderedCatalog.llm)).toBe("gpt-a");
+  });
   it("fills null slots with each group's first model id", () => {
     expect(fillModelDefaults(EMPTY_SELECTED, catalog)).toEqual({
       llm: "gpt-a",

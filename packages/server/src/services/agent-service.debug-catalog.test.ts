@@ -37,6 +37,20 @@ function makeService(debug: boolean): AgentService {
 }
 
 describe("getUserModelCatalog — debug env catalog", () => {
+  it("reorders an existing cached catalog to use the new preferred model immediately", async () => {
+    const service = makeService(false);
+    const ids = ["claude-opus-4.1", "gpt-5.4", "deepseek-v4.1-flash"];
+    (service as unknown as { redis: { get: () => Promise<string> } }).redis = {
+      get: async () => JSON.stringify({
+        llm: ids.map((id) => ({ id, type: "llm", provider: "openai" })),
+        image: [], video: [],
+      }),
+    };
+    const catalog = await service.getUserModelCatalog("u1", "test-user-key");
+    expect(catalog!.llm.map((model) => model.id)).toEqual([
+      "deepseek-v4.1-flash", "gpt-5.4", "claude-opus-4.1",
+    ]);
+  });
   it("returns the single env LLM when debug is on and there is no apiKey", async () => {
     const service = makeService(true);
     const catalog = await service.getUserModelCatalog("u1", null);

@@ -7,6 +7,7 @@ import {
 
 describe("pickDigitalEmployeeLlmModel", () => {
   it.each([
+    [["deepseek-v4-flash", "qwen3.7-max", "deepseek-v4.1-flash"], "deepseek-v4.1-flash"],
     [["qwen3.7-max", "deepseek-v4-flash-selfhosted", "deepseek-v4-pro", "deepseek-v4-flash"], "deepseek-v4-flash"],
     [["qwen3.7-max", "deepseek-v4-flash-selfhosted", "deepseek-v4-pro"], "deepseek-v4-pro"],
     [["qwen3.7-max", "deepseek-v4-flash-selfhosted"], "deepseek-v4-flash-selfhosted"],

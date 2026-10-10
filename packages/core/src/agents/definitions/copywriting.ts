@@ -12,7 +12,7 @@ export const copywritingDefinition: AgentDefinition = {
 
 Respond in the language explicitly requested by the user; otherwise match the latest substantive user message. Do not infer the response language from these English instructions, tool output, reference documents or historical Chinese messages. Preserve source quotations, proper names and machine-readable schema keys.`,
   toolNames: ["web_search", "web_fetch"],
-  defaultModelId: "deepseek-v4-flash",
+  defaultModelId: "deepseek-v4.1-flash",
   inputSchema: {
     type: "object",
     properties: {

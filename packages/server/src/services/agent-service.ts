@@ -55,7 +55,7 @@ import { proposeOutlineTool } from "../tools/propose-outline-tool.js";
 import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
-import { enrichCatalog, moveClaudeModelsToEnd, resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
+import { enrichCatalog, orderLlmModels, resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import {
   DIGITAL_EMPLOYEE_LLM_UNAVAILABLE,
@@ -824,10 +824,9 @@ export class AgentService {
     const cached = await this.redis.get(cacheKey);
     if (cached) {
       const catalog = JSON.parse(cached) as ReturnType<typeof enrichCatalog>;
-      // Normalize entries written before Claude-last ordering moved to the
-      // server, so utility calls stop using the stale former first model
-      // immediately instead of waiting for the cache TTL.
-      return { ...catalog, llm: moveClaudeModelsToEnd(catalog.llm) };
+      // Apply current default ordering to cached catalogs immediately,
+      // without waiting for the cache TTL.
+      return { ...catalog, llm: orderLlmModels(catalog.llm) };
     }
     if (!apiKey) {
       // Debug mode has no tokenhub key: surface the single env LLM so the model
