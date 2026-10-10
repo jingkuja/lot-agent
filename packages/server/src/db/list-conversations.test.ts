@@ -51,6 +51,7 @@ describe("listConversations", () => {
     const { db, query } = mockDb();
     await db.listConversations("u1", { limit: 20, includePreview: true });
     const [sql] = query.mock.calls[0];
+    expect(sql).toContain("conversations.agent_id IN ('video', 'marketing_video')");
     expect(sql).toMatch(/AS preview_url/);
     expect(sql).toMatch(/metadata->>'kind'/);
   });

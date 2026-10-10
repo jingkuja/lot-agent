@@ -404,7 +404,7 @@ export class DB {
            FROM messages m
            WHERE m.conversation_id = conversations.id
              AND COALESCE(m.metadata->>'kind', '') = 'generation'
-             AND COALESCE(m.metadata->>'mediaType', 'image') = CASE WHEN conversations.agent_id = 'video' THEN 'video' ELSE 'image' END
+             AND COALESCE(m.metadata->>'mediaType', 'image') = CASE WHEN conversations.agent_id IN ('video', 'marketing_video') THEN 'video' ELSE 'image' END
              AND COALESCE(m.metadata->>'status', m.status) = 'completed'
            ORDER BY m.seq DESC NULLS LAST, m.created_at DESC
            LIMIT 1

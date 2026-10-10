@@ -558,13 +558,18 @@ describe("POST /conversations/:id/generations/:messageId/redownload", () => {
   });
 });
 
-describe("mini program video duplicate protection", () => {
+describe.each(["miniprogram", "marketing_video"])("%s video duplicate protection", (client) => {
+  const scenarioService = () => {
+    const service = fakeService();
+    service.db.getConversation.mockResolvedValue({ id: "c1", user_id: "u1", agent_id: client === "marketing_video" ? "marketing_video" : "video" });
+    return service;
+  };
   const submit = (a: Hono) => a.request("/conversations/c1/generations", {
-    method: "POST", headers: { "Content-Type": "application/json", "X-Lot-Client": "miniprogram" },
+    method: "POST", headers: { "Content-Type": "application/json", "X-Lot-Client": client === "miniprogram" ? "miniprogram" : "web" },
     body: JSON.stringify({ prompt: "视频", mediaType: "video" }),
   });
   it("replays an existing task without enqueueing or checking quota again", async () => {
-    const service = fakeService(); const a = app(service);
+    const service = scenarioService(); const a = app(service);
     expect((await submit(a)).status).toBe(202);
     const replay = await submit(a);
     expect(replay.status).toBe(202); expect((await replay.json()).taskId).toBe("task-1");
@@ -573,13 +578,13 @@ describe("mini program video duplicate protection", () => {
     expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(2);
   });
   it("rejects a concurrent submission before any paid work", async () => {
-    const service = fakeService(); service.db.claimConversationRun.mockResolvedValue(false);
+    const service = scenarioService(); service.db.claimConversationRun.mockResolvedValue(false);
     expect((await submit(app(service))).status).toBe(409);
     expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
     expect(service.db.releaseConversationRun).not.toHaveBeenCalled();
   });
   it("serializes two concurrent requests through the database lease", async () => {
-    const service = fakeService(); let claimed = false;
+    const service = scenarioService(); let claimed = false;
     service.db.claimConversationRun.mockImplementation(async () => {
       if (claimed) return false;
       claimed = true; return true;
@@ -591,7 +596,7 @@ describe("mini program video duplicate protection", () => {
     expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(1);
   });
   it("releases the lease after a quota rejection so a funded user can submit", async () => {
-    const service = fakeService(); service.usageMeter.checkQuota.mockResolvedValueOnce({ ok: false, reason: "积分不足" });
+    const service = scenarioService(); service.usageMeter.checkQuota.mockResolvedValueOnce({ ok: false, reason: "积分不足" });
     const a = app(service);
     expect((await submit(a)).status).toBe(402);
     expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(1);
@@ -599,11 +604,25 @@ describe("mini program video duplicate protection", () => {
     expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(1);
   });
   it("never re-enqueues when the first enqueue result was lost", async () => {
-    const service = fakeService(); service.jobQueue.enqueue.mockRejectedValue(new Error("lost response"));
+    const service = scenarioService(); service.jobQueue.enqueue.mockRejectedValue(new Error("lost response"));
     const a = app(service); a.onError(() => new Response("unavailable", { status: 500 }));
     expect((await submit(a)).status).toBe(500);
     expect((await submit(a)).status).toBe(409);
     expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(1);
     expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(2);
   });
+});
+
+
+it.each([undefined, "doubao-seedance-2-5"])("fixes marketing video generation and pricing to Kling regardless of requested model %s", async (model) => {
+  const service = fakeService();
+  service.db.getConversation.mockResolvedValue({ id: "c1", user_id: "u1", agent_id: "marketing_video" });
+  const res = await app(service).request("/conversations/c1/generations", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: "店铺介绍", mediaType: "video", model, settings: { quality: "4k", durationSec: 5 } }),
+  });
+  expect(res.status).toBe(202);
+  expect(service.modelRegistry.getConfig).toHaveBeenCalledWith("kling-video-v3-omni");
+  expect(service.jobQueue.enqueue).toHaveBeenCalledWith("video.generate", expect.objectContaining({ modelId: "kling-video-v3-omni", quality: "4k" }), "u1");
+  expect(service.messages.find((message: { role: string }) => message.role === "assistant").model).toBe("kling-video-v3-omni");
 });

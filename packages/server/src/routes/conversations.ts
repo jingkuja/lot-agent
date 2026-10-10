@@ -1,7 +1,7 @@
 import { parseChatSourceTypes } from "@lot-agent/core";
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
+import { estimateCost, MAX_IMAGE_EDIT_REFERENCES, marketingVideoDefinition } from "@lot-agent/core";
 import type { AgentService } from "../services/agent-service.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
@@ -173,7 +173,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     const provider = isDigitalEmployee ? undefined : service["llmConfig"].default;
     let metadata: Record<string, unknown> | undefined;
     if (body.videoPublication !== undefined) {
-      if (agentId !== "video" || !validVideoPublication(body.videoPublication)) {
+      if (!["video", "marketing_video"].includes(agentId) || !validVideoPublication(body.videoPublication)) {
         return c.json({ error: "Invalid video publication" }, 400);
       }
       metadata = { videoPublication: { copy: body.videoPublication.copy, tags: body.videoPublication.tags } };
@@ -196,7 +196,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     const conv = await service.db.getConversation(id);
     if (!conv || conv.user_id !== c.get("userId")) return c.json({ error: "Not found" }, 404);
     const body: unknown = await c.req.json().catch(() => null);
-    if (conv.agent_id !== "video" || !validVideoPublication(body)) return c.json({ error: "Invalid video publication" }, 400);
+    if (!["video", "marketing_video"].includes(conv.agent_id) || !validVideoPublication(body)) return c.json({ error: "Invalid video publication" }, 400);
     await service.db.mergeConversationMetadata(id, { videoPublication: { copy: body.copy, tags: body.tags } });
     return c.json({ ok: true });
   });
@@ -580,10 +580,10 @@ export function createGenerationRoutes(service: AgentService) {
     if (!prompt || (mediaType !== "image" && mediaType !== "video")) {
       return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
     }
-    // The mini program creates one conversation per paid video attempt. Use a
+    // The mini program and marketing studio create one conversation per paid video attempt. Use a
     // database lease (shared across server processes) plus its durable message
     // to replay retries, including a retry after enqueue returned no response.
-    const videoRunId = mediaType === "video" && isMiniprogramClient(c.req.header("x-lot-client"))
+    const videoRunId = mediaType === "video" && (conv.agent_id === "marketing_video" || isMiniprogramClient(c.req.header("x-lot-client")))
       ? randomUUID() : null;
     if (videoRunId && !await service.db.claimConversationRun(conversationId, videoRunId, RUN_LEASE_STALE_MS)) {
       return c.json({ error: "视频提交结果待确认，请查询原任务，勿重复生成" }, 409);
@@ -602,7 +602,9 @@ export function createGenerationRoutes(service: AgentService) {
       }
       // Client settings pass a per-media whitelist so identity fields
       // (conversationId/assistantMessageId/userId) can never ride along.
-      const selectedModel = typeof body.model === "string" && body.model ? body.model : undefined;
+      const selectedModel = conv.agent_id === "marketing_video" && mediaType === "video"
+        ? marketingVideoDefinition.defaultModelId
+        : typeof body.model === "string" && body.model ? body.model : undefined;
       let settings = pickGenerationSettings(mediaType, body.settings);
       // Mini program quality tiers shift the requested resolution before
       // validation: 快速 drops every ratio one step, 自动/标准 only the wide

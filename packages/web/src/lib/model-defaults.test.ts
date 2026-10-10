@@ -81,3 +81,7 @@ describe("groupForKind", () => {
     expect(groupForKind(undefined)).toBe("llm");
   });
 });
+
+it("routes the marketing studio to the video model catalog", () => {
+  expect(groupForKind("marketing_video")).toBe("video");
+});

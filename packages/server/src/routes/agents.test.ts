@@ -9,6 +9,7 @@ function fakeService(installed: Map<string, number>) {
     { id: "image", name: "图片生成", type: "image", description: "", toolNames: [], defaultModelId: "m" },
     { id: "ppt", name: "PPT 制作", type: "ppt", description: "", toolNames: [], defaultModelId: "m" },
     { id: "contract", name: "合同审核", type: "contract", description: "", toolNames: [], defaultModelId: "m" },
+    { id: "marketing_video", name: "营销影像", type: "marketing_video", description: "", toolNames: [], defaultModelId: "m" },
     { id: "copywriting", name: "文案创作", type: "copywriting", description: "", toolNames: [], defaultModelId: "m", hidden: true },
   ];
   return {
@@ -42,6 +43,7 @@ describe("agents routes", () => {
     expect(byId.general.installed).toBe(true);
     expect(byId.digital_employee).toMatchObject({ installed: true, sortOrder: -1 });
     expect(byId.image).toMatchObject({ installed: true, sortOrder: 1 });
+    expect(byId.marketing_video).toMatchObject({ installed: true, sortOrder: null });
     expect(byId.contract).toMatchObject({ installed: true, sortOrder: null });
   });
 
@@ -114,7 +116,7 @@ describe("agents routes", () => {
     const svc = fakeService(new Map());
     const res = await app(svc).request("/agents");
     const body = await res.json();
-    expect(body.length).toBe(5);
+    expect(body.length).toBe(6);
     expect(body.every((agent: any) => agent.installed)).toBe(true);
     expect(svc.db.getUserAgents).toHaveBeenCalledWith("u1");
   });

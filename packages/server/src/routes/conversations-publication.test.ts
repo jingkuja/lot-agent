@@ -2,10 +2,10 @@ import { Hono } from "hono";
 import { expect, it, vi } from "vitest";
 import { createConversationRoutes } from "./conversations.js";
 
-function setup(owner = "u1") {
+function setup(owner = "u1", agentId = "video") {
   const db = {
     createConversation: vi.fn(async (...args) => ({ metadata: args[6] })),
-    getConversation: vi.fn(async () => ({ user_id: owner, agent_id: "video" })),
+    getConversation: vi.fn(async () => ({ user_id: owner, agent_id: agentId })),
     mergeConversationMetadata: vi.fn(async () => {}),
   };
   const app = new Hono<{ Variables: { userId: string } }>();
@@ -33,4 +33,16 @@ it("rejects cross-account edits and malformed publication", async () => {
   const own = setup();
   expect((await own.app.request("/conversations/c1/video-publication", { method: "PUT", body: JSON.stringify({ copy: "x", tags: [] }) })).status).toBe(400);
   expect(own.db.mergeConversationMetadata).not.toHaveBeenCalled();
+});
+
+it.each(["video", "marketing_video"])("persists and protects publication for %s", async (agentId) => {
+  const { app, db } = setup("u1", agentId);
+  const created = await app.request("/conversations", { method: "POST", body: JSON.stringify({ agentId, videoPublication: publication }) });
+  expect(created.status).toBe(201);
+  expect(await created.json()).toMatchObject({ metadata: { videoPublication: publication } });
+  expect(db.createConversation.mock.calls[0][4]).toBe(agentId);
+  expect((await app.request("/conversations/c1/video-publication", { method: "PUT", body: JSON.stringify(publication) })).status).toBe(200);
+  const foreign = setup("other", agentId);
+  expect((await foreign.app.request("/conversations/c1/video-publication", { method: "PUT", body: JSON.stringify(publication) })).status).toBe(404);
+  expect(foreign.db.mergeConversationMetadata).not.toHaveBeenCalled();
 });

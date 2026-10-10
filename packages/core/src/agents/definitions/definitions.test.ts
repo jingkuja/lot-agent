@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pptDefinition, contractDefinition, imageDefinition, digitalEmployeeDefinition } from "./index.js";
+import { pptDefinition, contractDefinition, imageDefinition, digitalEmployeeDefinition, marketingVideoDefinition } from "./index.js";
 
 describe("agent definitions", () => {
   it("ppt is a real office agent with ask_user + generate_ppt", () => {
@@ -47,4 +47,9 @@ describe("agent definitions", () => {
     expect(digitalEmployeeDefinition.systemPrompt).toContain("productName=\"Agent Distribution\"");
     expect(digitalEmployeeDefinition.systemPrompt).toContain("Negative sentiment is never a reason to omit productName");
   });
+});
+
+it("marketing video is a visible studio agent with no model-driven write tools", () => {
+  expect(marketingVideoDefinition).toMatchObject({ id: "marketing_video", type: "marketing_video", name: "营销影像", category: "创作", toolNames: [] });
+  expect(marketingVideoDefinition.hidden).not.toBe(true);
 });

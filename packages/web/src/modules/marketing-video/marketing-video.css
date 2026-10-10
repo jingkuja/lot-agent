@@ -1,0 +1,97 @@
+.mv-scroll { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg); }
+.mv-studio { width: min(100%, 1060px); margin: 0 auto; padding: 36px 36px 24px; color: var(--text); }
+.mv-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.mv-eyebrow { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .12em; }
+.mv-heading h1 { font-size: clamp(23px, 2.4vw, 32px); margin: 10px 0; font-weight: 650; }
+.mv-heading p, .mv-hint { color: var(--text-muted); font-size: 13px; line-height: 1.8; }
+.mv-heading-mark { display: grid; place-items: center; width: 72px; height: 72px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 24px; color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); font-size: 28px; transform: rotate(-7deg); }
+.mv-studio button, .mv-upload-button { font: inherit; cursor: pointer; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-secondary); border-radius: 10px; padding: 10px 16px; font-size: 13px; }
+.mv-studio button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.mv-studio button:disabled { opacity: .45; cursor: not-allowed; }
+.mv-studio :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.mv-steps { display: flex; overflow-x: auto; gap: 8px; padding: 0 0 14px; scrollbar-width: thin; }
+.mv-steps button { display: flex; align-items: center; gap: 7px; padding: 8px 10px; white-space: nowrap; border-color: transparent; background: transparent; font-size: 12px; }
+.mv-steps span { display: grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; background: var(--overlay-sink); }
+.mv-steps button.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); }
+.mv-steps .active span, .mv-steps .done span { background: var(--accent); color: var(--bg-card); }
+.mv-card { padding: 28px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg-card); box-shadow: var(--neu-raise-sm); }
+.mv-section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.mv-section-head h2 { font-size: 19px; font-weight: 650; outline: none; }
+.mv-section-head > span { font-size: 12px; color: var(--text-muted); }
+.mv-directions, .mv-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mv-directions button { display: grid; text-align: left; gap: 8px; padding: 20px; background: var(--bg); }
+.mv-directions button > span { font-size: 25px; color: var(--accent); }
+.mv-directions strong { font-size: 16px; color: var(--text); }
+.mv-directions small { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+.mv-studio button.selected { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--bg-card)); }
+.mv-field { display: grid; gap: 9px; margin: 22px 0; font-size: 13px; font-weight: 550; }
+.mv-field input:not([type=range]), .mv-field textarea, .mv-field select { width: 100%; padding: 12px 14px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border-input); border-radius: 10px; font: inherit; line-height: 1.7; }
+.mv-field textarea { resize: vertical; min-height: 90px; }
+.mv-field textarea::placeholder { color: var(--text-muted); font-weight: 400; }
+.mv-field input[type=range] { width: 100%; accent-color: var(--accent); }
+.mv-field output { float: right; color: var(--accent); }
+.mv-label { display: block; margin: 22px 0 12px; font-size: 13px; }
+.mv-choices { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+.mv-choices button { flex: 1; min-width: 95px; }
+.mv-scenes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.mv-scenes button { min-width: 0; padding: 8px 8px 13px; font-size: 12px; }
+.mv-scene { display: flex; align-items: end; justify-content: center; gap: 5px; height: 80px; border-radius: 6px; margin-bottom: 12px; background: color-mix(in srgb, var(--accent) 6%, var(--bg)); overflow: hidden; }
+.mv-scene i { display: block; width: 25%; height: 70%; background: color-mix(in srgb, var(--accent) 18%, var(--bg-card)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); border-radius: 4px 4px 0 0; }
+.mv-scene i:nth-child(2) { height: 45%; }
+.mv-scene-1 i { border-radius: 50% 50% 0 0; }
+.mv-scene-2 i { width: 12%; height: 80%; }
+.mv-scene-3 i:nth-child(2) { height: 85%; }
+.mv-scene-4 i { border-style: dashed; background: transparent; }
+.mv-studio .mv-soft { background: color-mix(in srgb, var(--accent) 6%, var(--bg-card)); color: var(--accent); }
+.mv-studio .mv-primary { background: var(--accent); color: var(--bg-card); border-color: var(--accent); }
+.mv-studio .mv-primary:hover:not(:disabled) { color: var(--bg-card); filter: brightness(.94); }
+.mv-upload { margin: 18px 0; }
+.mv-upload-button { display: inline-block; position: relative; background: var(--bg); border-style: dashed; }
+.mv-upload-button input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.mv-upload-button:focus-within { outline: 2px solid var(--accent); }
+.mv-asset-preview { display: grid; gap: 9px; margin: 14px 0; min-width: 0; }
+.mv-asset-preview img { max-width: 100%; width: 200px; max-height: 190px; object-fit: contain; border-radius: 10px; }
+.mv-asset-preview audio { max-width: 100%; }
+.mv-asset-preview > span { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.mv-twin { min-width: 0; margin: 20px 0; padding: 20px; background: var(--bg); border-radius: 12px; border: 1px solid var(--border); }
+.mv-twin h3 { font-size: 14px; margin-bottom: 12px; }
+.mv-checkbox { display: flex; gap: 10px; align-items: center; margin: 28px 0; font-size: 14px; }
+.mv-checkbox input { accent-color: var(--accent); width: 18px; height: 18px; }
+.mv-cover { display: grid; place-items: center; min-height: 240px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); padding: 24px; text-align: center; }
+.mv-cover > div:last-child { display: grid; gap: 10px; }
+.mv-cover strong { font-size: 24px; overflow-wrap: anywhere; }
+.mv-cover span { color: var(--text-muted); }
+.mv-cover .mv-asset-preview img { margin: auto; }
+.mv-ready { text-align: center; padding: 8px 0 25px; }
+.mv-ready > span { font-size: 46px; color: var(--accent); }
+.mv-ready h3 { font-size: 20px; margin: 12px 0; }
+.mv-ready p { font-size: 13px; color: var(--text-muted); }
+.mv-summary { padding: 8px 18px; border-radius: 12px; background: var(--bg); }
+.mv-summary > div { display: grid; grid-template-columns: 120px 1fr; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.mv-summary > div:last-child { border-bottom: 0; }
+.mv-summary dt { color: var(--text-muted); }
+.mv-summary dd { text-align: right; overflow-wrap: anywhere; }
+.mv-script-review { margin: 22px 0; font-size: 13px; }
+.mv-script-review summary { cursor: pointer; color: var(--accent); }
+.mv-script-review p { margin-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.mv-generate { width: 100%; }
+.mv-footer { position: sticky; bottom: 0; z-index: 1; background: var(--bg); display: flex; align-items: center; gap: 24px; padding: 18px 0; }
+.mv-footer progress { flex: 1; min-width: 20px; height: 4px; border: none; accent-color: var(--accent); }
+.mv-footer progress::-webkit-progress-bar { background: var(--border); border-radius: 4px; }
+.mv-footer progress::-webkit-progress-value { background: var(--accent); border-radius: 4px; }
+.mv-error { color: var(--error); margin-top: 18px; font-size: 13px; }
+.mv-results .gen-card { max-width: 100%; }
+.mv-results .gen-asset { max-height: 460px; }
+.mv-publication { display: grid; gap: 12px; margin-top: 24px; font-size: 14px; }
+.mv-publication p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-pill-icon.agent-pill-icon--marketing_video { color: var(--icon-on-grad); background: var(--agent-icon-video); }
+@media (max-width: 760px) {
+  .mv-studio { padding: 22px 16px; }
+  .mv-card { padding: 20px 16px; }
+  .mv-heading-mark { display: none; }
+  .mv-scenes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mv-directions, .mv-columns { grid-template-columns: 1fr; }
+  .mv-directions button { padding: 14px; }
+  .mv-summary > div { grid-template-columns: 85px 1fr; gap: 10px; }
+  .mv-footer { gap: 12px; }
+}

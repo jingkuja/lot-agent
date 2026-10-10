@@ -19,6 +19,7 @@ Lot Agent 是共用账号、模型网关和计费体系的 AI 内容与办公工
 | --- | --- | --- |
 | 通用助手与 Agent 选择 | 流式聊天、模型选择、附件、工具调用、记忆、子 Agent 默认可用、九宫格选择与历史记录同步 | `Workspace.tsx`、`routes/agents.ts`、`agent-service.ts` |
 | 图片 / 视频 | 按模型参数异步生成、任务恢复、结果预览与下载、作品分享 | `GenerationCard.tsx`、`routes/conversations.ts`、`generation/run-job.ts` |
+| 营销影像 | 分步制作探店店铺介绍、主播宣传演讲，选择数字分身和视频背景 | `core/agents/definitions/marketing-video.ts`、`web/modules/marketing-video/` |
 | 办公 | 文档导出、合同对比、PPT 大纲确认、生成与修改 | `server/tools/`、`server/ppt/`、`core/presentation/` |
 | 数字员工 | 营销资料、客户画像、商机建议、客户获客、文案与素材生成 | `web/modules/digital-employee/`、`server/digital-employee/` |
 | 个人知识库 | 资料 / 事实 / 素材管理、索引、混合检索、聊天引用、外部知识密钥 | `web/modules/knowledge/`、`server/knowledge/` |
@@ -103,6 +104,10 @@ ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core
 Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务恢复检查后调用 `generation/kling-voices.ts`：将样例转为公网 URL → `POST /v1/wand/kling/custom-voices` → 每 2.5 秒查询至 `succeed` → 取 `task_result.voices[].voice_id` 作为内部参考音色，提供器将其写入请求的 `metadata.voice_id`（两个音色时为 `metadata.voice_ids`），不向网关发送 `reference_audio`，并开启视频音频。New API 网关需把上述 metadata 转为腾讯 `contents` 中的 `type=voice` / `voice_id` 项。创建接口的 `task_id` 不作为音色 ID。非 Kling 模型沿用音频 URL。自动音色名称使用 20 字符以内的短名称。音色 HTTP / 业务错误保留脱敏后的 message、code、request_id 供排查，不丢弃 400 的具体原因。单次最多两个音色；音色失败、超时或取消会阻止视频提交。
 
 `core/providers/kling-voices.ts` 定义音色 HTTP 协议和持久化接口；`generation/kling-voice-store.ts` 通过迁移 35 的 `generation_voice_tasks` 保存用户 / 视频任务 / 音频序号对应的外部请求 ID、音色任务 ID 和音色 ID。写请求前先保存外部请求 ID，未知创建结果仅查询，不重发 POST；凭证 / 来源指纹变化时拒绝复用。该记录只用于同一任务恢复，不跨视频任务缓存音色。Worker 通过 `generation/config.ts` 的 `loadKlingVoiceConfig` 读取独立服务端配置 `KLING_VOICE_BASE_URL`（默认 `https://tokenhub.tencentmaas.com/v1`）与 `KLING_VOICE_API_KEY`，不回退到 LLM、视频或用户推理 Key。客户端在基础地址后追加 `/wand/kling/custom-voices` 及查询路径；音色状态仍按用户 / 任务隔离，指纹绑定独立音色服务凭证。未配置 Key 时仅带参考声音的真实 Kling 任务报错；视频生成继续使用原有提供器配置，音频通过 `PUBLIC_BASE_URL` 对公网可读。Mock 视频不请求真实音色服务。协议依据：[腾讯 Kling 音色管理文档](https://cloud.tencent.com/document/product/1823/135742)。
+
+营销影像使用独立的 `marketing_video` Agent（空工具白名单），由 `ChatPanel → MarketingVideoStudio` 展示九步向导：创作方向与文案、标题标签、数字分身、声音设置、视频背景、视频画面、BGM·字幕、视频封面、确认生成。`draft.ts` 组织探店 / 主播口播要求，将肖像、背景按顺序放入 `video_reference_image`，声音放入 `video_reference_audio`，封面放入 `video_first_frame`；提示词同步标注肖像、背景图片与音频的对应序号。背景支持预设、自定义描述和上传参考图；字幕、配乐及文字仍由视频模型生成。营销影像固定使用 `kling-video-v3-omni`，前端不提供模型选择，服务端也固定入队模型；三个分辨率档位显示为默认（720p）、高清（1080p）、超清（4K）。
+
+文案生成复用鉴权计量的 `/api/video-drafts`。确认后 `Workspace` 创建 `marketing_video` 会话并保存 `videoPublication`，经 `useChat.generateMedia` 进入现有异步视频任务链路；结果使用 `GenerationCard` 预览、下载、取消和重试下载，返回历史可恢复任务。生成期间和结果页不提供重复生成按钮，新视频通过新会话开始；服务端与小程序共用会话租约及已有任务回放，同一会话不重复入队；未发送草稿切换时沿用 Agent 切换确认。发布标题 / 标签独立保存在会话元数据，可在结果页复制，不混入生成提示词。
 
 ### 4.4 文档与 PPT
 
@@ -231,6 +236,7 @@ API 默认 3000；Vite 默认 5173，代理 `/api` 和 `/static` 到 API。需�
 pnpm exec vitest run packages/core/src/tools/registry.test.ts
 pnpm test:knowledge
 pnpm check:agent-navigation:ui # 需 Playwright 和 Chrome；模拟接口检查 Agent 切换、确认与历史隔离
+pnpm check:marketing-video:ui # 模拟接口验证九步创作、素材、提交、任务恢复、中英文和暗色界面
 pnpm check:digital-twin:ui    # 需 Playwright（可用 PLAYWRIGHT_MODULE 指定路径）和 Chrome；模拟设备及 HTTP 数据，无付费调用
 pnpm --filter @lot-agent/web build
 pnpm --filter @lot-agent/miniprogram build  # 类型检查，真机行为另验

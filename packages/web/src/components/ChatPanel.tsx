@@ -1,11 +1,13 @@
 import { useI18n } from "../i18n/index.js";
 import { useEffect, useId, useRef, useState } from "react";
+import { MarketingVideoStudio } from "../modules/marketing-video/MarketingVideoStudio.js";
+import { GenerationCard } from "./GenerationCard.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
-import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile } from "../api/client.js";
+import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile, VideoPublication } from "../api/client.js";
 import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
 
 const miniProgramCode = new URL("../assets/mini-program-code.jpg", import.meta.url).href;
@@ -16,10 +18,12 @@ interface ChatPanelProps {
   onAttachmentConsumed?: () => void;
   onManageKnowledge?: () => void;
   messages: DisplayMessage[];
-  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings, knowledgeBases?: KnowledgeBaseRef[]) => void;
+  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings, knowledgeBases?: KnowledgeBaseRef[], videoPublication?: VideoPublication) => void | Promise<void>;
   onStop: () => void;
   isStreaming: boolean;
   activeConversationId: string | null;
+  onNewVideo?: () => void;
+  videoPublication?: unknown;
   onRegenerate?: () => void;
   /** Called when an assistant reply is clicked, to open the preview. */
   onSelectForPreview?: (content: string) => void;
@@ -146,6 +150,7 @@ function Seedance25Hint() {
 
 export function ChatPanel({
   attachment, onAttachmentConsumed, onManageKnowledge,
+  activeConversationId, onNewVideo, videoPublication,
   messages,
   onSend,
   onStop,
@@ -234,6 +239,16 @@ export function ChatPanel({
       <InputBranding />
     </>
   );
+
+  if (agent?.id === "marketing_video") {
+    return <MarketingVideoStudio key={activeConversationId ?? "new"}
+      onSubmit={(content, files, settings, publication) => onSend(content, files, settings, [], publication)}
+      onDraftChange={onDraftChange} onNewVideo={onNewVideo} busy={isStreaming} hasMessages={!isEmpty} publication={videoPublication}>
+      {messages.map((message) => message.generation
+        ? <GenerationCard key={message.id} generation={message.generation} messageId={message.id} onRedownload={onRedownloadGeneration} />
+        : message.role === "user" ? <details className="mv-script-review" key={message.id}><summary>{t("查看生成要求")}</summary><p>{message.content}</p></details> : null)}
+    </MarketingVideoStudio>;
+  }
 
   // Empty conversation: center the (enlarged) input in the page.
   if (isEmpty) {

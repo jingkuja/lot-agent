@@ -39,6 +39,8 @@ import type {
 } from "../modules/digital-employee/types.js";
 export type { CatalogModel };
 
+export interface VideoPublication { copy: string; tags: string; }
+
 export interface ConversationProject { id: string; name: string; }
 
 export interface Conversation {
@@ -425,11 +427,14 @@ export const api = {
       `/conversations?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ),
 
-  createConversation: (title?: string, agentId?: string, featureScope?: string, projectId?: string) =>
+  createConversation: (title?: string, agentId?: string, featureScope?: string, projectId?: string, videoPublication?: VideoPublication) =>
     request<Conversation>("/conversations", {
       method: "POST",
-      body: JSON.stringify({ title, agentId, featureScope, projectId }),
+      body: JSON.stringify({ title, agentId, featureScope, projectId, videoPublication }),
     }),
+
+  videoCopy: (topic: string, signal?: AbortSignal) =>
+    request<{ script: string; mainTitle: string; subtitle: string; publishTitle: string; tags: string }>("/video-drafts", { method: "POST", body: JSON.stringify({ topic }), signal }),
 
   getConversation: (id: string) =>
     request<Conversation & { messages: StoredMessage[] }>(

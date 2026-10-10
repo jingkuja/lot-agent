@@ -9,6 +9,7 @@ export const EMPTY_SELECTED: SelectedModels = { llm: null, image: null, video: n
 
 /** Agent kind → 模型目录分组(文字类 Agent 都用 llm 组)。 */
 export function groupForKind(kind: string | undefined): ModelGroup {
+  if (kind === "marketing_video") return "video";
   return kind === "image" || kind === "video" ? kind : "llm";
 }
 

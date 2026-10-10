@@ -25,6 +25,7 @@
     "knowledge:index": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-index.ts",
     "check:knowledge:ui": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-ui.ts",
     "check:agent-navigation:ui": "node packages/server/scripts/check-agent-navigation-ui.mjs",
+    "check:marketing-video:ui": "node packages/server/scripts/check-marketing-video-ui.mjs",
     "check:digital-twin:ui": "node packages/server/scripts/check-digital-twin-ui.mjs",
     "knowledge:backup": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-backup.ts",
     "check:knowledge:restore": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-restore.ts",

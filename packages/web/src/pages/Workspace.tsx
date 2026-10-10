@@ -16,6 +16,7 @@ import type { ModelCatalog } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
+import { MARKETING_VIDEO_MODEL } from "../modules/marketing-video/draft.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveImageSelection, resolveLlmSelection } from "../lib/model-defaults.js";
 import { digitalEmployeeConversations as filterDigitalEmployeeConversations, withoutDigitalEmployee } from "../lib/product-agent-scope.js";
 import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
@@ -127,6 +128,7 @@ export function Workspace({
   useEffect(() => { let live = true; void knowledgeApi.status().then(() => { if (live) setKnowledgeAvailable(true); }).catch(() => {}); return () => { live = false; }; }, [user.id]);
   const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
   const [hasDraft, setHasDraft] = useState(false);
+  const [studioRevision, setStudioRevision] = useState(0);
   const creatingConversation = useRef(false);
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
@@ -220,6 +222,7 @@ export function Workspace({
     (agentId: string) => {
       if (creatingConversation.current) return;
       setActiveAgentId(agentId);
+      if (agentId === "marketing_video") setStudioRevision((value) => value + 1);
       setNewProjectId(null);
       setNewAgentId(agentId);
       // Sync the ref BEFORE the next render so in-flight stream events stop
@@ -297,15 +300,16 @@ export function Workspace({
       content: string,
       files: PickedFile[] = [],
       settings?: unknown,
-      knowledgeBases: KnowledgeBaseRef[] = []
+      knowledgeBases: KnowledgeBaseRef[] = [],
+      videoPublication?: { copy: string; tags: string }
     ) => {
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
-        if (kind === "image" || kind === "video") {
+        if (kind === "image" || kind === "video" || kind === "marketing_video") {
           const modelId = kind === "image"
             ? resolveImageSelection(selectedModels.image, modelCatalog.image)
-            : selectedModels.video;
-          generateMedia(content, kind as "image" | "video", settings, files, modelId ?? undefined);
+            : kind === "marketing_video" ? MARKETING_VIDEO_MODEL : selectedModels.video;
+          generateMedia(content, kind === "image" ? "image" : "video", settings, files, modelId ?? undefined);
         } else {
           send(content, files, undefined, selectedModels.llm ?? undefined, knowledgeBases);
         }
@@ -323,7 +327,7 @@ export function Workspace({
         setIsCreatingConversation(true);
         let conv;
         try {
-          conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined);
+          conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined, videoPublication);
         } finally {
           creatingConversation.current = false;
           setIsCreatingConversation(false);
@@ -485,7 +489,7 @@ export function Workspace({
             </header>
           )}
           <ChatPanel
-            key={openAgentId}
+            key={openAgentId === "marketing_video" ? `${openAgentId}:${studioRevision}` : openAgentId}
             onDraftChange={setHasDraft}
             attachment={knowledgeAttachment}
             onAttachmentConsumed={() => setKnowledgeAttachment(undefined)}
@@ -495,6 +499,8 @@ export function Workspace({
             onStop={stop}
             isStreaming={isStreaming}
             activeConversationId={activeId}
+            onNewVideo={handleCreate}
+            videoPublication={conversations.find((c) => c.id === activeId)?.metadata?.videoPublication}
             onRegenerate={regenerate}
             onRedownloadGeneration={redownloadGeneration}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。

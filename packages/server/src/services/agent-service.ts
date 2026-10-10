@@ -33,6 +33,7 @@ import {
   copywritingDefinition,
   imageDefinition,
   videoDefinition,
+  marketingVideoDefinition,
   pptDefinition,
   contractDefinition,
   digitalEmployeeDefinition,
@@ -775,6 +776,7 @@ export class AgentService {
     this.agentRegistry.register(copywritingDefinition);
     this.agentRegistry.register(imageDefinition);
     this.agentRegistry.register(videoDefinition);
+    this.agentRegistry.register(marketingVideoDefinition);
     this.agentRegistry.register(pptDefinition);
     this.agentRegistry.register(contractDefinition);
   }
