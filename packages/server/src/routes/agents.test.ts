@@ -42,7 +42,7 @@ describe("agents routes", () => {
     expect(byId.general.installed).toBe(true);
     expect(byId.digital_employee).toMatchObject({ installed: true, sortOrder: -1 });
     expect(byId.image).toMatchObject({ installed: true, sortOrder: 1 });
-    expect(byId.contract).toMatchObject({ installed: false, sortOrder: null });
+    expect(byId.contract).toMatchObject({ installed: true, sortOrder: null });
   });
 
   it("GET exposes default-installed PPT as ready to use", async () => {
@@ -73,11 +73,11 @@ describe("agents routes", () => {
     expect(res.status).toBe(404);
   });
 
-  it("POST install known id -> ok + calls db", async () => {
+  it("POST install known id -> already available without a DB write", async () => {
     const svc = fakeService(new Map());
     const res = await app(svc).request("/agents/contract/install", { method: "POST" });
     expect(res.status).toBe(200);
-    expect(svc.db.installUserAgent).toHaveBeenCalledWith("u1", "contract");
+    expect(svc.db.installUserAgent).not.toHaveBeenCalled();
   });
 
   it("DELETE general -> 400", async () => {
@@ -90,11 +90,11 @@ describe("agents routes", () => {
     expect(res.status).toBe(400);
   });
 
-  it("DELETE installed sub-agent -> ok", async () => {
+  it("DELETE sub-agent cannot remove its availability", async () => {
     const svc = fakeService(new Map([["image", 1]]));
     const res = await app(svc).request("/agents/image/install", { method: "DELETE" });
-    expect(res.status).toBe(200);
-    expect(svc.db.uninstallUserAgent).toHaveBeenCalledWith("u1", "image");
+    expect(res.status).toBe(400);
+    expect(svc.db.uninstallUserAgent).not.toHaveBeenCalled();
   });
 
   it("POST promote unknown id -> 404", async () => {
@@ -102,9 +102,28 @@ describe("agents routes", () => {
     expect(res.status).toBe(404);
   });
 
-  it("POST promote not-installed -> 400", async () => {
-    const res = await app(fakeService(new Map())).request("/agents/contract/promote", { method: "POST" });
-    expect(res.status).toBe(400);
+  it("POST promote works for a previously uninstalled agent", async () => {
+    const svc = fakeService(new Map());
+    const res = await app(svc).request("/agents/contract/promote", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(svc.db.installUserAgent).toHaveBeenCalledWith("u1", "contract");
+    expect(svc.db.promoteUserAgent).toHaveBeenCalledWith("u1", "contract");
+  });
+
+  it("GET exposes every visible agent even for accounts with no installation rows", async () => {
+    const svc = fakeService(new Map());
+    const res = await app(svc).request("/agents");
+    const body = await res.json();
+    expect(body.length).toBe(5);
+    expect(body.every((agent: any) => agent.installed)).toBe(true);
+    expect(svc.db.getUserAgents).toHaveBeenCalledWith("u1");
+  });
+
+  it.each(["copywriting", "nope"])("DELETE %s does not expose hidden or unknown agents", async (id) => {
+    const svc = fakeService(new Map());
+    const res = await app(svc).request(`/agents/${id}/install`, { method: "DELETE" });
+    expect(res.status).toBe(404);
+    expect(svc.db.uninstallUserAgent).not.toHaveBeenCalled();
   });
 
   it("POST promote installed -> ok", async () => {

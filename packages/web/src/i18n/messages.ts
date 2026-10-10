@@ -1,5 +1,14 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
+  "当前 Agent": {"en": "Current agent", "id": "Agent saat ini"},
+  "切换 Agent": {"en": "Switch agent", "id": "Ganti agent"},
+  "选择 Agent": {"en": "Choose an agent", "id": "Pilih agent"},
+  "切换到 {0}？": {"en": "Switch to {0}?", "id": "Beralih ke {0}?"},
+  "是否离开当前的{0}，前往{1}？已发送的对话会保留在历史记录中。": {"en": "Leave {0} and switch to {1}? Sent messages will remain in your history.", "id": "Tinggalkan {0} dan beralih ke {1}? Pesan terkirim tetap tersimpan di riwayat."},
+  "当前任务会继续运行，可从历史记录返回查看。": {"en": "Your current task will continue. Return to it from your history.", "id": "Tugas saat ini akan berlanjut. Buka kembali melalui riwayat."},
+  "切换后，未发送的文字和附件将被清空。": {"en": "Unsent text and attachments will be cleared when you switch.", "id": "Teks dan lampiran yang belum dikirim akan dihapus saat beralih."},
+  "留在当前对话": {"en": "Stay in this chat", "id": "Tetap di percakapan ini"},
+  "离开并切换": {"en": "Leave and switch", "id": "Tinggalkan dan beralih"},
   "数字分身": {"en": "Digital twin", "id": "Kembaran digital"},
   "个人语音库": {"en": "Personal voice library", "id": "Pustaka suara pribadi"},
   "个人肖像库": {"en": "Personal portrait library", "id": "Pustaka potret pribadi"},
@@ -275,7 +284,7 @@ export const messages: Record<string, { en: string; id: string }> = {
   "协作中": {"en": "Collaborating", "id": "Berkolaborasi"},
   "文案创作": {"en": "Copywriting", "id": "Penulisan konten"},
   "图片生成": {"en": "Image generation", "id": "Pembuatan gambar"},
-  "PPT 制作": {"en": "Presentations", "id": "Presentasi"},
+  "PPT 制作": {"en": "PPT creation", "id": "Presentasi"},
   "视频生成": {"en": "Video generation", "id": "Pembuatan video"},
   "多模型，按需调用": {"en": "Multiple models, on demand", "id": "Beragam model sesuai kebutuhan"},
   "多智能体，协同交付": {"en": "Multiple agents, working together", "id": "Beragam agen bekerja bersama"},

@@ -17,7 +17,7 @@ Lot Agent 是共用账号、模型网关和计费体系的 AI 内容与办公工
 
 | 功能域 | 当前能力 | 主要入口 |
 | --- | --- | --- |
-| 通用助手与 Agent 中心 | 流式聊天、模型选择、附件、工具调用、记忆、子 Agent 安装与排序 | `Workspace.tsx`、`routes/agents.ts`、`agent-service.ts` |
+| 通用助手与 Agent 选择 | 流式聊天、模型选择、附件、工具调用、记忆、子 Agent 默认可用、九宫格选择与历史记录同步 | `Workspace.tsx`、`routes/agents.ts`、`agent-service.ts` |
 | 图片 / 视频 | 按模型参数异步生成、任务恢复、结果预览与下载、作品分享 | `GenerationCard.tsx`、`routes/conversations.ts`、`generation/run-job.ts` |
 | 办公 | 文档导出、合同对比、PPT 大纲确认、生成与修改 | `server/tools/`、`server/ppt/`、`core/presentation/` |
 | 数字员工 | 营销资料、客户画像、商机建议、客户获客、文案与素材生成 | `web/modules/digital-employee/`、`server/digital-employee/` |
@@ -26,7 +26,7 @@ Lot Agent 是共用账号、模型网关和计费体系的 AI 内容与办公工
 | 项目组织 | 会话项目创建、列表、会话归入项目 | `routes/conversations.ts`、迁移 `0031`；不等同完整项目协作系统 |
 | 账号与积分 | 登录、注册、手机号 / 微信绑定、托管凭证、余额和充值记录 | `routes/auth.ts`、`routes/usage.ts`、`routes/recharge.ts` |
 
-内置 `general` 与 `digital_employee` 是固定 Agent；图片、视频、PPT 默认安装。`copywriting` 定义仍隐藏，但数字员工业务已有文案能力，不能将二者混为一谈。合同对比依托 Agent 提示词、附件和文档工具。
+所有未隐藏的 Agent 默认可用，无需安装或卸载；`digital_employee` 保持独立产品入口。旧用户的安装记录仅用于保留排序，不再决定可用性。`copywriting` 定义仍隐藏，但数字员工业务已有文案能力，不能将二者混为一谈。合同对比依托 Agent 提示词、附件和文档工具。
 
 尚需区分的边界：发布连接器及内容审核仍是 stub / 关键词实现；TTS、ASR 仍为占位提供器。小程序视频的声音、字幕等要求不代表已接入独立配音和后期合成。`core/agents/orchestration.ts` 已有 agent-as-tool 与 DAG 定义 / 校验，但不是完整的持久化多 Agent 工作流执行器。
 
@@ -74,6 +74,8 @@ Hono API：鉴权、参数校验、限流、用户归属
 
 ### 4.2 聊天与工具
 
+工作台通过 `SidebarAgentTabs.tsx` 显示当前 Agent，默认展示 3 个快捷选项；九宫格按钮下方标注“更多”，点击后展开全部可用助手，点击“收起”恢复 3 个选项；展开 / 关闭面板或重复选择当前 Agent 不改变对话。`Workspace.tsx` 统一当前 Agent、历史筛选及新建会话目标；切换到不同 Agent 且已有会话、运行中任务或草稿时，通过 `AgentSwitchDialog.tsx` 确认后进入目标 Agent 的新对话。已发送的历史保留，后台任务继续；未发送的文字和附件在确认后清空。聊天区域顶部固定显示当前 Agent，输入框不再重复提供选择条。`routes/agents.ts` 对所有可见定义返回 `installed: true`；旧安装接口幂等成功，卸载接口拒绝，隐藏 Agent 仍不公开。
+
 ```text
 InputBox / ChatPanel → useChat → POST /api/conversations/:id/messages
   → 用户归属与会话运行租约
@@ -96,7 +98,7 @@ ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core
 
 前端以消息中的 `taskId` 查询 `GET /api/tasks/:id`；刷新后可以恢复。生成缓存、失败状态、取消与下载重试都有独立语义。已有 `generation.redownload` 路径只重试产物下载，避免把下载失败直接变成再次收费生成。
 
-数字分身入口位于知识面板侧栏，`DigitalTwinPanel.tsx` 分别管理个人语音与肖像。复用知识管理的鉴权上传、原件读取、分页和删除，以 `digital-twin:voice` / `digital-twin:portrait` 标签和媒体类型筛选，无新增数据库表。`TwinCapture.tsx` 使用浏览器设备权限采集，录音经 `media.ts` 转为最长 15 秒的单声道 WAV，拍照输出 JPEG；关闭面板会释放设备。上传声音限 MP3/WAV、2–15 秒、15 MB，肖像限 JPG/PNG/WebP、20 MB，服务端沿用私有存储的归属、流式大小和文件签名校验。素材保存在私有库；视频输入框通过 `DigitalTwinPicker` 读取所选文件并加入既有 `video_reference_audio` / `video_reference_image` 上传链路，同时补充提示词，发送后按现有视频附件方式提供给模型。参考声音用于所选模型的视频生成，不提供独立的长片配音服务；真人肖像支持以所选模型为准。macOS 打包权限说明位于 `packages/desktop/electron-builder.yml`。
+数字分身可从工作台品牌区的“数字分身”直接打开，也可从知识面板侧栏进入；`KnowledgePanel.initialSection` 指定初始面板。`DigitalTwinPanel.tsx` 分别管理个人语音与肖像。复用知识管理的鉴权上传、原件读取、分页和删除，以 `digital-twin:voice` / `digital-twin:portrait` 标签和媒体类型筛选，无新增数据库表。`TwinCapture.tsx` 使用浏览器设备权限采集，录音经 `media.ts` 转为最长 15 秒的单声道 WAV，拍照输出 JPEG；关闭面板会释放设备。上传声音限 MP3/WAV、2–15 秒、15 MB，肖像限 JPG/PNG/WebP、20 MB，服务端沿用私有存储的归属、流式大小和文件签名校验。素材保存在私有库；视频输入框通过 `DigitalTwinPicker` 读取所选文件并加入既有 `video_reference_audio` / `video_reference_image` 上传链路，同时补充提示词，发送后按现有视频附件方式提供给模型。参考声音用于所选模型的视频生成，不提供独立的长片配音服务；真人肖像支持以所选模型为准。macOS 打包权限说明位于 `packages/desktop/electron-builder.yml`。
 
 Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务恢复检查后调用 `generation/kling-voices.ts`：将样例转为公网 URL → `POST /v1/wand/kling/custom-voices` → 每 2.5 秒查询至 `succeed` → 取 `task_result.voices[].voice_id` 作为内部参考音色，提供器将其写入请求的 `metadata.voice_id`（两个音色时为 `metadata.voice_ids`），不向网关发送 `reference_audio`，并开启视频音频。New API 网关需把上述 metadata 转为腾讯 `contents` 中的 `type=voice` / `voice_id` 项。创建接口的 `task_id` 不作为音色 ID。非 Kling 模型沿用音频 URL。自动音色名称使用 20 字符以内的短名称。音色 HTTP / 业务错误保留脱敏后的 message、code、request_id 供排查，不丢弃 400 的具体原因。单次最多两个音色；音色失败、超时或取消会阻止视频提交。
 
@@ -134,7 +136,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 | 产品外壳与页面切换 | `web/App.tsx`、`web/shell/ProductShell.tsx`、`web/pages/Workspace.tsx`；当前用 History API，不是 React Router |
 | 请求、认证与流式状态 | `web/api/client.ts`、`web/hooks/useChat.ts`、`web/hooks/chat-reducer.ts`、`web/lib/token-store.ts` |
 | 会话、项目、发送 / 再生成 | `server/routes/conversations.ts`、`server/db/database.ts`、`web/hooks/useConversations.ts`、`web/components/Sidebar.tsx` |
-| Agent 定义、注册与安装 | `core/agents/definitions/`、`core/agents/types.ts`、`server/services/agent-service.ts`、`server/agents/install-order.ts`、`server/routes/agents.ts` |
+| Agent 定义、注册与默认可用性 | `core/agents/definitions/`、`core/agents/types.ts`、`server/services/agent-service.ts`、`server/agents/install-order.ts`、`server/routes/agents.ts` |
 | ReAct、模型终态、上下文 | `core/agent/agent.ts`、`core/llm/`、`core/context/context-manager.ts` |
 | 工具权限、schema、重试 / 取消 | `core/tools/registry.ts`、`core/tools/validate.ts`、`core/runtime/abort.ts` |
 | 网页搜索、网络访问、宿主工具 | `core/tools/builtins.ts`、`core/tools/net-fetch.ts`、`core/tools/net-guard.ts`、`core/tools/process.ts` |
@@ -178,7 +180,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 | --- | --- |
 | `/api/auth` | `routes/auth.ts`；登录等为公开入口，资料修改 / 绑定等在处理器内校验身份 |
 | `/api/conversations` | 聊天、项目、知识范围、生成与再生成；会话认证和资源归属 |
-| `/api/agents`、`/api/models` | Agent 安装与模型目录；会话认证 |
+| `/api/agents`、`/api/models` | Agent 目录与模型目录；会话认证 |
 | `/api/tasks`、`/api/assets`、`/api/uploads` | 异步任务、产物、附件；会话认证和资源归属 |
 | `/api/usage`、`/api/balance`、`/api/recharge` | 用量、余额、充值；会话认证 |
 | `/api/digital-employee` | 数字员工业务；会话认证、归属和功能作用域 |
@@ -193,7 +195,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 | 需求 | 建议改动顺序与检查点 |
 | --- | --- |
-| 新增 Agent | definition → 导出 / 注册 → 工具白名单 → 安装 / 可见性 → 前端选择和图标 → 权限及安装测试 |
+| 新增 Agent | definition → 导出 / 注册 → 工具白名单 → 可见性 → 前端九宫格选择和图标 → 权限及目录测试 |
 | 新增工具 / 交互卡片 | core 契约或 server 工具 → 注册与 Agent 白名单 → SSE / 持久化 → 前端解析与卡片；等待回复使用 `endsTurn` |
 | 新增模型 / 参数 | 目录和 provider 映射 → 服务端输入 → 提供器请求 → 前端设置 → 缓存键 / 计量；不要只加模型选择项 |
 | 改聊天行为 | `useChat` + reducer → 会话路由 → `AgentService` / core → 消息与 trace；覆盖刷新、取消、失败、再生成 |
@@ -228,6 +230,7 @@ API 默认 3000；Vite 默认 5173，代理 `/api` 和 `/static` 到 API。需�
 # 按实际改动选择测试范围；新纯逻辑按仓库约定先写 Vitest 测试
 pnpm exec vitest run packages/core/src/tools/registry.test.ts
 pnpm test:knowledge
+pnpm check:agent-navigation:ui # 需 Playwright 和 Chrome；模拟接口检查 Agent 切换、确认与历史隔离
 pnpm check:digital-twin:ui    # 需 Playwright（可用 PLAYWRIGHT_MODULE 指定路径）和 Chrome；模拟设备及 HTTP 数据，无付费调用
 pnpm --filter @lot-agent/web build
 pnpm --filter @lot-agent/miniprogram build  # 类型检查，真机行为另验

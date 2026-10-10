@@ -1,114 +1,86 @@
 import { useI18n } from "../i18n/index.js";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Agent } from "../api/client.js";
 import { GENERAL_ID, sortedSubAgents } from "../lib/agent-order.js";
 import { AGENT_ICONS, agentIconKind } from "../lib/agent-icons.js";
 
 interface SidebarAgentTabsProps {
-  /** 已安装 agents(含 general);组件内部负责排序。 */
   agents: Agent[];
   activeId: string;
   onSwitch: (agentId: string) => void;
   disabled?: boolean;
 }
 
-/** 容忍滚动位置的亚像素误差。 */
-const EDGE_EPSILON = 1;
-
+/** Show three quick choices by default; expand to browse all available Agents. */
 export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: SidebarAgentTabsProps) {
   const { t } = useI18n();
-  const stripRef = useRef<HTMLDivElement>(null);
-  const [overflowing, setOverflowing] = useState(false);
-  const [canPrev, setCanPrev] = useState(false);
-  const [canNext, setCanNext] = useState(false);
-
-  const general = agents.find((a) => a.id === GENERAL_ID) ?? null;
-  const subs = sortedSubAgents(agents);
-
-  const syncScrollState = useCallback(() => {
-    const el = stripRef.current;
-    if (!el) return;
-    setOverflowing(el.scrollWidth > el.clientWidth + EDGE_EPSILON);
-    setCanPrev(el.scrollLeft > EDGE_EPSILON);
-    setCanNext(el.scrollLeft + el.clientWidth < el.scrollWidth - EDGE_EPSILON);
-  }, []);
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const gridId = useId();
+  const current = agents.find((agent) => agent.id === activeId);
+  const general = agents.find((agent) => agent.id === GENERAL_ID);
+  const ordered = [...(general ? [general] : []), ...sortedSubAgents(agents)];
+  const visible = open ? ordered : ordered.slice(0, 3);
 
   useEffect(() => {
-    const el = stripRef.current;
-    if (!el) return;
-    syncScrollState();
-    const ro = new ResizeObserver(syncScrollState);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [syncScrollState, subs.length]);
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [open]);
 
-  // 跟随只发生在激活项变化时;手动滚动不会被夹回。
-  useEffect(() => {
-    const active = stripRef.current?.querySelector<HTMLElement>(".agent-tab.active");
-    active?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
-  }, [activeId]);
-
-  const nudge = (dir: 1 | -1) => {
-    const el = stripRef.current;
-    if (!el) return;
-    // 翻一整页(正好两个子标签),配合 scroll-snap 落在下一组起点。
-    el.scrollBy({ left: dir * el.clientWidth, behavior: "smooth" });
-  };
-
-  const renderTab = (a: Agent, pinned = false) => {
-    const kind = agentIconKind(a);
-    return (
-      <button
-        key={a.id}
-        type="button"
-        className={`agent-tab ${pinned ? "agent-tab--general" : ""} ${a.id === activeId ? "active" : ""}`}
-        onClick={() => onSwitch(a.id)}
-        disabled={disabled}
-        title={pinned ? t(a.name) : t(a.description)}
-        aria-label={pinned ? t(a.name) : undefined}
-      >
-        <span className={`agent-tab-icon agent-tab-icon--${kind}`} aria-hidden>
-          {AGENT_ICONS[kind]}
-        </span>
-        {!pinned && <span className="agent-tab-label">{t(a.name)}</span>}
-      </button>
-    );
-  };
+  const icon = (agent: Agent) => (
+    <span className={`agent-pill-icon agent-pill-icon--${agentIconKind(agent)}`} aria-hidden>
+      {AGENT_ICONS[agentIconKind(agent)]}
+    </span>
+  );
 
   return (
-    <div className="sidebar-agent-tabs">
-      {general && renderTab(general, true)}
-      {overflowing && (
-        <button
-          type="button"
-          className="agent-tab-arrow"
-          onClick={() => nudge(-1)}
-          disabled={disabled || !canPrev}
-          title={t("向前滚动")}
-          aria-label={t("向前滚动")}
-        >
-          ‹
-        </button>
-      )}
-      <div
-        className={`agent-tab-strip ${overflowing ? "is-overflowing" : ""}`}
-        ref={stripRef}
-        onScroll={syncScrollState}
-      >
-        {subs.map((a) => renderTab(a))}
+    <div className="sidebar-agent-picker" ref={root} onKeyDown={(event) => {
+      if (event.key === "Escape" && open) {
+        event.stopPropagation();
+        setOpen(false);
+        trigger.current?.focus();
+      }
+    }}>
+      <div className="sidebar-current-agent">
+        {current && icon(current)}
+        <div className="sidebar-current-agent-copy">
+          <span>{t("当前 Agent")}</span>
+          <strong>{current ? t(current.name) : t("加载中…")}</strong>
+        </div>
+        {ordered.length > 3 && <button ref={trigger} type="button" className={`agent-grid-toggle ${open ? "active" : ""}`}
+          aria-expanded={open} aria-controls={gridId} aria-label={t(open ? "收起" : "更多")}
+          title={t("切换 Agent")} disabled={disabled} onClick={() => setOpen((value) => !value)}>
+          <span className="agent-grid-toggle-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden>
+              {[4, 10, 16].flatMap((x) => [4, 10, 16].map((y) => <rect key={`${x}-${y}`} x={x} y={y} width="4" height="4" rx="1" />))}
+            </svg>
+          </span>
+          <span>{t(open ? "收起" : "更多")}</span>
+        </button>}
       </div>
-      {overflowing && (
-        <button
-          type="button"
-          className="agent-tab-arrow"
-          onClick={() => nudge(1)}
-          disabled={disabled || !canNext}
-          title={t("向后滚动")}
-          aria-label={t("向后滚动")}
-        >
-          ›
-        </button>
-      )}
+      <div className="agent-launcher" id={gridId}>
+        <div className="agent-launcher-grid" role="group" aria-label={t("选择 Agent")}>
+          {visible.map((agent) => (
+            <button key={agent.id} type="button"
+              className={`agent-launcher-item ${agent.id === activeId ? "active" : ""}`}
+              aria-pressed={agent.id === activeId} title={t(agent.description)} disabled={disabled}
+              onClick={() => {
+                setOpen(false);
+                trigger.current?.focus();
+                onSwitch(agent.id);
+              }}>
+              {icon(agent)}
+              <span>{t(agent.name)}</span>
+              {agent.id === activeId && <span className="agent-launcher-check" aria-hidden>✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

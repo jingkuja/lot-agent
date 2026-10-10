@@ -5,7 +5,6 @@ export interface UseAgents {
   agents: Agent[];
   loading: boolean;
   refresh: () => Promise<void>;
-
 }
 
 export function useAgents(enabled: boolean): UseAgents {
