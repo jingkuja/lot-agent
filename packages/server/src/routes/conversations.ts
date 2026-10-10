@@ -605,6 +605,12 @@ export function createGenerationRoutes(service: AgentService) {
       const selectedModel = conv.agent_id === "marketing_video" && mediaType === "video"
         ? marketingVideoDefinition.defaultModelId
         : typeof body.model === "string" && body.model ? body.model : undefined;
+      if (conv.agent_id === "marketing_video" && mediaType === "video") {
+        const duration = body.settings?.durationSec === undefined ? 5 : body.settings.durationSec;
+        if (typeof duration !== "number" || !Number.isInteger(duration) || duration < 4 || duration > 15) {
+          return c.json({ error: "营销影像视频时长需为 4–15 秒" }, 400);
+        }
+      }
       let settings = pickGenerationSettings(mediaType, body.settings);
       // Mini program quality tiers shift the requested resolution before
       // validation: 快速 drops every ratio one step, 自动/标准 only the wide

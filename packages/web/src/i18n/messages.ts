@@ -1,5 +1,7 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
+  "营销影像视频时长需为 4–15 秒": {"en": "Marketing videos must be 4–15 seconds long.", "id": "Durasi video pemasaran harus 4–15 detik."},
+  "最长 15 秒，适合短片或演讲片段，较长文案请精简后生成。": {"en": "Up to 15 seconds, for short videos or speech excerpts. Shorten longer scripts before generating.", "id": "Maksimal 15 detik, untuk video pendek atau cuplikan pidato. Ringkas naskah panjang sebelum membuat."},
   "高清": {"en": "HD", "id": "HD"},
   "超清": {"en": "Ultra HD", "id": "Ultra HD"},
   "营销影像": {"en": "Marketing video", "id": "Video pemasaran"},

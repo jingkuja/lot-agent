@@ -75,7 +75,7 @@ Hono API：鉴权、参数校验、限流、用户归属
 
 ### 4.2 聊天与工具
 
-工作台通过 `SidebarAgentTabs.tsx` 显示当前 Agent，默认展示 3 个快捷选项；九宫格按钮下方标注“更多”，点击后展开全部可用助手，点击“收起”恢复 3 个选项；展开 / 关闭面板或重复选择当前 Agent 不改变对话。`Workspace.tsx` 统一当前 Agent、历史筛选及新建会话目标；切换到不同 Agent 且已有会话、运行中任务或草稿时，通过 `AgentSwitchDialog.tsx` 确认后进入目标 Agent 的新对话。已发送的历史保留，后台任务继续；未发送的文字和附件在确认后清空。聊天区域顶部固定显示当前 Agent，输入框不再重复提供选择条。`routes/agents.ts` 对所有可见定义返回 `installed: true`；旧安装接口幂等成功，卸载接口拒绝，隐藏 Agent 仍不公开。
+工作台通过 `SidebarAgentTabs.tsx` 显示当前 Agent，默认展示 3 个快捷选项；通用助手固定第一、营销影像固定第二，其余沿用历史排序；九宫格按钮下方标注“更多”，点击后展开全部可用助手，点击“收起”恢复 3 个选项；展开 / 关闭面板或重复选择当前 Agent 不改变对话。`Workspace.tsx` 统一当前 Agent、历史筛选及新建会话目标；切换到不同 Agent 且已有会话、运行中任务或草稿时，通过 `AgentSwitchDialog.tsx` 确认后进入目标 Agent 的新对话。已发送的历史保留，后台任务继续；未发送的文字和附件在确认后清空。聊天区域顶部固定显示当前 Agent，输入框不再重复提供选择条。`routes/agents.ts` 对所有可见定义返回 `installed: true`；旧安装接口幂等成功，卸载接口拒绝，隐藏 Agent 仍不公开。
 
 ```text
 InputBox / ChatPanel → useChat → POST /api/conversations/:id/messages
@@ -105,7 +105,7 @@ Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务�
 
 `core/providers/kling-voices.ts` 定义音色 HTTP 协议和持久化接口；`generation/kling-voice-store.ts` 通过迁移 35 的 `generation_voice_tasks` 保存用户 / 视频任务 / 音频序号对应的外部请求 ID、音色任务 ID 和音色 ID。写请求前先保存外部请求 ID，未知创建结果仅查询，不重发 POST；凭证 / 来源指纹变化时拒绝复用。该记录只用于同一任务恢复，不跨视频任务缓存音色。Worker 通过 `generation/config.ts` 的 `loadKlingVoiceConfig` 读取独立服务端配置 `KLING_VOICE_BASE_URL`（默认 `https://tokenhub.tencentmaas.com/v1`）与 `KLING_VOICE_API_KEY`，不回退到 LLM、视频或用户推理 Key。客户端在基础地址后追加 `/wand/kling/custom-voices` 及查询路径；音色状态仍按用户 / 任务隔离，指纹绑定独立音色服务凭证。未配置 Key 时仅带参考声音的真实 Kling 任务报错；视频生成继续使用原有提供器配置，音频通过 `PUBLIC_BASE_URL` 对公网可读。Mock 视频不请求真实音色服务。协议依据：[腾讯 Kling 音色管理文档](https://cloud.tencent.com/document/product/1823/135742)。
 
-营销影像使用独立的 `marketing_video` Agent（空工具白名单），由 `ChatPanel → MarketingVideoStudio` 展示九步向导：创作方向与文案、标题标签、数字分身、声音设置、视频背景、视频画面、BGM·字幕、视频封面、确认生成。`draft.ts` 组织探店 / 主播口播要求，将肖像、背景按顺序放入 `video_reference_image`，声音放入 `video_reference_audio`，封面放入 `video_first_frame`；提示词同步标注肖像、背景图片与音频的对应序号。背景支持预设、自定义描述和上传参考图；字幕、配乐及文字仍由视频模型生成。营销影像固定使用 `kling-video-v3-omni`，前端不提供模型选择，服务端也固定入队模型；三个分辨率档位显示为默认（720p）、高清（1080p）、超清（4K）。
+营销影像使用独立的 `marketing_video` Agent（空工具白名单），由 `ChatPanel → MarketingVideoStudio` 展示九步向导：创作方向与文案、标题标签、数字分身、声音设置、视频背景、视频画面、BGM·字幕、视频封面、确认生成。`draft.ts` 组织探店 / 主播口播要求，将肖像、背景按顺序放入 `video_reference_image`，声音放入 `video_reference_audio`，封面放入 `video_first_frame`；提示词同步标注肖像、背景图片与音频的对应序号。背景支持预设、自定义描述和上传参考图；字幕、配乐及文字仍由视频模型生成。营销影像固定使用 `kling-video-v3-omni`，前端不提供模型选择，服务端也固定入队模型；三个分辨率档位显示为默认（720p）、高清（1080p）、超清（4K）。营销影像时长范围为 4–15 秒，前端滑块限制上限并显示说明，服务端在计费预检、消息落库和入队前拒绝越界、非整数及自动适配时长。
 
 文案生成复用鉴权计量的 `/api/video-drafts`。确认后 `Workspace` 创建 `marketing_video` 会话并保存 `videoPublication`，经 `useChat.generateMedia` 进入现有异步视频任务链路；结果使用 `GenerationCard` 预览、下载、取消和重试下载，返回历史可恢复任务。生成期间和结果页不提供重复生成按钮，新视频通过新会话开始；服务端与小程序共用会话租约及已有任务回放，同一会话不重复入队；未发送草稿切换时沿用 Agent 切换确认。发布标题 / 标签独立保存在会话元数据，可在结果页复制，不混入生成提示词。
 

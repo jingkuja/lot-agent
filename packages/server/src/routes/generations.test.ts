@@ -626,3 +626,29 @@ it.each([undefined, "doubao-seedance-2-5"])("fixes marketing video generation an
   expect(service.jobQueue.enqueue).toHaveBeenCalledWith("video.generate", expect.objectContaining({ modelId: "kling-video-v3-omni", quality: "4k" }), "u1");
   expect(service.messages.find((message: { role: string }) => message.role === "assistant").model).toBe("kling-video-v3-omni");
 });
+
+
+it.each([16, 60, -1, 0, 3, 15.5, "15", null])("rejects invalid marketing video duration %s before billing or enqueueing", async (durationSec) => {
+  const service = fakeService();
+  service.db.getConversation.mockResolvedValue({ id: "c1", user_id: "u1", agent_id: "marketing_video" });
+  const res = await app(service).request("/conversations/c1/generations", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: "店铺介绍", mediaType: "video", settings: { durationSec } }),
+  });
+  expect(res.status).toBe(400);
+  expect(service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  expect(service.db.addMessage).not.toHaveBeenCalled();
+  expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(1);
+});
+
+it.each([4, 15])("accepts marketing video duration boundary %s", async (durationSec) => {
+  const service = fakeService();
+  service.db.getConversation.mockResolvedValue({ id: "c1", user_id: "u1", agent_id: "marketing_video" });
+  const res = await app(service).request("/conversations/c1/generations", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: "店铺介绍", mediaType: "video", settings: { durationSec } }),
+  });
+  expect(res.status).toBe(202);
+  expect(service.jobQueue.enqueue).toHaveBeenCalledWith("video.generate", expect.objectContaining({ durationSec }), "u1");
+});

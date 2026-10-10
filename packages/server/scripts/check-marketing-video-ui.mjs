@@ -101,6 +101,11 @@ try {
   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}`);
   const snap = async (name) => { if (screenshotDir) { await mkdir(screenshotDir, { recursive: true }); await page.screenshot({ path: join(screenshotDir, name), animations: 'disabled' }); } };
   const chooseAgent = async (name) => { await page.locator('.agent-grid-toggle').click(); await page.locator('.agent-launcher-grid').getByRole('button', { name, exact: true }).click(); };
+  await page.locator('.agent-launcher-item').nth(2).waitFor();
+  assert.deepEqual(await page.locator('.agent-launcher-item > span:nth-child(2)').allTextContents(), ['通用助手', '营销影像', '图片生成']);
+  await page.locator('.agent-grid-toggle').click();
+  assert.equal(await page.locator('.agent-launcher-item > span:nth-child(2)').nth(1).textContent(), '营销影像');
+  await page.locator('.agent-grid-toggle').click();
   await chooseAgent('营销影像');
   await page.getByRole('heading', { name: '创作方向与文案', exact: true }).waitFor();
   assert.equal(await page.locator('.mv-steps button').count(), 9);
@@ -136,7 +141,9 @@ try {
   assert.equal(await page.getByLabel('选择模型', { exact: true }).count(), 0);
   assert.deepEqual(await page.getByRole('group', { name: '视频质量', exact: true }).getByRole('button').allTextContents(), ['默认', '高清', '超清']);
   await page.getByRole('button', { name: '超清', exact: true }).click();
-  await page.getByLabel('视频时长').fill('10');
+  assert.equal(await page.getByLabel('视频时长').getAttribute('max'), '15');
+  await page.getByLabel('视频时长').press('End');
+  assert.equal(await page.getByLabel('视频时长').inputValue(), '15');
   await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
   await page.getByRole('button', { name: '轻快', exact: true }).click();
   await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
@@ -158,7 +165,7 @@ try {
   assert.match(submission.prompt, /外貌参考 图片1/);
   assert.match(submission.prompt, /空间布局参考 图片2/);
   assert.match(submission.prompt, /音频1/);
-  assert.equal(submission.settings.durationSec, 10);
+  assert.equal(submission.settings.durationSec, 15);
   assert.equal(submission.settings.generate_audio, true);
   assert(!submission.prompt.includes('#探店'));
   assert.equal(writes.find(r => r.path === '/api/conversations').body.agentId, 'marketing_video');
