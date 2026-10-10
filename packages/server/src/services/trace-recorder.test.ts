@@ -14,6 +14,20 @@ function fakeDb() {
 }
 
 describe("TraceRecorder.finish", () => {
+  it("records actual request boundaries including compression and attempts without text", async () => {
+    const db = fakeDb();
+    const spans: any[] = [];
+    db.addSpan = async (span: any) => { spans.push(span); };
+    const recorder = new TraceRecorder(new TraceManager(), db, "m", "p");
+    recorder.start("c", "m");
+    recorder.observe({ type: "llm_start", attempt: 1, purpose: "compression" });
+    recorder.observe({ type: "llm_end", attempt: 1, failed: false });
+    recorder.observe({ type: "llm_start", attempt: 2, purpose: "reasoning" });
+    recorder.observe({ type: "llm_end", attempt: 2, failed: true });
+    await recorder.finish({ totalTokens: 100 });
+    expect(spans.map(s => [s.name, s.status])).toEqual([["llm.compress", "ok"], ["llm.chat", "error"]]);
+  });
+
   it("writes cachedPromptTokens into the persisted trace metadata when provided", async () => {
     const db = fakeDb();
     const tm = new TraceManager();

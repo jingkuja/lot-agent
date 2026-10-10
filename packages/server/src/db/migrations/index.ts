@@ -1,4 +1,5 @@
 import { virtualPayment } from "./0033-virtual-payment.js";
+import { agentRunState } from "./0034-agent-run-state.js";
 import { conversationProjects } from "./0031-conversation-projects.js";
 import { knowledgeReviewFixes } from "./0030-knowledge-review-fixes.js";
 import { knowledgeAccess } from "./0029-knowledge-access.js";
@@ -68,4 +69,5 @@ export const migrations: Migration[] = [
   knowledgeReviewFixes,
   conversationProjects,
   virtualPayment,
+  agentRunState,
 ];

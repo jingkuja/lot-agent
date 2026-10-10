@@ -84,6 +84,9 @@ InputBox / ChatPanel → useChat → POST /api/conversations/:id/messages
 
 `regenerate` 与发送消息共用会话运行租约，改聊天流程时需同时检查取消、失败收尾和历史持久化。`ask_user`、`propose_outline` 使用 `endsTurn: true` 结束本轮，让前端卡片接收用户回复。
 
+ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core/runtime/run-budget.ts` 统一推理、压缩及传输重试预算；`run-state.ts` 定义状态、执行日志接口和观测事件。服务端 `services/run-repository.ts` 将运行与工具步骤写入 `agent_runs / agent_steps`，执行前持久化意图，阻止未知写结果的自动重放。会话租约定期续租，消息写入和工具启动校验租约归属。`GET /api/conversations/:id/runs` 查询执行记录；前端 `RunRecoveryCard` 通过归属校验的操作核实接口处理未知结果，此接口不提供给模型。
+
+
 技能由 `core/skills/loader.ts` 加载：Agent 作用域技能强制注入，触发词用于预取，其余通过索引与 `load_skill` 按需加载。新增垂直 Agent 必须显式配置工具白名单。
 
 ### 4.3 图片与视频异步生成
@@ -154,7 +157,9 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0033-virtual-payment.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0034-agent-run-state.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪。
+
+运行日志新增 `agent_runs / agent_steps`，结果核实保留原始回执；普通模型会话与媒体生成任务状态互不替代。
 
 新增表 / 字段应追加迁移文件并在 `migrations/index.ts` 注册，不能只修改历史迁移或依赖手工 SQL。普通业务查询集中在 `db/database.ts`；数字员工和知识库有自己的 repository。PG `NUMERIC` 返回字符串，计算前显式转换。
 

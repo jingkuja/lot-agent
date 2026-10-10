@@ -12,6 +12,8 @@ export interface LLMRetryConfig {
   /** Aborts an in-progress backoff wait immediately (run cancellation), instead
    * of blocking the caller for up to the full delay. */
   signal?: AbortSignal;
+  onAttempt?: () => void;
+  onAttemptEnd?: (error?: unknown) => void;
 }
 
 /**
@@ -64,8 +66,7 @@ function defaultIsRetryable(err: unknown): boolean {
     message.includes("timeout") ||
     message.includes("econnreset") ||
     message.includes("econnrefused") ||
-    message.includes("network") ||
-    isMalformedToolCallError(err)
+    message.includes("network")
   );
 }
 
@@ -107,14 +108,18 @@ export async function* withLLMRetry(
   const isRetryable = cfg.isRetryable ?? defaultIsRetryable;
 
   for (let attempt = 0; ; attempt++) {
+    cfg.signal?.throwIfAborted();
+    cfg.onAttempt?.();
     let yieldedAny = false;
     try {
       for await (const chunk of createStream()) {
         yieldedAny = true;
         yield chunk;
       }
+      cfg.onAttemptEnd?.();
       return;
     } catch (err) {
+      cfg.onAttemptEnd?.(err);
       if (yieldedAny || attempt >= maxRetries || !isRetryable(err)) {
         throw err;
       }

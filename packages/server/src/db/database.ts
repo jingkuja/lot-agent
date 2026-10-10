@@ -538,6 +538,12 @@ export class DB {
     );
   }
 
+  async renewConversationRun(conversationId: string, runId: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE conversations SET run_started_at=now() WHERE id=$1 AND active_run_id=$2`, [conversationId, runId]);
+    return (rowCount ?? 0) > 0;
+  }
+
   // ── Messages ──
 
   async addMessage(
@@ -546,6 +552,7 @@ export class DB {
     role: string,
     content: string,
     options: {
+      runId?: string;
       toolCallId?: string;
       tokenCount?: number;
       model?: string;
@@ -564,9 +571,10 @@ export class DB {
     // inserts zero rows — stricter than the previous behavior (which would
     // have silently inserted an orphaned message), and acceptable since a
     // conversation_id with no owning row is already a caller bug.
-    await this.pool.query(
+    const { rowCount } = await this.pool.query(
       `WITH alloc AS (
-         UPDATE conversations SET next_seq = next_seq + 1 WHERE id = $2 RETURNING next_seq
+         UPDATE conversations SET next_seq = next_seq + 1
+         WHERE id = $2 AND ($11::uuid IS NULL OR active_run_id = $11) RETURNING next_seq
        )
        INSERT INTO messages (id, conversation_id, role, content, tool_call_id, token_count, model, latency_ms, metadata, status, seq)
        SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, alloc.next_seq FROM alloc`,
@@ -581,8 +589,10 @@ export class DB {
         options.latencyMs ?? null,
         JSON.stringify(options.metadata ?? {}),
         options.status ?? "completed",
+        options.runId ?? null,
       ]
     );
+    if (options.runId && !rowCount) throw new Error("Conversation execution lease lost before message persistence");
   }
 
   /**
@@ -757,11 +767,14 @@ export class DB {
    */
   async deleteMessagesFromAndAfter(conversationId: string, messageId: string): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      `DELETE FROM messages
-       WHERE conversation_id = $1
-         AND seq >= (
-           SELECT seq FROM messages WHERE id = $2 AND conversation_id = $1
-         )`,
+      `WITH deleted AS (
+         DELETE FROM messages
+         WHERE conversation_id = $1
+           AND seq >= (SELECT seq FROM messages WHERE id = $2 AND conversation_id = $1)
+         RETURNING id
+       )
+       UPDATE conversations SET metadata = COALESCE(metadata, '{}'::jsonb) - 'contextSummary'
+       WHERE id = $1 AND EXISTS (SELECT 1 FROM deleted)`,
       [conversationId, messageId]
     );
     return (rowCount ?? 0) > 0;

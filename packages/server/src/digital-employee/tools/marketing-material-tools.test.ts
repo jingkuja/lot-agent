@@ -1,11 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import { createMarketingMaterialTools } from "./marketing-material-tools.js";
+import { ToolRegistry } from "@lot-agent/core";
 
 function tool(name: string, service: Record<string, unknown>) {
   return createMarketingMaterialTools(service as any).find((item) => item.name === name)!;
 }
 
 describe("marketing material agent tools", () => {
+  it("preserves an ambiguous committed write through the business error wrapper", async () => {
+    const createProduct = vi.fn(async () => { throw new Error("ECONNRESET after commit"); });
+    const registry = new ToolRegistry();
+    registry.register(tool("create_marketing_product", { createProduct }));
+    const result = await registry.execute("create_marketing_product", { name: "Product" }, { userId: "u1", workingDirectory: "/tmp" });
+    expect(result.errorKind).toBe("unknown_outcome");
+    expect(createProduct).toHaveBeenCalledOnce();
+  });
+
   it("returns products and brand facts from the user-scoped store", async () => {
     const service = {
       listProducts: vi.fn(async () => ({ items: [{ id: "p1", name: "会员版" }], page: 1, limit: 20, total: 1 })),

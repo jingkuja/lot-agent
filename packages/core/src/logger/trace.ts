@@ -27,6 +27,8 @@ export interface Trace {
   metadata: {
     model: string;
     totalTokens: number;
+    totalCost?: number;
+    runStatus?: import("../runtime/run-state.js").RunStatus;
     duration?: number;
   };
 }

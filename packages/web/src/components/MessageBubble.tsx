@@ -1,3 +1,5 @@
+import { RunRecoveryCard } from "./RunRecoveryCard.js";
+import { runStatusLabels } from "../lib/run-status.js";
 import { useI18n } from "../i18n/index.js";
 import { KnowledgeSources } from "../modules/knowledge/KnowledgeSources.js";
 import React, { useState, useCallback } from "react";
@@ -168,6 +170,12 @@ export function MessageBubble({
   return (
     <div className="message-wrapper message-assistant">
       <div className="message-wrapper-inner">
+        {message.runStatus && message.runStatus !== "completed" && !message.isStreaming && (
+          <div className="message-content" role="status">{t(runStatusLabels[message.runStatus])}</div>
+        )}
+        {message.runStatus === "unknown_outcome" && message.conversationId && (
+          <RunRecoveryCard conversationId={message.conversationId} />
+        )}
         {message.thinking && (
           <CollapsibleToolCard
             title={t("思考过程")}

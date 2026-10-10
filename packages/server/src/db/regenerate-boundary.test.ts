@@ -22,6 +22,8 @@ describe("deleteMessagesFromAndAfter", () => {
     const [sql, params] = query.mock.calls[0];
     expect(sql).toMatch(/SELECT seq FROM messages WHERE id = \$2 AND conversation_id = \$1/);
     expect(params).toEqual(["c1", "m1"]);
+    expect(sql).toContain("- 'contextSummary'");
+    expect(sql).toContain("EXISTS (SELECT 1 FROM deleted)");
   });
 
   it("returns true when the boundary message existed (rows deleted)", async () => {

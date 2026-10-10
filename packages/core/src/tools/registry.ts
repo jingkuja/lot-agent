@@ -4,9 +4,9 @@ import type {
   ToolResult,
   ToolContext,
   ToolExecConfig,
-  ToolErrorKind,
 } from "../types/index.js";
 import { DEFAULT_TOOL_EXEC_CONFIG } from "../types/index.js";
+import { classifyToolFailure, toolEffect } from "./errors.js";
 import { validateToolInput } from "./validate.js";
 import { createDeadline, withAbort, abortableDelay } from "../runtime/abort.js";
 
@@ -160,13 +160,13 @@ export class ToolRegistry {
         return tool.execute(input, { ...context, signal: attempt.signal });
       }), attempt.signal);
       if (!result || typeof result.content !== "string") throw new Error("Invalid tool result");
-      if (result.isError && tool.retrySafe !== true && ["network", "timeout"].includes(result.errorKind ?? "")) {
+      if (result.isError && toolEffect(tool) === "write" && ["network", "timeout", "cancelled", "unknown"].includes(result.errorKind ?? "unknown")) {
         return { ...result, content: `${result.content}. Outcome unknown; verify before repeating this write.`, errorKind: "unknown_outcome" };
       }
       return result;
     } catch (error) {
       if (attempt.signal.aborted) {
-        const uncertain = tool.retrySafe !== true;
+        const uncertain = toolEffect(tool) === "write";
         return {
           content: uncertain
             ? `Tool '${tool.name}' ${attempt.timedOut ? "timed out" : "was cancelled"}; outcome unknown, do not repeat this write without verifying its result.`
@@ -175,8 +175,8 @@ export class ToolRegistry {
           errorKind: uncertain ? "unknown_outcome" : attempt.timedOut ? "timeout" : "cancelled",
         };
       }
-      const result = this.classifyError(error, tool.name);
-      if (tool.retrySafe !== true && result.errorKind === "network") {
+      const result = classifyToolFailure(error, `Tool '${tool.name}' error`);
+      if (toolEffect(tool) === "write" && ["network", "timeout", "cancelled", "unknown"].includes(result.errorKind ?? "unknown")) {
         return { ...result, content: `${result.content}. Outcome unknown; verify before repeating this write.`, errorKind: "unknown_outcome" };
       }
       return result;
@@ -185,51 +185,7 @@ export class ToolRegistry {
     }
   }
 
-  private classifyError(error: unknown, toolName: string): ToolResult {
-    const message = error instanceof Error ? error.message : String(error);
-    const lower = message.toLowerCase();
 
-    let kind: ToolErrorKind = "unknown";
-    let retryAfterMs: number | undefined;
-
-    if (
-      lower.includes("econnrefused") ||
-      lower.includes("econnreset") ||
-      lower.includes("etimedout") ||
-      lower.includes("fetch failed") ||
-      lower.includes("network") ||
-      lower.includes("socket hang up")
-    ) {
-      kind = "network";
-      retryAfterMs = 2000;
-    } else if (
-      lower.includes("enoent") ||
-      lower.includes("not found") ||
-      lower.includes("404")
-    ) {
-      kind = "not_found";
-    } else if (
-      lower.includes("eperm") ||
-      lower.includes("eacces") ||
-      lower.includes("403") ||
-      lower.includes("permission")
-    ) {
-      kind = "permission";
-    } else if (
-      lower.includes("invalid") ||
-      lower.includes("400") ||
-      lower.includes("bad request")
-    ) {
-      kind = "validation";
-    }
-
-    return {
-      content: `Tool '${toolName}' error [${kind}]: ${message}`,
-      isError: true,
-      errorKind: kind,
-      retryAfterMs,
-    };
-  }
 }
 
 function abortedResult(toolName: string): ToolResult {

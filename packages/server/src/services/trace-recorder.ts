@@ -1,4 +1,4 @@
-import type { TraceManager, Trace } from "@lot-agent/core";
+import type { TraceManager, Trace, RuntimeObservation } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 
 /**
@@ -10,6 +10,7 @@ import type { DB } from "../db/database.js";
  */
 export class TraceRecorder {
   private trace!: Trace;
+  private attemptSpans = new Map<number, string>();
   private llmSpanId: string | undefined;
   private toolSpanIds = new Map<string, string>();
   private requestStart = Date.now();
@@ -32,7 +33,22 @@ export class TraceRecorder {
     return this.trace;
   }
 
-  /** Start an LLM span (called on first text event). */
+  observe(event: RuntimeObservation): void {
+    if (event.type === "llm_start") {
+      this.attemptSpans.set(event.attempt, this.traceManager.startSpan(this.trace.id,
+        event.purpose === "compression" ? "llm.compress" : "llm.chat", undefined,
+        { attempt: event.attempt, purpose: event.purpose }).id);
+    } else if (event.type === "llm_end") {
+      const id = this.attemptSpans.get(event.attempt);
+      if (id) this.traceManager.endSpan(id, event.failed ? "error" : "ok");
+      this.attemptSpans.delete(event.attempt);
+    } else {
+      const span = this.traceManager.startSpan(this.trace.id, "tool.cache_hit", undefined, { toolName: event.toolName });
+      this.traceManager.endSpan(span.id);
+    }
+  }
+
+  /** Compatibility entrypoint for callers without attempt observations. */
   startLlmSpan(): void {
     if (!this.llmSpanId) {
       this.llmSpanId = this.traceManager.startSpan(this.trace.id, "llm.chat").id;
@@ -73,15 +89,14 @@ export class TraceRecorder {
    * errorMessage: the ACTUAL error message from the `error` AgentEvent
    * (or undefined when no error occurred).
    *
-   * NOTE: matches the original behavior where totalCost is set on the
-   * in-memory trace metadata by the caller AFTER persistence, so the persisted
-   * trace row's metadata intentionally does NOT include totalCost.
    */
   async finish(params: {
     totalTokens: number;
     cachedPromptTokens?: number;
     errorMessage?: string;
   }): Promise<void> {
+    for (const id of this.attemptSpans.values()) this.traceManager.endSpan(id, "error");
+    this.attemptSpans.clear();
     // Close any still-open spans
     if (this.llmSpanId) this.traceManager.endSpan(this.llmSpanId);
     for (const id of this.toolSpanIds.values()) this.traceManager.endSpan(id, "error");

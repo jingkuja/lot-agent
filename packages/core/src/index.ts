@@ -1,4 +1,5 @@
 export * from "./types/index.js";
+export * from "./runtime/run-state.js";
 export * from "./llm/index.js";
 export * from "./tools/index.js";
 export * from "./agent/index.js";
@@ -18,6 +19,6 @@ export * from "./billing/index.js";
 export * from "./publish/index.js";
 export * from "./knowledge/index.js";
 
-export { createDeadline, withAbort } from "./runtime/abort.js";
+export { createDeadline, withAbort, isTimeoutReason } from "./runtime/abort.js";
 
 export type { VirtualPaymentOrder, VirtualPaymentRepository } from "./billing/virtual-payment.js";

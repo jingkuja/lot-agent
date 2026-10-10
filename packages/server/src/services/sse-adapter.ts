@@ -28,6 +28,7 @@ export function agentEventToSse(event: AgentEvent): Record<string, unknown> {
         type: "done",
         ...(event.status ? { status: event.status } : {}),
         iterations: event.iterations,
+        ...(event.llmAttempts !== undefined ? { llmAttempts: event.llmAttempts } : {}),
         totalTokens: event.totalTokens,
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,

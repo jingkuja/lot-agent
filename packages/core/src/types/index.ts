@@ -2,7 +2,7 @@
 export interface ContentPart {
   type: "text" | "image" | "video" | "audio" | "file";
   text?: string;
-  image?: { url: string; mediaType: string };
+  image?: { url: string; mediaType: string; width?: number; height?: number };
   /** video / audio / file payload (image keeps its own `image` field). */
   media?: { url: string; mediaType: string; durationSec?: number };
 }
@@ -76,10 +76,15 @@ export interface ChatOptions {
   /** Aborts the in-flight request (run timeout or client disconnect). */
   signal?: AbortSignal;
   params?: ChatParams;
+  purpose?: "reasoning" | "compression";
+  onAttempt?: () => void;
+  onAttemptEnd?: (error?: unknown) => void;
 }
 
 /** Unified LLM provider interface */
 export interface LLMProvider {
+  /** Provider reports every transport attempt through ChatOptions callbacks. */
+  reportsAttempts?: boolean;
   chat(
     messages: Message[],
     tools?: LLMTool[],
@@ -127,6 +132,9 @@ export interface ToolExecConfig {
 
 /** Context passed to tool execution */
 export interface ToolContext {
+  /** Stable execution identity supplied by the runtime, never by model arguments. */
+  runId?: string;
+  operationId?: string;
   workingDirectory: string;
   memory?: import("../memory/store.js").AgentMemoryStore;
   /** Owner of the current request — used by tools that persist user-scoped artifacts (e.g. generated documents). */
@@ -149,6 +157,8 @@ export interface Tool {
   name: string;
   description: string;
   parameters: JSONSchema;
+  /** Side effects are independent of whether retries are allowed. Unknown tools default to write. */
+  effect?: "read" | "write" | "interaction";
   /** Per-tool execution config overrides */
   execConfig?: Partial<ToolExecConfig>;
   /** Explicit opt-in: safe to retry after an ambiguous failure (normally reads only). */

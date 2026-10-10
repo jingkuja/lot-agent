@@ -1,3 +1,5 @@
+import { RunRepository } from "./run-repository.js";
+import type { RunStatus } from "@lot-agent/core";
 import { RESPONSE_LANGUAGE_POLICY } from "./response-language-policy.js";
 import { parsePptApproval, PPT_APPROVAL_PREFIX } from "@lot-agent/core/presentation";
 import { exportConfirmedPpt } from "./ppt-confirmation.js";
@@ -13,6 +15,7 @@ import {
   Agent,
   LLMIncompleteError,
   createDeadline,
+  isTimeoutReason,
   withAbort,
   ToolRegistry,
   registerBuiltinTools,
@@ -44,7 +47,7 @@ import {
   estimateCost,
 } from "@lot-agent/core";
 import { dirname, resolve } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createDocTool } from "../tools/doc-tool.js";
 import { createPptTool } from "../tools/ppt-tool.js";
 import { proposeOutlineTool } from "../tools/propose-outline-tool.js";
@@ -169,7 +172,7 @@ export function readPersistedSummary(
   metadata: unknown
 ): import("@lot-agent/core").SummaryState | undefined {
   const s = (metadata as { contextSummary?: unknown } | null | undefined)
-    ?.contextSummary as { count?: unknown; text?: unknown } | null | undefined;
+    ?.contextSummary as { count?: unknown; text?: unknown; prefixHash?: unknown } | null | undefined;
   if (
     s &&
     typeof s.count === "number" &&
@@ -177,7 +180,7 @@ export function readPersistedSummary(
     typeof s.text === "string" &&
     s.text.length > 0
   ) {
-    return { count: s.count, text: s.text };
+    return { count: s.count, text: s.text, ...(typeof s.prefixHash === "string" ? { prefixHash: s.prefixHash } : {}) };
   }
   return undefined;
 }
@@ -309,6 +312,7 @@ async function getStrictRuntimeApiKey(
 
 export class AgentService {
   readonly db: DB;
+  readonly runRepository: RunRepository;
   readonly traceManager: TraceManager;
   readonly toolRegistry: ToolRegistry;
   readonly skillLoader: SkillLoader;
@@ -364,6 +368,7 @@ export class AgentService {
 
   constructor(config: ServiceConfig) {
     this.db = new DB(config.db);
+    this.runRepository = new RunRepository(this.db.pool);
     this.knowledge = createKnowledgeModule(config.knowledge, config.knowledgeService ?? (config.knowledge?.source === "local" ? createLocalKnowledgeService(this.db) : undefined));
     this.traceManager = new TraceManager();
     this.traceManager.addSink(new ConsoleSink());
@@ -529,6 +534,7 @@ export class AgentService {
     }, {
       contentGenerator: {
         recommend: async (input) => {
+          input.signal?.throwIfAborted();
           const { llm, usedModelId } = await this.resolveUtilityLLM({
             userId: input.userId,
             digitalEmployee: true,
@@ -548,10 +554,11 @@ export class AgentService {
                 "\"reasoning\":[\"...\"],\"creativeDirection\":\"...\",\"durationSeconds\":15}]}.",
             },
             { role: "user", content: JSON.stringify(input).slice(0, 30_000) },
-          ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.3, maxTokens: 2_400 } });
+          ], { signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000), params: { temperature: 0.3, maxTokens: 2_400 } });
           return { recommendations: parseAcquisitionRecommendations(raw), modelId: usedModelId };
         },
         createCopy: async (input) => {
+          input.signal?.throwIfAborted();
           const { llm, usedModelId } = await this.resolveUtilityLLM({
             userId: input.userId,
             modelId: input.modelId,
@@ -576,6 +583,7 @@ export class AgentService {
               })
               .join("\n\n")
             : "";
+          input.signal?.throwIfAborted();
           const raw = await complete(metered, [
             {
               role: "system",
@@ -599,11 +607,12 @@ export class AgentService {
                 attachments: attachmentNotes || undefined,
               }).slice(0, 30_000),
             },
-          ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.55, maxTokens: 1_600 } });
+          ], { signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000), params: { temperature: 0.55, maxTokens: 1_600 } });
           const parsed = parseAcquisitionCopy(raw);
           return { ...parsed, modelId: usedModelId };
         },
         evaluateFit: async (input) => {
+          input.signal?.throwIfAborted();
           const { llm, usedModelId } = await this.resolveUtilityLLM({
             userId: input.userId,
             digitalEmployee: true,
@@ -622,7 +631,7 @@ export class AgentService {
                 "\"corePoints\":[\"...\"],\"suggestedChannels\":[\"...\"],\"risks\":[\"...\"],\"priority\":\"low|normal|high\"}.",
             },
             { role: "user", content: JSON.stringify(input).slice(0, 30_000) },
-          ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.3, maxTokens: 1_200 } });
+          ], { signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000), params: { temperature: 0.3, maxTokens: 1_200 } });
           return { ...parseAcquisitionFit(raw), modelId: usedModelId };
         },
       },
@@ -1134,7 +1143,7 @@ export class AgentService {
     userId?: string,
     attachments?: AttachmentRef[],
     signal?: AbortSignal,
-    opts?: { modelId?: string; knowledgeBases?: KnowledgeBaseRef[] }
+    opts?: { modelId?: string; knowledgeBases?: KnowledgeBaseRef[]; runId?: string }
   ): AsyncIterable<AgentEvent> {
     const deadline = createDeadline(this.agentConfig.maxRunTimeMs ?? 1_800_000, signal);
     signal = deadline.signal;
@@ -1142,6 +1151,11 @@ export class AgentService {
     let recordedTokens = 0;
     let recordedCachedTokens = 0;
     let totalCost = 0;
+    const runId = opts?.runId ?? randomUUID();
+    let runStarted = false;
+    let ownsLease = false;
+    let runStatus: RunStatus | undefined;
+    let runState: Record<string, unknown> = {};
     try {
       signal.throwIfAborted();
       const def =
@@ -1164,16 +1178,25 @@ export class AgentService {
         return;
       }
 
+      if (this.runRepository && !opts?.runId) {
+        ownsLease = await this.db.claimConversationRun(conversationId, runId, this.agentConfig.maxRunTimeMs ?? 1_800_000);
+        if (!ownsLease) throw new Error("Conversation already has an active run");
+      }
+      const messageRepo = this.runRepository ? this.messageRepo.forRun(runId) : this.messageRepo;
       // ── Persist user message, load history (orphan tool messages filtered) ──
-      const userMsgId = await withAbort(this.messageRepo.saveUserMessage(
+      const userMsgId = await withAbort(messageRepo.saveUserMessage(
         conversationId,
         userMessage,
         attachments,
         opts?.knowledgeBases
       ), signal);
+      if (this.runRepository) {
+        await this.runRepository.begin(runId, conversationId, userId ?? "default", userMsgId, userMessage);
+        runStarted = true;
+      }
       const materialize = (atts: AttachmentRef[]) =>
         withAbort(Promise.all(atts.map((a) => extractAttachment(a, this.uploadStorage))), signal);
-      const history = await withAbort(this.messageRepo.loadHistory(
+      const history = await withAbort(messageRepo.loadHistory(
         conversationId,
         userMsgId,
         materialize
@@ -1206,6 +1229,8 @@ export class AgentService {
           "Ask the user to restart from the appropriate workspace. Do not claim to have searched, updated or generated business objects. "
         );
       }
+      const recovery = await this.runRepository?.recoveryContext(conversationId, userId ?? "default");
+      if (recovery) dynamicParts.push(recovery);
       let modelId: string;
       let llm: LLMProvider;
       if (def.id === "digital_employee") {
@@ -1257,6 +1282,10 @@ export class AgentService {
       const persistedSummary = readPersistedSummary(conversation?.metadata);
       const agent = new Agent({
         ...this.agentConfig,
+        tokenPrices: (() => {
+          const price = this.modelRegistry.getConfig(modelId) ?? (this.modelCatalog ? resolvePricing(this.modelCatalog, modelId, "llm") : undefined);
+          return price ? { input: price.inputPrice, output: price.outputPrice } : undefined;
+        })(),
         systemPrompt: `${def.systemPrompt}\n\n${RESPONSE_LANGUAGE_POLICY}`,
         allowedToolNames: def.id === "digital_employee"
           ? digitalEmployeeAllowedToolNames(featureScope, def.toolNames)
@@ -1290,9 +1319,11 @@ export class AgentService {
 
       const context: AgentContext = {
         llm,
+        journal: this.runRepository?.journal(runId, conversationId, userId ?? "default"),
         toolRegistry: this.toolRegistry,
         toolContext: {
           workingDirectory: process.cwd(),
+          runId,
           memory,
           userId: userId ?? "default",
           conversationId,
@@ -1341,7 +1372,6 @@ export class AgentService {
       let totalTokens = 0;
       let cachedPromptTokens = 0;
       let lastErrorMessage: string | undefined;
-      let runStatus: string | undefined;
 
       // Build this turn's user input — text plus materialized attachment parts
       // (images as data-url ContentParts, documents as injected text).
@@ -1360,6 +1390,7 @@ export class AgentService {
         def.id === "digital_employee" ? "tokenhub-user" : this.llmConfig.default
       );
       recorder.start(conversationId, modelId);
+      context.observe = event => recorder.observe?.(event);
 
       try {
         for await (const event of agent.run(runInput, context, history, { signal })) {
@@ -1368,13 +1399,11 @@ export class AgentService {
           }
 
           if (event.type === "text") {
-            recorder.startLlmSpan();
             assistantContent += event.content;
             producedAssistantText += event.content;
           }
 
           if (event.type === "tool_call") {
-            recorder.endLlmSpan();
             recorder.startToolSpan(event.name, event.id);
             currentToolCalls.push({
               id: event.id,
@@ -1390,7 +1419,7 @@ export class AgentService {
             // of the batch's tool calls; later results of the same batch find the
             // buffer already empty and only need their own row.
             if (currentToolCalls.length > 0) {
-              await this.messageRepo.saveAssistantWithToolCalls(
+              await messageRepo.saveAssistantWithToolCalls(
                 conversationId,
                 assistantContent || "",
                 currentToolCalls,
@@ -1402,11 +1431,12 @@ export class AgentService {
             }
             // Persist every result under its own call id — pairing by name is
             // ambiguous for same-name parallel calls and used to drop rows.
-            await this.messageRepo.saveToolResult(
+            await messageRepo.saveToolResult(
               conversationId,
               event.toolCallId,
               event.output,
-              event.isError
+              event.isError,
+              event.errorKind
             );
           }
 
@@ -1414,6 +1444,7 @@ export class AgentService {
             runStatus = event.status;
             totalTokens = event.totalTokens;
             cachedPromptTokens = event.cachedPromptTokens;
+            runState = { iterations: event.iterations, llmAttempts: event.llmAttempts, totalTokens: event.totalTokens };
           }
 
           if (event.type === "error") {
@@ -1436,15 +1467,16 @@ export class AgentService {
         const finalContent = buildFinalAssistantContent(
           assistantContent || "",
           lastErrorMessage,
-          signal?.aborted ?? false
+          (signal?.aborted ?? false) && !isTimeoutReason(signal?.reason)
         );
         try {
-          await this.messageRepo.saveFinalAssistant(
+          await messageRepo.saveFinalAssistant(
             conversationId,
             finalContent,
             currentToolCalls,
             currentThinking || undefined,
-            knowledgeSources.length ? knowledgeSources : undefined
+            knowledgeSources.length ? knowledgeSources : undefined,
+            { runId, status: runStatus ?? (isTimeoutReason(signal.reason) ? "timed_out" : signal.aborted ? "cancelled" : lastErrorMessage ? "failed" : "completed") }
           );
         } catch (error) {
           saveError = error;
@@ -1458,7 +1490,7 @@ export class AgentService {
         // and create a junk task row. Pass this turn's resolved modelId so the
         // worker can extract with the same model + user tokenhub key that
         // generated the turn, instead of a fixed env-configured model.
-        if (def.id !== "digital_employee" && producedAssistantText.trim() && !lastErrorMessage && !signal.aborted) {
+        if (def.id !== "digital_employee" && runStatus === "completed" && producedAssistantText.trim() && !lastErrorMessage && !signal.aborted) {
           this.jobQueue
             .enqueue("memory.extract", { conversationId, modelId }, userId ?? "default")
             .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
@@ -1483,7 +1515,7 @@ export class AgentService {
         // Independent finalizers: failure to save messages/traces cannot skip known usage.
         await Promise.allSettled(usageWrites);
         recorder.traceObject.metadata.totalCost = totalCost;
-        recorder.traceObject.metadata.runStatus = runStatus ?? (signal.aborted ? "cancelled" : lastErrorMessage ? "failed" : "completed");
+        recorder.traceObject.metadata.runStatus = runStatus ?? (isTimeoutReason(signal.reason) ? "timed_out" : signal.aborted ? "cancelled" : lastErrorMessage ? "failed" : "completed");
         try {
           await recorder.finish({
             totalTokens: recordedTokens || totalTokens,
@@ -1493,14 +1525,23 @@ export class AgentService {
         } catch (error) {
           console.warn("[TraceRecorder] Failed to persist trace:", error);
         }
-        if (saveError) throw saveError;
+        if (saveError) { runStatus = "failed"; throw saveError; }
 
       }
       // Title generation is driven by the route after the stream completes, so it
       // can emit the result as a `title` SSE event (live sidebar update).
+    } catch (error) {
+      runStatus = isTimeoutReason(signal.reason) ? "timed_out" : signal.aborted ? "cancelled" : "failed";
+      throw error;
     } finally {
+      const status = runStatus ?? (isTimeoutReason(signal.reason) ? "timed_out" : signal.aborted ? "cancelled" : "failed");
       deadline.dispose();
       await Promise.allSettled(usageWrites);
+      try {
+        if (runStarted) await this.runRepository.finish(runId, status, { ...runState, totalTokens: recordedTokens, totalCost });
+      } finally {
+        if (ownsLease) await this.db.releaseConversationRun(conversationId, runId);
+      }
     }
   }
 

@@ -23,6 +23,7 @@ function fakeService(
   const claimConversationRun = vi.fn(async () => opts.claimResult ?? true);
   const releaseConversationRun = vi.fn(async () => {});
   return {
+    runRepository: { list: vi.fn(async () => []), resolve: vi.fn(async () => true) },
     db: {
       getConversation: vi.fn(async () =>
         owner == null ? null : { id: "c1", user_id: owner, agent_id: "general" }
@@ -143,6 +144,7 @@ describe("POST /conversations/:id/messages — run lease", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('"type":"error"');
+    expect(body).toContain('"type":"stream_end"');
     expect(body).toContain("boom");
 
     expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(1);
@@ -184,5 +186,39 @@ describe("POST /conversations/:id/regenerate — run lease", () => {
     const res = await regenerate(app(service));
     expect(res.status).toBe(404);
     expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(1);
+  });
+});
+
+const operationId = "11111111-1111-4111-8111-111111111111";
+const verifyOperation = (a: ReturnType<typeof app>, id = operationId, outcome = "succeeded") =>
+  a.request(`/conversations/c1/operations/${id}/verify`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outcome }),
+  });
+
+describe("execution recovery ownership", () => {
+  it("does not expose or resolve another user's execution records", async () => {
+    const service = fakeService({ conversationOwner: "other" });
+    const instance = app(service);
+    expect((await instance.request("/conversations/c1/runs")).status).toBe(404);
+    expect((await verifyOperation(instance)).status).toBe(404);
+    expect(service.runRepository.list).not.toHaveBeenCalled();
+    expect(service.runRepository.resolve).not.toHaveBeenCalled();
+  });
+
+  it("validates verification input and uses the authenticated owner", async () => {
+    const service = fakeService();
+    const instance = app(service);
+    expect((await verifyOperation(instance, "invalid")).status).toBe(400);
+    expect((await verifyOperation(instance, operationId, "running")).status).toBe(400);
+    expect(service.runRepository.resolve).not.toHaveBeenCalled();
+    expect((await verifyOperation(instance)).status).toBe(200);
+    expect(service.runRepository.resolve).toHaveBeenCalledWith("c1", "u1", operationId, "succeeded");
+    expect(service.streamAgentResponse).not.toHaveBeenCalled();
+  });
+
+  it("reports conflicts when the operation cannot be safely verified", async () => {
+    const service = fakeService();
+    service.runRepository.resolve.mockResolvedValue(false);
+    expect((await verifyOperation(app(service))).status).toBe(409);
   });
 });

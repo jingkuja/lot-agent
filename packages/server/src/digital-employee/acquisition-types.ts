@@ -59,6 +59,7 @@ export interface CampaignAssetAttachment {
 
 export interface CampaignContentGenerator {
   recommend(input: {
+    signal?: AbortSignal;
     userId: string;
     cohort: Record<string, unknown>;
     segments: Array<Record<string, unknown>>;
@@ -66,6 +67,7 @@ export interface CampaignContentGenerator {
     brand: Record<string, unknown> | null;
   }): Promise<{ recommendations: CampaignRecommendationDraft[]; modelId: string }>;
   createCopy(input: {
+    signal?: AbortSignal;
     userId: string;
     prompt: string;
     brief: Record<string, unknown>;
@@ -74,6 +76,7 @@ export interface CampaignContentGenerator {
     attachments?: CampaignAssetAttachment[];
   }): Promise<{ title: string; content: string; modelId: string }>;
   evaluateFit?(input: {
+    signal?: AbortSignal;
     userId: string;
     audience: Record<string, unknown>;
     product: Record<string, unknown>;

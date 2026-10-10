@@ -1,3 +1,4 @@
+import { toolError as failureResult } from "./agent-tool-helpers.js";
 import type { Tool, ToolContext, ToolResult } from "@lot-agent/core";
 import type { DigitalEmployeeService } from "../service.js";
 import type { Health, ProfileChangeInput, RelationshipStage } from "../types.js";
@@ -10,6 +11,7 @@ const HEALTH_ENUM = ["healthy", "watch", "at_risk"];
 export function createCustomerProfileTools(service: DigitalEmployeeService): Tool[] {
   const search: Tool = {
     name: "search_customer_profiles",
+    effect: "read",
     description:
       "Search or count the current account's customer profiles by name/alias, relationship, health or tags. total is the database match count; items is only the current page. Use total for counts. No contact details are returned.",
     parameters: {
@@ -60,6 +62,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
 
   const get: Tool = {
     name: "get_customer_profiles",
+    effect: "read",
     description:
       "Read 1–6 profiles confirmed by search_customer_profiles, including per-product state and up to five recent observations. Multiple IDs are allowed only after explicit selection of all matching profiles for a read request. Never use for bulk updates. No contact details are returned.",
     parameters: {
@@ -238,9 +241,5 @@ function optionalInteger(value: unknown, min: number, max: number): number | und
 }
 
 function toolError(prefix: string, error: unknown): ToolResult {
-  return {
-    content: `${prefix}：${error instanceof Error ? error.message : "服务暂时不可用"}`,
-    isError: true,
-    errorKind: error instanceof InputError ? "validation" : "unknown",
-  };
+  return failureResult(prefix, error);
 }

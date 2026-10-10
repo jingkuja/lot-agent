@@ -155,7 +155,8 @@ export class CustomerAcquisitionService {
     return { items: rows.map(toRecommendation), generatedAt: latest.rows[0]?.generated_at ? iso(latest.rows[0].generated_at) : null };
   }
 
-  async refreshRecommendations(userId: string) {
+  async refreshRecommendations(userId: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const [insights, productsResult, brandResult] = await Promise.all([
       this.getCohortInsights(userId),
       this.db.pool.query(
@@ -174,6 +175,7 @@ export class CustomerAcquisitionService {
     if (this.contentGenerator) {
       try {
         const generated = await this.contentGenerator.recommend({
+          signal,
           userId,
           cohort: insights.overall ? { summary: insights.overall.summary, metrics: insights.overall.metrics } : {},
           segments: safeSegments,
@@ -181,7 +183,8 @@ export class CustomerAcquisitionService {
           brand: brandResult.rows[0] ?? null,
         });
         drafts = generated.recommendations;
-      } catch {
+      } catch (error) {
+        if (signal?.aborted) throw error;
         drafts = fallbackRecommendations(safeSegments, safeProducts);
       }
     } else {
@@ -191,6 +194,7 @@ export class CustomerAcquisitionService {
     if (!drafts.length) drafts = fallbackRecommendations(safeSegments, safeProducts);
     const recommendationDate = shanghaiDate(new Date());
     for (const draft of drafts) {
+      signal?.throwIfAborted();
       const segmentId = safeSegments.some((item) => item.id === draft.segmentId) ? draft.segmentId : null;
       const productId = safeProducts.some((item) => item.id === draft.productId) ? draft.productId : safeProducts[0]?.id ?? null;
       await this.db.pool.query(
@@ -243,7 +247,8 @@ export class CustomerAcquisitionService {
     return this.modelResolver?.get(userId) ?? emptyModelAvailability();
   }
 
-  async createAsset(userId: string, input: CreateCampaignAssetInput) {
+  async createAsset(userId: string, input: CreateCampaignAssetInput, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const existing = input.campaignId ? await this.loadCampaignRow(userId, input.campaignId) : null;
     const productId = input.productId || existing?.product_id;
     if (!productId) throw new InputError("请选择产品资料");
@@ -310,6 +315,7 @@ export class CustomerAcquisitionService {
       ? await this.loadSnapshot(userId, existing.segment_snapshot_id)
       : await this.resolveSnapshot(userId, resolvedInput);
     const brand = (await this.db.pool.query(`SELECT * FROM marketing_brand_assets WHERE user_id=$1`, [userId])).rows[0] ?? null;
+    signal?.throwIfAborted();
     const campaignId = existing
       ? existing.id
       : await this.createCampaign(userId, resolvedInput, snapshot.id, product.id);
@@ -327,6 +333,7 @@ export class CustomerAcquisitionService {
       if (this.contentGenerator) {
         try {
           generated = await this.contentGenerator.createCopy({
+            signal,
             userId,
             prompt: resolvedInput.prompt,
             brief,
@@ -334,10 +341,12 @@ export class CustomerAcquisitionService {
             knowledgeBaseIds: resolvedInput.knowledgeBaseIds,
             attachments: resolvedInput.attachments,
           });
-        } catch {
+        } catch (error) {
+          if (signal?.aborted) throw error;
           // A usable, fact-bound draft is preferable to losing the whole brief.
         }
       }
+      signal?.throwIfAborted();
       const assetId = randomUUID();
       await this.db.pool.query(
         `INSERT INTO de_marketing_asset_library
@@ -356,6 +365,7 @@ export class CustomerAcquisitionService {
       return this.getAsset(userId, assetId);
     }
 
+    signal?.throwIfAborted();
     const modelId = mediaModelId!;
     const mediaPrompt = campaignMediaPrompt(resolvedInput, snapshot, product, brand, isPoster ? "poster" : "video");
     const assetId = randomUUID();
@@ -538,7 +548,8 @@ export class CustomerAcquisitionService {
     };
   }
 
-  async evaluateSegmentProductFit(userId: string, input: { segmentId?: string; segmentSnapshotId?: string; productId: string }) {
+  async evaluateSegmentProductFit(userId: string, input: { segmentId?: string; segmentSnapshotId?: string; productId: string }, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const snapshot = await this.resolveSnapshot(userId, {
       segmentId: input.segmentId, segmentSnapshotId: input.segmentSnapshotId,
     });
@@ -558,13 +569,16 @@ export class CustomerAcquisitionService {
     if (this.contentGenerator?.evaluateFit) {
       try {
         fit = await this.contentGenerator.evaluateFit({
+          signal,
           userId, audience: safeAudience, product: safeProduct,
           brand: brand ? { tone: brand.tone ?? [], version: Number(brand.version) } : null,
         });
-      } catch {
+      } catch (error) {
+        if (signal?.aborted) throw error;
         // Keep the deterministic fallback when the model is unavailable.
       }
     }
+    signal?.throwIfAborted();
     const id = randomUUID();
     await this.db.pool.query(
       `INSERT INTO de_campaign_opportunities
@@ -797,7 +811,8 @@ export class CustomerAcquisitionService {
     return { opportunityId, status: "dismissed" as const };
   }
 
-  async rewriteAsset(userId: string, assetId: string, instruction: string) {
+  async rewriteAsset(userId: string, assetId: string, instruction: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const asset = await this.getAsset(userId, assetId);
     if (!asset.campaignId) throw new InputError("该资产没有关联营销活动，请先创建活动");
     const campaign = (await this.db.pool.query(
@@ -818,7 +833,7 @@ export class CustomerAcquisitionService {
       channels: campaign.channels ?? [],
       callToAction: campaign.call_to_action ?? "",
       title: asset.title,
-    });
+    }, signal);
   }
 
   async recordCampaignUsage(userId: string, assetId: string, input: DeploymentInput) {

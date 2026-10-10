@@ -76,6 +76,7 @@ describe("conversation knowledge-base persistence", () => {
 
     expect(service.resolveKnowledgeBases).toHaveBeenCalledWith("u1", ["kb1"], "remote");
     expect(service.streamAgentResponse.mock.calls[0][6]).toEqual({
+      runId: expect.any(String),
       modelId: undefined,
       knowledgeBases: [{ id: "kb1", name: "知识库 kb1", sourceTypes: ["document", "note"] }],
     });
@@ -115,6 +116,7 @@ describe("conversation knowledge-base persistence", () => {
       knowledgeBases: [],
     });
     expect(service.streamAgentResponse.mock.calls[0][6]).toEqual({
+      runId: expect.any(String),
       modelId: undefined,
       knowledgeBases: [],
     });

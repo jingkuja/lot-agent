@@ -201,6 +201,23 @@ export function createConversationRoutes(service: AgentService): Hono {
     return c.json({ ok: true });
   });
 
+  app.get("/:id/runs", async (c) => {
+    const conversation = await service.db.getConversation(c.req.param("id"));
+    if (!conversation || conversation.user_id !== c.get("userId")) return c.json({ error: "Not found" }, 404);
+    return c.json({ runs: await service.runRepository.list(conversation.id, c.get("userId")) });
+  });
+
+  app.post("/:id/operations/:operationId/verify", async (c) => {
+    const conversation = await service.db.getConversation(c.req.param("id"));
+    if (!conversation || conversation.user_id !== c.get("userId")) return c.json({ error: "Not found" }, 404);
+    const operationId = c.req.param("operationId");
+    const body = await c.req.json().catch(() => null);
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(operationId) ||
+      !body || !["succeeded", "failed"].includes(body.outcome)) return c.json({ error: "Invalid verification" }, 400);
+    const verified = await service.runRepository.resolve(conversation.id, c.get("userId"), operationId, body.outcome);
+    return verified ? c.json({ ok: true }) : c.json({ error: "Operation is not awaiting verification or the conversation is still running" }, 409);
+  });
+
   // Get conversation with messages — ownership check
   app.get("/:id", async (c) => {
     const userId = c.get("userId");
@@ -430,8 +447,21 @@ export function createConversationRoutes(service: AgentService): Hono {
         // spurious 409. Title generation is only best-effort tail work and does
         // not need to hold the message-writing lease.
         let leaseReleased = false;
+        const execution = new AbortController();
+        const signal = AbortSignal.any([c.req.raw.signal, execution.signal]);
+        let renewing = false;
+        const heartbeat = setInterval(async () => {
+          if (renewing || leaseReleased || !service.db.renewConversationRun) return;
+          renewing = true;
+          try {
+            if (!await service.db.renewConversationRun(id, runId)) execution.abort(new Error("Execution lease lost"));
+          } catch { execution.abort(new Error("Execution lease renewal failed")); }
+          finally { renewing = false; }
+        }, 20_000);
+        heartbeat.unref();
         const releaseLease = async () => {
           if (leaseReleased) return;
+          clearInterval(heartbeat);
           await service.db.releaseConversationRun(id, runId);
           leaseReleased = true;
         };
@@ -439,17 +469,16 @@ export function createConversationRoutes(service: AgentService): Hono {
         // Open the stream immediately with an SSE comment so the client (and
         // any reverse proxy) flushes the connection before the first token,
         // rather than holding everything until the response completes.
-        controller.enqueue(encoder.encode(": open\n\n"));
-
         try {
+          controller.enqueue(encoder.encode(": open\n\n"));
           for await (const event of service.streamAgentResponse(
             id,
             body.content ?? "",
             conversation.agent_id,
             userId,
             attachments,
-            c.req.raw.signal,
-            { modelId: body.modelId, knowledgeBases }
+            signal,
+            { modelId: body.modelId, knowledgeBases, runId }
           )) {
             send(agentEventToSse(event));
           }
@@ -478,10 +507,12 @@ export function createConversationRoutes(service: AgentService): Hono {
             // title generation is best-effort
           }
         } catch (error) {
+          await releaseLease();
           send({
             type: "error",
             message: error instanceof Error ? error.message : String(error),
           });
+          send({ type: "stream_end" });
         } finally {
           // Covers exits before the normal pre-stream_end release: an agent
           // error, a failed release attempt, or a client disconnect (the
@@ -492,6 +523,7 @@ export function createConversationRoutes(service: AgentService): Hono {
           } catch (err) {
             console.warn("[run-lease] release failed:", err);
           }
+          clearInterval(heartbeat);
           controller.close();
         }
       },

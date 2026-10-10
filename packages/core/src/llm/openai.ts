@@ -18,7 +18,7 @@ import type {
   LLMProvider,
 } from "../types/index.js";
 import { mediaPartPlaceholder } from "../types/index.js";
-import { withLLMRetry, isMalformedToolCallError } from "./retry.js";
+import { withLLMRetry } from "./retry.js";
 import { logger } from "../logger/log.js";
 
 const log = logger.child({ mod: "llm.openai" });
@@ -30,6 +30,7 @@ export interface OpenAIProviderConfig {
 }
 
 export class OpenAIProvider implements LLMProvider {
+  readonly reportsAttempts = true;
   private client: OpenAI;
   private model: string;
 
@@ -97,7 +98,7 @@ export class OpenAIProvider implements LLMProvider {
         })()
       );
 
-    yield* withLLMRetry(createStream, { isRetryable: isOpenAIRetryable, signal: opts?.signal });
+    yield* withLLMRetry(createStream, { isRetryable: isOpenAIRetryable, signal: opts?.signal, onAttempt: opts?.onAttempt, onAttemptEnd: opts?.onAttemptEnd });
   }
 }
 
@@ -107,10 +108,7 @@ function isOpenAIRetryable(err: unknown): boolean {
     err instanceof RateLimitError ||
     err instanceof InternalServerError ||
     err instanceof APIConnectionError ||
-    err instanceof APIConnectionTimeoutError ||
-    // A 400-class rejection of truncated/garbled tool-call JSON — transient,
-    // so let the model regenerate instead of killing the turn.
-    isMalformedToolCallError(err)
+    err instanceof APIConnectionTimeoutError
   );
 }
 

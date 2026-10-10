@@ -63,6 +63,10 @@ export const AppConfigSchema = z.object({
   models: z.array(ModelConfigSchema).optional().default([]),
   agent: z.object({
     maxIterations: z.number().int().positive(),
+    maxLlmAttempts: z.number().int().positive().optional(),
+    maxTotalTokens: z.number().int().positive().optional(),
+    maxNoProgressRounds: z.number().int().positive().optional(),
+    maxCost: z.number().positive().optional(),
     maxRunTimeMs: z.number().int().positive().optional(),
     maxToolCalls: z.number().int().positive().optional(),
     maxParallelTools: z.number().int().positive().optional(),

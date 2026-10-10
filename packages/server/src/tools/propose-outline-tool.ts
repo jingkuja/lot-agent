@@ -3,6 +3,7 @@ import { PPT_DECK_SCHEMA, validateDeck, inspectDeck, type PptDeck } from "@lot-a
 
 export const proposeOutlineTool: Tool = {
   name: "propose_outline",
+  effect: "interaction",
   description: "Show an editable slide-by-slide plan and the agreed brief, theme and uploaded template/background settings for approval. Include finished slide content, since the confirmation button exports exactly this deck without an LLM rewrite. This ends the turn; do not generate until approval.",
   parameters: PPT_DECK_SCHEMA,
   endsTurn: true,

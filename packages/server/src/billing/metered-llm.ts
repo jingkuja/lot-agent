@@ -11,6 +11,7 @@ export type LLMUsage = NonNullable<ChatChunk["usage"]>;
  */
 export function meterLLM(llm: LLMProvider, onUsage: (usage: LLMUsage) => void): LLMProvider {
   return {
+    reportsAttempts: llm.reportsAttempts,
     async *chat(
       messages: Message[],
       tools?: LLMTool[],

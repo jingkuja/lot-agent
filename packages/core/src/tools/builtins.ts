@@ -108,6 +108,7 @@ async function checkContainment(
 
 export const readFileTool: Tool = {
   name: "read_file",
+  effect: "read",
   description:
     "Read the contents of a file. Returns the file content as text.",
   parameters: {
@@ -175,6 +176,7 @@ export const writeFileTool: Tool = {
 
 export const listFilesTool: Tool = {
   name: "list_files",
+  effect: "read",
   description:
     "List files and directories in a given path. Returns names with trailing / for directories.",
   parameters: {
@@ -266,6 +268,7 @@ export const executeCommandTool: Tool = {
 
 export const searchFilesTool: Tool = {
   name: "search_files",
+  effect: "read",
   description:
     "Search for a text pattern in files within a directory. Returns matching lines with file paths.",
   parameters: {
@@ -375,6 +378,8 @@ function networkFailure(error: unknown, prefix: string, signal?: AbortSignal): T
 
 export const webFetchTool: Tool = {
   name: "web_fetch",
+  effect: "read",
+  parallelSafe: true,
   description:
     "Fetch a URL and return its text content. Useful for reading web pages, APIs, or documents.",
   // Pure external read — the same URL within a run yields the same content, so
@@ -450,6 +455,8 @@ export const webFetchTool: Tool = {
 
 export const webSearchTool: Tool = {
   name: "web_search",
+  effect: "read",
+  parallelSafe: true,
   description:
     "Search the web using Zhipu BigModel web search. Returns titles, URLs, content and publication dates. Use content directly; use web_fetch only when content is empty and a link is available.",
   cacheable: false,

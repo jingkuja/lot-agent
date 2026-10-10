@@ -49,7 +49,7 @@ it("retries only explicitly retry-safe reads and cancels backoff promptly", asyn
   const registry = new ToolRegistry();
   const controller = new AbortController();
   const execute = vi.fn(async () => ({ content: "network", isError: true, errorKind: "network" as const }));
-  registry.register({ name: "read", description: "", parameters: {}, retrySafe: true, execute });
+  registry.register({ name: "read", effect: "read", description: "", parameters: {}, retrySafe: true, execute });
   const pending = registry.execute("read", {}, ctx, { signal: controller.signal });
   await vi.advanceTimersByTimeAsync(1);
   controller.abort();

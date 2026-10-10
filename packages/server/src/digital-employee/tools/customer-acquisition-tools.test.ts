@@ -64,7 +64,8 @@ describe("customer acquisition agent tools", () => {
     expect(rewriteAsset).toHaveBeenCalledWith(
       "u1",
       "00000000-0000-4000-8000-000000000012",
-      "更克制，不能出现未确认的性能数字"
+      "更克制，不能出现未确认的性能数字",
+      undefined
     );
     expect(JSON.parse(result.content).asset.id).toBe("a2");
   });
@@ -79,7 +80,7 @@ describe("customer acquisition agent tools", () => {
       channels: ["朋友圈"],
       callToAction: "预约报名",
     }, context);
-    expect(service.createAsset).toHaveBeenCalledWith("u1", expect.objectContaining({ assetType: "copy" }));
+    expect(service.createAsset).toHaveBeenCalledWith("u1", expect.objectContaining({ assetType: "copy" }), undefined);
     expect(JSON.parse(result.content).asset).toMatchObject({ id: "a1", assetType: "copy" });
   });
 
@@ -97,6 +98,6 @@ describe("customer acquisition agent tools", () => {
     expect(service.createAsset).toHaveBeenCalledWith("u1", expect.objectContaining({
       assetType: "poster",
       modelId: "flux-pro",
-    }));
+    }), undefined);
   });
 });

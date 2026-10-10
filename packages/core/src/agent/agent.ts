@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { RunBudget, RunBudgetError } from "../runtime/run-budget.js";
+import type { ExecutionJournal, RuntimeObservation, RunStatus } from "../runtime/run-state.js";
+import { toolEffect } from "../tools/errors.js";
 import type {
   ChatParams,
   JSONSchema,
@@ -22,7 +26,7 @@ import type { Retriever } from "../retrieval/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 import { isMalformedToolCallError } from "../llm/retry.js";
-import { LLMResponseError, formatLLMError } from "../llm/errors.js";
+import { formatLLMError } from "../llm/errors.js";
 import { createDeadline, withAbort, abortableStream, abortableDelay } from "../runtime/abort.js";
 import { estimateTokens } from "../context/tokenizer.js";
 
@@ -35,7 +39,8 @@ export type AgentEvent =
   | { type: "tool_result"; toolCallId: string; name: string; output: string; isError: boolean; errorKind?: ToolErrorKind }
   | {
       type: "done";
-      status?: "completed" | "awaiting_input" | "failed" | "cancelled" | "timed_out" | "budget_exhausted" | "unknown_outcome";
+      status?: RunStatus;
+      llmAttempts?: number;
       iterations: number;
       totalTokens: number;
       inputTokens: number;
@@ -47,6 +52,11 @@ export type AgentEvent =
 
 export interface AgentConfig {
   maxIterations: number;
+  maxLlmAttempts: number;
+  maxTotalTokens: number;
+  maxNoProgressRounds: number;
+  maxCost?: number;
+  tokenPrices?: { input: number; output: number };
   maxToolCalls: number;
   maxParallelTools: number;
   /** Wall-clock timeout for the entire agent run in ms. Default: 1800000 (30 min) */
@@ -68,6 +78,8 @@ export interface AgentConfig {
 
 export interface AgentContext {
   llm: LLMProvider;
+  journal?: ExecutionJournal;
+  observe?: (event: RuntimeObservation) => void;
   toolRegistry: ToolRegistry;
   toolContext: ToolContext;
   memory?: AgentMemoryStore;
@@ -93,6 +105,9 @@ export interface AgentRunOptions {
 
 const DEFAULT_CONFIG: AgentConfig = {
   maxIterations: 20,
+  maxLlmAttempts: 60,
+  maxTotalTokens: 1_000_000,
+  maxNoProgressRounds: 3,
   maxToolCalls: 100,
   maxParallelTools: 4,
   maxRunTimeMs: 1_800_000, // 30 minutes
@@ -170,9 +185,10 @@ export class Agent {
 
   constructor(config: Partial<AgentConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    for (const key of ["maxIterations", "maxRunTimeMs", "maxToolCalls", "maxParallelTools"] as const) {
+    for (const key of ["maxIterations", "maxRunTimeMs", "maxToolCalls", "maxParallelTools", "maxLlmAttempts", "maxTotalTokens", "maxNoProgressRounds"] as const) {
       if (!Number.isSafeInteger(this.config[key]) || this.config[key] <= 0) throw new Error(`Invalid ${key}`);
     }
+    if (this.config.maxCost !== undefined && (!Number.isFinite(this.config.maxCost) || this.config.maxCost <= 0 || !this.config.tokenPrices)) throw new Error("maxCost requires positive cost limit and tokenPrices");
     // Push outputSchema down to the provider as a constrained-generation hint,
     // unless the caller already set an explicit responseSchema.
     if (this.config.outputSchema) {
@@ -198,24 +214,28 @@ export class Agent {
     const deadline = createDeadline(this.config.maxRunTimeMs, opts.signal);
     const signal = deadline.signal;
     let iterations = 0;
-    let totalTokens = 0;
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let cachedPromptTokens = 0;
     // How many times this run has fed a malformed-tool-call failure back to the
     // model for recovery (bounded by MAX_MALFORMED_RECOVERIES).
     let malformedRecoveries = 0;
 
+    const budget = new RunBudget(this.config, context.observe);
+    const llm = budget.wrap(context.llm);
+    const compressor = this.config.contextConfig?.compressor
+      ? budget.wrap(this.config.contextConfig.compressor) : llm;
+    let lastObservation = "";
+    let unchangedRounds = 0;
+    let hasDeliverableTool = false;
     let toolCount = 0;
     let uncertainOutcome = false;
     const abortReason = () => deadline.timedOut ? "timeout" : signal.aborted ? "cancelled" : null;
-    const done = (status: "completed" | "awaiting_input" | "failed" | "cancelled" | "timed_out" | "budget_exhausted" = "completed"): AgentEvent => ({
-      type: "done", iterations, totalTokens, inputTokens, outputTokens, cachedPromptTokens,
+    const done = (status: RunStatus = "completed"): AgentEvent => ({
+      type: "done", iterations, totalTokens: budget.inputTokens + budget.outputTokens,
+      inputTokens: budget.inputTokens, outputTokens: budget.outputTokens, cachedPromptTokens: budget.cachedTokens, llmAttempts: budget.attempts,
       status: uncertainOutcome ? "unknown_outcome" : deadline.timedOut ? "timed_out" : signal.aborted ? "cancelled" : status,
     });
     const abortError = (kind: "timeout" | "cancelled"): AgentEvent => ({
       type: "error", message: kind === "timeout"
-        ? `Agent run timed out after ${Math.round(this.config.maxRunTimeMs / 1000)}s`
+        ? `Agent run timed out: ${signal.reason instanceof Error ? signal.reason.message : "deadline exceeded"}`
         : "Agent run cancelled",
     });
     try {
@@ -317,7 +337,7 @@ export class Agent {
           undefined, // memory — could be wired to a memory store
           workingHistory,
           undefined, // user message already lives in workingHistory
-          this.config.contextConfig?.compressor ?? context.llm,
+          compressor,
           { signal, retrieval: retrievalBlock, toolTokens, generationTokens: this.config.modelParams?.maxTokens }
         ), signal);
 
@@ -336,7 +356,7 @@ export class Agent {
           toolCalls = [];
           let sawDone = false;
           try {
-            for await (const chunk of abortableStream(context.llm.chat(messages, tools, {
+            for await (const chunk of abortableStream(llm.chat(messages, tools, {
               signal,
               params: this.config.modelParams,
             }), signal)) {
@@ -353,13 +373,6 @@ export class Agent {
                 hasToolCalls = true;
                 toolCalls.push(chunk.toolCall);
               }
-              if (chunk.type === "done" && chunk.usage) {
-                totalTokens +=
-                  chunk.usage.promptTokens + chunk.usage.completionTokens;
-                inputTokens += chunk.usage.promptTokens;
-                outputTokens += chunk.usage.completionTokens;
-                cachedPromptTokens += chunk.usage.cachedPromptTokens ?? 0;
-              }
               if (chunk.type === "done") {
                 if (sawDone) throw new Error("Duplicate LLM completion");
                 sawDone = true;
@@ -373,12 +386,6 @@ export class Agent {
             streamError = undefined;
             break;
           } catch (err) {
-            if (err instanceof LLMResponseError && err.usage && !sawDone) {
-              inputTokens += err.usage.promptTokens;
-              outputTokens += err.usage.completionTokens;
-              totalTokens += err.usage.promptTokens + err.usage.completionTokens;
-              cachedPromptTokens += err.usage.cachedPromptTokens ?? 0;
-            }
             // Cancellation/timeout is terminal — never retry it as an artifact.
             if (abortReason()) {
               streamError = err;
@@ -418,12 +425,17 @@ export class Agent {
               ? MALFORMED_FALLBACK_MESSAGE
               : formatLLMError(streamError),
           };
-          yield done("failed");
+          yield done(streamError instanceof RunBudgetError ? "budget_exhausted" : "failed");
           return;
         }
 
         // If no tool calls, agent is done
         if (!hasToolCalls) {
+          if (!assistantContent.trim() && !hasDeliverableTool) {
+            yield { type: "error", message: "Model completed without an answer or deliverable" };
+            yield done("empty_response");
+            return;
+          }
           // Structured output: validate the final answer against the schema.
           // A violation is surfaced as an error event (not retried — the caller
           // decides what to do), then the run closes cleanly with `done`.
@@ -468,6 +480,7 @@ export class Agent {
           const dedupKey = `${tc.name}:${stableStringify(tc.arguments)}`;
           const cached = cacheable ? successfulCalls.get(dedupKey) : undefined;
           if (cached) {
+            context.observe?.({ type: "cache_hit", toolName: tc.name });
             // Identical cacheable call already succeeded this run — reuse it
             // instead of re-running, and tell the model so it stops repeating.
             return {
@@ -477,12 +490,24 @@ export class Agent {
           }
           const pending = cacheable ? pendingCalls.get(dedupKey) : undefined;
           if (pending) return pending;
-          const work = context.toolRegistry.execute(
-            tc.name,
-            tc.arguments,
-            context.toolContext,
-            { signal, allowedToolNames }
-          );
+          const work = (async (): Promise<ToolResult> => {
+            const tool = context.toolRegistry.get(tc.name)!;
+            const entry = await context.journal?.start(tc, iterations, toolEffect(tool));
+            if (entry?.result) return entry.result;
+            const result = await context.toolRegistry.execute(
+              tc.name, tc.arguments,
+              { ...context.toolContext, operationId: entry?.operationId },
+              { signal, allowedToolNames }
+            );
+            if (entry) {
+              try { await context.journal!.finish(entry.operationId, result); }
+              catch (error) {
+                if (toolEffect(tool) !== "write") throw error;
+                return { content: `Operation ${entry.operationId} may have committed but its result could not be saved. Verify before repeating.`, isError: true, errorKind: "unknown_outcome" };
+              }
+            }
+            return result;
+          })();
           if (cacheable) pendingCalls.set(dedupKey, work);
           try {
             const result = await work;
@@ -495,10 +520,14 @@ export class Agent {
 
         // Record a completed call's result: emit the event, append to history,
         // and report whether it ends the turn. Order-preserving.
+        const observations: string[] = [];
         const recordResult = function* (
           tc: ToolCall,
           result: ToolResult
         ): Generator<AgentEvent, boolean> {
+          if (!result.isError) hasDeliverableTool = true;
+          observations.push(stableStringify({ name: tc.name, args: tc.arguments, error: result.errorKind,
+            output: result.content.replace(/^\[skipped duplicate call:[^\n]*\]\n\n/, "") }));
           yield {
             type: "tool_result",
             toolCallId: tc.id,
@@ -560,6 +589,17 @@ export class Agent {
             }
           }
         }
+        const fingerprint = createHash("sha256").update(observations.join("\n")).digest("hex");
+        unchangedRounds = fingerprint === lastObservation ? unchangedRounds + 1 : 1;
+        lastObservation = fingerprint;
+        if (unchangedRounds >= this.config.maxNoProgressRounds) {
+          yield { type: "error", message: "Stopped after repeated tool calls produced no new information. Existing results are preserved; change the approach before continuing." };
+          yield done("stalled");
+          return;
+        }
+        if (unchangedRounds === this.config.maxNoProgressRounds - 1) {
+          workingHistory.push({ role: "user", content: "[Runtime notice] These calls produced no new information. Replan using a different approach or answer with the results already obtained. Do not repeat identical operations." });
+        }
       }
 
       // Max iterations reached
@@ -571,7 +611,7 @@ export class Agent {
     } catch (error) {
       const reason = abortReason();
       yield reason ? abortError(reason) : { type: "error", message: formatLLMError(error) };
-      yield done("failed");
+      yield done(error instanceof RunBudgetError ? "budget_exhausted" : "failed");
     } finally {
       deadline.dispose();
     }

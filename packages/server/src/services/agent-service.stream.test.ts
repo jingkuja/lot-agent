@@ -125,6 +125,16 @@ async function drain(events: AsyncIterable<unknown>): Promise<unknown[]> {
 }
 
 describe("streamAgentResponse tool-result persistence", () => {
+  it("persists timeout as a timeout with visible error content", async () => {
+    const { fake, repo } = fakeService({ script: [] });
+    (fake as any).agentConfig = { maxRunTimeMs: 10 };
+    (fake as any).modelRegistry.getProvider = () => ({ async *chat() { await new Promise(() => {}); } });
+    const events = await drain(fake.streamAgentResponse("c1", "hi", "general", "u1"));
+    expect(events.at(-1)).toMatchObject({ status: "timed_out" });
+    expect((repo.saveFinalAssistant.mock.calls[0] as unknown[])[1]).toContain("timed out");
+    expect((repo.saveFinalAssistant.mock.calls[0] as unknown[])[5]).toMatchObject({ status: "timed_out" });
+  });
+
   it("persists every parallel tool result, paired by toolCallId (same-name tools)", async () => {
     const { fake, repo } = fakeService({ script: parallelSameNameScript() });
 

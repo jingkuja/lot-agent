@@ -1,5 +1,6 @@
 import type { ToolContext, ToolResult } from "@lot-agent/core";
-import { InputError } from "../errors.js";
+import { classifyToolFailure } from "@lot-agent/core";
+import { DigitalEmployeeError, InputError } from "../errors.js";
 import type { ConversationActionDraft } from "../conversation-drafts.js";
 
 export function object(value: unknown): Record<string, unknown> {
@@ -39,11 +40,11 @@ export function confirmationContent(draft: ConversationActionDraft, commitTool: 
 }
 
 export function toolError(prefix: string, error: unknown): ToolResult {
-  return {
-    content: `${prefix}：${error instanceof Error ? error.message : "服务暂时不可用"}`,
-    isError: true,
-    errorKind: error instanceof InputError ? "validation" : "unknown",
-  };
+  if (error instanceof DigitalEmployeeError) {
+    return { content: `${prefix}：${error.message}`, isError: true,
+      errorKind: error.status === 404 ? "not_found" : error.status === 403 ? "permission" : "validation" };
+  }
+  return classifyToolFailure(error, prefix);
 }
 
 export function jsonResult(value: unknown): ToolResult {

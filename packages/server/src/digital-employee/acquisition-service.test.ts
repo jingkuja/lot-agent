@@ -25,6 +25,31 @@ function availability(overrides: Partial<CampaignModelAvailability> = {}): Campa
 }
 
 describe("CustomerAcquisitionService", () => {
+  it("propagates cancellation through copy generation and never saves its late result or a fallback", async () => {
+    const controller = new AbortController();
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{ id: "p1", name: "Product", version: 1 }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) return { rows: [{
+        id: "s1", audience_description: "Public", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date(),
+      }] };
+      return { rows: [] };
+    });
+    const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, {
+      recommend: vi.fn(),
+      createCopy: async ({ signal }) => {
+        expect(signal).toBe(controller.signal);
+        controller.abort();
+        return { title: "late", content: "late content", modelId: "m" };
+      },
+    });
+    await expect(service.createAsset("u1", {
+      assetType: "copy", prompt: "write", publicAudience: "Public", productId: "p1",
+      objective: "Inform", channels: ["web"], callToAction: "Read",
+    }, controller.signal)).rejects.toThrow();
+    expect(query.mock.calls.some(([sql]) => sql.includes("INSERT INTO de_marketing_asset_library"))).toBe(false);
+    expect(query.mock.calls.some(([sql]) => sql.includes("INSERT INTO de_campaign_generation_runs"))).toBe(false);
+  });
+
   it("sends only aggregate audience data and approved product facts to copy generation", async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{

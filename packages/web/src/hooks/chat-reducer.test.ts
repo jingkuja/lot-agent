@@ -283,3 +283,12 @@ describe("chatReducer — generation lifecycle", () => {
     expect(s.messages.find((m) => m.id === "tmp-g")?.generation?.status).toBe("cancelled");
   });
 });
+
+it("retains terminal run status while waiting for persistence and lease release", () => {
+  const message: DisplayMessage = { id: "end", role: "assistant", content: "", runStatus: "unknown_outcome" };
+  const pending = chatReducer({ ...initialChatState, isStreaming: true }, { type: "run_finished", message });
+  expect(pending.isStreaming).toBe(true);
+  const finished = chatReducer(pending, { type: "turn_finalized", message });
+  expect(finished.isStreaming).toBe(false);
+  expect(finished.messages[0].runStatus).toBe("unknown_outcome");
+});

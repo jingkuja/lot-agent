@@ -1,3 +1,4 @@
+import { toolError as failureResult } from "./agent-tool-helpers.js";
 import type { Tool, ToolContext, ToolResult } from "@lot-agent/core";
 import type { DigitalEmployeeService } from "../service.js";
 import { InputError, ProductSelectionRequiredError } from "../errors.js";
@@ -202,9 +203,5 @@ function formatCommit(result: Awaited<ReturnType<DigitalEmployeeService["commitC
 }
 
 function toolError(error: unknown): ToolResult {
-  return {
-    content: `客户画像记录失败：${error instanceof Error ? error.message : "服务暂时不可用"}`,
-    isError: true,
-    errorKind: error instanceof InputError ? "validation" : "unknown",
-  };
+  return failureResult("客户信息处理失败", error);
 }

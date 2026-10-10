@@ -82,6 +82,9 @@ export interface AgentEvent {
   input?: unknown;
   output?: string;
   isError?: boolean;
+  status?: import("@lot-agent/core").RunStatus;
+  errorKind?: import("@lot-agent/core").ToolErrorKind;
+  transportClosed?: boolean;
   iterations?: number;
   totalTokens?: number;
   inputTokens?: number;
@@ -273,7 +276,18 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface AgentRunRecord {
+  id: string;
+  status: string;
+  steps: Array<{ id: string; tool_name: string; status: string; input: unknown; result?: { content?: string } }>;
+}
+
 export const api = {
+  getAgentRuns: (conversationId: string) => request<{ runs: AgentRunRecord[] }>(`/conversations/${encodeURIComponent(conversationId)}/runs`),
+  verifyAgentOperation: (conversationId: string, operationId: string, outcome: "succeeded" | "failed") =>
+    request<{ ok: boolean }>(`/conversations/${encodeURIComponent(conversationId)}/operations/${encodeURIComponent(operationId)}/verify`, {
+      method: "POST", body: JSON.stringify({ outcome }),
+    }),
   getProductLinks: (signal?: AbortSignal) => request<{ webUrl: string; tokenhubUrl: string; globle?: number }>("/public/product", { signal }),
   // ── Auth ────────────────────────────────────────────────────────────────────
   getPublicKey: () => request<{ publicKey: string }>("/auth/public-key"),
@@ -488,7 +502,7 @@ export const api = {
         if (res.status === 401) {
           clearToken();
           window.dispatchEvent(new Event("lot:unauthorized"));
-          onEvent({ type: "error", message: "Unauthorized" });
+          onEvent({ type: "error", transportClosed: true, message: "Unauthorized" });
           return;
         }
 
@@ -497,17 +511,18 @@ export const api = {
           // "对话正在处理另一条消息，请稍候再试") instead of a generic
           // message, same pattern as `request()`/`uploadFile` above.
           const err = await res.json().catch(() => ({ error: "Request failed" }));
-          onEvent({ type: "error", message: err.error ?? "Request failed" });
+          onEvent({ type: "error", transportClosed: true, message: err.error ?? "Request failed" });
           return;
         }
         if (!res.body) {
-          onEvent({ type: "error", message: "Request failed" });
+          onEvent({ type: "error", transportClosed: true, message: "Request failed" });
           return;
         }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let streamEnded = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -527,14 +542,16 @@ export const api = {
               }
               // Awaited so the handler can pace rendering (e.g. hold the
               // "tool executing" state briefly) while preserving event order.
+              if (event?.type === "stream_end") streamEnded = true;
               if (event) await onEvent(event);
             }
           }
         }
+        if (!streamEnded) await onEvent({ type: "error", transportClosed: true, message: "Connection closed before the turn was finalized" });
       } catch (error) {
         if (!controller.signal.aborted) {
           onEvent({
-            type: "error",
+            type: "error", transportClosed: true,
             message: error instanceof Error ? error.message : String(error),
           });
         }

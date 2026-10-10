@@ -10,7 +10,9 @@ import type { KnowledgeBaseRef } from "./rag-client.js";
  * original streamAgentResponse implementation.
  */
 export class MessageRepository {
-  constructor(private readonly db: DB) {}
+  constructor(private readonly db: DB, private readonly runId?: string) {}
+
+  forRun(runId: string): MessageRepository { return new MessageRepository(this.db, runId); }
 
   /** Insert the user message and return its generated id. */
   async saveUserMessage(
@@ -21,6 +23,7 @@ export class MessageRepository {
   ): Promise<string> {
     const userMsgId = randomUUID();
     await this.db.addMessage(userMsgId, conversationId, "user", userMessage, {
+      ...(this.runId ? { runId: this.runId } : {}),
       metadata: {
         ...(attachments?.length ? { attachments } : {}),
         ...(knowledgeBases?.length ? { knowledgeBases } : {}),
@@ -126,7 +129,7 @@ export class MessageRepository {
       conversationId,
       "assistant",
       content,
-      { toolCallId: undefined, metadata: thinking ? { thinking } : {} }
+      { ...(this.runId ? { runId: this.runId } : {}), toolCallId: undefined, metadata: thinking ? { thinking } : {} }
     );
     for (const tc of toolCalls) {
       await this.db.addToolCall(assistantMsgId, tc.id, tc.name, tc.arguments);
@@ -139,7 +142,8 @@ export class MessageRepository {
     conversationId: string,
     toolCallId: string | undefined,
     output: string,
-    isError?: boolean
+    isError?: boolean,
+    errorKind?: import("@lot-agent/core").ToolErrorKind
   ): Promise<void> {
     await this.db.addMessage(
       randomUUID(),
@@ -149,7 +153,7 @@ export class MessageRepository {
       // A failed call must stay recognizable after reload: the web renders
       // interactive calls (propose_outline/ask_user) as confirmation cards
       // and needs to skip the ones whose execution was rejected.
-      { toolCallId, metadata: isError ? { isError: true } : {} }
+      { ...(this.runId ? { runId: this.runId } : {}), toolCallId, metadata: { ...(isError ? { isError: true } : {}), ...(errorKind ? { errorKind } : {}) } }
     );
   }
 
@@ -162,16 +166,17 @@ export class MessageRepository {
     content: string,
     toolCalls: { id: string; name: string; arguments: unknown }[],
     thinking?: string,
-    knowledgeSources?: import("@lot-agent/core").KnowledgeEvidence[]
+    knowledgeSources?: import("@lot-agent/core").KnowledgeEvidence[],
+    run?: { runId: string; status: import("@lot-agent/core").RunStatus }
   ): Promise<void> {
-    if (!content && toolCalls.length === 0) return;
+    if (!content && toolCalls.length === 0 && (!run || run.status === "completed")) return;
     const assistantMsgId = randomUUID();
     await this.db.addMessage(
       assistantMsgId,
       conversationId,
       "assistant",
       content,
-      { metadata: { ...(thinking ? { thinking } : {}), ...(knowledgeSources?.length ? { knowledgeSources } : {}) } }
+      { ...(this.runId ? { runId: this.runId } : {}), metadata: { ...(run ? { runId: run.runId, runStatus: run.status } : {}), ...(thinking ? { thinking } : {}), ...(knowledgeSources?.length ? { knowledgeSources } : {}) } }
     );
     for (const tc of toolCalls) {
       await this.db.addToolCall(assistantMsgId, tc.id, tc.name, tc.arguments);

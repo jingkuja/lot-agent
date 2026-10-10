@@ -5,7 +5,7 @@ import Anthropic, {
   APIConnectionError,
   APIConnectionTimeoutError,
 } from "@anthropic-ai/sdk";
-import { withLLMRetry, isMalformedToolCallError } from "./retry.js";
+import { withLLMRetry } from "./retry.js";
 import type {
   MessageParam,
   RawMessageStreamEvent,
@@ -31,6 +31,7 @@ export interface AnthropicProviderConfig {
 }
 
 export class AnthropicProvider implements LLMProvider {
+  readonly reportsAttempts = true;
   private client: Anthropic;
   private model: string;
 
@@ -111,7 +112,7 @@ export class AnthropicProvider implements LLMProvider {
         structured ? STRUCTURED_TOOL : undefined
       );
 
-    yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable, signal: opts?.signal });
+    yield* withLLMRetry(createStream, { isRetryable: isAnthropicRetryable, signal: opts?.signal, onAttempt: opts?.onAttempt, onAttemptEnd: opts?.onAttemptEnd });
   }
 }
 
@@ -121,10 +122,7 @@ function isAnthropicRetryable(err: unknown): boolean {
     err instanceof RateLimitError ||
     err instanceof InternalServerError ||
     err instanceof APIConnectionError ||
-    err instanceof APIConnectionTimeoutError ||
-    // A 400-class rejection of truncated/garbled tool-call JSON — transient,
-    // so let the model regenerate instead of killing the turn.
-    isMalformedToolCallError(err)
+    err instanceof APIConnectionTimeoutError
   );
 }
 

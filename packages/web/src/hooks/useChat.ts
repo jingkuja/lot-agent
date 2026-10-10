@@ -150,8 +150,10 @@ export function useChat(
       return {
         id: m.id,
         dbId: m.id,
+        conversationId: convId,
         role,
         content: m.content,
+        runStatus: parsedMeta?.runStatus as DisplayMessage["runStatus"],
         thinking: parsedMeta?.thinking as string | undefined,
         knowledgeSources: parsedMeta?.knowledgeSources as DisplayMessage["knowledgeSources"],
         attachments:
@@ -172,6 +174,7 @@ export function useChat(
                 // to keep rejected interactive calls (propose_outline/ask_user)
                 // from re-rendering as live confirmation cards after reload.
                 isError: parsedMeta?.isError === true,
+                errorKind: parsedMeta?.errorKind,
               }
             : undefined,
         rating: m.rating ?? null,
@@ -287,6 +290,7 @@ export function useChat(
         // user switches back.
         let assistantMsg: DisplayMessage = {
           id: `assistant-${randomId()}`,
+          conversationId: cid,
           role: "assistant",
           content: "",
           isStreaming: true,
@@ -349,11 +353,13 @@ export function useChat(
               name: event.name ?? "",
               output: event.output ?? "",
               isError: event.isError ?? false,
+              errorKind: event.errorKind,
             });
 
           // Reset for next LLM iteration (new assistant message)
           assistantMsg = {
             id: `assistant-${randomId()}`,
+            conversationId: cid,
             role: "assistant",
             content: "",
             isStreaming: true,
@@ -368,8 +374,8 @@ export function useChat(
         }
 
         if (event.type === "done" || event.type === "stream_end") {
-          assistantMsg = { ...assistantMsg, isStreaming: false };
-          if (isCurrent()) dispatch({ type: "turn_finalized", message: assistantMsg });
+          assistantMsg = { ...assistantMsg, isStreaming: false, ...(event.status ? { runStatus: event.status } : {}) };
+          if (isCurrent()) dispatch({ type: event.type === "done" ? "run_finished" : "turn_finalized", message: assistantMsg });
 
           if (event.type === "stream_end") {
             turnEnded = true;
@@ -385,13 +391,13 @@ export function useChat(
           // A failure in the tail (after stream_end) only concerns the
           // best-effort title — the turn already ended cleanly on screen.
           if (turnEnded) return;
-          releaseStream();
+          if (event.transportClosed) releaseStream();
           assistantMsg = {
             ...assistantMsg,
             content: assistantMsg.content + `\n\n[Error: ${event.message}]`,
             isStreaming: false,
           };
-          if (isCurrent()) dispatch({ type: "turn_finalized", message: assistantMsg });
+          if (isCurrent()) dispatch({ type: event.transportClosed ? "turn_finalized" : "run_finished", message: assistantMsg });
         }
       }, uploaded, controller, modelId, knowledgeBases.map((item) => item.id), knowledgeBases[0]?.sourceTypes);
       })();

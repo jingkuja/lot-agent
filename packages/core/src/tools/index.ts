@@ -1,4 +1,5 @@
 export { ToolRegistry } from "./registry.js";
+export { classifyToolFailure, toolEffect } from "./errors.js";
 export {
   readFileTool,
   writeFileTool,

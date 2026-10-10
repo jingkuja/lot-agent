@@ -1,4 +1,5 @@
-import type { Tool, ToolResult } from "@lot-agent/core";
+import { toolError } from "./agent-tool-helpers.js";
+import type { Tool } from "@lot-agent/core";
 import type { MarketingMaterialsService } from "../marketing-service.js";
 import { InputError } from "../errors.js";
 import { parseEntityId } from "../validators.js";
@@ -53,6 +54,7 @@ const productProperties = {
 export function createMarketingMaterialTools(service: MarketingMaterialsService): Tool[] {
   const search: Tool = {
     name: "search_marketing_materials",
+    effect: "read",
     description: "Search the current account's product and brand facts first when answering about benefits, verified facts, objections, valid offers, prohibited phrases, cases, FAQs, product notes, brand tone, visual assets or calls to action.",
     parameters: {
       type: "object",
@@ -152,8 +154,4 @@ function optionalString(value: unknown, max: number): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim() || value.trim().length > max) throw new InputError("查询关键词无效");
   return value.trim();
-}
-
-function toolError(prefix: string, error: unknown): ToolResult {
-  return { content: `${prefix}：${error instanceof Error ? error.message : "服务暂时不可用"}`, isError: true };
 }

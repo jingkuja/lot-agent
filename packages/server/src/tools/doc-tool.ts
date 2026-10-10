@@ -76,7 +76,7 @@ export function createDocTool(deps: DocToolDeps): Tool {
       }) ?? {};
 
       if (!content.trim()) {
-        return { content: "Cannot generate a document: `content` is empty.", isError: true };
+        return { content: "Cannot generate a document: `content` is empty.", isError: true, errorKind: "validation" };
       }
 
       const requested = (SUPPORTED.has(format as DocFormat) ? format : "docx") as DocFormat;

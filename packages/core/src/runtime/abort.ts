@@ -1,15 +1,29 @@
 /** Cancellation helpers also bound dependencies which do not cooperate with signals. */
 export interface Deadline { signal: AbortSignal; readonly timedOut: boolean; dispose(): void; }
 
+export class RunTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Timed out after ${timeoutMs}ms`);
+    this.name = "TimeoutError";
+  }
+}
+
+export function isTimeoutReason(reason: unknown): boolean {
+  return reason instanceof Error && reason.name === "TimeoutError";
+}
+
 export function createDeadline(timeoutMs: number, parent?: AbortSignal): Deadline {
   const controller = new AbortController();
   let timedOut = false;
-  const onAbort = () => controller.abort(parent?.reason ?? new Error("Cancelled"));
+  const onAbort = () => {
+    timedOut = isTimeoutReason(parent?.reason);
+    controller.abort(parent?.reason ?? new Error("Cancelled"));
+  };
   if (parent?.aborted) onAbort();
   else parent?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => {
     timedOut = true;
-    controller.abort(new Error(`Timed out after ${timeoutMs}ms`));
+    controller.abort(new RunTimeoutError(timeoutMs));
   }, timeoutMs);
   return {
     signal: controller.signal,

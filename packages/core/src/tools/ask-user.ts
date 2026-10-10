@@ -34,6 +34,7 @@ interface AskUserInput {
 
 export const askUserTool: Tool = {
   name: "ask_user",
+  effect: "interaction",
   description:
     "Ask one clarification question and wait for the answer when essential information is missing. Put enumerable choices in options, never inside question. Set multiSelect: true when multiple choices are allowed. This ends the turn; the answer arrives in the next user message. Use the user's language for question and option labels.",
   parameters: {

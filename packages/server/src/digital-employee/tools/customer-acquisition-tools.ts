@@ -1,3 +1,4 @@
+import { toolError as failureResult } from "./agent-tool-helpers.js";
 import type { Tool, ToolContext, ToolResult } from "@lot-agent/core";
 import type { CustomerAcquisitionService } from "../acquisition-service.js";
 import { InputError } from "../errors.js";
@@ -27,6 +28,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const segments: Tool = {
     name: "search_customer_segments",
+    effect: "read",
     description: "Search saved dynamic segments, criteria and latest aggregate snapshots. Resolve a unique segmentId or snapshotId before generating content.",
     parameters: {
       type: "object",
@@ -66,7 +68,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     },
     async execute(input, context) {
       return run(context, "生成群体文案失败", async (userId) => {
-        const asset = await service.createAsset(userId, parseCreateCampaignAsset({ ...object(input), assetType: "copy" }));
+        const asset = await service.createAsset(userId, parseCreateCampaignAsset({ ...object(input), assetType: "copy" }), context.signal);
         return {
           asset,
           message: `已生成并保存群体文案「${asset.title}」`,
@@ -78,6 +80,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const searchAssets: Tool = {
     name: "search_marketing_assets",
+    effect: "read",
     description: "Search Acquisition Hub's copy, poster and video assets and their generation/deployment status.",
     parameters: {
       type: "object",
@@ -103,6 +106,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const deploymentStatus: Tool = {
     name: "get_asset_deployment_status",
+    effect: "read",
     description: "Read an asset confirmed by search_marketing_assets, including platform deployment status and feedback.",
     parameters: { type: "object", properties: { assetId: { type: "string" } }, required: ["assetId"] },
     async execute(input, context) {
@@ -119,7 +123,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     parameters: { type: "object", properties: {} },
     async execute(_input, context) {
       return run(context, "生成每日推荐失败", async (userId) => ({
-        ...await service.refreshRecommendations(userId),
+        ...await service.refreshRecommendations(userId, context.signal),
         managementUrl: "/digital-employee/copy",
       }));
     },
@@ -127,6 +131,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const getRecommendations: Tool = {
     name: "get_daily_recommendations",
+    effect: "read",
     description: "Search daily recommendations by pending, adopted, ignored or expired status.",
     parameters: { type: "object", properties: { status: { type: "string", enum: RECOMMENDATION_STATUS } } },
     async execute(input, context) {
@@ -155,6 +160,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const searchCampaigns: Tool = {
     name: "search_marketing_campaigns",
+    effect: "read",
     description: "List campaigns with asset counts and outcome-entry counts. Resolve a unique campaignId before creating copy, posters or videos.",
     parameters: {
       type: "object",
@@ -170,6 +176,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const getCampaign: Tool = {
     name: "get_marketing_campaign",
+    effect: "read",
     description: "Read a campaign's brief, copy/poster/video versions, selected versions and aggregate outcomes.",
     parameters: { type: "object", properties: { campaignId: { type: "string" } }, required: ["campaignId"] },
     async execute(input, context) {
@@ -182,6 +189,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const searchOpportunities: Tool = {
     name: "search_campaign_opportunities",
+    effect: "read",
     description: "Search cohort marketing opportunities. Acceptance creates a campaign before content generation.",
     parameters: { type: "object", properties: { status: { type: "string", enum: ["suggested", "accepted", "dismissed", "expired"] } } },
     async execute(input, context) {
@@ -275,7 +283,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
           productId: parseEntityId(value.productId, "productId"),
           segmentId: value.segmentId === undefined ? undefined : parseEntityId(value.segmentId, "segmentId"),
           segmentSnapshotId: value.segmentSnapshotId === undefined ? undefined : parseEntityId(value.segmentSnapshotId, "segmentSnapshotId"),
-        });
+        }, context.signal);
       });
     },
   };
@@ -342,7 +350,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     },
     async execute(input, context) {
       return run(context, assetType === "poster" ? "生成海报失败" : "生成视频失败", async (userId) => {
-        const asset = await service.createAsset(userId, parseCreateCampaignAsset({ ...object(input), assetType }));
+        const asset = await service.createAsset(userId, parseCreateCampaignAsset({ ...object(input), assetType }), context.signal);
         return {
           asset,
           message: assetType === "poster" ? "已提交海报生成任务，完成后会进入营销资产库。" : "已提交视频生成任务，完成后会进入营销资产库。",
@@ -370,7 +378,8 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
         const asset = await service.rewriteAsset(
           userId,
           parseEntityId(value.assetId, "assetId"),
-          asObjectString(value.instruction, "改写要求")
+          asObjectString(value.instruction, "改写要求"),
+          context.signal
         );
         return { asset, managementUrl: "/digital-employee/copy" };
       });
@@ -572,14 +581,11 @@ async function run(
     if (context.featureScope && context.featureScope !== "customer-acquisition") {
       throw new InputError("当前对话不在获客宝作用域，请先进入获客宝对话");
     }
+    context.signal?.throwIfAborted();
     const value = await operation(context.userId ?? "default");
     return { content: typeof value === "string" ? value : JSON.stringify(value) };
   } catch (error) {
-    return {
-      content: `${prefix}：${error instanceof Error ? error.message : "服务暂时不可用"}`,
-      isError: true,
-      errorKind: error instanceof InputError ? "validation" : "unknown",
-    };
+    return failureResult(prefix, error);
   }
 }
 

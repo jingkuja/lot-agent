@@ -14,6 +14,8 @@ export interface GenerationView {
 }
 
 export interface DisplayMessage {
+  conversationId?: string;
+  runStatus?: import("@lot-agent/core").RunStatus;
   knowledgeSources?: import("../modules/knowledge/api.js").Evidence[];
   id: string;
   dbId?: string;
@@ -21,7 +23,7 @@ export interface DisplayMessage {
   content: string;
   thinking?: string;
   toolCalls?: { name: string; input: unknown }[];
-  toolResult?: { name: string; output: string; isError: boolean };
+  toolResult?: { name: string; output: string; isError: boolean; errorKind?: import("@lot-agent/core").ToolErrorKind };
   isStreaming?: boolean;
   rating?: number | null;
   attachments?: import("../api/client.js").UploadedAttachment[];
@@ -73,8 +75,10 @@ export type ChatAction =
       name: string;
       output: string;
       isError: boolean;
+      errorKind?: import("@lot-agent/core").ToolErrorKind;
     }
   /** Turn ended (done / stream_end / error): finalize, drop the bubble if it has nothing to show. */
+  | { type: "run_finished"; message: DisplayMessage }
   | { type: "turn_finalized"; message: DisplayMessage }
   /** Regenerate: cut the tail of the list starting at this message (inclusive). */
   | { type: "truncated_from"; id: string }
@@ -136,7 +140,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         id: action.cardId,
         role: "tool",
         content: "",
-        toolResult: { name: action.name, output: action.output, isError: action.isError },
+        toolResult: { name: action.name, output: action.output, isError: action.isError, ...(action.errorKind ? { errorKind: action.errorKind } : {}) },
       };
       return {
         ...state,
@@ -149,12 +153,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     }
 
+    case "run_finished":
+      return { ...state, messages: upsert(state.messages, { ...action.message, isStreaming: false }) };
+
     case "turn_finalized": {
       const done = { ...action.message, isStreaming: false };
       // A bubble with neither text nor tool calls has nothing to show — drop
       // it (a thinking-only turn is persisted server-side and comes back on
       // the stream_end reload).
-      const keep = Boolean(done.content) || Boolean(done.toolCalls?.length);
+      const keep = Boolean(done.content) || Boolean(done.toolCalls?.length) || (!!done.runStatus && done.runStatus !== "completed");
       return {
         ...state,
         isStreaming: false,
