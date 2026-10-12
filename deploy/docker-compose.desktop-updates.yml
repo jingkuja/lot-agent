@@ -1,0 +1,5 @@
+# docker compose -f docker-compose.yml -f deploy/docker-compose.desktop-updates.yml up -d web
+services:
+  web:
+    volumes:
+      - ${DESKTOP_UPDATES_DIR:-/www/wwwroot/todoucloud.com/updates}:/www/wwwroot/todoucloud.com/updates:ro

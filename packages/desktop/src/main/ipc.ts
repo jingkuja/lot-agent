@@ -1,4 +1,5 @@
 import type { DesktopToolHost } from "./tool-host.js";
+import type { DesktopUpdater } from "./updater.js";
 import {
   app,
   BrowserWindow,
@@ -15,6 +16,7 @@ export interface IpcContext {
   getWindow: () => BrowserWindow | null;
   tokenStore: SecureTokenStore;
   toolHost: DesktopToolHost;
+  updater: DesktopUpdater;
   getServerUrl: () => string | null;
   setServerUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
 }
@@ -48,6 +50,10 @@ export function registerIpc(ctx: IpcContext): void {
     });
   };
   handle("lot:local:state", (_event, id) => ctx.toolHost.state(id));
+  handle("lot:update:get", () => ctx.updater.getState());
+  handle("lot:update:check", () => ctx.updater.check());
+  handle("lot:update:install", () => ctx.updater.install());
+  handle("lot:update:manual", () => ctx.updater.manual());
   handle("lot:local:bind-draft", (_event, id) => ctx.toolHost.approvals.bindDraft(id));
   handle("lot:local:permission", (_event, id, mode) => ctx.toolHost.approvals.setMode(id, mode));
   handle("lot:local:approval", (_event, id, approvalId, decision) => ctx.toolHost.approvals.respond(id, approvalId, decision));

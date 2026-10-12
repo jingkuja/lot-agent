@@ -6,6 +6,7 @@ import { ThemeToggle } from "./components/ThemeToggle.js";
 import { Titlebar } from "./components/Titlebar.js";
 import { DownloadToast } from "./components/DownloadToast.js";
 import { DesktopDownload } from "./components/DesktopDownload.js";
+import { DesktopUpdate } from "./components/DesktopUpdate.js";
 import { api, getToken, setToken, clearToken, type User } from "./api/client.js";
 import { readTokenFromUrl, stripTokenFromUrl } from "./lib/url-token.js";
 import "./App.css";
@@ -106,12 +107,13 @@ export default function App() {
   const showDesktopDownload = view === "ready" && !international && !window.lotDesktop;
 
   return (
-    <div className={`app-shell${showDesktopDownload ? " has-desktop-download" : ""}`}>
+    <div className={`app-shell${showDesktopDownload || window.lotDesktop?.getUpdateState ? " has-desktop-download" : ""}`}>
       <Titlebar />
       {content}
       {showDesktopDownload && <DesktopDownload />}
       <ThemeToggle />
       <DownloadToast />
+      <DesktopUpdate />
     </div>
   );
 }

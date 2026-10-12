@@ -33,3 +33,6 @@ tests/eval/results/vectors-*.json
 
 # WeChat DevTools local settings when importing the repository root.
 /project.private.config.json
+
+# Desktop release private keys must stay outside Git.
+*update-private*.pem

@@ -16,6 +16,14 @@ function setup() {
   return { host, frame, contents };
 }
 describe("Electron local execution boundary", () => {
+  it("prevents new local tasks once installation acquires the lock", async () => {
+    const { host } = setup();
+    expect(host.lockForUpdate()).toBe(true);
+    expect(host.lockForUpdate()).toBe(false);
+    await expect(host.prepare("chat")).rejects.toThrow("update");
+    host.unlockUpdate();
+    expect(await host.prepare("chat")).toBe(false);
+  });
   it("rejects frames, other windows and remote pages", () => {
     const { host, frame, contents } = setup();
     expect(() => host.assertSender({ sender: contents, senderFrame: frame } as any)).not.toThrow();
@@ -32,6 +40,7 @@ describe("Electron local execution boundary", () => {
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => new Response(JSON.stringify(init.method === "POST" ? { capability: "a".repeat(64), version: 2 } : { request: null, activeRequestId: null }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     expect(await host.prepare("chat")).toBe(true);
+    expect(host.lockForUpdate()).toBe(false);
     expect(JSON.stringify(await host.state())).not.toContain("a".repeat(64));
     const url = "http://127.0.0.1:3456/api/conversations/chat/messages";
     expect(host.attachHeader(url, 99, "POST", { "x-lot-desktop-capability": "forged" })).toEqual({});
@@ -50,6 +59,7 @@ describe("Electron local execution boundary", () => {
     vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => init.method === "POST" ? new Promise<Response>(resolve => { complete = resolve; }) : Promise.resolve(new Response("{}"))));
     const preparing = host.prepare("chat");
     await vi.waitFor(() => expect(complete).toBeTypeOf("function"));
+    expect(host.lockForUpdate()).toBe(false);
     host.reset();
     complete(new Response(JSON.stringify({ capability: "a".repeat(64), version: 2 })));
     await expect(preparing).rejects.toThrow("authorization changed");

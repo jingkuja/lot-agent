@@ -6312,3 +6312,13 @@ html:not([lang="zh-CN"]) .agent-tab-strip .agent-tab {
 .desktop-approval-actions .desktop-approval-primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
 .desktop-approval-actions .desktop-approval-primary:hover { background: var(--accent-hover); }
 .desktop-permission-menu p[role="alert"], .desktop-approval p[role="alert"] { color: var(--danger); }
+
+.desktop-update-trigger { position: fixed; right: 68px; top: 16px; height: 40px; z-index: 999; padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); color: var(--text); cursor: pointer; }
+.desktop-update-dialog { margin: auto; width: min(520px, calc(100vw - 40px)); max-height: 80vh; overflow: auto; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); color: var(--text); box-shadow: var(--neu-raise-sm); }
+.desktop-update-dialog::backdrop { background: color-mix(in srgb, var(--text) 35%, transparent); }
+.desktop-update-dialog p { margin: 12px 0; line-height: 1.6; color: var(--text-secondary); }
+.desktop-update-dialog progress { width: 100%; accent-color: var(--accent); }
+.desktop-update-dialog .desktop-update-notes { white-space: pre-wrap; max-height: 180px; overflow: auto; }
+.desktop-update-dialog footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.desktop-update-dialog button { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--bg-hover); cursor: pointer; }
+.desktop-update-dialog button:disabled { opacity: .5; cursor: default; }

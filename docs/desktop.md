@@ -87,8 +87,10 @@ localhost:3000）。生效地址会保存，供下次启动和开发代理使用
 
 产物在 `packages/desktop/release/`：
 
-- macOS：`Lot Agent-<version>-arm64.dmg / -x64.dmg`（及 `.zip`）
-- Windows：`Lot Agent Setup <version>.exe`（NSIS，per-user 安装免管理员）。
+在 Mac 上生成包含三平台安装包、签名清单和服务器脚本的完整发布压缩包，可直接运行 `pnpm release:desktop 0.2.2`；版本号可替换，无需手改 `package.json`。此命令的产物按版本存放，完整说明见 [一条命令构建发布包](desktop-updates.md#一条命令构建完整发布包)。
+
+- macOS：`linquclaw-<version>-mac-arm64.dmg / -mac-x64.dmg`（及 `.zip`）
+- Windows：`linquclaw-<version>-win-x64.exe`（NSIS，per-user 安装免管理员）。
   NSIS 交叉构建无需 Wine，macOS 上可直接出包（已验证）；正式发布建议在
   对应平台或 CI matrix 上构建。
 
@@ -125,8 +127,9 @@ Windows 签名：`CSC_LINK` 指向代码签名证书即可，electron-builder �
 
 ## 自动更新
 
-本期未接入。预留方向：`electron-updater` + generic provider 指向内部分发服务，
-或在 OTA 离线盒场景复用 `deploy/ota/` 的通道。
+自 `0.2.0` 起支持固定 HTTPS 更新源和 Ed25519 签名清单：Mac 无开发者账号时自动下载 ZIP，点击重启后独立辅助进程替换应用，失败可用 DMG 手动安装；Windows 使用 NSIS 更新。更新源独立于业务服务器，运行中任务和输入框草稿阻止安装。
+
+密钥生成、构建配置、服务器发布脚本、Nginx 配置及验收见 [桌面自动更新与服务器发布](desktop-updates.md)。旧客户端需先手动安装一次带更新模块的版本。
 
 ## 快捷键（桌面端）
 

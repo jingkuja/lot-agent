@@ -5,13 +5,16 @@ copyright: Copyright © 2026
 directories:
   output: release
 
-# The app is fully bundled by tsup (only `electron` is external), so no
-# node_modules need to ship inside the asar.
+# electron-updater is an external production dependency; electron-builder
+# includes its production dependency tree inside the asar.
+artifactName: linquclaw-${version}-${os}-${arch}.${ext}
 files:
   - dist/**
   - package.json
 
 extraResources:
+  - from: scripts/mac-update-helper.sh
+    to: updater/mac-update-helper.sh
   # The built web app, served by the main process's loopback server.
   - from: ../web/dist
     to: web-dist
@@ -47,3 +50,8 @@ nsis:
   oneClick: true
   perMachine: false
   shortcutName: Lot Agent
+  # Generate app-update.yml/cache metadata. Runtime uses the signed custom
+  # provider and the build-pinned URL, never this placeholder feed.
+publish:
+  provider: generic
+  url: https://updates.invalid/

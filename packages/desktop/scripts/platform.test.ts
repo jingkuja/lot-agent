@@ -43,3 +43,22 @@ describe("desktop platform scripts", () => {
     expect(existsSync(join(fixture, "keep", "file.txt"))).toBe(true);
   });
 });
+
+it("embeds only a public key even if the wrong PEM file is supplied", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { readFileSync } = await import("node:fs");
+  copyFileSync(new URL("./pack.mjs", import.meta.url), join(fixture, "scripts", "pack.mjs"));
+  const keys = generateKeyPairSync("ed25519");
+  const privateFile = join(fixture, "fixture-private.pem");
+  writeFileSync(privateFile, keys.privateKey.export({ type: "pkcs8", format: "pem" }));
+  const captured = join(fixture, "captured.json");
+  const runner = join(fixture, "pnpm.cjs");
+  writeFileSync(runner, 'require("node:fs").writeFileSync(process.env.TEST_CAPTURE, JSON.stringify({ key: process.env.LOT_DESKTOP_UPDATE_PUBLIC_KEY, url: process.env.LOT_DESKTOP_UPDATE_URL }));');
+  const result = spawnSync(process.execPath, [join(fixture, "scripts", "pack.mjs")], {
+    encoding: "utf8", env: { PATH: process.env.PATH, npm_execpath: runner, TEST_CAPTURE: captured, LOT_DESKTOP_UPDATE_PUBLIC_KEY_FILE: privateFile, LOT_DESKTOP_UPDATE_URL: "https://updates.example/stable/" },
+  });
+  expect(result.status).toBe(0);
+  const value = JSON.parse(readFileSync(captured, "utf8"));
+  expect(value.key).toBe(keys.publicKey.export({ type: "spki", format: "pem" }));
+  expect(value.key).not.toContain("PRIVATE");
+});

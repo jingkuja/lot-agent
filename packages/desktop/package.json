@@ -1,6 +1,6 @@
 {
   "name": "@lot-agent/desktop",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Lot Agent desktop client (Electron shell over @lot-agent/web)",
   "author": "Lot Agent",
@@ -22,5 +22,8 @@
     "electron-builder": "^26.15.3",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
   }
 }

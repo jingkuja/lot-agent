@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { createPublicKey } from "node:crypto";
 
 const desktopDir = fileURLToPath(new URL("../", import.meta.url));
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -26,6 +28,16 @@ try { normalized = new URL(serverUrl.includes("://") ? serverUrl : `http://${ser
 catch { throw new Error("--server-url must be a valid HTTP(S) origin"); }
 if (!["https:", "http:"].includes(normalized.protocol) || normalized.username || normalized.password || normalized.search || normalized.hash || normalized.pathname !== "/") throw new Error("--server-url must be an HTTP(S) origin without credentials, paths or query parameters");
 const env = { ...process.env, LOT_DESKTOP_DEFAULT_SERVER_URL: normalized.origin };
+if (env.LOT_DESKTOP_UPDATE_PUBLIC_KEY_FILE) env.LOT_DESKTOP_UPDATE_PUBLIC_KEY = readFileSync(env.LOT_DESKTOP_UPDATE_PUBLIC_KEY_FILE, "utf8");
+if (env.LOT_DESKTOP_UPDATE_URL || env.LOT_DESKTOP_UPDATE_PUBLIC_KEY) {
+  const url = new URL(env.LOT_DESKTOP_UPDATE_URL);
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new Error("LOT_DESKTOP_UPDATE_URL must be a fixed HTTPS directory URL");
+  if (!env.LOT_DESKTOP_UPDATE_PUBLIC_KEY) throw new Error("An Ed25519 update public key is required");
+  const key = createPublicKey(env.LOT_DESKTOP_UPDATE_PUBLIC_KEY);
+  if (key.asymmetricKeyType !== "ed25519") throw new Error("An Ed25519 update public key is required");
+  // Never embed a private PEM even if the operator supplied the wrong key file.
+  env.LOT_DESKTOP_UPDATE_PUBLIC_KEY = key.export({ type: "spki", format: "pem" }).toString();
+} else console.log("Updates disabled: set LOT_DESKTOP_UPDATE_URL and LOT_DESKTOP_UPDATE_PUBLIC_KEY_FILE for release builds.");
 console.log(`Packaging current Web UI with default server ${normalized.origin}`);
 function pnpm(arguments_, cwd) {
   // npm_execpath points at pnpm's JS entry on every platform, avoiding cmd.exe

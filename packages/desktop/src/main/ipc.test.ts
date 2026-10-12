@@ -20,8 +20,9 @@ describe("desktop privileged IPC", () => {
       assertSender: vi.fn((event: { trusted: boolean }) => { if (!event.trusted) throw new Error("Untrusted desktop sender"); }),
       state: vi.fn(() => ({ directory: null })), reset: vi.fn(), prepare: vi.fn(), choose: vi.fn(), finish: vi.fn(),
     };
-    registerIpc({ getWindow: () => null, tokenStore, toolHost, getServerUrl: () => null, setServerUrl: vi.fn() } as any);
-    return { tokenStore, toolHost };
+    const updater = { getState: vi.fn(), check: vi.fn(), install: vi.fn(), manual: vi.fn() };
+    registerIpc({ getWindow: () => null, tokenStore, toolHost, updater, getServerUrl: () => null, setServerUrl: vi.fn() } as any);
+    return { tokenStore, toolHost, updater };
   }
   it("does not expose credentials or local operations to an untrusted frame", () => {
     const { tokenStore, toolHost } = setup();
@@ -42,5 +43,12 @@ describe("desktop privileged IPC", () => {
     mocks.listeners.get("lot:token:set")!(event, null);
     expect(toolHost.reset).toHaveBeenCalledOnce();
     expect(tokenStore.set).toHaveBeenCalledWith(null);
+  });
+  it("protects every updater operation with the same sender boundary", () => {
+    const { updater } = setup();
+    for (const channel of ["get", "check", "install", "manual"]) expect(() => mocks.handlers.get(`lot:update:${channel}`)!({ trusted: false })).toThrow("Untrusted");
+    expect(updater.install).not.toHaveBeenCalled();
+    mocks.handlers.get("lot:update:install")!({ trusted: true });
+    expect(updater.install).toHaveBeenCalledOnce();
   });
 });

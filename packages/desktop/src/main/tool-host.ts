@@ -27,6 +27,13 @@ export class DesktopToolHost {
   private runs = new Map<string, Run>();
   private generation = 0;
   private preparing = new Set<string>();
+  private installingUpdate = false;
+  lockForUpdate() {
+    if (this.runs.size || this.preparing.size || this.installingUpdate) return false;
+    this.installingUpdate = true;
+    return true;
+  }
+  unlockUpdate() { this.installingUpdate = false; }
   constructor(private ctx: ToolHostContext) {}
   assertSender(event: IpcMainInvokeEvent) {
     const win = this.ctx.getWindow();
@@ -78,6 +85,7 @@ export class DesktopToolHost {
     });
   }
   async prepare(id: string) {
+    if (this.installingUpdate) throw new Error("An application update is being installed");
     if (!this.root) return false;
     if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error("Invalid conversation");
     if (this.runs.has(id) || this.preparing.has(id)) throw new Error("Local turn already active");

@@ -148,6 +148,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [oldContractFile, setOldContractFile] = useState<File | null>(null);
   const [newContractFile, setNewContractFile] = useState<File | null>(null);
   const hasDraft = !!(promptValue.trim() || files.length || referenceVideoFiles.length || referenceAudioFiles.length || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length || oldContractFile || newContractFile);
+  const updateDraftRef = useRef(!embedded && hasDraft);
+  updateDraftRef.current = !embedded && hasDraft;
+  useEffect(() => {
+    const beforeUpdate = (event: Event) => { if (updateDraftRef.current) event.preventDefault(); };
+    window.addEventListener("lot:before-update", beforeUpdate);
+    return () => window.removeEventListener("lot:before-update", beforeUpdate);
+  }, []);
   useEffect(() => { onDraftChange?.(hasDraft); }, [hasDraft, onDraftChange]);
 
   const templateInputRef = useRef<HTMLInputElement>(null);

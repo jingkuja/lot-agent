@@ -10,6 +10,16 @@
 
 export type DesktopPlatform = "darwin" | "win32" | "linux";
 
+export interface DesktopUpdateState {
+  status: "disabled" | "idle" | "checking" | "current" | "downloading" | "ready" | "installing" | "error" | "manual";
+  currentVersion: string;
+  version?: string;
+  notes?: string;
+  progress: number;
+  manualAvailable: boolean;
+  blocked?: boolean;
+}
+
 export interface DesktopDownloadEvent {
   id: string;
   filename: string;
@@ -38,6 +48,11 @@ export interface LocalWorkspaceState {
 }
 
 export interface LotDesktopBridge {
+  getUpdateState(): Promise<DesktopUpdateState>;
+  checkForUpdates(): Promise<DesktopUpdateState>;
+  installUpdate(): Promise<DesktopUpdateState>;
+  openUpdateInstaller(): Promise<DesktopUpdateState>;
+  onUpdateState(cb: (state: DesktopUpdateState) => void): () => void;
   getLocalWorkspace(conversationId?: string | null): Promise<LocalWorkspaceState>;
   bindLocalPermission(conversationId: string): Promise<void>;
   setLocalPermission(conversationId: string | null, mode: LocalPermissionMode): Promise<void>;

@@ -9,6 +9,7 @@
     "dist:desktop": "pnpm --filter @lot-agent/desktop run dist",
     "dist:desktop:win": "pnpm --filter @lot-agent/desktop run dist:win",
     "dist:desktop:mac": "pnpm --filter @lot-agent/desktop run dist:mac",
+    "release:desktop": "node packages/desktop/scripts/release.mjs",
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
     "test": "vitest run",
@@ -34,7 +35,8 @@
     "check:knowledge:eval": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/evaluate-knowledge.ts",
     "check:knowledge:release": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-release.ts",
     "check:knowledge:persistence": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-persistence.ts",
-    "check:desktop-tools:ui": "node packages/server/scripts/check-desktop-tools-ui.mjs"
+    "check:desktop-tools:ui": "node packages/server/scripts/check-desktop-tools-ui.mjs",
+    "check:desktop-updates:ui": "node packages/server/scripts/check-desktop-updates-ui.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

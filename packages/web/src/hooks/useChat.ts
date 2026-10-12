@@ -1,5 +1,5 @@
 import { useI18n } from "../i18n/index.js";
-import { useReducer, useCallback, useRef, useState } from "react";
+import { useReducer, useCallback, useRef, useState, useEffect } from "react";
 import { api, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
@@ -34,6 +34,13 @@ export function useChat(
   // concurrent chat bleeds its reply into whatever conversation is displayed.
   const streamsRef = useRef<Map<string, AbortController>>(new Map());
   const genPollRef = useRef<{ cancelled: boolean } | null>(null);
+  useEffect(() => {
+    const beforeUpdate = (event: Event) => {
+      if (streamsRef.current.size || (genPollRef.current && !genPollRef.current.cancelled)) event.preventDefault();
+    };
+    window.addEventListener("lot:before-update", beforeUpdate);
+    return () => window.removeEventListener("lot:before-update", beforeUpdate);
+  }, []);
   const onStreamEndRef = useRef(onStreamEnd);
   onStreamEndRef.current = onStreamEnd;
   const onTitleRef = useRef(onTitle);

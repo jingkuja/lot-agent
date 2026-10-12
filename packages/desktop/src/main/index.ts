@@ -1,4 +1,5 @@
 import { DesktopToolHost } from "./tool-host.js";
+import { DesktopUpdater } from "./updater.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -158,6 +159,15 @@ async function main(): Promise<void> {
     getRendererOrigin: () => rendererOrigin,
   });
   app.on("before-quit", () => toolHost.reset());
+  const updater = new DesktopUpdater({
+    getWindow: () => mainWindow,
+    lockForInstall: () => toolHost.lockForUpdate(),
+    unlockInstall: () => { toolHost.unlockUpdate(); isQuitting = false; },
+    beforeQuit: () => { isQuitting = true; toolHost.reset(); },
+    quit: () => { isQuitting = true; app.quit(); },
+  });
+  await updater.initialize().catch(() => {});
+  app.on("before-quit", () => updater.stop());
 
   const setServerUrl = async (
     raw: string
@@ -183,6 +193,7 @@ async function main(): Promise<void> {
     getWindow: () => mainWindow,
     tokenStore,
     toolHost,
+    updater,
     getServerUrl: () => config.serverUrl!,
     setServerUrl,
   });
@@ -274,6 +285,7 @@ async function main(): Promise<void> {
     return { action: "deny" };
   });
   await mainWindow.loadURL(loadUrl);
+  await updater.ready().catch(() => {});
 
   setupTray();
 }
