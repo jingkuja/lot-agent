@@ -21,15 +21,15 @@ describe("digital employee profile routes", () => {
   });
 
   it("refreshes the cohort with the LLM model selected by the user", async () => {
-    const cohort = { summary: "已更新", modelId: "deepseek-v4-flash" };
+    const cohort = { summary: "已更新", modelId: "deepseek-v4.1-flash" };
     const service = { refreshCohortSummary: vi.fn(async () => cohort) };
     const response = await app(service).request("/digital-employee/overview/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ modelId: "deepseek-v4-flash" }),
+      body: JSON.stringify({ modelId: "deepseek-v4.1-flash" }),
     });
     expect(response.status).toBe(200);
-    expect(service.refreshCohortSummary).toHaveBeenCalledWith("u1", "deepseek-v4-flash");
+    expect(service.refreshCohortSummary).toHaveBeenCalledWith("u1", "deepseek-v4.1-flash");
     await expect(response.json()).resolves.toEqual(cohort);
   });
 

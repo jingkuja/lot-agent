@@ -16,7 +16,7 @@ const seedream = "doubao-seedream-5-0-pro";
 describe("parseMiniprogramConfig", () => {
   it("defaults to per-tier models and a single gpt-image-2 backup", () => {
     expect(parseMiniprogramConfig(undefined)).toEqual(DEFAULT_MINIPROGRAM_CONFIG);
-    expect(DEFAULT_MINIPROGRAM_CONFIG.llm).toBe("deepseek-v4-flash");
+    expect(DEFAULT_MINIPROGRAM_CONFIG.llm).toBe("deepseek-v4.1-flash");
     expect(DEFAULT_MINIPROGRAM_CONFIG.image).toEqual({
       "1": seedream,  // 快速
       "2": sunburst,  // 高清

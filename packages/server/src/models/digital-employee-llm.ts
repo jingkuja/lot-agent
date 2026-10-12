@@ -1,7 +1,6 @@
 /** Preferred LLMs for every digital-employee model call, in selection order. */
 export const DIGITAL_EMPLOYEE_LLM_PRIORITY = [
   "deepseek-v4.1-flash",
-  "deepseek-v4-flash",
   "deepseek-v4-pro",
   "deepseek-v4-flash-selfhosted",
   "qwen3.7-max",

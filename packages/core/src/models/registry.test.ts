@@ -3,7 +3,7 @@ import { InMemoryModelRegistry } from "./registry.js";
 import type { ModelConfig } from "./types.js";
 
 const llmModel: ModelConfig = {
-  id: "deepseek-v4-flash",
+  id: "deepseek-v4.1-flash",
   type: "llm",
   provider: "openai",
   billingUnit: "token",
@@ -48,12 +48,12 @@ describe("InMemoryModelRegistry", () => {
     registry.register(llmModel, () => ({}));
     registry.register(imageModel, () => ({}));
     expect(registry.list("llm")).toHaveLength(1);
-    expect(registry.list("llm")[0].id).toBe("deepseek-v4-flash");
+    expect(registry.list("llm")[0].id).toBe("deepseek-v4.1-flash");
   });
 
   it("getConfig returns the pricing fields", () => {
     registry.register(llmModel, () => ({}));
-    const cfg = registry.getConfig("deepseek-v4-flash");
+    const cfg = registry.getConfig("deepseek-v4.1-flash");
     expect(cfg).toBeDefined();
     expect(cfg?.inputPrice).toBe(0.001);
     expect(cfg?.outputPrice).toBe(0.002);
@@ -78,8 +78,8 @@ describe("InMemoryModelRegistry", () => {
       return fakeProvider;
     });
 
-    const p1 = registry.getProvider("deepseek-v4-flash");
-    const p2 = registry.getProvider("deepseek-v4-flash");
+    const p1 = registry.getProvider("deepseek-v4.1-flash");
+    const p2 = registry.getProvider("deepseek-v4.1-flash");
 
     expect(callCount).toBe(1);
     expect(p1).toBe(p2); // same instance
@@ -107,7 +107,7 @@ describe("InMemoryModelRegistry", () => {
     registry.register(llmModel, () => ({}));
     registry.register(disabledModel, () => ({}));
     const ids = registry.list().map((m) => m.id);
-    expect(ids).toEqual(["deepseek-v4-flash"]);
+    expect(ids).toEqual(["deepseek-v4.1-flash"]);
   });
 
   it("list(type) hides disabled models of that type", () => {

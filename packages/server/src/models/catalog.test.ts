@@ -38,12 +38,12 @@ describe("catalog resolvers", () => {
   });
   it("puts deepseek-v4.1-flash first while preserving the remaining order", () => {
     const out = enrichCatalog(cfg, {
-      llm: ["claude-opus-4.1", "gpt-5.4", "deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.7-max"],
+      llm: ["claude-opus-4.1", "gpt-5.4", "other-llm", "deepseek-v4.1-flash", "qwen3.7-max"],
       image: [],
       video: [],
     });
     expect(out.llm.map((model) => model.id)).toEqual([
-      "deepseek-v4.1-flash", "gpt-5.4", "deepseek-v4-flash", "qwen3.7-max", "claude-opus-4.1",
+      "deepseek-v4.1-flash", "gpt-5.4", "other-llm", "qwen3.7-max", "claude-opus-4.1",
     ]);
   });
   it("stably moves Claude LLMs behind other models before choosing a default", () => {

@@ -406,7 +406,7 @@ describe("POST /conversations/:id/generations", () => {
     expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], {
       userId: "u1",
       digitalEmployee: false,
-      modelId: "deepseek-v4-flash",
+      modelId: "deepseek-v4.1-flash",
     });
   });
 

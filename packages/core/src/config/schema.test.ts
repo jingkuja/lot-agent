@@ -27,7 +27,7 @@ describe("AppConfigSchema", () => {
       ...baseCfg,
       models: [
         {
-          id: "deepseek-v4-flash", type: "llm", provider: "openai", billingUnit: "token",
+          id: "deepseek-v4.1-flash", type: "llm", provider: "openai", billingUnit: "token",
           inputPrice: 0.001, outputPrice: 0.002, unitPrice: 0, enabled: true,
           capabilities: { contextWindow: 128000, maxOutputTokens: 8192, vision: false, toolUse: true, reasoning: false },
         },

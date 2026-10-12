@@ -9,7 +9,7 @@ const makeDef = (id: string): AgentDefinition => ({
   description: `Test agent ${id}`,
   systemPrompt: `You are ${id}.`,
   toolNames: [],
-  defaultModelId: "deepseek-v4-flash",
+  defaultModelId: "deepseek-v4.1-flash",
 });
 
 describe("InMemoryAgentRegistry", () => {

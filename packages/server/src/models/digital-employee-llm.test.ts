@@ -7,8 +7,8 @@ import {
 
 describe("pickDigitalEmployeeLlmModel", () => {
   it.each([
-    [["deepseek-v4-flash", "qwen3.7-max", "deepseek-v4.1-flash"], "deepseek-v4.1-flash"],
-    [["qwen3.7-max", "deepseek-v4-flash-selfhosted", "deepseek-v4-pro", "deepseek-v4-flash"], "deepseek-v4-flash"],
+    [["other-llm", "qwen3.7-max", "deepseek-v4.1-flash"], "deepseek-v4.1-flash"],
+    [["qwen3.7-max", "deepseek-v4-flash-selfhosted", "deepseek-v4-pro", "deepseek-v4.1-flash"], "deepseek-v4.1-flash"],
     [["qwen3.7-max", "deepseek-v4-flash-selfhosted", "deepseek-v4-pro"], "deepseek-v4-pro"],
     [["qwen3.7-max", "deepseek-v4-flash-selfhosted"], "deepseek-v4-flash-selfhosted"],
     [["qwen3.7-max"], "qwen3.7-max"],
@@ -27,7 +27,7 @@ describe("resolveDigitalEmployeeLlm", () => {
   it("keeps the active key when it has an LLM", async () => {
     const list = vi.fn(async (key: string) => key === "active"
       ? ["model-active"]
-      : ["deepseek-v4-flash"]);
+      : ["deepseek-v4.1-flash"]);
     await expect(resolveDigitalEmployeeLlm("active", ["other"], list)).resolves.toMatchObject({
       apiKey: "active",
       modelId: "model-active",
@@ -48,7 +48,7 @@ describe("resolveDigitalEmployeeLlm", () => {
 
   it("finds a requested model on another key before using a fallback", async () => {
     const list = vi.fn(async (key: string) => key === "active"
-      ? ["deepseek-v4-flash"]
+      ? ["deepseek-v4.1-flash"]
       : ["requested-model"]);
     await expect(resolveDigitalEmployeeLlm(
       "active", ["other"], list, "requested-model"

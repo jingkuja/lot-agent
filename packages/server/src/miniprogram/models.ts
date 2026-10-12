@@ -7,7 +7,7 @@ export interface MiniprogramConfig {
 }
 
 export const DEFAULT_MINIPROGRAM_CONFIG: MiniprogramConfig = {
-  llm: "deepseek-v4-flash",
+  llm: "deepseek-v4.1-flash",
   // Slot ids sent by the mini program's quality picker:
   //   "1" = 快速   → seedream (cheap/fast)
   //   "2" = 高清   → sunburst (best quality)
