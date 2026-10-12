@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { LocalToolCapabilities } from "@lot-agent/core/desktop";
 import type { AgentService } from "../services/agent-service.js";
 
 export function createDesktopToolRoutes(service: AgentService) {
@@ -9,8 +10,23 @@ export function createDesktopToolRoutes(service: AgentService) {
     if (conversation.agent_id !== "general") return c.json({ error: "Local tools require the general assistant" }, 403);
     await next();
   });
-  app.post("/:id/desktop-tools/session", c => {
-    try { return c.json({ capability: service.desktopTools.create(c.get("userId"), c.req.param("id")) }); }
+  app.post("/:id/desktop-tools/session", async c => {
+    let capabilities: LocalToolCapabilities | undefined;
+    let bytes = 0;
+    const chunks: Uint8Array[] = [];
+    if (c.req.raw.body) for await (const chunk of c.req.raw.body as unknown as AsyncIterable<Uint8Array>) {
+      bytes += chunk.length;
+      if (bytes > 1024) return c.json({ error: "Registration too large" }, 413);
+      chunks.push(chunk);
+    }
+    if (bytes) {
+      let body;
+      try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return c.json({ error: "Invalid desktop capabilities" }, 400); }
+      if (!body || Array.isArray(body) || body.version !== 2 || !["bash", "powershell", null].includes(body.shell)
+        || Object.keys(body).some(key => !["version", "shell"].includes(key))) return c.json({ error: "Invalid desktop capabilities" }, 400);
+      capabilities = { version: 2, shell: body.shell };
+    }
+    try { return c.json({ capability: service.desktopTools.create(c.get("userId"), c.req.param("id"), capabilities), version: 2 }); }
     catch { return c.json({ error: "Desktop session limit reached" }, 429); }
   });
   app.get("/:id/desktop-tools/session", c => {

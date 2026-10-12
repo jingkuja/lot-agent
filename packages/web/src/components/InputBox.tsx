@@ -30,6 +30,7 @@ export interface InputBoxHandle {
 }
 
 interface InputBoxProps {
+  toolbarStart?: React.ReactNode;
   onDraftChange?: (hasDraft: boolean) => void;
   attachment?: { id: string; file: File };
   onAttachmentConsumed?: () => void;
@@ -81,7 +82,7 @@ const SUPPORTED_TYPES: { label: string; exts: string }[] = [
 ];
 
 export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox({
-  attachment, onAttachmentConsumed, onManageKnowledge, onDraftChange,
+  toolbarStart, attachment, onAttachmentConsumed, onManageKnowledge, onDraftChange,
   onSend,
   onStop,
   disabled = false,
@@ -685,6 +686,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           }}
         />
         <div className="input-toolbar-left">
+          {toolbarStart}
           {mediaMode && !videoMode && (
             <button
               type="button"

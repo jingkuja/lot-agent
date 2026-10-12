@@ -18,6 +18,7 @@ import { parseDownloadArtifact } from "../lib/download-artifact.js";
 const localToolLabels: Record<string, string> = {
   desktop_list_files: "本地目录列表", desktop_read_file: "读取本地文件",
   desktop_write_file: "新建本地文件", desktop_edit_file: "编辑本地文件", desktop_bash: "本地 Bash",
+  desktop_powershell: "本地 PowerShell", desktop_delete_file: "删除本地文件",
 };
 
 interface MessageBubbleProps {

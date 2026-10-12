@@ -33,6 +33,9 @@ Windows（x64）。
 pnpm run dev:desktop        # 根目录：web(vite HMR) + electron，加载 localhost:5173
 ```
 
+桌面开发启动通过 `scripts/dev.mjs` 设置环境并直接启动 Electron，兼容 Windows
+默认终端；`clean` 同样使用 Node，只清理 desktop 包内的 `dist` 与 `release`。
+
 dev 模式下 vite 代理会按请求读取桌面端保存的 `userData/config.json`
 （启动参数或手动配置入口写入），因此开发窗口与打包应用跟随同一个服务器地址；
 未配置时回退 `localhost:3000`。打包版本首次启动默认连接 `https://todoucloud.com`，
@@ -79,6 +82,8 @@ Windows 快捷方式目标末尾可追加 `--server-url=https://your-server.exam
 localhost:3000）。生效地址会保存，供下次启动和开发代理使用。更换服务器会清除
 旧服务器的登录令牌与本机工具授权并重新加载页面，避免凭证跨服务器发送。
 仅接受 HTTP(S) 的域名和可选端口，不接受账号、路径、查询参数和片段。
+本地 `/__lot/*` 控制接口校验 Host 和请求来源；配置 POST 仅接受同源 JSON 请求，
+阻止其他网页通过回环地址更改服务器配置。
 
 产物在 `packages/desktop/release/`：
 
@@ -142,7 +147,7 @@ Windows 签名：`CSC_LINK` 指向代码签名证书即可，electron-builder �
 
 ## 本地工作目录与 Agent 工具
 
-桌面通用助手的输入框上方提供“本地工作目录”入口。通过系统目录选择器授权后，当前桌面会话可以列目录、读取 UTF-8 文件、新建文件、精确替换文件文本和运行 Bash；点击“停用本地工具”会撤销授权并取消本机任务。目录授权不跨重启、页面重载、账号切换或服务器切换保留。其他专用 Agent 保持现有工具白名单。
+桌面通用助手在输入框左下角提供工具权限菜单，菜单内可选择本地工作目录。通过系统目录选择器授权后，当前桌面会话可以列目录、读取 UTF-8 文件、新建文件、精确替换文件文本、删除单个文件和运行系统命令；点击“停用本地工具”会撤销授权并取消本机任务。目录授权不跨重启、页面重载、账号切换或服务器切换保留。其他专用 Agent 保持现有工具白名单。
 
 | 工具 | 行为 |
 | --- | --- |
@@ -150,15 +155,27 @@ Windows 签名：`CSC_LINK` 指向代码签名证书即可，electron-builder �
 | `desktop_read_file` | 读取最多 1 MB 的 UTF-8 文本，结果最多 50000 字符 |
 | `desktop_write_file` | 新建文本文件，拒绝覆盖已有文件；父目录需要已存在 |
 | `desktop_edit_file` | 精确替换唯一匹配文本；确认后再次核对原文，通过临时文件替换保存 |
-| `desktop_bash` | 在所选目录启动 Bash，默认 30 秒、最多 120 秒；输出超限或取消时终止进程组 |
+| `desktop_delete_file` | 永久删除所选目录内的单个普通文件；拒绝目录和链接，批准期间文件变化则拒绝删除；不依赖命令行 |
+| `desktop_bash` | macOS/Linux 使用系统 Bash；默认 30 秒、最多 120 秒；输出超限或取消时终止进程组 |
+| `desktop_powershell` | Windows 使用系统 PowerShell 5.1，无需安装 Git Bash；超时和取消使用 taskkill 终止进程树 |
 
-文件工具拒绝相对路径越界、绝对路径、符号链接、硬链接、二进制和特殊文件。文件修改与每条 Bash 命令均通过原生对话框确认。**Bash 不是操作系统沙箱**，命令可以访问工作目录之外的文件和网络；确认框明确说明这一点。Bash 不继承应用的 API Key 等额外环境变量，不加载 profile/rc 文件。Windows 使用 Git for Windows 安装的 Bash，缺失时界面提示；文件工具不依赖 Bash。
+文件新增、读取、编辑和删除由客户端直接处理，不依赖任何 Shell。Windows 命令使用
+系统 `System32/WindowsPowerShell/v1.0/powershell.exe`，macOS/Linux 使用系统 Bash；
+不搜索 Git、WSL 或用户 PATH 内的同名程序。命令输入和返回结果保留 Unicode，
+PowerShell 使用 UTF-8 输出并保留非零退出码，不加载 profile，也不修改系统执行策略。
+客户端注册时上报 v2 协议和实际可用 Shell，服务端仅向模型提供对应语法的命令工具。
+Shell 不可用时仍提供全部文件工具。新版客户端要求服务端支持 v2，请同步更新两端；
+服务端收到旧版客户端的空注册请求时仍只提供原有五个工具，不下发新增操作。
+
+文件工具拒绝相对路径越界、绝对路径、符号链接、硬链接和特殊文件；读取及编辑拒绝二进制，删除支持单个普通二进制文件。文件修改与命令 的批准策略由主进程按会话管理，默认“每次确认”；“本次对话确认”需要首次点击“本次对话允许”，后续同一会话自动执行；“完全授权”直接允许当前会话后续操作。新建会话只继承其草稿中明确选择的策略，不会影响其他已有会话。策略与批准仅在主进程内存中保存，重载、注销、停用工具或更换目录后清除。审批在聊天消息区以紧凑卡片展示命令或文件改动，支持拒绝、允许一次、本次对话允许，不弹系统授权窗。**Bash 和 PowerShell 均不是操作系统沙箱**，命令可以访问工作目录之外的文件和网络；权限菜单与命令审批卡片明确说明这一点。命令进程不继承应用的 API Key 等额外环境变量，不加载 profile/rc 文件。系统命令环境不可用时界面提示文件工具仍可使用。
 
 读取的内容和命令输出会作为工具结果发送给远端模型，并沿现有消息 / 执行记录链路保存，界面会在授权入口说明。文件本身由 Electron 主进程处理，服务端不执行 Shell 或访问用户电脑路径。
 
 ### 调用链与权限边界
 
-`DesktopWorkspace → preload → tool-host.ts → 原生目录授权 → /api/conversations/:id/desktop-tools/session`。
+`InputBox / DesktopWorkspace → useDesktopWorkspace → preload → tool-host.ts / tool-approvals.ts → 系统目录选择器 → /api/conversations/:id/desktop-tools/session`。
+
+`DesktopApprovalCards` 从可信 IPC 获取当前会话的待审批操作，批准使用主进程生成的单次 ID；取消、断连或过期后 ID 立即失效。修改权限档位不会自动批准已展示的请求。这里是已有本地工具执行器的批准回调，不新增等待聊天回复的模型工具，也不改变 `endsTurn` 协议。批准后的工具输入、结果或拒绝错误沿现有消息持久化链路保存；临时批准卡片不持久化，重新加载不会恢复可执行按钮。
 
 主进程以当前登录令牌申请短期、单次聊天使用的随机 capability；该值只保存在主进程内存，经 `webRequest` 注入受信任主窗口的指定会话消息 POST。普通 Web / 小程序不提供这条本地桥接，服务端不会根据 `clientType`、User-Agent 或普通端类型标记启用工具。此机制验证授权能力的持有与会话归属，不是对客户端二进制的远程证明；即使第三方模拟协议，也不会因此访问已连接桌面端的授权目录或执行器。
 
@@ -172,11 +189,13 @@ Windows 签名：`CSC_LINK` 指向代码签名证书即可，electron-builder �
 
 ```bash
 pnpm --filter @lot-agent/core build
-pnpm exec vitest run packages/desktop/src/main/local-tools.test.ts packages/desktop/src/main/tool-host.test.ts packages/server/src/desktop
-pnpm exec vitest run packages/desktop/src/main/local-server.test.ts
+pnpm exec vitest run packages/desktop packages/server/src/desktop packages/server/src/services/agent-service.stream.test.ts packages/core/src/tools/registry.test.ts
 pnpm check:desktop-tools:ui  # 需 Playwright + Chrome；PLAYWRIGHT_MODULE 可指定安装路径
 pnpm --filter @lot-agent/web build
 pnpm --filter @lot-agent/desktop build
+pnpm --filter @lot-agent/desktop exec tsc --noEmit
 ```
 
-UI 脚本使用模拟桌面桥接，验证中文浅色、英文深色、选择 / 停用目录以及 Web 端隐藏入口；不访问用户本地文件、不调用真实模型。`DESKTOP_SCREENSHOTS_DIR` 可指定已有目录保存截图。实际原生对话框、系统目录权限和 Windows Git Bash 仍需对应平台桌面验收。
+UI 脚本使用模拟桌面桥接，验证中文浅色、英文深色、选择 / 停用目录三档权限、批准/拒绝卡片、输入框内位置以及 Web 端隐藏入口；不访问用户本地文件、不调用真实模型。`DESKTOP_SCREENSHOTS_DIR` 可指定已有目录保存截图。文件工具测试只操作临时目录；Windows 命令测试使用系统 PowerShell，无需 Git Bash，且不跳过 Windows，目录链接测试使用 junction。
+
+最近一次本机测试及真实 Electron 验证范围见 [2026-10-12 验证记录](desktop-verification-2026-10-12.md)。Windows 安装启动、系统目录权限、PowerShell 及进程树取消仍需对应平台验收。

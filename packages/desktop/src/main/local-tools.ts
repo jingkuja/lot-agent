@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
-import { lstat, readdir, realpath, open, access, rename, unlink } from "node:fs/promises";
+import { lstat, readdir, realpath, open, rename, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
+import { executeShell } from "./local-shell.js";
 import { randomUUID } from "node:crypto";
 import { validLocalInput, type LocalToolResult, type LocalToolRequest } from "../../../core/src/desktop/protocol.js";
 
@@ -44,59 +44,6 @@ async function readText(target: string): Promise<string> {
   } finally { await handle.close(); }
 }
 
-export async function findBash(): Promise<string | null> {
-  const candidates = process.platform === "win32"
-    ? [join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"), join(process.env.LOCALAPPDATA ?? "", "Programs", "Git", "bin", "bash.exe")]
-    : ["/bin/bash", "/usr/bin/bash"];
-  for (const candidate of candidates) {
-    try { await access(candidate, constants.X_OK); return candidate; } catch { /* Try next installed shell. */ }
-  }
-  return null;
-}
-
-async function bash(command: string, cwd: string, timeoutMs: number, signal: AbortSignal): Promise<LocalToolResult> {
-  const executable = await findBash();
-  if (!executable) return denied("Bash is not installed. On Windows install Git for Windows and restart the app.");
-  signal.throwIfAborted();
-  // Do not copy model/API credentials or shell startup injection variables.
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of ["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL"]) if (process.env[key]) env[key] = process.env[key];
-  return new Promise(resolveResult => {
-    const child = spawn(executable, ["--noprofile", "--norc", "-c", command], { cwd, env, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
-    let content = "";
-    let stopped = false;
-    let settled = false;
-    const finish = (result: LocalToolResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal.removeEventListener("abort", stop);
-      resolveResult(result);
-    };
-    const stop = () => {
-      stopped = true;
-      if (!child.pid) return;
-      if (process.platform === "win32") {
-        const killer = spawn(join(process.env.SYSTEMROOT ?? "C:\\Windows", "System32", "taskkill.exe"), ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
-        killer.on("error", () => child.kill());
-      } else {
-        try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
-      }
-    };
-    const timer = setTimeout(stop, timeoutMs);
-    signal.addEventListener("abort", stop, { once: true });
-    if (signal.aborted) stop();
-    const append = (chunk: string) => {
-      content += chunk;
-      if (content.length > 50000) { content = content.slice(0, 50000); stop(); }
-    };
-    child.stdout.setEncoding("utf8").on("data", append);
-    child.stderr.setEncoding("utf8").on("data", append);
-    child.on("error", () => finish({ content: "Bash could not start", isError: true, errorKind: "not_found" }));
-    child.on("close", code => finish({ ...output(`${content}\n[exit: ${code ?? "terminated"}]${stopped ? "\nStopped: cancelled, timed out or output limit reached. Verify effects before repeating." : ""}`), isError: stopped || code !== 0, ...(stopped ? { errorKind: "unknown_outcome" as const } : {}) }));
-  });
-}
-
 export async function executeLocalTool(root: string, request: LocalToolRequest, signal: AbortSignal,
   approve: (detail: string, signal: AbortSignal) => Promise<boolean>): Promise<LocalToolResult> {
   if (!validLocalInput(request.name, request.input)) return { content: "Invalid local tool input", isError: true, errorKind: "validation" };
@@ -104,11 +51,12 @@ export async function executeLocalTool(root: string, request: LocalToolRequest, 
   let attemptedWrite = false;
   try {
     signal.throwIfAborted();
-    if (request.name === "desktop_bash") {
-      if (!await approve(`Bash\n${root}\n\n${input.command}`, signal)) return denied("User declined the command");
+    if (request.name === "desktop_bash" || request.name === "desktop_powershell") {
+      const kind = request.name === "desktop_powershell" ? "powershell" : "bash";
+      if (!await approve(`${kind === "powershell" ? "PowerShell" : "Bash"}\n${root}\n\n${input.command}`, signal)) return denied("User declined the command");
       signal.throwIfAborted();
       await localPath(root, ".");
-      return await bash(input.command as string, root, Number(input.timeoutMs ?? 30000), signal);
+      return await executeShell(kind, input.command as string, root, Number(input.timeoutMs ?? 30000), signal);
     }
     const path = String(input.path ?? ".");
     const target = await localPath(root, path);
@@ -118,6 +66,22 @@ export async function executeLocalTool(root: string, request: LocalToolRequest, 
       return output(entries.slice(0, 2000).map(entry => `${entry.name}${entry.isDirectory() ? "/" : entry.isSymbolicLink() ? " [link: unavailable]" : ""}`).sort().join("\n") || "(empty directory)");
     }
     if (request.name === "desktop_read_file") return output(await readText(target));
+    if (request.name === "desktop_delete_file") {
+      const before = await lstat(target, { bigint: true });
+      if (!before.isFile() || before.nlink > 1n) return denied("Only a single regular file can be deleted");
+      if (!await approve(`${path}\n\n永久删除文件 / Permanently delete file (${before.size} bytes)`, signal)) return denied("User declined the file deletion");
+      signal.throwIfAborted();
+      await localPath(root, path);
+      const after = await lstat(target, { bigint: true });
+      if (!after.isFile() || after.nlink > 1n || before.dev !== after.dev || before.ino !== after.ino
+        || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) {
+        return { content: "File changed while awaiting approval; inspect it again", isError: true, errorKind: "validation" };
+      }
+      signal.throwIfAborted();
+      attemptedWrite = true;
+      await unlink(target);
+      return output(`Deleted ${path}`);
+    }
     const original = request.name === "desktop_edit_file" ? await readText(target) : null;
     let content = String(input.content ?? "");
     if (original !== null) {
@@ -136,7 +100,7 @@ export async function executeLocalTool(root: string, request: LocalToolRequest, 
       attemptedWrite = true;
       try { await handle.writeFile(content, { encoding: "utf8", signal }); } finally { await handle.close(); }
     } else {
-      // Recheck after the native approval: never silently clobber external edits.
+      // Recheck after approval: never silently clobber external edits.
       if (await readText(target) !== original) return { content: "File changed while awaiting approval; read it again", isError: true, errorKind: "validation" };
       const mode = (await lstat(target)).mode;
       const temp = join(dirname(target), `.lot-edit-${randomUUID()}`);

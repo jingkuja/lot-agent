@@ -328,6 +328,7 @@ export function Workspace({
         let conv;
         try {
           conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined, videoPublication);
+          if (newAgentId === "general") await window.lotDesktop?.bindLocalPermission(conv.id);
         } finally {
           creatingConversation.current = false;
           setIsCreatingConversation(false);

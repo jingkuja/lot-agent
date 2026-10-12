@@ -1,7 +1,9 @@
+import { ToolApprovals } from "./tool-approvals.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { realpath } from "node:fs/promises";
 import { BrowserWindow, dialog, type IpcMainInvokeEvent } from "electron";
-import { executeLocalTool, findBash } from "./local-tools.js";
+import { executeLocalTool } from "./local-tools.js";
+import { findLocalShell } from "./local-shell.js";
 import type { LocalToolRequest } from "../../../core/src/desktop/protocol.js";
 
 interface Run {
@@ -20,6 +22,7 @@ export interface ToolHostContext {
 }
 
 export class DesktopToolHost {
+  readonly approvals = new ToolApprovals();
   private root: string | null = null;
   private runs = new Map<string, Run>();
   private generation = 0;
@@ -29,7 +32,10 @@ export class DesktopToolHost {
     const win = this.ctx.getWindow();
     if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || new URL(event.senderFrame.url).origin !== this.ctx.getRendererOrigin()) throw new Error("Untrusted desktop sender");
   }
-  async state() { return { directory: this.root, bashAvailable: !!await findBash(), activeRuns: this.runs.size }; }
+  async state(id: string | null = null) {
+    const shell = await findLocalShell();
+    return { permissionMode: this.approvals.mode(id), approvals: this.approvals.list(id), directory: this.root, shell: shell?.kind ?? null, activeRuns: this.runs.size };
+  }
   async choose() {
     const win = this.ctx.getWindow();
     if (!win || this.runs.size || this.preparing.size) throw new Error("Stop local tasks before changing the directory");
@@ -38,12 +44,14 @@ export class DesktopToolHost {
     if (!result.canceled && result.filePaths[0]) {
       const root = await realpath(result.filePaths[0]);
       if (generation !== this.generation || this.runs.size || this.preparing.size) throw new Error("Desktop state changed; select the directory again");
+      if (this.root !== null) this.approvals.reset();
       this.root = root;
     }
     return this.state();
   }
   reset() {
     this.generation++;
+    this.approvals.reset();
     this.root = null;
     for (const id of this.runs.keys()) this.finish(id);
   }
@@ -81,14 +89,17 @@ export class DesktopToolHost {
     const run: Run = { capability: "", controller: new AbortController(), token, baseUrl, attached: false };
     this.preparing.add(id);
     try {
-      const response = await this.request(run, id, "session", "POST");
+      const shell = await findLocalShell();
+      if (generation !== this.generation) throw new Error("Desktop authorization changed");
+      const response = await this.request(run, id, "session", "POST", { version: 2, shell: shell?.kind ?? null });
       // Other specialized agents retain their established tool allowlists.
       if (response.status === 403) return false;
       if (!response.ok) throw new Error("Local tools connection failed. Check the server version and your login.");
-      const data = await response.json() as { capability?: string };
+      const data = await response.json() as { capability?: string; version?: number };
       if (!data.capability || !/^[a-f0-9]{64}$/.test(data.capability)) throw new Error("Invalid desktop capability");
       run.capability = data.capability;
       this.runs.set(id, run);
+      if (data.version !== 2) { this.finish(id); throw new Error("Update the desktop server to support native local tools"); }
       if (generation !== this.generation) { this.finish(id); throw new Error("Desktop authorization changed"); }
       void this.poll(id, root, run);
       return true;
@@ -128,20 +139,8 @@ export class DesktopToolHost {
   private async execute(id: string, root: string, run: Run, request: LocalToolRequest, operation: NonNullable<Run["operation"]>) {
     try {
       const signal = AbortSignal.any([run.controller.signal, operation.controller.signal]);
-      const result = await executeLocalTool(root, request, signal, async (detail, approvalSignal) => {
-        const win = this.ctx.getWindow();
-        if (!win || approvalSignal.aborted) return false;
-        const isBash = request.name === "desktop_bash";
-        // Native confirmation is not a model tool waiting on a chat reply.
-        // No changes execute after a cancelled/expired confirmation.
-        const answer = await dialog.showMessageBox(win, {
-          type: "warning", title: "本地操作确认 / Confirm local operation",
-          message: isBash ? "允许执行此 Bash 命令？/ Run this Bash command?" : "允许修改此本地文件？/ Change this local file?",
-          detail: `${isBash ? "Bash 可访问工作目录以外的文件及网络。/ Bash can access files outside the workspace and the network.\n\n" : ""}${detail}`,
-          buttons: ["取消 / Cancel", "执行 / Run"], defaultId: 0, cancelId: 0, noLink: true, signal: approvalSignal,
-        });
-        return answer.response === 1 && !approvalSignal.aborted;
-      });
+      const result = await executeLocalTool(root, request, signal, (detail, approvalSignal) =>
+        this.approvals.request(id, request.name, detail, approvalSignal));
       if (!signal.aborted) {
         const response = await this.request(run, id, "result", "POST", { id: request.id, result });
         if (!response.ok) throw new Error("Local result was not accepted");

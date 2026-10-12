@@ -21,14 +21,27 @@ export interface DesktopDownloadEvent {
   error?: string;
 }
 
+export type LocalPermissionMode = "always" | "conversation" | "full";
+export interface LocalApproval {
+  id: string;
+  conversationId: string;
+  name: string;
+  detail: string;
+}
+
 export interface LocalWorkspaceState {
+  permissionMode: LocalPermissionMode;
+  approvals: LocalApproval[];
   directory: string | null;
-  bashAvailable: boolean;
+  shell: "bash" | "powershell" | null;
   activeRuns: number;
 }
 
 export interface LotDesktopBridge {
-  getLocalWorkspace(): Promise<LocalWorkspaceState>;
+  getLocalWorkspace(conversationId?: string | null): Promise<LocalWorkspaceState>;
+  bindLocalPermission(conversationId: string): Promise<void>;
+  setLocalPermission(conversationId: string | null, mode: LocalPermissionMode): Promise<void>;
+  respondLocalApproval(conversationId: string, approvalId: string, decision: "deny" | "once" | "conversation"): Promise<void>;
   chooseLocalWorkspace(): Promise<LocalWorkspaceState>;
   disableLocalWorkspace(): Promise<LocalWorkspaceState>;
   prepareLocalTools(conversationId: string): Promise<boolean>;

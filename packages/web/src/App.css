@@ -6263,13 +6263,37 @@ html:not([lang="zh-CN"]) .agent-tab-strip .agent-tab {
 }
 
 /* Desktop local workspace uses the same light/dark theme tokens as chat. */
-.desktop-workspace { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); color: var(--text); }
-.desktop-workspace-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; }
-.desktop-workspace-path { flex: 1; min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
-.desktop-workspace-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
-.desktop-workspace-indicator.enabled { background: var(--success); }
-.desktop-workspace button { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 9px; color: var(--text); background: var(--bg-input); cursor: pointer; }
-.desktop-workspace button:disabled { opacity: .5; cursor: default; }
-.desktop-workspace button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.desktop-workspace p { margin: 7px 0 0; font-size: 11px; line-height: 1.6; color: var(--text-muted); }
-.desktop-workspace p[role="alert"] { color: var(--danger, var(--text)); }
+/* Desktop permissions live in the composer's leading toolbar slot. */
+.desktop-workspace { position: relative; color: var(--text); }
+.desktop-permission-trigger { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.desktop-permission-trigger:hover, .desktop-permission-trigger[aria-expanded="true"] { background: var(--bg-hover); color: var(--text); }
+.desktop-permission-trigger.is-full { color: var(--accent); }
+.desktop-permission-chevron { color: var(--text-muted); font-size: 14px; }
+.desktop-permission-menu { position: fixed; z-index: 80; box-sizing: border-box; width: min(330px, calc(100vw - 64px)); max-height: min(520px, 65vh); overflow-y: auto; padding: 8px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); box-shadow: var(--shadow-lg); text-align: left; }
+.desktop-permission-heading { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px 12px; font-size: 12px; }
+.desktop-permission-heading > span { color: var(--text-muted); font-size: 11px; }
+.desktop-permission-options { display: grid; gap: 3px; }
+.desktop-permission-options button { display: flex; gap: 10px; align-items: center; width: 100%; padding: 10px; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.desktop-permission-options button:hover, .desktop-permission-options button[aria-pressed="true"] { background: var(--bg-hover); }
+.desktop-permission-check { width: 16px; color: var(--accent); flex-shrink: 0; }
+.desktop-permission-options strong { display: block; font-size: 13px; font-weight: 500; }
+.desktop-permission-options small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.desktop-permission-folder { margin: 8px 2px 0; padding: 13px 8px 5px; border-top: 1px solid var(--border); font-size: 11px; }
+.desktop-workspace-path { display: block; margin: 8px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.desktop-permission-folder > div { display: flex; gap: 8px; }
+.desktop-permission-folder button, .desktop-approval-actions button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.desktop-permission-folder button:hover, .desktop-approval-actions button:hover { background: var(--bg-hover); }
+.desktop-permission-menu p, .desktop-approval p { margin: 10px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.desktop-permission-menu button:disabled, .desktop-workspace button:disabled, .desktop-approval button:disabled { opacity: .5; cursor: default; }
+.desktop-permission-menu button:focus-visible, .desktop-workspace button:focus-visible, .desktop-approval button:focus-visible, .desktop-approval pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.desktop-approval { width: min(100%, 640px); box-sizing: border-box; margin: 12px auto 20px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); color: var(--text); }
+.desktop-approval-heading { display: flex; align-items: center; gap: 10px; }
+.desktop-approval-icon { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 10px; color: var(--accent); }
+.desktop-approval-heading strong { display: block; font-size: 14px; font-weight: 600; }
+.desktop-approval-heading div > span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 11px; }
+.desktop-approval pre { max-height: 220px; overflow: auto; margin: 14px 0 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); color: var(--text); font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.desktop-approval-actions, .desktop-approval-actions > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.desktop-approval-actions { justify-content: space-between; margin-top: 16px; }
+.desktop-approval-actions .desktop-approval-primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
+.desktop-approval-actions .desktop-approval-primary:hover { background: var(--accent-hover); }
+.desktop-permission-menu p[role="alert"], .desktop-approval p[role="alert"] { color: var(--danger); }

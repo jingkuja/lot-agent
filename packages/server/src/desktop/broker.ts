@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Tool, ToolResult } from "@lot-agent/core";
-import { localToolDefinitions, validLocalInput, type LocalToolRequest } from "@lot-agent/core/desktop";
+import { localToolsForClient, validLocalInput, type LocalToolRequest, type LocalToolCapabilities } from "@lot-agent/core/desktop";
 
 interface Pending {
   request: LocalToolRequest;
@@ -12,6 +12,7 @@ interface Session {
   conversationId: string;
   expires: number;
   claimed: boolean;
+  capabilities?: LocalToolCapabilities;
   pending?: Pending;
 }
 const failure = (): ToolResult => ({ content: "Desktop disconnected or operation cancelled. Verify local writes before repeating.", isError: true, errorKind: "unknown_outcome" });
@@ -24,11 +25,11 @@ export class DesktopToolBroker {
   private sweep() {
     for (const [key, session] of this.sessions) if (session.expires < Date.now()) this.close(key);
   }
-  create(userId: string, conversationId: string): string {
+  create(userId: string, conversationId: string, capabilities?: LocalToolCapabilities): string {
     this.sweep();
     if (this.sessions.size >= 1000 || [...this.sessions.values()].filter(s => s.userId === userId).length >= 4) throw new Error("Too many desktop sessions");
     const key = randomBytes(32).toString("hex");
-    this.sessions.set(key, { userId, conversationId, claimed: false, expires: Date.now() + 30_000 });
+    this.sessions.set(key, { userId, conversationId, capabilities, claimed: false, expires: Date.now() + 30_000 });
     return key;
   }
   private get(key: string, userId: string, conversationId: string) {
@@ -66,7 +67,7 @@ export class DesktopToolBroker {
     const session = this.get(key, userId, conversationId);
     if (!session || session.claimed) return undefined;
     session.claimed = true;
-    return localToolDefinitions.map(definition => ({
+    return localToolsForClient(session.capabilities).map(definition => ({
       ...definition,
       execConfig: { timeoutMs: 300_000 },
       retrySafe: false,

@@ -9,12 +9,12 @@
   "scripts": {
     "build": "tsup",
     "icons": "node scripts/make-icons.mjs",
-    "dev": "tsup && LOT_DESKTOP_DEV=1 electron .",
+    "dev": "tsup && node scripts/dev.mjs",
     "start": "electron .",
     "dist": "node scripts/pack.mjs",
     "dist:mac": "node scripts/pack.mjs --mac",
     "dist:win": "node scripts/pack.mjs --win nsis --x64",
-    "clean": "rm -rf dist release"
+    "clean": "node scripts/clean.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

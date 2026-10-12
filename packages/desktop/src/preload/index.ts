@@ -15,7 +15,10 @@ function subscribe<T>(channel: string) {
 
 contextBridge.exposeInMainWorld("lotDesktop", {
   platform: process.platform,
-  getLocalWorkspace: () => ipcRenderer.invoke("lot:local:state"),
+  getLocalWorkspace: (id: string | null) => ipcRenderer.invoke("lot:local:state", id),
+  bindLocalPermission: (id: string) => ipcRenderer.invoke("lot:local:bind-draft", id),
+  setLocalPermission: (id: string | null, mode: string) => ipcRenderer.invoke("lot:local:permission", id, mode),
+  respondLocalApproval: (id: string, approvalId: string, decision: string) => ipcRenderer.invoke("lot:local:approval", id, approvalId, decision),
   chooseLocalWorkspace: () => ipcRenderer.invoke("lot:local:choose"),
   disableLocalWorkspace: () => ipcRenderer.invoke("lot:local:disable"),
   prepareLocalTools: (id: string) => ipcRenderer.invoke("lot:local:prepare", id),

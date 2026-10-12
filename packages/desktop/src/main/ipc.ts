@@ -47,7 +47,10 @@ export function registerIpc(ctx: IpcContext): void {
       return listener(event, ...args);
     });
   };
-  handle("lot:local:state", () => ctx.toolHost.state());
+  handle("lot:local:state", (_event, id) => ctx.toolHost.state(id));
+  handle("lot:local:bind-draft", (_event, id) => ctx.toolHost.approvals.bindDraft(id));
+  handle("lot:local:permission", (_event, id, mode) => ctx.toolHost.approvals.setMode(id, mode));
+  handle("lot:local:approval", (_event, id, approvalId, decision) => ctx.toolHost.approvals.respond(id, approvalId, decision));
   handle("lot:local:choose", () => ctx.toolHost.choose());
   handle("lot:local:disable", () => { ctx.toolHost.reset(); return ctx.toolHost.state(); });
   handle("lot:local:prepare", (_event, id: string) => ctx.toolHost.prepare(id));

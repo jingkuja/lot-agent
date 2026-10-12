@@ -220,7 +220,23 @@ export async function startLocalServer(
       const pathname = url.pathname;
 
       // ── Loopback-only control endpoints ──────────────────────────────────
+      if (pathname.startsWith("/__lot/")) {
+        // A loopback listener alone does not stop another website from posting
+        // to it. Check Host against DNS rebinding and Origin before changing
+        // the backend; unlike CORS response headers, this blocks the mutation.
+        const authority = `${host.includes(":") ? `[${host}]` : host}:${req.socket.localPort}`;
+        const origin = `http://${authority}`;
+        if (req.headers.host !== authority || (req.headers.origin !== undefined && req.headers.origin !== origin)
+          || (req.method === "POST" && req.headers.origin !== origin)) {
+          sendJson(res, 403, { error: "Forbidden" });
+          return;
+        }
+      }
       if (pathname === "/__lot/config" && req.method === "POST") {
+        if (req.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+          sendJson(res, 415, { error: "Expected application/json" });
+          return;
+        }
         try {
           const body = JSON.parse(await readBody(req)) as { serverUrl?: string };
           if (!body.serverUrl) {

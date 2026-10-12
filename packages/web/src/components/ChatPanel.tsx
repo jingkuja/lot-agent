@@ -1,4 +1,5 @@
-import { DesktopWorkspace } from "./DesktopWorkspace.js";
+import { DesktopWorkspace, DesktopApprovalCards } from "./DesktopWorkspace.js";
+import { useDesktopWorkspace } from "../hooks/useDesktopWorkspace.js";
 import { useI18n } from "../i18n/index.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { MarketingVideoStudio } from "../modules/marketing-video/MarketingVideoStudio.js";
@@ -171,6 +172,8 @@ export function ChatPanel({
   emptyDashboard,
 }: ChatPanelProps) {
   const { t } = useI18n();
+  const desktopControl = useDesktopWorkspace(activeConversationId, agent?.id === "general");
+  const pendingApprovalId = desktopControl.state?.approvals[0]?.id;
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // While streaming, the assistant bubble only enters the list once its first
@@ -184,7 +187,7 @@ export function ChatPanel({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, awaitingResponse]);
+  }, [messages, awaitingResponse, pendingApprovalId]);
 
   // Only show regenerate on the last completed assistant message
   const lastAssistantIdx = [...messages]
@@ -217,8 +220,8 @@ export function ChatPanel({
     <>
       {isEmpty && mode === "video" && <Seedance25Hint />}
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
-      {agent?.id === "general" && <DesktopWorkspace disabled={isStreaming} />}
       <InputBox
+        toolbarStart={<DesktopWorkspace key={activeConversationId ?? "new"} disabled={isStreaming} control={desktopControl} />}
         onDraftChange={onDraftChange}
         attachment={attachment}
         onAttachmentConsumed={onAttachmentConsumed}
@@ -318,6 +321,7 @@ export function ChatPanel({
             </div>
           </div>
         )}
+        <DesktopApprovalCards control={desktopControl} />
         <div ref={messagesEndRef} />
       </div>
       <div className="input-area">{inputEl}</div>

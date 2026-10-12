@@ -17,24 +17,30 @@ try {
     import {ChatPanel} from ${JSON.stringify(resolve(root, "packages/web/src/components/ChatPanel.tsx"))};
     import {LanguageProvider} from ${JSON.stringify(resolve(root, "packages/web/src/i18n/index.tsx"))};
     import ${JSON.stringify(resolve(root, "packages/web/src/App.css"))};
-    createRoot(document.getElementById('root')).render(<LanguageProvider><main style={{maxWidth:1000,margin:'40px auto'}}><ChatPanel messages={[]} onSend={()=>{}} onStop={()=>{}} isStreaming={false} activeConversationId={null} agent={{id:'general',name:'通用助手',type:'general'}} /></main></LanguageProvider>);`);
+    function Fixture() { const [empty, setEmpty] = React.useState(false); window.setEmptyChat = setEmpty; return <LanguageProvider><main style={{maxWidth:1000,margin:'40px auto'}}><ChatPanel messages={empty ? [] : [{id:'user-1',role:'user',content:'请帮我整理工作目录。'}]} onSend={()=>{}} onStop={()=>{}} isStreaming={false} activeConversationId={'chat'} agent={{id:'general',name:'通用助手',type:'general'}} /></main></LanguageProvider>; } createRoot(document.getElementById('root')).render(<Fixture />);`);
   vite = await createServer({ configFile: false, root: temp, esbuild: { jsx: "automatic" }, resolve: { alias: { react: resolve(root, "packages/web/node_modules/react"), "react-dom": resolve(root, "packages/web/node_modules/react-dom"), "react-markdown": resolve(root, "packages/web/node_modules/react-markdown"), "remark-gfm": resolve(root, "packages/web/node_modules/remark-gfm") } }, server: { host: "127.0.0.1", port: 0, fs: { allow: [root, temp] } } });
   await vite.listen();
   browser = await chromium.launch({ headless: true, channel: "chrome" });
-  for (const [desktop, locale, theme] of [[true, "zh", "light"], [true, "en", "dark"], [false, "en", "light"]]) {
+  for (const [desktop, locale, theme, platform] of [[true, "zh", "light", "darwin"], [true, "en", "dark", "darwin"], [true, "zh", "dark", "win32"], [true, "en", "light", "win32"], [false, "en", "light", null]]) {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    await context.addInitScript(({ desktop, locale, theme }) => {
+    await context.addInitScript(({ desktop, locale, theme, platform }) => {
       localStorage.setItem("lot:language", locale);
       document.addEventListener("DOMContentLoaded", () => document.documentElement.setAttribute("data-theme", theme));
       if (!desktop) return;
-      let state = { directory: null, bashAvailable: true, activeRuns: 0 };
+      const shell = platform === "win32" ? "powershell" : "bash";
+      let state = { directory: null, shell, activeRuns: 0, permissionMode: "always", approvals: [] };
+      window.queueApproval = (kind = "shell") => { state = { ...state, approvals: [{ id: "approval-1", conversationId: "chat", name: kind === "delete" ? "desktop_delete_file" : `desktop_${shell}`, detail: kind === "delete" ? "fixture.txt\nPermanently delete file" : `${shell}\nworkspace\n${shell === "powershell" ? "Get-ChildItem" : "ls -la"}` }] }; };
+      window.setShellUnavailable = () => { state = { ...state, shell: null }; };
+      window.approvalDecisions = [];
       window.lotDesktop = {
-        platform: "darwin", appVersion: "fixture", getToken: () => null,
+        platform, appVersion: "fixture", getToken: () => null,
         getLocalWorkspace: async () => state,
+        setLocalPermission: async (_id, permissionMode) => { state = { ...state, permissionMode }; },
+        respondLocalApproval: async (id, approvalId, decision) => { window.approvalDecisions.push({ id, approvalId, decision }); state = { ...state, approvals: [] }; },
         chooseLocalWorkspace: async () => (state = { ...state, directory: "/Users/demo/Projects/local-workspace" }),
         disableLocalWorkspace: async () => (state = { ...state, directory: null }),
       };
-    }, { desktop, locale, theme });
+    }, { desktop, locale, theme, platform });
     const page = await context.newPage();
     page.setDefaultTimeout(10000);
     page.on("console", msg => { if (msg.type() === "error") console.error(msg.text()); });
@@ -48,17 +54,56 @@ try {
     });
     await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}`);
     if (desktop) {
+      const trigger = page.getByRole("button", { name: locale === "zh" ? "工具权限" : "Tool permissions", exact: true });
+      await trigger.waitFor();
+      assert.equal(await page.locator(".input-box .desktop-workspace").count(), 1);
+      await trigger.click();
       await page.getByRole("button", { name: locale === "zh" ? "选择目录" : "Choose folder", exact: true }).click();
       await page.getByText("/Users/demo/Projects/local-workspace", { exact: true }).waitFor();
-      const panel = page.locator(".desktop-workspace");
+      const panel = page.locator(".desktop-permission-menu");
       assert.equal(await panel.count(), 1);
       const box = await panel.boundingBox();
       assert.ok(box.width > 300 && box.width <= 1280);
       const css = await panel.evaluate(element => ({ color: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor }));
       assert.notEqual(css.color, css.background);
+      for (const label of locale === "zh" ? ["本次对话确认", "完全授权", "每次确认"] : ["Ask for this chat", "Full access", "Ask every time"]) {
+        const option = page.getByRole("button", { name: new RegExp(label) });
+        await option.click();
+        await page.waitForFunction(label => document.querySelector(".desktop-permission-trigger")?.textContent?.includes(label), label);
+        assert.equal(await option.getAttribute("aria-pressed"), "true");
+      }
+      await page.keyboard.press("Escape");
+      assert.equal(await panel.count(), 0);
+      await page.evaluate(() => window.queueApproval());
+      await page.getByRole("button", { name: locale === "zh" ? "允许一次" : "Allow once", exact: true }).waitFor();
+      assert.equal(await page.locator(".chat-messages .desktop-approval").count(), 1);
+      if (process.env.DESKTOP_SCREENSHOTS_DIR) await page.screenshot({ path: join(process.env.DESKTOP_SCREENSHOTS_DIR, `approval-${locale}-${theme}.png`) });
+      for (const [decision, label] of [["once", locale === "zh" ? "允许一次" : "Allow once"], ["conversation", locale === "zh" ? "本次对话允许" : "Allow for this chat"], ["deny", locale === "zh" ? "拒绝执行" : "Deny"]]) {
+        await page.evaluate(() => window.queueApproval());
+        await page.getByRole("button", { name: label, exact: true }).click();
+        await page.locator(".desktop-approval").waitFor({ state: "detached" });
+        assert.deepEqual(await page.evaluate(() => window.approvalDecisions.at(-1)), { id: "chat", approvalId: "approval-1", decision });
+      }
+      await page.evaluate(() => window.queueApproval("delete"));
+      await page.getByText(locale === "zh" ? "允许永久删除此文件？" : "Permanently delete this file?", { exact: true }).waitFor();
+      await page.getByRole("button", { name: locale === "zh" ? "拒绝执行" : "Deny", exact: true }).click();
+      await page.locator(".desktop-approval").waitFor({ state: "detached" });
+      await trigger.click();
+      assert.equal(await panel.getByText(/Git Bash/).count(), 0);
+      await page.evaluate(() => window.setShellUnavailable());
+      await page.getByText(locale === "zh" ? "系统命令环境不可用；本地文件工具仍可使用。" : "The system shell is unavailable. Local file tools are still available.", { exact: true }).waitFor();
       if (process.env.DESKTOP_SCREENSHOTS_DIR) await page.screenshot({ path: join(process.env.DESKTOP_SCREENSHOTS_DIR, `desktop-${locale}-${theme}.png`) });
       await page.getByRole("button", { name: locale === "zh" ? "停用本地工具" : "Disable local tools", exact: true }).click();
       await page.getByText(locale === "zh" ? "未启用本地工具" : "Local tools disabled", { exact: true }).waitFor();
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => window.setEmptyChat(true));
+      await page.locator(".input-area--centered").waitFor();
+      await page.setViewportSize({ width: 740, height: 620 });
+      await trigger.click();
+      const menuBox = await panel.boundingBox();
+      assert.ok(menuBox.x >= 0 && menuBox.y >= 0 && menuBox.x + menuBox.width <= 740 && menuBox.y + menuBox.height <= 620);
+      await page.mouse.click(10, 10);
+      await panel.waitFor({ state: "detached" });
     } else {
       await page.locator(".input-branding").waitFor();
       assert.equal(await page.locator(".desktop-workspace").count(), 0);
@@ -66,7 +111,7 @@ try {
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log("PASS desktop Chinese/light, English/dark, choose/disable directory, browser tool isolation");
+  console.log("PASS desktop macOS/Windows, Chinese/English, light/dark, native shell and deletion approvals, composer placement, permission modes, inline approval actions, choose/disable directory, browser tool isolation");
 } finally {
   await browser?.close();
   await vite?.close();

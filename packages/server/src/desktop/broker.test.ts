@@ -4,6 +4,17 @@ import { DesktopToolBroker } from "./broker.js";
 
 const context = { userId: "u1", conversationId: "c1", workingDirectory: "/never-execute-on-server" };
 describe("desktop capability broker", () => {
+  it("advertises only the client's native shell while keeping files available without a shell", () => {
+    const broker = new DesktopToolBroker();
+    for (const shell of ["bash", "powershell", null] as const) {
+      const key = broker.create("u1", "c1", { version: 2, shell });
+      const names = broker.claim(key, "u1", "c1")!.map(tool => tool.name);
+      expect(names).toContain("desktop_delete_file");
+      expect(names.includes("desktop_bash")).toBe(shell === "bash");
+      expect(names.includes("desktop_powershell")).toBe(shell === "powershell");
+      broker.close(key);
+    }
+  });
   it("isolates users and conversations and accepts each capability once", () => {
     const broker = new DesktopToolBroker();
     const key = broker.create("u1", "c1");

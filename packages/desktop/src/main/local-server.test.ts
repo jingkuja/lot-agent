@@ -236,6 +236,17 @@ describe("proxy", () => {
 });
 
 describe("setup flow", () => {
+  // fetch normalizes Host, so use the HTTP client to exercise rebinding.
+  const controlRequest = (pathname: string, method: string, headers: Record<string, string>, body?: string) =>
+    new Promise<number>((resolve, reject) => {
+      const request = http.request(`${base}${pathname}`, { method, headers }, response => {
+        response.resume();
+        response.on("end", () => resolve(response.statusCode ?? 0));
+      });
+      request.on("error", reject);
+      request.end(body);
+    });
+
   it("serves the setup page on / when no server is configured", async () => {
     serverUrl = null;
     const res = await fetch(`${base}/`);
@@ -253,7 +264,7 @@ describe("setup flow", () => {
     serverUrl = null;
     const res = await fetch(`${base}/__lot/config`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: base },
       body: JSON.stringify({ serverUrl: upstreamUrl }),
     });
     expect(res.status).toBe(200);
@@ -267,10 +278,49 @@ describe("setup flow", () => {
   it("rejects a config post without serverUrl", async () => {
     const res = await fetch(`${base}/__lot/config`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: base },
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects cross-origin and originless configuration writes", async () => {
+    for (const origin of ["https://untrusted.example", "null", undefined]) {
+      const response = await fetch(`${base}/__lot/config`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(origin ? { origin } : {}) },
+        body: JSON.stringify({ serverUrl: "https://untrusted.example" }),
+      });
+      expect(response.status).toBe(403);
+      expect(savedUrl).toBeNull();
+      expect(serverUrl).toBe(upstreamUrl);
+    }
+  });
+
+  it("rejects simple cross-origin form payloads and forged control hosts", async () => {
+    const simple = await fetch(`${base}/__lot/config`, {
+      method: "POST",
+      headers: { "content-type": "text/plain", origin: "https://untrusted.example" },
+      body: JSON.stringify({ serverUrl: "https://untrusted.example" }),
+    });
+    expect(simple.status).toBe(403);
+    const wrongType = await fetch(`${base}/__lot/config`, {
+      method: "POST",
+      headers: { "content-type": "text/plain", origin: base },
+      body: JSON.stringify({ serverUrl: "https://untrusted.example" }),
+    });
+    expect(wrongType.status).toBe(415);
+    const rebound = await controlRequest("/__lot/config", "POST",
+      { "content-type": "application/json", origin: base, host: "untrusted.example" },
+      JSON.stringify({ serverUrl: "https://untrusted.example" }));
+    expect(rebound).toBe(403);
+    expect(savedUrl).toBeNull();
+  });
+
+  it("only exposes control state to the loopback host and same-origin readers", async () => {
+    expect((await fetch(`${base}/__lot/state`)).status).toBe(200);
+    expect((await fetch(`${base}/__lot/state`, { headers: { origin: "https://untrusted.example" } })).status).toBe(403);
+    expect(await controlRequest("/__lot/setup", "GET", { host: "untrusted.example" })).toBe(403);
   });
 });
 
