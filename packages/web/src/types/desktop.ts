@@ -21,7 +21,18 @@ export interface DesktopDownloadEvent {
   error?: string;
 }
 
+export interface LocalWorkspaceState {
+  directory: string | null;
+  bashAvailable: boolean;
+  activeRuns: number;
+}
+
 export interface LotDesktopBridge {
+  getLocalWorkspace(): Promise<LocalWorkspaceState>;
+  chooseLocalWorkspace(): Promise<LocalWorkspaceState>;
+  disableLocalWorkspace(): Promise<LocalWorkspaceState>;
+  prepareLocalTools(conversationId: string): Promise<boolean>;
+  finishLocalTools(conversationId: string): Promise<void>;
   platform: DesktopPlatform;
   appVersion: string;
 

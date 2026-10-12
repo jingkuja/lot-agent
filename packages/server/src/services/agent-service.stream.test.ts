@@ -244,3 +244,28 @@ it("includes response language policy even with an overridden agent prompt", asy
   expect(system).toContain("Do not choose Chinese just because tool results");
   expect(calls[0].some((message) => message.role === "user" && String(message.content).includes("Tolong bantu saya"))).toBe(true);
 });
+
+
+describe("desktop local tools are request scoped", () => {
+  const script = (): ChatChunk[][] => [[
+    { type: "tool_call", toolCall: { id: "local-1", name: "desktop_read_file", arguments: { path: "demo.txt" } } },
+    { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
+  ], [{ type: "done", usage: { promptTokens: 1, completionTokens: 1 } }]];
+  it("persists local results without adding a tool to the shared registry", async () => {
+    const { fake, repo } = fakeService({ script: script() });
+    const execute = vi.fn(async () => ({ content: "from desktop" }));
+    await drain(fake.streamAgentResponse("c1", "read", "general", "u1", undefined, undefined, {
+      desktopTools: [{ name: "desktop_read_file", description: "Local read", parameters: { type: "object" }, effect: "read", execute }],
+    }));
+    expect(execute).toHaveBeenCalledOnce();
+    expect(fake.toolRegistry.get("desktop_read_file")).toBeUndefined();
+    expect(repo.saveToolResult).toHaveBeenCalledWith("c1", "local-1", "from desktop", false, undefined);
+  });
+  it("blocks hallucinated local calls from a web turn even if an extension registered one", async () => {
+    const { fake } = fakeService({ script: script() });
+    const execute = vi.fn(async () => ({ content: "must not run" }));
+    fake.toolRegistry.register({ name: "desktop_read_file", description: "accidental extension", parameters: {}, execute });
+    await drain(fake.streamAgentResponse("c1", "read", "general", "u1"));
+    expect(execute).not.toHaveBeenCalled();
+  });
+});

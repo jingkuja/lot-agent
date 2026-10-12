@@ -4,6 +4,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   normalizeServerUrl,
+  serverUrlArgument,
+  resolveServerUrl,
+  tokenMatchesServer,
   readConfig,
   writeConfig,
 } from "./config-store.js";
@@ -77,5 +80,34 @@ describe("readConfig / writeConfig", () => {
   it("returns {} on non-object JSON", () => {
     fs.writeFileSync(file, '"just a string"');
     expect(readConfig(file)).toEqual({});
+  });
+});
+
+describe("desktop server selection", () => {
+  it("launches a fresh packaged install against todoucloud without setup", () => {
+    expect(resolveServerUrl({ argv: [], config: {}, isDev: false })).toBe("https://todoucloud.com");
+    expect(resolveServerUrl({ argv: [], config: {}, isDev: true })).toBe("http://localhost:3000");
+  });
+  it("uses command-line > saved config > bundled default", () => {
+    const options = { argv: [], config: {}, isDev: false, bundledDefault: "https://bundled.example" };
+    expect(resolveServerUrl(options)).toBe("https://bundled.example");
+    expect(resolveServerUrl({ ...options, config: { serverUrl: "https://saved.example" } })).toBe("https://saved.example");
+    expect(resolveServerUrl({ ...options, config: { serverUrl: "https://saved.example" }, argv: ["app", "--server-url", "https://launch.example/"] })).toBe("https://launch.example");
+    expect(serverUrlArgument(["--server-url=https://launch.example/"])).toBe("https://launch.example");
+  });
+  it("rejects incomplete, duplicated or unsafe command arguments", () => {
+    for (const argv of [["--server-url"], ["--server-url="], ["--server-url", "--other"], ["--server-url=https://one.example", "--server-url=https://two.example"], ["--server-url=file:///tmp"], ["--server-url=https://user:password@example.com"], ["--server-url=https://example.com/path"], ["--server-url=https://example.com?token=secret"]]) {
+      expect(() => serverUrlArgument(argv)).toThrow();
+    }
+    expect(serverUrlArgument(["--some-electron-flag"])).toBeUndefined();
+  });
+  it("falls back safely for malformed saved settings", () => {
+    expect(resolveServerUrl({ argv: [], config: { serverUrl: "ftp://bad" }, isDev: false })).toBe("https://todoucloud.com");
+  });
+  it("never sends a session token to a newly selected server", () => {
+    expect(tokenMatchesServer({}, "https://todoucloud.com")).toBe(false);
+    expect(tokenMatchesServer({ serverUrl: "https://old.example" }, "https://todoucloud.com")).toBe(false);
+    expect(tokenMatchesServer({ serverUrl: "https://todoucloud.com/" }, "https://todoucloud.com")).toBe(true);
+    expect(tokenMatchesServer({ serverUrl: "https://todoucloud.com", tokenServerUrl: "https://other.example" }, "https://todoucloud.com")).toBe(false);
   });
 });

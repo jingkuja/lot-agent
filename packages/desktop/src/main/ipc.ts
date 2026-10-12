@@ -1,3 +1,4 @@
+import type { DesktopToolHost } from "./tool-host.js";
 import {
   app,
   BrowserWindow,
@@ -5,12 +6,15 @@ import {
   ipcMain,
   Notification,
   shell,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
 } from "electron";
 import type { SecureTokenStore } from "./secure-token.js";
 
 export interface IpcContext {
   getWindow: () => BrowserWindow | null;
   tokenStore: SecureTokenStore;
+  toolHost: DesktopToolHost;
   getServerUrl: () => string | null;
   setServerUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
 }
@@ -29,39 +33,60 @@ function setAttention(ctx: IpcContext, count: number): void {
  * talks to. Keep channel names in sync with `src/preload/index.ts`.
  */
 export function registerIpc(ctx: IpcContext): void {
+  // All privileged channels share the same origin/window/frame boundary,
+  // including secure-token access used to authorize local tool sessions.
+  const on = (channel: string, listener: (event: IpcMainEvent, ...args: any[]) => void) => {
+    ipcMain.on(channel, (event, ...args) => {
+      try { ctx.toolHost.assertSender(event); } catch { event.returnValue = null; return; }
+      listener(event, ...args);
+    });
+  };
+  const handle = (channel: string, listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      ctx.toolHost.assertSender(event);
+      return listener(event, ...args);
+    });
+  };
+  handle("lot:local:state", () => ctx.toolHost.state());
+  handle("lot:local:choose", () => ctx.toolHost.choose());
+  handle("lot:local:disable", () => { ctx.toolHost.reset(); return ctx.toolHost.state(); });
+  handle("lot:local:prepare", (_event, id: string) => ctx.toolHost.prepare(id));
+  handle("lot:local:finish", (_event, id: string) => ctx.toolHost.finish(id));
+
   // ── App meta ───────────────────────────────────────────────────────────────
-  ipcMain.on("lot:app-version", (event) => {
+  on("lot:app-version", (event) => {
     event.returnValue = app.getVersion();
   });
 
   // ── Token (sync read at startup; fire-and-forget writes) ───────────────────
-  ipcMain.on("lot:token:get", (event) => {
+  on("lot:token:get", (event) => {
     event.returnValue = ctx.tokenStore.get();
   });
-  ipcMain.on("lot:token:set", (_event, token: string | null) => {
+  on("lot:token:set", (_event, token: string | null) => {
+    ctx.toolHost.reset();
     ctx.tokenStore.set(typeof token === "string" ? token : null);
   });
 
   // ── Server endpoint ─────────────────────────────────────────────────────────
-  ipcMain.on("lot:server:get", (event) => {
+  on("lot:server:get", (event) => {
     event.returnValue = ctx.getServerUrl();
   });
-  ipcMain.handle("lot:server:set", (_event, url: string) =>
+  handle("lot:server:set", (_event, url: string) =>
     ctx.setServerUrl(String(url ?? ""))
   );
 
   // ── Window controls (custom frameless titlebar on Windows) ──────────────────
-  ipcMain.on("lot:win:minimize", () => ctx.getWindow()?.minimize());
-  ipcMain.on("lot:win:toggle-maximize", () => {
+  on("lot:win:minimize", () => ctx.getWindow()?.minimize());
+  on("lot:win:toggle-maximize", () => {
     const win = ctx.getWindow();
     if (!win) return;
     if (win.isMaximized()) win.unmaximize();
     else win.maximize();
   });
-  ipcMain.on("lot:win:close", () => ctx.getWindow()?.close());
+  on("lot:win:close", () => ctx.getWindow()?.close());
 
   // ── Notifications / attention ───────────────────────────────────────────────
-  ipcMain.on("lot:notify", (_event, title: string, body?: string) => {
+  on("lot:notify", (_event, title: string, body?: string) => {
     const win = ctx.getWindow();
     if (win?.isFocused()) return; // user is already looking at the app
     const notification = new Notification({
@@ -75,18 +100,18 @@ export function registerIpc(ctx: IpcContext): void {
     notification.show();
     setAttention(ctx, 1);
   });
-  ipcMain.on("lot:attention", (_event, count: number) => {
+  on("lot:attention", (_event, count: number) => {
     setAttention(ctx, Number(count) || 0);
   });
 
   // ── Native shell helpers ────────────────────────────────────────────────────
-  ipcMain.on("lot:show-in-folder", (_event, target: string) => {
+  on("lot:show-in-folder", (_event, target: string) => {
     if (typeof target === "string" && target) shell.showItemInFolder(target);
   });
-  ipcMain.on("lot:open-path", (_event, target: string) => {
+  on("lot:open-path", (_event, target: string) => {
     if (typeof target === "string" && target) void shell.openPath(target);
   });
-  ipcMain.handle("lot:show-alert", async (_event, message: string) => {
+  handle("lot:show-alert", async (_event, message: string) => {
     const win = ctx.getWindow();
     const options = {
       message: String(message),

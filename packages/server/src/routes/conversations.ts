@@ -425,9 +425,14 @@ export function createConversationRoutes(service: AgentService): Hono {
     // mid-stream — `c.req.raw.signal` aborts and `service.streamAgentResponse`'s
     // own `for await` unwinds, see agent-service.ts) unwinds through the
     // `finally` below, which is the one place that releases the lease.
+    const desktopCapability = c.req.header("X-Lot-Desktop-Capability");
+    const desktopTools = desktopCapability && conversation.agent_id === "general"
+      ? service.desktopTools?.claim(desktopCapability, userId, id) : undefined;
+    if (desktopCapability && !desktopTools) return c.json({ error: "Desktop capability unavailable" }, 403);
     const runId = randomUUID();
     const claimed = await service.db.claimConversationRun(id, runId, RUN_LEASE_STALE_MS);
     if (!claimed) {
+      if (desktopCapability) service.desktopTools.close(desktopCapability);
       return c.json({ error: RUN_CONFLICT_MESSAGE }, 409);
     }
 
@@ -478,13 +483,14 @@ export function createConversationRoutes(service: AgentService): Hono {
             userId,
             attachments,
             signal,
-            { modelId: body.modelId, knowledgeBases, runId }
+            { modelId: body.modelId, knowledgeBases, runId, ...(desktopTools ? { desktopTools } : {}) }
           )) {
             send(agentEventToSse(event));
           }
           // Release the server-side turn first, then tell the client it may
           // unlock. The title is a whole extra LLM round-trip and deliberately
           // runs after both sides agree that the conversation turn has ended.
+          if (desktopCapability) service.desktopTools.close(desktopCapability);
           await releaseLease();
           send({ type: "stream_end" });
           // Summarize + persist the conversation title (first message only) and
@@ -523,6 +529,7 @@ export function createConversationRoutes(service: AgentService): Hono {
           } catch (err) {
             console.warn("[run-lease] release failed:", err);
           }
+          if (desktopCapability) service.desktopTools.close(desktopCapability);
           clearInterval(heartbeat);
           controller.close();
         }

@@ -16,6 +16,10 @@
     "./knowledge": {
       "types": "./dist/knowledge/browser.d.ts",
       "import": "./dist/knowledge/browser.js"
+    },
+    "./desktop": {
+      "types": "./dist/desktop/protocol.d.ts",
+      "import": "./dist/desktop/protocol.js"
     }
   },
   "scripts": {

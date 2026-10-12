@@ -79,6 +79,8 @@ function devProxyPlugin(): Plugin {
         res.destroy();
       }
     });
+    // Forward renderer disconnects so Stop also aborts the remote agent run.
+    res.on("close", () => { if (!res.writableEnded) upstream.destroy(); });
     req.pipe(upstream);
   };
 

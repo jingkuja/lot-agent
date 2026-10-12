@@ -3,7 +3,7 @@ import { LanguageSelect } from "../i18n/index.js";
 import { useEffect, useRef, useState } from "react";
 import { api, setToken, type User } from "../api/client.js";
 import { encryptPassword } from "../lib/rsa.js";
-import { ServerSettingsModal } from "./ServerSettingsModal.js";
+import { LegalModal } from "./LegalModal.js";
 import { PasswordReset } from "./PasswordReset.js";
 
 interface LoginProps {
@@ -46,12 +46,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   const [sendingCode, setSendingCode] = useState<"email" | "phone" | null>(null);
   const [emailCountdown, setEmailCountdown] = useState(0);
   const [phoneCountdown, setPhoneCountdown] = useState(0);
-  // Desktop shell: server endpoint is configurable via the bridge.
-  const desktop = typeof window !== "undefined" ? window.lotDesktop : undefined;
-  const [serverModalOpen, setServerModalOpen] = useState(false);
-  const [serverUrl, setServerUrl] = useState<string | null>(() =>
-    desktop ? desktop.getServerUrl() : null
-  );
+  const [legalDialog, setLegalDialog] = useState<"terms" | "privacy" | null>(null);
 
   const resetParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const resetEmail = resetParams?.get("email") ?? "";
@@ -402,15 +397,11 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
               {mode === "login" ? t("没有账号？立即注册") : t("已有账号？返回登录")}
             </button>
           )}
-          {desktop && (
-            <button
-              type="button"
-              className="login-server-link"
-              onClick={() => setServerModalOpen(true)}
-            >
-              {t("服务器设置")}{serverUrl ? ` · ${serverUrl}` : ""}
-            </button>
-          )}
+          <div className="login-legal-links">
+            <button type="button" onClick={() => setLegalDialog("terms")}>{t("用户协议")}</button>
+            <span aria-hidden="true">·</span>
+            <button type="button" onClick={() => setLegalDialog("privacy")}>{t("隐私政策")}</button>
+          </div>
         </div>
         <footer className="login-compliance" aria-label={t("网站备案与许可信息")}>
           <a
@@ -422,15 +413,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
           <span>{t("增值电信业务经营许可证：川B2-20260779")}</span>
         </footer>
       </section>
-      {serverModalOpen && desktop && (
-        <ServerSettingsModal
-          onClose={() => {
-            setServerModalOpen(false);
-            // Refresh the displayed url after a successful save.
-            setServerUrl(desktop.getServerUrl());
-          }}
-        />
-      )}
+      {legalDialog && <LegalModal kind={legalDialog} onClose={() => setLegalDialog(null)} />}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { createDesktopToolRoutes } from "./desktop/routes.js";
 import { createVideoDraftRoutes } from "./routes/video-drafts.js";
 import { KnowledgeKeys } from "./knowledge/access/keys.js";
 import { RedisKnowledgeLimiter } from "./knowledge/access/limiter.js";
@@ -321,6 +322,7 @@ async function main() {
   app.use("/api/digital-employee/*", digitalEmployeeRateLimit);
 
   // Protected API routes
+  app.route("/api/conversations", createDesktopToolRoutes(service));
   app.route("/api/conversations", createConversationRoutes(service));
   app.route("/api/conversations", createGenerationRoutes(service));
   app.route("/api/skills", createSkillRoutes(service));

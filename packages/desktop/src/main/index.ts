@@ -1,3 +1,4 @@
+import { DesktopToolHost } from "./tool-host.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -8,8 +9,10 @@ import {
   nativeImage,
   safeStorage,
   Tray,
+  shell,
+  dialog,
 } from "electron";
-import { normalizeServerUrl, readConfig, writeConfig } from "./config-store.js";
+import { normalizeServerUrl, readConfig, writeConfig, resolveServerUrl, tokenMatchesServer } from "./config-store.js";
 import { setupDownloadManager } from "./download-manager.js";
 import { registerIpc } from "./ipc.js";
 import { probeServer, startLocalServer } from "./local-server.js";
@@ -42,7 +45,10 @@ if (!gotLock) {
     mainWindow.show();
     mainWindow.focus();
   });
-  void app.whenReady().then(main);
+  void app.whenReady().then(main).catch(error => {
+    dialog.showErrorBox("Lot Agent", error instanceof Error ? error.message : "启动失败");
+    app.quit();
+  });
 }
 
 function tokenCipher(): TokenCipher {
@@ -134,6 +140,25 @@ async function main(): Promise<void> {
     tokenCipher()
   );
 
+  const serverUrl = resolveServerUrl({
+    argv: process.argv, config, isDev,
+    bundledDefault: process.env.LOT_DESKTOP_DEFAULT_SERVER_URL,
+  });
+  if (!tokenMatchesServer(config, serverUrl)) tokenStore.set(null);
+  // Persist the effective origin so the Vite dev proxy and native tools agree.
+  // This also binds secure storage to the selected backend across restarts.
+  config = { ...config, serverUrl, tokenServerUrl: serverUrl };
+  writeConfig(configFile, config);
+
+  let rendererOrigin = "";
+  const toolHost = new DesktopToolHost({
+    getWindow: () => mainWindow,
+    getServerUrl: () => config.serverUrl!,
+    getToken: () => tokenStore.get(),
+    getRendererOrigin: () => rendererOrigin,
+  });
+  app.on("before-quit", () => toolHost.reset());
+
   const setServerUrl = async (
     raw: string
   ): Promise<{ ok: boolean; error?: string }> => {
@@ -145,15 +170,20 @@ async function main(): Promise<void> {
     }
     const probe = await probeServer(url);
     if (!probe.ok) return probe;
-    config = { ...config, serverUrl: url };
+    toolHost.reset();
+    const changed = config.serverUrl !== url;
+    if (changed) tokenStore.set(null);
+    config = { ...config, serverUrl: url, tokenServerUrl: url };
     writeConfig(configFile, config);
+    if (changed) mainWindow?.webContents.reload();
     return { ok: true };
   };
 
   registerIpc({
     getWindow: () => mainWindow,
     tokenStore,
-    getServerUrl: () => config.serverUrl ?? null,
+    toolHost,
+    getServerUrl: () => config.serverUrl!,
     setServerUrl,
   });
 
@@ -169,7 +199,7 @@ async function main(): Promise<void> {
       : path.resolve(moduleDir, "../../../web/dist");
     const server = await startLocalServer({
       webDistDir,
-      getServerUrl: () => config.serverUrl ?? null,
+      getServerUrl: () => config.serverUrl!,
       onServerUrlChange: setServerUrl,
     });
     serverPort = server.port;
@@ -221,7 +251,28 @@ async function main(): Promise<void> {
   });
 
   const loadUrl = isDev ? DEV_SERVER_URL : `http://127.0.0.1:${serverPort}/`;
-  console.log(`[lot-agent] loading ${loadUrl} (server: ${config.serverUrl ?? "未配置"})`);
+  console.log(`[lot-agent] loading ${loadUrl} (server: ${config.serverUrl})`);
+  rendererOrigin = new URL(loadUrl).origin;
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    callback({ requestHeaders: toolHost.attachHeader(details.url, details.webContentsId ?? -1, details.method, details.requestHeaders) });
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (new URL(url).origin !== rendererOrigin) event.preventDefault();
+  });
+  mainWindow.webContents.on("will-redirect", (event, url) => {
+    if (new URL(url).origin !== rendererOrigin) event.preventDefault();
+  });
+  mainWindow.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
+    if (mainFrame && !inPlace) toolHost.reset();
+  });
+  mainWindow.webContents.on("render-process-gone", () => toolHost.reset());
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const target = new URL(url);
+    if (target.origin === rendererOrigin && target.pathname.startsWith("/static/")) {
+      mainWindow?.webContents.downloadURL(url);
+    } else if (/^https?:/.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
   await mainWindow.loadURL(loadUrl);
 
   setupTray();

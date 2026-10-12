@@ -15,6 +15,11 @@ import { PptArtifactCard } from "./PptArtifactCard.js";
 import { parsePptArtifact, parsePptApproval } from "@lot-agent/core/presentation";
 import { parseDownloadArtifact } from "../lib/download-artifact.js";
 
+const localToolLabels: Record<string, string> = {
+  desktop_list_files: "本地目录列表", desktop_read_file: "读取本地文件",
+  desktop_write_file: "新建本地文件", desktop_edit_file: "编辑本地文件", desktop_bash: "本地 Bash",
+};
+
 interface MessageBubbleProps {
   message: DisplayMessage;
   onRegenerate?: () => void;
@@ -148,7 +153,7 @@ export function MessageBubble({
       <div className="message-wrapper message-tool">
         <div className="message-wrapper-inner">
           <CollapsibleToolCard
-            title={message.toolResult?.name ?? "tool"}
+            title={t(localToolLabels[message.toolResult?.name ?? ""] ?? message.toolResult?.name ?? "tool")}
             type="result"
             isError={message.toolResult?.isError}
             defaultCollapsed={!!message.dbId}
@@ -258,7 +263,7 @@ export function MessageBubble({
               return (
                 <CollapsibleToolCard
                   key={i}
-                  title={tc.name}
+                  title={t(localToolLabels[tc.name] ?? tc.name)}
                   type="call"
                   defaultCollapsed={!!message.dbId}
                 >
@@ -276,7 +281,7 @@ export function MessageBubble({
           <div className="tool-running" role="status">
             <TypingDots />
             <span className="tool-running-label">
-              {t("正在执行工具")}{message.toolCalls![message.toolCalls!.length - 1].name}…
+              {t("正在执行工具")}{t(localToolLabels[message.toolCalls![message.toolCalls!.length - 1].name] ?? message.toolCalls![message.toolCalls!.length - 1].name)}…
             </span>
           </div>
         )}

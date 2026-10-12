@@ -11,9 +11,9 @@
     "icons": "node scripts/make-icons.mjs",
     "dev": "tsup && LOT_DESKTOP_DEV=1 electron .",
     "start": "electron .",
-    "dist": "pnpm run build && electron-builder",
-    "dist:mac": "pnpm run build && electron-builder --mac",
-    "dist:win": "pnpm run build && electron-builder --win nsis --x64",
+    "dist": "node scripts/pack.mjs",
+    "dist:mac": "node scripts/pack.mjs --mac",
+    "dist:win": "node scripts/pack.mjs --win nsis --x64",
     "clean": "rm -rf dist release"
   },
   "devDependencies": {

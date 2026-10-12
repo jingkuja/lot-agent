@@ -21,6 +21,7 @@ let base: string;
 /** Mutable config the loopback server reads on every request. */
 let serverUrl: string | null;
 let savedUrl: string | null;
+let cancelledUpstream = false;
 
 function upstreamHandler(
   req: http.IncomingMessage,
@@ -49,9 +50,16 @@ function upstreamHandler(
       res.writeHead(200, {
         "content-type": req.headers["content-type"] ?? "application/octet-stream",
         "x-echo-authorization": String(req.headers.authorization ?? ""),
+        "x-echo-desktop-capability": String(req.headers["x-lot-desktop-capability"] ?? ""),
       });
       res.end(Buffer.concat(chunks));
     });
+    return;
+  }
+  if (req.url === "/api/cancellable") {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write("data: ready\n\n");
+    res.on("close", () => { cancelledUpstream = true; });
     return;
   }
   if (req.url === "/api/stream") {
@@ -277,5 +285,25 @@ describe("knowledge forwarding", () => {
     expect(ranged.status).toBe(206); expect(ranged.headers.get("content-range")).toBe("bytes 1-3/5"); expect(await ranged.text()).toBe("bcd");
     const preview = await fetch(`${base}/api/rag/preview/fixture?token=synthetic-ticket`);
     expect(await preview.json()).toEqual({ path: "/api/rag/preview/fixture?token=synthetic-ticket" });
+  });
+});
+
+
+describe("desktop agent transport", () => {
+  it("forwards the main-process capability header", async () => {
+    const response = await fetch(`${base}/api/echo`, { method: "POST", headers: { "X-Lot-Desktop-Capability": "test-capability" }, body: "test" });
+    expect(response.headers.get("x-echo-desktop-capability")).toBe("test-capability");
+    await response.text();
+  });
+  it("aborts the upstream SSE connection when the renderer stops", async () => {
+    cancelledUpstream = false;
+    const controller = new AbortController();
+    const response = await fetch(`${base}/api/cancellable`, { signal: controller.signal });
+    const reader = response.body!.getReader();
+    await reader.read();
+    controller.abort();
+    await reader.cancel().catch(() => {});
+    for (let i = 0; i < 50 && !cancelledUpstream; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    expect(cancelledUpstream).toBe(true);
   });
 });

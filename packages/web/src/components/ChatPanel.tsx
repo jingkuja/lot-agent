@@ -1,3 +1,4 @@
+import { DesktopWorkspace } from "./DesktopWorkspace.js";
 import { useI18n } from "../i18n/index.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { MarketingVideoStudio } from "../modules/marketing-video/MarketingVideoStudio.js";
@@ -216,6 +217,7 @@ export function ChatPanel({
     <>
       {isEmpty && mode === "video" && <Seedance25Hint />}
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
+      {agent?.id === "general" && <DesktopWorkspace disabled={isStreaming} />}
       <InputBox
         onDraftChange={onDraftChange}
         attachment={attachment}

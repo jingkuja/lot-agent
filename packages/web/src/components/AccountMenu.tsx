@@ -2,6 +2,7 @@ import { useI18n } from "../i18n/index.js";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type ManagedUpload, type User } from "../api/client.js";
+import { LegalModal } from "./LegalModal.js";
 import { RechargeModal } from "./RechargeModal.js";
 import { RechargeHistoryModal } from "./RechargeHistoryModal.js";
 
@@ -117,9 +118,9 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
                 <span aria-hidden>↪</span>{t("退出账号")}</button>
             </div>
             <div className="account-popover-legal">
-              <button type="button" onClick={() => openDialog("privacy")}>{t("隐私权政策")}</button>
+              <button type="button" onClick={() => openDialog("privacy")}>{t("隐私政策")}</button>
               <span aria-hidden>·</span>
-              <button type="button" onClick={() => openDialog("terms")}>{t("服务协议")}</button>
+              <button type="button" onClick={() => openDialog("terms")}>{t("用户协议")}</button>
             </div>
           </div>
         )}
@@ -329,74 +330,6 @@ function FileManagerModal({ onClose }: { onClose: () => void }) {
         </div>
       </section>
     </div>
-  );
-}
-
-function LegalModal({ kind, onClose }: { kind: "privacy" | "terms"; onClose: () => void }) {
-  const { t } = useI18n();
-  const privacy = kind === "privacy";
-  return (
-    <div className="account-dialog-overlay" onClick={onClose}>
-      <section className="account-dialog legal-dialog" role="dialog" aria-modal="true" aria-labelledby={`${kind}-title`} onClick={(event) => event.stopPropagation()}>
-        <header className="account-dialog-head">
-          <span><h2 id={`${kind}-title`}>{privacy ? t("隐私权政策") : t("服务协议")}</h2><p>{t("更新日期：2026年8月18日")}</p></span>
-          <button type="button" onClick={onClose} aria-label={t("关闭")}>×</button>
-        </header>
-        <article className="legal-content">
-          {privacy ? <PrivacyPolicy /> : <ServiceTerms />}
-        </article>
-        <footer className="legal-dialog-footer"><button type="button" onClick={onClose}>{t("我知道了")}</button></footer>
-      </section>
-    </div>
-  );
-}
-
-function PrivacyPolicy() {
-  const { t } = useI18n();
-  return (
-    <>
-      <p>{t("灵渠claw重视你的隐私。本政策说明我们在提供AI对话、文件处理、知识库及数字员工服务时，如何处理与你有关的信息。")}</p>
-      <h3>{t("一、我们处理的信息")}</h3>
-      <h4>{t("1. 文字输入与对话")}</h4>
-      <p>{t("你的文字输入仅用于完成当前请求、提供连续对话及展示账户内的历史记录。我们不会将文字输入用于模型训练、广告投放、营销、出售或与服务无关的数据分享。为实现历史会话功能，对话内容会保存在你的账户空间，直至你删除相应会话。")}</p>
-      <h4>{t("2. 用户上传的文件")}</h4>
-      <p>{t("你主动上传的图片、文档、音视频及其他文件默认持久化保存，用于后续会话引用和文件处理。你可以在“文件管理”中随时查看并永久删除；删除后，相关历史会话中的文件链接可能失效。")}</p>
-      <h4>{t("3. 有限度的用户画像")}</h4>
-      <p>{t("为改善交互体验，我们可能在最小必要范围内处理功能偏好、常用能力和交互习惯等信息。此类信息仅用于产品内的体验优化和个性化，不用于广告、营销、用户交易、对外数据共享或任何与服务无关的用途。")}</p>
-      <h3>{t("二、AI推理与必要的数据传输")}</h3>
-      <p>{t("为生成回复，你提交的必要内容会发送至灵渠AI及你所配置的模型服务进行即时推理。相关服务对数据的处理还受其自身规则约束。我们不会向无关第三方出售或提供你的信息，但法律法规另有要求的除外。")}</p>
-      <h3>{t("三、保存、删除与安全")}</h3>
-      <p>{t("我们按照实现服务所需的最短期限保存信息，并采取访问控制、传输保护和账号隔离等合理措施。你可以删除上传文件及会话记录；如法律要求保留安全日志或交易记录，我们会在法定期限内保存并限制用途。")}</p>
-      <h3>{t("四、你的权利")}</h3>
-      <p>{t("你有权访问、更正或删除与你有关的信息，并可停止使用服务。涉及其他个人信息的文件，应确保已取得合法授权。请勿上传国家秘密、违法内容或超出必要范围的敏感个人信息。")}</p>
-      <h3>{t("五、政策更新")}</h3>
-      <p>{t("服务或法律要求发生变化时，我们可能更新本政策。重大变化会通过产品内提示等合理方式告知你。")}</p>
-    </>
-  );
-}
-
-function ServiceTerms() {
-  const { t } = useI18n();
-  return (
-    <>
-      <p>{t("欢迎使用灵渠claw。登录、访问或使用本服务，即表示你已阅读并同意本协议。")}</p>
-      <h3>{t("一、服务基础与配置")}</h3>
-      <p>{t("灵渠claw依托灵渠AI提供AI推理服务，所有模型调用统一使用由平台管理的订阅 Key。用户无需选择或提供个人 API Key；可用模型、订阅额度和推理能力以平台配置为准。因额度不足、模型下线或上游服务异常导致的功能不可用，不视为灵渠claw对服务能力的额外承诺。")}</p>
-      <h3>{t("二、账号范围")}</h3>
-      <p>{t("灵渠claw内的服务、配置、文件、知识库、用量及权益仅限当前登录账号使用。其他账号不能继承、共享或自动获得当前灵渠AI账号已有的服务与权益。你应妥善保管账号凭证，并对账号下的操作负责。")}</p>
-      <h3>{t("三、知识库的额度使用")}</h3>
-      <p>{t("灵渠AI知识库按向量模型的标准定价收费。涉及图片和 PDF 扫描件的处理时，将使用多模态模型 DeepSeek V4.1 Flash，相关费用按实际使用的 Token 数量结算。")}</p>
-      <h3>{t("四、合理使用")}</h3>
-      <p>{t("你不得利用服务生成、上传或传播违法侵权内容，不得绕过安全限制、干扰系统运行、盗用他人账号或实施其他可能损害平台及第三方权益的行为。你应对输入内容及AI输出的最终使用承担责任。")}</p>
-      <h3>{t("五、AI输出说明")}</h3>
-      <p>{t("AI输出可能存在错误、遗漏或时效性限制，仅供辅助参考。涉及医疗、法律、金融、安全或其他重要决策时，应由具备资质的专业人员独立审核，不应将AI输出作为唯一依据。")}</p>
-      <h3>{t("六、知识产权与数据")}</h3>
-      <p>{t("你保留对合法上传内容的相应权利，并授权服务在完成请求所必需的范围内处理这些内容。你应确保上传内容不侵犯他人的知识产权、隐私权或其他合法权益。")}</p>
-      <h3>{t("七、服务变更与中断")}</h3>
-      <p>{t("我们可能因维护、升级、安全风险、法律要求或上游服务变化调整部分功能。我们会尽合理努力保障服务稳定，但不对不可抗力、网络故障或第三方服务异常造成的中断作绝对可用性保证。")}</p>
-      <h3>{t("八、协议更新")}</h3>
-      <p>{t("本协议可能随服务变化进行更新。更新后的协议公布后生效；如你不同意更新内容，应停止使用相关服务。")}</p>
-    </>
   );
 }
 

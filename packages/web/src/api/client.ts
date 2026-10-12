@@ -490,7 +490,11 @@ export const api = {
     knowledgeSourceTypes?: KnowledgeSourceType[]
   ): AbortController => {
     (async () => {
+      let localPrepared = false;
       try {
+        controller.signal.throwIfAborted();
+        localPrepared = await window.lotDesktop?.prepareLocalTools(conversationId) ?? false;
+        controller.signal.throwIfAborted();
         const res = await fetch(
           `${BASE}/conversations/${conversationId}/messages`,
           {
@@ -547,7 +551,13 @@ export const api = {
               }
               // Awaited so the handler can pace rendering (e.g. hold the
               // "tool executing" state briefly) while preserving event order.
-              if (event?.type === "stream_end") streamEnded = true;
+              if (event?.type === "stream_end") {
+                streamEnded = true;
+                if (localPrepared) {
+                  await window.lotDesktop?.finishLocalTools(conversationId).catch(() => {});
+                  localPrepared = false;
+                }
+              }
               if (event) await onEvent(event);
             }
           }
@@ -560,6 +570,8 @@ export const api = {
             message: error instanceof Error ? error.message : String(error),
           });
         }
+      } finally {
+        if (localPrepared) await window.lotDesktop?.finishLocalTools(conversationId).catch(() => {});
       }
     })();
 

@@ -56,7 +56,7 @@ Hono API：鉴权、参数校验、限流、用户归属
 | [packages/core/src](../packages/core/src) | Agent 引擎、模型和工具接口、技能、上下文、记忆抽象、通用提供器。保持无 `pg` / `ioredis` 依赖；通过接口注入基础设施。 |
 | [packages/server/src](../packages/server/src) | API、依赖组装、数据库、队列、计费、业务服务和文件生成。运行 API 与两个 Worker 入口。 |
 | [packages/web/src](../packages/web/src) | 浏览器工作台、交互卡片、知识管理和数字员工 UI；不持有网关内部密钥。 |
-| [packages/desktop/src](../packages/desktop/src) | Electron 主进程、preload、本地静态与反向代理、下载、通知、凭证存储。业务界面复用 Web。 |
+| [packages/desktop/src](../packages/desktop/src) | Electron 主进程、preload、本地静态与反向代理、下载、通知、凭证存储、本地工作目录授权与本机工具执行。业务界面复用 Web。 |
 | [packages/miniprogram/miniprogram](../packages/miniprogram/miniprogram) | 微信原生页面、登录、生成、轮询、作品分享与保存。共用服务端业务。 |
 | [skills](../skills) | 产品运行时加载的 Markdown 技能，不是本次 Coding Agent 的开发任务文档。 |
 | [config](../config) | 非秘密配置、模型目录、Agent 参数与 MCP 配置。环境变量覆盖行为看对应 loader，不假定所有模块都合并 `local.json`。 |
@@ -66,6 +66,8 @@ Hono API：鉴权、参数校验、限流、用户归属
 ### 4.1 登录、模型与计费
 
 `App.tsx / 小程序 session.ts → routes/auth.ts → tokenhub/client.ts → users + sessions`。
+
+Web 与桌面登录页 `web/components/Login.tsx` 在登录前提供“用户协议 / 隐私政策”，与账号菜单共用 `web/components/LegalModal.tsx` 的现有正文。
 
 密码登录经 RSA 公钥加密后发送，服务端解密并向网关认证；另外有 Token 登录、手机登录、微信登录和绑定流程。非 DEBUG 的服务默认启用托管 New API 凭证，所需配置在 `AgentService` 构造函数校验，凭证加密实现见 `auth/secret-box.ts`。
 
@@ -164,7 +166,8 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 其他客户端入口：
 
-- 桌面：`packages/desktop/src/main/index.ts` 启动；`main/local-server.ts` 静态与代理；`main/ipc.ts` 与 `preload/index.ts` 定义桥接；`main/secure-token.ts` 存储凭证。
+- 桌面本地工具：`core/desktop/protocol.ts` 为共享协议（`@lot-agent/core/desktop`）；`web/components/DesktopWorkspace.tsx` 为目录授权入口；`server/desktop/routes.ts` / `broker.ts` 校验归属和单次 capability，在通用助手当前请求中注入工具代理；`packages/desktop/src/main/tool-host.ts` 持有授权、轮询并取消任务，`local-tools.ts` 执行 Bash 和本地文件读写。普通 Web / 小程序不获本机执行桥接，部署服务器不执行宿主命令。限制、原生确认与多实例路由要求见 [桌面端](desktop.md)。
+- 桌面：`packages/desktop/scripts/pack.mjs` 统一重建 Core / Web / Electron 后打包，可用 `--server-url` 指定默认后端（默认 `https://todoucloud.com`）；`packages/desktop/src/main/config-store.ts` 解析启动地址参数及凭证归属；`packages/desktop/src/main/index.ts` 启动；`main/local-server.ts` 静态与代理；`main/ipc.ts` 与 `preload/index.ts` 定义桥接；`main/secure-token.ts` 存储凭证。
 - 小程序：`packages/miniprogram/miniprogram/app.json` 页面 / 导航；`services/api.ts` 请求；`services/session.ts` 登录；`services/generate.ts`、`services/video.ts` 创作；`pages/studio/`、`pages/video/`、`pages/gallery/`、`pages/mine/` 为主入口。
 
 ## 6. 数据与接口定位
@@ -235,6 +238,7 @@ API 默认 3000；Vite 默认 5173，代理 `/api` 和 `/static` 到 API。需�
 # 按实际改动选择测试范围；新纯逻辑按仓库约定先写 Vitest 测试
 pnpm exec vitest run packages/core/src/tools/registry.test.ts
 pnpm test:knowledge
+pnpm check:desktop-tools:ui  # 桌面工作目录界面、中英文主题与 Web 入口隔离（模拟桥接）
 pnpm check:agent-navigation:ui # 需 Playwright 和 Chrome；模拟接口检查 Agent 切换、确认与历史隔离
 pnpm check:marketing-video:ui # 模拟接口验证九步创作、素材、提交、任务恢复、中英文和暗色界面
 pnpm check:digital-twin:ui    # 需 Playwright（可用 PLAYWRIGHT_MODULE 指定路径）和 Chrome；模拟设备及 HTTP 数据，无付费调用

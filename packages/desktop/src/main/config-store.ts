@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 export interface DesktopConfig {
-  /** Remote Lot Agent server origin, e.g. `http://192.168.1.10` or
-   * `https://agent.example.com`. Undefined until the user completes the
-   * first-run server setup. */
+  /** Explicit or previously selected remote server origin. */
   serverUrl?: string;
+  /** Server to which the encrypted session token belongs. */
+  tokenServerUrl?: string;
   /** Close button hides to the tray instead of quitting. */
   minimizeToTray?: boolean;
 }
@@ -34,7 +34,10 @@ export function normalizeServerUrl(input: string): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("仅支持 http/https 协议");
   }
-  return url;
+  if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/") {
+    throw new Error("服务器地址仅支持域名和端口，不能包含账号、路径、查询参数或片段");
+  }
+  return parsed.origin;
 }
 
 export function readConfig(file: string): DesktopConfig {
@@ -50,4 +53,42 @@ export function readConfig(file: string): DesktopConfig {
 export function writeConfig(file: string, config: DesktopConfig): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(config, null, 2), "utf8");
+}
+
+
+export const DEFAULT_SERVER_URL = "https://todoucloud.com";
+
+/** Both --server-url=https://host and --server-url https://host are accepted. */
+export function serverUrlArgument(argv: readonly string[]): string | undefined {
+  let result: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg !== "--server-url" && !arg.startsWith("--server-url=")) continue;
+    if (result !== undefined) throw new Error("--server-url 只能指定一次");
+    const value = arg === "--server-url" ? argv[++i] : arg.slice("--server-url=".length);
+    if (!value || value.startsWith("--")) throw new Error("--server-url 需要服务器地址");
+    result = normalizeServerUrl(value);
+  }
+  return result;
+}
+
+export function resolveServerUrl(options: {
+  argv: readonly string[];
+  config: DesktopConfig;
+  isDev: boolean;
+  bundledDefault?: string;
+}): string {
+  const commandLine = serverUrlArgument(options.argv);
+  if (commandLine) return commandLine;
+  if (typeof options.config.serverUrl === "string") {
+    try { return normalizeServerUrl(options.config.serverUrl); } catch { /* Ignore corrupt legacy config. */ }
+  }
+  return normalizeServerUrl(options.isDev ? "http://localhost:3000" : options.bundledDefault ?? DEFAULT_SERVER_URL);
+}
+
+/** Legacy tokens are preserved only when their saved server matches. */
+export function tokenMatchesServer(config: DesktopConfig, serverUrl: string): boolean {
+  const previous = config.tokenServerUrl ?? config.serverUrl;
+  if (typeof previous !== "string") return false;
+  try { return normalizeServerUrl(previous) === serverUrl; } catch { return false; }
 }
