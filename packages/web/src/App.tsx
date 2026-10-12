@@ -5,6 +5,7 @@ import { ProductShell } from "./shell/ProductShell.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
 import { Titlebar } from "./components/Titlebar.js";
 import { DownloadToast } from "./components/DownloadToast.js";
+import { DesktopDownload } from "./components/DesktopDownload.js";
 import { api, getToken, setToken, clearToken, type User } from "./api/client.js";
 import { readTokenFromUrl, stripTokenFromUrl } from "./lib/url-token.js";
 import "./App.css";
@@ -14,7 +15,7 @@ type View = "loading" | "login" | "ready";
 const AUTO_LOGIN_FAIL = "自动登录失败，请手动登录";
 
 export default function App() {
-  const { t } = useI18n();
+  const { t, enabled: international } = useI18n();
   const [view, setView] = useState<View>("loading");
   const [user, setUser] = useState<User | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -102,10 +103,13 @@ export default function App() {
     content = <Login onLogin={handleLogin} initialError={loginError} />;
   }
 
+  const showDesktopDownload = view === "ready" && !international && !window.lotDesktop;
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell${showDesktopDownload ? " has-desktop-download" : ""}`}>
       <Titlebar />
       {content}
+      {showDesktopDownload && <DesktopDownload />}
       <ThemeToggle />
       <DownloadToast />
     </div>

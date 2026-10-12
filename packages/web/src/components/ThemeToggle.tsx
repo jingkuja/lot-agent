@@ -1,5 +1,5 @@
 import { useI18n } from "../i18n/index.js";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTheme } from "../hooks/useTheme.js";
 import type { Theme } from "../lib/theme.js";
 
@@ -26,7 +26,7 @@ function loadPos(): Pos | null {
     const raw = localStorage.getItem(POS_KEY);
     if (!raw) return null;
     const p = JSON.parse(raw);
-    if (typeof p?.left === "number" && typeof p?.top === "number") return p;
+    if (Number.isFinite(p?.left) && Number.isFinite(p?.top)) return p;
   } catch {
     /* ignore malformed value */
   }
@@ -58,6 +58,18 @@ export function ThemeToggle() {
   // doesn't open the menu.
   const draggedRef = useRef(false);
 
+  // Saved coordinates can belong to a larger window or another display.
+  // Recover the default top-right anchor before painting an off-screen button.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    if (rect.left < EDGE_MARGIN || rect.top < EDGE_MARGIN ||
+      rect.right > window.innerWidth - EDGE_MARGIN || rect.bottom > window.innerHeight - EDGE_MARGIN) {
+      setPos(null);
+    }
+  }, []);
+
   // Close the menu on outside click or Escape.
   useEffect(() => {
     if (!open) return;
@@ -77,9 +89,9 @@ export function ThemeToggle() {
 
   // Persist the dragged position.
   useEffect(() => {
-    if (!pos) return;
     try {
-      localStorage.setItem(POS_KEY, JSON.stringify(pos));
+      if (pos) localStorage.setItem(POS_KEY, JSON.stringify(pos));
+      else localStorage.removeItem(POS_KEY);
     } catch {
       /* ignore quota / disabled storage */
     }

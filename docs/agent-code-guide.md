@@ -166,6 +166,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 其他客户端入口：
 
+- Web 桌面版下载：`App.tsx` / `components/DesktopDownload.tsx` 在登录后的右上角显示三平台下载弹窗，链接指向当前域名根路径的 `linquclaw-arm64.dmg`、`linquclaw.dmg`、`linquclaw.exe`；复用 `/api/public/product` 的 `globle` 标记，`globle > 0` 或 Electron 环境隐藏入口。
 - 桌面本地工具：`core/desktop/protocol.ts` 为共享协议（`@lot-agent/core/desktop`）；`web/components/DesktopWorkspace.tsx` 为目录授权入口；`server/desktop/routes.ts` / `broker.ts` 校验归属和单次 capability，在通用助手当前请求中注入工具代理；`packages/desktop/src/main/tool-host.ts` 持有授权、轮询并取消任务，`local-tools.ts` 执行 Bash 和本地文件读写。普通 Web / 小程序不获本机执行桥接，部署服务器不执行宿主命令。限制、原生确认与多实例路由要求见 [桌面端](desktop.md)。
 - 桌面：`packages/desktop/scripts/pack.mjs` 统一重建 Core / Web / Electron 后打包，可用 `--server-url` 指定默认后端（默认 `https://todoucloud.com`）；`packages/desktop/src/main/config-store.ts` 解析启动地址参数及凭证归属；`packages/desktop/src/main/index.ts` 启动；`main/local-server.ts` 静态与代理；`main/ipc.ts` 与 `preload/index.ts` 定义桥接；`main/secure-token.ts` 存储凭证。
 - 小程序：`packages/miniprogram/miniprogram/app.json` 页面 / 导航；`services/api.ts` 请求；`services/session.ts` 登录；`services/generate.ts`、`services/video.ts` 创作；`pages/studio/`、`pages/video/`、`pages/gallery/`、`pages/mine/` 为主入口。

@@ -1,5 +1,7 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
+  "桌面版下载": {"en": "Download desktop app", "id": "Unduh aplikasi desktop"},
+  "选择适合你电脑的版本": {"en": "Choose the version for your computer", "id": "Pilih versi untuk komputer Anda"},
   "本地工作目录": {"en": "Local workspace", "id": "Direktori lokal"},
   "未启用本地工具": {"en": "Local tools disabled", "id": "Alat lokal dinonaktifkan"},
   "更换目录": {"en": "Change folder", "id": "Ganti folder"},
