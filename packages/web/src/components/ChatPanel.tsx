@@ -1,4 +1,4 @@
-import { DesktopWorkspace, DesktopApprovalCards } from "./DesktopWorkspace.js";
+import { DesktopWorkspace, DesktopWorkspaceBar, DesktopApprovalCards } from "./DesktopWorkspace.js";
 import { useDesktopWorkspace } from "../hooks/useDesktopWorkspace.js";
 import { useI18n } from "../i18n/index.js";
 import { useEffect, useId, useRef, useState } from "react";
@@ -220,6 +220,7 @@ export function ChatPanel({
     <>
       {isEmpty && mode === "video" && <Seedance25Hint />}
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
+      <DesktopWorkspaceBar disabled={isStreaming} control={desktopControl} />
       <InputBox
         toolbarStart={<DesktopWorkspace key={activeConversationId ?? "new"} disabled={isStreaming} control={desktopControl} />}
         onDraftChange={onDraftChange}

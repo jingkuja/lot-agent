@@ -32,12 +32,14 @@ try {
       window.queueApproval = (kind = "shell") => { state = { ...state, approvals: [{ id: "approval-1", conversationId: "chat", name: kind === "delete" ? "desktop_delete_file" : `desktop_${shell}`, detail: kind === "delete" ? "fixture.txt\nPermanently delete file" : `${shell}\nworkspace\n${shell === "powershell" ? "Get-ChildItem" : "ls -la"}` }] }; };
       window.setShellUnavailable = () => { state = { ...state, shell: null }; };
       window.approvalDecisions = [];
+      window.chooseCount = 0;
+      window.setLocalRuns = activeRuns => { state = { ...state, activeRuns }; };
       window.lotDesktop = {
         platform, appVersion: "fixture", getToken: () => null,
         getLocalWorkspace: async () => state,
         setLocalPermission: async (_id, permissionMode) => { state = { ...state, permissionMode }; },
         respondLocalApproval: async (id, approvalId, decision) => { window.approvalDecisions.push({ id, approvalId, decision }); state = { ...state, approvals: [] }; },
-        chooseLocalWorkspace: async () => (state = { ...state, directory: "/Users/demo/Projects/local-workspace" }),
+        chooseLocalWorkspace: async () => { window.chooseCount++; return (state = { ...state, directory: "/Users/demo/Projects/local-workspace" + (window.chooseCount > 1 ? "/new-workspace" : "") }); },
         disableLocalWorkspace: async () => (state = { ...state, directory: null }),
       };
     }, { desktop, locale, theme, platform });
@@ -57,10 +59,24 @@ try {
       const trigger = page.getByRole("button", { name: locale === "zh" ? "工具权限" : "Tool permissions", exact: true });
       await trigger.waitFor();
       assert.equal(await page.locator(".input-box .desktop-workspace").count(), 1);
+      const bar = page.locator(".desktop-workspace-bar");
+      await bar.getByText(locale === "zh" ? "未选择目录" : "No folder selected", { exact: true }).waitFor();
+      const barBox = await bar.boundingBox();
+      const inputBox = await page.locator(".input-box").boundingBox();
+      assert.ok(barBox.y + barBox.height <= inputBox.y);
+      if (process.env.DESKTOP_SCREENSHOTS_DIR) await page.screenshot({ path: join(process.env.DESKTOP_SCREENSHOTS_DIR, `workspace-empty-${locale}-${theme}.png`) });
+      await bar.getByRole("button", { name: locale === "zh" ? "选择目录" : "Choose folder", exact: true }).click();
+      await bar.getByText("/Users/demo/Projects/local-workspace", { exact: true }).waitFor();
       await trigger.click();
-      await page.getByRole("button", { name: locale === "zh" ? "选择目录" : "Choose folder", exact: true }).click();
-      await page.getByText("/Users/demo/Projects/local-workspace", { exact: true }).waitFor();
       const panel = page.locator(".desktop-permission-menu");
+      await panel.getByText("/Users/demo/Projects/local-workspace", { exact: true }).waitFor();
+      await panel.getByRole("button", { name: locale === "zh" ? "更换目录" : "Change folder", exact: true }).click();
+      await bar.getByText("/Users/demo/Projects/local-workspace/new-workspace", { exact: true }).waitFor();
+      await page.evaluate(() => window.setLocalRuns(1));
+      await page.waitForFunction(() => document.querySelector(".desktop-workspace-bar button")?.disabled);
+      assert.equal(await panel.getByRole("button", { name: locale === "zh" ? "更换目录" : "Change folder", exact: true }).isDisabled(), true);
+      await page.evaluate(() => window.setLocalRuns(0));
+      await page.waitForFunction(() => !document.querySelector(".desktop-workspace-bar button")?.disabled);
       assert.equal(await panel.count(), 1);
       const box = await panel.boundingBox();
       assert.ok(box.width > 300 && box.width <= 1280);
@@ -74,6 +90,7 @@ try {
       }
       await page.keyboard.press("Escape");
       assert.equal(await panel.count(), 0);
+      if (process.env.DESKTOP_SCREENSHOTS_DIR) await page.screenshot({ path: join(process.env.DESKTOP_SCREENSHOTS_DIR, `workspace-selected-${locale}-${theme}.png`) });
       await page.evaluate(() => window.queueApproval());
       await page.getByRole("button", { name: locale === "zh" ? "允许一次" : "Allow once", exact: true }).waitFor();
       assert.equal(await page.locator(".chat-messages .desktop-approval").count(), 1);
@@ -95,9 +112,11 @@ try {
       if (process.env.DESKTOP_SCREENSHOTS_DIR) await page.screenshot({ path: join(process.env.DESKTOP_SCREENSHOTS_DIR, `desktop-${locale}-${theme}.png`) });
       await page.getByRole("button", { name: locale === "zh" ? "停用本地工具" : "Disable local tools", exact: true }).click();
       await page.getByText(locale === "zh" ? "未启用本地工具" : "Local tools disabled", { exact: true }).waitFor();
+      await bar.getByText(locale === "zh" ? "未选择目录" : "No folder selected", { exact: true }).waitFor();
       await page.keyboard.press("Escape");
       await page.evaluate(() => window.setEmptyChat(true));
       await page.locator(".input-area--centered").waitFor();
+      assert.equal(await page.locator(".input-area--centered .desktop-workspace-bar").count(), 1);
       await page.setViewportSize({ width: 740, height: 620 });
       await trigger.click();
       const menuBox = await panel.boundingBox();
@@ -107,11 +126,12 @@ try {
     } else {
       await page.locator(".input-branding").waitFor();
       assert.equal(await page.locator(".desktop-workspace").count(), 0);
+      assert.equal(await page.locator(".desktop-workspace-bar").count(), 0);
     }
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log("PASS desktop macOS/Windows, Chinese/English, light/dark, native shell and deletion approvals, composer placement, permission modes, inline approval actions, choose/disable directory, browser tool isolation");
+  console.log("PASS desktop macOS/Windows, Chinese/English, light/dark, native shell and deletion approvals, persistent directory bar and menu sync, running-task lock, composer placement, permission modes, inline approval actions, choose/disable directory, browser tool isolation");
 } finally {
   await browser?.close();
   await vite?.close();

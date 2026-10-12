@@ -14,6 +14,24 @@ export function PermissionIcon() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z" /><path d="m8.5 12 2.5 2.5 4.5-5" /></svg>;
 }
 
+export function DesktopWorkspaceBar({ disabled, control }: { disabled: boolean; control: DesktopWorkspaceControl }) {
+  const { t } = useI18n();
+  const { state, busy, error } = control;
+  if (!control.available) return null;
+  return <section className="desktop-workspace-bar" aria-label={t("本地工作目录")}>
+    <div className="desktop-workspace-bar-row">
+      <span className="desktop-workspace-bar-label">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /><path d="M3 8h18" /></svg>
+        {t("本地工作目录")}
+      </span>
+      <span className="desktop-workspace-bar-path" title={state?.directory ?? undefined}>{state?.directory ?? t("未选择目录")}</span>
+      <button type="button" disabled={!state || busy || disabled || !!state.activeRuns} onClick={() => void control.choose()}>{t(state?.directory ? "更换目录" : "选择目录")}</button>
+    </div>
+    {!state?.directory && <p>{t("读取内容与命令输出将发送给模型并保存在聊天记录中。")}</p>}
+    {error && <p role="alert">{t("权限操作失败，请重试；该请求可能已取消。")}</p>}
+  </section>;
+}
+
 export function DesktopWorkspace({ disabled, control }: { disabled: boolean; control: DesktopWorkspaceControl }) {
   const { t } = useI18n();
   const { state, busy, error } = control;
