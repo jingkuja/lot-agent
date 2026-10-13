@@ -206,3 +206,5 @@ pnpm --filter @lot-agent/desktop exec tsc --noEmit
 UI 脚本使用模拟桌面桥接，验证中文浅色、英文深色、选择 / 停用目录三档权限、批准/拒绝卡片、输入框内位置以及 Web 端隐藏入口；不访问用户本地文件、不调用真实模型。`DESKTOP_SCREENSHOTS_DIR` 可指定已有目录保存截图。文件工具测试只操作临时目录；Windows 命令测试使用系统 PowerShell，无需 Git Bash，且不跳过 Windows，目录链接测试使用 junction。
 
 最近一次本机测试及真实 Electron 验证范围见 [2026-10-12 验证记录](desktop-verification-2026-10-12.md)。Windows 安装启动、系统目录权限、PowerShell 及进程树取消仍需对应平台验收。
+
+最新 Web 页面同步、三平台重打包及跨端 UI 检查见 [2026-10-13 同步验证记录](desktop-verification-2026-10-13.md)。

@@ -82,7 +82,7 @@ try {
   const header = page.locator('.workspace-agent-identity strong');
   const grid = page.locator('.agent-launcher-grid');
   const dialog = page.locator('.agent-switch-dialog');
-  const toggle = () => page.locator('.agent-grid-toggle').click();
+  const toggle = () => page.locator('.agent-grid-toggle[aria-controls]').click();
   const pick = async (name) => { await toggle(); await grid.getByRole('button', { name, exact: true }).click(); };
   const checkCurrent = async (name) => {
     await page.waitForFunction((name) => document.querySelector('.sidebar-current-agent-copy strong')?.textContent === name, name);
@@ -93,7 +93,7 @@ try {
   assert.equal(await page.locator('.agent-switcher').count(), 0);
   assert.equal(await page.getByText('Studio 管理', { exact: true }).count(), 0);
   assert.equal(await grid.getByRole('button').count(), 3);
-  assert.equal(await page.locator('.agent-grid-toggle').innerText(), '更多');
+  assert.equal(await page.locator('.agent-grid-toggle[aria-controls]').innerText(), '更多');
   await snap('agent-default-three.png');
   // The default row is usable without opening More.
   await grid.getByRole('button', { name: '图片生成', exact: true }).click();
@@ -102,7 +102,7 @@ try {
   await checkCurrent('通用助手');
   await toggle();
   assert.equal(await grid.getByRole('button').count(), 5);
-  assert.equal(await page.locator('.agent-grid-toggle').innerText(), '收起');
+  assert.equal(await page.locator('.agent-grid-toggle[aria-controls]').innerText(), '收起');
   await toggle();
   assert.equal(await grid.getByRole('button').count(), 3);
   await toggle();

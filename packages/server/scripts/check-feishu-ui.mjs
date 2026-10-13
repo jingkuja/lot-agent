@@ -23,12 +23,17 @@ try {
   vite = await createServer({ configFile:false,root:temp,esbuild:{ jsx:"automatic" },resolve:{ alias:{ react:resolve(root,"packages/web/node_modules/react"),"react-dom":resolve(root,"packages/web/node_modules/react-dom") } },server:{ host:"127.0.0.1",port:0,fs:{ allow:[root,temp] } } });
   await vite.listen();
   browser = await chromium.launch({ headless:true,channel:"chrome" });
-  for (const [locale,theme] of [["zh","light"],["en","dark"]]) {
+  for (const [locale,theme,platform] of [["zh","light",null],["en","dark",null],["zh","light","darwin"],["en","dark","win32"]]) {
     const context = await browser.newContext({ viewport:{ width:1100,height:1000 } });
-    await context.addInitScript(({ locale,theme }) => {
+    await context.addInitScript(({ locale,theme,platform }) => {
       localStorage.setItem("lot:language",locale);
       document.addEventListener("DOMContentLoaded",() => document.documentElement.setAttribute("data-theme",theme));
-    },{ locale,theme });
+      if (platform) window.lotDesktop = {
+        platform, appVersion:"fixture", getToken:()=>"feishu-ui-fixture", setToken:()=>{},
+        getLocalWorkspace:async()=>({ directory:null,shell:platform === "win32" ? "powershell" : "bash",activeRuns:0,permissionMode:"always",approvals:[] }),
+        bindLocalPermission:async()=>{}, notify:()=>{}, setAttention:()=>{},
+      };
+    },{ locale,theme,platform });
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     const errors = [], sends = [];
@@ -90,7 +95,7 @@ try {
     assert.ok(await refresh.isEnabled(),"404 must provide a retry action");
     if (process.env.FEISHU_SCREENSHOTS_DIR) {
       await mkdir(process.env.FEISHU_SCREENSHOTS_DIR,{ recursive:true });
-      await page.screenshot({ path:join(process.env.FEISHU_SCREENSHOTS_DIR,`feishu-unavailable-${locale}-${theme}.png`) });
+      await page.screenshot({ path:join(process.env.FEISHU_SCREENSHOTS_DIR,`feishu-unavailable-${platform ?? "web"}-${locale}-${theme}.png`) });
     }
     for (statusResponse of ["unavailable","network"]) {
       await refresh.click();
@@ -164,8 +169,8 @@ try {
     await page.getByText("请确认是哪位张三",{exact:true}).waitFor();
     await page.locator(".feishu-message-status").getByText(locale==="zh" ? "等待回复" : "Waiting for reply",{exact:true}).waitFor();
     assert.equal(await page.locator(".sidebar-channel-pin").count(),1);
-    if (process.env.FEISHU_SCREENSHOTS_DIR) await page.screenshot({path:join(process.env.FEISHU_SCREENSHOTS_DIR,`feishu-transcript-${locale}-${theme}.png`)});
+    if (process.env.FEISHU_SCREENSHOTS_DIR) await page.screenshot({path:join(process.env.FEISHU_SCREENSHOTS_DIR,`feishu-transcript-${platform ?? "web"}-${locale}-${theme}.png`)});
     assert.deepEqual(errors,[]); await context.close();
   }
-  console.log("Feishu UI passed: Chinese light / English dark, 404 / 503 / network failure recovery, unconfigured refresh, sidebar entry, official contacts and scope upgrade, natural-language messaging guidance without manual form, official QR creation, automatic authorization polling, private code confirmation, single pinned transcript and live task refresh.");
+  console.log("Feishu UI passed: Web and simulated macOS / Windows bridge, Chinese light / English dark, 404 / 503 / network failure recovery, unconfigured refresh, sidebar entry, official contacts and scope upgrade, natural-language messaging guidance without manual form, official QR creation, automatic authorization polling, private code confirmation, single pinned transcript and live task refresh.");
 } finally { await browser?.close(); await vite?.close(); await rm(temp,{ recursive:true,force:true }); }
