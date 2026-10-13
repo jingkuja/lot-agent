@@ -113,3 +113,16 @@
   .mv-summary > div { grid-template-columns: 85px 1fr; gap: 10px; }
   .mv-footer { gap: 12px; }
 }
+
+.mv-storyboard-panel { scroll-margin-top: 20px; }
+.mv-storyboard { margin: 24px 0; }
+.mv-storyboard h3 { font-size: 16px; font-weight: 600; }
+.mv-shot-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mv-shot { padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); min-width: 0; }
+.mv-shot header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mv-shot h4 { font-size: 14px; font-weight: 600; }
+.mv-shot header span { font-size: 12px; color: var(--text-muted); }
+.mv-shot .mv-field { margin: 16px 0 0; }
+.mv-shot textarea { min-height: 72px; font-weight: 400; }
+.mv-storyboard-ai { padding: 16px 0; }
+@media (max-width: 760px) { .mv-shot-list { grid-template-columns: 1fr; } }

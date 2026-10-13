@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../../", import.meta.url));
+const { planMarketingSegments, storyboardScript, marketingReviewText } = await import(new URL("../../../packages/core/dist/marketing-video/index.js", import.meta.url));
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const { createServer } = createRequire(resolve(root, "packages/web/package.json"))("vite");
@@ -45,7 +46,7 @@ try {
   const conversations = agents.filter((a) => a.id !== 'digital_employee').map((a) => ({ id: `history-${a.id}`, title: `${a.id} 历史记录`, agent_id: a.id, created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:00:00Z' }));
   let taskState = 'running', sequence = 0;
   let apiUnavailable = true;
-  let failNextReview = false;
+  let failNextReview = false, failNextStoryboard = false;
   let holdNextSave = false, releaseSave;
   const projects = new Map();
   const script = '欢迎来到转角咖啡店。我们用现磨咖啡迎接每一位客人，明亮的空间适合休息和聊天。你可以选择喜欢的位置，点上一杯手冲咖啡，慢慢享受今天的时光。欢迎来店里坐一坐，发现属于你的咖啡时刻。';
@@ -61,7 +62,8 @@ try {
   await page.route("**/api/**", async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (!path.startsWith("/api/")) return route.continue();
-    const json = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
+    // Simulate older responses omitting optional/new empty fields, including copy and publication.
+    const json = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data, (key, value) => key === 'storyboard' && Array.isArray(value) && !value.length ? undefined : value) });
     if (request.method() !== 'GET') writes.push({ path, body: request.headers()["content-type"]?.includes("application/json") ? request.postDataJSON() : null });
     if (path === '/api/public/product') return json({ globle: 1 });
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
@@ -75,13 +77,21 @@ try {
         const body = request.postDataJSON(), old = projects.get(id);
         assert.equal(body.version, old?.version ?? 0);
         const p = { ...(old ?? { id, status: 'draft', progress: 0, taskId: null, review: null, reviewedScript: null, knowledgeItemId: null }), version: body.version + 1, draft: body.draft, updatedAt: new Date().toISOString() };
-        if (p.reviewedScript !== [p.draft.script, p.draft.publishTitle, p.draft.tags].join('\n')) p.review = null;
+        if (p.reviewedScript !== marketingReviewText(p.draft)) p.review = null;
         projects.set(id, p); return json(p);
       }
       const p = projects.get(id); assert(p, `project ${id} missing`);
+      if (action === 'storyboard') {
+        if (failNextStoryboard) { failNextStoryboard = false; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'AI 分镜生成失败，原分镜已保留，请重试。' }) }); }
+        const body = request.postDataJSON(); assert.equal(body.version, p.version);
+        const current = p.draft.storyboard.length ? p.draft.storyboard : planMarketingSegments(p.draft.script, p.draft.durationSec).map(part => ({ script: part.script, visual: '木质吧台和咖啡产品特写', action: '自然讲述并展示咖啡', camera: '缓慢推近' }));
+        const shots = current.map((shot, index) => body.instruction && (body.index === undefined || body.index === index) ? { ...shot, camera: 'AI 调整镜头' } : shot);
+        p.version++; p.draft = { ...p.draft, storyboard: shots, script: storyboardScript(shots) }; p.review = null;
+        return json(p);
+      }
       if (action === 'review') {
         if (failNextReview) { failNextReview = false; return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ code: 'MARKETING_TEXT_TRUNCATED', error: '模型输出未完成，请重试；当前文案已保留。' }) }); }
-        p.review = { verdict: 'pass', issues: [] }; p.reviewedScript = [p.draft.script, p.draft.publishTitle, p.draft.tags].join('\n'); return json(p);
+        p.review = { verdict: 'pass', issues: [] }; p.reviewedScript = marketingReviewText(p.draft); return json(p);
       }
       if (action === 'publication') { p.version++; p.draft.publishTitle = '手冲咖啡与惬意时光'; p.draft.tags = '#咖啡'; p.review = null; return json(p); }
       if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; return json(p); }
@@ -170,7 +180,7 @@ try {
     await page.getByRole('alert').filter({ hasText: reason }).waitFor();
     await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
     await page.getByRole('alert').filter({ hasText: reason }).waitFor();
-    assert.equal(await page.getByRole('button', { name: '确认生成完整视频' }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '生成分镜并预览' }).isDisabled(), true);
     assert.equal(await page.getByText('查看自动分段（0 段）').count(), 0);
     await snap('marketing-video-plan-error.png');
     await page.getByRole('button', { name: '修改文案或时长' }).click();
@@ -179,7 +189,7 @@ try {
   await page.getByLabel('视频口播文案').fill('长'.repeat(180));
   await page.getByRole('button', { name: '60 秒', exact: true }).click();
   await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
-  assert.equal(await page.getByRole('button', { name: '确认生成完整视频' }).isDisabled(), false);
+  assert.equal(await page.getByRole('button', { name: '生成分镜并预览' }).isDisabled(), false);
   await page.getByRole('button', { name: '确定文案', exact: false }).click();
   await page.getByLabel('视频口播文案').fill(script);
   await page.getByRole('button', { name: '下一步', exact: true }).click();
@@ -209,13 +219,39 @@ try {
   const savingRequest = page.waitForRequest(request => request.method() === 'PUT' && request.url().includes('/api/marketing-videos/'));
   await page.getByRole('group', { name: '视频质量', exact: true }).getByRole('button', { name: '高清', exact: true }).click();
   await savingRequest;
-  assert.equal(await page.getByRole('button', { name: '确认生成完整视频' }).isDisabled(), false);
+  assert.equal(await page.getByRole('button', { name: '生成分镜并预览' }).isDisabled(), false);
   await page.getByText('查看自动分段（4 段）').click();
   await snap('marketing-video-review.png');
-  await page.getByRole('button', { name: '确认生成完整视频' }).evaluate(button => { button.click(); button.click(); });
+  await page.getByRole('button', { name: '生成分镜并预览' }).evaluate(button => { button.click(); button.click(); });
   await page.getByRole('button', { name: '正在保存…', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
   releaseSave();
+  await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
+  assert.equal(writes.filter(r => r.path.endsWith('/storyboard')).length, 1);
+  assert.equal(await page.locator('.mv-shot').count(), 4);
+  const firstShot = page.getByRole('article', { name: '第 1 镜', exact: true });
+  const secondShot = page.getByRole('article', { name: '第 2 镜', exact: true });
+  await firstShot.getByLabel('分镜口播').fill('欢迎来到转角咖啡店，一起喝杯咖啡。');
+  await secondShot.getByLabel('人物与产品动作').fill('轻轻转动咖啡杯');
+  await page.getByLabel('AI 修改范围').selectOption('0');
+  await page.getByLabel('分镜修改要求').fill('改为产品特写，口播不变');
+  failNextStoryboard = true;
+  await page.getByRole('button', { name: 'AI 修改分镜', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'AI 分镜生成失败' }).waitFor();
+  assert.equal(await secondShot.getByLabel('人物与产品动作').inputValue(), '轻轻转动咖啡杯');
+  await page.getByRole('button', { name: 'AI 修改分镜', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: '分镜已保存' }).waitFor();
+  assert.equal(await firstShot.getByLabel('景别与镜头运动').inputValue(), 'AI 调整镜头');
+  assert.equal(await secondShot.getByLabel('景别与镜头运动').inputValue(), '缓慢推近');
+  assert.equal(await secondShot.getByLabel('人物与产品动作').inputValue(), '轻轻转动咖啡杯');
+  await page.reload(); await chooseAgent('营销影像');
+  await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
+  assert.equal(await firstShot.getByLabel('分镜口播').inputValue(), '欢迎来到转角咖啡店，一起喝杯咖啡。');
+  assert.equal(await firstShot.getByLabel('景别与镜头运动').inputValue(), 'AI 调整镜头');
+  await page.getByRole('heading', { name: '确认分镜', exact: true }).scrollIntoViewIfNeeded();
+  await snap('marketing-video-storyboard.png');
+  await page.getByRole('button', { name: '确认分镜并生成视频' }).evaluate(button => { button.click(); button.click(); });
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);
   const p = [...projects.values()][0];
@@ -238,9 +274,12 @@ try {
   await page.getByRole('button', { name: '更新知识库草稿', exact: true }).click();
   await page.getByRole('button', { name: '已存入知识库', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/archive')).length, 2);
-  await page.getByRole('button', { name: '复制为新草稿', exact: true }).click();
+  assert.equal(await page.locator('.mv-results .mv-shot').count(), 4);
+  assert.equal(await firstShot.getByLabel('分镜口播').getAttribute('readonly'), '');
+  await page.getByRole('button', { name: '修改分镜并重新制作', exact: true }).click();
+  await page.getByRole('button', { name: '确定文案', exact: false }).click();
   await page.getByRole('heading', { name: '确定文案', exact: true }).waitFor();
-  assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
+  assert.equal(await page.getByLabel('视频口播文案').inputValue(), p.draft.script);
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
   await page.getByRole('button', { name: '选择数字分身音色', exact: true }).click();
@@ -249,8 +288,9 @@ try {
   await voicePicker.getByRole('button', { name: '完成', exact: true }).click();
   await page.locator('.mv-asset-preview').filter({ has: page.locator('audio') }).getByRole('button', { name: '移除', exact: true }).click();
   assert.equal(await page.locator('.mv-asset-preview audio').count(), 0);
+  await page.getByRole('heading', { name: '确认分镜', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-dark.png');
-  await page.getByRole('button', { name: '确认生成完整视频' }).click();
+  await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 2);
   assert.equal([...projects.values()].filter(item => item.taskId && !item.draft.assets.voice).length, 1);
@@ -270,6 +310,18 @@ try {
   await page.getByRole('dialog', { name: 'Choose digital twin voice' }).getByRole('heading', { name: 'Personal voice library' }).waitFor();
   await snap('marketing-video-voice-picker-en-dark.png');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Create storyboard manually', exact: true }).click();
+  await page.getByRole('heading', { name: 'Review storyboard', exact: true }).waitFor();
+  assert.equal(await page.locator('.mv-shot').count(), 2);
+  await page.getByLabel('AI revision scope').selectOption('all');
+  await page.getByLabel('Storyboard revision request').fill('Make all shots close-ups');
+  await page.getByRole('button', { name: 'Revise storyboard with AI', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: 'Storyboard saved.' }).waitFor();
+  assert.deepEqual(await page.getByLabel('Framing and camera movement').evaluateAll(inputs => inputs.map(input => input.value)), ['AI 调整镜头', 'AI 调整镜头']);
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await page.getByRole('heading', { name: 'Review storyboard', exact: true }).scrollIntoViewIfNeeded();
+  await snap('marketing-video-storyboard-en-compact.png');
+
   await page.getByRole('button', { name: 'Write copy', exact: false }).click();
   await page.getByLabel('Spoken script').fill('word '.repeat(100));
   await page.getByRole('button', { name: 'Voice & captions', exact: false }).click();
@@ -278,6 +330,33 @@ try {
   await snap('marketing-video-plan-error-en-dark.png');
   await page.getByRole('button', { name: 'Edit script or duration' }).click();
   assert.equal(await page.getByLabel('Spoken script').inputValue(), 'word '.repeat(100));
+  // Pre-storyboard API records omit the field entirely. Loading must not mutate them.
+  const { storyboard: omittedStoryboard, ...legacyDraft } = p.draft;
+  const legacyId = '11111111-1111-4111-8111-111111111111';
+  projects.set(legacyId, { id: legacyId, version: 1, draft: { ...legacyDraft, assets: {} }, status: 'draft', taskId: null, progress: 0, review: null, reviewedScript: null, knowledgeItemId: null });
+  await page.evaluate(id => localStorage.setItem('lot:marketing-video:fixture', id), legacyId);
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.getByRole('heading', { name: 'Write copy', exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('.mv-studio button.mv-soft')?.disabled === false);
+  assert.equal(await page.getByLabel('Spoken script').inputValue(), legacyDraft.script);
+  await page.waitForTimeout(1100);
+  assert.equal(writes.filter(r => r.path === `/api/marketing-videos/${legacyId}`).length, 0, 'defaulting a missing storyboard must not autosave');
+  await page.getByRole('button', { name: 'Voice & captions', exact: false }).click();
+  await page.getByRole('button', { name: 'Create storyboard manually', exact: true }).click();
+  await page.getByRole('heading', { name: 'Review storyboard', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === 'Save draft' && button.disabled));
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.getByRole('heading', { name: 'Review storyboard', exact: true }).waitFor();
+  assert.equal(await page.locator('.mv-shot').count(), legacyDraft.durationSec / 15);
+  const legacyResultId = '22222222-2222-4222-8222-222222222222';
+  projects.set(legacyResultId, { ...projects.get(legacyId), id: legacyResultId, draft: { ...legacyDraft, assets: {} }, taskId: 'legacy-task', status: 'succeeded', output: { assets: resultAssets } });
+  await page.evaluate(id => localStorage.setItem('lot:marketing-video:fixture', id), legacyResultId);
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.getByRole('heading', { name: 'Production storyboard', exact: true }).waitFor({ state: 'hidden' });
+  await page.getByText('This older video has no saved storyboard. Copy its draft to add shots and create a new video.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Edit storyboard for a new video', exact: true }).click();
+  await page.getByRole('button', { name: 'Create storyboard manually', exact: true }).waitFor();
   apiUnavailable = true;
   await page.reload(); await chooseAgent('Marketing video');
   await page.getByRole('alert').filter({ hasText: 'This server does not support the new marketing video workflow yet.' }).waitFor();
@@ -285,7 +364,7 @@ try {
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-unavailable-en-dark.png');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []);
-  console.log('PASS: unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, model subtitles without local subtitle support, 60s plan, double-click safety, reload recovery, editable publication, archive/update, duplicated/new drafts, dark and English responsive layouts.');
+  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, model subtitles without local subtitle support, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {
   console.error({ errors, unexpectedRequests, body: await page?.locator('body').innerText() });
   throw error;

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
-import { MarketingDraftSchema, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingReview, planMarketingSegments } from "@lot-agent/core/marketing-video";
+import { MarketingDraftSchema, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 
 export class MarketingError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409 | 503 = 400) { super(message); }
 }
-export const reviewText = (draft: MarketingDraft) => [draft.script, draft.publishTitle, draft.tags].join("\n");
+export const reviewText = marketingReviewText;
 export function renderKey(draft: MarketingDraft) {
   // PG JSONB reorders object keys. Normalize through the schema before comparing.
   const { publishTitle: _title, tags: _tags, ...rest } = MarketingDraftSchema.parse(draft);
@@ -13,7 +13,7 @@ export function renderKey(draft: MarketingDraft) {
 }
 const select = `SELECT p.*, t.status, t.progress, t.stage, t.error, t.output FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
 function project(row: Record<string, any>): MarketingProject {
-  return { id: row.id, version: row.version, draft: row.draft, updatedAt: new Date(row.updated_at).toISOString(), review: row.review,
+  return { id: row.id, version: row.version, draft: MarketingDraftSchema.parse(row.draft), updatedAt: new Date(row.updated_at).toISOString(), review: row.review,
     reviewedScript: row.reviewed_script, taskId: row.task_id, status: row.status ?? "draft", progress: Number(row.progress ?? 0),
     stage: row.stage ?? undefined, error: row.error ?? undefined, output: row.output ?? undefined, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version };
 }
@@ -75,7 +75,7 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       if (!p.review || p.reviewed_script !== reviewText(p.draft) || p.review.verdict === "reject") throw new MarketingError("请先完成当前文案检查。");
       const taskId = randomUUID();
       await client.query(`INSERT INTO tasks(id,type,input,user_id) VALUES($1,'marketing.video',$2,$3)`, [taskId, JSON.stringify({ ...input, projectId: id, draft: p.draft }), owner]);
-      for (const part of planMarketingSegments(p.draft.script, p.draft.durationSec)) {
+      for (const part of resolveMarketingSegments(MarketingDraftSchema.parse(p.draft))) {
         const childId = randomUUID();
         // These tasks are executed by the parent, never delivered independently.
         await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.segment',$2,$3,'marketing-segments')`, [childId, JSON.stringify({ parentId: taskId, ...part }), owner]);

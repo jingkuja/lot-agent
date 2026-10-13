@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+export const MarketingShotSchema = z.object({
+  script: z.string().max(600),
+  visual: z.string().max(600),
+  action: z.string().max(400),
+  camera: z.string().max(400),
+}).strict();
+export const MarketingStoryboardSchema = z.array(MarketingShotSchema).max(4);
+export type MarketingShot = z.infer<typeof MarketingShotSchema>;
+
 export const MarketingDraftSchema = z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),
@@ -18,6 +27,7 @@ export const MarketingDraftSchema = z.object({
     voice: z.string().uuid().optional(), video: z.string().uuid().optional(),
     music: z.string().uuid().optional(), cover: z.string().uuid().optional(),
   }).strict().default({}),
+  storyboard: MarketingStoryboardSchema.default([]),
   publishTitle: z.string().max(100).default(""),
   tags: z.string().max(160).default(""),
 }).strict();
@@ -78,4 +88,24 @@ export function planMarketingSegments(script: string, durationSec: number): Mark
   if (parts.some((text) => speechUnits(text) === 0)) throw new Error("文案过短，请补充内容。");
   if (parts.some((text) => speechUnits(text) > 15 * 4.5)) throw new Error("部分段落过长，请缩短句子后重试。");
   return parts.map((text, index) => ({ index, script: text, durationSec: 15 }));
+}
+
+/** Narration edits in the storyboard are also the project's editable copy. */
+export const storyboardScript = (shots: MarketingShot[]) => shots.map(shot => shot.script.trim()).join("\n");
+export function marketingReviewText(draft: MarketingDraft): string {
+  const base = [draft.script, draft.publishTitle, draft.tags].join("\n");
+  return draft.storyboard?.length ? `${base}\n${draft.storyboard.map(shot => [shot.visual, shot.action, shot.camera].join("\n")).join("\n")}` : base;
+}
+
+/** Saved shot boundaries are authoritative; never re-split edited narration. */
+export function resolveMarketingSegments(draft: MarketingDraft): MarketingSegment[] {
+  if (!draft.storyboard?.length) return planMarketingSegments(draft.script, draft.durationSec);
+  if (draft.storyboard.length !== draft.durationSec / 15) throw new Error("分镜数量与视频时长不一致，请重新生成分镜。");
+  if (storyboardScript(draft.storyboard) !== draft.script.trim()) throw new Error("分镜口播与文案不一致，请重新生成分镜。");
+  return draft.storyboard.map((shot, index) => {
+    if (![shot.script, shot.visual, shot.action, shot.camera].every(value => value.trim())) throw new Error("请补全每段分镜的口播、画面、动作和镜头信息。");
+    if (!speechUnits(shot.script)) throw new Error("文案过短，请补充内容。");
+    if (speechUnits(shot.script) > 15 * 4.5) throw new Error("部分段落过长，请缩短句子后重试。");
+    return { index, script: shot.script, durationSec: 15 };
+  });
 }

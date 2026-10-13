@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
+import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
 import { createMarketingVideoRoutes } from "./routes.js";
 import type { AgentService } from "../services/agent-service.js";
 import type { PgMarketingProjectStore } from "./repository.js";
@@ -104,5 +104,48 @@ describe("marketing project HTTP boundaries", () => {
   it("bounds JSON request bodies", async () => {
     const f = fixture();
     expect((await f.call(`/${id}`, { draft: "x".repeat(70000) }, "PUT")).status).toBe(413);
+  });
+});
+
+
+describe("marketing storyboard editing", () => {
+  const shots = [
+    { script: "欢迎到店喝咖啡。", visual: "明亮咖啡店", action: "端起咖啡杯", camera: "中景推进" },
+    { script: "发现你喜欢的咖啡。", visual: "咖啡杯特写", action: "倒入手冲咖啡", camera: "俯拍特写" },
+  ];
+  it("generates and persists a validated board using owner credentials without submitting video", async () => {
+    const f = fixture(); f.service.marketingText.mockResolvedValueOnce({ shots });
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(200);
+    expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: shots, script: storyboardScript(shots) }));
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal));
+    expect(f.store.reserve).not.toHaveBeenCalled();
+    expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
+  });
+  it("changes only the requested shot, preserving manual edits elsewhere", async () => {
+    const f = fixture(); Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
+    const revised = { ...shots[1], camera: "平移到产品近景" };
+    f.service.marketingText.mockResolvedValueOnce({ shots: [revised] });
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "改成平移", index: 1 })).status).toBe(200);
+    expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: [shots[0], revised] }));
+  });
+  it("rejects stale versions, submitted projects, invalid target and malformed AI output", async () => {
+    const f = fixture();
+    expect((await f.call(`/${id}/storyboard`, { version: 0, locale: "zh", instruction: "" })).status).toBe(409);
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "", index: 5 })).status).toBe(400);
+    Object.assign(f.project, { taskId: "existing" });
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(409);
+    expect(f.service.marketingText).not.toHaveBeenCalled();
+    Object.assign(f.project, { taskId: null });
+    for (const invalid of [{ shots: [shots[0]] }, { shots: shots.map(shot => ({ ...shot, script: "字".repeat(200) })) }, { shots: shots.map(shot => ({ ...shot, camera: "" })) }]) {
+      f.service.marketingText.mockResolvedValueOnce(invalid);
+      expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(503);
+    }
+    expect(f.store.save).not.toHaveBeenCalled();
+  });
+  it("does not edit another user's missing project", async () => {
+    const f = fixture(); f.store.get.mockResolvedValueOnce(null as never);
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(404);
+    expect(f.store.get).toHaveBeenCalledWith("owner", id);
+    expect(f.service.marketingText).not.toHaveBeenCalled();
   });
 });
