@@ -132,11 +132,21 @@ export function useChat(
     []
   );
 
+  const [channel,setChannel] = useState<string | null>(null);
+  const loadSeq = useRef(0);
+  const channelSnapshot = useRef("");
   const loadMessages = useCallback(async (convId: string) => {
+    const seq = ++loadSeq.current;
     const data = await api.getConversation(convId);
     // The user may have switched again while this fetch was in flight — a
     // stale response must not overwrite the conversation now on screen.
-    if (cidRef.current !== convId) return;
+    if (cidRef.current !== convId || seq !== loadSeq.current) return;
+    setChannel(data.channel ?? null);
+    if (data.channel === "feishu") {
+      const snapshot = JSON.stringify({ id:data.id,model:data.model,metadata:data.metadata,messages:data.messages });
+      if (channelSnapshot.current === snapshot) return;
+      channelSnapshot.current = snapshot;
+    } else channelSnapshot.current = "";
     const rawStoredKnowledgeBases = data.metadata?.knowledgeBases;
     const display: DisplayMessage[] = data.messages.map((m) => {
       const role = m.role as DisplayMessage["role"];
@@ -160,6 +170,7 @@ export function useChat(
         conversationId: convId,
         role,
         content: m.content,
+        feishuStatus: parsedMeta?.feishuStatus as string | undefined,
         runStatus: parsedMeta?.runStatus as DisplayMessage["runStatus"],
         thinking: parsedMeta?.thinking as string | undefined,
         knowledgeSources: parsedMeta?.knowledgeSources as DisplayMessage["knowledgeSources"],
@@ -229,6 +240,20 @@ export function useChat(
       pollGeneration(last.generation.taskId, last.id, last.generation.mediaType, token);
     }
   }, [pollGeneration]);
+
+  useEffect(() => {
+    if (!conversationId || channel !== "feishu") return;
+    let loading = false;
+    const update = async () => {
+      if (loading || document.visibilityState === "hidden" || streamsRef.current.has(conversationId)) return;
+      loading = true;
+      try { await loadMessages(conversationId); } catch { /* Keep the last visible transcript on network failures. */ }
+      finally { loading = false; }
+    };
+    const timer = window.setInterval(() => void update(),3000);
+    window.addEventListener("focus",update);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus",update); };
+  },[conversationId,channel,loadMessages]);
 
   const streamMessage = useCallback(
     (
@@ -588,11 +613,13 @@ export function useChat(
     // Cancel any in-flight generation poll and drop the streaming lock so a
     // resumed poll in the next conversation doesn't leave the input disabled.
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
+    loadSeq.current++; setChannel(null); channelSnapshot.current = "";
     setConversationKnowledgeBases([]);
     dispatch({ type: "cleared" });
   }, []);
 
   return {
+    channel,
     messages: state.messages,
     conversationModel: state.conversationModel,
     conversationKnowledgeBases,

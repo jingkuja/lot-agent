@@ -12,6 +12,7 @@ import { migrations } from "./migrations/index.js";
 import { maskPhone } from "./phone.js";
 
 export interface Conversation {
+  channel?: "feishu" | null;
   id: string;
   title: string;
   model: string | null;
@@ -374,7 +375,7 @@ export class DB {
     // identically to a brand-new chat, so surfacing one as the "latest"
     // conversation makes the workspace look like it always opens a new chat.
     where.push(
-      "EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id)"
+      "(channel = 'feishu' OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id))"
     );
     if (userId) {
       params.push(userId);
@@ -394,7 +395,7 @@ export class DB {
       // cursor never loses precision the way a client-supplied timestamp would.
       // A deleted cursor row yields NULL → an empty page (self-heals on refresh).
       where.push(
-        `(updated_at, id) < (SELECT updated_at, id FROM conversations WHERE id = $${params.length})`
+        `(COALESCE(channel='feishu',false), updated_at, id) < (SELECT COALESCE(channel='feishu',false), updated_at, id FROM conversations WHERE id = $${params.length} ${userId ? " AND user_id = $1" : ""})`
       );
     }
 
@@ -413,7 +414,7 @@ export class DB {
 
     let sql = `SELECT conversations.*${previewSelect} FROM conversations WHERE ${where.join(
       " AND "
-    )} ORDER BY updated_at DESC, id DESC`;
+    )} ORDER BY COALESCE(channel='feishu',false) DESC, updated_at DESC, id DESC`;
     if (hasPaging) {
       params.push(limit);
       sql += ` LIMIT $${params.length}`;
@@ -593,6 +594,13 @@ export class DB {
       ]
     );
     if (options.runId && !rowCount) throw new Error("Conversation execution lease lost before message persistence");
+  }
+
+  async updateChannelMessage(id: string, conversationId: string, content: string, metadata: Record<string, unknown>, runId: string) {
+    const result = await this.pool.query(`UPDATE messages m SET content=$3,metadata=m.metadata || $4::jsonb
+      FROM conversations c WHERE m.id=$1 AND m.conversation_id=$2 AND c.id=m.conversation_id AND c.active_run_id=$5`,
+    [id,conversationId,content,JSON.stringify(metadata),runId]);
+    if (!result.rowCount) throw new Error("Conversation execution lease lost before channel result persistence");
   }
 
   /**

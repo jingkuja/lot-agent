@@ -287,6 +287,11 @@ export function MessageBubble({
           </div>
         )}
 
+        {message.feishuStatus && <p className="feishu-message-status">{t(({
+          pending:"待处理",running:"运行中",completed:"已完成",failed:"失败",cancelled:"已取消",
+          unknown:"结果待核实",reply_unknown:"结果已处理，回传待核实",rate_limited:"请求过于频繁",
+        } as Record<string,string>)[message.feishuStatus] ?? message.feishuStatus)}</p>}
+
         {/* Action buttons — skip intermediate tool-calling turns; those
             actions belong to the final answer, not a turn that ends in a tool
             call (keeps the call → reply → result sequence reading as one unit). */}

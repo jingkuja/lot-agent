@@ -55,7 +55,8 @@ export function Sidebar({
   const renderConversation = (conv: Conversation) => (
     <div key={conv.id} className={`sidebar-item ${conv.id === activeId ? "active" : ""}`}>
       <button className="sidebar-conversation-link sidebar-item-title" onClick={() => onSelect(conv.id)} title={conv.id === "__new__" ? t("新对话") : conv.title}>{conv.id === "__new__" ? t("新对话") : conv.title}</button>
-      {conv.id !== "__new__" && <>
+      {conv.channel === "feishu" && <span className="sidebar-channel-pin" title={t("置顶")}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden><path d="m16 3 5 5-4 1-3 5v4l-8-8h4l5-3 1-4Z" /><path d="m10 14-7 7" /></svg></span>}
+      {conv.id !== "__new__" && conv.channel !== "feishu" && <>
         <select className="sidebar-project-move" aria-label={t("移动“{0}”到项目", [conv.title])} title={t("移入项目")} value={conv.project_id ?? ""}
           onChange={(e) => { setError(""); void onMove(conv.id, e.target.value || null).catch(() => setError("移动失败，请重试")); }}>
           <option value="">{t("最近（无项目）")}</option>
@@ -127,9 +128,13 @@ export function Sidebar({
       </form>}
       {error && <div className="sidebar-project-error" role="alert">{t(error)}</div>}
       <div className="sidebar-list" ref={listRef} onScroll={handleScroll}>
+        {conversations.some(conv => conv.channel === "feishu") && <section aria-label={t("置顶")}>
+          <div className="sidebar-section-label project-section-label">{t("置顶")}</div>
+          {conversations.filter(conv => conv.channel === "feishu").map(renderConversation)}
+        </section>}
         {projects.length > 0 && <div className="sidebar-section-label project-section-label">{t("项目")}</div>}
         {projects.map((project) => {
-          const items = conversations.filter((conv) => conv.project_id === project.id);
+          const items = conversations.filter((conv) => conv.channel !== "feishu" && conv.project_id === project.id);
           const expanded = !collapsed.has(project.id);
           return <section key={project.id} className="sidebar-project">
             <div className="sidebar-project-header">
@@ -149,7 +154,7 @@ export function Sidebar({
           </section>;
         })}
         <div className="sidebar-section-label project-section-label">{t("最近")}</div>
-        {conversations.filter((conv) => !conv.project_id).map(renderConversation)}
+        {conversations.filter((conv) => conv.channel !== "feishu" && !conv.project_id).map(renderConversation)}
         {loadingMore && <div className="sidebar-loading-more">{t("加载中…")}</div>}
       </div>
     </aside>

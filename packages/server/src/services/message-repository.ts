@@ -10,9 +10,9 @@ import type { KnowledgeBaseRef } from "./rag-client.js";
  * original streamAgentResponse implementation.
  */
 export class MessageRepository {
-  constructor(private readonly db: DB, private readonly runId?: string) {}
+  constructor(private readonly db: DB, private readonly runId?: string, private readonly finalMessageId?: string) {}
 
-  forRun(runId: string): MessageRepository { return new MessageRepository(this.db, runId); }
+  forRun(runId: string, finalMessageId?: string): MessageRepository { return new MessageRepository(this.db, runId, finalMessageId); }
 
   /** Insert the user message and return its generated id. */
   async saveUserMessage(
@@ -43,9 +43,9 @@ export class MessageRepository {
     materialize?: (atts: AttachmentRef[]) => Promise<ContentPart[]>
   ): Promise<Message[]> {
     const stored = await this.db.getMessages(conversationId);
-    const filtered = stored.filter(
-      (m) => m.role !== "user" || m.id !== excludeMessageId
-    );
+    // Queued channel tasks may already have later user/result rows. Never leak them into this turn.
+    const cutoff = stored.findIndex(m => m.id === excludeMessageId);
+    const filtered = (cutoff < 0 ? stored : stored.slice(0,cutoff)).filter(m => m.role !== "assistant" || !["pending","running"].includes(String(m.metadata?.feishuStatus)));
 
     // Tool calls live in a side table (message_tool_calls), keyed by message id —
     // NOT on the messages row. Load them so an assistant turn that issued tool
@@ -170,6 +170,10 @@ export class MessageRepository {
     run?: { runId: string; status: import("@lot-agent/core").RunStatus }
   ): Promise<void> {
     if (!content && toolCalls.length === 0 && (!run || run.status === "completed")) return;
+    if (this.finalMessageId && run) {
+      await this.db.updateChannelMessage(this.finalMessageId,conversationId,content,{ runId:run.runId,runStatus:run.status,...(thinking ? { thinking } : {}) },this.runId!);
+      return;
+    }
     const assistantMsgId = randomUUID();
     await this.db.addMessage(
       assistantMsgId,

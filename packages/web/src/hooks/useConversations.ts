@@ -26,10 +26,20 @@ export function useConversations() {
   // Refresh from the top. Keeps however many pages are already loaded (so a
   // post-stream refresh doesn't collapse the list back to one page) by
   // refetching max(loaded, PAGE_SIZE) rows in a single keyset page.
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (background = false) => {
     const seq = ++refreshSeq.current;
-    setLoading(true);
+    if (!background) setLoading(true);
     try {
+      if (background) {
+        const page = await api.listConversations(PAGE_SIZE);
+        if (seq !== refreshSeq.current) return;
+        setConversations(prev => {
+          const seen = new Set(page.items.map(c => c.id));
+          return [...page.items,...prev.filter(c => !seen.has(c.id))];
+        });
+        if (conversations.length < PAGE_SIZE) setNextCursor(page.nextCursor);
+        return;
+      }
       const count = Math.min(Math.max(conversations.length, PAGE_SIZE), 100);
       const { items, nextCursor } = await listWithProjects(count);
       if (seq !== refreshSeq.current) return; // superseded by a newer refresh
@@ -39,6 +49,15 @@ export function useConversations() {
       if (seq === refreshSeq.current) setLoading(false);
     }
   }, [conversations.length]);
+
+  // Incoming channel tasks arrive independently of a browser SSE stream.
+  useEffect(() => {
+    const update = () => { if (document.visibilityState !== "hidden") void refresh(true).catch(() => {}); };
+    const timer = window.setInterval(update,10_000);
+    window.addEventListener("focus",update);
+    window.addEventListener("lot:feishu-connected",update);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus",update); window.removeEventListener("lot:feishu-connected",update); };
+  },[refresh]);
 
   // Append the next keyset page, de-duping by id (the list reorders live, so a
   // page can still overlap with rows already held).
@@ -102,6 +121,7 @@ export function useConversations() {
   const remove = useCallback(
     async (id: string) => {
       await api.deleteConversation(id);
+      refreshSeq.current++;
       setConversations((prev) => prev.filter((c) => c.id !== id));
       if (activeId === id) setActiveId(null);
     },

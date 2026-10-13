@@ -27,7 +27,7 @@ describe("listConversations", () => {
     await db.listConversations("u1", { limit: 20 });
     const [sql, params] = query.mock.calls[0];
     expect(sql).toMatch(/user_id = \$1/);
-    expect(sql).toMatch(/ORDER BY updated_at DESC, id DESC/);
+    expect(sql).toMatch(/ORDER BY COALESCE\(channel='feishu',false\) DESC, updated_at DESC, id DESC/);
     expect(params).toContain("u1");
   });
 

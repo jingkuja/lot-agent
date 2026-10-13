@@ -15,6 +15,7 @@ import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interacti
 const miniProgramCode = new URL("../assets/mini-program-code.jpg", import.meta.url).href;
 
 interface ChatPanelProps {
+  readOnly?: boolean;
   onDraftChange?: (hasDraft: boolean) => void;
   attachment?: { id: string; file: File };
   onAttachmentConsumed?: () => void;
@@ -152,6 +153,7 @@ function Seedance25Hint() {
 }
 
 export function ChatPanel({
+  readOnly,
   attachment, onAttachmentConsumed, onManageKnowledge,
   activeConversationId, onNewVideo, videoPublication,
   messages,
@@ -173,7 +175,7 @@ export function ChatPanel({
   emptyDashboard,
 }: ChatPanelProps) {
   const { t } = useI18n();
-  const desktopControl = useDesktopWorkspace(activeConversationId, agent?.id === "general");
+  const desktopControl = useDesktopWorkspace(activeConversationId, !readOnly && agent?.id === "general");
   const pendingApprovalId = desktopControl.state?.approvals[0]?.id;
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -217,7 +219,7 @@ export function ChatPanel({
         ? modelCatalog?.video
         : modelCatalog?.llm;
 
-  const inputEl = (
+  const inputEl = readOnly ? <p className="feishu-transcript-hint">{t("飞书任务与结果会自动同步到此处。请在飞书私聊机器人发送任务，输入 /cancel 可取消任务。")}</p> : (
     <>
       {isEmpty && mode === "video" && <Seedance25Hint />}
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}

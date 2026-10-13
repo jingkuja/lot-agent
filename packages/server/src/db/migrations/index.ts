@@ -1,3 +1,4 @@
+import { feishuPersonalChannel } from "./0038-feishu-personal-channel.js";
 import { virtualPayment } from "./0033-virtual-payment.js";
 import { marketingVideoProjects } from "./0036-marketing-video-projects.js";
 import { agentRunState } from "./0034-agent-run-state.js";
@@ -11,6 +12,7 @@ import { knowledgeIndex } from "./0026-knowledge-index.js";
 import { knowledgeJobs } from "./0025-knowledge-jobs.js";
 import { knowledgeFoundation } from "./0024-knowledge-foundation.js";
 import type { Migration } from "../migration-runner.js";
+import { feishuIntegration } from "./0037-feishu.js";
 import { baseline } from "./0001-baseline.js";
 import { messageSeq } from "./0002-message-seq.js";
 import { conversationRunLease } from "./0003-conversation-run-lease.js";
@@ -74,4 +76,6 @@ export const migrations: Migration[] = [
   agentRunState,
   klingVoiceTasks,
   marketingVideoProjects,
+  feishuIntegration,
+  feishuPersonalChannel,
 ];

@@ -22,3 +22,4 @@ export * from "./knowledge/index.js";
 export { createDeadline, withAbort, isTimeoutReason } from "./runtime/abort.js";
 
 export type { VirtualPaymentOrder, VirtualPaymentRepository } from "./billing/virtual-payment.js";
+export type { FeishuConnection, FeishuSendRecord, FeishuUserStore, FeishuInboxJob, FeishuRepository, FeishuSetup } from "./feishu/types.js";

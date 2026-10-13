@@ -123,6 +123,10 @@ services:
     restart: unless-stopped
     environment:
       <<: *app-env
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_ENABLED: ${FEISHU_ENABLED:-1}
+      FEISHU_LONG_CONNECTION: ${FEISHU_LONG_CONNECTION:-1}
       ROLE: server
       PORT: "3000"
     volumes:

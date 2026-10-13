@@ -111,6 +111,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     const userId = c.get("userId");
     const conversation = await service.db.getConversation(c.req.param("id"));
     if (!conversation || conversation.user_id !== userId) return c.json({ error: "Not found" }, 404);
+    if (conversation.channel === "feishu") return c.json({ error: "飞书会话固定展示在通用 Agent 顶部" },409);
     const body = await c.req.json().catch(() => null);
     if (!body || (body.projectId !== null && typeof body.projectId !== "string")) return c.json({ error: "Invalid projectId" }, 400);
     if (body.projectId !== null && !await service.db.ownsConversationProject(body.projectId, userId)) return c.json({ error: "Not found" }, 404);
@@ -302,6 +303,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     if (!conversation || conversation.user_id !== userId) {
       return c.json({ error: "Not found" }, 404);
     }
+    if (conversation.channel === "feishu") return c.json({ error: "请在飞书中发送或取消任务，此处保留完整记录" },409);
     const deleted = await service.db.deleteConversation(id);
     if (!deleted) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
@@ -315,6 +317,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     if (!conversation || conversation.user_id !== userId) {
       return c.json({ error: "Not found" }, 404);
     }
+    if (conversation.channel === "feishu") return c.json({ error: "请在飞书中发送或取消任务，此处保留完整记录" },409);
 
     const body = await c.req.json<{ afterMessageId: string }>();
     if (!body.afterMessageId) {
@@ -346,6 +349,7 @@ export function createConversationRoutes(service: AgentService): Hono {
     if (!conversation || conversation.user_id !== userId) {
       return c.json({ error: "Not found" }, 404);
     }
+    if (conversation.channel === "feishu") return c.json({ error: "请在飞书中发送或取消任务，此处保留完整记录" },409);
     if (conversation.agent_id === "digital_employee" && !readConversationFeatureScope(conversation.metadata)) {
       return c.json({ error: "digital_employee conversations require a valid featureScope" }, 400);
     }
@@ -564,6 +568,7 @@ export function createGenerationRoutes(service: AgentService) {
     if (!conv || (conv as { user_id?: string }).user_id !== userId) {
       return c.json({ error: "Conversation not found" }, 404);
     }
+    if (conv.channel === "feishu") return c.json({ error: "请在飞书中发送任务" },409);
 
     let body: {
       prompt?: string;

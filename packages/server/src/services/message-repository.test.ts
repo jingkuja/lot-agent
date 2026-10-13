@@ -178,3 +178,25 @@ describe("saveFinalAssistant thinking metadata", () => {
     expect(row.metadata.thinking).toBe("final reasoning");
   });
 });
+
+describe("Feishu unified transcript", () => {
+  it("retains previous user turns but excludes queued future tasks and placeholders from the model context", async () => {
+    const db=memDb();
+    db.rows.push(
+      { id:"u1",role:"user",content:"first",metadata:{ feishuStatus:"pending" } },
+      { id:"a1",role:"assistant",content:"first answer",metadata:{ feishuStatus:"completed" } },
+      { id:"u2",role:"user",content:"current",metadata:{ feishuStatus:"pending" } },
+      { id:"a2",role:"assistant",content:"working",metadata:{ feishuStatus:"running" } },
+      { id:"u3",role:"user",content:"future task",metadata:{ feishuStatus:"pending" } },
+      { id:"a3",role:"assistant",content:"queued",metadata:{ feishuStatus:"pending" } },
+    );
+    expect((await new MessageRepository(db).loadHistory("c1","u2")).map(m => m.content)).toEqual(["first","first answer"]);
+  });
+  it("updates the reserved result row without appending another answer", async () => {
+    const db=memDb(); const writes: unknown[]=[];
+    db.updateChannelMessage=async (...args: unknown[]) => { writes.push(args); };
+    await new MessageRepository(db).forRun("run","result").saveFinalAssistant("c1","done",[],undefined,undefined,{ runId:"run",status:"completed" });
+    expect(db.rows).toHaveLength(0);
+    expect(writes[0]).toEqual(["result","c1","done",{ runId:"run",runStatus:"completed" },"run"]);
+  });
+});

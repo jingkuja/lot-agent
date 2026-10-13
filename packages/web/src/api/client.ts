@@ -44,6 +44,7 @@ export interface VideoPublication { copy: string; tags: string; }
 export interface ConversationProject { id: string; name: string; }
 
 export interface Conversation {
+  channel?: "feishu" | null;
   project_id?: string | null;
   id: string;
   title: string;

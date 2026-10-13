@@ -5,13 +5,14 @@ import { api, type ManagedUpload, type User } from "../api/client.js";
 import { LegalModal } from "./LegalModal.js";
 import { RechargeModal } from "./RechargeModal.js";
 import { RechargeHistoryModal } from "./RechargeHistoryModal.js";
+import { FeishuSettings } from "./FeishuSettings.js";
 
 interface AccountMenuProps {
   user: User;
   onLogout?: () => void;
 }
 
-type Dialog = "recharge" | "recharge-history" | "files" | "phone" | "privacy" | "terms" | null;
+type Dialog = "recharge" | "recharge-history" | "files" | "phone" | "privacy" | "terms" | "feishu" | null;
 
 function accountText(user: User) {
   const email = user.username ?? user.name ?? "当前账号";
@@ -97,6 +98,8 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
               </span>
             </div>
             <div className="account-popover-actions">
+              <button type="button" role="menuitem" onClick={() => openDialog("feishu")}>
+                <span aria-hidden>↗</span>{t("飞书接入")}</button>
               <button type="button" role="menuitem" onClick={() => openDialog("recharge")}>
                 <span aria-hidden>＋</span>{t("充值")}</button>
               <button type="button" role="menuitem" onClick={() => openDialog("recharge-history")}>
@@ -128,6 +131,7 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
 
       {dialog && createPortal(
         <>
+          {dialog === "feishu" && <FeishuSettings key={user.id} onClose={() => setDialog(null)} />}
           {dialog === "recharge" && <RechargeModal onClose={() => setDialog(null)} />}
           {dialog === "recharge-history" && <RechargeHistoryModal onClose={() => setDialog(null)} />}
           {dialog === "files" && <FileManagerModal onClose={() => setDialog(null)} />}

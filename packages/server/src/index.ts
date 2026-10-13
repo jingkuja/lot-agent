@@ -1,4 +1,10 @@
 import { createDesktopToolRoutes } from "./desktop/routes.js";
+import { loadFeishuConfig, FeishuClient } from "./feishu/client.js";
+import { PgFeishuRepository } from "./feishu/repository.js";
+import { FeishuService } from "./feishu/service.js";
+import { FeishuChannel } from "./feishu/channel.js";
+import { createFeishuRoutes, createFeishuPublicRoutes } from "./feishu/routes.js";
+import { SecretBox } from "./auth/secret-box.js";
 import { createVideoDraftRoutes } from "./routes/video-drafts.js";
 import { createMarketingVideoRoutes } from "./marketing-video/routes.js";
 import { KnowledgeKeys } from "./knowledge/access/keys.js";
@@ -103,6 +109,10 @@ async function main() {
 
   const service = new AgentService(serviceConfig);
   await service.init();
+  const feishuConfig = loadFeishuConfig();
+  const feishu = feishuConfig ? new FeishuService(new PgFeishuRepository(service.db.pool), new FeishuClient(feishuConfig), new SecretBox(process.env.SECRET_MASTER_KEY)) : null;
+  const feishuChannel = feishu ? new FeishuChannel(feishu,service) : null;
+  feishuChannel?.start(process.env.FEISHU_LONG_CONNECTION !== "0");
 
   // Sessions hard-expire after 7 days (session-store.ts) but expired rows are
   // never otherwise deleted (#16) — sweep once at startup, then hourly. Runs
@@ -252,7 +262,7 @@ async function main() {
   });
 
   const requestLogger = logger();
-  app.use("*", (c, next) => c.req.path.startsWith("/api/rag/preview/") ? next() : requestLogger(c, next));
+  app.use("*", (c, next) => c.req.path.startsWith("/api/rag/preview/") || c.req.path.startsWith("/api/public/feishu/") ? next() : requestLogger(c, next));
   app.use("*", cors({
     origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
     credentials: true,
@@ -280,6 +290,8 @@ async function main() {
   app.route("/api/auth", createAuthRoutes(service));
   app.route("/api/public/product", createProductRoutes());
   app.route("/api/public/shares", createPublicImageShareRoutes(service));
+  app.use("/api/public/feishu/*", loginRateLimit);
+  app.route("/api/public/feishu", createFeishuPublicRoutes(feishu));
 
   // Auth guard for all other /api/* routes
   const authMw = createAuthMiddleware(service.sessions, {
@@ -312,6 +324,8 @@ async function main() {
   app.use("/api/knowledge-bases/*", authMw);
   app.use("/api/digital-employee", authMw);
   app.use("/api/digital-employee/*", authMw);
+  app.use("/api/feishu/*", authMw);
+  app.on("POST", "/api/feishu/*", rateLimit({ store:rateLimitStore, keyFn:c => c.get("userId"), prefix:"rl:feishu", limit:90, windowMs:60_000 }));
 
   // userId-keyed rate limits — registered after authMw (so `userId` is set)
   // and before the route handlers below. Exact method+path so GET/SSE-poll
@@ -329,6 +343,7 @@ async function main() {
   app.use("/api/digital-employee/*", digitalEmployeeRateLimit);
 
   // Protected API routes
+  app.route("/api/feishu", createFeishuRoutes(feishu, userId => feishuChannel?.abortUser(userId), appId => feishuChannel?.connectionStatus(appId) ?? "disabled"));
   app.route("/api/conversations", createDesktopToolRoutes(service));
   app.route("/api/conversations", createConversationRoutes(service));
   app.route("/api/conversations", createGenerationRoutes(service));
@@ -423,6 +438,7 @@ async function main() {
   const shutdown = async () => {
     console.log("\nShutting down...");
     await stopVirtualPayments();
+    await feishuChannel?.stop();
     await service.shutdown();
     process.exit(0);
   };

@@ -14,6 +14,7 @@ export interface GenerationView {
 }
 
 export interface DisplayMessage {
+  feishuStatus?: string;
   conversationId?: string;
   runStatus?: import("@lot-agent/core").RunStatus;
   knowledgeSources?: import("../modules/knowledge/api.js").Evidence[];

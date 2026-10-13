@@ -35,6 +35,8 @@ function parallelSameNameScript(): ChatChunk[][] {
 function fakeService(opts: {
   script: ChatChunk[][];
   conversationModel?: string | null;
+  apiKey?: string;
+  catalogModels?: string[];
 }) {
   const calls: Message[][] = [];
   const registry = new ToolRegistry();
@@ -87,10 +89,11 @@ function fakeService(opts: {
         metadata: {},
       })),
       setConversationModel: vi.fn(async () => {}),
-      getUserApiKey: vi.fn(async () => null),
+      getUserApiKey: vi.fn(async () => opts.apiKey ?? null),
       mergeConversationMetadata: vi.fn(async () => {}),
     },
-    providerFactory: { llm: vi.fn() },
+    providerFactory: { llm: vi.fn(() => scriptedLLM(opts.script, calls)) },
+    getUserModelCatalog: vi.fn(async () => ({ llm: (opts.catalogModels ?? []).map(id => ({ id })) })),
     modelRegistry: {
       getProvider: () => scriptedLLM(opts.script, calls),
       getConfig: () => undefined,
@@ -123,6 +126,42 @@ async function drain(events: AsyncIterable<unknown>): Promise<unknown[]> {
   for await (const e of events) out.push(e);
   return out;
 }
+
+it("Feishu strips every execution tool even when a model requests one", async () => {
+  const { fake, calls } = fakeService({ script: parallelSameNameScript() });
+  const tool = fake.toolRegistry.get("fetchy")!;
+  const execute = vi.spyOn(tool, "execute");
+  const advertised = vi.spyOn(fake.toolRegistry, "toLLMTools");
+  await drain(fake.streamAgentResponse("c1", "generate a video", "general", "u1", [], undefined, { channel: "feishu" }));
+  expect(advertised).toHaveBeenCalledWith([]);
+  expect(execute).not.toHaveBeenCalled();
+  expect(JSON.stringify(calls)).toContain("后续支持，持续开发中...");
+});
+
+describe("Feishu model selection", () => {
+  const script: ChatChunk[][] = [[{ type: "text", content: "hello" }, { type: "done", usage: { promptTokens: 2, completionTokens: 1 } }]];
+  it("uses and persists the web catalog default with the bound user's credential", async () => {
+    const { fake, usageMeter } = fakeService({ script, apiKey: "owner-key", catalogModels: ["deepseek-v4.1-flash", "other-model"] });
+    await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", [], undefined, { channel: "feishu" }));
+    expect(fake.getUserModelCatalog).toHaveBeenCalledWith("u1", "owner-key");
+    expect(fake.providerFactory.llm).toHaveBeenCalledWith("deepseek-v4.1-flash", "owner-key");
+    expect(fake.db.setConversationModel).toHaveBeenCalledWith("c1", "deepseek-v4.1-flash");
+    expect(usageMeter.record).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1", modelId: "deepseek-v4.1-flash" }));
+  });
+  it("preserves the conversation's existing model", async () => {
+    const { fake } = fakeService({ script, apiKey: "owner-key", conversationModel: "chosen-model", catalogModels: ["other-model"] });
+    await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", [], undefined, { channel: "feishu" }));
+    expect(fake.getUserModelCatalog).not.toHaveBeenCalled();
+    expect(fake.providerFactory.llm).toHaveBeenCalledWith("chosen-model", "owner-key");
+    expect(fake.db.setConversationModel).not.toHaveBeenCalled();
+  });
+  it("does not fall back to the server model when the owner has no available models", async () => {
+    const { fake } = fakeService({ script, apiKey: "owner-key", catalogModels: [] });
+    await expect(drain(fake.streamAgentResponse("c1", "hi", "general", "u1", [], undefined, { channel: "feishu" }))).rejects.toThrow("暂无可用的文字模型");
+    expect(fake.providerFactory.llm).not.toHaveBeenCalled();
+    expect(fake.db.setConversationModel).not.toHaveBeenCalled();
+  });
+});
 
 describe("streamAgentResponse tool-result persistence", () => {
   it("persists timeout as a timeout with visible error content", async () => {

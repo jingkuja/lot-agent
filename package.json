@@ -37,6 +37,7 @@
     "check:knowledge:release": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-release.ts",
     "check:knowledge:persistence": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-persistence.ts",
     "check:desktop-tools:ui": "node packages/server/scripts/check-desktop-tools-ui.mjs",
+    "check:feishu:ui": "node packages/server/scripts/check-feishu-ui.mjs",
     "check:desktop-updates:ui": "node packages/server/scripts/check-desktop-updates-ui.mjs"
   },
   "devDependencies": {

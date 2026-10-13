@@ -1,0 +1,18 @@
+.feishu-dialog { width: min(620px, calc(100vw - 32px)); max-height: 90vh; display: flex; flex-direction: column; }
+.feishu-body { padding: 20px; overflow-y: auto; display: grid; gap: 14px; }
+.feishu-body p { margin: 0; line-height: 1.6; }
+.feishu-body a { color: var(--accent); text-underline-offset: 3px; }
+.feishu-form { display: grid; gap: 8px; }
+.feishu-form h3 { margin: 8px 0; font-size: 15px; }
+.feishu-form input:not([type=checkbox]), .feishu-form textarea { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-input); font: inherit; }
+.feishu-form textarea { resize: vertical; }
+.feishu-body button { padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text); cursor: pointer; }
+.feishu-body button:disabled { opacity: .5; cursor: default; }
+.feishu-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.feishu-checkbox { display: flex; gap: 8px; align-items: center; }
+.feishu-hint, .feishu-contacts small { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.feishu-contacts { padding: 0; margin: 0; list-style: none; display: grid; gap: 8px; }
+.feishu-contacts li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.feishu-contacts small { display: block; }
+.feishu-setup { display: grid; justify-items: start; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); }
+.feishu-qr { max-width: 100%; height: auto; border-radius: 8px; }

@@ -139,6 +139,8 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ## 5. 基础代码索引
 
+飞书接入：`server/feishu/` 的 `onboarding-client.ts` / `service.ts` 实现官方 PersonalAgent 扫码建机器人、设备授权与私聊验证码绑定；`channel.ts` 按用户应用维护 SDK 长连接并并行消费任务，`repository.ts` 按用户串行、持久化去重及取消。`web/components/FeishuSettings.tsx` 从账号菜单打开，轮询接入进度及绑定后的通道状态；`Sidebar.tsx`、`useConversations.ts`、`useChat.ts` 展示并刷新每用户唯一置顶的飞书会话。迁移 `0037` 保存接入记录，`0038` 增加加密应用凭据、接入阶段、会话唯一索引并合并旧历史。`AgentService.streamAgentResponse` 的 `channel: "feishu"` 首次使用用户可用模型列表的默认项并保存到会话，禁用执行工具，复用队列预写的消息并排除尚未执行的任务上下文。协议、权限、失败语义和验证见 [飞书接入](feishu.md)。
+
 以下路径沿用开头的简写约定。文件名不带行号，避免代码移动导致索引失效。
 
 | 要了解 / 修改的内容 | 优先阅读路径 |
