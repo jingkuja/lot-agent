@@ -111,6 +111,7 @@ async function main() {
   await service.init();
   const feishuConfig = loadFeishuConfig();
   const feishu = feishuConfig ? new FeishuService(new PgFeishuRepository(service.db.pool), new FeishuClient(feishuConfig), new SecretBox(process.env.SECRET_MASTER_KEY)) : null;
+  service.feishuService = feishu;
   const feishuChannel = feishu ? new FeishuChannel(feishu,service) : null;
   feishuChannel?.start(process.env.FEISHU_LONG_CONNECTION !== "0");
 

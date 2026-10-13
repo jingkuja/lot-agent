@@ -1,4 +1,4 @@
-import { FeishuError, type OAuthTokens } from "./client.js";
+import { FeishuError, FEISHU_USER_SCOPES, type OAuthTokens } from "./client.js";
 import { gzipSync } from "node:zlib";
 
 const ACCOUNTS = "https://accounts.feishu.cn";
@@ -52,11 +52,11 @@ export class FeishuOnboardingClient {
     url.searchParams.set("source", "node-sdk/lot-agent");
     url.searchParams.set("tp", "sdk");
     url.searchParams.set("createOnly", "true");
-    url.searchParams.set("name", "Lot Agent");
-    url.searchParams.set("desc", "在飞书中使用你的 Lot Agent 助手");
+    url.searchParams.set("name", "灵渠claw");
+    url.searchParams.set("desc", "在飞书中使用你的灵渠claw助手");
     url.searchParams.set("addons", gzipSync(Buffer.from(JSON.stringify({
       preset: false,
-      scopes: { tenant: ["im:message:send_as_bot", "im:message.p2p_msg:readonly"], user: ["im:message", "im:message.send_as_user"] },
+      scopes: { tenant: ["im:message:send_as_bot", "im:message.p2p_msg:readonly"], user: FEISHU_USER_SCOPES },
       events: { items: { tenant: ["im.message.receive_v1"] } },
     }))).toString("base64url"));
     return {

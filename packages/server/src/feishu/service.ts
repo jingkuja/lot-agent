@@ -1,7 +1,7 @@
 import { createHash, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import type { FeishuConnection, FeishuRepository, FeishuUserStore, FeishuSetup, FeishuInboxJob } from "@lot-agent/core";
 import { SecretBox } from "../auth/secret-box.js";
-import { FeishuClient, FeishuError, FEISHU_SCOPES } from "./client.js";
+import { FeishuClient, FeishuError, FEISHU_SCOPES, type ContactSearchInput } from "./client.js";
 import { FeishuOnboardingClient, type DeviceGrant, type Registration } from "./onboarding-client.js";
 
 export const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -148,8 +148,31 @@ export class FeishuService {
     return { configured:true,connected:!!c, appId:c?.app_id,
       account:c ? { name:c.name,openId:c.open_id } : null,
       canSendAsUser:!!c && ["im:message","im:message.send_as_user"].every(scope => c.scopes.includes(scope)),
+      canSearchContacts: !!c && c.scopes.includes("contact:user:search"),
       needsReauthorization:!!c && c.expires_at <= Date.now() && !this.secrets.open(c.refresh_token),
       setup:this.view(s),contacts:await this.repository.contacts(userId),recent:await this.repository.recent(userId) };
+  }
+  async searchContacts(userId: string, input: ContactSearchInput, revision?: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    if ((input.query !== undefined && (!input.query.trim() || [...input.query].length > 50))
+      || (input.pageSize !== undefined && (!Number.isInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > 30))
+      || (input.pageToken !== undefined && input.pageToken.length > 2048)) throw new FeishuError("search_failed");
+    const staged = await this.repository.withUser(userId, async store => {
+      const c = await store.connection();
+      if (!c || (revision && c.revision !== revision)) return { error: new FeishuError("auth") };
+      if (!c.scopes.includes("contact:user:search")) return { error: new FeishuError("contact_permission") };
+      let token: string;
+      try { token = await this.access(store, c); } catch { return { error: new FeishuError("auth") }; }
+      if (!c.scopes.includes("contact:user:search")) return { error: new FeishuError("contact_permission") };
+      return { token, client: this.connectionClient(c), revision: c.revision };
+    });
+    if (staged.error) throw staged.error;
+    signal?.throwIfAborted();
+    const result = await staged.client!.searchContacts(staged.token!, input, signal);
+    const active = await this.repository.withUser(userId, async store => (await store.connection())?.revision === staged.revision);
+    signal?.throwIfAborted();
+    if (!active) throw new FeishuError("auth");
+    return result;
   }
   async disconnect(userId: string) { await this.repository.withUser(userId, store => store.disconnect()); }
   async botReply(job: FeishuInboxJob, text: string, signal?: AbortSignal) {
@@ -179,37 +202,55 @@ export class FeishuService {
       throw new FeishuError("auth");
     }
   }
-  async send(userId: string, input: { recipient: string; text: string; requestId: string; reply?: boolean }, revision?: string, signal?: AbortSignal) {
+  async send(userId: string, input: { recipient: string; text: string; requestId: string; reply?: boolean; identity?: "user" | "bot"; alternateRequestId?: string }, revision?: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
+    if (input.identity !== undefined && !["user", "bot"].includes(input.identity)) throw new FeishuError("rejected");
     let fingerprint = "";
+    const self = !input.reply && ["self", "me", "myself", "我", "自己", "我自己", "本人"].includes(input.recipient.trim().toLowerCase());
+    const identity = self ? "bot" as const : input.identity ?? "user";
     const staged = await this.repository.withUser(userId, async store => {
       const c = await store.connection();
       if (!c || (revision && revision !== c.revision)) return { error: new FeishuError("auth") };
-      fingerprint = hash(JSON.stringify([c.app_id,c.tenant_key,c.open_id,input.recipient,input.text,!!input.reply]));
+      // Retain legacy fingerprints for user/self sends; explicitly requested bot sends are distinct operations.
+      fingerprint = hash(JSON.stringify([c.app_id,c.tenant_key,c.open_id,self ? "self" : input.recipient,input.text,!!input.reply,
+        ...(!self && identity === "bot" ? ["bot"] : [])]));
       const existing = await store.sendRecord(input.requestId);
       if (existing) {
         if (existing.fingerprint !== fingerprint) return { error: new FeishuError("rejected") };
-        return existing.status === "sent" ? { messageId: existing.message_id! } : { error: new FeishuError("unknown") };
+        return existing.status === "sent" ? { messageId: existing.message_id! }
+          : { error: new FeishuError(existing.status === "failed" ? "rejected" : "unknown") };
       }
-      const target = input.reply ? input.recipient : /^ou_[\w-]+$/.test(input.recipient) ? input.recipient : await store.contact(input.recipient);
+      // A model changing identities within one request must not bypass an uncertain/successful send.
+      if (input.alternateRequestId) {
+        const alternate = await store.sendRecord(input.alternateRequestId);
+        if (alternate && alternate.status !== "failed") {
+          return { error: new FeishuError(alternate.status === "sent" ? "rejected" : "unknown") };
+        }
+      }
+      const target = self ? c.open_id : input.reply ? input.recipient : /^ou_[\w-]+$/.test(input.recipient) ? input.recipient : await store.contact(input.recipient);
       if (!target || (input.reply && !/^om_[\w-]+$/.test(target))) return { error: new FeishuError("rejected") };
-      let token: string;
-      try { token = await this.access(store,c); } catch { return { error: new FeishuError("auth") }; }
+      let token: string | undefined;
+      if (identity === "user") {
+        try { token = await this.access(store,c); } catch { return { error: new FeishuError("auth") }; }
+        if (!["im:message", "im:message.send_as_user"].every(s => c.scopes.includes(s))) return { error: new FeishuError("permission") };
+      }
       if (signal?.aborted) return { error: new Error("Feishu send cancelled") };
-      if (!["im:message", "im:message.send_as_user"].every(s => c.scopes.includes(s))) return { error: new FeishuError("permission") };
       await store.saveSend({ request_id: input.requestId, fingerprint, status: "sending", message_id: null });
       return { token, target, client: this.connectionClient(c) };
     });
     if (staged.error) throw staged.error;
-    if (staged.messageId) return { messageId: staged.messageId, identity: "user" as const };
+    if (staged.messageId) return { messageId: staged.messageId, identity };
     // The intent is COMMITTED before the external write; interrupted sends are never replayed.
     let dispatched = false;
     try {
       signal?.throwIfAborted();
       dispatched = true;
-      const messageId = await staged.client!.send(staged.token!,staged.target!,input.text,hash(`${userId}:${input.requestId}`).slice(0,40),input.reply,signal);
+      const uuid = hash(`${userId}:${input.requestId}`).slice(0,40);
+      const messageId = identity === "bot"
+        ? await staged.client!.botSend(staged.target!,input.text,uuid,input.reply,signal)
+        : await staged.client!.send(staged.token!,staged.target!,input.text,uuid,input.reply,signal);
       await this.repository.withUser(userId, store => store.saveSend({ request_id: input.requestId,fingerprint,status: "sent",message_id: messageId }));
-      return { messageId, identity: "user" as const };
+      return { messageId, identity };
     } catch (error) {
       await this.repository.withUser(userId, store => store.saveSend({ request_id: input.requestId,fingerprint,
         status: !dispatched || (error instanceof FeishuError && error.kind !== "unknown") ? "failed" : "unknown", message_id: null }));

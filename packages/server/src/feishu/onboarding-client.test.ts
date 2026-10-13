@@ -16,7 +16,7 @@ describe("official Feishu registration protocol",() => {
     expect(url.searchParams.get("user_code")).toBe("public-code");
     expect(url.href).not.toContain("secret-device");
     const addons=JSON.parse(gunzipSync(Buffer.from(url.searchParams.get("addons")!,"base64url")).toString());
-    expect(addons).toEqual({ preset:false,scopes:{ tenant:["im:message:send_as_bot","im:message.p2p_msg:readonly"],user:["im:message","im:message.send_as_user"] },events:{ items:{ tenant:["im.message.receive_v1"] } } });
+    expect(addons).toEqual({ preset:false,scopes:{ tenant:["im:message:send_as_bot","im:message.p2p_msg:readonly"],user:["im:message","im:message.send_as_user","contact:user:search"] },events:{ items:{ tenant:["im.message.receive_v1"] } } });
     expect(grant).toMatchObject({ expiresIn:123,interval:7 });
   });
   it("uses Basic auth to request the device grant and form-encoded v3 tokens",async () => {

@@ -1,5 +1,12 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
+  "等待回复": { "en": "Waiting for reply", "id": "Menunggu balasan" },
+  "联系人由飞书官方授权查询，无需手动保存姓名或用户 ID；同名时会请你选择。": {"en": "Contacts are searched through official Feishu authorization. No manual names or user IDs are needed; you will choose between matching names.", "id": "Kontak dicari melalui otorisasi resmi Feishu. Tidak perlu menyimpan nama atau ID pengguna; Anda akan memilih jika ada nama yang sama."},
+  "飞书联系人搜索尚未授权，请重新授权；若仍失败，请由管理员开通搜索用户权限": {"en": "Feishu contact search needs authorization. Authorize again; if it still fails, ask your administrator to enable Search users.", "id": "Pencarian kontak Feishu memerlukan otorisasi. Otorisasi ulang; jika masih gagal, minta administrator mengaktifkan izin pencarian pengguna."},
+  "飞书可使用 Web 通用助手的工具，生成文件及完整执行记录可在会话中查看。": {"en": "Feishu supports the Web General Assistant tools. Generated files and full execution records are available in the conversation.", "id": "Feishu mendukung alat Asisten Umum Web. File dan catatan eksekusi lengkap tersedia dalam percakapan."},
+  "飞书": { "en": "Feishu", "id": "Feishu" },
+  "在任意对话中直接说：查好后发给我自己，或把消息发给联系人。": { "en": "In any conversation, ask to send the result to yourself or a contact.", "id": "Di percakapan mana pun, minta hasil dikirim ke diri sendiri atau kontak." },
+  "飞书私聊也支持自然语言发送消息；/help 查看帮助；/cancel 取消任务。": { "en": "Feishu chats also support sending messages in natural language; /help for help; /cancel to cancel tasks.", "id": "Chat Feishu juga mendukung pengiriman pesan dengan bahasa alami; /help untuk bantuan; /cancel untuk membatalkan tugas." },
   "绑定验证码无效或已过期，请检查飞书私聊后重试": {"en": "The code is invalid or expired. Check your Feishu direct messages and try again.", "id": "Kode tidak valid atau kedaluwarsa. Periksa pesan pribadi Feishu dan coba lagi."},
   "飞书权限不足，请重新授权；若仍失败请联系企业管理员": {"en": "Feishu permissions are insufficient. Authorize again; if it still fails, contact your administrator.", "id": "Izin Feishu tidak cukup. Otorisasi ulang; jika tetap gagal, hubungi administrator."},
   "请求过于频繁": {"en": "Too many requests", "id": "Terlalu banyak permintaan"},

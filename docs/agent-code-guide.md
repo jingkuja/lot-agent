@@ -139,7 +139,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ## 5. 基础代码索引
 
-飞书接入：`server/feishu/` 的 `onboarding-client.ts` / `service.ts` 实现官方 PersonalAgent 扫码建机器人、设备授权与私聊验证码绑定；`channel.ts` 按用户应用维护 SDK 长连接并并行消费任务，`repository.ts` 按用户串行、持久化去重及取消。`web/components/FeishuSettings.tsx` 从账号菜单打开，轮询接入进度及绑定后的通道状态；`Sidebar.tsx`、`useConversations.ts`、`useChat.ts` 展示并刷新每用户唯一置顶的飞书会话。迁移 `0037` 保存接入记录，`0038` 增加加密应用凭据、接入阶段、会话唯一索引并合并旧历史。`AgentService.streamAgentResponse` 的 `channel: "feishu"` 首次使用用户可用模型列表的默认项并保存到会话，禁用执行工具，复用队列预写的消息并排除尚未执行的任务上下文。协议、权限、失败语义和验证见 [飞书接入](feishu.md)。
+飞书接入：`server/feishu/` 的 `onboarding-client.ts` / `service.ts` 实现官方 PersonalAgent 扫码建机器人、设备授权与私聊验证码绑定；`channel.ts` 按用户应用维护 SDK 长连接并并行消费任务，`repository.ts` 按用户串行、持久化去重及取消。`web/components/FeishuSettings.tsx` 从当前 Agent 卡片（`SidebarAgentTabs.tsx`）或账号菜单打开，轮询接入进度及绑定后的通道状态；`Sidebar.tsx`、`useConversations.ts`、`useChat.ts` 展示并刷新每用户唯一置顶的飞书会话。迁移 `0037` 保存接入记录，`0038` 增加加密应用凭据、接入阶段、会话唯一索引并合并旧历史。`AgentService.streamAgentResponse` 的 `channel: "feishu"` 首次使用用户可用模型列表的默认项并保存到会话，沿用 Web 通用助手的服务端工具白名单，复用队列预写的消息并排除尚未执行的任务上下文。`server/feishu/tools.ts` 在任意 Agent 文字对话按请求注入官方联系人搜索（`contact:user:search`，用户 Token，支持分页和可见外部联系人）与发送工具；收件人 `self` 由机器人向绑定本人投递，其他联系人默认使用用户身份，明确选择 `identity: "bot"` 时自动以机器人发送；外部单聊需收件人先启用，受控失败回执附启用链接。保留身份隔离的持久化幂等、同一请求跨身份去重、绑定版本校验和取消。设置页仅管理连接与授权，移除手动联系人/发送表单。`channel.ts` 回传提问选项、PPT 大纲与文档下载回执，并把等待用户回复保存为 `awaiting_input`；完整读取错误后的终态，保留发送回执、受控 API 错误码及运行 ID，明确拒绝的幂等重入不会误报未知结果。协议、权限、失败语义和验证见 [飞书接入](feishu.md)。
 
 以下路径沿用开头的简写约定。文件名不带行号，避免代码移动导致索引失效。
 

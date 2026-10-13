@@ -1,3 +1,5 @@
+import { ToolRegistry } from "@lot-agent/core";
+import { createFeishuTools } from "./tools.js";
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import type { FeishuRepository, FeishuUserStore, FeishuConnection, FeishuSendRecord, FeishuInboxJob, FeishuSetup } from "@lot-agent/core";
@@ -5,7 +7,7 @@ import { FeishuClient, FeishuError, loadFeishuConfig } from "./client.js";
 import { FeishuService, hash } from "./service.js";
 import { FeishuChannel } from "./channel.js";
 import { createFeishuRoutes, createFeishuPublicRoutes } from "./routes.js";
-import { isMediaGeneration, MEDIA_UNAVAILABLE, parseSendCommand } from "./policy.js";
+import { parseSendCommand } from "./policy.js";
 import { FeishuOnboardingClient } from "./onboarding-client.js";
 import { SecretBox } from "../auth/secret-box.js";
 import type { AgentService } from "../services/agent-service.js";
@@ -62,13 +64,126 @@ function setup(fetcher = vi.fn<typeof fetch>()) {
   const service = new FeishuService(repo,client,secrets,new FeishuOnboardingClient(onboardingFetch));
   repo.bindings.set("u1",{ user_id:"u1",app_id:"cli_test",tenant_key:"tenant",open_id:"ou_me",name:"Me",
     access_token:secrets.seal("user-token"),refresh_token:secrets.seal("refresh-token"),expires_at:Date.now()+3600_000,
-    scopes:["im:message","im:message.send_as_user"],revision:"revision" });
+    scopes:["im:message","im:message.send_as_user","contact:user:search"],revision:"revision" });
   const input = { recipient:"ou_alice",text:"原文\n`$()`",requestId:"request_1234567890" };
   return { repo,secrets,client,service,fetcher,onboardingFetch,input };
 }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value),{ status,headers:{ "Content-Type":"application/json" } });
 
 describe("Feishu user identity and delivery safety",() => {
+  it("uses the owner's bot only when explicitly selected, with a separate idempotency key after a user rejection", async () => {
+    const s = setup();
+    s.fetcher.mockImplementation(async (url, init) => {
+      if (String(url).includes("tenant_access_token")) return json({ code: 0, tenant_access_token: "bot-token" });
+      const bot = (init?.headers as Record<string, string>).Authorization === "Bearer bot-token";
+      expect(JSON.parse(String(init?.body))).toMatchObject({ receive_id: "ou_alice", content: JSON.stringify({ text: "fixture" }) });
+      return bot ? json({ code: 0, data: { message_id: "om_bot" } }) : json({ code: 230038 }, 400);
+    });
+    const registry = new ToolRegistry();
+    for (const tool of createFeishuTools(s.service, "u1")) registry.register(tool);
+    const context = { userId: "u1", runId: "run", sourceMessageId: "input", workingDirectory: "/tmp" };
+    const input = { recipient: "ou_alice", text: "fixture" };
+    expect(await registry.execute("feishu_send_message", input, context)).toMatchObject({ errorKind: "validation" });
+    expect(s.fetcher).toHaveBeenCalledTimes(1); // No silent bot fallback.
+    const result = await registry.execute("feishu_send_message", { ...input, identity: "bot" }, context);
+    expect(JSON.parse(result.content)).toMatchObject({ status: "sent", identity: "bot", messageId: "om_bot" });
+    await registry.execute("feishu_send_message", { ...input, identity: "bot" }, context);
+    expect(s.fetcher).toHaveBeenCalledTimes(3);
+    expect([...s.repo.sends.values()].map(row => row.status).sort()).toEqual(["failed", "sent"]);
+  });
+  it("isolates explicit bot sends by owner/revision, does not refresh the user token and supports bot replies", async () => {
+    const s = setup();
+    s.repo.bindings.get("u1")!.expires_at = 0;
+    s.repo.bindings.get("u1")!.scopes = [];
+    s.fetcher.mockImplementation(async (url, init) => {
+      if (String(url).includes("tenant_access_token")) return json({ code: 0, tenant_access_token: "bot-token" });
+      expect(String(url)).toContain("im/v1/messages/om_original/reply");
+      expect(init?.headers).toMatchObject({ Authorization: "Bearer bot-token" });
+      return json({ code: 0, data: { message_id: "om_reply" } });
+    });
+    const input = { ...s.input, recipient: "om_original", reply: true, identity: "bot" as const };
+    await expect(s.service.send("u2", input)).rejects.toMatchObject({ kind: "auth" });
+    await expect(s.service.send("u1", input, "old-binding")).rejects.toMatchObject({ kind: "auth" });
+    expect(s.fetcher).not.toHaveBeenCalled();
+    expect(await s.service.send("u1", input)).toEqual({ identity: "bot", messageId: "om_reply" });
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
+    expect(s.onboardingFetch).not.toHaveBeenCalled();
+    await expect(s.service.send("u1", { ...input, identity: "user" })).rejects.toMatchObject({ kind: "rejected" });
+  });
+  it("explains missing bot availability and never retries a lost delivery response", async () => {
+    const s = setup();
+    s.fetcher.mockImplementation(async url => String(url).includes("tenant_access_token")
+      ? json({ code: 0, tenant_access_token: "bot-token" }) : json({ code: 230013 }, 400));
+    await expect(s.service.send("u1", { ...s.input, identity: "bot" })).rejects.toMatchObject({ kind: "bot_unavailable", apiCode: 230013,
+      message: expect.stringContaining("https://applink.feishu.cn/client/bot/open?appId=cli_test") });
+    expect(s.repo.sends.get(`u1:${s.input.requestId}`)?.status).toBe("failed");
+    const next = { ...s.input, requestId: "uncertain_bot_send", identity: "bot" as const };
+    s.fetcher.mockImplementation(async url => {
+      if (String(url).includes("tenant_access_token")) return json({ code: 0, tenant_access_token: "bot-token" });
+      throw new Error("lost receipt");
+    });
+    await expect(s.service.send("u1", next)).rejects.toMatchObject({ kind: "unknown" });
+    await expect(s.service.send("u1", next)).rejects.toMatchObject({ kind: "unknown" });
+    expect(s.fetcher).toHaveBeenCalledTimes(4);
+  });
+  it("does not label failed bot authentication as a possibly delivered message", async () => {
+    const s = setup();
+    s.fetcher.mockRejectedValue(new Error("token endpoint unavailable"));
+    await expect(s.service.send("u1", { ...s.input, identity: "bot" })).rejects.toMatchObject({ kind: "bot_auth" });
+    expect(s.repo.sends.get(`u1:${s.input.requestId}`)?.status).toBe("failed");
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ["user", "sent"], ["user", "unknown"], ["bot", "sent"], ["bot", "unknown"],
+  ] as const)("does not bypass a %s send with %s outcome by switching identities", async (identity, outcome) => {
+    const s = setup();
+    s.fetcher.mockImplementation(async url => {
+      if (String(url).includes("tenant_access_token")) return json({ code: 0, tenant_access_token: "bot-token" });
+      if (outcome === "unknown") throw new Error("lost delivery receipt");
+      return json({ code: 0, data: { message_id: "om_sent" } });
+    });
+    const registry = new ToolRegistry();
+    for (const tool of createFeishuTools(s.service, "u1")) registry.register(tool);
+    const context = { userId: "u1", runId: "run", sourceMessageId: "input", workingDirectory: "/tmp" };
+    const input = { recipient: "ou_alice", text: "fixture", identity };
+    await registry.execute("feishu_send_message", input, context);
+    const before = s.fetcher.mock.calls.length;
+    const result = await registry.execute("feishu_send_message", { ...input, identity: identity === "bot" ? "user" : "bot" }, context);
+    expect(result).toMatchObject({ isError: true, errorKind: outcome === "unknown" ? "unknown_outcome" : "validation" });
+    expect(s.fetcher).toHaveBeenCalledTimes(before);
+    expect(s.repo.sends.size).toBe(1);
+  });
+  it("explains 230038 as a cross-tenant API restriction, with no retry or bot fallback", async () => {
+    const s = setup();
+    s.fetcher.mockResolvedValue(json({ code: 230038, msg: "Cross tenant p2p chat operate forbid." }, 400));
+    const registry = new ToolRegistry();
+    for (const tool of createFeishuTools(s.service, "u1")) registry.register(tool);
+    const result = await registry.execute("feishu_send_message", { recipient: "ou_external", text: "fixture" },
+      { userId: "u1", runId: "run", workingDirectory: "/tmp" });
+    expect(result).toMatchObject({ isError: true, errorKind: "validation" });
+    expect(result.content).toContain("跨租户");
+    expect(result.content).toContain("重新授权或改用姓名不能解除");
+    expect(result.content).toContain("230038");
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
+    expect(s.fetcher.mock.calls[0][1]?.headers).toMatchObject({ Authorization: "Bearer user-token" });
+  });
+  it("keeps a definite rejection definite when the same send is retried by name, without another HTTP write", async () => {
+    const s = setup();
+    s.fetcher.mockImplementation(async url => String(url).includes("users/search")
+      ? json({ code: 0, data: { items: [{ id: "ou_alice", meta_data: { i18n_names: { en_us: "Anson" } } }], has_more: false } })
+      : json({ code: 230013, msg: "upstream body with secret-token" }, 400));
+    const registry = new ToolRegistry();
+    for (const tool of createFeishuTools(s.service, "u1")) registry.register(tool);
+    const context = { userId: "u1", runId: "run", sourceMessageId: "input", workingDirectory: "/tmp" };
+    const first = await registry.execute("feishu_send_message", { recipient: "ou_alice", text: "fixture" }, context);
+    const second = await registry.execute("feishu_send_message", { recipient: "Anson", text: "fixture" }, context);
+    expect(first).toMatchObject({ isError: true, errorKind: "validation" });
+    expect(first.content).toContain("230013");
+    expect(first.content).not.toContain("secret-token");
+    expect(second).toMatchObject({ isError: true, errorKind: "validation" });
+    expect(second.content).not.toContain("无法确认");
+    expect(s.fetcher.mock.calls.filter(([url]) => String(url).includes("im/v1/messages"))).toHaveLength(1);
+  });
   it("sends exact text with the user's token and persists the intent before HTTP",async () => {
     const s=setup();
     s.fetcher.mockImplementation(async (_url,init) => {
@@ -234,16 +349,9 @@ describe("Feishu OAuth and routes",() => {
 
 describe("Feishu incoming commands",() => {
   const job: FeishuInboxJob={ message_id:"om_incoming",chat_id:"oc_chat",user_id:"u1",revision:"revision",text:"" };
-  it.each(["生成一张海报","帮我制作视频","给我画一张猫咪图片","generate an image of a cat","create a short video"])("returns exact media placeholder for %s",async text => {
-    const s=setup(); const agent={ streamAgentResponse:vi.fn() } as unknown as AgentService;
-    const channel=new FeishuChannel(s.service,agent);
-    expect(await channel.execute({ ...job,text },new AbortController().signal)).toBe(MEDIA_UNAVAILABLE);
-    expect(agent.streamAgentResponse).not.toHaveBeenCalled(); expect(s.fetcher).not.toHaveBeenCalled();
-  });
   it("keeps quoted outbound messages intact and allows writing scripts",() => {
     expect(parseSendCommand("给张三发：请生成视频\n谢谢")).toEqual({ recipient:"张三",text:"请生成视频\n谢谢" });
     expect(parseSendCommand("/send 张三 原文\n内容")).toMatchObject({ recipient:"张三",text:"原文\n内容" });
-    expect(isMediaGeneration("帮我写一段视频脚本")).toBe(false);
   });
   it("accepts only the bound owner in private chat and deduplicates cancellation",async () => {
     const s=setup(); const channel=new FeishuChannel(s.service,{} as AgentService);
@@ -260,5 +368,143 @@ describe("Feishu incoming commands",() => {
     s.fetcher.mockResolvedValue(json({ code:0,data:{ message_id:"om_sent" } }));
     expect(await channel.execute({ ...job,text:"/send ou_alice hello" },new AbortController().signal)).toContain("本人身份");
     expect(s.repo.sends.has(`u1:${hash("inbound:om_incoming")}`)).toBe(true);
+  });
+});
+
+
+describe("Feishu conversation tools", () => {
+  function tools(s: ReturnType<typeof setup>, revision = "revision") {
+    const registry = new ToolRegistry();
+    for (const tool of createFeishuTools(s.service, "u1", revision)) registry.register(tool);
+    const context = { workingDirectory: ".", userId: "u1", runId: "run1", sourceMessageId: "input1" };
+    return { registry, context };
+  }
+  it("delivers researched text to the bound self via the bot and deduplicates repeated calls", async () => {
+    const s = setup();
+    s.repo.bindings.get("u1")!.scopes = [];
+    s.fetcher.mockImplementation(async (url, init) => {
+      if (String(url).includes("tenant_access_token")) return json({ code: 0, tenant_access_token: "bot-token" });
+      expect(init?.headers).toMatchObject({ Authorization: "Bearer bot-token" });
+      expect(JSON.parse(String(init?.body))).toMatchObject({ receive_id: "ou_me", content: JSON.stringify({ text: "已核实的收盘价和来源" }) });
+      return json({ code: 0, data: { message_id: "om_self" } });
+    });
+    const { registry, context } = tools(s);
+    const input = { recipient: "self", text: "已核实的收盘价和来源" };
+    const result = await registry.execute("feishu_send_message", input, context);
+    expect(JSON.parse(result.content)).toEqual({ status: "sent", messageId: "om_self", identity: "bot" });
+    await registry.execute("feishu_send_message", input, { ...context, operationId: "another-tool-call" });
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("uses the owner's saved contact and exact text with user identity", async () => {
+    const s = setup(); await s.repo.saveContact("u1", "张三", "ou_alice");
+    s.fetcher.mockImplementation(async (_url, init) => {
+      if (String(_url).includes("users/search")) return json({ code: 0, data: { items: [{ id: "ou_alice", meta_data: { i18n_names: { zh_cn: "张三" } } }], has_more: false } });
+      expect(init?.headers).toMatchObject({ Authorization: "Bearer user-token" });
+      expect(JSON.parse(String(init?.body))).toMatchObject({ receive_id: "ou_alice", content: JSON.stringify({ text: s.input.text }) });
+      return json({ code: 0, data: { message_id: "om_contact" } });
+    });
+    const { registry, context } = tools(s);
+    expect((await registry.execute("feishu_send_message", { recipient: "张三", text: s.input.text }, context)).isError).toBeUndefined();
+  });
+  it("validates input, authenticated owner, stale binding and cancellation before sending", async () => {
+    const s = setup(), { registry, context } = tools(s, "stale");
+    const input = { recipient: "self", text: "hello" };
+    expect(await registry.execute("feishu_send_message", { ...input, userId: "u2" }, context)).toMatchObject({ errorKind: "validation" });
+    expect(await registry.execute("feishu_send_message", input, { ...context, userId: "u2" })).toMatchObject({ errorKind: "permission" });
+    expect(await registry.execute("feishu_contacts", {}, { ...context, userId: "u2" })).toMatchObject({ errorKind: "permission" });
+    expect(await registry.execute("feishu_send_message", input, context)).toMatchObject({ errorKind: "permission" });
+    expect(await registry.execute("feishu_send_message", input, context, { signal: AbortSignal.abort() })).toMatchObject({ errorKind: "cancelled" });
+    expect(s.fetcher).not.toHaveBeenCalled();
+  });
+  it("returns uncertain delivery without replaying the external write", async () => {
+    const s = setup(); s.fetcher.mockRejectedValue(new Error("private transport details"));
+    const { registry, context } = tools(s);
+    const input = { recipient: "ou_alice", text: "hello" };
+    for (let i = 0; i < 2; i++) {
+      const result = await registry.execute("feishu_send_message", input, context);
+      expect(result).toMatchObject({ isError: true, errorKind: "unknown_outcome" });
+      expect(result.content).not.toContain("private transport");
+    }
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("lists only public connection details and guides unbound users to connect", async () => {
+    const s = setup(), { registry, context } = tools(s);
+    s.fetcher.mockResolvedValue(json({ code: 0, data: { items: [{ id: "ou_me", meta_data: { i18n_names: { zh_cn: "Me" } } }], has_more: false } }));
+    const result = await registry.execute("feishu_contacts", {}, context);
+    expect(JSON.parse(result.content)).toMatchObject({ users: [{ openId: "ou_me" }] });
+    expect(result.content).not.toMatch(/user-token|refresh-token|enc:v1|secret/);
+    s.repo.bindings.clear();
+    expect(await registry.execute("feishu_contacts", {}, context)).toMatchObject({ isError: true, errorKind: "permission" });
+  });
+});
+
+
+describe("official Feishu contact search", () => {
+  const result = (items: unknown[] = [], hasMore = false) => json({ code: 0, data: { items, has_more: hasMore, page_token: hasMore ? "next+page" : "" } });
+  const person = (id = "ou_alice", name = "张三") => ({ id, display_info: "<h>张三</h>\n研发部", meta_data: { i18n_names: { zh_cn: name }, mail_address: "alice@example.org", chat_id: "oc_known", is_cross_tenant: true } });
+  it("uses the official POST endpoint, user credential, pagination and external-contact fields", async () => {
+    const s = setup(); s.fetcher.mockImplementation(async () => result([person()], true));
+    const found = await s.service.searchContacts("u1", { query: "张三", pageSize: 30, pageToken: "next+page" }, "revision");
+    const [url, init] = s.fetcher.mock.calls[0];
+    expect(String(url)).toBe("https://open.feishu.cn/open-apis/contact/v3/users/search?page_size=30&page_token=next%2Bpage");
+    expect(init).toMatchObject({ method: "POST", redirect: "error", headers: { Authorization: "Bearer user-token" } });
+    expect(JSON.parse(String(init?.body))).toEqual({ query: "张三" });
+    expect(found).toMatchObject({ users: [{ openId: "ou_alice", name: "张三", displayInfo: "张三\n研发部", hasChatted: true, isExternal: true }], hasMore: true, pageToken: "next+page" });
+    await s.service.searchContacts("u1", {});
+    expect(JSON.parse(String(s.fetcher.mock.calls[1][1]?.body))).toEqual({ filter: { has_contact: true } });
+  });
+  it("requires contact scope, validates owner and binding version, and never uses a bot token", async () => {
+    const s = setup();
+    await expect(s.service.searchContacts("u2", { query: "张三" })).rejects.toMatchObject({ kind: "auth" });
+    await expect(s.service.searchContacts("u1", { query: "张三" }, "stale")).rejects.toMatchObject({ kind: "auth" });
+    s.repo.bindings.get("u1")!.scopes = ["im:message", "im:message.send_as_user"];
+    expect(await s.service.status("u1")).toMatchObject({ canSendAsUser: true, canSearchContacts: false });
+    await expect(s.service.searchContacts("u1", {})).rejects.toMatchObject({ kind: "contact_permission" });
+    expect(s.fetcher).not.toHaveBeenCalled();
+  });
+  it("refreshes search credentials under the owner lock", async () => {
+    const s = setup(); s.repo.bindings.get("u1")!.expires_at = 0;
+    s.fetcher.mockImplementation(async (url, init) => {
+      if (String(url).includes("oauth/token")) return json({ access_token: "new-token", refresh_token: "rotated", expires_in: 7200 });
+      expect(init?.headers).toMatchObject({ Authorization: "Bearer new-token" });
+      return result([person()]);
+    });
+    expect((await s.service.searchContacts("u1", { query: "张三" })).users).toHaveLength(1);
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("discards results after disconnection and does not execute an already-cancelled search", async () => {
+    const s = setup();
+    await expect(s.service.searchContacts("u1", {}, undefined, AbortSignal.abort())).rejects.toThrow();
+    expect(s.fetcher).not.toHaveBeenCalled();
+    s.fetcher.mockImplementation(async () => { s.repo.bindings.clear(); return result([person()]); });
+    await expect(s.service.searchContacts("u1", {})).rejects.toMatchObject({ kind: "auth" });
+  });
+  it.each([{ items: [] }, { items: [person(), person("ou_other")] }])("never sends to missing or ambiguous names", async ({ items }) => {
+    const s = setup(); s.fetcher.mockResolvedValue(result(items));
+    const tool = createFeishuTools(s.service, "u1")[1];
+    const receipt = await tool.execute({ recipient: "张三", text: "hello" }, { workingDirectory: ".", userId: "u1", runId: "run" });
+    expect(receipt).toMatchObject({ isError: true, errorKind: "validation" });
+    expect(JSON.parse(receipt.content).users).toHaveLength(items.length);
+    expect(s.repo.sends.size).toBe(0);
+    expect(s.fetcher.mock.calls.every(([url]) => String(url).includes("users/search"))).toBe(true);
+  });
+  it("does not select the first page's only person when more candidates exist", async () => {
+    const s = setup(); s.fetcher.mockResolvedValue(result([person()], true));
+    const tool = createFeishuTools(s.service, "u1")[1];
+    expect(await tool.execute({ recipient: "张三", text: "hello" }, { workingDirectory: ".", userId: "u1", runId: "run" })).toMatchObject({ isError: true });
+    expect(s.repo.sends.size).toBe(0);
+  });
+  it("classifies permission errors and malformed search responses without exposing raw data", async () => {
+    const s = setup();
+    s.fetcher.mockResolvedValueOnce(json({ code: 99991672, msg: "secret" }, 403));
+    await expect(s.service.searchContacts("u1", {})).rejects.toMatchObject({ kind: "contact_permission" });
+    s.fetcher.mockResolvedValueOnce(json({ data: { items: [{ id: "not-an-open-id" }], has_more: false } }));
+    await expect(s.service.searchContacts("u1", {})).rejects.toMatchObject({ kind: "search_failed" });
+  });
+  it("includes the new scope when an existing account authorizes again", async () => {
+    const s = setup();
+    s.onboardingFetch.mockResolvedValue(json({ device_code: "device", verification_uri_complete: "https://accounts.feishu.cn/authorize", expires_in: 240, interval: 5 }));
+    await s.service.begin("u1");
+    expect(new URLSearchParams(String(s.onboardingFetch.mock.calls[0][1]?.body)).get("scope")).toContain("contact:user:search");
   });
 });

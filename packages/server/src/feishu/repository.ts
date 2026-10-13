@@ -123,7 +123,7 @@ export class PgFeishuRepository implements FeishuRepository {
   async claim(): Promise<FeishuInboxJob | null> {
     // A crashed worker is never replayed. Its transcript explains the unknown outcome.
     await this.pool.query(`WITH expired AS (
-      UPDATE feishu_inbox SET status='unknown' WHERE status='running' AND started_at<now()-interval '5 minutes'
+      UPDATE feishu_inbox SET status='unknown' WHERE status='running' AND started_at<now()-interval '35 minutes'
       RETURNING result_message_id,conversation_id,run_id
     ), released AS (
       UPDATE conversations c SET active_run_id=NULL,run_started_at=NULL FROM expired e

@@ -99,7 +99,7 @@ describe.skipIf(!testUrl)("Feishu PostgreSQL migration and queue integration", (
   it("marks crashed work unknown and never replays it",async () => {
     const cid=await bind("crash"); const pending=job("crash"); await repo.enqueue(pending);
     const running=(await repo.claim())!;
-    await db.pool.query("UPDATE feishu_inbox SET started_at=now()-interval '6 minutes' WHERE message_id=$1",[running.message_id]);
+    await db.pool.query("UPDATE feishu_inbox SET started_at=now()-interval '36 minutes' WHERE message_id=$1",[running.message_id]);
     expect(await repo.claim()).toBeNull();
     expect((await db.getMessages(cid)).at(-1)?.metadata.feishuStatus).toBe("unknown");
     expect((await db.pool.query("SELECT active_run_id FROM conversations WHERE id=$1",[cid])).rows[0].active_run_id).toBeNull();

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { SkillLoader, ToolRegistry } from "@lot-agent/core";
 import type { ChatChunk, Message } from "@lot-agent/core";
+import type { FeishuService } from "../feishu/service.js";
 import { AgentService } from "./agent-service.js";
 
 /** LLM that replays a script of chunk-lists; one list per chat() call. */
@@ -127,15 +128,23 @@ async function drain(events: AsyncIterable<unknown>): Promise<unknown[]> {
   return out;
 }
 
-it("Feishu strips every execution tool even when a model requests one", async () => {
-  const { fake, calls } = fakeService({ script: parallelSameNameScript() });
-  const tool = fake.toolRegistry.get("fetchy")!;
-  const execute = vi.spyOn(tool, "execute");
+it("Feishu preserves the same Web Agent tool allowlist, including document tools", async () => {
+  const { fake } = fakeService({ script: [[
+    { type: "tool_call", toolCall: { id: "doc", name: "generate_document", arguments: { content: "report" } } },
+    { type: "tool_call", toolCall: { id: "blocked", name: "execute_command", arguments: { command: "whoami" } } },
+    { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
+  ], [{ type: "text", content: "done" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }]] });
+  const doc = vi.fn(async () => ({ content: "下载链接：https://example.org/report.docx" }));
+  const host = vi.fn(async () => ({ content: "host" }));
+  fake.toolRegistry.register({ name: "generate_document", description: "document", parameters: {}, execute: doc });
+  fake.toolRegistry.register({ name: "execute_command", description: "host", parameters: {}, execute: host });
+  const definition = fake.agentRegistry.get("general")!;
+  vi.spyOn(fake.agentRegistry, "get").mockReturnValue({ ...definition, toolNames: ["fetchy", "generate_document", "execute_command"] });
   const advertised = vi.spyOn(fake.toolRegistry, "toLLMTools");
-  await drain(fake.streamAgentResponse("c1", "generate a video", "general", "u1", [], undefined, { channel: "feishu" }));
-  expect(advertised).toHaveBeenCalledWith([]);
-  expect(execute).not.toHaveBeenCalled();
-  expect(JSON.stringify(calls)).toContain("后续支持，持续开发中...");
+  await drain(fake.streamAgentResponse("c1", "generate a report", "general", "u1", [], undefined, { channel: "feishu" }));
+  expect(advertised).toHaveBeenCalledWith(["fetchy", "generate_document"]);
+  expect(doc).toHaveBeenCalledTimes(1);
+  expect(host).not.toHaveBeenCalled();
 });
 
 describe("Feishu model selection", () => {
@@ -307,4 +316,32 @@ describe("desktop local tools are request scoped", () => {
     await drain(fake.streamAgentResponse("c1", "read", "general", "u1"));
     expect(execute).not.toHaveBeenCalled();
   });
+});
+
+
+it.each(["feishu", "web", "contract"])("researches then sends through Feishu in a %s conversation", async channel => {
+  const { fake, repo, calls } = fakeService({ script: [
+    [{ type: "tool_call", toolCall: { id: "search", name: "web_search", arguments: { query: "招商银行昨日收盘价" } } },
+      { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
+    [{ type: "tool_call", toolCall: { id: "send", name: "feishu_send_message", arguments: { recipient: "self", text: "查询结果，含交易日期及来源" } } },
+      { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
+    [{ type: "text", content: "已发送到你的飞书。" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
+  ] });
+  const search = vi.fn(async () => ({ content: "查询结果，含交易日期及来源" }));
+  fake.toolRegistry.register({ name: "web_search", description: "search", parameters: { type: "object" }, effect: "read", execute: search });
+  const definition = fake.agentRegistry.get("general")!;
+  vi.spyOn(fake.agentRegistry, "get").mockReturnValue({ ...definition, id: channel === "contract" ? "contract" : "general", toolNames: channel === "contract" ? [] : ["web_search"] });
+  const send = vi.fn(async () => {
+    expect(search).toHaveBeenCalledTimes(1);
+    return { messageId: "om_delivered", identity: "bot" as const };
+  });
+  fake.feishuService = { send } as unknown as FeishuService;
+  const events = await drain(fake.streamAgentResponse("c1", "获取昨天招商银行的收盘价发给我自己", channel === "contract" ? "contract" : "general", "u1", [], undefined,
+    channel === "feishu" ? { channel: "feishu", feishuTurn: { userMessageId: "input", resultMessageId: "output", revision: "bound-version" } } : undefined));
+  expect(send).toHaveBeenCalledWith("u1", expect.objectContaining({ recipient: "self", text: "查询结果，含交易日期及来源", requestId: expect.any(String) }),
+    channel === "feishu" ? "bound-version" : undefined, expect.any(AbortSignal));
+  expect(events.at(-1)).toMatchObject({ type: "done", status: "completed" });
+  expect(repo.saveToolResult).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(calls)).toContain("om_delivered");
+  expect(fake.toolRegistry.get("feishu_send_message")).toBeUndefined();
 });

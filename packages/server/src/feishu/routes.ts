@@ -7,7 +7,7 @@ export function createFeishuRoutes(service: FeishuService | null, onDisconnect: 
   app.onError((error, c) => c.json({ error: error instanceof FeishuError ? error.message : "飞书请求失败，请稍后查看连接状态" }, 400));
   app.use("*", async (c,next) => { c.header("Cache-Control", "no-store"); await next(); });
   app.get("/status", async c => {
-    if (!service) return c.json({ configured:false,connected:false,canSendAsUser:false,account:null,contacts:[],recent:[] });
+    if (!service) return c.json({ configured:false,connected:false,canSendAsUser:false,canSearchContacts:false,account:null,contacts:[],recent:[] });
     const status = await service.status(c.get("userId"));
     return c.json({ ...status,messageConnection:connectionStatus(status.appId) });
   });
@@ -44,8 +44,9 @@ export function createFeishuRoutes(service: FeishuService | null, onDisconnect: 
     if (!b || typeof b.recipient !== "string" || !b.recipient.trim() || b.recipient.length > 120
       || typeof b.text !== "string" || !b.text.trim() || Buffer.byteLength(b.text) > 12_000
       || typeof b.requestId !== "string" || !/^[a-zA-Z0-9_-]{16,80}$/.test(b.requestId)
-      || (b.reply !== undefined && typeof b.reply !== "boolean")) return c.json({ error: "消息参数无效" }, 400);
-    return c.json(await service!.send(c.get("userId"), { recipient: b.recipient.trim(), text: b.text, requestId: b.requestId, reply: b.reply },undefined,c.req.raw.signal));
+      || (b.reply !== undefined && typeof b.reply !== "boolean")
+      || (b.identity !== undefined && !["user", "bot"].includes(b.identity))) return c.json({ error: "消息参数无效" }, 400);
+    return c.json(await service!.send(c.get("userId"), { recipient: b.recipient.trim(), text: b.text, requestId: b.requestId, reply: b.reply, identity: b.identity },undefined,c.req.raw.signal));
   });
   return app;
 }

@@ -36,14 +36,14 @@ try {
     const transcript=[{id:"input",role:"user",content:"飞书任务一"},{id:"result",role:"assistant",content:"完整结果一",metadata:{feishuStatus:"completed"}}];
     let statusResponse = "missing";
     page.on("pageerror",e => errors.push(e.message));
-    const state = { configured:true,connected:true,canSendAsUser:true,messageConnection:"connected",account:{ name:"测试账号",openId:"ou_owner" },contacts:[],recent:[] };
+    const state = { configured:true,connected:true,canSendAsUser:true,canSearchContacts:false,messageConnection:"connected",account:{ name:"测试账号",openId:"ou_owner" },contacts:[],recent:[] };
     let pauseAuthorization = true;
     await page.route("**/api/**",async route => {
       const req=route.request(), path=new URL(req.url()).pathname;
       if (!path.startsWith("/api/")) return route.continue();
       let value={}; let status=200;
       if (path==="/api/public/product") value={ globle:1 };
-      if (path==="/api/agents") value=[{id:"general",name:"通用助手",type:"general",installed:true,toolNames:[],defaultModelId:"test"}];
+      if (path==="/api/agents") value=[["general","通用助手"],["marketing_video","营销影像"],["image","图片生成"],["contract","合同对比"]].map(([id,name])=>({id,name,type:id,installed:true,toolNames:[],defaultModelId:"test"}));
       if (path==="/api/conversations/projects" || path==="/api/knowledge-bases") value=[];
       if (path==="/api/conversations") value={items:conversations,nextCursor:null};
       if (path==="/api/conversations/pin") value={...conversations[0],messages:transcript};
@@ -81,8 +81,7 @@ try {
       await route.fulfill({ status,contentType:"application/json",body:JSON.stringify(value) });
     });
     await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}`);
-    await page.locator(".account-chip").click();
-    await page.getByRole("menuitem",{ name:locale==="zh" ? "飞书接入" : "Feishu connection" }).click();
+    await page.locator(".sidebar-current-agent").getByRole("button",{ name:locale==="zh" ? "飞书接入" : "Feishu connection" }).click();
     const dialog=page.getByRole("dialog");
     const refresh=dialog.getByRole("button",{ name:locale==="zh" ? "刷新连接状态" : "Refresh connection status",exact:true });
     const loading=dialog.getByText(locale==="zh" ? "加载中…" : "Loading…",{ exact:true });
@@ -107,21 +106,18 @@ try {
     statusResponse="connected";
     await refresh.click();
     await dialog.getByText("测试账号",{ exact:false }).waitFor();
-    await page.locator("#feishu-alias").fill("张三");
-    await page.locator("#feishu-open-id").fill("ou_alice");
-    await dialog.getByRole("button",{ name:locale==="zh" ? "保存联系人" : "Save contact",exact:true }).click();
-    await page.locator(".feishu-contacts").getByText("张三",{ exact:false }).waitFor();
-    await page.locator("#feishu-recipient").fill("张三");
-    await page.locator("#feishu-text").fill("Exact text\n消息原文");
-    const send=dialog.getByRole("button",{ name:locale==="zh" ? "以本人身份发送" : "Send as myself",exact:true });
-    await send.click(); await dialog.getByRole("alert").waitFor();
-    assert.equal(sends.length,1); assert.equal(sends[0].text,"Exact text\n消息原文");
-    assert.equal(sends[0].recipient,"张三"); assert.equal(sends[0].reply,false);
-    await send.click();
-    await dialog.getByRole("status").getByText("om_fixture",{ exact:false }).waitFor();
-    assert.equal(sends[0].requestId,sends[1].requestId,"retry must retain idempotency key");
-    assert.equal(await page.locator("#feishu-text").inputValue(),"");
-    assert.ok(await send.isDisabled());
+    assert.equal(await page.locator("#feishu-alias,#feishu-open-id").count(),0,"manual contact form is removed");
+    const contactPermission=dialog.getByRole("status").filter({hasText:locale==="zh" ? "飞书联系人搜索尚未授权" : "Feishu contact search needs authorization"});
+    await contactPermission.waitFor();
+    state.canSearchContacts=true;
+    await refresh.click();
+    await contactPermission.waitFor({state:"hidden"});
+    assert.equal(await contactPermission.count(),0,"new scope clears the reauthorization hint");
+    await dialog.getByText(locale==="zh" ? "联系人由飞书官方授权查询，无需手动保存姓名或用户 ID；同名时会请你选择。" : "Contacts are searched through official Feishu authorization. No manual names or user IDs are needed; you will choose between matching names.",{exact:true}).waitFor();
+    assert.equal(await page.locator("#feishu-recipient,#feishu-text").count(),0,"manual send form is removed");
+    await dialog.getByText(locale==="zh" ? "在任意对话中直接说：查好后发给我自己，或把消息发给联系人。" : "In any conversation, ask to send the result to yourself or a contact.",{exact:true}).waitFor();
+    assert.equal(sends.length,0,"settings must not send messages");
+    if (process.env.FEISHU_SCREENSHOTS_DIR) await page.screenshot({path:join(process.env.FEISHU_SCREENSHOTS_DIR,`feishu-contacts-${locale}-${theme}.png`)});
     const css=await dialog.evaluate(el => ({ color:getComputedStyle(el).color,background:getComputedStyle(el).backgroundColor }));
     assert.notEqual(css.color,css.background);
     assert.ok((await dialog.boundingBox()).width<1100);
@@ -164,9 +160,12 @@ try {
     assert.equal(await page.locator("textarea").count(),0,"channel view must preserve its transcript");
     transcript.push({id:"input2",role:"user",content:"飞书任务二"},{id:"result2",role:"assistant",content:"失败结果二",metadata:{feishuStatus:"failed"}});
     await page.getByText("失败结果二",{exact:true}).waitFor();
+    transcript.push({id:"input3",role:"user",content:"发给张三"},{id:"result3",role:"assistant",content:"请确认是哪位张三",metadata:{feishuStatus:"awaiting_input"}});
+    await page.getByText("请确认是哪位张三",{exact:true}).waitFor();
+    await page.locator(".feishu-message-status").getByText(locale==="zh" ? "等待回复" : "Waiting for reply",{exact:true}).waitFor();
     assert.equal(await page.locator(".sidebar-channel-pin").count(),1);
     if (process.env.FEISHU_SCREENSHOTS_DIR) await page.screenshot({path:join(process.env.FEISHU_SCREENSHOTS_DIR,`feishu-transcript-${locale}-${theme}.png`)});
     assert.deepEqual(errors,[]); await context.close();
   }
-  console.log("Feishu UI passed: Chinese light / English dark, 404 / 503 / network failure recovery, unconfigured refresh, contacts, exact sends, stable retry ID, official QR creation, automatic authorization polling, private code confirmation, single pinned transcript and live task refresh.");
+  console.log("Feishu UI passed: Chinese light / English dark, 404 / 503 / network failure recovery, unconfigured refresh, sidebar entry, official contacts and scope upgrade, natural-language messaging guidance without manual form, official QR creation, automatic authorization polling, private code confirmation, single pinned transcript and live task refresh.");
 } finally { await browser?.close(); await vite?.close(); await rm(temp,{ recursive:true,force:true }); }

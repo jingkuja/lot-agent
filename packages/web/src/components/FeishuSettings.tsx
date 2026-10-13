@@ -10,10 +10,9 @@ interface Setup {
 }
 interface Status {
   setup?: Setup | null;
-  configured: boolean; connected: boolean; canSendAsUser: boolean;
+  configured: boolean; connected: boolean; canSendAsUser: boolean; canSearchContacts: boolean;
   needsReauthorization?: boolean; messageConnection?: string;
   account: { name: string; openId: string } | null;
-  contacts: Array<{ alias: string; open_id: string }>;
   recent: Array<{ message_id: string; status: string; created_at: string }>;
 }
 
@@ -26,12 +25,6 @@ export function FeishuSettings({ onClose }: { onClose: () => void }) {
   const [notice,setNotice] = useState("");
   const [qr,setQr] = useState("");
   const [code,setCode] = useState("");
-  const [alias,setAlias] = useState("");
-  const [openId,setOpenId] = useState("");
-  const [recipient,setRecipient] = useState("");
-  const [text,setText] = useState("");
-  const [reply,setReply] = useState(false);
-  const [requestId,setRequestId] = useState(() => crypto.randomUUID());
   const load = useCallback(async (signal?: AbortSignal, quiet = false) => {
     if (!quiet) { setLoading(true); setError(""); }
     const timeout = AbortSignal.timeout(15_000);
@@ -116,11 +109,6 @@ export function FeishuSettings({ onClose }: { onClose: () => void }) {
     const result = await request<Setup>("/feishu/authorize",{ method: "POST" });
     setCode(""); setStatus(prev => prev ? { ...prev,setup:result } : prev);
   });
-  const send = () => act(async () => {
-    const result = await request<{ messageId: string }>("/feishu/messages",{ method: "POST",body: JSON.stringify({ recipient,text,reply,requestId }) });
-    setNotice(`${t("已以本人身份发送")} · ${result.messageId}`);
-    setText(""); setRequestId(crypto.randomUUID());
-  });
   return <div className="account-dialog-overlay" onClick={onClose}>
     <section className="account-dialog feishu-dialog" role="dialog" aria-modal="true" aria-labelledby="feishu-title" onClick={e => e.stopPropagation()}>
       <header className="account-dialog-head"><span><h2 id="feishu-title">{t("飞书接入")}</h2>
@@ -168,38 +156,13 @@ export function FeishuSettings({ onClose }: { onClose: () => void }) {
           </form>}
           {setup && ["failed","expired"].includes(setup.phase) && <p role="status">{t("接入未完成或已过期，请重新连接飞书。企业限制可能需要管理员确认。")}</p>}
           {status.connected && <>
-            <form onSubmit={e => { e.preventDefault(); void send(); }} className="feishu-form">
-              <h3>{t("以本人身份发送")}</h3>
-              <label className="feishu-checkbox"><input type="checkbox" checked={reply} disabled={busy} onChange={e => {
-                setReply(e.target.checked); setRecipient(""); setRequestId(crypto.randomUUID());
-              }} />{t("回复指定消息")}</label>
-              <label htmlFor="feishu-recipient">{t(reply ? "消息 ID（om_ 开头）" : "联系人别名或飞书用户 ID（ou_ 开头）")}</label>
-              <input id="feishu-recipient" list={reply ? undefined : "feishu-contacts"} required maxLength={120} value={recipient} disabled={busy}
-                onChange={e => { setRecipient(e.target.value); setRequestId(crypto.randomUUID()); }} />
-              <datalist id="feishu-contacts">{status.contacts.map(c => <option key={c.alias} value={c.alias}>{c.open_id}</option>)}</datalist>
-              <label htmlFor="feishu-text">{t("消息原文")}</label>
-              <textarea id="feishu-text" required rows={4} maxLength={3000} value={text} disabled={busy}
-                onChange={e => { setText(e.target.value); setRequestId(crypto.randomUUID()); }} />
-              <button type="submit" disabled={busy || !status.canSendAsUser || status.needsReauthorization || !recipient.trim() || !text.trim()}>{t(busy ? "处理中…" : "以本人身份发送")}</button>
-            </form>
-            <form className="feishu-form" onSubmit={e => { e.preventDefault(); void act(async () => {
-              await request("/feishu/contacts",{ method: "POST",body: JSON.stringify({ alias,openId }) });
-              setAlias(""); setOpenId(""); await load();
-            }); }}>
-              <h3>{t("常用联系人")}</h3>
-              <label htmlFor="feishu-alias">{t("联系人别名")}</label><input id="feishu-alias" value={alias} onChange={e => setAlias(e.target.value)} required maxLength={40} disabled={busy} />
-              <label htmlFor="feishu-open-id">{t("飞书用户 ID（ou_ 开头）")}</label><input id="feishu-open-id" value={openId} onChange={e => setOpenId(e.target.value)} required disabled={busy} />
-              <p className="feishu-hint">{t("用户 ID 需来自当前飞书应用，可先由应用管理员提供。保存别名后即可按姓名发送。")}</p>
-              <button type="submit" disabled={busy}>{t("保存联系人")}</button>
-            </form>
-            <ul className="feishu-contacts">{status.contacts.map(c => <li key={c.alias}><span>{c.alias} <small>{c.open_id}</small></span>
-              <button type="button" disabled={busy} onClick={() => void act(async () => {
-                await request(`/feishu/contacts/${encodeURIComponent(c.alias)}`,{ method: "DELETE" }); await load();
-              })}>{t("删除")}</button></li>)}</ul>
-            <p className="feishu-hint">{t("在飞书私聊机器人：/send 联系人别名 消息原文；/help 查看帮助；/cancel 取消任务。")}</p>
-            <p className="feishu-hint">{t("图片、视频生成请求统一回复：")}{"后续支持，持续开发中..."}</p>
+            <p className="feishu-hint">{t("在任意对话中直接说：查好后发给我自己，或把消息发给联系人。")}</p>
+            <p className="feishu-hint">{t("联系人由飞书官方授权查询，无需手动保存姓名或用户 ID；同名时会请你选择。")}</p>
+            {!status.canSearchContacts && <p role="status">{t("飞书联系人搜索尚未授权，请重新授权；若仍失败，请由管理员开通搜索用户权限")}</p>}
+            <p className="feishu-hint">{t("飞书私聊也支持自然语言发送消息；/help 查看帮助；/cancel 取消任务。")}</p>
+            <p className="feishu-hint">{t("飞书可使用 Web 通用助手的工具，生成文件及完整执行记录可在会话中查看。")}</p>
             {status.recent.length > 0 && <details><summary>{t("最近飞书任务")}</summary><ul className="feishu-contacts">
-              {status.recent.map(j => <li key={j.message_id}><small>{j.message_id}</small><span>{t({ pending:"待处理",running:"运行中",completed:"已完成",failed:"失败",cancelled:"已取消",unknown:"结果待核实",reply_unknown:"结果已处理，回传待核实" }[j.status] ?? j.status)}</span></li>)}
+              {status.recent.map(j => <li key={j.message_id}><small>{j.message_id}</small><span>{t({ pending:"待处理",running:"运行中",awaiting_input:"等待回复",completed:"已完成",failed:"失败",cancelled:"已取消",unknown:"结果待核实",reply_unknown:"结果已处理，回传待核实" }[j.status] ?? j.status)}</span></li>)}
             </ul></details>}
           </>}
         </>}
