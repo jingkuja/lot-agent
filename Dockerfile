@@ -30,8 +30,9 @@ RUN pnpm --filter @lot-agent/core run build \
 # ---------- Stage 2: production runtime ----------
 FROM node:20-bookworm-slim AS runtime
 ENV NODE_ENV=production
-# Actual PPT thumbnails; optional at runtime via PPT_PREVIEW=0.
-RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-impress poppler-utils fonts-noto-cjk \
+# Video composition (ffmpeg + ffprobe) and PPT thumbnails (PPT_PREVIEW=0 to disable).
+# CJK fonts also support FFmpeg's libass subtitle renderer.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libreoffice-impress poppler-utils fonts-noto-cjk \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 RUN corepack enable

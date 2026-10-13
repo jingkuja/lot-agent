@@ -35,6 +35,7 @@ interface ChatPanelProps {
   inputAbove?: React.ReactNode;
   /** Current user's name (for the empty-state greeting). */
   userName?: string;
+  userId?: string;
   /** Per-user model catalog (llm/image/video) for the model picker. */
   modelCatalog?: { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] };
   /** Currently selected model id for this conversation (null = agent default). */
@@ -162,7 +163,7 @@ export function ChatPanel({
   agent,
   inputAbove,
   onDraftChange,
-  userName,
+  userName, userId,
   modelCatalog,
   selectedModel,
   onModelChange,
@@ -247,7 +248,7 @@ export function ChatPanel({
   );
 
   if (agent?.id === "marketing_video") {
-    return <MarketingVideoStudio key={activeConversationId ?? "new"}
+    return <MarketingVideoStudio key={activeConversationId ?? "new"} ownerId={userId}
       onSubmit={(content, files, settings, publication) => onSend(content, files, settings, [], publication)}
       onDraftChange={onDraftChange} onNewVideo={onNewVideo} busy={isStreaming} hasMessages={!isEmpty} publication={videoPublication}>
       {messages.map((message) => message.generation

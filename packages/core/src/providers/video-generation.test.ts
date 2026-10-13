@@ -45,6 +45,7 @@ describe("HappyhorseVideoAdapter", () => {
       data: null,
     });
     expect(r.status).toBe("failed");
+    expect(r.failureUnconfirmed).toBe(true);
     expect(r.error).toContain("未订购seedance2.0");
   });
 });

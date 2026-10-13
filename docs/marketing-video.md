@@ -1,0 +1,64 @@
+# 营销视频制作
+
+## 首版范围
+
+营销影像入口提供「确定文案 → 确定素材 → 配音与字幕」，提交后展示结果和发布信息。文案支持原创生成、参考文案结构分析及改写、风险提示和修改建议。检查覆盖口播、标题和标签，编辑后旧检查失效；这属于辅助筛查，不代表平台审核通过。
+
+数字人路径复用 Kling 原生视频配音，支持已有肖像 / 音色库和背景参考图；不承诺逐字播报、音色跨段一致或精确口型。实拍对口型尚未接入，入口禁用。BGM 为用户上传的音频，在本地混入；字幕由视频模型按每段提示词生成，要求与该段旁白文字、语言和节奏一致；不使用本地 SRT 或 FFmpeg 字幕滤镜。生成前可关闭字幕，发布前需试听和校对。
+
+| 目标时长 | 生成任务 | 执行并发 |
+| --- | --- | --- |
+| 30 秒 | 2 × 15 秒 | 最多 2 个片段 |
+| 45 秒 | 3 × 15 秒 | 最多 2 个片段 |
+| 60 秒 | 4 × 15 秒 | 最多 2 个片段 |
+
+画面支持 9:16、16:9、1:1，清晰度支持 720p、1080p。先规范化片段的尺寸、帧率、音轨和编码，再顺序拼接；检查片段有音轨和足够时长，最终时长允许 AAC 封装带来的微小误差。
+
+## 存储与恢复
+
+- `core/marketing-video` 保存共享 schema、口播长度估算、分段规划和存储接口。
+- `/api/marketing-videos` 为独立项目 API，沿用会话登录、用户凭证和额度检查。模型固定在服务端；输入素材只接受当前用户资产 ID，不接受客户端任意 URL。新项目不创建聊天会话，旧会话结果继续可读。
+- 迁移 36 增加 `marketing_video_projects`、`marketing_video_segments` 和 `usage_logs.idempotency_key`。草稿版本防止多页面覆盖；提交后制作配置固定，标题标签仍可修改。数据库 JSONB 比较须经过 schema 规范化，不能直接依赖键顺序。
+- 草稿自动保存；浏览器仅按用户 ID 保存最后打开的项目 ID。项目列表显示最近 50 条。断开页面不取消后台任务。
+- PG 事务先持久化父任务、全部片段和不可变参数，再向 BullMQ 投递父任务 ID。Redis 故障后可在结果页点「恢复排队任务」。不会自动重试付费提交。
+- Worker 持有父任务 advisory lock，最多并行执行两个片段。成功片段继续复用；已取得模型任务 ID 的片段继续查询 / 下载。模型明确失败或产物缺少音轨、时长不足时，用户点击继续才创建新生成请求。
+- 在模型 POST 前记录提交未知标记。收到任务 ID 后立即保存；未收到回执时，保留未知状态并停止再次 POST。此时需人工核实网关记录，不能直接清空标记当作失败重发。
+- 片段资产与恢复输出同一事务提交；计量用用户、片段、模型任务 ID 去重，避免工作进程重启造成重复计量。重新生成失败片段可能产生供应商费用。纯查询、下载和拼接恢复不做新增额度预检。
+- 取消会传递到片段轮询、下载和 FFmpeg；第三方已接受的请求不保证可撤销或退费。原 Worker 收尾期间不允许重新激活父任务。
+- 入库将视频原件、口播、发布标题、话题标签和项目 ID 保存在私有知识库。重复入库复用资料；修改标题标签后可点「更新知识库草稿」。删除过的归档可重新创建。需要 `KNOWLEDGE_MANAGEMENT_ENABLED=1`；可选索引仍遵循既有知识 Worker 开关。
+
+首版尚无真实抖音授权和发布接口。结果页提供下载视频、复制标题标签，直发按钮明确禁用。接入后应复用持久化项目和发布元数据，另建发布任务并校验平台授权，不能把打开抖音网页视为发布成功。
+
+## 环境和验证
+
+先由 API 执行迁移，再启动 Worker。API 和普通视频 Worker 均需要 `ffmpeg`、`ffprobe`；编码需要 libx264、AAC；模型字幕不依赖 libass 或本地字幕字体。可用 `MARKETING_FFMPEG_PATH` / `MARKETING_FFPROBE_PATH` 指定程序路径。容器配置参见 [部署](deployment.md)。拼接能力检查失败时界面阻止生成；字幕选项仅控制模型提示词，不参与本地能力检查。
+
+音色样例继续使用 `KLING_VOICE_BASE_URL` / `KLING_VOICE_API_KEY`，视频推理仍使用当前用户模型凭证；素材引用需要正确的 `PUBLIC_BASE_URL`。未选择音色样例时使用模型原生旁白。
+
+页面先检查草稿列表和服务能力，成功后才启用编辑、自动保存和生成；接口未部署返回 404 时显示更新服务提示，连接失败可点「重新连接」。普通本地开发代理连接 `localhost:3000`，仅桌面开发模式跟随桌面服务器设置。线上升级必须同时更新 Web、API 和 Worker 镜像并执行迁移 36；只更新 Web 会导致新接口 `Not Found`。文案生成成功后，即使风险检查失败，也保留生成的口播，可单独重试检查。
+
+```bash
+pnpm --filter @lot-agent/core build
+pnpm exec vitest run packages/core/src/marketing-video packages/server/src/marketing-video packages/server/src/jobs/bullmq-queue.test.ts packages/server/src/billing/meter.test.ts packages/server/src/generation/run-job.test.ts
+pnpm check:marketing-video:ui
+# 指向空的本地 marketing_check_* 数据库；脚本拒绝非空库，不清理已有表。
+MARKETING_CHECK_DATABASE_URL=postgresql://USER:PASSWORD@127.0.0.1:5432/marketing_check_local pnpm check:marketing-video:db
+pnpm --filter @lot-agent/server build
+pnpm --filter @lot-agent/web build
+```
+
+数据库脚本只使用模拟模型和本地合成素材，验证升级迁移、归属、并发预留、版本检查、失败续作、未知提交保护、取消、下载恢复、计量去重和知识库更新 / 重建，并实际拼接 30 / 45 / 60 秒视频和 BGM。字幕提示词及无本地字幕能力时的提交由单元测试和浏览器脚本覆盖；模型字幕实际效果需真实生成后校对。浏览器脚本使用模拟接口，可通过 `PLAYWRIGHT_MODULE` 指定 Playwright，`MARKETING_SCREENSHOTS_DIR` 保存截图。上述结果不替代真实模型音画质量或抖音发布验收。
+
+文案生成、审核和标题使用 `marketing-video/text.ts`：请求 JSON 模式和最多 8192 输出 token，DeepSeek 混合模型显式关闭思考（[官方参数](https://api-docs.deepseek.com/api/create-chat-completion/)），90 秒超时并传递请求取消。必须收到正常完成标记后才解析 JSON；空结果、截断、格式异常均不能写入审核结果，也不会自动重新采样。已知模型用量包含失败回执并记录一次。错误按授权、额度、连接和输出完整性返回安全提示与错误码，日志不记录文案、模型思考、原始响应或凭证。
+
+## 后续对口型服务候选
+
+2026-10-13 核对官方文档后的建议；本次未开通或调用这些服务。
+
+| 服务 | 对本项目的用途与限制 |
+| --- | --- |
+| [腾讯云智能数智人：视频免训练](https://cloud.tencent.com/document/product/1240/116222) / [照片免训练](https://cloud.tencent.com/document/product/1240/118475) | 优先评估需要同时覆盖实拍与数字人的方案。视频和照片都有文本 / 音频驱动接口；照片音频驱动支持 2–60 秒，输出 720p / 1080p。视频接口需购买小时包或并发资源；应先用同一文案和素材对比实际效果。 |
+| [阿里云 VideoRetalk](https://help.aliyun.com/en/model-studio/videoretalk-api) | 适合先补实拍口型替换。输入人物视频及完整人声音频；视频 / 音频均支持 2–120 秒，可覆盖本项目长度。北京地域，需单独接入完整 TTS 音轨；现有 Kling 参考音色不等同于输出的配音文件。 |
+| [阿里云 wan2.2-s2v](https://help.aliyun.com/zh/model-studio/wan-s2v-api) | 照片 + 音频驱动的另一选择，480p / 720p；单段音频须小于 20 秒，仍需复用本项目的分段和拼接。 |
+
+建议先评测腾讯两类免训练接口是否能统一满足素材路径；若只补实拍口型，优先小规模评测 VideoRetalk。后续链路应先生成完整 TTS 音频，再以音频驱动人物并获得字幕时间轴，最后混 BGM；这会比当前模型原生配音更便于控制文案和字幕。

@@ -5,6 +5,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./marketing-video": {
+      "types": "./dist/marketing-video/index.d.ts",
+      "import": "./dist/marketing-video/index.js"
+    },
     "./presentation": {
       "types": "./dist/presentation/index.d.ts",
       "import": "./dist/presentation/index.js"

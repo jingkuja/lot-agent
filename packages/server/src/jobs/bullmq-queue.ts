@@ -120,6 +120,21 @@ export class BullmqJobQueue implements JobQueue {
     }
   }
 
+  /** Deliver a task committed atomically with its owning business record. */
+  async deliverPersisted(id: string, type: string): Promise<void> {
+    const previous = await this.queue.getJob(id);
+    if (previous) {
+      const state = await previous.getState();
+      if (state === "failed" || state === "completed") await previous.retry(state);
+    } else await publishPersistedJob(this.queue, id, type, { maxAttempts: 1 });
+  }
+
+  /** Do not revive a cancelled row while its previous worker is unwinding. */
+  async canResumePersisted(id: string): Promise<boolean> {
+    const previous = await this.queue.getJob(id);
+    return !previous || ["failed", "completed"].includes(await previous.getState());
+  }
+
   async get(id: string): Promise<JobRecord | null> {
     const row = await this.db.getTask(id);
     if (!row) return null;

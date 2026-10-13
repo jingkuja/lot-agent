@@ -1454,7 +1454,14 @@ export class DB {
     inputCount: number;
     outputCount: number;
     totalCost: number;
+    idempotencyKey?: string;
   }): Promise<void> {
+    if (u.idempotencyKey) {
+      await this.pool.query(`INSERT INTO usage_logs (user_id,task_id,model_id,model_type,input_count,output_count,total_cost,idempotency_key)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (user_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
+      [u.userId, u.taskId ?? null, u.modelId, u.modelType, u.inputCount, u.outputCount, u.totalCost, u.idempotencyKey]);
+      return;
+    }
     await this.pool.query(
       `INSERT INTO usage_logs (user_id, task_id, model_id, model_type, input_count, output_count, total_cost)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,

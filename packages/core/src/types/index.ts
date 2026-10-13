@@ -42,7 +42,9 @@ export interface ChatParams {
   temperature?: number;
   maxTokens?: number;
   topP?: number;
-  /** Reserved for E3's structured-output work; unread by any provider today. */
+  /** JSON mode for providers that do not support JSON Schema output. */
+  responseFormat?: "json_object";
+  /** Schema output takes precedence over responseFormat when both are set. */
   responseSchema?: JSONSchema;
   reasoning?: "off" | number;
 }

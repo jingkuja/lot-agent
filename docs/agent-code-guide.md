@@ -107,9 +107,13 @@ Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务�
 
 `core/providers/kling-voices.ts` 定义音色 HTTP 协议和持久化接口；`generation/kling-voice-store.ts` 通过迁移 35 的 `generation_voice_tasks` 保存用户 / 视频任务 / 音频序号对应的外部请求 ID、音色任务 ID 和音色 ID。写请求前先保存外部请求 ID，未知创建结果仅查询，不重发 POST；凭证 / 来源指纹变化时拒绝复用。该记录只用于同一任务恢复，不跨视频任务缓存音色。Worker 通过 `generation/config.ts` 的 `loadKlingVoiceConfig` 读取独立服务端配置 `KLING_VOICE_BASE_URL`（默认 `https://tokenhub.tencentmaas.com/v1`）与 `KLING_VOICE_API_KEY`，不回退到 LLM、视频或用户推理 Key。客户端在基础地址后追加 `/wand/kling/custom-voices` 及查询路径；音色状态仍按用户 / 任务隔离，指纹绑定独立音色服务凭证。未配置 Key 时仅带参考声音的真实 Kling 任务报错；视频生成继续使用原有提供器配置，音频通过 `PUBLIC_BASE_URL` 对公网可读。Mock 视频不请求真实音色服务。协议依据：[腾讯 Kling 音色管理文档](https://cloud.tencent.com/document/product/1823/135742)。
 
-营销影像使用独立的 `marketing_video` Agent（空工具白名单），由 `ChatPanel → MarketingVideoStudio` 展示九步向导：创作方向与文案、标题标签、数字分身、声音设置、视频背景、视频画面、BGM·字幕、视频封面、确认生成。`draft.ts` 组织探店 / 主播口播要求，将肖像、背景按顺序放入 `video_reference_image`，声音放入 `video_reference_audio`，封面放入 `video_first_frame`；提示词同步标注肖像、背景图片与音频的对应序号。背景支持预设、自定义描述和上传参考图；字幕、配乐及文字仍由视频模型生成。营销影像固定使用 `kling-video-v3-omni`，前端不提供模型选择，服务端也固定入队模型；三个分辨率档位显示为默认（720p）、高清（1080p）、超清（4K）。营销影像时长范围为 4–15 秒，前端滑块限制上限并显示说明，服务端在计费预检、消息落库和入队前拒绝越界、非整数及自动适配时长。
+营销影像使用独立的 `marketing_video` Agent（空工具白名单）。`ChatPanel → MarketingVideoStudio → ProjectStudio` 提供三步创作：确定文案（生成或拆解改写、风险检查）、确定素材（肖像和背景）、配音与字幕（选填音色样例，可直接从数字分身语音库选择或上传；上传 BGM、画面比例）。`core/marketing-video` 定义严格草稿 schema 和分段规划；30 / 45 / 60 秒分别生成 2 / 3 / 4 个 15 秒片段。固定使用 `kling-video-v3-omni`，支持 720p / 1080p，沿用模型原生配音与已有 Kling 音色链路。
 
-文案生成复用鉴权计量的 `/api/video-drafts`。确认后 `Workspace` 创建 `marketing_video` 会话并保存 `videoPublication`，经 `useChat.generateMedia` 进入现有异步视频任务链路；结果使用 `GenerationCard` 预览、下载、取消和重试下载，返回历史可恢复任务。生成期间和结果页不提供重复生成按钮，新视频通过新会话开始；服务端与小程序共用会话租约及已有任务回放，同一会话不重复入队；未发送草稿切换时沿用 Agent 切换确认。发布标题 / 标签独立保存在会话元数据，可在结果页复制，不混入生成提示词。
+`POST /api/marketing-videos/:id/generate → marketing-video/repository.ts` 在一个 PG 事务中创建草稿关联的父任务和全部片段任务，随后按父任务 ID 幂等投递 Redis。`workers/index.ts → marketing-video/run.ts` 同时执行最多两个片段，保留成功产物、模型任务 ID 和提交未知状态；恢复仅继续原任务，明确失败的片段才在用户点击继续后重新生成。`media.ts` 在本地校验文件签名、规范化编码并以 FFmpeg 拼接、混入 BGM；`prompt.ts` 根据字幕开关要求视频模型生成与每段旁白一致的字幕或不加字幕，不使用本地字幕滤镜或 ASR 对齐。取消经父任务传递到模型轮询和 FFmpeg。迁移 36 新增项目 / 片段表与计量幂等键，保证恢复不重复记录同一模型任务费用。
+
+草稿按用户保存到数据库，页面只在账号隔离的 localStorage 里保存最后打开的项目 ID。制作配置提交后固定，发布标题 / 标签仍可编辑；`marketing-video/archive.ts` 将成片和发布信息归档到私有知识库，再次保存同步最新文案。首版实际对口型和抖音直发能力明确禁用，结果可预览、下载并复制发布文案。旧会话结果仍由包装组件展示，旧 `/api/video-drafts` 与会话生成接口保持兼容，其 4–15 秒限制不影响新项目链路。依赖、恢复语义和验收命令见 [营销视频制作](marketing-video.md)。
+
+`AgentService.marketingText → marketing-video/text.ts` 统一处理文案 JSON 输出、完整结束检查、90 秒超时及安全错误码。DeepSeek 混合模型的营销请求显式关闭思考，避免小输出预算被耗尽；截断结果不作为审核通过，不自动重新采样，失败用量仍经 `meterLLM` 记录。
 
 ### 4.4 文档与 PPT
 
@@ -177,7 +181,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0034-agent-run-state.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0036-marketing-video-projects.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪。
 
 运行日志新增 `agent_runs / agent_steps`，结果核实保留原始回执；普通模型会话与媒体生成任务状态互不替代。
 
@@ -192,6 +196,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 | `/api/auth` | `routes/auth.ts`；登录等为公开入口，资料修改 / 绑定等在处理器内校验身份 |
 | `/api/conversations` | 聊天、项目、知识范围、生成与再生成；会话认证和资源归属 |
 | `/api/agents`、`/api/models` | Agent 目录与模型目录；会话认证 |
+| `/api/marketing-videos` | `marketing-video/routes.ts`；三步创作、用户草稿、文案检查、分段生成和知识库归档 |
 | `/api/tasks`、`/api/assets`、`/api/uploads` | 异步任务、产物、附件；会话认证和资源归属 |
 | `/api/usage`、`/api/balance`、`/api/recharge` | 用量、余额、充值；会话认证 |
 | `/api/digital-employee` | 数字员工业务；会话认证、归属和功能作用域 |
@@ -235,7 +240,7 @@ pnpm dev:knowledge
 pnpm dev:desktop             # Web + Electron；后端需另行运行
 ```
 
-API 默认 3000；Vite 默认 5173，代理 `/api` 和 `/static` 到 API。需要 PostgreSQL / Redis；知识索引还需要 pgvector 和知识开关。新环境启动消费者前确认 server 迁移完成。
+API 默认 3000；Vite 默认 5173，普通 `dev` / `dev:web` 将 `/api`、`/static`、`/health` 代理到 `localhost:3000`。只有 `dev:desktop` 显式启用的 Vite `desktop` 模式读取桌面保存的服务器地址，避免本地新前端误连旧版线上后端。需要 PostgreSQL / Redis；知识索引还需要 pgvector 和知识开关。新环境启动消费者前确认 server 迁移完成。
 
 ```bash
 # 按实际改动选择测试范围；新纯逻辑按仓库约定先写 Vitest 测试
@@ -243,7 +248,9 @@ pnpm exec vitest run packages/core/src/tools/registry.test.ts
 pnpm test:knowledge
 pnpm check:desktop-tools:ui  # 桌面工作目录界面、中英文主题与 Web 入口隔离（模拟桥接）
 pnpm check:agent-navigation:ui # 需 Playwright 和 Chrome；模拟接口检查 Agent 切换、确认与历史隔离
-pnpm check:marketing-video:ui # 模拟接口验证九步创作、素材、提交、任务恢复、中英文和暗色界面
+pnpm check:marketing-video:ui # 模拟接口验证三步创作、素材、草稿/任务恢复、中英文和暗色界面
+# MARKETING_CHECK_DATABASE_URL 指向空的本地 marketing_check_* 测试库
+pnpm check:marketing-video:db # 隔离数据库、模拟模型、本地 FFmpeg 合成与恢复验证
 pnpm check:digital-twin:ui    # 需 Playwright（可用 PLAYWRIGHT_MODULE 指定路径）和 Chrome；模拟设备及 HTTP 数据，无付费调用
 pnpm --filter @lot-agent/web build
 pnpm --filter @lot-agent/miniprogram build  # 类型检查，真机行为另验

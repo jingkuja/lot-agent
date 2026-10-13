@@ -1,4 +1,5 @@
 import { virtualPayment } from "./0033-virtual-payment.js";
+import { marketingVideoProjects } from "./0036-marketing-video-projects.js";
 import { agentRunState } from "./0034-agent-run-state.js";
 import { klingVoiceTasks } from "./0035-kling-voice-tasks.js";
 import { conversationProjects } from "./0031-conversation-projects.js";
@@ -72,4 +73,5 @@ export const migrations: Migration[] = [
   virtualPayment,
   agentRunState,
   klingVoiceTasks,
+  marketingVideoProjects,
 ];

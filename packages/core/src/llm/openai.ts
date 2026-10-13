@@ -80,6 +80,12 @@ export class OpenAIProvider implements LLMProvider {
               temperature: params?.temperature,
               max_tokens: params?.maxTokens,
               top_p: params?.topP,
+              // DeepSeek hybrid models default to thinking. Small structured
+              // tasks explicitly opt out so reasoning cannot consume the
+              // entire answer budget. Keep vendor fields off other models.
+              ...(params?.reasoning === "off" && /(?:^|\/)deepseek-(?:v[34](?:[.-]|$)|flash(?:-|$)|chat$)/i.test(model)
+                ? { thinking: { type: "disabled" } }
+                : {}),
               // Structured output: constrain generation to the JSON schema.
               // `strict: false` so arbitrary user schemas (without the strict
               // subset's additionalProperties/required rules) aren't rejected.
@@ -90,7 +96,9 @@ export class OpenAIProvider implements LLMProvider {
                       json_schema: { name: "response", schema: params.responseSchema, strict: false },
                     },
                   }
-                : {}),
+                : params?.responseFormat === "json_object"
+                  ? { response_format: { type: "json_object" as const } }
+                  : {}),
             },
             { signal: opts?.signal }
           );

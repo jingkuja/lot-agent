@@ -2,6 +2,7 @@
 .digital-twin-panel p { color: var(--text-secondary); line-height: 1.65; }
 .twin-libraries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .twin-library { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); }
+.twin-library:only-child { grid-column: 1 / -1; }
 .twin-library > header { display: flex; align-items: flex-start; gap: 12px; }
 .twin-library h4 { margin: 0 0 5px; font-size: 16px; }
 .twin-library header p { margin: 0; font-size: 12px; }

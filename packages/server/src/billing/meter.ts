@@ -14,6 +14,7 @@ export class UsageMeter {
     taskId?: string | null;
     modelId: string;
     usage: UsageCounts;
+    idempotencyKey?: string;
   }): Promise<number> {
     const cfg = this.getModelConfig(p.modelId);
     if (!cfg) {
@@ -29,6 +30,7 @@ export class UsageMeter {
       inputCount: p.usage.inputCount,
       outputCount: p.usage.outputCount,
       totalCost: cost,
+      ...(p.idempotencyKey ? { idempotencyKey: p.idempotencyKey } : {}),
     });
     return cost;
   }

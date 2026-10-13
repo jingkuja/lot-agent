@@ -107,6 +107,7 @@ describe("HttpGenerationClient.poll", () => {
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: passthrough, model: "m" });
     const r = await c.poll("t1");
     expect(r.status).toBe("failed");
+    expect(r.failureUnconfirmed).toBe(true);
   });
   it("still maps a real non-terminal status to 'running'", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ status: "processing" }) }));

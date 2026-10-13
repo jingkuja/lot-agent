@@ -86,23 +86,24 @@ function TwinLibrary({ kind, onSelect, onChanged }: { kind: TwinKind; onSelect?:
   </section>;
 }
 
-export function DigitalTwinPanel({ onSelect, onChanged }: { onSelect?: SelectTwin; onChanged?: () => Promise<void> }) {
+export function DigitalTwinPanel({ onSelect, onChanged, kind }: { onSelect?: SelectTwin; onChanged?: () => Promise<void>; kind?: TwinKind }) {
   const { t } = useI18n();
   return <div className="digital-twin-panel">
     <div className="knowledge-section-heading"><h3>{t("数字分身")}</h3><p>{t("保存你的声音和肖像，在视频制作中随时选用。")}</p></div>
-    <div className="twin-libraries"><TwinLibrary kind="voice" onSelect={onSelect} onChanged={onChanged} /><TwinLibrary kind="portrait" onSelect={onSelect} onChanged={onChanged} /></div>
+    <div className="twin-libraries">{(!kind || kind === "voice") && <TwinLibrary kind="voice" onSelect={onSelect} onChanged={onChanged} />}{(!kind || kind === "portrait") && <TwinLibrary kind="portrait" onSelect={onSelect} onChanged={onChanged} />}</div>
     <p className="twin-footnote">{t("在视频制作输入框中点击“数字分身”即可选用素材。音色与肖像还原效果，以及真人肖像是否可用，取决于所选模型。")}</p>
   </div>;
 }
 
-export function DigitalTwinPicker({ onSelect, onClose }: { onSelect: SelectTwin; onClose: () => void }) {
+export function DigitalTwinPicker({ onSelect, onClose, kind }: { onSelect: SelectTwin; onClose: () => void; kind?: TwinKind }) {
   const { t } = useI18n();
+  const title = kind === "voice" ? "选择数字分身音色" : "选择数字分身素材";
   const dialog = useRef<HTMLDialogElement>(null);
   const [notice, setNotice] = useState("");
   useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className="knowledge-dialog twin-picker" aria-label={t("选择数字分身素材")} onCancel={(e) => { e.preventDefault(); onClose(); }}>
-    <header className="knowledge-head knowledge-header"><h2>{t("选择数字分身素材")}</h2><button type="button" onClick={onClose}>{t("完成")}</button></header>
-    <main className="knowledge-main"><DigitalTwinPanel onSelect={async (file, kind) => { await onSelect(file, kind); setNotice(t("已添加“{0}”，可继续选择其他素材。", [file.name])); }} /></main>
+  return <dialog ref={dialog} className="knowledge-dialog twin-picker" aria-label={t(title)} onCancel={(e) => { e.preventDefault(); onClose(); }}>
+    <header className="knowledge-head knowledge-header"><h2>{t(title)}</h2><button type="button" onClick={onClose}>{t("完成")}</button></header>
+    <main className="knowledge-main"><DigitalTwinPanel kind={kind} onSelect={async (file, kind) => { await onSelect(file, kind); setNotice(t("已添加“{0}”，可继续选择其他素材。", [file.name])); }} /></main>
     {notice && <p className="twin-selection-notice" role="status">{notice}</p>}
   </dialog>;
 }

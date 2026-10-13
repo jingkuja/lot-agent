@@ -27,6 +27,8 @@ export interface PollResult {
   /** All artifact URLs when the request produced multiple (image `n > 1`). */
   urls?: string[];
   error?: string;
+  /** A lookup error is not proof that a paid vendor task actually failed. */
+  failureUnconfirmed?: boolean;
 }
 
 export function parseSize(size?: string): [number, number] {
@@ -205,7 +207,7 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     // a failure so the caller stops polling, instead of optimistically coercing
     // it to "running", which would loop until the job's max-wait timeout.
     if (!parsed.status) {
-      return { ...parsed, status: "failed", error: parsed.error ?? "generation poll returned no status" };
+      return { ...parsed, status: "failed", failureUnconfirmed: true, error: parsed.error ?? "generation poll returned no status" };
     }
     return { ...parsed, status: "running" };
   }

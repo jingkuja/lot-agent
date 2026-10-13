@@ -128,7 +128,7 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
     // message }) — surface it as a failure with the real message rather than an
     // empty status that would be read as "still running".
     if (!status) {
-      return { status: "failed", progress: 0, error: vendorErr ?? "generation poll returned no status" };
+      return { status: "failed", progress: 0, failureUnconfirmed: true, error: vendorErr ?? "generation poll returned no status" };
     }
     return {
       status,

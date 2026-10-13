@@ -48,6 +48,13 @@
 
 无需在宿主机安装 Node / PostgreSQL / Redis，全部在容器内。
 
+视频拼接依赖 `ffmpeg` 和 `ffprobe`，由根目录 `Dockerfile` 的生产阶段安装到
+`lot-agent-app` 共用镜像，server、worker 和 knowledge-worker 都可使用。
+视频编码使用 H.264（libx264）和 AAC；营销视频字幕由模型根据提示词生成，
+不要求 FFmpeg 的 libass 字幕支持。容器以 `node` 用户执行这些命令，无需 root 权限。
+只在宿主机安装不能让容器直接调用；在运行中容器临时安装则会随容器重建丢失。
+应重建应用镜像并重新创建使用它的容器，无需把宿主机二进制或 Docker socket 挂进容器。
+
 ---
 
 ## 3. 交付物清单
@@ -145,6 +152,18 @@ docker compose exec postgres psql -U "$PG_USER" -d "$PG_DATABASE" -c "\dt"
 ```
 
 浏览器打开 `http://<主机IP>:<WEB_PORT>`，应看到登录/聊天界面。注册或登录后发起一次对话即可验证 LLM 链路（需已配置 Key）。
+
+验证视频处理依赖（生产中拼接任务应由 worker 执行）：
+
+```bash
+docker compose exec -T server ffmpeg -version
+docker compose exec -T worker ffprobe -version
+docker compose exec -T worker sh -c 'ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx264|aac"'
+```
+
+拼接使用 concat demuxer；直接 `-c copy` 要求各片段的流结构、编码、分辨率、
+帧率和音频参数一致。参数不一致时先统一转码，再拼接。输出写入共享 `app_data`
+卷后，server 才能提供下载。安装依赖不等于业务接口已接入拼接功能。
 
 > 异步生成（图片/视频）当前为 **Stub** 实现：worker 会产出占位资产，用于验证任务队列与计费链路通畅，并非真实生成内容（见 `CLAUDE.md` 的「未完成」说明）。
 

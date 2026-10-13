@@ -36,10 +36,14 @@ pnpm run dev:desktop        # 根目录：web(vite HMR) + electron，加载 loca
 桌面开发启动通过 `scripts/dev.mjs` 设置环境并直接启动 Electron，兼容 Windows
 默认终端；`clean` 同样使用 Node，只清理 desktop 包内的 `dist` 与 `release`。
 
-dev 模式下 vite 代理会按请求读取桌面端保存的 `userData/config.json`
+`dev:desktop` 使用 Vite 的 `desktop` 模式，代理按请求读取桌面端保存的 `userData/config.json`
 （启动参数或手动配置入口写入），因此开发窗口与打包应用跟随同一个服务器地址；
 未配置时回退 `localhost:3000`。打包版本首次启动默认连接 `https://todoucloud.com`，
 直接进入当前 Web UI，无需用户填写服务器地址。`/__lot/setup` 仅保留为手动配置入口。登录页底部与 Web 共用“用户协议 / 隐私政策”入口，不再展示服务器设置或服务器地址。
+
+普通 `pnpm dev` / `pnpm dev:web` 的代理固定连接 `http://localhost:3000`，不读取
+桌面端保存的远端地址，避免本地新页面误连旧版线上 API。需要单独启动桌面开发代理时，
+使用 `pnpm --filter @lot-agent/web run dev --mode desktop`；更换模式需重启 Vite。
 
 生产模式本地验证（走回环服务器 + 默认服务器）：
 

@@ -526,6 +526,7 @@ export function Workspace({
               </>
             ) : undefined}
             userName={user.name}
+            userId={user.id}
             modelCatalog={modelCatalog}
             selectedModel={selectedModels[modelGroup]}
             onModelChange={handleModelChange}

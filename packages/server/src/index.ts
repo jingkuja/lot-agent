@@ -1,5 +1,6 @@
 import { createDesktopToolRoutes } from "./desktop/routes.js";
 import { createVideoDraftRoutes } from "./routes/video-drafts.js";
+import { createMarketingVideoRoutes } from "./marketing-video/routes.js";
 import { KnowledgeKeys } from "./knowledge/access/keys.js";
 import { RedisKnowledgeLimiter } from "./knowledge/access/limiter.js";
 import { createKnowledgeAccessRoutes } from "./knowledge/access/routes.js";
@@ -296,6 +297,8 @@ async function main() {
   app.use("/api/models/*", authMw);
   app.use("/api/tasks/*", authMw);
   app.use("/api/video-drafts", authMw);
+  app.use("/api/marketing-videos", authMw);
+  app.use("/api/marketing-videos/*", authMw);
   app.use("/api/video-drafts/*", authMw);
   app.use("/api/assets", authMw);
   app.use("/api/assets/*", authMw);
@@ -319,6 +322,10 @@ async function main() {
   app.on("POST", "/api/conversations/:id/generations", generationRateLimit);
   app.on("POST", "/api/tasks", generationRateLimit);
   app.on("POST", "/api/video-drafts", messagesRateLimit);
+  app.on("POST", "/api/marketing-videos/copy", messagesRateLimit);
+  app.on("POST", "/api/marketing-videos/:id/review", messagesRateLimit);
+  app.on("POST", "/api/marketing-videos/:id/publication", messagesRateLimit);
+  app.on("POST", "/api/marketing-videos/:id/generate", generationRateLimit);
   app.use("/api/digital-employee/*", digitalEmployeeRateLimit);
 
   // Protected API routes
@@ -333,6 +340,7 @@ async function main() {
   app.route("/api/models", createModelRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/video-drafts", createVideoDraftRoutes(service));
+  app.route("/api/marketing-videos", createMarketingVideoRoutes(service, resolve(ROOT, "data")));
   app.route("/api/assets/shares", createImageShareRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));

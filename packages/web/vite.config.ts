@@ -9,10 +9,9 @@ import react from "@vitejs/plugin-react";
 const FALLBACK_TARGET = "http://localhost:3000";
 
 /**
- * When the Electron shell is running, its "服务器设置" modal persists the
- * chosen backend to the app's userData/config.json. Read it per request so
- * the dev proxy follows the same server the packaged app would use (the
- * loopback server does the same in prod). Falls back to localhost:3000.
+ * Desktop development reads the Electron server setting per request, just
+ * like the packaged shell. Ordinary web development must stay on the local
+ * API: a previously saved desktop setting may point at an older deployment.
  */
 function desktopServerUrl(): string | null {
   try {
@@ -46,7 +45,7 @@ function desktopServerUrl(): string | null {
  * desktop shell's loopback proxy: headers flushed immediately (SSE), bodies
  * piped both ways (uploads), origin/referer stripped.
  */
-function devProxyPlugin(): Plugin {
+function devProxyPlugin(mode: string): Plugin {
   const proxyRequest = (
     req: Connect.IncomingMessage,
     res: http.ServerResponse,
@@ -94,7 +93,7 @@ function devProxyPlugin(): Plugin {
           url.startsWith("/api/") ||
           url.startsWith("/static/")
         ) {
-          proxyRequest(req, res, desktopServerUrl() ?? FALLBACK_TARGET);
+          proxyRequest(req, res, mode === "desktop" ? desktopServerUrl() ?? FALLBACK_TARGET : FALLBACK_TARGET);
           return;
         }
         next();
@@ -103,8 +102,8 @@ function devProxyPlugin(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), devProxyPlugin()],
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), devProxyPlugin(mode)],
   // Relative asset URLs so the same dist works when served from the nginx root,
   // the desktop shell's loopback server, or opened via file:// for debugging.
   base: "./",
@@ -117,4 +116,4 @@ export default defineConfig({
     allowedHosts: ["aigc.todoucloud.com","todoucloud.com"],
     port: 5173,
   },
-});
+}));

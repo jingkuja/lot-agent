@@ -44,6 +44,11 @@ try {
   ].map(([id, name, description], sortOrder) => ({ id, name, description, type: id, installed: true, sortOrder }));
   const conversations = agents.filter((a) => a.id !== 'digital_employee').map((a) => ({ id: `history-${a.id}`, title: `${a.id} 历史记录`, agent_id: a.id, created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:00:00Z' }));
   let taskState = 'running', sequence = 0;
+  let apiUnavailable = true;
+  let failNextReview = false;
+  let holdNextSave = false, releaseSave;
+  const projects = new Map();
+  const script = '欢迎来到转角咖啡店。我们用现磨咖啡迎接每一位客人，明亮的空间适合休息和聊天。你可以选择喜欢的位置，点上一杯手冲咖啡，慢慢享受今天的时光。欢迎来店里坐一坐，发现属于你的咖啡时刻。';
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
   const wav = Buffer.alloc(44 + 16000 * 3 * 2);
   wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(16000, 24); wav.writeUInt32LE(32000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40);
@@ -59,8 +64,32 @@ try {
     const json = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
     if (request.method() !== 'GET') writes.push({ path, body: request.headers()["content-type"]?.includes("application/json") ? request.postDataJSON() : null });
     if (path === '/api/public/product') return json({ globle: 1 });
-    if (path === '/api/video-drafts') return json({ script: '镜头从店铺门头推进，介绍招牌咖啡，邀请顾客到店。', mainTitle: '转角咖啡', subtitle: '一杯好心情', publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' });
-    if (path === '/api/uploads') return json({ assetId: `upload-${++sequence}`, filename: 'asset', mime: 'image/png', url: `/static/upload-${sequence}.png`, size: 100 });
+    if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
+    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false });
+    if (path === '/api/marketing-videos') return json({ data: [...projects.values()] });
+    if (path === '/api/marketing-videos/copy') return json({ draft: { ...request.postDataJSON().draft, script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' }, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
+    if (path.startsWith('/api/marketing-videos/')) {
+      const [, , , id, action] = path.split('/');
+      if (request.method() === 'PUT') {
+        if (holdNextSave) { holdNextSave = false; await new Promise(resolve => { releaseSave = resolve; }); }
+        const body = request.postDataJSON(), old = projects.get(id);
+        assert.equal(body.version, old?.version ?? 0);
+        const p = { ...(old ?? { id, status: 'draft', progress: 0, taskId: null, review: null, reviewedScript: null, knowledgeItemId: null }), version: body.version + 1, draft: body.draft, updatedAt: new Date().toISOString() };
+        if (p.reviewedScript !== [p.draft.script, p.draft.publishTitle, p.draft.tags].join('\n')) p.review = null;
+        projects.set(id, p); return json(p);
+      }
+      const p = projects.get(id); assert(p, `project ${id} missing`);
+      if (action === 'review') {
+        if (failNextReview) { failNextReview = false; return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ code: 'MARKETING_TEXT_TRUNCATED', error: '模型输出未完成，请重试；当前文案已保留。' }) }); }
+        p.review = { verdict: 'pass', issues: [] }; p.reviewedScript = [p.draft.script, p.draft.publishTitle, p.draft.tags].join('\n'); return json(p);
+      }
+      if (action === 'publication') { p.version++; p.draft.publishTitle = '手冲咖啡与惬意时光'; p.draft.tags = '#咖啡'; p.review = null; return json(p); }
+      if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; return json(p); }
+      if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
+      if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'] }; }
+      return json(p);
+    }
+    if (path === '/api/uploads') { sequence++; return json({ assetId: `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`, filename: 'asset', mime: request.postDataBuffer()?.includes(Buffer.from('audio/wav')) ? 'audio/wav' : 'image/png', url: `/static/upload-${sequence}.png`, size: 100 }); }
     if (path.endsWith('/items')) return json({ data: library.filter((item) => item.tags.includes(new URL(request.url()).searchParams.get('tag'))), nextCursor: null });
     if (path.endsWith('/content')) { const voice = path.includes('/voice/'); return route.fulfill({ contentType: voice ? 'audio/wav' : 'image/png', body: voice ? wav : png }); }
     if (path === '/api/agents') return json(agents);
@@ -107,98 +136,156 @@ try {
   assert.equal(await page.locator('.agent-launcher-item > span:nth-child(2)').nth(1).textContent(), '营销影像');
   await page.locator('.agent-grid-toggle').click();
   await chooseAgent('营销影像');
-  await page.getByRole('heading', { name: '创作方向与文案', exact: true }).waitFor();
-  assert.equal(await page.locator('.mv-steps button').count(), 9);
+  await page.getByRole('heading', { name: '确定文案', exact: true }).waitFor();
+  assert.equal(await page.locator('.mv-steps button').count(), 3);
+  await page.getByRole('alert').filter({ hasText: '当前服务器尚不支持新版营销视频' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '生成文案并检查', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '保存草稿', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByLabel('产品、卖点和目标顾客', { exact: true }).isDisabled(), true);
+  assert.equal(writes.filter(r => r.path.startsWith('/api/marketing-videos')).length, 0);
+  await snap('marketing-video-unavailable.png');
+  apiUnavailable = false;
+  await page.getByRole('button', { name: '重新连接', exact: true }).click();
+  await page.getByRole('button', { name: '重新连接', exact: true }).waitFor({ state: 'hidden' });
   await snap('marketing-video-start.png');
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: '请先填写' }).waitFor();
-  await page.getByLabel('这次想拍什么', { exact: true }).fill('为转角咖啡店拍摄探店介绍，突出手冲咖啡和明亮的店内环境。');
-  await page.getByRole('button', { name: '智能生成文案与标题' }).click();
-  await page.waitForFunction(() => document.querySelector('.mv-field textarea[rows="6"]')?.value.includes('店铺门头'));
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
-  assert.equal(await page.getByLabel('封面主标题', { exact: true }).inputValue(), '转角咖啡');
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
+  await page.getByLabel('产品、卖点和目标顾客', { exact: true }).fill('为转角咖啡店介绍手冲咖啡和明亮的环境。');
+  await page.getByRole('button', { name: '拆解爆款文案', exact: true }).click();
+  await page.getByLabel('粘贴参考文案').fill('先展示店铺环境，再讲特色，最后邀请到店。');
+  failNextReview = true;
+  await page.getByRole('button', { name: '拆解改写并检查', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: '模型输出未完成，请重试；当前文案已保留。' }).waitFor();
+  assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
+  await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
+  await page.getByText('未发现明显风险', { exact: true }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/copy')).length, 1);
+  assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
+  for (const [invalidScript, reason] of [
+    ['长'.repeat(180), '文案过长，请精简文案或增加视频时长。'],
+    ['短', '文案过短，请补充内容。'],
+    ['长'.repeat(50) + '。' + '文'.repeat(80), '部分段落过长，请缩短句子后重试。'],
+  ]) {
+    await page.getByLabel('视频口播文案').fill(invalidScript);
+    await page.getByRole('alert').filter({ hasText: reason }).waitFor();
+    await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
+    await page.getByRole('alert').filter({ hasText: reason }).waitFor();
+    assert.equal(await page.getByRole('button', { name: '确认生成完整视频' }).isDisabled(), true);
+    assert.equal(await page.getByText('查看自动分段（0 段）').count(), 0);
+    await snap('marketing-video-plan-error.png');
+    await page.getByRole('button', { name: '修改文案或时长' }).click();
+    assert.equal(await page.getByLabel('视频口播文案').inputValue(), invalidScript);
+  }
+  await page.getByLabel('视频口播文案').fill('长'.repeat(180));
+  await page.getByRole('button', { name: '60 秒', exact: true }).click();
+  await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
+  assert.equal(await page.getByRole('button', { name: '确认生成完整视频' }).isDisabled(), false);
+  await page.getByRole('button', { name: '确定文案', exact: false }).click();
+  await page.getByLabel('视频口播文案').fill(script);
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '实拍对口型（待接入）' }).isDisabled(), true);
   await page.getByRole('button', { name: '选择数字分身素材', exact: true }).click();
   const twin = page.getByRole('dialog', { name: '选择数字分身素材' });
   await twin.locator('.twin-asset').filter({ hasText: '我的肖像' }).getByRole('button', { name: '用于视频制作' }).click();
-  await twin.locator('.twin-asset').filter({ hasText: '我的声音' }).getByRole('button', { name: '用于视频制作' }).click();
-  await twin.getByRole('status').filter({ hasText: '我的声音' }).waitFor();
+  await twin.getByRole('status').filter({ hasText: '我的肖像' }).waitFor();
   await twin.getByRole('button', { name: '完成', exact: true }).click();
-  assert.equal(await page.locator('.mv-twin audio').count(), 1);
-  assert.equal(await page.locator('.mv-twin img').count(), 1);
-  await snap('marketing-video-twin.png');
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: '无配音', exact: true }).count(), 0);
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
-  await page.getByRole('button', { name: '自定义背景', exact: true }).click();
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: '请描述自定义背景' }).waitFor();
-  await page.getByLabel('背景补充描述').fill('保留木质吧台、明亮落地窗和店铺招牌');
+  await page.getByLabel('背景补充描述').fill('木质吧台和明亮落地窗');
   await page.getByLabel('上传背景图片（选填）').setInputFiles({ name: 'store.png', mimeType: 'image/png', buffer: png });
-  await page.locator('.mv-asset-preview img').waitFor();
-  await snap('marketing-video-background.png');
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
-  assert.equal(await page.getByLabel('选择模型', { exact: true }).count(), 0);
-  assert.deepEqual(await page.getByRole('group', { name: '视频质量', exact: true }).getByRole('button').allTextContents(), ['默认', '高清', '超清']);
-  await page.getByRole('button', { name: '超清', exact: true }).click();
-  assert.equal(await page.getByLabel('视频时长').getAttribute('max'), '15');
-  await page.getByLabel('视频时长').press('End');
-  assert.equal(await page.getByLabel('视频时长').inputValue(), '15');
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
-  await page.getByRole('button', { name: '轻快', exact: true }).click();
-  await page.getByRole('button', { name: '下一步 ›', exact: true }).click();
-  await page.getByLabel('选择封面图（选填）').setInputFiles({ name: 'cover.png', mimeType: 'image/png', buffer: png });
-  await page.getByRole('button', { name: '检查生成设置' }).click();
+  await page.locator('.mv-asset-preview img').nth(1).waitFor();
+  await snap('marketing-video-assets.png');
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
+  assert.equal(await page.getByLabel('添加字幕', { exact: true }).isChecked(), true);
+  assert.equal(await page.getByText('当前环境不支持字幕，可关闭字幕后生成。').count(), 0);
+  assert.equal(await page.getByLabel('上传音色样例（选填，2–15 秒）').isVisible(), true);
+  await page.getByRole('button', { name: '选择数字分身音色', exact: true }).click();
+  const voicePicker = page.getByRole('dialog', { name: '选择数字分身音色' });
+  assert.equal(await voicePicker.getByRole('heading', { name: '个人肖像库' }).count(), 0);
+  await voicePicker.locator('.twin-asset').filter({ hasText: '我的声音' }).getByRole('button', { name: '用于视频制作' }).click();
+  await voicePicker.getByRole('status').filter({ hasText: '我的声音' }).waitFor();
+  await voicePicker.getByRole('button', { name: '完成', exact: true }).click();
+  await page.locator('.mv-asset-preview audio').waitFor();
+  await page.getByText('更多设置', { exact: true }).click();
+  holdNextSave = true;
+  const savingRequest = page.waitForRequest(request => request.method() === 'PUT' && request.url().includes('/api/marketing-videos/'));
+  await page.getByRole('group', { name: '视频质量', exact: true }).getByRole('button', { name: '高清', exact: true }).click();
+  await savingRequest;
+  assert.equal(await page.getByRole('button', { name: '确认生成完整视频' }).isDisabled(), false);
+  await page.getByText('查看自动分段（4 段）').click();
   await snap('marketing-video-review.png');
-  await page.getByRole('button', { name: '确认设置并生成视频' }).evaluate((button) => { button.click(); button.click(); });
+  await page.getByRole('button', { name: '确认生成完整视频' }).evaluate(button => { button.click(); button.click(); });
+  await page.getByRole('button', { name: '正在保存…', exact: true }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
+  releaseSave();
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
-  await page.waitForFunction(() => document.querySelector('.gen-card'));
-  assert.equal(writes.filter(r => r.path.endsWith('/generations')).length, 1);
-  const submission = writes.find(r => r.path.endsWith('/generations')).body;
-  assert.equal(submission.mediaType, 'video');
-  assert.equal(submission.model, 'kling-video-v3-omni');
-  assert.equal(submission.settings.quality, '4k');
-  assert.equal(submission.settings.size, '2160x3840');
-  assert.equal(submission.input_reference.length, 2);
-  assert.equal(submission.reference_audio.length, 1);
-  assert(submission.first_frame);
-  assert.match(submission.prompt, /外貌参考 图片1/);
-  assert.match(submission.prompt, /空间布局参考 图片2/);
-  assert.match(submission.prompt, /音频1/);
-  assert.equal(submission.settings.durationSec, 15);
-  assert.equal(submission.settings.generate_audio, true);
-  assert(!submission.prompt.includes('#探店'));
-  assert.equal(writes.find(r => r.path === '/api/conversations').body.agentId, 'marketing_video');
-  assert.equal(writes.find(r => r.path === '/api/conversations').body.videoPublication.tags, '#探店 #咖啡');
-  // Leave a running task, then recover it from this agent's own history.
-  await chooseAgent('通用助手');
-  await page.getByRole('button', { name: '离开并切换', exact: true }).click();
-  await chooseAgent('营销影像');
-  await page.locator('.sidebar-conversation-link').filter({ hasText: '新对话' }).last().click();
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);
+  const p = [...projects.values()][0];
+  assert.equal(p.draft.durationSec, 60); assert.equal(p.draft.quality, '1080p');
+  assert(p.draft.assets.voice); assert(p.draft.assets.background); assert(p.draft.assets.portrait);
+  assert.equal(writes.filter(r => r.path.endsWith('/generations')).length, 0);
+  // Recover by account-scoped project ID, even after the whole page reloads.
+  await page.reload(); await chooseAgent('营销影像');
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
-  await page.getByRole('button', { name: '复制发布文案', exact: true }).waitFor();
-  assert.equal(writes.filter(r => r.path.endsWith('/generations')).length, 1);
-  await page.getByRole('button', { name: '开始新视频', exact: true }).click();
-  assert.equal(await page.getByLabel('视频文案 / 分镜').inputValue(), '');
-  await page.getByRole('button', { name: '主播宣传演讲' }).click();
-  await page.getByLabel('视频文案 / 分镜').fill('大家好，欢迎了解我们的品牌。');
-  await page.locator('.mv-steps button').nth(4).click();
-  assert.equal(await page.getByRole('button', { name: '简约演播室', exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);
+  assert.equal(await page.getByRole('button', { name: '发布到抖音', exact: true }).isDisabled(), true);
+  await page.getByLabel('视频发布标题').fill('欢迎到转角咖啡坐坐');
+  await page.getByRole('button', { name: '存草稿到知识库', exact: true }).click();
+  await page.getByRole('button', { name: '已存入知识库', exact: true }).waitFor();
+  assert.equal(p.draft.publishTitle, '来发现你的下一杯咖啡'); // PUT replaces the fixture, not mutation.
+  assert.equal(projects.get(p.id).draft.publishTitle, '欢迎到转角咖啡坐坐');
+  await page.getByLabel('短视频检索标签').fill('#转角咖啡 #探店');
+  await page.getByRole('button', { name: '更新知识库草稿', exact: true }).click();
+  await page.getByRole('button', { name: '已存入知识库', exact: true }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/archive')).length, 2);
+  await page.getByRole('button', { name: '复制为新草稿', exact: true }).click();
+  await page.getByRole('heading', { name: '确定文案', exact: true }).waitFor();
+  assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
+  await page.getByRole('button', { name: '选择数字分身音色', exact: true }).click();
+  await voicePicker.locator('.twin-asset').filter({ hasText: '我的声音' }).getByRole('button', { name: '用于视频制作' }).click();
+  await voicePicker.getByRole('status').filter({ hasText: '我的声音' }).waitFor();
+  await voicePicker.getByRole('button', { name: '完成', exact: true }).click();
+  await page.locator('.mv-asset-preview').filter({ has: page.locator('audio') }).getByRole('button', { name: '移除', exact: true }).click();
+  assert.equal(await page.locator('.mv-asset-preview audio').count(), 0);
   await snap('marketing-video-dark.png');
+  await page.getByRole('button', { name: '确认生成完整视频' }).click();
+  await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 2);
+  assert.equal([...projects.values()].filter(item => item.taskId && !item.draft.assets.voice).length, 1);
+  await page.getByRole('button', { name: '开始新视频', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('textarea[rows="6"]')?.value === '');
   await page.evaluate(() => localStorage.setItem('lot:language', 'en'));
-  await page.reload();
-  await chooseAgent('Marketing video');
-  await page.getByRole('heading', { name: 'Direction & script', exact: true }).waitFor();
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.getByRole('heading', { name: 'Write copy', exact: true }).waitFor();
   await page.setViewportSize({ width: 760, height: 1000 });
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.getByLabel('Spoken script').fill(script);
+  await page.getByRole('button', { name: 'Voice & captions', exact: false }).click();
+  assert.equal(await page.getByLabel('Upload voice sample (optional, 2–15 seconds)').isVisible(), true);
   await snap('marketing-video-en-compact.png');
-  assert.deepEqual(errors, []);
-  assert.deepEqual(unexpectedRequests, []);
-  console.log('PASS: agent navigation, nine-step workflow, AI copy, portrait/voice selection, custom background validation/upload, cover, settings, single video submission, saved publication, task recovery, new draft, presenter direction, dark and English responsive layouts.');
+  await page.getByRole('button', { name: 'Choose digital twin voice', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Choose digital twin voice' }).getByRole('heading', { name: 'Personal voice library' }).waitFor();
+  await snap('marketing-video-voice-picker-en-dark.png');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Write copy', exact: false }).click();
+  await page.getByLabel('Spoken script').fill('word '.repeat(100));
+  await page.getByRole('button', { name: 'Voice & captions', exact: false }).click();
+  await page.getByRole('alert').filter({ hasText: 'Shorten the script or increase the video duration.' }).waitFor();
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await snap('marketing-video-plan-error-en-dark.png');
+  await page.getByRole('button', { name: 'Edit script or duration' }).click();
+  assert.equal(await page.getByLabel('Spoken script').inputValue(), 'word '.repeat(100));
+  apiUnavailable = true;
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.getByRole('alert').filter({ hasText: 'This server does not support the new marketing video workflow yet.' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Generate and check copy', exact: true }).isDisabled(), true);
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await snap('marketing-video-unavailable-en-dark.png');
+  assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []);
+  console.log('PASS: unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, model subtitles without local subtitle support, 60s plan, double-click safety, reload recovery, editable publication, archive/update, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {
   console.error({ errors, unexpectedRequests, body: await page?.locator('body').innerText() });
   throw error;
