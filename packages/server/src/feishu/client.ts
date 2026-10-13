@@ -1,15 +1,12 @@
-export interface FeishuConfig { appId: string; appSecret: string; }
+export interface FeishuAppCredentials { appId: string; appSecret: string; }
 export const FEISHU_USER_SCOPES = ["im:message", "im:message.send_as_user", "contact:user:search"];
 export const FEISHU_SCOPES = [...FEISHU_USER_SCOPES, "offline_access"];
 export interface ContactSearchInput { query?: string; hasChatted?: boolean; pageSize?: number; pageToken?: string; }
 export interface FeishuContact { openId: string; name: string; email: string; enterpriseEmail: string; displayInfo: string; hasChatted: boolean; isExternal: boolean; }
 export interface ContactSearchResult { users: FeishuContact[]; hasMore: boolean; pageToken?: string; }
 
-export function loadFeishuConfig(env = process.env): FeishuConfig | null {
-  if (!env.SECRET_MASTER_KEY || env.FEISHU_ENABLED === "0") return null;
-  if (!env.FEISHU_APP_ID && !env.FEISHU_APP_SECRET) return { appId: "", appSecret: "" };
-  if (!env.FEISHU_APP_ID || !env.FEISHU_APP_SECRET) throw new Error("Legacy Feishu app credentials must be configured together");
-  return { appId: env.FEISHU_APP_ID, appSecret: env.FEISHU_APP_SECRET };
+export function isFeishuEnabled(env = process.env): boolean {
+  return !!env.SECRET_MASTER_KEY && env.FEISHU_ENABLED !== "0";
 }
 
 export class FeishuError extends Error {
@@ -28,8 +25,7 @@ export interface OAuthTokens { access_token: string; refresh_token?: string; exp
 
 /** Fixed official origin; no caller-controlled URLs, redirects, or automatic write retries. */
 export class FeishuClient {
-  constructor(readonly config: FeishuConfig, private readonly fetcher: typeof fetch = fetch) {}
-  forApp(appId: string, appSecret: string) { return new FeishuClient({ appId, appSecret }, this.fetcher); }
+  constructor(readonly config: FeishuAppCredentials, private readonly fetcher: typeof fetch = fetch) {}
   private async call(path: string, body?: unknown, token?: string, signal?: AbortSignal): Promise<any> {
     let response: Response;
     try {
@@ -47,14 +43,6 @@ export class FeishuClient {
     if (response.status >= 500) throw new FeishuError("unknown", code);
     if (!response.ok || (value.code !== undefined && value.code !== 0) || value.error) throw new FeishuError("rejected", code);
     return value;
-  }
-  async tokens(grant: { refresh_token: string }): Promise<OAuthTokens> {
-    const result = await this.call("authen/v2/oauth/token", {
-      client_id: this.config.appId, client_secret: this.config.appSecret,
-      grant_type: "refresh_token", ...grant,
-    });
-    if (typeof result.access_token !== "string" || !result.access_token || !(result.expires_in > 0)) throw new FeishuError("auth");
-    return result;
   }
   async profile(token: string): Promise<{ open_id: string; tenant_key: string; name: string }> {
     const { data } = await this.call("authen/v1/user_info", undefined, token);

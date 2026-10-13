@@ -1,5 +1,5 @@
 import { createDesktopToolRoutes } from "./desktop/routes.js";
-import { loadFeishuConfig, FeishuClient } from "./feishu/client.js";
+import { isFeishuEnabled } from "./feishu/client.js";
 import { PgFeishuRepository } from "./feishu/repository.js";
 import { FeishuService } from "./feishu/service.js";
 import { FeishuChannel } from "./feishu/channel.js";
@@ -109,8 +109,7 @@ async function main() {
 
   const service = new AgentService(serviceConfig);
   await service.init();
-  const feishuConfig = loadFeishuConfig();
-  const feishu = feishuConfig ? new FeishuService(new PgFeishuRepository(service.db.pool), new FeishuClient(feishuConfig), new SecretBox(process.env.SECRET_MASTER_KEY)) : null;
+  const feishu = isFeishuEnabled() ? new FeishuService(new PgFeishuRepository(service.db.pool), new SecretBox(process.env.SECRET_MASTER_KEY)) : null;
   service.feishuService = feishu;
   const feishuChannel = feishu ? new FeishuChannel(feishu,service) : null;
   feishuChannel?.start(process.env.FEISHU_LONG_CONNECTION !== "0");

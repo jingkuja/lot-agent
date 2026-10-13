@@ -13,15 +13,15 @@ interface SetupData {
   deliveryUnknown?: boolean;
 }
 export class FeishuService {
-  constructor(readonly repository: FeishuRepository, readonly client: FeishuClient, private readonly secrets: SecretBox,
-    private readonly onboarding = new FeishuOnboardingClient()) {
+  constructor(readonly repository: FeishuRepository, private readonly secrets: SecretBox,
+    private readonly onboarding = new FeishuOnboardingClient(), private readonly fetcher: typeof fetch = fetch) {
     if (!secrets.enabled) throw new Error("Feishu requires encrypted token storage");
   }
   connectionClient(c: FeishuConnection) {
-    const secret = c.app_secret ? this.secrets.open(c.app_secret)
-      : c.app_id === this.client.config.appId ? this.client.config.appSecret : "";
+    if (!c.app_secret) throw new FeishuError("auth");
+    const secret = this.secrets.open(c.app_secret);
     if (!secret) throw new FeishuError("auth");
-    return this.client.forApp(c.app_id, secret);
+    return new FeishuClient({ appId: c.app_id, appSecret: secret }, this.fetcher);
   }
   private view(s: FeishuSetup | null) {
     if (!s) return null;
@@ -77,7 +77,7 @@ export class FeishuService {
             if (authorized.slowDown) s.interval = Math.min(60,s.interval+5);
           } else {
             const tokens = authorized.value;
-            const profile = await this.client.forApp(app.appId,app.appSecret).profile(tokens.access_token);
+            const profile = await new FeishuClient(app, this.fetcher).profile(tokens.access_token);
             if (profile.open_id !== app.openId) throw new FeishuError("auth");
             const connection: FeishuConnection = { user_id:userId,app_id:app.appId,app_secret:this.secrets.seal(app.appSecret),...profile,
               access_token:this.secrets.seal(tokens.access_token),refresh_token:this.secrets.seal(tokens.refresh_token ?? ""),
@@ -186,9 +186,8 @@ export class FeishuService {
     const refresh = this.secrets.open(c.refresh_token);
     if (!refresh) throw new FeishuError("auth");
     try {
-      const next = c.app_secret
-        ? await this.onboarding.refresh(c.app_id,this.secrets.open(c.app_secret),refresh)
-        : await this.connectionClient(c).tokens({ refresh_token: refresh });
+      const { appId, appSecret } = this.connectionClient(c).config;
+      const next = await this.onboarding.refresh(appId,appSecret,refresh);
       c.access_token = this.secrets.seal(next.access_token);
       c.refresh_token = this.secrets.seal(next.refresh_token ?? refresh);
       c.expires_at = Date.now() + next.expires_in * 1000;

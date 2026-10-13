@@ -3,7 +3,7 @@ import { createFeishuTools } from "./tools.js";
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import type { FeishuRepository, FeishuUserStore, FeishuConnection, FeishuSendRecord, FeishuInboxJob, FeishuSetup } from "@lot-agent/core";
-import { FeishuClient, FeishuError, loadFeishuConfig } from "./client.js";
+import { FeishuError, isFeishuEnabled } from "./client.js";
 import { FeishuService, hash } from "./service.js";
 import { FeishuChannel } from "./channel.js";
 import { createFeishuRoutes, createFeishuPublicRoutes } from "./routes.js";
@@ -59,18 +59,43 @@ class MemoryRepository implements FeishuRepository {
 function setup(fetcher = vi.fn<typeof fetch>()) {
   const repo = new MemoryRepository();
   const secrets = new SecretBox("11".repeat(32));
-  const client = new FeishuClient({ appId:"cli_test",appSecret:"secret" },fetcher);
   const onboardingFetch = vi.fn<typeof fetch>();
-  const service = new FeishuService(repo,client,secrets,new FeishuOnboardingClient(onboardingFetch));
-  repo.bindings.set("u1",{ user_id:"u1",app_id:"cli_test",tenant_key:"tenant",open_id:"ou_me",name:"Me",
+  const service = new FeishuService(repo,secrets,new FeishuOnboardingClient(onboardingFetch),fetcher);
+  repo.bindings.set("u1",{ user_id:"u1",app_id:"cli_test",app_secret:secrets.seal("secret"),tenant_key:"tenant",open_id:"ou_me",name:"Me",
     access_token:secrets.seal("user-token"),refresh_token:secrets.seal("refresh-token"),expires_at:Date.now()+3600_000,
     scopes:["im:message","im:message.send_as_user","contact:user:search"],revision:"revision" });
   const input = { recipient:"ou_alice",text:"原文\n`$()`",requestId:"request_1234567890" };
-  return { repo,secrets,client,service,fetcher,onboardingFetch,input };
+  return { repo,secrets,service,fetcher,onboardingFetch,input };
 }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value),{ status,headers:{ "Content-Type":"application/json" } });
 
 describe("Feishu user identity and delivery safety",() => {
+  it("uses each owner's encrypted application credentials for bot sends", async () => {
+    const s = setup();
+    s.repo.bindings.set("u2", { ...s.repo.bindings.get("u1")!, user_id: "u2", app_id: "cli_second", app_secret: s.secrets.seal("second-secret") });
+    const apps: unknown[] = [];
+    s.fetcher.mockImplementation(async (url, init) => {
+      if (String(url).includes("tenant_access_token")) {
+        const app = JSON.parse(String(init?.body));
+        apps.push(app);
+        return json({ code: 0, tenant_access_token: `bot-${app.app_id}` });
+      }
+      return json({ code: 0, data: { message_id: "om_sent" } });
+    });
+    await s.service.send("u1", { ...s.input, identity: "bot" });
+    await s.service.send("u2", { ...s.input, identity: "bot" });
+    expect(apps).toEqual([{ app_id: "cli_test", app_secret: "secret" }, { app_id: "cli_second", app_secret: "second-secret" }]);
+    expect(s.fetcher.mock.calls[1][1]?.headers).toMatchObject({ Authorization: "Bearer bot-cli_test" });
+    expect(s.fetcher.mock.calls[3][1]?.headers).toMatchObject({ Authorization: "Bearer bot-cli_second" });
+  });
+  it("rejects a binding without its own application secret before making an HTTP request", async () => {
+    const s = setup();
+    s.repo.bindings.get("u1")!.app_secret = "";
+    await expect(s.service.send("u1", { ...s.input, identity: "bot" })).rejects.toMatchObject({ kind: "auth" });
+    await expect(s.service.begin("u1")).rejects.toMatchObject({ kind: "auth" });
+    expect(s.fetcher).not.toHaveBeenCalled();
+    expect(s.onboardingFetch).not.toHaveBeenCalled();
+  });
   it("uses the owner's bot only when explicitly selected, with a separate idempotency key after a user rejection", async () => {
     const s = setup();
     s.fetcher.mockImplementation(async (url, init) => {
@@ -215,30 +240,33 @@ describe("Feishu user identity and delivery safety",() => {
   });
   it("refreshes under the user lock, encrypts rotation and never exposes tokens in status",async () => {
     const s=setup(); s.repo.bindings.get("u1")!.expires_at=0;
-    s.fetcher.mockImplementation(async url => String(url).includes("oauth/token")
-      ? json({ access_token:"new-access",refresh_token:"new-refresh",expires_in:7200 })
-      : json({ code:0,data:{ message_id:"om_sent" } }));
+    s.onboardingFetch.mockResolvedValue(json({ access_token:"new-access",refresh_token:"new-refresh",expires_in:7200 }));
+    s.fetcher.mockImplementation(async () => json({ code:0,data:{ message_id:"om_sent" } }));
     await Promise.all([s.service.send("u1",s.input),s.service.send("u1",{ ...s.input,requestId:"second-request-id" })]);
-    expect(s.fetcher.mock.calls.filter(([url]) => String(url).includes("oauth/token"))).toHaveLength(1);
+    expect(s.onboardingFetch).toHaveBeenCalledTimes(1);
+    expect(s.onboardingFetch.mock.calls[0][0]).toBe("https://accounts.feishu.cn/oauth/v3/token");
+    expect(Object.fromEntries(new URLSearchParams(String(s.onboardingFetch.mock.calls[0][1]?.body)))).toEqual({ client_id:"cli_test",client_secret:"secret",refresh_token:"refresh-token",grant_type:"refresh_token" });
     expect(s.repo.bindings.get("u1")!.refresh_token).toMatch(/^enc:v1:/);
     expect(s.secrets.open(s.repo.bindings.get("u1")!.refresh_token)).toBe("new-refresh");
     expect(JSON.stringify(await s.service.status("u1"))).not.toMatch(/new-access|new-refresh|enc:v1/);
   });
   it("requires reauthorization after uncertain refresh instead of reusing a rotated token",async () => {
     const s=setup(); s.repo.bindings.get("u1")!.expires_at=0;
-    s.fetcher.mockRejectedValue(new Error("timeout"));
+    s.onboardingFetch.mockRejectedValue(new Error("timeout"));
     await expect(s.service.send("u1",s.input)).rejects.toMatchObject({ kind:"auth" });
     await expect(s.service.send("u1",s.input)).rejects.toMatchObject({ kind:"auth" });
-    expect(s.fetcher).toHaveBeenCalledTimes(1);
+    expect(s.onboardingFetch).toHaveBeenCalledTimes(1);
+    expect(s.fetcher).not.toHaveBeenCalled();
   });
   it("does not send when cancelled while refreshing credentials",async () => {
     const s=setup(); s.repo.bindings.get("u1")!.expires_at=0;
     const controller=new AbortController();
-    s.fetcher.mockImplementation(async () => {
+    s.onboardingFetch.mockImplementation(async () => {
       controller.abort(); return json({ access_token:"fresh",refresh_token:"rotated",expires_in:7200 });
     });
     await expect(s.service.send("u1",s.input,undefined,controller.signal)).rejects.toThrow("cancelled");
-    expect(s.fetcher).toHaveBeenCalledTimes(1);
+    expect(s.onboardingFetch).toHaveBeenCalledTimes(1);
+    expect(s.fetcher).not.toHaveBeenCalled();
     expect(s.repo.sends.size).toBe(0);
     expect(s.secrets.open(s.repo.bindings.get("u1")!.refresh_token)).toBe("rotated");
   });
@@ -339,11 +367,10 @@ describe("Feishu OAuth and routes",() => {
     expect((await app.request("/messages",{ method:"POST",body:"{}" })).status).toBe(400);
   });
   it("requires encryption but not developer app configuration for QR setup",() => {
-    expect(loadFeishuConfig({})).toBeNull();
-    expect(loadFeishuConfig({ SECRET_MASTER_KEY:"x" })).toEqual({ appId:"",appSecret:"" });
-    expect(loadFeishuConfig({ SECRET_MASTER_KEY:"x",FEISHU_ENABLED:"0" })).toBeNull();
-    expect(() => loadFeishuConfig({ SECRET_MASTER_KEY:"x",FEISHU_APP_ID:"partial" })).toThrow();
-    expect(loadFeishuConfig({ SECRET_MASTER_KEY:"x",FEISHU_APP_ID:"cli",FEISHU_APP_SECRET:"secret",FEISHU_REDIRECT_URI:"deprecated" })).toEqual({ appId:"cli",appSecret:"secret" });
+    expect(isFeishuEnabled({})).toBe(false);
+    expect(isFeishuEnabled({ SECRET_MASTER_KEY:"x" })).toBe(true);
+    expect(isFeishuEnabled({ SECRET_MASTER_KEY:"x",FEISHU_ENABLED:"1" })).toBe(true);
+    expect(isFeishuEnabled({ SECRET_MASTER_KEY:"x",FEISHU_ENABLED:"0" })).toBe(false);
   });
 });
 
@@ -357,10 +384,12 @@ describe("Feishu incoming commands",() => {
     const s=setup(); const channel=new FeishuChannel(s.service,{} as AgentService);
     const event={ sender:{ sender_type:"user",tenant_key:"tenant",sender_id:{ open_id:"ou_me" } },
       message:{ message_id:"om_event",chat_id:"oc_chat",chat_type:"p2p",message_type:"text",content:JSON.stringify({ text:"/cancel" }) } };
-    await channel.receive({ ...event,sender:{ ...event.sender,tenant_key:"another-tenant" } });
-    await channel.receive({ ...event,message:{ ...event.message,chat_type:"group" } });
+    await channel.receive({ ...event,sender:{ ...event.sender,tenant_key:"another-tenant" } }, "cli_test");
+    await channel.receive({ ...event,message:{ ...event.message,chat_type:"group" } }, "cli_test");
+    await channel.receive(event, "cli_other");
+    await channel.receive(event, "");
     expect(s.repo.inbox.size).toBe(0);
-    await channel.receive(event); await channel.receive(event);
+    await channel.receive(event, "cli_test"); await channel.receive(event, "cli_test");
     expect(s.repo.inbox.size).toBe(1); expect(s.repo.cancel).toHaveBeenCalledTimes(1);
   });
   it("dispatches explicit commands with the inbound message id as idempotency key",async () => {
@@ -464,13 +493,14 @@ describe("official Feishu contact search", () => {
   });
   it("refreshes search credentials under the owner lock", async () => {
     const s = setup(); s.repo.bindings.get("u1")!.expires_at = 0;
-    s.fetcher.mockImplementation(async (url, init) => {
-      if (String(url).includes("oauth/token")) return json({ access_token: "new-token", refresh_token: "rotated", expires_in: 7200 });
+    s.onboardingFetch.mockResolvedValue(json({ access_token: "new-token", refresh_token: "rotated", expires_in: 7200 }));
+    s.fetcher.mockImplementation(async (_url, init) => {
       expect(init?.headers).toMatchObject({ Authorization: "Bearer new-token" });
       return result([person()]);
     });
     expect((await s.service.searchContacts("u1", { query: "张三" })).users).toHaveLength(1);
-    expect(s.fetcher).toHaveBeenCalledTimes(2);
+    expect(s.onboardingFetch).toHaveBeenCalledTimes(1);
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
   });
   it("discards results after disconnection and does not execute an already-cancelled search", async () => {
     const s = setup();

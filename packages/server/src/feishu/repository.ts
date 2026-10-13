@@ -24,13 +24,14 @@ export class PgFeishuRepository implements FeishuRepository {
         connection: async () => (await client.query("SELECT * FROM feishu_connections WHERE user_id=$1", [userId])).rows[0] ?? null,
         saveConnection: async (c) => {
           if (c.user_id !== userId) throw new Error("Feishu ownership mismatch");
+          if (!c.app_secret) throw new Error("Feishu application secret is required");
           await client.query(`INSERT INTO feishu_connections
             (user_id,app_id,open_id,tenant_key,name,access_token,refresh_token,expires_at,scopes,revision,app_secret)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)
             ON CONFLICT(user_id) DO UPDATE SET app_id=EXCLUDED.app_id,open_id=EXCLUDED.open_id,
             tenant_key=EXCLUDED.tenant_key,name=EXCLUDED.name,access_token=EXCLUDED.access_token,
             refresh_token=EXCLUDED.refresh_token,expires_at=EXCLUDED.expires_at,scopes=EXCLUDED.scopes,revision=EXCLUDED.revision,app_secret=EXCLUDED.app_secret`,
-          [userId,c.app_id,c.open_id,c.tenant_key,c.name,c.access_token,c.refresh_token,c.expires_at,JSON.stringify(c.scopes),c.revision,c.app_secret ?? null]);
+          [userId,c.app_id,c.open_id,c.tenant_key,c.name,c.access_token,c.refresh_token,c.expires_at,JSON.stringify(c.scopes),c.revision,c.app_secret]);
         },
         disconnect: async (preserveContacts = false) => {
           await client.query("DELETE FROM feishu_connections WHERE user_id=$1", [userId]);

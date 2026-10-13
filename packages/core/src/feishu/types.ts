@@ -2,8 +2,8 @@
 export interface FeishuConnection {
   user_id: string;
   app_id: string;
-  /** Encrypted per-user application secret; null for legacy server-configured apps. */
-  app_secret?: string | null;
+  /** Required encrypted secret for this user's QR-created application. */
+  app_secret: string;
   open_id: string;
   tenant_key: string;
   name: string;

@@ -41,7 +41,8 @@ export class FeishuChannel {
   private longConnectionEnabled = false;
   constructor(private readonly feishu: FeishuService, private readonly agent: AgentService, private readonly concurrency = 8) {}
 
-  async receive(data: any, appId = this.feishu.client.config.appId) {
+  async receive(data: any, appId: string) {
+    if (!appId) return;
     const m = data?.message, sender = data?.sender;
     if (m?.chat_type !== "p2p" || sender?.sender_type !== "user" || m?.message_type !== "text"
       || typeof m.message_id !== "string" || typeof m.chat_id !== "string"
