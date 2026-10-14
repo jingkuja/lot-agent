@@ -77,10 +77,12 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         await client.query("COMMIT"); return p.task_id as string;
       }
       if (!p.review || p.reviewed_script !== reviewText(p.draft) || p.review.verdict === "reject") throw new MarketingError("请先完成当前文案检查。");
+      // Validate the complete duration plan before creating any video task.
+      const plan = resolveMarketingSegments(MarketingDraftSchema.parse(p.draft));
       const taskId = randomUUID();
       await client.query(`INSERT INTO tasks(id,type,input,user_id) VALUES($1,'marketing.video',$2,$3)`, [taskId, JSON.stringify({ ...input, projectId: id, draft: p.draft,
         ...(p.reference_analysis_id ? { referenceAnalysis: { id: p.reference_analysis_id, acceptedRevision: p.reference_revision, evidenceIds: p.reference_evidence_ids } } : {}) }), owner]);
-      for (const part of resolveMarketingSegments(MarketingDraftSchema.parse(p.draft))) {
+      for (const part of plan) {
         const childId = randomUUID();
         // These tasks are executed by the parent, never delivered independently.
         await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.segment',$2,$3,'marketing-segments')`, [childId, JSON.stringify({ parentId: taskId, ...part }), owner]);

@@ -82,4 +82,6 @@ export const migrations: Migration[] = [
   feishuPersonalChannel,
   marketingReferenceAnalysis,
   marketingAutomaticCreation,
+  marketingShotDurations,
 ];
+import { marketingShotDurations } from "./0041-marketing-shot-durations.js";

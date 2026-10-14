@@ -52,6 +52,9 @@ describe("HappyhorseVideoAdapter", () => {
 
 describe("OpenaiVideoAdapter", () => {
   const a = new OpenaiVideoAdapter();
+  it.each([4, 6, 13, 15])("sends the planned Kling duration of %ds without rounding up", durationSec => {
+    expect(a.buildCreateBody({ prompt: "Presenter", durationSec }, "kling-video-v3-omni")).toMatchObject({ seconds: String(durationSec) });
+  });
   it("uses the OpenAI-style create path but the shared plural poll path", () => {
     expect(a.createPath()).toBe("/videos");
     expect(a.pollPath("t1")).toBe("/videos/t1");

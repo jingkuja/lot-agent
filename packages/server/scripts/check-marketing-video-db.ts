@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MarketingDraftSchema, planMarketingSegments } from "@lot-agent/core/marketing-video";
+import { MarketingDraftSchema, planMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
 import { DB } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migration-runner.js";
 import { migrations } from "../src/db/migrations/index.js";
@@ -24,7 +24,8 @@ const store = new PgMarketingProjectStore(db.pool);
 const root = await mkdtemp(join(tmpdir(), "lot-marketing-integration-"));
 const owner = randomUUID(), other = randomUUID();
 const script = "欢迎来到我们的咖啡店。这里有现磨咖啡，也有明亮舒适的座位。你可以约上朋友聊聊天，也可以独自享受一段安静时光。欢迎来店里坐一坐，选择自己喜欢的一杯咖啡。";
-const draft = MarketingDraftSchema.parse({ topic: "咖啡店", script, publishTitle: "欢迎来喝咖啡", tags: "#咖啡 #探店", subtitles: false });
+const legacyShots = [script.slice(0, 35), script.slice(35)].map(script => ({ script, visual: "人物在咖啡店出镜", action: "人物展示咖啡", camera: "中景" }));
+const draft = MarketingDraftSchema.parse({ topic: "咖啡店", storyboard: legacyShots, script: storyboardScript(legacyShots), publishTitle: "欢迎来喝咖啡", tags: "#咖啡 #探店", subtitles: false });
 let creates = 0, polls = 0, failSecond = false, unknown = false, downloadFail = false, unconfirmed = false;
 const failed = new Set<string>();
 const fixture = join(root, "clip.mp4");
@@ -145,14 +146,70 @@ try {
   const sentBeforeLookup = creates; await store.reserve(owner, five.p.id, five.p.version, {}, true);
   await run(five.taskId); assert.equal(creates, sentBeforeLookup, "ambiguous lookup errors must not trigger another paid POST");
 
+  // Variable timing survives reservation, worker inputs, retry and composition.
+  const timedShots = [4, 6, 7].map(durationSec => ({ durationSec, script: "欢迎来喝咖啡。", visual: "人物正面出镜", action: "人物端起咖啡", camera: "中景" }));
+  for (const [target, timings] of [[17, [4, 6, 7]], [60, [13, 13, 13, 13, 13]]] as const) {
+    const storyboard = timings.map(durationSec => ({ ...timedShots[0], durationSec }));
+    const timedDraft = MarketingDraftSchema.parse({ durationSec: target, storyboard, script: storyboardScript(storyboard) });
+    let timed = await store.save(owner, randomUUID(), 0, timedDraft);
+    timed = await store.setReview(owner, timed, { verdict: "pass", issues: [] });
+    const timedTask = await store.reserve(owner, timed.id, timed.version, { modelId: "fixture" }, false);
+    assert.deepEqual((await store.segments(owner, timed.id)).map(s => Number(s.duration_sec)), timings);
+    const actualDurations: number[] = [];
+    const generate = deps.generation;
+    deps.generation = async (job, signal) => {
+      const gen = await generate(job, signal);
+      return { ...gen, provider: { ...gen.provider, create: async request => {
+        const index = Number(/^Create shot (\d+) /.exec(request.prompt)?.[1]) - 1;
+        assert(Number.isInteger(index) && index >= 0);
+        actualDurations[index] = Number(request.durationSec);
+        return gen.provider.create(request);
+      } } };
+    };
+    const timedOutput = await run(timedTask);
+    assert.deepEqual(actualDurations, timings);
+    const asset = (await db.getAsset(timedOutput.assetIds[0]))!;
+    const actualTotal = timings.reduce((sum: number, n) => sum + n, 0);
+    assert(Math.abs(Number(asset.duration_sec) - actualTotal) < 0.3);
+    assert(Math.abs((await inspectMedia(join(root, "assets", asset.storage_key))).duration - actualTotal) < 0.3);
+    assert.equal((await store.get(owner, timed.id))!.draft.durationSec, target, "Keep the chosen target separate from the actual video duration");
+    deps.generation = generate;
+  }
+  // Reject a 70s plan before enqueueing or making any paid video request.
+  const oversizedShots = Array.from({ length: 5 }, () => ({ ...timedShots[0], durationSec: 14 }));
+  let oversized = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: oversizedShots, script: storyboardScript(oversizedShots) }));
+  oversized = await store.setReview(owner, oversized, { verdict: "pass", issues: [] });
+  const tasksBefore = (await db.pool.query("SELECT count(*)::int AS n FROM tasks")).rows[0].n;
+  await assert.rejects(store.reserve(owner, oversized.id, oversized.version, { modelId: "fixture" }, false), /分镜总时长/);
+  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM tasks")).rows[0].n, tasksBefore);
+  assert.equal((await store.get(owner, oversized.id))!.taskId, null);
+  // Even corrupted persisted durations are rejected before provider resolution.
+  const validShots = oversizedShots.map(s => ({ ...s, durationSec: 13 }));
+  let corrupted = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: validShots, script: storyboardScript(validShots) }));
+  corrupted = await store.setReview(owner, corrupted, { verdict: "pass", issues: [] });
+  const corruptTask = await store.reserve(owner, corrupted.id, corrupted.version, { modelId: "fixture" }, false);
+  await db.pool.query("UPDATE marketing_video_segments SET duration_sec=14 WHERE project_id=$1", [corrupted.id]);
+  let resolved = 0; const originalGeneration = deps.generation;
+  deps.generation = async () => { resolved++; throw new Error("must not resolve provider for oversized video"); };
+  await assert.rejects(run(corruptTask), /视频分段配置不完整/);
+  assert.equal(resolved, 0);
+  deps.generation = originalGeneration;
+  const maximumShots = Array.from({ length: 15 }, () => ({ ...timedShots[0], durationSec: 4 }));
+  let maximum = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: maximumShots, script: storyboardScript(maximumShots) }));
+  maximum = await store.setReview(owner, maximum, { verdict: "pass", issues: [] });
+  await store.reserve(owner, maximum.id, maximum.version, { modelId: "fixture" }, false);
+  const maximumSegments = await store.segments(owner, maximum.id);
+  assert.equal(maximumSegments.length, 15); assert.equal(maximumSegments[14].slot, 14);
+  await assert.rejects(db.pool.query("INSERT INTO marketing_video_segments(project_id,slot,task_id,script,duration_sec) VALUES($1,15,$2,'invalid',4)", [maximum.id, maximumSegments[0].task_id]), /slot_check/);
+
   const music = join(root, "music.wav");
   await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000", "-t", "2", music]);
-  for (const durationSec of [45, 60] as const) {
+  for (const durationSec of [15, 45, 60] as const) {
     const configured = { ...draft, durationSec, ratio: durationSec === 45 ? "16:9" as const : "1:1" as const, subtitles: true };
-    const segments = planMarketingSegments(script, durationSec);
+    const segments = planMarketingSegments(durationSec === 15 ? script.slice(0, 30) : script, durationSec);
     const assembled = await composeMarketingVideo({ files: segments.map(() => fixture), segments, draft: configured, music });
     assert(Math.abs(assembled.durationSec - durationSec) < 0.3); assert(assembled.body.length > 0);
     assert.equal(assembled.width, durationSec === 45 ? 1280 : 720); assert.equal(assembled.height, 720);
   }
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", cancellation: "passed", downloadResume: "passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", compositionSeconds: [30, 45, 60], bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", cancellation: "passed", downloadResume: "passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { MarketingDraftSchema, planMarketingSegments, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject } from "@lot-agent/core/marketing-video";
+import { MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject } from "@lot-agent/core/marketing-video";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
@@ -58,7 +58,17 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const validReview = !!project?.review && project.reviewedScript === reviewedText(draft);
   const dirty = JSON.stringify(draft) !== saved.current;
   const update = (next: MarketingDraft) => { draftRef.current = next; setDraft(next); setError(""); setNotice(""); };
-  function field<K extends keyof MarketingDraft>(name: K, value: MarketingDraft[K]) { update({ ...draftRef.current, [name]: value, ...(["script", "durationSec"].includes(name) && value !== draftRef.current[name] ? { storyboard: [] } : {}) }); }
+  function field<K extends keyof MarketingDraft>(name: K, value: MarketingDraft[K]) {
+    const next = { ...draftRef.current, [name]: value };
+    if (value !== draftRef.current[name]) {
+      if (name === "script") next.storyboard = [];
+      if (name === "durationSec" && next.storyboard.length) {
+        try { next.storyboard = timeMarketingStoryboard(next.storyboard, next.durationSec); }
+        catch { next.storyboard = []; }
+      }
+    }
+    update(next);
+  }
   async function open(id: string) {
     const token = ++epoch.current;
     const p = await requestProject(`/marketing-videos/${id}`);
@@ -188,8 +198,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }
   async function manualStoryboard() {
     const storyboard = planMarketingSegments(draftRef.current.script, draftRef.current.durationSec).map(part => ({
-      script: part.script, visual: draftRef.current.background || t("展示产品与使用场景"),
-      action: t("围绕本段口播自然讲述并展示产品"), camera: t("中景平稳拍摄，缓慢推近主体"),
+      durationSec: part.durationSec, script: part.script, visual: draftRef.current.background || t("展示产品与使用场景"),
+      action: t("人物正面出镜，自然讲述并展示产品"), camera: t("中景平稳拍摄，缓慢推近主体"),
     }));
     update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) });
     await save();
@@ -224,14 +234,14 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     : plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "");
 
   return <div className="mv-scroll"><div className="mv-studio">
-    <header className="mv-heading"><div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("30–60 秒 · 自动分段合成 · 抖音发布素材")}</p></div><button disabled={busy || saving || !ready} onClick={() => void act(() => newDraft())}>{t("开始新视频")}</button></header>
+    <header className="mv-heading"><div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div><button disabled={busy || saving || !ready} onClick={() => void act(() => newDraft())}>{t("开始新视频")}</button></header>
     {loadError && <div className="mv-connection-error" role="alert"><p>{t(loadError)}</p><button onClick={() => { setLoadError(""); setLoadAttempt(value => value + 1); }}>{t("重新连接")}</button></div>}
     <details className="mv-library"><summary>{t("我的视频草稿")} · {projects.length}</summary><div className="mv-draft-list">{projects.map(p => <button key={p.id} disabled={busy || saving} aria-pressed={p.id === project?.id} onClick={() => void act(async () => { if (dirty) await save(); await open(p.id); })}><strong>{p.draft.publishTitle || p.draft.topic || t("未命名草稿")}</strong><span>{p.draft.durationSec}s · {t(({ draft: "草稿", pending: "等待生成", running: "生成中", succeeded: "已生成", failed: "生成失败", cancelled: "已取消" } as Record<string, string>)[p.status] ?? p.status)}</span></button>)}</div></details>
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}
     {project?.taskId ? <section className="mv-card mv-results"><div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => void act(() => newDraft(true))}>{t("复制为新草稿")}</button></div>
       {project.status === "succeeded" && project.output?.assets?.[0] ? <><video className="mv-result-video" controls src={project.output.assets[0].url} /><a className="mv-download" href={project.output.assets[0].url} download>{t("下载视频")}</a></> : <div className="mv-progress"><strong>{t(active ? "正在制作完整视频" : project.status === "cancelled" ? "已取消" : "生成失败")}</strong><progress aria-label={t("视频制作进度")} max="100" value={project.progress} /><span>{project.progress}% · {project.stage?.startsWith("片段完成 ") ? t("片段完成 {0}", [project.stage.slice(5)]) : t(project.stage || "等待生成")}</span>{project.status === "pending" && <button disabled={busy} onClick={() => void act(() => generate(true))}>{t("恢复排队任务")}</button>}{active && <button disabled={busy} onClick={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })}>{t("取消")}</button>}{!active && <button disabled={busy} onClick={() => void act(() => generate(true))}>{t("继续未完成的任务")}</button>}{project.error && <p className="mv-error">{t(project.error)}</p>}<p className="mv-hint">{t("成功片段会保留。重新生成失败片段可能产生费用；提交结果未知时不会自动重发。")}</p></div>}
       <div className="mv-publication"><button disabled={busy} onClick={() => void act(() => publication())}>{t("重新生成标题和标签")}</button>{textField("publishTitle", "视频发布标题", 100)}{textField("tags", "短视频检索标签", 160)}<div className="mv-choices"><button disabled={busy} onClick={() => void act(async () => { await save(); await navigator.clipboard.writeText([draft.publishTitle, draft.tags].filter(Boolean).join("\n")); setNotice("已复制"); })}>{t("复制发布文案")}</button><button disabled={busy || project.status !== "succeeded" || !capabilities?.knowledge} onClick={() => void act(async () => { const p = await save(); const result = await request<{ itemId: string; version: number }>(`/marketing-videos/${p.id}/archive`, json("POST", {})); setCurrent({ ...p, knowledgeItemId: result.itemId, knowledgeVersion: result.version }); setNotice("视频和发布文案已保存到知识库。"); })}>{t(project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库草稿" : "存草稿到知识库")}</button><button disabled title={t("抖音发布权限尚未接入，请下载视频并复制文案发布。")}>{t("发布到抖音")}</button></div>{notice && <p className="mv-hint" role="status">{t(notice)}</p>}<p className="mv-hint">{t("抖音发布权限尚未接入，请下载视频并复制文案发布。")}</p>{!capabilities?.knowledge && <p className="mv-hint">{t("知识库尚未启用。")}</p>}</div>
-      <details className="mv-script-review" open><summary>{t("查看制作分镜")}</summary>{draft.storyboard.length ? <StoryboardEditor shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}<button disabled={busy || saving} onClick={() => void act(() => newDraft(true, true))}>{t("修改分镜并重新制作")}</button></details>
+      <details className="mv-script-review" open><summary>{t("查看制作分镜")}</summary>{draft.storyboard.length ? <StoryboardEditor presenterRequired={draft.mode === "avatar"} shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}<button disabled={busy || saving} onClick={() => void act(() => newDraft(true, true))}>{t("修改分镜并重新制作")}</button></details>
     </section> : <>
       <nav className="mv-steps" aria-label={t("视频创作步骤")}>{STEPS.map((label, i) => <button key={label} disabled={busy || !ready} aria-current={i === step ? "step" : undefined} className={i === step ? "active" : ""} onClick={() => { if (i && !draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(i); }}><span>{i + 1}</span>{t(label)}</button>)}</nav>
       <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / 3</span></div>
@@ -242,27 +252,29 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
             <p className="mv-hint">{t("粘贴视频链接、分享文本或文案，AI 自动拆解并生成文案和分镜。")}</p>
             <details><summary>{t("补充产品与创作要求（选填）")}</summary>{textField("topic", "产品、卖点和目标顾客", 800)}</details>
           </> : textField("topic", "产品、卖点和目标顾客", 800)}
-          <label className="mv-label">{t("目标时长")}</label>{choices("目标时长", [30, 45, 60].map(n => ({ value: String(n), label: t("{0} 秒", [n]) })), String(draft.durationSec), value => field("durationSec", Number(value) as 30 | 45 | 60))}
+          <label className="mv-label">{t("目标时长")}</label>{choices("目标时长", [15, 30, 45, 60].map(n => ({ value: String(n), label: t("{0} 秒", [n]) })), String(draft.durationSec), value => field("durationSec", Number(value)))}
+          <label className="mv-field"><span>{t("整片时长（秒）")} · {draft.durationSec}s</span><input type="range" min="15" max="60" step="1" aria-label={t("整片时长（秒）")} value={draft.durationSec} disabled={busy} onChange={e => field("durationSec", Number(e.target.value))} /></label>
+          <p className="mv-hint">{t("选择 15–60 秒目标时长，AI 自动安排每镜 4–15 秒，可多出最多 5 秒，成片最长 65 秒。")}</p>
           <button className="mv-soft" disabled={busy || !(draft.copyMode === "rewrite" ? draft.reference : draft.topic).trim() || !ready} onClick={() => void act(writeCopy)}>{t(busy ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜")}</button>
           {project?.referenceAnalysis && <ReferenceAnalysisPanel key={`${ownerId}:${project.referenceAnalysis.id}`} id={project.referenceAnalysis.id} ownerId={ownerId} onActive={setAnalysisPending} onComplete={completedAnalysis} />}
           {analysis && <details className="mv-script-review"><summary>{t("文案结构")}</summary><p>{analysis}</p></details>}
           {(draft.copyMode !== "rewrite" || !!draft.script.trim()) && <>
           {textField("script", "视频口播文案", 2000, 6)}<p className="mv-hint">{t("预计口播 {0} 秒，实际以成片为准。", [Math.ceil(speechUnits(draft.script) / 4)])}</p>
-          {!!draft.storyboard.length && <StoryboardEditor creation shots={draft.storyboard} busy={busy} onChange={storyboard => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) })} onAi={(instruction, index) => void act(() => editStoryboard(instruction, index))} />}
+          {!!draft.storyboard.length && <StoryboardEditor presenterRequired={draft.mode === "avatar"} creation shots={draft.storyboard} busy={busy} onChange={storyboard => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) })} onAi={(instruction, index) => void act(() => editStoryboard(instruction, index))} />}
           {draft.script.trim() && plan.error && <p className="mv-error" role="alert">{t(plan.error)}</p>}
           <details className="mv-script-review"><summary>{t("标题标签")}</summary>{textField("publishTitle", "视频发布标题", 100)}{textField("tags", "短视频检索标签", 160)}<button disabled={busy || !ready || !draft.script.trim()} onClick={() => void act(() => publication())}>{t("重新生成标题和标签")}</button></details>
           <button disabled={busy || !ready || !draft.script.trim()} onClick={() => void act(review)}>{t("检查当前文案")}</button>
           {validReview && <div className={`mv-review mv-review-${project.review!.verdict}`} role="status"><strong>{t(({ pass: "未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[project.review!.verdict])}</strong>{project.review!.issues.map((issue, i) => <article key={i}><p>{issue.text}</p><p>{issue.reason}</p><p>{issue.suggestion}</p>{issue.text && (["script", "publishTitle", "tags"] as const).some(key => draft[key].includes(issue.text)) && <button disabled={busy} onClick={() => { const key = (["script", "publishTitle", "tags"] as const).find(key => draft[key].includes(issue.text)); if (key) field(key, draft[key].replace(issue.text, issue.suggestion)); }}>{t("采用修改建议")}</button>}</article>)}</div>}
           </>}
         </>}
-        {step === 1 && <><div className="mv-directions"><button className="selected" aria-pressed="true">{t("数字人")}</button><button disabled title={t("实拍对口型服务尚未接入。")}>{t("实拍对口型（待接入）")}</button></div><p className="mv-hint">{t("选择个人肖像，也可以留空，由模型安排人物或产品画面。")}</p><button className="mv-soft" disabled={busy} onClick={() => setTwinOpen("all")}>{t("选择数字分身素材")}</button><div className="mv-columns">{asset("portrait", "上传肖像（选填）", "image/jpeg,image/png,image/webp")}{asset("background", "上传背景图片（选填）", "image/jpeg,image/png,image/webp")}</div>{textField("background", "背景补充描述", 600)}</>}
+        {step === 1 && <><div className="mv-directions"><button className="selected" aria-pressed="true">{t("数字人")}</button><button disabled title={t("实拍对口型服务尚未接入。")}>{t("实拍对口型（待接入）")}</button></div><p className="mv-hint">{t("选择个人肖像作为出镜人物；留空时由模型安排一致的人物形象。")}</p><button className="mv-soft" disabled={busy} onClick={() => setTwinOpen("all")}>{t("选择数字分身素材")}</button><div className="mv-columns">{asset("portrait", "上传肖像（选填）", "image/jpeg,image/png,image/webp")}{asset("background", "上传背景图片（选填）", "image/jpeg,image/png,image/webp")}</div>{textField("background", "背景补充描述", 600)}</>}
         {step === 2 && <><label className="mv-label">{t("旁白风格")}</label>{choices("旁白风格", ["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value })), draft.voice, value => field("voice", value))}<button className="mv-soft" disabled={busy || frozen || !ready} onClick={() => setTwinOpen("voice")}>{t("选择数字分身音色")}</button>{asset("voice", "上传音色样例（选填，2–15 秒）", "audio/mpeg,audio/wav")}<p className="mv-hint">{t("音色样例选填，可使用数字分身中的声音或自行上传；留空时按所选旁白风格使用模型原生配音，发布前请试听成片。")}</p>{asset("music", "选择背景音乐（选填）", "audio/mpeg,audio/wav,audio/mp4")}{draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
           <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label><p className="mv-hint">{t("字幕由视频模型根据提示词生成，发布前请检查文字与音画是否一致。")}</p>
           <label className="mv-label">{t("画面比例")}</label>{choices("画面比例", ["9:16", "16:9", "1:1"].map(value => ({ value, label: value })), draft.ratio, value => field("ratio", value as MarketingDraft["ratio"]))}
           <details><summary>{t("更多设置")}</summary>{choices("视频质量", [{ value: "720p", label: "默认" }, { value: "1080p", label: "高清" }], draft.quality, value => field("quality", value as MarketingDraft["quality"]))}</details>
           {!draft.storyboard.length && !!parts.length && <details className="mv-script-review"><summary>{t("查看自动分段（{0} 段）", [parts.length])}</summary>{parts.map(p => <p key={p.index}>{p.index + 1} · {p.durationSec}s<br />{p.script}</p>)}</details>}
-          <p className="mv-hint">{t("整片 {0} 秒，分 {1} 段生成；费用按实际生成片段记录。", [draft.durationSec, draft.durationSec / 15])}</p>
-          {!!draft.storyboard.length && <div ref={storyboardPanel} className="mv-storyboard-panel"><StoryboardEditor shots={draft.storyboard} busy={busy} onChange={storyboard => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) })} onAi={(instruction, index) => void act(() => editStoryboard(instruction, index))} /></div>}
+          <p className="mv-hint">{t("目标 {0} 秒，分镜共 {1} 秒，分 {2} 段生成。", [draft.durationSec, parts.reduce((sum, part) => sum + part.durationSec, 0), parts.length])}</p>
+          {!!draft.storyboard.length && <div ref={storyboardPanel} className="mv-storyboard-panel"><StoryboardEditor presenterRequired={draft.mode === "avatar"} shots={draft.storyboard} busy={busy} onChange={storyboard => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) })} onAi={(instruction, index) => void act(() => editStoryboard(instruction, index))} /></div>}
           {!draft.storyboard.length && <p className="mv-hint">{t("先生成可编辑分镜，确认后再制作视频。")}</p>}
           {generationBlocker && <div id={generationHintId} role="alert"><p className="mv-error">{t(generationBlocker)}</p>{plan.error && !draft.storyboard.length && <button disabled={busy || !ready} onClick={() => setStep(0)}>{t("修改文案或时长")}</button>}</div>}
           <button className="mv-primary mv-generate" disabled={busy || !!generationBlocker} aria-describedby={generationBlocker ? generationHintId : undefined} onClick={() => void act(() => draft.storyboard.length ? generate() : editStoryboard())}>{t(busy ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览")}</button>

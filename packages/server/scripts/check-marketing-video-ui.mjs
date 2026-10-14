@@ -70,7 +70,7 @@ try {
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
     if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false });
     if (path === '/api/marketing-videos') return json({ data: [...projects.values()] });
-    if (path === '/api/marketing-videos/copy') return json({ draft: { ...request.postDataJSON().draft, storyboard: planMarketingSegments(script, request.postDataJSON().draft.durationSec).map(part => ({ script: part.script, visual: '咖啡店', action: '展示咖啡', camera: '中景' })), script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' }, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
+    if (path === '/api/marketing-videos/copy') return json({ draft: { ...request.postDataJSON().draft, storyboard: planMarketingSegments(script, request.postDataJSON().draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '咖啡店', action: '展示咖啡', camera: '中景' })), script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' }, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
     if (path.startsWith('/api/marketing-videos/')) {
       const [, , , id, action] = path.split('/');
       if (request.method() === 'PUT') {
@@ -85,7 +85,7 @@ try {
       if (action === 'storyboard') {
         if (failNextStoryboard) { failNextStoryboard = false; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'AI 分镜生成失败，原分镜已保留，请重试。' }) }); }
         const body = request.postDataJSON(); assert.equal(body.version, p.version);
-        const current = p.draft.storyboard.length ? p.draft.storyboard : planMarketingSegments(p.draft.script, p.draft.durationSec).map(part => ({ script: part.script, visual: '木质吧台和咖啡产品特写', action: '自然讲述并展示咖啡', camera: '缓慢推近' }));
+        const current = p.draft.storyboard.length ? p.draft.storyboard : planMarketingSegments(p.draft.script, p.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '木质吧台和咖啡产品特写', action: '自然讲述并展示咖啡', camera: '缓慢推近' }));
         const shots = current.map((shot, index) => body.instruction && (body.index === undefined || body.index === index) ? { ...shot, camera: 'AI 调整镜头' } : shot);
         p.version++; p.draft = { ...p.draft, storyboard: shots, script: storyboardScript(shots) }; p.review = null;
         return json(p);
@@ -177,7 +177,6 @@ try {
   for (const [invalidScript, reason] of [
     ['长'.repeat(180), '文案过长，请精简文案或增加视频时长。'],
     ['短', '文案过短，请补充内容。'],
-    ['长'.repeat(50) + '。' + '文'.repeat(80), '部分段落过长，请缩短句子后重试。'],
   ]) {
     await page.getByLabel('视频口播文案').fill(invalidScript);
     await page.getByRole('alert').filter({ hasText: reason }).waitFor();
@@ -223,7 +222,7 @@ try {
   await page.getByRole('group', { name: '视频质量', exact: true }).getByRole('button', { name: '高清', exact: true }).click();
   await savingRequest;
   assert.equal(await page.getByRole('button', { name: '生成分镜并预览' }).isDisabled(), false);
-  await page.getByText('查看自动分段（4 段）').click();
+  await page.getByText(`查看自动分段（${planMarketingSegments(script, 60).length} 段）`).click();
   await snap('marketing-video-review.png');
   await page.getByRole('button', { name: '生成分镜并预览' }).evaluate(button => { button.click(); button.click(); });
   await page.getByRole('button', { name: '正在保存…', exact: true }).waitFor();
@@ -232,7 +231,7 @@ try {
   await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
   assert.equal(writes.filter(r => r.path.endsWith('/storyboard')).length, 1);
-  assert.equal(await page.locator('.mv-shot').count(), 4);
+  assert.equal(await page.locator('.mv-shot').count(), planMarketingSegments(script, 60).length);
   const firstShot = page.getByRole('article', { name: '第 1 镜', exact: true });
   const secondShot = page.getByRole('article', { name: '第 2 镜', exact: true });
   await firstShot.getByLabel('分镜口播').fill('欢迎来到转角咖啡店，一起喝杯咖啡。');
@@ -277,7 +276,7 @@ try {
   await page.getByRole('button', { name: '更新知识库草稿', exact: true }).click();
   await page.getByRole('button', { name: '已存入知识库', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/archive')).length, 2);
-  assert.equal(await page.locator('.mv-results .mv-shot').count(), 4);
+  assert.equal(await page.locator('.mv-results .mv-shot').count(), p.draft.storyboard.length);
   assert.equal(await firstShot.getByLabel('分镜口播').getAttribute('readonly'), '');
   await page.getByRole('button', { name: '修改分镜并重新制作', exact: true }).click();
   await page.getByRole('button', { name: '确定文案', exact: false }).click();
@@ -315,12 +314,12 @@ try {
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Create storyboard manually', exact: true }).click();
   await page.getByRole('heading', { name: 'Review storyboard', exact: true }).waitFor();
-  assert.equal(await page.locator('.mv-shot').count(), 2);
+  assert.equal(await page.locator('.mv-shot').count(), planMarketingSegments(script, 30).length);
   await page.getByLabel('AI revision scope').selectOption('all');
   await page.getByLabel('Storyboard revision request').fill('Make all shots close-ups');
   await page.getByRole('button', { name: 'Revise storyboard with AI', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Storyboard saved.' }).waitFor();
-  assert.deepEqual(await page.getByLabel('Framing and camera movement').evaluateAll(inputs => inputs.map(input => input.value)), ['AI 调整镜头', 'AI 调整镜头']);
+  assert.deepEqual(await page.getByLabel('Framing and camera movement').evaluateAll(inputs => inputs.map(input => input.value)), planMarketingSegments(script, 30).map(() => 'AI 调整镜头'));
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.getByRole('heading', { name: 'Review storyboard', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-storyboard-en-compact.png');
@@ -351,7 +350,7 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === 'Save draft' && button.disabled));
   await page.reload(); await chooseAgent('Marketing video');
   await page.getByRole('heading', { name: 'Review storyboard', exact: true }).waitFor();
-  assert.equal(await page.locator('.mv-shot').count(), legacyDraft.durationSec / 15);
+  assert.equal(await page.locator('.mv-shot').count(), planMarketingSegments(legacyDraft.script, legacyDraft.durationSec).length);
   const legacyResultId = '22222222-2222-4222-8222-222222222222';
   projects.set(legacyResultId, { ...projects.get(legacyId), id: legacyResultId, draft: { ...legacyDraft, assets: {} }, taskId: 'legacy-task', status: 'succeeded', output: { assets: resultAssets } });
   await page.evaluate(id => localStorage.setItem('lot:marketing-video:fixture', id), legacyResultId);

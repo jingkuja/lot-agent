@@ -76,10 +76,11 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
   let selection = row.selection as Awaited<ReturnType<typeof extractAnalysisFrames>> | null;
   if (!selection) {
     signal.throwIfAborted();
-    selection = await extractAnalysisFrames({ directory, source: snapshot.source, runner: mediaRuntime.decoderRunner(directory), signal });
+    selection = await extractAnalysisFrames({ directory, source: snapshot.source, runner: mediaRuntime.decoderRunner(directory), threads: deps.config.decodeThreads, signal });
     snapshot.source.durationMs = selection.durationMs;
     await deps.store.checkpoint(lease, snapshot, "frames", selection);
   }
-  snapshot = await analyzeSelectedFrames({ snapshot, selection, revision: lease.revision, models, checkpoint, signal });
+  snapshot = await analyzeSelectedFrames({ snapshot, selection, revision: lease.revision, models, checkpoint, signal,
+    ocrConcurrency: deps.config.ocrConcurrency, visualConcurrency: deps.config.visualConcurrency });
   await create(snapshot);
 }

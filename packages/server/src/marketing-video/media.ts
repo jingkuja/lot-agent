@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep, join } from "node:path";
-import type { MarketingDraft, MarketingSegment } from "@lot-agent/core/marketing-video";
+import { isMarketingDurationValid, type MarketingDraft, type MarketingSegment } from "@lot-agent/core/marketing-video";
 
 export function mediaProcess(binary: string, args: string[], opts: { signal?: AbortSignal; cwd?: string; timeoutMs?: number } = {}): Promise<string> {
   opts.signal?.throwIfAborted();
@@ -60,6 +60,10 @@ export async function inspectMedia(path: string, signal?: AbortSignal) {
   return { format, duration, audio: value.streams?.some((s: { codec_type: string }) => s.codec_type === "audio"), video: value.streams?.some((s: { codec_type: string }) => s.codec_type === "video") };
 }
 export async function composeMarketingVideo(input: { files: string[]; segments: MarketingSegment[]; draft: MarketingDraft; music?: string; signal?: AbortSignal }) {
+  const durationSec = input.segments.reduce((sum, segment) => sum + segment.durationSec, 0);
+  if (!input.segments.length || input.segments.length > 15 || input.files.length !== input.segments.length
+    || input.segments.some((segment, index) => segment.index !== index || !Number.isInteger(segment.durationSec) || segment.durationSec < 4 || segment.durationSec > 15)
+    || !isMarketingDurationValid(input.draft.durationSec, durationSec)) throw new Error("视频分段配置不完整");
   const folder = await mkdtemp(join(tmpdir(), "lot-marketing-"));
   try {
     const edge = input.draft.quality === "1080p" ? 1080 : 720;
@@ -85,11 +89,11 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
     }
     // Captions are already part of the model-generated frames.
     args.push("-c:v", "copy");
-    args.push("-c:a", "aac", "-t", String(input.draft.durationSec), "-threads", "2", "-movflags", "+faststart", "final.mp4");
+    args.push("-c:a", "aac", "-t", String(durationSec), "-threads", "2", "-movflags", "+faststart", "final.mp4");
     await mediaProcess(ffmpeg(), args, { cwd: folder, signal: input.signal });
     const output = join(folder, "final.mp4");
     const info = await inspectMedia(output, input.signal);
-    if (Math.abs(info.duration - input.draft.durationSec) > 0.3) throw new Error("成片时长校验失败");
+    if (Math.abs(info.duration - durationSec) > 0.3) throw new Error("成片时长校验失败");
     if ((await stat(output)).size > 200 * 1024 * 1024) throw new Error("成片超过知识库存储限制，请降低清晰度。");
     return { body: await readFile(output), durationSec: info.duration, width, height };
   } finally { await rm(folder, { recursive: true, force: true }); }

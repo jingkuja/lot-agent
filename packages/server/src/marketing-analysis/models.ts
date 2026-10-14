@@ -70,10 +70,11 @@ export class AnalysisModels {
       let terminal = false;
       let savingId = Promise.resolve();
       try {
-        // Full copy/storyboard synthesis can spend over two minutes reasoning
-        // over all source evidence. Keep cancellation, with a bounded longer
-        // deadline for this final text-only stage.
-        const deadline = AbortSignal.timeout(stepId.startsWith("copy:") ? 300000 : 120000);
+        // Both summary and copy/storyboard synthesis reason over all evidence.
+        // Keep the same longer deadline for these text-only stages, while
+        // caller cancellation and lease loss still abort immediately.
+        const synthesis = stepId.startsWith("summary:") || stepId.startsWith("copy:");
+        const deadline = AbortSignal.timeout(synthesis ? 300000 : 120000);
         for await (const chunk of llm.chat(messages, undefined, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline, params: { maxTokens: 8192 }, onResponseId: id => {
           receipt!.responseId = id;
           savingId = savingId.then(() => this.deps.ledger.responseId?.(stepId, id)).catch(() => {});

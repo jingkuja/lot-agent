@@ -117,21 +117,53 @@ describe("marketing project HTTP boundaries", () => {
   });
   it("bounds JSON request bodies", async () => {
     const f = fixture();
-    expect((await f.call(`/${id}`, { draft: "x".repeat(70000) }, "PUT")).status).toBe(413);
+    expect((await f.call(`/${id}`, { draft: "x".repeat(140000) }, "PUT")).status).toBe(413);
   });
 });
 
 
 describe("marketing storyboard editing", () => {
+  it.each([62, 65])("preserves a %ds AI plan for a 60s target in creation and editing", async total => {
+    const f = fixture(); f.project.draft.durationSec = 60;
+    const shots = Array.from({ length: 5 }, (_, i) => ({ durationSec: 12 + (i < total - 60 ? 1 : 0), script: "欢迎来喝咖啡。", visual: "人物在吧台前出镜", action: "人物展示咖啡", camera: "中景" }));
+    f.service.marketingText.mockResolvedValueOnce({ shots, publishTitle: "咖啡", tags: "", analysis: "展示产品" });
+    const created = await f.call("/copy", { draft: { topic: "咖啡", durationSec: 60 }, locale: "zh" });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toMatchObject({ draft: { durationSec: 60, storyboard: shots } });
+    f.service.marketingText.mockResolvedValueOnce({ shots });
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "调整节奏" })).status).toBe(200);
+    expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ durationSec: 60, storyboard: shots }));
+    Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
+    f.service.modelCatalog.pricing = { "kling-video-v3-omni": { inputPrice: 0, outputPrice: 0, unitPrice: 1 } };
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+    expect(f.service.usageMeter.checkQuota).toHaveBeenCalledWith("owner", total);
+    for (const timings of [[14, 13, 13, 13, 13], [14, 14, 14, 14, 14]]) {
+      f.project.draft.storyboard = shots.map((shot, i) => ({ ...shot, durationSec: timings[i] }));
+      expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
+    }
+    expect(f.store.reserve).toHaveBeenCalledOnce();
+    expect(f.service.jobQueue.deliverPersisted).toHaveBeenCalledOnce();
+  });
+  it("supports AI-selected shot counts and unequal durations summing to the total", async () => {
+    const f = fixture(); f.project.draft.durationSec = 17;
+    const shots = [4, 6, 7].map(durationSec => ({ durationSec, script: "欢迎来喝咖啡。", visual: "人物在吧台前正面出镜", action: "人物端起杯子", camera: "中景" }));
+    f.service.marketingText.mockResolvedValueOnce({ shots });
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "增加一个开场镜头" })).status).toBe(200);
+    expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: shots }));
+    Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
+    f.service.marketingText.mockResolvedValueOnce({ shots: [{ ...shots[1], durationSec: 15, camera: "缓慢推进" }] });
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "镜头推进", index: 1 })).status).toBe(200);
+    expect(f.store.save.mock.calls.at(-1)?.[3].storyboard.map(s => s.durationSec)).toEqual([4, 6, 7]);
+  });
   const shots = [
-    { script: "欢迎到店喝咖啡。", visual: "明亮咖啡店", action: "端起咖啡杯", camera: "中景推进" },
-    { script: "发现你喜欢的咖啡。", visual: "咖啡杯特写", action: "倒入手冲咖啡", camera: "俯拍特写" },
+    { durationSec: 15, script: "欢迎到店喝咖啡。", visual: "明亮咖啡店", action: "端起咖啡杯", camera: "中景推进" },
+    { durationSec: 15, script: "发现你喜欢的咖啡。", visual: "咖啡杯特写", action: "倒入手冲咖啡", camera: "俯拍特写" },
   ];
   it("generates and persists a validated board using owner credentials without submitting video", async () => {
     const f = fixture(); f.service.marketingText.mockResolvedValueOnce({ shots });
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(200);
     expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: shots, script: storyboardScript(shots) }));
-    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal));
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal), { upstreamBilling: true });
     expect(f.store.reserve).not.toHaveBeenCalled();
     expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
   });

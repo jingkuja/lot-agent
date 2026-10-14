@@ -96,9 +96,12 @@ try {
   // Continue: resume retried skipped OCR and counted all attempts as images.
   const full = await create(); const fullLease = (await store.claim(full.id))!;
   const fullLedger = new PgAnalysisLedger(store, fullLease);
-  for (let i = 0; i < 120; i++) {
-    await fullLedger.begin(`ocr:f${String(i + 1).padStart(4, "0")}`, `ocr-${i}`, "deepseek-v4.1-flash", 1);
-    await fullLedger.finish(`ocr:f${String(i + 1).padStart(4, "0")}`, i < 8 ? failed : receipt);
+  for (let offset = 0; offset < 120; offset += config.ocrConcurrency) {
+    await Promise.all(Array.from({ length: Math.min(config.ocrConcurrency, 120 - offset) }, async (_, index) => {
+      const i = offset + index;
+      await fullLedger.begin(`ocr:f${String(i + 1).padStart(4, "0")}`, `ocr-${i}`, "deepseek-v4.1-flash", 1);
+      await fullLedger.finish(`ocr:f${String(i + 1).padStart(4, "0")}`, i < 8 ? failed : receipt);
+    }));
   }
   for (let i = 0; i < 8; i++) {
     await fullLedger.begin(`visual:${i}`, `visual-${i}`, "kimi-k3", 6);

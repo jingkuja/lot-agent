@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { MarketingDraft, MarketingSegment } from "@lot-agent/core/marketing-video";
+import { MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { PgMarketingProjectStore } from "./repository.js";
@@ -33,9 +33,17 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     await assertActive();
     const existing = (await deps.db.pool.query("SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 ORDER BY created_at LIMIT 1", [job.id, job.userId])).rows[0];
     if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime }] };
-    const draft = job.input.draft as MarketingDraft;
-    const segments = await store.segments(job.userId, project.id);
-    if (segments.length !== draft.durationSec / 15) throw new Error("视频分段配置不完整");
+    const draft = MarketingDraftSchema.parse(job.input.draft);
+    const segments = (await store.segments(job.userId, project.id)).map(segment => ({ ...segment, duration_sec: Number(segment.duration_sec) }));
+    // Persisted boundaries are authoritative, including legacy jobs without a
+    // storyboard. Never re-plan an already submitted video during recovery.
+    // Check the full paid duration before resolving providers or sending a clip.
+    if (!segments.length || segments.length > 15 || segments.some((s, i) => s.slot !== i || !Number.isInteger(s.duration_sec) || s.duration_sec < 4 || s.duration_sec > 15)
+      || !isMarketingDurationValid(draft.durationSec, segments.reduce((sum, s) => sum + s.duration_sec, 0))) throw new Error("视频分段配置不完整");
+    if (draft.storyboard.length) {
+      const planned = resolveMarketingSegments(draft);
+      if (planned.length !== segments.length || planned.some((p, i) => p.script !== segments[i].script || p.durationSec !== segments[i].duration_sec)) throw new Error("视频分段配置不完整");
+    } else if (segments.map(s => s.script).join("").trim() !== draft.script.trim()) throw new Error("视频分段配置不完整");
     const progress: number[] = segments.map((s) => s.status === "succeeded" ? 100 : 0);
     const report = async () => deps.db.updateTaskProgress(job.id, Math.floor(progress.reduce((a, b) => a + b, 0) / segments.length * 0.85), `片段完成 ${progress.filter(p => p === 100).length}/${segments.length}`);
     const files: string[] = new Array(segments.length);

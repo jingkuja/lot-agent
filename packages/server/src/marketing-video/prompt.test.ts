@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
 import { marketingSegmentPrompt } from "./prompt.js";
+import { creationPrompt } from "./creation.js";
 
 describe("marketing model subtitle instructions", () => {
+  it("requires a visible identifiable presenter in creation and every video shot, even when selected after the board", () => {
+    const draft = MarketingDraftSchema.parse({ assets: { portrait: "11111111-1111-4111-8111-111111111111" }, durationSec: 17,
+      storyboard: [{ durationSec: 6, script: "欢迎光临。", visual: "Product-only close-up", action: "展示杯子", camera: "特写" }] });
+    const creation = creationPrompt(draft, "zh").system;
+    expect(creation).toContain("between 17 and 22 seconds, never over 65"); expect(creation).toContain("integer durationSec of 4–15 seconds");
+    for (const prompt of [creation, marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2)]) {
+      expect(prompt).toContain("visibly on camera in EVERY shot");
+      expect(prompt).toContain("match the supplied portrait identity");
+      expect(prompt).toContain("takes precedence over conflicting shot directions");
+    }
+    expect(marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2)).toContain("Duration exactly 6 seconds");
+  });
   it.each(["欢迎来到咖啡店。", "Welcome to our coffee shop."])("requests matching subtitles for each shot: %s", (script) => {
     const draft = MarketingDraftSchema.parse({ script: `${script}其他片段。`, subtitles: true });
     const prompt = marketingSegmentPrompt(draft, { index: 1, script, durationSec: 15 }, 4);

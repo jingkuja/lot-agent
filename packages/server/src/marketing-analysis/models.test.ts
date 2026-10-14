@@ -100,7 +100,7 @@ describe("analysis model calls", () => {
     await expect(setup(forged).models.summarize(input)).rejects.toThrow("INVALID_EVIDENCE_REFERENCE");
   });
   it("generates copy and all shots from the complete analysis once, then reuses the receipt", async () => {
-    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
+    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ durationSec: 15, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
     const f = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" });
     const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [frame(0)], frameTexts: [], texts: [], observations: [{ description: "完整场景观察", frameIds: ["f0001"], uncertainty: "" }] };
     const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: snapshot.source.canonicalUrl });
@@ -120,24 +120,63 @@ describe("analysis model calls", () => {
     expect(chat).toHaveBeenCalledOnce();
     expect(finish).toHaveBeenCalledWith("ocr:f0001", { text: "", outcome: "rejected", errorCode: "MODEL_QUOTA" });
   });
-  it("allows a complete storyboard response after two minutes without replaying it", async () => {
+  it.each(["summary", "copy"] as const)("allows a complete %s response after two minutes without replaying it", async stage => {
     vi.useFakeTimers();
     const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => {
       const controller = new AbortController(); setTimeout(() => controller.abort(), ms); return controller.signal;
     });
     const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: "参考文案" });
-    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
-    const finish = vi.fn(async () => {}); const begin = vi.fn(async () => null);
-    const models = new AnalysisModels({ readFrame: async () => new Uint8Array(), ledger: { begin, finish }, provider: async () => ({ async *chat(_messages, _tools, options) {
+    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ durationSec: 15, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
+    const response = stage === "copy" ? { shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" }
+      : { summary: [], timeline: [], marketingPoints: [], limitations: [] };
+    let receipt: ModelStepReceipt | undefined;
+    const finish = vi.fn(async (_id: string, value: ModelStepReceipt) => { receipt = value; });
+    const begin = vi.fn(async () => receipt ?? null);
+    const chat = vi.fn(async function* (_messages, _tools, options) {
       await new Promise(resolve => setTimeout(resolve, 130000)); options?.signal?.throwIfAborted();
-      yield { type: "text", content: JSON.stringify({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" }) };
-      yield { type: "done", finishReason: "stop", usage: { promptTokens: 100, completionTokens: 100 } };
-    } }) });
+      yield { type: "text" as const, content: JSON.stringify(response) };
+      yield { type: "done" as const, finishReason: "stop", usage: { promptTokens: 100, completionTokens: 100 } };
+    } satisfies LLMProvider["chat"]);
+    const models = new AnalysisModels({ readFrame: async () => new Uint8Array(), ledger: { begin, finish }, provider: async () => ({ chat }) });
+    const run = () => stage === "copy"
+      ? models.createCopy(draft, "zh", { source: { platform: "bilibili", canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [], frameTexts: [], texts: [], observations: [] }, 1)
+      : models.summarize({ revision: 1, frames: [], texts: [], observations: [], durationMs: 1000, limitations: [] });
     try {
-      const result = models.createCopy(draft, "zh", { source: { platform: "bilibili", canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [], frameTexts: [], texts: [], observations: [] }, 1);
-      const completed = expect(result).resolves.toMatchObject({ draft: { storyboard: shots } });
+      const result = run();
+      const completed = expect(result).resolves.toMatchObject(stage === "copy" ? { draft: { storyboard: shots } } : response);
       await vi.advanceTimersByTimeAsync(130000); await completed;
-      expect(begin).toHaveBeenCalledOnce(); expect(finish).toHaveBeenCalledWith("copy:1", expect.objectContaining({ outcome: "completed" }));
+      await run();
+      expect(chat).toHaveBeenCalledOnce(); expect(finish).toHaveBeenCalledWith(`${stage}:1`, expect.objectContaining({ outcome: "completed" }));
+    } finally { timeout.mockRestore(); vi.useRealTimers(); }
+  });
+  it.each(["deadline", "cancel"] as const)("stops a slow summary on %s and never automatically resubmits", async reason => {
+    vi.useFakeTimers();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => {
+      const controller = new AbortController(); setTimeout(() => controller.abort(), ms); return controller.signal;
+    });
+    const controller = new AbortController(); let receipt: ModelStepReceipt | undefined;
+    const chat = vi.fn(async function* (_messages, _tools, options) {
+      options?.onResponseId?.("resp-slow-summary");
+      yield { type: "text" as const, content: '{"summary":[' };
+      await new Promise<void>((_resolve, reject) => {
+        options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), { once: true });
+      });
+    } satisfies LLMProvider["chat"]);
+    const models = new AnalysisModels({ readFrame: async () => new Uint8Array(), provider: async () => ({ chat }), ledger: {
+      begin: async () => receipt ?? null, finish: async (_id, value) => { receipt = value; },
+    } });
+    const run = () => models.summarize({ revision: 1, frames: [], texts: [], observations: [], durationMs: 1000, limitations: [] }, controller.signal);
+    try {
+      const rejected = expect(run()).rejects.toThrow("REQUEST_UNKNOWN");
+      await vi.advanceTimersByTimeAsync(130000);
+      expect(receipt).toBeUndefined();
+      if (reason === "cancel") controller.abort();
+      else await vi.advanceTimersByTimeAsync(170000);
+      await rejected;
+      expect(receipt).toMatchObject({ outcome: "request_unknown", responseId: "resp-slow-summary", text: '{"summary":[' });
+      expect(receipt?.usage).toBeUndefined();
+      await expect(models.summarize({ revision: 1, frames: [], texts: [], observations: [], durationMs: 1000, limitations: [] })).rejects.toThrow("REQUEST_UNKNOWN");
+      expect(chat).toHaveBeenCalledOnce();
     } finally { timeout.mockRestore(); vi.useRealTimers(); }
   });
   it("reuses a summary after database key reordering", async () => {

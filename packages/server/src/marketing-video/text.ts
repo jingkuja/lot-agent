@@ -27,15 +27,17 @@ export function marketingTextError(error: unknown, signal?: AbortSignal): Market
 }
 
 export async function completeMarketingJson(llm: LLMProvider, system: string, input: string, signal?: AbortSignal): Promise<unknown> {
-  const timeout = AbortSignal.timeout(90_000);
+  const timeout = AbortSignal.timeout(300_000);
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let text = "";
   let completed = false;
   try {
     requestSignal.throwIfAborted();
+    // Kimi rejects reasoning.effort=none. Keep its default reasoning policy
+    // instead of sending the generic "off" switch through the gateway.
     for await (const chunk of llm.chat([
       { role: "system", content: system }, { role: "user", content: input },
-    ], undefined, { signal: requestSignal, params: { maxTokens: 8192, reasoning: "off", responseFormat: "json_object" } })) {
+    ], undefined, { signal: requestSignal, params: { maxTokens: 8192, responseFormat: "json_object" } })) {
       if (chunk.type === "text") text += chunk.content ?? "";
       if (chunk.type === "done") {
         if (["length", "max_tokens"].includes(chunk.finishReason ?? "")) {

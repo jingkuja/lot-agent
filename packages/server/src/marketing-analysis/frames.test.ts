@@ -37,6 +37,8 @@ describe("source frame timestamps", () => {
       expect(result.frames.at(-1)?.ptsMs).toBeGreaterThan(3500);
       expect(result.frames.some(f => f.reasons.includes("change"))).toBe(true);
       expect(result.frames.some((f, i) => i && f.ptsMs - result.frames[i - 1].ptsMs !== 500)).toBe(true);
+      const singleThread = await extractAnalysisFrames({ directory, source: { platform: "douyin", canonicalUrl: "https://www.douyin.com/video/1234567", mediaKey: "source.mp4", sourceHash: "a".repeat(64) }, runner, threads: 1 });
+      expect(result).toEqual(singleThread);
       await writeFile(join(directory, "source.mp4"), "#EXTM3U\nfile:///etc/passwd");
       await expect(extractAnalysisFrames({ directory, source: { platform: "douyin", canonicalUrl: "", mediaKey: "source.mp4", sourceHash: "a".repeat(64) }, runner })).rejects.toThrow("UNSUPPORTED_SOURCE");
       await runner.run("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=s=160x90:r=10:d=2", "-vf", "setpts=PTS+190/TB", "-c:v", "libvpx-vp9", "-y", "/work/source.webm"]);

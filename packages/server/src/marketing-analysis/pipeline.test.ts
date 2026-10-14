@@ -1,12 +1,99 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { selectAnalysisFrames, type AnalysisSnapshot, type FrameEvidence } from "@lot-agent/core/marketing-analysis";
 import type { Message } from "@lot-agent/core";
 import { AnalysisModels, type ModelStepReceipt } from "./models.js";
 import { analyzeSelectedFrames } from "./pipeline.js";
+import { AnalysisError } from "./errors.js";
 
 const frames: FrameEvidence[] = [0, 1].map(i => ({ id: `f000${i + 1}`, sourceHash: "a".repeat(64), sourcePts: String(i * 500), timeBase: "1/1000", ptsMs: i * 500, width: 640, height: 360, objectKey: `frame-000${i + 1}.jpg`, reasons: [] }));
 const selection = { ...selectAnalysisFrames(frames, frames.map((_, i) => new Uint8Array(96 * 54).fill(i * 255))), durationMs: 1000 };
 const initial = (): AnalysisSnapshot => ({ source: { platform: "douyin", canonicalUrl: "https://www.douyin.com/video/1234567", sourceHash: "a".repeat(64) }, frames: [], frameTexts: [], texts: [], observations: [] });
+
+function parallelSelection() {
+  const many = Array.from({ length: 24 }, (_, i) => ({ ...frames[0], id: `f${String(i + 1).padStart(4, "0")}`, ptsMs: i * 500, sourcePts: String(i * 500) }));
+  return { frames: many, ocr: many, visual: many, durationMs: 12000,
+    coverage: { sampledFrames: 24, ocrFrames: 24, visualFrames: 24, omittedOcrFrameIds: [], omittedVisualFrameIds: [], limitations: [] } };
+}
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+const emptySummary = () => ({ summary: [], timeline: [], marketingPoints: [], limitations: [] });
+
+describe("parallel frame analysis", () => {
+  it.each([undefined, { ocrConcurrency: 2, visualConcurrency: 1 }])("bounds parallel work, orders results, and summarizes only after both stages: %j", async settings => {
+    vi.useFakeTimers();
+    try {
+      const selected = parallelSelection();
+      let ocr = 0, visual = 0, peakOcr = 0, peakVisual = 0, writes = 0, peakWrites = 0, overlapping = false;
+      let completedOcr = 0, completedVisual = 0;
+      const snapshots: AnalysisSnapshot[] = [];
+      const models = {
+        ocr: vi.fn(async (frame: FrameEvidence) => {
+          peakOcr = Math.max(peakOcr, ++ocr); overlapping ||= visual > 0;
+          await delay(80 - Number(frame.id.slice(1)) % 8 * 5);
+          ocr--; completedOcr++;
+          return { frameId: frame.id, rawText: frame.id };
+        }),
+        observe: vi.fn(async (index: number, batch: FrameEvidence[]) => {
+          peakVisual = Math.max(peakVisual, ++visual); overlapping ||= ocr > 0;
+          await delay(50 - index * 10);
+          visual--; completedVisual++;
+          return [{ description: `batch ${index}`, frameIds: batch.map(f => f.id), uncertainty: "" }];
+        }),
+        summarize: vi.fn(async () => {
+          expect([ocr, visual, completedOcr, completedVisual]).toEqual([0, 0, 24, 4]);
+          return emptySummary();
+        }),
+      };
+      const pending = analyzeSelectedFrames({ snapshot: initial(), selection: selected, revision: 1, ...settings,
+        models: models as unknown as AnalysisModels, checkpoint: async snapshot => {
+          peakWrites = Math.max(peakWrites, ++writes); await delay(1); snapshots.push(snapshot); writes--;
+        } });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+      expect([peakOcr, peakVisual, peakWrites, overlapping]).toEqual([settings?.ocrConcurrency ?? 8, settings?.visualConcurrency ?? 3, 1, true]);
+      expect(result.frameTexts.map(t => t.frameId)).toEqual(selected.frames.map(f => f.id));
+      expect(result.observations.map(o => o.description)).toEqual(["batch 0", "batch 1", "batch 2", "batch 3"]);
+      expect(models.ocr).toHaveBeenCalledTimes(24); expect(models.observe).toHaveBeenCalledTimes(4); expect(models.summarize).toHaveBeenCalledOnce();
+      expect(snapshots.at(-1)).toEqual(result);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["MODEL_QUOTA", "MODEL_RATE_LIMIT", "REQUEST_UNKNOWN"])("stops scheduling after %s while retaining in-flight work", async code => {
+    vi.useFakeTimers();
+    try {
+      let saved = initial();
+      const models = {
+        ocr: vi.fn(async (frame: FrameEvidence) => {
+          await delay(frame.id === "f0001" ? 5 : 30);
+          if (frame.id === "f0001") throw new AnalysisError(code);
+          return { frameId: frame.id, rawText: "保留已完成结果" };
+        }),
+        observe: vi.fn(async (index: number, batch: FrameEvidence[]) => { await delay(40); return [{ description: `batch ${index}`, frameIds: batch.map(f => f.id), uncertainty: "" }]; }),
+        summarize: vi.fn(),
+      };
+      const outcome = analyzeSelectedFrames({ snapshot: initial(), selection: parallelSelection(), revision: 1, ocrConcurrency: 2, visualConcurrency: 2,
+        models: models as unknown as AnalysisModels, checkpoint: async snapshot => { saved = snapshot; } }).catch(error => error);
+      await vi.runAllTimersAsync();
+      expect(await outcome).toMatchObject({ code });
+      expect(models.ocr).toHaveBeenCalledTimes(2); expect(models.observe).toHaveBeenCalledTimes(2); expect(models.summarize).not.toHaveBeenCalled();
+      expect(saved.frameTexts).toHaveLength(1); expect(saved.observations).toHaveLength(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("cancels both active stages without starting more calls or a summary", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const stop = async (_input: unknown, signal?: AbortSignal) => { await delay(20); signal?.throwIfAborted(); return { frameId: "f0001", rawText: "" }; };
+      const models = { ocr: vi.fn(stop), observe: vi.fn(async (_i, _frames, signal) => { await stop(undefined, signal); return []; }), summarize: vi.fn() };
+      const outcome = analyzeSelectedFrames({ snapshot: initial(), selection: parallelSelection(), revision: 1, ocrConcurrency: 2, visualConcurrency: 2,
+        models: models as unknown as AnalysisModels, checkpoint: async () => {}, signal: controller.signal }).catch(error => error);
+      setTimeout(() => controller.abort(), 5);
+      await vi.runAllTimersAsync();
+      expect(await outcome).toMatchObject({ name: "AbortError" });
+      expect(models.ocr).toHaveBeenCalledTimes(2); expect(models.observe).toHaveBeenCalledTimes(2); expect(models.summarize).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+});
 
 describe("analysis stage checkpoints", () => {
   it("retains OCR on a failed summary; a corrected revision only pays for a new summary", async () => {

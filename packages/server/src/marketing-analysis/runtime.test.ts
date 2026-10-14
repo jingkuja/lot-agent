@@ -35,7 +35,7 @@ it("uses the Worker-selected sandbox for download and decoding before running mo
     storage: { directory: vi.fn(async () => directory) },
     db: { getUserApiKey: vi.fn(async () => "fixture-key") },
     hub: { listModels: vi.fn(async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] })) },
-    config: { downloaderVersion: "2026.07.04" }, baseUrl: "https://gateway.example.test/v1", bridgePath: "/bridge.py",
+    config: { downloaderVersion: "2026.07.04", decodeThreads: 4, ocrConcurrency: 8, visualConcurrency: 3 }, baseUrl: "https://gateway.example.test/v1", bridgePath: "/bridge.py",
   } as unknown as Parameters<typeof runAnalysis>[2];
   vi.mocked(downloadAnalysisSource).mockResolvedValue({ source: downloaded, bytes: 1, transferredBytes: 1 });
   vi.mocked(extractAnalysisFrames).mockResolvedValue({ frames: [], ocr: [], visual: [], durationMs: 1000,
@@ -44,9 +44,9 @@ it("uses the Worker-selected sandbox for download and decoding before running mo
     await runAnalysis(lease, signal, deps);
     expect(downloadAnalysisSource).toHaveBeenCalledWith(expect.objectContaining({ directory, signal, expectedDownloaderVersion: "2026.07.04" }), mediaRuntime.downloadRuntime);
     expect(mediaRuntime.decoderRunner).toHaveBeenCalledWith(directory);
-    expect(extractAnalysisFrames).toHaveBeenCalledWith({ directory, source: expect.objectContaining(downloaded), runner, signal });
+    expect(extractAnalysisFrames).toHaveBeenCalledWith({ directory, source: expect.objectContaining(downloaded), runner, threads: 4, signal });
     expect(checkpoint).toHaveBeenCalledWith(lease, expect.anything(), "downloaded");
-    expect(analyzeSelectedFrames).toHaveBeenCalledWith(expect.objectContaining({ revision: 1, signal }));
+    expect(analyzeSelectedFrames).toHaveBeenCalledWith(expect.objectContaining({ revision: 1, signal, ocrConcurrency: 8, visualConcurrency: 3 }));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

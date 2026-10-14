@@ -11,8 +11,8 @@ export function analysisError(value: unknown) {
   const code = value instanceof ApiClientError ? value.code : value instanceof Error ? value.message : "";
   return ({
     PROJECT_CONFLICT: "草稿已在其他页面更新，生成结果保留在参考资料中。",
-    REQUEST_UNKNOWN: "上游调用结果尚未确认，已暂停。请联系管理员核实后继续。",
-    MODEL_USAGE_UNKNOWN: "上游调用结果尚未确认，已暂停。请联系管理员核实后继续。",
+    REQUEST_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
+    MODEL_USAGE_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
     MODEL_QUOTA: "上游余额不足，请充值后继续。",
     MODEL_RATE_LIMIT: "上游服务繁忙，请稍后继续。",
     MODEL_AUTH_REQUIRED: "模型服务未授权，请检查账号配置。",

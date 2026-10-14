@@ -35,7 +35,11 @@ try {
     { script: "在明亮空间，品尝现磨咖啡。", visual: "明亮咖啡店与咖啡杯", action: "端起咖啡", camera: "中景缓缓推进" },
     { script: "找到自己喜欢的味道。", visual: "咖啡杯近景", action: "缓缓倒入咖啡", camera: "俯拍特写" },
   ];
-  const create = draft => ({ draft: { ...draft, script: shots.map(s => s.script).join("\n"), storyboard: shots, publishTitle: "转角咖啡", tags: "#咖啡" }, analysis: "场景切入，展示产品，邀请品尝。" });
+  const create = draft => {
+    const storyboard = draft.durationSec === 60 ? Array.from({ length: 5 }, (_, i) => ({ ...shots[i % 2], durationSec: 13 }))
+      : shots.map(shot => ({ ...shot, durationSec: 15 }));
+    return { draft: { ...draft, script: storyboard.map(s => s.script).join("\n"), storyboard, publishTitle: "转角咖啡", tags: "#咖啡" }, analysis: "场景切入，展示产品，邀请品尝。" };
+  };
   await page.route("**/api/**", async route => {
     const req = route.request(), path = new URL(req.url()).pathname;
     if (!path.startsWith("/api/")) return route.continue();
@@ -80,6 +84,9 @@ try {
   await page.goto(address);
   await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
   const reference = page.getByRole("textbox", { name: "视频链接或参考文案", exact: true });
+  const duration = page.getByRole("slider", { name: "整片时长（秒）", exact: true });
+  await duration.focus(); await duration.press("End");
+  assert.equal(await duration.inputValue(), "60");
   await reference.fill("一家明亮的咖啡店，提供现磨咖啡，欢迎品尝。");
   assert.equal(await page.getByText("参考视频分析", { exact: true }).count(), 0);
   await page.getByRole("button", { name: "一键拆解并生成", exact: true }).click();
@@ -87,7 +94,16 @@ try {
   await page.getByRole("button", { name: "开始新视频", exact: true }).waitFor({ state: "visible" });
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(b => b.textContent === '开始新视频').disabled);
   assert.equal(copyCalls, 1); assert.equal(starts, 0);
-  assert.equal(await page.getByText("中景缓缓推进", { exact: true }).count(), 1);
+  await page.getByText("0–13s · 13 秒", { exact: true }).waitFor();
+  await page.getByText("52–65s · 13 秒", { exact: true }).waitFor();
+  await page.getByText("数字分身将在每个镜头出镜，保持人物形象一致。", { exact: true }).waitFor();
+  assert.equal(await page.getByText("中景缓缓推进", { exact: true }).count(), 3);
+  assert.equal(await duration.inputValue(), "60");
+  await page.getByText("5 个分镜 · 共 65 秒", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "下一步", exact: true }).click();
+  await page.getByRole("button", { name: "下一步", exact: true }).click();
+  await page.getByText("目标 60 秒，分镜共 65 秒，分 5 段生成。", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "确认分镜并生成视频", exact: true }).isEnabled(), true);
   await page.getByRole("button", { name: "开始新视频", exact: true }).click();
   await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
   await reference.fill("https://www.bilibili.com/video/BV1234567890");
@@ -129,7 +145,7 @@ try {
   await page.getByRole("button", { name: "取消", exact: true }).waitFor(); assert.equal(resumes, 2);
   await page.getByRole("button", { name: "取消", exact: true }).click(); await page.getByText("已取消", { exact: true }).waitFor();
   Object.assign(value, { status: "needs_review", errorCode: "REQUEST_UNKNOWN" });
-  await page.reload(); await page.getByText("上游调用结果尚未确认，已暂停。请联系管理员核实后继续。", { exact: true }).waitFor();
+  await page.reload(); await page.getByText("模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
   Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
   await page.getByText("中景缓缓推进", { exact: true }).waitFor();
