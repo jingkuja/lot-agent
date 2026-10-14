@@ -32,8 +32,7 @@ const db = new DB({ host: url.hostname, port: Number(url.port || 5432), user: de
 const secrets = new SecretBox("00".repeat(32));
 const store = new PgAnalysisStore(db.pool, secrets);
 const directory = await mkdtemp(join(tmpdir(), "lot-media-db-")); const storage = new AnalysisStorage(directory);
-const config = analysisConfig({ MARKETING_ANALYSIS_ENABLED: "1", MARKETING_ANALYSIS_BUDGET_CNY: "1", YTDLP_VERSION: "2026.07.04", SECRET_MASTER_KEY: "fixture",
-  MARKETING_ANALYSIS_PRICING: JSON.stringify({ "deepseek-v4.1-flash": { inputPrice: 0.001, outputPrice: 0.002 }, "kimi-k3": { inputPrice: 0.002, outputPrice: 0.003 } }) });
+const config = analysisConfig({ MARKETING_ANALYSIS_ENABLED: "1", YTDLP_VERSION: "2026.07.04", SECRET_MASTER_KEY: "fixture" });
 const owner = randomUUID(); const other = randomUUID();
 const create = (user = owner, clientRequestId = randomUUID()) => store.create(user, { shareText: "https://www.bilibili.com/video/BV1234567890?p=2", clientRequestId }, config);
 try {
@@ -43,14 +42,14 @@ try {
   await db.pool.query("INSERT INTO users(id,name) VALUES($1,'fixture'),($2,'other fixture')", [owner, other]);
   await runMigrations(db.pool, migrations); await runMigrations(db.pool, migrations);
   await db.ensureUserBalance(owner);
-  await db.pool.query("UPDATE user_balance SET daily_limit=1.5 WHERE user_id=$1", [owner]);
+  await db.pool.query("UPDATE user_balance SET daily_limit=0,monthly_limit=0 WHERE user_id=$1", [owner]);
   const nonce = randomUUID();
   const [first, duplicate] = await Promise.all([create(owner, nonce), create(owner, nonce)]);
   assert.equal(first.id, duplicate.id); assert.equal((await db.getTask(first.id))?.type, "marketing.analysis");
   assert.equal((await db.pool.query("SELECT queue_name FROM tasks WHERE id=$1", [first.id])).rows[0].queue_name, "lot-media-analysis");
   assert.equal(await store.get(other, first.id), null);
   await assert.rejects(store.cancel(other, first.id), /ANALYSIS_NOT_FOUND/);
-  await assert.rejects(create(), /DAILY_LIMIT_EXCEEDED/);
+  const noLocalLimit = await create(); await store.cancel(owner, noLocalLimit.id);
   await assert.rejects(store.create(owner, { shareText: "https://www.bilibili.com/video/BV1234567890?p=3", clientRequestId: nonce }, config), /REQUEST_CONFLICT/);
   assert((await db.pool.query("SELECT share_text FROM marketing_reference_sources WHERE id=$1", [(await store.row(owner, first.id)).source_id])).rows[0].share_text.startsWith("enc:v1:"));
   await assert.rejects(dispatchAnalyses(store, { getJob: async () => null, add: async () => { throw new Error("redis offline"); } } as never), /redis offline/);
@@ -66,10 +65,10 @@ try {
   assert.equal((await new PgAnalysisLedger(store, lease).begin("ocr:f0001", "hash", "deepseek-v4.1-flash", 1))?.outcome, "request_unknown");
   const receipt = { text: '{"text":"不包邮 99元"}', outcome: "completed" as const, responseId: "fixture-response", usage: { promptTokens: 100, completionTokens: 50 } };
   await ledger.finish("ocr:f0001", receipt); await ledger.finish("ocr:f0001", receipt);
-  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM usage_logs WHERE task_id=$1", [first.id])).rows[0].n, 1);
-  assert.equal((await store.get(owner, first.id))!.budget!.spent, 0.0002);
+  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM usage_logs WHERE task_id=$1", [first.id])).rows[0].n, 0);
+  assert.equal("budget" in (await store.get(owner, first.id))!, false);
+  assert.equal((await db.pool.query("SELECT actual_cost FROM marketing_analysis_steps WHERE analysis_id=$1", [first.id])).rows[0].actual_cost, null);
   await assert.rejects(ledger.begin("visual:0", "hash2", "kimi-k3", 49), /ANALYSIS_IMAGE_BUDGET_EXHAUSTED/);
-  await assert.rejects(ledger.begin("visual:0", "hash2", "kimi-k3", 6, 1000000), /ANALYSIS_BUDGET_EXHAUSTED/);
   const snapshot: AnalysisSnapshot = { ...first.snapshot,
     source: { ...first.snapshot.source, durationMs: 1000 },
     frames: [{ id: "f0001", sourceHash: "a".repeat(64), sourcePts: "0", timeBase: "1/1000", ptsMs: 0, width: 100, height: 100, objectKey: "frame-0001.jpg", reasons: ["start"] }],
@@ -79,7 +78,7 @@ try {
   };
   await store.checkpoint(lease, snapshot, "summary"); await store.finish(lease);
   assert.equal((await store.get(owner, first.id))?.status, "ready");
-  assert.equal((await store.get(owner, first.id))?.budget?.reserved, 0);
+  assert.equal(Number((await store.row(owner, first.id)).reserved_cost), 0);
   const edited = (await store.edit(owner, first.id, 1, [{ id: "t0001", text: "不包邮 199元" }]))!;
   assert.equal(edited.revision, 2); assert.equal(edited.snapshot.texts[0].rawText, "不包邮 99元"); assert.equal(edited.snapshot.summary, undefined);
   await assert.rejects(store.edit(owner, first.id, 1, []), /REVISION_CONFLICT/);
@@ -93,6 +92,34 @@ try {
   assert.equal(await ledger3.begin("summary:2", "summary-hash", "kimi-k3", 0), null, "explicit resume permits one new known-failed attempt");
   await ledger3.finish("summary:2", { ...receipt, text: "summary" }); await store.finish(lease3);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id='summary:2'", [first.id])).rows[0].n, 2);
+  // A full selection with eight skipped OCR responses used to deadlock on
+  // Continue: resume retried skipped OCR and counted all attempts as images.
+  const full = await create(); const fullLease = (await store.claim(full.id))!;
+  const fullLedger = new PgAnalysisLedger(store, fullLease);
+  for (let i = 0; i < 120; i++) {
+    await fullLedger.begin(`ocr:f${String(i + 1).padStart(4, "0")}`, `ocr-${i}`, "deepseek-v4.1-flash", 1);
+    await fullLedger.finish(`ocr:f${String(i + 1).padStart(4, "0")}`, i < 8 ? failed : receipt);
+  }
+  for (let i = 0; i < 8; i++) {
+    await fullLedger.begin(`visual:${i}`, `visual-${i}`, "kimi-k3", 6);
+    await fullLedger.finish(`visual:${i}`, i === 7 ? failed : receipt);
+  }
+  await fullLedger.begin("summary:1", "summary-full", "kimi-k3", 0);
+  await fullLedger.finish("summary:1", failed); await store.finish(fullLease, "MODEL_STEP_FAILED");
+  await db.pool.query("UPDATE marketing_analysis_steps SET retry_requested=true WHERE analysis_id=$1 AND receipt->>'outcome'='failed'", [full.id]);
+  await store.resume(owner, full.id, 1);
+  const resumedLease = (await store.claim(full.id))!; const resumedLedger = new PgAnalysisLedger(store, resumedLease);
+  assert.equal((await resumedLedger.begin("ocr:f0001", "ocr-0", "deepseek-v4.1-flash", 1))?.outcome, "failed", "skipped OCR must stay cached on Continue");
+  assert.equal(await resumedLedger.begin("visual:7", "visual-7", "kimi-k3", 6), null, "retrying the same images must remain possible at the image limit");
+  await resumedLedger.finish("visual:7", receipt);
+  await assert.rejects(resumedLedger.begin("visual:7", "visual-7", "kimi-k3", 5), /MODEL_INPUT_CHANGED/);
+  await assert.rejects(resumedLedger.begin("visual:8", "extra-images", "kimi-k3", 1), /ANALYSIS_IMAGE_BUDGET_EXHAUSTED/);
+  assert.equal(await resumedLedger.begin("summary:1", "summary-full", "kimi-k3", 0), null);
+  await resumedLedger.finish("summary:1", receipt);
+  await resumedLedger.begin("copy:1", "copy-full", "kimi-k3", 0); await resumedLedger.finish("copy:1", receipt);
+  await store.finish(resumedLease);
+  assert.equal((await store.get(owner, full.id))?.status, "ready");
+  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id LIKE 'ocr:%'", [full.id])).rows[0].n, 120);
   const projects = new PgMarketingProjectStore(db.pool);
   const project = await projects.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ script: "已有生产口播", reference: "旧参考" }));
   const selection = { projectId: project.id, projectVersion: project.version, expectedRevision: 2, evidenceIds: ["t0001"] };
@@ -114,12 +141,12 @@ try {
   await assert.rejects(store.checkpoint(pendingLease, pending.snapshot, "ocr"), /ANALYSIS_LEASE_LOST/);
   await store.finish(pendingLease, "PROCESS_CANCELLED");
   const unknown = (await store.get(owner, pending.id))!;
-  assert.equal(unknown.status, "cancelled"); assert.equal(unknown.errorCode, "REQUEST_UNKNOWN"); assert(unknown.budget!.reserved > 0);
+  assert.equal(unknown.status, "cancelled"); assert.equal(unknown.errorCode, "REQUEST_UNKNOWN"); assert.equal("budget" in unknown, false);
   await assert.rejects(store.resume(owner, pending.id, 1), /REQUEST_UNKNOWN/);
   await assert.rejects(store.remove(owner, pending.id), /REQUEST_UNKNOWN/);
   await reconcileAnalysisStep(store, owner, pending.id, "ocr:f0001", 1, { ...receipt, outcome: "failed" }, "Fixture gateway usage verified");
   assert.equal((await store.get(owner, pending.id))?.status, "partial");
-  assert.equal((await store.get(owner, pending.id))?.budget?.reserved, 0);
+  assert.equal(Number((await store.row(owner, pending.id)).reserved_cost), 0);
   await assert.rejects(reconcileAnalysisStep(store, owner, pending.id, "ocr:f0001", 1, receipt, "Cannot overwrite known usage"), /MODEL_RECEIPT_CONFLICT/);
   await store.resume(owner, pending.id, 1);
   assert.equal((await store.get(owner, pending.id))?.status, "queued");
@@ -164,6 +191,46 @@ try {
     await transfer.query("UPDATE marketing_analysis_steps SET user_id=$2 WHERE analysis_id=$1", [first.id, other]);
     await assert.rejects(transfer.query("SET CONSTRAINTS ALL IMMEDIATE"), /foreign key constraint/);
   } finally { await transfer.query("ROLLBACK"); transfer.release(); }
+  // Single-action video creation: owner/version checks, durable association,
+  // atomic result writeback, no local fee calculation, and crash-safe replay.
+  const source = "https://www.bilibili.com/video/BV1234567890";
+  const newProject = () => projects.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ copyMode: "rewrite", reference: source }));
+  const targetProject = await newProject();
+  const input = { shareText: source, clientRequestId: randomUUID(), target: { projectId: targetProject.id, projectVersion: targetProject.version, locale: "zh" as const } };
+  await assert.rejects(store.create(other, input, config), /PROJECT_NOT_FOUND/);
+  await assert.rejects(store.create(owner, { ...input, target: { ...input.target, projectVersion: 99 } }, config), /PROJECT_CONFLICT/);
+  const creation = await store.create(owner, input, config);
+  assert.equal((await store.create(owner, input, config)).id, creation.id);
+  assert.equal((await projects.get(owner, targetProject.id))?.referenceAnalysis?.id, creation.id);
+  const creationLease = (await store.claim(creation.id))!;
+  const creationLedger = new PgAnalysisLedger(store, creationLease);
+  await creationLedger.begin("copy:1", "creation-hash", "kimi-k3", 0);
+  await creationLedger.finish("copy:1", { text: "", outcome: "rejected", errorCode: "MODEL_QUOTA" });
+  await store.finish(creationLease, "MODEL_QUOTA");
+  assert.equal((await store.get(owner, creation.id))?.errorCode, "MODEL_QUOTA");
+  await store.resume(owner, creation.id, 1);
+  const nextLease = (await store.claim(creation.id))!;
+  const nextLedger = new PgAnalysisLedger(store, nextLease);
+  assert.equal(await nextLedger.begin("copy:1", "creation-hash", "kimi-k3", 0), null);
+  await nextLedger.finish("copy:1", receipt);
+  const output = { draft: MarketingDraftSchema.parse({ ...targetProject.draft, script: "第一句。\n第二句。", storyboard: ["第一句。", "第二句。"].map(script => ({ script, visual: "产品近景", action: "展示产品", camera: "固定镜头" })) }), analysis: "从产品展示切入。" };
+  await store.checkpoint(nextLease, { ...creation.snapshot, creation: output }, "copy");
+  await store.finish(nextLease);
+  const autoApplied = (await projects.get(owner, targetProject.id))!;
+  assert.deepEqual(autoApplied.draft, output.draft); assert.equal(autoApplied.version, targetProject.version + 2);
+  assert.equal((await store.get(owner, creation.id))?.applied, true);
+  await store.resume(owner, creation.id, 1); assert.equal(await store.claim(creation.id), null);
+  assert.equal((await projects.get(owner, targetProject.id))?.version, autoApplied.version);
+  const conflicting = await newProject();
+  const conflictingJob = await store.create(owner, { ...input, clientRequestId: randomUUID(), target: { ...input.target, projectId: conflicting.id } }, config);
+  const conflictingLease = (await store.claim(conflictingJob.id))!;
+  const latest = (await projects.get(owner, conflicting.id))!;
+  await projects.save(owner, latest.id, latest.version, { ...latest.draft, topic: "另一个页面的新要求" });
+  await store.checkpoint(conflictingLease, { ...conflictingJob.snapshot, creation: output }, "copy");
+  await store.finish(conflictingLease);
+  assert.equal((await store.get(owner, conflictingJob.id))?.errorCode, "PROJECT_CONFLICT");
+  assert.equal((await projects.get(owner, conflicting.id))?.draft.topic, "另一个页面的新要求");
+  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM usage_logs")).rows[0].n, 0);
   const redisUrl = process.env.MARKETING_ANALYSIS_CHECK_REDIS_URL;
   if (redisUrl) {
     const redisAddress = new URL(redisUrl);
@@ -209,5 +276,5 @@ try {
       console.log("PASS: real Redis/BullMQ delivery, per-user concurrency, cross-process cancellation and crash recovery without resubmission");
     } finally { await consume.close(); await queue.close(); }
   }
-  console.log("PASS: migrations, duplicate requests, ownership, reservations, leases, cancellation, unknown calls, paid retries, accounting, revisions, draft previews, private frames and deletion");
+  console.log("PASS: migrations, duplicate requests, ownership, upstream billing without local budgets, leases, cancellation, unknown calls, explicit retries, automatic copy/storyboard writeback, version conflicts, revisions, private frames and deletion");
 } finally { await db.close(); await rm(directory, { recursive: true, force: true }); }

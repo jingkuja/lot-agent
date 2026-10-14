@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { MarketingDraft } from "../marketing-video/index.js";
 
 export const ANALYSIS_VERSION = "frames-v1";
 export const ANALYSIS_LIMITS = Object.freeze({ durationMs: 180_000, downloadBytes: 100 * 1024 * 1024, temporaryBytes: 512 * 1024 * 1024, candidates: 361, ocrImages: 120, visualImages: 48, batchImages: 6, requestBytes: 24 * 1024 * 1024 });
@@ -48,14 +49,17 @@ export interface AnalysisSource {
 export type AnalysisStatus = "queued" | "running" | "needs_auth" | "needs_review" | "partial" | "ready" | "failed" | "cancelled";
 export interface AnalysisSnapshot {
   source: AnalysisSource; frames: FrameEvidence[]; frameTexts: FrameText[]; texts: ScreenText[];
+  creation?: { draft: MarketingDraft; analysis: string };
   observations: VisualObservation[]; summary?: AnalysisSummary; summaryRevision?: number; coverage?: AnalysisCoverage;
 }
 export interface ReferenceAnalysis {
   id: string; ownerId: string; taskId: string; revision: number; version: number; status: AnalysisStatus;
   stage: string; errorCode?: string; snapshot: AnalysisSnapshot; createdAt: string; updatedAt: string;
-  budget?: { limit: number; spent: number; reserved: number }; pendingCalls?: number;
+  projectId?: string; applied?: boolean; pendingCalls?: number;
 }
-export const CreateAnalysisSchema = z.object({ shareText: z.string().trim().min(1).max(4000), clientRequestId: z.string().uuid() }).strict();
+export const CreateAnalysisSchema = z.object({ shareText: z.string().trim().min(1).max(4000), clientRequestId: z.string().uuid(),
+  target: z.object({ projectId: z.string().uuid(), projectVersion: z.number().int().positive(), locale: z.enum(["zh", "en", "id"]) }).strict().optional(),
+}).strict();
 export const EditAnalysisTextSchema = z.object({ expectedRevision: z.number().int().positive(), texts: z.array(z.object({ id: z.string().regex(/^t\d{4}$/), text: z.string().max(6000) }).strict()).max(120) }).strict();
 export interface AnalysisStore {
   get(ownerId: string, id: string): Promise<ReferenceAnalysis | null>;
@@ -68,12 +72,13 @@ export interface AnalysisQueue {
 export interface AnalysisUsage { promptTokens: number; completionTokens: number; cachedPromptTokens?: number }
 export interface ModelStepReceipt {
   text: string; usage?: AnalysisUsage; responseId?: string;
-  outcome: "completed" | "failed" | "request_unknown";
+  outcome: "completed" | "failed" | "request_unknown" | "rejected";
+  errorCode?: string;
 }
-/** begin() must atomically claim the durable intent and remaining budget.
+/** begin() must atomically claim the durable request intent.
  * Existing unknown intents may not trigger another paid request. */
 export interface AnalysisCallLedger {
-  begin(stepId: string, inputHash: string, model: string, imageCount: number, inputTokenReserve?: number): Promise<ModelStepReceipt | null>;
+  begin(stepId: string, inputHash: string, model: string, imageCount: number): Promise<ModelStepReceipt | null>;
   finish(stepId: string, receipt: ModelStepReceipt): Promise<void>;
   responseId?(stepId: string, id: string): Promise<void>;
 }

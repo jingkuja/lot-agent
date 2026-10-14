@@ -22,8 +22,7 @@ export async function dispatchAnalyses(store: PgAnalysisStore, queue: Queue) {
     AND (status='queued' OR (status='running' AND lease_until<now())) ORDER BY created_at LIMIT 100`)).rows;
   for (const row of rows) await deliverAnalysis(queue, row.id);
   await store.pool.query(`UPDATE marketing_reference_analyses a SET lease_token=NULL,lease_until=NULL,
-    reserved_cost=(SELECT COALESCE(sum(s.reserved_cost),0) FROM marketing_analysis_steps s WHERE s.analysis_id=a.id
-      AND (s.receipt IS NULL OR s.receipt->>'outcome'='request_unknown' OR s.receipt->'usage' IS NULL))
+    reserved_cost=0
     WHERE a.cancel_requested AND a.lease_until<now()`);
 }
 export function createAnalysisConsumer(connection: ConnectionOptions, concurrency: number, store: PgAnalysisStore,

@@ -30,17 +30,26 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
   let row = await deps.store.row(lease.ownerId, lease.id);
   if (row.pipeline_version !== ANALYSIS_VERSION) throw new AnalysisError("ANALYSIS_VERSION_UNSUPPORTED", 409);
   if ((await deps.store.pool.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2
-    AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR receipt->'usage' IS NULL) LIMIT 1`, [lease.id, lease.ownerId])).rowCount) throw new AnalysisError("REQUEST_UNKNOWN", 409);
+    AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR (receipt->'usage' IS NULL AND receipt->>'outcome'<>'rejected')) LIMIT 1`, [lease.id, lease.ownerId])).rowCount) throw new AnalysisError("REQUEST_UNKNOWN", 409);
   let snapshot = row.snapshot as AnalysisSnapshot;
+  signal.throwIfAborted();
+  if (snapshot.creation && row.creation_context) return;
   const directory = await deps.storage.directory(lease.ownerId, lease.id);
   const checkpoint = (value: AnalysisSnapshot, stage: string) => deps.store.checkpoint(lease, value, stage);
   const models = new AnalysisModels({ ledger: new PgAnalysisLedger(deps.store, lease),
     provider: async model => userResponsesProvider(deps.baseUrl, await analysisUserKey(deps.db, deps.hub, lease.ownerId), model),
     readFrame: frame => readAnalysisFile(directory, frame.objectKey, 4 * 1024 * 1024) });
+  const create = async (value: AnalysisSnapshot) => {
+    if (!row.creation_context || row.creation_context.applied || value.creation) return;
+    signal.throwIfAborted();
+    value.creation = await models.createCopy(row.creation_context.draft, row.creation_context.locale, value, lease.revision, signal);
+    await checkpoint(value, "copy");
+  };
   signal.throwIfAborted();
   // Check access before downloading, and resolve the user's current key again
   // for each model request. Nothing enters the child-process environment.
   await analysisUserKey(deps.db, deps.hub, lease.ownerId);
+  if (snapshot.summary && snapshot.summaryRevision === lease.revision) { await create(snapshot); return; }
   if (row.mode === "summary") {
     const evidence = new Set([...snapshot.frameTexts.map(t => t.frameId), ...snapshot.observations.flatMap(o => o.frameIds)]);
     snapshot.summary = await models.summarize({ revision: lease.revision, frames: snapshot.frames.filter(f => evidence.has(f.id)), texts: snapshot.texts,
@@ -51,6 +60,7 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
       ] }, signal);
     snapshot.summaryRevision = lease.revision;
     await checkpoint(snapshot, "summary");
+    await create(snapshot);
     return;
   }
   if (!snapshot.source.mediaKey && !row.selection) {
@@ -70,5 +80,6 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
     snapshot.source.durationMs = selection.durationMs;
     await deps.store.checkpoint(lease, snapshot, "frames", selection);
   }
-  await analyzeSelectedFrames({ snapshot, selection, revision: lease.revision, models, checkpoint, signal });
+  snapshot = await analyzeSelectedFrames({ snapshot, selection, revision: lease.revision, models, checkpoint, signal });
+  await create(snapshot);
 }

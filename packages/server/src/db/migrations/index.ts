@@ -1,3 +1,4 @@
+import { marketingAutomaticCreation } from "./0040-marketing-automatic-creation.js";
 import { marketingReferenceAnalysis } from "./0039-marketing-reference-analysis.js";
 import { feishuPersonalChannel } from "./0038-feishu-personal-channel.js";
 import { virtualPayment } from "./0033-virtual-payment.js";
@@ -80,4 +81,5 @@ export const migrations: Migration[] = [
   feishuIntegration,
   feishuPersonalChannel,
   marketingReferenceAnalysis,
+  marketingAutomaticCreation,
 ];

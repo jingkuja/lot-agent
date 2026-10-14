@@ -26,12 +26,26 @@ describe("marketing project HTTP boundaries", () => {
     expect(f.store.list).toHaveBeenCalledWith("owner");
     const capabilities = await f.call("/capabilities");
     expect(capabilities.status).toBe(200); expect(await capabilities.json()).toMatchObject({ composition: true });
-    const generated = { script: "欢迎到店发现现磨咖啡与明亮空间。", publishTitle: "转角咖啡时光", tags: "#咖啡", analysis: "介绍卖点并邀请到店。" };
+    const generated = { shots: [1, 2].map(() => ({ script: "欢迎到店发现现磨咖啡与明亮空间。", visual: "明亮咖啡店", action: "展示咖啡", camera: "中景" })), publishTitle: "转角咖啡时光", tags: "#咖啡", analysis: "介绍卖点并邀请到店。" };
     f.service.marketingText.mockResolvedValueOnce(generated);
     const copy = await f.call("/copy", { draft: { topic: "转角咖啡店：现磨咖啡、明亮空间" }, locale: "zh" });
     expect(copy.status).toBe(200);
-    expect(await copy.json()).toMatchObject({ draft: { script: generated.script, publishTitle: generated.publishTitle, tags: generated.tags }, analysis: generated.analysis });
-    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal));
+    expect(await copy.json()).toMatchObject({ draft: { script: storyboardScript(generated.shots), storyboard: generated.shots, publishTitle: generated.publishTitle, tags: generated.tags }, analysis: generated.analysis });
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal), { upstreamBilling: true });
+  });
+  it("creates copy and complete shots from text alone, without requiring a product topic", async () => {
+    const f = fixture();
+    const shots = [1, 2].map(() => ({ script: "欢迎品尝现磨咖啡。", visual: "咖啡店", action: "端起咖啡", camera: "特写" }));
+    f.service.marketingText.mockResolvedValueOnce({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "从场景切入。" });
+    const response = await f.call("/copy", { draft: { copyMode: "rewrite", reference: "现磨咖啡，欢迎品尝。" }, locale: "zh" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ draft: { storyboard: shots, script: storyboardScript(shots) } });
+    expect(f.service.marketingText).toHaveBeenCalledOnce();
+    expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
+    for (const invalid of [{ shots: [shots[0]] }, { shots: shots.map(shot => ({ ...shot, script: "字".repeat(90) })) }]) {
+      f.service.marketingText.mockResolvedValueOnce({ ...invalid, publishTitle: "咖啡", tags: "", analysis: "结构" });
+      expect((await f.call("/copy", { draft: { topic: "咖啡" }, locale: "zh" })).status).toBe(503);
+    }
   });
   it("requires a session and scopes lookups to the authenticated owner", async () => {
     expect((await fixture("").call("/")).status).toBe(401);

@@ -66,11 +66,11 @@ try {
     const json = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data, (key, value) => key === 'storyboard' && Array.isArray(value) && !value.length ? undefined : value) });
     if (request.method() !== 'GET') writes.push({ path, body: request.headers()["content-type"]?.includes("application/json") ? request.postDataJSON() : null });
     if (path === '/api/public/product') return json({ globle: 1 });
-    if (path === '/api/marketing-video-analyses/capabilities') return json({ enabled: false, budgetCny: 0 });
+    if (path === '/api/marketing-video-analyses/capabilities') return json({ enabled: false });
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
     if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false });
     if (path === '/api/marketing-videos') return json({ data: [...projects.values()] });
-    if (path === '/api/marketing-videos/copy') return json({ draft: { ...request.postDataJSON().draft, script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' }, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
+    if (path === '/api/marketing-videos/copy') return json({ draft: { ...request.postDataJSON().draft, storyboard: planMarketingSegments(script, request.postDataJSON().draft.durationSec).map(part => ({ script: part.script, visual: '咖啡店', action: '展示咖啡', camera: '中景' })), script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' }, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
     if (path.startsWith('/api/marketing-videos/')) {
       const [, , , id, action] = path.split('/');
       if (request.method() === 'PUT') {
@@ -140,17 +140,17 @@ try {
   });
   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}`);
   const snap = async (name) => { if (screenshotDir) { await mkdir(screenshotDir, { recursive: true }); await page.screenshot({ path: join(screenshotDir, name), animations: 'disabled' }); } };
-  const chooseAgent = async (name) => { await page.locator('.agent-grid-toggle').click(); await page.locator('.agent-launcher-grid').getByRole('button', { name, exact: true }).click(); };
+  const chooseAgent = async (name) => { await page.locator('.agent-grid-toggle[aria-controls]').click(); await page.locator('.agent-launcher-grid').getByRole('button', { name, exact: true }).click(); };
   await page.locator('.agent-launcher-item').nth(2).waitFor();
   assert.deepEqual(await page.locator('.agent-launcher-item > span:nth-child(2)').allTextContents(), ['通用助手', '营销影像', '图片生成']);
-  await page.locator('.agent-grid-toggle').click();
+  await page.locator('.agent-grid-toggle[aria-controls]').click();
   assert.equal(await page.locator('.agent-launcher-item > span:nth-child(2)').nth(1).textContent(), '营销影像');
-  await page.locator('.agent-grid-toggle').click();
+  await page.locator('.agent-grid-toggle[aria-controls]').click();
   await chooseAgent('营销影像');
   await page.getByRole('heading', { name: '确定文案', exact: true }).waitFor();
   assert.equal(await page.locator('.mv-steps button').count(), 3);
   await page.getByRole('alert').filter({ hasText: '当前服务器尚不支持新版营销视频' }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '生成文案并检查', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '生成文案和分镜', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: '保存草稿', exact: true }).isDisabled(), true);
   assert.equal(await page.getByLabel('产品、卖点和目标顾客', { exact: true }).isDisabled(), true);
   assert.equal(writes.filter(r => r.path.startsWith('/api/marketing-videos')).length, 0);
@@ -163,9 +163,11 @@ try {
   await page.getByRole('alert').filter({ hasText: '请先填写' }).waitFor();
   await page.getByLabel('产品、卖点和目标顾客', { exact: true }).fill('为转角咖啡店介绍手冲咖啡和明亮的环境。');
   await page.getByRole('button', { name: '拆解爆款文案', exact: true }).click();
-  await page.getByLabel('粘贴参考文案').fill('先展示店铺环境，再讲特色，最后邀请到店。');
+  await page.getByLabel('视频链接或参考文案').fill('先展示店铺环境，再讲特色，最后邀请到店。');
   failNextReview = true;
-  await page.getByRole('button', { name: '拆解改写并检查', exact: true }).click();
+  await page.getByRole('button', { name: '一键拆解并生成', exact: true }).click();
+  await page.getByRole('heading', { name: '生成分镜', exact: true }).waitFor();
+  await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: '模型输出未完成，请重试；当前文案已保留。' }).waitFor();
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
@@ -361,7 +363,7 @@ try {
   apiUnavailable = true;
   await page.reload(); await chooseAgent('Marketing video');
   await page.getByRole('alert').filter({ hasText: 'This server does not support the new marketing video workflow yet.' }).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Generate and check copy', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: 'Create copy and storyboard', exact: true }).isDisabled(), true);
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-unavailable-en-dark.png');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []);

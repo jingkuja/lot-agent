@@ -4,14 +4,13 @@ import { referencePreview } from "./apply.js";
 import { validReceiptUsage } from "./ledger.js";
 import type { AnalysisSnapshot } from "@lot-agent/core/marketing-analysis";
 
-it("requires explicit pricing, encrypted storage and a pinned downloader when enabled", () => {
+it("requires isolation configuration but no local budget or prices", () => {
   expect(analysisConfig({}).enabled).toBe(false);
   expect(() => analysisConfig({ MARKETING_ANALYSIS_ENABLED: "1" })).toThrow("ANALYSIS_CONFIG_REQUIRED");
-  const env = { MARKETING_ANALYSIS_ENABLED: "1", MARKETING_ANALYSIS_BUDGET_CNY: "2", YTDLP_VERSION: "2026.07.04", SECRET_MASTER_KEY: "fixture" };
-  expect(() => analysisConfig(env)).toThrow("ANALYSIS_PRICING_REQUIRED");
-  const prices = { "deepseek-v4.1-flash": { inputPrice: 0.001, outputPrice: 0.002 }, "kimi-k3": { inputPrice: 0.002, outputPrice: 0.003 } };
-  expect(analysisConfig({ ...env, MARKETING_ANALYSIS_PRICING: JSON.stringify(prices) }).pricing[1].inputPrice).toBe(0.002);
-  expect(() => analysisConfig({ ...env, MARKETING_ANALYSIS_PRICING: JSON.stringify({ ...prices, "kimi-k3": { inputPrice: 0, outputPrice: 0 } }) })).toThrow("ANALYSIS_PRICING_REQUIRED");
+  const env = { MARKETING_ANALYSIS_ENABLED: "1", YTDLP_VERSION: "2026.07.04", SECRET_MASTER_KEY: "fixture" };
+  expect(analysisConfig(env)).toEqual({ enabled: true, downloaderVersion: "2026.07.04", concurrency: 2 });
+  expect(analysisConfig({ ...env, MARKETING_ANALYSIS_BUDGET_CNY: "invalid", MARKETING_ANALYSIS_PRICING: "invalid" })).not.toHaveProperty("budget");
+  expect(() => analysisConfig({ ...env, MARKETING_ANALYSIS_CONCURRENCY: "5" })).toThrow("ANALYSIS_CONFIG_REQUIRED");
 });
 
 it("previews only selected, known evidence and preserves corrected text", () => {

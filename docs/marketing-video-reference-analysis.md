@@ -12,20 +12,24 @@
 
 协议依据：[Responses 迁移指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[流式事件](https://developers.openai.com/api/docs/guides/streaming-responses)。兼容网关是否支持全部可选字段仍需真实探测；分析调用当前用提示词约束 JSON，并做服务端 schema 校验，不强制可选 JSON 模式。
 
-## 任务、恢复与计量
+## 自动创作、恢复与上游计费
 
-`ReferenceAnalysisPanel → /api/marketing-video-analyses → PgAnalysisStore → lot-media-analysis → workers/media-analysis.ts → runtime.ts`。
+`ProjectStudio → /api/marketing-video-analyses → PgAnalysisStore → lot-media-analysis → workers/media-analysis.ts → runtime.ts`。
 
-迁移 **0039** 新增来源、分析、步骤、修订及加密平台会话表，并给营销项目增加分析引用。创建在一个 PG 事务中保存来源、任务、分析、幂等请求和预算。PG 中的 queued / 过期 running 记录充当待投递记录，Worker 每 5 秒补发；普通 `lot-tasks` Worker 不消费媒体分析任务。
+迁移 **0039** 新增来源、分析、步骤、修订及加密平台会话表，并给营销项目增加分析引用。迁移 **0040** 增加创作上下文并取消本地金额预留；旧费用数据保留为历史记录。创建在一个 PG 事务中保存来源、任务、分析、幂等请求及目标草稿版本。PG 中的 queued / 过期 running 记录充当待投递记录，Worker 每 5 秒补发；普通 `lot-tasks` Worker 不消费媒体分析任务。
 
-运行使用 90 秒租约，每 2 秒续约和检查取消；同一用户一次只运行一个分析，单任务 OCR 最多并发两个。成功下载、选帧、逐帧 OCR、分段观察和摘要分别提交检查点。数据库不可用或租约丢失后停止发布结果，恢复读取已保存的调用，不重新提交未知请求。
+运行使用 90 秒租约，每 2 秒续约和检查取消；同一用户一次只运行一个分析，单任务 OCR 最多并发两个。成功下载、选帧、逐帧 OCR、分段观察、摘要和生成文案/分镜分别提交检查点。数据库不可用或租约丢失后停止发布结果，恢复读取已保存的调用，不重新提交未知请求。
 
-每个模型步骤保存输入哈希、图片数、尝试编号、请求 ID、原始结果和真实 token 用量。完成回执与 `usage_logs` 在同一事务中写入；计量键为分析、步骤、尝试的组合。坏 JSON / 无效证据也保留已发生的费用，只有用户点击继续才可重试已知失败的步骤。缺失终态或用量的调用进入待核实状态，取消也不会将未知费用归零。
+每个模型步骤保存输入哈希、图片数、尝试编号、请求 ID、原始结果和真实 token 用量，不计算金额、不写本地费用账单。已知 OCR 无效输出保留回执并标记覆盖缺口，自动继续其他画面；不自动重试失败帧。缺失终态或用量进入待核实状态，不重发未知请求。明确的 HTTP 401/402/403/429 拒绝保存为 `rejected`，无需虚构零 token；余额不足显示充值后继续，只有用户主动继续才重试。
 
+“继续生成”同样复用已知 OCR 缺口，只重试被拒绝的请求或未完成的视觉、摘要、创作步骤。图片数量按固定步骤的选帧覆盖计算，不累计同一批图片的重试次数；新增图片仍受 120 / 48 张上限约束。摘要时间标注与有效引用冲突时，从引用的实际观察时间确定区间并排序，再执行完整校验；不改写陈述、不接受不存在的证据，原始回执保持不变。
+
+最终文案/分镜请求允许最多 5 分钟，其余模型步骤仍为 2 分钟；用户取消和租约失效会立即中止，不自动重试超时调用。超时且缺少终态用量的请求仍需核对网关回执后恢复。
+
+`marketing-video/creation.ts` 统一生成文案、发布标题/标签和每镜 15 秒的完整分镜。纯文案通过 `/marketing-videos/copy` 一次请求完成；视频由 `runtime.ts → AnalysisModels.createCopy` 使用完整分析证据自动生成，并由 `PgAnalysisStore.finish` 原子写入目标草稿。草稿归属、版本、制作状态及分析关联必须仍匹配；冲突时保留结果，不覆盖其他页面修改。刷新页面只查询已保存任务和草稿，不启动生成。
 兼容部分模型在 JSON 字符串中直接输出换行：只对字符串内未转义控制字符进行无损转义后重新解析，原始回执保持不变；缺引号、缺括号、截断、无效证据仍然拒绝，不补写推测内容。
 
-任务创建按用户原子预留整项额度。各批次在同一用户锁下检查剩余预算、图片总预算与已发生费用；预留额还参与该用户日/月额度检查。价格快照保存在分析记录中，**价格单位沿用项目的元/千 token**。请求准入用文字字节数、每图 16,384 token 与最多 8,192 输出 token 做保守估算，记录费用用网关实际用量。估算不是网关的扣费硬上限；网关 token/图片定价能力与估算偏差需真实验收。其他业务的额度流程尚不共享此预留锁。
-
+本流程的余额与计费由上游网关负责，不要求 `MARKETING_ANALYSIS_BUDGET_CNY` 或 `MARKETING_ANALYSIS_PRICING`。页面不展示预算、已花费用或预计费用。保留时长、图片数量、文件大小、并发及请求大小限制，用于控制资源与隔离风险。其他业务已有的计费与限额机制不受影响。
 操作员核对网关回执后，可以执行：
 
 ```sh
@@ -33,7 +37,7 @@ MARKETING_ANALYSIS_RECONCILIATION_NOTE='已核对的网关回执依据' \
 pnpm marketing-analysis:reconcile USER_ID ANALYSIS_UUID 'ocr:f0001' 1 /private/path/receipt.json
 ```
 
-回执必须有 `outcome`（completed / failed）、`responseId`、`text` 与经核实的 `usage.promptTokens / completionTokens`。工具拒绝覆盖已知费用或不匹配的请求 ID，保留核对记录，**不自动排队、不调用模型**。之后仍由用户显式继续。不得用估计 token 或虚构零用量解除保护。
+回执必须有 `outcome`（completed / failed）、`responseId`、`text` 与经核实的 `usage.promptTokens / completionTokens`。工具拒绝覆盖已知回执或不匹配的请求 ID，保留核对记录，**不自动排队、不调用模型**。之后仍由用户显式继续。不得用估计 token 或虚构零用量解除保护。
 
 ## 来源、隔离与证据
 
@@ -59,36 +63,33 @@ OCR 只合并相邻一致文字；空结果、漏识别或价格/否定词变化
 
 | 接口 | 行为 |
 | --- | --- |
-| `GET /capabilities` | 是否启用、时长与预算 |
-| `POST /` | `{shareText,clientRequestId}`，幂等创建，202 |
+| `GET /capabilities` | 是否启用、时长与平台 |
+| `POST /` | `{shareText,clientRequestId,target?:{projectId,projectVersion,locale}}`，幂等创建并关联草稿，202 |
 | `GET /?offset=0` / `GET /:id` | 每页 20 条简要历史 / 完整结果与覆盖情况 |
 | `GET /:id/frames/:frameId` | 私有 JPEG，`private,no-store` |
 | `POST /:id/cancel` | 持久化取消，Worker 中止请求和本地处理 |
 | `POST /:id/resume` / `POST /:id/summarize` | `{expectedRevision}`，显式付费动作，拒绝未知调用 |
 | `PATCH /:id/text` | `{expectedRevision,texts:[{id,text}]}`，保存新修订，保留原文 |
-| `POST /:id/apply-preview` / `POST /:id/apply` | `{expectedRevision,projectId,projectVersion,evidenceIds}`，预览 / 显式选用 |
+| `POST /:id/apply-preview` / `POST /:id/apply` | `{expectedRevision,projectId,projectVersion,evidenceIds}`，兼容旧记录的预览 / 选用，新工作台不调用 |
 | `DELETE /:id` | 检查租约、用量和项目引用后删除私有内容 |
 | `GET /sessions` / `PUT /sessions/:platform` / `DELETE /sessions/:platform` | 登录态状态 / 导入 `{cookies}` / 撤销，不返回 Cookie |
 
-营销工作台新增可折叠的“参考视频分析”：历史、进度、取消/继续、证据帧、字幕校对、分别复制文字/摘要及选用预览。原始视频时间线独立于现有 15 秒制作分镜。确认选用只更新草稿参考文案和分析版本引用；已提交项目拒绝修改，既有生产口播与制作快照保留。再次编辑参考文案会清除旧引用。页面状态和图片 URL 随账号切换销毁。
-
+营销工作台点击“拆解爆款文案”后直接显示一个“视频链接或参考文案”输入框。产品补充要求可选，点击“一键拆解并生成”后自动完成，文案与分镜显示在当前步骤并可编辑。“查看参考资料”默认折叠，仅展示摘要、画面文字和私有帧；不再要求校对、勾选、手动生成摘要或预览选用。平台登录仅在来源要求登录时展开处理。页面状态和图片 URL 随账号切换销毁。
 ## 配置与部署
 
 在 `.env` 设置：
 
 ```dotenv
 MARKETING_ANALYSIS_ENABLED=1
-MARKETING_ANALYSIS_BUDGET_CNY=<运营设定的单项预算>
-MARKETING_ANALYSIS_PRICING={"deepseek-v4.1-flash":{"inputPrice":<元/千token>,"outputPrice":<元/千token>},"kimi-k3":{"inputPrice":<元/千token>,"outputPrice":<元/千token>}}
 MARKETING_ANALYSIS_CONCURRENCY=2
 YTDLP_VERSION=<固定发行版>
 YTDLP_SHA256=<对应 CPU 架构独立可执行文件的官方 SHA256>
 SECRET_MASTER_KEY=<现有服务的加密主密钥>
 ```
 
-以上尖括号为需填写的配置说明，不能直接作为 JSON 或真实价格使用。API 和媒体 Worker 使用相同配置、PG/Redis 和私有数据卷。API 执行迁移；Worker 等待分析表就绪。运行 `pnpm dev:media-analysis`；根 `pnpm dev` 也包含这个入口，未启用时直接退出。
+以上尖括号为需填写的配置说明，不能直接作为配置值使用。API 和媒体 Worker 使用相同配置、PG/Redis 和私有数据卷。API 执行迁移；Worker 等待迁移 0040 的 `creation_context` 字段就绪。运行 `pnpm dev:media-analysis`；根 `pnpm dev` 也包含这个入口，未启用时直接退出。
 
-Apple Silicon Mac 本地开发在 `.env` 另加 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，并确保 `/usr/bin/sandbox-exec` 和 `/opt/homebrew/bin/` 下的 `yt-dlp`、`ffmpeg`、`ffprobe`、`python3` 可用，`YTDLP_VERSION` 与安装版本一致。修改后重启 `pnpm dev`（或单独重启媒体 Worker）。此前因 `SANDBOX_REQUIRED` 失败的任务由用户点击“继续分析”恢复，不自动重试付费调用。生产部署保持此开关关闭；Docker Compose 不传入这个本地开发开关。
+Apple Silicon Mac 本地开发在 `.env` 另加 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，并确保 `/usr/bin/sandbox-exec` 和 `/opt/homebrew/bin/` 下的 `yt-dlp`、`ffmpeg`、`ffprobe`、`python3` 可用，`YTDLP_VERSION` 与安装版本一致。修改后重启 `pnpm dev`（或单独重启媒体 Worker）。此前因 `SANDBOX_REQUIRED` 失败的任务由用户点击“继续生成”恢复，不自动重试付费调用。生产部署保持此开关关闭；Docker Compose 不传入这个本地开发开关。
 
 Linux 部署需要 `/usr/bin/bwrap`、`ffmpeg`、`ffprobe`、`prlimit`、`python3` 和 `/usr/local/bin/yt-dlp`。Python 仅运行隔离环境中的本地出口桥，不是独立服务。下载器源码/发行包参考 [yt-dlp](https://github.com/yt-dlp/yt-dlp)，隔离机制参考 [bubblewrap](https://github.com/containers/bubblewrap)。
 
@@ -113,7 +114,7 @@ pnpm check:marketing-analysis:ui    # 需 PLAYWRIGHT_MODULE 和本机 Chrome
 pnpm check:marketing-analysis:local-sandbox # macOS 实际文件/网络隔离与取消，无模型调用
 ```
 
-数据库脚本要求 `MARKETING_ANALYSIS_CHECK_DATABASE_URL` 指向本机空的 `media_analysis_check_*` 库（需安装 pgvector），验证旧库迁移、幂等提交、用户隔离、预留额度、租约、取消、未知请求、核对、计量去重、修订、草稿预览、私有帧和清理。另设 `MARKETING_ANALYSIS_CHECK_REDIS_URL=redis://127.0.0.1:<临时端口>/15` 可验证真实 BullMQ 投递、同用户串行、跨进程取消及崩溃后不重发；该 Redis 库必须是专用空库。UI 脚本使用真实 React（包括 StrictMode）与拦截数据，不调用真实模型；覆盖刷新恢复、冲突保留编辑、原文、显式应用、账号切换、中英文和暗色主题。
+数据库脚本要求 `MARKETING_ANALYSIS_CHECK_DATABASE_URL` 指向本机空的 `media_analysis_check_*` 库（需安装 pgvector），验证旧库迁移、幂等提交、用户隔离、无本地预算、租约、取消、未知请求、核对、调用去重、修订、自动回填与版本冲突、私有帧和清理。另设 `MARKETING_ANALYSIS_CHECK_REDIS_URL=redis://127.0.0.1:<临时端口>/15` 可验证真实 BullMQ 投递、同用户串行、跨进程取消及崩溃后不重发；该 Redis 库必须是专用空库。UI 脚本使用真实 React（包括 StrictMode）与拦截数据，不调用真实模型；覆盖纯文案/视频自动生成、刷新恢复、只读资料、上游余额不足、取消、未知请求、账号切换、中英文和暗色主题。
 
 本次本机验证结果（2026-10-14）：
 
@@ -127,6 +128,8 @@ pnpm check:marketing-analysis:local-sandbox # macOS 实际文件/网络隔离与
 | 新增脚本的补充严格类型检查 | 新增代码错误已修复；仍有未改动的 `digital-employee/service.ts` 类型断言与 `jobs/bullmq-queue.ts` 两个 ioredis 版本冲突，共 3 处既有错误 |
 
 上表为首轮离线与集成验证；其中没有真实模型调用。验证创建的 PG / Redis 容器仅存夹具数据，验收后删除。
+
+自动创作流程补充验证：纯文案直接生成完整分镜、视频分析自动回填、刷新恢复、上游余额不足/取消/未知调用、JSONB 字段顺序变化后的回执复用、草稿版本冲突均已通过定向单测和夹具集成检查。临时 PostgreSQL 迁移及自动回填检查、简化页面与原有视频制作浏览器回归、Core/Server/Web 构建通过；未调用真实模型。严格服务端类型检查仍报告上表所列的 3 处既有错误。
 
 随后使用用户提供的小红书视频进行本机真实测试：yt-dlp `2026.07.04`、FFmpeg `8.1.2` 下载并抽帧通过，视频 37.1 秒、720×1280、18,035,982 字节，产生 76 张候选帧，正式策略选中 76 张 OCR、48 张理解帧。首尾两帧先完成 4 次真实 Responses 调用（DeepSeek OCR 2 次、Kimi 多图 1 次和摘要 1 次），均有完成回执、请求 ID 和真实用量，合计输入 4,788 / 输出 1,202 token。该样本无需导入平台 Cookie。
 
@@ -161,7 +164,7 @@ MARKETING_ANALYSIS_LOCAL_MODEL_CALLS=1 pnpm check:marketing-analysis:local analy
 
 同一目录保留下载、抽帧和各参数组合的调用记录，文件锁防止并发执行；凭证、来源、参数或请求内容变化时拒绝错误复用，未知调用不自动重发。目录 `data/marketing-analysis`、`data/marketing-analysis-probes` 均已加入 `.gitignore`，不提交原片、图片、访问 Token 或原始回执。
 
-本机完整探测遇到有真实用量的 OCR 失败后，可显式设置 `MARKETING_ANALYSIS_LOCAL_SKIP_FAILED_OCR=1`，保留这些失败回执和已发生费用，将对应帧记入 `omittedOcrFrameIds` / `MODEL_OCR_FAILED`，继续尚未执行的原定请求。不会重新调用失败帧，不提高原定调用或图片上限；报告为 `completed_with_gaps`。未知请求、未知费用、多图理解或摘要失败仍停止。此选项不改变生产任务的显式校对/继续流程。
+本机完整探测遇到有真实用量的 OCR 失败后，可显式设置 `MARKETING_ANALYSIS_LOCAL_SKIP_FAILED_OCR=1`，保留这些失败回执和已发生费用，将对应帧记入 `omittedOcrFrameIds` / `MODEL_OCR_FAILED`，继续尚未执行的原定请求。不会重新调用失败帧，不提高原定调用或图片上限；报告为 `completed_with_gaps`。未知请求、未知费用、多图理解或摘要失败仍停止。生产流程现在默认保留已知 OCR 缺口并自动继续；此开关仅用于手工探测脚本。
 
 真实探测另外运行：
 
@@ -178,6 +181,6 @@ MARKETING_ANALYSIS_PROBE_COOKIE_FILE=/private/path/cookies.txt \
 pnpm check:marketing-analysis:live download
 ```
 
-报告放在 `data/marketing-analysis-probes` 私有目录；重用同一个 probe ID 复用已完成调用并阻止未知调用重发，文件锁和用户 PG advisory lock 保护单次探测。探测脚本是操作员验证入口，不替代生产任务预算/租约。
+报告放在 `data/marketing-analysis-probes` 私有目录；重用同一个 probe ID 复用已完成调用并阻止未知调用重发，文件锁和用户 PG advisory lock 保护单次探测。探测脚本是操作员验证入口，不替代生产任务租约与调用去重。
 
 待真实素材和测试账号到位后完成：每平台至少 5 条下载探测、最终每平台至少 10 条质量评测；两个模型的图像/顺序/JSON/用量兼容性；B 站单 P / cid；抖音和小红书 Cookie、挑战页、短链与 CDN；必要时再实现浏览器兜底；Linux 隔离与生产镜像、出口和分片限额实测。当前不承诺下载成功率、OCR 准确率、实际费用或 P50/P95。

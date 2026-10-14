@@ -62,6 +62,17 @@ describe("marketing text completion", () => {
     await expect(f.call()).rejects.toMatchObject({ code: "MARKETING_MODEL_AUTH", status: 503 });
   });
 
+  it("delegates creation billing to upstream while resolving the owner's model", async () => {
+    const f = setup([{ type: "text", content: '{}' }, { type: "done", finishReason: "stop", usage }]);
+    f.service.usageMeter.checkQuota.mockResolvedValue({ ok: false });
+    await AgentService.prototype.marketingText.call(f.service as unknown as AgentService, "Create shots", "Reference", "owner", undefined, { upstreamBilling: true });
+    expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+    expect(f.service.meterUtilityUsage).not.toHaveBeenCalled();
+    expect(f.service.resolveUtilityLLM).toHaveBeenCalledWith({ userId: "owner", modelId: "deepseek-v4.1-flash" });
+    const rejected = setup([], Object.assign(new Error("private upstream message"), { status: 402 }));
+    await expect(AgentService.prototype.marketingText.call(rejected.service as unknown as AgentService, "Create", "Reference", "owner", undefined, { upstreamBilling: true })).rejects.toMatchObject({ status: 402 });
+    expect(rejected.chat).toHaveBeenCalledOnce();
+  });
   it("stops before model selection on a quota failure or cancellation", async () => {
     const f = setup([]); f.service.usageMeter.checkQuota.mockResolvedValueOnce({ ok: false });
     await expect(f.call()).rejects.toMatchObject({ code: "MARKETING_USAGE_LIMIT", status: 402 });

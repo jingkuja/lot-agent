@@ -16,10 +16,12 @@ export function marketingTextError(error: unknown, signal?: AbortSignal): Market
       : new MarketingTextError("文案处理已取消。", "MARKETING_TEXT_CANCELLED", 400);
   }
   const status = error && typeof error === "object" ? (error as { status?: number; statusCode?: number }).status ?? (error as { statusCode?: number }).statusCode : undefined;
+  const upstream = error as { code?: string; error?: { code?: string } } | undefined;
+  const quota = ["insufficient_quota", "insufficient_user_quota", "insufficient_balance"].includes(upstream?.code ?? upstream?.error?.code ?? "");
+  if (status === 402 || ((status === 401 || status === 403) && quota)) return new MarketingTextError("上游余额不足，请充值后继续。", "MARKETING_MODEL_QUOTA", 402);
   if (status === 401 || status === 403 || (error instanceof Error && error.message === "managed New API credential unavailable")) {
     return new MarketingTextError("文案模型授权不可用，请检查账号的模型权限和积分后重试。", "MARKETING_MODEL_AUTH", 503);
   }
-  if (status === 402) return new MarketingTextError("模型积分不足，请补充积分后重试。", "MARKETING_MODEL_QUOTA", 402);
   if (status === 429) return new MarketingTextError("文案模型繁忙，请稍后重试。", "MARKETING_MODEL_BUSY", 503);
   return new MarketingTextError("文案模型暂时无法完成请求，请稍后重试。", "MARKETING_MODEL_UNAVAILABLE", 503);
 }

@@ -9,6 +9,13 @@ export const MarketingShotSchema = z.object({
 export const MarketingStoryboardSchema = z.array(MarketingShotSchema).max(4);
 export type MarketingShot = z.infer<typeof MarketingShotSchema>;
 
+export const MarketingCreationSchema = z.object({
+  shots: MarketingStoryboardSchema,
+  publishTitle: z.string().trim().min(1).max(100),
+  tags: z.string().max(160),
+  analysis: z.string().trim().min(1).max(2000),
+}).strict();
+
 export const MarketingDraftSchema = z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),

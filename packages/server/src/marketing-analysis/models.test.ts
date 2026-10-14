@@ -1,3 +1,4 @@
+import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatChunk, LLMProvider, Message } from "@lot-agent/core";
 import type { FrameEvidence } from "@lot-agent/core/marketing-analysis";
@@ -83,6 +84,69 @@ describe("analysis model calls", () => {
     const input = { revision: 2, frames: [frame(0)], texts: [], observations: [], durationMs: 1000, limitations: ["NO_AUDIO_ANALYSIS"] };
     expect((await setup(result).models.summarize(input)).limitations).toContain("NO_AUDIO_ANALYSIS");
     await expect(setup({ ...result, summary: [{ ...result.summary[0], evidenceIds: ["f9999"] }] }).models.summarize(input)).rejects.toThrow("INVALID_EVIDENCE_REFERENCE");
+  });
+  it("aligns summary timing with cited observations and replays without another request", async () => {
+    const result = { summary: [], timeline: [
+      { startMs: 0, endMs: 100, statement: "展示产品", evidenceIds: ["f0002"], inference: false },
+      { startMs: 100, endMs: 900, statement: "产品近景", evidenceIds: ["f0001"], inference: false },
+    ], marketingPoints: [], limitations: [] };
+    const input = { revision: 1, frames: [frame(0), frame(1)], texts: [], observations: [], durationMs: 1000, limitations: [] };
+    const f = setup(result);
+    const summary = await f.models.summarize(input);
+    expect(summary.timeline.map(t => [t.startMs, t.endMs])).toEqual([[0, 0], [500, 500]]);
+    expect(f.records.get("summary:1")?.receipt?.text).toBe(JSON.stringify(result));
+    expect(await f.models.summarize(input)).toEqual(summary); expect(f.requests).toHaveLength(1);
+    const forged = { ...result, timeline: [...result.timeline, { ...result.timeline[0], evidenceIds: ["f9999"] }] };
+    await expect(setup(forged).models.summarize(input)).rejects.toThrow("INVALID_EVIDENCE_REFERENCE");
+  });
+  it("generates copy and all shots from the complete analysis once, then reuses the receipt", async () => {
+    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
+    const f = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" });
+    const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [frame(0)], frameTexts: [], texts: [], observations: [{ description: "完整场景观察", frameIds: ["f0001"], uncertainty: "" }] };
+    const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: snapshot.source.canonicalUrl });
+    const result = await f.models.createCopy(draft, "zh", snapshot, 1);
+    expect(result.draft.script).toBe(storyboardScript(shots)); expect(result.draft.storyboard).toEqual(shots);
+    // Mimic PostgreSQL JSONB reordering, with identical semantic input.
+    const restored = JSON.parse(JSON.stringify(snapshot, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).reverse()) : value));
+    await f.models.createCopy(draft, "zh", restored, 1);
+    expect(f.requests).toHaveLength(1); expect(f.requests[0].messages[1].content).toContain("完整场景观察");
+    expect(f.records.has("copy:1")).toBe(true);
+  });
+  it.each([402, 403])("records upstream balance rejection (%s) without fabricating usage or replaying", async status => {
+    const finish = vi.fn(async () => {});
+    const chat = vi.fn(async function* (): AsyncGenerator<ChatChunk> { throw Object.assign(new Error("secret balance details"), { status, code: "insufficient_user_quota" }); });
+    const models = new AnalysisModels({ readFrame: async () => Uint8Array.from([255, 216, 255]), provider: async () => ({ chat }), ledger: { begin: async () => null, finish } });
+    await expect(models.ocr(frame(0))).rejects.toThrow("MODEL_QUOTA");
+    expect(chat).toHaveBeenCalledOnce();
+    expect(finish).toHaveBeenCalledWith("ocr:f0001", { text: "", outcome: "rejected", errorCode: "MODEL_QUOTA" });
+  });
+  it("allows a complete storyboard response after two minutes without replaying it", async () => {
+    vi.useFakeTimers();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => {
+      const controller = new AbortController(); setTimeout(() => controller.abort(), ms); return controller.signal;
+    });
+    const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: "参考文案" });
+    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
+    const finish = vi.fn(async () => {}); const begin = vi.fn(async () => null);
+    const models = new AnalysisModels({ readFrame: async () => new Uint8Array(), ledger: { begin, finish }, provider: async () => ({ async *chat(_messages, _tools, options) {
+      await new Promise(resolve => setTimeout(resolve, 130000)); options?.signal?.throwIfAborted();
+      yield { type: "text", content: JSON.stringify({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" }) };
+      yield { type: "done", finishReason: "stop", usage: { promptTokens: 100, completionTokens: 100 } };
+    } }) });
+    try {
+      const result = models.createCopy(draft, "zh", { source: { platform: "bilibili", canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [], frameTexts: [], texts: [], observations: [] }, 1);
+      const completed = expect(result).resolves.toMatchObject({ draft: { storyboard: shots } });
+      await vi.advanceTimersByTimeAsync(130000); await completed;
+      expect(begin).toHaveBeenCalledOnce(); expect(finish).toHaveBeenCalledWith("copy:1", expect.objectContaining({ outcome: "completed" }));
+    } finally { timeout.mockRestore(); vi.useRealTimers(); }
+  });
+  it("reuses a summary after database key reordering", async () => {
+    const f = setup({ summary: [{ statement: "咖啡", evidenceIds: ["t0001"], inference: false }], timeline: [], marketingPoints: [], limitations: [] });
+    const input = { revision: 1, frames: [frame(0)], texts: [{ id: "t0001", rawText: "咖啡", text: "咖啡", frameIds: ["f0001"], firstSeenMs: 0, lastSeenMs: 0 }], observations: [{ description: "咖啡", frameIds: ["f0001"], uncertainty: "" }], durationMs: 1000, limitations: [] };
+    await f.models.summarize(input);
+    const restored = JSON.parse(JSON.stringify(input, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).reverse()) : value));
+    await f.models.summarize({ ...input, texts: restored.texts, observations: restored.observations });
+    expect(f.requests).toHaveLength(1);
   });
   it("requires credentials and one of the two selected models", () => {
     expect(() => userResponsesProvider("https://example.test/v1", "", "kimi-k3")).toThrow("MODEL_AUTH_REQUIRED");

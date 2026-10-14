@@ -1,3 +1,5 @@
+import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
+import { AnalysisModels } from "./models.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,4 +48,28 @@ it("uses the Worker-selected sandbox for download and decoding before running mo
     expect(checkpoint).toHaveBeenCalledWith(lease, expect.anything(), "downloaded");
     expect(analyzeSelectedFrames).toHaveBeenCalledWith(expect.objectContaining({ revision: 1, signal }));
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+it("checkpoints automatic creation from the saved project and reuses it after interruption", async () => {
+  const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: "https://www.bilibili.com/video/BV1xx411c7mD" });
+  const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: draft.reference, mediaKey: "source.mp4" }, frames: [], frameTexts: [], texts: [], observations: [] };
+  const creation = { draft, analysis: "fixture" };
+  const create = vi.spyOn(AnalysisModels.prototype, "createCopy").mockResolvedValue(creation);
+  const checkpoint = vi.fn();
+  const row = { pipeline_version: ANALYSIS_VERSION, snapshot, selection: { frames: [], ocr: [], visual: [] }, creation_context: { draft, locale: "en" } };
+  const deps = {
+    store: { row: async () => row, pool: { query: async () => ({ rows: [], rowCount: 0 }) }, checkpoint },
+    storage: { directory: async () => "/tmp" },
+    db: { getUserApiKey: async () => "fixture-key" }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] }) },
+    config: {}, baseUrl: "https://gateway.example.test/v1", bridgePath: "/bridge.py",
+  } as unknown as Parameters<typeof runAnalysis>[2];
+  const lease = { id: "analysis", ownerId: "owner", token: "lease", revision: 1 }; const signal = new AbortController().signal;
+  vi.mocked(analyzeSelectedFrames).mockResolvedValue(snapshot);
+  try {
+    await runAnalysis(lease, signal, deps);
+    expect(create).toHaveBeenCalledWith(draft, "en", snapshot, 1, signal);
+    expect(checkpoint).toHaveBeenCalledWith(lease, expect.objectContaining({ creation }), "copy");
+    await runAnalysis(lease, signal, deps);
+    expect(create).toHaveBeenCalledOnce();
+  } finally { create.mockRestore(); }
 });

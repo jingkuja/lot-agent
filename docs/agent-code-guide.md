@@ -114,9 +114,9 @@ Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务�
 
 草稿按用户保存到数据库，页面只在账号隔离的 localStorage 里保存最后打开的项目 ID。制作配置提交后固定，发布标题 / 标签仍可编辑；`marketing-video/archive.ts` 将成片和发布信息归档到私有知识库，再次保存同步最新文案。首版实际对口型和抖音直发能力明确禁用，结果可预览、下载并复制发布文案；分镜只读展示，可复制为新草稿修改后重新制作。旧会话结果仍由包装组件展示，旧 `/api/video-drafts` 与会话生成接口保持兼容，其 4–15 秒限制不影响新项目链路。依赖、恢复语义和验收命令见 [营销视频制作](marketing-video.md)。
 
-`AgentService.marketingText → marketing-video/text.ts` 统一处理文案 JSON 输出、完整结束检查、90 秒超时及安全错误码。DeepSeek 混合模型的营销请求显式关闭思考，避免小输出预算被耗尽；截断结果不作为审核通过，不自动重新采样，失败用量仍经 `meterLLM` 记录。
+`AgentService.marketingText → marketing-video/text.ts` 统一处理文案 JSON 输出、完整结束检查、90 秒超时及安全错误码。DeepSeek 混合模型的营销请求显式关闭思考，避免小输出预算被耗尽；截断结果不作为审核通过，不自动重新采样，审核等既有请求仍经 `meterLLM` 记录。创作文案/分镜请求使用 `upstreamBilling`，不做本地额度检查或金额计算。
 
-参考视频分析通过 `ReferenceAnalysisPanel → /api/marketing-video-analyses → marketing-analysis/repository.ts → lot-media-analysis → workers/media-analysis.ts` 运行。迁移 `0039` 保存来源、分析、步骤、修订、加密平台 Cookie 和草稿引用；原片/证据在私有目录。`runtime.ts` 编排隔离下载、本地 PTS 抽帧、DeepSeek OCR、Kimi 观察和摘要；`ledger.ts` 在付费请求前记录意图并原子结算用量。未知结果不自动重发，校对摘要和应用草稿检查版本。`scripts/check-marketing-analysis-local.ts`、`local-probe.ts` 和 `probe-resume.ts` 提供显式 macOS 验证、隔离及保留失败费用的缺口续测。Apple Silicon 本地 Worker 可设置 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，由 `media-runtime.ts` 为下载及抽帧选择 macOS 沙箱；生产环境禁止该开关并保持 Linux 隔离，HTTP 输入不能选择运行时。默认未启用；单条小红书已完成下载和 85 次完整模型测试，保留 3 帧 OCR 缺口，三平台批量质量及 Linux 环境仍待验收。配置、API、恢复及检查命令见[参考视频分析实现](marketing-video-reference-analysis.md)。
+“拆解爆款文案”在选择按钮下提供视频链接/文案统一输入。纯文案经 `marketing-video/creation.ts` 一次生成文案和分镜；参考视频分析通过 `ProjectStudio → /api/marketing-video-analyses → marketing-analysis/repository.ts → lot-media-analysis → workers/media-analysis.ts` 运行。迁移 `0039` 保存来源、分析、步骤、修订、加密平台 Cookie 和草稿引用；原片/证据在私有目录。`runtime.ts` 编排隔离下载、本地 PTS 抽帧、DeepSeek OCR、Kimi 观察、摘要及文案/分镜创作；迁移 `0040` 保存目标草稿和版本，`repository.ts.finish` 自动回填，版本冲突保留结果。`ReferenceAnalysisPanel` 仅查询进度和提供可展开的只读资料。`ledger.ts` 保留意图与真实 token 回执，本流程不计算金额或预留预算，上游余额不足则停止，用户充值后显式继续；未知结果不自动重发。`scripts/check-marketing-analysis-local.ts`、`local-probe.ts` 和 `probe-resume.ts` 提供显式 macOS 验证、隔离及保留失败费用的缺口续测。Apple Silicon 本地 Worker 可设置 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，由 `media-runtime.ts` 为下载及抽帧选择 macOS 沙箱；生产环境禁止该开关并保持 Linux 隔离，HTTP 输入不能选择运行时。默认未启用；单条小红书已完成下载和 85 次完整模型测试，保留 3 帧 OCR 缺口，三平台批量质量及 Linux 环境仍待验收。配置、API、恢复及检查命令见[参考视频分析实现](marketing-video-reference-analysis.md)。
 
 通用 Responses 提供器在 `core/llm/responses.ts`，由 `llm.openai.protocol` / `OPENAI_PROTOCOL` 和优先级更高的 `modelCatalog.llmProtocols` 选择；已给 DeepSeek 与 Kimi 配置 Responses。工具调用使用 `call_id`，同轮 encrypted reasoning 状态参与上下文预算，保留原有 schema 和工具白名单。现有文档 OCR 独立 HTTP 路径保持原协议。
 
@@ -188,7 +188,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0039-marketing-reference-analysis.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查分析表就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0040-marketing-automatic-creation.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 40 的创作上下文字段就绪。
 
 运行日志新增 `agent_runs / agent_steps`，结果核实保留原始回执；普通模型会话与媒体生成任务状态互不替代。
 

@@ -1,3 +1,4 @@
+import { AnalysisError } from "./errors.js";
 import { ANALYSIS_LIMITS, mergeScreenText, type AnalysisSnapshot, type FrameEvidence, type FrameText } from "@lot-agent/core/marketing-analysis";
 import type { AnalysisModels } from "./models.js";
 import type { extractAnalysisFrames } from "./frames.js";
@@ -14,7 +15,7 @@ export async function analyzeSelectedFrames(input: {
   signal?: AbortSignal;
 }) {
   const snapshot: AnalysisSnapshot = structuredClone(input.snapshot);
-  snapshot.frames = input.selection.frames; snapshot.coverage = input.selection.coverage;
+  snapshot.frames = input.selection.frames; snapshot.coverage = structuredClone(input.selection.coverage);
   snapshot.source.durationMs = input.selection.durationMs;
   let writing = Promise.resolve();
   const save = (stage: string) => {
@@ -36,7 +37,15 @@ export async function analyzeSelectedFrames(input: {
         snapshot.frameTexts = snapshot.frames.flatMap(f => text.has(f.id) ? [text.get(f.id)!] : []);
         if (input.revision === 1) snapshot.texts = mergeScreenText(snapshot.frames, snapshot.frameTexts);
         await save("ocr");
-      } catch (error) { failure ??= error; }
+      } catch (error) {
+        if (error instanceof AnalysisError && ["MODEL_INVALID_JSON", "MODEL_INVALID_EVIDENCE", "MODEL_STEP_FAILED"].includes(error.code)) {
+          // Known malformed output is not retried. Continue with the remaining
+          // evidence; the final synthesis sees this coverage limitation.
+          snapshot.coverage!.omittedOcrFrameIds = [...new Set([...snapshot.coverage!.omittedOcrFrameIds, frame.id])];
+          snapshot.coverage!.limitations = [...new Set([...snapshot.coverage!.limitations, "OCR_INCOMPLETE"])];
+          await save("ocr");
+        } else failure ??= error;
+      }
     }
   };
   await Promise.all([work(), work()]);

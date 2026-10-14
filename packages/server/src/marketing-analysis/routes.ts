@@ -31,7 +31,7 @@ export function createAnalysisRoutes(service: Pick<AgentService, "db" | "tokenhu
     const known = error instanceof AnalysisError;
     return c.json({ error: known ? error.code : "ANALYSIS_FAILED", code: known ? error.code : "ANALYSIS_FAILED" }, known ? error.status : 500);
   });
-  app.get("/capabilities", c => c.json({ enabled: config.enabled, durationMs: 180000, budgetCny: config.budget, platforms: ["douyin", "xiaohongshu", "bilibili"] }));
+  app.get("/capabilities", c => c.json({ enabled: config.enabled, durationMs: 180000, platforms: ["douyin", "xiaohongshu", "bilibili"] }));
   app.use("*", async (_c, next) => { if (!config.enabled) throw new AnalysisError("ANALYSIS_DISABLED", 503); await next(); });
   app.get("/sessions", async c => c.json({ data: (await store.pool.query("SELECT platform,updated_at FROM marketing_analysis_sessions WHERE user_id=$1", [c.get("userId")])).rows }));
   app.put("/sessions/:platform", async c => {
