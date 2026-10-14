@@ -126,3 +126,17 @@
 .mv-shot textarea { min-height: 72px; font-weight: 400; }
 .mv-storyboard-ai { padding: 16px 0; }
 @media (max-width: 760px) { .mv-shot-list { grid-template-columns: 1fr; } }
+.ma-panel > summary { cursor: pointer; font-weight: 600; }
+.ma-panel > .mv-hint { margin-block: 12px; }
+.ma-history, .ma-sessions, .ma-result { margin-top: 20px; }
+.ma-result { border-top: 1px solid var(--border); padding-top: 16px; }
+.ma-text { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.ma-text p, .ma-result p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ma-text textarea, .ma-sessions textarea { width: 100%; min-height: 70px; box-sizing: border-box; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.ma-evidence-links { display: inline-flex; flex-wrap: wrap; gap: 4px; margin: 4px; }
+.ma-evidence-links button { padding: 2px 6px; font-size: 12px; }
+.ma-frame-list { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; }
+.ma-frame-preview { margin: 16px 0; }
+.ma-frame-preview img { display: block; max-height: 400px; max-width: 100%; object-fit: contain; border-radius: 8px; }
+.ma-apply-preview { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
+.ma-apply-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; font: inherit; }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { OpenAIProvider, OpenAIImagesImageProvider, HttpVideoGenerationProvider } from "@lot-agent/core";
+import { OpenAIProvider, OpenAIResponsesProvider, OpenAIImagesImageProvider, HttpVideoGenerationProvider } from "@lot-agent/core";
 import { ProviderFactory } from "./provider-factory.js";
 import type { ModelCatalogConfig } from "./catalog.js";
 import type { MediaGenerationConfig } from "../generation/config.js";
@@ -22,6 +22,11 @@ const f = new ProviderFactory({
 });
 
 describe("ProviderFactory", () => {
+  it("honors per-model Responses selection and a per-call override", () => {
+    const factory = new ProviderFactory({ catalog: { ...catalog, llmProtocols: { "kimi-k3": "responses" } }, llmBaseUrl: "https://h/v1", imageBase: media(), videoBase: media() });
+    expect(factory.llm("kimi-k3", "sk-u")).toBeInstanceOf(OpenAIResponsesProvider);
+    expect(factory.llm("kimi-k3", "sk-u", "chat-completions")).toBeInstanceOf(OpenAIProvider);
+  });
   it("llm → OpenAIProvider", () => {
     expect(f.llm("gpt-5.4", "sk-u")).toBeInstanceOf(OpenAIProvider);
   });

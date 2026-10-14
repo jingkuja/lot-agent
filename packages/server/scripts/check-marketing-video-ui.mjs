@@ -66,6 +66,7 @@ try {
     const json = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data, (key, value) => key === 'storyboard' && Array.isArray(value) && !value.length ? undefined : value) });
     if (request.method() !== 'GET') writes.push({ path, body: request.headers()["content-type"]?.includes("application/json") ? request.postDataJSON() : null });
     if (path === '/api/public/product') return json({ globle: 1 });
+    if (path === '/api/marketing-video-analyses/capabilities') return json({ enabled: false, budgetCny: 0 });
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
     if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false });
     if (path === '/api/marketing-videos') return json({ data: [...projects.values()] });

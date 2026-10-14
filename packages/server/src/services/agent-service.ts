@@ -467,6 +467,7 @@ export class AgentService {
     this.providerFactory = new ProviderFactory({
       catalog: this.modelCatalog,
       llmBaseUrl: this.llmConfig.openai.baseUrl ?? this.tokenhubBaseUrl,
+      llmProtocol: this.llmConfig.openai.protocol,
       imageBase: genConfig.image,
       videoBase: genConfig.video,
     });
@@ -746,7 +747,7 @@ export class AgentService {
     console.log(`Registered ${this.toolRegistry.getAll().length} tools`);
 
     // Populate model registry with all configured models
-    populateModelRegistry(this.modelRegistry, this.configModels, this.llmConfig);
+    populateModelRegistry(this.modelRegistry, this.configModels, this.llmConfig, this.modelCatalog.llmProtocols);
 
     // Initialize usage meter
     // Dynamically-discovered LLM models aren't in the static registry; fall back

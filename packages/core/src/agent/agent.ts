@@ -330,6 +330,7 @@ export class Agent {
         let hasToolCalls = false;
         let assistantContent = "";
         let toolCalls: ToolCall[] = [];
+        let responseState: Message["responseState"];
 
         // Assemble messages with context management (budget + sliding window + summary)
         const messages = await withAbort(this.contextManager.assemble(
@@ -354,6 +355,7 @@ export class Agent {
           hasToolCalls = false;
           assistantContent = "";
           toolCalls = [];
+          responseState = undefined;
           let sawDone = false;
           try {
             for await (const chunk of abortableStream(llm.chat(messages, tools, {
@@ -376,6 +378,7 @@ export class Agent {
               if (chunk.type === "done") {
                 if (sawDone) throw new Error("Duplicate LLM completion");
                 sawDone = true;
+                responseState = chunk.responseState;
                 if (chunk.finishReason && !["stop", "end_turn", "tool_calls", "tool_use", "stop_sequence"].includes(chunk.finishReason)) {
                   throw new Error(`LLM generation incomplete: ${chunk.finishReason}`);
                 }
@@ -467,6 +470,7 @@ export class Agent {
           role: "assistant",
           content: assistantContent || "",
           toolCalls,
+          responseState,
         };
         workingHistory.push(assistantMsg);
 

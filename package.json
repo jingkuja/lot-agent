@@ -2,7 +2,7 @@
   "name": "lot-agent",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n core,server,worker,knowledge,web -c blue,green,cyan,yellow,magenta \"pnpm --filter @lot-agent/core run dev\" \"pnpm --filter @lot-agent/server run dev\" \"pnpm --filter @lot-agent/server run dev:worker\" \"pnpm --filter @lot-agent/server run dev:knowledge\" \"pnpm --filter @lot-agent/web run dev\"",
+    "dev": "concurrently -n core,server,worker,knowledge,media,web -c blue,green,cyan,yellow,white,magenta \"pnpm --filter @lot-agent/core run dev\" \"pnpm --filter @lot-agent/server run dev\" \"pnpm --filter @lot-agent/server run dev:worker\" \"pnpm --filter @lot-agent/server run dev:knowledge\" \"pnpm --filter @lot-agent/server run dev:media-analysis\" \"pnpm --filter @lot-agent/web run dev\"",
     "dev:server": "pnpm --filter @lot-agent/server run dev",
     "dev:web": "pnpm --filter @lot-agent/web run dev",
     "dev:desktop": "pnpm --filter @lot-agent/desktop run build && concurrently -n web,electron -c magenta,yellow \"pnpm --filter @lot-agent/web run dev --mode desktop\" \"wait-on http://localhost:5173 && pnpm --filter @lot-agent/desktop run dev\"",
@@ -38,7 +38,16 @@
     "check:knowledge:persistence": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-persistence.ts",
     "check:desktop-tools:ui": "node packages/server/scripts/check-desktop-tools-ui.mjs",
     "check:feishu:ui": "node packages/server/scripts/check-feishu-ui.mjs",
-    "check:desktop-updates:ui": "node packages/server/scripts/check-desktop-updates-ui.mjs"
+    "check:desktop-updates:ui": "node packages/server/scripts/check-desktop-updates-ui.mjs",
+    "test:marketing-analysis": "pnpm --filter @lot-agent/core build && vitest run packages/core/src/llm packages/core/src/marketing-analysis packages/server/src/marketing-analysis packages/server/src/models/provider-factory.test.ts packages/server/src/config.test.ts",
+    "check:marketing-analysis:media": "pnpm --filter @lot-agent/core build && MARKETING_ANALYSIS_MEDIA_TEST=1 vitest run packages/server/src/marketing-analysis/frames.test.ts",
+    "check:marketing-analysis:live": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis.ts",
+    "check:marketing-analysis:local": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-local.ts",
+    "check:marketing-analysis:local-sandbox": "pnpm --filter @lot-agent/core build && MARKETING_ANALYSIS_LOCAL_SANDBOX_TEST=1 vitest run packages/server/src/marketing-analysis/local-probe.test.ts",
+    "dev:media-analysis": "pnpm --filter @lot-agent/server run dev:media-analysis",
+    "check:marketing-analysis:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-db.ts",
+    "check:marketing-analysis:ui": "node packages/server/scripts/check-marketing-analysis-ui.mjs",
+    "marketing-analysis:reconcile": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reconcile-marketing-analysis.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -1,11 +1,12 @@
 import { TokenhubEmbeddingProvider } from "../knowledge/ingestion/embedding.js";
-import { OpenAIProvider, type LLMProvider, type ImageGenerationProvider, type VideoGenerationProvider } from "@lot-agent/core";
+import { OpenAIProvider, OpenAIResponsesProvider, type LLMProvider, type ImageGenerationProvider, type VideoGenerationProvider } from "@lot-agent/core";
 import { makeImageProvider, makeVideoProvider, type MediaGenerationConfig } from "../generation/config.js";
 import { resolveProvider, type ModelCatalogConfig } from "./catalog.js";
 
 export interface ProviderFactoryDeps {
   catalog: ModelCatalogConfig;
   llmBaseUrl: string;
+  llmProtocol?: "chat-completions" | "responses";
   imageBase: MediaGenerationConfig;
   videoBase: MediaGenerationConfig;
 }
@@ -16,8 +17,9 @@ export interface ProviderFactoryDeps {
 export class ProviderFactory {
   constructor(private readonly deps: ProviderFactoryDeps) {}
 
-  llm(modelId: string, apiKey: string): LLMProvider {
-    return new OpenAIProvider({ apiKey, baseUrl: this.deps.llmBaseUrl, model: modelId });
+  llm(modelId: string, apiKey: string, protocol = this.deps.catalog.llmProtocols?.[modelId] ?? this.deps.llmProtocol): LLMProvider {
+    const Provider = protocol === "responses" ? OpenAIResponsesProvider : OpenAIProvider;
+    return new Provider({ apiKey, baseUrl: this.deps.llmBaseUrl, model: modelId });
   }
 
   embedding(modelId: string, apiKey: string, dimensions: number, onUsage: (tokens: number) => Promise<void>) {

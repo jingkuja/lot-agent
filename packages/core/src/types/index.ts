@@ -35,6 +35,8 @@ export interface Message {
   content: string | ContentPart[];
   toolCallId?: string;
   toolCalls?: ToolCall[];
+  /** Provider-produced, request-local stateless Responses context. */
+  responseState?: { model: string; items: unknown[] };
 }
 
 /** Per-call model parameters. */
@@ -55,6 +57,8 @@ export interface ChatChunk {
   content?: string;
   toolCall?: ToolCall;
   finishReason?: string;
+  responseId?: string;
+  responseState?: Message["responseState"];
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -81,6 +85,7 @@ export interface ChatOptions {
   purpose?: "reasoning" | "compression";
   onAttempt?: () => void;
   onAttemptEnd?: (error?: unknown) => void;
+  onResponseId?: (id: string) => void;
 }
 
 /** Unified LLM provider interface */

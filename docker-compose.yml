@@ -34,6 +34,12 @@ x-app-env: &app-env
   OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://tokenhub.wetok.ai/v1}
   TOKENHUB_BASE_URL: ${TOKENHUB_BASE_URL:-https://tokenhub.wetok.ai/api/agent-market}
   OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4.1-flash}
+  OPENAI_PROTOCOL: ${OPENAI_PROTOCOL:-chat-completions}
+  MARKETING_ANALYSIS_ENABLED: ${MARKETING_ANALYSIS_ENABLED:-0}
+  MARKETING_ANALYSIS_BUDGET_CNY: ${MARKETING_ANALYSIS_BUDGET_CNY:-}
+  MARKETING_ANALYSIS_PRICING: ${MARKETING_ANALYSIS_PRICING:-}
+  MARKETING_ANALYSIS_CONCURRENCY: ${MARKETING_ANALYSIS_CONCURRENCY:-2}
+  YTDLP_VERSION: ${YTDLP_VERSION:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
   # Image/video generation (tokenhub). WITHOUT a key the providers fall back to
@@ -167,6 +173,31 @@ services:
       ROLE: knowledge-worker
     healthcheck:
       disable: true
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      server:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  media-analysis-worker:
+    image: lot-agent-media-analysis:1.0
+    profiles: [media-analysis]
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      ROLE: media-analysis-worker
+    healthcheck:
+      disable: true
+    mem_limit: 3g
+    cpus: 2
+    pids_limit: 128
+    # The host must permit unprivileged user namespaces for bubblewrap.
+    # No privileged mode, host networking or Docker socket is permitted.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
     volumes:
       - app_data:/app/data
     depends_on:

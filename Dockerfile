@@ -51,6 +51,7 @@ COPY --from=builder /app/packages/core/dist packages/core/dist
 COPY --from=builder /app/packages/server/dist packages/server/dist
 COPY config config
 COPY skills skills
+COPY deploy/media-analysis-proxy-bridge.py deploy/media-analysis-proxy-bridge.py
 # Static assets read at runtime (e.g. the CJK font embedded into generated PDFs).
 COPY assets assets
 

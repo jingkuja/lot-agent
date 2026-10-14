@@ -139,6 +139,9 @@ export class ContextManager {
    * Count tokens in a message.
    */
   countMessageTokens(msg: Message): number {
+    // Responses replays these items instead of the flattened assistant text.
+    // Include opaque reasoning conservatively so it cannot bypass the budget.
+    if (msg.role === "assistant" && msg.responseState) return estimateTokens(JSON.stringify(msg.responseState.items)) + 4;
     let tokens = typeof msg.content === "string"
       ? estimateTokens(msg.content)
       : msg.content.reduce((sum, part) => {
@@ -505,6 +508,7 @@ export class ContextManager {
       const msg = result[i];
       if (
         msg.role === "assistant" &&
+        !msg.responseState &&
         typeof msg.content === "string" &&
         msg.content.length > 200
       ) {

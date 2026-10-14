@@ -24,6 +24,10 @@
     "./desktop": {
       "types": "./dist/desktop/protocol.d.ts",
       "import": "./dist/desktop/protocol.js"
+    },
+    "./marketing-analysis": {
+      "types": "./dist/marketing-analysis/index.d.ts",
+      "import": "./dist/marketing-analysis/index.js"
     }
   },
   "scripts": {

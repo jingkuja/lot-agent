@@ -27,6 +27,7 @@ export interface OpenAIProviderConfig {
   apiKey: string;
   baseUrl?: string;
   model: string;
+  protocol?: "chat-completions" | "responses";
 }
 
 export class OpenAIProvider implements LLMProvider {

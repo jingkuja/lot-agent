@@ -45,7 +45,8 @@ Hono API：鉴权、参数校验、限流、用户归属
      ├─ KnowledgeService → 资料管理 / 检索 / 外部接入
      └─ 任务提交 → Redis + BullMQ
                          ├─ 普通 Worker：图片、视频、记忆提取、商机发现
-                         └─ 知识 Worker：解析、OCR、embedding、索引发布
+                         ├─ 知识 Worker：解析、OCR、embedding、索引发布
+                         └─ 媒体分析 Worker：受控下载、抽帧、OCR、有序多图摘要
 
 共享依赖：PostgreSQL（业务与 pgvector） · Redis（队列、缓存、会话记忆）
           本地文件存储 · TokenHub / New API（账号、模型、额度与支付）
@@ -54,7 +55,7 @@ Hono API：鉴权、参数校验、限流、用户归属
 | 包 / 目录 | 职责与边界 |
 | --- | --- |
 | [packages/core/src](../packages/core/src) | Agent 引擎、模型和工具接口、技能、上下文、记忆抽象、通用提供器。保持无 `pg` / `ioredis` 依赖；通过接口注入基础设施。 |
-| [packages/server/src](../packages/server/src) | API、依赖组装、数据库、队列、计费、业务服务和文件生成。运行 API 与两个 Worker 入口。 |
+| [packages/server/src](../packages/server/src) | API、依赖组装、数据库、队列、计费、业务服务和文件生成。运行 API 与普通、知识、媒体分析 Worker 入口。 |
 | [packages/web/src](../packages/web/src) | 浏览器工作台、交互卡片、知识管理和数字员工 UI；不持有网关内部密钥。 |
 | [packages/desktop/src](../packages/desktop/src) | Electron 主进程、preload、本地静态与反向代理、下载、通知、凭证存储、本地工作目录授权与本机工具执行。业务界面复用 Web。 |
 | [packages/miniprogram/miniprogram](../packages/miniprogram/miniprogram) | 微信原生页面、登录、生成、轮询、作品分享与保存。共用服务端业务。 |
@@ -114,6 +115,10 @@ Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务�
 草稿按用户保存到数据库，页面只在账号隔离的 localStorage 里保存最后打开的项目 ID。制作配置提交后固定，发布标题 / 标签仍可编辑；`marketing-video/archive.ts` 将成片和发布信息归档到私有知识库，再次保存同步最新文案。首版实际对口型和抖音直发能力明确禁用，结果可预览、下载并复制发布文案；分镜只读展示，可复制为新草稿修改后重新制作。旧会话结果仍由包装组件展示，旧 `/api/video-drafts` 与会话生成接口保持兼容，其 4–15 秒限制不影响新项目链路。依赖、恢复语义和验收命令见 [营销视频制作](marketing-video.md)。
 
 `AgentService.marketingText → marketing-video/text.ts` 统一处理文案 JSON 输出、完整结束检查、90 秒超时及安全错误码。DeepSeek 混合模型的营销请求显式关闭思考，避免小输出预算被耗尽；截断结果不作为审核通过，不自动重新采样，失败用量仍经 `meterLLM` 记录。
+
+参考视频分析通过 `ReferenceAnalysisPanel → /api/marketing-video-analyses → marketing-analysis/repository.ts → lot-media-analysis → workers/media-analysis.ts` 运行。迁移 `0039` 保存来源、分析、步骤、修订、加密平台 Cookie 和草稿引用；原片/证据在私有目录。`runtime.ts` 编排隔离下载、本地 PTS 抽帧、DeepSeek OCR、Kimi 观察和摘要；`ledger.ts` 在付费请求前记录意图并原子结算用量。未知结果不自动重发，校对摘要和应用草稿检查版本。`scripts/check-marketing-analysis-local.ts`、`local-probe.ts` 和 `probe-resume.ts` 提供显式 macOS 验证、隔离及保留失败费用的缺口续测。Apple Silicon 本地 Worker 可设置 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，由 `media-runtime.ts` 为下载及抽帧选择 macOS 沙箱；生产环境禁止该开关并保持 Linux 隔离，HTTP 输入不能选择运行时。默认未启用；单条小红书已完成下载和 85 次完整模型测试，保留 3 帧 OCR 缺口，三平台批量质量及 Linux 环境仍待验收。配置、API、恢复及检查命令见[参考视频分析实现](marketing-video-reference-analysis.md)。
+
+通用 Responses 提供器在 `core/llm/responses.ts`，由 `llm.openai.protocol` / `OPENAI_PROTOCOL` 和优先级更高的 `modelCatalog.llmProtocols` 选择；已给 DeepSeek 与 Kimi 配置 Responses。工具调用使用 `call_id`，同轮 encrypted reasoning 状态参与上下文预算，保留原有 schema 和工具白名单。现有文档 OCR 独立 HTTP 路径保持原协议。
 
 ### 4.4 文档与 PPT
 
@@ -183,7 +188,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0036-marketing-video-projects.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0039-marketing-reference-analysis.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查分析表就绪。
 
 运行日志新增 `agent_runs / agent_steps`，结果核实保留原始回执；普通模型会话与媒体生成任务状态互不替代。
 
@@ -234,7 +239,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter @lot-agent/core build
-pnpm dev                    # core watch + API + 普通 Worker + 知识 Worker + Web
+pnpm dev                    # core watch + API + 普通 Worker + 知识 Worker + 媒体分析 Worker + Web
 pnpm dev:server
 pnpm dev:web
 pnpm --filter @lot-agent/server dev:worker
@@ -265,6 +270,7 @@ pnpm build
 ## 9. 专项文档
 
 - 部署与客户端：[部署](deployment.md)、[桌面端](desktop.md)、[小程序](miniprogram.md)、[充值](recharge.md)。
+- 营销影像：[营销视频制作](marketing-video.md)、[参考视频下载与抽帧分析方案](marketing-video-reference-analysis-plan.md)、[参考视频分析实现与验收](marketing-video-reference-analysis.md)（含本机真实样本测试；三平台批量质量与 Linux 环境待验收）。
 - 办公：[PPT 工作流](ppt-workflow.md)、[PPT 技能](../skills/ppt-authoring.md)、[文档技能](../skills/doc-generation.md)。
 - 知识库：[入库与检索](knowledge-ingestion.md)、[外部 API](knowledge-external-api.md)、[OpenAPI 契约](knowledge-openapi.json)、[备份恢复](knowledge-backup-restore.md)、[检索优化](knowledge-retrieval-optimization.md)。
 

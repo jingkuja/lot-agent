@@ -120,13 +120,15 @@ async function main() {
   const cache = new GenCache(conn);
 
   const genConfig = await loadGenerationConfig(ROOT);
+  const llmConfig = await loadLlmConfig(ROOT);
   const klingVoiceConfig = loadKlingVoiceConfig();
   const imageProvider = makeImageProvider(genConfig.image);
   const videoProvider = makeVideoProvider(genConfig.video);
   // Per-user provider factory: generation calls use the owning user's api_key.
   const providerFactory = new ProviderFactory({
     catalog: modelCatalog,
-    llmBaseUrl: genConfig.image.baseUrl,
+    llmBaseUrl: llmConfig.openai.baseUrl ?? genConfig.image.baseUrl,
+    llmProtocol: llmConfig.openai.protocol,
     imageBase: genConfig.image,
     videoBase: genConfig.video,
   });
@@ -260,7 +262,6 @@ async function main() {
   // the owning user's tokenhub key, same as chat/title generation — falling
   // back to the env-configured LLM only when either is unavailable (e.g. a
   // user without a tokenhub key, or an older queued job with no modelId).
-  const llmConfig = await loadLlmConfig(ROOT);
   const fallbackExtractLlm = createOptionalFallbackLLM(llmConfig);
   const fallbackExtractModelId =
     llmConfig.default === "openai" ? llmConfig.openai.model : llmConfig.anthropic.model;

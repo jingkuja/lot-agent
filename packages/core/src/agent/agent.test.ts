@@ -64,6 +64,14 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
 }
 
 describe("Agent.run", () => {
+  it("carries stateless Responses reasoning into the next tool turn", async () => {
+    const registry = new ToolRegistry();
+    registry.register({ name: "noop", description: "noop", parameters: { type: "object" }, async execute() { return { content: "ok" }; } });
+    const responseState = { model: "kimi-k3", items: [{ type: "reasoning", id: "rs1", summary: [], encrypted_content: "opaque" }, { type: "function_call", call_id: "c1", name: "noop", arguments: "{}" }] };
+    const llm = scriptedLLM([[{ type: "tool_call", toolCall: { id: "c1", name: "noop", arguments: {} } }, { type: "done", finishReason: "tool_calls", responseState }], textChunks("done")]);
+    await collect(new Agent({ systemPrompt: "sys" }).run("hello", makeContext(llm, registry)));
+    expect(llm.calls[1].find(m => m.role === "assistant")?.responseState).toEqual(responseState);
+  });
   it("places the user message before assistant tool calls and never duplicates it", async () => {
     const registry = new ToolRegistry();
     registry.register({

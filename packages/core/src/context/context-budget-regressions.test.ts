@@ -33,3 +33,12 @@ it("invalidates a same-length edited history prefix, but preserves unchanged pre
   expect(next).toHaveBeenCalledOnce();
   expect(JSON.stringify(result)).not.toContain("OLD_DELETED_FACT");
 });
+it("budgets opaque Responses state and never truncates only its flattened text", async () => {
+  const manager = new ContextManager({ budget: { total: 2000, generation: 500 } });
+  const state = { model: "fixture", items: [{ type: "reasoning", encrypted_content: "A".repeat(16000) }] };
+  const opaque: Message = { role: "assistant", content: "short flattened text", responseState: state };
+  expect(manager.countMessageTokens(opaque)).toBeGreaterThan(2000);
+  const output = await manager.assemble([], undefined, [{ role: "user", content: "old question" }, opaque, { role: "user", content: "current question" }]);
+  expect(manager.countTotalTokens(output)).toBeLessThanOrEqual(1500);
+  for (const message of output) if (message.responseState) expect(message).toEqual(opaque);
+});

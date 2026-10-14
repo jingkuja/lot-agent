@@ -1,3 +1,4 @@
+import { marketingReferenceAnalysis } from "./0039-marketing-reference-analysis.js";
 import { feishuPersonalChannel } from "./0038-feishu-personal-channel.js";
 import { virtualPayment } from "./0033-virtual-payment.js";
 import { marketingVideoProjects } from "./0036-marketing-video-projects.js";
@@ -78,4 +79,5 @@ export const migrations: Migration[] = [
   marketingVideoProjects,
   feishuIntegration,
   feishuPersonalChannel,
+  marketingReferenceAnalysis,
 ];

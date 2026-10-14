@@ -27,6 +27,10 @@ design/
 # Private knowledge originals must never be committed or served as static files.
 data/knowledge/
 
+# Reference video originals, model receipts and signed share links are private.
+data/marketing-analysis/
+data/marketing-analysis-probes/
+
 # Backups contain credentials/business data; evaluation vector caches are reproducible.
 data/backups/
 tests/eval/results/vectors-*.json

@@ -14,6 +14,7 @@ export function renderKey(draft: MarketingDraft) {
 const select = `SELECT p.*, t.status, t.progress, t.stage, t.error, t.output FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
 function project(row: Record<string, any>): MarketingProject {
   return { id: row.id, version: row.version, draft: MarketingDraftSchema.parse(row.draft), updatedAt: new Date(row.updated_at).toISOString(), review: row.review,
+    ...(row.reference_analysis_id ? { referenceAnalysis: { id: row.reference_analysis_id, acceptedRevision: row.reference_revision, evidenceIds: row.reference_evidence_ids ?? [] } } : {}),
     reviewedScript: row.reviewed_script, taskId: row.task_id, status: row.status ?? "draft", progress: Number(row.progress ?? 0),
     stage: row.stage ?? undefined, error: row.error ?? undefined, output: row.output ?? undefined, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version };
 }
@@ -40,6 +41,9 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         if (version !== old.version) throw new MarketingError("草稿已在其他页面更新，请重新打开。", 409);
         if (old.task_id && renderKey(old.draft) !== renderKey(draft)) throw new MarketingError("已提交的制作配置不可修改，请复制为新草稿。", 409);
         await client.query(`UPDATE marketing_video_projects SET draft=$3,version=version+1,updated_at=now(),
+          reference_analysis_id=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' THEN reference_analysis_id ELSE NULL END,
+          reference_revision=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' THEN reference_revision ELSE NULL END,
+          reference_evidence_ids=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' THEN reference_evidence_ids ELSE NULL END,
           review=CASE WHEN reviewed_script=$4 THEN review ELSE NULL END,
           reviewed_script=CASE WHEN reviewed_script=$4 THEN reviewed_script ELSE NULL END WHERE id=$1 AND user_id=$2`, [id, owner, JSON.stringify(draft), reviewText(draft)]);
       }
@@ -74,7 +78,8 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       }
       if (!p.review || p.reviewed_script !== reviewText(p.draft) || p.review.verdict === "reject") throw new MarketingError("请先完成当前文案检查。");
       const taskId = randomUUID();
-      await client.query(`INSERT INTO tasks(id,type,input,user_id) VALUES($1,'marketing.video',$2,$3)`, [taskId, JSON.stringify({ ...input, projectId: id, draft: p.draft }), owner]);
+      await client.query(`INSERT INTO tasks(id,type,input,user_id) VALUES($1,'marketing.video',$2,$3)`, [taskId, JSON.stringify({ ...input, projectId: id, draft: p.draft,
+        ...(p.reference_analysis_id ? { referenceAnalysis: { id: p.reference_analysis_id, acceptedRevision: p.reference_revision, evidenceIds: p.reference_evidence_ids } } : {}) }), owner]);
       for (const part of resolveMarketingSegments(MarketingDraftSchema.parse(p.draft))) {
         const childId = randomUUID();
         // These tasks are executed by the parent, never delivered independently.

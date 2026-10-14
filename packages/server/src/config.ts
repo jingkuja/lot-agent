@@ -19,6 +19,7 @@ export async function loadLlmConfig(rootDir: string): Promise<LLMConfig> {
   if (process.env.OPENAI_API_KEY) openaiRaw.apiKey = process.env.OPENAI_API_KEY;
   if (process.env.OPENAI_BASE_URL) openaiRaw.baseUrl = process.env.OPENAI_BASE_URL;
   if (process.env.OPENAI_MODEL) openaiRaw.model = process.env.OPENAI_MODEL;
+  if (process.env.OPENAI_PROTOCOL) openaiRaw.protocol = process.env.OPENAI_PROTOCOL;
   if (process.env.ANTHROPIC_API_KEY) anthropicRaw.apiKey = process.env.ANTHROPIC_API_KEY;
   if (process.env.ANTHROPIC_MODEL) anthropicRaw.model = process.env.ANTHROPIC_MODEL;
   if (process.env.LLM_DEFAULT) llmRaw.default = process.env.LLM_DEFAULT;

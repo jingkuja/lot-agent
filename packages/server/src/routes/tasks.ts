@@ -1,4 +1,5 @@
 import { KnowledgeJobs } from "../knowledge/ingestion/jobs.js";
+import { PgAnalysisStore } from "../marketing-analysis/repository.js";
 import { Hono } from "hono";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
@@ -110,6 +111,10 @@ export function createTaskRoutes(service: AgentService) {
     const job = await service.jobQueue.get(id);
     if (!job || (job as unknown as { userId?: string }).userId !== userId) {
       return c.json({ error: "Task not found" }, 404);
+    }
+    if (job.type === "marketing.analysis") {
+      const result = await new PgAnalysisStore(service.db.pool).cancel(userId, id);
+      return c.json({ ok: result?.status === "cancelled", status: result?.status });
     }
     const changed = job.type === "knowledge.ingest"
       ? await new KnowledgeJobs(service.db.pool).cancel(userId, id)

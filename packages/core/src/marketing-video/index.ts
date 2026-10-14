@@ -39,6 +39,7 @@ export const MarketingReviewSchema = z.object({
 export type MarketingReview = z.infer<typeof MarketingReviewSchema>;
 export interface MarketingSegment { index: number; script: string; durationSec: number; }
 export interface MarketingProject {
+  referenceAnalysis?: { id: string; acceptedRevision: number; evidenceIds: string[] };
   id: string; version: number; draft: MarketingDraft; updatedAt: string;
   review: MarketingReview | null; reviewedScript: string | null;
   taskId: string | null; status: string; progress: number; stage?: string;

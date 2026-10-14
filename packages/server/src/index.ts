@@ -7,6 +7,7 @@ import { createFeishuRoutes, createFeishuPublicRoutes } from "./feishu/routes.js
 import { SecretBox } from "./auth/secret-box.js";
 import { createVideoDraftRoutes } from "./routes/video-drafts.js";
 import { createMarketingVideoRoutes } from "./marketing-video/routes.js";
+import { createAnalysisRoutes } from "./marketing-analysis/routes.js";
 import { KnowledgeKeys } from "./knowledge/access/keys.js";
 import { RedisKnowledgeLimiter } from "./knowledge/access/limiter.js";
 import { createKnowledgeAccessRoutes } from "./knowledge/access/routes.js";
@@ -311,6 +312,8 @@ async function main() {
   app.use("/api/video-drafts", authMw);
   app.use("/api/marketing-videos", authMw);
   app.use("/api/marketing-videos/*", authMw);
+  app.use("/api/marketing-video-analyses", authMw);
+  app.use("/api/marketing-video-analyses/*", authMw);
   app.use("/api/video-drafts/*", authMw);
   app.use("/api/assets", authMw);
   app.use("/api/assets/*", authMw);
@@ -340,6 +343,9 @@ async function main() {
   app.on("POST", "/api/marketing-videos/:id/review", messagesRateLimit);
   app.on("POST", "/api/marketing-videos/:id/publication", messagesRateLimit);
   app.on("POST", "/api/marketing-videos/:id/generate", generationRateLimit);
+  app.on("POST", "/api/marketing-video-analyses", generationRateLimit);
+  app.on("POST", "/api/marketing-video-analyses/:id/resume", generationRateLimit);
+  app.on("POST", "/api/marketing-video-analyses/:id/summarize", generationRateLimit);
   app.use("/api/digital-employee/*", digitalEmployeeRateLimit);
 
   // Protected API routes
@@ -356,6 +362,7 @@ async function main() {
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/video-drafts", createVideoDraftRoutes(service));
   app.route("/api/marketing-videos", createMarketingVideoRoutes(service, resolve(ROOT, "data")));
+  app.route("/api/marketing-video-analyses", createAnalysisRoutes(service, resolve(ROOT, "data/marketing-analysis")));
   app.route("/api/assets/shares", createImageShareRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));

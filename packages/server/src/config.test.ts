@@ -10,6 +10,7 @@ describe("loadLlmConfig", () => {
   beforeEach(() => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_MODEL;
+    delete process.env.OPENAI_PROTOCOL;
     delete process.env.LLM_DEFAULT;
   });
   afterEach(() => {
@@ -20,10 +21,12 @@ describe("loadLlmConfig", () => {
     process.env.OPENAI_API_KEY = "sk-test";
     process.env.OPENAI_MODEL = "gpt-test";
     process.env.LLM_DEFAULT = "openai";
+    process.env.OPENAI_PROTOCOL = "responses";
     const llm = await loadLlmConfig(ROOT);
     expect(llm.default).toBe("openai");
     expect(llm.openai.apiKey).toBe("sk-test");
     expect(llm.openai.model).toBe("gpt-test");
+    expect(llm.openai.protocol).toBe("responses");
   });
 
   it("falls back to config defaults when env is unset", async () => {

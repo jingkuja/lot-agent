@@ -53,6 +53,7 @@ export const AppConfigSchema = z.object({
     openai: z.object({
       apiKey: z.string(),
       baseUrl: z.string().optional(),
+      protocol: z.enum(["chat-completions", "responses"]).optional(),
       model: z.string(),
     }),
     anthropic: z.object({

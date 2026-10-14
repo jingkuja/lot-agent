@@ -10,6 +10,7 @@ export interface CatalogModel {
   pricing: Pricing;
 }
 export interface ModelCatalogConfig {
+  llmProtocols?: Record<string, "chat-completions" | "responses">;
   providerMap: Record<string, string>;
   defaultProvider: Record<string, string>;
   pricing: Record<string, Pricing>;
