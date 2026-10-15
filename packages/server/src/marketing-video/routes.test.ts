@@ -39,6 +39,22 @@ function fixture(owner = "owner") {
   return { app, call, store, service, project, operations };
 }
 describe("marketing project HTTP boundaries", () => {
+  it("protects a legacy marketing upload and signs only its preview, leaving the canonical URL intact", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      const f = fixture();
+      const asset = { id, user_id: "owner", type: "upload", storage_key: "portrait.png", url: "/static/uploads/portrait.png", mime: "image/png", size_bytes: 10 };
+      f.project.draft.assets = { portrait: [id] };
+      const protect = vi.fn();
+      Object.assign(f.service.db, { protectMarketingUpload: protect });
+      f.service.db.getAsset.mockResolvedValue(asset);
+      const response = await f.call(`/${id}`);
+      expect(response.status).toBe(200);
+      expect((await response.json() as { assets: Record<string, { url: string }> }).assets[id].url).toContain("material_token=");
+      expect(protect).toHaveBeenCalledWith(id, "owner");
+      expect(asset.url).toBe("/static/uploads/portrait.png");
+    } finally { vi.unstubAllEnvs(); }
+  });
   it("serves the frontend's mounted list, capabilities and copy paths", async () => {
     const f = fixture();
     const list = await f.call("/");

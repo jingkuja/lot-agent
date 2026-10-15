@@ -30,6 +30,33 @@ function fileBody(name: string, type: string, bytes: Uint8Array) {
 }
 
 describe("POST /uploads", () => {
+  it("marks marketing inputs private at creation, returns only an expiring preview URL and persists the stable URL", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      const service = makeService();
+      service.uploadStorage.put.mockImplementation(async ({ key }: { key: string }) => ({ url: `/static/uploads/${key}` }));
+      const body = fileBody("portrait.png", "image/png", new Uint8Array([1]));
+      body.append("purpose", "marketing-video");
+      const response = await appFor(service).request("/", { method: "POST", body });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect((await response.json() as { url: string }).url).toContain("material_token=");
+      expect(service.created[0].isPrivate).toBe(true);
+      expect(service.created[0].url).not.toContain("?");
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("refuses private marketing uploads before writing when signing is unavailable", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "");
+    try {
+      const service = makeService();
+      const body = fileBody("voice.wav", "audio/wav", new Uint8Array([1]));
+      body.append("purpose", "marketing-video");
+      expect((await appFor(service).request("/", { method: "POST", body })).status).toBe(503);
+      expect(service.uploadStorage.put).not.toHaveBeenCalled();
+      expect(service.db.createAsset).not.toHaveBeenCalled();
+    } finally { vi.unstubAllEnvs(); }
+  });
   it("rejects disallowed mime", async () => {
     const service = makeService();
     const app = appFor(service);

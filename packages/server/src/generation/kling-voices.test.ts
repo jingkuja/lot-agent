@@ -6,6 +6,11 @@ function setup() {
   const rows = new Map<string, KlingVoiceCheckpoint & { fingerprint: string }>();
   const key = (scope: KlingVoiceScope) => `${scope.userId}/${scope.taskId}/${scope.slot}`;
   const store: KlingVoiceStore = {
+    get: vi.fn(async scope => {
+      const existing = rows.get(key(scope));
+      if (existing && existing.fingerprint !== scope.fingerprint) throw new Error("scope changed");
+      return existing ? { ...existing } : null;
+    }),
     claim: vi.fn(async (scope, externalTaskId) => {
       const existing = rows.get(key(scope));
       if (existing && existing.fingerprint !== scope.fingerprint) throw new Error("scope changed");
@@ -27,6 +32,60 @@ function setup() {
 }
 
 describe("Kling voice preparation", () => {
+  it("keeps stable voice identity when temporary URLs rotate and never resolves material on recovery", async () => {
+    const { deps, input, service } = setup();
+    const resolveReferenceUrl = vi.fn(async () => "https://media.example/a.wav?material_token=temporary-one");
+    vi.mocked(deps.provider.create).mockRejectedValueOnce(new Error("lost receipt"));
+    await expect(service.prepare({ ...input, resolveReferenceUrl })).rejects.toThrow("lost receipt");
+    expect(deps.provider.create).toHaveBeenCalledWith(expect.objectContaining({ voiceUrl: "https://media.example/a.wav?material_token=temporary-one" }), undefined);
+    const fingerprint = vi.mocked(deps.store.claim).mock.calls[0][0].fingerprint;
+    resolveReferenceUrl.mockRejectedValue(new Error("material has expired"));
+    expect(await service.prepare({ ...input, resolveReferenceUrl })).toBe("917124264959582304");
+    expect(vi.mocked(deps.store.get).mock.calls[1][0].fingerprint).toBe(fingerprint);
+    expect(resolveReferenceUrl).toHaveBeenCalledOnce();
+    expect(deps.provider.create).toHaveBeenCalledOnce();
+  });
+  it("leaves no write intent after a transient local material failure and can retry safely", async () => {
+    const { deps, input, service } = setup();
+    const resolveReferenceUrl = vi.fn().mockRejectedValueOnce(new Error("material lookup unavailable")).mockResolvedValue("https://media.example/a.wav?material_token=ready");
+    await expect(service.prepare({ ...input, resolveReferenceUrl })).rejects.toThrow("material lookup unavailable");
+    expect(deps.store.claim).not.toHaveBeenCalled(); expect(deps.provider.create).not.toHaveBeenCalled(); expect(deps.provider.poll).not.toHaveBeenCalled();
+    expect(await service.prepare({ ...input, resolveReferenceUrl })).toBe("917124264959582304");
+    expect(deps.store.claim).toHaveBeenCalledOnce(); expect(deps.provider.create).toHaveBeenCalledOnce();
+  });
+
+  it("prepares all new signed materials before any intent or paid request", async () => {
+    const { deps, input, service } = setup();
+    const resolveReferenceUrl = vi.fn().mockResolvedValueOnce("https://media.example/a.wav?signed=one").mockRejectedValueOnce(new Error("second material unavailable"));
+    await expect(service.prepare({ ...input, referenceAudio: [input.referenceAudio, "https://media.example/b.wav"], resolveReferenceUrl })).rejects.toThrow("second material unavailable");
+    expect(deps.store.claim).not.toHaveBeenCalled(); expect(deps.provider.create).not.toHaveBeenCalled();
+  });
+
+  it("only the atomic claim winner creates a voice after concurrent fresh reads", async () => {
+    const { deps, input, service } = setup();
+    let count = 0, release!: () => void;
+    const bothReady = new Promise<void>(done => { release = done; });
+    const resolveReferenceUrl = vi.fn(async url => {
+      if (++count === 2) release();
+      await bothReady;
+      return `${url}?material_token=fresh`;
+    });
+    const results = await Promise.all([service.prepare({ ...input, resolveReferenceUrl }), service.prepare({ ...input, resolveReferenceUrl })]);
+    expect(results).toEqual(["917124264959582304", "917124264959582304"]);
+    expect(deps.store.get).toHaveBeenCalledTimes(2); expect(deps.store.claim).toHaveBeenCalledTimes(2);
+    expect(deps.provider.create).toHaveBeenCalledOnce();
+    const externalId = vi.mocked(deps.provider.create).mock.calls[0][0].externalTaskId;
+    expect(deps.provider.poll).toHaveBeenCalledWith(externalId, undefined);
+  });
+
+  it("reuses a known voice even when the original material and its host are unavailable", async () => {
+    const { deps, input, service } = setup();
+    expect(await service.prepare(input)).toBe("917124264959582304");
+    deps.validateUrl.mockRejectedValue(new Error("host unavailable"));
+    const resolveReferenceUrl = vi.fn(async () => { throw new Error("material deleted"); });
+    expect(await service.prepare({ ...input, resolveReferenceUrl })).toBe("917124264959582304");
+    expect(resolveReferenceUrl).not.toHaveBeenCalled(); expect(deps.provider.create).toHaveBeenCalledOnce();
+  });
   it("persists before writing, polls every 2.5s and reuses the completed checkpoint", async () => {
     const { deps, input, service } = setup();
     const result = await service.prepare(input);
@@ -92,7 +151,7 @@ describe("Kling voice preparation", () => {
 
   it("validates the full batch before any paid write", async () => {
     const { deps, input, service } = setup();
-    vi.mocked(deps.validateUrl).mockResolvedValueOnce().mockRejectedValueOnce(new Error("private address"));
+    vi.mocked(deps.validateUrl).mockImplementation(async (url?: string) => { if (url?.includes("127.0.0.1")) throw new Error("private address"); });
     await expect(service.prepare({ ...input, referenceAudio: [input.referenceAudio, "http://127.0.0.1/a.wav"] })).rejects.toThrow("private address");
     expect(deps.provider.create).not.toHaveBeenCalled();
     expect(deps.store.claim).not.toHaveBeenCalled();

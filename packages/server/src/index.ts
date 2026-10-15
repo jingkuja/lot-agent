@@ -30,6 +30,7 @@ import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { staticFileHandler } from "./static-files.js";
+import { createUploadAccessGuard } from "./generation/private-materials.js";
 import { AgentService, type ServiceConfig } from "./services/agent-service.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
@@ -264,7 +265,7 @@ async function main() {
   });
 
   const requestLogger = logger();
-  app.use("*", (c, next) => c.req.path.startsWith("/api/rag/preview/") || c.req.path.startsWith("/api/public/feishu/") || c.req.path.startsWith("/api/public/marketing-analysis-audio/") ? next() : requestLogger(c, next));
+  app.use("*", (c, next) => c.req.path.startsWith("/static/uploads/") || c.req.path.startsWith("/api/rag/preview/") || c.req.path.startsWith("/api/public/feishu/") || c.req.path.startsWith("/api/public/marketing-analysis-audio/") ? next() : requestLogger(c, next));
   app.use("*", cors({
     origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
     credentials: true,
@@ -441,7 +442,7 @@ async function main() {
   app.route("/api/public/marketing-analysis-audio", createAnalysisAudioRoutes(resolve(ROOT, "data/marketing-analysis")));
   app.get("/static/assets/:filename", staticFileHandler(ASSETS_DIR));
   app.get("/static/documents/:filename", staticFileHandler(DOCS_DIR));
-  app.get("/static/uploads/:filename", staticFileHandler(UPLOADS_DIR));
+  app.get("/static/uploads/:filename", staticFileHandler(UPLOADS_DIR, { authorize: createUploadAccessGuard(service.db, service.sessions) }));
 
   const port = Number(process.env.PORT) || 3000;
 

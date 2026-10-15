@@ -43,7 +43,7 @@ export function parseSize(size?: string): [number, number] {
  * up to a few nested `error.message` / `message` layers to the innermost text,
  * falling back to `code`. Returns undefined for a normal (non-error) response.
  */
-export function extractVendorError(j: Record<string, unknown>): string | undefined {
+export function extractVendorError(j: Record<string, unknown>, privateValues: string[] = []): string | undefined {
   const nested = (j.error ?? {}) as Record<string, unknown>;
   let msg =
     (typeof j.message === "string" && j.message) ||
@@ -70,7 +70,36 @@ export function extractVendorError(j: Record<string, unknown>): string | undefin
     msg = cur.trim();
   }
   const code = typeof j.code === "string" ? j.code : undefined;
-  return msg || code || undefined;
+  return safeErrorMessage(msg || code, privateValues);
+}
+
+/** Vendor errors may echo request material. Keep a bounded diagnostic, never a
+ * response envelope, credential, URL, or an exact prompt supplied on create. */
+function safeErrorMessage(message: string | undefined, privateValues: string[] = []): string | undefined {
+  if (!message?.trim()) return undefined;
+  let value = message.trim();
+  if (/^[{\[]/.test(value) || /["']?(?:prompt|input_reference|reference_audio|reference_video)["']?\s*[:=]/i.test(value)) {
+    return "供应商返回了包含私有内容的错误响应。";
+  }
+  for (const privateValue of privateValues.filter(Boolean).sort((a, b) => b.length - a.length)) value = value.split(privateValue).join("[内容已隐藏]");
+  return value
+    .replace(/(?:https?:\/\/|data:)[^\s<>"']+/gi, "[链接已隐藏]")
+    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [已隐藏]")
+    .replace(/\b(?:material_token|api_key|authorization|token)\s*[:=]\s*[^\s,;]+/gi, "[凭证已隐藏]")
+    .slice(0, 512);
+}
+
+function requestPrivateValues(body: unknown): string[] {
+  const values: string[] = [];
+  const visit = (value: unknown, privateField = false) => {
+    if (typeof value === "string") { if (privateField) values.push(value); return; }
+    if (Array.isArray(value)) { value.forEach(item => visit(item, privateField)); return; }
+    if (value && typeof value === "object") {
+      for (const [name, item] of Object.entries(value)) visit(item, privateField || /^(prompt|input_reference|reference_video|reference_audio|first_frame|last_frame|url)$/.test(name));
+    }
+  };
+  visit(body);
+  return values;
 }
 
 /** Vendor adapter shape; `Req` is the media-specific request type. */
@@ -101,38 +130,31 @@ const DEFAULT_TIMEOUT_MS = 120_000;
  * 500 whose body is `{ code:"fail_to_fetch_task", message:"…未订购…资费包" }`), so
  * dig the human-readable vendor message out of it instead of dumping raw JSON.
  */
-async function responseError(res: { status: number; text(): Promise<string> }, ctx: string): Promise<Error> {
+async function responseError(res: { status: number; text(): Promise<string> }, ctx: string, privateValues: string[]): Promise<Error> {
   const body = await res.text();
   let vendorMsg: string | undefined;
   try {
-    vendorMsg = extractVendorError(JSON.parse(body) as Record<string, unknown>);
+    vendorMsg = extractVendorError(JSON.parse(body) as Record<string, unknown>, privateValues);
   } catch {
-    // body wasn't JSON — fall back to the raw text below
+    // A non-JSON body can contain private material or an HTML error page.
   }
-  return new Error(vendorMsg ?? `${ctx}: ${res.status} ${body}`);
+  return new Error(vendorMsg ?? `${ctx}: HTTP ${res.status}`);
 }
 
-/** Max chars of a raw vendor response body carried in a create-failure error —
- * enough to show the full returned payload on hover without an unbounded tooltip. */
-const RAW_BODY_CAP = 2000;
-
 /**
- * Build a create-failure Error that carries the **raw response body** so the UI
- * can show exactly what the vendor returned on hover. A create only succeeds when
+ * Build a create-failure Error with a safe vendor diagnostic. A create only succeeds when
  * the response yields a task id; every other outcome (non-2xx, non-JSON body, or
- * a 2xx envelope with no adapter-recognized task id) routes here. Leads with the
- * extracted vendor message when there is one, then appends the raw payload.
+ * a 2xx envelope with no adapter-recognized task id) routes here.
  */
-function createFailError(status: number, bodyText: string): Error {
-  const raw = bodyText.trim().slice(0, RAW_BODY_CAP);
+function createFailError(status: number, bodyText: string, privateValues: string[]): Error {
   let vendorMsg: string | undefined;
   try {
-    vendorMsg = extractVendorError(JSON.parse(bodyText) as Record<string, unknown>);
+    vendorMsg = extractVendorError(JSON.parse(bodyText) as Record<string, unknown>, privateValues);
   } catch {
-    // body wasn't JSON — the raw text is all we have to show
+    // The HTTP status remains useful without exposing an unstructured body.
   }
   const lead = vendorMsg ?? (status >= 400 ? `请求失败 (HTTP ${status})` : "未返回任务ID");
-  return new Error(raw ? `${lead}：${raw}` : lead);
+  return new Error(lead);
 }
 
 /** Drives any `VendorAdapter<Req>` over HTTP (async create→poll). */
@@ -162,34 +184,28 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     const model = req.model ?? this.opts.model;
     const url = `${baseUrl}${adapter.createPath()}`;
     const body = adapter.buildCreateBody(req, model);
-    // Debug: print the exact outgoing create request (URL + body) so the vendor
-    // call can be reproduced with curl. Auth header omitted on purpose.
-    console.log("[generation.create] →", "POST", url, JSON.stringify(body));
+    const privateValues = [apiKey, ...requestPrivateValues(body)];
+    console.log("[generation.create] request", { method: "POST" });
     const res = await this.request(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     }, 0);
-    // Read the body once as text so both the success path and every failure path
-    // (non-2xx, non-JSON, or a 2xx envelope with no task id) can see the raw
-    // payload — the create only "succeeds" when a task id comes back.
+    // Read once for parsing. Request/response bodies never enter logs or errors.
     const bodyText = await res.text();
-    console.log("[generation.create] ←", res.status, bodyText);
-    if (!res.ok) throw createFailError(res.status, bodyText);
+    console.log("[generation.create] response", { status: res.status });
+    if (!res.ok) throw createFailError(res.status, bodyText, privateValues);
     let json: unknown;
     try {
       json = JSON.parse(bodyText);
     } catch {
-      // A 2xx with a non-JSON body can't carry a task id — fail with the raw text.
-      throw createFailError(res.status, bodyText);
+      throw createFailError(res.status, bodyText, privateValues);
     }
     const created = adapter.parseCreate(json);
     // Success REQUIRES a vendor task id. A 200 with an error envelope (or any body
     // lacking the task id required by its adapter) has nothing to poll, so fail
-    // immediately — carrying the raw response so the UI shows what came back on
-    // hover — instead of returning an empty id the job runner would poll
-    // (`/videos/`) until the max-wait timeout.
-    if (!created.taskId) throw createFailError(res.status, bodyText);
+    // immediately instead of polling an empty id until the max-wait timeout.
+    if (!created.taskId) throw createFailError(res.status, bodyText, privateValues);
     return created;
   }
   async poll(taskId: string): Promise<PollResult> {
@@ -198,8 +214,9 @@ export class HttpGenerationClient<Req extends { model?: string }> {
       method: "GET",
       headers: { Authorization: `Bearer ${apiKey}` },
     }, 1);
-    if (!res.ok) throw await responseError(res, "generation poll failed");
-    const parsed = adapter.parsePoll(await res.json());
+    if (!res.ok) throw await responseError(res, "generation poll failed", [apiKey]);
+    const result = adapter.parsePoll(await res.json());
+    const parsed = result.error ? { ...result, error: safeErrorMessage(result.error, [apiKey]) } : result;
     const term = adapter.isTerminal(parsed.status);
     if (term) return { ...parsed, status: term };
     // A missing status is a malformed/error response the adapter couldn't

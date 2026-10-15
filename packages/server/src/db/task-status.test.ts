@@ -3,7 +3,7 @@ import { DB } from "./database.js";
 
 function fakeDb(rowCount = 1) {
   const db = Object.create(DB.prototype) as DB;
-  const query = vi.fn(async () => ({ rows: [], rowCount }));
+  const query = vi.fn(async (_sql: string, _params?: unknown[]) => ({ rows: [], rowCount }));
   // @ts-expect-error inject a fake pool
   db.pool = { query };
   return { db, query };
@@ -17,6 +17,19 @@ function fakeDb(rowCount = 1) {
  * every transition carries a WHERE-status guard.
  */
 describe("task status transitions", () => {
+  it("stores the selected queue with the original task input", async () => {
+    const { db, query } = fakeDb();
+    await db.createTask("t1", "marketing.video", { original: true }, "owner", "lot-marketing-video");
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("queue_name"), ["t1", "marketing.video", '{"original":true}', "owner", "lot-marketing-video"]);
+  });
+
+  it("keeps the stale-pending safety net for both ordinary and marketing tasks", async () => {
+    const { db, query } = fakeDb();
+    await db.failStalePendingTasks(60_000, "worker unavailable");
+    expect(query.mock.calls[0][0]).toContain("queue_name IN ('lot-tasks','lot-marketing-video')");
+    expect(query.mock.calls[0][0]).toContain("status = 'pending' AND attempts = 0");
+  });
+
   it("markTaskRunning is guarded and reports whether it claimed the task", async () => {
     const { db, query } = fakeDb(1);
     await expect(db.markTaskRunning("t1", 1)).resolves.toBe(true);

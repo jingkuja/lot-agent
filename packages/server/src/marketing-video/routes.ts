@@ -19,6 +19,7 @@ import { normalizeMarketingReview, REVIEW_INSTRUCTION } from "./compliance.js";
 export { REVIEW_INSTRUCTION } from "./compliance.js";
 import { ownedAnalysisUpload } from "../marketing-analysis/uploads.js";
 import { AnalysisError } from "../marketing-analysis/errors.js";
+import { signPrivateMaterial } from "../generation/private-materials.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const MODEL = "kling-video-v3-omni";
@@ -41,7 +42,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     console.error("[marketing-video] request failed", { method: c.req.method, errorType: error.name });
     return c.json({ error: "操作失败，请稍后重试。" }, 500);
   });
-  async function ownedAssets(owner: string, draft: MarketingDraft, allowMissing = false, historicalDraft?: MarketingDraft) {
+  async function ownedAssets(owner: string, draft: MarketingDraft, allowMissing = false, historicalDraft?: MarketingDraft, preview = false) {
     const result: Record<string, { id: string; url: string; name: string; mime: string; issue?: "unsupported" }> = {};
     if (draft.referenceUpload && draft.referenceUpload.id !== historicalDraft?.referenceUpload?.id) {
       try { await ownedAnalysisUpload(service.db.pool, owner, draft.referenceUpload.id); }
@@ -61,7 +62,11 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
           : ["voice", "music"].includes(slot) ? ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4"] : ["image/jpeg", "image/png", "image/webp"];
         const unsupported = !allowed.includes(asset.mime) || Number(asset.size_bytes) > (slot === "video" ? 150 : slot === "music" ? 30 : slot === "voice" ? 15 : 20) * 1024 * 1024;
         if (unsupported && !marketingAssetIds(historicalDraft?.assets[slot as keyof MarketingDraft["assets"]]).includes(id)) throw new MarketingError("素材格式或大小不支持");
-        result[id] = { id, url: asset.url, name: asset.original_name || slot, mime: asset.mime, ...(unsupported ? { issue: "unsupported" as const } : {}) };
+        if (asset.type === "upload") {
+          await service.db.protectMarketingUpload(id, owner);
+          asset.is_private = true;
+        }
+        result[id] = { id, url: preview ? signPrivateMaterial(asset) : asset.url, name: asset.original_name || slot, mime: asset.mime, ...(unsupported ? { issue: "unsupported" as const } : {}) };
         result[slot] ??= result[id];
       }
     }
@@ -109,7 +114,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   app.use("/:id/*", validateId);
   app.get("/:id", async (c) => {
     const p = await requireProject(c.get("userId"), c.req.param("id"));
-    return c.json({ ...p, assets: await ownedAssets(c.get("userId"), p.draft, true, p.draft) });
+    return c.json({ ...p, assets: await ownedAssets(c.get("userId"), p.draft, true, p.draft, true) });
   });
   app.get("/:id/text-operations", async c => {
     const owner = c.get("userId"); const id = c.req.param("id");

@@ -59,18 +59,28 @@
 
 首版尚无真实抖音授权和发布接口。结果页提供下载视频、复制标题标签，直发按钮明确禁用。接入后应复用持久化项目和发布元数据，另建发布任务并校验平台授权，不能把打开抖音网页视为发布成功。
 
+## 素材访问与队列隔离
+
+新营销上传在落库时标记为私有。迁移 47 保护旧项目和冻结任务引用的上传素材。未携带所有者会话或有效临时令牌的请求返回 404。移除素材不会恢复公开访问。浏览器预览失败时经所有者接口重新取链接。Worker 只在新提交时签发链接；已有供应商任务继续查询原 ID。音色请求在本地素材准备成功后才保存意图，已有回执仍可恢复。
+
+营销父任务使用 `lot-marketing-video`，普通任务使用 `lot-tasks`。两个队列各有并发 1 的 Worker，仍由同一个 Worker 进程启动。营销父任务内部最多并行两个片段。旧队列作业保留原 ID 转发；旧 active 作业不会重复投递。取消、显式恢复和未启动任务超时保护覆盖两个队列。该改动隔离消费槽位，不等于主机资源隔离。
+
+升级前停止新提交，并等待已使用旧无签名素材地址的供应商任务完成。停止旧 Worker 后执行迁移至 47，再启动同版本服务。不要混跑仍提供匿名素材访问的旧 API。详见 [F01 / F02 修复与验收](marketing-video-f01-f02-acceptance-20261015.md)。
+
 ## 环境和验证
 
 先由 API 执行迁移，再启动 Worker。API 和普通视频 Worker 均需要 `ffmpeg`、`ffprobe`；编码需要 libx264、AAC；模型字幕不依赖 libass 或本地字幕字体。可用 `MARKETING_FFMPEG_PATH` / `MARKETING_FFPROBE_PATH` 指定程序路径。容器配置参见 [部署](deployment.md)。拼接能力检查失败时界面阻止生成；字幕选项仅控制模型提示词，不参与本地能力检查。
 
-音色样例继续使用 `KLING_VOICE_BASE_URL` / `KLING_VOICE_API_KEY`，视频推理仍使用当前用户模型凭证；素材引用需要正确的 `PUBLIC_BASE_URL`。未选择音色样例时使用模型原生旁白。
+音色样例继续使用 `KLING_VOICE_BASE_URL` / `KLING_VOICE_API_KEY`，视频推理仍使用当前用户模型凭证；素材引用需要正确的 `PUBLIC_BASE_URL`。营销上传素材为私有，API 和 Worker 必须使用相同的现有 `SECRET_MASTER_KEY`。浏览器和供应商使用有效期 10 分钟的临时链接。未选择音色样例时使用模型原生旁白。
 
-页面先检查草稿列表和服务能力，成功后才启用编辑、自动保存和生成；接口未部署返回 404 时显示更新服务提示，连接失败可点「重新连接」。普通本地开发代理连接 `localhost:3000`，仅桌面开发模式跟随桌面服务器设置。线上升级必须同时更新 Web、API 和 Worker 镜像并执行迁移至 43；只更新 Web 会导致新接口 `Not Found`。文案和分镜生成后自动保存；风险检查可按需执行，提交制作前仍会自动检查当前内容。
+页面先检查草稿列表和服务能力，成功后才启用编辑、自动保存和生成；接口未部署返回 404 时显示更新服务提示，连接失败可点「重新连接」。普通本地开发代理连接 `localhost:3000`，仅桌面开发模式跟随桌面服务器设置。线上升级必须同时更新 Web、API、Worker 和 Nginx 配置，并执行迁移至 47；只更新 Web 会导致新接口 `Not Found`。文案和分镜生成后自动保存；风险检查可按需执行，提交制作前仍会自动检查当前内容。
 
 ```bash
 pnpm --filter @lot-agent/core build
 pnpm exec vitest run packages/core/src/marketing-video packages/server/src/marketing-video packages/server/src/jobs/bullmq-queue.test.ts packages/server/src/billing/meter.test.ts packages/server/src/generation/run-job.test.ts
 pnpm check:marketing-video:ui
+# 真实队列验证另需空的本机 PG 库和 Redis 15 号库；变量说明见验收记录。
+pnpm check:marketing-video:queue
 # 指向空的本地 marketing_check_* 数据库；脚本拒绝非空库，不清理已有表。
 MARKETING_CHECK_DATABASE_URL=postgresql://USER:PASSWORD@127.0.0.1:5432/marketing_check_local pnpm check:marketing-video:db
 pnpm --filter @lot-agent/server build

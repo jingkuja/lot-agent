@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import type { AgentService } from "../services/agent-service.js";
 import { attachmentKind } from "../services/attachment-extractor.js";
+import { signPrivateMaterial } from "../generation/private-materials.js";
 
 type Variables = { userId: string };
 
@@ -63,16 +64,23 @@ export function createUploadRoutes(service: AgentService) {
     const ext = extname(file.name) || "";
     const id = randomUUID();
     const key = `${id}${ext}`;
+    const isPrivate = body["purpose"] === "marketing-video";
+    // Fail before writing material when the temporary-link key is unavailable.
+    const privateAsset = { id, user_id: userId, type: "upload", storage_key: key, url: service.uploadStorage.getUrl(key), is_private: isPrivate };
+    let accessUrl: string;
+    try { accessUrl = signPrivateMaterial(privateAsset); }
+    catch { return c.json({ error: "素材访问服务未配置，请联系管理员。" }, 503); }
     const { url } = await service.uploadStorage.put({
       key, body: buf, contentType: mime,
     });
 
     await service.db.createAsset({
       id, taskId: null, userId, type: "upload",
-      storageKey: key, url, mime, sizeBytes: size, originalName: file.name,
+      storageKey: key, url, mime, sizeBytes: size, originalName: file.name, isPrivate,
     });
 
-    return c.json({ assetId: id, filename: file.name, mime, size, url, kind });
+    c.header("Cache-Control", "no-store");
+    return c.json({ assetId: id, filename: file.name, mime, size, url: isPrivate ? accessUrl : url, kind });
   });
 
   return app;

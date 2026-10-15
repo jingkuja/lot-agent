@@ -35,6 +35,8 @@ export interface JobGenerationProvider {
 
 export interface RunJobDeps {
   provider: JobGenerationProvider;
+  /** Authorize stable local material URLs, then mint an expiring vendor URL. */
+  resolveReferenceUrl?: (url: string) => Promise<string>;
   prepareKlingVoices?: (input: PrepareKlingVoicesInput) => Promise<ReferenceInput>;
   storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }> };
   db: {
@@ -90,9 +92,10 @@ type GenOut = { assetIds: string[]; assets: GenAssets; downloadFailed?: boolean;
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function publicReference(value: ReferenceInput | undefined): ReferenceInput | undefined {
-  if (typeof value === "string") return publicStaticUrl(value);
-  return value?.map(publicStaticUrl);
+async function publicReference(deps: RunJobDeps, value: ReferenceInput | undefined): Promise<ReferenceInput | undefined> {
+  const resolve = (url: string) => deps.resolveReferenceUrl?.(publicStaticUrl(url)) ?? Promise.resolve(publicStaticUrl(url));
+  if (typeof value === "string") return resolve(value);
+  return value ? Promise.all(value.map(resolve)) : undefined;
 }
 
 /**
@@ -107,7 +110,7 @@ async function imageReferencesAsDataUrls(
 ): Promise<ReferenceMedia[] | undefined> {
   if (!media?.length) return undefined;
   return Promise.all(media.map(async (item) => {
-    const source = publicStaticUrl(item.url);
+    const source = await publicReference(deps, item.url) as string;
     const { body, mime } = await deps.urlToBytes(source, { signal: deps.signal });
     if (!mime.startsWith("image/")) {
       throw new Error(`image edit reference is not an image (${mime})`);
@@ -262,16 +265,33 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     if (!vendorTaskId) {
       // Tokenhub image edits only accept Base64 data URLs. Video vendors fetch
       // references themselves, so those keep externally accessible URLs.
-      const publicMedia = mediaType === "image"
+      let publicMedia = mediaType === "image"
         ? await imageReferencesAsDataUrls(deps, media)
-        : media?.map((item) => ({ ...item, url: publicStaticUrl(item.url) }));
-      let preparedAudio = publicReference(referenceAudio);
+        : media ? await Promise.all(media.filter(item => !needsKlingVoices || item.type !== "reference_audio").map(async (item) => ({ ...item, url: await publicReference(deps, item.url) as string }))) : undefined;
+      let publicInputReference = await publicReference(deps, inputReference);
+      let publicVideoReference = await publicReference(deps, referenceVideo);
+      let publicFirstFrame = firstFrame ? await publicReference(deps, firstFrame) as string : undefined;
+      let publicLastFrame = lastFrame ? await publicReference(deps, lastFrame) as string : undefined;
+      // Voice checkpoints fingerprint the original URL. Temporary capabilities
+      // must never enter persisted input, cache keys or voice identity.
+      let preparedAudio = needsKlingVoices
+        ? typeof referenceAudio === "string" ? publicStaticUrl(referenceAudio) : referenceAudio?.map(publicStaticUrl)
+        : await publicReference(deps, referenceAudio);
       if (needsKlingVoices && preparedAudio) {
         if (!deps.prepareKlingVoices) throw new Error("Kling 音色服务未配置，无法提交参考声音。");
         preparedAudio = await deps.prepareKlingVoices({
           taskId: job.id, userId: job.userId, referenceAudio: preparedAudio,
           signal: deps.signal, assertNotCancelled,
+          resolveReferenceUrl: deps.resolveReferenceUrl,
         });
+        // Voice preparation can take minutes. Refresh image/video capabilities
+        // immediately before submission; the preflight above still prevents
+        // invalid references from starting a paid voice request.
+        publicInputReference = await publicReference(deps, inputReference);
+        publicVideoReference = await publicReference(deps, referenceVideo);
+        publicFirstFrame = firstFrame ? await publicReference(deps, firstFrame) as string : undefined;
+        publicLastFrame = lastFrame ? await publicReference(deps, lastFrame) as string : undefined;
+        publicMedia = media ? await Promise.all(media.filter(item => item.type !== "reference_audio").map(async item => ({ ...item, url: await publicReference(deps, item.url) as string }))) : undefined;
       }
       await assertNotCancelled();
       const createRequest = {
@@ -282,23 +302,21 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
         quality: (input.quality as string | undefined) ?? (mediaType === "image" ? "auto" : undefined),
         durationSec: input.durationSec as number | undefined,
         ratio: input.ratio as string | undefined,
-        input_reference: publicReference(inputReference),
-        reference_video: publicReference(referenceVideo),
+        input_reference: publicInputReference,
+        reference_video: publicVideoReference,
         reference_audio: preparedAudio,
         generate_audio: generateAudio,
-        first_frame: firstFrame ? publicStaticUrl(firstFrame) : undefined,
-        last_frame: lastFrame ? publicStaticUrl(lastFrame) : undefined,
+        first_frame: publicFirstFrame,
+        last_frame: publicLastFrame,
         // Dedicated voice IDs replace all legacy audio URLs for Kling.
         media: needsKlingVoices ? publicMedia?.filter((item) => item.type !== "reference_audio") : publicMedia,
       };
-      // Keep the task id and resolved vendor model beside the request payload so
-      // a video failure can be traced through the worker logs. Deliberately do
-      // not log provider configuration or headers: those contain the API key.
+      // Log identifiers only. Prompts and material capabilities are private.
       if (mediaType === "video" || mediaType === "image") {
         console.log(`[${mediaType}.generate] request`, JSON.stringify({
           taskId: job.id,
           model: deps.vendorModel,
-          body: createRequest,
+          durationSec: createRequest.durationSec,
         }));
       }
       const created = await deps.provider.create(createRequest);

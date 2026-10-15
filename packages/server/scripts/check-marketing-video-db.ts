@@ -73,7 +73,25 @@ try {
   await db.pool.query("CREATE EXTENSION IF NOT EXISTS vector");
   await runMigrations(db.pool, migrations.filter(m => m.version < 36));
   await db.pool.query("INSERT INTO users(id,name) VALUES($1,'marketing fixture'),($2,'other fixture')", [owner, other]);
+  await runMigrations(db.pool, migrations.filter(m => m.version < 47));
+  const oldMaterials = Array.from({ length: 5 }, () => randomUUID());
+  for (const [index, id] of oldMaterials.entries()) {
+    await db.pool.query("INSERT INTO assets(id,user_id,type,storage_key,url,mime,size_bytes) VALUES($1,$2,'upload',$3,$4,'image/png',1)",
+      [id, index === 3 ? other : owner, `${id}.png`, `/static/uploads/${id}.png`]);
+  }
+  const oldProject = randomUUID(), oldTask = randomUUID();
+  await db.pool.query("INSERT INTO marketing_video_projects(id,user_id,draft) VALUES($1,$2,$3)",
+    [oldProject, owner, { assets: { portrait: [oldMaterials[0].toUpperCase()], voice: oldMaterials[1], background: oldMaterials[3] } }]);
+  await db.createTask(oldTask, "marketing.video", { draft: { assets: { scene: [oldMaterials[2]] } } }, owner);
   await runMigrations(db.pool, migrations); await runMigrations(db.pool, migrations);
+  assert.deepEqual(await Promise.all(oldMaterials.map(async id => (await db.getAsset(id))!.is_private)), [true, true, true, false, false], "Backfill covers scalar/array and frozen inputs, without touching foreign or unrelated uploads");
+  await db.protectMarketingUpload(oldMaterials[4], other);
+  assert.equal((await db.getAsset(oldMaterials[4]))!.is_private, false);
+  await db.protectMarketingUpload(oldMaterials[4], owner);
+  assert.equal((await db.getAsset(oldMaterials[4]))!.is_private, true);
+  assert.equal((await db.getTask(oldTask))!.input.draft.assets.scene[0], oldMaterials[2], "Frozen input identity is unchanged");
+  await db.pool.query("DELETE FROM marketing_video_projects WHERE id=$1", [oldProject]);
+  await db.pool.query("DELETE FROM tasks WHERE id=$1", [oldTask]);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM users WHERE id=ANY($1::uuid[])", [[owner, other]])).rows[0].n, 2);
   await mkdir(join(root, "assets")); await mkdir(join(root, "uploads"));
   await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=256x144:r=25", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "15", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", fixture]);

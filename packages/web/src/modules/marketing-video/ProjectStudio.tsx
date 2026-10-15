@@ -57,6 +57,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const analysisRequest = useRef<{ fingerprint: string; body: unknown } | null>(null);
   const uploadRequest = useRef<{ fingerprint: string; id: string } | null>(null);
   const uploadController = useRef<AbortController | null>(null);
+  const previewRefresh = useRef(new Map<string, number>());
   const storageKey = `lot:marketing-video:${ownerId}`;
   const setCurrent = (p: Project) => { if (p.id === draftId.current && p.version < version.current) return; projectRef.current = p; setProject(p); setProjects(old => [p, ...old.filter(item => item.id !== p.id)].slice(0, 50)); };
   const remember = (id: string | null) => { try { if (id) localStorage.setItem(storageKey, id); else localStorage.removeItem(storageKey); } catch { /* Server drafts remain available. */ } };
@@ -296,10 +297,22 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       if (!file.size || file.size > 30 * 1024 * 1024 || !["audio/mpeg", "audio/wav", "audio/mp4"].includes(file.type)) throw new Error("背景音乐支持 MP3、WAV、M4A，最大 30 MB。");
       if (await readMediaDuration(file) > 600) throw new Error("背景音乐最长 10 分钟。");
     }
-    const value = await api.uploadFile(file);
+    const value = await api.uploadFile(file, undefined, "marketing-video");
     if (!alive.current || token !== epoch.current) return;
     setAssets(old => ({ ...old, [multiple ? value.assetId : slot]: { id: value.assetId, url: value.url, name: file.name, mime: value.mime } }));
     field("assets", { ...draftRef.current.assets, [slot]: multiple ? [...marketingAssetIds(draftRef.current.assets[slot]), value.assetId] : value.assetId });
+  }
+  async function refreshMaterial(id: string) {
+    // A suspended tab can outlive a capability. Re-authorize the read without
+    // saving a draft or retrying a paid operation. Bound broken-media retries.
+    if (Date.now() - (previewRefresh.current.get(id) ?? 0) < 60_000) return;
+    previewRefresh.current.set(id, Date.now());
+    const token = epoch.current;
+    try {
+      const fresh = await api.getAsset(id);
+      if (!alive.current || token !== epoch.current) return;
+      setAssets(old => Object.fromEntries(Object.entries(old).map(([key, value]) => [key, value.id === id ? { ...value, url: fresh.url } : value])));
+    } catch (error) { if (alive.current && token === epoch.current) setError(errorMessage(error)); }
   }
   async function newDraft(copy = false, editShots = false) {
     setTextPending(false); textRequest.current = null;
@@ -324,7 +337,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       });
     }} /></label>{ids.map(id => {
       const item = assets[id] ?? (assets[slot]?.id === id ? assets[slot] : undefined);
-      return <div key={id} className="mv-asset-preview">{item && (item.mime.startsWith("audio/") ? <audio controls src={item.url} aria-label={t("声音试听")} /> : item.mime.startsWith("video/") ? <video controls preload="metadata" src={item.url} aria-label={t("参考视频预览")} /> : <img src={item.url} alt={t(label)} />)}<span>{item?.name ?? t(label)}</span><button disabled={busy || frozen} onClick={() => {
+      return <div key={id} className="mv-asset-preview">{item && (item.mime.startsWith("audio/") ? <audio controls src={item.url} onError={() => void refreshMaterial(id)} aria-label={t("声音试听")} /> : item.mime.startsWith("video/") ? <video controls preload="metadata" src={item.url} onError={() => void refreshMaterial(id)} aria-label={t("参考视频预览")} /> : <img src={item.url} onError={() => void refreshMaterial(id)} alt={t(label)} />)}<span>{item?.name ?? t(label)}</span><button disabled={busy || frozen} onClick={() => {
         const next = { ...draftRef.current.assets };
         const remaining = ids.filter(value => value !== id);
         if (multiple && remaining.length) next[slot as "portrait" | "background" | "scene"] = remaining;

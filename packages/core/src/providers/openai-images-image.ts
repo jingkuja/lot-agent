@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CreateResult, PollResult } from "./generation-common.js";
+import { extractVendorError, type CreateResult, type PollResult } from "./generation-common.js";
 import type { ImageGenerationProvider, ImageGenerationRequest } from "./image-generation.js";
 
 /**
@@ -92,7 +92,12 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
       body: payload,
     });
     const text = await res.text();
-    if (!res.ok) throw new Error(`image generation failed: ${res.status} ${text}`);
+    if (!res.ok) {
+      let diagnostic: string | undefined;
+      try { diagnostic = extractVendorError(JSON.parse(text) as Record<string, unknown>, [this.opts.apiKey, req.prompt, ...referenceUrls]); }
+      catch { /* Unstructured error bodies can contain private image material. */ }
+      throw new Error(diagnostic ?? `image generation failed: HTTP ${res.status}`);
+    }
 
     let response: unknown;
     try {

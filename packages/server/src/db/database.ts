@@ -119,6 +119,7 @@ export interface StoredAsset {
   height: number | null;
   duration_sec: number | null;
   original_name: string | null;
+  is_private?: boolean;
   created_at: string;
 }
 
@@ -1020,10 +1021,11 @@ export class DB {
     height?: number | null;
     durationSec?: number | null;
     originalName?: string | null;
+    isPrivate?: boolean;
   }): Promise<void> {
     await this.pool.query(
-      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec, original_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec, original_name, is_private)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         a.id,
         a.taskId ?? null,
@@ -1037,6 +1039,7 @@ export class DB {
         a.height ?? null,
         a.durationSec ?? null,
         a.originalName ?? null,
+        a.isPrivate ?? false,
       ]
     );
   }
@@ -1047,6 +1050,16 @@ export class DB {
       [id]
     );
     return rows[0] ?? null;
+  }
+
+  async getUploadByStorageKey(key: string): Promise<StoredAsset | null> {
+    const { rows } = await this.pool.query("SELECT * FROM assets WHERE type='upload' AND storage_key=$1", [key]);
+    return rows[0] ?? null;
+  }
+
+  /** Privacy is monotonic. Removing material from a draft never republishes it. */
+  async protectMarketingUpload(id: string, userId: string): Promise<void> {
+    await this.pool.query("UPDATE assets SET is_private=true WHERE id=$1 AND user_id=$2 AND type='upload' AND NOT is_private", [id, userId]);
   }
 
   async listUserUploads(userId: string): Promise<StoredAsset[]> {
@@ -1644,12 +1657,13 @@ export class DB {
     id: string,
     type: string,
     input: unknown,
-    userId: string
+    userId: string,
+    queueName = "lot-tasks"
   ): Promise<void> {
     await this.pool.query(
-      `INSERT INTO tasks (id, type, input, user_id)
-       VALUES ($1, $2, $3, $4)`,
-      [id, type, JSON.stringify(input), userId]
+      `INSERT INTO tasks (id, type, input, user_id, queue_name)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, type, JSON.stringify(input), userId, queueName]
     );
   }
 
@@ -1722,7 +1736,7 @@ export class DB {
   async failStalePendingTasks(staleMs: number, error: string): Promise<StoredTask[]> {
     const { rows } = await this.pool.query(
       `UPDATE tasks SET status = 'failed', error = $2, updated_at = now()
-       WHERE status = 'pending' AND attempts = 0 AND queue_name = 'lot-tasks'
+       WHERE status = 'pending' AND attempts = 0 AND queue_name IN ('lot-tasks','lot-marketing-video')
          AND created_at < now() - make_interval(secs => $1::double precision / 1000)
        RETURNING *`,
       [staleMs, error]

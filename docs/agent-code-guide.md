@@ -44,7 +44,7 @@ Hono API：鉴权、参数校验、限流、用户归属
      ├─ DigitalEmployeeService → 客户 / 营销 / 商机 / 获客
      ├─ KnowledgeService → 资料管理 / 检索 / 外部接入
      └─ 任务提交 → Redis + BullMQ
-                         ├─ 普通 Worker：图片、视频、记忆提取、商机发现
+                         ├─ 普通 Worker 进程：普通任务与营销制作使用独立队列
                          ├─ 知识 Worker：解析、OCR、embedding、索引发布
                          └─ 媒体分析 Worker：受控下载、抽帧、OCR、有序多图摘要
 
@@ -110,11 +110,13 @@ ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core
 
 Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务恢复检查后调用 `generation/kling-voices.ts`：将样例转为公网 URL → `POST /v1/wand/kling/custom-voices` → 每 2.5 秒查询至 `succeed` → 取 `task_result.voices[].voice_id` 作为内部参考音色，提供器将其写入请求的 `metadata.voice_id`（两个音色时为 `metadata.voice_ids`），不向网关发送 `reference_audio`，并开启视频音频。New API 网关需把上述 metadata 转为腾讯 `contents` 中的 `type=voice` / `voice_id` 项。创建接口的 `task_id` 不作为音色 ID。非 Kling 模型沿用音频 URL。自动音色名称使用 20 字符以内的短名称。音色 HTTP / 业务错误保留脱敏后的 message、code、request_id 供排查，不丢弃 400 的具体原因。单次最多两个音色；音色失败、超时或取消会阻止视频提交。
 
-`core/providers/kling-voices.ts` 定义音色 HTTP 协议和持久化接口；`generation/kling-voice-store.ts` 通过迁移 35 的 `generation_voice_tasks` 保存用户 / 视频任务 / 音频序号对应的外部请求 ID、音色任务 ID 和音色 ID。写请求前先保存外部请求 ID，未知创建结果仅查询，不重发 POST；凭证 / 来源指纹变化时拒绝复用。该记录只用于同一任务恢复，不跨视频任务缓存音色。Worker 通过 `generation/config.ts` 的 `loadKlingVoiceConfig` 读取独立服务端配置 `KLING_VOICE_BASE_URL`（默认 `https://tokenhub.tencentmaas.com/v1`）与 `KLING_VOICE_API_KEY`，不回退到 LLM、视频或用户推理 Key。客户端在基础地址后追加 `/wand/kling/custom-voices` 及查询路径；音色状态仍按用户 / 任务隔离，指纹绑定独立音色服务凭证。未配置 Key 时仅带参考声音的真实 Kling 任务报错；视频生成继续使用原有提供器配置，音频通过 `PUBLIC_BASE_URL` 对公网可读。Mock 视频不请求真实音色服务。协议依据：[腾讯 Kling 音色管理文档](https://cloud.tencent.com/document/product/1823/135742)。
+`core/providers/kling-voices.ts` 定义音色 HTTP 协议和持久化接口；`generation/kling-voice-store.ts` 通过迁移 35 的 `generation_voice_tasks` 保存用户 / 视频任务 / 音频序号对应的外部请求 ID、音色任务 ID 和音色 ID。写请求前先保存外部请求 ID，未知创建结果仅查询，不重发 POST；凭证 / 来源指纹变化时拒绝复用。该记录只用于同一任务恢复，不跨视频任务缓存音色。Worker 通过 `generation/config.ts` 的 `loadKlingVoiceConfig` 读取独立服务端配置 `KLING_VOICE_BASE_URL`（默认 `https://tokenhub.tencentmaas.com/v1`）与 `KLING_VOICE_API_KEY`，不回退到 LLM、视频或用户推理 Key。客户端在基础地址后追加 `/wand/kling/custom-voices` 及查询路径；音色状态仍按用户 / 任务隔离，指纹绑定独立音色服务凭证。未配置 Key 时仅带参考声音的真实 Kling 任务报错；视频生成继续使用原有提供器配置，营销私有音频仅通过 `PUBLIC_BASE_URL` 上的 10 分钟临时链接供供应商读取。音色指纹继续使用原素材地址；既有检查点不依赖素材链接恢复。Mock 视频不请求真实音色服务。协议依据：[腾讯 Kling 音色管理文档](https://cloud.tencent.com/document/product/1823/135742)。
 
 营销影像使用独立的 `marketing_video` Agent（空工具白名单）。`ChatPanel → MarketingVideoStudio → ProjectStudio` 提供三步创作：确定文案（生成或拆解改写、风险检查）、确定素材（数字分身/肖像、背景和场景，人物素材合计最多 3 张，背景与场景合计最多 3 张，兼容旧单张草稿；可选 1 个直接参与生成的参考视频，选择后图片总数最多 3 张，并关闭原生口播配音，提交前由前后端校验）、配音与字幕（选填音色样例，可直接从数字分身语音库选择或上传；上传 BGM、画面比例）。`StoryboardEditor` 提供生成前的详细分镜确认，包含口播、画面、动作与镜头运动，可手动编辑或通过 `POST /api/marketing-videos/:id/storyboard` 按要求修改全部 / 单段分镜；确认后才提交视频任务。分镜随草稿 JSONB 保存，修改口播同步正文，修改正文清空旧分镜，修改时长优先自动重分配各镜时长。`core/marketing-video` 定义严格草稿 schema 和分段规划；整片可选 15–60 秒，每镜保存 4–15 秒的独立时长，由 Kimi 自动选择镜数和分配，实际总长允许比目标多最多 5 秒、最长 65 秒，合成和产物时长采用实际各镜总和；迁移 41 支持最多 15 镜，旧分镜仍按原 15 秒兼容。固定使用 `kling-video-v3-omni`，支持 720p / 1080p，沿用模型原生配音与已有 Kling 音色链路。
 
 `POST /api/marketing-videos/:id/generate → marketing-video/repository.ts` 在付费生成前校验各镜总和（目标至目标 +5 秒，最多 65 秒），在一个 PG 事务中创建草稿关联的父任务和全部片段任务，随后按父任务 ID 幂等投递 Redis。`workers/index.ts → marketing-video/run.ts` 同时执行最多两个片段，保留成功产物、模型任务 ID 和提交未知状态；恢复仅继续原任务，明确失败的片段才在用户点击继续后重新生成。`media.ts` 在本地校验文件签名、规范化编码并以 FFmpeg 拼接、混入 BGM；`resolveMarketingSegments` 保留确认后的分镜边界，任务快照携带完整分镜；`creation.ts` 统一文案、分镜修改和发布文案提示词，复用 `prompt.ts` 的素材角色、配音状态与字段约束，修改镜头默认保留确认文案。`prompt.ts` 为每段模型请求提供当前镜文案及画面、动作、镜头，`marketingImageReferences` 同时决定提交图片顺序与提示词编号；拆解来源不自动作为生成素材。字幕按该镜文案生成，参考视频模式只生成无声画面及可选字幕，不使用本地字幕滤镜或 ASR 对齐。规则详见 [营销视频制作](marketing-video.md#提示词与素材引用)。取消经父任务传递到模型轮询和 FFmpeg。迁移 36 新增项目 / 片段表与计量幂等键，保证恢复不重复记录同一模型任务费用。
+
+`generation/private-materials.ts` 处理营销上传的临时链接及静态访问控制。迁移 47 回填项目和冻结任务中的上传素材私有标记；`routes/uploads.ts` 接收 `purpose=marketing-video`。`generation/kling-voice-store.ts` 先读取既有检查点，新音色在本地素材准备成功后才记录意图。`jobs/task-queues.ts` 将营销父任务路由到 `lot-marketing-video`；`bullmq-queue.ts` 独立消费并兼容旧 `lot-tasks` 作业。迁移 46 更新队列元数据，不修改任务 ID 或供应商回执。详细边界和验证见 [F01 / F02 修复与验收](marketing-video-f01-f02-acceptance-20261015.md)。
 
 草稿按用户保存到数据库，页面只在账号隔离的 localStorage 里保存最后打开的项目 ID。制作配置提交后固定，发布标题 / 标签仍可编辑；`marketing-video/archive.ts` 将成片和发布信息归档到私有知识库，再次保存同步最新文案。首版实际对口型和抖音直发能力明确禁用，结果可预览、下载并复制发布文案；分镜只读展示，可复制为新草稿修改后重新制作。旧会话结果仍由包装组件展示，旧 `/api/video-drafts` 与会话生成接口保持兼容，其 4–15 秒限制不影响新项目链路。依赖、恢复语义和验收命令见 [营销视频制作](marketing-video.md)。
 
@@ -202,7 +204,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0045-marketing-analysis-uploads.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 45 的私有上传表，以及迁移 44 的摘要输入字段和既有创作上下文、清理字段就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0047-marketing-private-materials.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 45 的私有上传表，以及迁移 44 的摘要输入字段和既有创作上下文、清理字段就绪。
 
 运行日志新增 `agent_runs / agent_steps`，结果核实保留原始回执；普通模型会话与媒体生成任务状态互不替代。
 
@@ -284,7 +286,7 @@ pnpm build
 ## 9. 专项文档
 
 - 部署与客户端：[部署](deployment.md)、[桌面端](desktop.md)、[小程序](miniprogram.md)、[充值](recharge.md)。
-- 营销影像：[10 月 15 日评审修复与验收](marketing-video-review-20261015.md)、[营销视频制作](marketing-video.md)、[参考视频下载与抽帧分析方案](marketing-video-reference-analysis-plan.md)、[参考视频分析实现与验收](marketing-video-reference-analysis.md)（含本机真实样本测试；三平台批量质量与 Linux 环境待验收）。
+- 营销影像：[F01 / F02 修复与验收](marketing-video-f01-f02-acceptance-20261015.md)、[10 月 15 日评审修复与验收](marketing-video-review-20261015.md)、[营销视频制作](marketing-video.md)、[参考视频下载与抽帧分析方案](marketing-video-reference-analysis-plan.md)、[参考视频分析实现与验收](marketing-video-reference-analysis.md)（含本机真实样本测试；三平台批量质量与 Linux 环境待验收）。
 - 办公：[PPT 工作流](ppt-workflow.md)、[PPT 技能](../skills/ppt-authoring.md)、[文档技能](../skills/doc-generation.md)。
 - 知识库：[入库与检索](knowledge-ingestion.md)、[外部 API](knowledge-external-api.md)、[OpenAPI 契约](knowledge-openapi.json)、[备份恢复](knowledge-backup-restore.md)、[检索优化](knowledge-retrieval-optimization.md)。
 

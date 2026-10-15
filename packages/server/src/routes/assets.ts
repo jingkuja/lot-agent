@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import type { AgentService } from "../services/agent-service.js";
+import { signPrivateMaterial } from "../generation/private-materials.js";
 
 type Variables = { userId: string };
 
 export function createAssetRoutes(service: AgentService) {
   const app = new Hono<{ Variables: Variables }>();
+  app.use("*", async (c, next) => { c.header("Cache-Control", "no-store"); await next(); });
 
   // GET / — files explicitly uploaded by the current user.
   app.get("/", async (c) => {
@@ -16,7 +18,7 @@ export function createAssetRoutes(service: AgentService) {
         filename: file.original_name || file.storage_key,
         mime: file.mime,
         size: Number(file.size_bytes),
-        url: file.url,
+        url: signPrivateMaterial(file),
         createdAt: file.created_at,
       })),
     });
@@ -29,7 +31,7 @@ export function createAssetRoutes(service: AgentService) {
     const a = await service.db.getAsset(id);
     if (!a) return c.json({ error: "Not found" }, 404);
     if (a.user_id !== userId) return c.json({ error: "Not found" }, 404);
-    return c.json(a);
+    return c.json({ ...a, url: signPrivateMaterial(a) });
   });
 
   // DELETE /:id — user-owned uploads only; generated artifacts are immutable here.

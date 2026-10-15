@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
+import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
 import { MarketingDraftSchema, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 
 export class MarketingError extends Error {
@@ -80,8 +81,8 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       // Validate the complete duration plan before creating any video task.
       const plan = resolveMarketingSegments(MarketingDraftSchema.parse(p.draft));
       const taskId = randomUUID();
-      await client.query(`INSERT INTO tasks(id,type,input,user_id) VALUES($1,'marketing.video',$2,$3)`, [taskId, JSON.stringify({ ...input, projectId: id, draft: p.draft,
-        ...(p.reference_analysis_id ? { referenceAnalysis: { id: p.reference_analysis_id, acceptedRevision: p.reference_revision, evidenceIds: p.reference_evidence_ids } } : {}) }), owner]);
+      await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.video',$2,$3,$4)`, [taskId, JSON.stringify({ ...input, projectId: id, draft: p.draft,
+        ...(p.reference_analysis_id ? { referenceAnalysis: { id: p.reference_analysis_id, acceptedRevision: p.reference_revision, evidenceIds: p.reference_evidence_ids } } : {}) }), owner, MARKETING_VIDEO_QUEUE]);
       for (const part of plan) {
         const childId = randomUUID();
         // These tasks are executed by the parent, never delivered independently.

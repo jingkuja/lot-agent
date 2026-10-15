@@ -7,6 +7,7 @@ export interface PrepareKlingVoicesInput {
   referenceAudio: ReferenceInput;
   signal?: AbortSignal;
   assertNotCancelled: () => Promise<void>;
+  resolveReferenceUrl?: (url: string) => Promise<string>;
 }
 
 /** Runs only for Kling, inside the job after cache/resume checks and before video creation. */
@@ -24,27 +25,45 @@ export class KlingVoicePreparation {
   async prepare(input: PrepareKlingVoicesInput): Promise<ReferenceInput> {
     const urls = typeof input.referenceAudio === "string" ? [input.referenceAudio] : input.referenceAudio;
     if (!urls.length || urls.length > 2) throw new Error("Kling 最多支持 2 个参考音色。");
-    // Validate the whole batch before any remote writes.
+    // Validate the whole batch before creating any durable write intent. A
+    // failed local lookup/signature must remain safe to retry without polling
+    // an external ID that was never sent to the voice provider.
     for (const url of urls) {
       let parsed: URL;
       try { parsed = new URL(url); } catch {
         throw new Error("参考声音需要公网地址，请配置 PUBLIC_BASE_URL 后重新提交。");
       }
       if (parsed.username || parsed.password) throw new Error("参考声音必须使用无凭证的公网音频地址。");
-      await (this.deps.validateUrl ?? assertPublicUrl)(url);
+    }
+    const prepared = [];
+    for (const [slot, url] of urls.entries()) {
+      await input.assertNotCancelled();
+      const scope = { taskId: input.taskId, userId: input.userId, slot, fingerprint: createHash("sha256").update(JSON.stringify([this.deps.credentialScope, url])).digest("hex") };
+      const checkpoint = await this.deps.store.get(scope);
+      let voiceUrl: string | undefined;
+      if (!checkpoint) {
+        await (this.deps.validateUrl ?? assertPublicUrl)(url);
+        voiceUrl = await input.resolveReferenceUrl?.(url) ?? url;
+        await (this.deps.validateUrl ?? assertPublicUrl)(voiceUrl);
+      }
+      prepared.push({ scope, checkpoint, voiceUrl });
     }
     const voiceIds: string[] = [];
     const now = this.deps.now ?? Date.now;
     const sleep = this.deps.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-    for (const [slot, url] of urls.entries()) {
+    for (const item of prepared) {
       await input.assertNotCancelled();
-      const scope = { taskId: input.taskId, userId: input.userId, slot, fingerprint: createHash("sha256").update(JSON.stringify([this.deps.credentialScope, url])).digest("hex") };
-      const { created, checkpoint } = await this.deps.store.claim(scope, randomUUID());
+      const { scope } = item;
+      // The atomic claim still decides which caller may POST if two fresh
+      // readers both completed preflight. The loser reuses the winning IDs.
+      const { created, checkpoint } = item.checkpoint
+        ? { created: false, checkpoint: item.checkpoint }
+        : await this.deps.store.claim(scope, randomUUID());
       if (checkpoint.voiceId) { voiceIds.push(checkpoint.voiceId); continue; }
       let task;
       if (created) {
         await input.assertNotCancelled();
-        task = await this.deps.provider.create({ voiceName: `voice_${createHash("sha256").update(checkpoint.externalTaskId).digest("hex").slice(0, 14)}`, voiceUrl: url, externalTaskId: checkpoint.externalTaskId }, input.signal);
+        task = await this.deps.provider.create({ voiceName: `voice_${createHash("sha256").update(checkpoint.externalTaskId).digest("hex").slice(0, 14)}`, voiceUrl: item.voiceUrl!, externalTaskId: checkpoint.externalTaskId }, input.signal);
         await this.deps.store.save(scope, { vendorTaskId: task.taskId, voiceId: task.voiceId });
       } else {
         // A previous POST may have succeeded without a received response. Only

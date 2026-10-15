@@ -4,8 +4,7 @@ import { Queue, Worker } from "bullmq";
 import type Redis from "ioredis";
 import type { EnqueueOpts, JobControl, JobQueue, JobRecord } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
-
-const QUEUE_NAME = "lot-tasks";
+import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, taskQueueName } from "./task-queues.js";
 
 /**
  * BullMQ-backed JobQueue implementation.
@@ -18,8 +17,8 @@ const QUEUE_NAME = "lot-tasks";
  * worker crashes.
  */
 export class BullmqJobQueue implements JobQueue {
-  private queue: Queue;
-  private worker: Worker | null = null;
+  private queues = new Map<string, Queue>();
+  private workers = new Map<string, Worker>();
   private handlers = new Map<
     string,
     (job: JobRecord<unknown>, ctl: JobControl) => Promise<unknown>
@@ -31,7 +30,9 @@ export class BullmqJobQueue implements JobQueue {
     private readonly db: DB,
     private readonly connection: Redis
   ) {
-    this.queue = new Queue(QUEUE_NAME, { connection });
+    for (const name of [DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE]) {
+      this.queues.set(name, new Queue(name, { connection }));
+    }
   }
 
   async enqueue<I>(
@@ -41,8 +42,9 @@ export class BullmqJobQueue implements JobQueue {
     opts?: EnqueueOpts
   ): Promise<string> {
     const id = randomUUID();
-    await this.db.createTask(id, type, input, userId);
-    await publishPersistedJob(this.queue, id, type, opts);
+    const name = taskQueueName(type);
+    await this.db.createTask(id, type, input, userId, name);
+    await publishPersistedJob(this.queues.get(name)!, id, type, opts);
     return id;
   }
 
@@ -55,13 +57,29 @@ export class BullmqJobQueue implements JobQueue {
       handler as (job: JobRecord<unknown>, ctl: JobControl) => Promise<unknown>
     );
 
-    // Lazily create the single Worker on first process() call
-    if (!this.worker) {
-      this.worker = new Worker(
-        QUEUE_NAME,
+    this.startWorker(taskQueueName(type));
+    // Also drain legacy marketing entries from the old shared queue. This
+    // worker only forwards those entries; the render runs on its own worker.
+    if (type === "marketing.video") this.startWorker(DEFAULT_TASK_QUEUE);
+  }
+
+  private startWorker(name: string): void {
+    if (!this.workers.has(name)) {
+      const worker = new Worker(
+        name,
         async (bullJob) => {
           const { taskId } = bullJob.data as { taskId: string };
           const jobType = bullJob.name;
+
+          if (name === DEFAULT_TASK_QUEUE && jobType === "marketing.video") {
+            // No DB claim and no business handler here. Adding with the same
+            // ID is idempotent and never retries an existing failed target.
+            const row = await this.db.getTask(taskId);
+            if (row?.type === jobType && ["pending", "running"].includes(row.status)) {
+              await publishPersistedJob(this.queues.get(MARKETING_VIDEO_QUEUE)!, taskId, jobType, { maxAttempts: 1 });
+            }
+            return;
+          }
 
           const jobHandler = this.handlers.get(jobType);
           if (!jobHandler) {
@@ -115,24 +133,41 @@ export class BullmqJobQueue implements JobQueue {
             this.running.delete(taskId);
           }
         },
-        { connection: this.connection }
+        { connection: this.connection, concurrency: 1 }
       );
+      this.workers.set(name, worker);
     }
   }
 
   /** Deliver a task committed atomically with its owning business record. */
   async deliverPersisted(id: string, type: string): Promise<void> {
-    const previous = await this.queue.getJob(id);
+    const name = taskQueueName(type);
+    if (name === MARKETING_VIDEO_QUEUE) {
+      const legacy = await this.queues.get(DEFAULT_TASK_QUEUE)!.getJob(id);
+      if (legacy) {
+        // An older deployed worker may still be finishing this task. Never
+        // start a second render until it releases its BullMQ lock.
+        if (await legacy.getState() === "active") return;
+        // remove() fails if a worker claims it during this race. Let delivery
+        // fail safely instead of publishing a duplicate to the new queue.
+        await legacy.remove();
+      }
+    }
+    const queue = this.queues.get(name)!;
+    const previous = await queue.getJob(id);
     if (previous) {
       const state = await previous.getState();
       if (state === "failed" || state === "completed") await previous.retry(state);
-    } else await publishPersistedJob(this.queue, id, type, { maxAttempts: 1 });
+    } else await publishPersistedJob(queue, id, type, { maxAttempts: 1 });
   }
 
   /** Do not revive a cancelled row while its previous worker is unwinding. */
   async canResumePersisted(id: string): Promise<boolean> {
-    const previous = await this.queue.getJob(id);
-    return !previous || ["failed", "completed"].includes(await previous.getState());
+    for (const queue of this.queues.values()) {
+      const previous = await queue.getJob(id);
+      if (previous && !["failed", "completed"].includes(await previous.getState())) return false;
+    }
+    return true;
   }
 
   async get(id: string): Promise<JobRecord | null> {
@@ -161,16 +196,18 @@ export class BullmqJobQueue implements JobQueue {
     this.running.get(id)?.abort();
     // Remove a still-queued (waiting/delayed) job so it never starts. A job
     // already active is left to observe the aborted signal / DB status.
-    try {
-      const bullJob = await this.queue.getJob(id);
-      if (bullJob) {
-        const state = await bullJob.getState();
-        if (state === "waiting" || state === "delayed" || state === "prioritized") {
-          await bullJob.remove();
+    for (const queue of this.queues.values()) {
+      try {
+        const bullJob = await queue.getJob(id);
+        if (bullJob) {
+          const state = await bullJob.getState();
+          if (state === "waiting" || state === "delayed" || state === "prioritized") {
+            await bullJob.remove();
+          }
         }
+      } catch {
+        // best-effort — DB cancellation already recorded
       }
-    } catch {
-      // best-effort — DB cancellation already recorded
     }
     return changed;
   }
@@ -185,11 +222,9 @@ export class BullmqJobQueue implements JobQueue {
   }
 
   async close(): Promise<void> {
-    if (this.worker) {
-      await this.worker.close();
-      this.worker = null;
-    }
-    await this.queue.close();
+    await Promise.all([...this.workers.values()].map(worker => worker.close()));
+    this.workers.clear();
+    await Promise.all([...this.queues.values()].map(queue => queue.close()));
     this.connection.disconnect();
   }
 }

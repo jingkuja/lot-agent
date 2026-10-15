@@ -24,6 +24,8 @@ export interface KlingVoiceCheckpoint {
 }
 /** Durable claim must precede the remote write, including before its task ID is known. */
 export interface KlingVoiceStore {
+  /** Read without creating intent; reject an existing row with a different scope. */
+  get(scope: KlingVoiceScope): Promise<KlingVoiceCheckpoint | null>;
   claim(scope: KlingVoiceScope, externalTaskId: string): Promise<{ created: boolean; checkpoint: KlingVoiceCheckpoint }>;
   save(scope: KlingVoiceScope, result: { vendorTaskId: string; voiceId?: string }): Promise<void>;
 }

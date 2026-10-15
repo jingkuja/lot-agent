@@ -3,6 +3,17 @@ import type { KlingVoiceCheckpoint, KlingVoiceScope, KlingVoiceStore } from "@lo
 
 export class PgKlingVoiceStore implements KlingVoiceStore {
   constructor(private readonly pool: Pool) {}
+  async get(scope: KlingVoiceScope): Promise<KlingVoiceCheckpoint | null> {
+    const { rows } = await this.pool.query(`SELECT v.external_task_id,v.vendor_task_id,v.voice_id,v.fingerprint,v.user_id AS voice_user_id
+      FROM tasks t LEFT JOIN generation_voice_tasks v ON v.task_id=t.id AND v.slot=$3
+      WHERE t.id=$1 AND t.user_id=$2`, [scope.taskId, scope.userId, scope.slot]);
+    const row = rows[0];
+    if (!row) throw new Error("音色任务归属或凭证已变化，请重新发起视频任务。");
+    if (!row.external_task_id) return null;
+    if (row.voice_user_id !== scope.userId || row.fingerprint !== scope.fingerprint) throw new Error("音色任务归属或凭证已变化，请重新发起视频任务。");
+    return { externalTaskId: row.external_task_id, vendorTaskId: row.vendor_task_id ?? undefined, voiceId: row.voice_id ?? undefined };
+  }
+
   async claim(scope: KlingVoiceScope, externalTaskId: string) {
     const args = [scope.taskId, scope.userId, scope.slot, scope.fingerprint];
     const inserted = await this.pool.query(`

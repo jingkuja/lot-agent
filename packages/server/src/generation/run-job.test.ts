@@ -39,6 +39,55 @@ function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {
 const job = { id: "job1", userId: "u1", input: { prompt: "菊花", conversationId: "c1", assistantMessageId: "m1", size: "1024x1024" } };
 
 describe("runGenerationJob", () => {
+  it("refreshes material capabilities after slow voice preparation, without changing frozen references", async () => {
+    let phase = "preflight";
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://video.example/clip.mp4" })),
+    };
+    const { deps } = fakeDeps(provider, {
+      vendorModel: "kling-video-v3-omni",
+      resolveReferenceUrl: vi.fn(async url => `${url}?material_token=${phase}`),
+      prepareKlingVoices: vi.fn(async input => {
+        expect(input.referenceAudio).toBe("https://media.example/voice.wav");
+        phase = "after-voice"; return "voice-id";
+      }),
+    });
+    const input = { prompt: "script", reference_audio: "https://media.example/voice.wav", input_reference: "/static/uploads/portrait.png" };
+    await runGenerationJob(deps, { ...job, input }, "video");
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ input_reference: "/static/uploads/portrait.png?material_token=after-voice", reference_audio: "voice-id" }));
+    expect(input.input_reference).toBe("/static/uploads/portrait.png");
+  });
+  it("signs only a new submission, retains stable input/cache identity and omits private request content from logs", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://video.example/clip.mp4" })),
+    };
+    const resolveReferenceUrl = vi.fn(async (url: string) => `${url}?material_token=secret`);
+    const { deps } = fakeDeps(provider, { resolveReferenceUrl });
+    const input = { prompt: "private script", input_reference: "/static/uploads/portrait.png" };
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runGenerationJob(deps, { ...job, input }, "video");
+      expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ input_reference: "/static/uploads/portrait.png?material_token=secret" }));
+      expect(input.input_reference).toBe("/static/uploads/portrait.png");
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/private script|portrait|material_token|secret/);
+      resolveReferenceUrl.mockRejectedValue(new Error("expired material"));
+      vi.mocked(deps.db.getTaskVendorId).mockResolvedValue("v1");
+      await runGenerationJob(deps, { ...job, input }, "video");
+      expect(resolveReferenceUrl).toHaveBeenCalledOnce();
+      expect(provider.create).toHaveBeenCalledOnce();
+      expect(vi.mocked(deps.cache.get).mock.calls[0][0]).toBe(vi.mocked(deps.cache.get).mock.calls[1][0]);
+    } finally { log.mockRestore(); }
+  });
+
+  it("authorizes image edit references before reading bytes or making a paid request", async () => {
+    const provider = { create: vi.fn(), poll: vi.fn() };
+    const { deps } = fakeDeps(provider, { resolveReferenceUrl: vi.fn(async () => { throw new Error("素材不存在。"); }) });
+    await expect(runGenerationJob(deps, { ...job, input: { ...job.input, media: [{ type: "input_reference", url: "/static/uploads/foreign.png" }] } }, "image")).rejects.toThrow("素材不存在");
+    expect(deps.urlToBytes).not.toHaveBeenCalled();
+    expect(provider.create).not.toHaveBeenCalled();
+  });
   it("creates, polls to completion, stores asset, relays progress, marks message completed", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
@@ -507,6 +556,7 @@ describe("Kling voice references", () => {
       const preparation = new KlingVoicePreparation({
         provider: new HttpKlingVoiceProvider({ baseUrl: "https://voice.example/v1", apiKey: "voice-service-key" }),
         store: {
+          get: async () => null,
           claim: async (_scope, externalTaskId) => ({ created: true, checkpoint: { externalTaskId } }),
           save: async () => {},
         },

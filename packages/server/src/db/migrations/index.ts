@@ -87,6 +87,8 @@ export const migrations: Migration[] = [
   marketingAnalysisRetention,
   marketingResultRecovery,
   marketingAnalysisUploads,
+  marketingVideoQueue,
+  marketingPrivateMaterials,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -94,3 +96,5 @@ import { marketingTextOperations } from "./0042-marketing-text-operations.js";
 import { marketingAnalysisRetention } from "./0043-marketing-analysis-retention.js";
 import { marketingResultRecovery } from "./0044-marketing-result-recovery.js";
 import { marketingAnalysisUploads } from "./0045-marketing-analysis-uploads.js";
+import { marketingVideoQueue } from "./0046-marketing-video-queue.js";
+import { marketingPrivateMaterials } from "./0047-marketing-private-materials.js";

@@ -35,6 +35,20 @@ function makeApp(overrides: Record<string, unknown> = {}) {
 }
 
 describe("asset file management", () => {
+  it("renews a private preview only for its owner and does not modify its stored URL", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      const { app, service } = makeApp();
+      const privateAsset = { ...upload, is_private: true };
+      service.db.getAsset.mockResolvedValue(privateAsset);
+      const response = await app.request(`/${upload.id}`);
+      expect(response.status).toBe(200);
+      expect((await response.json() as { url: string }).url).toContain("material_token=");
+      expect(privateAsset.url).toBe(upload.url);
+      service.db.getAsset.mockResolvedValue({ ...privateAsset, user_id: "u2" });
+      expect((await app.request(`/${upload.id}`)).status).toBe(404);
+    } finally { vi.unstubAllEnvs(); }
+  });
   it("lists only the current user's uploads as safe public metadata", async () => {
     const { app, service } = makeApp();
     const res = await app.request("/");

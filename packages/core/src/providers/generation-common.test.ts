@@ -69,20 +69,18 @@ describe("HttpGenerationClient.create", () => {
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
     expect(await c.create({})).toEqual({ taskId: "task_1", status: "queued", progress: 0 });
   });
-  it("carries the RAW response body in the error when no task id comes back", async () => {
-    // A 200 body with no task_id and no vendor error envelope must still fail —
-    // and the thrown error must contain the raw payload so the UI shows it on hover.
+  it("reports a missing task id without exposing the raw response body", async () => {
     const rawBody = JSON.stringify({ object: "video", status: "queued", progress: 0 });
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => rawBody }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
-    await expect(c.create({})).rejects.toThrow(rawBody);
+    await expect(c.create({})).rejects.toThrow("未返回任务ID");
   });
-  it("fails with the raw text when a 2xx body is not JSON", async () => {
+  it("reports a malformed response without exposing unstructured text", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => "<html>gateway hiccup</html>" }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
-    await expect(c.create({})).rejects.toThrow(/gateway hiccup/);
+    await expect(c.create({})).rejects.toThrow("未返回任务ID");
   });
 });
 
@@ -163,5 +161,40 @@ describe("HttpGenerationClient.create hardening", () => {
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter, model: "m" });
     await expect(c.create({})).rejects.toThrow(/ECONNRESET/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs operation metadata without request, response, prompt, URL or credentials", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const body = { prompt: "private portrait prompt", input_reference: ["https://media.example/private.png?material_token=secret-capability"] };
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ task_id: "t", request: body, secret: "private-response" }) }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://private-endpoint.example", apiKey: "private-api-key", adapter: { ...adapter, buildCreateBody: () => body }, model: "m" });
+    await c.create({});
+    expect(log.mock.calls).toEqual([
+      ["[generation.create] request", { method: "POST" }],
+      ["[generation.create] response", { status: 200 }],
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a safe upstream diagnostic while hiding echoed prompt, URL and key", async () => {
+    const body = { prompt: "private portrait prompt", input_reference: ["https://media.example/private.png?material_token=secret-capability"] };
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 422, text: async () => JSON.stringify({
+      message: `Invalid reference: ${body.prompt}; ${body.input_reference[0]}; Bearer private-api-key`,
+      request: body,
+    }) }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "private-api-key", adapter: { ...adapter, buildCreateBody: () => body }, model: "m" });
+    const error = await c.create({}).then((): never => { throw new Error("expected create failure"); }, (error: Error) => error);
+    expect(error.message).toContain("Invalid reference");
+    for (const privateValue of [body.prompt, body.input_reference[0], "private-api-key", "secret-capability", "request"]) expect(error.message).not.toContain(privateValue);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits a raw error page on a failed poll", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 503, text: async () => "<html>private-content https://media.example/secret?material_token=secret</html>" }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "private-api-key", adapter, model: "m" });
+    await expect(c.poll("t")).rejects.toThrow("generation poll failed: HTTP 503");
   });
 });

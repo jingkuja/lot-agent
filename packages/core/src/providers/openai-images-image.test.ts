@@ -168,9 +168,19 @@ describe("OpenAIImagesImageProvider", () => {
     await expect(provider.create({ prompt: "cat" })).rejects.toThrow(/no image url or b64_json/i);
   });
 
-  it("surfaces non-success response bodies", async () => {
+  it("reports HTTP failure without exposing an unstructured response body", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, text: async () => "boom" })) as unknown as typeof fetch);
     const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "m" });
-    await expect(provider.create({ prompt: "cat" })).rejects.toThrow(/500 boom/);
+    await expect(provider.create({ prompt: "cat" })).rejects.toThrow("image generation failed: HTTP 500");
+  });
+
+  it("hides private image and prompt echoes while keeping a validation reason", async () => {
+    const prompt = "private portrait scene";
+    const image = "data:image/png;base64,cHJpdmF0ZS1pbWFnZQ==";
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ message: `Invalid image: ${image}; ${prompt}; private-key` }) })) as unknown as typeof fetch);
+    const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "private-key", model: "m" });
+    const error = await provider.create({ prompt, media: [{ type: "reference_image", url: image }] }).then((): never => { throw new Error("expected failure"); }, (error: Error) => error);
+    expect(error.message).toContain("Invalid image");
+    for (const privateValue of [prompt, image, "private-key"]) expect(error.message).not.toContain(privateValue);
   });
 });

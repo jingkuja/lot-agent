@@ -179,6 +179,7 @@ export interface TaskStatus {
 
 export interface AssetMeta {
   id: string;
+  url: string;
   filename: string;
   mediaType: string;
   size: number;
@@ -457,9 +458,10 @@ export const api = {
       body: JSON.stringify({ afterMessageId }),
     }),
 
-  uploadFile: async (file: File, signal?: AbortSignal): Promise<UploadedAttachment> => {
+  uploadFile: async (file: File, signal?: AbortSignal, purpose?: "marketing-video"): Promise<UploadedAttachment> => {
     const fd = new FormData();
     fd.append("file", file);
+    if (purpose) fd.append("purpose", purpose);
     const res = await fetch(`${BASE}/uploads`, {
       method: "POST",
       headers: { ...authHeaders() }, // 不要手动设 Content-Type，浏览器自动带 boundary

@@ -20,6 +20,7 @@ import { loadGenerationConfig, loadKlingVoiceConfig, makeKlingVoiceProvider, mak
 import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
+import { resolveMaterialReference } from "../generation/private-materials.js";
 import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import {
@@ -65,8 +66,10 @@ const VIDEO_DOWNLOAD_TIMEOUT_MS = 5 * 60_000; // 5min
 function safeUploadKeyFromUrl(url: string): string | null {
   const prefix = staticPrefix("/static/uploads/");
   if (!url.startsWith(prefix)) return null;
-  const key = url.slice(prefix.length);
-  return key && !key.includes("/") && !key.includes("\\") && !key.includes("..") ? key : null;
+  let key: string;
+  try { key = decodeURIComponent(url.slice(prefix.length).split("?")[0]); }
+  catch { return null; }
+  return key && !/[\\/\u0000-\u001f\u007f]/.test(key) && !key.includes("..") ? key : null;
 }
 
 function imageMimeForUpload(key: string, body: Buffer): string | null {
@@ -230,6 +233,7 @@ async function main() {
     const realVideo = mediaType === "video" && !!(apiKey || (!base.mock && base.apiKey));
     return {
       provider,
+      resolveReferenceUrl: (url) => resolveMaterialReference(db, job.userId, url),
       prepareKlingVoices: realVideo
         ? async (input) => {
             const voices = new KlingVoicePreparation({
@@ -249,7 +253,7 @@ async function main() {
         : meter,
       cache,
       updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
-      urlToBytes: (url, o) => urlToBytes(url, maxBytes, { ...o, timeoutMs: downloadTimeoutMs }),
+      urlToBytes: async (url, o) => urlToBytes(await resolveMaterialReference(db, job.userId, url), maxBytes, { ...o, timeoutMs: downloadTimeoutMs }),
       extFor,
       modelId: mediaType === "video" ? model : base.modelId,
       vendorModel: model,

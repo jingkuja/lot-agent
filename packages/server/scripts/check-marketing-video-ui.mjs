@@ -14,7 +14,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const { createServer } = createRequire(resolve(root, "packages/web/package.json"))("vite");
 const temp = await realpath(await mkdtemp(join(tmpdir(), "lot-marketing-video-")));
 let vite, browser, page;
-const errors = [], writes = [], unexpectedRequests = [];
+const errors = [], writes = [], unexpectedRequests = [], materialRefreshes = [];
 const screenshotDir = process.env.MARKETING_SCREENSHOTS_DIR;
 try {
   await writeFile(join(temp, "index.html"), '<div id="root"></div><script type="module" src="/main.tsx"></script>');
@@ -116,7 +116,15 @@ try {
       if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'] }; }
       return json({ ...p, assets: Object.fromEntries(uploadedAssets) });
     }
+    if (path.startsWith('/api/assets/') && request.method() === 'GET') {
+      assert.equal(request.headers()['authorization'], 'Bearer agent-navigation-test');
+      const asset = uploadedAssets.get(path.split('/').at(-1));
+      if (!asset) return json({ error: 'Not found' }, 404);
+      materialRefreshes.push(asset.id);
+      return json(asset);
+    }
     if (path === '/api/uploads') {
+      assert(request.postDataBuffer()?.includes(Buffer.from('marketing-video')), 'Marketing uploads declare the private purpose');
       sequence++; const asset = { assetId: `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`, filename: 'asset', mime: request.postDataBuffer()?.includes(Buffer.from('audio/wav')) ? 'audio/wav' : request.postDataBuffer()?.includes(Buffer.from('video/mp4')) ? 'video/mp4' : 'image/png', url: `/static/upload-${sequence}.png`, size: 100 };
       uploadedAssets.set(asset.assetId, { id: asset.assetId, name: asset.filename, mime: asset.mime, url: asset.url }); return json(asset);
     }
@@ -520,6 +528,7 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Create copy and storyboard', exact: true }).isDisabled(), true);
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-unavailable-en-dark.png');
+  assert(materialRefreshes.length > 0, 'Expired or failed previews reauthorize through the owned asset API');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []);
   console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, model subtitles without local subtitle support, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {

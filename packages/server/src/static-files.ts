@@ -16,7 +16,11 @@ export function guessMime(name: string): string {
   if (name.endsWith(".webp")) return "image/webp";
   if (name.endsWith(".gif")) return "image/gif";
   if (name.endsWith(".mp4")) return "video/mp4";
+  if (name.endsWith(".mov")) return "video/quicktime";
+  if (name.endsWith(".webm")) return "video/webm";
   if (name.endsWith(".mp3")) return "audio/mpeg";
+  if (name.endsWith(".wav")) return "audio/wav";
+  if (name.endsWith(".m4a")) return "audio/mp4";
   if (name.endsWith(".docx"))
     return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   if (name.endsWith(".pdf")) return "application/pdf";
@@ -48,7 +52,11 @@ export function contentPolicy(mime: string): ContentPolicy {
     (base.startsWith("image/") && base !== "image/svg+xml") ||
     base === "application/pdf" ||
     base === "video/mp4" ||
+    base === "video/quicktime" ||
+    base === "video/webm" ||
     base === "audio/mpeg" ||
+    base === "audio/wav" ||
+    base === "audio/mp4" ||
     base === "text/plain" ||
     base === "text/markdown";
 
@@ -110,12 +118,17 @@ export function parseRange(header: string | undefined, size: number): ByteRange 
  * Range support, and the active-content isolation policy from
  * `contentPolicy`.
  */
-export function staticFileHandler(dir: string) {
+export function staticFileHandler(dir: string, options: {
+  authorize?: (c: Context, filename: string) => Promise<boolean>;
+} = {}) {
   return async (c: Context): Promise<Response> => {
+    if (options.authorize) c.header("Cache-Control", "private, no-store");
     const filename = c.req.param("filename");
     if (!filename || filename.includes("/") || filename.includes("..")) {
       return c.text("bad request", 400);
     }
+
+    if (options.authorize && !await options.authorize(c, filename)) return c.text("not found", 404);
 
     const path = resolve(dir, filename);
     let size: number;
@@ -134,7 +147,7 @@ export function staticFileHandler(dir: string) {
       "Content-Type": contentType,
       "X-Content-Type-Options": "nosniff",
       "Accept-Ranges": "bytes",
-      "Cache-Control": "private, max-age=3600",
+      "Cache-Control": options.authorize ? "private, no-store" : "private, max-age=3600",
     };
     if (disposition === "attachment") {
       // filename is already validated above (no `/`, no `..`); still quote
