@@ -49,6 +49,7 @@ try {
   let failNextReview = false, failNextStoryboard = false;
   let holdNextSave = false, releaseSave;
   const projects = new Map();
+  const textOperations = new Map(), uploadedAssets = new Map();
   const script = '欢迎来到转角咖啡店。我们用现磨咖啡迎接每一位客人，明亮的空间适合休息和聊天。你可以选择喜欢的位置，点上一杯手冲咖啡，慢慢享受今天的时光。欢迎来店里坐一坐，发现属于你的咖啡时刻。';
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
   const wav = Buffer.alloc(44 + 16000 * 3 * 2);
@@ -70,7 +71,12 @@ try {
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
     if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false });
     if (path === '/api/marketing-videos') return json({ data: [...projects.values()] });
-    if (path.endsWith('/text-operations')) return json({ data: [] });
+    if (path.endsWith('/text-operations')) return json({ data: textOperations.get(path.split('/')[3]) ?? [] });
+    if (path.endsWith('/recover') && path.includes('/text-operations/')) {
+      const projectId = path.split('/')[3], p = projects.get(projectId), operation = textOperations.get(projectId)[0];
+      p.version++; p.draft = operation.result.draft; operation.status = 'succeeded'; operation.appliedVersion = p.version;
+      return json({ project: p, operation });
+    }
     if (path === '/api/marketing-videos/copy') {
       const body = request.postDataJSON(), p = projects.get(body.projectId);
       assert(p); assert.equal(body.version, p.version);
@@ -98,15 +104,22 @@ try {
       }
       if (action === 'review') {
         if (failNextReview) { failNextReview = false; return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ code: 'MARKETING_TEXT_TRUNCATED', error: '模型输出未完成，请重试；当前文案已保留。' }) }); }
-        p.review = { verdict: 'pass', issues: [] }; p.reviewedScript = marketingReviewText(p.draft); return json(p);
+        const issues = (p.draft.storyboard ?? []).flatMap((shot, shotIndex) => ['script', 'visual', 'action', 'camera'].flatMap(key => shot[key].includes('副业必赚') ? [{
+          text: '副业必赚', reason: '承诺一定获得收益，需要修改。', suggestion: '了解副业的投入与风险',
+          field: `storyboard.${key}`, shotIndex, severity: 'reject', source: 'risk-table', ruleId: 'risk-2',
+        }] : []));
+        p.review = { verdict: issues.length ? 'reject' : 'pass', issues }; p.reviewedScript = marketingReviewText(p.draft); return json(p);
       }
       if (action === 'publication') { p.version++; p.draft.publishTitle = '手冲咖啡与惬意时光'; p.draft.tags = '#咖啡'; p.review = null; return json(p); }
       if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; return json(p); }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
       if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'] }; }
-      return json(p);
+      return json({ ...p, assets: Object.fromEntries(uploadedAssets) });
     }
-    if (path === '/api/uploads') { sequence++; return json({ assetId: `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`, filename: 'asset', mime: request.postDataBuffer()?.includes(Buffer.from('audio/wav')) ? 'audio/wav' : request.postDataBuffer()?.includes(Buffer.from('video/mp4')) ? 'video/mp4' : 'image/png', url: `/static/upload-${sequence}.png`, size: 100 }); }
+    if (path === '/api/uploads') {
+      sequence++; const asset = { assetId: `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`, filename: 'asset', mime: request.postDataBuffer()?.includes(Buffer.from('audio/wav')) ? 'audio/wav' : request.postDataBuffer()?.includes(Buffer.from('video/mp4')) ? 'video/mp4' : 'image/png', url: `/static/upload-${sequence}.png`, size: 100 };
+      uploadedAssets.set(asset.assetId, { id: asset.assetId, name: asset.filename, mime: asset.mime, url: asset.url }); return json(asset);
+    }
     if (path.endsWith('/items')) return json({ data: library.filter((item) => item.tags.includes(new URL(request.url()).searchParams.get('tag'))), nextCursor: null });
     if (path.endsWith('/content')) { const voice = path.includes('/voice/'); return route.fulfill({ contentType: voice ? 'audio/wav' : 'image/png', body: voice ? wav : png }); }
     if (path === '/api/agents') return json(agents);
@@ -178,9 +191,53 @@ try {
   await page.getByRole('alert').filter({ hasText: '模型输出未完成，请重试；当前文案已保留。' }).waitFor();
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
-  await page.getByText('未发现明显风险', { exact: true }).waitFor();
+  await page.getByText('文案检查完成，未发现明显风险', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('region', { name: '文案与分镜检查' }).getByRole('status').textContent(), '文案检查完成，未发现明显风险');
+  assert.equal(await page.getByText('当前内容尚未检查，修改后需要重新检查。', { exact: true }).count(), 0);
+  assert.equal(await page.getByText('文案检查完成', { exact: true }).count(), 0);
   assert.equal(writes.filter(r => r.path.endsWith('/copy')).length, 1);
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
+  // Review exact storyboard fields, including duplicate excerpts in different
+  // shots. Applying one suggestion must not alter another shot or lose timing.
+  const originalShotCount = await page.locator('.mv-shot').count();
+  const firstCopyShot = page.locator('.mv-shot').nth(0), secondCopyShot = page.locator('.mv-shot').nth(1);
+  await firstCopyShot.getByLabel('画面内容').fill('招牌上写着副业必赚');
+  await page.getByText('当前内容尚未检查，修改后需要重新检查。', { exact: true }).waitFor();
+  assert.equal(await page.getByText('文案检查完成，未发现明显风险', { exact: true }).count(), 0);
+  await secondCopyShot.getByLabel('景别与镜头运动').fill('推进副业必赚招牌');
+  const narrationBeforeReviewFix = await page.getByLabel('视频口播文案').inputValue();
+  await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
+  const firstRisk = page.locator('.mv-review-issue').filter({ hasText: '第 1 镜 · 画面内容' });
+  const secondRisk = page.locator('.mv-review-issue').filter({ hasText: '第 2 镜 · 景别与镜头运动' });
+  await firstRisk.getByRole('button', { name: '一键修改', exact: true }).waitFor();
+  await firstRisk.scrollIntoViewIfNeeded();
+  await snap('marketing-video-risk-zh-light.png');
+  await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
+  await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
+  await page.getByRole('alert').filter({ hasText: '请先修改文案中标出的风险内容。' }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
+  await firstRisk.getByRole('button', { name: '一键修改', exact: true }).click();
+  await firstRisk.waitFor({ state: 'hidden' });
+  await secondRisk.getByRole('button', { name: '自己修改', exact: true }).waitFor();
+  assert.equal(await firstCopyShot.getByLabel('画面内容').inputValue(), '招牌上写着了解副业的投入与风险');
+  assert.equal(await secondCopyShot.getByLabel('景别与镜头运动').inputValue(), '推进副业必赚招牌');
+  assert.equal(await page.locator('.mv-shot').count(), originalShotCount);
+  assert.equal(await page.getByLabel('视频口播文案').inputValue(), narrationBeforeReviewFix);
+  await secondRisk.getByRole('button', { name: '自己修改', exact: true }).click();
+  await secondRisk.getByRole('textbox').fill('镜头缓慢推近咖啡杯');
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await snap('marketing-video-risk-manual-zh-dark.png');
+  await secondRisk.getByRole('button', { name: '保存修改并重新检查', exact: true }).click();
+  await page.getByText('文案检查完成，未发现明显风险', { exact: true }).waitFor();
+  assert.equal(await secondCopyShot.getByLabel('景别与镜头运动').inputValue(), '镜头缓慢推近咖啡杯');
+  await firstCopyShot.getByLabel('分镜口播').fill('这个副业必赚。');
+  await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
+  await page.locator('.mv-review-issue').getByRole('button', { name: '一键修改', exact: true }).click();
+  await page.getByText('文案检查完成，未发现明显风险', { exact: true }).waitFor();
+  assert.equal(await firstCopyShot.getByLabel('分镜口播').inputValue(), '这个了解副业的投入与风险。');
+  assert((await page.getByLabel('视频口播文案').inputValue()).startsWith('这个了解副业的投入与风险。'));
+  assert.equal(await page.locator('.mv-shot').count(), originalShotCount);
+  await page.evaluate(() => document.documentElement.dataset.theme = 'light');
   for (const [invalidScript, reason] of [
     ['长'.repeat(180), '文案过长，请精简文案或增加视频时长。'],
     ['短', '文案过短，请补充内容。'],
@@ -360,6 +417,19 @@ try {
   await snap('marketing-video-storyboard-en-compact.png');
 
   await page.getByRole('button', { name: 'Write copy', exact: false }).click();
+  {
+    const visualField = page.locator('.mv-shot').first().getByLabel('Scene details');
+    await visualField.fill('副业必赚');
+    await page.getByRole('button', { name: 'Check current copy', exact: true }).click();
+    const risk = page.locator('.mv-review-issue');
+    await risk.getByRole('button', { name: 'Edit manually', exact: true }).click();
+    await risk.getByRole('textbox').fill('A close-up of freshly brewed coffee');
+    await risk.scrollIntoViewIfNeeded();
+    await snap('marketing-video-risk-en-compact-dark.png');
+    await risk.getByRole('button', { name: 'Save and review again', exact: true }).click();
+    await page.getByText('Copy check complete. No obvious risks found.', { exact: true }).waitFor();
+    assert.equal(await visualField.inputValue(), 'A close-up of freshly brewed coffee');
+  }
   await page.getByLabel('Spoken script').fill('word '.repeat(100));
   await page.getByRole('button', { name: 'Voice & captions', exact: false }).click();
   await page.getByRole('alert').filter({ hasText: 'Shorten the script or increase the video duration.' }).waitFor();
@@ -394,6 +464,56 @@ try {
   await page.getByText('This older video has no saved storyboard. Copy its draft to add shots and create a new video.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit storyboard for a new video', exact: true }).click();
   await page.getByRole('button', { name: 'Create storyboard manually', exact: true }).waitFor();
+  // Unknown outcomes block mutations in this project, not navigation. A local
+  // receipt recovery must not generate another copy/storyboard request.
+  const blockedId = '33333333-3333-4333-8333-333333333333';
+  const oldVideoId = '44444444-4444-4444-8444-444444444444';
+  const blocked = { ...projects.get(legacyId), id: blockedId, version: 1, draft: { ...legacyDraft, assets: {}, topic: 'Waiting receipt', publishTitle: 'Waiting receipt', storyboard: [] }, taskId: null, status: 'draft' };
+  projects.set(blockedId, blocked);
+  const otherDraftId = '66666666-6666-4666-8666-666666666666';
+  projects.set(otherDraftId, { ...blocked, id: otherDraftId, draft: { ...blocked.draft, publishTitle: 'Other editable draft' } });
+  textOperations.set(blockedId, [{ id: '55555555-5555-4555-8555-555555555555', status: 'unknown' }]);
+  await page.evaluate(id => localStorage.setItem('lot:marketing-video:fixture', id), blockedId);
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor();
+  assert.equal(await page.getByLabel('Spoken script').isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: 'Start a new video', exact: true }).isDisabled(), false);
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await snap('marketing-video-unknown-en-dark.png');
+  await page.locator('.mv-library > summary').click();
+  await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
+  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor();
+  assert.equal(await page.getByLabel('Spoken script').isDisabled(), true, 'reopening the same project must keep its lock');
+  await page.locator('.mv-draft-list button').filter({ hasText: 'Other editable draft' }).click();
+  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(input => input.rows === 6 && !input.disabled));
+  await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
+  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor();
+  await page.getByRole('button', { name: 'Start a new video', exact: true }).click();
+  assert.equal(await page.getByLabel('Spoken script').isDisabled(), false);
+  assert.equal(await page.getByLabel('Spoken script').inputValue(), '');
+  if (!await page.locator('.mv-library').evaluate(element => element.open)) await page.locator('.mv-library > summary').click();
+  await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
+  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor();
+  const paidBeforeRecovery = writes.filter(r => r.path.endsWith('/copy') || r.path.endsWith('/storyboard')).length;
+  const operation = textOperations.get(blockedId)[0];
+  operation.status = 'needs_apply'; operation.result = { draft: { ...blocked.draft, script: 'Recovered local receipt' }, analysis: 'Local recovery' };
+  await page.getByRole('button', { name: 'Refresh creation status', exact: true }).click();
+  await page.getByRole('button', { name: 'Recover received result', exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(input => input.value === 'Recovered local receipt' && !input.disabled));
+  assert.equal(writes.filter(r => r.path.endsWith('/copy') || r.path.endsWith('/storyboard')).length, paidBeforeRecovery);
+  uploadedAssets.set(oldVideoId, { id: oldVideoId, name: 'Legacy WebM', mime: 'video/webm', url: '/static/legacy.webm', issue: 'unsupported' });
+  blocked.draft.assets = { video: oldVideoId }; blocked.draft.script = script;
+  await page.evaluate(() => localStorage.setItem('lot:language', 'zh'));
+  await page.reload(); await chooseAgent('营销影像');
+  await page.getByRole('button', { name: '确定素材', exact: false }).click();
+  await page.getByText('此历史素材不支持新生成，请移除或替换。', { exact: true }).waitFor();
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await page.getByRole('region', { name: '参考视频', exact: true }).scrollIntoViewIfNeeded();
+  await snap('marketing-video-legacy-webm-zh-dark.png');
+  await page.getByRole('region', { name: '参考视频', exact: true }).getByRole('button', { name: '移除', exact: true }).click();
+  await page.getByText('此历史素材不支持新生成，请移除或替换。', { exact: true }).waitFor({ state: 'hidden' });
+  await page.evaluate(() => localStorage.setItem('lot:language', 'en'));
   apiUnavailable = true;
   await page.reload(); await chooseAgent('Marketing video');
   await page.getByRole('alert').filter({ hasText: 'This server does not support the new marketing video workflow yet.' }).waitFor();

@@ -12,6 +12,7 @@ export function analysisError(value: unknown) {
   return ({
     ANALYSIS_STORAGE_LIMIT: "参考资料存储已达上限，请删除不再需要的分析后继续。",
     ANALYSIS_DISK_LOW: "服务器存储空间不足，请稍后继续或联系管理员。",
+    SOURCE_EXPIRED: "原视频已按保留期限清理，无法继续转写。可仅使用已保留的画面继续，或新建草稿重新取材。",
     PROJECT_CONFLICT: "草稿已在其他页面更新，生成结果保留在参考资料中。",
     REQUEST_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
     MODEL_USAGE_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
@@ -27,6 +28,13 @@ export function analysisError(value: unknown) {
     AUTH_REQUIRED: "该视频需要平台登录，请补充登录信息后继续。",
     CHALLENGE_REQUIRED: "请先在视频平台完成验证，再继续。",
     DURATION_LIMIT: "参考视频最长 180 秒。",
+    PIXEL_LIMIT: "本地爆款视频最高支持 1080p，请降低分辨率后上传。",
+    UPLOAD_LIMIT: "本地爆款视频最大 100 MB，请压缩后上传。",
+    UPLOAD_FORMAT: "本地爆款视频格式无效，请上传 MP4、MOV 或 WebM 视频。",
+    UPLOAD_NOT_FOUND: "本地视频不存在，请重新上传。",
+    UPLOAD_EXPIRED: "本地视频已过期，请重新上传。",
+    REQUEST_CONFLICT: "上传或分析请求已变更，请重新选择视频后重试。",
+    ANALYSIS_REQUEST_LIMIT: "上传文件或请求内容过大，请缩小后重试。",
     SANDBOX_REQUIRED: "服务器的媒体隔离环境不可用，请联系管理员。",
     ANALYSIS_DISABLED: "参考视频分析尚未启用。",
     UNSUPPORTED_SOURCE: "该链接不是支持的视频来源，请改用抖音、小红书或 B 站视频链接；普通官网链接请选择文字文案。",
@@ -100,15 +108,18 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
     {current && active(current) && <button disabled={busy} onClick={() => void act(() => request(`${base}/${id}/cancel`, json({})))}>{t("取消")}</button>}
     {speech?.status === "skipped" && <p className="mv-hint" role="status">{t(speech.reason === "ASR_MODEL_UNAVAILABLE"
       ? "当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。"
+      : speech.reason === "SOURCE_EXPIRED" ? "原视频已过期，按你的选择仅使用保留的画面和文字继续。"
       : "已下载的视频文件没有可用音轨，无法确认原视频是否有声音；已跳过语音转写。")}</p>}
     {speech?.status === "completed" && !hasSpeech && <p className="mv-hint" role="status">{t("转写未识别到语音内容，不代表原视频没有声音。")}</p>}
     {current?.errorCode && <p className="mv-error" role="alert">{t(analysisError(new Error(current.errorCode)))}</p>}
     {current?.status === "cancelled" && <p>{t("已取消")}</p>}
     {canResume && <p className="mv-hint">{t("继续生成可能重新调用模型并产生费用，已完成的有效结果会复用。")}</p>}
-    {canResume && <button disabled={busy} onClick={() => void act(async () => {
+    {canResume && current.errorCode === "SOURCE_EXPIRED" ? <button disabled={busy} onClick={() => void act(async () => {
+      await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision, visualOnly: true })); callbacks.current.onActive(true);
+    })}>{t("仅使用保留的画面继续")}</button> : canResume && <button disabled={busy} onClick={() => void act(async () => {
       await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision })); callbacks.current.onActive(true);
     })}>{t("继续生成")}</button>}
-    {current?.status === "needs_auth" && <details><summary>{t("补充平台登录信息")}</summary>
+    {current?.status === "needs_auth" && current.snapshot.source.platform !== "local" && <details><summary>{t("补充平台登录信息")}</summary>
       <label className="mv-field"><span>{t("个人平台 Cookies（Netscape 格式）")}</span><textarea rows={3} value={cookies} onChange={e => setCookies(e.target.value)} /></label>
       <button disabled={busy || !cookies.trim()} onClick={() => void act(async () => {
         await request(`${base}/sessions/${current.snapshot.source.platform}`, { method: "PUT", body: JSON.stringify({ cookies }) });

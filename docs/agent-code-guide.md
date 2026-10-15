@@ -29,7 +29,7 @@ Lot Agent 是共用账号、模型网关和计费体系的 AI 内容与办公工
 
 所有未隐藏的 Agent 默认可用，无需安装或卸载；`digital_employee` 保持独立产品入口。旧用户的安装记录仅用于保留排序，不再决定可用性。`copywriting` 定义仍隐藏，但数字员工业务已有文案能力，不能将二者混为一谈。合同对比依托 Agent 提示词、附件和文档工具。
 
-尚需区分的边界：发布连接器及内容审核仍是 stub / 关键词实现；通用 TTS、ASR 接口仍保留占位提供器；参考视频分析已独立接入可选 Qwen ASR。小程序视频的声音、字幕等要求不代表已接入独立配音和后期合成。`core/agents/orchestration.ts` 已有 agent-as-tool 与 DAG 定义 / 校验，但不是完整的持久化多 Agent 工作流执行器。
+尚需区分的边界：通用发布连接器及内容审核仍是 stub / 关键词实现；营销影像另有文案与分镜风险检查，结合风险词规则表及平台规则进行模型审核。通用 TTS、ASR 接口仍保留占位提供器；参考视频分析已独立接入可选 Qwen ASR。小程序视频的声音、字幕等要求不代表已接入独立配音和后期合成。`core/agents/orchestration.ts` 已有 agent-as-tool 与 DAG 定义 / 校验，但不是完整的持久化多 Agent 工作流执行器。
 
 ## 3. 技术架构
 
@@ -91,7 +91,7 @@ InputBox / ChatPanel → useChat → POST /api/conversations/:id/messages
 
 `regenerate` 与发送消息共用会话运行租约，改聊天流程时需同时检查取消、失败收尾和历史持久化。`ask_user`、`propose_outline` 使用 `endsTurn: true` 结束本轮，让前端卡片接收用户回复。
 
-`core/llm/responses.ts` 收到 Responses 终态后继续读取至传输结束，再发布最终结果；提前退出 SDK 迭代器会主动取消 HTTP 请求，可能使网关记录 `client_gone`。收尾沿用请求取消和超时，首个终态后的事件不重复输出文本、工具或用量；缺失终态仍按断流失败处理。
+`core/llm/responses.ts` 先校验并保留首个完整 Responses 终态，再等待正常 EOF（独立上限 1 秒），避免提前退出 SDK 导致网关记录 `client_gone`。尾部 reset、取消或超时不丢弃已验证结果，也不重复输出；缺失或不合法终态仍失败。Agent 在启动工具前继续检查取消。
 
 ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core/runtime/run-budget.ts` 统一推理、压缩及传输重试预算；`run-state.ts` 定义状态、执行日志接口和观测事件。服务端 `services/run-repository.ts` 将运行与工具步骤写入 `agent_runs / agent_steps`，执行前持久化意图，阻止未知写结果的自动重放。会话租约定期续租，消息写入和工具启动校验租约归属。`GET /api/conversations/:id/runs` 查询执行记录；前端 `RunRecoveryCard` 通过归属校验的操作核实接口处理未知结果，此接口不提供给模型。
 
@@ -120,11 +120,15 @@ Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务�
 
 `AgentService.marketingText → marketing-video/text.ts` 统一处理文案 JSON 输出、完整结束检查、5 分钟超时及安全错误码。文案和分镜固定使用当前用户凭证的 `kimi-k3`，不回退到其他默认模型；数字人模式在分镜创作和实际片段请求中都要求人物每镜出镜；截断结果不作为审核通过，不自动重新采样，审核等既有请求仍经 `meterLLM` 记录。创作文案/分镜请求使用 `upstreamBilling`，不做本地额度检查或金额计算。
 
-“拆解爆款文案”在选择按钮下提供视频链接/文案统一输入，并显式选择文字或视频类型；`core/marketing-video/source.ts` 提供共享提示分类，普通官网 URL 保留为文字，服务端拒绝视频链接绕过分析进入 `/copy`。纯文案经 `marketing-video/creation.ts` 一次生成文案和分镜；参考视频分析通过 `ProjectStudio → /api/marketing-video-analyses → marketing-analysis/repository.ts → lot-media-analysis → workers/media-analysis.ts` 运行。迁移 `0039` 保存来源、分析、步骤、修订、加密平台 Cookie 和草稿引用；原片/证据在私有目录。`runtime.ts` 编排隔离下载、本地 PTS 抽帧、DeepSeek OCR、Kimi 观察、摘要及文案/分镜创作；`config.ts` 默认解码/抽帧 4 线程、单视频 OCR 8 路和画面理解 3 路，`pipeline.ts` 并行调度两类模型工作，按帧/批次序号汇集并串行保存检查点，全部完成后统一摘要；迁移 `0040` 保存目标草稿和版本，`repository.ts.finish` 自动回填，版本冲突保留结果。`ReferenceAnalysisPanel` 仅查询进度和提供可展开的只读资料。`ledger.ts` 保留意图与真实 token 回执，本流程不计算金额或预留预算，上游余额不足则停止，用户充值后显式继续；未知结果不自动重发。`scripts/check-marketing-analysis-local.ts`、`local-probe.ts` 和 `probe-resume.ts` 提供显式 macOS 验证、隔离及保留失败费用的缺口续测。Apple Silicon 本地 Worker 可设置 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，由 `media-runtime.ts` 为下载及抽帧选择 macOS 沙箱；生产环境禁止该开关并保持 Linux 隔离，HTTP 输入不能选择运行时。默认未启用；单条小红书已完成下载和 85 次完整模型测试，保留 3 帧 OCR 缺口，三平台批量质量及 Linux 环境仍待验收。配置、API、恢复及检查命令见[参考视频分析实现](marketing-video-reference-analysis.md)。
+“检查当前文案”通过 `marketing-video/compliance.ts` 合并风险表条件匹配与模型语义审核，`compliance-rules.ts` 保存用户词表的黑名单、条件词和局部豁免场景。审核覆盖正文、标题、标签、背景及每镜台词、画面、动作、镜头；规则版本与字段边界进入 `marketingReviewText`，修改内容后旧检查失效。`web/modules/marketing-video/ReviewPanel.tsx` 按字段和镜号展示风险原因、规则来源及修改建议；一键修改仅替换该字段唯一的原文片段，手动修改可编辑完整字段，均保存后重检。修改分镜台词同步正文；手改整篇正文清空旧分镜并提示重建。官方规则的来源和适用范围见[营销视频内容检查](marketing-video-compliance.md)；证号、榜单或白名单字样不能替代真实性核验，检查结果不等同平台审核通过。
 
-`marketing-video/operations.ts` 通过迁移 `0042` 持久化文案和分镜修改的请求 ID、输入哈希、草稿版本、模型、协议、回执及结果。`/copy` 和 `/:id/storyboard` 要求 `clientRequestId`；文案入口另传 `projectId` / `version`。结果与草稿回填原子提交，版本冲突单独保留结果，`GET /:id/text-operations` 和 `TextOperationPanel` 提供刷新恢复；未知请求阻止重复调用。查询和恢复已保存结果不调用模型。
+“拆解爆款文案”在选择按钮下提供视频链接/文案统一输入，并显式选择文字或视频类型；`core/marketing-video/source.ts` 提供共享提示分类，普通官网 URL 保留为文字，服务端拒绝视频链接绕过分析进入 `/copy`。纯文案经 `marketing-video/creation.ts` 一次生成文案和分镜；“拆解爆款文案”的参考类型支持视频链接、文字文案和上传本地爆款视频；`POST /api/marketing-video-analyses/uploads → marketing-analysis/uploads.ts` 保存 MP4 / MOV / WebM（100 MB、最长 180 秒、最高 1080p）的私有来源，迁移 `0045` 记录归属和哈希。草稿 `referenceUpload` 与直接参与生成的 `assets.video` 独立；`runtime.ts` 将归属及哈希校验后的上传复制至分析目录，复用隔离解码、OCR、ASR、摘要和自动回填。上传按用户存放在 `data/marketing-analysis/<owner hash>/uploads/<upload UUID>`，不挂静态目录，使用独立命名空间避免与分析任务 ID 碰撞；原片满七天后按任务状态回收，切换来源清除旧分析引用。
 
-`marketing-analysis/summary-input.ts` 统一正常与摘要恢复输入，限制项去重并保留首次顺序；`completedVisualBatches` 记录实际处理完成度，旧任务从账本读取批次状态。`analysisUserKey` 将取消和 15 秒授权截止时间传到模型目录 HTTP 与正文读取。创建、恢复和重新摘要共用用户事务锁下的准入检查；队列每次选各用户一个可运行候选。`storage.ts` 检查累计字节、在途预留和磁盘低水位；迁移 `0043` 记录临时文件清理，保留全部展示帧和不可变 selection。原片满七天后回收，抽帧完成立即删除 `gray.raw`。`ReferenceAnalysisPanel` 展示缺口、时间线、引用和推断，始终说明原声未转写。修复范围和验证见 [评审问题修复](marketing-video-review-fixes.md)。
+参考视频分析通过 `ProjectStudio → /api/marketing-video-analyses → marketing-analysis/repository.ts → lot-media-analysis → workers/media-analysis.ts` 运行。迁移 `0039` 保存来源、分析、步骤、修订、加密平台 Cookie 和草稿引用；原片/证据在私有目录。`runtime.ts` 编排隔离下载、本地 PTS 抽帧、DeepSeek OCR、Kimi 观察、摘要及文案/分镜创作；`config.ts` 默认解码/抽帧 4 线程、单视频 OCR 8 路和画面理解 3 路，`pipeline.ts` 并行调度两类模型工作，按帧/批次序号汇集并串行保存检查点，全部完成后统一摘要；迁移 `0040` 保存目标草稿和版本，`repository.ts.finish` 自动回填，版本冲突保留结果。`ReferenceAnalysisPanel` 仅查询进度和提供可展开的只读资料。`ledger.ts` 保留意图与真实 token 回执，本流程不计算金额或预留预算，上游余额不足则停止，用户充值后显式继续；未知结果不自动重发。`scripts/check-marketing-analysis-local.ts`、`local-probe.ts` 和 `probe-resume.ts` 提供显式 macOS 验证、隔离及保留失败费用的缺口续测。Apple Silicon 本地 Worker 可设置 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，由 `media-runtime.ts` 为下载及抽帧选择 macOS 沙箱；生产环境禁止该开关并保持 Linux 隔离，HTTP 输入不能选择运行时。默认未启用；单条小红书已完成下载和 85 次完整模型测试，保留 3 帧 OCR 缺口，三平台批量质量及 Linux 环境仍待验收。配置、API、恢复及检查命令见[参考视频分析实现](marketing-video-reference-analysis.md)。
+
+`marketing-video/operations.ts` 通过迁移 `0042` / `0044` 持久化文案和分镜修改的请求 ID、输入哈希、原始输入快照、解析器版本、草稿版本、模型、协议、回执及结果。完整回执进入 `needs_apply`；`POST /:id/text-operations/:operationId/recover` 仅用原始快照和回执本地解析、原子应用，提交结果未知时先读已存结果，版本冲突单独保留。`/copy` 和 `/:id/storyboard` 要求 `clientRequestId`；文案入口另传 `projectId` / `version`。结果与草稿回填原子提交，版本冲突单独保留结果，`GET /:id/text-operations` 和 `TextOperationPanel` 提供刷新恢复；未知请求阻止重复调用。查询和恢复已保存结果不调用模型；`TextOperationPanel` 提供状态刷新与恢复，unknown 仅锁定当前项目修改，允许切换或新建草稿。历史素材 GET 与新生成限制分离，旧 WebM 可预览和替换；Worker 以任务冻结的 `generate_audio` 保持旧任务音频语义，新任务记录 `marketingInputVersion: 2`。
+
+`marketing-analysis/summary-input.ts` 统一正常与摘要恢复输入，依据 selection 和实际 OCR/视觉完成状态补齐处理缺口；迁移 `0044` 的 `summary_inputs` 在首次摘要请求前按 revision 冻结输入，JSONB 回读重建原字段顺序，旧 intent 保持原 hash。限制项去重并保留首次顺序；`completedVisualBatches` 记录实际处理完成度，旧任务从账本读取批次状态。`analysisUserKey` 将取消和 15 秒授权截止时间传到模型目录 HTTP 与正文读取。创建、恢复和重新摘要共用用户事务锁下的准入检查；队列每次选各用户一个可运行候选。`storage.ts` 检查累计字节、在途预留和磁盘低水位；迁移 `0043` 记录临时文件清理，保留全部展示帧和不可变 selection。原片满七天后回收，抽帧完成立即删除 `gray.raw`。语音检查点缺失时优先从完整 ASR 回执恢复，不重新解码或请求；无回执且源已过期返回 `SOURCE_EXPIRED`，用户可显式选择仅使用保留画面继续，unknown 保护不变。`ReferenceAnalysisPanel` 展示缺口、时间线、引用和推断，按真实转写状态说明声音证据。修复范围和验证见 [评审问题修复](marketing-video-review-fixes.md)。
 
 `marketing-analysis/models.ts` 对汇总摘要和文案/分镜合成统一使用 5 分钟超时，逐帧 OCR 和分批观察为 2 分钟；取消和租约失效立即中止。中断请求保留已有资料与请求 ID，核对回执后从未完成步骤继续。
 
@@ -198,7 +202,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0043-marketing-analysis-retention.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 43 的创作上下文与清理字段就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0045-marketing-analysis-uploads.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 45 的私有上传表，以及迁移 44 的摘要输入字段和既有创作上下文、清理字段就绪。
 
 运行日志新增 `agent_runs / agent_steps`，结果核实保留原始回执；普通模型会话与媒体生成任务状态互不替代。
 
@@ -280,7 +284,7 @@ pnpm build
 ## 9. 专项文档
 
 - 部署与客户端：[部署](deployment.md)、[桌面端](desktop.md)、[小程序](miniprogram.md)、[充值](recharge.md)。
-- 营销影像：[营销视频制作](marketing-video.md)、[参考视频下载与抽帧分析方案](marketing-video-reference-analysis-plan.md)、[参考视频分析实现与验收](marketing-video-reference-analysis.md)（含本机真实样本测试；三平台批量质量与 Linux 环境待验收）。
+- 营销影像：[10 月 15 日评审修复与验收](marketing-video-review-20261015.md)、[营销视频制作](marketing-video.md)、[参考视频下载与抽帧分析方案](marketing-video-reference-analysis-plan.md)、[参考视频分析实现与验收](marketing-video-reference-analysis.md)（含本机真实样本测试；三平台批量质量与 Linux 环境待验收）。
 - 办公：[PPT 工作流](ppt-workflow.md)、[PPT 技能](../skills/ppt-authoring.md)、[文档技能](../skills/doc-generation.md)。
 - 知识库：[入库与检索](knowledge-ingestion.md)、[外部 API](knowledge-external-api.md)、[OpenAPI 契约](knowledge-openapi.json)、[备份恢复](knowledge-backup-restore.md)、[检索优化](knowledge-retrieval-optimization.md)。
 

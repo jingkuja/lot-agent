@@ -41,9 +41,9 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         if (version !== old.version) throw new MarketingError("草稿已在其他页面更新，请重新打开。", 409);
         if (old.task_id && renderKey(old.draft) !== renderKey(draft)) throw new MarketingError("已提交的制作配置不可修改，请复制为新草稿。", 409);
         await client.query(`UPDATE marketing_video_projects SET draft=$3,version=version+1,updated_at=now(),
-          reference_analysis_id=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' THEN reference_analysis_id ELSE NULL END,
-          reference_revision=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' THEN reference_revision ELSE NULL END,
-          reference_evidence_ids=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' THEN reference_evidence_ids ELSE NULL END,
+          reference_analysis_id=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_analysis_id ELSE NULL END,
+          reference_revision=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_revision ELSE NULL END,
+          reference_evidence_ids=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_evidence_ids ELSE NULL END,
           review=CASE WHEN reviewed_script=$4 THEN review ELSE NULL END,
           reviewed_script=CASE WHEN reviewed_script=$4 THEN reviewed_script ELSE NULL END WHERE id=$1 AND user_id=$2`, [id, owner, JSON.stringify(draft), reviewText(draft)]);
       }

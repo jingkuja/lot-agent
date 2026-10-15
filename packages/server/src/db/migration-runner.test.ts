@@ -139,7 +139,7 @@ describe("runMigrations", () => {
     });
     await runMigrations(pool, registeredMigrations);
     expect(calls.filter(({ sql }) => sql.includes("INSERT INTO schema_migrations")).map(({ params }) => params))
-      .toEqual([[33, "virtual-payment"], [34, "agent-run-state"], [35, "kling-voice-tasks"], [36, "marketing-video-projects"], [37, "feishu-integration"], [38, "feishu-personal-channel"], [39, "marketing-reference-analysis"], [40, "marketing-automatic-creation"], [41, "marketing-shot-durations"], [42, "marketing-text-operations"], [43, "marketing-analysis-retention"]]);
+      .toEqual([[33, "virtual-payment"], [34, "agent-run-state"], [35, "kling-voice-tasks"], [36, "marketing-video-projects"], [37, "feishu-integration"], [38, "feishu-personal-channel"], [39, "marketing-reference-analysis"], [40, "marketing-automatic-creation"], [41, "marketing-shot-durations"], [42, "marketing-text-operations"], [43, "marketing-analysis-retention"], [44, "marketing-result-recovery"], [45, "marketing-analysis-uploads"]]);
     expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 

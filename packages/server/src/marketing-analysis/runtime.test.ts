@@ -11,12 +11,42 @@ import { downloadAnalysisSource } from "./download.js";
 import { extractAnalysisFrames } from "./frames.js";
 import { analyzeSelectedFrames } from "./pipeline.js";
 import type { AnalysisMediaRuntime } from "./media-runtime.js";
+import { copyAnalysisUpload } from "./uploads.js";
 
 vi.mock("./audio-url.js", () => ({ withAnalysisAudioUrl: vi.fn(async (_input, use) => use("https://public.test/audio.wav", "fixture-hash")) }));
 vi.mock("./speech.js", async importOriginal => ({ ...await importOriginal<typeof import("./speech.js")>(), extractAnalysisAudio: vi.fn(), transcribeAnalysisAudio: vi.fn() }));
 vi.mock("./download.js", () => ({ downloadAnalysisSource: vi.fn() }));
 vi.mock("./frames.js", () => ({ extractAnalysisFrames: vi.fn() }));
 vi.mock("./pipeline.js", () => ({ analyzeSelectedFrames: vi.fn() }));
+vi.mock("./uploads.js", () => ({ copyAnalysisUpload: vi.fn() }));
+
+it("reads local upload bytes through the private owner path and reuses decoding and analysis without a network downloader", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lot-runtime-upload-"));
+  const source = { platform: "local" as const, canonicalUrl: "upload:local", uploadId: "local", sourceHash: "a".repeat(64) };
+  const prepared = { ...source, mediaKey: "source.mp4" };
+  const lease = { id: "analysis", ownerId: "owner", token: "lease", revision: 1 };
+  const runner = { run: vi.fn() };
+  const checkpoint = vi.fn();
+  const deps = { mediaRuntime: { decoderRunner: () => runner },
+    store: { row: async () => ({ pipeline_version: ANALYSIS_VERSION, mode: "all", snapshot: { source, frames: [], frameTexts: [], observations: [], texts: [] } }),
+      pool: { query: async () => ({ rows: [], rowCount: 0 }) }, checkpoint },
+    storage: { directory: async () => directory }, db: { getUserApiKey: async () => "owner-key" },
+    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] }) }, config: { decodeThreads: 4 },
+  } as unknown as Parameters<typeof runAnalysis>[2];
+  vi.mocked(downloadAnalysisSource).mockClear();
+  vi.mocked(copyAnalysisUpload).mockResolvedValue(prepared);
+  vi.mocked(extractAnalysisFrames).mockResolvedValue({ frames: [], ocr: [], visual: [], durationMs: 1000,
+    coverage: { sampledFrames: 0, ocrFrames: 0, visualFrames: 0, omittedOcrFrameIds: [], omittedVisualFrameIds: [], limitations: [] } });
+  const signal = new AbortController().signal;
+  try {
+    await runAnalysis(lease, signal, deps);
+    expect(copyAnalysisUpload).toHaveBeenCalledWith({ pool: deps.store.pool, storage: deps.storage, owner: "owner", source, directory, signal });
+    expect(downloadAnalysisSource).not.toHaveBeenCalled();
+    expect(extractAnalysisFrames).toHaveBeenCalledWith({ directory, source: prepared, runner, threads: 4, signal });
+    expect(checkpoint).toHaveBeenCalledWith(lease, expect.anything(), "downloaded");
+    expect(analyzeSelectedFrames).toHaveBeenCalledWith(expect.objectContaining({ snapshot: expect.objectContaining({ source: prepared }) }));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 it("uses the Worker-selected sandbox for download and decoding before running model analysis", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lot-runtime-test-"));
@@ -125,4 +155,35 @@ it("transcribes with the current owner key before synthesis and checkpoints the 
   vi.mocked(transcribeAnalysisAudio).mockClear();
   await runAnalysis(lease, signal, deps);
   expect(transcribeAnalysisAudio).not.toHaveBeenCalled();
+});
+
+it.each([
+  { permission: true, receipt: undefined, error: "SOURCE_EXPIRED" },
+  { permission: false, receipt: undefined, reason: "ASR_MODEL_UNAVAILABLE" },
+  { permission: true, receipt: { outcome: "completed", text: "保留的语音", usage: { promptTokens: 1, completionTokens: 2 } } },
+  { permission: false, receipt: { outcome: "completed", text: "保留的语音", usage: { promptTokens: 1, completionTokens: 2 } } },
+  { permission: true, receipt: { outcome: "rejected", text: "", errorCode: "MODEL_QUOTA" }, retry: true, error: "SOURCE_EXPIRED" },
+  { permission: true, receipt: { outcome: "request_unknown", text: "" }, error: "REQUEST_UNKNOWN" },
+])("restores expired-source speech without decoding or resubmitting: %j", async test => {
+  vi.mocked(extractAnalysisAudio).mockClear(); vi.mocked(transcribeAnalysisAudio).mockClear(); vi.mocked(analyzeSelectedFrames).mockClear();
+  const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: "fixture" }, frames: [], frameTexts: [], texts: [], observations: [] };
+  const checkpoint = vi.fn();
+  const deps = {
+    store: { row: async () => ({ pipeline_version: ANALYSIS_VERSION, snapshot, selection: { frames: [], ocr: [], visual: [] } }),
+      pool: { query: async (sql: string) => sql.includes("step_id='asr:source'") && test.receipt
+        ? { rows: [{ model: "qwen-audio-3.1-asr-flash", receipt: test.receipt, retry_requested: test.retry }], rowCount: 1 }
+        : { rows: [], rowCount: sql.includes("receipt IS NULL") && test.error === "REQUEST_UNKNOWN" ? 1 : 0 } }, checkpoint },
+    storage: { directory: async () => "/tmp" }, db: { getUserApiKey: async () => "fixture" },
+    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"], asr: test.permission ? ["qwen-audio-3.1-asr-flash"] : [] }) },
+    config: {}, baseUrl: "https://fixture.test", bridgePath: "/bridge.py",
+  } as unknown as Parameters<typeof runAnalysis>[2];
+  vi.mocked(analyzeSelectedFrames).mockImplementation(async input => input.snapshot);
+  const pending = runAnalysis({ id: "analysis", ownerId: "owner", token: "lease", revision: 1 }, new AbortController().signal, deps);
+  if (test.error) { await expect(pending).rejects.toThrow(test.error); expect(checkpoint).not.toHaveBeenCalled(); }
+  else {
+    await pending;
+    expect(checkpoint).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ speech: test.reason ? { status: "skipped", reason: test.reason }
+      : { status: "completed", id: "a0001", text: "保留的语音", model: "qwen-audio-3.1-asr-flash" } }), "asr");
+  }
+  expect(extractAnalysisAudio).not.toHaveBeenCalled(); expect(transcribeAnalysisAudio).not.toHaveBeenCalled();
 });

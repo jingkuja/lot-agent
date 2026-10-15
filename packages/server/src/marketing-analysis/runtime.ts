@@ -1,7 +1,6 @@
 import { withAnalysisAudioUrl } from "./audio-url.js";
-import { ASR_MODEL, extractAnalysisAudio, transcribeAnalysisAudio } from "./speech.js";
+import { ASR_MODEL, extractAnalysisAudio, speechFromReceipt, transcribeAnalysisAudio } from "./speech.js";
 import { createDeadline, withAbort } from "@lot-agent/core";
-import { summaryInput } from "./summary-input.js";
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ANALYSIS_VERSION, type AnalysisLease, type AnalysisSnapshot } from "@lot-agent/core/marketing-analysis";
@@ -18,6 +17,7 @@ import { extractAnalysisFrames } from "./frames.js";
 import { analysisMediaRuntime, type AnalysisMediaRuntime } from "./media-runtime.js";
 import { readAnalysisFile } from "./private-files.js";
 import { analyzeSelectedFrames } from "./pipeline.js";
+import { copyAnalysisUpload } from "./uploads.js";
 
 export async function analysisUserAccess(db: Pick<DB, "getUserApiKey">, hub: Pick<TokenhubClient, "listModels">, owner: string, signal?: AbortSignal) {
   const deadline = createDeadline(15_000, signal);
@@ -69,7 +69,7 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
         AND step_id LIKE 'visual:%' AND receipt->>'outcome'='completed' AND receipt->'usage' IS NOT NULL`, [lease.id, lease.ownerId]);
       snapshot.completedVisualBatches = [...new Set(completed.rows.map(r => Number(r.step_id.split(":")[1])))];
     }
-    snapshot.summary = await models.summarize(summaryInput(snapshot, lease.revision), signal);
+    snapshot.summary = await models.summarize(await deps.store.freezeSummaryInput(lease, snapshot), signal);
     snapshot.summaryRevision = lease.revision;
     await checkpoint(snapshot, "summary");
     await create(snapshot);
@@ -79,10 +79,14 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
     // Only files from an uncommitted local download are discarded. Model
     // checkpoints never depend on that directory before the source is saved.
     for (const name of await readdir(directory)) await rm(join(directory, name), { recursive: true, force: true });
-    const session = (await deps.store.pool.query("SELECT encrypted_cookies FROM marketing_analysis_sessions WHERE user_id=$1 AND platform=$2", [lease.ownerId, snapshot.source.platform])).rows[0];
-    const result = await downloadAnalysisSource({ directory, shareText: await deps.store.sourceText(lease), bridgePath: deps.bridgePath,
-      expectedDownloaderVersion: deps.config.downloaderVersion, signal, cookies: session ? deps.store.secrets.open(session.encrypted_cookies) : undefined }, mediaRuntime.downloadRuntime);
-    snapshot = { ...snapshot, source: result.source };
+    if (snapshot.source.platform === "local") {
+      snapshot = { ...snapshot, source: await copyAnalysisUpload({ pool: deps.store.pool, storage: deps.storage, owner: lease.ownerId, source: snapshot.source, directory, signal }) };
+    } else {
+      const session = (await deps.store.pool.query("SELECT encrypted_cookies FROM marketing_analysis_sessions WHERE user_id=$1 AND platform=$2", [lease.ownerId, snapshot.source.platform])).rows[0];
+      const result = await downloadAnalysisSource({ directory, shareText: await deps.store.sourceText(lease), bridgePath: deps.bridgePath,
+        expectedDownloaderVersion: deps.config.downloaderVersion, signal, cookies: session ? deps.store.secrets.open(session.encrypted_cookies) : undefined }, mediaRuntime.downloadRuntime);
+      snapshot = { ...snapshot, source: result.source };
+    }
     await checkpoint(snapshot, "downloaded");
   }
   let selection = row.selection as Awaited<ReturnType<typeof extractAnalysisFrames>> | null;
@@ -98,8 +102,14 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
     "SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2 AND (step_id LIKE 'summary:%' OR step_id LIKE 'copy:%') LIMIT 1",
     [lease.id, lease.ownerId])).rowCount;
   if (!snapshot.speech && !synthesisStarted) {
-    if (!access.asrAvailable) snapshot.speech = { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" };
+    const saved = (await deps.store.pool.query(`SELECT model,receipt,retry_requested FROM marketing_analysis_steps
+      WHERE analysis_id=$1 AND user_id=$2 AND step_id='asr:source' ORDER BY attempt DESC LIMIT 1`, [lease.id, lease.ownerId])).rows[0];
+    if (saved && (saved.receipt?.outcome === "completed" || !saved.retry_requested)) {
+      if (saved.model !== ASR_MODEL) throw new AnalysisError("MODEL_INPUT_CHANGED", 409);
+      snapshot.speech = speechFromReceipt(saved.receipt ?? { text: "", outcome: "request_unknown" });
+    } else if (!access.asrAvailable) snapshot.speech = { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" };
     else {
+      if (!snapshot.source.mediaKey) throw new AnalysisError("SOURCE_EXPIRED", 409);
       const audio = await extractAnalysisAudio({ directory, source: snapshot.source, runner: mediaRuntime.decoderRunner(directory), signal });
       if (!audio) snapshot.speech = { status: "skipped", reason: "NO_AUDIO_TRACK" };
       else {
@@ -116,6 +126,7 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
     await checkpoint(snapshot, "asr");
   }
   snapshot = await analyzeSelectedFrames({ snapshot, selection, revision: lease.revision, models, checkpoint, signal,
+    prepareSummary: value => deps.store.freezeSummaryInput(lease, value),
     ocrConcurrency: deps.config.ocrConcurrency, visualConcurrency: deps.config.visualConcurrency });
   await create(snapshot);
 }

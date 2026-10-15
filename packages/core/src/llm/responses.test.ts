@@ -5,6 +5,8 @@ import { createLLMProvider } from "./factory.js";
 import { LLMResponseError } from "./errors.js";
 import type { ChatChunk, Message } from "../types/index.js";
 import type { ResponseStreamEvent } from "openai/resources/responses/responses";
+import { Agent } from "../agent/agent.js";
+import { ToolRegistry } from "../tools/registry.js";
 
 async function collect(stream: AsyncIterable<ChatChunk>) {
   const chunks = [];
@@ -113,6 +115,46 @@ describe("Responses transport", () => {
     expect(chunks.filter(c => c.type === "text").map(c => c.content).join("")).toBe("你好");
     expect(chunks.filter(c => c.type === "done")).toHaveLength(1);
     expect(chunks.some(c => c.type === "tool_call")).toBe(false);
+  });
+
+  it.each(["reset", "AbortError", "never EOF"])("retains a complete SDK result after %s", async tail => {
+    let requestSignal: AbortSignal | undefined;
+    const fetch = vi.fn(async (_url, init) => {
+      requestSignal = init?.signal ?? undefined;
+      const body = new ReadableStream<Uint8Array>({ start(stream) {
+        stream.enqueue(new TextEncoder().encode(`event: response.completed\ndata: ${JSON.stringify(terminal([message('{"ok":true}')]))}\n\n`));
+        if (tail !== "never EOF") setTimeout(() => stream.error(tail === "reset" ? new Error("socket reset") : new DOMException("aborted", "AbortError")), 20);
+        requestSignal!.addEventListener("abort", () => { try { stream.error(new DOMException("aborted", "AbortError")); } catch {} }, { once: true });
+      } });
+      return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+    }) as unknown as ClientOptions["fetch"];
+    const provider = new OpenAIResponsesProvider({ model: "m", apiKey: "fixture" }, { fetch });
+    const chunks = await collect(provider.chat([]));
+    expect(chunks.filter(c => c.type === "text").map(c => c.content).join("")).toBe('{"ok":true}');
+    expect(chunks.filter(c => c.type === "done")).toEqual([expect.objectContaining({ finishReason: "stop", usage: { promptTokens: 22, completionTokens: 7, cachedPromptTokens: 10 } })]);
+    expect(fetch).toHaveBeenCalledOnce();
+    if (tail === "never EOF") expect(requestSignal!.aborted).toBe(true);
+  });
+
+  it.each(["failed", "incomplete"])("preserves %s semantics after a tail reset", async status => {
+    const fetch = (async () => new Response(new ReadableStream<Uint8Array>({ start(stream) {
+      stream.enqueue(new TextEncoder().encode(`event: response.${status}\ndata: ${JSON.stringify(terminal([call()], status, { incomplete_details: { reason: "max_output_tokens" } }))}\n\n`));
+      setTimeout(() => stream.error(new Error("socket reset")), 20);
+    } }), { headers: { "Content-Type": "text/event-stream" } })) as ClientOptions["fetch"];
+    const result = collect(new OpenAIResponsesProvider({ model: "m", apiKey: "fixture" }, { fetch }).chat([]));
+    if (status === "failed") await expect(result).rejects.toThrow("Responses failed");
+    else expect(await result).toEqual([expect.objectContaining({ type: "done", finishReason: "length" })]);
+  });
+
+  it("does not execute retained terminal tool calls after caller cancellation", async () => {
+    const controller = new AbortController(); const execute = vi.fn(async () => ({ content: "saved" }));
+    const registry = new ToolRegistry(); registry.register({ name: "save", description: "save", parameters: { type: "object" }, execute });
+    async function* source() { yield* events([terminal([call()])]); controller.abort(); throw new Error("tail reset"); }
+    const agent = new Agent({ systemPrompt: "fixture" });
+    const result = [];
+    for await (const event of agent.run("save", { llm: { chat: () => mapResponsesStream(source(), "m") }, toolRegistry: registry, toolContext: { workingDirectory: "/tmp" } }, [], { signal: controller.signal })) result.push(event);
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.some(event => event.type === "tool_call")).toBe(false);
   });
 
   it.each(["AbortError", "TimeoutError"])("still interrupts an unfinished request on %s without retrying", async reason => {

@@ -15,13 +15,13 @@ const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner") {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
   const store = { get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task") };
-  const service = { db: { pool: {}, getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async () => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
+  const service = { db: { pool: {}, getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
     begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, _input: unknown, draft?: typeof project.draft) => {
       if (version !== project.version || project.taskId) throw new MarketingError("草稿已更新", 409);
       return { fresh: true, operation: { id: requestId, kind, status: "running" }, draft: draft ?? project.draft };
     }),
-    receipt: vi.fn(), fail: vi.fn(), list: vi.fn(async () => []),
+    receipt: vi.fn(), fail: vi.fn(), list: vi.fn(async () => []), recover: vi.fn(),
     finish: vi.fn(async (owner: string, requestId: string, result: { draft: typeof project.draft; analysis: string }) => {
       await store.save(owner, project.id, project.version, result.draft);
       return { id: requestId, status: "succeeded", result };
@@ -86,9 +86,30 @@ describe("marketing project HTTP boundaries", () => {
     const f = fixture();
     expect((await f.call(`/${id}/review`, {})).status).toBe(503);
     expect(f.store.setReview).not.toHaveBeenCalled();
-    f.service.marketingText.mockResolvedValueOnce({ verdict: "suspect", issues: [{ text: "最好", reason: "无法核实", suggestion: "特色" }] });
+    f.service.marketingText.mockResolvedValueOnce({ verdict: "suspect", issues: [{ text: "产品", reason: "需要核实品牌授权", suggestion: "商品", field: "script", source: "xiaohongshu", ruleId: "platform-copyright", severity: "suspect" }] });
     expect((await f.call(`/${id}/review`, {})).status).toBe(200);
     expect(f.store.setReview).toHaveBeenCalledWith("owner", f.project, expect.objectContaining({ verdict: "suspect" }));
+  });
+  it("reviews every draft field with owner isolation, cancellation and local rules", async () => {
+    const f = fixture();
+    f.project.draft = MarketingDraftSchema.parse({ script: "普通产品介绍。", background: "项目稳赚招牌", storyboard: [{ script: "产品100%见效。", visual: "产品海报", action: "展示产品", camera: "中景" }] });
+    f.service.marketingText.mockResolvedValueOnce({ verdict: "pass", issues: [] });
+    expect((await f.call(`/${id}/review`, { locale: "en" })).status).toBe(200);
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.stringContaining("Write reasons and suggested replacements in en"), expect.any(String), "owner", expect.any(AbortSignal));
+    const input = JSON.parse(f.service.marketingText.mock.calls[0][1] as unknown as string);
+    expect(input.fields).toEqual(expect.arrayContaining([
+      { field: "background", text: "项目稳赚招牌" },
+      { field: "storyboard.script", shotIndex: 0, text: "产品100%见效。" },
+      { field: "storyboard.visual", shotIndex: 0, text: "产品海报" },
+      { field: "storyboard.action", shotIndex: 0, text: "展示产品" },
+      { field: "storyboard.camera", shotIndex: 0, text: "中景" },
+    ]));
+    expect(f.store.setReview).toHaveBeenCalledWith("owner", f.project, expect.objectContaining({ verdict: "suspect", issues: expect.arrayContaining([expect.objectContaining({ field: "storyboard.script", shotIndex: 0, reason: expect.stringContaining("Contextual risk term") })]) }));
+    const invalid = fixture();
+    invalid.service.marketingText.mockResolvedValueOnce({ verdict: "suspect", issues: [{ field: "storyboard.visual", shotIndex: 14, text: "不存在", reason: "风险", suggestion: "删除", source: "douyin", ruleId: "platform-sexual", severity: "suspect" }] });
+    expect((await invalid.call(`/${id}/review`, {})).status).toBe(503);
+    expect(invalid.store.setReview).not.toHaveBeenCalled();
+    expect((await invalid.call(`/${id}/review`, { locale: "invalid" })).status).toBe(400);
   });
   it("returns a recoverable truncation error and saves only a complete retry result", async () => {
     const f = fixture(); let truncated = true;
@@ -105,7 +126,7 @@ describe("marketing project HTTP boundaries", () => {
       expect(f.store.setReview).not.toHaveBeenCalled(); expect(chat).toHaveBeenCalledOnce();
       truncated = false;
       expect((await f.call(`/${id}/review`, {})).status).toBe(200);
-      expect(f.store.setReview.mock.calls).toEqual([["owner", f.project, { verdict: "pass", issues: [] }]]);
+      expect(f.store.setReview).toHaveBeenCalledWith("owner", f.project, expect.objectContaining({ verdict: "pass", issues: [] }));
     } finally { warn.mockRestore(); }
   });
   it("recovers a persisted pending job without new reservations or model calls", async () => {
@@ -217,7 +238,7 @@ describe("marketing storyboard editing", () => {
 
 it("rejects direct video synthesis but accepts ordinary website CTAs", async () => {
   const f = fixture();
-  for (const reference of ["https://www.bilibili.com/video/BV1234567890", "b23.tv/abc123", "分享 https://xhslink.com/a/abcdef", "https://example.com https://v.douyin.com/abcdef"]) {
+  for (const reference of ["https://www.bilibili.com/video/BV1234567890", "b23.tv/abc123", "分享 https://xhslink.com/a/abcdef", "https://example.com https://v.douyin.com/abcdef", "参考：https://b23.tv/abc123", "参考,‘b23.tv/abc123’", "参考:\"https://b23.tv/abc123\""]) {
     const result = await f.call("/copy", { draft: { copyMode: "rewrite", reference }, locale: "zh", source: { kind: "text" } });
     expect(result.status).toBe(400); expect(await result.json()).toMatchObject({ code: "VIDEO_ANALYSIS_REQUIRED" });
   }
@@ -225,6 +246,36 @@ it("rejects direct video synthesis but accepts ordinary website CTAs", async () 
   f.service.marketingText.mockResolvedValueOnce({ shots: [1, 2].map(() => ({ script: "现磨咖啡欢迎到店品尝。", visual: "店铺", action: "端杯", camera: "近景" })), publishTitle: "咖啡", tags: "", analysis: "介绍咖啡" });
   expect((await f.call("/copy", { draft: { copyMode: "rewrite", reference: "现磨咖啡，欢迎品尝。https://example.com/shop" }, locale: "zh", source: { kind: "text" } })).status).toBe(200);
   expect(f.service.marketingText).toHaveBeenCalledOnce();
+});
+
+it("opens and edits legacy WebM drafts while rejecting new unsupported generation", async () => {
+  const f = fixture(); f.project.draft.assets.video = id;
+  f.service.db.getAsset.mockResolvedValue({ user_id: "owner", mime: "video/webm", size_bytes: 100, url: "/static/legacy.webm" } as never);
+  const response = await f.call(`/${id}`);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ assets: { [id]: { mime: "video/webm", issue: "unsupported", url: "/static/legacy.webm" } } });
+  expect((await f.call(`/${id}`, { version: 1, draft: { ...f.project.draft, topic: "继续编辑" } }, "PUT")).status).toBe(200);
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
+  expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled(); expect(f.store.reserve).not.toHaveBeenCalled();
+  Object.assign(f.project, { taskId: "finished", status: "succeeded" });
+  expect((await f.call(`/${id}`, { version: 1, draft: { ...f.project.draft, publishTitle: "新标题" } }, "PUT")).status).toBe(200);
+  Object.assign(f.project, { taskId: null });
+  expect((await f.call(`/${id}`, { version: 1, draft: { assets: {} } }, "PUT")).status).toBe(200);
+  f.project.draft.assets = {};
+  expect((await f.call(`/${id}`, { version: 1, draft: { assets: { video: id } } }, "PUT")).status).toBe(400);
+  f.service.db.getAsset.mockResolvedValue({ user_id: "owner", mime: "video/mp4", size_bytes: 100 });
+  expect((await f.call(`/${id}`, { version: 1, draft: { assets: { video: id } } }, "PUT")).status).toBe(200);
+});
+
+it("recovers text operations through an owner and project scoped endpoint without a model call", async () => {
+  const f = fixture(); const operationId = randomUUID();
+  f.operations.recover.mockResolvedValue({ id: operationId, status: "conflict" });
+  expect((await f.call(`/${id}/text-operations/${operationId}/recover`, {})).status).toBe(200);
+  expect(f.operations.recover).toHaveBeenCalledWith("owner", id, operationId);
+  expect(f.service.marketingText).not.toHaveBeenCalled();
+  f.store.get.mockResolvedValueOnce(null as never);
+  expect((await f.call(`/${id}/text-operations/${operationId}/recover`, {})).status).toBe(404);
+  expect(f.operations.recover).toHaveBeenCalledOnce();
 });
 
 it("checks ownership of every image in all three categories", async () => {
@@ -243,7 +294,7 @@ it("restores all image metadata and submits six references in category order", a
   const ids = Array.from({ length: 6 }, () => randomUUID());
   f.project.draft.assets = { scene: ids.slice(5), background: ids.slice(3, 5), portrait: ids.slice(0, 3) };
   f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: "image/png", size_bytes: 100, url: `/static/${args[0]}.png` }));
-  const restored = await (await f.call(`/${id}`)).json();
+  const restored = await (await f.call(`/${id}`)).json() as { assets: Record<string, { url: string }> };
   for (const assetId of ids) expect(restored.assets[assetId].url).toBe(`/static/${assetId}.png`);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
   expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ input_reference: ids.map(assetId => `/static/${assetId}.png`) }), false);

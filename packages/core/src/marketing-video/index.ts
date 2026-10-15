@@ -28,6 +28,7 @@ export const MarketingDraftSchema = z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),
   reference: z.string().max(6000).default(""),
+  referenceUpload: z.object({ id: z.string().uuid(), name: z.string().min(1).max(255) }).strict().optional(),
   script: z.string().max(2000).default(""),
   durationSec: z.number().int().min(15).max(60).default(30),
   mode: z.enum(["avatar", "recorded"]).default("avatar"),
@@ -52,9 +53,21 @@ export function marketingReferenceError(draft: MarketingDraft): string {
   if (draft.assets.video && ["portrait", "background", "scene"].reduce((sum, slot) => sum + marketingAssetIds(draft.assets[slot as "portrait" | "background" | "scene"]).length, 0) > 3) return "已选择参考视频，人物与场景图片合计不能超过 3 张，请移除多余图片。";
   return "";
 }
+export const MarketingReviewFieldSchema = z.enum(["script", "publishTitle", "tags", "background", "storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera"]);
+export const MarketingReviewIssueSchema = z.object({
+  text: z.string().min(1).max(2000), reason: z.string().min(1).max(500), suggestion: z.string().max(2000),
+  // Optional only for compatibility with already saved review cards.
+  field: MarketingReviewFieldSchema.optional(), shotIndex: z.number().int().min(0).max(14).optional(),
+  ruleId: z.string().max(80).optional(), source: z.enum(["risk-table", "douyin", "xiaohongshu"]).optional(),
+  severity: z.enum(["suspect", "reject"]).optional(),
+}).strict();
+export type MarketingReviewIssue = z.infer<typeof MarketingReviewIssueSchema>;
+export type MarketingReviewField = z.infer<typeof MarketingReviewFieldSchema>;
 export const MarketingReviewSchema = z.object({
   verdict: z.enum(["pass", "suspect", "reject"]),
-  issues: z.array(z.object({ text: z.string().max(500), reason: z.string().max(500), suggestion: z.string().max(500) }).strict()).max(20),
+  issues: z.array(MarketingReviewIssueSchema).max(80),
+  ruleVersion: z.string().max(80).optional(),
+  reviewedAt: z.string().datetime().optional(),
 }).strict();
 export type MarketingReview = z.infer<typeof MarketingReviewSchema>;
 export interface MarketingSegment { index: number; script: string; durationSec: number; }
@@ -146,9 +159,57 @@ export function planMarketingSegments(script: string, durationSec: number): Mark
 
 /** Narration edits in the storyboard are also the project's editable copy. */
 export const storyboardScript = (shots: Pick<MarketingShot, "script">[]) => shots.map(shot => shot.script.trim()).join("\n");
+export const MARKETING_REVIEW_RULE_VERSION = "2026-10-15.1";
+export function marketingReviewFields(draft: MarketingDraft): { field: MarketingReviewField; shotIndex?: number; text: string }[] {
+  // Worker reservation may read older raw JSONB rows before project() parsing.
+  const normalized = MarketingDraftSchema.parse(draft);
+  return [
+    ...(["script", "publishTitle", "tags", "background"] as const).map(field => ({ field, text: normalized[field] })),
+    ...normalized.storyboard.flatMap((shot, shotIndex) => (["script", "visual", "action", "camera"] as const)
+      .map(field => ({ field: `storyboard.${field}` as MarketingReviewField, shotIndex, text: shot[field] }))),
+  ];
+}
 export function marketingReviewText(draft: MarketingDraft): string {
-  const base = [draft.script, draft.publishTitle, draft.tags].join("\n");
-  return draft.storyboard?.length ? `${base}\n${draft.storyboard.map(shot => [shot.visual, shot.action, shot.camera].join("\n")).join("\n")}` : base;
+  // Field boundaries and shot narration must be part of the review key. The
+  // version intentionally invalidates legacy checks that omitted these fields.
+  return JSON.stringify({ ruleVersion: MARKETING_REVIEW_RULE_VERSION, fields: marketingReviewFields(draft) });
+}
+
+export function marketingReviewFieldText(draft: MarketingDraft, issue: Pick<MarketingReviewIssue, "field" | "shotIndex">): string | null {
+  return marketingReviewFields(draft).find(entry => entry.field === issue.field && entry.shotIndex === issue.shotIndex)?.text ?? null;
+}
+
+/** Editing a narration field also updates its authoritative counterpart. */
+export function updateMarketingReviewField(draft: MarketingDraft, issue: Pick<MarketingReviewIssue, "field" | "shotIndex">, value: string): MarketingDraft | null {
+  if (marketingReviewFieldText(draft, issue) === null || !issue.field) return null;
+  let next: MarketingDraft;
+  if (issue.field.startsWith("storyboard.")) {
+    const key = issue.field.slice("storyboard.".length) as "script" | "visual" | "action" | "camera";
+    const storyboard = draft.storyboard.map((shot, index) => index === issue.shotIndex ? { ...shot, [key]: value } : shot);
+    next = { ...draft, storyboard, ...(key === "script" ? { script: storyboardScript(storyboard) } : {}) };
+  } else if (issue.field === "script" && draft.storyboard.length) {
+    // Manual copy edits invalidate the old shot boundaries instead of leaving
+    // different spoken lines in the render pipeline. The user regenerates them.
+    next = { ...draft, script: value, storyboard: [] };
+  } else next = { ...draft, [issue.field]: value };
+  const parsed = MarketingDraftSchema.safeParse(next);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Only replace a unique, exact excerpt in its reviewed field; never guess. */
+export function applyMarketingReviewSuggestion(draft: MarketingDraft, issue: MarketingReviewIssue): MarketingDraft | null {
+  const current = marketingReviewFieldText(draft, issue);
+  if (current === null || !issue.text || current.indexOf(issue.text) < 0 || current.indexOf(issue.text) !== current.lastIndexOf(issue.text) || issue.text === issue.suggestion) return null;
+  const updated = current.replace(issue.text, () => issue.suggestion);
+  if (issue.field === "script" && draft.storyboard.length) {
+    if (storyboardScript(draft.storyboard) !== draft.script.trim()) return null;
+    const matching = draft.storyboard.map((shot, shotIndex) => ({ shot, shotIndex })).filter(({ shot }) => shot.script.includes(issue.text));
+    if (matching.length !== 1) return null;
+    const { shot, shotIndex } = matching[0];
+    if (shot.script.indexOf(issue.text) !== shot.script.lastIndexOf(issue.text)) return null;
+    return updateMarketingReviewField(draft, { field: "storyboard.script", shotIndex }, shot.script.replace(issue.text, () => issue.suggestion));
+  }
+  return updateMarketingReviewField(draft, issue, updated);
 }
 
 /** Saved shot boundaries are authoritative; never re-split edited narration. */

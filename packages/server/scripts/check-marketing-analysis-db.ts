@@ -1,4 +1,5 @@
 import { checkReviewFixes } from "./check-marketing-review-fixes.js";
+import { checkMarketingUploads } from "./check-marketing-uploads-db.js";
 /** Only a NEW disposable local database; no downloads or paid model calls. */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -299,5 +300,6 @@ try {
       console.log("PASS: real Redis/BullMQ delivery, per-user concurrency, cross-process cancellation and crash recovery without resubmission");
     } finally { await consume.close(); await queue.close(); }
   }
+  await checkMarketingUploads(db.pool, storage);
   console.log("PASS: migrations, duplicate requests, ownership, upstream billing without local budgets, leases, cancellation, unknown calls, explicit retries, automatic copy/storyboard writeback, version conflicts, revisions, private frames and deletion");
 } finally { await db.close(); await rm(directory, { recursive: true, force: true }); }

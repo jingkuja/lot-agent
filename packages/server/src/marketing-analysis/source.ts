@@ -1,16 +1,18 @@
 import type { AnalysisSource } from "@lot-agent/core/marketing-analysis";
+import { marketingSourceUrls, marketingVideoPlatform } from "@lot-agent/core/marketing-video";
 import { AnalysisError } from "./errors.js";
 
 /** Pure normalization. DNS and every redirect are separately enforced by the
  * downloader's pinned egress; this function is not an SSRF boundary alone. */
 export function parseAnalysisSource(shareText: string): AnalysisSource {
   if (!shareText || shareText.length > 4000) throw new AnalysisError("INVALID_SOURCE");
-  const links = shareText.match(/https?:\/\/[^\s<>"“”]+/gi) ?? [];
+  const links = marketingSourceUrls(shareText);
   if (links.length !== 1) throw new AnalysisError("SINGLE_LINK_REQUIRED");
   const raw = links[0].replace(/[。，、；;！!？?）)\]}]+$/u, "");
   let url: URL;
   try { url = new URL(raw); } catch { throw new AnalysisError("INVALID_SOURCE"); }
   if (url.username || url.password || url.port || url.hash || /[\\\u0000-\u001f]/.test(raw)) throw new AnalysisError("INVALID_SOURCE");
+  if (!marketingVideoPlatform(url)) throw new AnalysisError("UNSUPPORTED_SOURCE");
   const host = url.hostname; const path = url.pathname.replace(/\/$/, "");
   const clean = new URL(`https://${host}${path}`);
   const params = [...url.searchParams.keys()];

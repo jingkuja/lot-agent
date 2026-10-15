@@ -76,15 +76,20 @@ function responseUsage(response: Response): ChatChunk["usage"] {
 
 export async function* mapResponsesStream(stream: AsyncIterable<ResponseStreamEvent>, model: string, onResponseId?: (id: string) => void): AsyncIterable<ChatChunk> {
   let terminal: Response | undefined;
+  let terminalChunks: ChatChunk[] = [];
   let usage: ChatChunk["usage"];
   let refusal = false;
   const streamed = new Map<string, string>();
+  const iterator = stream[Symbol.asyncIterator]();
+  let tailTimer: ReturnType<typeof setTimeout> | undefined;
+  let tailDeadline: Promise<null> | undefined;
+  let exhausted = false;
   try {
-    for await (const event of stream) {
-      // A Responses terminal event precedes transport EOF. Breaking here makes
-      // the SDK abort the HTTP request, which gateways can log as client_gone.
-      // Drain the tail under the caller's existing cancellation/deadline, while
-      // keeping the first terminal authoritative and ignoring trailing output.
+    for (;;) {
+      const next = tailDeadline ? await Promise.race([iterator.next(), tailDeadline]) : await iterator.next();
+      if (!next) break;
+      if (next.done) { exhausted = true; break; }
+      const event = next.value;
       if (terminal) continue;
       if (event.type === "response.created") onResponseId?.(event.response.id);
       if (event.type === "response.output_text.delta") {
@@ -96,25 +101,47 @@ export async function* mapResponsesStream(stream: AsyncIterable<ResponseStreamEv
       } else if (event.type === "response.refusal.delta" || event.type === "response.refusal.done") {
         refusal = true;
       } else if (["response.completed", "response.incomplete", "response.failed"].includes(event.type)) {
-        terminal = (event as { response: Response }).response;
-        usage = responseUsage(terminal);
-        if (terminal.status !== event.type.slice("response.".length)) throw new LLMResponseError("Inconsistent Responses terminal event", usage);
+        const response = (event as { response: Response }).response;
+        usage = responseUsage(response);
+        if (response.status !== event.type.slice("response.".length)) throw new LLMResponseError("Inconsistent Responses terminal event", usage);
+        // Validate and retain the entire first terminal before reading the tail.
+        // A reset or cancellation after this point cannot erase a valid result.
+        terminalChunks = response.status === "failed" ? [] : completedChunks(response, model, streamed, refusal, usage);
+        terminal = response;
+        // Normally EOF follows immediately. Give the gateway a short chance to
+        // close cleanly, independently of potentially unbounded caller signals.
+        tailDeadline = new Promise(resolve => { tailTimer = setTimeout(() => resolve(null), 1000); });
       } else if (event.type === "error") {
         // Never expose upstream bodies (which can contain prompts or keys).
         throw new LLMResponseError("Responses stream error", usage);
       }
     }
   } catch (error) {
-    if (usage && !(error instanceof LLMResponseError)) throw new LLMResponseError("Responses stream interrupted", usage);
-    throw error;
+    if (!terminal) {
+      if (usage && !(error instanceof LLMResponseError)) throw new LLMResponseError("Responses stream interrupted", usage);
+      throw error;
+    }
+  } finally {
+    clearTimeout(tailTimer);
+    if (!exhausted) {
+      // SDK Stream.return can wait behind a stuck read. Abort its own transport,
+      // never the caller's signal, and do not wait indefinitely for cleanup.
+      (stream as { controller?: AbortController }).controller?.abort();
+      void iterator.return?.().catch(() => {});
+    }
   }
   if (!terminal) throw new LLMResponseError("Responses stream ended before completion", usage);
   if (terminal.status === "failed" || terminal.status === "cancelled") throw new LLMResponseError(`Responses ${terminal.status}`, usage);
+  yield* terminalChunks;
+}
+
+function completedChunks(terminal: Response, model: string, streamed: Map<string, string>, refusal: boolean, usage: ChatChunk["usage"]): ChatChunk[] {
   if (terminal.status === "incomplete") {
-    yield { type: "done", finishReason: terminal.incomplete_details?.reason === "max_output_tokens" ? "length" : "content_filter", usage };
-    return;
+    return [{ type: "done", finishReason: terminal.incomplete_details?.reason === "max_output_tokens" ? "length" : "content_filter", usage }];
   }
   if (terminal.status !== "completed") throw new LLMResponseError("Invalid Responses terminal status", usage);
+  if (!Array.isArray(terminal.output)) throw new LLMResponseError("Invalid Responses output", usage);
+  const chunks: ChatChunk[] = [];
   const calls: NonNullable<ChatChunk["toolCall"]>[] = [];
   const ids = new Set<string>();
   for (const [index, item] of terminal.output.entries()) {
@@ -125,7 +152,7 @@ export async function* mapResponsesStream(stream: AsyncIterable<ResponseStreamEv
         if (part.type !== "output_text") continue;
         const prior = streamed.get(`${index}:${partIndex}`) ?? "";
         if (!part.text.startsWith(prior)) throw new LLMResponseError("Inconsistent Responses text", usage);
-        if (part.text.length > prior.length) yield { type: "text", content: part.text.slice(prior.length) };
+        if (part.text.length > prior.length) chunks.push({ type: "text", content: part.text.slice(prior.length) });
       }
     } else if (item.type === "function_call") {
       if (!item.call_id || !item.name || ids.has(item.call_id) || (item.status && item.status !== "completed")) throw new LLMResponseError("Invalid Responses function identity", usage);
@@ -138,7 +165,8 @@ export async function* mapResponsesStream(stream: AsyncIterable<ResponseStreamEv
   }
   // Validate every call before dispatching any; never execute refusal or
   // truncated output. Function schemas/allowlists remain the registry's job.
-  if (!refusal) for (const toolCall of calls) yield { type: "tool_call", toolCall };
-  yield { type: "done", finishReason: refusal ? "content_filter" : calls.length ? "tool_calls" : "stop", usage,
-    responseId: terminal.id, responseState: { model, items: terminal.output } };
+  if (!refusal) for (const toolCall of calls) chunks.push({ type: "tool_call", toolCall });
+  chunks.push({ type: "done", finishReason: refusal ? "content_filter" : calls.length ? "tool_calls" : "stop", usage,
+    responseId: terminal.id, responseState: { model, items: terminal.output } });
+  return chunks;
 }

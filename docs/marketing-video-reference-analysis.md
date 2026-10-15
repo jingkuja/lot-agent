@@ -53,6 +53,8 @@ pnpm marketing-analysis:reconcile USER_ID ANALYSIS_UUID 'ocr:f0001' 1 /private/p
 
 ## 来源、隔离与证据
 
+本地爆款视频通过鉴权的 `POST /uploads` 接收 multipart `file` 和 UUID `clientRequestId`，只接受 MP4 / MOV / WebM，正文上限 101 MiB、文件上限 100 MiB，并校验 MIME 和容器签名。迁移 **0045** 保存上传归属、原文件名、哈希及过期状态。文件位于 `data/marketing-analysis/<owner hash>/uploads/<upload UUID>`，与分析任务隔离且不公开挂载；容量预检涵盖未分析的上传。草稿保存 `referenceUpload: {id,name}`，它不作为视频生成素材使用。创建分析传 `uploadId`（与 `shareText` 互斥）；Worker 校验归属、单一常规文件及 SHA-256 后复制到任务目录，沿用无网络解码沙箱校验真实时长 ≤180 秒、分辨率 ≤1080p，再进入相同 OCR / ASR / 摘要 / 创作链路。上传及分析请求均幂等，刷新不重新发起模型调用。替换/移除来源会清理旧的草稿分析引用；上传满七天且无活动分析时回收原文件，过期后重新分析需重新上传。
+
 平台适配接受三平台的单视频长链/短链，保留 B 站选定 `p` 和小红书必要访问参数；拒绝主页、合集、直播、多个链接、图文和超过 180 秒的媒体。B 站提取器的实际单 P / cid 及登录会话兼容性仍需真链核对，尚无浏览器自动化兜底。
 
 下载器固定版本、固定参数，禁用插件、用户配置、JS runtimes、远程组件、外部下载器。优先选择含音轨的有界视频流，若无合并流则沿用视频流；当前不额外下载独立音轨，无音轨时页面提示并仅分析画面。下载进程在独立 Linux 网络命名空间内，只能通过任务专属 Unix socket 和 HTTPS CONNECT 代理出网；解析并固定公网 IPv4 地址，拒绝内网、保留网段和其他端口，所有连接累计限制 100 MiB。
@@ -76,7 +78,8 @@ OCR 只合并相邻一致文字；空结果、漏识别或价格/否定词变化
 | 接口 | 行为 |
 | --- | --- |
 | `GET /capabilities` | 是否启用、时长与平台 |
-| `POST /` | `{shareText,clientRequestId,target?:{projectId,projectVersion,locale}}`，幂等创建并关联草稿，202 |
+| `POST /uploads` | multipart `{file,clientRequestId}`，幂等私有上传，返回 `{id,name}`，201 |
+| `POST /` | `{shareText?,uploadId?,clientRequestId,target?:{projectId,projectVersion,locale}}`，两个来源字段二选一，幂等创建并关联草稿，202 |
 | `GET /?offset=0` / `GET /:id` | 每页 20 条简要历史 / 完整结果与覆盖情况 |
 | `GET /:id/frames/:frameId` | 私有 JPEG，`private,no-store` |
 | `POST /:id/cancel` | 持久化取消，Worker 中止请求和本地处理 |
@@ -88,6 +91,8 @@ OCR 只合并相邻一致文字；空结果、漏识别或价格/否定词变化
 
 营销工作台点击“拆解爆款文案”后直接显示一个“视频链接或参考文案”输入框。产品补充要求可选，点击“一键拆解并生成”后自动完成，文案与分镜显示在当前步骤并可编辑。“查看参考资料”默认折叠，仅展示摘要、画面文字和私有帧；不再要求校对、勾选、手动生成摘要或预览选用。平台登录仅在来源要求登录时展开处理。页面状态和图片 URL 随账号切换销毁。
 ## 配置与部署
+
+本地上传同样依赖 `MARKETING_ANALYSIS_ENABLED=1`、迁移 0045、运行中的媒体分析 Worker、共享私有数据卷及隔离 FFmpeg / FFprobe；仅省去平台下载，不绕过模型可用性或沙箱检查。ASR 仍按上文要求配置 `PUBLIC_BASE_URL`。现有 Nginx 全局 `client_max_body_size 155m` 可覆盖该上传请求，HTTP 入口复用上传限流。先升级 API 执行迁移，再启动新版媒体 Worker。
 
 在 `.env` 设置：
 

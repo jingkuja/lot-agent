@@ -27,17 +27,20 @@ export class AnalysisStorage {
     const disk = await statfs(this.root);
     if (disk.bavail * disk.bsize < freeMinimum + (globalPending + 1) * ANALYSIS_LIMITS.temporaryBytes) throw new AnalysisError("ANALYSIS_DISK_LOW", 503);
   }
-  async directory(owner: string, id: string) {
+  async uploadDirectory(owner: string, id: string) { return this.directory(owner, id, "uploads"); }
+  async removeUpload(owner: string, id: string) { await rm(await this.uploadDirectory(owner, id), { recursive: true, force: true }); }
+  async directory(owner: string, id: string, scope?: "uploads") {
     if (!/^[a-f0-9-]{36}$/i.test(id)) throw new AnalysisError("INVALID_PRIVATE_FILE");
     const root = resolve(this.root);
     const parts = [root, join(root, createHash("sha256").update(owner).digest("hex"))];
-    parts.push(join(parts[1], id));
+    if (scope) parts.push(join(parts[1], scope));
+    parts.push(join(parts.at(-1)!, id));
     for (const path of parts) {
       await mkdir(path, { recursive: true, mode: 0o700 });
       const info = await lstat(path);
       if (!info.isDirectory() || info.isSymbolicLink()) throw new AnalysisError("INVALID_PRIVATE_FILE");
     }
-    return parts[2];
+    return parts.at(-1)!;
   }
   async remove(owner: string, id: string) { await rm(await this.directory(owner, id), { recursive: true, force: true }); }
 }

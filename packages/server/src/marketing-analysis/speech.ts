@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createDeadline, withAbort } from "@lot-agent/core";
-import { ANALYSIS_LIMITS, type AnalysisCallLedger, type AnalysisSource, type AnalysisSpeech } from "@lot-agent/core/marketing-analysis";
+import { ANALYSIS_LIMITS, type AnalysisCallLedger, type AnalysisSource, type AnalysisSpeech, type ModelStepReceipt } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
 import { readAnalysisFile } from "./private-files.js";
 import type { MediaRunner } from "./sandbox.js";
@@ -101,10 +101,16 @@ export async function transcribeAnalysisAudio(input: {
     finally { deadline.dispose(); }
     await input.ledger.finish(step, receipt);
   }
+  return speechFromReceipt(receipt);
+}
+
+/** A completed ledger entry is sufficient even after the private source expires. */
+export function speechFromReceipt(receipt: ModelStepReceipt): AnalysisSpeech {
   if (receipt.errorCode === "ASR_MODEL_UNAVAILABLE" && receipt.outcome === "rejected") return { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" };
   if (receipt.outcome === "rejected") throw new AnalysisError(receipt.errorCode ?? "MODEL_AUTH_REQUIRED", 409);
   if (receipt.outcome === "request_unknown") throw new AnalysisError("REQUEST_UNKNOWN", 409);
-  if (!receipt.usage) throw new AnalysisError("MODEL_USAGE_UNKNOWN", 409);
+  if (!receipt.usage || ![receipt.usage.promptTokens, receipt.usage.completionTokens].every(n => Number.isSafeInteger(n) && n >= 0)) throw new AnalysisError("MODEL_USAGE_UNKNOWN", 409);
   if (receipt.outcome !== "completed") throw new AnalysisError("MODEL_STEP_FAILED", 409);
+  if (typeof receipt.text !== "string" || receipt.text.length > 30000) throw new AnalysisError("MODEL_INVALID_RESPONSE");
   return { status: "completed", id: "a0001", text: receipt.text, model: ASR_MODEL };
 }

@@ -28,3 +28,14 @@ it("counts retained bytes and reserves space for concurrent work, without follow
     await expect(storage.assertCapacity("stranger", 0, 0)).rejects.toThrow("INVALID_PRIVATE_FILE");
   } finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
 });
+
+it.each(["not-a-number", "-1", "1024", "1.5"])("rejects invalid configured storage thresholds: %s", async value => {
+  const root = await mkdtemp(join(tmpdir(), "lot-storage-config-"));
+  try {
+    for (const key of ["MARKETING_ANALYSIS_OWNER_BYTES", "MARKETING_ANALYSIS_MIN_FREE_BYTES"]) {
+      vi.stubEnv(key, value);
+      await expect(new AnalysisStorage(root).assertCapacity("owner", 0, 0)).rejects.toThrow("ANALYSIS_CONFIG_REQUIRED");
+      vi.unstubAllEnvs();
+    }
+  } finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
+});

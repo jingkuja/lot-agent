@@ -17,6 +17,27 @@ function parallelSelection() {
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const emptySummary = () => ({ summary: [], timeline: [], marketingPoints: [], limitations: [] });
 
+it.each(["MODEL_QUOTA", "MODEL_RATE_LIMIT", "MODEL_AUTH_REQUIRED"])("reports every unprocessed OCR frame after %s, then clears gaps on normal resume", async code => {
+  const { summaryInput, updateAnalysisCoverage } = await import("./summary-input.js");
+  let snapshot = initial();
+  const models = { ocr: vi.fn(async (frame: FrameEvidence) => {
+    if (frame.id === "f0002") throw new AnalysisError(code);
+    return { frameId: frame.id, rawText: "咖啡" };
+  }), observe: vi.fn(async () => []), summarize: vi.fn(async () => emptySummary()) };
+  await expect(analyzeSelectedFrames({ snapshot, selection, revision: 1, ocrConcurrency: 1,
+    models: models as unknown as AnalysisModels, checkpoint: async value => { snapshot = value; } })).rejects.toThrow(code);
+  expect(models.summarize).not.toHaveBeenCalled();
+  updateAnalysisCoverage(snapshot, selection);
+  expect(snapshot.coverage?.omittedOcrFrameIds).toEqual(["f0002"]);
+  expect(summaryInput(snapshot, 1).limitations).toContain("OCR_INCOMPLETE");
+  models.ocr.mockImplementation(async frame => ({ frameId: frame.id, rawText: "新品" }));
+  const resumed = await analyzeSelectedFrames({ snapshot, selection, revision: 1,
+    models: models as unknown as AnalysisModels, checkpoint: async () => {} });
+  expect(resumed.coverage?.omittedOcrFrameIds).toEqual([]);
+  expect(resumed.summary?.limitations).not.toContain("OCR_INCOMPLETE");
+  expect(models.ocr).toHaveBeenCalledTimes(3);
+});
+
 describe("parallel frame analysis", () => {
   it.each([undefined, { ocrConcurrency: 2, visualConcurrency: 1 }])("bounds parallel work, orders results, and summarizes only after both stages: %j", async settings => {
     vi.useFakeTimers();

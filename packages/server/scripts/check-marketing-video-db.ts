@@ -194,6 +194,23 @@ try {
   await assert.rejects(run(corruptTask), /视频分段配置不完整/);
   assert.equal(resolved, 0);
   deps.generation = originalGeneration;
+  // Upgrade an already submitted pre-v2 WebM job. Its frozen audio options
+  // and narration survive current reference-video restrictions and retries.
+  let oldVideo = await store.save(owner, randomUUID(), 0, { ...draft, assets: { video: randomUUID(), voice: randomUUID() } });
+  oldVideo = await store.setReview(owner, oldVideo, { verdict: "pass", issues: [] });
+  const oldVideoTask = await store.reserve(owner, oldVideo.id, oldVideo.version, { modelId: "fixture", generate_audio: true, reference_video: ["https://fixture.invalid/legacy.webm"], reference_audio: ["https://fixture.invalid/voice.wav"] }, false);
+  const capturedInputs: Record<string, unknown>[] = [];
+  deps.generation = async (job, signal) => { capturedInputs.push(job.input); return originalGeneration(job, signal); };
+  await run(oldVideoTask);
+  assert(capturedInputs.length > 1);
+  for (const input of capturedInputs) {
+    assert.equal(input.generate_audio, true);
+    assert.deepEqual(input.reference_audio, ["https://fixture.invalid/voice.wav"]);
+  }
+  const oldSent = creates;
+  await store.reserve(owner, oldVideo.id, oldVideo.version, {}, true);
+  await run(oldVideoTask); assert.equal(creates, oldSent);
+  deps.generation = originalGeneration;
   const maximumShots = Array.from({ length: 15 }, () => ({ ...timedShots[0], durationSec: 4 }));
   let maximum = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: maximumShots, script: storyboardScript(maximumShots) }));
   maximum = await store.setReview(owner, maximum, { verdict: "pass", issues: [] });

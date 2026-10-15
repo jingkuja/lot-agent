@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid } from "./index.js";
+import { marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText } from "./index.js";
 
 describe("marketing segment plan", () => {
   it.each([15, 17, 29, 30, 45, 59, 60])("preserves narration and respects the 15s cap for %ds", (duration) => {
@@ -44,10 +44,11 @@ describe("editable marketing storyboard", () => {
     const long = shots.map(shot => ({ ...shot, script: "字".repeat(100) }));
     expect(() => resolveMarketingSegments(MarketingDraftSchema.parse({ ...draft, storyboard: long, script: storyboardScript(long) }))).toThrow("过长");
   });
-  it("keeps old drafts and their review keys compatible", () => {
+  it("keeps old drafts readable but invalidates incomplete legacy review keys", () => {
     const draft = MarketingDraftSchema.parse({ script: "欢迎来到咖啡店，来这里喝一杯咖啡。" });
     expect(draft.storyboard).toEqual([]);
-    expect(marketingReviewText(draft)).toBe([draft.script, draft.publishTitle, draft.tags].join("\n"));
+    expect(marketingReviewText(draft)).not.toBe([draft.script, draft.publishTitle, draft.tags].join("\n"));
+    expect(marketingReviewText({ script: draft.script } as typeof draft)).toBe(marketingReviewText(draft));
     expect(resolveMarketingSegments(draft)).toEqual(planMarketingSegments(draft.script, 30));
   });
   it("keeps valid AI pacing and checks narration against each shot's duration", () => {
@@ -112,4 +113,49 @@ it("allows draft editing but blocks video generation with more than three images
   expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: [id, id], scene: id } }))).toBe("");
   expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: [id, id], scene: [id, id] } }))).toContain("不能超过 3 张");
   expect(MarketingDraftSchema.safeParse({ assets: { video: [id, id] } }).success).toBe(false);
+});
+
+describe("located marketing review edits", () => {
+  const storyboard = [
+    { script: "这个产品最好。", visual: "产品最好海报", action: "介绍产品", camera: "近景" },
+    { script: "欢迎了解信息。", visual: "另一张产品最好海报", action: "展示外观", camera: "中景" },
+  ];
+  const draft = MarketingDraftSchema.parse({ script: storyboardScript(storyboard), storyboard });
+  const issue = { text: "最好", reason: "夸大", suggestion: "有特色", field: "storyboard.visual" as const, shotIndex: 0 };
+  it("modifies only the exact declared field and supports deleting an excerpt", () => {
+    const next = applyMarketingReviewSuggestion(draft, issue)!;
+    expect(next.storyboard[0].visual).toBe("产品有特色海报");
+    expect(next.storyboard[1]).toEqual(draft.storyboard[1]);
+    expect(next.script).toBe(draft.script);
+    expect(applyMarketingReviewSuggestion(draft, { ...issue, suggestion: "" })?.storyboard[0].visual).toBe("产品海报");
+    expect(marketingReviewFieldText(draft, { field: "script", shotIndex: 0 })).toBeNull();
+  });
+  it("rejects ambiguous, absent, cross-shot and oversized replacements", () => {
+    expect(applyMarketingReviewSuggestion({ ...draft, storyboard: [{ ...draft.storyboard[0], visual: "最好最好" }] }, issue)).toBeNull();
+    expect(applyMarketingReviewSuggestion(draft, { ...issue, text: "没有这句话" })).toBeNull();
+    expect(applyMarketingReviewSuggestion(draft, { ...issue, suggestion: "字".repeat(601) })).toBeNull();
+    expect(applyMarketingReviewSuggestion(draft, { text: draft.script, suggestion: "新的口播。", reason: "风险", field: "script" })).toBeNull();
+    expect(applyMarketingReviewSuggestion(draft, { ...issue, field: undefined })).toBeNull();
+  });
+  it("synchronizes both narration edit paths without changing other shots", () => {
+    for (const location of [{ field: "script" as const }, { field: "storyboard.script" as const, shotIndex: 0 }]) {
+      const next = applyMarketingReviewSuggestion(draft, { ...issue, ...location, shotIndex: "shotIndex" in location ? location.shotIndex : undefined })!;
+      expect(next.script).toBe("这个产品有特色。\n欢迎了解信息。");
+      expect(next.storyboard[0].script).toBe("这个产品有特色。");
+      expect(next.storyboard[1]).toEqual(draft.storyboard[1]);
+    }
+    expect(applyMarketingReviewSuggestion({ ...draft, script: "不同的最好文案。" }, { ...issue, field: "script", shotIndex: undefined })).toBeNull();
+    const manual = updateMarketingReviewField(draft, { field: "script" }, "完全重写的口播。")!;
+    expect(manual.storyboard).toEqual([]);
+    expect(manual.script).toBe("完全重写的口播。");
+    expect(updateMarketingReviewField(draft, { field: "storyboard.script", shotIndex: 1 }, "手动修改。")?.script).toBe("这个产品最好。\n手动修改。");
+  });
+  it("invalidates checks after changes to every content field and its boundary", () => {
+    const key = marketingReviewText(draft);
+    for (const field of ["script", "publishTitle", "tags", "background"] as const)
+      expect(marketingReviewText({ ...draft, [field]: draft[field] + "新内容" })).not.toBe(key);
+    for (const field of ["script", "visual", "action", "camera"] as const)
+      expect(marketingReviewText({ ...draft, storyboard: draft.storyboard.map((shot, i) => i ? shot : { ...shot, [field]: shot[field] + "新内容" }) })).not.toBe(key);
+    expect(marketingReviewText({ ...draft, publishTitle: "a\nb", tags: "c" })).not.toBe(marketingReviewText({ ...draft, publishTitle: "a", tags: "b\nc" }));
+  });
 });

@@ -260,7 +260,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...restInit,
     headers: {
-      "Content-Type": "application/json",
+      ...(restInit.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...authHeaders(),
       ...(callerHeaders as Record<string, string> | undefined),
     },

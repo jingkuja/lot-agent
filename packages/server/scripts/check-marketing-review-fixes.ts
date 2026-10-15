@@ -12,8 +12,16 @@ import { analysisConfig } from "../src/marketing-analysis/config.js";
 import { AnalysisModels } from "../src/marketing-analysis/models.js";
 import { PgAnalysisLedger } from "../src/marketing-analysis/ledger.js";
 import { summaryInput } from "../src/marketing-analysis/summary-input.js";
+import { checkTextResultRecovery } from "./check-marketing-result-recovery.js";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AnalysisStorage } from "../src/marketing-analysis/storage.js";
+import { collectAnalysisFiles } from "../src/marketing-analysis/cleanup.js";
+import { runAnalysis } from "../src/marketing-analysis/runtime.js";
 
 export async function checkReviewFixes(pool: pg.Pool) {
+  await checkTextResultRecovery(pool);
   const owner = randomUUID(), other = randomUUID();
   await pool.query("INSERT INTO users(id,name) VALUES($1,'review fixture'),($2,'other review fixture')", [owner, other]);
   const projects = new PgMarketingProjectStore(pool);
@@ -91,7 +99,89 @@ export async function checkReviewFixes(pool: pg.Pool) {
   await resumedModel.summarize(summaryInput((await analyses.row(owner, analysis.id)).snapshot, 1));
   assert.equal(calls, 2);
   await analyses.finish(next);
+  // New summary inputs carry unprocessed OCR even after quota/auth rejection.
+  // JSONB round trips must preserve the model's exact serialized request.
+  const coverageJob = await create(); const coverageLease = (await analyses.claim(coverageJob.id))!;
+  const secondFrame = { ...frame, id: "f0002", objectKey: "frame-0002.jpg", ptsMs: 500, sourcePts: "500" };
+  const coverageSnapshot = { ...coverageJob.snapshot, source: { ...coverageJob.snapshot.source, durationMs: 1000, title: "title", author: "author" },
+    frames: [frame, secondFrame], frameTexts: [{ frameId: frame.id, rawText: "coffee" }], completedVisualBatches: [0] };
+  const selection = { frames: coverageSnapshot.frames, ocr: coverageSnapshot.frames, visual: coverageSnapshot.frames, durationMs: 1000,
+    coverage: { sampledFrames: 2, ocrFrames: 2, visualFrames: 2, omittedOcrFrameIds: [], omittedVisualFrameIds: [], limitations: ["SAMPLED_IMAGES_ONLY", "NO_AUDIO_ANALYSIS"] } };
+  await analyses.checkpoint(coverageLease, coverageSnapshot, "ocr", selection);
+  const frozen = await analyses.freezeSummaryInput(coverageLease, coverageSnapshot);
+  assert(frozen.limitations.includes("OCR_INCOMPLETE"));
+  assert.deepEqual((await analyses.row(owner, coverageJob.id)).snapshot.coverage.omittedOcrFrameIds, ["f0002"]);
+  let summaryCalls = 0;
+  const frozenProvider = async () => ({ async *chat() {
+    summaryCalls++; yield { type: "text" as const, content: JSON.stringify({ summary: [], timeline: [], marketingPoints: [], limitations: [] }) };
+    yield { type: "done" as const, finishReason: "stop", usage: { promptTokens: 1, completionTokens: 1 } };
+  } });
+  const frozenModel = new AnalysisModels({ ledger: new PgAnalysisLedger(analyses, coverageLease), provider: frozenProvider, readFrame: async () => new Uint8Array() });
+  await frozenModel.summarize(frozen);
+  const reread = (await analyses.row(owner, coverageJob.id)).snapshot;
+  reread.frameTexts.push({ frameId: secondFrame.id, rawText: "later" });
+  await frozenModel.summarize(await analyses.freezeSummaryInput(coverageLease, reread));
+  assert.equal(summaryCalls, 1, "saved summary receipt survives reordered JSONB keys and later processing changes");
+  await analyses.finish(coverageLease);
+  // A pre-upgrade intent gets its original input, without rewriting its hash.
+  const legacyJob = await create(); const legacyLease = (await analyses.claim(legacyJob.id))!;
+  const legacySnapshot = { ...coverageSnapshot, coverage: selection.coverage };
+  await analyses.checkpoint(legacyLease, legacySnapshot, "ocr", selection);
+  const legacyModel = new AnalysisModels({ ledger: new PgAnalysisLedger(analyses, legacyLease), provider: frozenProvider, readFrame: async () => new Uint8Array() });
+  await legacyModel.summarize(summaryInput(legacySnapshot, 1));
+  const beforeLegacyRecovery = summaryCalls;
+  const legacyFrozen = await analyses.freezeSummaryInput(legacyLease, (await analyses.row(owner, legacyJob.id)).snapshot);
+  assert(!legacyFrozen.limitations.includes("OCR_INCOMPLETE"));
+  await legacyModel.summarize(legacyFrozen);
+  assert.equal(summaryCalls, beforeLegacyRecovery);
+  await analyses.finish(legacyLease);
+  const retentionRoot = await mkdtemp(join(tmpdir(), "lot-review-retention-"));
+  const storage = new AnalysisStorage(retentionRoot);
+  try {
+    for (const receivedSpeech of [false, true]) {
+      const sourceJob = await create(); const sourceLease = (await analyses.claim(sourceJob.id))!;
+      const sourceSnapshot = { ...coverageSnapshot, source: { ...coverageSnapshot.source, mediaKey: "source.mp4" } };
+      await analyses.checkpoint(sourceLease, sourceSnapshot, "frames", selection);
+      const sourceDirectory = await storage.directory(owner, sourceJob.id);
+      await writeFile(join(sourceDirectory, "source.mp4"), "fixture-private-source");
+      await writeFile(join(sourceDirectory, frame.objectKey), "retained frame");
+      if (receivedSpeech) {
+        const asrLedger = new PgAnalysisLedger(analyses, sourceLease);
+        await asrLedger.begin("asr:source", "immutable-audio-hash", "qwen-audio-3.1-asr-flash", 0);
+        await asrLedger.finish("asr:source", { text: "已收到的语音", outcome: "completed", usage: { promptTokens: 1, completionTokens: 1 } });
+      }
+      await analyses.finish(sourceLease, "MODEL_QUOTA");
+      await pool.query("UPDATE marketing_reference_analyses SET created_at=now()-interval '8 days' WHERE id=$1", [sourceJob.id]);
+      await collectAnalysisFiles(analyses, storage);
+      await assert.rejects(stat(join(sourceDirectory, "source.mp4")), /ENOENT/);
+      assert((await stat(join(sourceDirectory, frame.objectKey))).isFile());
+      if (!receivedSpeech) {
+        assert.equal((await analyses.get(owner, sourceJob.id))!.errorCode, "SOURCE_EXPIRED");
+        await analyses.resume(owner, sourceJob.id, 1, false, true);
+        assert.deepEqual((await analyses.row(owner, sourceJob.id)).snapshot.speech, { status: "skipped", reason: "SOURCE_EXPIRED" });
+        await analyses.cancel(owner, sourceJob.id);
+      } else {
+        await analyses.resume(owner, sourceJob.id, 1); const restoredLease = (await analyses.claim(sourceJob.id))!;
+        const recoveringStore = new Proxy(analyses, { get(target, property) {
+          if (property === "checkpoint") return async (...args: Parameters<PgAnalysisStore["checkpoint"]>) => {
+            await target.checkpoint(...args);
+            if (args[2] === "asr") throw new Error("fixture stop after speech checkpoint");
+          };
+          const value = Reflect.get(target, property); return typeof value === "function" ? value.bind(target) : value;
+        } });
+        await assert.rejects(runAnalysis(restoredLease, new AbortController().signal, {
+          store: recoveringStore, storage, config,
+          db: { getUserApiKey: async () => "fixture" }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] }) },
+          baseUrl: "https://never-call.invalid", bridgePath: "/never-run",
+          mediaRuntime: { decoderRunner: () => { throw new Error("must not decode expired source"); } },
+        } as unknown as Parameters<typeof runAnalysis>[2]), /fixture stop after speech checkpoint/);
+        assert.equal((await analyses.row(owner, sourceJob.id)).snapshot.speech.text, "已收到的语音");
+        assert.equal((await pool.query("SELECT count(*)::int AS n FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id='asr:source'", [sourceJob.id])).rows[0].n, 1);
+        await analyses.finish(restoredLease, "FIXTURE_STOP");
+      }
+    }
+  } finally { await rm(retentionRoot, { recursive: true, force: true }); }
   const fairness = { backlogOwner: owner, otherOwner: other, otherTask: waiting.id };
-  console.log("PASS: review regressions: durable text replay/conflict/unknown/ownership, concurrent resume admission, 101-row fair dispatch and real summary ledger recovery");
+  console.log("PASS: review regressions: durable text replay/conflict/unknown/ownership, concurrent resume admission, 101-row fair dispatch, frozen summary/legacy hash recovery, source expiry and ASR receipt restoration without decoding or resubmission");
   return fairness;
 }

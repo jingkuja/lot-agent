@@ -345,6 +345,7 @@ async function main() {
   app.on("POST", "/api/marketing-videos/:id/publication", messagesRateLimit);
   app.on("POST", "/api/marketing-videos/:id/generate", generationRateLimit);
   app.on("POST", "/api/marketing-video-analyses", generationRateLimit);
+  app.on("POST", "/api/marketing-video-analyses/uploads", uploadRateLimit);
   app.on("POST", "/api/marketing-video-analyses/:id/resume", generationRateLimit);
   app.on("POST", "/api/marketing-video-analyses/:id/summarize", generationRateLimit);
   app.use("/api/digital-employee/*", digitalEmployeeRateLimit);

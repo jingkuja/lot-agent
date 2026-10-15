@@ -43,12 +43,12 @@ export interface AnalysisCoverage {
   limitations: string[];
 }
 export interface AnalysisSource {
-  platform: AnalysisPlatform; canonicalUrl: string; canonicalId?: string; selectedPart?: number;
+  platform: AnalysisPlatform | "local"; canonicalUrl: string; canonicalId?: string; selectedPart?: number; uploadId?: string;
   title?: string; author?: string; durationMs?: number; sourceHash?: string; mediaKey?: string; downloaderVersion?: string;
 }
 export type AnalysisStatus = "queued" | "running" | "needs_auth" | "needs_review" | "partial" | "ready" | "failed" | "cancelled";
 export type AnalysisSpeech = { status: "completed"; id: "a0001"; text: string; model: string }
-  | { status: "skipped"; reason: "ASR_MODEL_UNAVAILABLE" | "NO_AUDIO_TRACK" };
+  | { status: "skipped"; reason: "ASR_MODEL_UNAVAILABLE" | "NO_AUDIO_TRACK" | "SOURCE_EXPIRED" };
 export interface AnalysisSnapshot {
   speech?: AnalysisSpeech;
   source: AnalysisSource; frames: FrameEvidence[]; frameTexts: FrameText[]; texts: ScreenText[];
@@ -61,9 +61,9 @@ export interface ReferenceAnalysis {
   stage: string; errorCode?: string; snapshot: AnalysisSnapshot; createdAt: string; updatedAt: string;
   projectId?: string; applied?: boolean; pendingCalls?: number;
 }
-export const CreateAnalysisSchema = z.object({ shareText: z.string().trim().min(1).max(4000), clientRequestId: z.string().uuid(),
+export const CreateAnalysisSchema = z.object({ shareText: z.string().trim().min(1).max(4000).optional(), uploadId: z.string().uuid().optional(), clientRequestId: z.string().uuid(),
   target: z.object({ projectId: z.string().uuid(), projectVersion: z.number().int().positive(), locale: z.enum(["zh", "en", "id"]) }).strict().optional(),
-}).strict();
+}).strict().refine(value => !!value.shareText !== !!value.uploadId, { message: "Choose one analysis source" });
 export const EditAnalysisTextSchema = z.object({ expectedRevision: z.number().int().positive(), texts: z.array(z.object({ id: z.string().regex(/^t\d{4}$/), text: z.string().max(6000) }).strict()).max(120) }).strict();
 export interface AnalysisStore {
   get(ownerId: string, id: string): Promise<ReferenceAnalysis | null>;

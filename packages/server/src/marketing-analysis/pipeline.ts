@@ -1,4 +1,4 @@
-import { summaryInput } from "./summary-input.js";
+import { summaryInput, updateAnalysisCoverage } from "./summary-input.js";
 import { AnalysisError } from "./errors.js";
 import { analysisParallelism } from "./config.js";
 import { ANALYSIS_LIMITS, mergeScreenText, type AnalysisSnapshot, type FrameText } from "@lot-agent/core/marketing-analysis";
@@ -16,6 +16,7 @@ export async function analyzeSelectedFrames(input: {
   visualConcurrency?: number;
   models: AnalysisModels;
   checkpoint(snapshot: AnalysisSnapshot, stage: string): Promise<void>;
+  prepareSummary?(snapshot: AnalysisSnapshot): Promise<ReturnType<typeof summaryInput>>;
   signal?: AbortSignal;
 }) {
   const parallelism = analysisParallelism(input);
@@ -76,7 +77,10 @@ export async function analyzeSelectedFrames(input: {
   if (failed) throw failure;
   // The final text-only call sees only evidence actually sent to a model.
   input.signal?.throwIfAborted();
-  snapshot.summary = await input.models.summarize(summaryInput(snapshot, input.revision), input.signal);
+  let summary;
+  if (input.prepareSummary) summary = await input.prepareSummary(snapshot);
+  else { updateAnalysisCoverage(snapshot, input.selection); summary = summaryInput(snapshot, input.revision); }
+  snapshot.summary = await input.models.summarize(summary, input.signal);
   snapshot.summaryRevision = input.revision;
   await save("summary");
   return snapshot;

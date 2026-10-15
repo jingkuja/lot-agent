@@ -6,6 +6,8 @@ import { SecretBox } from "../auth/secret-box.js";
 import { parseAnalysisSource } from "./source.js";
 import { AnalysisError } from "./errors.js";
 import { ANALYSIS_JOB, ANALYSIS_QUEUE, type AnalysisConfig } from "./config.js";
+import { restoreSummaryInput, summaryInput, updateAnalysisCoverage } from "./summary-input.js";
+import { ownedAnalysisUpload } from "./uploads.js";
 
 export function analysisRecord(row: Record<string, any>): ReferenceAnalysis {
   return { id: row.id, ownerId: row.user_id, taskId: row.id, revision: row.revision, version: row.version,
@@ -48,8 +50,8 @@ export class PgAnalysisStore implements AnalysisJobStore {
     }
     if (Number(pending.count) >= 3) throw new AnalysisError("ANALYSIS_CONCURRENCY_LIMIT", 409);
   }
-  async create(owner: string, input: { shareText: string; clientRequestId: string; target?: { projectId: string; projectVersion: number; locale: "zh" | "en" | "id" } }, _config: AnalysisConfig) {
-    const source = parseAnalysisSource(input.shareText);
+  async create(owner: string, input: { shareText?: string; uploadId?: string; clientRequestId: string; target?: { projectId: string; projectVersion: number; locale: "zh" | "en" | "id" } }, _config: AnalysisConfig) {
+    const source = input.uploadId ? { platform: "local" as const, canonicalUrl: `upload:${input.uploadId}`, uploadId: input.uploadId } : parseAnalysisSource(input.shareText ?? "");
     const hash = createHash("sha256").update(input.target ? JSON.stringify([source.canonicalUrl, input.target.projectId, input.target.projectVersion, input.target.locale]) : source.canonicalUrl).digest("hex");
     return this.transaction(async client => {
       await ownerLock(client, owner);
@@ -59,19 +61,21 @@ export class PgAnalysisStore implements AnalysisJobStore {
         return analysisRecord(existing);
       }
       if (!this.secrets.enabled) throw new AnalysisError("ANALYSIS_CONFIG_REQUIRED", 503);
+      const upload = input.uploadId ? await ownedAnalysisUpload(client, owner, input.uploadId, true) : undefined;
       let context = null;
       if (input.target) {
         const project = (await client.query("SELECT * FROM marketing_video_projects WHERE id=$1 AND user_id=$2 FOR UPDATE", [input.target.projectId, owner])).rows[0];
         if (!project) throw new AnalysisError("PROJECT_NOT_FOUND", 404);
         if (project.version !== input.target.projectVersion || project.task_id) throw new AnalysisError("PROJECT_CONFLICT", 409);
         const draft = MarketingDraftSchema.parse(project.draft);
-        if (draft.copyMode !== "rewrite" || draft.reference.trim() !== input.shareText.trim()) throw new AnalysisError("PROJECT_CONFLICT", 409);
+        if (draft.copyMode !== "rewrite" || (input.uploadId ? draft.referenceUpload?.id !== input.uploadId
+          : !!draft.referenceUpload || draft.reference.trim() !== input.shareText?.trim())) throw new AnalysisError("PROJECT_CONFLICT", 409);
         context = { ...input.target, projectVersion: project.version + 1, draft };
       }
       await this.admit(client, owner);
       const id = randomUUID(); const sourceId = randomUUID();
-      const snapshot: AnalysisSnapshot = { source, frames: [], frameTexts: [], texts: [], observations: [] };
-      await client.query("INSERT INTO marketing_reference_sources(id,user_id,share_text,platform) VALUES($1,$2,$3,$4)", [sourceId, owner, this.secrets.seal(input.shareText), source.platform]);
+      const snapshot: AnalysisSnapshot = { source: { ...source, ...(upload ? { sourceHash: upload.source_hash, title: upload.original_name } : {}) }, frames: [], frameTexts: [], texts: [], observations: [] };
+      await client.query("INSERT INTO marketing_reference_sources(id,user_id,share_text,platform) VALUES($1,$2,$3,$4)", [sourceId, owner, this.secrets.seal(input.shareText ?? source.canonicalUrl), source.platform]);
       await client.query("INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,$2,$3,$4,$5)", [id, ANALYSIS_JOB, JSON.stringify({ analysisId: id }), owner, ANALYSIS_QUEUE]);
       const row = (await client.query(`INSERT INTO marketing_reference_analyses(id,user_id,source_id,client_request_id,input_hash,pipeline_version,snapshot,creation_context)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`, [id, owner, sourceId, input.clientRequestId, hash, ANALYSIS_VERSION, JSON.stringify(snapshot), context ? JSON.stringify(context) : null])).rows[0];
@@ -117,6 +121,20 @@ export class PgAnalysisStore implements AnalysisJobStore {
     const source = (await this.pool.query("SELECT share_text FROM marketing_reference_sources WHERE id=$1 AND user_id=$2", [row.source_id, lease.ownerId])).rows[0];
     return this.secrets.open(source.share_text);
   }
+  async freezeSummaryInput(lease: AnalysisLease, snapshot: AnalysisSnapshot): Promise<ReturnType<typeof summaryInput>> {
+    return this.transaction(async client => {
+      const row = await this.leased(client, lease);
+      const frozen = row.summary_inputs?.[String(lease.revision)];
+      if (frozen) return restoreSummaryInput(frozen);
+      const prior = await client.query("SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2 AND step_id=$3 LIMIT 1", [lease.id, lease.ownerId, `summary:${lease.revision}`]);
+      // Pre-upgrade intents retain the exact legacy normalization and hash.
+      // New revisions record actual processing coverage before their first POST.
+      if (!prior.rowCount && row.selection) updateAnalysisCoverage(snapshot, row.selection);
+      const input = summaryInput(snapshot, lease.revision);
+      await client.query("UPDATE marketing_reference_analyses SET summary_inputs=jsonb_set(summary_inputs,ARRAY[$2::text],$3::jsonb),snapshot=$4 WHERE id=$1", [lease.id, String(lease.revision), JSON.stringify(input), JSON.stringify(snapshot)]);
+      return input;
+    });
+  }
   async finish(lease: AnalysisLease, errorCode?: string) {
     return this.transaction(async client => {
       await ownerLock(client, lease.ownerId);
@@ -155,7 +173,7 @@ export class PgAnalysisStore implements AnalysisJobStore {
     });
     return this.get(owner, id);
   }
-  async resume(owner: string, id: string, revision: number, summarizeOnly = false) {
+  async resume(owner: string, id: string, revision: number, summarizeOnly = false, visualOnly = false) {
     await this.transaction(async client => {
       await ownerLock(client, owner); const row = await this.row(owner, id, client, true);
       if (row.revision !== revision) throw new AnalysisError("REVISION_CONFLICT", 409);
@@ -164,6 +182,12 @@ export class PgAnalysisStore implements AnalysisJobStore {
       if (row.status === "queued") return;
       if (summarizeOnly && !row.snapshot.frames.length) throw new AnalysisError("EVIDENCE_REQUIRED", 409);
       if (!summarizeOnly && row.status === "ready") return;
+      if (visualOnly) {
+        if (!row.selection || row.snapshot.source.mediaKey || row.snapshot.speech || (await client.query(
+          "SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND (step_id LIKE 'summary:%' OR step_id LIKE 'copy:%' OR (step_id='asr:source' AND receipt->>'outcome'='completed')) LIMIT 1", [id])).rowCount) throw new AnalysisError("MODEL_INPUT_CHANGED", 409);
+        row.snapshot.speech = { status: "skipped", reason: "SOURCE_EXPIRED" };
+        await client.query("UPDATE marketing_reference_analyses SET snapshot=$2 WHERE id=$1", [id, JSON.stringify(row.snapshot)]);
+      }
       await this.admit(client, owner);
       // Malformed OCR is already a recorded coverage gap, not unfinished work.
       // Also clear flags left by older resume logic. Rejected OCR is retryable

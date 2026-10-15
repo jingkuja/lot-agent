@@ -169,12 +169,21 @@
 .mv-review > strong { display: block; font-size: 13px; color: var(--text); }
 .mv-review-pass { border-color: color-mix(in srgb, var(--success) 32%, var(--border)); background: color-mix(in srgb, var(--success) 5%, var(--bg)); }
 .mv-review-pass > strong { color: var(--success); }
-.mv-review-suspect { border-color: color-mix(in srgb, var(--de-warning) 35%, var(--border)); background: color-mix(in srgb, var(--de-warning) 5%, var(--bg)); }
-.mv-review-reject { border-color: color-mix(in srgb, var(--error) 35%, var(--border)); background: color-mix(in srgb, var(--error) 5%, var(--bg)); }
+.mv-review-suspect, .mv-review-reject { border: 2px solid var(--error); }
+.mv-review-suspect { background: color-mix(in srgb, var(--de-warning) 5%, var(--bg)); }
+.mv-review-reject { background: color-mix(in srgb, var(--error) 5%, var(--bg)); }
 .mv-review-reject > strong { color: var(--error); }
 .mv-review article { display: grid; gap: 4px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 .mv-review article p { margin: 0; color: var(--text-secondary); }
 .mv-review article button { justify-self: start; margin-top: 6px; font-size: 12px; min-height: 32px; padding: 5px 12px; }
+.mv-review-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
+.mv-review-section h3 { margin: 0; font-size: 14px; }
+.mv-review-issue header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; }
+.mv-review-issue header span, .mv-review-issue .mv-review-source { color: var(--text-muted); font-size: 11px; }
+.mv-review-issue blockquote { margin: 6px 0; padding: 8px 12px; border-left: 3px solid var(--border); background: var(--bg-card); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mv-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.mv-review-edit { min-width: 0; }
+.mv-review-edit .mv-field { margin: 8px 0 0; }
 
 .mv-result-video { display: block; max-width: 100%; max-height: 500px; margin: auto; border-radius: var(--radius-md); background: var(--bg); }
 .mv-download { display: flex; width: fit-content; align-items: center; justify-content: center; margin: 14px auto 0; padding: 8px 18px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); color: var(--accent); font-size: 13px; font-weight: 550; text-decoration: none; }
@@ -228,6 +237,8 @@
 .mv-reference-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
 .mv-reference-heading > label { font-size: 13px; font-weight: 600; color: var(--text); }
 .mv-reference-input > textarea { display: block; }
+.mv-local-reference { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; color: var(--text-secondary); }
+.mv-local-reference span { min-width: 0; overflow-wrap: anywhere; }
 .mv-creative-brief > .mv-field { margin: 4px 0 0; }
 .mv-source-options { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
 .mv-source-options label { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 4px; color: var(--text-secondary); font-size: 12px; font-weight: 500; cursor: pointer; transition: background-color .15s ease, color .15s ease; }

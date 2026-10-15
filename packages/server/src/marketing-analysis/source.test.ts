@@ -5,6 +5,9 @@ import { resolveEgressTarget } from "./egress.js";
 import { sandboxArgs, isolatedMediaRunner } from "./sandbox.js";
 
 describe("single-platform video sources", () => {
+  it.each(["参考：https://b23.tv/abc123。", "参考:b23.tv/abc123", "参考，‘https://b23.tv/abc123’", "[分享标题](https://b23.tv/abc123)"])("uses shared URL boundaries: %s", text => {
+    expect(parseAnalysisSource(text)).toEqual({ platform: "bilibili", canonicalUrl: "https://b23.tv/abc123" });
+  });
   it("normalizes share text and preserves a selected Bilibili part", () => {
     expect(parseAnalysisSource("看看视频 https://www.bilibili.com/video/BV1xx411c7mD?p=3&share_source=copy 。")).toEqual({ platform: "bilibili", canonicalId: "BV1xx411c7mD", selectedPart: 3, canonicalUrl: "https://www.bilibili.com/video/BV1xx411c7mD?p=3" });
     expect(parseAnalysisSource("https://v.douyin.com/abcd123/").platform).toBe("douyin");

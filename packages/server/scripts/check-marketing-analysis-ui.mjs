@@ -5,6 +5,7 @@ import { mkdtemp, writeFile, readFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
@@ -12,7 +13,8 @@ const { createServer } = createRequire(resolve(root, "packages/web/package.json"
 const temp = await realpath(await mkdtemp(join(tmpdir(), "lot-analysis-ui-")));
 const liveSpeech = process.env.MARKETING_ANALYSIS_UI_SPEECH_RESULT
   ? JSON.parse(await readFile(process.env.MARKETING_ANALYSIS_UI_SPEECH_RESULT, "utf8")) : null;
-let vite, browser;
+let vite, browser, uploads = 0, uploadRequestId;
+const uploadId = "00000000-0000-4000-8000-000000000045";
 try {
   await writeFile(join(temp, "index.html"), '<div id="root"></div><script type="module" src="/main.tsx"></script>');
   await writeFile(join(temp, "main.tsx"), `import React,{useState} from 'react';import {createRoot} from 'react-dom/client';
@@ -25,12 +27,38 @@ try {
     <ProjectStudio key={owner} ownerId={owner}/></>}
     createRoot(document.getElementById('root')).render(<React.StrictMode><LanguageProvider><Test/></LanguageProvider></React.StrictMode>);`);
   vite = await createServer({ configFile: false, root: temp, esbuild: { jsx: "automatic" }, optimizeDeps: { include: ["react", "react-dom/client", "react/jsx-runtime"] },
+    plugins: [{ name: "fixture-local-upload", configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url !== "/api/marketing-video-analyses/uploads") return next();
+        void (async () => {
+          assert.equal(req.headers.authorization, "Bearer fixture-token");
+          assert(req.headers["content-type"].startsWith("multipart/form-data; boundary="));
+          const chunks = []; for await (const chunk of req) chunks.push(chunk);
+          const raw = Buffer.concat(chunks); assert(raw.includes(Buffer.from("ftyp")), "HTTP server receives actual MP4 bytes");
+          const requestId = raw.toString().match(/name="clientRequestId"\r\n\r\n([^\r]+)/)?.[1]; assert(requestId);
+          uploads++;
+          if (uploads === 1) uploadRequestId = requestId;
+          assert.equal(requestId, uploadRequestId, "an explicitly retried lost upload response must reuse its request ID");
+          res.statusCode = 201; res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ id: uploadId, name: "local-reference.mp4" }));
+        })().catch(error => { console.error(error); res.statusCode = 500; res.end(); });
+      });
+    } }],
     resolve: { alias: { react: resolve(root, "packages/web/node_modules/react"), "react-dom": resolve(root, "packages/web/node_modules/react-dom") } },
     server: { host: "127.0.0.1", port: 0, fs: { allow: [root, temp] } } });
   await vite.listen(); browser = await chromium.launch({ headless: true, channel: "chrome" });
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } }); const page = await context.newPage();
   const errors = []; page.on("pageerror", error => errors.push(error.message));
   await context.addInitScript(() => { if (!localStorage.getItem("lot:language")) localStorage.setItem("lot:language", "zh"); });
+  await context.addInitScript(() => {
+    const original = window.fetch; let lostUpload = false;
+    window.fetch = async (...args) => {
+      const response = await original(...args);
+      if (String(args[0]).endsWith("/marketing-video-analyses/uploads") && !lostUpload) {
+        lostUpload = true; await response.arrayBuffer(); throw new TypeError("fixture lost upload response");
+      }
+      return response;
+    };
+  });
   const id = "00000000-0000-4000-8000-000000000039";
   const projects = new Map(); const textOperations = new Map(); let value, projectId, account = "owner", copyCalls = 0, starts = 0, resumes = 0;
   const shots = [
@@ -52,6 +80,7 @@ try {
     if (path.endsWith("/text-operations")) return json({ data: textOperations.get(path.split("/").at(-2)) ?? [] });
     if (path === "/api/marketing-videos/copy") {
       copyCalls++; const body = req.postDataJSON(); assert(body.clientRequestId);
+      assert(["text", "video"].includes(body.source.kind), "generation must not send the upload tab as an unsupported source kind");
       const p = projects.get(body.projectId); assert.equal(p.version, body.version);
       const result = create(body.draft); p.version++; p.draft = result.draft;
       textOperations.set(p.id, [{ id: body.clientRequestId, status: "succeeded", appliedVersion: p.version, result }]);
@@ -60,14 +89,20 @@ try {
       if (copyCalls === 1) return route.abort("failed");
       return json({ ...result, project: p, operation: { status: "succeeded" } });
     }
+    if (path === "/api/marketing-video-analyses/uploads") {
+      // CDP intentionally omits file bytes from postData; use the local HTTP
+      // middleware above to verify the real multipart transfer.
+      return route.continue();
+    }
     if (path === "/api/marketing-video-analyses") {
       assert.equal(req.method(), "POST"); starts++;
       const body = req.postDataJSON(); projectId = body.target.projectId;
       assert(body.clientRequestId); assert.equal(body.target.locale, "zh");
       const p = projects.get(projectId); assert.equal(p.version, body.target.projectVersion);
+      if (body.uploadId) { assert.equal(body.uploadId, uploadId); assert.equal(body.shareText, undefined); assert.equal(p.draft.referenceUpload.id, uploadId); assert.equal(p.draft.assets.video, undefined); }
       p.version++; p.referenceAnalysis = { id, acceptedRevision: 0, evidenceIds: [] };
       value = { id, ownerId: "owner", projectId, revision: 1, status: "queued", stage: "queued", snapshot: {
-        source: { platform: "bilibili", title: "咖啡参考视频" }, frames: [{ id: "f0001", ptsMs: 0 }],
+        source: { platform: body.uploadId ? "local" : "bilibili", title: body.uploadId ? "local-reference.mp4" : "咖啡参考视频" }, frames: [{ id: "f0001", ptsMs: 0 }],
         texts: [{ id: "t0001", text: "原片画面文字", firstSeenMs: 0, lastSeenMs: 500 }], frameTexts: [], observations: [],
       } };
       return json(value, 202);
@@ -77,7 +112,11 @@ try {
       assert.equal(req.headers().authorization, "Bearer fixture-token");
       return route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jrWQAAAAASUVORK5CYII=", "base64") });
     }
-    if (path.endsWith("/resume")) { resumes++; assert.equal(req.postDataJSON().expectedRevision, 1); value.status = "running"; delete value.errorCode; return json(value); }
+    if (path.endsWith("/resume")) {
+      resumes++; assert.equal(req.postDataJSON().expectedRevision, 1);
+      if (value.errorCode === "SOURCE_EXPIRED") { assert.equal(req.postDataJSON().visualOnly, true); value.snapshot.speech = { status: "skipped", reason: "SOURCE_EXPIRED" }; }
+      value.status = "running"; delete value.errorCode; return json(value);
+    }
     if (path.endsWith("/cancel")) { value.status = "cancelled"; return json(value); }
     if (/^\/api\/marketing-videos\/[a-f0-9-]+$/.test(path)) {
       const pid = path.split("/").at(-1);
@@ -85,7 +124,7 @@ try {
         const body = req.postDataJSON(), old = projects.get(pid);
         assert.equal(body.version, old?.version ?? 0);
         const p = { ...old, id: pid, draft: body.draft, version: body.version + 1, status: "draft", assets: {} };
-        if (old && old.draft.reference !== body.draft.reference) delete p.referenceAnalysis;
+        if (old && (old.draft.reference !== body.draft.reference || old.draft.referenceUpload?.id !== body.draft.referenceUpload?.id || old.draft.copyMode !== body.draft.copyMode)) delete p.referenceAnalysis;
         projects.set(pid, p); return json(p);
       }
       return json(projects.get(pid));
@@ -155,9 +194,9 @@ try {
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(b => b.textContent === '一键拆解并生成').disabled);
   assert.equal(copyCalls, 1); assert.equal(starts, 1); assert.equal(resumes, 1);
   await page.getByRole("button", { name: "下一步", exact: true }).click();
-  await page.getByRole("button", { name: "数字人", exact: true }).waitFor();
+  await page.getByRole("button", { name: "选择数字分身素材", exact: true }).waitFor();
   await page.getByRole("button", { name: "上一步", exact: true }).click();
-  assert.equal(await page.getByRole("checkbox").count(), 2);
+  assert.equal(await page.getByRole("checkbox").count(), 3);
   assert(!/预算|已记录费用|选用预览|生成当前修订摘要/.test(await page.locator("body").innerText()));
   await page.getByText("当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。", { exact: true }).waitFor();
   assert.equal(await page.locator(".ma-panel > details.mv-script-review").evaluate(el => el.open), false);
@@ -183,6 +222,13 @@ try {
   Object.assign(value, { status: "partial", errorCode: "MODEL_USAGE_UNKNOWN" }); await page.reload();
   await page.getByText("模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
+  Object.assign(value, { status: "partial", errorCode: "SOURCE_EXPIRED" }); delete value.snapshot.speech;
+  await page.reload();
+  await page.getByText("原视频已按保留期限清理，无法继续转写。可仅使用已保留的画面继续，或新建草稿重新取材。", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
+  await page.getByRole("button", { name: "仅使用保留的画面继续", exact: true }).click();
+  await page.getByText("原视频已过期，按你的选择仅使用保留的画面和文字继续。", { exact: true }).waitFor();
+  assert.equal(resumes, 3);
   value.snapshot.speech = { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "  " };
   Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
   await page.getByText("转写未识别到语音内容，不代表原视频没有声音。", { exact: true }).waitFor();
@@ -223,10 +269,61 @@ try {
   value.snapshot.speech = { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "" }; await page.reload();
   await page.getByText("No speech was recognized in the transcription. This does not mean the original video has no sound.", { exact: true }).waitFor();
   await page.getByText("Some OCR failed; the summary may omit content.", { exact: true }).waitFor();
+  // A real short MP4 exercises browser duration decoding, multipart bytes,
+  // explicit retry after response loss, draft persistence and source cleanup.
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("zh");
+  await page.getByRole("button", { name: "开始新视频", exact: true }).click();
+  await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
+  await page.getByRole("checkbox", { name: "上传本地爆款视频", exact: true }).check();
+  assert.equal(await page.getByRole("button", { name: "一键拆解并生成", exact: true }).isDisabled(), true);
+  await page.getByRole("button", { name: "智能生成文案", exact: true }).click();
+  await page.getByRole("textbox", { name: "产品、卖点和目标顾客", exact: true }).fill("介绍一家本地咖啡店");
+  await page.getByRole("button", { name: "生成文案和分镜", exact: true }).click();
+  await page.getByRole("textbox", { name: "视频口播文案", exact: true }).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll("textarea")].some(input => input.value.startsWith("在明亮空间")));
+  assert.equal(copyCalls, 2);
+  await page.getByRole("button", { name: "开始新视频", exact: true }).click();
+  await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
+  await page.getByRole("checkbox", { name: "上传本地爆款视频", exact: true }).check();
+  const localVideo = join(temp, "local-reference.mp4");
+  execFileSync(process.env.MARKETING_FFMPEG_PATH || "ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", localVideo]);
+  const localInput = page.getByLabel("选择本地视频文件", { exact: true });
+  await localInput.setInputFiles({ name: "bad.txt", mimeType: "text/plain", buffer: Buffer.from("not video") });
+  await page.locator(".mv-error").filter({ hasText: "本地爆款视频支持 MP4" }).waitFor(); assert.equal(uploads, 0);
+  await localInput.setInputFiles(localVideo);
+  await page.getByText("处理未完成，已有结果已保留，请稍后继续。", { exact: true }).waitFor();
+  assert.equal(uploads, 1);
+  await localInput.setInputFiles(localVideo);
+  await page.locator(".mv-local-reference").getByText("local-reference.mp4", { exact: true }).waitFor();
+  await page.waitForFunction(() => !document.body.innerText.includes("保存中"));
+  assert.equal(uploads, 2);
+  await page.reload();
+  await page.locator(".mv-local-reference").getByText("local-reference.mp4", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("checkbox", { name: "上传本地爆款视频", exact: true }).isChecked(), true);
+  assert.equal(uploads, 2); assert.equal(starts, 1);
+  await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("en");
+  await page.getByRole("checkbox", { name: "Upload a local reference video", exact: true }).waitFor();
+  await page.getByText("Local reference videos support MP4, MOV and WebM, up to 100 MB, 180 seconds and 1080p.", { exact: true }).waitFor();
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  if (screenshots) await page.screenshot({ path: join(screenshots, "local-reference-dark-en.png"), fullPage: true });
+  await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("zh");
+  await page.getByRole("button", { name: "一键拆解并生成", exact: true }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).waitFor(); assert.equal(starts, 2);
+  await page.reload(); await page.getByRole("button", { name: "取消", exact: true }).waitFor(); assert.equal(starts, 2);
+  await page.getByRole("button", { name: "取消", exact: true }).click(); await page.getByText("已取消", { exact: true }).waitFor();
+  await page.getByRole("checkbox", { name: "文字文案", exact: true }).check();
+  await reference.fill("改为手动参考文字");
+  await page.getByText("已取消", { exact: true }).waitFor({ state: "hidden" });
+  assert.equal(await page.getByText("查看参考资料", { exact: true }).count(), 0);
+  assert.equal(projects.get(projectId).draft.referenceUpload, undefined);
+  assert.equal(projects.get(projectId).referenceAnalysis, undefined);
+  await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("en");
   account = "other"; await page.getByRole("button", { name: "Switch account", exact: true }).click();
   await page.waitForFunction(() => !document.body.innerText.includes('咖啡参考视频'));
   assert.equal(await page.getByText("View source material", { exact: true }).count(), 0);
   assert.equal(await page.locator("img.ma-frame").count(), 0);
   assert.deepEqual(errors, []);
-  console.log("Marketing automatic creation UI passed: text/video, complete shots, refresh, private evidence, quota/cancel, account isolation, English and dark theme");
+  console.log("Marketing automatic creation UI passed: text/link/local upload, actual MP4 bytes, upload retry and refresh, source cleanup, complete shots, private evidence, quota/cancel, explicit source-expiry recovery, account isolation, English and dark theme");
 } finally { await browser?.close(); await vite?.close(); await rm(temp, { recursive: true, force: true }); }

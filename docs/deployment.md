@@ -95,6 +95,15 @@ WEB_PORT=80                     # 浏览器访问端口，被占用可改成 808
 >
 > Compose 在 `PG_PASSWORD` / `REDIS_PASSWORD` 缺失时会直接报错（编排里用了 `${VAR:?...}` 强校验），属预期保护。
 
+参考视频分析的存储阈值由 Compose 共享环境传入 API 和 Worker：
+
+```ini
+MARKETING_ANALYSIS_OWNER_BYTES=2147483648
+MARKETING_ANALYSIS_MIN_FREE_BYTES=1073741824
+```
+
+两项单位均为字节，必须是至少 `536870912`（单任务预留量）的安全整数；非法配置会拒绝分析存储准入。默认每用户 2 GiB、磁盘最低剩余 1 GiB。调整后需要重新创建 server、worker 和已启用的 media-analysis-worker 容器，单纯 `restart` 不会更新环境。核对时只输出这两个非秘密字段，勿打印整个容器环境或未过滤的 Compose 配置。参考视频分析的启用与隔离依赖见 [实现与部署说明](marketing-video-reference-analysis.md)。
+
 ---
 
 ## 5. 构建与启动
@@ -125,6 +134,8 @@ docker compose logs -f server worker
 ```
 
 首次启动顺序由健康检查保证：`postgres` / `redis` 先 healthy，`server` 与 `worker` 才启动；`server` 启动时自动执行表结构迁移。
+
+升级到 10 月 15 日评审修复版本时，先停止旧 Worker，由新 server 完成迁移 `0044-marketing-result-recovery`，再启用同版本 Worker 和 Web。新版本保存文本恢复输入和摘要冻结输入，媒体 Worker 会检查新字段就绪。保留数据库备份；已有 `needs_apply` 记录时不能直接降级到不认识该状态的旧版本。历史记录的恢复限制及验证范围见 [本次修复说明](marketing-video-review-20261015.md)。
 
 启动成功的标志：
 
