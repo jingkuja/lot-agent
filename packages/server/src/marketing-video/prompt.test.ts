@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
-import { marketingSegmentPrompt } from "./prompt.js";
-import { creationPrompt } from "./creation.js";
+import { MARKETING_VIDEO_PROMPT_MAX_CHARS, marketingImageReferences, marketingSegmentPrompt } from "./prompt.js";
+import { creationPrompt, publicationPrompt, storyboardPrompt } from "./creation.js";
+
+const id = "11111111-1111-4111-8111-111111111111";
+const shotData = (prompt: string) => JSON.parse(prompt.split("\nconfirmedShot: ")[1]);
 
 describe("marketing model subtitle instructions", () => {
   it("requires a visible identifiable presenter in creation and every video shot, even when selected after the board", () => {
@@ -9,18 +12,20 @@ describe("marketing model subtitle instructions", () => {
       storyboard: [{ durationSec: 6, script: "欢迎光临。", visual: "Product-only close-up", action: "展示杯子", camera: "特写" }] });
     const creation = creationPrompt(draft, "zh").system;
     expect(creation).toContain("between 17 and 22 seconds, never over 65"); expect(creation).toContain("integer durationSec of 4–15 seconds");
-    for (const prompt of [creation, marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2)]) {
-      expect(prompt).toContain("visibly on camera in EVERY shot");
-      expect(prompt).toContain("match the supplied portrait identity");
-      expect(prompt).toContain("takes precedence over conflicting shot directions");
-    }
-    expect(marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2)).toContain("Duration exactly 6 seconds");
+    expect(creation).toContain("visibly on camera in EVERY shot");
+    expect(creation).toContain("match the supplied portrait identity");
+    const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2);
+    expect(prompt).toContain("Presenter in EVERY shot, face and upper body visible");
+    expect(prompt).toContain("use portrait identity");
+    expect(prompt).toContain("Overrides conflicting visuals");
+    expect(prompt).toContain("Duration exactly 6 seconds");
   });
   it.each(["欢迎来到咖啡店。", "Welcome to our coffee shop."])("requests matching subtitles for each shot: %s", (script) => {
     const draft = MarketingDraftSchema.parse({ script: `${script}其他片段。`, subtitles: true });
     const prompt = marketingSegmentPrompt(draft, { index: 1, script, durationSec: 15 }, 4);
     expect(prompt).toContain("Create shot 2 of 4");
-    expect(prompt).toContain(`Narrate ONLY this text, verbatim, finishing within the shot: ${script}`);
+    expect(prompt).toContain("Narrate ONLY confirmedShot.script verbatim");
+    expect(shotData(prompt).script).toBe(script);
     expect(prompt).toContain("subtitles matching ONLY this shot's narration verbatim");
     expect(prompt).toContain("in the same language and synchronized with the speech");
     expect(prompt).not.toContain("其他片段");
@@ -42,26 +47,142 @@ describe("marketing model subtitle instructions", () => {
     const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 15 }, 2);
     expect(prompt).toContain("Do not add on-screen text or subtitles.");
     expect(prompt).not.toContain("Generate clear, readable on-screen subtitles");
-    expect(prompt).toContain("Use audio 1 for the narrator's voice.");
+    expect(prompt).toContain("Use the supplied custom voice");
+    expect(prompt).toContain("never the words in the voice sample");
+    expect(prompt).not.toContain("Use audio 1");
   });
 });
 
 it("numbers portrait, background and scene references in submission order", () => {
-  const id = "11111111-1111-4111-8111-111111111111";
   const draft = MarketingDraftSchema.parse({ assets: { portrait: [id, id, id], background: [id, id], scene: [id] } });
   const prompt = marketingSegmentPrompt(draft, { index: 0, script: "Hello", durationSec: 15 }, 1);
-  expect(prompt).toContain("Use image 3 for the presenter's appearance.");
-  expect(prompt).toContain("Use image 4 for the setting.");
-  expect(prompt).toContain("Use image 6 for the scene composition and details.");
+  expect(prompt).toContain("Use image 3 for the presenter's identity only.");
+  expect(prompt).toContain("Use image 4 for the setting and spatial layout.");
+  expect(prompt).toContain("Use image 6 for relevant scene composition, objects and details.");
+  expect(prompt).not.toContain(id);
 
 });
 
 it("uses reference video for silent visuals without requesting voice synthesis", () => {
-  const id = "11111111-1111-4111-8111-111111111111";
   const draft = MarketingDraftSchema.parse({ assets: { video: id, voice: id } });
   const prompt = marketingSegmentPrompt(draft, { index: 0, script: "Hello", durationSec: 5 }, 1);
   expect(prompt).toContain("Use video 1 as a reference");
-  expect(prompt).toContain("Do not generate speech or audio.");
+  expect(prompt).toContain("Do not generate speech or audio");
+  expect(prompt).toContain("Silent demonstration, no lip-sync");
+  expect(prompt).toContain("no speech synchronization is needed");
   expect(prompt).not.toContain("Use audio 1");
+  expect(prompt).not.toContain("Use the supplied custom voice");
   expect(prompt).not.toContain("Narrate ONLY");
+  expect(shotData(prompt)).not.toHaveProperty("voiceStyle");
+});
+
+it.each([
+  { assets: { scene: id, cover: id, music: id }, roles: ["scene"] },
+  { assets: { background: [id, id], portrait: id, voice: id }, roles: ["portrait", "background", "background"] },
+  { assets: { portrait: id, scene: id, video: id }, roles: ["portrait", "scene"] },
+  { assets: { cover: id, music: id, voice: id }, roles: [] },
+])("numbers only submitted images and accepts legacy slots: $roles", ({ assets, roles }) => {
+  const draft = MarketingDraftSchema.parse({ assets });
+  expect(marketingImageReferences(draft)).toEqual(roles.map((role, index) => ({ role, imageNumber: index + 1, assetId: id })));
+  const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 8 }, 2);
+  expect([...prompt.matchAll(/Use image (\d+) for/g)].map(match => Number(match[1]))).toEqual(roles.map((_, index) => index + 1));
+});
+
+it("honors persisted audio mode independently of the presence of a video reference", () => {
+  const withVideo = MarketingDraftSchema.parse({ assets: { video: id, voice: id } });
+  const legacy = marketingSegmentPrompt(withVideo, { index: 0, script: "Hello", durationSec: 8 }, 2, true);
+  expect(legacy).toContain("Narrate ONLY");
+  expect(legacy).toContain("Use video 1");
+  expect(legacy).toContain("Use the supplied custom voice");
+  const silent = marketingSegmentPrompt(MarketingDraftSchema.parse({ subtitles: false }), { index: 0, script: "Hello", durationSec: 8 }, 2, false);
+  expect(silent).not.toContain("Use video 1");
+  expect(silent).not.toContain("Narrate ONLY");
+  expect(silent).toContain("Do not add on-screen text or subtitles.");
+  expect(silent).toContain("communicate the message through visible actions");
+});
+
+it("keeps confirmed content in its fields and applies later material/ratio selections", () => {
+  const script = '你好。\n"不要改我的台词。"';
+  const draft = MarketingDraftSchema.parse({ ratio: "16:9", background: "简约演播室", publishTitle: "不要播报的标题", tags: "#不要播报的标签",
+    assets: { portrait: id, scene: id, music: id, cover: id },
+    storyboard: [{ script, visual: "窗边陈列台", action: "人物展示杯子", camera: "缓慢平移" }] });
+  const prompt = marketingSegmentPrompt(draft, { index: 0, script, durationSec: 15 }, 1);
+  expect(shotData(prompt)).toEqual({ script, visual: "窗边陈列台", action: "人物展示杯子", camera: "缓慢平移", backgroundDescription: draft.background, voiceStyle: draft.voice });
+  expect(prompt).toContain("aspect ratio 16:9");
+  expect(prompt).toContain("allow deliberate scene changes");
+  expect(prompt).toContain("Supplied setting references take precedence");
+  expect(prompt).not.toContain("same presenter, outfit and environment throughout");
+  expect(prompt).not.toContain(draft.publishTitle);
+  expect(prompt).not.toContain(draft.tags);
+});
+
+it("keeps ordinary six-image prompts compact and rejects oversize directions without truncating copy", () => {
+  const draft = MarketingDraftSchema.parse({ assets: { portrait: [id, id, id], background: id, scene: [id, id], voice: id },
+    storyboard: [{ script: "欢迎来喝咖啡。", visual: "人物在窗边展示咖啡", action: "端起杯子", camera: "中景推近" }] });
+  const segment = { index: 0, script: draft.storyboard[0].script, durationSec: 15 };
+  expect(marketingSegmentPrompt(draft, segment, 2).length).toBeLessThanOrEqual(2500);
+  expect(MARKETING_VIDEO_PROMPT_MAX_CHARS).toBe(3072);
+  const long = MarketingDraftSchema.parse({ ...draft, background: "背景".repeat(300), voice: "声音".repeat(50),
+    storyboard: [{ ...draft.storyboard[0], visual: "画面".repeat(300), action: "动作".repeat(200), camera: "镜头".repeat(200) }] });
+  expect(() => marketingSegmentPrompt(long, segment, 2)).toThrow("生成提示词过长");
+  expect(long.storyboard[0].script).toBe(segment.script);
+});
+
+describe("copy and storyboard source boundaries", () => {
+  it("omits stale rewrite sources and copy when generating a new topic", () => {
+    const draft = MarketingDraftSchema.parse({ topic: "新款咖啡杯", reference: "旧店铺限时五折", script: "过期文案", assets: { portrait: id, background: [id, id], music: id, cover: id }, ratio: "1:1", subtitles: false });
+    const prompt = creationPrompt(draft, "zh", { summary: "过期摘要" });
+    const input = JSON.parse(prompt.input);
+    expect(input).toMatchObject({ topic: draft.topic, copyMode: "generate", ratio: "1:1", subtitles: false, generateAudio: true,
+      materials: { portrait: 1, background: 2, scene: 0, video: false, voice: false, music: true } });
+    expect(input).not.toHaveProperty("reference");
+    expect(input).not.toHaveProperty("evidence");
+    expect(input).not.toHaveProperty("script");
+    expect(prompt.input).not.toContain(id);
+    expect(prompt.system).toContain("NOT provided to this text-planning call");
+  });
+
+  it("distinguishes a style-only rewrite brief from replacing the product", () => {
+    const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", topic: "语气轻松一些", reference: "这家店提供手冲咖啡。" });
+    const prompt = creationPrompt(draft, "zh");
+    expect(JSON.parse(prompt.input)).toMatchObject({ topic: draft.topic, reference: draft.reference });
+    expect(prompt.system).toContain("only changes style, audience or pacing");
+    expect(prompt.system).toContain("explicitly identifies a different product/business");
+    expect(prompt.system).not.toContain("No usable audio transcript is supplied");
+  });
+
+  it.each([false, true])("keeps analyzed source evidence separate from generation video (speech=%s)", speechAvailable => {
+    const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: "https://example.com/source-video", referenceUpload: { id, name: "source.mp4" } });
+    const evidence = { observations: [{ description: "窗边喝咖啡" }], ...(speechAvailable ? { speech: { status: "completed", text: "欢迎品尝" } } : {}) };
+    const prompt = creationPrompt(draft, "zh", evidence, speechAvailable);
+    const input = JSON.parse(prompt.input);
+    expect(input.evidence).toEqual(evidence);
+    expect(input).not.toHaveProperty("reference");
+    expect(input.materials.video).toBe(false);
+    expect(input.generateAudio).toBe(true);
+    expect(prompt.input).not.toContain("source.mp4");
+    expect(prompt.system).toContain(speechAvailable ? "fallible ASR source narration" : "Do not infer that the original video is silent");
+    expect(prompt.system).toContain("inference=true");
+  });
+
+  it("passes current assets and approved copy to a single-shot revision without old references", () => {
+    const draft = MarketingDraftSchema.parse({ reference: "过期来源", ratio: "16:9", subtitles: false, assets: { video: id, portrait: id, voice: id }, storyboard: [
+      { durationSec: 7, script: "First approved line.", visual: "正面人物", action: "拿杯子", camera: "中景" },
+      { durationSec: 10, script: "Second approved line.", visual: "窗边人物", action: "展示杯子", camera: "中景" },
+    ] });
+    const prompt = storyboardPrompt(draft, "zh", draft.storyboard, "改为缓慢推近，口播不变", 1);
+    expect(JSON.parse(prompt.input)).toMatchObject({ shots: draft.storyboard, selectedIndex: 1, revisionRequest: "改为缓慢推近，口播不变", ratio: "16:9", subtitles: false, generateAudio: false, materials: { video: true, portrait: 1, voice: true } });
+    expect(prompt.input).not.toContain("过期来源");
+    expect(prompt.input).not.toContain(id);
+    expect(prompt.system).toContain("index 1 (shot 2), lasting exactly 10 seconds");
+    expect(prompt.system).toContain("do not authorize rewriting or translating narration");
+    expect(prompt.system).not.toContain("The target duration is");
+  });
+
+  it("passes only final narration to publication copy generation", () => {
+    const prompt = publicationPrompt("原样保留的咖啡介绍。", "zh");
+    expect(JSON.parse(prompt.input)).toEqual({ script: "原样保留的咖啡介绍。" });
+    expect(prompt.system).toContain("publication metadata, not narration");
+    expect(prompt.system).toContain("one string of space-separated hashtags");
+  });
 });

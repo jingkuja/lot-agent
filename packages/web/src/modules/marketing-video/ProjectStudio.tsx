@@ -247,7 +247,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   async function manualStoryboard() {
     const storyboard = planMarketingSegments(draftRef.current.script, draftRef.current.durationSec).map(part => ({
       durationSec: part.durationSec, script: part.script, visual: draftRef.current.background || t("展示产品与使用场景"),
-      action: t("人物正面出镜，自然讲述并展示产品"), camera: t("中景平稳拍摄，缓慢推近主体"),
+      action: t(draftRef.current.assets.video ? "人物正面出镜，无声展示产品，不做说话口型" : "人物正面出镜，自然讲述并展示产品"), camera: t("中景平稳拍摄，缓慢推近主体"),
     }));
     update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) });
     await save();
@@ -382,6 +382,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
               </div> : <textarea id={`${generationHintId}-reference`} value={draft.reference} rows={4} maxLength={6000} disabled={busy || frozen || !ready} onChange={e => field("reference", e.target.value)} />}
             </div>
             <p className="mv-hint">{t(sourceKind === "upload" ? "上传后点击一键拆解并生成，AI 读取视频画面、字幕和台词，生成文案与分镜。原视频私有保存 7 天。" : "粘贴视频链接、分享文本或文案，AI 自动拆解并生成文案和分镜。")}</p>
+            <p className="mv-hint">{t("拆解素材用于参考文案和结构，不会自动用于视频生成；需要画面参考时，请在“确定素材”中添加。")}</p>
             <details className="mv-creative-brief" open><summary>{t("补充产品与创作要求（选填）")}</summary>{textField("topic", "产品、卖点和目标顾客", 800)}</details>
           </> : textField("topic", "产品、卖点和目标顾客", 800)}
           <label className="mv-field"><span>{t("整片时长（秒）")} · {draft.durationSec}s</span><input type="range" min="15" max="60" step="1" aria-label={t("整片时长（秒）")} value={draft.durationSec} disabled={busy} onChange={e => field("durationSec", Number(e.target.value))} /></label>
@@ -397,7 +398,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           </>}
         </>}
         {step === 1 && <>
-          <p className="mv-hint">{t("选择个人肖像作为出镜人物；留空时由模型安排一致的人物形象。")}</p>
+          <p className="mv-hint">{t("肖像用于确定出镜人物，第一张为主要参考，其余请使用同一人的照片；留空时由模型安排人物。")}</p>
           <section className="mv-material-group" aria-label={t("人物")}>
             <div className="mv-material-heading"><strong>{t("人物")}</strong><span>{t("合计最多 3 张（已选 {0} 张）", [imageCount("portrait", draft)])}</span></div>
             <div className="mv-columns"><div className="mv-upload"><button className="mv-upload-button" disabled={busy || frozen || !ready || imageCount("portrait", draft) >= 3} onClick={() => setTwinOpen("portrait")}>{t("选择数字分身素材")}</button></div>{asset("portrait", "上传肖像图片（选填）", "image/jpeg,image/png,image/webp")}</div>
@@ -405,11 +406,13 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           <section className="mv-material-group" aria-label={t("场景")}>
             <div className="mv-material-heading"><strong>{t("场景")}</strong><span>{t("合计最多 3 张（已选 {0} 张）", [imageCount("scene", draft)])}</span></div>
             <div className="mv-columns">{asset("background", "上传背景图片（选填）", "image/jpeg,image/png,image/webp")}{asset("scene", "上传场景图片（选填）", "image/jpeg,image/png,image/webp")}</div>
+            <p className="mv-hint">{t("背景图参考环境与空间布局，场景图参考构图与物品细节。图片中的其他人物不会作为主角；每镜按分镜选用相关内容。")}</p>
           </section>
           <section className="mv-material-group" aria-label={t("参考视频")}>
             <div className="mv-material-heading"><strong>{t("参考视频")}</strong><span>{t("最多 1 个")}</span></div>
             {asset("video", "上传参考视频（选填）", "video/mp4,video/quicktime")}
             <p className="mv-hint">{t("参考视频支持 MP4、MOV，最大 150 MB，时长 3–15.5 秒。")}</p>
+            <p className="mv-hint">{t("此处视频参与生成，用于参考动作和构图；成片内容以已确认的文案与分镜为准，不沿用原视频台词或音乐。")}</p>
             {draft.assets.video && <p className="mv-hint" role="status">{t("已选择参考视频：人物与场景图片合计最多 3 张；不生成口播配音，音色设置不生效，可添加背景音乐。")}</p>}
             {marketingReferenceError(draft) && <p className="mv-error" role="alert">{t(marketingReferenceError(draft))}</p>}
           </section>

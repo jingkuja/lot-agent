@@ -9,6 +9,7 @@ import { createMarketingVideoRoutes } from "./routes.js";
 import type { AgentService } from "../services/agent-service.js";
 import type { PgMarketingProjectStore } from "./repository.js";
 import { completeMarketingJson } from "./text.js";
+import { marketingSegmentPrompt } from "./prompt.js";
 
 vi.mock("./media.js", () => ({ mediaCapabilities: async () => ({ composition: true, subtitles: false }), inspectMedia: vi.fn(), ownedAssetPath: vi.fn() }));
 const id = "11111111-1111-4111-8111-111111111111";
@@ -155,6 +156,18 @@ describe("marketing project HTTP boundaries", () => {
     const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
     expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ error: expect.stringContaining("过长") });
   });
+  it("rejects an oversized shot prompt before any quota, task or provider call", async () => {
+    const f = fixture();
+    const shots = [1, 2].map(() => ({ durationSec: 15, script: "欢迎来喝咖啡。", visual: "画面".repeat(300), action: "动作".repeat(200), camera: "镜头".repeat(200) }));
+    f.project.draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots), background: "背景".repeat(300) });
+    const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "生成提示词过长，请精简分镜画面、动作、镜头或背景描述。" });
+    expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+    expect(f.store.reserve).not.toHaveBeenCalled();
+    expect(f.service.marketingText).not.toHaveBeenCalled();
+    expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
+  });
   it("bounds JSON request bodies", async () => {
     const f = fixture();
     expect((await f.call(`/${id}`, { draft: "x".repeat(140000) }, "PUT")).status).toBe(413);
@@ -209,10 +222,17 @@ describe("marketing storyboard editing", () => {
   });
   it("changes only the requested shot, preserving manual edits elsewhere", async () => {
     const f = fixture(); Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
+    f.project.draft.assets = { video: id, portrait: id, voice: id };
+    f.project.draft.ratio = "16:9";
+    f.project.draft.subtitles = false;
     const revised = { ...shots[1], camera: "平移到产品近景" };
     f.service.marketingText.mockResolvedValueOnce({ shots: [revised] });
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "改成平移", index: 1 })).status).toBe(200);
     expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: [shots[0], revised] }));
+    const [system, input] = f.service.marketingText.mock.calls[0];
+    expect(JSON.parse(input)).toMatchObject({ shots, selectedIndex: 1, revisionRequest: "改成平移", ratio: "16:9", subtitles: false, generateAudio: false, materials: { portrait: 1, video: true, voice: true } });
+    expect(system).toContain("index 1 (shot 2), lasting exactly 15 seconds");
+    expect(input).not.toContain(id);
   });
   it("rejects stale versions, submitted projects, invalid target and malformed AI output", async () => {
     const f = fixture();
@@ -298,6 +318,13 @@ it("restores all image metadata and submits six references in category order", a
   for (const assetId of ids) expect(restored.assets[assetId].url).toBe(`/static/${assetId}.png`);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
   expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ input_reference: ids.map(assetId => `/static/${assetId}.png`) }), false);
+  const prompt = marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2);
+  const roles = [...prompt.matchAll(/Use image (\d+) for ([^.]+)\./g)].map(match => ({ image: Number(match[1]), role: match[2] }));
+  expect(roles).toEqual([
+    ...[1, 2, 3].map(image => ({ image, role: "the presenter's identity only" })),
+    ...[4, 5].map(image => ({ image, role: "the setting and spatial layout" })),
+    { image: 6, role: "relevant scene composition, objects and details" },
+  ]);
 });
 
 it("rejects video with four images before billing or task creation", async () => {

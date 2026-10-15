@@ -49,6 +49,10 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
       const planned = resolveMarketingSegments(draft);
       if (planned.length !== segments.length || planned.some((p, i) => p.script !== segments[i].script || p.durationSec !== segments[i].duration_sec)) throw new Error("视频分段配置不完整");
     } else if (segments.map(s => s.script).join("").trim() !== draft.script.trim()) throw new Error("视频分段配置不完整");
+    // Validate every remaining submission before any segment incurs a model or voice charge.
+    // Completed/resumable vendor tasks keep using their original submitted prompts.
+    const prompts = segments.map((segment, index) => !segment.vendor_task_id || segment.output?.retrySafe === true
+      ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio) : undefined);
     const progress: number[] = segments.map((s) => s.status === "succeeded" ? 100 : 0);
     const report = async () => deps.db.updateTaskProgress(job.id, Math.floor(progress.reduce((a, b) => a + b, 0) / segments.length * 0.85), `片段完成 ${progress.filter(p => p === 100).length}/${segments.length}`);
     const files: string[] = new Array(segments.length);
@@ -74,8 +78,8 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
               await deps.db.pool.query("UPDATE tasks SET vendor_task_id=NULL,output=NULL WHERE id=$1 AND user_id=$2", [segment.task_id, job.userId]);
             }
             await deps.db.pool.query("UPDATE tasks SET status='running',error=NULL WHERE id=$1 AND user_id=$2 AND status<>'succeeded'", [segment.task_id, job.userId]);
-            const prompt = marketingSegmentPrompt(draft, { index: i, script: segment.script, durationSec: Number(segment.duration_sec) }, segments.length, generateAudio);
-            Object.assign(child.input, { prompt });
+            // A known vendor task is polled/downloaded without rebuilding its old prompt.
+            Object.assign(child.input, { prompt: prompts[i] ?? "" });
             const provider = gen.provider;
             const baseDb = gen.db;
             output = await runGenerationJob({ ...gen,

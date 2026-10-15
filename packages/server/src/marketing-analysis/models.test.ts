@@ -1,7 +1,7 @@
 import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatChunk, LLMProvider, Message } from "@lot-agent/core";
-import type { FrameEvidence } from "@lot-agent/core/marketing-analysis";
+import type { AnalysisSnapshot, FrameEvidence } from "@lot-agent/core/marketing-analysis";
 import { AnalysisModels, userResponsesProvider, type ModelStepReceipt } from "./models.js";
 
 const frame = (i: number): FrameEvidence => ({ id: `f${String(i + 1).padStart(4, "0")}`, ptsMs: i * 500, sourceHash: "a".repeat(64), sourcePts: String(i * 500), timeBase: "1/1000", width: 720, height: 1280, objectKey: `${i}.jpg`, reasons: [] });
@@ -120,6 +120,22 @@ describe("analysis model calls", () => {
     expect(chat).toHaveBeenCalledOnce();
     expect(finish).toHaveBeenCalledWith("ocr:f0001", { text: "", outcome: "rejected", errorCode: "MODEL_QUOTA" });
   });
+  it.each([false, true])("carries ASR status and sampling gaps into copy without treating the analyzed video as a generation asset (speech=%s)", async completed => {
+    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ durationSec: 15, script, visual: "人物在咖啡店", action: "展示咖啡", camera: "中景" }));
+    const f = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "从场景切入。" });
+    const snapshot: AnalysisSnapshot = {
+      source: { platform: "local", canonicalUrl: "private-source", uploadId: "11111111-1111-4111-8111-111111111111" },
+      frames: [], frameTexts: [], texts: [], observations: [],
+      speech: completed ? { status: "completed", id: "a0001", text: "现磨咖啡", model: "asr" } : { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" },
+      coverage: { sampledFrames: 2, ocrFrames: 1, visualFrames: 1, omittedOcrFrameIds: ["f0002"], omittedVisualFrameIds: [], limitations: ["OCR_INCOMPLETE"] },
+    };
+    await f.models.createCopy(MarketingDraftSchema.parse({ copyMode: "rewrite" }), "zh", snapshot, 1);
+    const [system, input] = f.requests[0].messages;
+    expect(JSON.parse(input.content as string)).toMatchObject({ generateAudio: true, materials: { video: false }, evidence: { speech: snapshot.speech, limitations: ["OCR_INCOMPLETE"] } });
+    expect(input.content).not.toContain("private-source");
+    expect(input.content).not.toContain(snapshot.source.uploadId);
+    expect(system.content).toContain(completed ? "fallible ASR source narration" : "No usable audio transcript is supplied");
+  });
   it.each(["summary", "copy"] as const)("allows a complete %s response after two minutes without replaying it", async stage => {
     vi.useFakeTimers();
     const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => {
@@ -205,7 +221,8 @@ it("includes speech in synthesis, preserves ASR evidence, and reuses receipts af
   expect(f.requests[0].messages[1].content).toContain(speech.text);
   const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ durationSec: 15, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
   const copy = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" });
-  await copy.models.createCopy(MarketingDraftSchema.parse({}), "zh", { source: { platform: "bilibili", canonicalUrl: "fixture" }, frames: [], frameTexts: [], texts: [], observations: [], speech }, 1);
+  // The analysis API accepts creation contexts only in rewrite mode.
+  await copy.models.createCopy(MarketingDraftSchema.parse({ copyMode: "rewrite" }), "zh", { source: { platform: "bilibili", canonicalUrl: "fixture" }, frames: [], frameTexts: [], texts: [], observations: [], speech }, 1);
   expect(copy.requests[0].messages[1].content).toContain(speech.text);
   expect(copy.requests[0].messages[0].content).not.toContain("not audio");
 });

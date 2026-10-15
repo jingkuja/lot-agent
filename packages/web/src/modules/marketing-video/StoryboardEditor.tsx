@@ -26,7 +26,7 @@ export function StoryboardEditor({ shots, busy, readOnly = false, creation = fal
     </article>)}</div>
     {!readOnly && <details className="mv-storyboard-ai" open={creation ? undefined : true}><summary>{t("调整分镜（选填）")}</summary>
       <label className="mv-field"><span>{t("AI 修改范围")}</span><select value={target} disabled={busy} onChange={e => setTarget(e.target.value)}><option value="all">{t("全部分镜")}</option>{shots.map((_, index) => <option key={index} value={index}>{t("第 {0} 镜", [index + 1])}</option>)}</select></label>
-      <label className="mv-field"><span>{t("分镜修改要求")}</span><textarea rows={2} maxLength={1000} value={instruction} disabled={busy} placeholder={t("例如：开场改为产品特写，镜头缓慢推近，口播保持不变。")} onChange={e => setInstruction(e.target.value)} /></label>
+      <label className="mv-field"><span>{t("分镜修改要求")}</span><textarea rows={2} maxLength={1000} value={instruction} disabled={busy} placeholder={t("例如：开场由人物手持产品展示，保留脸部和上半身，镜头缓慢推近，口播保持不变。")} onChange={e => setInstruction(e.target.value)} /></label>
       <button className="mv-soft" disabled={busy || !instruction.trim()} onClick={() => onAi?.(instruction.trim(), target === "all" ? undefined : Number(target))}>{t(busy ? "正在处理…" : "AI 修改分镜")}</button>
     </details>}
   </div>;

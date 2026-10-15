@@ -156,7 +156,8 @@ export class AnalysisModels {
 
   async createCopy(draft: MarketingDraft, locale: string, snapshot: AnalysisSnapshot, revision: number, signal?: AbortSignal) {
     const prompt = creationPrompt(draft, locale, { source: { title: snapshot.source.title, durationMs: snapshot.source.durationMs },
-      texts: snapshot.texts, observations: snapshot.observations, summary: snapshot.summary, ...(snapshot.speech?.status === "completed" ? { speech: snapshot.speech } : {}) }, snapshot.speech?.status === "completed");
+      texts: snapshot.texts, observations: snapshot.observations, summary: snapshot.summary,
+      limitations: snapshot.coverage?.limitations ?? [], speech: snapshot.speech }, snapshot.speech?.status === "completed");
     return this.invoke(`copy:${revision}`, ANALYSIS_MODELS.visual, [
       { role: "system", content: prompt.system }, { role: "user", content: prompt.input },
     ], 0, signal, raw => parseCreation(raw, draft));
