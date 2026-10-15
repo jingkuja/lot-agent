@@ -4,7 +4,7 @@ import { creationPrompt, parseCreation } from "./creation.js";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { estimateCost } from "@lot-agent/core";
-import { MarketingDraftSchema, MarketingReviewSchema, MarketingStoryboardSchema, storyboardScript, resolveMarketingSegments, planMarketingSegments, timeMarketingStoryboard, marketingMaxDuration, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { marketingReferenceError, marketingAssetIds, MarketingDraftSchema, MarketingReviewSchema, MarketingStoryboardSchema, storyboardScript, resolveMarketingSegments, planMarketingSegments, timeMarketingStoryboard, marketingMaxDuration, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
@@ -39,16 +39,19 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   });
   async function ownedAssets(owner: string, draft: MarketingDraft, allowMissing = false) {
     const result: Record<string, { id: string; url: string; name: string; mime: string }> = {};
-    for (const [slot, id] of Object.entries(draft.assets)) {
-      const asset = await service.db.getAsset(id);
-      if (!asset || asset.user_id !== owner) {
-        if (allowMissing) continue;
-        throw new MarketingError("素材不存在", 404);
+    for (const [slot, value] of Object.entries(draft.assets)) {
+      for (const id of marketingAssetIds(value)) {
+        const asset = await service.db.getAsset(id);
+        if (!asset || asset.user_id !== owner) {
+          if (allowMissing) continue;
+          throw new MarketingError("素材不存在", 404);
+        }
+        const allowed = slot === "video" ? ["video/mp4", "video/quicktime"]
+          : ["voice", "music"].includes(slot) ? ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4"] : ["image/jpeg", "image/png", "image/webp"];
+        if (!allowed.includes(asset.mime) || Number(asset.size_bytes) > (slot === "video" ? 150 : slot === "music" ? 30 : slot === "voice" ? 15 : 20) * 1024 * 1024) throw new MarketingError("素材格式或大小不支持");
+        result[id] = { id, url: asset.url, name: asset.original_name || slot, mime: asset.mime };
+        result[slot] ??= result[id];
       }
-      const allowed = slot === "video" ? ["video/mp4", "video/quicktime", "video/webm"]
-        : ["voice", "music"].includes(slot) ? ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4"] : ["image/jpeg", "image/png", "image/webp"];
-      if (!allowed.includes(asset.mime) || Number(asset.size_bytes) > (slot === "video" ? 150 : slot === "music" ? 30 : slot === "voice" ? 15 : 20) * 1024 * 1024) throw new MarketingError("素材格式或大小不支持");
-      result[slot] = { id, url: asset.url, name: asset.original_name || slot, mime: asset.mime };
     }
     return result;
   }
@@ -180,6 +183,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     if (p.version !== body.version) throw new MarketingError("草稿已更新，请重新确认。", 409);
     if (p.taskId && !await (service.jobQueue as BullmqJobQueue).canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
+    const referenceError = marketingReferenceError(p.draft);
+    if (referenceError) throw new MarketingError(referenceError);
     if (p.draft.mode !== "avatar") throw new MarketingError("实拍对口型服务尚未接入，请选择数字人制作。", 503);
     const capabilities = await mediaCapabilities();
     if (!capabilities.composition) throw new MarketingError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
@@ -189,9 +194,15 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const segments = p.taskId ? await store.segments(owner, p.id) : [];
     const billableSeconds = p.taskId ? segments.filter(s => !s.vendor_task_id || s.output?.retrySafe === true).reduce((sum, s) => sum + Number(s.duration_sec), 0) : planned.reduce((sum, s) => sum + s.durationSec, 0);
     const assets = await ownedAssets(owner, p.draft, !!p.taskId && billableSeconds === 0);
+    if (assets.video) {
+      const video = (await service.db.getAsset(assets.video.id))!;
+      const info = await inspectMedia(await ownedAssetPath(dataRoot, video), c.req.raw.signal);
+      if (!info.video || info.duration < 3 || info.duration > 15.5 || !Number.isFinite(info.fps) || info.fps < 24 || info.fps > 60
+        || info.width < 700 || info.height < 700 || info.width > 4553 || info.height > 4553 || info.width * info.height > 8294400 || info.width / info.height < 0.4 || info.width / info.height > 2) throw new MarketingError("参考视频需为 3–15.5 秒、24–60 fps，宽高各 700–4553 像素，总像素不超过 8294400，宽高比 0.4–2。");
+    }
     if (assets.voice || assets.music) {
       for (const slot of ["voice", "music"] as const) {
-        if (!assets[slot]) continue;
+        if (!assets[slot] || (slot === "voice" && p.draft.assets.video)) continue;
         const asset = (await service.db.getAsset(assets[slot].id))!;
         const info = await inspectMedia(await ownedAssetPath(dataRoot, asset), c.req.raw.signal);
         if (!info.audio || (slot === "voice" && (info.duration < 2 || info.duration > 15))) throw new MarketingError("声音样例时长需为 2–15 秒");
@@ -207,8 +218,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const [w, h] = p.draft.ratio.split(":").map(Number);
     const input = { modelId: MODEL, quality: p.draft.quality, resolution: p.draft.quality, ratio: p.draft.ratio,
       size: `${Math.round(edge * w / Math.min(w, h) / 8) * 8}x${Math.round(edge * h / Math.min(w, h) / 8) * 8}`,
-      input_reference: [assets.portrait?.url, assets.background?.url].filter(Boolean),
-      reference_audio: assets.voice ? [assets.voice.url] : undefined,
+      input_reference: ["portrait", "background", "scene"].flatMap(slot => marketingAssetIds(p.draft.assets[slot as "portrait" | "background" | "scene"]).flatMap(id => assets[id] ? [assets[id].url] : [])),
+      reference_video: assets.video ? [assets.video.url] : undefined,
+      generate_audio: !p.draft.assets.video,
+      reference_audio: !p.draft.assets.video && assets.voice ? [assets.voice.url] : undefined,
       requireUserModelKey: process.env.DEBUG !== "1" };
     const taskId = await store.reserve(owner, p.id, body.version, input, body.retry);
     try { await (service.jobQueue as BullmqJobQueue).deliverPersisted(taskId, "marketing.video"); }

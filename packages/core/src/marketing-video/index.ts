@@ -19,6 +19,11 @@ export const MarketingCreationSchema = z.object({
   analysis: z.string().trim().min(1).max(2000),
 }).strict();
 
+const MarketingImagesSchema = z.union([z.string().uuid(), z.array(z.string().uuid()).min(1).max(3)]);
+export function marketingAssetIds(value: string | string[] | undefined): string[] {
+  return value === undefined ? [] : Array.isArray(value) ? value : [value];
+}
+
 export const MarketingDraftSchema = z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),
@@ -33,15 +38,20 @@ export const MarketingDraftSchema = z.object({
   subtitles: z.boolean().default(true),
   musicVolume: z.number().min(0).max(0.5).default(0.12),
   assets: z.object({
-    portrait: z.string().uuid().optional(), background: z.string().uuid().optional(),
+    portrait: MarketingImagesSchema.optional(), background: MarketingImagesSchema.optional(),
+    scene: MarketingImagesSchema.optional(),
     voice: z.string().uuid().optional(), video: z.string().uuid().optional(),
     music: z.string().uuid().optional(), cover: z.string().uuid().optional(),
-  }).strict().default({}),
+  }).strict().refine(assets => marketingAssetIds(assets.background).length + marketingAssetIds(assets.scene).length <= 3, { message: "背景与场景图片合计最多 3 张。" }).default({}),
   storyboard: MarketingStoryboardSchema.default([]),
   publishTitle: z.string().max(100).default(""),
   tags: z.string().max(160).default(""),
 }).strict();
 export type MarketingDraft = z.infer<typeof MarketingDraftSchema>;
+export function marketingReferenceError(draft: MarketingDraft): string {
+  if (draft.assets.video && ["portrait", "background", "scene"].reduce((sum, slot) => sum + marketingAssetIds(draft.assets[slot as "portrait" | "background" | "scene"]).length, 0) > 3) return "已选择参考视频，人物与场景图片合计不能超过 3 张，请移除多余图片。";
+  return "";
+}
 export const MarketingReviewSchema = z.object({
   verdict: z.enum(["pass", "suspect", "reject"]),
   issues: z.array(z.object({ text: z.string().max(500), reason: z.string().max(500), suggestion: z.string().max(500) }).strict()).max(20),

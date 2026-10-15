@@ -1,3 +1,4 @@
+import { inspectMedia } from "./media.js";
 import { randomUUID } from "node:crypto";
 import { MarketingError } from "./repository.js";
 import type { PgMarketingTextOperations } from "./operations.js";
@@ -224,4 +225,47 @@ it("rejects direct video synthesis but accepts ordinary website CTAs", async () 
   f.service.marketingText.mockResolvedValueOnce({ shots: [1, 2].map(() => ({ script: "现磨咖啡欢迎到店品尝。", visual: "店铺", action: "端杯", camera: "近景" })), publishTitle: "咖啡", tags: "", analysis: "介绍咖啡" });
   expect((await f.call("/copy", { draft: { copyMode: "rewrite", reference: "现磨咖啡，欢迎品尝。https://example.com/shop" }, locale: "zh", source: { kind: "text" } })).status).toBe(200);
   expect(f.service.marketingText).toHaveBeenCalledOnce();
+});
+
+it("checks ownership of every image in all three categories", async () => {
+  for (const slot of ["portrait", "background", "scene"]) {
+    const f = fixture();
+    f.service.db.getAsset.mockResolvedValueOnce({ user_id: "owner", mime: "image/png", size_bytes: 100 });
+    const response = await f.call(`/${id}`, { version: 0, draft: { assets: { [slot]: [id, randomUUID()] } } }, "PUT");
+    expect(response.status).toBe(404);
+    expect(f.service.db.getAsset).toHaveBeenCalledTimes(2);
+    expect(f.store.save).not.toHaveBeenCalled();
+  }
+});
+
+it("restores all image metadata and submits six references in category order", async () => {
+  const f = fixture();
+  const ids = Array.from({ length: 6 }, () => randomUUID());
+  f.project.draft.assets = { scene: ids.slice(5), background: ids.slice(3, 5), portrait: ids.slice(0, 3) };
+  f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: "image/png", size_bytes: 100, url: `/static/${args[0]}.png` }));
+  const restored = await (await f.call(`/${id}`)).json();
+  for (const assetId of ids) expect(restored.assets[assetId].url).toBe(`/static/${assetId}.png`);
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ input_reference: ids.map(assetId => `/static/${assetId}.png`) }), false);
+});
+
+it("rejects video with four images before billing or task creation", async () => {
+  const f = fixture();
+  f.project.draft.assets = { video: id, portrait: [id, id], scene: [id, id] };
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
+  expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  expect(f.store.reserve).not.toHaveBeenCalled();
+});
+it("validates reference video metadata and sends it with audio disabled", async () => {
+  const f = fixture();
+  const videoId = randomUUID();
+  f.project.draft.assets = { video: videoId, portrait: id, voice: randomUUID() };
+  f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : args[0] === id ? "image/png" : "audio/wav", size_bytes: 100, url: `/static/${args[0]}` }));
+  const info = { format: "mov", video: true, audio: false, duration: 5, width: 1280, height: 720, fps: 30 };
+  vi.mocked(inspectMedia).mockResolvedValueOnce({ ...info, duration: 16 });
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
+  expect(f.store.reserve).not.toHaveBeenCalled();
+  vi.mocked(inspectMedia).mockResolvedValueOnce(info);
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined }), false);
 });

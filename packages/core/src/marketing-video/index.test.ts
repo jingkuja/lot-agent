@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid } from "./index.js";
+import { marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid } from "./index.js";
 
 describe("marketing segment plan", () => {
   it.each([15, 17, 29, 30, 45, 59, 60])("preserves narration and respects the 15s cap for %ds", (duration) => {
@@ -91,4 +91,25 @@ describe("editable marketing storyboard", () => {
     expect(() => allocateShotDurations([{ script: "字".repeat(68) }], 15)).toThrow("过长");
     expect(() => allocateShotDurations(Array.from({ length: 6 }, () => ({ script: "欢迎" })), 15)).toThrow("分镜数量");
   });
+});
+
+it("limits each image category to three UUIDs and accepts legacy single images", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  for (const slot of ["portrait", "background", "scene"]) {
+    for (const value of [id, [id], [id, id, id]]) expect(MarketingDraftSchema.safeParse({ assets: { [slot]: value } }).success).toBe(true);
+    for (const value of [[], [id, id, id, id], ["https://untrusted.test/image.png"]]) expect(MarketingDraftSchema.safeParse({ assets: { [slot]: value } }).success).toBe(false);
+  }
+});
+
+it("shares the three-image allowance across background and scene", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  expect(MarketingDraftSchema.safeParse({ assets: { portrait: [id, id, id], background: id, scene: [id, id] } }).success).toBe(true);
+  expect(MarketingDraftSchema.safeParse({ assets: { background: [id, id], scene: [id, id] } }).success).toBe(false);
+});
+
+it("allows draft editing but blocks video generation with more than three images", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: [id, id], scene: id } }))).toBe("");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: [id, id], scene: [id, id] } }))).toContain("不能超过 3 张");
+  expect(MarketingDraftSchema.safeParse({ assets: { video: [id, id] } }).success).toBe(false);
 });

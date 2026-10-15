@@ -1,6 +1,6 @@
 import { TextOperationPanel } from "./TextOperationPanel.js";
 import { useEffect, useId, useRef, useState } from "react";
-import { marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject } from "@lot-agent/core/marketing-video";
+import { marketingReferenceError, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject } from "@lot-agent/core/marketing-video";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
@@ -43,7 +43,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const busy = actionBusy || analysisPending || textPending; const [saving, setSaving] = useState(false);
   const [error, setError] = useState(""); const [notice, setNotice] = useState("");
   const [sourceKind, setSourceKind] = useState<"text" | "video">("video");
-  const [analysis, setAnalysis] = useState(""); const [twinOpen, setTwinOpen] = useState<"all" | "voice" | null>(null);
+  const [analysis, setAnalysis] = useState(""); const [twinOpen, setTwinOpen] = useState<"portrait" | "voice" | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(""); const [loadAttempt, setLoadAttempt] = useState(0);
   const draftRef = useRef(draft); const projectRef = useRef<Project | null>(null);
@@ -208,6 +208,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     update(result.draft); setCurrent(result);
   }
   async function generate(retry = false) {
+    const referenceError = marketingReferenceError(draftRef.current);
+    if (referenceError) { setStep(1); throw new Error(referenceError); }
     if (!retry) resolveMarketingSegments(draftRef.current);
     if (!retry && (!draftRef.current.publishTitle.trim() || !draftRef.current.tags.trim())) await publication(true);
     let p = await save();
@@ -238,16 +240,27 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) });
     await save();
   }
+  const imageCount = (slot: keyof MarketingDraft["assets"], value = draftRef.current) => slot === "background" || slot === "scene"
+    ? marketingAssetIds(value.assets.background).length + marketingAssetIds(value.assets.scene).length
+    : marketingAssetIds(value.assets[slot]).length;
   async function selectAsset(file: File, slot: keyof MarketingDraft["assets"]) {
-    if (slot === "voice" || slot === "portrait" || slot === "background" || slot === "cover") await validateTwinFile(file, slot === "voice" ? "voice" : "portrait");
-    else {
+    const multiple = ["portrait", "background", "scene"].includes(slot);
+    if (multiple && imageCount(slot) >= 3) throw new Error("人物或场景区域各最多 3 张。");
+    const token = epoch.current;
+    if (slot === "scene" || slot === "voice" || slot === "portrait" || slot === "background" || slot === "cover") await validateTwinFile(file, slot === "voice" ? "voice" : "portrait");
+    else if (slot === "video") {
+      if (draftRef.current.assets.video) throw new Error("参考视频最多 1 个，请先移除已有视频。");
+      if (!file.size || file.size > 150 * 1024 * 1024 || !["video/mp4", "video/quicktime"].includes(file.type)) throw new Error("参考视频支持 MP4、MOV，最大 150 MB，时长 3–15.5 秒。");
+      const duration = await readMediaDuration(file);
+      if (!Number.isFinite(duration) || duration < 3 || duration > 15.5) throw new Error("参考视频支持 MP4、MOV，最大 150 MB，时长 3–15.5 秒。");
+    } else {
       if (!file.size || file.size > 30 * 1024 * 1024 || !["audio/mpeg", "audio/wav", "audio/mp4"].includes(file.type)) throw new Error("背景音乐支持 MP3、WAV、M4A，最大 30 MB。");
       if (await readMediaDuration(file) > 600) throw new Error("背景音乐最长 10 分钟。");
     }
     const value = await api.uploadFile(file);
-    if (!alive.current) return;
-    setAssets(old => ({ ...old, [slot]: { id: value.assetId, url: value.url, name: file.name, mime: value.mime } }));
-    field("assets", { ...draftRef.current.assets, [slot]: value.assetId });
+    if (!alive.current || token !== epoch.current) return;
+    setAssets(old => ({ ...old, [multiple ? value.assetId : slot]: { id: value.assetId, url: value.url, name: file.name, mime: value.mime } }));
+    field("assets", { ...draftRef.current.assets, [slot]: multiple ? [...marketingAssetIds(draftRef.current.assets[slot]), value.assetId] : value.assetId });
   }
   async function newDraft(copy = false, editShots = false) {
     setTextPending(false); textRequest.current = null;
@@ -260,14 +273,34 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }
   const choices = (label: string, values: { value: string; label: string }[], value: string, choose: (value: string) => void) => <div className="mv-choices" role="group" aria-label={t(label)}>{values.map(item => <button key={item.value} type="button" disabled={busy || frozen || !ready} className={value === item.value ? "selected" : ""} aria-pressed={value === item.value} onClick={() => choose(item.value)}>{t(item.label)}</button>)}</div>;
   const textField = (name: "topic" | "reference" | "script" | "background" | "publishTitle" | "tags", label: string, max: number, rows = 2) => <label className="mv-field"><span>{t(label)}</span><textarea value={draft[name]} rows={rows} maxLength={max} disabled={busy || !ready || (frozen && !["publishTitle", "tags"].includes(name))} onChange={e => field(name, e.target.value)} /></label>;
-  const asset = (slot: keyof MarketingDraft["assets"], label: string, accept: string) => <div className="mv-upload"><label className="mv-upload-button">{t(label)}<input aria-label={t(label)} type="file" accept={accept} disabled={busy || frozen || !ready} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void act(() => selectAsset(file, slot)); }} /></label>{assets[slot] && <div className="mv-asset-preview">{assets[slot].mime.startsWith("audio/") ? <audio controls src={assets[slot].url} aria-label={t("声音试听")} /> : <img src={assets[slot].url} alt={t(label)} />}<span>{assets[slot].name}</span><button disabled={busy || frozen} onClick={() => { const next = { ...draft.assets }; delete next[slot]; field("assets", next); setAssets(old => { const value = { ...old }; delete value[slot]; return value; }); }}>{t("移除")}</button></div>}</div>;
+  const asset = (slot: keyof MarketingDraft["assets"], label: string, accept: string) => {
+    const multiple = ["portrait", "background", "scene"].includes(slot);
+    const ids = marketingAssetIds(draft.assets[slot]);
+    return <div className="mv-upload"><label className="mv-upload-button">{t(label)}<input aria-label={t(label)} type="file" accept={accept} multiple={multiple} disabled={busy || frozen || !ready || (slot === "video" && !!draft.assets.video) || (multiple && imageCount(slot, draft) >= 3)} onChange={e => {
+      const files = Array.from(e.target.files ?? []); e.target.value = "";
+      if (files.length) void act(async () => {
+        if (slot === "video" && files.length > 1) throw new Error("参考视频最多 1 个，请先移除已有视频。");
+        if (multiple && imageCount(slot) + files.length > 3) throw new Error("人物或场景区域各最多 3 张。");
+        for (const file of files) await selectAsset(file, slot);
+      });
+    }} /></label>{ids.map(id => {
+      const item = assets[id] ?? (assets[slot]?.id === id ? assets[slot] : undefined);
+      return <div key={id} className="mv-asset-preview">{item && (item.mime.startsWith("audio/") ? <audio controls src={item.url} aria-label={t("声音试听")} /> : item.mime.startsWith("video/") ? <video controls preload="metadata" src={item.url} aria-label={t("参考视频预览")} /> : <img src={item.url} alt={t(label)} />)}<span>{item?.name ?? t(label)}</span><button disabled={busy || frozen} onClick={() => {
+        const next = { ...draftRef.current.assets };
+        const remaining = ids.filter(value => value !== id);
+        if (multiple && remaining.length) next[slot as "portrait" | "background" | "scene"] = remaining;
+        else delete next[slot];
+        field("assets", next);
+      }}>{t("移除")}</button></div>;
+    })}</div>;
+  };
   const plan = (() => {
     try { return { parts: resolveMarketingSegments(draft), error: "" }; }
     catch (e) { return { parts: [], error: errorMessage(e) }; }
   })();
   const parts = plan.parts;
   const generationBlocker = !ready ? loadError || "正在加载草稿…"
-    : plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "");
+    : marketingReferenceError(draft) || plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "");
 
   return <div className="mv-scroll"><div className="mv-studio">
     <header className="mv-heading"><div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div><button disabled={busy || saving || !ready} onClick={() => void act(() => newDraft())}>{t("开始新视频")}</button></header>
@@ -314,11 +347,29 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           {validReview && <div className={`mv-review mv-review-${project.review!.verdict}`} role="status"><strong>{t(({ pass: "未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[project.review!.verdict])}</strong>{project.review!.issues.map((issue, i) => <article key={i}><p>{issue.text}</p><p>{issue.reason}</p><p>{issue.suggestion}</p>{issue.text && (["script", "publishTitle", "tags"] as const).some(key => draft[key].includes(issue.text)) && <button disabled={busy} onClick={() => { const key = (["script", "publishTitle", "tags"] as const).find(key => draft[key].includes(issue.text)); if (key) field(key, draft[key].replace(issue.text, issue.suggestion)); }}>{t("采用修改建议")}</button>}</article>)}</div>}
           </>}
         </>}
-        {step === 1 && <><div className="mv-directions"><button className="selected" aria-pressed="true">{t("数字人")}</button><button disabled title={t("实拍对口型服务尚未接入。")}>{t("实拍对口型（待接入）")}</button></div><p className="mv-hint">{t("选择个人肖像作为出镜人物；留空时由模型安排一致的人物形象。")}</p><button className="mv-soft" disabled={busy} onClick={() => setTwinOpen("all")}>{t("选择数字分身素材")}</button><div className="mv-columns">{asset("portrait", "上传肖像（选填）", "image/jpeg,image/png,image/webp")}{asset("background", "上传背景图片（选填）", "image/jpeg,image/png,image/webp")}</div>{textField("background", "背景补充描述", 600)}</>}
-        {step === 2 && <><label className="mv-label">{t("旁白风格")}</label>{choices("旁白风格", ["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value })), draft.voice, value => field("voice", value))}<button className="mv-soft" disabled={busy || frozen || !ready} onClick={() => setTwinOpen("voice")}>{t("选择数字分身音色")}</button>{asset("voice", "上传音色样例（选填，2–15 秒）", "audio/mpeg,audio/wav")}<p className="mv-hint">{t("音色样例选填，可使用数字分身中的声音或自行上传；留空时按所选旁白风格使用模型原生配音，发布前请试听成片。")}</p>{asset("music", "选择背景音乐（选填）", "audio/mpeg,audio/wav,audio/mp4")}{draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
+        {step === 1 && <>
+          <p className="mv-hint">{t("选择个人肖像作为出镜人物；留空时由模型安排一致的人物形象。")}</p>
+          <section className="mv-material-group" aria-label={t("人物")}>
+            <div className="mv-material-heading"><strong>{t("人物")}</strong><span>{t("合计最多 3 张（已选 {0} 张）", [imageCount("portrait", draft)])}</span></div>
+            <div className="mv-columns"><div className="mv-upload"><button className="mv-upload-button" disabled={busy || frozen || !ready || imageCount("portrait", draft) >= 3} onClick={() => setTwinOpen("portrait")}>{t("选择数字分身素材")}</button></div>{asset("portrait", "上传肖像图片（选填）", "image/jpeg,image/png,image/webp")}</div>
+          </section>
+          <section className="mv-material-group" aria-label={t("场景")}>
+            <div className="mv-material-heading"><strong>{t("场景")}</strong><span>{t("合计最多 3 张（已选 {0} 张）", [imageCount("scene", draft)])}</span></div>
+            <div className="mv-columns">{asset("background", "上传背景图片（选填）", "image/jpeg,image/png,image/webp")}{asset("scene", "上传场景图片（选填）", "image/jpeg,image/png,image/webp")}</div>
+          </section>
+          <section className="mv-material-group" aria-label={t("参考视频")}>
+            <div className="mv-material-heading"><strong>{t("参考视频")}</strong><span>{t("最多 1 个")}</span></div>
+            {asset("video", "上传参考视频（选填）", "video/mp4,video/quicktime")}
+            <p className="mv-hint">{t("参考视频支持 MP4、MOV，最大 150 MB，时长 3–15.5 秒。")}</p>
+            {draft.assets.video && <p className="mv-hint" role="status">{t("已选择参考视频：人物与场景图片合计最多 3 张；不生成口播配音，音色设置不生效，可添加背景音乐。")}</p>}
+            {marketingReferenceError(draft) && <p className="mv-error" role="alert">{t(marketingReferenceError(draft))}</p>}
+          </section>
+          {textField("background", "背景/场景补充描述", 600)}
+        </>}
+        {step === 2 && <>{draft.assets.video ? <p className="mv-hint" role="status">{t("已选择参考视频：人物与场景图片合计最多 3 张；不生成口播配音，音色设置不生效，可添加背景音乐。")}</p> : <><label className="mv-label">{t("旁白风格")}</label>{choices("旁白风格", ["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value })), draft.voice, value => field("voice", value))}<button className="mv-soft" disabled={busy || frozen || !ready} onClick={() => setTwinOpen("voice")}>{t("选择数字分身音色")}</button>{asset("voice", "上传音色样例（选填，2–15 秒）", "audio/mpeg,audio/wav")}<p className="mv-hint">{t("音色样例选填，可使用数字分身中的声音或自行上传；留空时按所选旁白风格使用模型原生配音，发布前请试听成片。")}</p></>}{asset("music", "选择背景音乐（选填）", "audio/mpeg,audio/wav,audio/mp4")}{draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
           <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label><p className="mv-hint">{t("字幕由视频模型根据提示词生成，发布前请检查文字与音画是否一致。")}</p>
           <label className="mv-label">{t("画面比例")}</label>{choices("画面比例", ["9:16", "16:9", "1:1"].map(value => ({ value, label: value })), draft.ratio, value => field("ratio", value as MarketingDraft["ratio"]))}
-          <details><summary>{t("更多设置")}</summary>{choices("视频质量", [{ value: "720p", label: "默认" }, { value: "1080p", label: "高清" }], draft.quality, value => field("quality", value as MarketingDraft["quality"]))}</details>
+          {choices("视频质量", [{ value: "720p", label: "默认" }, { value: "1080p", label: "高清" }], draft.quality, value => field("quality", value as MarketingDraft["quality"]))}
           {!draft.storyboard.length && !!parts.length && <details className="mv-script-review"><summary>{t("查看自动分段（{0} 段）", [parts.length])}</summary>{parts.map(p => <p key={p.index}>{p.index + 1} · {p.durationSec}s<br />{p.script}</p>)}</details>}
           <p className="mv-hint">{t("目标 {0} 秒，分镜共 {1} 秒，分 {2} 段生成。", [draft.durationSec, parts.reduce((sum, part) => sum + part.durationSec, 0), parts.length])}</p>
           {!!draft.storyboard.length && <div ref={storyboardPanel} className="mv-storyboard-panel"><StoryboardEditor presenterRequired={draft.mode === "avatar"} shots={draft.storyboard} busy={busy} onChange={storyboard => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) })} onAi={(instruction, index) => void act(() => editStoryboard(instruction, index))} /></div>}
@@ -331,7 +382,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       <footer className="mv-footer"><button disabled={!step || busy || !ready} onClick={() => setStep(step - 1)}>{t("上一步")}</button><button disabled={busy || saving || !ready || !dirty} onClick={() => void act(async () => { await save(); })}>{t("保存草稿")}</button><span role="status">{t(saving ? "正在保存…" : dirty ? "等待保存" : project ? "草稿已保存" : "")}</span><button className="mv-primary" disabled={step === 2 || busy || !ready} onClick={() => { if (!draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(step + 1); }}>{t("下一步")}</button></footer>
     </>}
     {error && <p className="mv-error" role="alert">{t(error)}</p>}{!project?.taskId && notice && <p className="mv-hint" role="status">{t(notice)}</p>}
-    {twinOpen && <DigitalTwinPicker kind={twinOpen === "voice" ? "voice" : undefined} onClose={() => { if (!lock.current) setTwinOpen(null); }} onSelect={async (file, kind) => {
+    {twinOpen && <DigitalTwinPicker kind={twinOpen} onClose={() => { if (!lock.current) setTwinOpen(null); }} onSelect={async (file, kind) => {
       if (lock.current) throw new Error(t("正在处理…"));
       lock.current = true; setBusy(true);
       try { await selectAsset(file, kind === "voice" ? "voice" : "portrait"); }

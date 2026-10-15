@@ -76,9 +76,14 @@
 .mv-scene-4 i { border-style: dashed; background: transparent; }
 
 /* Upload & Asset Preview */
+.mv-material-group { margin: 14px 0; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.mv-material-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.mv-material-heading > span { color: var(--text-muted); font-size: 12px; }
+.mv-material-group .mv-upload-button { box-shadow: none; }
+
 .mv-upload { margin: 10px 0 0; }
 .mv-columns .mv-upload { margin-top: 12px; }
-.mv-upload-button { position: relative; width: 100%; min-height: 38px; background: var(--bg); border-style: dashed; border-color: var(--border-input); color: var(--text-secondary); }
+.mv-studio .mv-upload-button { position: relative; width: 100%; min-height: 38px; background: var(--bg); border-style: dashed; border-color: var(--border-input); color: var(--text-secondary); }
 .mv-upload-button input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
 .mv-upload-button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mv-asset-preview { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); min-width: 0; }
@@ -243,3 +248,5 @@
   .mv-summary > div { grid-template-columns: 85px 1fr; gap: 10px; }
   .mv-footer { gap: 8px; padding: 10px 12px; bottom: 8px; }
 }
+
+.mv-asset-preview video { width: 100%; max-height: 200px; border-radius: var(--radius-sm); background: var(--bg); }

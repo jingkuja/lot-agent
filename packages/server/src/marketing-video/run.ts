@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { marketingReferenceError, MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { PgMarketingProjectStore } from "./repository.js";
@@ -34,6 +34,8 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     const existing = (await deps.db.pool.query("SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 ORDER BY created_at LIMIT 1", [job.id, job.userId])).rows[0];
     if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime }] };
     const draft = MarketingDraftSchema.parse(job.input.draft);
+    const referenceError = marketingReferenceError(draft);
+    if (referenceError) throw new Error(referenceError);
     const segments = (await store.segments(job.userId, project.id)).map(segment => ({ ...segment, duration_sec: Number(segment.duration_sec) }));
     // Persisted boundaries are authoritative, including legacy jobs without a
     // storyboard. Never re-plan an already submitted video during recovery.
@@ -56,7 +58,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
           if (segment.vendor_task_id === UNKNOWN) throw new Error("片段提交结果未知，请核实原任务；系统不会重复提交付费请求。");
           let output = segment.output;
           let generated = false;
-          const child = { id: segment.task_id as string, userId: job.userId, input: { ...job.input, draft: undefined, durationSec: segment.duration_sec, generate_audio: true } };
+          const child = { id: segment.task_id as string, userId: job.userId, input: { ...job.input, draft: undefined, durationSec: segment.duration_sec, generate_audio: !draft.assets.video, reference_audio: draft.assets.video ? undefined : job.input.reference_audio } };
           const gen = await deps.generation(child, controller.signal);
           const meter = async (usage: Record<string, unknown>) => {
             const vendor = await deps.db.getTaskVendorId(child.id);
@@ -126,7 +128,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
           if (!asset || asset.user_id !== job.userId) throw new Error("片段素材不可用");
           files[i] = await ownedAssetPath(deps.dataRoot, asset);
           const info = await inspectMedia(files[i], controller.signal);
-          if (!info.video || !info.audio || info.duration < Number(segment.duration_sec) - 0.25) {
+          if (!info.video || (!draft.assets.video && !info.audio) || info.duration < Number(segment.duration_sec) - 0.25) {
             await deps.db.pool.query("UPDATE tasks SET status='running',output=$2 WHERE id=$1 AND user_id=$3", [child.id, JSON.stringify({ retrySafe: true }), job.userId]);
             throw new Error("生成片段缺少配音或时长不足；继续任务会重新生成该片段。");
           }

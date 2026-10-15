@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mkdtemp, writeFile, rm, mkdir, realpath } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, mkdir, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,7 +106,7 @@ try {
       if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'] }; }
       return json(p);
     }
-    if (path === '/api/uploads') { sequence++; return json({ assetId: `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`, filename: 'asset', mime: request.postDataBuffer()?.includes(Buffer.from('audio/wav')) ? 'audio/wav' : 'image/png', url: `/static/upload-${sequence}.png`, size: 100 }); }
+    if (path === '/api/uploads') { sequence++; return json({ assetId: `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`, filename: 'asset', mime: request.postDataBuffer()?.includes(Buffer.from('audio/wav')) ? 'audio/wav' : request.postDataBuffer()?.includes(Buffer.from('video/mp4')) ? 'video/mp4' : 'image/png', url: `/static/upload-${sequence}.png`, size: 100 }); }
     if (path.endsWith('/items')) return json({ data: library.filter((item) => item.tags.includes(new URL(request.url()).searchParams.get('tag'))), nextCursor: null });
     if (path.endsWith('/content')) { const voice = path.includes('/voice/'); return route.fulfill({ contentType: voice ? 'audio/wav' : 'image/png', body: voice ? wav : png }); }
     if (path === '/api/agents') return json(agents);
@@ -203,15 +203,43 @@ try {
   await page.getByRole('button', { name: '确定文案', exact: false }).click();
   await page.getByLabel('视频口播文案').fill(script);
   await page.getByRole('button', { name: '下一步', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: '实拍对口型（待接入）' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '实拍对口型（待接入）' }).count(), 0);
   await page.getByRole('button', { name: '选择数字分身素材', exact: true }).click();
   const twin = page.getByRole('dialog', { name: '选择数字分身素材' });
   await twin.locator('.twin-asset').filter({ hasText: '我的肖像' }).getByRole('button', { name: '用于视频制作' }).click();
   await twin.getByRole('status').filter({ hasText: '我的肖像' }).waitFor();
   await twin.getByRole('button', { name: '完成', exact: true }).click();
-  await page.getByLabel('背景补充描述').fill('木质吧台和明亮落地窗');
+  await page.getByLabel('背景/场景补充描述').fill('木质吧台和明亮落地窗');
   await page.getByLabel('上传背景图片（选填）').setInputFiles({ name: 'store.png', mimeType: 'image/png', buffer: png });
   await page.locator('.mv-asset-preview img').nth(1).waitFor();
+  const portraitInput = page.getByLabel('上传肖像图片（选填）');
+  await portraitInput.setInputFiles([1, 2].map(i => ({ name: `portrait-${i}.png`, mimeType: 'image/png', buffer: png })));
+  await page.waitForFunction(() => document.querySelectorAll('.mv-asset-preview img').length === 4);
+  assert.equal(await portraitInput.isDisabled(), true);
+  const sceneInput = page.getByLabel('上传场景图片（选填）');
+  await sceneInput.setInputFiles([1, 2, 3, 4].map(i => ({ name: `scene-${i}.png`, mimeType: 'image/png', buffer: png })));
+  await page.getByRole('alert').filter({ hasText: '人物或场景区域各最多 3 张。' }).waitFor();
+  await sceneInput.setInputFiles([1, 2].map(i => ({ name: `scene-${i}.png`, mimeType: 'image/png', buffer: png })));
+  await page.waitForFunction(() => document.querySelectorAll('.mv-asset-preview img').length === 6);
+  assert.equal(await sceneInput.isDisabled(), true);
+  assert.equal(await page.getByLabel('上传背景图片（选填）').isDisabled(), true);
+  await page.getByRole('region', { name: '场景', exact: true }).getByRole('button', { name: '移除', exact: true }).last().click();
+  assert.equal(await sceneInput.isDisabled(), false);
+  assert.equal(await page.getByLabel('上传背景图片（选填）').isDisabled(), false);
+  if (process.env.MARKETING_REFERENCE_VIDEO) {
+    const videoInput = page.getByLabel('上传参考视频（选填）');
+    await videoInput.setInputFiles({ name: 'reference.mp4', mimeType: 'video/mp4', buffer: await readFile(process.env.MARKETING_REFERENCE_VIDEO) });
+    await page.getByRole('alert').filter({ hasText: '图片合计不能超过 3 张' }).waitFor();
+    assert.equal(await videoInput.isDisabled(), true);
+    await page.getByRole('button', { name: '下一步', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: '生成分镜并预览', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '选择数字分身音色', exact: true }).count(), 0);
+    await page.getByRole('button', { name: '上一步', exact: true }).click();
+    await snap('marketing-video-reference-limit.png');
+    await page.getByRole('region', { name: '参考视频', exact: true }).getByRole('button', { name: '移除', exact: true }).click();
+    assert.equal(await videoInput.isDisabled(), false);
+    assert.equal(await page.getByRole('alert').filter({ hasText: '图片合计不能超过 3 张' }).count(), 0);
+  }
   await snap('marketing-video-assets.png');
   await page.getByRole('button', { name: '下一步', exact: true }).click();
   assert.equal(await page.getByLabel('添加字幕', { exact: true }).isChecked(), true);
@@ -224,7 +252,6 @@ try {
   await voicePicker.getByRole('status').filter({ hasText: '我的声音' }).waitFor();
   await voicePicker.getByRole('button', { name: '完成', exact: true }).click();
   await page.locator('.mv-asset-preview audio').waitFor();
-  await page.getByText('更多设置', { exact: true }).click();
   holdNextSave = true;
   const savingRequest = page.waitForRequest(request => request.method() === 'PUT' && request.url().includes('/api/marketing-videos/'));
   await page.getByRole('group', { name: '视频质量', exact: true }).getByRole('button', { name: '高清', exact: true }).click();

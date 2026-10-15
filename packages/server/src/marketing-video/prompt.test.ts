@@ -45,3 +45,23 @@ describe("marketing model subtitle instructions", () => {
     expect(prompt).toContain("Use audio 1 for the narrator's voice.");
   });
 });
+
+it("numbers portrait, background and scene references in submission order", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const draft = MarketingDraftSchema.parse({ assets: { portrait: [id, id, id], background: [id, id], scene: [id] } });
+  const prompt = marketingSegmentPrompt(draft, { index: 0, script: "Hello", durationSec: 15 }, 1);
+  expect(prompt).toContain("Use image 3 for the presenter's appearance.");
+  expect(prompt).toContain("Use image 4 for the setting.");
+  expect(prompt).toContain("Use image 6 for the scene composition and details.");
+
+});
+
+it("uses reference video for silent visuals without requesting voice synthesis", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const draft = MarketingDraftSchema.parse({ assets: { video: id, voice: id } });
+  const prompt = marketingSegmentPrompt(draft, { index: 0, script: "Hello", durationSec: 5 }, 1);
+  expect(prompt).toContain("Use video 1 as a reference");
+  expect(prompt).toContain("Do not generate speech or audio.");
+  expect(prompt).not.toContain("Use audio 1");
+  expect(prompt).not.toContain("Narrate ONLY");
+});
