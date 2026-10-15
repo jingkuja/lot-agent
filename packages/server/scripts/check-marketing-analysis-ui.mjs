@@ -160,6 +160,9 @@ try {
   assert.equal(await page.getByRole("checkbox").count(), 2);
   assert(!/预算|已记录费用|选用预览|生成当前修订摘要/.test(await page.locator("body").innerText()));
   await page.getByText("当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。", { exact: true }).waitFor();
+  assert.equal(await page.locator(".ma-panel > details.mv-script-review").evaluate(el => el.open), false);
+  await page.getByText("部分画面文字识别失败，摘要可能遗漏内容。", { exact: true }).waitFor();
+  assert.equal(await page.getByText("未识别画面文字的采样帧 (1)：f0001 · 0.0s", { exact: true }).isVisible(), true);
   await page.getByText("查看参考资料", { exact: true }).click();
   await page.getByText("画面文字", { exact: true }).click();
   await page.getByText("t0001 · 0.0s–0.5s · 原片画面文字", { exact: true }).waitFor();
@@ -177,6 +180,14 @@ try {
   Object.assign(value, { status: "needs_review", errorCode: "REQUEST_UNKNOWN" });
   await page.reload(); await page.getByText("模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
+  Object.assign(value, { status: "partial", errorCode: "MODEL_USAGE_UNKNOWN" }); await page.reload();
+  await page.getByText("模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
+  value.snapshot.speech = { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "  " };
+  Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
+  await page.getByText("转写未识别到语音内容，不代表原视频没有声音。", { exact: true }).waitFor();
+  assert.equal(await page.locator(".ma-panel > details.mv-script-review").evaluate(el => el.open), false);
+  assert(!(await page.locator("body").innerText()).includes("可见文字和语音转写生成"));
   value.snapshot.speech = liveSpeech ?? { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "测试录音设备，进入网站。" };
   Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
   await page.getByText("中景缓缓推进", { exact: true }).waitFor();
@@ -208,7 +219,10 @@ try {
   value.snapshot.speech = { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" }; await page.reload();
   await page.getByText("qwen-audio-3.1-asr-flash is unavailable for this account. Speech transcription was skipped; image and text analysis will continue.", { exact: true }).waitFor();
   value.snapshot.speech = { status: "skipped", reason: "NO_AUDIO_TRACK" }; await page.reload();
-  await page.getByText("The reference video has no usable audio track. Speech transcription was skipped; image and text analysis will continue.", { exact: true }).waitFor();
+  await page.getByText("The downloaded file has no usable audio track. This does not confirm whether the original video has sound; transcription was skipped.", { exact: true }).waitFor();
+  value.snapshot.speech = { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "" }; await page.reload();
+  await page.getByText("No speech was recognized in the transcription. This does not mean the original video has no sound.", { exact: true }).waitFor();
+  await page.getByText("Some OCR failed; the summary may omit content.", { exact: true }).waitFor();
   account = "other"; await page.getByRole("button", { name: "Switch account", exact: true }).click();
   await page.waitForFunction(() => !document.body.innerText.includes('咖啡参考视频'));
   assert.equal(await page.getByText("View source material", { exact: true }).count(), 0);

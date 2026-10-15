@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { createDeadline, withAbort } from "@lot-agent/core";
 import { ANALYSIS_LIMITS, type AnalysisCallLedger, type AnalysisSource, type AnalysisSpeech } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
 import { readAnalysisFile } from "./private-files.js";
@@ -37,19 +38,24 @@ export async function extractAnalysisAudio(input: { directory: string; source: A
   } finally { await rm(join(input.directory, "speech.wav"), { force: true }); }
 }
 
-async function boundedJson(response: Response) {
+async function boundedJson(response: Response, signal: AbortSignal) {
   const reader = response.body?.getReader();
   if (!reader) throw new AnalysisError("MODEL_INVALID_RESPONSE");
   const chunks: Uint8Array[] = []; let size = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read(); if (done) break;
+      signal.throwIfAborted();
+      const { done, value } = await withAbort(reader.read(), signal); if (done) break;
       size += value.length;
       if (size > 256 * 1024) throw new AnalysisError("MODEL_OUTPUT_LIMIT");
       chunks.push(value);
     }
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  } finally {
+    // A stalled transport's cancel promise must not hold the worker lease.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 /** The Qwen gateway has its own input/parameters envelope, not the LLM messages envelope.
@@ -65,14 +71,15 @@ export async function transcribeAnalysisAudio(input: {
   let receipt = await input.ledger.begin(step, createHash("sha256").update(input.audioHash ? JSON.stringify({ model: ASR_MODEL, audioHash: input.audioHash, format: "wav", sample_rate: "16000" }) : payload).digest("hex"), ASR_MODEL, 0);
   if (!receipt) {
     receipt = { text: "", outcome: "request_unknown" };
+    const deadline = createDeadline(180000, input.signal);
     try {
-      const deadline = AbortSignal.timeout(180000);
-      const response = await (input.fetchImpl ?? fetch)(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      deadline.signal.throwIfAborted();
+      const response = await withAbort((input.fetchImpl ?? fetch)(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST", redirect: "error", headers: { Authorization: `Bearer ${input.apiKey}`, "Content-Type": "application/json" }, body: payload,
-        signal: input.signal ? AbortSignal.any([input.signal, deadline]) : deadline,
-      });
+        signal: deadline.signal,
+      }), deadline.signal);
       if (!response.ok) {
-        const error = await boundedJson(response).catch(() => null);
+        const error = await boundedJson(response, deadline.signal).catch(() => null);
         const code = error?.error?.code;
         const missing = response.status === 404 || ([400, 403].includes(response.status) && ["model_not_found", "model_not_available", "model_not_allowed"].includes(code));
         if (missing || [401, 402, 403, 429].includes(response.status)) {
@@ -80,7 +87,7 @@ export async function transcribeAnalysisAudio(input: {
           receipt.errorCode = missing ? "ASR_MODEL_UNAVAILABLE" : response.status === 402 || ["insufficient_quota", "insufficient_user_quota", "insufficient_balance"].includes(code) ? "MODEL_QUOTA" : response.status === 429 ? "MODEL_RATE_LIMIT" : "MODEL_AUTH_REQUIRED";
         }
       } else {
-        const result = await boundedJson(response);
+        const result = await boundedJson(response, deadline.signal);
         if (typeof result.id === "string" && result.id.length <= 500) receipt.responseId = result.id;
         const usage = result.usage;
         if (usage && [usage.prompt_tokens, usage.completion_tokens].every(n => Number.isSafeInteger(n) && n >= 0)) receipt.usage = { promptTokens: usage.prompt_tokens, completionTokens: usage.completion_tokens };
@@ -91,6 +98,7 @@ export async function transcribeAnalysisAudio(input: {
         } else if (receipt.usage) receipt.outcome = "failed";
       }
     } catch { /* An interrupted or ambiguous paid request must never be retried automatically. */ }
+    finally { deadline.dispose(); }
     await input.ledger.finish(step, receipt);
   }
   if (receipt.errorCode === "ASR_MODEL_UNAVAILABLE" && receipt.outcome === "rejected") return { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" };

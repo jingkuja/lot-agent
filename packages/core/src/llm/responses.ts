@@ -81,6 +81,11 @@ export async function* mapResponsesStream(stream: AsyncIterable<ResponseStreamEv
   const streamed = new Map<string, string>();
   try {
     for await (const event of stream) {
+      // A Responses terminal event precedes transport EOF. Breaking here makes
+      // the SDK abort the HTTP request, which gateways can log as client_gone.
+      // Drain the tail under the caller's existing cancellation/deadline, while
+      // keeping the first terminal authoritative and ignoring trailing output.
+      if (terminal) continue;
       if (event.type === "response.created") onResponseId?.(event.response.id);
       if (event.type === "response.output_text.delta") {
         const key = `${event.output_index}:${event.content_index}`;
@@ -94,7 +99,6 @@ export async function* mapResponsesStream(stream: AsyncIterable<ResponseStreamEv
         terminal = (event as { response: Response }).response;
         usage = responseUsage(terminal);
         if (terminal.status !== event.type.slice("response.".length)) throw new LLMResponseError("Inconsistent Responses terminal event", usage);
-        break;
       } else if (event.type === "error") {
         // Never expose upstream bodies (which can contain prompts or keys).
         throw new LLMResponseError("Responses stream error", usage);

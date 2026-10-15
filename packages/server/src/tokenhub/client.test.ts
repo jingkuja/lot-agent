@@ -692,6 +692,13 @@ it.each(["headers", "body"])("cancels a stalled model catalog %s read", async ph
   expect(observed?.aborted).toBe(true); expect(fetch).toHaveBeenCalledOnce();
 });
 
+it("preserves the gateway audio model group for user-scoped ASR authorization", async () => {
+  const fetch = vi.fn().mockResolvedValue(ok({ llm: ["kimi-k3"], audio: ["qwen-audio-3.1-asr-flash"] }));
+  const client = new TokenhubClient("https://fixture.test", fetch);
+  expect(await client.listModels("owner-key")).toEqual({ llm: ["kimi-k3"], image: [], video: [], audio: ["qwen-audio-3.1-asr-flash"] });
+  expect(fetch).toHaveBeenCalledWith("https://fixture.test/models", expect.objectContaining({ headers: { Authorization: "Bearer owner-key" } }));
+});
+
 it("bounds catalog body reads even without caller cancellation", async () => {
   vi.useFakeTimers();
   try {

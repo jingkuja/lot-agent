@@ -87,6 +87,58 @@ describe("Responses transport", () => {
     expect(createLLMProvider({ default: "openai", openai: { model: "m", apiKey: "x", protocol: "responses" }, anthropic: { model: "unused", apiKey: "" } })).toBeInstanceOf(OpenAIResponsesProvider);
   });
 
+  it.each(["completed", "incomplete", "failed"])("drains a %s response without cancelling the SDK request", async status => {
+    let requestSignal: AbortSignal | undefined;
+    const fetch = vi.fn(async (_url, init) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Response(`event: response.${status}\ndata: ${JSON.stringify(terminal([message()], status, { incomplete_details: { reason: "max_output_tokens" } }))}\n\ndata: [DONE]\n\n`, { headers: { "Content-Type": "text/event-stream" } });
+    }) as unknown as ClientOptions["fetch"];
+    const provider = new OpenAIResponsesProvider({ model: "kimi-k3", apiKey: "fixture", baseUrl: "https://gateway.test/v1" }, { fetch });
+    const result = collect(provider.chat([]));
+    if (status === "failed") await expect(result).rejects.toMatchObject({ usage: { promptTokens: 22, completionTokens: 7 } });
+    else expect((await result).filter(c => c.type === "done")).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(requestSignal).toBeDefined();
+    expect(requestSignal!.aborted).toBe(false);
+  });
+
+  it("keeps the first terminal authoritative while consuming trailing events to EOF", async () => {
+    let reachedEof = false;
+    async function* source() {
+      yield* events([terminal(), { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "ignored" }, terminal([call()])]);
+      reachedEof = true;
+    }
+    const chunks = await collect(mapResponsesStream(source(), "m"));
+    expect(reachedEof).toBe(true);
+    expect(chunks.filter(c => c.type === "text").map(c => c.content).join("")).toBe("你好");
+    expect(chunks.filter(c => c.type === "done")).toHaveLength(1);
+    expect(chunks.some(c => c.type === "tool_call")).toBe(false);
+  });
+
+  it.each(["AbortError", "TimeoutError"])("still interrupts an unfinished request on %s without retrying", async reason => {
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    const fetch = vi.fn(async (_url, init) => {
+      requestSignal = init?.signal ?? undefined;
+      const body = new ReadableStream<Uint8Array>({ start(stream) {
+        stream.enqueue(new TextEncoder().encode(`event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "partial" })}\n\n`));
+        requestSignal!.addEventListener("abort", () => stream.error(new DOMException("aborted", "AbortError")), { once: true });
+      } });
+      return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+    }) as unknown as ClientOptions["fetch"];
+    const provider = new OpenAIResponsesProvider({ model: "kimi-k3", apiKey: "fixture", baseUrl: "https://gateway.test/v1" }, { fetch });
+    const chunks: ChatChunk[] = [];
+    await expect((async () => {
+      for await (const chunk of provider.chat([], undefined, { signal: controller.signal })) {
+        chunks.push(chunk);
+        controller.abort(new DOMException("cancelled or expired", reason));
+      }
+    })()).rejects.toThrow("before completion");
+    expect(chunks).toEqual([{ type: "text", content: "partial" }]);
+    expect(requestSignal!.aborted).toBe(true);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("posts Responses wire format to /v1/responses with isolated credentials and no hidden retry", async () => {
     const requests: { path?: string; authorization?: string; body: any }[] = [];
     const transport = { fetch: (async (url, init) => {

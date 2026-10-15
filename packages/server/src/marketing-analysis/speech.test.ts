@@ -64,6 +64,14 @@ it("requires only the visual models, treats ASR as optional, and isolates catalo
   expect(await analysisUserAccess(db, hub, "bob")).toEqual({ key: "bob-key", asrAvailable: true });
   expect(hub.listModels).toHaveBeenLastCalledWith("bob-key", expect.any(AbortSignal));
 });
+
+it("recognizes the real gateway audio group without granting ASR to another owner", async () => {
+  const db = { getUserApiKey: async (owner: string) => `${owner}-key` };
+  const hub = { listModels: async (key: string) => ({ llm: ["kimi-k3", "deepseek-v4.1-flash"], image: [], video: [],
+    audio: key === "alice-key" ? [ASR_MODEL] : [] }) };
+  expect(await analysisUserAccess(db, hub, "alice")).toEqual({ key: "alice-key", asrAvailable: true });
+  expect(await analysisUserAccess(db, hub, "bob")).toEqual({ key: "bob-key", asrAvailable: false });
+});
 it("extracts bounded mono 16k WAV with the sandbox and skips absent audio tracks", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lot-asr-"));
   const source = { platform: "bilibili" as const, canonicalUrl: "https://www.bilibili.com/video/BV1xx411c7mD", mediaKey: "source.mp4" };
@@ -94,4 +102,37 @@ it("reuses the same audio receipt when a temporary URL rotates", async () => {
   await transcribeAnalysisAudio({ ...f.input, audioHash: "a".repeat(64), audioUrl: "https://public.test/new-token" });
   expect(f.fetchImpl).toHaveBeenCalledOnce();
   expect(f.input.ledger.begin.mock.calls[0]).toEqual(f.input.ledger.begin.mock.calls[1]);
+});
+
+it.each(["fetch", "body"])("bounds an uncooperative ASR %s by the deadline and blocks replay", async phase => {
+  vi.useFakeTimers();
+  const cancel = vi.fn(() => new Promise<void>(() => {}));
+  const fetchImpl = vi.fn(async () => phase === "fetch" ? await new Promise<Response>(() => {})
+    : new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"id":')); }, cancel })));
+  const f = setup(fetchImpl);
+  try {
+    const result = transcribeAnalysisAudio(f.input).catch(error => error);
+    await vi.advanceTimersByTimeAsync(180001);
+    expect(await result).toMatchObject({ message: "REQUEST_UNKNOWN" });
+    expect(f.finish).toHaveBeenCalledWith("asr:source", { text: "", outcome: "request_unknown" });
+    await expect(transcribeAnalysisAudio(f.input)).rejects.toThrow("REQUEST_UNKNOWN");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    if (phase === "body") expect(cancel).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { vi.useRealTimers(); }
+});
+
+it.each(["cancel", "lease lost", "shutdown"])("stops a stalled ASR body on %s without waiting for transport cleanup", async reason => {
+  const controller = new AbortController();
+  let started!: () => void;
+  const reading = new Promise<void>(resolve => { started = resolve; });
+  const f = setup(vi.fn(async () => new Response(new ReadableStream({
+    pull() { started(); return new Promise<void>(() => {}); },
+    cancel() { return new Promise<void>(() => {}); },
+  }))));
+  const result = transcribeAnalysisAudio({ ...f.input, signal: controller.signal }).catch(error => error);
+  await reading; controller.abort(new Error(reason));
+  expect(await result).toMatchObject({ message: "REQUEST_UNKNOWN" });
+  expect(f.finish).toHaveBeenCalledWith("asr:source", { text: "", outcome: "request_unknown" });
+  expect(f.fetchImpl).toHaveBeenCalledOnce();
 });

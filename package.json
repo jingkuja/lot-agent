@@ -47,6 +47,7 @@
     "dev:media-analysis": "pnpm --filter @lot-agent/server run dev:media-analysis",
     "check:marketing-analysis:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-db.ts",
     "check:marketing-analysis:ui": "node packages/server/scripts/check-marketing-analysis-ui.mjs",
+    "check:marketing-analysis:audio-url": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-audio-url.ts",
     "marketing-analysis:reconcile": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reconcile-marketing-analysis.ts"
   },
   "devDependencies": {

@@ -91,6 +91,8 @@ InputBox / ChatPanel → useChat → POST /api/conversations/:id/messages
 
 `regenerate` 与发送消息共用会话运行租约，改聊天流程时需同时检查取消、失败收尾和历史持久化。`ask_user`、`propose_outline` 使用 `endsTurn: true` 结束本轮，让前端卡片接收用户回复。
 
+`core/llm/responses.ts` 收到 Responses 终态后继续读取至传输结束，再发布最终结果；提前退出 SDK 迭代器会主动取消 HTTP 请求，可能使网关记录 `client_gone`。收尾沿用请求取消和超时，首个终态后的事件不重复输出文本、工具或用量；缺失终态仍按断流失败处理。
+
 ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core/runtime/run-budget.ts` 统一推理、压缩及传输重试预算；`run-state.ts` 定义状态、执行日志接口和观测事件。服务端 `services/run-repository.ts` 将运行与工具步骤写入 `agent_runs / agent_steps`，执行前持久化意图，阻止未知写结果的自动重放。会话租约定期续租，消息写入和工具启动校验租约归属。`GET /api/conversations/:id/runs` 查询执行记录；前端 `RunRecoveryCard` 通过归属校验的操作核实接口处理未知结果，此接口不提供给模型。
 
 
@@ -98,7 +100,7 @@ ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core
 
 ### 4.3 图片与视频异步生成
 
-参考视频语音识别由 `server/marketing-analysis/speech.ts` 接入固定 `qwen-audio-3.1-asr-flash`，`runtime.ts` 按当前用户模型目录判断是否可用；缺失时跳过并由 `ReferenceAnalysisPanel.tsx` 提示；参考输入框上方使用默认选中视频链接的紧凑复选框，补充创作要求默认展开，时长默认 30 秒且仅保留滑块。隔离解码为 16 kHz 单声道 WAV，通过 `audio-url.ts` 生成基于 `PUBLIC_BASE_URL` 的十分钟加密访问链接，调用网关 `/chat/completions` 的 `input.messages` / `parameters` 协议，复用持久化调用回执与取消保护；转写进入摘要与文案，`a0001` 仅为无时间戳的原声证据，不用于时间线。
+参考视频语音识别由 `server/marketing-analysis/speech.ts` 接入固定 `qwen-audio-3.1-asr-flash`，`runtime.ts` 按当前用户模型目录的 `llm/asr/audio` 分组判断是否可用；缺失时跳过并由 `ReferenceAnalysisPanel.tsx` 提示；参考输入框上方使用默认选中视频链接的紧凑复选框，补充创作要求默认展开，时长默认 30 秒且仅保留滑块。隔离解码为 16 kHz 单声道 WAV，通过 `audio-url.ts` 生成基于 `PUBLIC_BASE_URL` 的十分钟加密访问链接，调用网关 `/chat/completions` 的 `input.messages` / `parameters` 协议，复用持久化调用回执与取消保护；180 秒总期限约束请求与正文，未知结果禁止重发。转写进入摘要与文案，`a0001` 仅为无时间戳的原声证据，不用于时间线。OCR 缺口、下载文件无音轨及空转写在主结果旁可见，均不将未识别等同原片无声音。公网 URL 检查见 `scripts/check-marketing-analysis-audio-url.ts`，真实素材 `download/speech/analyze` 探测见 `scripts/check-marketing-analysis-local.ts`；[本机真实验收记录](marketing-video-live-acceptance.md)区分已通过的 ASR 与受阻的 Linux 门禁。
 
 `POST /api/conversations/:id/generations → 校验 / 额度预检 → pending 消息与 task → BullMQ → workers/index.ts → generation/run-job.ts → 提供器 → 下载并存储资产 → 计量 / 状态更新`。
 

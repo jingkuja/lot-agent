@@ -1,6 +1,6 @@
 import "../src/load-env.js";
 import { readFile, writeFile, mkdir, open, rm } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { downloadAnalysisSource } from "../src/marketing-analysis/download.js";
@@ -12,13 +12,17 @@ import { failedProbeOcrFrames } from "../src/marketing-analysis/probe-resume.js"
 import { analyzeSelectedFrames } from "../src/marketing-analysis/pipeline.js";
 import { readAnalysisFile } from "../src/marketing-analysis/private-files.js";
 import { loadLlmConfig } from "../src/config.js";
-import { ANALYSIS_VERSION, type AnalysisSnapshot, type FrameEvidence } from "@lot-agent/core/marketing-analysis";
+import { ANALYSIS_VERSION, type AnalysisSnapshot, type AnalysisSpeech, type FrameEvidence } from "@lot-agent/core/marketing-analysis";
+import { ASR_MODEL, extractAnalysisAudio, transcribeAnalysisAudio } from "../src/marketing-analysis/speech.js";
+import { withAnalysisAudioUrl } from "../src/marketing-analysis/audio-url.js";
+import { AnalysisStorage } from "../src/marketing-analysis/storage.js";
+import { TokenhubClient } from "../src/tokenhub/client.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const directory = resolve(process.env.MARKETING_ANALYSIS_LOCAL_DIR ?? "");
 const mode = process.argv[2];
-if (!directory.startsWith(join(root, "data/marketing-analysis-probes/")) || !["download", "analyze"].includes(mode)) {
-  console.error("Usage: MARKETING_ANALYSIS_LOCAL_DIR=<private data/marketing-analysis-probes/run directory> YTDLP_VERSION=<installed version> pnpm check:marketing-analysis:local download|analyze. Place the authorized share link in source.txt. Analyze additionally requires MARKETING_ANALYSIS_LOCAL_MODEL_CALLS=1, uses this operator's OPENAI_API_KEY, and defaults to 6 OCR / 6 visual frames.");
+if (!directory.startsWith(join(root, "data/marketing-analysis-probes/")) || !["download", "speech", "analyze"].includes(mode)) {
+  console.error("Usage: MARKETING_ANALYSIS_LOCAL_DIR=<private data/marketing-analysis-probes/run directory> YTDLP_VERSION=<installed version> pnpm check:marketing-analysis:local download|speech|analyze. Place the authorized share link in source.txt. Speech/analyze additionally require MARKETING_ANALYSIS_LOCAL_MODEL_CALLS=1 and use this operator's OPENAI_API_KEY. Speech makes at most one ASR call; analyze defaults to 6 OCR / 6 visual frames.");
   process.exit(1);
 }
 const controller = new AbortController();
@@ -47,6 +51,47 @@ try {
     console.log(JSON.stringify({ status: "downloaded", platform: result.source.platform, bytes: result.bytes, durationMs: selection.durationMs,
       candidates: selection.frames.length, ocrFrames: selection.ocr.length, visualFrames: selection.visual.length, report: directory }));
     await rm(join(directory, "failure.json"), { force: true });
+  } else if (mode === "speech") {
+    if (process.env.MARKETING_ANALYSIS_LOCAL_MODEL_CALLS !== "1") throw new Error("EXPLICIT_MODEL_PROBE_REQUIRED");
+    const config = await loadLlmConfig(root);
+    if (!config.openai.apiKey || !config.openai.baseUrl) throw new Error("PROBE_OPERATOR_KEY_REQUIRED");
+    const download = JSON.parse(await readFile(join(directory, "download.json"), "utf8"));
+    const context = { sourceHash: download.source.sourceHash, model: ASR_MODEL, baseUrl: config.openai.baseUrl,
+      credential: createHash("sha256").update(config.openai.apiKey).digest("hex") };
+    await mkdir(join(directory, "asr"), { mode: 0o700, recursive: true });
+    try {
+      const previous = JSON.parse(await readFile(join(directory, "asr/context.json"), "utf8"));
+      if (JSON.stringify(previous) !== JSON.stringify(context)) throw new Error("PROBE_CONTEXT_CHANGED");
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; await save("asr/context.json", context); }
+    const hub = new TokenhubClient(process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market", undefined, process.env.NEW_API_AGENT_KEY ?? "");
+    const available = await hub.listModels(config.openai.apiKey, controller.signal);
+    if (![...available.llm, ...(available.asr ?? []), ...(available.audio ?? [])].includes(ASR_MODEL)) throw new Error("ASR_MODEL_UNAVAILABLE");
+    const audio = await extractAnalysisAudio({ directory: sourceDir, source: download.source, runner: localProbeRunner(sourceDir), signal: controller.signal });
+    if (!audio) throw new Error("NO_AUDIO_TRACK");
+    const id = randomUUID(); const owner = `acceptance-${id}`;
+    const audioDirectory = await new AnalysisStorage(join(root, "data/marketing-analysis")).directory(owner, id);
+    const ledger = new ProbeCallLedger(join(directory, "asr/receipts"), async () => {}, { calls: 1, images: 0 });
+    let speech: AnalysisSpeech;
+    let publicUrlVerified = false;
+    try {
+      speech = await withAnalysisAudioUrl({ directory: audioDirectory, ownerId: owner, analysisId: id, audio,
+        publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "", masterKey: process.env.SECRET_MASTER_KEY ?? "" }, async (url, hash) => {
+        const response = await fetch(url, { redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+        if (response.status !== 200 || Number(response.headers.get("content-length")) !== audio.length) {
+          await response.body?.cancel(); throw new Error("PUBLIC_AUDIO_RESPONSE_INVALID");
+        }
+        if (createHash("sha256").update(Buffer.from(await response.arrayBuffer())).digest("hex") !== hash) throw new Error("PUBLIC_AUDIO_CONTENT_INVALID");
+        publicUrlVerified = true;
+        return transcribeAnalysisAudio({ audioUrl: url, audioHash: hash, baseUrl: config.openai.baseUrl!, apiKey: config.openai.apiKey, ledger, signal: controller.signal });
+      });
+    } finally { await rm(dirname(audioDirectory), { recursive: true, force: true }); }
+    const receipts = await ledger.records();
+    await save("asr/result.json", { sourceHash: context.sourceHash, speech, publicUrlVerified, audioBytes: audio.length,
+      usage: receipts.map(r => ({ model: r.model, responseId: r.receipt?.responseId, outcome: r.receipt?.outcome, usage: r.receipt?.usage })) });
+    console.log(JSON.stringify({ status: speech.status, publicUrlVerified, audioBytes: audio.length, calls: receipts.length,
+      transcriptCharacters: speech.status === "completed" ? speech.text.trim().length : 0, report: join(directory, "asr/result.json") }));
+    if (speech.status !== "completed" || !speech.text.trim()) process.exitCode = 1;
+    else await rm(join(directory, "failure.json"), { force: true });
   } else {
     if (process.env.MARKETING_ANALYSIS_LOCAL_MODEL_CALLS !== "1") throw new Error("EXPLICIT_MODEL_PROBE_REQUIRED");
     const config = await loadLlmConfig(root);
@@ -55,6 +100,12 @@ try {
     const visualCap = Number(process.env.MARKETING_ANALYSIS_LOCAL_MAX_VISUAL ?? 6);
     if (![ocrCap, visualCap].every(n => Number.isInteger(n) && n >= 2) || ocrCap > 120 || visualCap > 48) throw new Error("INVALID_PROBE_LIMITS");
     const download = JSON.parse(await readFile(join(directory, "download.json"), "utf8"));
+    let speech: AnalysisSpeech | undefined;
+    try {
+      const asr = JSON.parse(await readFile(join(directory, "asr/result.json"), "utf8"));
+      if (asr.sourceHash !== download.source.sourceHash) throw new Error("PROBE_CONTEXT_CHANGED");
+      speech = asr.speech;
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const selection: Awaited<ReturnType<typeof extractAnalysisFrames>> = JSON.parse(await readFile(join(directory, "frames.json"), "utf8"));
     function cap(frames: FrameEvidence[], max: number) {
       if (frames.length <= max) return frames;
@@ -70,7 +121,8 @@ try {
     selection.ocr = ocr; selection.visual = visual;
     const run = `analysis-${ocrCap}-${visualCap}`;
     await mkdir(join(directory, run), { mode: 0o700, recursive: true });
-    const context = { version: ANALYSIS_VERSION, sourceHash: download.source.sourceHash, credential: createHash("sha256").update(config.openai.apiKey).digest("hex"), ocrCap, visualCap, baseUrl: config.openai.baseUrl };
+    const context = { version: ANALYSIS_VERSION, sourceHash: download.source.sourceHash, credential: createHash("sha256").update(config.openai.apiKey).digest("hex"), ocrCap, visualCap, baseUrl: config.openai.baseUrl,
+      ...(speech ? { speechHash: createHash("sha256").update(JSON.stringify(speech)).digest("hex") } : {}) };
     const contextFile = join(directory, run, "context.json");
     try { const previous = JSON.parse(await readFile(contextFile, "utf8")); if (JSON.stringify(previous) !== JSON.stringify(context)) throw new Error("PROBE_CONTEXT_CHANGED"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; await save(`${run}/context.json`, context); }
@@ -88,7 +140,7 @@ try {
         }
       } };
     }, readFrame: frame => readAnalysisFile(sourceDir, frame.objectKey, 4 * 1024 * 1024) });
-    let snapshot: AnalysisSnapshot = { source: download.source, frames: [], frameTexts: [], texts: [], observations: [] };
+    let snapshot: AnalysisSnapshot = { source: download.source, frames: [], frameTexts: [], texts: [], observations: [], ...(speech ? { speech } : {}) };
     try { snapshot = JSON.parse(await readFile(join(directory, run, "snapshot.json"), "utf8")); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     let result: AnalysisSnapshot;

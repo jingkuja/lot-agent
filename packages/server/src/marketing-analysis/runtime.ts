@@ -28,7 +28,7 @@ export async function analysisUserAccess(db: Pick<DB, "getUserApiKey">, hub: Pic
     deadline.signal.throwIfAborted();
     const available = await withAbort(hub.listModels(key, deadline.signal), deadline.signal);
     if (!Object.values(ANALYSIS_MODELS).every(id => available.llm.includes(id))) throw new AnalysisError("ANALYSIS_MODEL_NOT_ALLOWED", 503);
-    return { key, asrAvailable: [...available.llm, ...(available.asr ?? [])].includes(ASR_MODEL) };
+    return { key, asrAvailable: [...available.llm, ...(available.asr ?? []), ...(available.audio ?? [])].includes(ASR_MODEL) };
   } finally { deadline.dispose(); }
 }
 export async function analysisUserKey(...args: Parameters<typeof analysisUserAccess>) {

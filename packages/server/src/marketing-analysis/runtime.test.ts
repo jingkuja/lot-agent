@@ -89,6 +89,20 @@ it("aborts credential/catalog resolution before downloading or posting to a mode
   expect(hub.listModels).toHaveBeenCalledWith("fixture-key", expect.any(AbortSignal));
 });
 
+it.each(["credential", "catalog"])("bounds a stalled initial or per-request %s lookup to 15 seconds", async phase => {
+  const { analysisUserAccess } = await import("./runtime.js");
+  vi.useFakeTimers();
+  const hub = { listModels: vi.fn(async () => new Promise<never>(() => {})) };
+  const db = { getUserApiKey: vi.fn(async () => phase === "credential" ? await new Promise<never>(() => {}) : "fixture-key") };
+  try {
+    const result = analysisUserAccess(db, hub, "owner").catch(error => error);
+    await vi.advanceTimersByTimeAsync(15001);
+    expect(await result).toMatchObject({ name: "TimeoutError" });
+    expect(hub.listModels).toHaveBeenCalledTimes(phase === "catalog" ? 1 : 0);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { vi.useRealTimers(); }
+});
+
 it("transcribes with the current owner key before synthesis and checkpoints the result", async () => {
   const speech = { status: "completed" as const, id: "a0001" as const, text: "欢迎光临", model: "qwen-audio-3.1-asr-flash" };
   const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: "fixture", mediaKey: "source.mp4" }, frames: [], frameTexts: [], texts: [], observations: [] };

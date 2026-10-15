@@ -14,11 +14,13 @@
 
 ## 可选视频语音转写
 
-参考视频拆解使用固定模型 `qwen-audio-3.1-asr-flash`。当前用户模型目录的 `llm` 或 `asr` 分组包含该 ID 才会转写；没有模型（或网关明确返回模型不存在）则保存跳过原因，页面提示并继续画面/文字分析。仍沿用当前用户凭证与现有网关 Base URL，不配置独立共享 Key，不切换其他 ASR 模型。
+参考视频拆解使用固定模型 `qwen-audio-3.1-asr-flash`。当前用户模型目录的 `llm`、`asr` 或 `audio` 分组包含该 ID 才会转写；没有模型（或网关明确返回模型不存在）则保存跳过原因，页面提示并继续画面/文字分析。仍沿用当前用户凭证与现有网关 Base URL，不配置独立共享 Key，不切换其他 ASR 模型。2026-10-15 真实网关将该模型放在 `audio` 分组，现已保留并识别此分组，避免错误跳过。
 
 `marketing-analysis/speech.ts` 在现有无网络解码沙箱中读取私有原片，转成最长 180 秒、16 kHz、单声道 PCM WAV。请求为 `POST <baseUrl>/chat/completions`，按用户提供的协议使用 `input.messages[].content[].input_audio.data`、`parameters.format="wav"` 与 `parameters.sample_rate="16000"`；音频使用 `PUBLIC_BASE_URL` 拼接 `/api/public/marketing-analysis-audio/<token>` 的公网 URL。`audio-url.ts` 用 `SECRET_MASTER_KEY` 加密包含任务归属、内容哈希和十分钟有效期的访问凭证；API 校验后只返回该任务的私有 WAV，请求结束即删除临时文件。API 和媒体 Worker 必须共享私有数据卷与主密钥，且 PUBLIC_BASE_URL 必须从模型网关可达。转写取 `choices[0].message.content`，保存响应 ID、实际 token 用量；完成状态必须为 `stop`，中断/未知用量不自动重发。
 
 转写保存在既有 snapshot JSONB 的 `speech` 字段，页面“查看参考资料”可展开原文；成功转写参与摘要和文案/分镜生成。`a0001` 是整段原声证据，只允许摘要和营销解读引用，不编造逐字时间戳。没有音轨时同样提示跳过；已有完成记录不自动补做付费 ASR。临时 WAV 在转写请求结束后删除，原片保持现有私有存储与清理策略。
+
+ASR 使用覆盖请求与正文的 180 秒总期限，显式中断不响应 signal 的等待；用户取消、租约丢失和 shutdown 同样退出，清理响应流不延长等待。已提交但未得到确定回执的调用保存为 unknown，不自动重发。主结果旁直接展示 OCR 缺口和音频缺口；空转写只表示未识别到语音，下载文件无音轨只描述当前文件，均不证明原视频无声音。下载器回退纯视频时尚不补取独立音轨。
 
 验证：协议、实际用量解析、模型缺失/无音轨、用户隔离、取消、未知请求不重发与证据校验均有离线测试。2026-10-15 使用用户提供的 localhost:4000 网关和 `https://todoucloud.com/2.wav` 实际调用一次成功：文本“测试录音设备，进入网站。”，输入 173 / 输出 7 tokens，响应 ID `828cc2f2-6d3f-9d34-88cd-f00ac0bc3d01`。未将 Key 写入文件或日志。样例联调将 PUBLIC_BASE_URL 临时设为 `https://todoucloud.com`，没有改动环境文件；新增临时音频路由需随 API 一起部署，不能将样例 URL 的成功当作生产反向代理已验收。
 
@@ -126,8 +128,11 @@ pnpm test:marketing-analysis
 pnpm check:marketing-analysis:media  # 实际 FFmpeg，只有自制夹具
 pnpm check:marketing-analysis:db    # 需专用空本机数据库 URL
 pnpm check:marketing-analysis:ui    # 需 PLAYWRIGHT_MODULE 和本机 Chrome
+pnpm check:marketing-analysis:audio-url # 经 PUBLIC_BASE_URL 校验短时 WAV、哈希和删除后 404，无模型调用
 pnpm check:marketing-analysis:local-sandbox # macOS 实际文件/网络隔离与取消，无模型调用
 ```
+
+2026-10-15 补充真实验收见[公网音频、Linux 与小红书 ASR 验收记录](marketing-video-live-acceptance.md)。本机探测按 `download → speech → analyze` 执行：`speech` 使用当前操作员凭证和持久化单次账本，先检查公网 WAV 哈希再提交 ASR；`analyze` 将同源 `asr/result.json` 中的语音加入摘要，并把语音哈希加入独立探测上下文。不得给已有视觉调用的旧探测目录补写语音后继续；输入变更会拒绝复用。原片链接、语音和回执仅存于 Git 忽略的私有探测目录。
 
 数据库脚本要求 `MARKETING_ANALYSIS_CHECK_DATABASE_URL` 指向本机空的 `media_analysis_check_*` 库（需安装 pgvector），验证旧库迁移、幂等提交、用户隔离、无本地预算、租约、取消、未知请求、核对、调用去重、修订、自动回填与版本冲突、私有帧和清理。另设 `MARKETING_ANALYSIS_CHECK_REDIS_URL=redis://127.0.0.1:<临时端口>/15` 可验证真实 BullMQ 投递、同用户串行、跨进程取消及崩溃后不重发；该 Redis 库必须是专用空库。UI 脚本使用真实 React（包括 StrictMode）与拦截数据，不调用真实模型；覆盖纯文案/视频自动生成、刷新恢复、只读资料、上游余额不足、取消、未知请求、账号切换、中英文和暗色主题。
 
