@@ -29,7 +29,7 @@ Lot Agent 是共用账号、模型网关和计费体系的 AI 内容与办公工
 
 所有未隐藏的 Agent 默认可用，无需安装或卸载；`digital_employee` 保持独立产品入口。旧用户的安装记录仅用于保留排序，不再决定可用性。`copywriting` 定义仍隐藏，但数字员工业务已有文案能力，不能将二者混为一谈。合同对比依托 Agent 提示词、附件和文档工具。
 
-尚需区分的边界：发布连接器及内容审核仍是 stub / 关键词实现；TTS、ASR 仍为占位提供器。小程序视频的声音、字幕等要求不代表已接入独立配音和后期合成。`core/agents/orchestration.ts` 已有 agent-as-tool 与 DAG 定义 / 校验，但不是完整的持久化多 Agent 工作流执行器。
+尚需区分的边界：发布连接器及内容审核仍是 stub / 关键词实现；通用 TTS、ASR 接口仍保留占位提供器；参考视频分析已独立接入可选 Qwen ASR。小程序视频的声音、字幕等要求不代表已接入独立配音和后期合成。`core/agents/orchestration.ts` 已有 agent-as-tool 与 DAG 定义 / 校验，但不是完整的持久化多 Agent 工作流执行器。
 
 ## 3. 技术架构
 
@@ -97,6 +97,8 @@ ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core
 技能由 `core/skills/loader.ts` 加载：Agent 作用域技能强制注入，触发词用于预取，其余通过索引与 `load_skill` 按需加载。新增垂直 Agent 必须显式配置工具白名单。
 
 ### 4.3 图片与视频异步生成
+
+参考视频语音识别由 `server/marketing-analysis/speech.ts` 接入固定 `qwen-audio-3.1-asr-flash`，`runtime.ts` 按当前用户模型目录判断是否可用；缺失时跳过并由 `ReferenceAnalysisPanel.tsx` 提示；参考输入框上方使用默认选中视频链接的紧凑复选框，补充创作要求默认展开，时长默认 30 秒且仅保留滑块。隔离解码为 16 kHz 单声道 WAV，通过 `audio-url.ts` 生成基于 `PUBLIC_BASE_URL` 的十分钟加密访问链接，调用网关 `/chat/completions` 的 `input.messages` / `parameters` 协议，复用持久化调用回执与取消保护；转写进入摘要与文案，`a0001` 仅为无时间戳的原声证据，不用于时间线。
 
 `POST /api/conversations/:id/generations → 校验 / 额度预检 → pending 消息与 task → BullMQ → workers/index.ts → generation/run-job.ts → 提供器 → 下载并存储资产 → 计量 / 状态更新`。
 

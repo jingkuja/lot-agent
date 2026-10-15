@@ -70,7 +70,13 @@ try {
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
     if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false });
     if (path === '/api/marketing-videos') return json({ data: [...projects.values()] });
-    if (path === '/api/marketing-videos/copy') return json({ draft: { ...request.postDataJSON().draft, storyboard: planMarketingSegments(script, request.postDataJSON().draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '咖啡店', action: '展示咖啡', camera: '中景' })), script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' }, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
+    if (path.endsWith('/text-operations')) return json({ data: [] });
+    if (path === '/api/marketing-videos/copy') {
+      const body = request.postDataJSON(), p = projects.get(body.projectId);
+      assert(p); assert.equal(body.version, p.version);
+      p.version++; p.draft = { ...body.draft, storyboard: planMarketingSegments(script, body.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '咖啡店', action: '展示咖啡', camera: '中景' })), script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' };
+      return json({ project: p, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
+    }
     if (path.startsWith('/api/marketing-videos/')) {
       const [, , , id, action] = path.split('/');
       if (request.method() === 'PUT') {
@@ -163,6 +169,7 @@ try {
   await page.getByRole('alert').filter({ hasText: '请先填写' }).waitFor();
   await page.getByLabel('产品、卖点和目标顾客', { exact: true }).fill('为转角咖啡店介绍手冲咖啡和明亮的环境。');
   await page.getByRole('button', { name: '拆解爆款文案', exact: true }).click();
+  await page.getByRole('checkbox', { name: '文字文案', exact: true }).check();
   await page.getByLabel('视频链接或参考文案').fill('先展示店铺环境，再讲特色，最后邀请到店。');
   failNextReview = true;
   await page.getByRole('button', { name: '一键拆解并生成', exact: true }).click();
@@ -189,7 +196,8 @@ try {
     assert.equal(await page.getByLabel('视频口播文案').inputValue(), invalidScript);
   }
   await page.getByLabel('视频口播文案').fill('长'.repeat(180));
-  await page.getByRole('button', { name: '60 秒', exact: true }).click();
+  await page.getByRole('slider', { name: '整片时长（秒）', exact: true }).focus();
+  await page.getByRole('slider', { name: '整片时长（秒）', exact: true }).press('End');
   await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
   assert.equal(await page.getByRole('button', { name: '生成分镜并预览' }).isDisabled(), false);
   await page.getByRole('button', { name: '确定文案', exact: false }).click();

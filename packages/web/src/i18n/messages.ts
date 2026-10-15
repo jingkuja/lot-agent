@@ -1,5 +1,14 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
+  "正在转写视频语音": {"en": "Transcribing video speech", "id": "Mentranskripsikan ucapan video"},
+  "当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。": {"en": "qwen-audio-3.1-asr-flash is unavailable for this account. Speech transcription was skipped; image and text analysis will continue.", "id": "Model qwen-audio-3.1-asr-flash tidak tersedia untuk akun ini. Transkripsi dilewati; analisis gambar dan teks tetap dilanjutkan."},
+  "参考视频未包含可用音轨，已跳过语音转写，继续分析画面和文字。": {"en": "The reference video has no usable audio track. Speech transcription was skipped; image and text analysis will continue.", "id": "Video referensi tidak memiliki trek audio yang dapat digunakan. Transkripsi dilewati; analisis gambar dan teks tetap dilanjutkan."},
+  "依据视频画面、可见文字和语音转写生成；转写可能有误，分镜为 AI 创作建议。": {"en": "Based on video images, visible text and speech transcription. Transcription may contain errors; the storyboard is an AI creative suggestion.", "id": "Berdasarkan gambar video, teks terlihat, dan transkripsi ucapan. Transkripsi mungkin keliru; storyboard merupakan saran kreatif AI."},
+  "视频语音转写需要配置可公开访问的 PUBLIC_BASE_URL。": {"en": "Video speech transcription requires a publicly accessible PUBLIC_BASE_URL.", "id": "Transkripsi ucapan video memerlukan PUBLIC_BASE_URL yang dapat diakses publik."},
+  "语音内容": {"en": "Spoken content", "id": "Konten ucapan"},
+  "视频语音转写": {"en": "Video speech transcript", "id": "Transkrip ucapan video"},
+  "未识别到语音内容。": {"en": "No speech was recognized.", "id": "Tidak ada ucapan yang dikenali."},
+  "语音转写未提供逐字时间戳，内容可能存在识别误差。": {"en": "The transcript has no word timestamps and may contain recognition errors.", "id": "Transkrip tidak memiliki cap waktu per kata dan mungkin mengandung kesalahan pengenalan."},
   "参考内容类型": {"en": "Reference type", "id": "Jenis referensi"},
   "文字文案": {"en": "Text copy", "id": "Naskah teks"},
   "视频链接": {"en": "Video link", "id": "Tautan video"},

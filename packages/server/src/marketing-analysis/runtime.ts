@@ -1,3 +1,5 @@
+import { withAnalysisAudioUrl } from "./audio-url.js";
+import { ASR_MODEL, extractAnalysisAudio, transcribeAnalysisAudio } from "./speech.js";
 import { createDeadline, withAbort } from "@lot-agent/core";
 import { summaryInput } from "./summary-input.js";
 import { readdir, rm } from "node:fs/promises";
@@ -17,7 +19,7 @@ import { analysisMediaRuntime, type AnalysisMediaRuntime } from "./media-runtime
 import { readAnalysisFile } from "./private-files.js";
 import { analyzeSelectedFrames } from "./pipeline.js";
 
-export async function analysisUserKey(db: Pick<DB, "getUserApiKey">, hub: Pick<TokenhubClient, "listModels">, owner: string, signal?: AbortSignal) {
+export async function analysisUserAccess(db: Pick<DB, "getUserApiKey">, hub: Pick<TokenhubClient, "listModels">, owner: string, signal?: AbortSignal) {
   const deadline = createDeadline(15_000, signal);
   try {
     deadline.signal.throwIfAborted();
@@ -26,8 +28,11 @@ export async function analysisUserKey(db: Pick<DB, "getUserApiKey">, hub: Pick<T
     deadline.signal.throwIfAborted();
     const available = await withAbort(hub.listModels(key, deadline.signal), deadline.signal);
     if (!Object.values(ANALYSIS_MODELS).every(id => available.llm.includes(id))) throw new AnalysisError("ANALYSIS_MODEL_NOT_ALLOWED", 503);
-    return key;
+    return { key, asrAvailable: [...available.llm, ...(available.asr ?? [])].includes(ASR_MODEL) };
   } finally { deadline.dispose(); }
+}
+export async function analysisUserKey(...args: Parameters<typeof analysisUserAccess>) {
+  return (await analysisUserAccess(...args)).key;
 }
 export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, deps: {
   store: PgAnalysisStore; storage: AnalysisStorage; db: DB; hub: TokenhubClient;
@@ -43,7 +48,8 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
   if (snapshot.creation && row.creation_context) return;
   const directory = await deps.storage.directory(lease.ownerId, lease.id);
   const checkpoint = (value: AnalysisSnapshot, stage: string) => deps.store.checkpoint(lease, value, stage);
-  const models = new AnalysisModels({ ledger: new PgAnalysisLedger(deps.store, lease),
+  const ledger = new PgAnalysisLedger(deps.store, lease);
+  const models = new AnalysisModels({ ledger,
     provider: async (model, requestSignal) => userResponsesProvider(deps.baseUrl, await analysisUserKey(deps.db, deps.hub, lease.ownerId, requestSignal), model),
     readFrame: frame => readAnalysisFile(directory, frame.objectKey, 4 * 1024 * 1024) });
   const create = async (value: AnalysisSnapshot) => {
@@ -55,7 +61,7 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
   signal.throwIfAborted();
   // Check access before downloading, and resolve the user's current key again
   // for each model request. Nothing enters the child-process environment.
-  await analysisUserKey(deps.db, deps.hub, lease.ownerId, signal);
+  const access = await analysisUserAccess(deps.db, deps.hub, lease.ownerId, signal);
   if (snapshot.summary && snapshot.summaryRevision === lease.revision) { await create(snapshot); return; }
   if (row.mode === "summary") {
     if (!snapshot.completedVisualBatches) {
@@ -85,6 +91,29 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
     selection = await extractAnalysisFrames({ directory, source: snapshot.source, runner: mediaRuntime.decoderRunner(directory), threads: deps.config.decodeThreads, signal });
     snapshot.source.durationMs = selection.durationMs;
     await deps.store.checkpoint(lease, snapshot, "frames", selection);
+  }
+  // Legacy synthesis inputs are immutable once submitted. Do not add a paid
+  // speech step that would invalidate an existing summary/copy receipt hash.
+  const synthesisStarted = !snapshot.speech && (await deps.store.pool.query(
+    "SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2 AND (step_id LIKE 'summary:%' OR step_id LIKE 'copy:%') LIMIT 1",
+    [lease.id, lease.ownerId])).rowCount;
+  if (!snapshot.speech && !synthesisStarted) {
+    if (!access.asrAvailable) snapshot.speech = { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" };
+    else {
+      const audio = await extractAnalysisAudio({ directory, source: snapshot.source, runner: mediaRuntime.decoderRunner(directory), signal });
+      if (!audio) snapshot.speech = { status: "skipped", reason: "NO_AUDIO_TRACK" };
+      else {
+        // Recheck the current user's credential and permission just before submitting audio.
+        const current = await analysisUserAccess(deps.db, deps.hub, lease.ownerId, signal);
+        snapshot.speech = current.asrAvailable
+          ? await withAnalysisAudioUrl({ directory, ownerId: lease.ownerId, analysisId: lease.id, audio,
+            publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "", masterKey: process.env.SECRET_MASTER_KEY ?? "" },
+          (audioUrl, audioHash) => transcribeAnalysisAudio({ audioUrl, audioHash, baseUrl: deps.baseUrl, apiKey: current.key, ledger, signal }))
+          : { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" };
+      }
+    }
+    signal.throwIfAborted();
+    await checkpoint(snapshot, "asr");
   }
   snapshot = await analyzeSelectedFrames({ snapshot, selection, revision: lease.revision, models, checkpoint, signal,
     ocrConcurrency: deps.config.ocrConcurrency, visualConcurrency: deps.config.visualConcurrency });

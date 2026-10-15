@@ -1,7 +1,7 @@
 /** Real React UI with intercepted fixtures. No external requests or model calls. */
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mkdtemp, writeFile, rm, realpath } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,8 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const { createServer } = createRequire(resolve(root, "packages/web/package.json"))("vite");
 const temp = await realpath(await mkdtemp(join(tmpdir(), "lot-analysis-ui-")));
+const liveSpeech = process.env.MARKETING_ANALYSIS_UI_SPEECH_RESULT
+  ? JSON.parse(await readFile(process.env.MARKETING_ANALYSIS_UI_SPEECH_RESULT, "utf8")) : null;
 let vite, browser;
 try {
   await writeFile(join(temp, "index.html"), '<div id="root"></div><script type="module" src="/main.tsx"></script>');
@@ -95,6 +97,16 @@ try {
   await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
   const reference = page.getByRole("textbox", { name: "视频链接或参考文案", exact: true });
   const duration = page.getByRole("slider", { name: "整片时长（秒）", exact: true });
+  assert.equal(await duration.inputValue(), "30");
+  assert.equal(await page.getByRole("checkbox", { name: "视频链接", exact: true }).isChecked(), true);
+  assert.equal(await page.getByRole("button", { name: /^(15|30|45|60) 秒$/ }).count(), 0);
+  const inputBounds = await reference.boundingBox();
+  const optionBounds = await page.getByRole("group", { name: "参考内容类型", exact: true }).boundingBox();
+  assert(optionBounds.y + optionBounds.height <= inputBounds.y, "source checkboxes belong above the input");
+  assert.equal(await page.locator(".mv-creative-brief").evaluate(el => el.open), true);
+  assert.equal(await page.getByRole("textbox", { name: "产品、卖点和目标顾客", exact: true }).isVisible(), true);
+  await page.getByRole("checkbox", { name: "文字文案", exact: true }).check();
+  assert.equal(await page.getByRole("checkbox", { name: "视频链接", exact: true }).isChecked(), false);
   await duration.focus(); await duration.press("End");
   assert.equal(await duration.inputValue(), "60");
   await reference.fill("一家明亮的咖啡店，提供现磨咖啡，欢迎品尝。https://example.com/shop");
@@ -135,6 +147,7 @@ try {
   const generated = create(projects.get(projectId).draft);
   Object.assign(projects.get(projectId), { draft: generated.draft, version: projects.get(projectId).version + 1, referenceAnalysis: { id, acceptedRevision: 1, evidenceIds: ["f0001"] } });
   Object.assign(value, { status: "ready", stage: "copy", applied: true }); value.snapshot.creation = generated;
+  value.snapshot.speech = { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" };
   value.snapshot.coverage = { sampledFrames: 1, ocrFrames: 1, visualFrames: 1, omittedOcrFrameIds: ["f0001"], omittedVisualFrameIds: [], limitations: ["OCR_INCOMPLETE"] };
   value.snapshot.summary = { summary: [{ statement: "展示咖啡", inference: false, evidenceIds: ["f0001"] }], marketingPoints: [{ kind: "hook", statement: "场景切入", inference: true, evidenceIds: ["f0001"] }], timeline: [{ startMs: 0, endMs: 500, statement: "展示产品", inference: false, evidenceIds: ["f0001"] }], limitations: ["OCR_INCOMPLETE"] };
   await page.getByRole("textbox", { name: "视频口播文案", exact: true }).waitFor();
@@ -144,8 +157,9 @@ try {
   await page.getByRole("button", { name: "下一步", exact: true }).click();
   await page.getByRole("button", { name: "数字人", exact: true }).waitFor();
   await page.getByRole("button", { name: "上一步", exact: true }).click();
-  assert.equal(await page.getByRole("checkbox").count(), 0);
+  assert.equal(await page.getByRole("checkbox").count(), 2);
   assert(!/预算|已记录费用|选用预览|生成当前修订摘要/.test(await page.locator("body").innerText()));
+  await page.getByText("当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。", { exact: true }).waitFor();
   await page.getByText("查看参考资料", { exact: true }).click();
   await page.getByText("画面文字", { exact: true }).click();
   await page.getByText("t0001 · 0.0s–0.5s · 原片画面文字", { exact: true }).waitFor();
@@ -163,10 +177,14 @@ try {
   Object.assign(value, { status: "needs_review", errorCode: "REQUEST_UNKNOWN" });
   await page.reload(); await page.getByText("模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
+  value.snapshot.speech = liveSpeech ?? { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "测试录音设备，进入网站。" };
   Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
   await page.getByText("中景缓缓推进", { exact: true }).waitFor();
   await page.getByText("已完成，但参考证据存在缺口", { exact: true }).waitFor();
   await page.getByText("查看参考资料", { exact: true }).click();
+  await page.getByText("视频语音转写", { exact: true }).click();
+  await page.getByText(value.snapshot.speech.text, { exact: true }).waitFor();
+  assert(!(await page.locator("body").innerText()).includes("原始声音未转录"));
   await page.getByText("部分画面文字识别失败，摘要可能遗漏内容。", { exact: true }).waitFor();
   await page.getByText("原片证据时间线", { exact: true }).click();
   const screenshots = process.env.MARKETING_ANALYSIS_UI_SCREENSHOTS;
@@ -186,6 +204,11 @@ try {
   await page.getByText("Completed with gaps in reference evidence", { exact: true }).scrollIntoViewIfNeeded();
   if (screenshots) await page.screenshot({ path: join(screenshots, "creation-mobile-en.png"), fullPage: false });
   assert.equal(await page.locator(".mv-studio").count(), 1);
+  await page.getByText("Video speech transcript", { exact: true }).waitFor();
+  value.snapshot.speech = { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" }; await page.reload();
+  await page.getByText("qwen-audio-3.1-asr-flash is unavailable for this account. Speech transcription was skipped; image and text analysis will continue.", { exact: true }).waitFor();
+  value.snapshot.speech = { status: "skipped", reason: "NO_AUDIO_TRACK" }; await page.reload();
+  await page.getByText("The reference video has no usable audio track. Speech transcription was skipped; image and text analysis will continue.", { exact: true }).waitFor();
   account = "other"; await page.getByRole("button", { name: "Switch account", exact: true }).click();
   await page.waitForFunction(() => !document.body.innerText.includes('咖啡参考视频'));
   assert.equal(await page.getByText("View source material", { exact: true }).count(), 0);

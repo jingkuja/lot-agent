@@ -22,6 +22,7 @@ export async function analyzeSelectedFrames(input: {
   const snapshot: AnalysisSnapshot = structuredClone(input.snapshot);
   snapshot.frames = input.selection.frames; snapshot.coverage = structuredClone(input.selection.coverage);
   snapshot.source.durationMs = input.selection.durationMs;
+  if (snapshot.speech?.status === "completed") snapshot.coverage.limitations = snapshot.coverage.limitations.filter(value => value !== "NO_AUDIO_ANALYSIS");
   let writing = Promise.resolve();
   const save = (stage: string) => {
     const copy = structuredClone(snapshot);

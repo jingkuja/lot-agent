@@ -29,7 +29,7 @@ export async function collectAnalysisFiles(store: PgAnalysisStore, storage: Anal
           ...["frames", "ocr", "visual"].flatMap(name => (row.selection?.[name] ?? []).map((f: { objectKey: string }) => f.objectKey)),
         ]);
         for (const name of await readdir(directory)) {
-          if (name === key || name === "gray.raw" || (/^frame-\d{4}\.jpg$/.test(name) && !retained.has(name))) await rm(join(directory, name), { force: true });
+          if (name === key || name === "gray.raw" || name === "speech.wav" || (/^frame-\d{4}\.jpg$/.test(name) && !retained.has(name))) await rm(join(directory, name), { force: true });
         }
         await client.query("UPDATE marketing_reference_analyses SET scratch_cleaned_at=now(),snapshot=snapshot #- '{source,mediaKey}' WHERE id=$1", [row.id]);
       }

@@ -17,6 +17,7 @@ export function analysisError(value: unknown) {
     MODEL_USAGE_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
     MODEL_QUOTA: "上游余额不足，请充值后继续。",
     MODEL_RATE_LIMIT: "上游服务繁忙，请稍后继续。",
+    ASR_PUBLIC_URL_REQUIRED: "视频语音转写需要配置可公开访问的 PUBLIC_BASE_URL。",
     MODEL_AUTH_REQUIRED: "模型服务未授权，请检查账号配置。",
     MODEL_STEP_FAILED: "文案整理未完成，点击继续生成将复用已有资料。",
     MODEL_INVALID_JSON: "文案整理未完成，点击继续生成将复用已有资料。",
@@ -87,11 +88,18 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
     catch (e) { if (alive.current) setError(analysisError(e)); }
     finally { locked.current = false; if (alive.current) setBusy(false); }
   }
-  const stage = current ? ({ queued: "等待处理", downloaded: "正在读取视频", frames: "正在读取视频", ocr: "正在理解视频内容", visual: "正在理解视频内容", summary: "正在整理文案结构", copy: "正在生成文案和分镜" } as Record<string, string>)[current.stage] ?? "正在理解视频内容" : "正在读取视频";
+  const stage = current ? ({ queued: "等待处理", downloaded: "正在读取视频", frames: "正在读取视频", asr: "正在转写视频语音", ocr: "正在理解视频内容", visual: "正在理解视频内容", summary: "正在整理文案结构", copy: "正在生成文案和分镜" } as Record<string, string>)[current.stage] ?? "正在理解视频内容" : "正在读取视频";
   const canResume = current && !active(current) && !["ready", "needs_review"].includes(current.status) && current.errorCode !== "REQUEST_UNKNOWN";
+  const speech = current?.snapshot.speech;
+  const evidenceNote = speech?.status === "completed"
+    ? "依据视频画面、可见文字和语音转写生成；转写可能有误，分镜为 AI 创作建议。"
+    : "依据视频画面和可见文字生成；原始声音未转录，分镜为 AI 创作建议。";
   return <div className="ma-panel" aria-live="polite">
     {(!current || active(current)) && <p role="status">{t(stage)}…</p>}
     {current && active(current) && <button disabled={busy} onClick={() => void act(() => request(`${base}/${id}/cancel`, json({})))}>{t("取消")}</button>}
+    {speech?.status === "skipped" && <p className="mv-hint" role="status">{t(speech.reason === "ASR_MODEL_UNAVAILABLE"
+      ? "当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。"
+      : "参考视频未包含可用音轨，已跳过语音转写，继续分析画面和文字。")}</p>}
     {current?.errorCode && <p className="mv-error" role="alert">{t(analysisError(new Error(current.errorCode)))}</p>}
     {current?.status === "cancelled" && <p>{t("已取消")}</p>}
     {canResume && <p className="mv-hint">{t("继续生成可能重新调用模型并产生费用，已完成的有效结果会复用。")}</p>}
@@ -108,12 +116,13 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
     </details>}
     {current && !active(current) && current.snapshot.summary && <div className="mv-hint" role="status">
       <p>{t(current.snapshot.coverage?.limitations.length || current.snapshot.summary.limitations.length ? "已完成，但参考证据存在缺口" : "参考画面分析已完成")}</p>
-      <p>{t("依据视频画面和可见文字生成；原始声音未转录，分镜为 AI 创作建议。")}</p>
+      <p>{t(evidenceNote)}</p>
     </div>}
     {current && <details className="mv-script-review"><summary>{t("查看参考资料")}</summary>
       <p>{current.snapshot.source.title}</p>
-      {current.snapshot.summary?.summary.map((item, i) => <p key={i}>{item.statement} · {t(item.inference ? "营销推断" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}
-      {current.snapshot.summary?.marketingPoints.map((item, i) => <p key={i}>{item.statement} · {t(item.inference ? "营销推断" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}
+      {speech?.status === "completed" && <details><summary>{t("视频语音转写")}</summary><p>{speech.text || t("未识别到语音内容。")}</p><p className="mv-hint">{t("语音转写未提供逐字时间戳，内容可能存在识别误差。")}</p></details>}
+      {current.snapshot.summary?.summary.map((item, i) => <p key={i}>{item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}
+      {current.snapshot.summary?.marketingPoints.map((item, i) => <p key={i}>{item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}
       {current.errorCode === "PROJECT_CONFLICT" && current.snapshot.creation && <><p>{current.snapshot.creation.analysis}</p><pre>{current.snapshot.creation.draft.script}</pre>{current.snapshot.creation.draft.storyboard.map((shot, i) => <article key={i}><p>{shot.visual}</p><p>{shot.action}</p><p>{shot.camera}</p></article>)}</>}
       {!!current.snapshot.coverage?.omittedOcrFrameIds.length && <p>{t("未识别画面文字的采样帧")} ({current.snapshot.coverage.omittedOcrFrameIds.length})：{current.snapshot.coverage.omittedOcrFrameIds.map(id => {
         const frame = current.snapshot.frames.find(f => f.id === id); return `${id}${frame ? ` · ${seconds(frame.ptsMs)}` : ""}`;
@@ -122,14 +131,14 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
         const frame = current.snapshot.frames.find(f => f.id === id); return `${id}${frame ? ` · ${seconds(frame.ptsMs)}` : ""}`;
       }).join("；")}</p>}
       {[...new Set([...(current.snapshot.coverage?.limitations ?? []), ...(current.snapshot.summary?.limitations ?? [])])].map(value => <p key={value} className="mv-hint">{t(({ OCR_INCOMPLETE: "部分画面文字识别失败，摘要可能遗漏内容。", VISUAL_INCOMPLETE: "部分画面尚未完成视觉分析。", DURATION_ESTIMATED: "末帧时长依据相邻帧间隔估计。" } as Record<string, string>)[value] ?? value)}</p>)}
-      {!!current.snapshot.summary?.timeline.length && <details><summary>{t("原片证据时间线")}</summary>{current.snapshot.summary.timeline.map((item, i) => <p key={i}>{seconds(item.startMs)}–{seconds(item.endMs)} · {item.statement} · {t(item.inference ? "营销推断" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}</details>}
+      {!!current.snapshot.summary?.timeline.length && <details><summary>{t("原片证据时间线")}</summary>{current.snapshot.summary.timeline.map((item, i) => <p key={i}>{seconds(item.startMs)}–{seconds(item.endMs)} · {item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}</details>}
       {!!current.snapshot.observations.length && <details><summary>{t("画面观察")}</summary>{current.snapshot.observations.map((item, i) => <p key={i}>{item.description} · {item.frameIds.join(", ")}{item.uncertainty && ` · ${item.uncertainty}`}</p>)}</details>}
       {!!current.snapshot.texts.length && <details><summary>{t("画面文字")}</summary>{current.snapshot.texts.map(text => <p key={text.id}>{text.id} · {seconds(text.firstSeenMs)}–{seconds(text.lastSeenMs)} · {text.text}</p>)}</details>}
       {!!current.snapshot.frames.length && <details><summary>{t("参考画面")}</summary>
         <div className="ma-evidence-links">{current.snapshot.frames.map(frame => <button key={frame.id} aria-pressed={frameId === frame.id} onClick={() => setFrameId(frame.id)}>{seconds(frame.ptsMs)}</button>)}</div>
         {frameUrl && <img className="ma-frame" src={frameUrl} alt={t("参考画面")} />}
       </details>}
-      <p className="mv-hint">{t("依据视频画面和可见文字生成；原始声音未转录，分镜为 AI 创作建议。")}</p>
+      <p className="mv-hint">{t(evidenceNote)}</p>
     </details>}
     {error && <p className="mv-error" role="alert">{t(error)}</p>}
   </div>;

@@ -12,6 +12,16 @@
 
 协议依据：[Responses 迁移指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[流式事件](https://developers.openai.com/api/docs/guides/streaming-responses)。兼容网关是否支持全部可选字段仍需真实探测；分析调用当前用提示词约束 JSON，并做服务端 schema 校验，不强制可选 JSON 模式。
 
+## 可选视频语音转写
+
+参考视频拆解使用固定模型 `qwen-audio-3.1-asr-flash`。当前用户模型目录的 `llm` 或 `asr` 分组包含该 ID 才会转写；没有模型（或网关明确返回模型不存在）则保存跳过原因，页面提示并继续画面/文字分析。仍沿用当前用户凭证与现有网关 Base URL，不配置独立共享 Key，不切换其他 ASR 模型。
+
+`marketing-analysis/speech.ts` 在现有无网络解码沙箱中读取私有原片，转成最长 180 秒、16 kHz、单声道 PCM WAV。请求为 `POST <baseUrl>/chat/completions`，按用户提供的协议使用 `input.messages[].content[].input_audio.data`、`parameters.format="wav"` 与 `parameters.sample_rate="16000"`；音频使用 `PUBLIC_BASE_URL` 拼接 `/api/public/marketing-analysis-audio/<token>` 的公网 URL。`audio-url.ts` 用 `SECRET_MASTER_KEY` 加密包含任务归属、内容哈希和十分钟有效期的访问凭证；API 校验后只返回该任务的私有 WAV，请求结束即删除临时文件。API 和媒体 Worker 必须共享私有数据卷与主密钥，且 PUBLIC_BASE_URL 必须从模型网关可达。转写取 `choices[0].message.content`，保存响应 ID、实际 token 用量；完成状态必须为 `stop`，中断/未知用量不自动重发。
+
+转写保存在既有 snapshot JSONB 的 `speech` 字段，页面“查看参考资料”可展开原文；成功转写参与摘要和文案/分镜生成。`a0001` 是整段原声证据，只允许摘要和营销解读引用，不编造逐字时间戳。没有音轨时同样提示跳过；已有完成记录不自动补做付费 ASR。临时 WAV 在转写请求结束后删除，原片保持现有私有存储与清理策略。
+
+验证：协议、实际用量解析、模型缺失/无音轨、用户隔离、取消、未知请求不重发与证据校验均有离线测试。2026-10-15 使用用户提供的 localhost:4000 网关和 `https://todoucloud.com/2.wav` 实际调用一次成功：文本“测试录音设备，进入网站。”，输入 173 / 输出 7 tokens，响应 ID `828cc2f2-6d3f-9d34-88cd-f00ac0bc3d01`。未将 Key 写入文件或日志。样例联调将 PUBLIC_BASE_URL 临时设为 `https://todoucloud.com`，没有改动环境文件；新增临时音频路由需随 API 一起部署，不能将样例 URL 的成功当作生产反向代理已验收。
+
 ## 自动创作、恢复与上游计费
 
 `ProjectStudio → /api/marketing-video-analyses → PgAnalysisStore → lot-media-analysis → workers/media-analysis.ts → runtime.ts`。
@@ -43,7 +53,7 @@ pnpm marketing-analysis:reconcile USER_ID ANALYSIS_UUID 'ocr:f0001' 1 /private/p
 
 平台适配接受三平台的单视频长链/短链，保留 B 站选定 `p` 和小红书必要访问参数；拒绝主页、合集、直播、多个链接、图文和超过 180 秒的媒体。B 站提取器的实际单 P / cid 及登录会话兼容性仍需真链核对，尚无浏览器自动化兜底。
 
-下载器固定版本、固定参数，禁用插件、用户配置、JS runtimes、远程组件、外部下载器。只选有界的视频流，不额外请求独立音轨。下载进程在独立 Linux 网络命名空间内，只能通过任务专属 Unix socket 和 HTTPS CONNECT 代理出网；解析并固定公网 IPv4 地址，拒绝内网、保留网段和其他端口，所有连接累计限制 100 MiB。
+下载器固定版本、固定参数，禁用插件、用户配置、JS runtimes、远程组件、外部下载器。优先选择含音轨的有界视频流，若无合并流则沿用视频流；当前不额外下载独立音轨，无音轨时页面提示并仅分析画面。下载进程在独立 Linux 网络命名空间内，只能通过任务专属 Unix socket 和 HTTPS CONNECT 代理出网；解析并固定公网 IPv4 地址，拒绝内网、保留网段和其他端口，所有连接累计限制 100 MiB。
 
 小红书提取器在真实样本中给出明文 HTTP 的 `*.xhscdn.com` 媒体地址；固定下载参数仅将该 CDN 的 URL 升级为 HTTPS，仍由同一个出口代理校验。其他明文 HTTP 请求继续拒绝，并记录 `NETWORK_BLOCKED`，避免被误判成需要登录。
 
@@ -53,7 +63,7 @@ Apple Silicon macOS 本地开发可显式设置 `MARKETING_ANALYSIS_MACOS_SANDBO
 
 抽帧保留实际源 PTS、timebase、旋转后尺寸、归一化时间及源文件哈希。约 2 Hz、首尾补帧、局部分区灰度差分和 5 秒周期覆盖；最多 361 候选、120 OCR 图片、48 多图图片、每批 6 张。达到预算时记录遗漏候选和限制，不标记为“完整字幕”。实际 VFR、起始偏移与旋转由合成视频测试覆盖；包含起始 PTS 为 190 秒、实际仅 2 秒的 WebM，时长限制不把容器起始偏移算成视频内容。
 
-OCR 只合并相邻一致文字；空结果、漏识别或价格/否定词变化保留边界。修订保留机器原文，已有摘要失效；校对后的继续只使用当前证据生成摘要，不重做付费 OCR。分段观察按时间输入图片，综合使用文字和已发送给模型的证据 ID，验证引用、时间范围、长度和数量，并明确未分析声音。时间线端点不得超出所引证据的最早/最晚观察时间 500ms，防止单张首帧被扩展成整条视频。模型提示词要求区分叠加字幕和物体上的印刷文字。
+OCR 只合并相邻一致文字；空结果、漏识别或价格/否定词变化保留边界。修订保留机器原文，已有摘要失效；校对后的继续只使用当前证据生成摘要，不重做付费 OCR。分段观察按时间输入图片，综合使用文字和已发送给模型的证据 ID，验证引用、时间范围、长度和数量，并按实际 ASR 状态区分原声转写与未分析声音。时间线端点不得超出所引证据的最早/最晚观察时间 500ms，防止单张首帧被扩展成整条视频。模型提示词要求区分叠加字幕和物体上的印刷文字。
 
 原片和帧位于 `data/marketing-analysis/<owner hash>/<analysis UUID>`，不挂 `/static`。帧读取经过用户鉴权、固定对象名、无符号链接/硬链接及文件大小检查。Worker 每分钟清理已删除分析及满 7 天且已停止的原片，保留帧与结果直到删除；项目引用或未核实用量阻止删除。平台 Cookie 按用户和平台加密保存，撤销只影响之后的任务，已经启动的下载最多持有本次任务副本。
 

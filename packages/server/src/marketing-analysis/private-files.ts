@@ -5,7 +5,7 @@ import { AnalysisError } from "./errors.js";
 
 /** The parent only reads regular task-local files after its sandbox exits. */
 export async function readAnalysisFile(directory: string, name: string, maxBytes: number): Promise<Buffer> {
-  if (!/^(?:frame-\d{4}\.jpg|gray\.raw)$/.test(name)) throw new AnalysisError("INVALID_PRIVATE_FILE");
+  if (!/^(?:frame-\d{4}\.jpg|gray\.raw|speech\.wav)$/.test(name)) throw new AnalysisError("INVALID_PRIVATE_FILE");
   const handle = await open(join(directory, name), constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await handle.stat();

@@ -6,11 +6,14 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { ANALYSIS_VERSION } from "@lot-agent/core/marketing-analysis";
 import { runAnalysis } from "./runtime.js";
+import { extractAnalysisAudio, transcribeAnalysisAudio } from "./speech.js";
 import { downloadAnalysisSource } from "./download.js";
 import { extractAnalysisFrames } from "./frames.js";
 import { analyzeSelectedFrames } from "./pipeline.js";
 import type { AnalysisMediaRuntime } from "./media-runtime.js";
 
+vi.mock("./audio-url.js", () => ({ withAnalysisAudioUrl: vi.fn(async (_input, use) => use("https://public.test/audio.wav", "fixture-hash")) }));
+vi.mock("./speech.js", async importOriginal => ({ ...await importOriginal<typeof import("./speech.js")>(), extractAnalysisAudio: vi.fn(), transcribeAnalysisAudio: vi.fn() }));
 vi.mock("./download.js", () => ({ downloadAnalysisSource: vi.fn() }));
 vi.mock("./frames.js", () => ({ extractAnalysisFrames: vi.fn() }));
 vi.mock("./pipeline.js", () => ({ analyzeSelectedFrames: vi.fn() }));
@@ -46,7 +49,9 @@ it("uses the Worker-selected sandbox for download and decoding before running mo
     expect(mediaRuntime.decoderRunner).toHaveBeenCalledWith(directory);
     expect(extractAnalysisFrames).toHaveBeenCalledWith({ directory, source: expect.objectContaining(downloaded), runner, threads: 4, signal });
     expect(checkpoint).toHaveBeenCalledWith(lease, expect.anything(), "downloaded");
-    expect(analyzeSelectedFrames).toHaveBeenCalledWith(expect.objectContaining({ revision: 1, signal, ocrConcurrency: 8, visualConcurrency: 3 }));
+    expect(analyzeSelectedFrames).toHaveBeenCalledWith(expect.objectContaining({ revision: 1, signal, ocrConcurrency: 8, visualConcurrency: 3,
+      snapshot: expect.objectContaining({ speech: { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" } }) }));
+    expect(extractAnalysisAudio).not.toHaveBeenCalled(); expect(transcribeAnalysisAudio).not.toHaveBeenCalled();
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -82,4 +87,28 @@ it("aborts credential/catalog resolution before downloading or posting to a mode
   await Promise.resolve(); await Promise.resolve(); controller.abort();
   expect(await result).toMatchObject({ name: "AbortError" });
   expect(hub.listModels).toHaveBeenCalledWith("fixture-key", expect.any(AbortSignal));
+});
+
+it("transcribes with the current owner key before synthesis and checkpoints the result", async () => {
+  const speech = { status: "completed" as const, id: "a0001" as const, text: "欢迎光临", model: "qwen-audio-3.1-asr-flash" };
+  const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: "fixture", mediaKey: "source.mp4" }, frames: [], frameTexts: [], texts: [], observations: [] };
+  const checkpoint = vi.fn(); const runner = { run: vi.fn() };
+  const row = { pipeline_version: ANALYSIS_VERSION, snapshot, selection: { frames: [], ocr: [], visual: [] } };
+  const deps = {
+    store: { row: async () => row, pool: { query: async () => ({ rows: [], rowCount: 0 }) }, checkpoint },
+    storage: { directory: async () => "/tmp" },
+    db: { getUserApiKey: async (owner: string) => `${owner}-key` }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"], asr: [speech.model] }) },
+    mediaRuntime: { decoderRunner: () => runner }, config: {}, baseUrl: "https://gateway.example.test/v1", bridgePath: "/bridge.py",
+  } as unknown as Parameters<typeof runAnalysis>[2];
+  const signal = new AbortController().signal; const lease = { id: "analysis", ownerId: "owner", token: "lease", revision: 1 };
+  vi.mocked(extractAnalysisAudio).mockResolvedValue(Buffer.from("fixture"));
+  vi.mocked(transcribeAnalysisAudio).mockResolvedValue(speech);
+  vi.mocked(analyzeSelectedFrames).mockImplementation(async input => input.snapshot);
+  await runAnalysis(lease, signal, deps);
+  expect(transcribeAnalysisAudio).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "owner-key", signal, baseUrl: deps.baseUrl }));
+  expect(checkpoint).toHaveBeenCalledWith(lease, expect.objectContaining({ speech }), "asr");
+  expect(analyzeSelectedFrames).toHaveBeenLastCalledWith(expect.objectContaining({ snapshot: expect.objectContaining({ speech }) }));
+  vi.mocked(transcribeAnalysisAudio).mockClear();
+  await runAnalysis(lease, signal, deps);
+  expect(transcribeAnalysisAudio).not.toHaveBeenCalled();
 });

@@ -1,4 +1,4 @@
-import { AnalysisSummarySchema, ObservationSchema, type AnalysisSummary, type FrameEvidence, type FrameText, type ScreenText, type VisualObservation } from "./index.js";
+import { AnalysisSummarySchema, ObservationSchema, type AnalysisSpeech, type AnalysisSummary, type FrameEvidence, type FrameText, type ScreenText, type VisualObservation } from "./index.js";
 
 /** Merge adjacent observed frames only. Missing OCR, empty frames and any
  * changed character break a run; identical text later in the clip is retained. */
@@ -28,15 +28,16 @@ export function validateObservation(value: unknown, frames: FrameEvidence[]): Vi
   return result;
 }
 
-export function validateSummary(value: unknown, frames: FrameEvidence[], texts: ScreenText[], durationMs: number): AnalysisSummary {
+export function validateSummary(value: unknown, frames: FrameEvidence[], texts: ScreenText[], durationMs: number, speech?: AnalysisSpeech): AnalysisSummary {
   const result = AnalysisSummarySchema.parse(value);
   const times = new Map<string, [number, number]>(frames.map(f => [f.id, [f.ptsMs, f.ptsMs]]));
   for (const text of texts) times.set(text.id, [text.firstSeenMs, text.lastSeenMs]);
   for (const item of [...result.summary, ...result.timeline, ...result.marketingPoints]) {
-    if (new Set(item.evidenceIds).size !== item.evidenceIds.length || item.evidenceIds.some(id => !times.has(id))) throw new Error("INVALID_EVIDENCE_REFERENCE");
+    if (new Set(item.evidenceIds).size !== item.evidenceIds.length || item.evidenceIds.some(id => !times.has(id) && !(speech?.status === "completed" && speech.text.trim() && id === speech.id))) throw new Error("INVALID_EVIDENCE_REFERENCE");
   }
   let prior = -1;
   for (const item of result.timeline) {
+    if (item.evidenceIds.includes("a0001")) throw new Error("INVALID_TIMELINE_RANGE");
     if (item.startMs < prior || item.endMs > durationMs) throw new Error("INVALID_TIMELINE_RANGE");
     if (item.evidenceIds.some(id => { const [start, end] = times.get(id)!; return end < item.startMs || start > item.endMs; })) throw new Error("EVIDENCE_OUTSIDE_TIMELINE");
     const cited = item.evidenceIds.map(id => times.get(id)!);

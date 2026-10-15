@@ -25,8 +25,8 @@
 .mv-directions small { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
 .mv-studio button.selected { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--bg-card)); }
 .mv-field { display: grid; gap: 9px; margin: 22px 0; font-size: 13px; font-weight: 550; }
-.mv-field input:not([type=range]), .mv-field textarea, .mv-field select { width: 100%; padding: 12px 14px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border-input); border-radius: 10px; font: inherit; line-height: 1.7; }
-.mv-field textarea { resize: vertical; min-height: 90px; }
+.mv-field input:not([type=range]), .mv-field textarea, .mv-field select, .mv-reference-input > textarea { width: 100%; padding: 12px 14px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border-input); border-radius: 10px; font: inherit; line-height: 1.7; }
+.mv-field textarea, .mv-reference-input > textarea { resize: vertical; min-height: 90px; }
 .mv-field textarea::placeholder { color: var(--text-muted); font-weight: 400; }
 .mv-field input[type=range] { width: 100%; accent-color: var(--accent); }
 .mv-field output { float: right; color: var(--accent); }
@@ -135,3 +135,18 @@
 .ma-evidence-links button { padding: 4px 8px; font-size: 12px; }
 .ma-evidence-links button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 .ma-frame { display: block; max-height: 400px; max-width: 100%; object-fit: contain; border-radius: 8px; }
+
+.mv-reference-input { margin: 22px 0 12px; }
+.mv-reference-input { font-size: 13px; }
+.mv-reference-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 9px; }
+.mv-reference-heading > label { font-weight: 550; }
+.mv-reference-input > textarea { display: block; }
+.mv-creative-brief { margin: 18px 0 22px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font: inherit; font-size: 13px; }
+.mv-creative-brief > summary { color: var(--text-secondary); font-size: 13px; font-weight: 550; line-height: 1.6; cursor: pointer; }
+.mv-creative-brief > summary::marker { color: var(--text-muted); font-size: 10px; }
+.mv-creative-brief > .mv-field { margin: 14px 0 0; font-weight: 400; }
+.mv-source-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
+.mv-source-options label { display: inline-flex; align-items: center; gap: 7px; padding: 4px 0; color: var(--text-muted); font-size: 12px; cursor: pointer; }
+.mv-source-options label.selected { color: var(--accent); }
+.mv-source-options input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: inherit; }
+.mv-source-options label:has(input:disabled) { opacity: .5; cursor: not-allowed; }

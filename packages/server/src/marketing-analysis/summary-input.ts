@@ -7,7 +7,7 @@ export function summaryInput(snapshot: AnalysisSnapshot, revision: number) {
   const limitations = [...new Set(snapshot.coverage?.limitations ?? [])];
   if (snapshot.completedVisualBatches && snapshot.completedVisualBatches.length < Math.ceil((snapshot.coverage?.visualFrames ?? 0) / ANALYSIS_LIMITS.batchImages)) limitations.push("VISUAL_INCOMPLETE");
   return {
-    revision, frames: snapshot.frames.filter(f => evidence.has(f.id)), texts: snapshot.texts,
+    revision, ...(snapshot.speech?.status === "completed" ? { speech: snapshot.speech } : {}), frames: snapshot.frames.filter(f => evidence.has(f.id)), texts: snapshot.texts,
     observations: snapshot.observations, durationMs: snapshot.source.durationMs!,
     metadata: { title: snapshot.source.title, author: snapshot.source.author },
     limitations: [...new Set(limitations)],

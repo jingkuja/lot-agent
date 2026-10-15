@@ -7,7 +7,7 @@ export const AnalysisPlatformSchema = z.enum(["douyin", "xiaohongshu", "bilibili
 export type AnalysisPlatform = z.infer<typeof AnalysisPlatformSchema>;
 const ms = z.number().int().min(0).max(ANALYSIS_LIMITS.durationMs);
 const frameId = z.string().regex(/^f\d{4}$/);
-const evidenceId = z.string().regex(/^[ft]\d{4}$/);
+const evidenceId = z.string().regex(/^(?:[ft]\d{4}|a0001)$/);
 export const FrameEvidenceSchema = z.object({
   id: frameId, sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
   sourcePts: z.string().regex(/^-?\d+$/), timeBase: z.string().regex(/^[1-9]\d*\/[1-9]\d*$/), ptsMs: ms,
@@ -47,7 +47,10 @@ export interface AnalysisSource {
   title?: string; author?: string; durationMs?: number; sourceHash?: string; mediaKey?: string; downloaderVersion?: string;
 }
 export type AnalysisStatus = "queued" | "running" | "needs_auth" | "needs_review" | "partial" | "ready" | "failed" | "cancelled";
+export type AnalysisSpeech = { status: "completed"; id: "a0001"; text: string; model: string }
+  | { status: "skipped"; reason: "ASR_MODEL_UNAVAILABLE" | "NO_AUDIO_TRACK" };
 export interface AnalysisSnapshot {
+  speech?: AnalysisSpeech;
   source: AnalysisSource; frames: FrameEvidence[]; frameTexts: FrameText[]; texts: ScreenText[];
   creation?: { draft: MarketingDraft; analysis: string };
   completedVisualBatches?: number[];

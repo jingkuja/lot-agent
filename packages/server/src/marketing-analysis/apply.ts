@@ -5,10 +5,11 @@ import { AnalysisError } from "./errors.js";
 
 /** Deterministic preview; source evidence never becomes production shots. */
 export function referencePreview(snapshot: AnalysisSnapshot, evidenceIds: string[]) {
-  const known = new Set([...snapshot.frames.map(f => f.id), ...snapshot.texts.map(t => t.id)]);
+  const known = new Set([...snapshot.frames.map(f => f.id), ...snapshot.texts.map(t => t.id), ...(snapshot.speech?.status === "completed" ? [snapshot.speech.id] : [])]);
   if (!evidenceIds.length || evidenceIds.length > 150 || new Set(evidenceIds).size !== evidenceIds.length || evidenceIds.some(id => !known.has(id))) throw new AnalysisError("INVALID_EVIDENCE_REFERENCE");
   const selected = new Set(evidenceIds);
   const sections = [
+    ...(snapshot.speech?.status === "completed" && selected.has(snapshot.speech.id) ? [`[a0001 ASR] ${snapshot.speech.text}`] : []),
     ...snapshot.texts.filter(t => selected.has(t.id)).map(t => `[${t.id} ${t.firstSeenMs}–${t.lastSeenMs}ms] ${t.text}`),
     ...(snapshot.summary?.summary ?? []).filter(f => f.evidenceIds.every(id => selected.has(id))).map(f => `[${f.evidenceIds.join(", ")}${f.inference ? "; inference" : ""}] ${f.statement}`),
   ];

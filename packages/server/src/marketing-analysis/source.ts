@@ -54,7 +54,7 @@ export function downloaderArgs(source: AnalysisSource, mode: "metadata" | "downl
   if (cookies) args.push("--cookies", "/work/cookies.txt");
   if (mode === "metadata") args.push("--skip-download", "--dump-single-json");
   else args.push("--downloader", "native", "--hls-prefer-native", "--fixup", "never", "--max-filesize", "100M", "--no-mtime",
-    "--format", "bestvideo[width<=1920][height<=1920]/best[vcodec!=none][width<=1920][height<=1920]",
+    "--format", "best[vcodec!=none][acodec!=none][width<=1920][height<=1920]/bestvideo[width<=1920][height<=1920]/best[vcodec!=none][width<=1920][height<=1920]",
     "--output", "/work/source.%(ext)s", "--print-json", "--no-simulate");
   // The XHS extractor returns HTTP CDN URLs even when the same object is
   // available over HTTPS. Upgrade only that known CDN before downloading;

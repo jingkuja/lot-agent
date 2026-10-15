@@ -1,3 +1,4 @@
+import { createAnalysisAudioRoutes } from "./marketing-analysis/audio-url.js";
 import { createDesktopToolRoutes } from "./desktop/routes.js";
 import { isFeishuEnabled } from "./feishu/client.js";
 import { PgFeishuRepository } from "./feishu/repository.js";
@@ -263,7 +264,7 @@ async function main() {
   });
 
   const requestLogger = logger();
-  app.use("*", (c, next) => c.req.path.startsWith("/api/rag/preview/") || c.req.path.startsWith("/api/public/feishu/") ? next() : requestLogger(c, next));
+  app.use("*", (c, next) => c.req.path.startsWith("/api/rag/preview/") || c.req.path.startsWith("/api/public/feishu/") || c.req.path.startsWith("/api/public/marketing-analysis-audio/") ? next() : requestLogger(c, next));
   app.use("*", cors({
     origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
     credentials: true,
@@ -436,6 +437,7 @@ async function main() {
   // (Range support, no full-buffer reads) and a shared content policy that
   // isolates active content (HTML, SVG) from same-origin inline rendering —
   // see contentPolicy() for the whitelist rationale.
+  app.route("/api/public/marketing-analysis-audio", createAnalysisAudioRoutes(resolve(ROOT, "data/marketing-analysis")));
   app.get("/static/assets/:filename", staticFileHandler(ASSETS_DIR));
   app.get("/static/documents/:filename", staticFileHandler(DOCS_DIR));
   app.get("/static/uploads/:filename", staticFileHandler(UPLOADS_DIR));

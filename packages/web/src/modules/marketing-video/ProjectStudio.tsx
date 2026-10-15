@@ -42,7 +42,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [operationReload, setOperationReload] = useState(0);
   const busy = actionBusy || analysisPending || textPending; const [saving, setSaving] = useState(false);
   const [error, setError] = useState(""); const [notice, setNotice] = useState("");
-  const [sourceKind, setSourceKind] = useState<"text" | "video">("text");
+  const [sourceKind, setSourceKind] = useState<"text" | "video">("video");
   const [analysis, setAnalysis] = useState(""); const [twinOpen, setTwinOpen] = useState<"all" | "voice" | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(""); const [loadAttempt, setLoadAttempt] = useState(0);
@@ -72,7 +72,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
         catch { next.storyboard = []; }
       }
     }
-    if (name === "reference") setSourceKind(marketingSourceKind(String(value)));
+
     update(next);
   }
   async function open(id: string) {
@@ -81,7 +81,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const p = await requestProject(`/marketing-videos/${id}`);
     if (!alive.current || token !== epoch.current) return;
     draftId.current = id; version.current = p.version; saved.current = JSON.stringify(p.draft);
-    setSourceKind(marketingSourceKind(p.draft.reference));
+    setSourceKind(p.draft.reference.trim() ? marketingSourceKind(p.draft.reference) : "video");
     update(p.draft); setCurrent(p); setAssets(p.assets ?? {}); setStep(p.referenceAnalysis ? 0 : p.draft.storyboard.length ? 2 : 0); setAnalysisPending(!!p.referenceAnalysis && !p.referenceAnalysis.acceptedRevision); setAnalysis(""); remember(id);
   }
   useEffect(() => {
@@ -255,6 +255,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     epoch.current++; draftId.current = crypto.randomUUID(); version.current = 0; projectRef.current = null; setProject(null); setAnalysisPending(false); analysisRequest.current = null;
     const next = copy ? { ...draftRef.current } : MarketingDraftSchema.parse({});
     saved.current = copy ? "" : JSON.stringify(next);
+    setSourceKind(copy && next.reference.trim() ? marketingSourceKind(next.reference) : "video");
     update(next); if (!copy) setAssets({}); setStep(editShots ? 2 : 0); setAnalysis(""); remember(null);
   }
   const choices = (label: string, values: { value: string; label: string }[], value: string, choose: (value: string) => void) => <div className="mv-choices" role="group" aria-label={t(label)}>{values.map(item => <button key={item.value} type="button" disabled={busy || frozen || !ready} className={value === item.value ? "selected" : ""} aria-pressed={value === item.value} onClick={() => choose(item.value)}>{t(item.label)}</button>)}</div>;
@@ -284,12 +285,21 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
         {step === 0 && <>
           {choices("文案方式", [{ value: "generate", label: "智能生成文案" }, { value: "rewrite", label: "拆解爆款文案" }], draft.copyMode, value => field("copyMode", value as MarketingDraft["copyMode"]))}
           {draft.copyMode === "rewrite" ? <>
-            {choices("参考内容类型", [{ value: "text", label: "文字文案" }, { value: "video", label: "视频链接" }], sourceKind, value => setSourceKind(value as "text" | "video"))}
-            {textField("reference", "视频链接或参考文案", 6000, 4)}
+            <div className="mv-reference-input">
+              <div className="mv-reference-heading">
+                <label htmlFor={`${generationHintId}-reference`}>{t("视频链接或参考文案")}</label>
+                <div className="mv-source-options" role="group" aria-label={t("参考内容类型")}>
+                  {(["video", "text"] as const).map(kind => <label key={kind} className={sourceKind === kind ? "selected" : ""}>
+                    <input type="checkbox" checked={sourceKind === kind} disabled={busy || frozen || !ready} onChange={() => setSourceKind(kind)} />
+                    {t(kind === "video" ? "视频链接" : "文字文案")}
+                  </label>)}
+                </div>
+              </div>
+              <textarea id={`${generationHintId}-reference`} value={draft.reference} rows={4} maxLength={6000} disabled={busy || frozen || !ready} onChange={e => field("reference", e.target.value)} />
+            </div>
             <p className="mv-hint">{t("粘贴视频链接、分享文本或文案，AI 自动拆解并生成文案和分镜。")}</p>
-            <details><summary>{t("补充产品与创作要求（选填）")}</summary>{textField("topic", "产品、卖点和目标顾客", 800)}</details>
+            <details className="mv-creative-brief" open><summary>{t("补充产品与创作要求（选填）")}</summary>{textField("topic", "产品、卖点和目标顾客", 800)}</details>
           </> : textField("topic", "产品、卖点和目标顾客", 800)}
-          <label className="mv-label">{t("目标时长")}</label>{choices("目标时长", [15, 30, 45, 60].map(n => ({ value: String(n), label: t("{0} 秒", [n]) })), String(draft.durationSec), value => field("durationSec", Number(value)))}
           <label className="mv-field"><span>{t("整片时长（秒）")} · {draft.durationSec}s</span><input type="range" min="15" max="60" step="1" aria-label={t("整片时长（秒）")} value={draft.durationSec} disabled={busy} onChange={e => field("durationSec", Number(e.target.value))} /></label>
           <p className="mv-hint">{t("选择 15–60 秒目标时长，AI 自动安排每镜 4–15 秒，可多出最多 5 秒，成片最长 65 秒。")}</p>
           <button className="mv-soft" disabled={busy || !(draft.copyMode === "rewrite" ? draft.reference : draft.topic).trim() || !ready} onClick={() => void act(writeCopy)}>{t(busy ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜")}</button>

@@ -9,6 +9,7 @@ export interface TokenhubLoginResult {
   apiKeys: RawApiKeyEntry[];
 }
 export interface TokenhubModels {
+  asr?: string[];
   llm: string[];
   image: string[];
   video: string[];
@@ -571,7 +572,7 @@ export class TokenhubClient {
         "tokenhub_models_failed",
         deadline.signal
       );
-      return { llm: data.llm ?? [], image: data.image ?? [], video: data.video ?? [] };
+      return { llm: data.llm ?? [], image: data.image ?? [], video: data.video ?? [], ...(data.asr ? { asr: data.asr } : {}) };
     } finally { deadline.dispose(); }
   }
 

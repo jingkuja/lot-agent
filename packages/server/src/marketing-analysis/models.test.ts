@@ -192,3 +192,20 @@ describe("analysis model calls", () => {
     expect(() => userResponsesProvider("https://example.test/v1", "key", "other")).toThrow("MODEL_AUTH_REQUIRED");
   });
 });
+
+it("includes speech in synthesis, preserves ASR evidence, and reuses receipts after JSONB reorders speech fields", async () => {
+  const speech = { status: "completed" as const, id: "a0001" as const, text: "测试录音设备，进入网站。", model: "qwen-audio-3.1-asr-flash" };
+  const input = { revision: 1, frames: [], texts: [], observations: [], durationMs: 1000, limitations: [], speech };
+  const result = { summary: [{ statement: speech.text, evidenceIds: ["a0001"], inference: false }], timeline: [], marketingPoints: [], limitations: [] };
+  const f = setup(result);
+  expect(await f.models.summarize(input)).toEqual(result);
+  const restored = { ...input, speech: { model: speech.model, text: speech.text, id: speech.id, status: speech.status } };
+  expect(await f.models.summarize(restored)).toEqual(result);
+  expect(f.requests).toHaveLength(1);
+  expect(f.requests[0].messages[1].content).toContain(speech.text);
+  const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ durationSec: 15, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
+  const copy = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" });
+  await copy.models.createCopy(MarketingDraftSchema.parse({}), "zh", { source: { platform: "bilibili", canonicalUrl: "fixture" }, frames: [], frameTexts: [], texts: [], observations: [], speech }, 1);
+  expect(copy.requests[0].messages[1].content).toContain(speech.text);
+  expect(copy.requests[0].messages[0].content).not.toContain("not audio");
+});
