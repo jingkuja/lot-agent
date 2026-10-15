@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { lstat, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ANALYSIS_LIMITS, FrameEvidenceSchema, selectAnalysisFrames, type AnalysisSource, type FrameEvidence } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
@@ -10,6 +10,30 @@ import { readAnalysisFile } from "./private-files.js";
 function timeMs(pts: string, start: string, timeBase: string): number {
   const [n, d] = timeBase.split("/").map(BigInt);
   return Number(((BigInt(pts) - BigInt(start)) * 1000n * n + d / 2n) / d);
+}
+
+// ffprobe decimal seconds are exact decimal values, not binary floats. Convert
+// before subtracting large starting offsets, then round up only once.
+function nanoseconds(value: unknown): bigint | undefined {
+  const match = String(value).match(/^(-?)(\d+)(?:\.(\d{1,9}))?$/);
+  if (!match) return undefined;
+  return (match[1] ? -1n : 1n) * (BigInt(match[2]) * 1_000_000_000n + BigInt((match[3] ?? "").padEnd(9, "0")));
+}
+export function frameDuration(pts: string[], timeBase: string, lastDuration: unknown, streamDuration: unknown, formatDuration: unknown, formatStart: unknown) {
+  const stream = nanoseconds(streamDuration);
+  const format = nanoseconds(formatDuration);
+  const offset = nanoseconds(formatStart) ?? 0n;
+  const metadata = stream !== undefined && stream > 0n ? stream : format === undefined ? 0n : format - (offset > 0n ? offset : 0n);
+  const raw = String(lastDuration ?? "0");
+  if (!/^\d+$/.test(raw)) throw new AnalysisError("INVALID_FRAME_TIMESTAMPS");
+  // For VFR this is explicitly an estimate of the final display interval only;
+  // all observed timestamps remain untouched. A one-frame clip needs metadata.
+  const estimated = BigInt(raw) === 0n;
+  const tail = estimated && pts.length > 1 ? BigInt(pts.at(-1)!) - BigInt(pts.at(-2)!) : BigInt(raw);
+  const [n, d] = timeBase.split("/").map(BigInt);
+  const ticks = (BigInt(pts.at(-1)!) - BigInt(pts[0]) + tail) * n * 1000n;
+  const durationMs = Math.max(Number((metadata + 999_999n) / 1_000_000n), Number((ticks + d - 1n) / d));
+  return { durationMs, estimated };
 }
 
 export function parseFrameLog(log: string, sourceHash: string, startPts: string): FrameEvidence[] {
@@ -50,13 +74,8 @@ export async function extractAnalysisFrames(input: { directory: string; source: 
   // Containers without stream duration can report an absolute end time:
   // e.g. a 2s WebM starting at PTS 190s has format.duration=192s. Normalize
   // that offset, but also measure decoded frames to catch under-reporting.
-  const streamDuration = Number(stream.duration);
-  const metadataDuration = Number.isFinite(streamDuration) && streamDuration > 0 ? streamDuration
-    : Number(probe.format?.duration) - Math.max(0, Number(probe.format?.start_time ?? 0));
-  const lastDuration = String(probe.frames.at(-1)?.duration ?? probe.frames.at(-1)?.pkt_duration ?? "0");
-  if (!/^\d+$/.test(lastDuration)) throw new AnalysisError("INVALID_FRAME_TIMESTAMPS");
-  const durationMs = Math.max(Number.isFinite(metadataDuration) ? Math.ceil(metadataDuration * 1000) : 0,
-    timeMs(String(BigInt(last) + BigInt(lastDuration)), start, stream.time_base));
+  const { durationMs, estimated } = frameDuration(pts, stream.time_base, probe.frames.at(-1)?.duration ?? probe.frames.at(-1)?.pkt_duration,
+    stream.duration, probe.format?.duration, probe.format?.start_time);
   if (!Number.isFinite(durationMs) || durationMs <= 0) throw new AnalysisError("UNSUPPORTED_SOURCE");
   if (durationMs > ANALYSIS_LIMITS.durationMs) throw new AnalysisError("DURATION_LIMIT");
   // showinfo after scaling retains timestamps while reporting delivered dimensions.
@@ -69,5 +88,7 @@ export async function extractAnalysisFrames(input: { directory: string; source: 
   const raw = await readAnalysisFile(input.directory, "gray.raw", ANALYSIS_LIMITS.candidates * 96 * 54);
   if (raw.length !== frames.length * 96 * 54) throw new AnalysisError("INVALID_GRAY_FRAME");
   const selection = selectAnalysisFrames(frames, frames.map((_, i) => raw.subarray(i * 96 * 54, (i + 1) * 96 * 54)));
+  await rm(join(input.directory, "gray.raw"), { force: true });
+  if (estimated) selection.coverage.limitations.push("DURATION_ESTIMATED");
   return { ...selection, durationMs };
 }

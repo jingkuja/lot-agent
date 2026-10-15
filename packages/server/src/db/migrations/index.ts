@@ -83,5 +83,10 @@ export const migrations: Migration[] = [
   marketingReferenceAnalysis,
   marketingAutomaticCreation,
   marketingShotDurations,
+  marketingTextOperations,
+  marketingAnalysisRetention,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
+
+import { marketingTextOperations } from "./0042-marketing-text-operations.js";
+import { marketingAnalysisRetention } from "./0043-marketing-analysis-retention.js";

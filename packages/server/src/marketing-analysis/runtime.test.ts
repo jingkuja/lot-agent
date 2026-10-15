@@ -73,3 +73,13 @@ it("checkpoints automatic creation from the saved project and reuses it after in
     expect(create).toHaveBeenCalledOnce();
   } finally { create.mockRestore(); }
 });
+
+it("aborts credential/catalog resolution before downloading or posting to a model", async () => {
+  const { analysisUserKey } = await import("./runtime.js");
+  const controller = new AbortController();
+  const hub = { listModels: vi.fn(async () => new Promise<never>(() => {})) };
+  const result = analysisUserKey({ getUserApiKey: async () => "fixture-key" } as never, hub, "owner", controller.signal).catch(error => error);
+  await Promise.resolve(); await Promise.resolve(); controller.abort();
+  expect(await result).toMatchObject({ name: "AbortError" });
+  expect(hub.listModels).toHaveBeenCalledWith("fixture-key", expect.any(AbortSignal));
+});

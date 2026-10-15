@@ -163,3 +163,21 @@ it("automatically synthesizes the remaining evidence after known OCR failures wi
   expect(calls).toHaveLength(4);
   expect(replay.summary?.limitations).toContain("OCR_INCOMPLETE");
 });
+
+it("reconstructs identical summary input after an OCR gap even when visual claims cite only one frame", async () => {
+  const { summaryInput } = await import("./summary-input.js");
+  let saved = initial();
+  let input: unknown;
+  const model = {
+    ocr: async () => { throw new AnalysisError("MODEL_INVALID_JSON"); },
+    observe: async () => [{ description: "product", frameIds: ["f0001"], uncertainty: "" }],
+    summarize: async (value: unknown) => { input = value; throw new AnalysisError("MODEL_INVALID_JSON"); },
+  };
+  await expect(analyzeSelectedFrames({ snapshot: saved, selection, revision: 1, models: model as unknown as AnalysisModels,
+    checkpoint: async value => { saved = value; } })).rejects.toThrow("MODEL_INVALID_JSON");
+  expect(summaryInput(saved, 1)).toEqual(input);
+  expect(summaryInput(saved, 1).limitations.filter(value => value === "OCR_INCOMPLETE")).toHaveLength(1);
+  expect(summaryInput(saved, 1).limitations).not.toContain("VISUAL_INCOMPLETE");
+  expect(summaryInput({ ...saved, coverage: { ...saved.coverage!, limitations: [...saved.coverage!.limitations, "OCR_INCOMPLETE"] } }, 1)).toEqual(input);
+  expect(summaryInput({ ...saved, completedVisualBatches: [] }, 1).limitations).toContain("VISUAL_INCOMPLETE");
+});

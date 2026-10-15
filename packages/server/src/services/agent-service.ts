@@ -3,7 +3,7 @@ import { MARKETING_COPY_MODEL } from "@lot-agent/core/marketing-video";
 import type { FeishuService } from "../feishu/service.js";
 import { createFeishuTools, FEISHU_MESSAGE_POLICY } from "../feishu/tools.js";
 import { FEISHU_TEXT_POLICY } from "../feishu/policy.js";
-import { completeMarketingJson, marketingTextError, MarketingTextError } from "../marketing-video/text.js";
+import { completeMarketingJson, marketingTextError, MarketingTextError, type MarketingTextOptions } from "../marketing-video/text.js";
 import { LOCAL_TOOL_NAMES } from "@lot-agent/core/desktop";
 import { RunRepository } from "./run-repository.js";
 import type { RunStatus } from "@lot-agent/core";
@@ -993,7 +993,8 @@ export class AgentService {
       .catch((err) => console.warn(`[UsageMeter] ${label} metering failed:`, err));
   }
 
-  async marketingText(system: string, input: string, userId: string, signal?: AbortSignal, options: { upstreamBilling?: boolean } = {}): Promise<unknown> {
+  async marketingText(system: string, input: string, userId: string, signal?: AbortSignal, options: MarketingTextOptions = {}): Promise<unknown> {
+    let invoked = false;
     try {
       signal?.throwIfAborted();
       if (!options.upstreamBilling) {
@@ -1003,8 +1004,14 @@ export class AgentService {
       const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, modelId: MARKETING_COPY_MODEL });
       if (usedModelId !== MARKETING_COPY_MODEL) throw new MarketingTextError("文案模型授权不可用，请检查账号的模型权限和积分后重试。", "MARKETING_MODEL_AUTH", 503);
       const metered = options.upstreamBilling ? llm : meterLLM(llm, usage => this.meterUtilityUsage("marketing text", usedModelId, userId, usage));
-      return await completeMarketingJson(metered, system, input, signal);
-    } catch (error) { throw marketingTextError(error, signal); }
+      invoked = true;
+      return await completeMarketingJson(metered, system, input, signal, options.onReceipt);
+    } catch (error) {
+      // Authorization/quota rejection happened before a model request existed.
+      // Record that fact so fixing account setup does not leave the draft locked.
+      if (!invoked && options.onReceipt) await options.onReceipt({ text: "", outcome: "rejected" });
+      throw marketingTextError(error, signal);
+    }
   }
 
   async generateVideoCopy(topic: string, userId: string, signal?: AbortSignal): Promise<{ script: string; mainTitle: string; subtitle: string; publishTitle: string; tags: string }> {

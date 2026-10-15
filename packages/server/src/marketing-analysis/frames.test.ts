@@ -58,3 +58,14 @@ describe("source frame timestamps", () => {
     } finally { await rm(directory, { recursive: true, force: true }); }
   }, 30000);
 });
+
+it("handles missing final duration, VFR, and decimal offset boundaries without float drift", async () => {
+  const { frameDuration } = await import("./frames.js");
+  expect(frameDuration(["190000", "191800", "191900"], "1/1000", undefined, undefined, "191.900000", "190.000000"))
+    .toEqual({ durationMs: 2000, estimated: true });
+  expect(frameDuration(["190000", "191900"], "1/1000", 100, undefined, "192.000000", "190.000000"))
+    .toEqual({ durationMs: 2000, estimated: false });
+  expect(frameDuration(["0", "40", "120"], "1/1000", undefined, undefined, undefined, 0)).toEqual({ durationMs: 200, estimated: true });
+  expect(frameDuration(["0", "40", "120"], "1/1000", 30, undefined, undefined, 0)).toEqual({ durationMs: 150, estimated: false });
+  expect(frameDuration(["0", "100"], "1/1000", 100, "0.200001", undefined, 0).durationMs).toBe(201);
+});

@@ -1,5 +1,5 @@
 export class AnalysisError extends Error {
-  constructor(readonly code: string, readonly status: 400 | 402 | 404 | 409 | 413 | 503 = 400) { super(code); this.name = "AnalysisError"; }
+  constructor(readonly code: string, readonly status: 400 | 402 | 404 | 409 | 413 | 422 | 503 = 400) { super(code); this.name = "AnalysisError"; }
 }
 export function classifyDownloadError(message: string): string {
   if (/captcha|challenge|verify|verification|验证|风控/i.test(message)) return "CHALLENGE_REQUIRED";

@@ -10,7 +10,7 @@ export type { AnalysisUsage, ModelStepReceipt, AnalysisCallLedger } from "@lot-a
 export interface AnalysisModelDeps {
   ledger: AnalysisCallLedger;
   /** Request-scoped credential resolution; never a shared provider singleton. */
-  provider(model: string): Promise<LLMProvider>;
+  provider(model: string, signal?: AbortSignal): Promise<LLMProvider>;
   readFrame(frame: FrameEvidence): Promise<Uint8Array>;
 }
 
@@ -60,7 +60,8 @@ export class AnalysisModels {
     signal?.throwIfAborted();
     const payload = JSON.stringify({ model, messages, maxTokens: 8192 });
     if (Buffer.byteLength(payload) > ANALYSIS_LIMITS.requestBytes) throw new AnalysisError("MODEL_REQUEST_LIMIT");
-    const llm = await this.deps.provider(model);
+    const llm = await this.deps.provider(model, signal);
+    signal?.throwIfAborted();
     const previous = await this.deps.ledger.begin(stepId, createHash("sha256").update(payload).digest("hex"), model, images);
     let receipt = previous;
     if (previous && !previous.usage && previous.outcome !== "rejected" && previous.outcome !== "completed") throw new AnalysisError("REQUEST_UNKNOWN", 409);

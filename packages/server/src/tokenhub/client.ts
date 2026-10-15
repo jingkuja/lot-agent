@@ -1,3 +1,4 @@
+import { createDeadline, withAbort } from "@lot-agent/core";
 import { logger } from "@lot-agent/core";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { normalizeApiKeyEntries, type RawApiKeyEntry } from "./api-key-entry.js";
@@ -561,13 +562,17 @@ export class TokenhubClient {
     return { userId: data.user_id, name: data.name, apiKeys };
   }
 
-  async listModels(apiKey: string): Promise<TokenhubModels> {
-    const data = await this.get<Partial<TokenhubModels>>(
-      "/models",
-      apiKey,
-      "tokenhub_models_failed"
-    );
-    return { llm: data.llm ?? [], image: data.image ?? [], video: data.video ?? [] };
+  async listModels(apiKey: string, signal?: AbortSignal): Promise<TokenhubModels> {
+    const deadline = createDeadline(15_000, signal);
+    try {
+      const data = await this.get<Partial<TokenhubModels>>(
+        "/models",
+        apiKey,
+        "tokenhub_models_failed",
+        deadline.signal
+      );
+      return { llm: data.llm ?? [], image: data.image ?? [], video: data.video ?? [] };
+    } finally { deadline.dispose(); }
   }
 
   private async post<T>(
@@ -587,13 +592,14 @@ export class TokenhubClient {
     );
   }
 
-  private async get<T>(path: string, apiKey: string, errCode: string): Promise<T> {
+  private async get<T>(path: string, apiKey: string, errCode: string, signal?: AbortSignal): Promise<T> {
     return this.unwrap<T>(
       () =>
         this.fetchImpl(`${this.baseUrl}${path}`, {
           headers: { Authorization: `Bearer ${apiKey}` },
+          signal,
         }),
-      errCode
+      errCode, signal
     );
   }
 
@@ -636,21 +642,24 @@ export class TokenhubClient {
     );
   }
 
-  private async unwrap<T>(call: () => Promise<Response>, errCode: string): Promise<T> {
+  private async unwrap<T>(call: () => Promise<Response>, errCode: string, signal?: AbortSignal): Promise<T> {
     // Client-facing responses stay opaque (a single generic error), but the real
     // cause — HTTP status + upstream message (e.g. 403 "invalid agent key") — is
     // logged server-side so operators can diagnose. Never logs the token/api key.
     let res: Response;
     try {
-      res = await call();
+      signal?.throwIfAborted();
+      res = await withAbort(call(), signal);
     } catch (err) {
+      signal?.throwIfAborted();
       logger.warn("tokenhub request failed", { errCode, cause: "network", err });
       throw new TokenhubClientError(errCode);
     }
     let env: Envelope<T> | null = null;
     try {
-      env = (await res.json()) as Envelope<T>;
+      env = (await withAbort(res.json(), signal)) as Envelope<T>;
     } catch {
+      signal?.throwIfAborted();
       // non-JSON / empty body — env stays null; still reported via status below.
     }
     if (!res.ok || !env || !env.success || env.data == null) {

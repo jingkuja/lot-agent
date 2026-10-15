@@ -14,12 +14,12 @@ import { applyAnalysis } from "./apply.js";
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const revision = (n: unknown): n is number => Number.isSafeInteger(n) && Number(n) > 0;
 export function createAnalysisRoutes(service: Pick<AgentService, "db" | "tokenhub">, root: string, deps: {
-  store?: PgAnalysisStore; storage?: AnalysisStorage; config?: AnalysisConfig; authorize?: (owner: string) => Promise<unknown>;
+  store?: PgAnalysisStore; storage?: AnalysisStorage; config?: AnalysisConfig; authorize?: (owner: string, signal?: AbortSignal) => Promise<unknown>;
 } = {}) {
   const config = deps.config ?? analysisConfig();
-  const store = deps.store ?? new PgAnalysisStore(service.db.pool);
   const storage = deps.storage ?? new AnalysisStorage(root);
-  const authorize = deps.authorize ?? (owner => analysisUserKey(service.db, service.tokenhub, owner));
+  const store = deps.store ?? new PgAnalysisStore(service.db.pool, undefined, (owner, pending, global) => storage.assertCapacity(owner, pending, global));
+  const authorize = deps.authorize ?? ((owner, signal) => analysisUserKey(service.db, service.tokenhub, owner, signal));
   const app = new Hono<{ Variables: { userId: string } }>();
   app.use("*", bodyLimit({ maxSize: 800 * 1024, onError: c => c.json({ error: "ANALYSIS_REQUEST_LIMIT", code: "ANALYSIS_REQUEST_LIMIT" }, 413) }));
   app.use("*", async (c, next) => {
@@ -57,7 +57,7 @@ export function createAnalysisRoutes(service: Pick<AgentService, "db" | "tokenhu
   app.post("/", async c => {
     const input = CreateAnalysisSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) throw new AnalysisError("INVALID_SOURCE");
-    await authorize(c.get("userId"));
+    await authorize(c.get("userId"), c.req.raw.signal);
     return c.json(await store.create(c.get("userId"), input.data, config), 202);
   });
   app.use("/:id/*", async (c, next) => { if (!uuid.test(c.req.param("id") ?? "")) throw new AnalysisError("ANALYSIS_NOT_FOUND", 404); await next(); });
@@ -79,7 +79,7 @@ export function createAnalysisRoutes(service: Pick<AgentService, "db" | "tokenhu
   for (const operation of ["resume", "summarize"] as const) app.post(`/:id/${operation}`, async c => {
     const body = await c.req.json().catch(() => null);
     if (!revision(body?.expectedRevision)) throw new AnalysisError("REVISION_CONFLICT", 409);
-    await authorize(c.get("userId"));
+    await authorize(c.get("userId"), c.req.raw.signal);
     return c.json(await store.resume(c.get("userId"), c.req.param("id"), body.expectedRevision, operation === "summarize"), 202);
   });
   app.patch("/:id/text", async c => {

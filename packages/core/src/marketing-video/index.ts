@@ -135,7 +135,7 @@ export function planMarketingSegments(script: string, durationSec: number): Mark
 }
 
 /** Narration edits in the storyboard are also the project's editable copy. */
-export const storyboardScript = (shots: MarketingShot[]) => shots.map(shot => shot.script.trim()).join("\n");
+export const storyboardScript = (shots: Pick<MarketingShot, "script">[]) => shots.map(shot => shot.script.trim()).join("\n");
 export function marketingReviewText(draft: MarketingDraft): string {
   const base = [draft.script, draft.publishTitle, draft.tags].join("\n");
   return draft.storyboard?.length ? `${base}\n${draft.storyboard.map(shot => [shot.visual, shot.action, shot.camera].join("\n")).join("\n")}` : base;
@@ -154,3 +154,5 @@ export function resolveMarketingSegments(draft: MarketingDraft): MarketingSegmen
     return { index, script: shot.script, durationSec: durations[index] };
   });
 }
+
+export * from "./source.js";

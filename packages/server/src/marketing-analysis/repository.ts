@@ -17,7 +17,8 @@ export async function ownerLock(client: pg.PoolClient, owner: string) {
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`media-analysis-budget:${owner}`]);
 }
 export class PgAnalysisStore implements AnalysisJobStore {
-  constructor(readonly pool: pg.Pool, readonly secrets = new SecretBox(process.env.SECRET_MASTER_KEY)) {}
+  constructor(readonly pool: pg.Pool, readonly secrets = new SecretBox(process.env.SECRET_MASTER_KEY),
+    private readonly capacity?: (owner: string, pending: number, globalPending: number) => Promise<void>) {}
   async transaction<T>(operation: (client: pg.PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try { await client.query("BEGIN"); const value = await operation(client); await client.query("COMMIT"); return value; }
@@ -35,6 +36,17 @@ export class PgAnalysisStore implements AnalysisJobStore {
     return (await this.pool.query(`SELECT id,user_id,revision,version,status,stage,error_code,created_at,updated_at,creation_context,
       jsonb_build_object('source',snapshot->'source','frames','[]'::jsonb,'frameTexts','[]'::jsonb,'texts','[]'::jsonb,'observations','[]'::jsonb) AS snapshot
       FROM marketing_reference_analyses WHERE user_id=$1 AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT 20 OFFSET $2`, [owner, offset])).rows.map(analysisRecord);
+  }
+  private async admit(client: pg.PoolClient, owner: string) {
+    const pending = (await client.query("SELECT count(*) AS count FROM marketing_reference_analyses WHERE user_id=$1 AND status IN ('queued','running') AND deleted_at IS NULL", [owner])).rows[0];
+    if (this.capacity) {
+      // Serialize disk reservations across owners as well as per-owner admission.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('media-analysis-storage',0))");
+      const reserved = (await client.query(`SELECT count(*) AS global_count,count(*) FILTER(WHERE user_id=$1) AS owner_count
+        FROM marketing_reference_analyses WHERE (status IN ('queued','running') OR lease_until>now()) AND deleted_at IS NULL`, [owner])).rows[0];
+      await this.capacity(owner, Number(reserved.owner_count), Number(reserved.global_count));
+    }
+    if (Number(pending.count) >= 3) throw new AnalysisError("ANALYSIS_CONCURRENCY_LIMIT", 409);
   }
   async create(owner: string, input: { shareText: string; clientRequestId: string; target?: { projectId: string; projectVersion: number; locale: "zh" | "en" | "id" } }, _config: AnalysisConfig) {
     const source = parseAnalysisSource(input.shareText);
@@ -56,8 +68,7 @@ export class PgAnalysisStore implements AnalysisJobStore {
         if (draft.copyMode !== "rewrite" || draft.reference.trim() !== input.shareText.trim()) throw new AnalysisError("PROJECT_CONFLICT", 409);
         context = { ...input.target, projectVersion: project.version + 1, draft };
       }
-      const pending = (await client.query("SELECT count(*) AS count FROM marketing_reference_analyses WHERE user_id=$1 AND status IN ('queued','running') AND deleted_at IS NULL", [owner])).rows[0];
-      if (Number(pending.count) >= 3) throw new AnalysisError("ANALYSIS_CONCURRENCY_LIMIT", 409);
+      await this.admit(client, owner);
       const id = randomUUID(); const sourceId = randomUUID();
       const snapshot: AnalysisSnapshot = { source, frames: [], frameTexts: [], texts: [], observations: [] };
       await client.query("INSERT INTO marketing_reference_sources(id,user_id,share_text,platform) VALUES($1,$2,$3,$4)", [sourceId, owner, this.secrets.seal(input.shareText), source.platform]);
@@ -153,6 +164,7 @@ export class PgAnalysisStore implements AnalysisJobStore {
       if (row.status === "queued") return;
       if (summarizeOnly && !row.snapshot.frames.length) throw new AnalysisError("EVIDENCE_REQUIRED", 409);
       if (!summarizeOnly && row.status === "ready") return;
+      await this.admit(client, owner);
       // Malformed OCR is already a recorded coverage gap, not unfinished work.
       // Also clear flags left by older resume logic. Rejected OCR is retryable
       // after replenishing upstream credit; unknown requests stay blocked above.
@@ -160,7 +172,7 @@ export class PgAnalysisStore implements AnalysisJobStore {
         (receipt->>'outcome'='rejected' OR step_id NOT LIKE 'ocr:%')
         WHERE analysis_id=$1 AND ((receipt->>'outcome'='failed' AND receipt->'usage' IS NOT NULL) OR receipt->>'outcome'='rejected')`, [id]);
       await client.query(`UPDATE marketing_reference_analyses SET status='queued',mode=$2,reserved_cost=$3,cancel_requested=false,
-        lease_token=NULL,lease_until=NULL,error_code=NULL,version=version+1,updated_at=now() WHERE id=$1`, [id, summarizeOnly || row.revision > 1 ? "summary" : "all", 0]);
+        lease_token=NULL,lease_until=NULL,error_code=NULL,scratch_cleaned_at=NULL,version=version+1,updated_at=now() WHERE id=$1`, [id, summarizeOnly || row.revision > 1 ? "summary" : "all", 0]);
       await client.query("UPDATE tasks SET status='pending',error=NULL,updated_at=now() WHERE id=$1", [id]);
     });
     return this.get(owner, id);

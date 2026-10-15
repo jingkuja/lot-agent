@@ -18,8 +18,14 @@ export async function deliverAnalysis(queue: Queue, id: string) {
 }
 export async function dispatchAnalyses(store: PgAnalysisStore, queue: Queue) {
   // PG is the outbox, including expired leases after a process crash.
-  const rows = (await store.pool.query(`SELECT id FROM marketing_reference_analyses WHERE deleted_at IS NULL AND NOT cancel_requested
-    AND (status='queued' OR (status='running' AND lease_until<now())) ORDER BY created_at LIMIT 100`)).rows;
+  const rows = (await store.pool.query(`SELECT id FROM (
+    SELECT DISTINCT ON (a.user_id) a.id,a.created_at FROM marketing_reference_analyses a
+    WHERE a.deleted_at IS NULL AND NOT a.cancel_requested
+      AND (a.status='queued' OR (a.status='running' AND a.lease_until<now()))
+      AND NOT EXISTS (SELECT 1 FROM marketing_reference_analyses busy
+        WHERE busy.user_id=a.user_id AND busy.status='running' AND busy.lease_until>now())
+    ORDER BY a.user_id,a.created_at,a.id
+  ) candidates ORDER BY created_at,id LIMIT 100`)).rows;
   for (const row of rows) await deliverAnalysis(queue, row.id);
   await store.pool.query(`UPDATE marketing_reference_analyses a SET lease_token=NULL,lease_until=NULL,
     reserved_cost=0

@@ -122,3 +122,13 @@ describe("marketing text completion", () => {
     expect(f.chat).toHaveBeenCalledOnce();
   });
 });
+
+it("records pre-model authorization failure as rejected instead of an unknown paid call", async () => {
+  const f = setup([]);
+  f.service.resolveUtilityLLM.mockRejectedValueOnce(new Error("managed New API credential unavailable"));
+  const onReceipt = vi.fn(async () => {});
+  await expect(AgentService.prototype.marketingText.call(f.service as unknown as AgentService, "system", "input", "owner", undefined, { upstreamBilling: true, onReceipt }))
+    .rejects.toMatchObject({ code: "MARKETING_MODEL_AUTH" });
+  expect(onReceipt).toHaveBeenCalledWith({ text: "", outcome: "rejected" });
+  expect(f.chat).not.toHaveBeenCalled();
+});

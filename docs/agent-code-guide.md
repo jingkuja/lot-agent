@@ -1,6 +1,6 @@
 # Lot Agent 项目架构与代码导航
 
-面向在本仓库进行功能开发、修复和重构的 Coding Agent。核对日期：2026-10-08；依据当前工作区代码，包含尚未提交的 PPT 改动，不代表线上已发布状态。本文是入口索引，具体行为以实现和对应测试为准。
+面向在本仓库进行功能开发、修复和重构的 Coding Agent。核对日期：2026-10-15；依据当前工作区代码，不代表线上已发布状态。本文是入口索引，具体行为以实现和对应测试为准。
 
 路径约定：`core/`、`server/`、`web/` 分别简写 `packages/core/src/`、`packages/server/src/`、`packages/web/src/`；完整路径均相对仓库根目录。
 
@@ -116,7 +116,11 @@ Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务�
 
 `AgentService.marketingText → marketing-video/text.ts` 统一处理文案 JSON 输出、完整结束检查、5 分钟超时及安全错误码。文案和分镜固定使用当前用户凭证的 `kimi-k3`，不回退到其他默认模型；数字人模式在分镜创作和实际片段请求中都要求人物每镜出镜；截断结果不作为审核通过，不自动重新采样，审核等既有请求仍经 `meterLLM` 记录。创作文案/分镜请求使用 `upstreamBilling`，不做本地额度检查或金额计算。
 
-“拆解爆款文案”在选择按钮下提供视频链接/文案统一输入。纯文案经 `marketing-video/creation.ts` 一次生成文案和分镜；参考视频分析通过 `ProjectStudio → /api/marketing-video-analyses → marketing-analysis/repository.ts → lot-media-analysis → workers/media-analysis.ts` 运行。迁移 `0039` 保存来源、分析、步骤、修订、加密平台 Cookie 和草稿引用；原片/证据在私有目录。`runtime.ts` 编排隔离下载、本地 PTS 抽帧、DeepSeek OCR、Kimi 观察、摘要及文案/分镜创作；`config.ts` 默认解码/抽帧 4 线程、单视频 OCR 8 路和画面理解 3 路，`pipeline.ts` 并行调度两类模型工作，按帧/批次序号汇集并串行保存检查点，全部完成后统一摘要；迁移 `0040` 保存目标草稿和版本，`repository.ts.finish` 自动回填，版本冲突保留结果。`ReferenceAnalysisPanel` 仅查询进度和提供可展开的只读资料。`ledger.ts` 保留意图与真实 token 回执，本流程不计算金额或预留预算，上游余额不足则停止，用户充值后显式继续；未知结果不自动重发。`scripts/check-marketing-analysis-local.ts`、`local-probe.ts` 和 `probe-resume.ts` 提供显式 macOS 验证、隔离及保留失败费用的缺口续测。Apple Silicon 本地 Worker 可设置 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，由 `media-runtime.ts` 为下载及抽帧选择 macOS 沙箱；生产环境禁止该开关并保持 Linux 隔离，HTTP 输入不能选择运行时。默认未启用；单条小红书已完成下载和 85 次完整模型测试，保留 3 帧 OCR 缺口，三平台批量质量及 Linux 环境仍待验收。配置、API、恢复及检查命令见[参考视频分析实现](marketing-video-reference-analysis.md)。
+“拆解爆款文案”在选择按钮下提供视频链接/文案统一输入，并显式选择文字或视频类型；`core/marketing-video/source.ts` 提供共享提示分类，普通官网 URL 保留为文字，服务端拒绝视频链接绕过分析进入 `/copy`。纯文案经 `marketing-video/creation.ts` 一次生成文案和分镜；参考视频分析通过 `ProjectStudio → /api/marketing-video-analyses → marketing-analysis/repository.ts → lot-media-analysis → workers/media-analysis.ts` 运行。迁移 `0039` 保存来源、分析、步骤、修订、加密平台 Cookie 和草稿引用；原片/证据在私有目录。`runtime.ts` 编排隔离下载、本地 PTS 抽帧、DeepSeek OCR、Kimi 观察、摘要及文案/分镜创作；`config.ts` 默认解码/抽帧 4 线程、单视频 OCR 8 路和画面理解 3 路，`pipeline.ts` 并行调度两类模型工作，按帧/批次序号汇集并串行保存检查点，全部完成后统一摘要；迁移 `0040` 保存目标草稿和版本，`repository.ts.finish` 自动回填，版本冲突保留结果。`ReferenceAnalysisPanel` 仅查询进度和提供可展开的只读资料。`ledger.ts` 保留意图与真实 token 回执，本流程不计算金额或预留预算，上游余额不足则停止，用户充值后显式继续；未知结果不自动重发。`scripts/check-marketing-analysis-local.ts`、`local-probe.ts` 和 `probe-resume.ts` 提供显式 macOS 验证、隔离及保留失败费用的缺口续测。Apple Silicon 本地 Worker 可设置 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，由 `media-runtime.ts` 为下载及抽帧选择 macOS 沙箱；生产环境禁止该开关并保持 Linux 隔离，HTTP 输入不能选择运行时。默认未启用；单条小红书已完成下载和 85 次完整模型测试，保留 3 帧 OCR 缺口，三平台批量质量及 Linux 环境仍待验收。配置、API、恢复及检查命令见[参考视频分析实现](marketing-video-reference-analysis.md)。
+
+`marketing-video/operations.ts` 通过迁移 `0042` 持久化文案和分镜修改的请求 ID、输入哈希、草稿版本、模型、协议、回执及结果。`/copy` 和 `/:id/storyboard` 要求 `clientRequestId`；文案入口另传 `projectId` / `version`。结果与草稿回填原子提交，版本冲突单独保留结果，`GET /:id/text-operations` 和 `TextOperationPanel` 提供刷新恢复；未知请求阻止重复调用。查询和恢复已保存结果不调用模型。
+
+`marketing-analysis/summary-input.ts` 统一正常与摘要恢复输入，限制项去重并保留首次顺序；`completedVisualBatches` 记录实际处理完成度，旧任务从账本读取批次状态。`analysisUserKey` 将取消和 15 秒授权截止时间传到模型目录 HTTP 与正文读取。创建、恢复和重新摘要共用用户事务锁下的准入检查；队列每次选各用户一个可运行候选。`storage.ts` 检查累计字节、在途预留和磁盘低水位；迁移 `0043` 记录临时文件清理，保留全部展示帧和不可变 selection。原片满七天后回收，抽帧完成立即删除 `gray.raw`。`ReferenceAnalysisPanel` 展示缺口、时间线、引用和推断，始终说明原声未转写。修复范围和验证见 [评审问题修复](marketing-video-review-fixes.md)。
 
 `marketing-analysis/models.ts` 对汇总摘要和文案/分镜合成统一使用 5 分钟超时，逐帧 OCR 和分批观察为 2 分钟；取消和租约失效立即中止。中断请求保留已有资料与请求 ID，核对回执后从未完成步骤继续。
 
@@ -190,7 +194,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0041-marketing-shot-durations.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 40 的创作上下文字段就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0043-marketing-analysis-retention.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 43 的创作上下文与清理字段就绪。
 
 运行日志新增 `agent_runs / agent_steps`，结果核实保留原始回执；普通模型会话与媒体生成任务状态互不替代。
 

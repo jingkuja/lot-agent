@@ -90,7 +90,7 @@ describe("Responses transport", () => {
   it("posts Responses wire format to /v1/responses with isolated credentials and no hidden retry", async () => {
     const requests: { path?: string; authorization?: string; body: any }[] = [];
     const transport = { fetch: (async (url, init) => {
-      requests.push({ path: new URL(String(url)).pathname, authorization: new Headers(init?.headers as HeadersInit).get("authorization") ?? undefined, body: JSON.parse(String(init?.body)) });
+      requests.push({ path: new URL(String(url)).pathname, authorization: new Headers(init?.headers as ConstructorParameters<typeof Headers>[0]).get("authorization") ?? undefined, body: JSON.parse(String(init?.body)) });
       if (requests.length > 1) return new Response('{"error":{"message":"unavailable"}}', { status: 503, headers: { "Content-Type": "application/json" } });
       return new Response(`event: response.completed\ndata: ${JSON.stringify(terminal())}\n\n`, { headers: { "Content-Type": "text/event-stream" } });
     }) as ClientOptions["fetch"] };

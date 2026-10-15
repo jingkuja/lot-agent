@@ -23,6 +23,11 @@
 
 ## 存储与恢复
 
+文案创作和分镜修改使用 `marketing_text_operations`（迁移 42）：前端先保存草稿，再携带 `clientRequestId` 和版本发起请求。服务端先保存调用意图，保存上游回执，再原子保存结果并尝试按版本回填；冲突结果仍可在“保存的创作记录”查看。相同请求 ID 和输入只返回原记录，不再次调用模型；不同输入复用 ID 返回 409。进程中断或未知回执阻止该草稿再次创作，需管理员核对上游回执后处理，不能直接清除记录绕过保护。记录查询接口为 `GET /api/marketing-videos/:id/text-operations`，由服务端校验归属。
+
+`POST /api/marketing-videos/copy` 需要 `projectId`、`version`、`clientRequestId`、`draft`、`locale` 和 `source: {kind: "text" | "video"}`；省略 source 的旧客户端使用共享识别规则，视频类型返回 `VIDEO_ANALYSIS_REQUIRED`，必须通过参考视频分析入口。`POST /:id/storyboard` 在原参数基础上增加 `clientRequestId`。缺少请求 ID 的旧客户端会被拒绝，不回退到不持久化的付费路径；部署时同步更新 Web 和 API。
+
+
 - `core/marketing-video` 保存共享 schema、口播长度估算、分段规划和存储接口。
 - `/api/marketing-videos` 为独立项目 API，沿用会话登录和用户凭证；文案/分镜初次创作由上游处理余额，其他制作请求保留既有额度检查。模型固定在服务端；输入素材只接受当前用户资产 ID，不接受客户端任意 URL。新项目不创建聊天会话，旧会话结果继续可读。
 - 迁移 36 增加 `marketing_video_projects`、`marketing_video_segments` 和 `usage_logs.idempotency_key`。草稿版本防止多页面覆盖；提交后制作配置固定，标题标签仍可修改。数据库 JSONB 比较须经过 schema 规范化，不能直接依赖键顺序。
@@ -42,7 +47,7 @@
 
 音色样例继续使用 `KLING_VOICE_BASE_URL` / `KLING_VOICE_API_KEY`，视频推理仍使用当前用户模型凭证；素材引用需要正确的 `PUBLIC_BASE_URL`。未选择音色样例时使用模型原生旁白。
 
-页面先检查草稿列表和服务能力，成功后才启用编辑、自动保存和生成；接口未部署返回 404 时显示更新服务提示，连接失败可点「重新连接」。普通本地开发代理连接 `localhost:3000`，仅桌面开发模式跟随桌面服务器设置。线上升级必须同时更新 Web、API 和 Worker 镜像并执行迁移至 40；只更新 Web 会导致新接口 `Not Found`。文案和分镜生成后自动保存；风险检查可按需执行，提交制作前仍会自动检查当前内容。
+页面先检查草稿列表和服务能力，成功后才启用编辑、自动保存和生成；接口未部署返回 404 时显示更新服务提示，连接失败可点「重新连接」。普通本地开发代理连接 `localhost:3000`，仅桌面开发模式跟随桌面服务器设置。线上升级必须同时更新 Web、API 和 Worker 镜像并执行迁移至 43；只更新 Web 会导致新接口 `Not Found`。文案和分镜生成后自动保存；风险检查可按需执行，提交制作前仍会自动检查当前内容。
 
 ```bash
 pnpm --filter @lot-agent/core build

@@ -30,7 +30,7 @@ try {
   const errors = []; page.on("pageerror", error => errors.push(error.message));
   await context.addInitScript(() => { if (!localStorage.getItem("lot:language")) localStorage.setItem("lot:language", "zh"); });
   const id = "00000000-0000-4000-8000-000000000039";
-  const projects = new Map(); let value, projectId, account = "owner", copyCalls = 0, starts = 0, resumes = 0;
+  const projects = new Map(); const textOperations = new Map(); let value, projectId, account = "owner", copyCalls = 0, starts = 0, resumes = 0;
   const shots = [
     { script: "在明亮空间，品尝现磨咖啡。", visual: "明亮咖啡店与咖啡杯", action: "端起咖啡", camera: "中景缓缓推进" },
     { script: "找到自己喜欢的味道。", visual: "咖啡杯近景", action: "缓缓倒入咖啡", camera: "俯拍特写" },
@@ -47,7 +47,17 @@ try {
     if (path === "/api/public/product") return json({ globle: 1 });
     if (path === "/api/marketing-videos/capabilities") return json({ composition: true, knowledge: false });
     if (path === "/api/marketing-videos") return json({ data: account === "owner" ? [...projects.values()] : [] });
-    if (path === "/api/marketing-videos/copy") { copyCalls++; return json(create(req.postDataJSON().draft)); }
+    if (path.endsWith("/text-operations")) return json({ data: textOperations.get(path.split("/").at(-2)) ?? [] });
+    if (path === "/api/marketing-videos/copy") {
+      copyCalls++; const body = req.postDataJSON(); assert(body.clientRequestId);
+      const p = projects.get(body.projectId); assert.equal(p.version, body.version);
+      const result = create(body.draft); p.version++; p.draft = result.draft;
+      textOperations.set(p.id, [{ id: body.clientRequestId, status: "succeeded", appliedVersion: p.version, result }]);
+      // The server completed, but the browser lost its response. Polling must
+      // recover the same durable result without issuing another copy POST.
+      if (copyCalls === 1) return route.abort("failed");
+      return json({ ...result, project: p, operation: { status: "succeeded" } });
+    }
     if (path === "/api/marketing-video-analyses") {
       assert.equal(req.method(), "POST"); starts++;
       const body = req.postDataJSON(); projectId = body.target.projectId;
@@ -56,7 +66,7 @@ try {
       p.version++; p.referenceAnalysis = { id, acceptedRevision: 0, evidenceIds: [] };
       value = { id, ownerId: "owner", projectId, revision: 1, status: "queued", stage: "queued", snapshot: {
         source: { platform: "bilibili", title: "咖啡参考视频" }, frames: [{ id: "f0001", ptsMs: 0 }],
-        texts: [{ id: "t0001", text: "原片画面文字", firstSeenMs: 0 }], frameTexts: [], observations: [],
+        texts: [{ id: "t0001", text: "原片画面文字", firstSeenMs: 0, lastSeenMs: 500 }], frameTexts: [], observations: [],
       } };
       return json(value, 202);
     }
@@ -87,13 +97,17 @@ try {
   const duration = page.getByRole("slider", { name: "整片时长（秒）", exact: true });
   await duration.focus(); await duration.press("End");
   assert.equal(await duration.inputValue(), "60");
-  await reference.fill("一家明亮的咖啡店，提供现磨咖啡，欢迎品尝。");
+  await reference.fill("一家明亮的咖啡店，提供现磨咖啡，欢迎品尝。https://example.com/shop");
   assert.equal(await page.getByText("参考视频分析", { exact: true }).count(), 0);
   await page.getByRole("button", { name: "一键拆解并生成", exact: true }).click();
   await page.waitForFunction(() => document.querySelector('textarea') && [...document.querySelectorAll('textarea')].some(t => t.value.includes('在明亮空间')));
   await page.getByRole("button", { name: "开始新视频", exact: true }).waitFor({ state: "visible" });
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(b => b.textContent === '开始新视频').disabled);
   assert.equal(copyCalls, 1); assert.equal(starts, 0);
+  await page.reload();
+  await page.getByText("保存的创作记录", { exact: true }).waitFor();
+  assert.equal(copyCalls, 1, "refresh after a lost copy response must reuse the paid result");
+  await page.getByRole("button", { name: /1\s*确定文案/ }).click();
   await page.getByText("0–13s · 13 秒", { exact: true }).waitFor();
   await page.getByText("52–65s · 13 秒", { exact: true }).waitFor();
   await page.getByText("数字分身将在每个镜头出镜，保持人物形象一致。", { exact: true }).waitFor();
@@ -121,6 +135,8 @@ try {
   const generated = create(projects.get(projectId).draft);
   Object.assign(projects.get(projectId), { draft: generated.draft, version: projects.get(projectId).version + 1, referenceAnalysis: { id, acceptedRevision: 1, evidenceIds: ["f0001"] } });
   Object.assign(value, { status: "ready", stage: "copy", applied: true }); value.snapshot.creation = generated;
+  value.snapshot.coverage = { sampledFrames: 1, ocrFrames: 1, visualFrames: 1, omittedOcrFrameIds: ["f0001"], omittedVisualFrameIds: [], limitations: ["OCR_INCOMPLETE"] };
+  value.snapshot.summary = { summary: [{ statement: "展示咖啡", inference: false, evidenceIds: ["f0001"] }], marketingPoints: [{ kind: "hook", statement: "场景切入", inference: true, evidenceIds: ["f0001"] }], timeline: [{ startMs: 0, endMs: 500, statement: "展示产品", inference: false, evidenceIds: ["f0001"] }], limitations: ["OCR_INCOMPLETE"] };
   await page.getByRole("textbox", { name: "视频口播文案", exact: true }).waitFor();
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(t => t.value.startsWith('在明亮空间')));
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(b => b.textContent === '一键拆解并生成').disabled);
@@ -132,7 +148,7 @@ try {
   assert(!/预算|已记录费用|选用预览|生成当前修订摘要/.test(await page.locator("body").innerText()));
   await page.getByText("查看参考资料", { exact: true }).click();
   await page.getByText("画面文字", { exact: true }).click();
-  await page.getByText("0.0s · 原片画面文字", { exact: true }).waitFor();
+  await page.getByText("t0001 · 0.0s–0.5s · 原片画面文字", { exact: true }).waitFor();
   await page.getByText("参考画面", { exact: true }).click(); await page.getByRole("button", { name: "0.0s", exact: true }).click();
   await page.locator("img.ma-frame").waitFor();
   await page.reload();
@@ -149,16 +165,25 @@ try {
   assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
   Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
   await page.getByText("中景缓缓推进", { exact: true }).waitFor();
+  await page.getByText("已完成，但参考证据存在缺口", { exact: true }).waitFor();
+  await page.getByText("查看参考资料", { exact: true }).click();
+  await page.getByText("部分画面文字识别失败，摘要可能遗漏内容。", { exact: true }).waitFor();
+  await page.getByText("原片证据时间线", { exact: true }).click();
   const screenshots = process.env.MARKETING_ANALYSIS_UI_SCREENSHOTS;
   if (screenshots) {
     const { mkdir } = await import("node:fs/promises"); await mkdir(screenshots, { recursive: true });
     await page.screenshot({ path: join(screenshots, "creation-light.png"), fullPage: true });
-    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
-    await page.screenshot({ path: join(screenshots, "creation-dark.png"), fullPage: true });
+
   }
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  await page.getByText("已完成，但参考证据存在缺口", { exact: true }).waitFor();
+  if (screenshots) await page.screenshot({ path: join(screenshots, "creation-dark.png"), fullPage: true });
   await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("en");
   await page.getByRole("textbox", { name: "Video link or reference copy", exact: true }).waitFor();
+  await page.getByText("Completed with gaps in reference evidence", { exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByText("Completed with gaps in reference evidence", { exact: true }).scrollIntoViewIfNeeded();
   if (screenshots) await page.screenshot({ path: join(screenshots, "creation-mobile-en.png"), fullPage: false });
   assert.equal(await page.locator(".mv-studio").count(), 1);
   account = "other"; await page.getByRole("button", { name: "Switch account", exact: true }).click();

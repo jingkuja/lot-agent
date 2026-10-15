@@ -19,7 +19,7 @@ async function main() {
   const root = resolve(dirname(process.argv[1]), "../../../..");
   const db = new DB({ max: 6, host: process.env.PG_HOST, port: Number(process.env.PG_PORT ?? 5432), user: process.env.PG_USER, password: process.env.PG_PASSWORD, database: process.env.PG_DATABASE });
   for (let attempt = 0; ; attempt++) {
-    try { await db.pool.query("SELECT creation_context FROM marketing_reference_analyses LIMIT 0"); break; }
+    try { await db.pool.query("SELECT creation_context,scratch_cleaned_at FROM marketing_reference_analyses LIMIT 0"); break; }
     catch (error) { if (attempt >= 29) { await db.close(); throw error; } await new Promise(resolve => setTimeout(resolve, 1000)); }
   }
   const store = new PgAnalysisStore(db.pool); const storage = new AnalysisStorage(resolve(root, "data/marketing-analysis"));

@@ -1,6 +1,7 @@
+import { summaryInput } from "./summary-input.js";
 import { AnalysisError } from "./errors.js";
 import { analysisParallelism } from "./config.js";
-import { ANALYSIS_LIMITS, mergeScreenText, type AnalysisSnapshot, type FrameEvidence, type FrameText } from "@lot-agent/core/marketing-analysis";
+import { ANALYSIS_LIMITS, mergeScreenText, type AnalysisSnapshot, type FrameText } from "@lot-agent/core/marketing-analysis";
 import type { AnalysisModels } from "./models.js";
 import type { extractAnalysisFrames } from "./frames.js";
 
@@ -65,6 +66,7 @@ export async function analyzeSelectedFrames(input: {
     pool(batches.length, parallelism.visualConcurrency, async index => {
       observations[index] = await input.models.observe(index, batches[index], input.signal);
       snapshot.observations = observations.flat();
+      snapshot.completedVisualBatches = [...new Set([...(snapshot.completedVisualBatches ?? []), index])].sort((a, b) => a - b);
       await save("visual");
     }),
   ]);
@@ -72,11 +74,8 @@ export async function analyzeSelectedFrames(input: {
   // start a summary on partial inputs or silently retry a paid request.
   if (failed) throw failure;
   // The final text-only call sees only evidence actually sent to a model.
-  const evidence = new Set([...snapshot.frameTexts.map(t => t.frameId), ...snapshot.observations.flatMap(o => o.frameIds)]);
-  const frames: FrameEvidence[] = snapshot.frames.filter(f => evidence.has(f.id));
   input.signal?.throwIfAborted();
-  snapshot.summary = await input.models.summarize({ revision: input.revision, frames, texts: snapshot.texts, observations: snapshot.observations,
-    durationMs: input.selection.durationMs, metadata: { title: snapshot.source.title, author: snapshot.source.author }, limitations: snapshot.coverage.limitations }, input.signal);
+  snapshot.summary = await input.models.summarize(summaryInput(snapshot, input.revision), input.signal);
   snapshot.summaryRevision = input.revision;
   await save("summary");
   return snapshot;

@@ -677,3 +677,27 @@ it.each(["refunded", "sandbox_paid"])("preserves %s without claiming a real cred
   const client = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch, "", "https://h/api/internal", "lot-agent", "control-secret");
   expect((await client.getManagedRechargeOrder(7, "LOTvirtual123")).status).toBe(status);
 });
+
+it.each(["headers", "body"])("cancels a stalled model catalog %s read", async phase => {
+  const controller = new AbortController(); let observed: AbortSignal | null | undefined;
+  const never = new Promise<never>(() => {});
+  const fetch = vi.fn(async (_url, init) => {
+    observed = init?.signal;
+    return phase === "headers" ? never : Object.assign(new Response(), { json: () => never });
+  });
+  const client = new TokenhubClient("https://fixture.test", fetch);
+  const result = client.listModels("fixture-key", controller.signal).catch(error => error);
+  await Promise.resolve(); controller.abort();
+  expect(await result).toMatchObject({ name: "AbortError" });
+  expect(observed?.aborted).toBe(true); expect(fetch).toHaveBeenCalledOnce();
+});
+
+it("bounds catalog body reads even without caller cancellation", async () => {
+  vi.useFakeTimers();
+  try {
+    const client = new TokenhubClient("https://fixture.test", async () => Object.assign(new Response(), { json: () => new Promise<never>(() => {}) }));
+    const result = client.listModels("fixture-key").catch(error => error);
+    await vi.advanceTimersByTimeAsync(15_001);
+    expect(await result).toMatchObject({ name: "TimeoutError" });
+  } finally { vi.useRealTimers(); }
+});

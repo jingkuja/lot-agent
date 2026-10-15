@@ -1,3 +1,4 @@
+import { checkReviewFixes } from "./check-marketing-review-fixes.js";
 /** Only a NEW disposable local database; no downloads or paid model calls. */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -174,10 +175,21 @@ try {
   assert.equal((await app.request(`/${first.id}/text`, { method: "PATCH", headers: { "x-test-user": owner, "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: 1, texts: [] }) })).status, 409);
   const privateDirectory = await storage.directory(owner, first.id);
   await writeFile(join(privateDirectory, "source.mp4"), "fixture");
+  await writeFile(join(privateDirectory, "gray.raw"), "scratch");
+  await writeFile(join(privateDirectory, "frame-0361.jpg"), "unused candidate");
+  const immutableSelection = (await store.row(owner, first.id)).selection;
   await db.pool.query("UPDATE marketing_reference_analyses SET created_at=now()-interval '8 days',snapshot=jsonb_set(snapshot,'{source,mediaKey}','\"source.mp4\"') WHERE id=$1", [first.id]);
   await collectAnalysisFiles(store, storage);
   await assert.rejects(stat(join(privateDirectory, "source.mp4")), /ENOENT/);
   assert((await stat(join(privateDirectory, "frame-0001.jpg"))).isFile());
+  await assert.rejects(stat(join(privateDirectory, "gray.raw")), /ENOENT/);
+  await assert.rejects(stat(join(privateDirectory, "frame-0361.jpg")), /ENOENT/);
+  assert.deepEqual((await store.row(owner, first.id)).selection, immutableSelection);
+  // Rows cleaned by the old source-only collector still reclaim scratch files.
+  await writeFile(join(privateDirectory, "gray.raw"), "legacy scratch");
+  await db.pool.query("UPDATE marketing_reference_analyses SET scratch_cleaned_at=NULL WHERE id=$1", [first.id]);
+  await collectAnalysisFiles(store, storage);
+  await assert.rejects(stat(join(privateDirectory, "gray.raw")), /ENOENT/);
   await store.remove(owner, first.id); assert.equal(await store.get(owner, first.id), null);
   await collectAnalysisFiles(store, storage); await assert.rejects(stat(privateDirectory), /ENOENT/);
   assert.equal((await store.list(owner)).some(row => row.id === first.id), false);
@@ -234,6 +246,7 @@ try {
   assert.equal((await store.get(owner, conflictingJob.id))?.errorCode, "PROJECT_CONFLICT");
   assert.equal((await projects.get(owner, conflicting.id))?.draft.topic, "另一个页面的新要求");
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM usage_logs")).rows[0].n, 0);
+  const fairness = await checkReviewFixes(db.pool);
   const redisUrl = process.env.MARKETING_ANALYSIS_CHECK_REDIS_URL;
   if (redisUrl) {
     const redisAddress = new URL(redisUrl);
@@ -263,6 +276,13 @@ try {
       while (!await done()) { if (Date.now() > deadline) throw new Error("Queue integration timed out"); await dispatchAnalyses(store, queue); await new Promise(resolve => setTimeout(resolve, 50)); }
     }
     try {
+      await db.pool.query("UPDATE marketing_reference_analyses SET status='queued',cancel_requested=false WHERE user_id=ANY($1) AND status='cancelled'", [[fairness.backlogOwner, fairness.otherOwner]]);
+      waitForCancel = (await db.pool.query("SELECT id FROM marketing_reference_analyses WHERE user_id=$1 AND status='queued' ORDER BY created_at,id LIMIT 1", [fairness.backlogOwner])).rows[0].id;
+      await until(async () => requests.has(waitForCancel) && (await store.get(fairness.otherOwner, fairness.otherTask))?.status === "ready");
+      assert.equal(peak, 2, "another owner progresses beside a blocked owner's 101-row backlog");
+      await db.pool.query("UPDATE marketing_reference_analyses SET status='cancelled',cancel_requested=true WHERE user_id=$1 AND status IN ('queued','running')", [fairness.backlogOwner]);
+      await until(async () => !(await store.row(fairness.backlogOwner, waitForCancel)).lease_token);
+      waitForCancel = ""; peak = 0;
       const a = await create(); const b = await create();
       await until(async () => (await store.get(owner, a.id))?.status === "ready" && (await store.get(owner, b.id))?.status === "ready");
       assert.equal(peak, 1, "per-owner leases serialize even with worker concurrency=2");

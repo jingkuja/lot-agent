@@ -50,6 +50,7 @@ export type AnalysisStatus = "queued" | "running" | "needs_auth" | "needs_review
 export interface AnalysisSnapshot {
   source: AnalysisSource; frames: FrameEvidence[]; frameTexts: FrameText[]; texts: ScreenText[];
   creation?: { draft: MarketingDraft; analysis: string };
+  completedVisualBatches?: number[];
   observations: VisualObservation[]; summary?: AnalysisSummary; summaryRevision?: number; coverage?: AnalysisCoverage;
 }
 export interface ReferenceAnalysis {

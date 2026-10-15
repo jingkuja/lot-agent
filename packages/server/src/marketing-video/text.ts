@@ -1,4 +1,10 @@
-import type { LLMProvider } from "@lot-agent/core";
+import { LLMResponseError, type LLMProvider } from "@lot-agent/core";
+
+export interface MarketingTextReceipt {
+  text: string; responseId?: string; usage?: { promptTokens: number; completionTokens: number };
+  outcome: "completed" | "failed" | "unknown" | "rejected";
+}
+export interface MarketingTextOptions { upstreamBilling?: boolean; onReceipt?: (receipt: MarketingTextReceipt) => Promise<void>; }
 
 export class MarketingTextError extends Error {
   constructor(message: string, readonly code: string, readonly status: 400 | 402 | 502 | 503 | 504 = 502) {
@@ -26,33 +32,65 @@ export function marketingTextError(error: unknown, signal?: AbortSignal): Market
   return new MarketingTextError("文案模型暂时无法完成请求，请稍后重试。", "MARKETING_MODEL_UNAVAILABLE", 503);
 }
 
-export async function completeMarketingJson(llm: LLMProvider, system: string, input: string, signal?: AbortSignal): Promise<unknown> {
+export async function completeMarketingJson(llm: LLMProvider, system: string, input: string, signal?: AbortSignal, onReceipt?: MarketingTextOptions["onReceipt"]): Promise<unknown> {
   const timeout = AbortSignal.timeout(300_000);
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let text = "";
   let completed = false;
+  const receipt: MarketingTextReceipt = { text: "", outcome: "unknown" };
+  let saved = false;
+  let receiptWrites = Promise.resolve();
+  let attempts = 0; let lastAttemptError: unknown;
   try {
     requestSignal.throwIfAborted();
     // Kimi rejects reasoning.effort=none. Keep its default reasoning policy
     // instead of sending the generic "off" switch through the gateway.
     for await (const chunk of llm.chat([
       { role: "system", content: system }, { role: "user", content: input },
-    ], undefined, { signal: requestSignal, params: { maxTokens: 8192, responseFormat: "json_object" } })) {
+    ], undefined, { signal: requestSignal,
+      onAttempt: () => {
+        if (onReceipt && attempts++ > 0) throw lastAttemptError ?? new Error("MARKETING_REQUEST_UNKNOWN");
+      },
+      onAttemptEnd: error => { lastAttemptError = error; },
+      params: { maxTokens: 8192, responseFormat: "json_object" }, onResponseId: id => {
+      receipt.responseId = id;
+      if (onReceipt) receiptWrites = receiptWrites.then(() => onReceipt({ text: "", outcome: "unknown", responseId: id }));
+      // Prevent an unhandled rejection while the stream is still active. The
+      // original promise is awaited before publishing any complete receipt.
+      void receiptWrites.catch(() => {});
+    } })) {
       if (chunk.type === "text") text += chunk.content ?? "";
+      if (text.length > 100_000) throw new Error("MODEL_OUTPUT_LIMIT");
       if (chunk.type === "done") {
+        receipt.usage = chunk.usage; receipt.responseId = chunk.responseId ?? receipt.responseId;
+        receipt.outcome = chunk.usage ? "failed" : "unknown";
         if (["length", "max_tokens"].includes(chunk.finishReason ?? "")) {
           throw new MarketingTextError("模型输出未完成，请重试；当前文案已保留。", "MARKETING_TEXT_TRUNCATED");
         }
         completed = ["stop", "end_turn", "stop_sequence"].includes(chunk.finishReason ?? "");
       }
     }
-    requestSignal.throwIfAborted();
+    // Once the full result arrives, commit it even if the browser disconnects.
+    if (!completed) requestSignal.throwIfAborted();
     if (!completed || !text.trim()) {
       throw new MarketingTextError("模型未返回完整结果，请重试；当前文案已保留。", "MARKETING_TEXT_EMPTY");
     }
+    receipt.text = text; receipt.outcome = receipt.usage ? "completed" : "unknown";
+    await receiptWrites;
+    if (onReceipt) { await onReceipt(receipt); saved = true; }
     // Accept a single Markdown fence from compatible providers, but never
     // repair truncated JSON or treat malformed output as a passing review.
     try { return JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")); }
     catch { throw new MarketingTextError("模型返回的结果格式异常，请重试；当前文案已保留。", "MARKETING_TEXT_INVALID_JSON"); }
-  } catch (error) { throw marketingTextError(error, requestSignal); }
+  } catch (error) {
+    if (!saved && onReceipt) {
+      await receiptWrites;
+      receipt.text = text;
+      if (error instanceof LLMResponseError && error.usage) { receipt.usage = error.usage; receipt.outcome = "failed"; }
+      const status = (error as { status?: number })?.status;
+      if (!text && !receipt.usage && !receipt.responseId && [401, 402, 403, 429].includes(status ?? 0)) receipt.outcome = "rejected";
+      await onReceipt(receipt);
+    }
+    throw marketingTextError(error, requestSignal);
+  }
 }

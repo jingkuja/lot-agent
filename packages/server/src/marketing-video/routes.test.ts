@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { MarketingError } from "./repository.js";
+import type { PgMarketingTextOperations } from "./operations.js";
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
@@ -10,13 +13,28 @@ vi.mock("./media.js", () => ({ mediaCapabilities: async () => ({ composition: tr
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner") {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
-  const store = { get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async () => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task") };
+  const store = { get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task") };
   const service = { db: { pool: {}, getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async () => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
+  const operations = {
+    begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, _input: unknown, draft?: typeof project.draft) => {
+      if (version !== project.version || project.taskId) throw new MarketingError("草稿已更新", 409);
+      return { fresh: true, operation: { id: requestId, kind, status: "running" }, draft: draft ?? project.draft };
+    }),
+    receipt: vi.fn(), fail: vi.fn(), list: vi.fn(async () => []),
+    finish: vi.fn(async (owner: string, requestId: string, result: { draft: typeof project.draft; analysis: string }) => {
+      await store.save(owner, project.id, project.version, result.draft);
+      return { id: requestId, status: "succeeded", result };
+    }),
+  };
   const app = new Hono<{ Variables: { userId: string } }>();
   if (owner) app.use("*", async (c, next) => { c.set("userId", owner); await next(); });
-  app.route("/api/marketing-videos", createMarketingVideoRoutes(service as unknown as AgentService, "/tmp", store as unknown as PgMarketingProjectStore));
-  const call = (path: string, value?: unknown, method = "POST") => app.request(`/api/marketing-videos${path === "/" ? "" : path}`, value === undefined ? undefined : { method, body: JSON.stringify(value), headers: { "Content-Type": "application/json" } });
-  return { app, call, store, service, project };
+  app.route("/api/marketing-videos", createMarketingVideoRoutes(service as unknown as AgentService, "/tmp", store as unknown as PgMarketingProjectStore, operations as unknown as PgMarketingTextOperations));
+  const call = (path: string, value?: unknown, method = "POST") => {
+    const input = value && typeof value === "object" && (path === "/copy" || path.endsWith("/storyboard"))
+      ? { clientRequestId: randomUUID(), projectId: id, version: 1, ...value } : value;
+    return app.request(`/api/marketing-videos${path === "/" ? "" : path}`, input === undefined ? undefined : { method, body: JSON.stringify(input), headers: { "Content-Type": "application/json" } });
+  };
+  return { app, call, store, service, project, operations };
 }
 describe("marketing project HTTP boundaries", () => {
   it("serves the frontend's mounted list, capabilities and copy paths", async () => {
@@ -31,7 +49,7 @@ describe("marketing project HTTP boundaries", () => {
     const copy = await f.call("/copy", { draft: { topic: "转角咖啡店：现磨咖啡、明亮空间" }, locale: "zh" });
     expect(copy.status).toBe(200);
     expect(await copy.json()).toMatchObject({ draft: { script: storyboardScript(generated.shots), storyboard: generated.shots, publishTitle: generated.publishTitle, tags: generated.tags }, analysis: generated.analysis });
-    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal), { upstreamBilling: true });
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal), expect.objectContaining({ upstreamBilling: true, onReceipt: expect.any(Function) }));
   });
   it("creates copy and complete shots from text alone, without requiring a product topic", async () => {
     const f = fixture();
@@ -163,7 +181,7 @@ describe("marketing storyboard editing", () => {
     const f = fixture(); f.service.marketingText.mockResolvedValueOnce({ shots });
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(200);
     expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: shots, script: storyboardScript(shots) }));
-    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal), { upstreamBilling: true });
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal), expect.objectContaining({ upstreamBilling: true, onReceipt: expect.any(Function) }));
     expect(f.store.reserve).not.toHaveBeenCalled();
     expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
   });
@@ -194,4 +212,16 @@ describe("marketing storyboard editing", () => {
     expect(f.store.get).toHaveBeenCalledWith("owner", id);
     expect(f.service.marketingText).not.toHaveBeenCalled();
   });
+});
+
+it("rejects direct video synthesis but accepts ordinary website CTAs", async () => {
+  const f = fixture();
+  for (const reference of ["https://www.bilibili.com/video/BV1234567890", "b23.tv/abc123", "分享 https://xhslink.com/a/abcdef", "https://example.com https://v.douyin.com/abcdef"]) {
+    const result = await f.call("/copy", { draft: { copyMode: "rewrite", reference }, locale: "zh", source: { kind: "text" } });
+    expect(result.status).toBe(400); expect(await result.json()).toMatchObject({ code: "VIDEO_ANALYSIS_REQUIRED" });
+  }
+  expect(f.service.marketingText).not.toHaveBeenCalled(); expect(f.operations.begin).not.toHaveBeenCalled();
+  f.service.marketingText.mockResolvedValueOnce({ shots: [1, 2].map(() => ({ script: "现磨咖啡欢迎到店品尝。", visual: "店铺", action: "端杯", camera: "近景" })), publishTitle: "咖啡", tags: "", analysis: "介绍咖啡" });
+  expect((await f.call("/copy", { draft: { copyMode: "rewrite", reference: "现磨咖啡，欢迎品尝。https://example.com/shop" }, locale: "zh", source: { kind: "text" } })).status).toBe(200);
+  expect(f.service.marketingText).toHaveBeenCalledOnce();
 });

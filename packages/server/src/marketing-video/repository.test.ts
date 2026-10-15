@@ -26,6 +26,6 @@ describe("persisting confirmed marketing shots", () => {
     const old = { script: "欢迎到店" };
     expect(renderKey(old as never)).toBe(renderKey(MarketingDraftSchema.parse(old)));
     const draft = MarketingDraftSchema.parse(old);
-    expect(renderKey({ ...draft, storyboard: [{ script: "欢迎到店", visual: "店铺", action: "招手", camera: "近景" }] })).not.toBe(renderKey(draft));
+    expect(renderKey(MarketingDraftSchema.parse({ ...draft, storyboard: [{ script: "欢迎到店", visual: "店铺", action: "招手", camera: "近景" }] }))).not.toBe(renderKey(draft));
   });
 });

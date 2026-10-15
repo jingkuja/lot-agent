@@ -1,5 +1,6 @@
+import { TextOperationPanel } from "./TextOperationPanel.js";
 import { useEffect, useId, useRef, useState } from "react";
-import { MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject } from "@lot-agent/core/marketing-video";
+import { marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject } from "@lot-agent/core/marketing-video";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
@@ -37,8 +38,11 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [step, setStep] = useState(0);
   const [actionBusy, setBusy] = useState(false);
   const [analysisPending, setAnalysisPending] = useState(false);
-  const busy = actionBusy || analysisPending; const [saving, setSaving] = useState(false);
+  const [textPending, setTextPending] = useState(false);
+  const [operationReload, setOperationReload] = useState(0);
+  const busy = actionBusy || analysisPending || textPending; const [saving, setSaving] = useState(false);
   const [error, setError] = useState(""); const [notice, setNotice] = useState("");
+  const [sourceKind, setSourceKind] = useState<"text" | "video">("text");
   const [analysis, setAnalysis] = useState(""); const [twinOpen, setTwinOpen] = useState<"all" | "voice" | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(""); const [loadAttempt, setLoadAttempt] = useState(0);
@@ -46,6 +50,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const draftId = useRef<string>(crypto.randomUUID()); const version = useRef(0);
   const saved = useRef(JSON.stringify(draft)); const flight = useRef<Promise<Project> | null>(null);
   const epoch = useRef(0); const alive = useRef(true); const lock = useRef(false);
+  const textRequest = useRef<{ fingerprint: string; id: string } | null>(null);
   const analysisRequest = useRef<{ fingerprint: string; body: unknown } | null>(null);
   const storageKey = `lot:marketing-video:${ownerId}`;
   const setCurrent = (p: Project) => { if (p.id === draftId.current && p.version < version.current) return; projectRef.current = p; setProject(p); setProjects(old => [p, ...old.filter(item => item.id !== p.id)].slice(0, 50)); };
@@ -67,13 +72,16 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
         catch { next.storyboard = []; }
       }
     }
+    if (name === "reference") setSourceKind(marketingSourceKind(String(value)));
     update(next);
   }
   async function open(id: string) {
     const token = ++epoch.current;
+    setTextPending(false);
     const p = await requestProject(`/marketing-videos/${id}`);
     if (!alive.current || token !== epoch.current) return;
     draftId.current = id; version.current = p.version; saved.current = JSON.stringify(p.draft);
+    setSourceKind(marketingSourceKind(p.draft.reference));
     update(p.draft); setCurrent(p); setAssets(p.assets ?? {}); setStep(p.referenceAnalysis ? 0 : p.draft.storyboard.length ? 2 : 0); setAnalysisPending(!!p.referenceAnalysis && !p.referenceAnalysis.acceptedRevision); setAnalysis(""); remember(id);
   }
   useEffect(() => {
@@ -129,7 +137,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     return () => { stopped = true; clearTimeout(timer); };
   }, [active, project?.id]);
   async function act(work: () => Promise<void>) {
-    if (lock.current || analysisPending || !ready) return; lock.current = true; setBusy(true); setError("");
+    if (lock.current || analysisPending || textPending || !ready) return; lock.current = true; setBusy(true); setError("");
     try { await work(); } catch (e) { if (alive.current) setError(errorMessage(e)); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
   }
@@ -140,7 +148,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }
   async function writeCopy() {
     const token = epoch.current;
-    if (draftRef.current.copyMode === "rewrite" && /https?:\/\//i.test(draftRef.current.reference)) {
+    if (draftRef.current.copyMode === "rewrite" && sourceKind === "video") {
       const p = await save();
       if (!alive.current || token !== epoch.current) return;
       const fingerprint = JSON.stringify([p.id, p.draft, locale]);
@@ -159,10 +167,31 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       }
       return;
     }
-    const result = await request<{ draft: MarketingDraft; analysis: string }>("/marketing-videos/copy", json("POST", { draft: draftRef.current, locale }));
+    const p = await save();
     if (!alive.current || token !== epoch.current) return;
-    update(MarketingDraftSchema.parse(result.draft)); setAnalysis(result.analysis); await save();
+    const fingerprint = JSON.stringify(["copy", p.id, p.version, p.draft, locale, sourceKind]);
+    if (textRequest.current?.fingerprint !== fingerprint) textRequest.current = { fingerprint, id: crypto.randomUUID() };
+    try {
+      const result = await request<{ project: Project; analysis: string }>("/marketing-videos/copy", json("POST", {
+        draft: p.draft, locale, source: { kind: sourceKind }, projectId: p.id, version: p.version, clientRequestId: textRequest.current.id,
+      }));
+      if (!alive.current || token !== epoch.current) return;
+      const next = normalizeProject(result.project);
+      version.current = next.version; saved.current = JSON.stringify(next.draft);
+      update(next.draft); setCurrent(next); setAnalysis(result.analysis);
+    } finally { if (alive.current && token === epoch.current) setOperationReload(n => n + 1); }
   }
+  async function textOperationState(operation?: { id: string; status: string; appliedVersion?: number; result?: { analysis: string } }) {
+    setTextPending(!!operation && ["running", "unknown"].includes(operation.status));
+    if (operation?.status === "failed") textRequest.current = null;
+    if (operation?.status !== "succeeded" || !operation.appliedVersion || operation.appliedVersion <= version.current || dirty) return;
+    const token = epoch.current; const id = draftId.current;
+    const p = await requestProject(`/marketing-videos/${id}`);
+    if (!alive.current || token !== epoch.current || saved.current !== JSON.stringify(draftRef.current)) return;
+    version.current = p.version; saved.current = JSON.stringify(p.draft);
+    update(p.draft); setCurrent(p); setAnalysis(operation.result?.analysis ?? "");
+  }
+
   async function completedAnalysis(value: ReferenceAnalysis) {
     if (value.projectId !== draftId.current || saved.current !== JSON.stringify(draftRef.current)) return;
     const token = epoch.current;
@@ -191,11 +220,16 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const token = epoch.current;
     const p = await save();
     if (!alive.current || token !== epoch.current) return;
-    const result = await requestProject(`/marketing-videos/${p.id}/storyboard`, json("POST", { version: p.version, locale, instruction, index }));
-    if (!alive.current || token !== epoch.current) return;
-    version.current = result.version; saved.current = JSON.stringify(result.draft);
-    update(result.draft); setCurrent(result); setNotice("分镜已保存，请确认后生成视频。");
+    const fingerprint = JSON.stringify(["storyboard", p.id, p.version, locale, instruction, index]);
+    if (textRequest.current?.fingerprint !== fingerprint) textRequest.current = { fingerprint, id: crypto.randomUUID() };
+    try {
+      const result = await requestProject(`/marketing-videos/${p.id}/storyboard`, json("POST", { version: p.version, locale, instruction, index, clientRequestId: textRequest.current.id }));
+      if (!alive.current || token !== epoch.current) return;
+      version.current = result.version; saved.current = JSON.stringify(result.draft);
+      update(result.draft); setCurrent(result); setNotice("分镜已保存，请确认后生成视频。");
+    } finally { if (alive.current && token === epoch.current) setOperationReload(n => n + 1); }
   }
+
   async function manualStoryboard() {
     const storyboard = planMarketingSegments(draftRef.current.script, draftRef.current.durationSec).map(part => ({
       durationSec: part.durationSec, script: part.script, visual: draftRef.current.background || t("展示产品与使用场景"),
@@ -216,6 +250,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     field("assets", { ...draftRef.current.assets, [slot]: value.assetId });
   }
   async function newDraft(copy = false, editShots = false) {
+    setTextPending(false); textRequest.current = null;
     if (dirty) await save();
     epoch.current++; draftId.current = crypto.randomUUID(); version.current = 0; projectRef.current = null; setProject(null); setAnalysisPending(false); analysisRequest.current = null;
     const next = copy ? { ...draftRef.current } : MarketingDraftSchema.parse({});
@@ -237,6 +272,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     <header className="mv-heading"><div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div><button disabled={busy || saving || !ready} onClick={() => void act(() => newDraft())}>{t("开始新视频")}</button></header>
     {loadError && <div className="mv-connection-error" role="alert"><p>{t(loadError)}</p><button onClick={() => { setLoadError(""); setLoadAttempt(value => value + 1); }}>{t("重新连接")}</button></div>}
     <details className="mv-library"><summary>{t("我的视频草稿")} · {projects.length}</summary><div className="mv-draft-list">{projects.map(p => <button key={p.id} disabled={busy || saving} aria-pressed={p.id === project?.id} onClick={() => void act(async () => { if (dirty) await save(); await open(p.id); })}><strong>{p.draft.publishTitle || p.draft.topic || t("未命名草稿")}</strong><span>{p.draft.durationSec}s · {t(({ draft: "草稿", pending: "等待生成", running: "生成中", succeeded: "已生成", failed: "生成失败", cancelled: "已取消" } as Record<string, string>)[p.status] ?? p.status)}</span></button>)}</div></details>
+    {project && <TextOperationPanel key={project.id} projectId={project.id} reload={operationReload} onState={textOperationState} />}
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}
     {project?.taskId ? <section className="mv-card mv-results"><div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => void act(() => newDraft(true))}>{t("复制为新草稿")}</button></div>
       {project.status === "succeeded" && project.output?.assets?.[0] ? <><video className="mv-result-video" controls src={project.output.assets[0].url} /><a className="mv-download" href={project.output.assets[0].url} download>{t("下载视频")}</a></> : <div className="mv-progress"><strong>{t(active ? "正在制作完整视频" : project.status === "cancelled" ? "已取消" : "生成失败")}</strong><progress aria-label={t("视频制作进度")} max="100" value={project.progress} /><span>{project.progress}% · {project.stage?.startsWith("片段完成 ") ? t("片段完成 {0}", [project.stage.slice(5)]) : t(project.stage || "等待生成")}</span>{project.status === "pending" && <button disabled={busy} onClick={() => void act(() => generate(true))}>{t("恢复排队任务")}</button>}{active && <button disabled={busy} onClick={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })}>{t("取消")}</button>}{!active && <button disabled={busy} onClick={() => void act(() => generate(true))}>{t("继续未完成的任务")}</button>}{project.error && <p className="mv-error">{t(project.error)}</p>}<p className="mv-hint">{t("成功片段会保留。重新生成失败片段可能产生费用；提交结果未知时不会自动重发。")}</p></div>}
@@ -248,6 +284,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
         {step === 0 && <>
           {choices("文案方式", [{ value: "generate", label: "智能生成文案" }, { value: "rewrite", label: "拆解爆款文案" }], draft.copyMode, value => field("copyMode", value as MarketingDraft["copyMode"]))}
           {draft.copyMode === "rewrite" ? <>
+            {choices("参考内容类型", [{ value: "text", label: "文字文案" }, { value: "video", label: "视频链接" }], sourceKind, value => setSourceKind(value as "text" | "video"))}
             {textField("reference", "视频链接或参考文案", 6000, 4)}
             <p className="mv-hint">{t("粘贴视频链接、分享文本或文案，AI 自动拆解并生成文案和分镜。")}</p>
             <details><summary>{t("补充产品与创作要求（选填）")}</summary>{textField("topic", "产品、卖点和目标顾客", 800)}</details>

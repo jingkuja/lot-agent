@@ -31,7 +31,7 @@ describe("editable marketing storyboard", () => {
   it("preserves manual boundaries and invalidates review after visual edits", () => {
     const draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots) });
     expect(resolveMarketingSegments(draft).map(part => part.script)).toEqual(shots.map(shot => shot.script));
-    const edited = { ...draft, storyboard: shots.map((shot, i) => i ? shot : { ...shot, visual: "加入限时折扣招牌" }) };
+    const edited = MarketingDraftSchema.parse({ ...draft, storyboard: shots.map((shot, i) => i ? shot : { ...shot, visual: "加入限时折扣招牌" }) });
     expect(marketingReviewText(edited)).not.toBe(marketingReviewText(draft));
   });
   it("rejects stale, incomplete and overlong boards without preventing partial draft saves", () => {
@@ -40,9 +40,9 @@ describe("editable marketing storyboard", () => {
     expect(() => resolveMarketingSegments({ ...draft, script: "其他文案" })).toThrow("不一致");
     const partial = { ...draft, storyboard: shots.map(shot => ({ ...shot, camera: "" })) };
     expect(MarketingDraftSchema.safeParse(partial).success).toBe(true);
-    expect(() => resolveMarketingSegments(partial)).toThrow("补全");
+    expect(() => resolveMarketingSegments(MarketingDraftSchema.parse(partial))).toThrow("补全");
     const long = shots.map(shot => ({ ...shot, script: "字".repeat(100) }));
-    expect(() => resolveMarketingSegments({ ...draft, storyboard: long, script: storyboardScript(long) })).toThrow("过长");
+    expect(() => resolveMarketingSegments(MarketingDraftSchema.parse({ ...draft, storyboard: long, script: storyboardScript(long) }))).toThrow("过长");
   });
   it("keeps old drafts and their review keys compatible", () => {
     const draft = MarketingDraftSchema.parse({ script: "欢迎来到咖啡店，来这里喝一杯咖啡。" });
