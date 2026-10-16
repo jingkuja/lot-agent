@@ -198,6 +198,8 @@ services:
     pids_limit: 128
     # The host must permit unprivileged user namespaces for bubblewrap.
     # No privileged mode, host networking or Docker socket is permitted.
+    # Ubuntu/Docker defaults may also block clone and mount. Install and verify
+    # the dedicated profiles in deploy/security/README.md before enabling them.
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]

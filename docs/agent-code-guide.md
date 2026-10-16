@@ -285,7 +285,7 @@ pnpm build
 
 ## 9. 专项文档
 
-- 部署与客户端：[部署](deployment.md)、[桌面端](desktop.md)、[小程序](miniprogram.md)、[充值](recharge.md)。
+- 部署与客户端：[部署](deployment.md)、[营销影像新服务器部署](marketing-video-new-server-deployment.md)、[媒体 Worker Linux 安全策略与预检](../deploy/security/README.md)、[桌面端](desktop.md)、[小程序](miniprogram.md)、[充值](recharge.md)。
 - 营销影像：[十月十六日实施与验收](marketing-video-implementation-20261016.md)（N01–N04、F03/F04 后续契约与样例）、[F01 / F02 修复与验收](marketing-video-f01-f02-acceptance-20261015.md)、[10 月 15 日评审修复与验收](marketing-video-review-20261015.md)、[营销视频制作](marketing-video.md)、[参考视频下载与抽帧分析方案](marketing-video-reference-analysis-plan.md)、[参考视频分析实现与验收](marketing-video-reference-analysis.md)（含本机真实样本测试；三平台批量质量与 Linux 环境待验收）。
 - 办公：[PPT 工作流](ppt-workflow.md)、[PPT 技能](../skills/ppt-authoring.md)、[文档技能](../skills/doc-generation.md)。
 - 知识库：[入库与检索](knowledge-ingestion.md)、[外部 API](knowledge-external-api.md)、[OpenAPI 契约](knowledge-openapi.json)、[备份恢复](knowledge-backup-restore.md)、[检索优化](knowledge-retrieval-optimization.md)。

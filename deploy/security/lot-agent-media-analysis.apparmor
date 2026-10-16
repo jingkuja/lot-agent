@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: Copyright The Moby Authors
+# SPDX-License-Identifier: Apache-2.0
+# Modified for Lot Agent: allow nested bubblewrap mount/pivot_root operations.
+# Ubuntu 22.04; retain user=node, cap_drop=ALL, no-new-privileges.
+abi <abi/3.0>,
+#include <tunables/global>
+profile lot-agent-media-analysis-v2 flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  network,
+  # Disallow obsolete socket families removed from the Linux kernel.
+  # AF_DECnet has no AppArmor family name, so it cannot be denied here.
+  deny network ax25,
+  deny network ipx,
+  deny network appletalk,
+  deny network netrom,
+  deny network rose,
+  deny network econet,
+  deny network atmsvc,
+  deny network irda,
+  deny network wanpipe,
+  deny network isdn,
+  deny network caif,
+  # Disallow AF_ALG (Linux kernel crypto API); see https://copy.fail/
+  deny network alg,
+  # Disallow AF_VSOCK to prevent host/guest communication.
+  deny network vsock,
+  capability,
+  file,
+  umount,
+  # Host (privileged) processes may send signals to container processes.
+  signal (receive) peer=unconfined,
+  # runc may send signals to container processes (for "docker stop").
+  signal (receive) peer=runc,
+  # crun may send signals to container processes (for "docker stop" when used with crun OCI runtime).
+  signal (receive) peer=crun,
+  # dockerd may send signals to container processes (for "docker kill").
+  signal (receive) peer=unconfined,
+  # Container processes may send signals amongst themselves.
+  signal (send,receive) peer=lot-agent-media-analysis-v2,
+  deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
+  # deny write to files not in /proc/<number>/** or /proc/sys/**
+  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel)
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,  # deny everything except shm* in /proc/sys/kernel/
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  # Docker systempaths masking prevents nested procfs mounts. With masking
+  # disabled only for this container, enforce sensitive path access through LSM.
+  # These paths remain visible but inaccessible; this is not identical to masking.
+  deny @{PROC}/{acpi,asound,interrupts,kcore,keys,latency_stats,sched_debug,scsi,timer_list,timer_stats}{,/**} rwklx,
+  deny @{PROC}/{bus,fs,irq,sys,sysrq-trigger}{,/**} wklx,
+  deny /sys/devices/system/cpu/cpu[0-9]*/thermal_throttle{,/**} rwklx,
+  deny /sys/{firmware,devices/virtual/powercap}{,/**} rwklx,
+  # Bubblewrap needs mounts and pivot_root in its nested user namespace.
+  # Kernel capability checks still apply; the outer container has no capabilities.
+  mount,
+  pivot_root,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  # allow processes within the container to trace each other,
+  # provided all other LSM and yama setting allow it.
+  ptrace (trace,tracedby,read,readby) peer=lot-agent-media-analysis-v2,
+}

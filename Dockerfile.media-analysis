@@ -19,6 +19,9 @@ RUN target_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
  && curl --fail --location --proto '=https' --tlsv1.2 "https://github.com/yt-dlp/yt-dlp/releases/download/$YTDLP_VERSION/$artifact" -o /usr/local/bin/yt-dlp \
  && printf '%s  /usr/local/bin/yt-dlp\n' "$YTDLP_SHA256" | sha256sum -c - \
  && chmod 755 /usr/local/bin/yt-dlp
+# Keep FFmpeg's BLAS/LAPACK dependencies within the sandbox's /usr mount.
+COPY deploy/security/fix-library-links.sh /usr/local/bin/lot-media-fix-library-links
+RUN sh /usr/local/bin/lot-media-fix-library-links
 ENV ROLE=media-analysis-worker
 USER node
 HEALTHCHECK NONE

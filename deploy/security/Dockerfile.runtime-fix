@@ -1,0 +1,7 @@
+# Offline repair of an already built, pinned media image. Context: this folder.
+ARG MEDIA_BASE_IMAGE=lot-agent-media-analysis:1.0
+FROM ${MEDIA_BASE_IMAGE}
+USER root
+COPY fix-library-links.sh /usr/local/bin/lot-media-fix-library-links
+RUN sh /usr/local/bin/lot-media-fix-library-links
+USER node

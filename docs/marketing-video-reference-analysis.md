@@ -124,9 +124,14 @@ docker build -f Dockerfile.media-analysis -t lot-agent-media-analysis:1.0 \
 docker compose --profile media-analysis up -d
 ```
 
-镜像固定下载器版本并校验 SHA256，不在任务中自更新。发布时还应固定基础应用镜像摘要。**此可选镜像与 Linux bubblewrap 执行尚未在本次 macOS 环境验收**；目标主机必须允许非特权 user namespace 及所需 mount 操作，容器 seccomp/AppArmor 也可能阻止它们。不能用 privileged、挂载宿主根目录/Docker socket 或关闭隔离作为运行条件；不满足时保留 `SANDBOX_REQUIRED` / 隔离失败，先完成目标运行环境验收。
+镜像固定下载器版本并校验 SHA256，不在任务中自更新。发布时还应固定基础应用镜像摘要。**2026-10-16 已在 Ubuntu 22.04 / amd64 完成 Linux 沙箱与媒体工具链验收**，见[实测记录](marketing-video-server-deployment-20261016.md)。新服务器须按[首次部署指南](marketing-video-new-server-deployment.md)准备宿主机策略并重新预检；目标主机必须允许非特权 user namespace 及所需 mount 操作，容器 seccomp/AppArmor 也可能阻止它们。不能用 privileged、挂载宿主根目录/Docker socket 或关闭隔离作为运行条件；不满足时保留 `SANDBOX_REQUIRED` / 隔离失败，先完成目标运行环境验收。
 
 ## 验证命令与未完成验收
+
+Ubuntu / Docker 出现 namespace 或 mount 拒绝时，按
+[媒体 Worker 专用安全策略](../deploy/security/README.md)安装并验证 seccomp / AppArmor
+策略。先在无业务数据的测试容器验证，再重建媒体 Worker；不关闭 seccomp / AppArmor。
+嵌套 proc 挂载所需的 `systempaths=unconfined` 必须与 v2 AppArmor 配套使用。
 
 ```sh
 pnpm test:marketing-analysis
