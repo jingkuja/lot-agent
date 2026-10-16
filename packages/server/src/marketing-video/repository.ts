@@ -94,6 +94,8 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
   async segments(owner: string, id: string) {
-    return (await this.pool.query(`SELECT s.*,t.status,t.vendor_task_id,t.output,t.error FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id JOIN tasks t ON t.id=s.task_id WHERE p.id=$1 AND p.user_id=$2 ORDER BY s.slot`, [id, owner])).rows;
+    return (await this.pool.query(`SELECT s.*,t.status,t.vendor_task_id,t.output,t.error FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id JOIN tasks t ON t.id=s.task_id
+      WHERE p.id=$1 AND p.user_id=$2 AND t.user_id=p.user_id AND t.type='marketing.segment'
+        AND t.input->>'parentId'=p.task_id::text ORDER BY s.slot`, [id, owner])).rows;
   }
 }

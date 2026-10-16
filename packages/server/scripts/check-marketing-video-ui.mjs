@@ -156,6 +156,7 @@ try {
           ...(conv.agent_id === 'video' ? { metadata: { kind: 'generation', mediaType: 'video', status: 'generating', taskId: 'fixture-task' } } : {}) },
       ] });
     }
+    if (path === '/api/tasks/fixture-task/cancel') { taskState = 'cancelled'; for (const p of projects.values()) if (p.taskId === 'fixture-task') p.stage = '已请求取消'; return json({ ok: true, status: 'cancelled', cancellationRequested: true }); }
     if (path === '/api/tasks/fixture-task') return json({ id: 'fixture-task', status: taskState, progress: 35, output: { assets: resultAssets } });
     if (path === '/api/usage/balance') return json({ balance: 100, totalUsed: 0, totalRecharged: 100, usedRatio: 0 });
     if (path === '/api/knowledge-bases') return json([]);
@@ -363,6 +364,16 @@ try {
   // Recover by account-scoped project ID, even after the whole page reloads.
   await page.reload(); await chooseAgent('营销影像');
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
+  taskState = 'pending'; p.stage = '等待队列处理';
+  await page.locator('.mv-progress strong').filter({ hasText: '等待生成' }).waitFor();
+  await page.getByText('35% · 等待队列处理', { exact: true }).waitFor();
+  await snap('marketing-video-queued-zh-light.png');
+  await page.locator('.mv-progress').getByRole('button', { name: '取消', exact: true }).click();
+  await page.locator('.mv-progress strong').filter({ hasText: '已请求取消' }).waitFor();
+  await page.getByText('取消请求已保存，原任务收尾后才能继续。', { exact: true }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1, 'cancellation and polling do not submit again');
+  taskState = 'running';
+  await page.reload(); await chooseAgent('营销影像');
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);
@@ -522,6 +533,17 @@ try {
   await page.getByRole('region', { name: '参考视频', exact: true }).getByRole('button', { name: '移除', exact: true }).click();
   await page.getByText('此历史素材不支持新生成，请移除或替换。', { exact: true }).waitFor({ state: 'hidden' });
   await page.evaluate(() => localStorage.setItem('lot:language', 'en'));
+  taskState = 'pending';
+  const queued = projects.get(p.id); queued.output = undefined; queued.stage = '队列状态待核实';
+  await page.evaluate(id => localStorage.setItem('lot:marketing-video:fixture', id), p.id);
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.locator('.mv-progress strong').filter({ hasText: 'Queued' }).waitFor();
+  await page.getByText('35% · Queue status is being verified', { exact: true }).waitFor();
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await snap('marketing-video-queued-en-dark.png');
+  await page.locator('.mv-progress').getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.locator('.mv-progress strong').filter({ hasText: 'Cancellation requested' }).waitFor();
+  await snap('marketing-video-cancelled-en-dark.png');
   apiUnavailable = true;
   await page.reload(); await chooseAgent('Marketing video');
   await page.getByRole('alert').filter({ hasText: 'This server does not support the new marketing video workflow yet.' }).waitFor();

@@ -180,7 +180,8 @@ describe("OpenAIImagesImageProvider", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ message: `Invalid image: ${image}; ${prompt}; private-key` }) })) as unknown as typeof fetch);
     const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "private-key", model: "m" });
     const error = await provider.create({ prompt, media: [{ type: "reference_image", url: image }] }).then((): never => { throw new Error("expected failure"); }, (error: Error) => error);
-    expect(error.message).toContain("Invalid image");
+    expect(error.message).toContain("TASK_FAILED");
+    expect(error.message).not.toContain("Invalid image");
     for (const privateValue of [prompt, image, "private-key"]) expect(error.message).not.toContain(privateValue);
   });
 });

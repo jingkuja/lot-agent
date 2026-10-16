@@ -49,7 +49,7 @@ describe("Kling custom voice HTTP contract", () => {
   it("does not retry a POST after an uncertain network outcome", async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error("connection lost"));
     vi.stubGlobal("fetch", fetcher);
-    await expect(provider().create({ voiceName: "sample", voiceUrl: "https://media.example/a.wav", externalTaskId: "e1" })).rejects.toThrow("connection lost");
+    await expect(provider().create({ voiceName: "sample", voiceUrl: "https://media.example/a.wav", externalTaskId: "e1" })).rejects.toThrow("TRANSPORT_ERROR");
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
@@ -67,11 +67,11 @@ describe("Kling custom voice HTTP contract", () => {
 });
 
 describe("Kling voice failure diagnostics", () => {
-  it("surfaces HTTP 400 validation details, business code and request ID without retrying", async () => {
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ code: 1201, message: "voice_name exceeds maximum length", request_id: "req-400" }, { status: 400 }));
+  it("keeps HTTP status and a validated request ID without free-form vendor text or retries", async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ code: 1201, message: "voice_name exceeds maximum length", request_id: "req-abcdef123456" }, { status: 400 }));
     vi.stubGlobal("fetch", fetcher);
     await expect(provider().create({ voiceName: "sample", voiceUrl: "https://media.example/a.wav", externalTaskId: "e1" }))
-      .rejects.toThrow("HTTP 400，code: 1201，request_id: req-400）：voice_name exceeds maximum length");
+      .rejects.toThrow("HTTP 400，request_id: req-abcdef123456");
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
@@ -81,23 +81,23 @@ describe("Kling voice failure diagnostics", () => {
     }, { status: 400 })));
     let message = "";
     try { await provider().poll("t1"); } catch (err) { message = (err as Error).message; }
-    expect(message).toContain("invalid key [redacted]");
-    expect(message).toContain("[url]");
+    expect(message).toContain("HTTP_ERROR");
+    expect(message).not.toContain("invalid key");
     expect(message).not.toMatch(/user-key|another-secret|token=private|media\.example/);
   });
 
   it("handles non-JSON gateway errors without exposing HTML or throwing a parse error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('<html>internal gateway debug</html>', { status: 502 })));
-    await expect(provider().poll("t1")).rejects.toThrow("Kling 音色接口请求失败（HTTP 502）");
+    await expect(provider().poll("t1")).rejects.toThrow("HTTP 502");
   });
 
-  it("preserves an upstream task failure reason", async () => {
+  it("classifies an upstream task failure without exposing its text", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ code: 0, data: { task_id: taskId, task_status: "failed", task_status_msg: "audio contains no clear speech" } })));
-    expect(await provider().poll(taskId)).toMatchObject({ status: "failed", error: "audio contains no clear speech" });
+    expect(await provider().poll(taskId)).toMatchObject({ status: "failed", error: expect.stringContaining("TASK_FAILED") });
   });
 
   it("also surfaces vendor validation errors delivered with HTTP 200", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ code: 1201, message: "invalid audio format", request_id: "req-2" })));
-    await expect(provider().poll(taskId)).rejects.toThrow("invalid audio format");
+    await expect(provider().poll(taskId)).rejects.toThrow("INVALID_RESPONSE");
   });
 });

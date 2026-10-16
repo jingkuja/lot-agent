@@ -1,6 +1,8 @@
 /** Opt-in, no-model integration check. Requires disposable local PG and Redis DB 15. */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { fork, type ChildProcess } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { Queue, Worker } from "bullmq";
 import { DB } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migration-runner.js";
@@ -18,7 +20,26 @@ if (!local(pgUrl.hostname) || !/^\/marketing_check_[a-z0-9_]+$/.test(pgUrl.pathn
 if (!local(redisUrl.hostname) || redisUrl.pathname !== "/15") throw new Error("Only an isolated local Redis DB 15 is allowed");
 const db = new DB({ host: pgUrl.hostname, port: Number(pgUrl.port || 5432), user: decodeURIComponent(pgUrl.username), password: decodeURIComponent(pgUrl.password), database: pgUrl.pathname.slice(1) });
 const publisherConnection = createRedisConnection(redisRaw);
+// A separate OS process proves that cancellation does not depend on the API's
+// in-memory AbortController. This child only runs the synthetic fixture type.
+if (process.argv.includes("--cancellation-worker")) {
+  const queue = new BullmqJobQueue(db, publisherConnection);
+  queue.process("fixture.cross-process", async (job, ctl) => {
+    process.send?.({ event: "started", id: job.id });
+    await new Promise<void>(done => {
+      if (ctl.signal.aborted) done();
+      else ctl.signal.addEventListener("abort", () => done(), { once: true });
+    });
+    process.send?.({ event: "stopped", id: job.id });
+    return { shouldNotOverwriteCancellation: true };
+  });
+  process.on("message", message => {
+    if (message === "close") void queue.close().then(() => db.close()).then(() => process.exit(0));
+  });
+  process.send?.({ event: "ready" });
+} else {
 let publisher: BullmqJobQueue | undefined, consumer: BullmqJobQueue | undefined;
+let child: ChildProcess | undefined;
 let legacyQueue: Queue | undefined, marketingQueue: Queue | undefined, legacyWorker: Worker | undefined;
 const releaseLegacy = deferred(), releaseMarketing = deferred();
 function deferred() {
@@ -44,7 +65,14 @@ try {
   const legacyInput = { kind: "legacy-active", frozen: "original-input" };
   await db.createTask(activeId, "marketing.video", legacyInput, owner);
   await db.setTaskVendorId(activeId, "fixture-original-vendor-receipt");
+  const untouched = [randomUUID(), randomUUID(), randomUUID()];
+  await db.createTask(untouched[0], "image.generate", { keep: "ordinary" }, owner);
+  await db.createTask(untouched[1], "marketing.segment", { keep: "segment" }, owner, "marketing-segments");
+  await db.createTask(untouched[2], "marketing.video", { keep: "custom-queue" }, owner, "custom-queue");
+  const beforeMigration = (await db.pool.query("SELECT * FROM tasks ORDER BY id")).rows;
   await db.migrate(); await db.migrate();
+  const afterMigration = (await db.pool.query("SELECT * FROM tasks ORDER BY id")).rows;
+  assert.deepEqual(afterMigration, beforeMigration.map(row => row.id === activeId ? { ...row, queue_name: MARKETING_VIDEO_QUEUE } : row), "0046 changes only marketing parent queue metadata; restart is idempotent");
   const migrated = (await db.pool.query("SELECT * FROM tasks WHERE id=$1", [activeId])).rows[0];
   assert.equal(migrated.queue_name, MARKETING_VIDEO_QUEUE);
   assert.deepEqual(migrated.input, legacyInput);
@@ -103,6 +131,13 @@ try {
   assert.equal(await db.getTaskStatus(bridgeId), "pending");
   assert.equal((await marketingQueue.getJob(bridgeId))?.id, bridgeId);
   const cancelledId = await publisher.enqueue("marketing.video", { kind: "cancelled" }, owner);
+  // Advance persisted age, keeping the first render blocked and the second
+  // in a real Redis waiting list throughout the actual watchdog call.
+  await db.pool.query("UPDATE tasks SET created_at=now()-interval '4 minutes' WHERE id=ANY($1::uuid[])", [[bridgeId, cancelledId]]);
+  await publisher.diagnosePending(180_000);
+  assert.equal(await db.getTaskStatus(bridgeId), "pending");
+  assert.equal((await db.getTask(bridgeId))?.stage, "等待队列处理");
+  assert.equal(await db.getTaskStatus(cancelledId), "pending");
   assert.equal(await publisher.cancel(cancelledId), true);
   assert.equal(await marketingQueue.getJob(cancelledId), undefined);
   releaseMarketing.resolve();
@@ -110,6 +145,19 @@ try {
   assert.equal(await db.getTaskStatus(blockedId), "succeeded");
   assert.equal(await db.getTaskStatus(cancelledId), "cancelled");
   assert.equal(starts.has(cancelledId), false);
+  assert.equal(starts.get(bridgeId), 1);
+
+  // Delayed entries are healthy, missing delivery is recoverable by original ID.
+  const delayedId = await publisher.enqueue("marketing.video", {}, owner, { delayMs: 60_000 });
+  const missingId = randomUUID(); await db.createTask(missingId, "marketing.video", {}, owner, MARKETING_VIDEO_QUEUE);
+  await db.pool.query("UPDATE tasks SET created_at=now()-interval '4 minutes' WHERE id=ANY($1::uuid[])", [[delayedId, missingId]]);
+  await publisher.diagnosePending(180_000);
+  assert.equal((await db.getTask(delayedId))?.stage, "等待队列处理");
+  assert.equal((await db.getTask(missingId))?.stage, "投递未完成，可恢复排队");
+  assert.equal(await db.getTaskStatus(missingId), "pending");
+  await publisher.deliverPersisted(missingId, "marketing.video");
+  await until(async () => await db.getTaskStatus(missingId) === "succeeded", "same-ID missing delivery recovery");
+  await publisher.cancel(delayedId);
 
   // Failed work is not automatically replayed by a stale legacy queue entry.
   const retryInput = { kind: "fail-once", frozen: { receipt: "fixture-original-receipt" } };
@@ -119,18 +167,47 @@ try {
   await until(async () => await (await legacyQueue!.getJob(retryId))?.getState() === "completed", "stale legacy entry skipped");
   assert.equal(starts.get(retryId), 1);
   assert.equal(await publisher.canResumePersisted(retryId), true);
+  // Redis redelivery alone cannot resurrect a declared terminal failure.
+  await (await marketingQueue.getJob(retryId))!.retry("failed");
+  await until(async () => await (await marketingQueue!.getJob(retryId))?.getState() === "completed", "terminal redelivery skipped");
+  assert.equal(starts.get(retryId), 1); assert.equal(await db.getTaskStatus(retryId), "failed");
   await db.updateTaskStatus(retryId, "pending");
   await publisher.deliverPersisted(retryId, "marketing.video");
   await until(async () => await db.getTaskStatus(retryId) === "succeeded", "explicit same-ID resume");
   assert.equal(starts.get(retryId), 2);
   assert.deepEqual((await db.getTask(retryId))?.input, retryInput);
   assert.deepEqual((await db.getTask(retryId))?.output, { originalId: retryId, kind: "fail-once" });
-  console.log("PASS: real PG + Redis queue isolation, active legacy protection, waiting migration, legacy forwarding, cancellation, same-ID explicit recovery; no model calls");
+
+  let retryStarts = 0;
+  consumer.process("fixture.retry", async () => { if (++retryStarts === 1) throw new Error("temporary fixture error"); return { attempts: retryStarts }; });
+  const automaticId = await publisher.enqueue("fixture.retry", {}, owner, { maxAttempts: 2 });
+  await until(async () => await db.getTaskStatus(automaticId) === "succeeded", "permitted automatic retry");
+  assert.equal(retryStarts, 2);
+  assert.equal((await db.getTask(automaticId))?.attempts, 2);
+
+  await consumer.close(); consumer = undefined;
+  const events = new Set<string>();
+  child = fork(fileURLToPath(import.meta.url), ["--cancellation-worker"], { stdio: ["ignore", "inherit", "inherit", "ipc"] });
+  child.on("message", message => events.add((message as { event: string }).event));
+  await until(async () => events.has("ready"), "child process ready");
+  const crossId = await publisher.enqueue("fixture.cross-process", {}, owner);
+  await until(async () => events.has("started"), "child process claimed task");
+  assert.equal(await publisher.cancel(crossId), true);
+  await until(async () => events.has("stopped"), "child observes durable cancellation");
+  assert.equal(await db.getTaskStatus(crossId), "cancelled");
+  await until(async () => await publisher!.canResumePersisted(crossId), "child unwinds queue lock");
+  assert.equal(await db.getTaskStatus(crossId), "cancelled", "late result cannot undo cancellation");
+  console.log("PASS: PG/Redis isolation, 0046 invariants, long pending diagnostics, delayed/missing delivery, terminal guard, automatic retry, same-ID resume and cross-process cancellation; no model calls");
 } finally {
   releaseLegacy.resolve(); releaseMarketing.resolve();
   await legacyWorker?.close();
   await consumer?.close();
   await legacyQueue?.close(); await marketingQueue?.close();
   if (publisher) await publisher.close(); else publisherConnection.disconnect();
+  if (child && child.exitCode === null) {
+    child.send("close");
+    await new Promise<void>(resolve => { const timeout = setTimeout(() => { child?.kill(); resolve(); }, 5000); child!.once("exit", () => { clearTimeout(timeout); resolve(); }); });
+  }
   await db.close();
+}
 }

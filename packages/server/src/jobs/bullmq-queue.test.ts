@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Redis from "ioredis";
 import type { DB } from "../db/database.js";
 const mocks = vi.hoisted(() => ({ queues: new Map<string, any>(), workers: new Map<string, any>() }));
 vi.mock("bullmq", () => ({
   Queue: class {
-    add = vi.fn(); getJob = vi.fn(); close = vi.fn();
+    add = vi.fn(); getJob = vi.fn(async () => undefined); close = vi.fn();
     constructor(name: string) { mocks.queues.set(name, this); }
   },
   Worker: class {
@@ -19,14 +19,16 @@ function fixture() {
   const db = {
     createTask: vi.fn(), cancelTask: vi.fn(async () => true), markTaskRunning: vi.fn(async () => true),
     getTask: vi.fn(async (id: string) => ({ id, type: id === "ordinary" ? "image.generate" : "marketing.video", status: "pending", input: { original: true }, user_id: "owner", created_at: "now", updated_at: "now" })),
-    setTaskResult: vi.fn(), setTaskError: vi.fn(),
+    getTaskStatus: vi.fn(async () => "running"),
+    setTaskResult: vi.fn(), setTaskError: vi.fn(), markTaskRetryPending: vi.fn(),
+    findStalePendingTasks: vi.fn(async () => [{ id: "old-task" }]), setPendingTaskDiagnostic: vi.fn(),
   };
-  const connection = { disconnect: vi.fn() };
+  const connection = { status: "ready", disconnect: vi.fn() };
   const queue = new BullmqJobQueue(db as unknown as DB, connection as unknown as Redis);
   return { queue, db, connection, ordinary: mocks.queues.get(DEFAULT_TASK_QUEUE), marketing: mocks.queues.get(MARKETING_VIDEO_QUEUE) };
 }
 function stored(state: string) { return { getState: vi.fn(async () => state), retry: vi.fn(), remove: vi.fn() }; }
-function job(id = "same-id", name = "marketing.video") { return { data: { taskId: id }, name, attemptsMade: 0, updateProgress: vi.fn() }; }
+function job(id = "same-id", name = "marketing.video") { return { data: { taskId: id }, name, attemptsMade: 0, opts: { attempts: 1 }, updateProgress: vi.fn() }; }
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(done => { resolve = done; });
@@ -34,6 +36,47 @@ function deferred() {
 }
 
 beforeEach(() => { mocks.queues.clear(); mocks.workers.clear(); });
+afterEach(() => vi.useRealTimers());
+
+describe("pending diagnostics", () => {
+  it.each(["waiting", "delayed", "prioritized", "active"])("keeps a healthy %s entry live in either queue", async state => {
+    const f = fixture(); f.ordinary.getJob.mockResolvedValue(stored(state));
+    await f.queue.diagnosePending(180_000);
+    expect(f.db.setPendingTaskDiagnostic).toHaveBeenCalledWith("old-task", "等待队列处理");
+    expect(f.db.setTaskError).not.toHaveBeenCalled();
+    expect(f.marketing.add).not.toHaveBeenCalled();
+  });
+  it("distinguishes unreadable Redis from confirmed missing delivery", async () => {
+    const f = fixture(); f.marketing.getJob.mockRejectedValue(new Error("Redis unavailable"));
+    await f.queue.diagnosePending(180_000);
+    expect(f.db.setPendingTaskDiagnostic).toHaveBeenLastCalledWith("old-task", "队列状态待核实");
+    f.marketing.getJob.mockResolvedValue(undefined);
+    await f.queue.diagnosePending(180_000);
+    expect(f.db.setPendingTaskDiagnostic).toHaveBeenLastCalledWith("old-task", "投递未完成，可恢复排队");
+    expect(f.db.setTaskError).not.toHaveBeenCalled();
+  });
+  it("bounds a hung Redis read without assuming delivery is missing", async () => {
+    vi.useFakeTimers();
+    const f = fixture(); f.ordinary.getJob.mockReturnValue(new Promise(() => {}));
+    const diagnostic = f.queue.diagnosePending(180_000);
+    await vi.advanceTimersByTimeAsync(2000); await diagnostic;
+    expect(f.db.setPendingTaskDiagnostic).toHaveBeenCalledWith("old-task", "队列状态待核实");
+    expect(f.marketing.add).not.toHaveBeenCalled();
+  });
+  it("does not enqueue diagnostic reads while Redis is disconnected", async () => {
+    const f = fixture(); f.connection.status = "reconnecting";
+    await f.queue.diagnosePending(180_000);
+    expect(f.ordinary.getJob).not.toHaveBeenCalled();
+    expect(f.db.setPendingTaskDiagnostic).toHaveBeenCalledWith("old-task", "队列状态待核实");
+  });
+  it("acknowledges durable cancellation during a Redis outage and prevents recovery", async () => {
+    const f = fixture(); f.connection.status = "reconnecting";
+    expect(await f.queue.cancel("same-id")).toBe(true);
+    expect(f.db.cancelTask).toHaveBeenCalledWith("same-id");
+    expect(f.ordinary.getJob).not.toHaveBeenCalled();
+    expect(await f.queue.canResumePersisted("same-id")).toBe(false);
+  });
+});
 
 describe("isolated marketing task delivery", () => {
   it("keeps the DB task ID and disables automatic paid retries on its own queue", async () => {
@@ -82,6 +125,35 @@ describe("isolated marketing task delivery", () => {
 });
 
 describe("isolated task workers", () => {
+  it("keeps a permitted ordinary retry pending and only makes the final attempt failed", async () => {
+    const f = fixture(); f.queue.process("image.generate", async () => { throw new Error("temporary"); });
+    const task = { ...job("ordinary", "image.generate"), opts: { attempts: 2 } };
+    const worker = mocks.workers.get(DEFAULT_TASK_QUEUE);
+    await expect(worker.run(task)).rejects.toThrow("temporary");
+    expect(f.db.markTaskRetryPending).toHaveBeenCalledWith("ordinary", 1);
+    expect(f.db.setTaskError).not.toHaveBeenCalled();
+    await expect(worker.run({ ...task, attemptsMade: 1 })).rejects.toThrow("temporary");
+    expect(f.db.setTaskError).toHaveBeenCalledWith("ordinary", "temporary");
+  });
+  it("observes a cancellation that races the DB claim before entering the handler", async () => {
+    const f = fixture(), handler = vi.fn(); f.queue.process("marketing.video", handler);
+    f.db.getTaskStatus.mockResolvedValue("cancelled");
+    await mocks.workers.get(MARKETING_VIDEO_QUEUE).run(job());
+    expect(handler).not.toHaveBeenCalled();
+  });
+  it("aborts on cancellation written by another process", async () => {
+    vi.useFakeTimers();
+    const f = fixture(), entered = deferred();
+    let signal!: AbortSignal;
+    f.queue.process("marketing.video", async (_job, ctl) => {
+      signal = ctl.signal; entered.resolve();
+      await new Promise<void>(done => ctl.signal.addEventListener("abort", () => done(), { once: true }));
+    });
+    const running = mocks.workers.get(MARKETING_VIDEO_QUEUE).run(job()); await entered.promise;
+    f.db.getTaskStatus.mockResolvedValue("cancelled");
+    await vi.advanceTimersByTimeAsync(1000); await running;
+    expect(signal.aborted).toBe(true);
+  });
   it("finishes an ordinary task while the marketing handler is still waiting", async () => {
     const f = fixture(), entered = deferred(), release = deferred();
     f.queue.process("marketing.video", async () => { entered.resolve(); await release.promise; return "marketing-done"; });

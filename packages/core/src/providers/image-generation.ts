@@ -71,7 +71,7 @@ export class HappyhorseImageAdapter implements ImageVendorAdapter {
       progress: Number(j.progress ?? 0),
       url,
       ...(urls && urls.length > 0 ? { urls } : {}),
-      error: typeof j.error === "string" ? j.error : vendorErr,
+      error: vendorErr,
     };
   }
   isTerminal(status: string): "completed" | "failed" | null {

@@ -97,6 +97,7 @@ export class BullmqJobQueue implements JobQueue {
           if (!row) {
             throw new Error(`Task ${taskId} not found in DB`);
           }
+          if (!["pending", "running"].includes(row.status)) return;
 
           const jobRecord: JobRecord<unknown> = {
             id: row.id,
@@ -113,6 +114,16 @@ export class BullmqJobQueue implements JobQueue {
 
           const controller = new AbortController();
           this.running.set(taskId, controller);
+          // Cancellation is durable in PG, including when the API and worker
+          // are different processes. Losing that channel must stop new work.
+          const observeCancellation = async () => {
+            const status = await this.db.getTaskStatus(taskId);
+            if (status !== "running") controller.abort();
+          };
+          const cancellationTimer = setInterval(() => {
+            void observeCancellation().catch(() => controller.abort());
+          }, 1000);
+          cancellationTimer.unref();
           const ctl: JobControl = {
             signal: controller.signal,
             // Renew the BullMQ lock so a long job isn't treated as stalled.
@@ -122,14 +133,20 @@ export class BullmqJobQueue implements JobQueue {
           };
 
           try {
+            await observeCancellation();
+            if (controller.signal.aborted) return;
             const output = await jobHandler(jobRecord, ctl);
             await this.db.setTaskResult(taskId, output);
             return output;
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
-            await this.db.setTaskError(taskId, message);
+            const retry = jobType !== "marketing.video" && attempts < (bullJob.opts.attempts ?? 1)
+              && (err as Error)?.name !== "UnrecoverableError";
+            if (retry) await this.db.markTaskRetryPending(taskId, attempts);
+            else await this.db.setTaskError(taskId, message);
             throw err; // rethrow so BullMQ marks job as failed
           } finally {
+            clearInterval(cancellationTimer);
             this.running.delete(taskId);
           }
         },
@@ -139,8 +156,36 @@ export class BullmqJobQueue implements JobQueue {
     }
   }
 
+  /** Queue latency is diagnostic only. Redis errors are unknown, never missing. */
+  async diagnosePending(staleMs: number): Promise<void> {
+    let readable = this.connection.status === "ready";
+    for (const row of await this.db.findStalePendingTasks(staleMs)) {
+      let stage = "投递未完成，可恢复排队";
+      try {
+        if (!readable) throw new Error("queue unavailable");
+        for (const queue of this.queues.values()) {
+          // BullMQ's connection intentionally retries forever. Bound this
+          // read-only diagnostic, so an outage still yields an unknown state.
+          const state = await queueDeadline(async () => (await queue.getJob(row.id))?.getState());
+          if (state) {
+            if (["waiting", "delayed", "prioritized", "active", "waiting-children"].includes(state)) {
+              stage = "等待队列处理";
+              break;
+            }
+            // An old terminal entry may carry retry history. Never blindly
+            // remove/recreate it from a periodic diagnostic.
+            stage = "队列状态待核实";
+          }
+        }
+      } catch { readable = false; stage = "队列状态待核实"; }
+      await this.db.setPendingTaskDiagnostic(row.id, stage);
+    }
+  }
+
   /** Deliver a task committed atomically with its owning business record. */
   async deliverPersisted(id: string, type: string): Promise<void> {
+    const row = await this.db.getTask(id);
+    if (!row || row.type !== type || !["pending", "running"].includes(row.status)) return;
     const name = taskQueueName(type);
     if (name === MARKETING_VIDEO_QUEUE) {
       const legacy = await this.queues.get(DEFAULT_TASK_QUEUE)!.getJob(id);
@@ -163,11 +208,14 @@ export class BullmqJobQueue implements JobQueue {
 
   /** Do not revive a cancelled row while its previous worker is unwinding. */
   async canResumePersisted(id: string): Promise<boolean> {
-    for (const queue of this.queues.values()) {
-      const previous = await queue.getJob(id);
-      if (previous && !["failed", "completed"].includes(await previous.getState())) return false;
-    }
-    return true;
+    if (this.connection.status !== "ready") return false;
+    try {
+      for (const queue of this.queues.values()) {
+        const state = await queueDeadline(async () => (await queue.getJob(id))?.getState());
+        if (state && !["failed", "completed"].includes(state)) return false;
+      }
+      return true;
+    } catch { return false; }
   }
 
   async get(id: string): Promise<JobRecord | null> {
@@ -194,17 +242,20 @@ export class BullmqJobQueue implements JobQueue {
     const changed = await this.db.cancelTask(id);
     // Abort a handler running in this process.
     this.running.get(id)?.abort();
+    if (this.connection.status !== "ready") return changed;
     // Remove a still-queued (waiting/delayed) job so it never starts. A job
     // already active is left to observe the aborted signal / DB status.
     for (const queue of this.queues.values()) {
       try {
-        const bullJob = await queue.getJob(id);
-        if (bullJob) {
-          const state = await bullJob.getState();
-          if (state === "waiting" || state === "delayed" || state === "prioritized") {
-            await bullJob.remove();
+        await queueDeadline(async () => {
+          const bullJob = await queue.getJob(id);
+          if (bullJob) {
+            const state = await bullJob.getState();
+            if (state === "waiting" || state === "delayed" || state === "prioritized") {
+              await bullJob.remove();
+            }
           }
-        }
+        });
       } catch {
         // best-effort — DB cancellation already recorded
       }
@@ -227,6 +278,15 @@ export class BullmqJobQueue implements JobQueue {
     await Promise.all([...this.queues.values()].map(queue => queue.close()));
     this.connection.disconnect();
   }
+}
+
+async function queueDeadline<T>(read: () => Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([read(), new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error("queue unavailable")), 2000);
+    })]);
+  } finally { if (timeout) clearTimeout(timeout); }
 }
 
 function toIso(v: string | Date): string {

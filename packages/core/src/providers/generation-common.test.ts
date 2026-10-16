@@ -20,16 +20,17 @@ describe("parseSize", () => {
 });
 
 describe("extractVendorError", () => {
-  it("digs the innermost message out of a nested JSON-string envelope", () => {
+  it("replaces a nested vendor error envelope with a fixed safe category", () => {
     const msg = extractVendorError({
       code: "fail_to_fetch_task",
       message: '{"error":{"message":"当前账号处未订购seedance2.0模型资费包","type":"proxy_error"}}',
       data: null,
     });
-    expect(msg).toContain("未订购seedance2.0");
+    expect(msg).toContain("TASK_FAILED");
+    expect(msg).not.toContain("未订购seedance2.0");
   });
   it("falls back to the code when no message is present", () => {
-    expect(extractVendorError({ code: "fail_to_fetch_task" })).toBe("fail_to_fetch_task");
+    expect(extractVendorError({ code: "fail_to_fetch_task" })).toContain("TASK_FAILED");
   });
   it("returns undefined for a normal in-progress response", () => {
     expect(extractVendorError({ status: "processing", progress: 30 })).toBeUndefined();
@@ -51,7 +52,7 @@ describe("HttpGenerationClient.create", () => {
     parsePoll: () => ({ status: "processing", progress: 0 }),
     isTerminal: () => null,
   };
-  it("throws the vendor message when a 200 create response carries no task id", async () => {
+  it("returns a safe invalid-response error when a 200 create has no task id", async () => {
     // tokenhub can return a create failure as HTTP 200 with an error envelope and
     // no task_id. Without a task id there is nothing to poll, so it must surface
     // as a failure carrying the vendor message — not a queued task with an empty id.
@@ -61,7 +62,7 @@ describe("HttpGenerationClient.create", () => {
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
-    await expect(c.create({})).rejects.toThrow(/未订购seedance2\.0/);
+    await expect(c.create({})).rejects.toThrow("INVALID_RESPONSE");
   });
   it("returns the task when a create response carries a task id", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => JSON.stringify({ task_id: "task_1", status: "queued" }) }));
@@ -74,13 +75,13 @@ describe("HttpGenerationClient.create", () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => rawBody }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
-    await expect(c.create({})).rejects.toThrow("未返回任务ID");
+    await expect(c.create({})).rejects.toThrow("INVALID_RESPONSE");
   });
   it("reports a malformed response without exposing unstructured text", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => "<html>gateway hiccup</html>" }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
-    await expect(c.create({})).rejects.toThrow("未返回任务ID");
+    await expect(c.create({})).rejects.toThrow("INVALID_RESPONSE");
   });
 });
 
@@ -131,7 +132,7 @@ describe("HttpGenerationClient.poll", () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: passthrough, model: "m" });
-    await expect(c.poll("t1")).rejects.toThrow(/ECONNRESET/);
+    await expect(c.poll("t1")).rejects.toThrow("TRANSPORT_ERROR");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -159,7 +160,7 @@ describe("HttpGenerationClient.create hardening", () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter, model: "m" });
-    await expect(c.create({})).rejects.toThrow(/ECONNRESET/);
+    await expect(c.create({})).rejects.toThrow("TRANSPORT_ERROR");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -186,7 +187,8 @@ describe("HttpGenerationClient.create hardening", () => {
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "private-api-key", adapter: { ...adapter, buildCreateBody: () => body }, model: "m" });
     const error = await c.create({}).then((): never => { throw new Error("expected create failure"); }, (error: Error) => error);
-    expect(error.message).toContain("Invalid reference");
+    expect(error.message).toContain("HTTP 422");
+    expect(error.message).not.toContain("Invalid reference");
     for (const privateValue of [body.prompt, body.input_reference[0], "private-api-key", "secret-capability", "request"]) expect(error.message).not.toContain(privateValue);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -195,6 +197,6 @@ describe("HttpGenerationClient.create hardening", () => {
     const fetchMock = vi.fn(async () => ({ ok: false, status: 503, text: async () => "<html>private-content https://media.example/secret?material_token=secret</html>" }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "private-api-key", adapter, model: "m" });
-    await expect(c.poll("t")).rejects.toThrow("generation poll failed: HTTP 503");
+    await expect(c.poll("t")).rejects.toThrow("HTTP 503");
   });
 });

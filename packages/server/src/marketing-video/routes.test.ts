@@ -15,8 +15,8 @@ vi.mock("./media.js", () => ({ mediaCapabilities: async () => ({ composition: tr
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner") {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
-  const store = { get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task") };
-  const service = { db: { pool: {}, getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
+  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task") };
+  const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
     begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, _input: unknown, draft?: typeof project.draft) => {
       if (version !== project.version || project.taskId) throw new MarketingError("草稿已更新", 409);
@@ -362,4 +362,63 @@ it("validates reference video metadata and sends it with audio disabled", async 
   vi.mocked(inspectMedia).mockResolvedValueOnce(info);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
   expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined }), false);
+});
+
+
+describe("historical generation recovery", () => {
+  function historical() {
+    const f = fixture();
+    Object.assign(f.project, { taskId: "parent", status: "failed" });
+    f.project.draft.assets.video = id;
+    const frozen = structuredClone(f.project.draft);
+    f.service.db.getTask.mockResolvedValue({ id: "parent", type: "marketing.video", user_id: "owner", status: "failed", input: { projectId: id, draft: frozen, generate_audio: true } });
+    f.store.segments.mockResolvedValue([0, 1].map(slot => ({ slot, task_id: `child-${slot}`, duration_sec: "15", script: "欢迎到店。", vendor_task_id: `vendor-${slot}` })));
+    f.store.reserve.mockResolvedValue("parent");
+    f.service.db.getAsset.mockResolvedValue({ user_id: "owner", mime: "video/webm", size_bytes: 100, url: "/static/legacy.webm" } as never);
+    vi.mocked(inspectMedia).mockClear();
+    return f;
+  }
+  it("reaches same-ID poll/download recovery for legacy WebM, using frozen input and no quota", async () => {
+    const f = historical();
+    // Current presentation metadata and expired source analysis are irrelevant.
+    f.project.draft.assets.video = "another-display-reference";
+    const response = await f.call(`/${id}/generate`, { version: 1, retry: true });
+    expect(response.status).toBe(202);
+    expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, {}, true);
+    expect(f.service.jobQueue.deliverPersisted).toHaveBeenCalledWith("parent", "marketing.video");
+    expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+    expect(inspectMedia).not.toHaveBeenCalled();
+    expect(f.service.db.getAsset).toHaveBeenCalledWith(id);
+    expect(f.service.marketingText).not.toHaveBeenCalled();
+  });
+  it("applies strict input rules to any mixed segment requiring a new submission", async () => {
+    const f = historical();
+    f.store.segments.mockResolvedValue([
+      { slot: 0, task_id: "child-0", duration_sec: 15, script: "欢迎到店。", vendor_task_id: "known" },
+      { slot: 1, task_id: "child-1", duration_sec: 15, script: "欢迎到店。", vendor_task_id: null },
+    ]);
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: true })).status).toBe(400);
+    expect(f.store.reserve).not.toHaveBeenCalled(); expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+  it("blocks a mixed unknown result before reserving, billing or delivering anything", async () => {
+    const f = historical();
+    f.store.segments.mockResolvedValue([
+      { slot: 0, task_id: "child-0", duration_sec: 15, vendor_task_id: null },
+      { slot: 1, task_id: "child-1", duration_sec: 15, vendor_task_id: "marketing-submission-unknown", output: { retrySafe: true } },
+    ]);
+    const result = await f.call(`/${id}/generate`, { version: 1, retry: true });
+    expect(result.status).toBe(409); expect(await result.json()).toMatchObject({ error: expect.stringContaining("结果未知") });
+    expect(f.store.reserve).not.toHaveBeenCalled(); expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
+    expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+  it("never bypasses frozen task, material or output ownership during recovery", async () => {
+    const f = historical();
+    f.service.db.getTask.mockResolvedValueOnce({ user_id: "other" });
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: true })).status).toBe(409);
+    f.service.db.getAsset.mockResolvedValue({ user_id: "other", mime: "video/webm", size_bytes: 100 });
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: true })).status).toBe(404);
+    f.store.segments.mockResolvedValue([0, 1].map(slot => ({ slot, task_id: `child-${slot}`, duration_sec: 15, output: { assetIds: ["foreign-output"] } })));
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: true })).status).toBe(404);
+    expect(f.store.reserve).not.toHaveBeenCalled();
+  });
 });

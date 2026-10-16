@@ -14,6 +14,10 @@ import { archiveMarketingVideo } from "../src/marketing-video/archive.js";
 import { composeMarketingVideo, ffmpeg, inspectMedia, mediaCapabilities, mediaProcess } from "../src/marketing-video/media.js";
 import { KnowledgeRepository } from "../src/knowledge/repository.js";
 import { UsageMeter } from "../src/billing/meter.js";
+import { Hono } from "hono";
+import { createMarketingVideoRoutes } from "../src/marketing-video/routes.js";
+import type { AgentService } from "../src/services/agent-service.js";
+import { HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
 
 const raw = process.env.MARKETING_CHECK_DATABASE_URL;
 if (!raw) throw new Error("Set MARKETING_CHECK_DATABASE_URL to an empty local database named marketing_check_<suffix>");
@@ -215,20 +219,60 @@ try {
   // Upgrade an already submitted pre-v2 WebM job. Its frozen audio options
   // and narration survive current reference-video restrictions and retries.
   let oldVideo = await store.save(owner, randomUUID(), 0, { ...draft, assets: { video: randomUUID(), voice: randomUUID() } });
+  for (const [slot, id] of Object.entries(oldVideo.draft.assets)) {
+    await db.pool.query("INSERT INTO assets(id,user_id,type,storage_key,url,mime,size_bytes) VALUES($1,$2,'upload',$3,$4,$5,100)",
+      [id, owner, `${id}.${slot === "video" ? "webm" : "wav"}`, `/static/uploads/${id}`, slot === "video" ? "video/webm" : "audio/wav"]);
+  }
   oldVideo = await store.setReview(owner, oldVideo, { verdict: "pass", issues: [] });
   const oldVideoTask = await store.reserve(owner, oldVideo.id, oldVideo.version, { modelId: "fixture", generate_audio: true, reference_video: ["https://fixture.invalid/legacy.webm"], reference_audio: ["https://fixture.invalid/voice.wav"] }, false);
   const capturedInputs: Record<string, unknown>[] = [];
   deps.generation = async (job, signal) => { capturedInputs.push(job.input); return originalGeneration(job, signal); };
-  await run(oldVideoTask);
+  downloadFail = true;
+  await assert.rejects(run(oldVideoTask), /下载未完成/);
+  downloadFail = false;
   assert(capturedInputs.length > 1);
   for (const input of capturedInputs) {
     assert.equal(input.generate_audio, true);
     assert.deepEqual(input.reference_audio, ["https://fixture.invalid/voice.wav"]);
   }
   const oldSent = creates;
-  await store.reserve(owner, oldVideo.id, oldVideo.version, {}, true);
+  const frozenBefore = (await db.getTask(oldVideoTask))!.input;
+  const receiptsBefore = (await store.segments(owner, oldVideo.id)).map(s => [s.task_id, s.vendor_task_id]);
+  let delivered: string | undefined;
+  const app = new Hono<{ Variables: { userId: string } }>();
+  app.use("*", async (c, next) => { c.set("userId", owner); await next(); });
+  app.route("/marketing", createMarketingVideoRoutes({ db,
+    jobQueue: { canResumePersisted: async () => true, deliverPersisted: async (id: string) => { delivered = id; } },
+    usageMeter: { checkQuota: async () => { throw new Error("known receipts must not require a new quota"); } },
+    modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} },
+  } as unknown as AgentService, root, store));
+  const resumed = await app.request(`/marketing/${oldVideo.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: oldVideo.version, retry: true }) });
+  assert.equal(resumed.status, 202, await resumed.text());
+  assert.equal(delivered, oldVideoTask);
+  assert.deepEqual((await db.getTask(oldVideoTask))!.input, frozenBefore);
   await run(oldVideoTask); assert.equal(creates, oldSent);
+  assert.deepEqual((await store.segments(owner, oldVideo.id)).map(s => [s.task_id, s.vendor_task_id]), receiptsBefore);
   deps.generation = originalGeneration;
+
+  // Real adapter -> real worker -> real task.error -> real HTTP project view.
+  // The only network surface is a synthetic fetch fixture, never a vendor.
+  const originalFetch = globalThis.fetch, originalLog = console.log;
+  const sentinel = "SENTINEL-private-prompt https://private.example/a?material_token=SENTINEL-token Bearer SENTINEL-key";
+  const diagnostics: string[] = [];
+  try {
+    console.log = (...values) => { diagnostics.push(JSON.stringify(values)); };
+    globalThis.fetch = async (_url, init) => init?.method === "POST"
+      ? Response.json({ id: randomUUID(), status: "queued" })
+      : Response.json({ status: "failed", error: sentinel, request_id: sentinel });
+    const provider = new HttpVideoGenerationProvider({ baseUrl: "https://fixture.invalid", apiKey: "SENTINEL-key", model: "fixture", adapter: new OpenaiVideoAdapter() });
+    deps.generation = async (job, signal) => ({ ...await originalGeneration(job, signal), provider });
+    const protectedProject = await newProject();
+    await assert.rejects(run(protectedProject.taskId), /TASK_FAILED/);
+    const storedErrors = (await db.pool.query("SELECT error FROM tasks WHERE id=$1 OR input->>'parentId'=$1::text", [protectedProject.taskId])).rows;
+    const visible = await app.request(`/marketing/${protectedProject.p.id}`);
+    assert.equal(visible.status, 200);
+    assert(!/SENTINEL|private\.example|material_token|Bearer/.test(JSON.stringify(storedErrors) + await visible.text() + diagnostics.join("\n")));
+  } finally { globalThis.fetch = originalFetch; console.log = originalLog; deps.generation = originalGeneration; }
   const maximumShots = Array.from({ length: 15 }, () => ({ ...timedShots[0], durationSec: 4 }));
   let maximum = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: maximumShots, script: storyboardScript(maximumShots) }));
   maximum = await store.setReview(owner, maximum, { verdict: "pass", issues: [] });
@@ -246,5 +290,5 @@ try {
     assert(Math.abs(assembled.durationSec - durationSec) < 0.3); assert(assembled.body.length > 0);
     assert.equal(assembled.width, durationSec === 45 ? 1280 : 720); assert.equal(assembled.height, 720);
   }
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", cancellation: "passed", downloadResume: "passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

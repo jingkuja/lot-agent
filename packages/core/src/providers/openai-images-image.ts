@@ -94,7 +94,7 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
     const text = await res.text();
     if (!res.ok) {
       let diagnostic: string | undefined;
-      try { diagnostic = extractVendorError(JSON.parse(text) as Record<string, unknown>, [this.opts.apiKey, req.prompt, ...referenceUrls]); }
+      try { diagnostic = extractVendorError(JSON.parse(text) as Record<string, unknown>); }
       catch { /* Unstructured error bodies can contain private image material. */ }
       throw new Error(diagnostic ?? `image generation failed: HTTP ${res.status}`);
     }

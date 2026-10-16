@@ -1,4 +1,5 @@
 export * from "./generation-common.js";
+export * from "./provider-error.js";
 export * from "./image-generation.js";
 export * from "./openai-images-image.js";
 export * from "./video-generation.js";

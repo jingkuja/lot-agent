@@ -5,8 +5,9 @@ import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generat
 import { PgMarketingProjectStore } from "./repository.js";
 import { composeMarketingVideo, inspectMedia, ownedAssetPath } from "./media.js";
 import { marketingSegmentPrompt } from "./prompt.js";
+import { segmentRecoveryAction, UNKNOWN_SUBMISSION, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 
-const UNKNOWN = "marketing-submission-unknown";
+const UNKNOWN = UNKNOWN_SUBMISSION;
 export interface MarketingRunDeps {
   db: DB; dataRoot: string;
   generation(job: { userId: string; input: Record<string, unknown> }, signal: AbortSignal): Promise<RunJobDeps>;
@@ -40,6 +41,9 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     const referenceError = marketingReferenceError(draft);
     if (job.input.marketingInputVersion === 2 && referenceError) throw new Error(referenceError);
     const segments = (await store.segments(job.userId, project.id)).map(segment => ({ ...segment, duration_sec: Number(segment.duration_sec) }));
+    // Stop the entire mixed batch before any fresh paid intent if a sibling's
+    // submission result is still unknown.
+    if (segments.some(segment => segmentRecoveryAction(segment) === "unknown")) throw new Error(UNKNOWN_SUBMISSION_MESSAGE);
     // Persisted boundaries are authoritative, including legacy jobs without a
     // storyboard. Never re-plan an already submitted video during recovery.
     // Check the full paid duration before resolving providers or sending a clip.
@@ -51,7 +55,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     } else if (segments.map(s => s.script).join("").trim() !== draft.script.trim()) throw new Error("视频分段配置不完整");
     // Validate every remaining submission before any segment incurs a model or voice charge.
     // Completed/resumable vendor tasks keep using their original submitted prompts.
-    const prompts = segments.map((segment, index) => !segment.vendor_task_id || segment.output?.retrySafe === true
+    const prompts = segments.map((segment, index) => segmentRecoveryAction(segment) === "submit"
       ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio) : undefined);
     const progress: number[] = segments.map((s) => s.status === "succeeded" ? 100 : 0);
     const report = async () => deps.db.updateTaskProgress(job.id, Math.floor(progress.reduce((a, b) => a + b, 0) / segments.length * 0.85), `片段完成 ${progress.filter(p => p === 100).length}/${segments.length}`);
@@ -92,6 +96,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                   await assertActive();
                   const claim = await deps.db.pool.query("UPDATE tasks SET vendor_task_id=$2 WHERE id=$1 AND vendor_task_id IS NULL RETURNING id", [child.id, UNKNOWN]);
                   if (!claim.rowCount) throw new Error("片段提交结果未知，请核实原任务。");
+                  await assertActive();
                   let result;
                   try { result = await provider.create(request); }
                   catch { throw new Error("片段提交结果未知，请核实原任务；系统不会重复提交付费请求。"); }

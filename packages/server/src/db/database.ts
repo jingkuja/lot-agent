@@ -1684,18 +1684,26 @@ export class DB {
 
   /**
    * Mark a task running and record which attempt this is (jobs v2 retries).
-   * Guarded so a cancelled/succeeded task can't be resurrected (a cancel can
-   * race the queue handing the job to a worker); 'failed' stays claimable for
-   * BullMQ retries. Returns whether the task was actually claimed — a false
+   * Terminal tasks require explicit recovery. Permitted automatic retries
+   * stay pending, and stalled workers may reclaim running tasks. A false
    * means the worker must skip execution.
    */
   async markTaskRunning(id: string, attempts: number): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      `UPDATE tasks SET status = 'running', attempts = $2, updated_at = now()
-       WHERE id = $1 AND status IN ('pending','running','failed')`,
+      `UPDATE tasks SET status = 'running', attempts = $2, stage = NULL, error = NULL, updated_at = now()
+       WHERE id = $1 AND status IN ('pending','running')`,
       [id, attempts]
     );
     return (rowCount ?? 0) > 0;
+  }
+
+  /** A configured BullMQ retry is still live, never a user-visible failure. */
+  async markTaskRetryPending(id: string, attempts: number): Promise<void> {
+    await this.pool.query(
+      `UPDATE tasks SET status = 'pending', stage = '等待自动重试', error = NULL, updated_at = now()
+       WHERE id = $1 AND status = 'running' AND attempts = $2`,
+      [id, attempts]
+    );
   }
 
   /** Current status of a task row (workers poll this to observe cross-process cancellation). */
@@ -1710,7 +1718,7 @@ export class DB {
   /** Cancel a task if it hasn't already reached a terminal state. Returns whether a row changed. */
   async cancelTask(id: string): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      "UPDATE tasks SET status = 'cancelled', updated_at = now() WHERE id = $1 AND status IN ('pending','running')",
+      "UPDATE tasks SET status = 'cancelled', stage = '已请求取消', updated_at = now() WHERE id = $1 AND status IN ('pending','running')",
       [id]
     );
     return (rowCount ?? 0) > 0;
@@ -1724,24 +1732,21 @@ export class DB {
     return rows[0]?.vendor_task_id ?? null;
   }
 
-  /**
-   * Fail generation tasks that were enqueued but **never claimed** by a worker
-   * (`status = 'pending'` with `attempts = 0`) and are older than `staleMs`.
-   * This is the safety net for a down/misconfigured worker (crashed on startup,
-   * wrong Redis DB, not running): without it such tasks — and the "生成中" cards
-   * bound to them — hang forever. `attempts = 0` scopes it to jobs a worker
-   * never even started, so an in-flight (running) or retrying job is untouched.
-   * Returns the failed rows so the caller can also fail the linked message.
-   */
-  async failStalePendingTasks(staleMs: number, error: string): Promise<StoredTask[]> {
+  /** Age triggers a queue diagnostic, not an execution failure. */
+  async findStalePendingTasks(staleMs: number): Promise<StoredTask[]> {
     const { rows } = await this.pool.query(
-      `UPDATE tasks SET status = 'failed', error = $2, updated_at = now()
+      `SELECT * FROM tasks
        WHERE status = 'pending' AND attempts = 0 AND queue_name IN ('lot-tasks','lot-marketing-video')
          AND created_at < now() - make_interval(secs => $1::double precision / 1000)
-       RETURNING *`,
-      [staleMs, error]
+       ORDER BY updated_at, id LIMIT 100`,
+      [staleMs]
     );
     return rows as StoredTask[];
+  }
+
+  async setPendingTaskDiagnostic(id: string, stage: string): Promise<void> {
+    await this.pool.query(`UPDATE tasks SET stage=$2, updated_at=now()
+      WHERE id=$1 AND status='pending' AND attempts=0`, [id, stage]);
   }
 
   async setTaskVendorId(id: string, vendorTaskId: string): Promise<void> {

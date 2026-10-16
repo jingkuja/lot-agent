@@ -134,7 +134,7 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
       status,
       progress: Number(j.progress ?? 0),
       url: typeof meta.url === "string" ? meta.url : undefined,
-      error: typeof j.error === "string" ? j.error : vendorErr,
+      error: vendorErr,
     };
   }
   isTerminal(status: string): "completed" | "failed" | null {

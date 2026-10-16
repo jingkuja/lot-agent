@@ -1,3 +1,4 @@
+import { BullmqJobQueue } from "./jobs/bullmq-queue.js";
 import { createAnalysisAudioRoutes } from "./marketing-analysis/audio-url.js";
 import { createDesktopToolRoutes } from "./desktop/routes.js";
 import { isFeishuEnabled } from "./feishu/client.js";
@@ -163,47 +164,20 @@ async function main() {
   void enqueueDailyOpportunityDiscoveries();
   setInterval(enqueueDailyOpportunityDiscoveries, OPPORTUNITY_DISCOVERY_CHECK_INTERVAL_MS).unref();
 
-  // Generation tasks are enqueued to Redis and consumed by a SEPARATE worker
-  // process. If that worker is down or misconfigured (crashed on startup for a
-  // missing env key, pointed at the wrong Redis DB, or simply not running), its
-  // jobs are never claimed and the tasks — plus the "生成中" cards bound to them —
-  // hang at 'pending' forever. This server-side sweep (the server is the always-
-  // up process) fails tasks that were never picked up (attempts 0) beyond the
-  // threshold and flips their generation message to 'failed', so the UI shows a
-  // visible failure with a diagnostic instead of an endless spinner. Same
-  // detached (`.unref()`), never-crash-the-server shape as the session sweep.
-  const STALE_TASK_MS = 3 * 60 * 1000; // never-claimed after 3 min ⇒ worker not consuming
-  const STALE_TASK_SWEEP_INTERVAL_MS = 60 * 1000;
-  const reapStalePendingTasks = async () => {
+  // Long waits trigger diagnostics, never terminal failures. A queue entry may
+  // legitimately wait behind long renders; Redis outages are not missing jobs.
+  let diagnosingTasks = false;
+  const diagnosePendingTasks = async () => {
+    if (diagnosingTasks) return;
+    diagnosingTasks = true;
     try {
-      const failed = await service.db.failStalePendingTasks(
-        STALE_TASK_MS,
-        "任务未被处理：generation worker 不可用（队列未被消费，请检查 worker 是否启动、REDIS_URL/DB 是否一致）"
-      );
-      for (const t of failed) {
-        const input = (t.input ?? {}) as Record<string, unknown>;
-        const messageId = input.assistantMessageId as string | undefined;
-        const conversationId = input.conversationId as string | undefined;
-        if (messageId && conversationId) {
-          await service.db
-            .markMessageGenerationFailed(messageId, t.error ?? "worker unavailable", {
-              conversationId,
-              userId: t.user_id,
-            })
-            .catch(() => {});
-        }
-      }
-      if (failed.length > 0) {
-        console.warn(
-          `[stale-task-reaper] failed ${failed.length} unclaimed task(s) — is the generation worker running and on the same REDIS_URL DB?`
-        );
-      }
-    } catch (err) {
-      console.warn("Stale task reaper failed:", err);
-    }
+      if (service.jobQueue instanceof BullmqJobQueue) await service.jobQueue.diagnosePending(3 * 60 * 1000);
+    } catch {
+      console.warn("[task-queue] pending diagnostics unavailable");
+    } finally { diagnosingTasks = false; }
   };
-  void reapStalePendingTasks();
-  setInterval(reapStalePendingTasks, STALE_TASK_SWEEP_INTERVAL_MS).unref();
+  void diagnosePendingTasks();
+  setInterval(diagnosePendingTasks, 60 * 1000).unref();
 
   // Debug mode (DEBUG=1): seed a stable login-less user whose empty key set makes
   // every provider resolution fall through to the env LLM. externalUserId 0 is

@@ -32,7 +32,7 @@ describe("POST /tasks/:id/cancel", () => {
     const service = fakeService({ id: "task-1", userId: "u1", status: "running", input: {} });
     const res = await cancel(app(service));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, status: "cancelled" });
+    expect(await res.json()).toEqual({ ok: true, status: "cancelled", cancellationRequested: true });
     expect(service.jobQueue.cancel).toHaveBeenCalledWith("task-1");
   });
 
@@ -68,7 +68,7 @@ describe("POST /tasks/:id/cancel", () => {
     service.jobQueue.cancel = vi.fn(async () => false);
     const res = await cancel(app(service));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false, status: "succeeded" });
+    expect(await res.json()).toEqual({ ok: false, status: "succeeded", cancellationRequested: false });
     expect(service.db.markMessageGenerationCancelled).not.toHaveBeenCalled();
   });
 });

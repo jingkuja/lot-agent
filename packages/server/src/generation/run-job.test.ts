@@ -39,6 +39,31 @@ function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {
 const job = { id: "job1", userId: "u1", input: { prompt: "菊花", conversationId: "c1", assistantMessageId: "m1", size: "1024x1024" } };
 
 describe("runGenerationJob", () => {
+  it.each(["create", "poll", "resume", "download"])("does not persist or display upstream secrets from %s failures", async phase => {
+    const secret = "SENTINEL-private-prompt https://private.example/a?material_token=SENTINEL-token Bearer SENTINEL-key";
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      if (init?.method === "POST") return phase === "create"
+        ? Response.json({ message: secret, request_id: secret }, { status: 503 })
+        : Response.json({ id: "original-vendor-id", status: "queued" });
+      return phase === "download" ? Response.json({ status: "completed", metadata: { url: "https://vendor.example/clip.mp4" } })
+        : Response.json({ status: "failed", error: secret });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const provider = new HttpVideoGenerationProvider({ baseUrl: "https://vendor.example", apiKey: "SENTINEL-key", adapter: new OpenaiVideoAdapter(), model: "fixture" });
+      const { deps, calls } = fakeDeps(provider);
+      if (phase === "resume") vi.mocked(deps.db.getTaskVendorId).mockResolvedValue("original-vendor-id");
+      if (phase === "download") vi.mocked(deps.urlToBytes).mockRejectedValue(new Error(secret));
+      let diagnostic = "";
+      try { diagnostic = (await runGenerationJob(deps, job, "video")).error ?? ""; }
+      catch (error) { diagnostic = (error as Error).message; }
+      const visibleErrors = calls.message.map((message: { metadata: { error?: string } }) => message.metadata.error).join(" ");
+      expect(diagnostic).toMatch(/HTTP_ERROR|TASK_FAILED|TRANSPORT_ERROR/);
+      expect(diagnostic + visibleErrors + JSON.stringify(log.mock.calls)).not.toMatch(/SENTINEL|private\.example|material_token|Bearer/);
+      expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(phase === "resume" ? 0 : 1);
+    } finally { log.mockRestore(); vi.unstubAllGlobals(); }
+  });
   it("refreshes material capabilities after slow voice preparation, without changing frozen references", async () => {
     let phase = "preflight";
     const provider: JobGenerationProvider = {
@@ -463,7 +488,8 @@ describe("runGenerationJob", () => {
     const last = calls.message.at(-1);
     expect(last).toMatchObject({ id: "m1", status: "download_failed" });
     expect(last.metadata.sourceUrl).toBe("https://vendor.example/out.mp4");
-    expect(last.metadata.error).toContain("download timed out");
+    expect(last.metadata.error).toContain("TRANSPORT_ERROR");
+    expect(last.metadata.error).not.toContain("download timed out");
   });
 
   it("finalizes a cancellation observed during download as cancelled, not download_failed", async () => {

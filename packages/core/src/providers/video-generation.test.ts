@@ -46,7 +46,8 @@ describe("HappyhorseVideoAdapter", () => {
     });
     expect(r.status).toBe("failed");
     expect(r.failureUnconfirmed).toBe(true);
-    expect(r.error).toContain("未订购seedance2.0");
+    expect(r.error).toContain("请求失败");
+    expect(r.error).not.toContain("未订购seedance2.0");
   });
 });
 
@@ -174,7 +175,7 @@ describe("HttpVideoGenerationProvider", () => {
     expect(r.status).toBe("completed");
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe("https://api/v1/videos/task_1");
   });
-  it("create throws the clean vendor message when the endpoint returns HTTP 500", async () => {
+  it("create keeps HTTP status without copying vendor text", async () => {
     // The real tokenhub /video/generations response for an unsubscribed model:
     // HTTP 500 with a structured error envelope. The thrown error must be the
     // human-readable message, not a raw-JSON dump.
@@ -186,7 +187,7 @@ describe("HttpVideoGenerationProvider", () => {
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "doubao-seedance-2.0" });
-    await expect(p.create({ prompt: "小猫睡觉" })).rejects.toThrow(/未订购seedance2\.0/);
+    await expect(p.create({ prompt: "小猫睡觉" })).rejects.toThrow("HTTP_ERROR");
   });
   it("create throws instead of returning an empty task id when a 200 body has no task_id", async () => {
     // The real failure mode: /video/generations answers HTTP 200 with an error
@@ -198,7 +199,7 @@ describe("HttpVideoGenerationProvider", () => {
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "vm" });
-    await expect(p.create({ prompt: "小猫睡觉" })).rejects.toThrow(/未订购seedance2\.0/);
+    await expect(p.create({ prompt: "小猫睡觉" })).rejects.toThrow("INVALID_RESPONSE");
   });
   it("openai-video accepts the standard id-only create response", async () => {
     const rawBody = JSON.stringify({ id: "task_1", object: "video", status: "queued", progress: 0 });
@@ -228,7 +229,8 @@ describe("HttpVideoGenerationProvider", () => {
     const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "vm" });
     const r = await p.poll("task_1");
     expect(r.status).toBe("failed");
-    expect(r.error).toContain("未订购seedance2.0");
+    expect(r.error).toContain("请求失败");
+    expect(r.error).not.toContain("未订购seedance2.0");
   });
   it("poll surfaces the raw Wand failed-task envelope as failed", async () => {
     const fetchMock = vi.fn(async () => ({
@@ -254,7 +256,9 @@ describe("HttpVideoGenerationProvider", () => {
     });
     const r = await p.poll("task_1");
     expect(r.status).toBe("failed");
-    expect(r.error).toContain("Aspect ratio must be specified");
+    expect(r.error).toContain("INVALID_RESPONSE");
+    expect(r.error).toContain("922601cf-1003-4f9f-9b4f-66704c3b6f0e");
+    expect(r.error).not.toContain("Aspect ratio must be specified");
   });
 });
 

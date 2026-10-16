@@ -5,7 +5,7 @@ import { invalidTextResult, parseTextResult } from "./text-result.js";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { estimateCost } from "@lot-agent/core";
-import { marketingReferenceError, marketingAssetIds, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { isMarketingDurationValid, marketingReferenceError, marketingAssetIds, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
@@ -20,6 +20,7 @@ export { REVIEW_INSTRUCTION } from "./compliance.js";
 import { ownedAnalysisUpload } from "../marketing-analysis/uploads.js";
 import { AnalysisError } from "../marketing-analysis/errors.js";
 import { signPrivateMaterial } from "../generation/private-materials.js";
+import { segmentRecoveryAction, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const MODEL = "kling-video-v3-omni";
@@ -54,7 +55,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     for (const [slot, value] of Object.entries(draft.assets)) {
       for (const id of marketingAssetIds(value)) {
         const asset = await service.db.getAsset(id);
-        if (!asset || asset.user_id !== owner) {
+        if (asset && asset.user_id !== owner) throw new MarketingError("素材不存在", 404);
+        if (!asset) {
           if (allowMissing) continue;
           throw new MarketingError("素材不存在", 404);
         }
@@ -199,21 +201,46 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     if (p.version !== body.version) throw new MarketingError("草稿已更新，请重新确认。", 409);
     if (p.taskId && !await (service.jobQueue as BullmqJobQueue).canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
-    const referenceError = marketingReferenceError(p.draft);
-    if (referenceError) throw new MarketingError(referenceError);
-    if (p.draft.mode !== "avatar") throw new MarketingError("实拍对口型服务尚未接入，请选择数字人制作。", 503);
+    let draft = p.draft;
+    let originalAudio: boolean | undefined;
+    const segments = p.taskId ? await store.segments(owner, p.id) : [];
+    if (p.taskId) {
+      const original = await service.db.getTask(p.taskId);
+      const frozen = original?.input && typeof original.input === "object" && !Array.isArray(original.input) ? original.input as Record<string, unknown> : undefined;
+      if (!original || !frozen || original.user_id !== owner || original.type !== "marketing.video" || frozen.projectId !== p.id
+        || !["failed", "cancelled"].includes(original.status) || !segments.length) throw new MarketingError("原任务不可恢复。", 409);
+      draft = MarketingDraftSchema.parse(frozen.draft);
+      originalAudio = frozen.generate_audio !== false;
+      if (segments.length > 15 || segments.some((s, i) => s.slot !== i || !Number.isInteger(Number(s.duration_sec)) || Number(s.duration_sec) < 4 || Number(s.duration_sec) > 15)
+        || !isMarketingDurationValid(draft.durationSec, segments.reduce((sum, s) => sum + Number(s.duration_sec), 0))) throw new MarketingError("视频分段配置不完整", 409);
+      if (segments.some(s => segmentRecoveryAction(s) === "unknown")) throw new MarketingError(UNKNOWN_SUBMISSION_MESSAGE, 409);
+      for (const segment of segments.filter(s => segmentRecoveryAction(s) === "reuse")) {
+        for (const assetId of segment.output.assetIds) {
+          const asset = await service.db.getAsset(assetId);
+          if (!asset || asset.user_id !== owner || asset.task_id !== segment.task_id) throw new MarketingError("片段素材不可用", 404);
+        }
+      }
+    }
+    const needsSubmission = !p.taskId || segments.some(s => segmentRecoveryAction(s) === "submit");
+    if (needsSubmission) {
+      const referenceError = marketingReferenceError(draft);
+      if (referenceError) throw new MarketingError(referenceError);
+      if (draft.mode !== "avatar") throw new MarketingError("实拍对口型服务尚未接入，请选择数字人制作。", 503);
+    }
     const capabilities = await mediaCapabilities();
     if (!capabilities.composition) throw new MarketingError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
     let planned;
     try {
-      planned = resolveMarketingSegments(p.draft);
-      if (!p.taskId) planned.forEach(segment => marketingSegmentPrompt(p.draft, segment, planned.length));
+      planned = p.taskId ? segments.map((segment, index) => ({ index, script: segment.script, durationSec: Number(segment.duration_sec) })) : resolveMarketingSegments(draft);
+      if (!p.taskId) planned.forEach(segment => marketingSegmentPrompt(draft, segment, planned.length));
+      else segments.forEach((segment, index) => {
+        if (segmentRecoveryAction(segment) === "submit") marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: Number(segment.duration_sec) }, segments.length, originalAudio);
+      });
     }
     catch (error) { throw new MarketingError((error as Error).message); }
-    const segments = p.taskId ? await store.segments(owner, p.id) : [];
-    const billableSeconds = p.taskId ? segments.filter(s => !s.vendor_task_id || s.output?.retrySafe === true).reduce((sum, s) => sum + Number(s.duration_sec), 0) : planned.reduce((sum, s) => sum + s.durationSec, 0);
-    const assets = await ownedAssets(owner, p.draft, !!p.taskId && billableSeconds === 0);
-    if (assets.video) {
+    const billableSeconds = p.taskId ? segments.filter(s => segmentRecoveryAction(s) === "submit").reduce((sum, s) => sum + Number(s.duration_sec), 0) : planned.reduce((sum, s) => sum + s.durationSec, 0);
+    const assets = await ownedAssets(owner, draft, !needsSubmission, needsSubmission ? undefined : draft);
+    if (needsSubmission && assets.video) {
       const video = (await service.db.getAsset(assets.video.id))!;
       const info = await inspectMedia(await ownedAssetPath(dataRoot, video), c.req.raw.signal);
       if (!info.video || info.duration < 3 || info.duration > 15.5 || !Number.isFinite(info.fps) || info.fps < 24 || info.fps > 60
@@ -221,7 +248,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     if (assets.voice || assets.music) {
       for (const slot of ["voice", "music"] as const) {
-        if (!assets[slot] || (slot === "voice" && p.draft.assets.video)) continue;
+        if (!assets[slot] || (slot === "voice" && (!needsSubmission || draft.assets.video))) continue;
         const asset = (await service.db.getAsset(assets[slot].id))!;
         const info = await inspectMedia(await ownedAssetPath(dataRoot, asset), c.req.raw.signal);
         if (!info.audio || (slot === "voice" && (info.duration < 2 || info.duration > 15))) throw new MarketingError("声音样例时长需为 2–15 秒");
@@ -232,6 +259,14 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (billableSeconds > 0) {
       const quota = await service.usageMeter.checkQuota(owner, estimatedCost);
       if (!quota.ok) return c.json({ error: quota.reason, code: quota.code }, 402);
+    }
+    if (p.taskId) {
+      // reserve's recovery branch changes only status. Never rebuild the
+      // frozen provider input, vendor IDs or segment billing identity.
+      const taskId = await store.reserve(owner, p.id, body.version, {}, true);
+      try { await (service.jobQueue as BullmqJobQueue).deliverPersisted(taskId, "marketing.video"); }
+      catch { throw new MarketingError("任务已保存，队列暂不可用；请重新打开草稿继续。", 503); }
+      return c.json(await store.get(owner, p.id), 202);
     }
     const edge = p.draft.quality === "1080p" ? 1080 : 720;
     const [w, h] = p.draft.ratio.split(":").map(Number);

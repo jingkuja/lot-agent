@@ -1,3 +1,4 @@
+import { ProviderError } from "@lot-agent/core";
 import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
 import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
@@ -196,7 +197,7 @@ async function downloadAndFinalize(
     // let the caller finalize the message as 'cancelled'.
     if (err instanceof JobCancelledError) throw err;
     if (deps.signal?.aborted) throw new JobCancelledError();
-    const message = err instanceof Error ? err.message : String(err);
+    const message = new ProviderError("generation", "download", "TRANSPORT_ERROR").message;
     await setMsg("download_failed", { sourceUrl, error: message });
     return { assetIds: [], assets: [], downloadFailed: true, sourceUrl, error: message };
   }

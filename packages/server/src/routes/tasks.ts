@@ -131,7 +131,8 @@ export function createTaskRoutes(service: AgentService) {
         });
       }
     }
-    return c.json({ ok: changed, status: changed ? "cancelled" : job.status });
+    const current = changed ? "cancelled" : (await service.jobQueue.get(id))?.status ?? job.status;
+    return c.json({ ok: changed, status: current, cancellationRequested: current === "cancelled" });
   });
 
   // GET /:id — poll task status, ownership check
