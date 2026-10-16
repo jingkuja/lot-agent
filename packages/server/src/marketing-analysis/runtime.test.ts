@@ -109,6 +109,35 @@ it("checkpoints automatic creation from the saved project and reuses it after in
   } finally { create.mockRestore(); }
 });
 
+it("resumes failed copy from the saved summary without repeating video analysis", async () => {
+  const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: "https://www.bilibili.com/video/BV1xx411c7mD" });
+  const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: draft.reference }, frames: [], frameTexts: [], texts: [], observations: [],
+    summary: { summary: [], marketingPoints: [], timeline: [], limitations: [] }, summaryRevision: 1 };
+  const creation = { draft, analysis: "fixture" };
+  const create = vi.spyOn(AnalysisModels.prototype, "createCopy").mockRejectedValueOnce(new Error("MODEL_INVALID_JSON")).mockResolvedValueOnce(creation);
+  const summarize = vi.spyOn(AnalysisModels.prototype, "summarize");
+  const checkpoint = vi.fn();
+  const row = { pipeline_version: ANALYSIS_VERSION, snapshot, mode: "all", creation_context: { draft, locale: "zh" } };
+  const deps = {
+    store: { row: async () => row, pool: { query: async () => ({ rows: [], rowCount: 0 }) }, checkpoint },
+    storage: { directory: async () => "/tmp" }, db: { getUserApiKey: async () => "fixture-key" },
+    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] }) }, config: {},
+  } as unknown as Parameters<typeof runAnalysis>[2];
+  const lease = { id: "analysis", ownerId: "owner", token: "lease", revision: 1 };
+  const signal = new AbortController().signal;
+  for (const mock of [downloadAnalysisSource, copyAnalysisUpload, extractAnalysisFrames, extractAnalysisAudio, transcribeAnalysisAudio, analyzeSelectedFrames]) vi.mocked(mock).mockClear();
+  try {
+    await expect(runAnalysis(lease, signal, deps)).rejects.toThrow("MODEL_INVALID_JSON");
+    expect(checkpoint).not.toHaveBeenCalled();
+    await runAnalysis(lease, signal, deps);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenLastCalledWith(draft, "zh", snapshot, 1, signal);
+    expect(checkpoint).toHaveBeenCalledWith(lease, expect.objectContaining({ creation }), "copy");
+    expect(summarize).not.toHaveBeenCalled();
+    for (const mock of [downloadAnalysisSource, copyAnalysisUpload, extractAnalysisFrames, extractAnalysisAudio, transcribeAnalysisAudio, analyzeSelectedFrames]) expect(mock).not.toHaveBeenCalled();
+  } finally { create.mockRestore(); summarize.mockRestore(); }
+});
+
 it("aborts credential/catalog resolution before downloading or posting to a model", async () => {
   const { analysisUserKey } = await import("./runtime.js");
   const controller = new AbortController();

@@ -310,6 +310,7 @@ export const messages: Record<string, { en: string; id: string }> = {
   "人物正面出镜，无声展示产品，不做说话口型": {"en": "The presenter faces the camera and silently demonstrates the product without speaking mouth movements", "id": "Presenter menghadap kamera dan memperagakan produk tanpa suara atau gerakan mulut berbicara"},
   "目标时长": {"en": "Target duration", "id": "Target durasi"},
   "正在处理…": {"en": "Working…", "id": "Memproses…"},
+  "视频拆解结果已保存，文案和分镜尚未完成。继续生成会复用已有拆解结果。": {"en": "Video analysis is saved, but the copy and storyboard are unfinished. Resume generation to reuse the saved analysis.", "id": "Hasil analisis video telah disimpan, tetapi naskah dan storyboard belum selesai. Lanjutkan pembuatan untuk menggunakan kembali hasil analisis."},
   "拆解改写并检查": {"en": "Analyze, rewrite and check", "id": "Analisis, tulis ulang, dan periksa"},
   "生成文案并检查": {"en": "Generate and check copy", "id": "Buat dan periksa naskah"},
   "文案结构": {"en": "Copy structure", "id": "Struktur naskah"},

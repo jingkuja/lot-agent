@@ -61,6 +61,7 @@ try {
   });
   const id = "00000000-0000-4000-8000-000000000039";
   const projects = new Map(); const textOperations = new Map(); let value, projectId, account = "owner", copyCalls = 0, starts = 0, resumes = 0;
+  let loseResumeResponse = false;
   const shots = [
     { script: "在明亮空间，品尝现磨咖啡。", visual: "明亮咖啡店与咖啡杯", action: "端起咖啡", camera: "中景缓缓推进" },
     { script: "找到自己喜欢的味道。", visual: "咖啡杯近景", action: "缓缓倒入咖啡", camera: "俯拍特写" },
@@ -115,7 +116,9 @@ try {
     if (path.endsWith("/resume")) {
       resumes++; assert.equal(req.postDataJSON().expectedRevision, 1);
       if (value.errorCode === "SOURCE_EXPIRED") { assert.equal(req.postDataJSON().visualOnly, true); value.snapshot.speech = { status: "skipped", reason: "SOURCE_EXPIRED" }; }
-      value.status = "running"; delete value.errorCode; return json(value);
+      value.status = "running"; delete value.errorCode;
+      if (loseResumeResponse) { loseResumeResponse = false; return route.abort("failed"); }
+      return json(value);
     }
     if (path.endsWith("/cancel")) { value.status = "cancelled"; return json(value); }
     if (/^\/api\/marketing-videos\/[a-f0-9-]+$/.test(path)) {
@@ -183,6 +186,27 @@ try {
   await page.getByRole("button", { name: "继续生成", exact: true }).click();
   await page.getByRole("button", { name: "取消", exact: true }).waitFor();
   assert.equal(resumes, 1); assert.equal(starts, 1);
+  // The video evidence is complete, but the final copy model failed. The
+  // primary action must continue this exact job, also after refreshing.
+  value.snapshot.summary = { summary: [], marketingPoints: [], timeline: [], limitations: [] };
+  value.snapshot.summaryRevision = 1;
+  Object.assign(value, { status: "partial", stage: "summary", errorCode: "MODEL_INVALID_JSON" });
+  await page.getByRole("button", { name: "继续生成", exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "一键拆解并生成", exact: true }).count(), 0);
+  await page.reload();
+  await page.getByText("视频拆解结果已保存，文案和分镜尚未完成。继续生成会复用已有拆解结果。", { exact: true }).waitFor();
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+  await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("en");
+  await page.getByText("Video analysis is saved, but the copy and storyboard are unfinished. Resume generation to reuse the saved analysis.", { exact: true }).waitFor();
+  assert.equal(await page.locator(".ma-panel > .mv-soft").innerText(), "Continue creation");
+  assert.equal(starts, 1); assert.equal(resumes, 1);
+  await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("zh");
+  loseResumeResponse = true;
+  await page.getByRole("button", { name: "继续生成", exact: true }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).waitFor();
+  assert.equal(resumes, 2); assert.equal(starts, 1, "resuming copy must not create another analysis");
+  assert.equal(await page.getByRole("button", { name: "一键拆解并生成", exact: true }).count(), 0);
+  await page.evaluate(() => document.documentElement.removeAttribute("data-theme"));
   const generated = create(projects.get(projectId).draft);
   Object.assign(projects.get(projectId), { draft: generated.draft, version: projects.get(projectId).version + 1, referenceAnalysis: { id, acceptedRevision: 1, evidenceIds: ["f0001"] } });
   Object.assign(value, { status: "ready", stage: "copy", applied: true }); value.snapshot.creation = generated;
@@ -192,7 +216,7 @@ try {
   await page.getByRole("textbox", { name: "视频口播文案", exact: true }).waitFor();
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(t => t.value.startsWith('在明亮空间')));
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(b => b.textContent === '一键拆解并生成').disabled);
-  assert.equal(copyCalls, 1); assert.equal(starts, 1); assert.equal(resumes, 1);
+  assert.equal(copyCalls, 1); assert.equal(starts, 1); assert.equal(resumes, 2);
   await page.getByRole("button", { name: "下一步", exact: true }).click();
   await page.getByRole("button", { name: "选择数字分身素材", exact: true }).waitFor();
   await page.getByRole("button", { name: "上一步", exact: true }).click();
@@ -213,12 +237,13 @@ try {
   // Upstream exhaustion is actionable, while unknown submissions are not replayed.
   Object.assign(value, { status: "partial", applied: false, errorCode: "MODEL_QUOTA" });
   await page.reload(); await page.getByText("上游余额不足，请充值后继续。", { exact: true }).waitFor();
-  assert.equal(resumes, 1); await page.getByRole("button", { name: "继续生成", exact: true }).click();
-  await page.getByRole("button", { name: "取消", exact: true }).waitFor(); assert.equal(resumes, 2);
+  assert.equal(resumes, 2); await page.getByRole("button", { name: "继续生成", exact: true }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).waitFor(); assert.equal(resumes, 3);
   await page.getByRole("button", { name: "取消", exact: true }).click(); await page.getByText("已取消", { exact: true }).waitFor();
   Object.assign(value, { status: "needs_review", errorCode: "REQUEST_UNKNOWN" });
   await page.reload(); await page.getByText("模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "一键拆解并生成", exact: true }).count(), 0, "unknown requests must not offer a new paid analysis");
   Object.assign(value, { status: "partial", errorCode: "MODEL_USAGE_UNKNOWN" }); await page.reload();
   await page.getByText("模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
@@ -228,7 +253,7 @@ try {
   assert.equal(await page.getByRole("button", { name: "继续生成", exact: true }).count(), 0);
   await page.getByRole("button", { name: "仅使用保留的画面继续", exact: true }).click();
   await page.getByText("原视频已过期，按你的选择仅使用保留的画面和文字继续。", { exact: true }).waitFor();
-  assert.equal(resumes, 3);
+  assert.equal(resumes, 4);
   value.snapshot.speech = { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "  " };
   Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
   await page.getByText("转写未识别到语音内容，不代表原视频没有声音。", { exact: true }).waitFor();
@@ -313,10 +338,13 @@ try {
   await page.getByRole("button", { name: "取消", exact: true }).waitFor(); assert.equal(starts, 2);
   await page.reload(); await page.getByRole("button", { name: "取消", exact: true }).waitFor(); assert.equal(starts, 2);
   await page.getByRole("button", { name: "取消", exact: true }).click(); await page.getByText("已取消", { exact: true }).waitFor();
+  const sourceSaved = page.waitForResponse(response => response.url().endsWith(`/api/marketing-videos/${projectId}`)
+    && response.request().method() === "PUT" && response.request().postDataJSON().draft.reference === "改为手动参考文字");
   await page.getByRole("checkbox", { name: "文字文案", exact: true }).check();
   await reference.fill("改为手动参考文字");
   await page.getByText("已取消", { exact: true }).waitFor({ state: "hidden" });
   assert.equal(await page.getByText("查看参考资料", { exact: true }).count(), 0);
+  await sourceSaved;
   assert.equal(projects.get(projectId).draft.referenceUpload, undefined);
   assert.equal(projects.get(projectId).referenceAnalysis, undefined);
   await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("en");

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { ApiClientError, getToken, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -53,8 +53,9 @@ export function analysisError(value: unknown) {
 
 /** Progress and optional source material only. The worker writes the result to
  * the draft; opening or refreshing this component never starts a model call. */
-export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
+export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, completedAction, disabled = false }: {
   id: string; ownerId: string; onActive(value: boolean): void; onComplete(value: ReferenceAnalysis): Promise<void>;
+  completedAction?: ReactNode; disabled?: boolean;
 }) {
   const { t } = useI18n();
   const callbacks = useRef({ onActive, onComplete }); callbacks.current = { onActive, onComplete };
@@ -98,9 +99,9 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
   }, [id, frameId]);
   async function act(operation: () => Promise<unknown>) {
     if (locked.current) return; locked.current = true; setBusy(true); setError("");
-    try { await operation(); if (alive.current) setReload(n => n + 1); }
+    try { await operation(); }
     catch (e) { if (alive.current) setError(analysisError(e)); }
-    finally { locked.current = false; if (alive.current) setBusy(false); }
+    finally { locked.current = false; if (alive.current) { setBusy(false); setReload(n => n + 1); } }
   }
   const stage = current ? ({ queued: "等待处理", downloaded: "正在读取视频", frames: "正在读取视频", asr: "正在转写视频语音", ocr: "正在理解视频内容", visual: "正在理解视频内容", summary: "正在整理文案结构", copy: "正在生成文案和分镜" } as Record<string, string>)[current.stage] ?? "正在理解视频内容" : "正在读取视频";
   const canResume = current && !active(current) && !["ready", "needs_review"].includes(current.status) && !["REQUEST_UNKNOWN", "MODEL_USAGE_UNKNOWN"].includes(current.errorCode ?? "");
@@ -110,6 +111,12 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
     ? "依据视频画面、可见文字和语音转写生成；转写可能有误，分镜为 AI 创作建议。"
     : "依据视频画面和可见文字生成；原始声音未转录，分镜为 AI 创作建议。";
   return <div className="ma-panel" aria-live="polite">
+    {current?.status === "ready" ? completedAction : <>
+      {(!current || active(current)) && <button className="mv-soft" disabled>{t("正在处理…")}</button>}
+      {canResume && <button className="mv-soft" disabled={busy || disabled} onClick={() => void act(async () => {
+        await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision, ...(current.errorCode === "SOURCE_EXPIRED" ? { visualOnly: true } : {}) })); callbacks.current.onActive(true);
+      })}>{t(current.errorCode === "SOURCE_EXPIRED" ? "仅使用保留的画面继续" : "继续生成")}</button>}
+    </>}
     {(!current || active(current)) && <p role="status">{t(stage)}…</p>}
     {current && active(current) && <button disabled={busy} onClick={() => void act(() => request(`${base}/${id}/cancel`, json({})))}>{t("取消")}</button>}
     {speech?.status === "skipped" && <p className="mv-hint" role="status">{t(speech.reason === "ASR_MODEL_UNAVAILABLE"
@@ -120,11 +127,6 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
     {current?.errorCode && <p className="mv-error" role="alert">{t(analysisError(new Error(current.errorCode)))}</p>}
     {current?.status === "cancelled" && <p>{t("已取消")}</p>}
     {canResume && <p className="mv-hint">{t("继续生成可能重新调用模型并产生费用，已完成的有效结果会复用。")}</p>}
-    {canResume && current.errorCode === "SOURCE_EXPIRED" ? <button disabled={busy} onClick={() => void act(async () => {
-      await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision, visualOnly: true })); callbacks.current.onActive(true);
-    })}>{t("仅使用保留的画面继续")}</button> : canResume && <button disabled={busy} onClick={() => void act(async () => {
-      await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision })); callbacks.current.onActive(true);
-    })}>{t("继续生成")}</button>}
     {current?.status === "needs_auth" && current.snapshot.source.platform !== "local" && <details><summary>{t("补充平台访问信息")}</summary>
       <label className="mv-field"><span>{t("个人平台 Cookies（Netscape 格式）")}</span><textarea rows={3} value={cookies} onChange={e => setCookies(e.target.value)} /></label>
       <button disabled={busy || !cookies.trim()} onClick={() => void act(async () => {
@@ -134,7 +136,8 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
       <button disabled={busy} onClick={() => void act(() => request(`${base}/sessions/${current.snapshot.source.platform}`, { method: "DELETE" }))}>{t("清除平台访问信息")}</button>
     </details>}
     {current && !active(current) && current.snapshot.summary && <div className="mv-hint" role="status">
-      <p>{t(!hasSpeech || current.snapshot.coverage?.limitations.length || current.snapshot.summary.limitations.length || current.snapshot.coverage?.omittedOcrFrameIds.length || current.snapshot.coverage?.omittedVisualFrameIds.length ? "已完成，但参考证据存在缺口" : "参考画面分析已完成")}</p>
+      <p>{t(!current.snapshot.creation && canResume ? "视频拆解结果已保存，文案和分镜尚未完成。继续生成会复用已有拆解结果。"
+        : !hasSpeech || current.snapshot.coverage?.limitations.length || current.snapshot.summary.limitations.length || current.snapshot.coverage?.omittedOcrFrameIds.length || current.snapshot.coverage?.omittedVisualFrameIds.length ? "已完成，但参考证据存在缺口" : "参考画面分析已完成")}</p>
       <p>{t(evidenceNote)}</p>
     </div>}
     {current && <div className="ma-coverage" role="status">

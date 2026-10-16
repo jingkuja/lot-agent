@@ -163,6 +163,13 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     if (draftRef.current.copyMode === "rewrite" && sourceKind !== "text") {
       const p = await save();
       if (!alive.current || token !== epoch.current) return;
+      // Recover the linked job before creating another analysis, including
+      // after a lost response or a stale completed-state render.
+      if (p.referenceAnalysis) {
+        const existing = await request<ReferenceAnalysis>(`/marketing-video-analyses/${p.referenceAnalysis.id}`);
+        if (!alive.current || token !== epoch.current) return;
+        if (existing.status !== "ready") { await open(p.id); return; }
+      }
       const fingerprint = JSON.stringify([p.id, p.draft, locale]);
       if (analysisRequest.current?.fingerprint !== fingerprint) analysisRequest.current = { fingerprint, body: {
         ...(sourceKind === "upload" ? { uploadId: p.draft.referenceUpload?.id } : { shareText: p.draft.reference.trim() }),
@@ -351,6 +358,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     catch (e) { return { parts: [], error: errorMessage(e) }; }
   })();
   const parts = plan.parts;
+  const referenceAnalysis = project?.draft.copyMode === draft.copyMode && project.draft.reference === draft.reference && project.draft.referenceUpload?.id === draft.referenceUpload?.id
+    ? project.referenceAnalysis : undefined;
+  const copyAction = <button className="mv-soft" disabled={busy || !(draft.copyMode === "rewrite" ? sourceKind === "upload" ? !!draft.referenceUpload : draft.reference.trim() : draft.topic.trim()) || !ready} onClick={() => void act(writeCopy)}>{t(busy ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜")}</button>;
   const generationBlocker = !ready ? loadError || "正在加载草稿…"
     : Object.entries(draft.assets).some(([slot, value]) => marketingAssetIds(value).some(id => {
       const item = assets[id] ?? (assets[slot]?.id === id ? assets[slot] : undefined);
@@ -400,8 +410,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           </> : textField("topic", "产品、卖点和目标顾客", 800)}
           <label className="mv-field"><span>{t("整片时长（秒）")} · {draft.durationSec}s</span><input type="range" min="15" max="60" step="1" aria-label={t("整片时长（秒）")} value={draft.durationSec} disabled={busy} onChange={e => field("durationSec", Number(e.target.value))} /></label>
           <p className="mv-hint">{t("选择 15–60 秒目标时长，AI 自动安排每镜 4–15 秒，可多出最多 5 秒，成片最长 65 秒。")}</p>
-          <button className="mv-soft" disabled={busy || !(draft.copyMode === "rewrite" ? sourceKind === "upload" ? !!draft.referenceUpload : draft.reference.trim() : draft.topic.trim()) || !ready} onClick={() => void act(writeCopy)}>{t(busy ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜")}</button>
-          {project?.referenceAnalysis && <ReferenceAnalysisPanel key={`${ownerId}:${project.referenceAnalysis.id}`} id={project.referenceAnalysis.id} ownerId={ownerId} onActive={setAnalysisPending} onComplete={completedAnalysis} />}
+          {referenceAnalysis
+            ? <ReferenceAnalysisPanel key={`${ownerId}:${referenceAnalysis.id}`} id={referenceAnalysis.id} ownerId={ownerId} onActive={setAnalysisPending} onComplete={completedAnalysis} completedAction={copyAction} disabled={actionBusy || textPending || saving || !ready} />
+            : copyAction}
           {analysis && <details className="mv-script-review"><summary>{t("文案结构")}</summary><p>{analysis}</p></details>}
           {(draft.copyMode !== "rewrite" || !!draft.script.trim()) && <>
           {textField("script", "视频口播文案", 2000, 6)}<p className="mv-hint">{t("预计口播 {0} 秒，实际以成片为准。", [Math.ceil(speechUnits(draft.script) / 4)])}</p>
