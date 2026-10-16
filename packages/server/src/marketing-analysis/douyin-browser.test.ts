@@ -9,6 +9,14 @@ const sample = () => ({ pageUrl: source.canonicalUrl, title: "公开视频", use
   videos: [{ url: "https://v26-web.douyinvod.com/public.mp4?__vid=7658289800398589193", duration: 58.2, width: 576, height: 1024 }] });
 
 describe("anonymous Douyin player", () => {
+  it("keeps Linux Crashpad descriptor setup and browser caches inside the temporary sandbox", () => {
+    expect(analysisBrowserArgs("/tmp/profile", 3189, "linux")).not.toContain("--disable-crashpad-for-testing");
+    expect(analysisBrowserArgs("/tmp/profile", 3189, "darwin")).toContain("--disable-crashpad-for-testing");
+    const args = sandboxBrowserArgs({ path: "/bridge.py", socket: "/task.sock" }, analysisBrowserArgs("/tmp/profile", 3189, "linux"));
+    const environment = new Map(args.flatMap((value, i) => value === "--setenv" ? [[args[i + 1], args[i + 2]]] : []));
+    expect(environment.get("HOME")).toBe("/tmp");
+    expect(environment.get("XDG_CACHE_HOME")).toBe("/tmp/cache");
+  });
   it("accepts only the matching public player and copies an explicit metadata allowlist", () => {
     const result = douyinBrowserMetadata({ ...sample(), cookies: "must-not-copy", requested_downloads: [{ url: "file:///etc/passwd" }] }, parseAnalysisSource("https://v.douyin.com/Opl7-ZVVzec/"));
     expect(result).toMatchObject({ id: source.canonicalId, duration: 58.2, protocol: "https", http_headers: { Referer: source.canonicalUrl } });

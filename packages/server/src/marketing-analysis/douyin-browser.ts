@@ -13,9 +13,11 @@ export interface BrowserLaunch { command: string; args: string[]; env: Record<st
 
 /** Always used inside the OS sandbox. The browser profile is new for each task;
  * only the parent-owned HTTPS proxy can access the network. */
-export function analysisBrowserArgs(profile: string, proxyPort = 3189): string[] {
+export function analysisBrowserArgs(profile: string, proxyPort = 3189, platform: NodeJS.Platform = process.platform): string[] {
   return ["--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking",
-    "--disable-component-update", "--disable-sync", "--disable-extensions", "--disable-breakpad", "--disable-crash-reporter", "--disable-crashpad-for-testing",
+    "--disable-component-update", "--disable-sync", "--disable-extensions", "--disable-breakpad", "--disable-crash-reporter",
+    // Linux Chromium needs Crashpad's descriptor setup for utility processes.
+    ...(platform === "darwin" ? ["--disable-crashpad-for-testing"] : []),
     "--disable-default-apps", "--disable-client-side-phishing-detection", "--disable-component-extensions-with-background-pages",
     "--disable-features=NetworkTimeServiceQuerying,AimEnabled,OptimizationHints,OptimizationGuideModelDownloading,AutofillServerCommunication,MediaRouter,DialMediaRouteProvider,AvoidCorsURLLoaderRestartOnRedirect",
     "--no-first-run", "--no-default-browser-check", "--no-service-autorun", "--password-store=basic", "--use-mock-keychain",

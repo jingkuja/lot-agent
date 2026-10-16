@@ -4,10 +4,12 @@ The only network capability is a single mounted Unix socket owned by the
 parent's HTTPS egress policy. No credentials or application files are mounted.
 """
 import selectors
+import re
 import socket
 import subprocess
 import sys
 import threading
+from urllib.parse import urlsplit
 
 
 def relay(client):
@@ -40,13 +42,34 @@ def serve(listener):
         threading.Thread(target=relay, args=(client,), daemon=True).start()
 
 
-listener = socket.socket()
-listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-listener.bind(('127.0.0.1', 3189))
-listener.listen(8)
-threading.Thread(target=serve, args=(listener,), daemon=True).start()
-# argv comes from the server's fixed command builder, never from request JSON.
-# Preserve only Chromium's private debugging pipes, not a debugging TCP port.
-if sys.argv[1:2] == ['--browser']:
-    sys.exit(subprocess.call(['/usr/bin/chromium', *sys.argv[2:]], pass_fds=(3, 4)))
-sys.exit(subprocess.call(['/usr/local/bin/yt-dlp', *sys.argv[1:]]))
+def downloader_command(args):
+    binary = '/usr/local/bin/yt-dlp'
+    # Only the server's normalized positional URL selects the pinned hotfix.
+    # Version checks, other platforms and browser metadata use the original tool.
+    if len(args) >= 2 and args[-2] == '--':
+        source = urlsplit(args[-1])
+        if source.scheme == 'https' and not source.query and not source.fragment and (
+            source.netloc == 'v.douyin.com' and re.fullmatch(r'/[A-Za-z0-9_-]{3,80}', source.path)
+            or source.netloc == 'www.douyin.com' and re.fullmatch(r'/video/\d{5,30}', source.path)
+        ):
+            binary = '/usr/local/bin/yt-dlp-douyin'
+    return [binary, *args]
+
+
+def main():
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(('127.0.0.1', 3189))
+    listener.listen(8)
+    threading.Thread(target=serve, args=(listener,), daemon=True).start()
+    # argv comes from the server's fixed command builder, never from request JSON.
+    # Preserve only Chromium's private debugging pipes, not a debugging TCP port.
+    if sys.argv[1:2] == ['--browser']:
+        # Debian's wrapper sources /etc/chromium.d and user settings. Run the
+        # packaged binary directly inside our minimal /usr-only sandbox.
+        return subprocess.call(['/usr/lib/chromium/chromium', *sys.argv[2:]], pass_fds=(3, 4))
+    return subprocess.call(downloader_command(sys.argv[1:]))
+
+
+if __name__ == '__main__':
+    sys.exit(main())

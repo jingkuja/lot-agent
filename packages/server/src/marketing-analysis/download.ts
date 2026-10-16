@@ -33,7 +33,7 @@ export async function downloadAnalysisSource(input: { shareText: string; directo
     const bridge = { path: resolve(input.bridgePath), socket: socketPath };
     return { egress, runner: isolatedMediaRunner(workDirectory, bridge),
       resolveDouyin: (source: AnalysisSource, signal: AbortSignal) => resolveDouyinBrowser(source, signal, async () => {
-        try { await access("/usr/bin/chromium", constants.X_OK); } catch { throw new AnalysisError("BROWSER_UNAVAILABLE", 503); }
+        try { await access("/usr/lib/chromium/chromium", constants.X_OK); } catch { throw new AnalysisError("BROWSER_UNAVAILABLE", 503); }
         return { command: "/usr/bin/bwrap", args: sandboxBrowserArgs(bridge, analysisBrowserArgs("/tmp/profile")), env: { PATH: "/usr/bin:/bin" } };
       }) };
   }))(directory, input.signal);

@@ -20,6 +20,7 @@ export function sandboxBrowserArgs(bridge: { path: string; socket: string }, bro
     "--ro-bind", "/etc/fonts", "/etc/fonts", "--dir", "/work", "--chdir", "/work",
     "--ro-bind", bridge.path, "/bridge.py", "--ro-bind", bridge.socket, "/egress.sock",
     "--setenv", "PATH", "/usr/bin:/usr/local/bin", "--setenv", "LC_ALL", "C.UTF-8",
+    "--setenv", "HOME", "/tmp", "--setenv", "XDG_CACHE_HOME", "/tmp/cache",
     "--", "/usr/bin/prlimit", "--cpu=60", "--nofile=256", `--fsize=${ANALYSIS_LIMITS.downloadBytes}`, "--",
     "/usr/bin/python3", "-I", "/bridge.py", "--browser", ...browserArgs];
 }

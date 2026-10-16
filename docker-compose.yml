@@ -195,7 +195,8 @@ services:
       disable: true
     mem_limit: 3g
     cpus: 2
-    pids_limit: 128
+    # Chromium and its proxy threads need headroom for the default two jobs.
+    pids_limit: 512
     # The host must permit unprivileged user namespaces for bubblewrap.
     # No privileged mode, host networking or Docker socket is permitted.
     # Ubuntu/Docker defaults may also block clone and mount. Install and verify

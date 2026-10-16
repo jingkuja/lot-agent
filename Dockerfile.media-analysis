@@ -10,7 +10,7 @@ ARG YTDLP_SHA256
 RUN test -n "$YTDLP_VERSION" || { echo >&2 'YTDLP_VERSION is required; pass --build-arg YTDLP_VERSION=...'; exit 1; }; \
     test "${#YTDLP_SHA256}" = 64 || { echo >&2 'YTDLP_SHA256 must contain 64 hexadecimal characters; pass --build-arg YTDLP_SHA256=...'; exit 1; }; \
     case "$YTDLP_SHA256" in *[!0-9a-fA-F]*) echo >&2 'YTDLP_SHA256 must contain only hexadecimal characters'; exit 1 ;; esac
-RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap python3 ca-certificates curl util-linux chromium \
+RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap python3 ca-certificates curl util-linux chromium patch \
  && rm -rf /var/lib/apt/lists/*
 # Legacy Docker builders do not populate TARGETARCH. Detect the image's
 # architecture (not the host's) when the BuildKit argument is absent.
@@ -19,6 +19,17 @@ RUN target_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
  && curl --fail --location --proto '=https' --tlsv1.2 "https://github.com/yt-dlp/yt-dlp/releases/download/$YTDLP_VERSION/$artifact" -o /usr/local/bin/yt-dlp \
  && printf '%s  /usr/local/bin/yt-dlp\n' "$YTDLP_SHA256" | sha256sum -c - \
  && chmod 755 /usr/local/bin/yt-dlp
+# Keep the original binary for other platforms. This fixed, reviewed Douyin
+# compatibility patch is applied to the official portable release at build time.
+COPY deploy/yt-dlp /tmp/yt-dlp-hotfix
+RUN test "$YTDLP_VERSION" = 2026.08.19 \
+ && curl --fail --location --proto '=https' --tlsv1.2 https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp -o /tmp/yt-dlp-official \
+ && python3 /tmp/yt-dlp-hotfix/build-douyin-zipapp.py /tmp/yt-dlp-official /tmp/yt-dlp-hotfix/douyin-17826.patch /usr/local/bin/yt-dlp-douyin "$YTDLP_VERSION" \
+ && test "$(/usr/local/bin/yt-dlp-douyin --ignore-config --no-plugin-dirs --version)" = "$YTDLP_VERSION" \
+ && rm -rf /tmp/yt-dlp-hotfix /tmp/yt-dlp-official
+# Media-only rebuilds may reuse an older application image; update the matching
+# dispatcher here as well so the newly installed hotfix is actually selected.
+COPY deploy/media-analysis-proxy-bridge.py /app/deploy/media-analysis-proxy-bridge.py
 # Keep FFmpeg's BLAS/LAPACK dependencies within the sandbox's /usr mount.
 COPY deploy/security/fix-library-links.sh /usr/local/bin/lot-media-fix-library-links
 RUN sh /usr/local/bin/lot-media-fix-library-links

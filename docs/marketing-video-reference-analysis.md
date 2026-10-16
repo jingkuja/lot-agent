@@ -59,6 +59,8 @@ pnpm marketing-analysis:reconcile USER_ID ANALYSIS_UUID 'ocr:f0001' 1 /private/p
 
 下载错误区分明确登录要求（`AUTH_REQUIRED`）、浏览器会话缺失（`PLATFORM_SESSION_REQUIRED`）和访问拒绝（`PLATFORM_ACCESS_DENIED`）。抖音提取器的 `Fresh cookies (not necessarily logged in) are needed` 只说明需要有效浏览器会话，不能据此认定视频必须登录；单独的 HTTP 403 也不作为登录证据。
 
+2026-10-16 线上诊断确认详情接口返回 `ArgusSecurityPlugin Signature Not Found`。Linux 媒体镜像为规范化抖音链接单独使用固定的 `yt-dlp-douyin`，将已审查的 [上游 PR #17826](https://github.com/yt-dlp/yt-dlp/pull/17826) 应用到官方 `2026.08.19` portable zipapp；源包、补丁与变更前后提取器均校验 SHA256。该 PR 尚未合并，不能表述为官方已发布修复。构建与更新约束见 [固定抖音提取器补丁](../deploy/yt-dlp/README.md)。原版可执行文件及 `YTDLP_SHA256` 不变，其他平台和浏览器白名单元数据下载继续使用原版；原有沙箱、HTTPS 出口、用户 Cookie 归属及取消不变。
+
 抖音元数据读取遇到上述会话缺失/访问拒绝时，`download.ts → douyin-browser.ts` 自动尝试一次全新的匿名 Chromium 会话，最多 45 秒。可关闭的登录推广面板不作为访问限制；只读取公开页面中播放器实际加载的 HTTPS `*.douyinvod.com` 地址，要求 URL 的 `__vid` 与最终页面视频 ID 一致，并校验时长和尺寸。父进程生成白名单元数据，通过私有 `browser-source.json` 和 yt-dlp `--load-info-json` 下载，避免再次进入需要 Cookie 的提取器。页面验证码、明确登录要求、取消、网络拒绝和其他平台不会触发此兜底；没有验证码自动处理。匿名页面仍无法获取媒体时返回 `BROWSER_READ_FAILED`，缺少浏览器返回 `BROWSER_UNAVAILABLE`，不误报必须登录。用户仍可选择“上传本地爆款视频”继续。
 
 浏览器通过 `browser-pipe.ts` 使用私有 FD 3/4 通信，不开放调试端口、不复用用户浏览器配置或平台 Cookie。Linux 在独立 bubblewrap 命名空间中使用空工作目录和 256 MiB 临时文件系统，macOS 使用独立临时目录及 `sandbox-exec`；浏览器进程不接收应用凭据。浏览器后台明文 HTTP 请求无可用代理端点，页面图片/字体请求被拦截，HTTPS 页面和视频共用原有公网校验及 100 MiB 累计流量限制，连接数有界为最多 64。取消/超时终止进程组并清理临时配置；媒体下载后删除私有 URL 元数据。浏览器允许 JavaScript 执行网页，yt-dlp 自身仍禁用 JS runtimes。
@@ -120,6 +122,8 @@ SECRET_MASTER_KEY=<现有服务的加密主密钥>
 Apple Silicon Mac 本地开发在 `.env` 另加 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，并确保 `/usr/bin/sandbox-exec` 和 `/opt/homebrew/bin/` 下的 `yt-dlp`、`ffmpeg`、`ffprobe`、`python3` 可用，`YTDLP_VERSION` 与安装版本一致。抖音匿名网页兜底另需 `/Applications/Google Chrome.app`，只启动临时配置，不读取用户已登录浏览器。修改后重启 `pnpm dev`（或单独重启媒体 Worker）。此前因 `SANDBOX_REQUIRED` 失败的任务由用户点击“继续生成”恢复，不自动重试付费调用。生产部署保持此开关关闭；Docker Compose 不传入这个本地开发开关。
 
 Linux 部署需要 `/usr/bin/bwrap`、`ffmpeg`、`ffprobe`、`prlimit`、`python3`、`chromium` 和 `/usr/local/bin/yt-dlp`。Python 仅运行隔离环境中的本地出口桥，不是独立服务。新增浏览器依赖后须重建 `Dockerfile.media-analysis` 镜像，不能只重启旧镜像。下载器源码/发行包参考 [yt-dlp](https://github.com/yt-dlp/yt-dlp)，隔离机制参考 [bubblewrap](https://github.com/containers/bubblewrap)。
+
+Debian Chromium 在沙箱内直接运行 `/usr/lib/chromium/chromium`，避免 `/usr/bin/chromium` 包装脚本读取未挂载的 `/etc/chromium.d`。Linux 不使用 `--disable-crashpad-for-testing`；HOME 和缓存目录固定在沙箱的 `/tmp` 中。媒体容器默认两任务并发时使用 `pids_limit: 512`，原 128 上限会令浏览器和出口桥无法创建线程。已有服务器须在保留 seccomp / AppArmor 等策略的前提下更新镜像标签与这一资源限制；普通 `restart` 不应用它们。
 
 可选专用镜像及 Compose profile：
 
