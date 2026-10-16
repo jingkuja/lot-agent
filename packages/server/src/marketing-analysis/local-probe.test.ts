@@ -1,12 +1,14 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:net";
 import { request } from "node:http";
 import { describe, expect, it } from "vitest";
-import { localProbePolicy, localProbeRunner } from "./local-probe.js";
+import { localProbeBrowserLaunch, localProbePolicy, localProbeRunner } from "./local-probe.js";
+import { resolveDouyinBrowser } from "./douyin-browser.js";
+import { parseAnalysisSource } from "./source.js";
 import { startAnalysisEgress } from "./egress.js";
 import { analysisMediaRuntime } from "./media-runtime.js";
 import { extractAnalysisFrames } from "./frames.js";
@@ -64,8 +66,8 @@ def write(path):
 def connect(port):
     with socket.create_connection(('127.0.0.1', int(port)), timeout=1): pass
 print(json.dumps({'readTask': permitted(lambda: read(sys.argv[1] + '/allowed')), 'writeTask': permitted(lambda: write(sys.argv[1] + '/created')), 'readOutside': permitted(lambda: read(sys.argv[2])), 'writeOutside': permitted(lambda: write(sys.argv[2])), 'proxy': permitted(lambda: connect(sys.argv[3])), 'direct': permitted(lambda: connect(sys.argv[4]))}))`;
-      for (const allowedPort of [undefined, proxyPort]) {
-        const { stdout } = await execute("/usr/bin/sandbox-exec", ["-p", localProbePolicy(work, allowedPort), python, "-I", "-c", script, work, outside, String(proxyPort), String(directPort)], {
+      for (const [allowedPort, browserRoot] of [[undefined, undefined], [proxyPort, undefined], [proxyPort, "/Applications/Google Chrome.app"]] as const) {
+        const { stdout } = await execute("/usr/bin/sandbox-exec", ["-p", localProbePolicy(work, allowedPort, browserRoot), python, "-I", "-c", script, work, outside, String(proxyPort), String(directPort)], {
           cwd: work, env: { PATH: "/opt/homebrew/bin:/usr/bin:/bin", TMPDIR: work }, timeout: 10000,
         });
         expect(JSON.parse(stdout)).toEqual({ readTask: true, writeTask: true, readOutside: false, writeOutside: false, proxy: allowedPort !== undefined, direct: false });
@@ -80,6 +82,20 @@ print(json.dumps({'readTask': permitted(lambda: read(sys.argv[1] + '/allowed')),
     try {
       await expect(localProbeRunner(directory).run("ffmpeg", ["-nostdin", "-v", "error", "-re", "-f", "lavfi", "-i", "color=size=16x16:rate=1", "-t", "60", "-f", "null", "/dev/null"], controller.signal)).rejects.toThrow("PROCESS_CANCELLED");
     } finally { clearTimeout(timer); await rm(directory, { recursive: true, force: true }); }
+  }, 10000);
+
+  it.skipIf(!native)("cancels an isolated Chrome and removes its anonymous profile without opening a public connection", async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1800);
+    let scratch = "";
+    try {
+      await expect(resolveDouyinBrowser(parseAnalysisSource("https://www.douyin.com/video/123456789"), controller.signal, async directory => {
+        scratch = directory;
+        // Port 9 has no task proxy. Browser requests cannot reach the internet.
+        return localProbeBrowserLaunch(directory, 9);
+      })).rejects.toThrow("PROCESS_CANCELLED");
+      await expect(access(scratch)).rejects.toThrow();
+    } finally { clearTimeout(timer); }
   }, 10000);
 
   it.skipIf(!native)("reports a rejected plaintext proxy request as network blocked", async () => {

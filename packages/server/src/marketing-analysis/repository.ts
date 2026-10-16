@@ -157,7 +157,7 @@ export class PgAnalysisStore implements AnalysisJobStore {
           await client.query("UPDATE marketing_reference_analyses SET creation_context=creation_context || '{\"applied\":true}'::jsonb WHERE id=$1", [row.id]);
         }
       }
-      const status = cancelled ? "cancelled" : unknown ? "needs_review" : !code ? "ready" : ["AUTH_REQUIRED", "CHALLENGE_REQUIRED"].includes(code) ? "needs_auth" : row.snapshot.texts.length ? "partial" : "failed";
+      const status = cancelled ? "cancelled" : unknown ? "needs_review" : !code ? "ready" : ["AUTH_REQUIRED", "PLATFORM_SESSION_REQUIRED", "CHALLENGE_REQUIRED"].includes(code) ? "needs_auth" : row.snapshot.texts.length ? "partial" : "failed";
       const reserved = 0;
       await client.query("UPDATE marketing_reference_analyses SET status=$2,error_code=$3,reserved_cost=$4,lease_token=NULL,lease_until=NULL,version=version+1,updated_at=now() WHERE id=$1", [lease.id, status, code ?? null, reserved]);
       await client.query("UPDATE tasks SET status=$2,error=$3,progress=$4,updated_at=now() WHERE id=$1", [lease.id, status === "ready" ? "succeeded" : cancelled ? "cancelled" : "failed", code ?? null, status === "ready" ? 100 : 0]);

@@ -48,7 +48,8 @@ function part(value: string | null) {
 }
 
 /** No user-controlled options, templates, external downloaders or plugins. */
-export function downloaderArgs(source: AnalysisSource, mode: "metadata" | "download", cookies = false): string[] {
+export function downloaderArgs(source: AnalysisSource, mode: "metadata" | "download", cookies = false, browserSource = false): string[] {
+  if (browserSource && (mode !== "download" || source.platform !== "douyin")) throw new AnalysisError("UNSUPPORTED_SOURCE");
   const safe = parseAnalysisSource(source.canonicalUrl);
   const args = ["--ignore-config", "--no-plugin-dirs", "--no-cache-dir", "--no-js-runtimes", "--no-remote-components",
     "--no-playlist", "--no-check-formats", "--no-progress", "--no-warnings", "--socket-timeout", "20", "--retries", "1", "--fragment-retries", "1",
@@ -56,14 +57,14 @@ export function downloaderArgs(source: AnalysisSource, mode: "metadata" | "downl
   if (cookies) args.push("--cookies", "/work/cookies.txt");
   if (mode === "metadata") args.push("--skip-download", "--dump-single-json");
   else args.push("--downloader", "native", "--hls-prefer-native", "--fixup", "never", "--max-filesize", "100M", "--no-mtime",
-    "--format", "best[vcodec!=none][acodec!=none][width<=1920][height<=1920]/bestvideo[width<=1920][height<=1920]/best[vcodec!=none][width<=1920][height<=1920]",
+    "--format", browserSource ? "best" : "best[vcodec!=none][acodec!=none][width<=1920][height<=1920]/bestvideo[width<=1920][height<=1920]/best[vcodec!=none][width<=1920][height<=1920]",
     "--output", "/work/source.%(ext)s", "--print-json", "--no-simulate");
   // The XHS extractor returns HTTP CDN URLs even when the same object is
   // available over HTTPS. Upgrade only that known CDN before downloading;
   // the egress proxy continues to reject all cleartext HTTP requests.
   if (mode === "download" && source.platform === "xiaohongshu") args.push("--replace-in-metadata", "before_dl:url",
     "^http://([a-zA-Z0-9.-]+\\.xhscdn\\.com)/", "https://\\1/");
-  return [...args, "--", safe.canonicalUrl];
+  return browserSource ? [...args, "--load-info-json", "/work/browser-source.json"] : [...args, "--", safe.canonicalUrl];
 }
 
 export function validateSourceMetadata(raw: Record<string, unknown>, source: AnalysisSource): AnalysisSource {

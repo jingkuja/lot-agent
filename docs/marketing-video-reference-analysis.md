@@ -55,7 +55,13 @@ pnpm marketing-analysis:reconcile USER_ID ANALYSIS_UUID 'ocr:f0001' 1 /private/p
 
 本地爆款视频通过鉴权的 `POST /uploads` 接收 multipart `file` 和 UUID `clientRequestId`，只接受 MP4 / MOV / WebM，正文上限 101 MiB、文件上限 100 MiB，并校验 MIME 和容器签名。迁移 **0045** 保存上传归属、原文件名、哈希及过期状态。文件位于 `data/marketing-analysis/<owner hash>/uploads/<upload UUID>`，与分析任务隔离且不公开挂载；容量预检涵盖未分析的上传。草稿保存 `referenceUpload: {id,name}`，它不作为视频生成素材使用。创建分析传 `uploadId`（与 `shareText` 互斥）；Worker 校验归属、单一常规文件及 SHA-256 后复制到任务目录，沿用无网络解码沙箱校验真实时长 ≤180 秒、分辨率 ≤1080p，再进入相同 OCR / ASR / 摘要 / 创作链路。上传及分析请求均幂等，刷新不重新发起模型调用。替换/移除来源会清理旧的草稿分析引用；上传满七天且无活动分析时回收原文件，过期后重新分析需重新上传。
 
-平台适配接受三平台的单视频长链/短链，保留 B 站选定 `p` 和小红书必要访问参数；拒绝主页、合集、直播、多个链接、图文和超过 180 秒的媒体。B 站提取器的实际单 P / cid 及登录会话兼容性仍需真链核对，尚无浏览器自动化兜底。
+平台适配接受三平台的单视频长链/短链，保留 B 站选定 `p` 和小红书必要访问参数；拒绝主页、合集、直播、多个链接、图文和超过 180 秒的媒体。B 站提取器的实际单 P / cid 及登录会话兼容性仍需真链核对；浏览器兜底仅用于抖音。
+
+下载错误区分明确登录要求（`AUTH_REQUIRED`）、浏览器会话缺失（`PLATFORM_SESSION_REQUIRED`）和访问拒绝（`PLATFORM_ACCESS_DENIED`）。抖音提取器的 `Fresh cookies (not necessarily logged in) are needed` 只说明需要有效浏览器会话，不能据此认定视频必须登录；单独的 HTTP 403 也不作为登录证据。
+
+抖音元数据读取遇到上述会话缺失/访问拒绝时，`download.ts → douyin-browser.ts` 自动尝试一次全新的匿名 Chromium 会话，最多 45 秒。可关闭的登录推广面板不作为访问限制；只读取公开页面中播放器实际加载的 HTTPS `*.douyinvod.com` 地址，要求 URL 的 `__vid` 与最终页面视频 ID 一致，并校验时长和尺寸。父进程生成白名单元数据，通过私有 `browser-source.json` 和 yt-dlp `--load-info-json` 下载，避免再次进入需要 Cookie 的提取器。页面验证码、明确登录要求、取消、网络拒绝和其他平台不会触发此兜底；没有验证码自动处理。匿名页面仍无法获取媒体时返回 `BROWSER_READ_FAILED`，缺少浏览器返回 `BROWSER_UNAVAILABLE`，不误报必须登录。用户仍可选择“上传本地爆款视频”继续。
+
+浏览器通过 `browser-pipe.ts` 使用私有 FD 3/4 通信，不开放调试端口、不复用用户浏览器配置或平台 Cookie。Linux 在独立 bubblewrap 命名空间中使用空工作目录和 256 MiB 临时文件系统，macOS 使用独立临时目录及 `sandbox-exec`；浏览器进程不接收应用凭据。浏览器后台明文 HTTP 请求无可用代理端点，页面图片/字体请求被拦截，HTTPS 页面和视频共用原有公网校验及 100 MiB 累计流量限制，连接数有界为最多 64。取消/超时终止进程组并清理临时配置；媒体下载后删除私有 URL 元数据。浏览器允许 JavaScript 执行网页，yt-dlp 自身仍禁用 JS runtimes。
 
 下载器固定版本、固定参数，禁用插件、用户配置、JS runtimes、远程组件、外部下载器。优先选择含音轨的有界视频流，若无合并流则沿用视频流；当前不额外下载独立音轨，无音轨时页面提示并仅分析画面。下载进程在独立 Linux 网络命名空间内，只能通过任务专属 Unix socket 和 HTTPS CONNECT 代理出网；解析并固定公网 IPv4 地址，拒绝内网、保留网段和其他端口，所有连接累计限制 100 MiB。
 
@@ -111,9 +117,9 @@ SECRET_MASTER_KEY=<现有服务的加密主密钥>
 
 以上尖括号为需填写的配置说明，不能直接作为配置值使用。API 和媒体 Worker 使用相同配置、PG/Redis 和私有数据卷。API 执行迁移；Worker 等待迁移 0040 的 `creation_context` 字段就绪。运行 `pnpm dev:media-analysis`；根 `pnpm dev` 也包含这个入口，未启用时直接退出。
 
-Apple Silicon Mac 本地开发在 `.env` 另加 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，并确保 `/usr/bin/sandbox-exec` 和 `/opt/homebrew/bin/` 下的 `yt-dlp`、`ffmpeg`、`ffprobe`、`python3` 可用，`YTDLP_VERSION` 与安装版本一致。修改后重启 `pnpm dev`（或单独重启媒体 Worker）。此前因 `SANDBOX_REQUIRED` 失败的任务由用户点击“继续生成”恢复，不自动重试付费调用。生产部署保持此开关关闭；Docker Compose 不传入这个本地开发开关。
+Apple Silicon Mac 本地开发在 `.env` 另加 `MARKETING_ANALYSIS_MACOS_SANDBOX=1`，并确保 `/usr/bin/sandbox-exec` 和 `/opt/homebrew/bin/` 下的 `yt-dlp`、`ffmpeg`、`ffprobe`、`python3` 可用，`YTDLP_VERSION` 与安装版本一致。抖音匿名网页兜底另需 `/Applications/Google Chrome.app`，只启动临时配置，不读取用户已登录浏览器。修改后重启 `pnpm dev`（或单独重启媒体 Worker）。此前因 `SANDBOX_REQUIRED` 失败的任务由用户点击“继续生成”恢复，不自动重试付费调用。生产部署保持此开关关闭；Docker Compose 不传入这个本地开发开关。
 
-Linux 部署需要 `/usr/bin/bwrap`、`ffmpeg`、`ffprobe`、`prlimit`、`python3` 和 `/usr/local/bin/yt-dlp`。Python 仅运行隔离环境中的本地出口桥，不是独立服务。下载器源码/发行包参考 [yt-dlp](https://github.com/yt-dlp/yt-dlp)，隔离机制参考 [bubblewrap](https://github.com/containers/bubblewrap)。
+Linux 部署需要 `/usr/bin/bwrap`、`ffmpeg`、`ffprobe`、`prlimit`、`python3`、`chromium` 和 `/usr/local/bin/yt-dlp`。Python 仅运行隔离环境中的本地出口桥，不是独立服务。新增浏览器依赖后须重建 `Dockerfile.media-analysis` 镜像，不能只重启旧镜像。下载器源码/发行包参考 [yt-dlp](https://github.com/yt-dlp/yt-dlp)，隔离机制参考 [bubblewrap](https://github.com/containers/bubblewrap)。
 
 可选专用镜像及 Compose profile：
 
@@ -213,4 +219,6 @@ pnpm check:marketing-analysis:live download
 
 报告放在 `data/marketing-analysis-probes` 私有目录；重用同一个 probe ID 复用已完成调用并阻止未知调用重发，文件锁和用户 PG advisory lock 保护单次探测。探测脚本是操作员验证入口，不替代生产任务租约与调用去重。
 
-待真实素材和测试账号到位后完成：每平台至少 5 条下载探测、最终每平台至少 10 条质量评测；两个模型的图像/顺序/JSON/用量兼容性；B 站单 P / cid；抖音和小红书 Cookie、挑战页、短链与 CDN；必要时再实现浏览器兜底；Linux 隔离与生产镜像、出口和分片限额实测。当前不承诺下载成功率、OCR 准确率、实际费用或 P50/P95。
+2026-10-16 抖音匿名兜底本机实测：用户短链 `https://v.douyin.com/Opl7-ZVVzec/` 在不导入 Cookie、不登录的独立 Chrome 会话中完成下载，视频 ID `7658289800398589193`，58.2 秒、576×1024、8,139,173 字节，FFprobe 确认音视频双轨，隔离抽帧产出 118 张候选帧。此检查未调用付费模型，不代表所有抖音视频都可匿名访问。
+
+待真实素材和测试账号到位后完成：每平台至少 5 条下载探测、最终每平台至少 10 条质量评测；两个模型的图像/顺序/JSON/用量兼容性；B 站单 P / cid；抖音和小红书 Cookie、挑战页、短链与 CDN；新增 Chromium 的生产镜像与出口限额验收。当前不承诺下载成功率、OCR 准确率、实际费用或 P50/P95。

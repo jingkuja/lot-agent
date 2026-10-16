@@ -10,7 +10,7 @@ ARG YTDLP_SHA256
 RUN test -n "$YTDLP_VERSION" || { echo >&2 'YTDLP_VERSION is required; pass --build-arg YTDLP_VERSION=...'; exit 1; }; \
     test "${#YTDLP_SHA256}" = 64 || { echo >&2 'YTDLP_SHA256 must contain 64 hexadecimal characters; pass --build-arg YTDLP_SHA256=...'; exit 1; }; \
     case "$YTDLP_SHA256" in *[!0-9a-fA-F]*) echo >&2 'YTDLP_SHA256 must contain only hexadecimal characters'; exit 1 ;; esac
-RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap python3 ca-certificates curl util-linux \
+RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap python3 ca-certificates curl util-linux chromium \
  && rm -rf /var/lib/apt/lists/*
 # Legacy Docker builders do not populate TARGETARCH. Detect the image's
 # architecture (not the host's) when the BuildKit argument is absent.

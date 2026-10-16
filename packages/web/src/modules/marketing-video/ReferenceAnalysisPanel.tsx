@@ -26,6 +26,12 @@ export function analysisError(value: unknown) {
     EVIDENCE_OUTSIDE_TIMELINE: "文案整理未完成，点击继续生成将复用已有资料。",
     ANALYSIS_IMAGE_BUDGET_EXHAUSTED: "画面处理已暂停，点击继续生成将复用已有资料。",
     AUTH_REQUIRED: "该视频需要平台登录，请补充登录信息后继续。",
+    PLATFORM_SESSION_REQUIRED: "平台需要有效的浏览器访问信息，不一定需要登录账号。可补充访问信息，或选择“上传本地爆款视频”继续。",
+    PLATFORM_ACCESS_DENIED: "平台暂时拒绝了视频读取请求，无法确认是否需要登录。请稍后重试，或选择“上传本地爆款视频”继续。",
+    NETWORK_BLOCKED: "暂时无法安全连接视频来源，请上传本地视频继续，或联系管理员。",
+    DOWNLOAD_FAILED: "视频链接读取失败，请稍后重试，或选择“上传本地爆款视频”继续。",
+    BROWSER_UNAVAILABLE: "服务器的视频网页读取组件不可用，请联系管理员，或选择“上传本地爆款视频”继续。",
+    BROWSER_READ_FAILED: "已尝试读取公开视频，但暂时未获取到可用视频。请稍后重试，或选择“上传本地爆款视频”继续。",
     CHALLENGE_REQUIRED: "请先在视频平台完成验证，再继续。",
     DURATION_LIMIT: "参考视频最长 180 秒。",
     PIXEL_LIMIT: "本地爆款视频最高支持 1080p，请降低分辨率后上传。",
@@ -119,13 +125,13 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete }: {
     })}>{t("仅使用保留的画面继续")}</button> : canResume && <button disabled={busy} onClick={() => void act(async () => {
       await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision })); callbacks.current.onActive(true);
     })}>{t("继续生成")}</button>}
-    {current?.status === "needs_auth" && current.snapshot.source.platform !== "local" && <details><summary>{t("补充平台登录信息")}</summary>
+    {current?.status === "needs_auth" && current.snapshot.source.platform !== "local" && <details><summary>{t("补充平台访问信息")}</summary>
       <label className="mv-field"><span>{t("个人平台 Cookies（Netscape 格式）")}</span><textarea rows={3} value={cookies} onChange={e => setCookies(e.target.value)} /></label>
       <button disabled={busy || !cookies.trim()} onClick={() => void act(async () => {
         await request(`${base}/sessions/${current.snapshot.source.platform}`, { method: "PUT", body: JSON.stringify({ cookies }) });
         setCookies(""); await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision })); callbacks.current.onActive(true);
       })}>{t("保存并继续")}</button>
-      <button disabled={busy} onClick={() => void act(() => request(`${base}/sessions/${current.snapshot.source.platform}`, { method: "DELETE" }))}>{t("清除平台登录信息")}</button>
+      <button disabled={busy} onClick={() => void act(() => request(`${base}/sessions/${current.snapshot.source.platform}`, { method: "DELETE" }))}>{t("清除平台访问信息")}</button>
     </details>}
     {current && !active(current) && current.snapshot.summary && <div className="mv-hint" role="status">
       <p>{t(!hasSpeech || current.snapshot.coverage?.limitations.length || current.snapshot.summary.limitations.length || current.snapshot.coverage?.omittedOcrFrameIds.length || current.snapshot.coverage?.omittedVisualFrameIds.length ? "已完成，但参考证据存在缺口" : "参考画面分析已完成")}</p>

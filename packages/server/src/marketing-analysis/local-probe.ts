@@ -9,11 +9,12 @@ import { AnalysisError } from "./errors.js";
 import { startAnalysisEgress } from "./egress.js";
 import type { AnalysisDownloadRuntime } from "./download.js";
 import type { MediaRunner } from "./sandbox.js";
+import { analysisBrowserArgs, resolveDouyinBrowser, type BrowserLaunch } from "./douyin-browser.js";
 
 /** macOS isolation for operator probes and explicitly opted-in development Workers.
  * Never selected by production configuration or HTTP input.
  * Child processes cannot read app credentials/home or make direct requests. */
-export function localProbePolicy(directory: string, proxyPort?: number) {
+export function localProbePolicy(directory: string, proxyPort?: number, browserRoot?: string) {
   if (proxyPort !== undefined && (!Number.isInteger(proxyPort) || proxyPort < 1 || proxyPort > 65535)) throw new AnalysisError("SANDBOX_REQUIRED", 503);
   return `(version 1)
 (deny default)
@@ -22,7 +23,22 @@ export function localProbePolicy(directory: string, proxyPort?: number) {
 (allow file-read* (literal "/"))
 (allow file-read* (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/opt/homebrew") (subpath "/Library/Apple") (subpath "/Library/Developer/CommandLineTools") (subpath "/private/etc/ssl") (subpath "/private/var/db/timezone") (literal "/private/etc/localtime") (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (subpath ${JSON.stringify(directory)}))
 (allow file-write* (subpath ${JSON.stringify(directory)}) (literal "/dev/null"))
+${browserRoot ? `(allow file-read* (subpath ${JSON.stringify(browserRoot)}))
+(allow iokit-open (iokit-user-client-class "RootDomainUserClient"))
+(allow mach-register (global-name-regex #"^com[.]google[.]Chrome[.]MachPortRendezvousServer[.][0-9]+$"))
+(allow network-bind network-outbound (subpath ${JSON.stringify(directory)}))` : ""}
 ${proxyPort === undefined ? "" : `(allow network-outbound (remote ip "localhost:${proxyPort}"))`}`;
+}
+
+export async function localProbeBrowserLaunch(directory: string, proxyPort: number): Promise<BrowserLaunch> {
+  if (process.platform !== "darwin") throw new AnalysisError("SANDBOX_REQUIRED", 503);
+  const browserRoot = "/Applications/Google Chrome.app";
+  let binary: string, python: string;
+  try { binary = await realpath(`${browserRoot}/Contents/MacOS/Google Chrome`); python = await realpath("/opt/homebrew/bin/python3"); }
+  catch { throw new AnalysisError("BROWSER_UNAVAILABLE", 503); }
+  const limits = "import os,resource,sys;resource.setrlimit(resource.RLIMIT_CPU,(60,60));resource.setrlimit(resource.RLIMIT_FSIZE,(104857600,104857600));resource.setrlimit(resource.RLIMIT_NOFILE,(256,256));os.execv(sys.argv[1],sys.argv[1:])";
+  return { command: "/usr/bin/sandbox-exec", args: ["-p", localProbePolicy(directory, proxyPort, browserRoot), python, "-I", "-c", limits,
+    binary, ...analysisBrowserArgs(join(directory, "profile"), proxyPort)], env: { PATH: "/opt/homebrew/bin:/usr/bin:/bin", LC_ALL: "C", TMPDIR: directory, MAC_CHROMIUM_TMPDIR: directory } };
 }
 
 export function localProbeRunner(directory: string, proxyPort?: number): MediaRunner {
@@ -74,7 +90,7 @@ export function localProbeRunner(directory: string, proxyPort?: number): MediaRu
 export async function localProbeDownloadRuntime(directory: string, signal: AbortSignal): Promise<AnalysisDownloadRuntime> {
   if (process.platform !== "darwin") throw new AnalysisError("SANDBOX_REQUIRED", 503);
   const path = join(tmpdir(), `lot-egress-${randomUUID()}.sock`);
-  const egress = await startAnalysisEgress(path, { signal, maxBytes: ANALYSIS_LIMITS.downloadBytes });
+  const egress = await startAnalysisEgress(path, { signal, maxBytes: ANALYSIS_LIMITS.downloadBytes, maxConnections: 64 });
   const sockets = new Set<Socket>();
   const relay = createServer(client => {
     const peer = connect(path); sockets.add(client); sockets.add(peer);
@@ -87,7 +103,8 @@ export async function localProbeDownloadRuntime(directory: string, signal: Abort
     await new Promise<void>((resolve, reject) => { relay.once("error", reject); relay.listen(0, "127.0.0.1", () => { relay.off("error", reject); resolve(); }); });
     const address = relay.address();
     if (!address || typeof address === "string") throw new AnalysisError("SANDBOX_REQUIRED", 503);
-    return { runner: localProbeRunner(directory, address.port), egress: {
+    return { runner: localProbeRunner(directory, address.port),
+      resolveDouyin: (source, signal) => resolveDouyinBrowser(source, signal, scratch => localProbeBrowserLaunch(scratch, address.port)), egress: {
       get bytes() { return egress.bytes; }, get failure() { return egress.failure; },
       async close() { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => relay.close(() => resolve())); await egress.close(); },
     } };

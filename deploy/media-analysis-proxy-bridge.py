@@ -46,4 +46,7 @@ listener.bind(('127.0.0.1', 3189))
 listener.listen(8)
 threading.Thread(target=serve, args=(listener,), daemon=True).start()
 # argv comes from the server's fixed command builder, never from request JSON.
+# Preserve only Chromium's private debugging pipes, not a debugging TCP port.
+if sys.argv[1:2] == ['--browser']:
+    sys.exit(subprocess.call(['/usr/bin/chromium', *sys.argv[2:]], pass_fds=(3, 4)))
 sys.exit(subprocess.call(['/usr/local/bin/yt-dlp', *sys.argv[1:]]))

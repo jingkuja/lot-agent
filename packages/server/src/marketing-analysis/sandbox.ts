@@ -9,6 +9,21 @@ export interface MediaRunner {
   run(command: MediaCommand, args: string[], signal?: AbortSignal): Promise<{ stdout: string; stderr: string }>;
 }
 
+/** Browser gets an empty task mount and a bounded temporary filesystem, never
+ * the source directory or imported cookies. FD 3/4 carry only private CDP. */
+export function sandboxBrowserArgs(bridge: { path: string; socket: string }, browserArgs: string[]): string[] {
+  // bubblewrap passes inherited descriptors through to its payload. Node only
+  // supplies stdio and CDP FD 3/4; no unsupported --preserve-fds flag is needed.
+  return ["--unshare-all", "--die-with-parent", "--new-session", "--clearenv", "--cap-drop", "ALL",
+    "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
+    "--proc", "/proc", "--dev", "/dev", "--size", "268435456", "--tmpfs", "/tmp", "--dir", "/etc", "--ro-bind", "/etc/ssl", "/etc/ssl",
+    "--ro-bind", "/etc/fonts", "/etc/fonts", "--dir", "/work", "--chdir", "/work",
+    "--ro-bind", bridge.path, "/bridge.py", "--ro-bind", bridge.socket, "/egress.sock",
+    "--setenv", "PATH", "/usr/bin:/usr/local/bin", "--setenv", "LC_ALL", "C.UTF-8",
+    "--", "/usr/bin/prlimit", "--cpu=60", "--nofile=256", `--fsize=${ANALYSIS_LIMITS.downloadBytes}`, "--",
+    "/usr/bin/python3", "-I", "/bridge.py", "--browser", ...browserArgs];
+}
+
 /** Fixed, minimal filesystem and independent network/PID/IPC namespaces.
  * Never mount /, /app, a home directory, database secrets or the Docker socket. */
 export function sandboxArgs(workDir: string, command: MediaCommand, args: string[], bridge?: { path: string; socket: string }): string[] {

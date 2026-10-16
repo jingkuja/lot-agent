@@ -25,15 +25,20 @@ export async function resolveEgressTarget(authority: string, resolve = resolvePu
   return addresses[0];
 }
 
-export async function startAnalysisEgress(path: string, options: { signal: AbortSignal; maxBytes: number }) {
+export async function startAnalysisEgress(path: string, options: { signal: AbortSignal; maxBytes: number; maxConnections?: number }) {
+  // A rendered page needs concurrent script/CDN connections. Callers may opt
+  // into at most 64 tunnels; the destination and byte policies are unchanged.
+  const maxConnections = options.maxConnections ?? 8;
+  if (!Number.isInteger(maxConnections) || maxConnections < 1 || maxConnections > 64) throw new AnalysisError("SANDBOX_REQUIRED", 503);
   const sockets = new Set<Socket>(); let bytes = 0; let failure: string | undefined; let closed = false;
   const stop = () => { for (const socket of sockets) socket.destroy(); };
   const server = createServer((_req, res) => { failure = "NETWORK_BLOCKED"; res.writeHead(403); res.end(); });
+  server.maxConnections = maxConnections;
   server.maxHeadersCount = 20; server.headersTimeout = 5000; server.requestTimeout = 10000;
   server.on("connection", socket => { sockets.add(socket); socket.setTimeout(30000, () => socket.destroy()); socket.on("error", () => {}); socket.once("close", () => sockets.delete(socket)); });
   server.on("connect", (request, client, head) => {
     client.on("error", () => {});
-    if (sockets.size > 16 || closed || bytes >= options.maxBytes || options.signal.aborted) { client.destroy(); return; }
+    if (sockets.size > maxConnections * 2 || closed || bytes >= options.maxBytes || options.signal.aborted) { client.destroy(); return; }
     void (async () => {
       const address = await resolveEgressTarget(request.url ?? "", url => resolvePublicUrl(url, { resolve: async hostname => {
         const { lookup } = await import("node:dns/promises");
