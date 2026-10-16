@@ -6,10 +6,16 @@ USER root
 ARG TARGETARCH
 ARG YTDLP_VERSION
 ARG YTDLP_SHA256
+# Validate before installing packages; .env is not loaded by docker build.
+RUN test -n "$YTDLP_VERSION" || { echo >&2 'YTDLP_VERSION is required; pass --build-arg YTDLP_VERSION=...'; exit 1; }; \
+    test "${#YTDLP_SHA256}" = 64 || { echo >&2 'YTDLP_SHA256 must contain 64 hexadecimal characters; pass --build-arg YTDLP_SHA256=...'; exit 1; }; \
+    case "$YTDLP_SHA256" in *[!0-9a-fA-F]*) echo >&2 'YTDLP_SHA256 must contain only hexadecimal characters'; exit 1 ;; esac
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap python3 ca-certificates curl util-linux \
- && rm -rf /var/lib/apt/lists/* \
- && test -n "$YTDLP_VERSION" && test "${#YTDLP_SHA256}" = 64 \
- && case "$TARGETARCH" in amd64) artifact=yt-dlp_linux ;; arm64) artifact=yt-dlp_linux_aarch64 ;; *) exit 1 ;; esac \
+ && rm -rf /var/lib/apt/lists/*
+# Legacy Docker builders do not populate TARGETARCH. Detect the image's
+# architecture (not the host's) when the BuildKit argument is absent.
+RUN target_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+ && case "$target_arch" in amd64) artifact=yt-dlp_linux ;; arm64) artifact=yt-dlp_linux_aarch64 ;; *) echo >&2 "Unsupported media-analysis image architecture: $target_arch"; exit 1 ;; esac \
  && curl --fail --location --proto '=https' --tlsv1.2 "https://github.com/yt-dlp/yt-dlp/releases/download/$YTDLP_VERSION/$artifact" -o /usr/local/bin/yt-dlp \
  && printf '%s  /usr/local/bin/yt-dlp\n' "$YTDLP_SHA256" | sha256sum -c - \
  && chmod 755 /usr/local/bin/yt-dlp
