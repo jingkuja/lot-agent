@@ -205,6 +205,15 @@ pnpm --filter @lot-agent/desktop exec tsc --noEmit
 
 UI 脚本使用模拟桌面桥接，验证中文浅色、英文深色、选择 / 停用目录三档权限、批准/拒绝卡片、输入框内位置以及 Web 端隐藏入口；不访问用户本地文件、不调用真实模型。`DESKTOP_SCREENSHOTS_DIR` 可指定已有目录保存截图。文件工具测试只操作临时目录；Windows 命令测试使用系统 PowerShell，无需 Git Bash，且不跳过 Windows，目录链接测试使用 junction。
 
-最近一次本机测试及真实 Electron 验证范围见 [2026-10-12 验证记录](desktop-verification-2026-10-12.md)。Windows 安装启动、系统目录权限、PowerShell 及进程树取消仍需对应平台验收。
+### 平台验收边界
 
-最新 Web 页面同步、三平台重打包及跨端 UI 检查见 [2026-10-13 同步验证记录](desktop-verification-2026-10-13.md)。
+2026-10-12 / 13 的 macOS arm64 验证覆盖真实 Electron preload/IPC、本地工具、批准与拒绝、取消及 v2 单文件删除；使用隔离临时用户、模拟 broker 和目录选择器，没有真实模型或已有账号在线链路。10 月 13 日三平台重打包的 Web 文件哈希与 Web 构建一致，Mac ARM64 安装包启动通过；这些历史结果不代替新版本复测。
+
+Windows 界面和 PowerShell 参数、凭证环境隔离、`taskkill` 的模拟验证不代表 Windows 真机通过。Windows x64 普通用户仍需验收：
+
+1. NSIS 安装、启动、重启、窗口/托盘与 DPAPI 凭证保存、读取、退出清理。
+2. 真实目录选择器、中文/空格路径、只读 NTFS 权限、三档审批；拒绝后文件不变，失败可见。
+3. 无 Git Bash 时的新建/编辑/单文件删除及系统 PowerShell；禁用 Shell 后文件工具仍可用。
+4. 长命令及子进程停止/超时，确认进程树终止；跨会话、停用、重载、注销及服务器切换清权。
+
+Intel Mac 真机运行、真实目录授权、真实后端/模型完整聊天链路也需目标环境验收。交叉构建出的安装包和模拟浏览器检查不能替代上述检查。测试入口沿用上方命令，打包及发布见[桌面更新指南](desktop-updates.md)。

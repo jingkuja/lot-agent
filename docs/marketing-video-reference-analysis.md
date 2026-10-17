@@ -1,13 +1,13 @@
 # 参考视频分析：实现与验证
 
-2026-10-14。按[开发方案](marketing-video-reference-analysis-plan.md)实现 Responses 接入、持久化分析任务、独立 Worker、抽帧/OCR/多图摘要和工作台入口。用户提供的一条小红书视频已在本机完成下载、解码及 85 次完整模型测试，得到含 3 帧 OCR 缺口的摘要与时间线。**三平台下载成功率、批量质量评测、生产 Linux 隔离环境仍待验收**。默认 `MARKETING_ANALYSIS_ENABLED=0`，不能把单样本结果当作三平台已经交付验收。
+本文汇总参考视频分析的当前实现、恢复契约、部署和验收边界，2026-10-17 整理。已实现 Responses、持久化任务、独立 Worker、抽帧/OCR/多图摘要、可选 ASR 与工作台。默认 `MARKETING_ANALYSIS_ENABLED=0`。小红书真实样本保留 OCR 缺口；2026-10-16 已完成一台 Ubuntu 22.04 / amd64 服务器的 Linux 沙箱验收，其他目标主机须重新预检。三平台批量下载成功率和语义质量仍待验收。
 
 ## 协议与入口
 
 - `core/llm/responses.ts` 实现 OpenAI Responses：`POST <baseUrl>/responses`、`input_text` / `input_image`、流式文本与推理摘要、函数调用/返回、结构化文本格式、终态和用量。Base URL 需包含 `/v1`，提供器不重复拼接。
 - `OPENAI_PROTOCOL=responses` 或 `llm.openai.protocol` 设置默认协议；`modelCatalog.llmProtocols` 的模型级配置优先。目前 `deepseek-v4.1-flash`、`kimi-k3` 使用 Responses。其他模型保留 Chat Completions 默认配置。Core registry、用户提供器及普通 Worker 都读取协议配置。
 - 使用 `store:false` 和 `reasoning.encrypted_content`，同一 Agent 推理轮中的工具续调保留提供器输出项；上下文预算包含这些项。状态只在当前运行内传递，不能由客户端提交或跨模型复用。
-- Responses SDK 关闭自动重试；完整终态之前不执行函数调用。截断、拒答、错误及流提前结束不会成为可执行工具结果。工具仍经过原有 schema、服务端白名单、归属和沙箱检查。
+- Responses SDK 关闭自动重试；首个合法完整终态保存后等待正常 EOF，独立尾部上限 1 秒；尾部 reset、取消或超时不丢弃已验证回执，也不重复输出。完整终态之前不执行函数调用。截断、拒答、错误及流提前结束不会成为可执行工具结果。工具仍经过原有 schema、服务端白名单、归属和沙箱检查。
 - 参考分析始终使用当前用户的托管网关 Key 和用户可用模型目录，不回退到平台共享 Key。现有知识库的独立文档 OCR HTTP 路径保持原协议。
 
 协议依据：[Responses 迁移指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[流式事件](https://developers.openai.com/api/docs/guides/streaming-responses)。兼容网关是否支持全部可选字段仍需真实探测；分析调用当前用提示词约束 JSON，并做服务端 schema 校验，不强制可选 JSON 模式。
@@ -50,6 +50,20 @@ pnpm marketing-analysis:reconcile USER_ID ANALYSIS_UUID 'ocr:f0001' 1 /private/p
 ```
 
 回执必须有 `outcome`（completed / failed）、`responseId`、`text` 与经核实的 `usage.promptTokens / completionTokens`。工具拒绝覆盖已知回执或不匹配的请求 ID，保留核对记录，**不自动排队、不调用模型**。之后仍由用户显式继续。不得用估计 token 或虚构零用量解除保护。
+
+## 恢复与升级契约
+
+升级时先停止旧 Worker，由新 server 完成全部已注册迁移，再启用同版本 API、Worker 和 Web。0042 保存文本操作，0043 增加清理标记，0044 增加 `input_snapshot`、`parser_version`、`needs_apply` 活动锁及分析 `summary_inputs`，0045 保存私有来源上传。媒体 Worker 检查依赖字段就绪；保留备份、历史回执和输入哈希，不重写旧草稿或模型任务身份。
+
+`POST /api/marketing-videos/:id/text-operations/:operationId/recover` 校验项目和操作归属，仅使用原始快照及完整回执本地解析和原子应用，不调用供应商。重复恢复返回已存结果，提交响应丢失先重读；版本变化保存 conflict 结果，不覆盖新编辑。无效模型 JSON/语义可标 failed，由用户显式重新生成；unknown 和未应用的有效结果仍阻止新付费请求。unknown 只锁定当前草稿，允许切换、新建和刷新查询。
+
+迁移前缺少原始快照或解析器版本的记录不能安全自动重建；需按原版本人工核实。解析器升级必须提供兼容读取器，不能用当前草稿推测旧输入。不能直接回退到不认识 `needs_apply` 或不持久化付费意图的版本；需先停新任务，保留完整数据并用兼容版本处理已有记录。
+
+正常摘要和 summary-only 共用输入构造，在首次 summary intent 前按 revision 冻结 selection、实际 OCR/视觉完成状态和缺口；限制项去重但保留首次顺序。JSONB 回读恢复请求字段顺序，已有 intent 保持原 hash；缺失视觉完成字段时读取历史批次回执。`MODEL_INPUT_CHANGED` 不通过删账本或改哈希绕过，使用对应历史版本恢复或人工核实。
+
+语音检查点缺失时优先复用完整 ASR 回执，不重新解码或付费。源满七天仍按隐私期限清理，保留 selection、展示帧与回执；无可用回执且仍需原片时返回 `SOURCE_EXPIRED`。仅当源已过期、没有 speech 且尚无摘要/创作 intent 时，用户可显式选择仅画面继续，并保留缺音原因；unknown 继续等待核实，不修改已经提交摘要的身份。
+
+授权查询的 15 秒期限覆盖凭证、模型目录 fetch 和正文，取消与租约信号传递到提供器创建。create/resume/summarize 共用用户事务锁下的 3 个待处理任务上限；派发每用户选一个候选，并排除已有有效运行租约的用户。存储默认每用户 2 GiB、全局至少余 1 GiB，每个在途任务预留 512 MiB，取消但租约未结束仍占预留；配置由 `MARKETING_ANALYSIS_OWNER_BYTES` / `MARKETING_ANALYSIS_MIN_FREE_BYTES` 共享传给 API 和 Worker。抽帧后删除 `gray.raw`，七天清理覆盖遗留临时文件和清单外 JPEG，保留 snapshot.frames 与 selection 的并集。
 
 ## 来源、隔离与证据
 
@@ -152,7 +166,7 @@ pnpm check:marketing-analysis:audio-url # 经 PUBLIC_BASE_URL 校验短时 WAV�
 pnpm check:marketing-analysis:local-sandbox # macOS 实际文件/网络隔离与取消，无模型调用
 ```
 
-2026-10-15 补充真实验收见[公网音频、Linux 与小红书 ASR 验收记录](marketing-video-live-acceptance.md)。本机探测按 `download → speech → analyze` 执行：`speech` 使用当前操作员凭证和持久化单次账本，先检查公网 WAV 哈希再提交 ASR；`analyze` 将同源 `asr/result.json` 中的语音加入摘要，并把语音哈希加入独立探测上下文。不得给已有视觉调用的旧探测目录补写语音后继续；输入变更会拒绝复用。原片链接、语音和回执仅存于 Git 忽略的私有探测目录。
+公网音频和小红书 ASR 的 2026-10-15 实测见下方“真实验收范围”。本机探测按 `download → speech → analyze` 执行：`speech` 使用当前操作员凭证和持久化单次账本，先检查公网 WAV 哈希再提交 ASR；`analyze` 将同源 `asr/result.json` 中的语音加入摘要，并把语音哈希加入独立探测上下文。不得给已有视觉调用的旧探测目录补写语音后继续；输入变更会拒绝复用。原片链接、语音和回执仅存于 Git 忽略的私有探测目录。
 
 数据库脚本要求 `MARKETING_ANALYSIS_CHECK_DATABASE_URL` 指向本机空的 `media_analysis_check_*` 库（需安装 pgvector），验证旧库迁移、幂等提交、用户隔离、无本地预算、租约、取消、未知请求、核对、调用去重、修订、自动回填与版本冲突、私有帧和清理。另设 `MARKETING_ANALYSIS_CHECK_REDIS_URL=redis://127.0.0.1:<临时端口>/15` 可验证真实 BullMQ 投递、同用户串行、跨进程取消及崩溃后不重发；该 Redis 库必须是专用空库。UI 脚本使用真实 React（包括 StrictMode）与拦截数据，不调用真实模型；覆盖纯文案/视频自动生成、刷新恢复、只读资料、上游余额不足、取消、未知请求、账号切换、中英文和暗色主题。
 
@@ -226,3 +240,35 @@ pnpm check:marketing-analysis:live download
 2026-10-16 抖音匿名兜底本机实测：用户短链 `https://v.douyin.com/Opl7-ZVVzec/` 在不导入 Cookie、不登录的独立 Chrome 会话中完成下载，视频 ID `7658289800398589193`，58.2 秒、576×1024、8,139,173 字节，FFprobe 确认音视频双轨，隔离抽帧产出 118 张候选帧。此检查未调用付费模型，不代表所有抖音视频都可匿名访问。
 
 待真实素材和测试账号到位后完成：每平台至少 5 条下载探测、最终每平台至少 10 条质量评测；两个模型的图像/顺序/JSON/用量兼容性；B 站单 P / cid；抖音和小红书 Cookie、挑战页、短链与 CDN；新增 Chromium 的生产镜像与出口限额验收。当前不承诺下载成功率、OCR 准确率、实际费用或 P50/P95。
+
+### 真实验收范围
+
+2026-10-15 使用映射到本机 API 的公网域名及一条授权小红书视频，新增 5 次真实付费调用：ASR 1 次、OCR 2 次、画面理解 1 次、摘要 1 次。该轮与前述 2026-10-14 的 89 次视觉调用分开记录，没有估算人民币金额。
+
+| 验收项 | 实测与边界 |
+| --- | --- |
+| 公网 WAV | 有效凭证返回 200、正确 `audio/wav`、长度及 SHA-256、`private, no-store`；删除后 404；后续 ASR 成功证明该网关可读取，不等于所有生产代理已验收 |
+| 下载与 ASR | 37.1 秒、18,035,982 字节原片，16 kHz 单声道 WAV 1,187,454 字节；118 字转写，输入 521 / 输出 84 tokens，完整回执；仅验证内嵌音轨，未逐字听校 |
+| 语音进摘要 | 4 条摘要和 3 条营销解读引用 `a0001`；时间线仅引用画面/文字；仅取 2 帧 OCR、2 帧观察，保留采样缺口，不作为全片视觉质量验收 |
+| 回执复用 | 重新提取同源音频并轮换 URL 后复用同一响应 ID，只有一个 ASR 意图，没有再次请求 |
+| 浏览器 | 真实转写加载到 React/Chrome，中英文、暗色、窄屏和恢复通过；其余业务接口使用夹具 |
+| Linux | 当日 Docker Desktop namespace 被拒且测试镜像构建受证书链阻塞，未关闭安全校验；后续 2026-10-16 Ubuntu 验收见[服务器部署记录](marketing-video-server-deployment-20261016.md)，不外推其他系统组合 |
+
+原始证据保存在 Git 忽略的 `data/marketing-analysis-probes/acceptance-xhs-20261015/`：`download.json`、`frames.json`、`asr/result.json` / `asr/receipts/`、`analysis-2-2/report.json` / `analysis-2-2/receipts/`。ASR 响应 ID 为 `1cf02d3c-07b0-9335-acec-8a4d56204ee1`。短时 WAV 请求后删除，带参数来源链接、凭证、原片和原始回执不提交 Git。
+
+复现按 `pnpm check:marketing-analysis:local download`、`speech`、`analyze` 执行；`MARKETING_ANALYSIS_LOCAL_DIR` 指向专用私有目录，后两步需 `MARKETING_ANALYSIS_LOCAL_MODEL_CALLS=1`，新目录会付费。已有目录仅复用同输入的已知回执；不能给已开始视觉调用的旧目录补写语音后继续。该轮 OCR / 观察帧数均设为 2。
+
+### 批量验收与质量目标
+
+先为每平台至少准备 5 条授权长短链，最终冻结每平台至少 10 条质量样本及失败反例，记录下载成功率、采样漏检、OCR 错误、摘要事实错误、真实用量/费用和 P50/P95。单样本、夹具或单台 Linux 主机通过不能替代该项验收。
+
+| 维度 | 必须保留的验收点 |
+| --- | --- |
+| 下载 | B 站单 P/cid，抖音/小红书登录过期、Cookie、挑战页、短链/CDN；失效、超长、非视频、中断及流式限额 |
+| 采样与 OCR | 固定背景字幕变化、快切、300 ms 文字、首尾 CTA、VFR/旋转/起始偏移；价格、品名、否定词人工标注，区分采样漏检与 OCR 错识 |
+| 模型与摘要 | 两模型实际图片输入、时间顺序、JSON、结束状态、用量和请求大小；逐条事实有证据，推断单列；无语音证据不编造口播，ASR 无逐字时间戳不用于时间线 |
+| 恢复与隔离 | 各阶段杀进程、Redis 失败、网络断开、提交未知、取消、重复投递；跨用户读取、DNS 重绑定、重定向内网、下载器旁路、路径穿越、超像素和恶意清单 |
+| 工作台 | 刷新、部分成果、校对修订、草稿冲突、账号切换、中英文及暗色 |
+| 部署与资源 | 目标 Linux 命名空间、正式镜像/供应链、Chromium 出口限额、共享磁盘容量告警、生产音频 URL；真实成片口播/字幕/人物一致性另验 |
+
+采样召回率按“有候选帧命中可见区间的标注文字条数 / 标注文字总条数”计算；OCR 准确率仅统计已命中的清晰文字。清晰常驻字幕字符准确率 ≥95%、关键价格/否定词无未提示误读、摘要无无依据事实是待验证目标，不能表述为已达成。普通样本与快速字幕压力样本分项报告，无法覆盖时明确限制。真实成本包含所有 OCR、画面理解、摘要和 ASR 调用，另计下载、存储及计算，不预设抽帧一定比原视频输入便宜。

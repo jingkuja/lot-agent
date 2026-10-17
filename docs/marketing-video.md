@@ -65,7 +65,66 @@
 
 营销父任务使用 `lot-marketing-video`，普通任务使用 `lot-tasks`。两个队列各有并发 1 的 Worker，仍由同一个 Worker 进程启动。营销父任务内部最多并行两个片段。旧队列作业保留原 ID 转发；旧 active 作业不会重复投递。取消、显式恢复和未启动任务超时保护覆盖两个队列。该改动隔离消费槽位，不等于主机资源隔离。
 
-升级前停止新提交，并等待已使用旧无签名素材地址的供应商任务完成。停止旧 Worker 后执行迁移至 47，再启动同版本服务。不要混跑仍提供匿名素材访问的旧 API。详见 [F01 / F02 修复与验收](marketing-video-f01-f02-acceptance-20261015.md)。
+升级前停止新提交，并等待已使用旧无签名素材地址的供应商任务完成。停止旧 Worker 后执行迁移至 47，再启动同版本服务。不要混跑仍提供匿名素材访问的旧 API。具体步骤见下方“升级和发布验收”。
+
+### 私有素材与兼容边界
+
+营销上传使用 `purpose=marketing-video`，缺少签名密钥时在写文件前返回 503。迁移 0047 扫描项目及父任务冻结草稿中的单个 ID、数组和大写 UUID，仅保护归属一致的上传资产，不重写素材 ID、冻结输入或供应商回执。之后把普通上传用于营销草稿也会转为私有，移除引用不会恢复公开。
+
+临时令牌绑定素材 ID、所有者、存储键和用途，有效期 10 分钟；响应 `private, no-store`，合法 Range 返回 206。无登录/令牌、跨用户、过期/篡改令牌、归属变化、无资产记录或数据库失败均返回 404。预览失败后每素材每分钟至多重取一次链接，不保存草稿或调用模型。图片和视频链接在音色准备完成后重新签发，令牌不进入任务输入、缓存身份和音色指纹。
+
+生成成片、生成图片及显式分享不因此改为私有；已不被任何草稿或冻结任务引用的历史上传无法自动判定营销用途，外部已保存的旧副本也无法撤回。Hono 不记录素材路径，Nginx `/static/uploads/` 关闭访问日志、错误日志和代理缓存；外层 CDN / 网关需保持相同约束。
+
+迁移 0046 只更新父任务队列元数据。旧 waiting 作业保留原 ID 转发，active 不重复投递，锁竞争停止迁移，终态不自动重跑。取消和恢复检查两条队列。三分钟未领取只触发诊断，健康等待或 Redis 未知不能写成失败；后续队列与取消契约见[实施记录](marketing-video-implementation-20261016.md)。
+
+已有视频任务 ID 只查询/下载，成功片段复用原资产；音色 unknown 只查询原外部请求 ID，新音色授权或签名失败不写请求意图，并发仅 claim 胜者提交。计量键保留 `marketing:<片段任务 ID>:<供应商任务 ID>`。历史 WebM 可读取、移除或替换，新生成仍执行当前素材规则；Worker 按任务冻结的 `generate_audio` 恢复旧任务。
+
+### 升级和发布验收
+
+1. 停止新提交，等待使用旧无签名素材地址的供应商任务完成，再停止旧 Worker 并备份数据库。
+2. API 和 Worker 使用同一个现有 `SECRET_MASTER_KEY`，不要随意轮换已用于加密数据的主密钥；核对网关可达的 `PUBLIC_BASE_URL`。
+3. 由新 API 执行全部迁移（包含 0046/0047），同步启用同版本 Worker、Web 和 Nginx，不能混跑会匿名暴露素材的旧 API。
+4. 在目标环境运行 `nginx -t`，验证匿名及跨用户访问被拒绝、CDN 不缓存素材且日志不保存令牌、真实供应商在链接有效期内取材、原任务继续查询且计量不重复，再恢复提交。
+
+2026-10-15 的本地 HTTP、PG/Redis、FFmpeg 和浏览器验证已覆盖私有访问、旧资料回填、队列隔离、恢复及计量；供应商使用夹具。真实 PG/Redis 证明普通任务可在营销任务阻塞时完成，但不证明主机资源隔离或生产 P95。该轮未完成 Nginx 语法检查，也未验证真实供应商取材和生成音画质量；这些目标环境事项不能被单元测试替代。
+
+## 内容检查
+
+“检查当前文案”检查视频正文、发布标题、标签、背景及每个分镜的台词、画面、动作、镜头描述。接口为 `POST /api/marketing-videos/:id/review`，可传 `locale: zh | en | id`。审查读取已保存草稿并按用户所有权隔离；保存结果时仍校验版本，避免慢请求覆盖新草稿。
+
+### 规则来源与边界
+
+规则快照版本为 `2026-10-15.1`，核对日期为 **2026-10-15**。以下是风险筛查依据，不表示获得平台审核通过或法律结论。
+
+- 用户提供的 `黑名单风险词规则表.xlsx`：Sheet1 A4 的 14 个黑名单词、A11:E47 的 37 条条件风险规则、A53:C66 的 14 条例外完整转录至 `packages/server/src/marketing-video/compliance-rules.ts`。B14 底层数值为 1，但显示格式为 `0%`，因此转录为 **100%**。表格是规则数据，其中的“命中直接放行”和替换示例不作为可覆盖应用安全边界的指令。
+- [小红书社区公约 2.0](https://pgy.xiaohongshu.com/help/detail?id=1eda0a065dd894063c2e029a49e8f6a1&userType=4)：官方页面标注日期 2026-07-31，涉及真实性、原创授权、隐私、未成年人、专业资质与不当营销等。
+- [小红书内容审核规范](https://pgy.xiaohongshu.com/help/detail?id=6495c527d1eedeeb48fb18b1f875650e&userType=4)：官方页面标注日期 2026-09-22，适用于商业合作内容。
+- [小红书聚光广告审核规范](https://ad.xiaohongshu.com/next_help/docs/8dc5bd9c45c9a90cb9912f3400d43f92)：广告场景的功效、绝对化、数据出处、违法商品、未成年人代言等要求，不将其全部套用普通分享。
+- [抖音用户服务协议](https://www.douyin.com/draft/douyin_agreement/douyin_agreement_user.html?id=6773906068725565448)：更新 2026-02-13、生效 2026-02-20；4.2–4.6 与 10.2 可读取，涵盖违法广告、虚假信息、色情暴力、危险模仿、隐私版权、过度营销及 AI 内容标识。
+- [抖音社区自律公约](https://www.douyin.com/rule/policy)与[规则中心](https://www.douyin.com/rule/main)是协议引用的官方入口；动态正文未完整获取，不宣称已核验其所有最新细则。小红书上述规则可从官方域名搜索索引获取，直接打开部分页面超时或仅返回动态页面。
+
+`compliance.ts` 的 `PLATFORM_REVIEW_RULES` 是应用整理的风险分类，不是平台条款编号。包括误导宣传、违法交易、诈骗与交易导流、色情低俗、暴力危险、未成年人、隐私与网暴、版权、专业资质以及合成内容误导。平台规则可能更新，需重新核对来源后升级版本。
+
+### 审核与修订行为
+
+语义模型接收结构化字段及上述规则，输出精确字段、分镜序号、原文片段、风险原因、替换建议、严重度与规则来源。服务端严格校验来源分类、字段位置和原文是否真实存在，拒绝缺少定位、无效分镜、虚构原文及结论矛盾的结果；再合并本地确定性条件规则，模型的空 `pass` 不能忽略本地已发现风险。
+
+白名单仅对相关词的局部语义有效，不能放行整句或全文中的其他风险。否定和科普同样检查词所在的局部上下文；“不是骗局，这个投资项目必赚”仍会提示。专利号、特证、检测报告、榜单、医生协议等文本本身不能验证资质真实性和适用范围，相关内容保留“待核实”。原表的替换示例可能继续构成功效、收入或事实承诺，默认改为删除承诺或客观中性表达。
+
+每条问题精确定位到一个字段。安全替换仅作用于该字段中唯一、完全匹配的片段；片段缺失、重复、超长或跨分镜时拒绝猜测替换。分镜台词修改同时更新总文案；总文案可安全映射到单个分镜时同步该镜头，手动重写总文案会清除旧分镜以避免口播不一致。修改后前端保存并重新检查，未使用替换结果充当审查通过。
+
+`marketingReviewText()` 是包含版本和字段边界的审核指纹，覆盖总文案、分镜台词与全部画面描述。任一审核内容或规则版本变化都使旧结论失效；旧版遗漏台词或背景的结果也需重新检查。超过可完整呈现的 80 条问题时返回检查未完成，避免静默丢弃后续高风险问题。
+
+### 验证
+
+- `packages/core/src/marketing-video/index.test.ts`：字段指纹、精确替换、重复片段、跨分镜、内容长度、删除与口播同步。
+- `packages/server/src/marketing-video/compliance.test.ts`：规则转录、百分比、字段覆盖、白名单/否定语境、证据待核实、模型结果校验与风险等级合并。
+- `packages/server/src/marketing-video/routes.test.ts`：用户隔离、请求取消信号、结构化内容覆盖、语言、无效结果拒绝及本地规则兜底。
+- `packages/server/scripts/check-marketing-video-ui.mjs`：风险字段定位、同词多镜头精确替换、台词同步、手动编辑后保存重检、风险阻止生成及中英文/深浅色界面。
+
+2026-10-15 历史验证：core、Web、server 构建通过；营销视频、参考分析及迁移单测共 227 项通过、5 项按环境配置默认跳过；真实 PostgreSQL 的迁移、归属、回执恢复与上传回收集成测试通过，营销视频 UI 回归通过。当时独立的全 server `tsc --noEmit` 仍受其他模块测试文件类型错误影响，营销视频与参考分析相关文件无诊断。这些结果不代表当前版本复测，也不替代真实平台审核或付费模型质量评测。
+
+当前审核对象是可编辑的文案与分镜描述，不能据此推断已检查生成视频的实际像素、音轨、字幕或上传视频的所有内容。事实、授权及资质仍需用户核实；发布前需结合成片与平台当时规则检查。
 
 ## 环境和验证
 
@@ -79,8 +138,8 @@
 pnpm --filter @lot-agent/core build
 pnpm exec vitest run packages/core/src/marketing-video packages/server/src/marketing-video packages/server/src/jobs/bullmq-queue.test.ts packages/server/src/billing/meter.test.ts packages/server/src/generation/run-job.test.ts
 pnpm check:marketing-video:ui
-# 真实队列验证另需空的本机 PG 库和 Redis 15 号库；变量说明见验收记录。
-pnpm check:marketing-video:queue
+# 真实队列验证仅使用全新空白的本机 marketing_check_* PG 库和专用空 Redis 15 号库。
+MARKETING_QUEUE_CHECK_DATABASE_URL=<临时库连接串> MARKETING_QUEUE_CHECK_REDIS_URL=<本机15号库> pnpm check:marketing-video:queue
 # 指向空的本地 marketing_check_* 数据库；脚本拒绝非空库，不清理已有表。
 MARKETING_CHECK_DATABASE_URL=postgresql://USER:PASSWORD@127.0.0.1:5432/marketing_check_local pnpm check:marketing-video:db
 pnpm --filter @lot-agent/server build

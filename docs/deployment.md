@@ -34,7 +34,7 @@
 
 - **server 与 worker 是同一份代码、同一个镜像**（`lot-agent-app`），靠环境变量 `ROLE` 决定启动 `index.js`（API）还是 `workers/index.js`（任务消费）。
 - **server 与 worker 共享 `app_data` 卷**：worker 生成图片/视频写入 `data/assets`，server 在 `/static` 读取并对外提供。二者必须挂同一个卷，否则前端拿不到生成结果。
-- **数据库表由应用启动时自动迁移创建**（`packages/server/src/db/database.ts` 的 `migrate()`，幂等 `CREATE TABLE IF NOT EXISTS`）。`deploy/postgres/init.sql` 只负责扩展等应用做不了的事。
+- **数据库由 server 启动时的正式迁移器升级**（`packages/server/src/db/migration-runner.ts`，advisory lock 与逐迁移事务，版本登记到 `schema_migrations`）。Worker 不执行迁移。`deploy/postgres/init.sql` 只负责扩展等应用做不了的事。
 - **所有密钥来自 `.env`**，镜像与编排文件不含明文。
 
 ---
@@ -138,7 +138,7 @@ docker compose logs -f server worker
 
 首次启动顺序由健康检查保证：`postgres` / `redis` 先 healthy，`server` 与 `worker` 才启动；`server` 启动时自动执行表结构迁移。
 
-升级到 10 月 15 日评审修复版本时，先停止旧 Worker，由新 server 完成迁移 `0044-marketing-result-recovery`，再启用同版本 Worker 和 Web。新版本保存文本恢复输入和摘要冻结输入，媒体 Worker 会检查新字段就绪。保留数据库备份；已有 `needs_apply` 记录时不能直接降级到不认识该状态的旧版本。历史记录的恢复限制及验证范围见 [本次修复说明](marketing-video-review-20261015.md)。
+升级营销影像时，先停止旧 Worker，由新 server 完成全部已注册迁移（当前至 0047），再启用同版本 Worker 和 Web。迁移 `0044-marketing-result-recovery` 引入恢复契约；0046/0047 引入队列隔离和私有素材。新版本保存文本恢复输入和摘要冻结输入，媒体 Worker 会检查新字段就绪。保留数据库备份；已有 `needs_apply` 记录时不能直接降级到不认识该状态的旧版本。历史记录的恢复限制及验证范围见 [恢复与升级契约](marketing-video-reference-analysis.md#恢复与升级契约)，私有素材发布步骤见[升级和发布验收](marketing-video.md#升级和发布验收)。
 
 启动成功的标志：
 
@@ -147,6 +147,22 @@ docker compose logs -f server worker
 - `worker` 日志出现 `Worker started, listening for jobs`。
 
 ---
+
+### 知识服务部署与容量
+
+知识 Worker 复用应用镜像、PostgreSQL、Redis 和 `app_data` 卷，使用独立的 `lot-knowledge` 队列，不能改为普通任务的 `lot-tasks`。
+
+1. 按[备份恢复手册](knowledge-backup-restore.md)备份完整业务库及私有原件，另外安全保存环境配置、当前镜像摘要和 Compose 配置。
+2. PostgreSQL 使用 `pgvector/pgvector:pg16`，生产固定验证过的镜像摘要。即使知识功能关闭，已注册迁移仍要求 pgvector 扩展可安装。保留旧卷；不要直接跨 PG 主版本或把已有 Alpine 数据卷切到 Debian。核对扩展、排序规则和 ICU，必要时按数据库升级要求重建索引。
+3. 停止旧知识 Worker，构建应用与 Web 镜像；先启动新 server 完成全部迁移。知识 Worker 的最低就绪检查为 schema 0030，不是旧文档中的 28/29。
+4. 设置 `KNOWLEDGE_MANAGEMENT_ENABLED=1`、`KNOWLEDGE_INGESTION_ENABLED=1`，执行 `docker compose --profile knowledge up -d`。确认 server 健康及迁移完成后再消费任务；核对 `data/knowledge` 持久化且不暴露为静态目录。
+5. 验证索引 profile、模型权限、队列与实际用量。需要外部只读访问时再开启 `KNOWLEDGE_EXTERNAL_ENABLED=1`，创建按库授权的独立知识密钥，见[外部 API](knowledge-external-api.md)。
+
+`KNOWLEDGE_CONCURRENCY` 默认 2，`KNOWLEDGE_PG_POOL_MAX` 默认 4（2–32）；数据库连接预算应包括 API、普通、知识和媒体 Worker。Nginx 管理上传/替换上限 200m，保持流式转发，预览票据不进入访问日志。生产不启用 `DEBUG=1` 或 `DEBUG_LLM`，不记录凭证、原文和预览令牌。
+
+TXT/Markdown/PDF/DOCX、笔记、媒体说明及确认事实可索引，图片与扫描 PDF 已接入 OCR；知识库音视频内容识别仍未接入。解析、索引迁移、后台账单核对和恢复见[知识入库手册](knowledge-ingestion.md)。模型访问始终使用资料所有者凭证；能力元数据短缓存不替代每次余额检查与真实记账。更换 Node/ICU、模型、维度、路由或分段规则时需核对 immutable profile，使用 build/switch，不能混用旧向量。
+
+2026-09-24 的本机历史容量测试在约 1 万片段/并发 5、10 万片段/并发 1 达到 2 秒目标；10 万片段/并发 5 的端到端 P95 为 2.6–2.7 秒。它使用随机容量片段，不是生产 SLA；详见[历史基线](knowledge-retrieval-optimization.md#历史质量与容量基线)。扩大规模前在目标硬件复测，再评估 HNSW。外部接口每 Key 60 次/分钟、5 并发，仍受用户网关额度限制。
 
 ## 6. 验证
 

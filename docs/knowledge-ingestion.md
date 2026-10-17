@@ -1,6 +1,6 @@
-# 本地知识管理、入库与检索（S1 / S2）
+# 本地知识管理、入库与检索
 
-2026-09-24。S1/S2 管理、事实、素材、索引迁移与恢复已实现，并以现有 PostgreSQL / Redis 验证。用户已接受“字节候选分段＋模型返回 usage 校验”作为本阶段方案，S1/S2 验收完成；精确 tokenizer 不再作为前置条件。
+本文汇总知识管理接口、入库、检索、索引升级和账单恢复。2026-10-17 整理；当前实现与测试为准。配置 `knowledge.source=local`，外部只读接口另见[外部 API](knowledge-external-api.md)，部署及容量要求见[部署手册](deployment.md#知识服务部署与容量)。
 
 ## 本地运行
 
@@ -14,7 +14,7 @@ pnpm run dev:knowledge
 pnpm run dev:web
 ```
 
-`.env` 的 `KNOWLEDGE_MANAGEMENT_ENABLED=1` 开启管理入口，`KNOWLEDGE_INGESTION_ENABLED=1` 开启新资料的入库及本地检索；本次已在本地启用。仓库默认仍关闭。不会自动将此前保存的资料全部计费入库：无任务的待处理资料可调用 retry；新建资料才自动排队。
+`.env` 的 `KNOWLEDGE_MANAGEMENT_ENABLED=1` 开启管理入口，`KNOWLEDGE_INGESTION_ENABLED=1` 开启新资料的入库及本地检索；两个环境开关默认关闭。不会自动将此前保存的资料全部计费入库：无任务的待处理资料可调用 retry；新建资料才自动排队。
 
 `KNOWLEDGE_QUEUE` 默认 `lot-knowledge`，禁止设为 `lot-tasks`；`KNOWLEDGE_CONCURRENCY` 默认 2，范围 1–8。原生成/记忆 Worker 保持原队列。所有消费者使用同一份代码、Node/ICU、模型路由配置和私有存储目录。`pnpm dev` 同时启动知识 Worker；仅在 `KNOWLEDGE_INGESTION_ENABLED=1` 时消费，启动时最多等待 30 秒让 server 完成迁移。单独启动时使用 `pnpm dev:knowledge`。
 
@@ -24,7 +24,7 @@ pnpm run dev:web
 
 检索可选择全局本人资料（包括收件箱、有效个人事实）或指定库，支持关键词、语义、混合及显式降级。结果显示来源、真实位置与手工说明标记；查看出处打开所属版本并定位，正文以纯文本呈现。轮询及复制/查看时重新核验引用，资料删除/更新后清除旧引用。
 
-“个人信息”管理强类型字段、分类、版本、有效期、停用、外部可见开关和库关联，支持历史查看。自动记忆提取改为候选，确认后才改变事实；聊天优先确认事实，过期/停用事实的同 key 旧记忆也不会重新浮现。修改立即撤销旧语义投影，新投影异步构建。**外部知识 API 尚未开放**，单项开关不等于外部授权。
+“个人信息”管理强类型字段、分类、版本、有效期、停用、外部可见开关和库关联，支持历史查看。自动记忆提取改为候选，确认后才改变事实；聊天优先确认事实，过期/停用事实的同 key 旧记忆也不会重新浮现。修改立即撤销旧语义投影，新投影异步构建。外部访问还需启用 `KNOWLEDGE_EXTERNAL_ENABLED=1`、创建独立知识密钥并授权对应库和 `profile:read`；单项可见开关不等于完整外部授权。
 
 “个人素材”分别展示本人旧上传/生成素材及私有资料；“用于当前对话”只放入输入框，不自动发送或归档，“保存个人素材”复制到私有空间，“加入知识库”显式建立关联。旧素材按 owner 核验并排除数字员工会话资产；归档独立副本不会随旧资产删除消失，也不会撤销旧静态/分享链接。图片/音频/视频通过短期会话票据预览，无法播放时仍可下载；媒体说明可编辑；图片文字识别已接入，音视频内容识别 / ASR 尚未接入。
 
@@ -47,11 +47,11 @@ pnpm run dev:web
 - 固定 `qwen3.7-text-embedding`、1024 维、cosine；向量归一化后保存。`OPENAI_BASE_URL` 是固定模型路由，不取平台环境 API Key。每次执行按 owner 从现有凭证机制读取有效 Key；先检查该 Key 的模型列表。
 - 用户提供的 `qwen3-rerank` 留给设计中的 P1 重排序；当前 hybrid 是中文全文检索 + 精确 cosine + RRF。
 - [官方接口规格](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api/)规定该 embedding 默认 1024 维、每批最多 20 条。适配器校验数量、维度、索引顺序、非有限数和零向量。
-- **本阶段采用用户于 2026-09-24 确认的分段方案**，不依赖尚未获得的匹配 tokenizer。当前 profile 明确标为 `provider-usage-per-chunk-v1`：以 512 UTF-8 字节、64 字节重叠产生候选，逐段请求，使用返回的真实 input usage 验证不超过 512 tokens。它不是“精确 tokenizer 切分”，也不会把字符/字节数记作计费 tokens；超过预算整次入库失败而不截断正文。未来若切换到对应 tokenizer，应建新 profile 并重建；这属于后续优化。
+- 分段不依赖模型专属 tokenizer。新用户默认 chunker 为 `utf8-packed-512-overlap64-v2`，合并相邻短行/段落，不跨 PDF 页、DOCX 标题或来源；已有用户继续使用自己的活动 profile。tokenizer 标记为 `provider-usage-per-chunk-v1`：以 512 UTF-8 字节、64 字节重叠产生候选，逐段请求，使用返回的真实 input usage 验证不超过 512 tokens。它不是“精确 tokenizer 切分”，也不会把字符/字节数记作计费 tokens；超过预算整次入库失败而不截断正文。未来若切换到对应 tokenizer，应建新 profile 并重建；这属于后续优化。
 - `Intl.Segmenter('zh')` 负责中文词法，英文型号独立保留；ICU 版本纳入 immutable profile。查询和资料严格匹配 profile。ICU 字典存在将部分词拆成单字的情况，应继续做中文检索质量评测。
 - 单文档解析最多 50 MiB、500 页、200 万字符、30 秒；Worker JS old heap 256 MiB + young heap 32 MiB，可终止。此限制**不是进程总 RSS 上限**。索引最多 2000 片段，超限明确失败；不静默丢弃尾部。
 - 真实调用先持久化 `rag_embedding_charges` 回执，再按 TokenHub `/api/log/token` 的 request_id/model_name 匹配实际 quota，以 `/api/status` 的 quota_per_unit/exchange_rate 换算，事务写入既有 `usage_logs`，同一回执只计一次。
-- 账单日志延迟或不可读时持久保留待对账回执，并以 `EMBEDDING_BILLING_PENDING` 阻止后续模型调用，不记为免费。后续重试先尝试对账。网关不返回 request_id 或旧日志已不可查询时，需要运营核对回执，不应清空账单以强行继续。当前没有独立后台对账定时器。
+- 账单日志延迟或不可读时持久保留待对账回执，并以 `EMBEDDING_BILLING_PENDING` 阻止后续模型调用，不记为免费。后续重试先尝试对账。网关不返回 request_id 或旧日志已不可查询时，需要运营核对回执，不应清空账单以强行继续。知识 Worker 启动后及每 30 秒执行后台对账；待结算阻塞按用户、网关及凭证指纹隔离，不阻塞其他 Key。人工恢复见下文。
 - 平台每日/月度限制使用每 512 字节 0.01 元的保守准入预算；**它不是模型价格**，实际费用始终以网关账单为准。TokenHub 自身余额/限额仍由网关执行。并发额度预占不在此版提供。
 - 已完成片段存入运行 checkpoint；同 revision 重试可复用。无法消除“网关已收费但响应/本地落库丢失”窗口，任何实际重调仍需如实计费。
 
@@ -94,7 +94,75 @@ pnpm knowledge:gc --apply
 
 清理核对活动/待处理版本、运行中任务、上传租约、索引构建、回滚窗口和物理引用；备份 hold 有效时整体停止。旧索引按 owner 删除行，保留共享表结构，不影响其他用户；保留期过后旧回滚指针撤销。元数据提交后再删除物理孤立文件，期间锁定同 owner 的新上传，重复运行安全。已登记历史对象与孤立私有文件均计入实际占用。清理不是自动定时任务，备份保留周期应小于或等于实际 GC 保留期。
 
-## 管理 API 补充
+## 管理 API
+
+管理与原件访问都按用户隔离，不接受客户端指定 owner 或存储键。原件位于私有 `data/knowledge`，同用户按内容哈希去重，不跨用户共享。删除立即撤销关联和预览，历史原件仍计容量，物理回收遵守前述 GC 与备份保留窗口。
+
+前缀 `/api/rag/manage`，使用现有 `Authorization: Bearer <session>`。请求不接受 owner、内部对象键或活动版本指针。
+
+| 方法 | 路径 | 输入/行为 |
+| --- | --- | --- |
+| GET / POST | `/collections` | 分页列库 / `{name, description?}` 建库 |
+| PATCH | `/collections/:id` | `{name, description?, version}` |
+| DELETE | `/collections/:id` | `{version}`，只移除库与关联，保留资料 |
+| GET / POST | `/items` | 分页列资料 / 新建笔记或书签 |
+| GET | `/items/:id` | 归属检查后的元数据，不含磁盘键 |
+| PATCH | `/items/:id` | `{version, title, description?, tags?, content?, sourceUrl?}`；正文仅笔记可改，URL 仅书签可改；创建新版本并取消旧待处理代次 |
+| DELETE | `/items/:id` | `{version}`，返回受影响库 ID |
+| PUT / DELETE | `/collections/:collectionId/items/:itemId` | 加入 / 移出单个库，重复加入幂等 |
+| POST | `/uploads` | 原始文件字节流，见下文 |
+| GET / HEAD | `/items/:id/revisions/:revisionId/content` | 鉴权文件流，支持单段 Range，非法 Range 为 416 |
+| POST | `/items/:id/revisions/:revisionId/preview-ticket` | 生成最长 5 分钟且不超过会话到期时间的预览 URL |
+| GET | `/storage` | `storedBytes`，含历史/待回收对象，同用户内容去重 |
+
+列库、列资料支持 `limit=1..100`、`cursor`（使用返回的 `nextCursor`，不要自行拼接）。列资料可指定 `collectionId`，并支持 `inbox`、`types`、`tag`、`q` 和 `source` 筛选。类型、来源、标签和标题在 SQL 分页前过滤。游标保留 PG 时间戳微秒精度，以免同毫秒内资料被跳过。
+
+创建库、创建资料、上传文件必须发送 `Idempotency-Key`（1–128 个可见 ASCII 字符）。同用户同路由同 Key 同请求返回同结果；改请求而复用 Key 返回 409。事务级锁防止跨进程同时创建重复记录。重新上传仍会读取/校验字节，但不会产生重复实体或同用户重复原件。
+
+笔记示例：
+
+```json
+{
+  "sourceType": "note",
+  "title": "产品说明",
+  "content": "离线模式支持查看已下载资料。",
+  "description": "内部测试资料",
+  "collectionIds": [],
+  "tags": ["产品"]
+}
+```
+
+书签使用 `sourceType: "bookmark"` 和 `sourceUrl`（HTTP/HTTPS），只保存地址和说明，不请求远程网页。
+
+### 流式上传与原件读取
+
+上传接口接收原始字节，不接收 multipart；这样无需将 200 MiB 视频完整读进内存。设置文件的 `Content-Type`，用 `X-Knowledge-Metadata` 发送经 `encodeURIComponent(JSON.stringify(...))` 编码的元数据（编码后上限 16 KiB）：
+
+上传上限为文本/PDF/DOCX 50 MiB、图片 20 MiB、音频 100 MiB、视频 200 MiB；MIME 白名单及签名校验以 `packages/server/src/knowledge/private-storage.ts` 为准。文本必须为 UTF-8；文件签名通过不代表完整解析成功，损坏文件仍可能在入库阶段失败。
+
+```ts
+const metadata = { title: file.name, collectionIds: [collectionId], tags: [], description: "" };
+await fetch("/api/rag/manage/uploads", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${sessionToken}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": file.type || "text/plain",
+    "X-Knowledge-Metadata": encodeURIComponent(JSON.stringify(metadata)),
+  },
+  body: file,
+});
+```
+
+成功返回 `{id, revisionId}`，通过资料详情获取保存/索引状态。MIME 白名单以服务端为准，不应给未知文件强制伪造 MIME；上面文本 fallback 只适用于已确认的文本文件。当前一请求一文件；批量收集 UI 为每个文件分别维护请求和状态。
+
+小文件可鉴权 fetch 后创建 Blob URL。大文件使用预览接口返回的 `/api/rag/preview/<ticket>`；此 URL 不需要额外 Bearer 头，但每次请求都会重新检查原会话、票据有效期、资料删除状态、运行代次和版本可见性。退出、到期、编辑、删除后后续请求失效，已开始传输的数据不回收。没有真实会话的 DEBUG 用户无法签发票据，可使用管理文件流。
+
+响应使用 `no-store`、`nosniff` 和安全内容策略。应用与仓库 nginx 对预览路径不记录 URL；新增代理也必须避免记录该能力 URL。nginx 为知识上传单独配置 200 MiB 上限和流式转发，不改变旧上传接口限制。
+
+错误为 `{request_id, error: {code, message, retryable}}`。400 参数、401 会话、404 不存在或不可见、409 版本/幂等冲突、413 超限、415 格式不支持、503 依赖不可用。不会把数据库错误原文或原件键返回客户端。
+
+### 索引、事实与素材接口
 
 均使用原有 Bearer 会话，与外部知识 Key 无关：
 
@@ -134,29 +202,37 @@ collection_ids 1–10 个，top_k 1–20，tags 为 AND、source_types 为 OR。
 
 ## 部署
 
-新版迁移依赖 pgvector，**即使功能关闭也需要扩展可安装**。Compose 的 PostgreSQL 改为 `pgvector/pgvector:pg16`；不要不经备份直接把已有 Alpine 数据卷切到 Debian 镜像。先备份、停旧实例，核对主版本、扩展及排序规则版本，必要时 REINDEX/REFRESH COLLATION，确认旧业务数据后再升级 server。本次现有本地实例已在 S1 按此流程替换。
+按[知识服务部署与容量](deployment.md#知识服务部署与容量)升级：先备份，再由新 server 执行所有已注册迁移，确认知识 schema 0030 就绪后启动同版本知识 Worker。仅更新 Web 或跳过迁移不能完成升级。备份、恢复及数据库回退见[备份恢复手册](knowledge-backup-restore.md)。
 
-知识进程复用应用镜像和 `app_data`，独立 Compose profile：
+## 索引升级与账单恢复
+
+已有用户的活动 profile 和 checkpoint 不自动改写。由旧 v1 短行策略切换到 v2 时，保持模型、维度、路由一致，使用前述 `knowledge:index start → build → status → switch` 流程。`build` 使用资料所有者凭证，会产生真实费用；切换前仍由旧索引服务，版本竞争或资料不完整时拒绝切换。不要把旧应用直接回滚到新 schema，回执唯一约束和资料状态已有变化。
+
+知识 Worker 每 30 秒核对待结算回执，即使最后一个片段或查询已经完成也继续处理。付费向量在回执延迟时可保存 checkpoint；同一凭证有待结算费用时不再发起新向量调用，其他 Key / 网关不被旧回执阻塞。退役凭证或历史无指纹账单使用人工恢复入口：
 
 ```sh
-docker compose --profile knowledge up -d
+pnpm knowledge:billing status OWNER_UUID
+pnpm knowledge:billing reconcile OWNER_UUID ORIGINAL_PROVIDER_ROUTE
+# 原退役 Key 通过安全环境变量 KNOWLEDGE_RECEIPT_KEY 提供，不放入命令参数。
+# 仅在核实原网关和凭证后处理无指纹历史记录：
+pnpm knowledge:billing reconcile OWNER_UUID ORIGINAL_PROVIDER_ROUTE --legacy
 ```
 
-设置以上两个功能开关为 1。server 执行迁移；knowledge-worker 等待 server healthcheck，检查 schema 28 后才领取任务。原 worker 不消费知识队列。
+只根据匹配的 request ID、模型及网关实际 quota 结算。缺少请求 ID、凭证已撤销或日志超出保留窗口时保持 pending，不能猜测金额、记零或清空回执解除保护；后台不会猜测历史记录的原凭证。
+
+无可索引说明的音视频或书签保留为 `stored_only`，补充说明后再入库，清空说明会撤下旧索引；图片走 OCR / 画面说明路径。资料接口持久返回错误码与解析诊断，重开后仍显示未识别 PDF 页。个人素材列表、原件和归档统一排除企业业务资产，已归档副本持久保存上传/生成来源。聊天默认资料类型仍为文档/笔记，可显式选择其他类型及有效事实；出处定期及聚焦时重新核验，失效后清除。
 
 ## 验证与剩余验收
 
 ```sh
-pnpm run test:knowledge
-pnpm run check:knowledge:integration --redis
-# 显式计费：仅用于已获授权的最近登录账号；测试结束清理合成资料，保留用量。
-pnpm run check:knowledge:live --live --latest-user
+pnpm test:knowledge
+pnpm check:knowledge:integration --redis
+pnpm check:knowledge:upgrade
+pnpm check:knowledge:retrieval
+# 显式计费：仅用于已获授权的最近登录账号；清理合成资料，保留实际用量。
+pnpm check:knowledge:live --live --latest-user
 ```
 
-验证记录见 [S1/S2 验收记录](knowledge-s1-s2-verification.md)。数据库、Redis 与浏览器验证均复用现有本地基础设施，只创建并清理隔离测试账号/队列/临时文件，不创建容器。真实模型测试保留其实际用量记录。
+集成脚本的数据库地址、隔离及清理范围以各脚本参数为准；普通单测不代表数据库、Redis 或真实模型验收通过。2026-09-24 修复验证覆盖 schema 29 → 30、上传重放、企业素材隔离、跨行召回、旧 Key 与新网关隔离、延迟及历史回执恢复；浏览器与 Electron 使用真实管理链路和模型替身，未重跑付费模型。该批 Redis 专项未运行，server 全目录严格类型检查仍有既有诊断。这些是历史验证范围，不是当前版本的复测结果。
 
-已接受的设计调整：采用“字节候选 + 返回 usage 硬校验”，不将其描述为精确 token 切分，也不再将匹配 tokenizer 列为阶段阻塞项。其他边界：Worker 内存限制是 JS heap 而非总 RSS；大规模中文质量和容量指标留待 S4。S3 的 Agent 本地检索工具及外部知识 Key / Dify API 尚未接入，S1/S2 不开放外部入口。
-
-## 2026-09-24 Review 修复升级
-
-本版要求 schema 0030，并引入短行合并 v2 profile、仅保存状态与按凭证隔离的回执对账。旧索引保留原规则；升级步骤、显式重建和账单恢复见 [RAG Review 修复记录](knowledge-review-fixes.md)。
+检索历史基线、合成语料限制及后续真实质量评测见[检索优化与评测](knowledge-retrieval-optimization.md)。解析 Worker heap 限制不是总 RSS；不能以合成短文档或本机测试承诺生产质量和容量。

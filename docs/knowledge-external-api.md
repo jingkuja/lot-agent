@@ -4,7 +4,7 @@
 
 ## 启用
 
-现有 PostgreSQL 执行迁移 29。管理入口需要 `KNOWLEDGE_MANAGEMENT_ENABLED=1`；索引需要 `KNOWLEDGE_INGESTION_ENABLED=1` 和独立知识 worker；外部只读接口需要 `KNOWLEDGE_EXTERNAL_ENABLED=1`。Redis 不可用时拒绝外部请求，不绕过限流。配置 `knowledge.source=local` 时 Lot Agent 直接调用本地服务，不回退远端 RAG。
+先由 server 执行全部已注册迁移；外部接口由迁移 0029 引入，当前知识 Worker 还要求 schema 0030 就绪，升级顺序见[部署手册](deployment.md#知识服务部署与容量)。管理入口需要 `KNOWLEDGE_MANAGEMENT_ENABLED=1`；索引需要 `KNOWLEDGE_INGESTION_ENABLED=1` 和独立知识 worker；外部只读接口需要 `KNOWLEDGE_EXTERNAL_ENABLED=1`。Redis 不可用时拒绝外部请求，不绕过限流。配置 `knowledge.source=local` 时 Lot Agent 直接调用本地服务，不回退远端 RAG。
 
 在个人知识库的“外部接入”创建密钥，必须显式选 1–10 个知识库。默认只允许 `retrieval:read`；`assets:read` 和 `profile:read` 可选。个人信息还必须逐条允许共享。密钥只在创建和轮换时展示一次；数据库只存 SHA-256 哈希和短前缀。编辑授权、轮换、撤销采用版本检查；旧授权在请求前和返回前重新校验。轮换使旧密钥立即失效。撤销会阻止后续读取，无法收回客户端此前已经取得的资料。
 
