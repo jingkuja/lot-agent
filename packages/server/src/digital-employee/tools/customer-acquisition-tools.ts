@@ -453,14 +453,14 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const prepareFeedback: Tool = {
     name: "prepare_deployment_feedback",
-    description: "Prepare impressions, interactions, conversions or textual feedback for a deployment. After confirmation call commit_deployment_feedback.",
+    description: "Prepare impressions, interactions, conversions or textual feedback for a deployment. Counts are increments since the previous feedback record, not platform cumulative totals; if the user gives a cumulative total, subtract the counts already recorded or ask. After confirmation call commit_deployment_feedback.",
     parameters: {
       type: "object",
       properties: {
         deploymentId: { type: "string" },
-        impressions: { type: "integer" },
-        interactions: { type: "integer" },
-        conversions: { type: "integer" },
+        impressions: { type: "integer", description: "New impressions since the previous record" },
+        interactions: { type: "integer", description: "New interactions since the previous record" },
+        conversions: { type: "integer", description: "New conversions since the previous record" },
         feedbackText: { type: "string" },
       },
       required: ["deploymentId"],

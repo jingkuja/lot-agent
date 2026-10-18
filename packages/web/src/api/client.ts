@@ -870,7 +870,7 @@ export const api = {
       method: "PUT", body: JSON.stringify(input),
     }),
 
-  addDeploymentFeedback: (deploymentId: string, input: { impressions?: number | null; interactions?: number | null; conversions?: number | null; feedbackText?: string }) =>
+  addDeploymentFeedback: (deploymentId: string, input: { requestId?: string; impressions?: number | null; interactions?: number | null; conversions?: number | null; feedbackText?: string }) =>
     request<DeploymentFeedback>(`/digital-employee/acquisition/deployments/${encodeURIComponent(deploymentId)}/feedback`, {
       method: "POST", body: JSON.stringify(input),
     }),

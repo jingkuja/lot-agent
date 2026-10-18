@@ -1,5 +1,6 @@
 import { useI18n } from "../../../i18n/index.js";
 import type { MarketingAsset } from "../types.js";
+import { generationStateLabel, generationStopped } from "./asset-delivery.js";
 
 const TYPE_LABEL = { text: "营销文案", poster: "营销海报", image: "营销图片", video: "营销视频" };
 
@@ -17,7 +18,7 @@ export function MarketingAssetCard({ item, onView, onManage, onReuse, onArchive 
   const conversions = feedback.reduce((sum, entry) => sum + (entry.conversions ?? 0), 0);
   return <article className="de-marketing-asset-card">
     <div className={`de-asset-preview asset-${item.assetType} clickable`} onClick={onView} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onView(); } }} title={t("查看内容详情")}>
-      {item.fileUrl && item.assetType === "video" ? <video src={item.fileUrl} controls preload="metadata" onClick={(event) => event.stopPropagation()} /> : item.fileUrl ? <img src={item.fileUrl} alt={item.title} /> : item.assetType === "text" ? <p>{item.content.slice(0, 180)}</p> : <div className={`de-generation-state ${item.generationStatus}`}><span>{item.generationStatus === "failed" ? "!" : "◌"}</span>{item.generationStatus === "failed" ? t("生成失败") : t("正在生成")}</div>}
+      {item.fileUrl && item.assetType === "video" ? <video src={item.fileUrl} controls preload="metadata" onClick={(event) => event.stopPropagation()} /> : item.fileUrl ? <img src={item.fileUrl} alt={item.title} /> : item.assetType === "text" && item.content ? <p>{item.content.length > 180 ? `${item.content.slice(0, 180)}…` : item.content}</p> : <div className={`de-generation-state ${item.generationStatus}`}><span>{generationStopped(item.generationStatus) ? "!" : "◌"}</span>{t(generationStateLabel(item.generationStatus))}</div>}
       <span className="de-asset-type">{t(TYPE_LABEL[item.assetType])}</span>
     </div>
     <div className="de-asset-card-body">

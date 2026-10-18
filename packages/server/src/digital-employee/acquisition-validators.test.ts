@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAcquisitionLead, parseCreateCampaignAsset, parseDeployment, parseSegmentInput } from "./acquisition-validators.js";
+import { parseAcquisitionLead, parseCreateCampaignAsset, parseDeployment, parseFeedback, parseSegmentInput } from "./acquisition-validators.js";
 
 describe("customer acquisition validators", () => {
   it("requires a cohort snapshot, segment or explicit public audience", () => {
@@ -65,6 +65,13 @@ describe("customer acquisition validators", () => {
   it("requires a name for custom deployment platforms", () => {
     expect(() => parseDeployment({ platform: "other", status: "deployed", deployedAt: new Date().toISOString() }))
       .toThrow("其他平台需要填写名称");
+  });
+
+  it("accepts a feedback request id and rejects malformed ones", () => {
+    expect(parseFeedback({ requestId: "00000000-0000-4000-8000-000000000301", impressions: 50 })).toMatchObject({
+      requestId: "00000000-0000-4000-8000-000000000301", impressions: 50,
+    });
+    expect(() => parseFeedback({ requestId: "retry-1" })).toThrow("requestId格式无效");
   });
 
   it("requires a display name for acquisition lead return", () => {

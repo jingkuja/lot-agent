@@ -4,6 +4,7 @@ import { api } from "../../../api/client.js";
 import type { MarketingAsset, MarketingAssetType } from "../types.js";
 import { MarketingAssetCard } from "./MarketingAssetCard.js";
 import { DeploymentManager } from "./DeploymentManager.js";
+import { assetTextFileName, generationStateLabel } from "./asset-delivery.js";
 
 const TYPE_LABEL = { text: "营销文案", poster: "营销海报", image: "营销图片", video: "营销视频" } as const;
 
@@ -71,6 +72,18 @@ function AssetContentDetail({ asset, onClose, onManage, onReuse }: {
   onReuse: () => void;
 }) {
   const { t, locale } = useI18n();
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const text = asset.assetType === "text" ? asset.content : "";
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopyNotice("已复制"); }
+    catch { setCopyNotice("复制失败，请选中文字手动复制。"); }
+  };
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = assetTextFileName(asset.title); link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  };
   return <div className="de-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="de-modal de-asset-content-modal" role="dialog" aria-modal="true" aria-label={t("内容详情")}>
       <header className="de-modal-head">
@@ -93,11 +106,14 @@ function AssetContentDetail({ asset, onClose, onManage, onReuse }: {
         )}
         <div className="de-asset-content-meta">
           <span>{t("模型")}{asset.modelId || "—"}</span>
-          <span>{t("状态")}{asset.generationStatus === "ready" ? t("已就绪") : asset.generationStatus}</span>
+          <span>{t("状态")}{t(generationStateLabel(asset.generationStatus))}</span>
           <span>{t("创建于")}{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(asset.createdAt))}</span>
         </div>
       </div>
       <footer className="de-modal-actions">
+        {copyNotice && <span role="status">{t(copyNotice)}</span>}
+        {text && <button className="de-secondary-button" onClick={() => void copy()}>{t("复制全文")}</button>}
+        {text && <button className="de-secondary-button" onClick={download}>{t("下载文案")}</button>}
         {asset.fileUrl && <a className="de-secondary-button" href={asset.fileUrl} download>{t("下载文件")}</a>}
         <button className="de-secondary-button" onClick={onReuse}>{t("复用")}</button>
         <button className="de-primary-button" disabled={asset.generationStatus !== "ready"} onClick={onManage}>{t("投放与反馈")}</button>

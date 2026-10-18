@@ -507,12 +507,20 @@ export class CustomerAcquisitionService {
     if (!deployment.rows[0]) throw new NotFoundError("未找到投放记录");
     const { rows } = await this.db.pool.query(
       `INSERT INTO de_deployment_feedback
-         (id,user_id,deployment_id,impressions,interactions,conversions,feedback_text)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+         (id,user_id,deployment_id,impressions,interactions,conversions,feedback_text,request_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (user_id,deployment_id,request_id) WHERE request_id IS NOT NULL DO NOTHING
+       RETURNING *`,
       [randomUUID(), userId, deploymentId, input.impressions ?? null, input.interactions ?? null,
-        input.conversions ?? null, input.feedbackText ?? ""]
+        input.conversions ?? null, input.feedbackText ?? "", input.requestId ?? null]
     );
-    return toFeedback(rows[0]);
+    if (rows[0]) return toFeedback(rows[0]);
+    // A retried submission already landed; return the original record instead of counting it again.
+    const existing = await this.db.pool.query(
+      `SELECT * FROM de_deployment_feedback WHERE user_id=$1 AND deployment_id=$2 AND request_id=$3`,
+      [userId, deploymentId, input.requestId]
+    );
+    return toFeedback(existing.rows[0]);
   }
 
   async prepareCustomerSegment(
@@ -903,7 +911,7 @@ export class CustomerAcquisitionService {
       return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/copy" };
     }
     const payload = draft.payload as unknown as FeedbackInput & { deploymentId: string };
-    const feedback = await this.addFeedback(userId, payload.deploymentId, payload);
+    const feedback = await this.addFeedback(userId, payload.deploymentId, { ...payload, requestId: draftId });
     await this.drafts.markApplied(userId, draftId, feedback.id);
     return { alreadyApplied: false, feedback, managementUrl: "/digital-employee/copy" };
   }

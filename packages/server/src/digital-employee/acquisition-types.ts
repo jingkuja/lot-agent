@@ -164,6 +164,8 @@ export interface DeploymentInput {
 }
 
 export interface FeedbackInput {
+  /** Client-generated id; retrying the same submission does not record it twice. */
+  requestId?: string;
   impressions?: number | null;
   interactions?: number | null;
   conversions?: number | null;

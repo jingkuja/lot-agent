@@ -93,6 +93,7 @@ export function parseDeployment(value: unknown): DeploymentInput {
 export function parseFeedback(value: unknown): FeedbackInput {
   const source = object(value);
   return {
+    requestId: optionalUuid(source.requestId, "requestId"),
     impressions: optionalCount(source.impressions, "曝光数"),
     interactions: optionalCount(source.interactions, "互动数"),
     conversions: optionalCount(source.conversions, "转化数"),

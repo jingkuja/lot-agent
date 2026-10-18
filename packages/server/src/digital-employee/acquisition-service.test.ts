@@ -637,3 +637,50 @@ describe("acquisition prompt quality helpers", () => {
     expect(drafts[0].reasoning?.some((line) => line.includes("多久上线"))).toBe(true);
   });
 });
+
+describe("deployment feedback idempotency", () => {
+  it("returns the original feedback when the same request id is retried", async () => {
+    const deploymentId = "00000000-0000-4000-8000-000000000201";
+    const requestId = "00000000-0000-4000-8000-000000000301";
+    const original = {
+      id: "00000000-0000-4000-8000-000000000401", deployment_id: deploymentId, impressions: 50,
+      interactions: null, conversions: null, feedback_text: "", recorded_at: "2026-10-18T00:00:00Z",
+    };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("SELECT id FROM de_asset_deployments")) return { rows: [{ id: deploymentId }] };
+      if (sql.includes("INSERT INTO de_deployment_feedback")) return { rows: [] };
+      if (sql.includes("FROM de_deployment_feedback WHERE")) return { rows: [original] };
+      return { rows: [] };
+    });
+    const service = new CustomerAcquisitionService({ pool: { query } } as any);
+    await expect(service.addFeedback("u1", deploymentId, { requestId, impressions: 50 })).resolves.toMatchObject({
+      id: original.id, impressions: 50,
+    });
+    const insert = query.mock.calls.find(([sql]) => sql.includes("INSERT INTO de_deployment_feedback"));
+    expect(insert?.[0]).toContain("ON CONFLICT (user_id,deployment_id,request_id)");
+    expect((insert as unknown as [string, unknown[]])[1].at(-1)).toBe(requestId);
+  });
+
+  it("uses the draft id as the request id when committing agent feedback", async () => {
+    const deploymentId = "00000000-0000-4000-8000-000000000201";
+    const draftId = "00000000-0000-4000-8000-000000000501";
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("SELECT id FROM de_asset_deployments")) return { rows: [{ id: deploymentId }] };
+      if (sql.includes("INSERT INTO de_deployment_feedback")) return { rows: [{
+        id: "f1", deployment_id: deploymentId, impressions: params?.[3], interactions: null, conversions: null,
+        feedback_text: "", recorded_at: "2026-10-18T00:00:00Z",
+      }] };
+      return { rows: [] };
+    });
+    const service = new CustomerAcquisitionService({ pool: { query } } as any);
+    const drafts = {
+      get: vi.fn(async () => ({ status: "pending", payload: { deploymentId, impressions: 20 } })),
+      markApplied: vi.fn(async () => undefined),
+    };
+    (service as any).drafts = drafts;
+    await service.commitDeploymentFeedback("u1", draftId);
+    const insert = query.mock.calls.find(([sql]) => sql.includes("INSERT INTO de_deployment_feedback")) as unknown as [string, unknown[]];
+    expect(insert[1].at(-1)).toBe(draftId);
+    expect(drafts.markApplied).toHaveBeenCalledWith("u1", draftId, "f1");
+  });
+});
