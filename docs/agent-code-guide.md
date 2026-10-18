@@ -287,6 +287,7 @@ pnpm build
 
 ## 9. 专项文档
 
+- 产品方向：[定位、客群与路线图](roadmap.md)。
 - 部署与客户端：[部署（含知识服务）](deployment.md)、[营销影像新服务器部署](marketing-video-new-server-deployment.md)、[媒体 Worker Linux 安全策略与预检](../deploy/security/README.md)、[桌面端与平台验收](desktop.md)、[桌面发布与更新](desktop-updates.md)、[小程序](miniprogram.md)。
 - 账号与接入：[充值](recharge.md)、[微信虚拟支付](wechat-virtual-payment.md)、[飞书](feishu.md)。
 - 营销影像：[视频制作、素材隐私与内容检查](marketing-video.md)、[参考视频分析、恢复与验收](marketing-video-reference-analysis.md)、[十月十六日实施记录](marketing-video-implementation-20261016.md)（保留 N01–N04 及未实施的 F03/F04 契约和样例）、[服务器部署与修复记录](marketing-video-server-deployment-20261016.md)（实际环境与回退依据）。
