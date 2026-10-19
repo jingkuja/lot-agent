@@ -100,6 +100,8 @@ export interface MarketingProject {
   error?: string; output?: { assetIds: string[]; assets: { url: string; mime: string }[] };
   knowledgeItemId: string | null;
   knowledgeVersion?: number | null;
+  /** Clips of the current job whose paid submission outcome is unknown. */
+  unknownSegments?: number;
 }
 /** A store is owner-scoped even for worker reads; infrastructure lives in server. */
 export interface MarketingProjectStore {

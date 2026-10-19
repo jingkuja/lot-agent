@@ -1,5 +1,6 @@
 export type ProviderPhase = "create" | "poll" | "download";
-export type ProviderErrorCode = "HTTP_ERROR" | "TRANSPORT_ERROR" | "INVALID_RESPONSE" | "TASK_FAILED" | "REAL_PERSON_REJECTED";
+/** CONNECT_ERROR: the connection failed before any request byte was sent. */
+export type ProviderErrorCode = "HTTP_ERROR" | "TRANSPORT_ERROR" | "CONNECT_ERROR" | "INVALID_RESPONSE" | "TASK_FAILED" | "REAL_PERSON_REJECTED";
 
 /** No untrusted body, exception cause, prompt or URL is retained here. */
 export class ProviderError extends Error {

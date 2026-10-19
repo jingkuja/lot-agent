@@ -214,7 +214,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }
   async function textOperationState(operation?: { id: string; status: string; appliedVersion?: number; result?: { analysis: string } }) {
     setTextPending(!!operation && ["running", "unknown", "needs_apply"].includes(operation.status));
-    if (operation?.status === "failed") textRequest.current = null;
+    // A released intent keeps its ID on the server; the next creation needs a new one.
+    if (operation?.status === "failed" || operation?.status === "released") textRequest.current = null;
     if (operation?.status !== "succeeded" || !operation.appliedVersion || operation.appliedVersion <= version.current || dirty) return;
     const token = epoch.current; const id = draftId.current;
     const p = await requestProject(`/marketing-videos/${id}`);
@@ -413,7 +414,11 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     {project && <TextOperationPanel key={project.id} projectId={project.id} reload={operationReload} onState={async operation => { if (project.id === draftId.current) await textOperationState(operation); }} />}
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}
     {project?.taskId ? <section className="mv-card mv-results"><div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => void act(() => newDraft(true))}>{t("复制为新草稿")}</button></div>
-      {project.status === "succeeded" && project.output?.assets?.[0] ? <><video className="mv-result-video" controls src={project.output.assets[0].url} /><a className="mv-download" href={project.output.assets[0].url} download>{t("下载视频")}</a></> : <TaskStatus project={project} busy={busy} onResume={() => void act(() => generate(true))} onCancel={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })} onCopy={step => void act(() => newDraft(true, step))} />}
+      {project.status === "succeeded" && project.output?.assets?.[0] ? <><video className="mv-result-video" controls src={project.output.assets[0].url} /><a className="mv-download" href={project.output.assets[0].url} download>{t("下载视频")}</a></> : <TaskStatus project={project} busy={busy} onResume={() => void act(() => generate(true))} onCancel={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })} onCopy={step => void act(() => newDraft(true, step))} onRelease={() => void act(async () => {
+        const released = await request<{ project: Project }>(`/marketing-videos/${project.id}/unknown-segments/release`, json("POST", {}));
+        if (alive.current) setCurrent(normalizeProject(released.project));
+        await generate(true);
+      })} />}
       <div className="mv-publication"><button disabled={busy} onClick={() => void act(() => publication())}>{t("重新生成标题和标签")}</button>{textField("publishTitle", "视频发布标题", 100)}{textField("tags", "短视频检索标签", 160)}<div className="mv-choices"><button disabled={busy} onClick={() => void act(async () => { await save(); await navigator.clipboard.writeText([draft.publishTitle, draft.tags].filter(Boolean).join("\n")); setNotice("已复制"); })}>{t("复制发布文案")}</button><button disabled={busy || project.status !== "succeeded" || !capabilities?.knowledge} onClick={() => void act(async () => { const p = await save(); const result = await request<{ itemId: string; version: number }>(`/marketing-videos/${p.id}/archive`, json("POST", {})); setCurrent({ ...p, knowledgeItemId: result.itemId, knowledgeVersion: result.version }); setNotice("视频和发布文案已保存到知识库。"); })}>{t(project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库草稿" : "存草稿到知识库")}</button><button disabled title={t("抖音发布权限尚未接入，请下载视频并复制文案发布。")}>{t("发布到抖音")}</button></div>{notice && <p className="mv-hint" role="status">{t(notice)}</p>}<p className="mv-hint">{t("抖音发布权限尚未接入，请下载视频并复制文案发布。")}</p>{!capabilities?.knowledge && <p className="mv-hint">{t("知识库尚未启用。")}</p>}</div>
       <details className="mv-script-review" open><summary>{t("查看制作分镜")}</summary>{draft.storyboard.length ? <StoryboardEditor presenterRequired={draft.mode === "avatar"} shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}<button disabled={busy || saving} onClick={() => void act(() => newDraft(true, 2))}>{t("修改分镜并重新制作")}</button></details>
     </section> : <>

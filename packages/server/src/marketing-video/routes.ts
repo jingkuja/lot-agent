@@ -103,7 +103,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (!reserved.fresh) return c.json({ ...replay(reserved.operation), operation: reserved.operation, project: await requireProject(owner, body.projectId) });
     try {
       const prompt = creationPrompt(reserved.draft, body.locale);
-      const raw = await service.marketingText(prompt.system, prompt.input, owner, c.req.raw.signal,
+      // Not tied to the browser connection: a refresh or closed tab must not turn
+      // a paid request into an unknown one. The 300 s request deadline still applies,
+      // and the saved result is applied here and shown by the operation records.
+      const raw = await service.marketingText(prompt.system, prompt.input, owner, undefined,
         { upstreamBilling: true, onReceipt: receipt => operations.receipt(owner, body.clientRequestId, receipt) });
       const result = parseTextResult("copy", raw, reserved.draft);
       const operation = await operations.finish(owner, body.clientRequestId, result);
@@ -132,6 +135,23 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     await requireProject(owner, projectId);
     const operation = await operations.recover(owner, projectId, operationId);
     return c.json({ operation, project: await requireProject(owner, projectId) });
+  });
+  app.post("/:id/text-operations/:operationId/release", async c => {
+    const owner = c.get("userId"); const projectId = c.req.param("id");
+    const operationId = c.req.param("operationId");
+    if (!uuid.test(operationId)) throw new MarketingError("创作记录不存在。", 404);
+    await requireProject(owner, projectId);
+    const operation = await operations.release(owner, projectId, operationId);
+    return c.json({ operation, project: await requireProject(owner, projectId) });
+  });
+  // Explicit user consent replaces the support-only exit for clips with an unknown
+  // submission outcome. The following /generate retry resubmits only those clips.
+  app.post("/:id/unknown-segments/release", async c => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    if (!p.taskId) throw new MarketingError("没有结果未知的片段。", 409);
+    if (!await (service.jobQueue as BullmqJobQueue).canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
+    const released = await store.releaseUnknownSegments(owner, p.id);
+    return c.json({ released, project: await requireProject(owner, p.id) });
   });
   app.put("/:id", async (c) => {
     const body = await c.req.json().catch(() => null);
@@ -169,7 +189,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       catch (error) { throw new MarketingError((error as Error).message); }
       const prompt = storyboardPrompt(p.draft, body.locale, initial, body.instruction, body.index);
       started = true;
-      const raw = await service.marketingText(prompt.system, prompt.input, owner, c.req.raw.signal,
+      // Same as /copy: finish and record the paid result even if the browser disconnects.
+      const raw = await service.marketingText(prompt.system, prompt.input, owner, undefined,
         { upstreamBilling: true, onReceipt: receipt => operations.receipt(owner, body.clientRequestId, receipt) });
       const result = parseTextResult("storyboard", raw, p.draft, body.index);
       const operation = await operations.finish(owner, body.clientRequestId, result);

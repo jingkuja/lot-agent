@@ -15,14 +15,14 @@ vi.mock("./media.js", () => ({ mediaCapabilities: async () => ({ composition: tr
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner") {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
-  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => {}) };
+  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => {}), releaseUnknownSegments: vi.fn(async () => 1) };
   const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
     begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, _input: unknown, draft?: typeof project.draft) => {
       if (version !== project.version || project.taskId) throw new MarketingError("草稿已更新", 409);
       return { fresh: true, operation: { id: requestId, kind, status: "running" }, draft: draft ?? project.draft };
     }),
-    receipt: vi.fn(), fail: vi.fn(), list: vi.fn(async () => []), recover: vi.fn(),
+    receipt: vi.fn(), fail: vi.fn(), list: vi.fn(async () => []), recover: vi.fn(), release: vi.fn(async (_owner: string, _project: string, operationId: string) => ({ id: operationId, kind: "copy", status: "released" })),
     finish: vi.fn(async (owner: string, requestId: string, result: { draft: typeof project.draft; analysis: string }) => {
       await store.save(owner, project.id, project.version, result.draft);
       return { id: requestId, status: "succeeded", result };
@@ -67,7 +67,8 @@ describe("marketing project HTTP boundaries", () => {
     const copy = await f.call("/copy", { draft: { topic: "转角咖啡店：现磨咖啡、明亮空间" }, locale: "zh" });
     expect(copy.status).toBe(200);
     expect(await copy.json()).toMatchObject({ draft: { script: storyboardScript(generated.shots), storyboard: generated.shots, publishTitle: generated.publishTitle, tags: generated.tags }, analysis: generated.analysis });
-    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal), expect.objectContaining({ upstreamBilling: true, onReceipt: expect.any(Function) }));
+    // A browser disconnect must not abort a recorded paid request into an unknown outcome.
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", undefined, expect.objectContaining({ upstreamBilling: true, onReceipt: expect.any(Function) }));
   });
   it("creates copy and complete shots from text alone, without requiring a product topic", async () => {
     const f = fixture();
@@ -245,7 +246,7 @@ describe("marketing storyboard editing", () => {
     const f = fixture(); f.service.marketingText.mockResolvedValueOnce({ shots });
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(200);
     expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: shots, script: storyboardScript(shots) }));
-    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", expect.any(AbortSignal), expect.objectContaining({ upstreamBilling: true, onReceipt: expect.any(Function) }));
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", undefined, expect.objectContaining({ upstreamBilling: true, onReceipt: expect.any(Function) }));
     expect(f.store.reserve).not.toHaveBeenCalled();
     expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
   });
@@ -416,6 +417,34 @@ it("rejects Grok reference video with images and 1080p references before billing
   expect(f.store.reserve).not.toHaveBeenCalled();
 });
 
+
+describe("explicit release of unknown paid outcomes", () => {
+  const operationId = "22222222-2222-4222-8222-222222222222";
+  it("releases an unknown text operation only through the owner-scoped store", async () => {
+    const f = fixture();
+    const response = await f.call(`/${id}/text-operations/${operationId}/release`, {});
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ operation: { id: operationId, status: "released" }, project: { id } });
+    expect(f.operations.release).toHaveBeenCalledWith("owner", id, operationId);
+    expect(f.service.marketingText).not.toHaveBeenCalled();
+    expect((await f.call(`/${id}/text-operations/not-a-uuid/release`, {})).status).toBe(404);
+  });
+  it("releases unknown clips without resubmitting, and refuses while the job may still run", async () => {
+    const f = fixture();
+    expect((await f.call(`/${id}/unknown-segments/release`, {})).status).toBe(409);
+    Object.assign(f.project, { taskId: "parent", status: "failed" });
+    f.service.jobQueue.canResumePersisted.mockResolvedValueOnce(false);
+    expect((await f.call(`/${id}/unknown-segments/release`, {})).status).toBe(409);
+    expect(f.store.releaseUnknownSegments).not.toHaveBeenCalled();
+    const response = await f.call(`/${id}/unknown-segments/release`, {});
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ released: 1, project: { id } });
+    expect(f.store.releaseUnknownSegments).toHaveBeenCalledWith("owner", id);
+    expect(f.store.reserve).not.toHaveBeenCalled();
+    expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
+    expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+});
 
 describe("historical generation recovery", () => {
   function historical() {

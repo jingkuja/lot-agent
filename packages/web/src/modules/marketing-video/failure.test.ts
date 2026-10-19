@@ -3,10 +3,13 @@ import { translate } from "../../i18n/locale.js";
 import { videoFailure } from "./failure.js";
 
 describe("marketing video failure guidance", () => {
-  it("never offers a paid resubmission while a clip outcome is unknown", () => {
-    for (const error of ["片段提交结果未知，请核实原任务；系统不会重复提交付费请求。", "片段提交结果未知，请核实原任务。"]) {
-      expect(videoFailure(error, "片段完成 1/3").actions).toEqual(["support", "copy"]);
+  it("offers only an explicit, confirmed resubmission while a clip outcome is unknown", () => {
+    for (const error of ["片段提交结果未知，请核实原任务；系统不会重复提交付费请求。", "TASK_FAILED", undefined]) {
+      // The server's per-clip count decides, even when the parent error names another clip.
+      expect(videoFailure(error, "片段完成 1/3", 2).actions).toEqual(["release", "support"]);
     }
+    // After the user released the clips, the stale parent error must lead to a normal resume.
+    expect(videoFailure("片段提交结果未知，请核实原任务；系统不会重复提交付费请求。", "片段完成 1/3", 0).actions).toContain("resume");
   });
   it("maps provider errors to an actionable cause", () => {
     const cases: [string, string, string[]][] = [
@@ -16,6 +19,7 @@ describe("marketing video failure guidance", () => {
       ["数字员工生成任务缺少用户 TokenHub key", "视频模型账号未授权，或尚未配置可用的模型密钥。", ["resume"]],
       ["媒体供应商请求失败（poll，TASK_FAILED）", "视频模型未能完成部分片段。", ["resume", "copy"]],
       ["媒体供应商请求失败（poll，TRANSPORT_ERROR）", "暂时无法查询片段的生成状态。", ["resume"]],
+      ["媒体供应商请求失败（create，CONNECT_ERROR）", "暂时无法连接视频模型服务，片段没有提交。", ["resume"]],
       ["媒体供应商请求失败（download，TRANSPORT_ERROR）", "片段已经生成，但下载到本地时没有完成。", ["resume"]],
       ["generation timed out", "片段等待时间过长，暂未拿到生成结果。", ["resume"]],
       ["视频分段配置不完整", "这次制作的配置或素材已无法继续使用。", ["copy"]],
@@ -27,7 +31,9 @@ describe("marketing video failure guidance", () => {
     expect(videoFailure("ffmpeg exited with code 1", "正在合成视频")).toMatchObject({ reason: "所有片段都已生成，合成成片时出现问题。", actions: ["resume"] });
   });
   it("translates every cause and next step", () => {
-    for (const error of ["片段提交结果未知", "包含真人", "HTTP 401", "未配置", "HTTP 402", "HTTP 429", "正在收尾", "下载未完成", "TASK_FAILED", "timed out", "poll", "缺少配音", "任务不存在", "other"]) {
+    const unknown = videoFailure(undefined, undefined, 1);
+    for (const text of [unknown.reason, unknown.next]) expect(translate(text, "en"), text).not.toBe(text);
+    for (const error of ["CONNECT_ERROR", "片段提交结果未知", "包含真人", "HTTP 401", "未配置", "HTTP 402", "HTTP 429", "正在收尾", "下载未完成", "TASK_FAILED", "timed out", "poll", "缺少配音", "任务不存在", "other"]) {
       const failure = videoFailure(error, undefined);
       for (const text of [failure.reason, failure.next]) expect(translate(text, "en"), text).not.toBe(text);
     }

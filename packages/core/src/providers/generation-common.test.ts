@@ -106,6 +106,23 @@ describe("HttpGenerationClient.create", () => {
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
     await expect(c.create({})).rejects.toThrow("INVALID_RESPONSE");
   });
+  it("marks a create that never connected as CONNECT_ERROR and keeps sent requests ambiguous", async () => {
+    const failure = (cause: unknown) => Object.assign(new TypeError("fetch failed"), { cause });
+    const refused = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    const cases: [unknown, string][] = [
+      [failure(refused), "CONNECT_ERROR"],
+      [failure(Object.assign(new AggregateError([refused, refused]), { code: "ECONNREFUSED" })), "CONNECT_ERROR"],
+      [failure(Object.assign(new AggregateError([refused, { code: "ECONNRESET" }]), { code: "ECONNREFUSED" })), "TRANSPORT_ERROR"],
+      [failure(Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" })), "TRANSPORT_ERROR"],
+      [failure(Object.assign(new Error("reset"), { code: "ECONNRESET" })), "TRANSPORT_ERROR"],
+      [new DOMException("timed out", "TimeoutError"), "TRANSPORT_ERROR"],
+    ];
+    for (const [error, code] of cases) {
+      vi.stubGlobal("fetch", vi.fn(async () => { throw error; }) as unknown as typeof fetch);
+      const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
+      await expect(c.create({})).rejects.toThrow(`create，${code}`);
+    }
+  });
   it("reports a malformed response without exposing unstructured text", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => "<html>gateway hiccup</html>" }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);

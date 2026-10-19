@@ -77,6 +77,18 @@ export interface HttpGenerationOpts<Req> {
 /** Default per-request timeout for generation HTTP calls (2 minutes). */
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+// Errors raised while resolving or connecting, before the request is written.
+// Resets, socket closes and timeouts are excluded: the vendor may have
+// accepted the POST, so callers must keep treating them as unknown.
+const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT",
+  "CERT_HAS_EXPIRED", "DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "ERR_TLS_CERT_ALTNAME_INVALID"]);
+/** True only when fetch failed to connect (including every address of a multi-address lookup). */
+export function failedBeforeSend(error: unknown): boolean {
+  const cause = (error as { cause?: { code?: unknown; errors?: { code?: unknown }[] } } | undefined)?.cause;
+  if (!(error instanceof TypeError) || !cause || !CONNECT_CODES.has(String(cause.code))) return false;
+  return !Array.isArray(cause.errors) || cause.errors.every(item => CONNECT_CODES.has(String(item?.code)));
+}
+
 /** Drives any `VendorAdapter<Req>` over HTTP (async create→poll). */
 export class HttpGenerationClient<Req extends { model?: string }> {
   constructor(protected opts: HttpGenerationOpts<Req>) {}
@@ -94,7 +106,7 @@ export class HttpGenerationClient<Req extends { model?: string }> {
       try {
         return await fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
       } catch (e) {
-        if (attempt >= retries) throw new ProviderError("generation", phase, "TRANSPORT_ERROR");
+        if (attempt >= retries) throw new ProviderError("generation", phase, phase === "create" && failedBeforeSend(e) ? "CONNECT_ERROR" : "TRANSPORT_ERROR");
       }
     }
   }

@@ -4,11 +4,12 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MarketingDraftSchema, planMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
+import { KLING_MARKETING_PROFILE, MarketingDraftSchema, planMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
 import { DB } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migration-runner.js";
 import { migrations } from "../src/db/migrations/index.js";
 import { PgMarketingProjectStore } from "../src/marketing-video/repository.js";
+import { PgMarketingTextOperations } from "../src/marketing-video/operations.js";
 import { runMarketingVideo, type MarketingRunDeps } from "../src/marketing-video/run.js";
 import { archiveMarketingVideo } from "../src/marketing-video/archive.js";
 import { composeMarketingVideo, ffmpeg, inspectMedia, mediaCapabilities, mediaProcess } from "../src/marketing-video/media.js";
@@ -61,7 +62,8 @@ const deps: MarketingRunDeps = {
 async function newProject() {
   let p = await store.save(owner, randomUUID(), 0, draft);
   p = await store.setReview(owner, p, { verdict: "pass", issues: [] });
-  const taskId = await store.reserve(owner, p.id, p.version, { modelId: "fixture" }, false);
+  // Jobs must record a registered clip profile; the provider in deps stays a local fixture.
+  const taskId = await store.reserve(owner, p.id, p.version, { modelId: KLING_MARKETING_PROFILE.modelId }, false);
   return { p: (await store.get(owner, p.id))!, taskId };
 }
 async function run(taskId: string) {
@@ -145,9 +147,61 @@ try {
 
   const two = await newProject(); unknown = true;
   await assert.rejects(run(two.taskId), /结果未知/); unknown = false;
-  const before = creates;
+  let before = creates;
   await store.reserve(owner, two.p.id, two.p.version, {}, true);
   await assert.rejects(run(two.taskId), /结果未知/); assert.equal(creates, before);
+  // The user's confirmed release is the exit: owner-scoped, audited, and only
+  // clips without a finished or known vendor task are submitted again.
+  const twoSegments = await store.segments(owner, two.p.id);
+  const unknownClips = twoSegments.filter(s => s.vendor_task_id === "marketing-submission-unknown").length;
+  assert(unknownClips >= 1);
+  assert.equal((await store.get(owner, two.p.id))!.unknownSegments, unknownClips);
+  assert.equal((await store.list(owner)).find(p => p.id === two.p.id)!.unknownSegments, unknownClips);
+  await assert.rejects(store.releaseUnknownSegments(other, two.p.id), /不存在/);
+  const holder = await db.pool.connect();
+  try {
+    await holder.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [`marketing:${two.taskId}`]);
+    await assert.rejects(store.releaseUnknownSegments(owner, two.p.id), /收尾/);
+  } finally { await holder.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [`marketing:${two.taskId}`]); holder.release(); }
+  assert.equal(await store.releaseUnknownSegments(owner, two.p.id), unknownClips);
+  await assert.rejects(store.releaseUnknownSegments(owner, two.p.id), /没有结果未知/);
+  assert.equal((await store.get(owner, two.p.id))!.unknownSegments, undefined);
+  assert.equal((await db.pool.query("SELECT sum(unknown_released_count)::int AS n FROM marketing_video_segments WHERE project_id=$1 AND unknown_released_at IS NOT NULL", [two.p.id])).rows[0].n, unknownClips);
+  const resubmit = twoSegments.filter(s => s.status !== "succeeded").length;
+  await store.reserve(owner, two.p.id, two.p.version, {}, true);
+  await run(two.taskId); assert.equal(creates, before + resubmit, "only unfinished clips are submitted again");
+  before = creates;
+
+  // Unknown text creation: a live request cannot be released, a received result
+  // must be recovered, and a released intent never applies a late result.
+  const ops = new PgMarketingTextOperations(db.pool);
+  const textProject = await store.save(owner, randomUUID(), 0, draft);
+  const firstOp = randomUUID();
+  await ops.begin(owner, firstOp, textProject.id, textProject.version, "copy", { n: 1 });
+  await assert.rejects(ops.release(owner, textProject.id, firstOp), /仍在处理/);
+  await ops.fail(owner, firstOp, true);
+  assert.equal((await ops.list(owner, textProject.id))[0].status, "unknown");
+  await assert.rejects(ops.begin(owner, randomUUID(), textProject.id, textProject.version, "copy", { n: 2 }), /待核实/);
+  await assert.rejects(ops.release(other, textProject.id, firstOp), /不存在/);
+  assert.equal((await ops.release(owner, textProject.id, firstOp)).status, "released");
+  assert.equal((await ops.release(owner, textProject.id, firstOp)).status, "released");
+  assert.notEqual((await db.pool.query("SELECT released_at FROM marketing_text_operations WHERE id=$1", [firstOp])).rows[0].released_at, null);
+  await assert.rejects(ops.finish(owner, firstOp, { draft, analysis: "late" }), /状态已改变/);
+  assert.equal((await store.get(owner, textProject.id))!.version, textProject.version);
+  const staleOp = randomUUID();
+  assert.equal((await ops.begin(owner, staleOp, textProject.id, textProject.version, "copy", { n: 2 })).fresh, true);
+  await db.pool.query("UPDATE marketing_text_operations SET created_at=now()-interval '7 minutes' WHERE id=$1", [staleOp]);
+  assert.equal((await ops.release(owner, textProject.id, staleOp)).status, "released", "a running row older than the request deadline has no live request");
+  const receivedOp = randomUUID();
+  await ops.begin(owner, receivedOp, textProject.id, textProject.version, "copy", { n: 3 });
+  await ops.receipt(owner, receivedOp, { text: "{}", outcome: "completed", usage: { promptTokens: 1, completionTokens: 1 } });
+  await assert.rejects(ops.release(owner, textProject.id, receivedOp), /已收到/);
+  const failedProject = await store.save(owner, randomUUID(), 0, draft), failedOp = randomUUID();
+  await ops.begin(owner, failedOp, failedProject.id, failedProject.version, "copy", { n: 4 });
+  await ops.fail(owner, failedOp, false);
+  await assert.rejects(ops.release(owner, failedProject.id, failedOp), /没有待核实/);
+  const removable = await store.save(owner, randomUUID(), 0, draft);
+  await store.remove(owner, removable.id); assert.equal(await store.get(owner, removable.id), null);
 
   const three = await newProject(); await db.cancelTask(three.taskId);
   await assert.rejects(runMarketingVideo(deps, { id: three.taskId, userId: owner, input: (await db.getTask(three.taskId))!.input as Record<string, unknown> }, new AbortController().signal), /cancelled/);
@@ -175,7 +229,7 @@ try {
     const timedDraft = MarketingDraftSchema.parse({ durationSec: target, storyboard, script: storyboardScript(storyboard) });
     let timed = await store.save(owner, randomUUID(), 0, timedDraft);
     timed = await store.setReview(owner, timed, { verdict: "pass", issues: [] });
-    const timedTask = await store.reserve(owner, timed.id, timed.version, { modelId: "fixture" }, false);
+    const timedTask = await store.reserve(owner, timed.id, timed.version, { modelId: KLING_MARKETING_PROFILE.modelId }, false);
     assert.deepEqual((await store.segments(owner, timed.id)).map(s => Number(s.duration_sec)), timings);
     const actualDurations: number[] = [];
     const generate = deps.generation;
@@ -202,14 +256,14 @@ try {
   let oversized = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: oversizedShots, script: storyboardScript(oversizedShots) }));
   oversized = await store.setReview(owner, oversized, { verdict: "pass", issues: [] });
   const tasksBefore = (await db.pool.query("SELECT count(*)::int AS n FROM tasks")).rows[0].n;
-  await assert.rejects(store.reserve(owner, oversized.id, oversized.version, { modelId: "fixture" }, false), /分镜总时长/);
+  await assert.rejects(store.reserve(owner, oversized.id, oversized.version, { modelId: KLING_MARKETING_PROFILE.modelId }, false), /分镜总时长/);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM tasks")).rows[0].n, tasksBefore);
   assert.equal((await store.get(owner, oversized.id))!.taskId, null);
   // Even corrupted persisted durations are rejected before provider resolution.
   const validShots = oversizedShots.map(s => ({ ...s, durationSec: 13 }));
   let corrupted = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: validShots, script: storyboardScript(validShots) }));
   corrupted = await store.setReview(owner, corrupted, { verdict: "pass", issues: [] });
-  const corruptTask = await store.reserve(owner, corrupted.id, corrupted.version, { modelId: "fixture" }, false);
+  const corruptTask = await store.reserve(owner, corrupted.id, corrupted.version, { modelId: KLING_MARKETING_PROFILE.modelId }, false);
   await db.pool.query("UPDATE marketing_video_segments SET duration_sec=14 WHERE project_id=$1", [corrupted.id]);
   let resolved = 0; const originalGeneration = deps.generation;
   deps.generation = async () => { resolved++; throw new Error("must not resolve provider for oversized video"); };
@@ -224,7 +278,7 @@ try {
       [id, owner, `${id}.${slot === "video" ? "webm" : "wav"}`, `/static/uploads/${id}`, slot === "video" ? "video/webm" : "audio/wav"]);
   }
   oldVideo = await store.setReview(owner, oldVideo, { verdict: "pass", issues: [] });
-  const oldVideoTask = await store.reserve(owner, oldVideo.id, oldVideo.version, { modelId: "fixture", generate_audio: true, reference_video: ["https://fixture.invalid/legacy.webm"], reference_audio: ["https://fixture.invalid/voice.wav"] }, false);
+  const oldVideoTask = await store.reserve(owner, oldVideo.id, oldVideo.version, { modelId: KLING_MARKETING_PROFILE.modelId, generate_audio: true, reference_video: ["https://fixture.invalid/legacy.webm"], reference_audio: ["https://fixture.invalid/voice.wav"] }, false);
   const capturedInputs: Record<string, unknown>[] = [];
   deps.generation = async (job, signal) => { capturedInputs.push(job.input); return originalGeneration(job, signal); };
   downloadFail = true;
@@ -276,7 +330,7 @@ try {
   const maximumShots = Array.from({ length: 15 }, () => ({ ...timedShots[0], durationSec: 4 }));
   let maximum = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: maximumShots, script: storyboardScript(maximumShots) }));
   maximum = await store.setReview(owner, maximum, { verdict: "pass", issues: [] });
-  await store.reserve(owner, maximum.id, maximum.version, { modelId: "fixture" }, false);
+  await store.reserve(owner, maximum.id, maximum.version, { modelId: KLING_MARKETING_PROFILE.modelId }, false);
   const maximumSegments = await store.segments(owner, maximum.id);
   assert.equal(maximumSegments.length, 15); assert.equal(maximumSegments[14].slot, 14);
   await assert.rejects(db.pool.query("INSERT INTO marketing_video_segments(project_id,slot,task_id,script,duration_sec) VALUES($1,15,$2,'invalid',4)", [maximum.id, maximumSegments[0].task_id]), /slot_check/);
@@ -290,5 +344,5 @@ try {
     assert(Math.abs(assembled.durationSec - durationSec) < 0.3); assert(assembled.body.length > 0);
     assert.equal(assembled.width, durationSec === 45 ? 1280 : 720); assert.equal(assembled.height, 720);
   }
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

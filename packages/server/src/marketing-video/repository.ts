@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
 import { MarketingDraftSchema, marketingJobProfile, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
+import { UNKNOWN_SUBMISSION } from "./recovery.js";
 
 export class MarketingError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409 | 503 = 400) { super(message); }
@@ -12,12 +13,16 @@ export function renderKey(draft: MarketingDraft) {
   const { publishTitle: _title, tags: _tags, ...rest } = MarketingDraftSchema.parse(draft);
   return JSON.stringify(rest);
 }
-const select = `SELECT p.*, t.status, t.progress, t.stage, t.error, t.output FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
+const select = `SELECT p.*, t.status, t.progress, t.stage, t.error, t.output,
+  (SELECT count(*)::int FROM marketing_video_segments s JOIN tasks st ON st.id=s.task_id
+    WHERE s.project_id=p.id AND st.input->>'parentId'=p.task_id::text AND st.vendor_task_id='${UNKNOWN_SUBMISSION}') AS unknown_segments
+  FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
 function project(row: Record<string, any>): MarketingProject {
   return { id: row.id, version: row.version, draft: MarketingDraftSchema.parse(row.draft), updatedAt: new Date(row.updated_at).toISOString(), review: row.review,
     ...(row.reference_analysis_id ? { referenceAnalysis: { id: row.reference_analysis_id, acceptedRevision: row.reference_revision, evidenceIds: row.reference_evidence_ids ?? [] } } : {}),
     reviewedScript: row.reviewed_script, taskId: row.task_id, status: row.status ?? "draft", progress: Number(row.progress ?? 0),
-    stage: row.stage ?? undefined, error: row.error ?? undefined, output: row.output ?? undefined, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version };
+    stage: row.stage ?? undefined, error: row.error ?? undefined, output: row.output ?? undefined, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version,
+    ...(Number(row.unknown_segments) > 0 ? { unknownSegments: Number(row.unknown_segments) } : {}) };
 }
 export class PgMarketingProjectStore implements MarketingProjectStore {
   constructor(readonly pool: pg.Pool) {}
@@ -91,6 +96,31 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       }
       await client.query(`UPDATE marketing_video_projects SET task_id=$3,updated_at=now() WHERE id=$1 AND user_id=$2`, [id, owner, taskId]);
       await client.query("COMMIT"); return taskId;
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+  /** The user accepts a possible duplicate charge for clips whose submission outcome is
+   * unknown. Only those clips become new submissions; finished and known vendor clips are
+   * kept. Each release is counted on the segment for billing reconciliation. */
+  async releaseUnknownSegments(owner: string, id: string) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const p = (await client.query(`SELECT p.task_id,t.status FROM marketing_video_projects p JOIN tasks t ON t.id=p.task_id
+        WHERE p.id=$1 AND p.user_id=$2 AND t.user_id=p.user_id FOR UPDATE OF p`, [id, owner])).rows[0];
+      if (!p) throw new MarketingError("草稿不存在", 404);
+      if (!["failed", "cancelled"].includes(p.status)) throw new MarketingError("视频正在生成，请等任务停止后再处理。", 409);
+      // Same key as the worker's job lock: never race a worker that is still finishing.
+      const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [`marketing:${p.task_id}`]);
+      if (!lock.rows[0].locked) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
+      const released = (await client.query(`UPDATE tasks st SET vendor_task_id=NULL,output='{"retrySafe":true}'::jsonb,updated_at=now()
+        FROM marketing_video_segments s WHERE s.project_id=$1 AND st.id=s.task_id AND st.user_id=$2 AND st.type='marketing.segment'
+          AND st.input->>'parentId'=$3 AND st.vendor_task_id=$4 RETURNING st.id`, [id, owner, p.task_id, UNKNOWN_SUBMISSION])).rows.map(row => row.id as string);
+      if (!released.length) throw new MarketingError("没有结果未知的片段。", 409);
+      await client.query(`UPDATE marketing_video_segments SET unknown_released_count=unknown_released_count+1,unknown_released_at=now()
+        WHERE project_id=$1 AND task_id=ANY($2::uuid[])`, [id, released]);
+      await client.query("COMMIT");
+      console.warn("[marketing-video] unknown segments released", { projectId: id, taskId: p.task_id, segments: released.length });
+      return released.length;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
   /** Remove the draft record only; uploaded materials and generated videos stay in the owner's personal assets. */

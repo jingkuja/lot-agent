@@ -80,7 +80,7 @@ describe("marketing segment submission failures", () => {
     return { result, released };
   }
   it("releases the claim after an explicit vendor rejection so the user can retry after fixing it", async () => {
-    for (const error of [new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 429 }), new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: 400 })]) {
+    for (const error of [new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 429 }), new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: 400 }), new ProviderError("generation", "create", "CONNECT_ERROR")]) {
       const f = await submitWith(error);
       await expect(f.result).rejects.toBe(error);
       expect(f.released()).toBe(true);

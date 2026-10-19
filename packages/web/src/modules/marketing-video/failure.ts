@@ -2,8 +2,9 @@
 export type VideoFailure = {
   reason: string;
   next: string;
-  /** resume: continue the same task; copy: the frozen task cannot succeed as is; support: outcome must be verified first. */
-  actions: ("resume" | "copy" | "support")[];
+  /** resume: continue the same task; copy: the frozen task cannot succeed as is; support: outcome must be verified first;
+   * release: the user may accept a possible duplicate charge and resubmit only the unknown clips. */
+  actions: ("resume" | "copy" | "support" | "release")[];
   /** Creation step a copied draft opens at: materials (1) or shots (2). */
   copyStep?: 1 | 2;
 };
@@ -13,11 +14,18 @@ const segmentFailed: VideoFailure = {
   next: "点击继续生成只会重做未完成的片段（可能产生费用），已完成的片段会保留。如反复失败，可复制为新草稿调整分镜或素材。",
   actions: ["resume", "copy"],
 };
+// Decided from the server's per-clip state, not from error text: the parent error
+// names only the first failure, and released clips must stop showing this.
+const unknownSubmission: VideoFailure = {
+  reason: "有片段已发送给视频模型，但没有收到明确结果。为避免重复扣费，系统不会自动重新提交。",
+  next: "可以确认后只重新提交这些片段（可能重复计费），已完成的片段会保留；如需核实费用，请联系客服并提供任务编号。",
+  actions: ["release", "support"],
+};
 const rules: [RegExp, VideoFailure][] = [
-  [/片段提交结果未知|marketing-submission-unknown/, {
-    reason: "有片段已发送给视频模型，但没有收到明确结果。为避免重复扣费，系统不会自动重新提交。",
-    next: "请联系客服并提供任务编号核实。如需立即重做，可复制为新草稿重新制作（会重新计费）。",
-    actions: ["support", "copy"],
+  [/CONNECT_ERROR/, {
+    reason: "暂时无法连接视频模型服务，片段没有提交。",
+    next: "请稍后点击继续生成，不会重复计费。已完成的片段不会重做。",
+    actions: ["resume"],
   }],
   [/REAL_PERSON_REJECTED|包含真人|PrivacyInformation|real person/i, {
     reason: "视频模型判定参考图中包含真人，拒绝了生成。",
@@ -77,7 +85,8 @@ const rules: [RegExp, VideoFailure][] = [
   }],
 ];
 
-export function videoFailure(error: string | undefined, stage: string | undefined): VideoFailure {
+export function videoFailure(error: string | undefined, stage: string | undefined, unknownSegments = 0): VideoFailure {
+  if (unknownSegments > 0) return unknownSubmission;
   // Every clip is stored before composition starts, so its errors never need a model call.
   if (stage === "正在合成视频") return {
     reason: "所有片段都已生成，合成成片时出现问题。",

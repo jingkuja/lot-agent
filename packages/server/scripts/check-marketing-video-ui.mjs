@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-const { planMarketingSegments, storyboardScript, marketingReviewText } = await import(new URL("../../../packages/core/dist/marketing-video/index.js", import.meta.url));
+const { planMarketingSegments, storyboardScript, marketingReviewText, KLING_MARKETING_PROFILE } = await import(new URL("../../../packages/core/dist/marketing-video/index.js", import.meta.url));
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const { createServer } = createRequire(resolve(root, "packages/web/package.json"))("vite");
@@ -32,6 +32,8 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   await context.addInitScript(() => { if (!localStorage.getItem("lot:language")) localStorage.setItem("lot:language", "zh"); });
   page = await context.newPage();
+  // Paid and destructive actions ask for confirmation; the checks below accept it.
+  page.on("dialog", dialog => void dialog.accept());
   page.setDefaultTimeout(10000);
   page.on("pageerror", (error) => errors.push(error.message));
   const agents = [
@@ -69,9 +71,15 @@ try {
     if (path === '/api/public/product') return json({ globle: 1 });
     if (path === '/api/marketing-video-analyses/capabilities') return json({ enabled: false });
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
-    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false });
+    // The UI follows the server's clip profile. This fixture keeps Kling's limits under a
+    // neutral ID, so vendor-specific upload checks do not reject the 1×1 fixture images.
+    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video' } });
     if (path === '/api/marketing-videos') return json({ data: [...projects.values()] });
     if (path.endsWith('/text-operations')) return json({ data: textOperations.get(path.split('/')[3]) ?? [] });
+    if (path.endsWith('/release') && path.includes('/text-operations/')) {
+      const [, , , projectId, , operationId] = path.split('/'), operation = textOperations.get(projectId).find(item => item.id === operationId);
+      operation.status = 'released'; return json({ project: projects.get(projectId), operation });
+    }
     if (path.endsWith('/recover') && path.includes('/text-operations/')) {
       const projectId = path.split('/')[3], p = projects.get(projectId), operation = textOperations.get(projectId)[0];
       p.version++; p.draft = operation.result.draft; operation.status = 'succeeded'; operation.appliedVersion = p.version;
@@ -111,6 +119,7 @@ try {
         p.review = { verdict: issues.length ? 'reject' : 'pass', issues }; p.reviewedScript = marketingReviewText(p.draft); return json(p);
       }
       if (action === 'publication') { p.version++; p.draft.publishTitle = '手冲咖啡与惬意时光'; p.draft.tags = '#咖啡'; p.review = null; return json(p); }
+      if (action === 'unknown-segments') { delete p.unknownSegments; taskState = 'running'; return json({ released: 2, project: p }); }
       if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; return json(p); }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
       if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'] }; }
@@ -223,7 +232,7 @@ try {
   await snap('marketing-video-risk-zh-light.png');
   await page.getByRole('button', { name: '配音与字幕', exact: false }).click();
   await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
-  await page.getByRole('alert').filter({ hasText: '请先修改文案中标出的风险内容。' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: '文案检查发现需要修改的内容' }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
   await firstRisk.getByRole('button', { name: '一键修改', exact: true }).click();
   await firstRisk.waitFor({ state: 'hidden' });
@@ -365,12 +374,12 @@ try {
   await page.reload(); await chooseAgent('营销影像');
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   taskState = 'pending'; p.stage = '等待队列处理';
-  await page.locator('.mv-progress strong').filter({ hasText: '等待生成' }).waitFor();
+  await page.locator('.mv-progress strong').filter({ hasText: '排队中' }).waitFor();
   await page.getByText('35% · 等待队列处理', { exact: true }).waitFor();
   await snap('marketing-video-queued-zh-light.png');
-  await page.locator('.mv-progress').getByRole('button', { name: '取消', exact: true }).click();
-  await page.locator('.mv-progress strong').filter({ hasText: '已请求取消' }).waitFor();
-  await page.getByText('取消请求已保存，原任务收尾后才能继续。', { exact: true }).waitFor();
+  await page.locator('.mv-progress').getByRole('button', { name: '取消生成', exact: true }).click();
+  await page.locator('.mv-progress strong').filter({ hasText: '已取消' }).waitFor();
+  await page.getByText('35% · 已请求取消', { exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1, 'cancellation and polling do not submit again');
   taskState = 'running';
   await page.reload(); await chooseAgent('营销影像');
@@ -494,32 +503,43 @@ try {
   textOperations.set(blockedId, [{ id: '55555555-5555-4555-8555-555555555555', status: 'unknown' }]);
   await page.evaluate(id => localStorage.setItem('lot:marketing-video:fixture', id), blockedId);
   await page.reload(); await chooseAgent('Marketing video');
-  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: 'Start a new video', exact: true }).isDisabled(), false);
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-unknown-en-dark.png');
   await page.locator('.mv-library > summary').click();
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
-  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), true, 'reopening the same project must keep its lock');
   await page.locator('.mv-draft-list button').filter({ hasText: 'Other editable draft' }).click();
-  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor({ state: 'hidden' });
+  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor({ state: 'hidden' });
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(input => input.rows === 6 && !input.disabled));
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
-  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
   await page.getByRole('button', { name: 'Start a new video', exact: true }).click();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), false);
   assert.equal(await page.getByLabel('Spoken script').inputValue(), '');
   if (!await page.locator('.mv-library').evaluate(element => element.open)) await page.locator('.mv-library > summary').click();
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
-  await page.getByRole('alert').filter({ hasText: 'The request outcome needs verification.' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
   const paidBeforeRecovery = writes.filter(r => r.path.endsWith('/copy') || r.path.endsWith('/storyboard')).length;
   const operation = textOperations.get(blockedId)[0];
   operation.status = 'needs_apply'; operation.result = { draft: { ...blocked.draft, script: 'Recovered local receipt' }, analysis: 'Local recovery' };
   await page.getByRole('button', { name: 'Refresh creation status', exact: true }).click();
   await page.getByRole('button', { name: 'Recover received result', exact: true }).click();
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(input => input.value === 'Recovered local receipt' && !input.disabled));
+  assert.equal(writes.filter(r => r.path.endsWith('/copy') || r.path.endsWith('/storyboard')).length, paidBeforeRecovery);
+  // A confirmed discard unlocks AI creation for this project without any model request.
+  const discarded = '77777777-7777-4777-8777-777777777777';
+  textOperations.set(blockedId, [{ id: discarded, status: 'unknown' }, ...textOperations.get(blockedId)]);
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
+  assert.equal(await page.getByLabel('Spoken script').isDisabled(), true);
+  await page.getByRole('button', { name: 'Discard this result', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(input => input.rows === 6 && !input.disabled));
+  assert.equal(writes.filter(r => r.path.endsWith(`/text-operations/${discarded}/release`)).length, 1);
   assert.equal(writes.filter(r => r.path.endsWith('/copy') || r.path.endsWith('/storyboard')).length, paidBeforeRecovery);
   uploadedAssets.set(oldVideoId, { id: oldVideoId, name: 'Legacy WebM', mime: 'video/webm', url: '/static/legacy.webm', issue: 'unsupported' });
   blocked.draft.assets = { video: oldVideoId }; blocked.draft.script = script;
@@ -541,9 +561,22 @@ try {
   await page.getByText('35% · Queue status is being verified', { exact: true }).waitFor();
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-queued-en-dark.png');
-  await page.locator('.mv-progress').getByRole('button', { name: 'Cancel', exact: true }).click();
-  await page.locator('.mv-progress strong').filter({ hasText: 'Cancellation requested' }).waitFor();
+  await page.locator('.mv-progress').getByRole('button', { name: 'Cancel generation', exact: true }).click();
+  await page.locator('.mv-progress strong').filter({ hasText: 'Cancelled' }).waitFor();
+  await page.getByText('35% · Cancellation requested', { exact: true }).waitFor();
   await snap('marketing-video-cancelled-en-dark.png');
+  // Unknown clip outcomes: no plain resume; one confirmed release, then one retry of the same job.
+  taskState = 'failed'; queued.stage = '片段完成 1/2'; queued.error = '片段提交结果未知，请核实原任务；系统不会重复提交付费请求。'; queued.unknownSegments = 2;
+  const generatedBeforeRelease = writes.filter(r => r.path.endsWith('/generate')).length;
+  await page.reload(); await chooseAgent('Marketing video');
+  await page.getByRole('button', { name: 'Resubmit unknown clips', exact: true }).waitFor();
+  assert.equal(await page.locator('.mv-progress').getByRole('button', { name: 'Continue creation', exact: true }).count(), 0);
+  await snap('marketing-video-unknown-clips-en-dark.png');
+  await page.getByRole('button', { name: 'Resubmit unknown clips', exact: true }).click();
+  await page.locator('.mv-progress strong').filter({ hasText: 'Creating your video' }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/unknown-segments/release')).length, 1);
+  const retries = writes.filter(r => r.path.endsWith('/generate')).slice(generatedBeforeRelease);
+  assert.equal(retries.length, 1); assert.equal(retries[0].body.retry, true);
   apiUnavailable = true;
   await page.reload(); await chooseAgent('Marketing video');
   await page.getByRole('alert').filter({ hasText: 'This server does not support the new marketing video workflow yet.' }).waitFor();

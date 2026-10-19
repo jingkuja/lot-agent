@@ -6,11 +6,13 @@ import type { MarketingTextReceipt } from "./text.js";
 import { parseTextResult, TEXT_RESULT_VERSION } from "./text-result.js";
 
 export interface TextOperation {
-  id: string; kind: "copy" | "storyboard"; status: "running" | "unknown" | "needs_apply" | "failed" | "succeeded" | "conflict";
+  id: string; kind: "copy" | "storyboard"; status: "running" | "unknown" | "needs_apply" | "failed" | "succeeded" | "conflict" | "released";
   result?: { draft: MarketingDraft; analysis: string }; appliedVersion?: number;
 }
+// Longer than the 300 s text request deadline: a running row this old has no live request.
+const STALE_RUNNING_MS = 360_000;
 const view = (row: Record<string, any>): TextOperation => ({ id: row.id, kind: row.kind,
-  status: row.status === "running" && Date.now() - new Date(row.created_at).getTime() > 360_000 ? "unknown" : row.status,
+  status: row.status === "running" && Date.now() - new Date(row.created_at).getTime() > STALE_RUNNING_MS ? "unknown" : row.status,
   result: row.result ?? undefined, appliedVersion: row.applied_version ?? undefined });
 
 export class PgMarketingTextOperations {
@@ -81,6 +83,25 @@ export class PgMarketingTextOperations {
     } catch (error) { await this.fail(owner, id, true, true); throw new MarketingError("文案或分镜生成不完整，请重试。", 503); }
     await this.pool.query("UPDATE marketing_text_operations SET status='needs_apply',updated_at=now() WHERE user_id=$1 AND id=$2 AND status IN ('running','unknown')", [owner, id]);
     return this.finish(owner, id, result);
+  }
+  /** The user accepts a possible duplicate charge and unlocks AI creation for the project.
+   * The row and its receipt stay for billing reconciliation; a result that is already
+   * received must be recovered instead, and a live request cannot be released. */
+  async release(owner: string, projectId: string, id: string): Promise<TextOperation> {
+    return this.transaction(async client => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`marketing-text:${owner}`]);
+      const row = (await client.query("SELECT * FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2 AND id=$3 FOR UPDATE", [owner, projectId, id])).rows[0];
+      if (!row) throw new MarketingError("创作记录不存在。", 404);
+      if (row.status === "released") return view(row);
+      if (row.status === "needs_apply" || row.receipt?.outcome === "completed") throw new MarketingError("创作结果已收到，请恢复已收到的结果，不会再次扣费。", 409);
+      const status = view(row).status;
+      if (status === "running") throw new MarketingError("创作请求仍在处理，请稍后刷新创作状态。", 409);
+      if (status !== "unknown") throw new MarketingError("该创作记录没有待核实的结果。", 409);
+      const released = (await client.query(`UPDATE marketing_text_operations SET status='released',released_at=now(),updated_at=now()
+        WHERE user_id=$1 AND id=$2 RETURNING *`, [owner, id])).rows[0];
+      console.warn("[marketing-video] unknown text operation released", { projectId, operationId: id });
+      return view(released);
+    });
   }
   async fail(owner: string, id: string, started = true, invalidOutput = false) {
     // A missing receipt includes process/transport failure. Never infer that a
