@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MarketingDraftSchema, storyboardScript, type MarketingShot } from "@lot-agent/core/marketing-video";
 import { runMarketingVideo, type MarketingRunDeps } from "./run.js";
 import { runGenerationJob } from "../generation/run-job.js";
+import { ProviderError } from "@lot-agent/core";
 
 const store = vi.hoisted(() => ({ get: vi.fn(), segments: vi.fn() }));
 vi.mock("./repository.js", () => ({ PgMarketingProjectStore: class {
@@ -63,5 +64,35 @@ describe("marketing prompt submission preflight", () => {
     expect(f.db.setTaskError).not.toHaveBeenCalled();
     expect(f.compose).toHaveBeenCalledOnce();
     expect(f.connection.release).toHaveBeenCalledOnce();
+  });
+});
+
+describe("marketing segment submission failures", () => {
+  const shot: MarketingShot = { durationSec: 15, script: "欢迎来喝咖啡。", visual: "人物展示咖啡", action: "端起杯子", camera: "中景" };
+  async function submitWith(error: Error) {
+    const f = fixture([shot, shot]);
+    f.db.pool.query.mockImplementation(async () => ({ rows: [], rowCount: 1 }) as never);
+    const create = vi.fn(async () => { throw error; });
+    f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", db: {}, provider: { create }, meter: { record: vi.fn() }, storage: { put: vi.fn() } } as never);
+    vi.mocked(runGenerationJob).mockImplementation(async (deps) => { await deps.provider.create({} as never); throw new Error("unreachable"); });
+    const result = runMarketingVideo(f.deps, f.job, new AbortController().signal);
+    const released = () => (f.db.pool.query.mock.calls as unknown[][]).some(([sql]) => String(sql).includes("SET vendor_task_id=NULL WHERE id=$1 AND vendor_task_id=$2"));
+    return { result, released };
+  }
+  it("releases the claim after an explicit vendor rejection so the user can retry after fixing it", async () => {
+    for (const error of [new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 429 }), new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: 400 })]) {
+      const f = await submitWith(error);
+      await expect(f.result).rejects.toBe(error);
+      expect(f.released()).toBe(true);
+    }
+  });
+  it("keeps ambiguous submissions blocked to avoid paying twice", async () => {
+    for (const error of [new ProviderError("generation", "create", "TRANSPORT_ERROR"), new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 502 }), new Error("socket hang up")]) {
+      const f = await submitWith(error);
+      await expect(f.result).rejects.toThrow("片段提交结果未知");
+      expect(f.released()).toBe(false);
+    }
+    vi.mocked(runGenerationJob).mockReset();
+    vi.mocked(runGenerationJob).mockImplementation(async (_deps: unknown, job: { id: string }) => ({ assetIds: [`asset-${job.id}`], assets: [] }) as never);
   });
 });

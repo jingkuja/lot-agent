@@ -140,6 +140,13 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     await ownedAssets(c.get("userId"), parsed.data, !!old?.taskId, old?.draft);
     return c.json(await store.save(c.get("userId"), c.req.param("id"), body.version, parsed.data));
   });
+  app.delete("/:id", async (c) => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    // A cancelled job may still be queued or finishing in BullMQ.
+    if (p.status === "cancelled" && p.taskId && !await (service.jobQueue as BullmqJobQueue).canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后再删除。", 409);
+    await store.remove(owner, p.id);
+    return c.json({ ok: true });
+  });
   app.post("/:id/storyboard", async (c) => {
     const owner = c.get("userId");
     let p = await requireProject(owner, c.req.param("id"));

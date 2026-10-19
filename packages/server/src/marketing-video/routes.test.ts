@@ -15,7 +15,7 @@ vi.mock("./media.js", () => ({ mediaCapabilities: async () => ({ composition: tr
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner") {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
-  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task") };
+  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => {}) };
   const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
     begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, _input: unknown, draft?: typeof project.draft) => {
@@ -90,6 +90,19 @@ describe("marketing project HTTP boundaries", () => {
     expect((await f.call(`/${id}`)).status).toBe(404);
     expect(f.store.get).toHaveBeenCalledWith("owner", id);
     expect((await f.call("/not-a-uuid")).status).toBe(404);
+  });
+  it("deletes only the owner's draft and waits for a cancelled worker to finish", async () => {
+    const f = fixture();
+    const remove = () => f.app.request(`/api/marketing-videos/${id}`, { method: "DELETE" });
+    expect((await remove()).status).toBe(200);
+    expect(f.store.remove).toHaveBeenCalledWith("owner", id);
+    f.store.get.mockResolvedValueOnce(null as never);
+    expect((await remove()).status).toBe(404);
+    expect((await f.app.request("/api/marketing-videos/not-a-uuid", { method: "DELETE" })).status).toBe(404);
+    Object.assign(f.project, { taskId: "existing", status: "cancelled" });
+    f.service.jobQueue.canResumePersisted.mockResolvedValueOnce(false);
+    expect((await remove()).status).toBe(409);
+    expect(f.store.remove).toHaveBeenCalledOnce();
   });
   it("rejects foreign assets, owner overrides and invalid durations before saving", async () => {
     const f = fixture();

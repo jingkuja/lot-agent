@@ -159,10 +159,15 @@
 /* Draft Library */
 .mv-library { margin: 0 0 16px; background: var(--bg-card); box-shadow: var(--neu-raise-sm); }
 .mv-draft-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; max-height: 240px; overflow: auto; }
+.mv-draft-item { position: relative; display: grid; }
 .mv-draft-list button { display: grid; gap: 4px; padding: 10px 12px; text-align: left; justify-items: start; background: var(--bg); }
 .mv-draft-list strong { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
 .mv-draft-list span { font-size: 11px; color: var(--text-muted); }
 .mv-draft-list button[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--bg-card)); }
+.mv-draft-item > button:first-child { padding-right: 40px; }
+.mv-studio .mv-draft-delete { position: absolute; top: 6px; right: 6px; display: inline-flex; min-height: 0; width: 28px; height: 28px; padding: 0; border-color: transparent; background: transparent; color: var(--text-muted); }
+.mv-studio .mv-draft-delete:hover:not(:disabled) { border-color: color-mix(in srgb, var(--error) 40%, var(--border)); color: var(--error); background: color-mix(in srgb, var(--error) 6%, var(--bg-card)); }
+.mv-draft-delete svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Copy Risk Review */
 .mv-review { margin: 14px 0 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); font-size: 12px; line-height: 1.7; }
@@ -193,6 +198,12 @@
 .mv-progress strong { font-size: 14px; color: var(--text); }
 .mv-progress progress { width: 100%; height: 6px; accent-color: var(--accent); }
 .mv-progress > span { color: var(--text-secondary); font-size: 12px; }
+.mv-progress .mv-choices { margin: 0; }
+.mv-failure { display: grid; gap: 6px; width: 100%; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--error) 30%, var(--border)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--error) 5%, var(--bg-card)); font-size: 13px; line-height: 1.7; color: var(--text); }
+.mv-failure p { margin: 0; }
+.mv-progress .mv-failure strong { margin-right: 8px; font-size: 13px; color: var(--error); }
+.mv-progress .mv-task-details { width: 100%; margin: 0; padding: 8px 12px; background: var(--bg-card); }
+.mv-task-details p { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; user-select: text; }
 
 .agent-pill-icon.agent-pill-icon--marketing_video { color: var(--icon-on-grad); background: var(--agent-icon-video); }
 

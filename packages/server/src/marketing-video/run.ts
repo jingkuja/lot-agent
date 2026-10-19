@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ProviderError } from "@lot-agent/core";
 import { marketingReferenceError, MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
@@ -8,6 +9,12 @@ import { marketingSegmentPrompt } from "./prompt.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 
 const UNKNOWN = UNKNOWN_SUBMISSION;
+// 4xx answers reject the request itself; 408/409 and 5xx may still have created a task.
+const REJECTED_STATUS = new Set([400, 401, 402, 403, 404, 413, 422, 429]);
+export function definiteRejection(error: unknown) {
+  return error instanceof ProviderError && error.phase === "create"
+    && (error.code === "REAL_PERSON_REJECTED" || (error.code === "HTTP_ERROR" && REJECTED_STATUS.has(error.httpStatus ?? 0)));
+}
 export interface MarketingRunDeps {
   db: DB; dataRoot: string;
   generation(job: { userId: string; input: Record<string, unknown> }, signal: AbortSignal): Promise<RunJobDeps>;
@@ -99,7 +106,15 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                   await assertActive();
                   let result;
                   try { result = await provider.create(request); }
-                  catch { throw new Error("片段提交结果未知，请核实原任务；系统不会重复提交付费请求。"); }
+                  catch (error) {
+                    // An explicit vendor rejection created no task. Release the
+                    // claim so an explicit retry may submit after the user fixes it.
+                    if (definiteRejection(error)) {
+                      await deps.db.pool.query("UPDATE tasks SET vendor_task_id=NULL WHERE id=$1 AND vendor_task_id=$2", [child.id, UNKNOWN]);
+                      throw error;
+                    }
+                    throw new Error(UNKNOWN_SUBMISSION_MESSAGE);
+                  }
                   if (!result.taskId) throw new Error("片段提交结果未知，请核实原任务。");
                   // Persist immediately, including before another async operation can fail.
                   await deps.db.setTaskVendorId(child.id, result.taskId);

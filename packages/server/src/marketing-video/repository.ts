@@ -93,6 +93,29 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       await client.query("COMMIT"); return taskId;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
+  /** Remove the draft record only; uploaded materials and generated videos stay in the owner's personal assets. */
+  async remove(owner: string, id: string) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Same lock order as text operations: owner text lock, then the project row.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`marketing-text:${owner}`]);
+      const p = (await client.query(`${select} WHERE p.user_id=$1 AND p.id=$2 FOR UPDATE OF p`, [owner, id])).rows[0];
+      if (!p) throw new MarketingError("草稿不存在", 404);
+      if (p.task_id) {
+        if (["pending", "running"].includes(p.status)) throw new MarketingError("视频正在生成，请先取消，任务结束后再删除。", 409);
+        const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [`marketing:${p.task_id}`]);
+        if (!lock.rows[0].locked) throw new MarketingError("原任务正在收尾，请稍后再删除。", 409);
+      }
+      if ((await client.query("SELECT 1 FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2 AND status IN ('running','unknown','needs_apply')", [owner, id])).rowCount
+        || (p.reference_analysis_id && (await client.query("SELECT 1 FROM marketing_reference_analyses WHERE id=$1 AND status IN ('queued','running')", [p.reference_analysis_id])).rowCount)) {
+        throw new MarketingError("已有创作请求正在处理或结果待核实，请稍后再删除。", 409);
+      }
+      await client.query("DELETE FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2", [owner, id]);
+      await client.query("DELETE FROM marketing_video_projects WHERE user_id=$1 AND id=$2", [owner, id]);
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
   async segments(owner: string, id: string) {
     return (await this.pool.query(`SELECT s.*,t.status,t.vendor_task_id,t.output,t.error FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id JOIN tasks t ON t.id=s.task_id
       WHERE p.id=$1 AND p.user_id=$2 AND t.user_id=p.user_id AND t.type='marketing.segment'

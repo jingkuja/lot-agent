@@ -7,6 +7,7 @@ import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile } from "../digital-twin/media.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { ReviewPanel } from "./ReviewPanel.js";
+import { TaskStatus } from "./TaskStatus.js";
 import { checkKlingReferenceImage, klingReferenceVideoIssue, readMediaDuration, readMediaMetadata } from "../../lib/video-references.js";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { ReferenceAnalysisPanel, analysisError } from "./ReferenceAnalysisPanel.js";
@@ -24,6 +25,7 @@ const STEPS = ["确定文案", "确定素材", "配音与字幕"];
 const reviewedText = marketingReviewText;
 const json = (method: string, value: unknown) => ({ method, body: JSON.stringify(value) });
 const unavailableMessage = "当前服务器尚不支持新版营销视频，请更新服务后重试。";
+const pollError = "暂时无法查询进度，正在自动重试；无需重复生成。";
 const errorMessage = (error: unknown) => error instanceof ApiClientError && error.status === 404 && /^(404\s+)?Not Found$/i.test(error.message)
   ? unavailableMessage : error instanceof Error ? error.message : "操作失败，请重试。";
 
@@ -44,6 +46,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const navigationBusy = actionBusy || analysisPending;
   const busy = navigationBusy || textPending; const [saving, setSaving] = useState(false);
   const [error, setError] = useState(""); const [notice, setNotice] = useState("");
+  const [working, setWorking] = useState("");
   const [sourceKind, setSourceKind] = useState<"text" | "video" | "upload">("video");
   const [uploadingReference, setUploadingReference] = useState(false);
   const [analysis, setAnalysis] = useState(""); const [twinOpen, setTwinOpen] = useState<"portrait" | "voice" | null>(null);
@@ -135,8 +138,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const poll = async () => {
       try {
         const p = await requestProject(`/marketing-videos/${id}`);
-        if (!stopped && token === epoch.current) { setCurrent(p); }
-      } catch { if (!stopped) setError("暂时无法查询进度，正在重试；请勿重复生成。"); }
+        if (!stopped && token === epoch.current) { setCurrent(p); setError(old => old === pollError ? "" : old); }
+      } catch { if (!stopped) setError(pollError); }
       if (!stopped) timer = setTimeout(() => void poll(), 2500);
     };
     timer = setTimeout(() => void poll(), 1000);
@@ -145,7 +148,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   async function act(work: () => Promise<void>, navigation = false) {
     if (lock.current || analysisPending || (!navigation && textPending) || !ready) return; lock.current = true; setBusy(true); setError("");
     try { await work(); } catch (e) { if (alive.current) setError(errorMessage(e)); }
-    finally { lock.current = false; if (alive.current) setBusy(false); }
+    finally { lock.current = false; if (alive.current) { setBusy(false); setWorking(""); } }
   }
   async function review() {
     const p = await save();
@@ -231,10 +234,11 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const referenceError = marketingReferenceError(draftRef.current);
     if (referenceError) { setStep(1); throw new Error(referenceError); }
     if (!retry) resolveMarketingSegments(draftRef.current);
-    if (!retry && (!draftRef.current.publishTitle.trim() || !draftRef.current.tags.trim())) await publication(true);
+    if (!retry && (!draftRef.current.publishTitle.trim() || !draftRef.current.tags.trim())) { setWorking("正在补全标题和标签…"); await publication(true); }
     let p = await save();
-    if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { await review(); p = projectRef.current!; }
-    if (p.review?.verdict === "reject") { setStep(0); throw new Error("请先修改文案中标出的风险内容。"); }
+    if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { setWorking("正在检查文案与分镜…"); await review(); p = projectRef.current!; }
+    if (p.review?.verdict === "reject") { setStep(0); throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。"); }
+    setWorking("正在提交生成任务…");
     const result = await requestProject(`/marketing-videos/${p.id}/generate`, json("POST", { version: p.version, retry }));
     if (alive.current) setCurrent(result);
   }
@@ -326,14 +330,29 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       setAssets(old => Object.fromEntries(Object.entries(old).map(([key, value]) => [key, value.id === id ? { ...value, url: fresh.url } : value])));
     } catch (error) { if (alive.current && token === epoch.current) setError(errorMessage(error)); }
   }
-  async function newDraft(copy = false, editShots = false) {
+  async function newDraft(copy = false, step = 0) {
     setTextPending(false); textRequest.current = null;
     if (dirty) await save();
+    resetDraft(copy, step);
+  }
+  function resetDraft(copy = false, step = 0) {
     epoch.current++; draftId.current = crypto.randomUUID(); version.current = 0; projectRef.current = null; setProject(null); setAnalysisPending(false); analysisRequest.current = null;
     const next = copy ? { ...draftRef.current } : MarketingDraftSchema.parse({});
     saved.current = copy ? "" : JSON.stringify(next);
     setSourceKind(next.referenceUpload ? "upload" : copy && next.reference.trim() ? marketingSourceKind(next.reference) : "video");
-    update(next); if (!copy) setAssets({}); setStep(editShots ? 2 : 0); setAnalysis(""); remember(null);
+    update(next); if (!copy) setAssets({}); setStep(step); setAnalysis(""); remember(null);
+  }
+  async function deleteDraft(p: Project) {
+    if (!window.confirm(t("确定删除视频草稿“{0}”吗？删除后无法恢复。\n视频中使用的素材和已生成的视频仍保留在「个人素材」中，如需永久删除，请前往「个人素材」删除。", [p.draft.publishTitle || p.draft.topic || t("未命名草稿")]))) return;
+    await act(async () => {
+      // Let an in-flight autosave settle so it cannot recreate the deleted row.
+      if (flight.current) await flight.current.catch(() => {});
+      await request(`/marketing-videos/${p.id}`, { method: "DELETE" });
+      if (!alive.current) return;
+      setProjects(old => old.filter(item => item.id !== p.id));
+      if (p.id === draftId.current) { setTextPending(false); textRequest.current = null; resetDraft(); }
+      setNotice("草稿已删除。关联素材仍在「个人素材」中，如需永久删除请前往删除。");
+    });
   }
   const choices = (label: string, values: { value: string; label: string }[], value: string, choose: (value: string) => void) => <div className="mv-choices" role="group" aria-label={t(label)}>{values.map(item => <button key={item.value} type="button" disabled={busy || frozen || !ready} className={value === item.value ? "selected" : ""} aria-pressed={value === item.value} onClick={() => choose(item.value)}>{t(item.label)}</button>)}</div>;
   const textField = (name: "topic" | "reference" | "script" | "background" | "publishTitle" | "tags", label: string, max: number, rows = 2) => <label className="mv-field"><span>{t(label)}</span><textarea value={draft[name]} rows={rows} maxLength={max} disabled={busy || !ready || (frozen && !["publishTitle", "tags"].includes(name))} onChange={e => field(name, e.target.value)} /></label>;
@@ -376,13 +395,13 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   return <div className="mv-scroll"><div className="mv-studio">
     <header className="mv-heading"><div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div><button disabled={navigationBusy || saving || !ready} onClick={() => void act(() => newDraft(), true)}>{t("开始新视频")}</button></header>
     {loadError && <div className="mv-connection-error" role="alert"><p>{t(loadError)}</p><button onClick={() => { setLoadError(""); setLoadAttempt(value => value + 1); }}>{t("重新连接")}</button></div>}
-    <details className="mv-library"><summary>{t("我的视频草稿")} · {projects.length}</summary><div className="mv-draft-list">{projects.map(p => <button key={p.id} disabled={navigationBusy || saving} aria-pressed={p.id === project?.id} onClick={() => void act(async () => { if (dirty) await save(); await open(p.id); }, true)}><strong>{p.draft.publishTitle || p.draft.topic || t("未命名草稿")}</strong><span>{p.draft.durationSec}s · {t(({ draft: "草稿", pending: "等待生成", running: "生成中", succeeded: "已生成", failed: "生成失败", cancelled: "已请求取消" } as Record<string, string>)[p.status] ?? p.status)}</span></button>)}</div></details>
+    <details className="mv-library"><summary>{t("我的视频草稿")} · {projects.length}</summary><div className="mv-draft-list">{projects.map(p => <div key={p.id} className="mv-draft-item"><button disabled={navigationBusy || saving} aria-pressed={p.id === project?.id} onClick={() => void act(async () => { if (dirty) await save(); await open(p.id); }, true)}><strong>{p.draft.publishTitle || p.draft.topic || t("未命名草稿")}</strong><span>{p.draft.durationSec}s · {t(({ draft: "草稿", pending: "等待生成", running: "生成中", succeeded: "已生成", failed: "生成未完成", cancelled: "已取消" } as Record<string, string>)[p.status] ?? p.status)}</span></button><button className="mv-draft-delete" disabled={busy || saving || ["pending", "running"].includes(p.status)} aria-label={t("删除草稿")} title={t(["pending", "running"].includes(p.status) ? "视频正在生成，请先取消，任务结束后再删除。" : "删除草稿")} onClick={() => void deleteDraft(p)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></svg></button></div>)}</div></details>
     {project && <TextOperationPanel key={project.id} projectId={project.id} reload={operationReload} onState={async operation => { if (project.id === draftId.current) await textOperationState(operation); }} />}
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}
     {project?.taskId ? <section className="mv-card mv-results"><div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => void act(() => newDraft(true))}>{t("复制为新草稿")}</button></div>
-      {project.status === "succeeded" && project.output?.assets?.[0] ? <><video className="mv-result-video" controls src={project.output.assets[0].url} /><a className="mv-download" href={project.output.assets[0].url} download>{t("下载视频")}</a></> : <div className="mv-progress"><strong>{t(project.status === "pending" ? "等待生成" : active ? "正在制作完整视频" : project.status === "cancelled" ? "已请求取消" : "生成失败")}</strong><progress aria-label={t("视频制作进度")} max="100" value={project.progress} /><span>{project.progress}% · {project.stage?.startsWith("片段完成 ") ? t("片段完成 {0}", [project.stage.slice(5)]) : t(project.stage || "等待生成")}</span>{project.status === "pending" && <button disabled={busy} onClick={() => void act(() => generate(true))}>{t("恢复排队任务")}</button>}{active && <button disabled={busy} onClick={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })}>{t("取消")}</button>}{!active && <button disabled={busy} onClick={() => void act(() => generate(true))}>{t("继续未完成的任务")}</button>}{project.status === "cancelled" && <p className="mv-hint">{t("取消请求已保存，原任务收尾后才能继续。")}</p>}{project.error && <p className="mv-error">{t(project.error)}</p>}<p className="mv-hint">{t("成功片段会保留。重新生成失败片段可能产生费用；提交结果未知时不会自动重发。")}</p></div>}
+      {project.status === "succeeded" && project.output?.assets?.[0] ? <><video className="mv-result-video" controls src={project.output.assets[0].url} /><a className="mv-download" href={project.output.assets[0].url} download>{t("下载视频")}</a></> : <TaskStatus project={project} busy={busy} onResume={() => void act(() => generate(true))} onCancel={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })} onCopy={step => void act(() => newDraft(true, step))} />}
       <div className="mv-publication"><button disabled={busy} onClick={() => void act(() => publication())}>{t("重新生成标题和标签")}</button>{textField("publishTitle", "视频发布标题", 100)}{textField("tags", "短视频检索标签", 160)}<div className="mv-choices"><button disabled={busy} onClick={() => void act(async () => { await save(); await navigator.clipboard.writeText([draft.publishTitle, draft.tags].filter(Boolean).join("\n")); setNotice("已复制"); })}>{t("复制发布文案")}</button><button disabled={busy || project.status !== "succeeded" || !capabilities?.knowledge} onClick={() => void act(async () => { const p = await save(); const result = await request<{ itemId: string; version: number }>(`/marketing-videos/${p.id}/archive`, json("POST", {})); setCurrent({ ...p, knowledgeItemId: result.itemId, knowledgeVersion: result.version }); setNotice("视频和发布文案已保存到知识库。"); })}>{t(project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库草稿" : "存草稿到知识库")}</button><button disabled title={t("抖音发布权限尚未接入，请下载视频并复制文案发布。")}>{t("发布到抖音")}</button></div>{notice && <p className="mv-hint" role="status">{t(notice)}</p>}<p className="mv-hint">{t("抖音发布权限尚未接入，请下载视频并复制文案发布。")}</p>{!capabilities?.knowledge && <p className="mv-hint">{t("知识库尚未启用。")}</p>}</div>
-      <details className="mv-script-review" open><summary>{t("查看制作分镜")}</summary>{draft.storyboard.length ? <StoryboardEditor presenterRequired={draft.mode === "avatar"} shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}<button disabled={busy || saving} onClick={() => void act(() => newDraft(true, true))}>{t("修改分镜并重新制作")}</button></details>
+      <details className="mv-script-review" open><summary>{t("查看制作分镜")}</summary>{draft.storyboard.length ? <StoryboardEditor presenterRequired={draft.mode === "avatar"} shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}<button disabled={busy || saving} onClick={() => void act(() => newDraft(true, 2))}>{t("修改分镜并重新制作")}</button></details>
     </section> : <>
       <nav className="mv-steps" aria-label={t("视频创作步骤")}>{STEPS.map((label, i) => <button key={label} disabled={busy || !ready} aria-current={i === step ? "step" : undefined} className={i === step ? "active" : ""} onClick={() => { if (i && !draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(i); }}><span>{i + 1}</span>{t(label)}</button>)}</nav>
       <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / 3</span></div>
@@ -456,7 +475,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           {!!draft.storyboard.length && <div ref={storyboardPanel} className="mv-storyboard-panel"><StoryboardEditor presenterRequired={draft.mode === "avatar"} shots={draft.storyboard} busy={busy} onChange={storyboard => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) })} onAi={(instruction, index) => void act(() => editStoryboard(instruction, index))} /></div>}
           {!draft.storyboard.length && <p className="mv-hint">{t("先生成可编辑分镜，确认后再制作视频。")}</p>}
           {generationBlocker && <div id={generationHintId} role="alert"><p className="mv-error">{t(generationBlocker)}</p>{plan.error && !draft.storyboard.length && <button disabled={busy || !ready} onClick={() => setStep(0)}>{t("修改文案或时长")}</button>}</div>}
-          <button className="mv-primary mv-generate" disabled={busy || !!generationBlocker} aria-describedby={generationBlocker ? generationHintId : undefined} onClick={() => void act(() => draft.storyboard.length ? generate() : editStoryboard())}>{t(busy ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览")}</button>
+          <button className="mv-primary mv-generate" disabled={busy || !!generationBlocker} aria-describedby={generationBlocker ? generationHintId : undefined} onClick={() => void act(() => draft.storyboard.length ? generate() : editStoryboard())}>{t(busy ? saving ? "正在保存…" : working || "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览")}</button>
           {!draft.storyboard.length && <button disabled={busy || !!generationBlocker} onClick={() => void act(manualStoryboard)}>{t("手动编排分镜")}</button>}
         </>}
         {!!draft.script.trim() && <section className="mv-review-section" aria-label={t("文案与分镜检查")}>

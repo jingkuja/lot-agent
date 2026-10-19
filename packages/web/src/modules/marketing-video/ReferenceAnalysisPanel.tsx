@@ -82,7 +82,7 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
           completed.current = `${id}:${value.revision}`;
         }
         callbacks.current.onActive(active(value)); again = !!active(value);
-      } catch { if (!controller.signal.aborted) setError("暂时无法查询进度，正在重试；请勿重复生成。"); }
+      } catch { if (!controller.signal.aborted) setError("暂时无法查询进度，正在自动重试；无需重复生成。"); }
       if (!controller.signal.aborted && again) timer = setTimeout(() => void poll(), 2000);
     };
     void poll();
@@ -127,6 +127,7 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
     {current?.errorCode && <p className="mv-error" role="alert">{t(analysisError(new Error(current.errorCode)))}</p>}
     {current?.status === "cancelled" && <p>{t("已取消")}</p>}
     {canResume && <p className="mv-hint">{t("继续生成可能重新调用模型并产生费用，已完成的有效结果会复用。")}</p>}
+    {current && !active(current) && !canResume && current.status !== "ready" && <p className="mv-hint">{t("此次分析暂时无法继续。请联系客服并提供分析编号 {0} 核实；也可以点击「开始新视频」重新拆解，或改用「文字文案」继续。", [current.id])}</p>}
     {current?.status === "needs_auth" && current.snapshot.source.platform !== "local" && <details><summary>{t("补充平台访问信息")}</summary>
       <label className="mv-field"><span>{t("个人平台 Cookies（Netscape 格式）")}</span><textarea rows={3} value={cookies} onChange={e => setCookies(e.target.value)} /></label>
       <button disabled={busy || !cookies.trim()} onClick={() => void act(async () => {

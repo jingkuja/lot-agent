@@ -29,3 +29,40 @@ describe("persisting confirmed marketing shots", () => {
     expect(renderKey(MarketingDraftSchema.parse({ ...draft, storyboard: [{ script: "欢迎到店", visual: "店铺", action: "招手", camera: "近景" }] }))).not.toBe(renderKey(draft));
   });
 });
+
+describe("deleting marketing drafts", () => {
+  const store = (row: Record<string, unknown> | undefined, busy = { lock: true, text: 0, analysis: 0 }) => {
+    const query = vi.fn(async (sql: string, _params?: unknown[]) => {
+      if (sql.includes("FOR UPDATE OF p")) return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+      if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ locked: busy.lock }], rowCount: 1 };
+      if (sql.startsWith("SELECT 1 FROM marketing_text_operations")) return { rows: [], rowCount: busy.text };
+      if (sql.startsWith("SELECT 1 FROM marketing_reference_analyses")) return { rows: [], rowCount: busy.analysis };
+      return { rows: [], rowCount: 1 };
+    });
+    const client = { query, release: vi.fn() };
+    return { query, client, store: new PgMarketingProjectStore({ connect: async () => client } as unknown as pg.Pool) };
+  };
+  it("removes the owner's operation records and project in one transaction", async () => {
+    const f = store({ id: "project", task_id: "task", status: "succeeded" });
+    await f.store.remove("owner", "project");
+    const deletes = f.query.mock.calls.filter(([sql]) => sql.startsWith("DELETE"));
+    expect(deletes.map(([sql, params]) => [sql.split(" WHERE")[0], params])).toEqual([
+      ["DELETE FROM marketing_text_operations", ["owner", "project"]], ["DELETE FROM marketing_video_projects", ["owner", "project"]]]);
+    expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
+    expect(f.client.release).toHaveBeenCalledOnce();
+  });
+  it("refuses missing, generating, finishing or pending creation drafts without deleting", async () => {
+    for (const [row, busy, status] of [
+      [undefined, undefined, 404],
+      [{ task_id: "task", status: "running" }, undefined, 409],
+      [{ task_id: "task", status: "cancelled" }, { lock: false, text: 0, analysis: 0 }, 409],
+      [{ task_id: null }, { lock: true, text: 1, analysis: 0 }, 409],
+      [{ task_id: null, reference_analysis_id: "analysis" }, { lock: true, text: 0, analysis: 1 }, 409],
+    ] as const) {
+      const f = store(row, busy);
+      await expect(f.store.remove("owner", "project")).rejects.toMatchObject({ status });
+      expect(f.query.mock.calls.some(([sql]) => sql.startsWith("DELETE"))).toBe(false);
+      expect(f.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
+    }
+  });
+});
