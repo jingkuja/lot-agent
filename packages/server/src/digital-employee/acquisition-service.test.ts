@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CustomerAcquisitionService, campaignMediaPrompt, fallbackCopy, fallbackRecommendations } from "./acquisition-service.js";
+import { CustomerAcquisitionService, campaignMediaPrompt, campaignVideoModels, fallbackCopy, fallbackRecommendations } from "./acquisition-service.js";
 import type { CampaignModelAvailability } from "./acquisition-types.js";
 
 function availability(overrides: Partial<CampaignModelAvailability> = {}): CampaignModelAvailability {
@@ -682,5 +682,12 @@ describe("deployment feedback idempotency", () => {
     const insert = query.mock.calls.find(([sql]) => sql.includes("INSERT INTO de_deployment_feedback")) as unknown as [string, unknown[]];
     expect(insert[1].at(-1)).toBe(draftId);
     expect(drafts.markApplied).toHaveBeenCalledWith("u1", draftId, "f1");
+  });
+});
+
+describe("campaignVideoModels", () => {
+  it("hides Grok video from Acquisition model choices", () => {
+    expect(campaignVideoModels([{ id: "doubao-seedance-2-5" }, { id: "grok-imagine-video-1.5" }, { id: "kling-video-v3-omni" }]))
+      .toEqual([{ id: "doubao-seedance-2-5", label: "doubao-seedance-2-5" }, { id: "kling-video-v3-omni", label: "kling-video-v3-omni" }]);
   });
 });

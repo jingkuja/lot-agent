@@ -1,4 +1,4 @@
-import { isH3MaxModel, isKlingModel, isMinimaxH3Model } from "./model-filter.js";
+import { isGrokVideoModel, isH3MaxModel, isKlingModel, isMinimaxH3Model } from "./model-filter.js";
 
 export interface VideoQuality {
   label: string;
@@ -20,6 +20,9 @@ export const KLING_VIDEO_QUALITIES: VideoQuality[] = [
   { label: "4K超清", short: "4k", edge: 2160 },
 ];
 
+/** Grok 使用参考图或参考视频时最高 720p；纯文本和首尾帧可用 1080p。 */
+export const GROK_REFERENCE_VIDEO_QUALITIES: VideoQuality[] = VIDEO_QUALITIES.slice(0, 2);
+
 /** MiniMax H3（`minimax-video-h3`）仅支持 768P / 2K。2K 短边为 1440。 */
 export const MINIMAX_H3_VIDEO_QUALITIES: VideoQuality[] = [
   { label: "768P高清", short: "768p", edge: 768 },
@@ -39,7 +42,8 @@ const ALL_VIDEO_QUALITIES: VideoQuality[] = [
   ...H3_MAX_VIDEO_QUALITIES,
 ];
 
-export function videoQualitiesForModel(id: string | null | undefined): VideoQuality[] {
+export function videoQualitiesForModel(id: string | null | undefined, hasReferenceMedia = false): VideoQuality[] {
+  if (isGrokVideoModel(id)) return hasReferenceMedia ? GROK_REFERENCE_VIDEO_QUALITIES : VIDEO_QUALITIES;
   if (isH3MaxModel(id)) return H3_MAX_VIDEO_QUALITIES;
   if (isMinimaxH3Model(id)) return MINIMAX_H3_VIDEO_QUALITIES;
   return isKlingModel(id) ? KLING_VIDEO_QUALITIES : VIDEO_QUALITIES;

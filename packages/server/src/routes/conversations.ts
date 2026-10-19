@@ -1,13 +1,14 @@
 import { parseChatSourceTypes } from "@lot-agent/core";
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { estimateCost, MAX_IMAGE_EDIT_REFERENCES, marketingVideoDefinition } from "@lot-agent/core";
+import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
+import { activeMarketingVideoProfile } from "../marketing-video/model.js";
 import type { AgentService } from "../services/agent-service.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
-import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
 import {
   DEFAULT_MINIPROGRAM_CONFIG,
@@ -615,7 +616,7 @@ export function createGenerationRoutes(service: AgentService) {
       // Client settings pass a per-media whitelist so identity fields
       // (conversationId/assistantMessageId/userId) can never ride along.
       const selectedModel = conv.agent_id === "marketing_video" && mediaType === "video"
-        ? marketingVideoDefinition.defaultModelId
+        ? activeMarketingVideoProfile().modelId
         : typeof body.model === "string" && body.model ? body.model : undefined;
       if (conv.agent_id === "marketing_video" && mediaType === "video") {
         const duration = body.settings?.durationSec === undefined ? 5 : body.settings.durationSec;
@@ -662,6 +663,10 @@ export function createGenerationRoutes(service: AgentService) {
         if (legacyImages.length > 5) {
           return c.json({ error: "input_reference supports at most 5 references" }, 400);
         }
+      }
+      if (mediaType === "video") {
+        const grokIssue = grokVideoIssue(resolvedModel, { ...settings, ...videoReferences, media });
+        if (grokIssue) return c.json({ error: grokIssue }, 400);
       }
       const type = mediaType === "image" ? "image.generate" : "video.generate";
 

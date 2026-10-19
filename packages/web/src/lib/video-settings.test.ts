@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  GROK_REFERENCE_VIDEO_QUALITIES,
   H3_MAX_VIDEO_QUALITIES,
   KLING_VIDEO_QUALITIES,
   MINIMAX_H3_VIDEO_QUALITIES,
@@ -52,5 +53,15 @@ describe("pickVideoQuality", () => {
     expect(pickVideoQuality(MINIMAX_H3_VIDEO_QUALITIES, "4k").short).toBe("2k");
     expect(pickVideoQuality(H3_MAX_VIDEO_QUALITIES, "720p").short).toBe("768p");
     expect(pickVideoQuality(H3_MAX_VIDEO_QUALITIES, "2k").short).toBe("768p");
+  });
+});
+
+describe("Grok video qualities", () => {
+  it("offers 1080p without references and caps reference media at 720p", () => {
+    expect(videoQualitiesForModel("grok-imagine-video-1.5")).toBe(VIDEO_QUALITIES);
+    expect(videoQualitiesForModel("grok-imagine-video-1.5", true)).toBe(GROK_REFERENCE_VIDEO_QUALITIES);
+    expect(GROK_REFERENCE_VIDEO_QUALITIES.map((q) => q.short)).toEqual(["480p", "720p"]);
+    expect(pickVideoQuality(GROK_REFERENCE_VIDEO_QUALITIES, "1080p").short).toBe("720p");
+    expect(videoQualitiesForModel("kling-video-v3-omni", true)).toBe(KLING_VIDEO_QUALITIES);
   });
 });

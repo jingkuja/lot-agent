@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import type { AgentService } from "../services/agent-service.js";
-import { billedVideoSeconds, finalizeImageSettings, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 
 const ALLOWED_TYPES = ["image.generate", "video.generate"] as const;
 
@@ -42,6 +42,8 @@ export function sanitizeTaskInput(
   if (mediaType === "video") {
     Object.assign(input, pickVideoReferenceInputs(raw));
     input.generate_audio = resolveVideoGenerateAudio(input.generate_audio, input.reference_audio);
+    const grokIssue = grokVideoIssue(input.modelId as string | undefined, input);
+    if (grokIssue) throw new Error(grokIssue);
   }
   return input;
 }

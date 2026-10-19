@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  GROK_VIDEO_MODEL,
+  grokVideoInputIssue,
+  isGrokVideoModel,
+  videoTierEdge,
   HappyhorseVideoAdapter,
   OpenaiVideoAdapter,
   HttpVideoGenerationProvider,
@@ -324,5 +328,40 @@ describe.each([new HappyhorseVideoAdapter(), new OpenaiVideoAdapter()])("Kling v
     const body = adapter.buildCreateBody({ prompt: "p", reference_audio: "https://media.example/audio.wav", resolution: "720p" }, "doubao-seedance-2.0") as Record<string, unknown>;
     expect(body.reference_audio).toBe("https://media.example/audio.wav");
     expect(body.metadata).toEqual({ resolution: "720p" });
+  });
+});
+
+describe("Grok Imagine 1.5 limits", () => {
+  const base = { images: 0, videos: 0, audios: 0, firstFrame: false, lastFrame: false, resolutions: ["1080p"] };
+  it("matches only the 1.5 flagship id", () => {
+    expect(isGrokVideoModel(GROK_VIDEO_MODEL)).toBe(true);
+    expect(isGrokVideoModel("grok-imagine-video-1.5-lite")).toBe(false);
+    expect(isGrokVideoModel("grok-imagine-video")).toBe(false);
+  });
+  it("reads tiers and sizes as short edges", () => {
+    expect(videoTierEdge("720p")).toBe(720);
+    expect(videoTierEdge("1920x1080")).toBe(1080);
+    expect(videoTierEdge("4k")).toBe(2160);
+    expect(videoTierEdge("auto")).toBeUndefined();
+  });
+  it("allows 1080p text, first/last frame and audio requests", () => {
+    expect(grokVideoInputIssue(base)).toBeUndefined();
+    expect(grokVideoInputIssue({ ...base, firstFrame: true, lastFrame: true, audios: 3 })).toBeUndefined();
+  });
+  it("caps reference images and video at 720p", () => {
+    expect(grokVideoInputIssue({ ...base, images: 2 })).toContain("720p");
+    expect(grokVideoInputIssue({ ...base, videos: 1, resolutions: ["720p", "1280x720"] })).toBeUndefined();
+  });
+  it("uses a reference video alone", () => {
+    for (const extra of [{ images: 1 }, { audios: 1 }, { firstFrame: true }, { lastFrame: true }]) {
+      expect(grokVideoInputIssue({ ...base, resolutions: ["720p"], videos: 1, ...extra })).toContain("参考视频");
+    }
+    expect(grokVideoInputIssue({ ...base, videos: 2 })).toContain("1 段");
+    expect(grokVideoInputIssue({ ...base, audios: 4 })).toContain("3 段");
+  });
+  it("limits reference-video requests to 8 seconds", () => {
+    expect(grokVideoInputIssue({ ...base, resolutions: ["720p"], videos: 1, durationSec: 8 })).toBeUndefined();
+    expect(grokVideoInputIssue({ ...base, resolutions: ["720p"], videos: 1, durationSec: 9 })).toContain("8 秒");
+    expect(grokVideoInputIssue({ ...base, durationSec: 15 })).toBeUndefined();
   });
 });

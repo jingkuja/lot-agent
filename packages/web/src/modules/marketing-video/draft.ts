@@ -1,10 +1,13 @@
 import type { PickedFile } from "../../api/client.js";
 import type { VideoSettings } from "../../components/MediaSettings.js";
-import { pickVideoQuality, KLING_VIDEO_QUALITIES } from "../../lib/video-settings.js";
+import { DEFAULT_MARKETING_VIDEO_MODEL } from "@lot-agent/core/marketing-video";
+import { pickVideoQuality, VIDEO_QUALITIES } from "../../lib/video-settings.js";
 
-export const MARKETING_VIDEO_MODEL = "kling-video-v3-omni";
-export const MARKETING_VIDEO_QUALITIES = KLING_VIDEO_QUALITIES.map((quality, index) => ({
-  ...quality, label: ["默认", "高清", "超清"][index],
+/** Display default only; the server substitutes its configured marketing model. */
+export const MARKETING_VIDEO_MODEL = DEFAULT_MARKETING_VIDEO_MODEL;
+/** Marketing drafts offer 720p / 1080p; model profiles may cap references at 720p. */
+export const MARKETING_VIDEO_QUALITIES = VIDEO_QUALITIES.slice(1).map((quality, index) => ({
+  ...quality, label: ["默认", "高清"][index],
 }));
 
 export const STEPS = ["创作方向与文案", "标题标签", "数字分身", "声音设置", "视频背景", "视频画面", "BGM·字幕", "视频封面", "确认生成"];

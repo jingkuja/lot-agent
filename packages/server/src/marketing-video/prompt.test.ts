@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
-import { MARKETING_VIDEO_PROMPT_MAX_CHARS, marketingImageReferences, marketingSegmentPrompt } from "./prompt.js";
+import { marketingImageReferences, marketingSegmentPrompt } from "./prompt.js";
+import { activeMarketingVideoProfile } from "./model.js";
 import { creationPrompt, publicationPrompt, storyboardPrompt } from "./creation.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -121,7 +122,7 @@ it("keeps ordinary six-image prompts compact and rejects oversize directions wit
     storyboard: [{ script: "欢迎来喝咖啡。", visual: "人物在窗边展示咖啡", action: "端起杯子", camera: "中景推近" }] });
   const segment = { index: 0, script: draft.storyboard[0].script, durationSec: 15 };
   expect(marketingSegmentPrompt(draft, segment, 2).length).toBeLessThanOrEqual(2500);
-  expect(MARKETING_VIDEO_PROMPT_MAX_CHARS).toBe(3072);
+  expect(activeMarketingVideoProfile().promptMaxChars).toBe(3072);
   const long = MarketingDraftSchema.parse({ ...draft, background: "背景".repeat(300), voice: "声音".repeat(50),
     storyboard: [{ ...draft.storyboard[0], visual: "画面".repeat(300), action: "动作".repeat(200), camera: "镜头".repeat(200) }] });
   expect(() => marketingSegmentPrompt(long, segment, 2)).toThrow("生成提示词过长");

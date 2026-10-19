@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   filterModels,
   isGptImage15,
+  isGrokVideoModel,
   isGptImage2,
   isGptImage25Flare,
   isGptImage25Sunburst,
@@ -14,6 +15,7 @@ import {
   orderLlmModels,
   seedanceAssetMention,
   visibleImageModels,
+  visibleVideoModels,
 } from "./model-filter.js";
 
 const models = [
@@ -229,5 +231,14 @@ describe("missingSeedanceMentions", () => {
         audios: 1,
       })
     ).toEqual([]);
+  });
+});
+
+describe("visibleVideoModels", () => {
+  it("labels Grok Imagine 1.5 as 旗舰 and keeps its real id", () => {
+    const listed = visibleVideoModels([{ id: "kling-video-v3-omni" }, { id: "grok-imagine-video-1.5" }, { id: "grok-imagine-video-1.5-lite" }]);
+    expect(listed).toEqual([{ id: "kling-video-v3-omni" }, { id: "grok-imagine-video-1.5", label: "旗舰" }, { id: "grok-imagine-video-1.5-lite" }]);
+    expect(isGrokVideoModel("Grok-Imagine-Video-1.5")).toBe(true);
+    expect(isGrokVideoModel("grok-imagine-video")).toBe(false);
   });
 });

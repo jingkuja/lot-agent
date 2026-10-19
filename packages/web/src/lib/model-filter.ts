@@ -70,6 +70,16 @@ export function isKlingModel(id: string | null | undefined): boolean {
   return (id ?? "").toLowerCase().startsWith("kling");
 }
 
+/** xAI Grok Imagine 1.5; the lite and classic variants are separate models. */
+export function isGrokVideoModel(id: string | null | undefined): boolean {
+  return (id ?? "").trim().toLowerCase() === "grok-imagine-video-1.5";
+}
+
+/** Video picker: Grok is shown as 旗舰; requests keep the real model id. */
+export function visibleVideoModels<T extends { id: string; label?: string }>(models: T[]): T[] {
+  return models.map((model) => isGrokVideoModel(model.id) ? { ...model, label: IMAGE_FLAGSHIP_LABEL } : model);
+}
+
 /** MiniMax H3 Max (ids like `h3-max` / `minimax-video-h3-max`) uses 480P / 768P. */
 export function isH3MaxModel(id: string | null | undefined): boolean {
   return /h3[-_ ]?max/i.test(id ?? "");

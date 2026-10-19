@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { KLING_MARKETING_PROFILE, marketingVideoProfile, type MarketingVideoProfile } from "./models.js";
+
+export * from "./models.js";
 
 export const MARKETING_COPY_MODEL = "kimi-k3";
 export const MarketingShotSchema = z.object({
@@ -49,8 +52,26 @@ export const MarketingDraftSchema = z.object({
   tags: z.string().max(160).default(""),
 }).strict();
 export type MarketingDraft = z.infer<typeof MarketingDraftSchema>;
-export function marketingReferenceError(draft: MarketingDraft): string {
-  if (draft.assets.video && ["portrait", "background", "scene"].reduce((sum, slot) => sum + marketingAssetIds(draft.assets[slot as "portrait" | "background" | "scene"]).length, 0) > 3) return "已选择参考视频，人物与场景图片合计不能超过 3 张，请移除多余图片。";
+/** Frozen input format. Versions before 2 predate reference checks; rules
+ * always come from the profile of the recorded `modelId`. */
+export const MARKETING_INPUT_VERSION = 3;
+
+/** Profile of a frozen job; inputs without a model id were submitted to Kling. */
+export function marketingJobProfile(input: { modelId?: unknown }): MarketingVideoProfile {
+  const profile = marketingVideoProfile(typeof input.modelId === "string" ? input.modelId : KLING_MARKETING_PROFILE.modelId);
+  if (!profile) throw new Error("原任务使用的视频模型已不受支持，请复制为新草稿后重新制作。");
+  return profile;
+}
+
+/** Reference combinations the model cannot use. */
+export function marketingReferenceError(draft: MarketingDraft, profile: MarketingVideoProfile): string {
+  const images = (["portrait", "background", "scene"] as const).reduce((sum, slot) => sum + marketingAssetIds(draft.assets[slot]).length, 0);
+  if (draft.assets.video && images > profile.imagesWithReferenceVideo) {
+    return profile.imagesWithReferenceVideo
+      ? `已选择参考视频，人物与场景图片合计不能超过 ${profile.imagesWithReferenceVideo} 张，请移除多余图片。`
+      : "已选择参考视频，人物与场景图片不会参与生成，请移除图片或参考视频。";
+  }
+  if (profile.referenceMaxQuality === "720p" && draft.quality === "1080p" && (images || draft.assets.video)) return "使用人物、场景图片或参考视频时最高支持 720p，请将视频质量改为默认。";
   return "";
 }
 export const MarketingReviewFieldSchema = z.enum(["script", "publishTitle", "tags", "background", "storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera"]);
@@ -99,41 +120,56 @@ export const marketingMaxDuration = (target: number) => Math.min(65, target + 5)
 export const isMarketingDurationValid = (target: number, actual: number) => Number.isInteger(target) && target >= 15 && target <= 60
   && Number.isInteger(actual) && actual >= target && actual <= marketingMaxDuration(target);
 
+/** Schema and storyboard upper bound shared by every model. */
+export const MARKETING_SHOT_MAX_SECONDS = 15;
+/** Longest shot the model accepts for this draft. */
+export function marketingShotMaxSeconds(draft: Pick<MarketingDraft, "assets">, profile: MarketingVideoProfile): number {
+  return Math.min(MARKETING_SHOT_MAX_SECONDS, draft.assets.video ? profile.referenceVideoShotMaxSeconds : profile.shotMaxSeconds);
+}
+
 /** Keep the AI's valid timing, or apportion integer seconds by its pacing
- * weights, bounded by narration length and the model's 4–15 second range. */
-export function allocateShotDurations(shots: { script: string; durationSec?: number }[], target: number): number[] {
+ * weights, bounded by narration length and the model's 4–maxShot second range. */
+export function allocateShotDurations(shots: { script: string; durationSec?: number }[], target: number, maxShot = MARKETING_SHOT_MAX_SECONDS): number[] {
   const maximum = marketingMaxDuration(target);
   if (!isMarketingDurationValid(target, target) || !shots.length || shots.length > 15
-    || shots.length * 4 > maximum || shots.length * 15 < target) throw new Error("分镜数量与视频时长不一致，请重新生成分镜。");
+    || shots.length * 4 > maximum || shots.length * maxShot < target) throw new Error("分镜数量与视频时长不一致，请重新生成分镜。");
   const minimum = shots.map(shot => Math.max(4, Math.ceil(speechUnits(shot.script) / 4.5)));
   const minimumTotal = minimum.reduce((a, b) => a + b, 0);
-  if (minimum.some(n => n > 15) || minimumTotal > maximum) throw new Error("文案过长，请精简文案或增加视频时长。");
+  if (minimum.some(n => n > maxShot) || minimumTotal > maximum) throw new Error("文案过长，请精简文案或增加视频时长。");
   const requested = shots.map(shot => shot.durationSec ?? 0);
-  if (requested.every((n, i) => Number.isInteger(n) && n >= minimum[i] && n <= 15) && isMarketingDurationValid(target, requested.reduce((a, b) => a + b, 0))) return requested;
+  if (requested.every((n, i) => Number.isInteger(n) && n >= minimum[i] && n <= maxShot) && isMarketingDurationValid(target, requested.reduce((a, b) => a + b, 0))) return requested;
   const total = Math.max(target, minimumTotal);
   const weights = shots.map(shot => Math.max(1, shot.durationSec ?? speechUnits(shot.script)));
   const result = [...minimum];
   for (let remaining = total - result.reduce((a, b) => a + b, 0); remaining > 0; remaining--) {
     let best = -1;
-    for (let i = 0; i < result.length; i++) if (result[i] < 15 && (best < 0 || weights[i] / (result[i] + 1) > weights[best] / (result[best] + 1))) best = i;
+    for (let i = 0; i < result.length; i++) if (result[i] < maxShot && (best < 0 || weights[i] / (result[i] + 1) > weights[best] / (result[best] + 1))) best = i;
     result[best]++;
   }
   return result;
 }
 
-export function timeMarketingStoryboard(shots: MarketingShot[], total: number): MarketingShot[] {
-  const durations = allocateShotDurations(shots, total);
+export function timeMarketingStoryboard(shots: MarketingShot[], total: number, maxShot = MARKETING_SHOT_MAX_SECONDS): MarketingShot[] {
+  const durations = allocateShotDurations(shots, total, maxShot);
   return shots.map((shot, index) => ({ ...shot, durationSec: durations[index] }));
 }
 
-/** Split at phrase boundaries. Segment times are integers accepted by Kling. */
-export function planMarketingSegments(script: string, durationSec: number): MarketingSegment[] {
+/** Re-time saved shots that exceed the draft's cap, e.g. after a reference video is added. */
+export function capMarketingStoryboard(shots: MarketingShot[], draft: Pick<MarketingDraft, "assets" | "durationSec">, profile: MarketingVideoProfile): MarketingShot[] {
+  const maxShot = marketingShotMaxSeconds(draft, profile);
+  if (!shots.some(shot => (shot.durationSec ?? MARKETING_SHOT_MAX_SECONDS) > maxShot)) return shots;
+  try { return timeMarketingStoryboard(shots, draft.durationSec, maxShot); }
+  catch { throw new Error(`当前视频模型每镜最长 ${maxShot} 秒，请重新生成全部分镜。`); }
+}
+
+/** Split at phrase boundaries. Segment times are integers accepted by the video model. */
+export function planMarketingSegments(script: string, durationSec: number, maxShot = MARKETING_SHOT_MAX_SECONDS): MarketingSegment[] {
   if (!Number.isInteger(durationSec) || durationSec < 15 || durationSec > 60 || !script.trim()) throw new Error("请填写文案并选择 15–60 秒的整片时长。");
   const units = speechUnits(script);
   if (units > marketingMaxDuration(durationSec) * 4.5) throw new Error("文案过长，请精简文案或增加视频时长。");
   // Preserve every character, including whitespace and punctuation. Long
   // sentences may be split at a comma, space, or ultimately a character edge.
-  const count = Math.max(Math.ceil(durationSec / 15), Math.min(Math.ceil(durationSec / 8), Math.floor(units / 4)));
+  const count = Math.max(Math.ceil(durationSec / maxShot), Math.min(Math.ceil(durationSec / 8), Math.floor(units / 4)));
   if (units < count * 4) throw new Error("文案过短，请补充内容。");
   const chars = Array.from(script.trim());
   if (chars.length < count) throw new Error("文案过短，请补充内容。");
@@ -152,8 +188,8 @@ export function planMarketingSegments(script: string, durationSec: number): Mark
   }
   parts.push(chars.slice(start).join(""));
   if (parts.some((text) => speechUnits(text) === 0)) throw new Error("文案过短，请补充内容。");
-  if (parts.some((text) => speechUnits(text) > 15 * 4.5)) throw new Error("部分段落过长，请缩短句子后重试。");
-  const durations = allocateShotDurations(parts.map(script => ({ script })), durationSec);
+  if (parts.some((text) => speechUnits(text) > maxShot * 4.5)) throw new Error("部分段落过长，请缩短句子后重试。");
+  const durations = allocateShotDurations(parts.map(script => ({ script })), durationSec, maxShot);
   return parts.map((text, index) => ({ index, script: text, durationSec: durations[index] }));
 }
 
@@ -213,9 +249,11 @@ export function applyMarketingReviewSuggestion(draft: MarketingDraft, issue: Mar
 }
 
 /** Saved shot boundaries are authoritative; never re-split edited narration. */
-export function resolveMarketingSegments(draft: MarketingDraft): MarketingSegment[] {
-  if (!draft.storyboard?.length) return planMarketingSegments(draft.script, draft.durationSec);
+export function resolveMarketingSegments(draft: MarketingDraft, profile: MarketingVideoProfile): MarketingSegment[] {
+  const maxShot = marketingShotMaxSeconds(draft, profile);
+  if (!draft.storyboard?.length) return planMarketingSegments(draft.script, draft.durationSec, maxShot);
   const durations = draft.storyboard.map(shot => shot.durationSec ?? 15);
+  if (maxShot < MARKETING_SHOT_MAX_SECONDS && durations.some(n => n > maxShot)) throw new Error(`当前视频模型每镜最长 ${maxShot} 秒，请重新生成或调整分镜。`);
   if (durations.some(n => !Number.isInteger(n) || n < 4 || n > 15) || !isMarketingDurationValid(draft.durationSec, durations.reduce((a, b) => a + b, 0))) throw new Error("分镜总时长不能短于目标时长，最多可多 5 秒，且不超过 65 秒。");
   if (storyboardScript(draft.storyboard) !== draft.script.trim()) throw new Error("分镜口播与文案不一致，请重新生成分镜。");
   return draft.storyboard.map((shot, index) => {

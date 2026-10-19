@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DB } from "../db/database.js";
-import type { JobQueue } from "@lot-agent/core";
+import { isGrokVideoModel, type JobQueue } from "@lot-agent/core";
 import { billedVideoSeconds, resolveVideoGenerateAudio, validateImageGenerationSettings } from "../generation/input.js";
 import { ConversationActionDrafts } from "./conversation-drafts.js";
 import { ConflictError, InputError, NotFoundError, QuotaError } from "./errors.js";
@@ -1491,6 +1491,12 @@ function normalizeRecommendationMix(value: CampaignRecommendationDraft[]) {
 }
 
 function iso(value: string | Date): string { return new Date(value).toISOString(); }
+
+/** Video models offered by Acquisition; Grok is not offered here yet. Requests
+ * outside this list are rejected by resolveCampaignModel. */
+export function campaignVideoModels(models: { id: string }[]): CampaignModelOption[] {
+  return models.filter((model) => !isGrokVideoModel(model.id)).map((model) => ({ id: model.id, label: model.id }));
+}
 
 function emptyModelAvailability(): CampaignModelAvailability {
   return {

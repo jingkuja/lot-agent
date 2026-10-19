@@ -1,6 +1,6 @@
 import { TextOperationPanel } from "./TextOperationPanel.js";
 import { useEffect, useId, useRef, useState } from "react";
-import { marketingReferenceError, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, MARKETING_SHOT_MAX_SECONDS, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
@@ -9,12 +9,13 @@ import { StoryboardEditor } from "./StoryboardEditor.js";
 import { ReviewPanel } from "./ReviewPanel.js";
 import { TaskStatus } from "./TaskStatus.js";
 import { checkKlingReferenceImage, klingReferenceVideoIssue, readMediaDuration, readMediaMetadata } from "../../lib/video-references.js";
+import { isKlingModel } from "../../lib/model-filter.js";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { ReferenceAnalysisPanel, analysisError } from "./ReferenceAnalysisPanel.js";
 
 type Asset = { id: string; url: string; name: string; mime: string; issue?: "unsupported" };
 type Project = MarketingProject & { assets?: Record<string, Asset> };
-type Capabilities = { composition: boolean; knowledge: boolean };
+type Capabilities = { composition: boolean; knowledge: boolean; model?: MarketingVideoProfile };
 // Persisted drafts and older API responses can predate newly added fields.
 // Normalize before storing state or computing the saved/dirty snapshot.
 const normalizeProject = (project: Project): Project => ({ ...project, draft: MarketingDraftSchema.parse(project.draft) });
@@ -38,6 +39,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [projects, setProjects] = useState<Project[]>([]);
   const [assets, setAssets] = useState<Record<string, Asset>>({});
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  // The server picks the clip model; its limits drive validation and hints here.
+  const profile = capabilities?.model ?? DEFAULT_MARKETING_VIDEO_PROFILE;
   const [step, setStep] = useState(0);
   const [actionBusy, setBusy] = useState(false);
   const [analysisPending, setAnalysisPending] = useState(false);
@@ -77,8 +80,13 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     if (value !== draftRef.current[name]) {
       if (name === "script") next.storyboard = [];
       if (name === "durationSec" && next.storyboard.length) {
-        try { next.storyboard = timeMarketingStoryboard(next.storyboard, next.durationSec); }
+        try { next.storyboard = timeMarketingStoryboard(next.storyboard, next.durationSec, marketingShotMaxSeconds(next, profile)); }
         catch { next.storyboard = []; }
+      }
+      // A reference video may lower the shot cap; keep the board and let the plan report conflicts.
+      if (name === "assets" && !!next.assets.video !== !!draftRef.current.assets.video && next.storyboard.length) {
+        try { next.storyboard = timeMarketingStoryboard(next.storyboard, next.durationSec, marketingShotMaxSeconds(next, profile)); }
+        catch { /* resolveMarketingSegments shows the error */ }
       }
     }
 
@@ -231,9 +239,10 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     update(result.draft); setCurrent(result);
   }
   async function generate(retry = false) {
-    const referenceError = marketingReferenceError(draftRef.current);
+    // Retries resume a frozen job whose recorded model rules the server checks.
+    const referenceError = retry ? "" : marketingReferenceError(draftRef.current, profile);
     if (referenceError) { setStep(1); throw new Error(referenceError); }
-    if (!retry) resolveMarketingSegments(draftRef.current);
+    if (!retry) resolveMarketingSegments(draftRef.current, profile);
     if (!retry && (!draftRef.current.publishTitle.trim() || !draftRef.current.tags.trim())) { setWorking("正在补全标题和标签…"); await publication(true); }
     let p = await save();
     if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { setWorking("正在检查文案与分镜…"); await review(); p = projectRef.current!; }
@@ -257,7 +266,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }
 
   async function manualStoryboard() {
-    const storyboard = planMarketingSegments(draftRef.current.script, draftRef.current.durationSec).map(part => ({
+    const storyboard = planMarketingSegments(draftRef.current.script, draftRef.current.durationSec, marketingShotMaxSeconds(draftRef.current, profile)).map(part => ({
       durationSec: part.durationSec, script: part.script, visual: draftRef.current.background || t("展示产品与使用场景"),
       action: t(draftRef.current.assets.video ? "人物正面出镜，无声展示产品，不做说话口型" : "人物正面出镜，自然讲述并展示产品"), camera: t("中景平稳拍摄，缓慢推近主体"),
     }));
@@ -300,14 +309,16 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const token = epoch.current;
     if (slot === "scene" || slot === "voice" || slot === "portrait" || slot === "background" || slot === "cover") {
       await validateTwinFile(file, slot === "voice" ? "voice" : "portrait");
-      // Portrait, background and scene images are sent to Kling as references; the cover is not.
-      const issue = multiple ? await checkKlingReferenceImage(file) : undefined;
+      // Portrait, background and scene images are model references; the cover is not.
+      const issue = multiple && isKlingModel(profile.modelId) ? await checkKlingReferenceImage(file) : undefined;
       if (issue) throw new Error(issue);
     }
     else if (slot === "video") {
       if (draftRef.current.assets.video) throw new Error("参考视频最多 1 个，请先移除已有视频。");
-      if (!file.size || file.size > 150 * 1024 * 1024 || !["video/mp4", "video/quicktime"].includes(file.type)) throw new Error("参考视频支持 MP4、MOV，最大 150 MB，时长 3–15.5 秒。");
-      const issue = klingReferenceVideoIssue(file, await readMediaMetadata(file));
+      if (!file.size || file.size > 150 * 1024 * 1024 || !["video/mp4", "video/quicktime"].includes(file.type)) throw new Error("参考视频支持 MP4、MOV，最大 150 MB。");
+      const metadata = await readMediaMetadata(file);
+      if (!metadata.width || !metadata.height) throw new Error("无法读取参考视频分辨率，请更换文件");
+      const issue = isKlingModel(profile.modelId) ? klingReferenceVideoIssue(file, metadata) : undefined;
       if (issue) throw new Error(issue);
     } else {
       if (!file.size || file.size > 30 * 1024 * 1024 || !["audio/mpeg", "audio/wav", "audio/mp4"].includes(file.type)) throw new Error("背景音乐支持 MP3、WAV、M4A，最大 30 MB。");
@@ -378,19 +389,22 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     })}</div>;
   };
   const plan = (() => {
-    try { return { parts: resolveMarketingSegments(draft), error: "" }; }
+    try { return { parts: resolveMarketingSegments(draft, profile), error: "" }; }
     catch (e) { return { parts: [], error: errorMessage(e) }; }
   })();
   const parts = plan.parts;
   const referenceAnalysis = project?.draft.copyMode === draft.copyMode && project.draft.reference === draft.reference && project.draft.referenceUpload?.id === draft.referenceUpload?.id
     ? project.referenceAnalysis : undefined;
   const copyAction = <button className="mv-soft" disabled={busy || !(draft.copyMode === "rewrite" ? sourceKind === "upload" ? !!draft.referenceUpload : draft.reference.trim() : draft.topic.trim()) || !ready} onClick={() => void act(writeCopy)}>{t(busy ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜")}</button>;
+  const referenceVideoStatus = profile.imagesWithReferenceVideo
+    ? t("已选择参考视频：人物与场景图片合计最多 {0} 张；不生成口播配音，音色设置不生效，可添加背景音乐。", [profile.imagesWithReferenceVideo])
+    : t("已选择参考视频：人物与场景图片不参与生成；不生成口播配音，音色设置不生效，可添加背景音乐。");
   const generationBlocker = !ready ? loadError || "正在加载草稿…"
     : Object.entries(draft.assets).some(([slot, value]) => marketingAssetIds(value).some(id => {
       const item = assets[id] ?? (assets[slot]?.id === id ? assets[slot] : undefined);
       return !item || item.issue;
     })) ? "素材已不可用或不支持新生成，请移除或替换。"
-    : marketingReferenceError(draft) || plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "");
+    : marketingReferenceError(draft, profile) || plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "");
 
   return <div className="mv-scroll"><div className="mv-studio">
     <header className="mv-heading"><div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div><button disabled={navigationBusy || saving || !ready} onClick={() => void act(() => newDraft(), true)}>{t("开始新视频")}</button></header>
@@ -459,17 +473,23 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           <section className="mv-material-group" aria-label={t("参考视频")}>
             <div className="mv-material-heading"><strong>{t("参考视频")}</strong><span>{t("最多 1 个")}</span></div>
             {asset("video", "上传参考视频（选填）", "video/mp4,video/quicktime")}
-            <p className="mv-hint">{t("参考视频支持 MP4、MOV，最大 150 MB，时长 3–15.5 秒。")}</p>
+            <p className="mv-hint">{[
+              t("参考视频支持 MP4、MOV，最大 150 MB。"),
+              profile.referenceVideo ? t("时长 {0}–{1} 秒。", [profile.referenceVideo.minSeconds, profile.referenceVideo.maxSeconds]) : "",
+              profile.imagesWithReferenceVideo ? t("选择参考视频后，人物与场景图片合计最多 {0} 张。", [profile.imagesWithReferenceVideo]) : t("选择参考视频后，人物与场景图片不参与生成。"),
+              profile.referenceVideoShotMaxSeconds < MARKETING_SHOT_MAX_SECONDS ? t("选择参考视频后，每镜最长 {0} 秒。", [profile.referenceVideoShotMaxSeconds]) : "",
+            ].filter(Boolean).join(" ")}</p>
             <p className="mv-hint">{t("此处视频参与生成，用于参考动作和构图；成片内容以已确认的文案与分镜为准，不沿用原视频台词或音乐。")}</p>
-            {draft.assets.video && <p className="mv-hint" role="status">{t("已选择参考视频：人物与场景图片合计最多 3 张；不生成口播配音，音色设置不生效，可添加背景音乐。")}</p>}
-            {marketingReferenceError(draft) && <p className="mv-error" role="alert">{t(marketingReferenceError(draft))}</p>}
+            {draft.assets.video && <p className="mv-hint" role="status">{referenceVideoStatus}</p>}
+            {marketingReferenceError(draft, profile) && <p className="mv-error" role="alert">{t(marketingReferenceError(draft, profile))}</p>}
           </section>
           {textField("background", "背景/场景补充描述", 600)}
         </>}
-        {step === 2 && <>{draft.assets.video ? <p className="mv-hint" role="status">{t("已选择参考视频：人物与场景图片合计最多 3 张；不生成口播配音，音色设置不生效，可添加背景音乐。")}</p> : <><label className="mv-label">{t("旁白风格")}</label>{choices("旁白风格", ["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value })), draft.voice, value => field("voice", value))}<button className="mv-soft" disabled={busy || frozen || !ready} onClick={() => setTwinOpen("voice")}>{t("选择数字分身音色")}</button>{asset("voice", "上传音色样例（选填，2–15 秒）", "audio/mpeg,audio/wav")}<p className="mv-hint">{t("音色样例选填，可使用数字分身中的声音或自行上传；留空时按所选旁白风格使用模型原生配音，发布前请试听成片。")}</p></>}{asset("music", "选择背景音乐（选填）", "audio/mpeg,audio/wav,audio/mp4")}{draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
+        {step === 2 && <>{draft.assets.video ? <p className="mv-hint" role="status">{referenceVideoStatus}</p> : <><label className="mv-label">{t("旁白风格")}</label>{choices("旁白风格", ["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value })), draft.voice, value => field("voice", value))}<button className="mv-soft" disabled={busy || frozen || !ready} onClick={() => setTwinOpen("voice")}>{t("选择数字分身音色")}</button>{asset("voice", "上传音色样例（选填，2–15 秒）", "audio/mpeg,audio/wav")}<p className="mv-hint">{t("音色样例选填，可使用数字分身中的声音或自行上传；留空时按所选旁白风格使用模型原生配音，发布前请试听成片。")}</p></>}{asset("music", "选择背景音乐（选填）", "audio/mpeg,audio/wav,audio/mp4")}{draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
           <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label><p className="mv-hint">{t("字幕由视频模型根据提示词生成，发布前请检查文字与音画是否一致。")}</p>
           <label className="mv-label">{t("画面比例")}</label>{choices("画面比例", ["9:16", "16:9", "1:1"].map(value => ({ value, label: value })), draft.ratio, value => field("ratio", value as MarketingDraft["ratio"]))}
           {choices("视频质量", [{ value: "720p", label: "默认" }, { value: "1080p", label: "高清" }], draft.quality, value => field("quality", value as MarketingDraft["quality"]))}
+          {profile.referenceMaxQuality && <p className="mv-hint">{t("使用人物、场景图片或参考视频时最高支持 720p。")}</p>}
           {!draft.storyboard.length && !!parts.length && <details className="mv-script-review"><summary>{t("查看自动分段（{0} 段）", [parts.length])}</summary>{parts.map(p => <p key={p.index}>{p.index + 1} · {p.durationSec}s<br />{p.script}</p>)}</details>}
           <p className="mv-hint">{t("目标 {0} 秒，分镜共 {1} 秒，分 {2} 段生成。", [draft.durationSec, parts.reduce((sum, part) => sum + part.durationSec, 0), parts.length])}</p>
           {!!draft.storyboard.length && <div ref={storyboardPanel} className="mv-storyboard-panel"><StoryboardEditor presenterRequired={draft.mode === "avatar"} shots={draft.storyboard} busy={busy} onChange={storyboard => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) })} onAi={(instruction, index) => void act(() => editStoryboard(instruction, index))} /></div>}

@@ -614,17 +614,44 @@ describe.each(["miniprogram", "marketing_video"])("%s video duplicate protection
 });
 
 
-it.each([undefined, "doubao-seedance-2-5"])("fixes marketing video generation and pricing to Kling regardless of requested model %s", async (model) => {
+it.each([undefined, "doubao-seedance-2-5"])("fixes marketing video generation and pricing to Grok regardless of requested model %s", async (model) => {
   const service = fakeService();
   service.db.getConversation.mockResolvedValue({ id: "c1", user_id: "u1", agent_id: "marketing_video" });
   const res = await app(service).request("/conversations/c1/generations", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: "店铺介绍", mediaType: "video", model, settings: { quality: "4k", durationSec: 5 } }),
+    body: JSON.stringify({ prompt: "店铺介绍", mediaType: "video", model, settings: { quality: "1080p", durationSec: 5 } }),
   });
   expect(res.status).toBe(202);
-  expect(service.modelRegistry.getConfig).toHaveBeenCalledWith("kling-video-v3-omni");
-  expect(service.jobQueue.enqueue).toHaveBeenCalledWith("video.generate", expect.objectContaining({ modelId: "kling-video-v3-omni", quality: "4k" }), "u1");
-  expect(service.messages.find((message: { role: string }) => message.role === "assistant").model).toBe("kling-video-v3-omni");
+  expect(service.modelRegistry.getConfig).toHaveBeenCalledWith("grok-imagine-video-1.5");
+  expect(service.jobQueue.enqueue).toHaveBeenCalledWith("video.generate", expect.objectContaining({ modelId: "grok-imagine-video-1.5", quality: "1080p" }), "u1");
+  expect(service.messages.find((message: { role: string }) => message.role === "assistant").model).toBe("grok-imagine-video-1.5");
+});
+
+it.each([
+  [{ settings: { quality: "1080p" }, input_reference: ["https://cdn.example.com/a.png"] }, "720p"],
+  [{ settings: { size: "1920x1080" }, reference_video: "https://cdn.example.com/a.mp4" }, "720p"],
+  [{ settings: { quality: "720p" }, reference_video: "https://cdn.example.com/a.mp4", reference_audio: ["https://cdn.example.com/a.wav"] }, "参考视频"],
+  [{ settings: { quality: "720p" }, reference_video: "https://cdn.example.com/a.mp4", first_frame: "https://cdn.example.com/f.png" }, "参考视频"],
+  [{ settings: { quality: "720p" }, reference_video: ["https://cdn.example.com/a.mp4", "https://cdn.example.com/b.mp4"] }, "1 段"],
+  [{ settings: { quality: "720p", durationSec: 10 }, reference_video: "https://cdn.example.com/a.mp4" }, "8 秒"],
+])("rejects Grok reference combinations before billing %#", async (extra, message) => {
+  const service = fakeService();
+  const res = await app(service).request("/conversations/c1/generations", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: "店铺介绍", mediaType: "video", model: "grok-imagine-video-1.5", ...extra }),
+  });
+  expect(res.status).toBe(400);
+  expect((await res.json() as { error: string }).error).toContain(message);
+  expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+});
+
+it("allows Grok 1080p with only a first frame", async () => {
+  const service = fakeService();
+  const res = await app(service).request("/conversations/c1/generations", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: "店铺介绍", mediaType: "video", model: "grok-imagine-video-1.5", settings: { quality: "1080p" }, first_frame: "https://cdn.example.com/f.png" }),
+  });
+  expect(res.status).toBe(202);
 });
 
 

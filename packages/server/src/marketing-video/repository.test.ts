@@ -14,7 +14,7 @@ describe("persisting confirmed marketing shots", () => {
     const query = vi.fn(async (sql: string, _params?: unknown[]) => ({ rows: sql.startsWith("SELECT * FROM marketing_video_projects") ? [row] : [], rowCount: 1 }));
     const client = { query, release: vi.fn() };
     const store = new PgMarketingProjectStore({ connect: async () => client } as unknown as pg.Pool);
-    await store.reserve("owner", "project", 2, { modelId: "fixture" }, false);
+    await store.reserve("owner", "project", 2, { modelId: "grok-imagine-video-1.5" }, false);
     const parent = query.mock.calls.find(([sql]) => sql.includes("'marketing.video'"))!;
     expect(JSON.parse(parent[1]![1] as string).draft.storyboard).toEqual(storyboard);
     const segments = query.mock.calls.filter(([sql]) => sql.startsWith("INSERT INTO marketing_video_segments"));

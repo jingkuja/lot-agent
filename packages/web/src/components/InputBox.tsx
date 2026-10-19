@@ -1,6 +1,6 @@
 import { useI18n } from "../i18n/index.js";
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
-import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
+import { ImageSettingsPicker, VIDEO_DURATIONS, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
 import { DEFAULT_IMAGE_QUALITY, DEFAULT_IMAGE_SIZE, imageSizeError } from "../lib/image-settings.js";
 import { ModelPicker } from "./ModelPicker.js";
 import {
@@ -10,12 +10,14 @@ import {
   missingSeedanceMentions,
   seedanceAssetMention,
   visibleImageModels,
+  visibleVideoModels,
+  isGrokVideoModel,
   type CatalogModel,
 } from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
-import { MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, MAX_KLING_REFERENCE_VIDEOS, checkKlingReferenceImage, klingReferenceImagesIssue, klingReferenceVideosIssue, validateReferenceMedia, readMediaDuration } from "../lib/video-references.js";
+import { MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, MAX_KLING_REFERENCE_VIDEOS, MAX_GROK_REFERENCE_VIDEOS, GROK_REFERENCE_VIDEO_MAX_SECONDS, durationsUpTo, grokReferencesIssue, checkKlingReferenceImage, klingReferenceImagesIssue, klingReferenceVideosIssue, validateReferenceMedia, readMediaDuration } from "../lib/video-references.js";
 import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.js";
@@ -106,7 +108,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const promptValue = value !== undefined ? value : internalValue;
   const setPromptValue = onChange ?? setInternalValue;
   const pickerModels = useMemo(
-    () => (mode === "image" ? visibleImageModels(models) : models),
+    () => (mode === "image" ? visibleImageModels(models) : mode === "video" ? visibleVideoModels(models) : models),
     [mode, models]
   );
   const noModels = !!onModelChange && pickerModels.length === 0;
@@ -130,8 +132,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const seedanceVideo = videoMode && isSeedanceModel(effectiveVideoModel);
   const seedance25Video = videoMode && isSeedance25Model(effectiveVideoModel);
   const klingVideo = videoMode && isKlingModel(effectiveVideoModel);
-  const maxReferenceVideos = klingVideo ? MAX_KLING_REFERENCE_VIDEOS : MAX_VIDEO_REFERENCE_VIDEOS;
+  const grokVideo = videoMode && isGrokVideoModel(effectiveVideoModel);
+  const maxReferenceVideos = klingVideo ? MAX_KLING_REFERENCE_VIDEOS : grokVideo ? MAX_GROK_REFERENCE_VIDEOS : MAX_VIDEO_REFERENCE_VIDEOS;
   const lockAdaptive = seedanceVideo && referenceVideoFiles.length > 0;
+  const grokReferenceVideo = grokVideo && referenceVideoFiles.length > 0;
+  const pickerDurations = useMemo(
+    () => grokReferenceVideo ? durationsUpTo(videoDurations ?? VIDEO_DURATIONS, GROK_REFERENCE_VIDEO_MAX_SECONDS) : videoDurations,
+    [grokReferenceVideo, videoDurations]
+  );
   const missingMentions = seedance25Video
     ? missingSeedanceMentions(promptValue, {
         images: files.length,
@@ -242,6 +250,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       // Duration reads cached each file's metadata, so this adds no extra I/O.
       const klingIssue = kind === "video" && klingVideo ? klingReferenceVideosIssue(next) : undefined;
       if (klingIssue) throw new Error(klingIssue);
+      if (kind === "video" && grokVideo && next.length > MAX_GROK_REFERENCE_VIDEOS) throw new Error("旗舰模型最多添加 1 段参考视频");
       if (kind === "video") setReferenceVideoFiles(next);
       else setReferenceAudioFiles(next);
     } catch (error) {
@@ -250,7 +259,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       checkingMediaRef.current = false;
       setCheckingMedia(false);
     }
-  }, [referenceVideoFiles, referenceAudioFiles, klingVideo]);
+  }, [referenceVideoFiles, referenceAudioFiles, klingVideo, grokVideo]);
 
   /** Kling rejects invalid images before they join the composer; other models add them unchanged. */
   const addVideoImages = useCallback(async (picked: File[], add: (accepted: File[]) => void) => {
@@ -393,6 +402,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         const klingIssue = klingReferenceImagesIssue(images) ?? klingReferenceVideosIssue(referenceVideoFiles);
         if (klingIssue) throw new Error(klingIssue);
       }
+      if (grokVideo) {
+        const grokIssue = grokReferencesIssue({
+          images: files.length,
+          videos: referenceVideoFiles.length,
+          audios: referenceAudioFiles.length,
+          frames: Number(!!firstFrameFile) + Number(!!lastFrameFile),
+          durationSec: (settingsRef.current as VideoSettings | undefined)?.durationSec,
+        });
+        if (grokIssue) throw new Error(grokIssue);
+      }
       return [
         ...files.map((f) => ({ file: f, slot: "video_reference_image" as const })),
         ...referenceVideoFiles.map((f) => ({ file: f, slot: "video_reference_video" as const })),
@@ -415,7 +434,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       ];
     }
     return files.map((f) => ({ file: f }));
-  }, [files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, videoMode, klingVideo, pptMode, contractMode]);
+  }, [files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, videoMode, klingVideo, grokVideo, pptMode, contractMode]);
 
   useImperativeHandle(ref, () => ({
     getFiles: collectPickedFiles,
@@ -784,6 +803,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES}
                 title={klingVideo
                   ? t("最多9张，JPG/PNG，50MB 以内，宽高不小于 300px，宽高比 1:2.5–2.5:1")
+                  : grokVideo ? t("最多9张；使用参考图时最高 720p")
                   : seedance25Video ? t("最多9张；提示词须按上传顺序写出 @Image1、@Image2…") : t("最多9张")}
               >
                 {t("🖼️ 参考图")}</button>
@@ -794,6 +814,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 disabled={disabled || checkingMedia || referenceVideoFiles.length >= maxReferenceVideos}
                 title={klingVideo
                   ? t("最多1段，MP4/MOV，200MB 以内，3–15.5 秒，宽高 700–4553px，宽高比 0.4–2")
+                  : grokVideo ? t("最多1段；使用参考视频时不使用参考图、首尾帧和参考音频，最高 720p，单次最长 8 秒")
                   : seedance25Video ? t("最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Video1、@Video2…") : t("最多3段，总时长不超过15秒")}
               >
                 {t("🎞️ 参考视频")}</button>
@@ -963,8 +984,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               disabled={disabled}
               lockAdaptive={lockAdaptive}
               hasReferenceAudio={referenceAudioFiles.length > 0}
+              hasReferenceMedia={files.length > 0 || referenceVideoFiles.length > 0}
               selectedModel={effectiveVideoModel}
-              durations={videoDurations}
+              durations={pickerDurations}
               onChange={handleSettingsChange}
             />
           )}

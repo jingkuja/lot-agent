@@ -1,4 +1,5 @@
-import { marketingAssetIds, marketingMaxDuration, type MarketingDraft, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { activeMarketingVideoProfile } from "./model.js";
+import { marketingAssetIds, marketingMaxDuration, marketingShotMaxSeconds, type MarketingDraft, type MarketingVideoProfile, type MarketingSegment } from "@lot-agent/core/marketing-video";
 
 /** The prompt and provider payload must use the same order, including legacy single images. */
 export function marketingImageReferences(draft: MarketingDraft) {
@@ -27,8 +28,9 @@ export function marketingPromptInput(value: unknown): string {
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
 }
 
-export function marketingTimingRequirement(draft: MarketingDraft): string {
-  return `The target duration is ${draft.durationSec} seconds. The sum must be between ${draft.durationSec} and ${marketingMaxDuration(draft.durationSec)} seconds, never over 65. Hit the target when practical; up to 5 extra seconds are optional for natural pacing, not required. Choose ${Math.ceil(draft.durationSec / 15)}–${Math.min(15, Math.floor(marketingMaxDuration(draft.durationSec) / 4))} shots. Allocate each shot an integer durationSec of 4–15 seconds to fit its content.`;
+export function marketingTimingRequirement(draft: MarketingDraft, profile: MarketingVideoProfile = activeMarketingVideoProfile()): string {
+  const maxShot = marketingShotMaxSeconds(draft, profile);
+  return `The target duration is ${draft.durationSec} seconds. The sum must be between ${draft.durationSec} and ${marketingMaxDuration(draft.durationSec)} seconds, never over 65. Hit the target when practical; up to 5 extra seconds are optional for natural pacing, not required. Choose ${Math.ceil(draft.durationSec / maxShot)}–${Math.min(15, Math.floor(marketingMaxDuration(draft.durationSec) / 4))} shots. Allocate each shot an integer durationSec of 4–${maxShot} seconds to fit its content.`;
 }
 
 export const MARKETING_STORYBOARD_RULES = [
@@ -47,11 +49,8 @@ export function marketingPresenterRequirement(draft: MarketingDraft, generateAud
   return `Mandatory character requirement: the presenter must be visibly on camera in EVERY shot, with a recognizable face and upper body, ${generateAudio ? "speaking or demonstrating the product" : "silently demonstrating the product without speech or lip-sync"}. ${draft.assets.portrait ? "The presenter must match the supplied portrait identity; never substitute another person." : "Create one consistent presenter across all shots."} Include the presenter explicitly in each shot's visual and action. Product details may share the frame with the presenter; never use product-only, scenery-only, hands-only shots or off-screen narration. This requirement takes precedence over conflicting shot directions.`;
 }
 
-// TokenHub V3 Omni: recommended <=2500, hard limit 3072 characters.
-// https://cloud.tencent.com/document/product/1823/135742
-export const MARKETING_VIDEO_PROMPT_MAX_CHARS = 3072;
-
-export function marketingSegmentPrompt(draft: MarketingDraft, segment: MarketingSegment, count: number, generateAudio = !draft.assets.video): string {
+/** Builds one clip request; the profile's prompt cap bounds every paid request. */
+export function marketingSegmentPrompt(draft: MarketingDraft, segment: MarketingSegment, count: number, generateAudio = !draft.assets.video, profile: MarketingVideoProfile = activeMarketingVideoProfile()): string {
   const shot = draft.storyboard?.[segment.index];
   const images = marketingImageReferences(draft);
   const imageInstructions = images.map(({ imageNumber, role }) => `Use image ${imageNumber} for ${role === "portrait" ? "the presenter's identity only" : role === "background" ? "the setting and spatial layout" : "relevant scene composition, objects and details"}.`);
@@ -78,6 +77,6 @@ export function marketingSegmentPrompt(draft: MarketingDraft, segment: Marketing
     `confirmedShot: ${marketingPromptInput({ script: segment.script, visual: shot?.visual ?? "", action: shot?.action ?? "", camera: shot?.camera ?? "", backgroundDescription: draft.background, ...(generateAudio ? { voiceStyle: draft.voice } : {}) })}`,
   ].filter(Boolean).join("\n");
   // Never truncate approved copy or shot directions to fit a paid request.
-  if (prompt.length > MARKETING_VIDEO_PROMPT_MAX_CHARS) throw new Error("生成提示词过长，请精简分镜画面、动作、镜头或背景描述。");
+  if (prompt.length > profile.promptMaxChars) throw new Error("生成提示词过长，请精简分镜画面、动作、镜头或背景描述。");
   return prompt;
 }

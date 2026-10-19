@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { klingReferenceImageIssue, klingReferenceVideoIssue, validateReferenceMedia } from "./video-references.js";
+import { durationsUpTo, grokReferencesIssue, klingReferenceImageIssue, klingReferenceVideoIssue, validateReferenceMedia } from "./video-references.js";
 
 describe("video reference uploads", () => {
   const read = async (value: number) => value;
@@ -54,5 +54,25 @@ describe("Kling reference image limits", () => {
     expect(klingReferenceImageIssue(png, { width: 751, height: 300 })).toContain("1:2.5–2.5:1");
     expect(klingReferenceImageIssue(png, { width: 300, height: 751 })).toContain("1:2.5–2.5:1");
     expect(klingReferenceImageIssue(png, { width: 0, height: 0 })).toContain("无法读取");
+  });
+});
+
+describe("Grok reference rules", () => {
+  it("rejects references that a Grok reference video would ignore", () => {
+    const none = { images: 0, videos: 0, audios: 0, frames: 0 };
+    expect(grokReferencesIssue({ ...none, images: 9, audios: 3, frames: 2 })).toBeUndefined();
+    expect(grokReferencesIssue({ ...none, videos: 1 })).toBeUndefined();
+    expect(grokReferencesIssue({ ...none, videos: 2 })).toContain("1 段");
+    for (const extra of [{ images: 1 }, { audios: 1 }, { frames: 1 }]) {
+      expect(grokReferencesIssue({ ...none, videos: 1, ...extra })).toContain("不会使用");
+    }
+  });
+});
+
+describe("Grok reference video duration", () => {
+  it("keeps only choices up to 8 seconds and rejects longer requests", () => {
+    expect(durationsUpTo(["4秒", "8秒", "9秒", "15秒"], 8)).toEqual(["4秒", "8秒"]);
+    expect(grokReferencesIssue({ images: 0, videos: 1, audios: 0, frames: 0, durationSec: 8 })).toBeUndefined();
+    expect(grokReferencesIssue({ images: 0, videos: 1, audios: 0, frames: 0, durationSec: 9 })).toContain("8 秒");
   });
 });

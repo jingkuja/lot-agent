@@ -322,6 +322,7 @@ export function VideoSettingsPicker({
   disabled,
   lockAdaptive,
   hasReferenceAudio = false,
+  hasReferenceMedia = false,
   selectedModel,
   onChange,
   durations = VIDEO_DURATIONS,
@@ -331,7 +332,9 @@ export function VideoSettingsPicker({
   lockAdaptive?: boolean;
   /** 有参考音频时供应商必须生成声音，页面不可改。 */
   hasReferenceAudio?: boolean;
-  /** 当前视频模型；Kling / MiniMax H3 / H3 Max 使用各自的分辨率档位。 */
+  /** 有参考图或参考视频；Grok 此时最高 720p。 */
+  hasReferenceMedia?: boolean;
+  /** 当前视频模型；Kling / MiniMax H3 / H3 Max / Grok 使用各自的分辨率档位。 */
   selectedModel?: string | null;
   onChange?: (s: VideoSettings) => void;
   /** 时长选项，默认 4～15秒；获客宝使用 10秒 / 15秒。 */
@@ -342,7 +345,7 @@ export function VideoSettingsPicker({
   const wrapRef = useDismiss(open, () => setOpen(false));
   const durationOptions = durations.length ? durations : VIDEO_DURATIONS;
   const defaultDuration = durationOptions[0];
-  const qualityOptions = videoQualitiesForModel(selectedModel);
+  const qualityOptions = videoQualitiesForModel(selectedModel, hasReferenceMedia);
   const [quality, setQuality] = useState<Quality>(() => {
     const next = pickVideoQuality(qualityOptions, lastVideo.quality);
     lastVideo.quality = next.short;
@@ -360,7 +363,10 @@ export function VideoSettingsPicker({
 
   useEffect(() => {
     if (durationOptions.includes(duration)) return;
-    setDuration(defaultDuration);
+    // Keep the longest choice that still fits, e.g. 15秒 → 8秒 when a reference video caps it.
+    const seconds = Number(duration.replace(/[^0-9]/g, ""));
+    const fitting = durationOptions.filter((option) => Number(option.replace(/[^0-9]/g, "")) <= seconds);
+    setDuration(fitting.at(-1) ?? defaultDuration);
   }, [duration, durationOptions, defaultDuration]);
 
   useEffect(() => {

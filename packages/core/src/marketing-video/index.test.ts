@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText } from "./index.js";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText } from "./index.js";
+
+const grok = GROK_MARKETING_PROFILE;
+const kling = KLING_MARKETING_PROFILE;
 
 describe("marketing segment plan", () => {
   it.each([15, 17, 29, 30, 45, 59, 60])("preserves narration and respects the 15s cap for %ds", (duration) => {
@@ -30,34 +33,34 @@ describe("editable marketing storyboard", () => {
   ];
   it("preserves manual boundaries and invalidates review after visual edits", () => {
     const draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots) });
-    expect(resolveMarketingSegments(draft).map(part => part.script)).toEqual(shots.map(shot => shot.script));
+    expect(resolveMarketingSegments(draft, grok).map(part => part.script)).toEqual(shots.map(shot => shot.script));
     const edited = MarketingDraftSchema.parse({ ...draft, storyboard: shots.map((shot, i) => i ? shot : { ...shot, visual: "加入限时折扣招牌" }) });
     expect(marketingReviewText(edited)).not.toBe(marketingReviewText(draft));
   });
   it("rejects stale, incomplete and overlong boards without preventing partial draft saves", () => {
     const draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots) });
-    expect(() => resolveMarketingSegments({ ...draft, durationSec: 60 })).toThrow("分镜总时长");
-    expect(() => resolveMarketingSegments({ ...draft, script: "其他文案" })).toThrow("不一致");
+    expect(() => resolveMarketingSegments({ ...draft, durationSec: 60 }, grok)).toThrow("分镜总时长");
+    expect(() => resolveMarketingSegments({ ...draft, script: "其他文案" }, grok)).toThrow("不一致");
     const partial = { ...draft, storyboard: shots.map(shot => ({ ...shot, camera: "" })) };
     expect(MarketingDraftSchema.safeParse(partial).success).toBe(true);
-    expect(() => resolveMarketingSegments(MarketingDraftSchema.parse(partial))).toThrow("补全");
+    expect(() => resolveMarketingSegments(MarketingDraftSchema.parse(partial), grok)).toThrow("补全");
     const long = shots.map(shot => ({ ...shot, script: "字".repeat(100) }));
-    expect(() => resolveMarketingSegments(MarketingDraftSchema.parse({ ...draft, storyboard: long, script: storyboardScript(long) }))).toThrow("过长");
+    expect(() => resolveMarketingSegments(MarketingDraftSchema.parse({ ...draft, storyboard: long, script: storyboardScript(long) }), grok)).toThrow("过长");
   });
   it("keeps old drafts readable but invalidates incomplete legacy review keys", () => {
     const draft = MarketingDraftSchema.parse({ script: "欢迎来到咖啡店，来这里喝一杯咖啡。" });
     expect(draft.storyboard).toEqual([]);
     expect(marketingReviewText(draft)).not.toBe([draft.script, draft.publishTitle, draft.tags].join("\n"));
     expect(marketingReviewText({ script: draft.script } as typeof draft)).toBe(marketingReviewText(draft));
-    expect(resolveMarketingSegments(draft)).toEqual(planMarketingSegments(draft.script, 30));
+    expect(resolveMarketingSegments(draft, grok)).toEqual(planMarketingSegments(draft.script, 30));
   });
   it("keeps valid AI pacing and checks narration against each shot's duration", () => {
     const storyboard = shots.map((shot, i) => ({ ...shot, durationSec: i ? 11 : 6 }));
     const draft = MarketingDraftSchema.parse({ durationSec: 17, storyboard, script: storyboardScript(storyboard) });
-    expect(resolveMarketingSegments(draft).map(p => p.durationSec)).toEqual([6, 11]);
+    expect(resolveMarketingSegments(draft, grok).map(p => p.durationSec)).toEqual([6, 11]);
     expect(timeMarketingStoryboard(draft.storyboard, 17)).toEqual(storyboard);
     const long = { ...storyboard[0], durationSec: 4, script: "字".repeat(19) };
-    expect(() => resolveMarketingSegments({ ...draft, durationSec: 15, storyboard: [long, storyboard[1]], script: storyboardScript([long, storyboard[1]]) })).toThrow("过长");
+    expect(() => resolveMarketingSegments({ ...draft, durationSec: 15, storyboard: [long, storyboard[1]], script: storyboardScript([long, storyboard[1]]) }, grok)).toThrow("过长");
     const legacy = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots) });
     expect(legacy.storyboard.map(s => s.durationSec)).toEqual([15, 15]);
   });
@@ -68,11 +71,11 @@ describe("editable marketing storyboard", () => {
         const storyboard = Array.from({ length: count }, (_, i) => ({ ...shots[i % 2], durationSec: Math.floor(actual / count) + (i < actual % count ? 1 : 0) }));
         const draft = MarketingDraftSchema.parse({ durationSec: target, storyboard, script: storyboardScript(storyboard) });
         expect(timeMarketingStoryboard(storyboard, target)).toEqual(storyboard);
-        expect(resolveMarketingSegments(draft).reduce((sum, s) => sum + s.durationSec, 0)).toBe(actual);
+        expect(resolveMarketingSegments(draft, grok).reduce((sum, s) => sum + s.durationSec, 0)).toBe(actual);
       }
       for (const actual of [target - 1, target + 6]) {
         const storyboard = Array.from({ length: count }, (_, i) => ({ ...shots[i % 2], durationSec: Math.floor(actual / count) + (i < actual % count ? 1 : 0) }));
-        expect(() => resolveMarketingSegments(MarketingDraftSchema.parse({ durationSec: target, storyboard, script: storyboardScript(storyboard) }))).toThrow("分镜总时长");
+        expect(() => resolveMarketingSegments(MarketingDraftSchema.parse({ durationSec: target, storyboard, script: storyboardScript(storyboard) }), grok)).toThrow("分镜总时长");
       }
     }
     // Extra narration can use the tolerance without demanding a longer target.
@@ -108,11 +111,21 @@ it("shares the three-image allowance across background and scene", () => {
   expect(MarketingDraftSchema.safeParse({ assets: { background: [id, id], scene: [id, id] } }).success).toBe(false);
 });
 
-it("allows draft editing but blocks video generation with more than three images", () => {
+it("applies Kling's three-image reference video rule", () => {
   const id = "11111111-1111-4111-8111-111111111111";
-  expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: [id, id], scene: id } }))).toBe("");
-  expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: [id, id], scene: [id, id] } }))).toContain("不能超过 3 张");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: [id, id], scene: id } }), kling)).toBe("");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: [id, id], scene: [id, id] } }), kling)).toContain("不能超过 3 张");
   expect(MarketingDraftSchema.safeParse({ assets: { video: [id, id] } }).success).toBe(false);
+});
+
+it("uses a Grok reference video alone and caps references at 720p", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  expect(DEFAULT_MARKETING_VIDEO_MODEL).toBe("grok-imagine-video-1.5");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id } }), grok)).toBe("");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: id } }), grok)).toContain("不会参与生成");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { scene: id } }), grok)).toContain("720p");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { video: id } }), grok)).toContain("720p");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { cover: id, voice: id } }), grok)).toBe("");
 });
 
 describe("located marketing review edits", () => {
@@ -158,4 +171,35 @@ describe("located marketing review edits", () => {
       expect(marketingReviewText({ ...draft, storyboard: draft.storyboard.map((shot, i) => i ? shot : { ...shot, [field]: shot[field] + "新内容" }) })).not.toBe(key);
     expect(marketingReviewText({ ...draft, publishTitle: "a\nb", tags: "c" })).not.toBe(marketingReviewText({ ...draft, publishTitle: "a", tags: "b\nc" }));
   });
+});
+
+it("limits Grok reference video shots to 8 seconds", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const video = MarketingDraftSchema.parse({ assets: { video: id } });
+  expect(marketingShotMaxSeconds(video, grok)).toBe(8);
+  expect(marketingShotMaxSeconds(video, kling)).toBe(15);
+  expect(marketingShotMaxSeconds(MarketingDraftSchema.parse({}), grok)).toBe(15);
+  const script = "欢迎来到我们的店铺，".repeat(12);
+  const parts = planMarketingSegments(script, 60, 8);
+  expect(parts.length).toBeGreaterThanOrEqual(8);
+  expect(parts.every(part => part.durationSec >= 4 && part.durationSec <= 8)).toBe(true);
+  const shots = [0, 1, 2, 3].map(() => ({ durationSec: 15, script: "欢迎到店。", visual: "店内", action: "展示", camera: "中景" }));
+  expect(() => resolveMarketingSegments({ ...video, durationSec: 60, script: storyboardScript(shots), storyboard: shots }, grok)).toThrow("每镜最长 8 秒");
+  expect(resolveMarketingSegments({ ...video, durationSec: 60, script: storyboardScript(shots), storyboard: shots }, kling)).toHaveLength(4);
+  expect(capMarketingStoryboard(shots, { ...video, durationSec: 30 }, grok).every(shot => shot.durationSec <= 8)).toBe(true);
+  expect(capMarketingStoryboard(shots, MarketingDraftSchema.parse({ durationSec: 60 }), grok)).toBe(shots);
+  expect(() => capMarketingStoryboard(shots.slice(0, 2), { ...video, durationSec: 30 }, grok)).toThrow("重新生成全部分镜");
+  const retimed = timeMarketingStoryboard(shots, 30, 8);
+  expect(retimed.every(shot => shot.durationSec <= 8)).toBe(true);
+  expect(retimed.reduce((sum, shot) => sum + shot.durationSec, 0)).toBe(30);
+  expect(resolveMarketingSegments({ ...video, durationSec: 30, script: storyboardScript(retimed), storyboard: retimed }, grok)).toHaveLength(4);
+  expect(() => timeMarketingStoryboard(shots.slice(0, 2), 30, 8)).toThrow("分镜数量");
+});
+
+it("resolves model profiles for new and frozen jobs", () => {
+  expect(marketingVideoProfile("kling-video-v3-omni")).toBe(kling);
+  expect(marketingVideoProfile("unknown")).toBeUndefined();
+  expect(marketingJobProfile({ modelId: "grok-imagine-video-1.5" })).toBe(grok);
+  expect(marketingJobProfile({})).toBe(kling);
+  expect(() => marketingJobProfile({ modelId: "retired-model" })).toThrow("不受支持");
 });

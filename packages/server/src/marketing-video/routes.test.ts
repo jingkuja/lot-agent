@@ -216,7 +216,7 @@ describe("marketing storyboard editing", () => {
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "调整节奏" })).status).toBe(200);
     expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ durationSec: 60, storyboard: shots }));
     Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
-    f.service.modelCatalog.pricing = { "kling-video-v3-omni": { inputPrice: 0, outputPrice: 0, unitPrice: 1 } };
+    f.service.modelCatalog.pricing = { "grok-imagine-video-1.5": { inputPrice: 0, outputPrice: 0, unitPrice: 1 } };
     expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
     expect(f.service.usageMeter.checkQuota).toHaveBeenCalledWith("owner", total);
     for (const timings of [[14, 13, 13, 13, 13], [14, 14, 14, 14, 14]]) {
@@ -251,7 +251,7 @@ describe("marketing storyboard editing", () => {
   });
   it("changes only the requested shot, preserving manual edits elsewhere", async () => {
     const f = fixture(); Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
-    f.project.draft.assets = { video: id, portrait: id, voice: id };
+    f.project.draft.assets = { portrait: id, voice: id };
     f.project.draft.ratio = "16:9";
     f.project.draft.subtitles = false;
     const revised = { ...shots[1], camera: "平移到产品近景" };
@@ -259,9 +259,17 @@ describe("marketing storyboard editing", () => {
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "改成平移", index: 1 })).status).toBe(200);
     expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: [shots[0], revised] }));
     const [system, input] = f.service.marketingText.mock.calls[0];
-    expect(JSON.parse(input)).toMatchObject({ shots, selectedIndex: 1, revisionRequest: "改成平移", ratio: "16:9", subtitles: false, generateAudio: false, materials: { portrait: 1, video: true, voice: true } });
+    expect(JSON.parse(input)).toMatchObject({ shots, selectedIndex: 1, revisionRequest: "改成平移", ratio: "16:9", subtitles: false, generateAudio: true, materials: { portrait: 1, video: false, voice: true } });
     expect(system).toContain("index 1 (shot 2), lasting exactly 15 seconds");
     expect(input).not.toContain(id);
+  });
+  it("asks for a full storyboard before a paid edit when a reference video cannot fit 8-second shots", async () => {
+    const f = fixture(); Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
+    f.project.draft.assets = { video: id };
+    const response = await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "改成平移", index: 1 });
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error: string }).error).toContain("8 秒");
+    expect(f.service.marketingText).not.toHaveBeenCalled();
   });
   it("rejects stale versions, submitted projects, invalid target and malformed AI output", async () => {
     const f = fixture();
@@ -366,15 +374,46 @@ it("rejects video with four images before billing or task creation", async () =>
 it("validates reference video metadata and sends it with audio disabled", async () => {
   const f = fixture();
   const videoId = randomUUID();
-  f.project.draft.assets = { video: videoId, portrait: id, voice: randomUUID() };
-  f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : args[0] === id ? "image/png" : "audio/wav", size_bytes: 100, url: `/static/${args[0]}` }));
-  const info = { format: "mov", video: true, audio: false, duration: 5, width: 1280, height: 720, fps: 30 };
-  vi.mocked(inspectMedia).mockResolvedValueOnce({ ...info, duration: 16 });
+  f.project.draft.assets = { video: videoId, voice: randomUUID() };
+  f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : "audio/wav", size_bytes: 100, url: `/static/${args[0]}` }));
+  // Kling's 3–15.5 s / 700 px limits no longer apply to Grok submissions.
+  const info = { format: "mov", video: true, audio: false, duration: 20, width: 640, height: 360, fps: 30 };
+  vi.mocked(inspectMedia).mockResolvedValueOnce({ ...info, video: false });
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
   expect(f.store.reserve).not.toHaveBeenCalled();
   vi.mocked(inspectMedia).mockResolvedValueOnce(info);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
-  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined }), false);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 3, modelId: "grok-imagine-video-1.5", reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined }), false);
+});
+
+it("submits new clips with the configured model profile", async () => {
+  process.env.MARKETING_VIDEO_MODEL = "kling-video-v3-omni";
+  try {
+    const f = fixture();
+    expect(await (await f.call("/capabilities", undefined, "GET")).json()).toMatchObject({ model: { modelId: "kling-video-v3-omni", imagesWithReferenceVideo: 3 } });
+    const videoId = randomUUID();
+    f.project.draft.assets = { video: videoId, portrait: id };
+    f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : "image/png", size_bytes: 100, url: `/static/${args[0]}` }));
+    // Kling keeps its documented reference video limits.
+    vi.mocked(inspectMedia).mockResolvedValueOnce({ format: "mov", video: true, audio: false, duration: 20, width: 1280, height: 720, fps: 30 });
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
+    vi.mocked(inspectMedia).mockResolvedValueOnce({ format: "mov", video: true, audio: false, duration: 5, width: 1280, height: 720, fps: 30 });
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+    expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ modelId: "kling-video-v3-omni", input_reference: [`/static/${id}`] }), false);
+  } finally { delete process.env.MARKETING_VIDEO_MODEL; }
+});
+
+it("rejects Grok reference video with images and 1080p references before billing", async () => {
+  const f = fixture();
+  f.project.draft.assets = { video: randomUUID(), portrait: id };
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
+  f.project.draft.assets = { portrait: id };
+  f.project.draft.quality = "1080p";
+  const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
+  expect(response.status).toBe(400);
+  expect((await response.json() as { error: string }).error).toContain("720p");
+  expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  expect(f.store.reserve).not.toHaveBeenCalled();
 });
 
 

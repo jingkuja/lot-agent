@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
-import { MarketingDraftSchema, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
+import { MarketingDraftSchema, marketingJobProfile, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 
 export class MarketingError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409 | 503 = 400) { super(message); }
@@ -79,7 +79,7 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       }
       if (!p.review || p.reviewed_script !== reviewText(p.draft) || p.review.verdict === "reject") throw new MarketingError("请先完成当前文案检查。");
       // Validate the complete duration plan before creating any video task.
-      const plan = resolveMarketingSegments(MarketingDraftSchema.parse(p.draft));
+      const plan = resolveMarketingSegments(MarketingDraftSchema.parse(p.draft), marketingJobProfile(input));
       const taskId = randomUUID();
       await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.video',$2,$3,$4)`, [taskId, JSON.stringify({ ...input, projectId: id, draft: p.draft,
         ...(p.reference_analysis_id ? { referenceAnalysis: { id: p.reference_analysis_id, acceptedRevision: p.reference_revision, evidenceIds: p.reference_evidence_ids } } : {}) }), owner, MARKETING_VIDEO_QUEUE]);

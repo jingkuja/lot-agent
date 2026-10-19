@@ -109,6 +109,7 @@ import { createCustomerAcquisitionTools } from "../digital-employee/tools/custom
 import { createOpportunityAdvisorTools } from "../digital-employee/tools/opportunity-advisor-tools.js";
 import { parseDigitalEmployeeFeatureScope } from "../digital-employee/feature-scope.js";
 import { DEFAULT_TOKENHUB_CONFIGURATION_URL } from "../digital-employee/acquisition-types.js";
+import { campaignVideoModels } from "../digital-employee/acquisition-service.js";
 
 /**
  * Builtin tools that touch the host filesystem / shell. On the deployed
@@ -660,7 +661,7 @@ export class AgentService {
           const llmModels = (llmResolution?.modelIds ?? [])
             .map((id) => ({ id, label: id }));
           const imageModels = (catalog?.image ?? []).map((model) => ({ id: model.id, label: model.id }));
-          const videoModels = (catalog?.video ?? []).map((model) => ({ id: model.id, label: model.id }));
+          const videoModels = campaignVideoModels(catalog?.video ?? []);
           return {
             llm: llmModels.length > 0,
             image: imageModels.length > 0,

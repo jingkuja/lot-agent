@@ -1,3 +1,5 @@
+import { grokVideoInputIssue, isGrokVideoModel } from "@lot-agent/core";
+
 /**
  * Per-media whitelist for client-supplied generation settings.
  *
@@ -116,6 +118,23 @@ export function pickVideoReferenceInputs(
     out[field] = value;
   }
   return out;
+}
+
+/** Grok model limits, checked on the whitelisted input including legacy `media` references. */
+export function grokVideoIssue(modelId: string | undefined, input: Record<string, unknown>): string | undefined {
+  if (!isGrokVideoModel(modelId)) return undefined;
+  const count = (value: unknown) => Array.isArray(value) ? value.length : typeof value === "string" && value.trim() ? 1 : 0;
+  const media = Array.isArray(input.media) ? input.media as { type?: unknown }[] : [];
+  const legacy = (type: string) => media.filter((item) => item?.type === type).length;
+  return grokVideoInputIssue({
+    images: count(input.input_reference) + legacy("reference_image"),
+    videos: count(input.reference_video) + legacy("reference_video"),
+    audios: count(input.reference_audio) + legacy("reference_audio"),
+    firstFrame: !!input.first_frame,
+    lastFrame: !!input.last_frame,
+    resolutions: [input.resolution, input.quality, input.size].map((value) => typeof value === "string" ? value : undefined),
+    durationSec: typeof input.durationSec === "number" ? input.durationSec : undefined,
+  });
 }
 
 /** Video quota/metering needs a positive second count. Seedance reference-video

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ProviderError } from "@lot-agent/core";
-import { marketingReferenceError, MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { PgMarketingProjectStore } from "./repository.js";
@@ -45,8 +45,11 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     // Persisted provider options govern recovery, including pre-v2 jobs that
     // allowed WebM plus native narration. Never infer audio from today's draft.
     const generateAudio = job.input.generate_audio !== false;
-    const referenceError = marketingReferenceError(draft);
-    if (job.input.marketingInputVersion === 2 && referenceError) throw new Error(referenceError);
+    const inputVersion = typeof job.input.marketingInputVersion === "number" ? job.input.marketingInputVersion : 1;
+    // The frozen model's rules apply; version 1 inputs predate reference checks.
+    const profile = marketingJobProfile(job.input);
+    const referenceError = inputVersion >= 2 ? marketingReferenceError(draft, profile) : "";
+    if (referenceError) throw new Error(referenceError);
     const segments = (await store.segments(job.userId, project.id)).map(segment => ({ ...segment, duration_sec: Number(segment.duration_sec) }));
     // Stop the entire mixed batch before any fresh paid intent if a sibling's
     // submission result is still unknown.
@@ -54,16 +57,16 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     // Persisted boundaries are authoritative, including legacy jobs without a
     // storyboard. Never re-plan an already submitted video during recovery.
     // Check the full paid duration before resolving providers or sending a clip.
-    if (!segments.length || segments.length > 15 || segments.some((s, i) => s.slot !== i || !Number.isInteger(s.duration_sec) || s.duration_sec < 4 || s.duration_sec > 15)
+    if (!segments.length || segments.length > 15 || segments.some((s, i) => s.slot !== i || !Number.isInteger(s.duration_sec) || s.duration_sec < 4 || s.duration_sec > marketingShotMaxSeconds(draft, profile))
       || !isMarketingDurationValid(draft.durationSec, segments.reduce((sum, s) => sum + s.duration_sec, 0))) throw new Error("视频分段配置不完整");
     if (draft.storyboard.length) {
-      const planned = resolveMarketingSegments(draft);
+      const planned = resolveMarketingSegments(draft, profile);
       if (planned.length !== segments.length || planned.some((p, i) => p.script !== segments[i].script || p.durationSec !== segments[i].duration_sec)) throw new Error("视频分段配置不完整");
     } else if (segments.map(s => s.script).join("").trim() !== draft.script.trim()) throw new Error("视频分段配置不完整");
     // Validate every remaining submission before any segment incurs a model or voice charge.
     // Completed/resumable vendor tasks keep using their original submitted prompts.
     const prompts = segments.map((segment, index) => segmentRecoveryAction(segment) === "submit"
-      ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio) : undefined);
+      ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile) : undefined);
     const progress: number[] = segments.map((s) => s.status === "succeeded" ? 100 : 0);
     const report = async () => deps.db.updateTaskProgress(job.id, Math.floor(progress.reduce((a, b) => a + b, 0) / segments.length * 0.85), `片段完成 ${progress.filter(p => p === 100).length}/${segments.length}`);
     const files: string[] = new Array(segments.length);

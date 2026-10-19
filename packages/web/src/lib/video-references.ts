@@ -68,6 +68,22 @@ export function cachedMediaMetadata(file: File): MediaMetadata | undefined {
 }
 
 export const MAX_KLING_REFERENCE_VIDEOS = 1;
+export const MAX_GROK_REFERENCE_VIDEOS = 1;
+/** Grok fails reference-video requests longer than 8 seconds. */
+export const GROK_REFERENCE_VIDEO_MAX_SECONDS = 8;
+
+/** Grok uses a reference video on its own; other references would be silently ignored. */
+export function grokReferencesIssue({ images, videos, audios, frames, durationSec }: { images: number; videos: number; audios: number; frames: number; durationSec?: number }): string | undefined {
+  if (videos > MAX_GROK_REFERENCE_VIDEOS) return "旗舰模型最多添加 1 段参考视频";
+  if (videos && (images || audios || frames)) return "旗舰模型使用参考视频时不会使用参考图、首尾帧和参考音频，请移除后再生成";
+  if (videos && durationSec != null && durationSec > GROK_REFERENCE_VIDEO_MAX_SECONDS) return "旗舰模型使用参考视频时单次最长 8 秒，请缩短视频时长";
+  return undefined;
+}
+
+/** Duration choices such as `8秒` that still fit a model's maximum. */
+export function durationsUpTo(options: readonly string[], maxSeconds: number): string[] {
+  return options.filter((option) => Number(option.replace(/[^0-9]/g, "")) <= maxSeconds);
+}
 const KLING_MAX_BYTES = 200 * 1024 * 1024;
 const KLING_MAX_PIXELS = 8_294_400;
 

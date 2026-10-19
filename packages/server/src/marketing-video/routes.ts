@@ -5,7 +5,7 @@ import { invalidTextResult, parseTextResult } from "./text-result.js";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { estimateCost } from "@lot-agent/core";
-import { isMarketingDurationValid, marketingReferenceError, marketingAssetIds, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { isMarketingDurationValid, MARKETING_INPUT_VERSION, marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
@@ -21,11 +21,13 @@ import { ownedAnalysisUpload } from "../marketing-analysis/uploads.js";
 import { AnalysisError } from "../marketing-analysis/errors.js";
 import { signPrivateMaterial } from "../generation/private-materials.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
+import { activeMarketingVideoProfile } from "./model.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-const MODEL = "kling-video-v3-omni";
 
 export function createMarketingVideoRoutes(service: AgentService, dataRoot: string, store = new PgMarketingProjectStore(service.db.pool), operations = new PgMarketingTextOperations(service.db.pool)) {
+  // New clips use the configured model; recovery uses each job's recorded model.
+  const activeProfile = activeMarketingVideoProfile();
   const app = new Hono<{ Variables: { userId: string } }>();
   app.use("*", bodyLimit({ maxSize: 128 * 1024, onError: (c) => c.json({ error: "请求正文过大" }, 413) }));
   app.use("*", async (c, next) => {
@@ -81,7 +83,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (operation.result) return operation.result;
     throw new MarketingError(operation.status === "failed" ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请先查看保存的创作记录。", 409);
   };
-  app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), recordedLipSync: false, douyinPublish: false, knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1" }));
+  app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), recordedLipSync: false, douyinPublish: false, knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", model: activeProfile }));
   app.get("/", async (c) => c.json({ data: await store.list(c.get("userId")) }));
   app.post("/copy", async (c) => {
     const body = await c.req.json().catch(() => null);
@@ -163,7 +165,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     try {
       if (body.index !== undefined && body.index >= p.draft.storyboard.length) throw new MarketingError("分镜修改参数无效。");
       let initial;
-      try { initial = p.draft.storyboard.length ? p.draft.storyboard : planMarketingSegments(p.draft.script, p.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: "", action: "", camera: "" })); }
+      try { initial = p.draft.storyboard.length ? capMarketingStoryboard(p.draft.storyboard, p.draft, activeProfile) : planMarketingSegments(p.draft.script, p.draft.durationSec, marketingShotMaxSeconds(p.draft, activeProfile)).map(part => ({ durationSec: part.durationSec, script: part.script, visual: "", action: "", camera: "" })); }
       catch (error) { throw new MarketingError((error as Error).message); }
       const prompt = storyboardPrompt(p.draft, body.locale, initial, body.instruction, body.index);
       started = true;
@@ -210,6 +212,9 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (p.taskId && !await (service.jobQueue as BullmqJobQueue).canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
     let draft = p.draft;
     let originalAudio: boolean | undefined;
+    // Recovery keeps the frozen job's model and reference rules.
+    let inputVersion = MARKETING_INPUT_VERSION;
+    let profile = activeProfile;
     const segments = p.taskId ? await store.segments(owner, p.id) : [];
     if (p.taskId) {
       const original = await service.db.getTask(p.taskId);
@@ -218,7 +223,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
         || !["failed", "cancelled"].includes(original.status) || !segments.length) throw new MarketingError("原任务不可恢复。", 409);
       draft = MarketingDraftSchema.parse(frozen.draft);
       originalAudio = frozen.generate_audio !== false;
-      if (segments.length > 15 || segments.some((s, i) => s.slot !== i || !Number.isInteger(Number(s.duration_sec)) || Number(s.duration_sec) < 4 || Number(s.duration_sec) > 15)
+      inputVersion = typeof frozen.marketingInputVersion === "number" ? frozen.marketingInputVersion : 1;
+      try { profile = marketingJobProfile(frozen); }
+      catch (error) { throw new MarketingError((error as Error).message, 409); }
+      if (segments.length > 15 || segments.some((s, i) => s.slot !== i || !Number.isInteger(Number(s.duration_sec)) || Number(s.duration_sec) < 4 || Number(s.duration_sec) > marketingShotMaxSeconds(draft, profile))
         || !isMarketingDurationValid(draft.durationSec, segments.reduce((sum, s) => sum + Number(s.duration_sec), 0))) throw new MarketingError("视频分段配置不完整", 409);
       if (segments.some(s => segmentRecoveryAction(s) === "unknown")) throw new MarketingError(UNKNOWN_SUBMISSION_MESSAGE, 409);
       for (const segment of segments.filter(s => segmentRecoveryAction(s) === "reuse")) {
@@ -230,7 +238,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     const needsSubmission = !p.taskId || segments.some(s => segmentRecoveryAction(s) === "submit");
     if (needsSubmission) {
-      const referenceError = marketingReferenceError(draft);
+      // Version 1 inputs predate reference checks.
+      const referenceError = inputVersion >= 2 ? marketingReferenceError(draft, profile) : "";
       if (referenceError) throw new MarketingError(referenceError);
       if (draft.mode !== "avatar") throw new MarketingError("实拍对口型服务尚未接入，请选择数字人制作。", 503);
     }
@@ -238,10 +247,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (!capabilities.composition) throw new MarketingError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
     let planned;
     try {
-      planned = p.taskId ? segments.map((segment, index) => ({ index, script: segment.script, durationSec: Number(segment.duration_sec) })) : resolveMarketingSegments(draft);
-      if (!p.taskId) planned.forEach(segment => marketingSegmentPrompt(draft, segment, planned.length));
+      planned = p.taskId ? segments.map((segment, index) => ({ index, script: segment.script, durationSec: Number(segment.duration_sec) })) : resolveMarketingSegments(draft, profile);
+      if (!p.taskId) planned.forEach(segment => marketingSegmentPrompt(draft, segment, planned.length, undefined, profile));
       else segments.forEach((segment, index) => {
-        if (segmentRecoveryAction(segment) === "submit") marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: Number(segment.duration_sec) }, segments.length, originalAudio);
+        if (segmentRecoveryAction(segment) === "submit") marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: Number(segment.duration_sec) }, segments.length, originalAudio, profile);
       });
     }
     catch (error) { throw new MarketingError((error as Error).message); }
@@ -250,8 +259,13 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (needsSubmission && assets.video) {
       const video = (await service.db.getAsset(assets.video.id))!;
       const info = await inspectMedia(await ownedAssetPath(dataRoot, video), c.req.raw.signal);
-      if (!info.video || info.duration < 3 || info.duration > 15.5 || !Number.isFinite(info.fps) || info.fps < 24 || info.fps > 60
-        || info.width < 700 || info.height < 700 || info.width > 4553 || info.height > 4553 || info.width * info.height > 8294400 || info.width / info.height < 0.4 || info.width / info.height > 2) throw new MarketingError("参考视频需为 3–15.5 秒、24–60 fps，宽高各 700–4553 像素，总像素不超过 8294400，宽高比 0.4–2。");
+      if (!info.video) throw new MarketingError("参考视频无法读取画面，请重新上传。");
+      const limits = profile.referenceVideo;
+      if (limits && (info.duration < limits.minSeconds || info.duration > limits.maxSeconds || !Number.isFinite(info.fps) || info.fps < limits.minFps || info.fps > limits.maxFps
+        || Math.min(info.width, info.height) < limits.minEdge || Math.max(info.width, info.height) > limits.maxEdge || info.width * info.height > limits.maxPixels
+        || info.width / info.height < limits.minAspect || info.width / info.height > limits.maxAspect)) {
+        throw new MarketingError(`参考视频需为 ${limits.minSeconds}–${limits.maxSeconds} 秒、${limits.minFps}–${limits.maxFps} fps，宽高各 ${limits.minEdge}–${limits.maxEdge} 像素，总像素不超过 ${limits.maxPixels}，宽高比 ${limits.minAspect}–${limits.maxAspect}。`);
+      }
     }
     if (assets.voice || assets.music) {
       for (const slot of ["voice", "music"] as const) {
@@ -261,7 +275,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
         if (!info.audio || (slot === "voice" && (info.duration < 2 || info.duration > 15))) throw new MarketingError("声音样例时长需为 2–15 秒");
       }
     }
-    const pricing = makePricingLookup((id) => service.modelRegistry.getConfig(id), service.modelCatalog, "video")(MODEL);
+    const pricing = makePricingLookup((id) => service.modelRegistry.getConfig(id), service.modelCatalog, "video")(profile.modelId);
     const estimatedCost = pricing ? estimateCost(pricing, { outputCount: billableSeconds }) : 0;
     if (billableSeconds > 0) {
       const quota = await service.usageMeter.checkQuota(owner, estimatedCost);
@@ -277,7 +291,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     const edge = p.draft.quality === "1080p" ? 1080 : 720;
     const [w, h] = p.draft.ratio.split(":").map(Number);
-    const input = { marketingInputVersion: 2, modelId: MODEL, quality: p.draft.quality, resolution: p.draft.quality, ratio: p.draft.ratio,
+    const input = { marketingInputVersion: MARKETING_INPUT_VERSION, modelId: profile.modelId, quality: p.draft.quality, resolution: p.draft.quality, ratio: p.draft.ratio,
       size: `${Math.round(edge * w / Math.min(w, h) / 8) * 8}x${Math.round(edge * h / Math.min(w, h) / 8) * 8}`,
       input_reference: marketingImageReferences(p.draft).flatMap(({ assetId }) => assets[assetId] ? [assets[assetId].url] : []),
       reference_video: assets.video ? [assets.video.url] : undefined,
