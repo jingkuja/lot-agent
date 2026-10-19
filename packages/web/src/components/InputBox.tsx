@@ -4,6 +4,7 @@ import { ImageSettingsPicker, VideoSettingsPicker, type ImageSettings, type Vide
 import { DEFAULT_IMAGE_QUALITY, DEFAULT_IMAGE_SIZE, imageSizeError } from "../lib/image-settings.js";
 import { ModelPicker } from "./ModelPicker.js";
 import {
+  isKlingModel,
   isSeedance25Model,
   isSeedanceModel,
   missingSeedanceMentions,
@@ -14,7 +15,7 @@ import {
 import type { PickedFile } from "../api/client.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
-import { MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, validateReferenceMedia, readMediaDuration } from "../lib/video-references.js";
+import { MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, MAX_KLING_REFERENCE_VIDEOS, checkKlingReferenceImage, klingReferenceImagesIssue, klingReferenceVideosIssue, validateReferenceMedia, readMediaDuration } from "../lib/video-references.js";
 import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.js";
@@ -128,6 +129,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const effectiveVideoModel = selectedModel ?? models[0]?.id ?? "";
   const seedanceVideo = videoMode && isSeedanceModel(effectiveVideoModel);
   const seedance25Video = videoMode && isSeedance25Model(effectiveVideoModel);
+  const klingVideo = videoMode && isKlingModel(effectiveVideoModel);
+  const maxReferenceVideos = klingVideo ? MAX_KLING_REFERENCE_VIDEOS : MAX_VIDEO_REFERENCE_VIDEOS;
   const lockAdaptive = seedanceVideo && referenceVideoFiles.length > 0;
   const missingMentions = seedance25Video
     ? missingSeedanceMentions(promptValue, {
@@ -236,6 +239,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     try {
       const next = [...(kind === "video" ? referenceVideoFiles : referenceAudioFiles), ...picked];
       await validateReferenceMedia(next, kind === "video" ? "视频" : "音频", readMediaDuration);
+      // Duration reads cached each file's metadata, so this adds no extra I/O.
+      const klingIssue = kind === "video" && klingVideo ? klingReferenceVideosIssue(next) : undefined;
+      if (klingIssue) throw new Error(klingIssue);
       if (kind === "video") setReferenceVideoFiles(next);
       else setReferenceAudioFiles(next);
     } catch (error) {
@@ -244,7 +250,45 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       checkingMediaRef.current = false;
       setCheckingMedia(false);
     }
-  }, [referenceVideoFiles, referenceAudioFiles]);
+  }, [referenceVideoFiles, referenceAudioFiles, klingVideo]);
+
+  /** Kling rejects invalid images before they join the composer; other models add them unchanged. */
+  const addVideoImages = useCallback(async (picked: File[], add: (accepted: File[]) => void) => {
+    if (!klingVideo) {
+      add(picked);
+      return;
+    }
+    if (!picked.length) return;
+    if (checkingMediaRef.current) {
+      setAttachmentError("正在检查附件时长，请稍后重试");
+      return;
+    }
+    checkingMediaRef.current = true;
+    setCheckingMedia(true);
+    setAttachmentError("");
+    try {
+      const issues = await Promise.all(picked.map(checkKlingReferenceImage));
+      const issue = issues.find(Boolean);
+      if (issue) setAttachmentError(issue);
+      const accepted = picked.filter((_, index) => !issues[index]);
+      if (accepted.length) add(accepted);
+    } finally {
+      checkingMediaRef.current = false;
+      setCheckingMedia(false);
+    }
+  }, [klingVideo]);
+
+  // Measure images picked under another model as soon as Kling is selected.
+  useEffect(() => {
+    if (!klingVideo) return;
+    const images = [...files, firstFrameFile, lastFrameFile].filter((file): file is File => !!file);
+    let active = true;
+    void Promise.all(images.map(checkKlingReferenceImage)).then((issues) => {
+      const issue = issues.find(Boolean);
+      if (active && issue) setAttachmentError(issue);
+    });
+    return () => { active = false; };
+  }, [klingVideo, files, firstFrameFile, lastFrameFile]);
 
   async function selectTwin(file: File, kind: TwinKind) {
     if (disabled || checkingMediaRef.current || selectingTwin.current) throw new Error(t("正在检查附件时长，请稍后重试"));
@@ -261,6 +305,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         setReferenceAudioFiles((old) => [...old, file]);
       } else {
         if (files.length >= MAX_VIDEO_REFERENCE_IMAGES) throw new Error(t("参考图最多 9 张"));
+        const klingIssue = klingVideo ? await checkKlingReferenceImage(file) : undefined;
+        if (klingIssue) throw new Error(t(klingIssue));
         const reference = seedanceVideo ? seedanceAssetMention("Image", files.length) : t("图片{0}", [files.length + 1]);
         instruction = t("视频主角的外貌参考 {0}，保持人物形象一致。", [reference]);
         addFiles([file]);
@@ -288,9 +334,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       else if (!newContractFile) setNewContractFile(file);
       else setAttachmentError("新旧合同附件已齐，请移除附件后重试。");
     } else if (files.length >= maxFiles) setAttachmentError("附件数量已满，请移除附件后重试。");
-    else addFiles([file]);
+    else void addVideoImages([file], addFiles);
     onAttachmentConsumed?.();
-  }, [attachment, addReferenceMedia, onAttachmentConsumed, onManageKnowledge, addFiles, mode, mediaMode, videoMode, contractMode, files.length, maxFiles, oldContractFile, newContractFile, referenceAudioFiles.length, referenceVideoFiles.length]);
+  }, [attachment, addReferenceMedia, addVideoImages, onAttachmentConsumed, onManageKnowledge, addFiles, mode, mediaMode, videoMode, contractMode, files.length, maxFiles, oldContractFile, newContractFile, referenceAudioFiles.length, referenceVideoFiles.length]);
 
   const removeFile = useCallback((idx: number) => {
     setFiles((prev) => {
@@ -341,6 +387,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const collectPickedFiles = useCallback((): PickedFile[] => {
     if (videoMode) {
       if (checkingMediaRef.current) throw new Error("正在检查附件时长，请稍后重试");
+      if (klingVideo) {
+        if (lastFrameFile && !firstFrameFile) throw new Error("Kling 不支持仅尾帧生成视频，请同时上传首帧图");
+        const images = [...files, firstFrameFile, lastFrameFile].filter((file): file is File => !!file);
+        const klingIssue = klingReferenceImagesIssue(images) ?? klingReferenceVideosIssue(referenceVideoFiles);
+        if (klingIssue) throw new Error(klingIssue);
+      }
       return [
         ...files.map((f) => ({ file: f, slot: "video_reference_image" as const })),
         ...referenceVideoFiles.map((f) => ({ file: f, slot: "video_reference_video" as const })),
@@ -363,7 +415,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       ];
     }
     return files.map((f) => ({ file: f }));
-  }, [files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, videoMode, pptMode, contractMode]);
+  }, [files, referenceVideoFiles, referenceAudioFiles, firstFrameFile, lastFrameFile, templateFile, backgroundFiles, oldContractFile, newContractFile, videoMode, klingVideo, pptMode, contractMode]);
 
   useImperativeHandle(ref, () => ({
     getFiles: collectPickedFiles,
@@ -387,7 +439,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         return;
       }
     }
-    const picked = collectPickedFiles();
+    let picked: PickedFile[];
+    try {
+      picked = collectPickedFiles();
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : "无法读取附件时长");
+      return;
+    }
     const hasFiles = picked.length > 0;
     if ((!trimmed && !hasFiles) || disabled || !onSend) return;
     onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined, knowledgeBases);
@@ -597,7 +655,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           accept={mediaMode ? "image/*" : pptMode ? ACCEPT_CONTENT : ACCEPT}
           style={{ display: "none" }}
           onChange={(e) => {
-            addFiles(e.target.files);
+            void addVideoImages(Array.from(e.target.files ?? []), addFiles);
             e.target.value = "";
           }}
         />
@@ -632,7 +690,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           style={{ display: "none" }}
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null;
-            if (f) setFrameFile(setFirstFrameFile, firstFrameFile, f);
+            if (f) void addVideoImages([f], ([file]) => setFrameFile(setFirstFrameFile, firstFrameFile, file));
             e.target.value = "";
           }}
         />
@@ -643,7 +701,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           style={{ display: "none" }}
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null;
-            if (f) setFrameFile(setLastFrameFile, lastFrameFile, f);
+            if (f) void addVideoImages([f], ([file]) => setFrameFile(setLastFrameFile, lastFrameFile, file));
             e.target.value = "";
           }}
         />
@@ -724,15 +782,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 className="btn-reference"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || files.length >= MAX_VIDEO_REFERENCE_IMAGES}
-                title={seedance25Video ? t("最多9张；提示词须按上传顺序写出 @Image1、@Image2…") : t("最多9张")}
+                title={klingVideo
+                  ? t("最多9张，JPG/PNG，50MB 以内，宽高不小于 300px，宽高比 1:2.5–2.5:1")
+                  : seedance25Video ? t("最多9张；提示词须按上传顺序写出 @Image1、@Image2…") : t("最多9张")}
               >
                 {t("🖼️ 参考图")}</button>
               <button
                 type="button"
                 className="btn-reference"
                 onClick={() => referenceVideoInputRef.current?.click()}
-                disabled={disabled || checkingMedia || referenceVideoFiles.length >= MAX_VIDEO_REFERENCE_VIDEOS}
-                title={seedance25Video ? t("最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Video1、@Video2…") : t("最多3段，总时长不超过15秒")}
+                disabled={disabled || checkingMedia || referenceVideoFiles.length >= maxReferenceVideos}
+                title={klingVideo
+                  ? t("最多1段，MP4/MOV，200MB 以内，3–15.5 秒，宽高 700–4553px，宽高比 0.4–2")
+                  : seedance25Video ? t("最多3段，总时长不超过15秒；提示词须按上传顺序写出 @Video1、@Video2…") : t("最多3段，总时长不超过15秒")}
               >
                 {t("🎞️ 参考视频")}</button>
               <button
@@ -748,7 +810,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 className="btn-reference"
                 onClick={() => firstFrameInputRef.current?.click()}
                 disabled={disabled}
-                title={seedance25Video ? t("首帧图比例需与生成视频比例一致") : undefined}
+                title={klingVideo
+                  ? t("JPG/PNG，50MB 以内，宽高不小于 300px，宽高比 1:2.5–2.5:1")
+                  : seedance25Video ? t("首帧图比例需与生成视频比例一致") : undefined}
               >
                 {t("首帧图")}</button>
               <button
@@ -756,7 +820,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 className="btn-reference"
                 onClick={() => lastFrameInputRef.current?.click()}
                 disabled={disabled}
-                title={seedance25Video ? t("尾帧图比例需与生成视频比例一致") : undefined}
+                title={klingVideo
+                  ? t("需同时上传首帧图；JPG/PNG，50MB 以内，宽高不小于 300px，宽高比 1:2.5–2.5:1")
+                  : seedance25Video ? t("尾帧图比例需与生成视频比例一致") : undefined}
               >
                 {t("尾帧图")}</button>
             </>

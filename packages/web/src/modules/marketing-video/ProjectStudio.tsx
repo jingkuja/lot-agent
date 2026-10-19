@@ -7,7 +7,7 @@ import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile } from "../digital-twin/media.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { ReviewPanel } from "./ReviewPanel.js";
-import { readMediaDuration } from "../../lib/video-references.js";
+import { checkKlingReferenceImage, klingReferenceVideoIssue, readMediaDuration, readMediaMetadata } from "../../lib/video-references.js";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { ReferenceAnalysisPanel, analysisError } from "./ReferenceAnalysisPanel.js";
 
@@ -294,12 +294,17 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const multiple = ["portrait", "background", "scene"].includes(slot);
     if (multiple && imageCount(slot) >= 3) throw new Error("人物或场景区域各最多 3 张。");
     const token = epoch.current;
-    if (slot === "scene" || slot === "voice" || slot === "portrait" || slot === "background" || slot === "cover") await validateTwinFile(file, slot === "voice" ? "voice" : "portrait");
+    if (slot === "scene" || slot === "voice" || slot === "portrait" || slot === "background" || slot === "cover") {
+      await validateTwinFile(file, slot === "voice" ? "voice" : "portrait");
+      // Portrait, background and scene images are sent to Kling as references; the cover is not.
+      const issue = multiple ? await checkKlingReferenceImage(file) : undefined;
+      if (issue) throw new Error(issue);
+    }
     else if (slot === "video") {
       if (draftRef.current.assets.video) throw new Error("参考视频最多 1 个，请先移除已有视频。");
       if (!file.size || file.size > 150 * 1024 * 1024 || !["video/mp4", "video/quicktime"].includes(file.type)) throw new Error("参考视频支持 MP4、MOV，最大 150 MB，时长 3–15.5 秒。");
-      const duration = await readMediaDuration(file);
-      if (!Number.isFinite(duration) || duration < 3 || duration > 15.5) throw new Error("参考视频支持 MP4、MOV，最大 150 MB，时长 3–15.5 秒。");
+      const issue = klingReferenceVideoIssue(file, await readMediaMetadata(file));
+      if (issue) throw new Error(issue);
     } else {
       if (!file.size || file.size > 30 * 1024 * 1024 || !["audio/mpeg", "audio/wav", "audio/mp4"].includes(file.type)) throw new Error("背景音乐支持 MP3、WAV、M4A，最大 30 MB。");
       if (await readMediaDuration(file) > 600) throw new Error("背景音乐最长 10 分钟。");

@@ -37,10 +37,20 @@ export function parseSize(size?: string): [number, number] {
   return m ? [Number(m[1]), Number(m[2])] : [1024, 1024];
 }
 
+// Volcengine Ark rejects references showing real people until the account
+// completes real-person verification; tokenhub may mask the code prefix.
+const REAL_PERSON_REJECTION = /\.PrivacyInformation\b|may contain (?:a )?real person/i;
+
+/** Classify a real-person rejection at any envelope depth without copying its text. */
+export function isRealPersonRejection(body: unknown): boolean {
+  try { return REAL_PERSON_REJECTION.test(typeof body === "string" ? body : JSON.stringify(body) ?? ""); }
+  catch { return false; }
+}
+
 /** Detect an error envelope without copying any free-form vendor text. */
-export function extractVendorError(j: Record<string, unknown>): string | undefined {
+export function extractVendorError(j: Record<string, unknown>, phase: ProviderPhase = "poll"): string | undefined {
   if (j.error || j.message || (j.code && j.code !== 0)) {
-    return new ProviderError("generation", "poll", "TASK_FAILED").message;
+    return new ProviderError("generation", phase, isRealPersonRejection(j) ? "REAL_PERSON_REJECTED" : "TASK_FAILED").message;
   }
   return undefined;
 }
@@ -101,15 +111,17 @@ export class HttpGenerationClient<Req extends { model?: string }> {
       body: JSON.stringify(body),
     }, 0, "create");
     console.log("[generation.create] response", { status: res.status });
+    const text = await res.text();
+    const realPerson = isRealPersonRejection(text);
     let json: Record<string, unknown>;
-    try { json = JSON.parse(await res.text()); }
-    catch { throw new ProviderError("generation", "create", res.ok ? "INVALID_RESPONSE" : "HTTP_ERROR", { httpStatus: res.status }); }
+    try { json = JSON.parse(text); }
+    catch { throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : res.ok ? "INVALID_RESPONSE" : "HTTP_ERROR", { httpStatus: res.status }); }
     const details = { httpStatus: res.status, requestId: json?.request_id, privateValues: [apiKey] };
-    if (!res.ok) throw new ProviderError("generation", "create", "HTTP_ERROR", details);
+    if (!res.ok) throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : "HTTP_ERROR", details);
     let created: CreateResult;
     try { created = adapter.parseCreate(json); }
     catch { throw new ProviderError("generation", "create", "INVALID_RESPONSE", details); }
-    if (!created.taskId) throw new ProviderError("generation", "create", "INVALID_RESPONSE", details);
+    if (!created.taskId) throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : "INVALID_RESPONSE", details);
     return created;
   }
   async poll(taskId: string): Promise<PollResult> {
@@ -126,10 +138,17 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     }
     catch { throw new ProviderError("generation", "poll", res.ok ? "INVALID_RESPONSE" : "HTTP_ERROR", { httpStatus: res.status }); }
     const details = { httpStatus: res.status, requestId: json?.request_id, privateValues: [apiKey] };
-    if (!res.ok) throw new ProviderError("generation", "poll", "HTTP_ERROR", details);
+    // The vendor explicitly rejected the input, so the failure is confirmed.
+    const realPersonFailure = (): PollResult =>
+      ({ status: "failed", progress: 0, error: new ProviderError("generation", "poll", "REAL_PERSON_REJECTED", details).message });
+    if (!res.ok) {
+      if (isRealPersonRejection(json)) return realPersonFailure();
+      throw new ProviderError("generation", "poll", "HTTP_ERROR", details);
+    }
     let result: PollResult;
     try { result = adapter.parsePoll(json); }
     catch { throw new ProviderError("generation", "poll", "INVALID_RESPONSE", details); }
+    if ((result.error || adapter.isTerminal(result.status) === "failed") && isRealPersonRejection(json)) return realPersonFailure();
     const parsed = { ...result, ...(result.error || adapter.isTerminal(result.status) === "failed"
       ? { error: new ProviderError("generation", "poll", result.failureUnconfirmed ? "INVALID_RESPONSE" : "TASK_FAILED", details).message } : {}) };
     const term = adapter.isTerminal(parsed.status);

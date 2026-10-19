@@ -232,6 +232,19 @@ describe("HttpVideoGenerationProvider", () => {
     expect(r.error).toContain("请求失败");
     expect(r.error).not.toContain("未订购seedance2.0");
   });
+  it("poll reports a real-person rejection envelope as a confirmed failure", async () => {
+    const message = JSON.stringify({ error: { code: "***.PrivacyInformation", message: "The request failed because the input image 'content[0]' may contain real person." } });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ code: "fail_to_fetch_task", message: `status_code=400, ${JSON.stringify({ code: "fail_to_fetch_task", message, data: null })}`, data: null }),
+    })) as unknown as typeof fetch);
+    const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new OpenaiVideoAdapter(), model: "doubao-seedance-2.0" });
+    const r = await p.poll("task_1");
+    expect(r.status).toBe("failed");
+    expect(r.failureUnconfirmed).toBeUndefined();
+    expect(r.error).toContain("REAL_PERSON_REJECTED");
+    expect(r.error).not.toContain("content[0]");
+  });
   it("poll surfaces the raw Wand failed-task envelope as failed", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

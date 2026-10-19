@@ -17,13 +17,18 @@ it("shows nested real-person rejection and billing reassurance directly on the c
   let error = JSON.stringify({ error: { code: "InputImageSensitiveContentDetected.PrivacyInformation", message: "The input image may contain real person." } });
   for (let i = 0; i < 3; i++) error = JSON.stringify({ code: "fail_to_fetch_task", message: error, data: null });
   const text = visibleText({ error });
-  expect(text).toContain("请检查是否使用了真人图片，建议更换图片后重试。如仍失败，请稍后再试或联系客服。");
+  expect(text).toContain("上传的参考图包含真人，需要先完成真人认证后再使用。");
   expect(text).toContain("温馨提示：视频未成功生成，不会扣除积分。");
   expect(text).not.toContain("fail_to_fetch_task");
 });
 
 it("recognizes the extracted leaf message and provides a fallback for other failures", () => {
-  expect(visibleText({ error: "The request failed because the input image 'content[0]' may contain real person." })).toContain("真人图片");
+  expect(visibleText({ error: "The request failed because the input image 'content[0]' may contain real person." })).toContain("真人认证");
+  expect(visibleText({ error: "参考图包含真人，需先完成真人认证（create，REAL_PERSON_REJECTED，HTTP 400）" })).toContain("需要先完成真人认证");
+  const image = visibleText({ mediaType: "image", error: "参考图包含真人，需先完成真人认证（create，REAL_PERSON_REJECTED，HTTP 400）" });
+  expect(image).toContain("需要先完成真人认证");
+  expect(image).not.toContain("不会扣除积分");
+  expect(visibleText({ mediaType: "image", error: "upstream error" })).not.toContain("请稍后再试");
   expect(visibleText({ error: "upstream error" })).toContain("请稍后再试，或联系客服。");
   expect(visibleText()).toContain("请稍后再试，或联系客服。");
 });

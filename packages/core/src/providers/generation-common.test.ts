@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   parseSize,
   extractVendorError,
+  isRealPersonRejection,
   HttpGenerationClient,
   type VendorAdapter,
 } from "./generation-common.js";
@@ -19,6 +20,21 @@ describe("parseSize", () => {
   });
 });
 
+// Shape reported by tokenhub, with the vendor error code prefix masked.
+const REAL_PERSON_BODY = `status_code=400, ${JSON.stringify({
+  code: "fail_to_fetch_task",
+  message: JSON.stringify({ error: { code: "***.PrivacyInformation", message: "The request failed because the input image 'content[0]' may contain real person. Request id: 0217", param: "content[0]", type: "BadRequest" } }),
+  data: null,
+})}`;
+
+describe("isRealPersonRejection", () => {
+  it("matches masked codes and the leaf message at any nesting depth", () => {
+    expect(isRealPersonRejection(REAL_PERSON_BODY)).toBe(true);
+    expect(isRealPersonRejection({ error: { message: JSON.stringify({ code: "InputImageSensitiveContentDetected.PrivacyInformation" }) } })).toBe(true);
+    expect(isRealPersonRejection({ code: "fail_to_fetch_task", message: "当前账号处未订购seedance2.0模型资费包" })).toBe(false);
+  });
+});
+
 describe("extractVendorError", () => {
   it("replaces a nested vendor error envelope with a fixed safe category", () => {
     const msg = extractVendorError({
@@ -31,6 +47,12 @@ describe("extractVendorError", () => {
   });
   it("falls back to the code when no message is present", () => {
     expect(extractVendorError({ code: "fail_to_fetch_task" })).toContain("TASK_FAILED");
+  });
+  it("classifies a real-person rejection without copying the vendor text", () => {
+    const msg = extractVendorError({ code: "fail_to_fetch_task", message: REAL_PERSON_BODY, data: null });
+    expect(msg).toContain("REAL_PERSON_REJECTED");
+    expect(msg).toContain("真人认证");
+    expect(msg).not.toContain("content[0]");
   });
   it("returns undefined for a normal in-progress response", () => {
     expect(extractVendorError({ status: "processing", progress: 30 })).toBeUndefined();
@@ -63,6 +85,13 @@ describe("HttpGenerationClient.create", () => {
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
     await expect(c.create({})).rejects.toThrow("INVALID_RESPONSE");
+  });
+  it("classifies a non-JSON HTTP 400 real-person rejection", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 400, text: async () => REAL_PERSON_BODY })) as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
+    const err = await c.create({}).catch(e => e as Error);
+    expect(err.message).toContain("REAL_PERSON_REJECTED");
+    expect(err.message).not.toContain("content[0]");
   });
   it("returns the task when a create response carries a task id", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => JSON.stringify({ task_id: "task_1", status: "queued" }) }));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateReferenceMedia } from "./video-references.js";
+import { klingReferenceImageIssue, klingReferenceVideoIssue, validateReferenceMedia } from "./video-references.js";
 
 describe("video reference uploads", () => {
   const read = async (value: number) => value;
@@ -15,5 +15,44 @@ describe("video reference uploads", () => {
       await expect(validateReferenceMedia([duration], "音频", read)).rejects.toThrow("无法读取");
     }
     await expect(validateReferenceMedia([1], "视频", async () => { throw new Error("decode"); })).rejects.toThrow();
+  });
+});
+
+describe("Kling reference video limits", () => {
+  const mp4 = { name: "ref.mp4", type: "video/mp4", size: 10 * 1024 * 1024 };
+  const meta = (width: number, height: number, duration = 5) => ({ duration, width, height });
+  it("accepts the inclusive boundaries", () => {
+    expect(klingReferenceVideoIssue(mp4, meta(720, 1280, 3))).toBeUndefined();
+    expect(klingReferenceVideoIssue({ ...mp4, name: "ref.MOV", type: "" }, meta(3840, 2160, 15.5))).toBeUndefined();
+    expect(klingReferenceVideoIssue(mp4, meta(700, 1400))).toBeUndefined();
+    expect(klingReferenceVideoIssue({ ...mp4, size: 200 * 1024 * 1024 }, meta(1080, 1920))).toBeUndefined();
+  });
+  it("rejects each official limit", () => {
+    expect(klingReferenceVideoIssue({ ...mp4, name: "ref.webm", type: "video/webm" }, meta(1080, 1920))).toContain("MP4、MOV");
+    expect(klingReferenceVideoIssue({ ...mp4, size: 200 * 1024 * 1024 + 1 }, meta(1080, 1920))).toContain("200MB");
+    expect(klingReferenceVideoIssue(mp4, meta(1080, 1920, 2.9))).toContain("3–15.5 秒");
+    expect(klingReferenceVideoIssue(mp4, meta(1080, 1920, 15.6))).toContain("3–15.5 秒");
+    expect(klingReferenceVideoIssue(mp4, meta(699, 1280))).toContain("700–4553px");
+    expect(klingReferenceVideoIssue(mp4, meta(1000, 4554))).toContain("700–4553px");
+    expect(klingReferenceVideoIssue(mp4, meta(3000, 3000))).toContain("8294400");
+    expect(klingReferenceVideoIssue(mp4, meta(1000, 2600))).toContain("0.4–2");
+    expect(klingReferenceVideoIssue(mp4, meta(0, 0))).toContain("分辨率");
+  });
+});
+
+describe("Kling reference image limits", () => {
+  const png = { name: "ref.png", type: "image/png", size: 1024 * 1024 };
+  it("accepts the inclusive boundaries", () => {
+    expect(klingReferenceImageIssue(png, { width: 300, height: 300 })).toBeUndefined();
+    expect(klingReferenceImageIssue(png, { width: 750, height: 300 })).toBeUndefined();
+    expect(klingReferenceImageIssue({ ...png, name: "ref.JPEG", type: "", size: 50 * 1024 * 1024 }, { width: 300, height: 750 })).toBeUndefined();
+  });
+  it("rejects each official limit", () => {
+    expect(klingReferenceImageIssue({ ...png, name: "ref.webp", type: "image/webp" }, { width: 800, height: 800 })).toContain("JPG、JPEG、PNG");
+    expect(klingReferenceImageIssue({ ...png, size: 50 * 1024 * 1024 + 1 }, { width: 800, height: 800 })).toContain("50MB");
+    expect(klingReferenceImageIssue(png, { width: 299, height: 600 })).toContain("300px");
+    expect(klingReferenceImageIssue(png, { width: 751, height: 300 })).toContain("1:2.5–2.5:1");
+    expect(klingReferenceImageIssue(png, { width: 300, height: 751 })).toContain("1:2.5–2.5:1");
+    expect(klingReferenceImageIssue(png, { width: 0, height: 0 })).toContain("无法读取");
   });
 });

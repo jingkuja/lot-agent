@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { extractVendorError, type CreateResult, type PollResult } from "./generation-common.js";
+import { extractVendorError, isRealPersonRejection, type CreateResult, type PollResult } from "./generation-common.js";
+import { ProviderError } from "./provider-error.js";
 import type { ImageGenerationProvider, ImageGenerationRequest } from "./image-generation.js";
 
 /**
@@ -94,8 +95,11 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
     const text = await res.text();
     if (!res.ok) {
       let diagnostic: string | undefined;
-      try { diagnostic = extractVendorError(JSON.parse(text) as Record<string, unknown>); }
-      catch { /* Unstructured error bodies can contain private image material. */ }
+      try { diagnostic = extractVendorError(JSON.parse(text) as Record<string, unknown>, "create"); }
+      catch {
+        // Unstructured error bodies can contain private image material.
+        if (isRealPersonRejection(text)) diagnostic = new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: res.status }).message;
+      }
       throw new Error(diagnostic ?? `image generation failed: HTTP ${res.status}`);
     }
 
