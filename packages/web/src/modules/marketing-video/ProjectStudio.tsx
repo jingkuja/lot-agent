@@ -456,7 +456,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           {textField("script", "视频口播文案", 2000, 6)}<p className="mv-hint">{t("预计口播 {0} 秒，实际以成片为准。", [Math.ceil(speechUnits(draft.script) / 4)])}</p>
           {!!draft.storyboard.length && <StoryboardEditor presenterRequired={draft.mode === "avatar"} creation shots={draft.storyboard} busy={busy} onChange={storyboard => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) })} onAi={(instruction, index) => void act(() => editStoryboard(instruction, index))} />}
           {draft.script.trim() && plan.error && <p className="mv-error" role="alert">{t(plan.error)}</p>}
-          <details className="mv-script-review"><summary>{t("标题标签")}</summary>{textField("publishTitle", "视频发布标题", 100)}{textField("tags", "短视频检索标签", 160)}<button disabled={busy || !ready || !draft.script.trim()} onClick={() => void act(() => publication())}>{t("重新生成标题和标签")}</button></details>
+          <details className="mv-script-review" open><summary>{t("标题标签")}</summary>{textField("publishTitle", "视频发布标题", 100)}{textField("tags", "短视频检索标签", 160)}<button disabled={busy || !ready || !draft.script.trim()} onClick={() => void act(() => publication())}>{t("重新生成标题和标签")}</button></details>
           </>}
         </>}
         {step === 1 && <>
