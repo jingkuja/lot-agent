@@ -93,7 +93,7 @@ export async function checkReviewFixes(pool: pg.Pool) {
   const model = new AnalysisModels({ ledger: new PgAnalysisLedger(analyses, lease), provider, readFrame: async () => new Uint8Array() });
   await analyses.checkpoint(lease, snapshot, "visual");
   await assert.rejects(model.summarize(summaryInput(snapshot, 1)), /MODEL_INVALID_JSON/);
-  await analyses.finish(lease, "MODEL_INVALID_JSON"); await analyses.resume(owner, analysis.id, 1, true);
+  await analyses.finish(lease, "MODEL_INVALID_JSON"); await analyses.resume(owner, analysis.id, 1);
   const next = (await analyses.claim(analysis.id))!;
   const resumedModel = new AnalysisModels({ ledger: new PgAnalysisLedger(analyses, next), provider, readFrame: async () => new Uint8Array() });
   await resumedModel.summarize(summaryInput((await analyses.row(owner, analysis.id)).snapshot, 1));
@@ -157,7 +157,7 @@ export async function checkReviewFixes(pool: pg.Pool) {
       assert((await stat(join(sourceDirectory, frame.objectKey))).isFile());
       if (!receivedSpeech) {
         assert.equal((await analyses.get(owner, sourceJob.id))!.errorCode, "SOURCE_EXPIRED");
-        await analyses.resume(owner, sourceJob.id, 1, false, true);
+        await analyses.resume(owner, sourceJob.id, 1, true);
         assert.deepEqual((await analyses.row(owner, sourceJob.id)).snapshot.speech, { status: "skipped", reason: "SOURCE_EXPIRED" });
         await analyses.cancel(owner, sourceJob.id);
       } else {

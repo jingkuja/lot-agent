@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { GenerationError } from "./errors.js";
 import { resolve } from "node:path";
 import {
   OpenAIImagesImageProvider,
@@ -40,7 +41,7 @@ export function loadKlingVoiceConfig(): KlingVoiceConfig {
 
 /** Called lazily for real Kling audio jobs so other generation can still run. */
 export function makeKlingVoiceProvider(cfg: KlingVoiceConfig): HttpKlingVoiceProvider {
-  if (!cfg.apiKey) throw new Error("Kling 音色服务未配置 KLING_VOICE_API_KEY。");
+  if (!cfg.apiKey) throw new GenerationError("CONFIG_MISSING", "Kling 音色服务未配置 KLING_VOICE_API_KEY。");
   return new HttpKlingVoiceProvider(cfg);
 }
 

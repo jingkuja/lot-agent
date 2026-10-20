@@ -73,7 +73,7 @@ async function run(taskId: string) {
   try {
     const output = await runMarketingVideo(deps, { id: taskId, userId: row.user_id, input: row.input as Record<string, unknown> }, new AbortController().signal);
     await db.setTaskResult(taskId, output); return output;
-  } catch (error) { await db.setTaskError(taskId, (error as Error).message); throw error; }
+  } catch (error) { await db.setTaskError(taskId, (error as Error).message, (error as { errorCode?: string }).errorCode); throw error; }
 }
 try {
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='public'")).rows[0].n, 0, "Refusing a nonempty database");
@@ -121,6 +121,7 @@ try {
 
   const one = await newProject(); failSecond = true;
   await assert.rejects(run(one.taskId), /fixture vendor failure/);
+  assert.equal((await store.get(owner, one.p.id))!.errorCode, "GENERATION_FAILED");
   assert.equal(creates, 2); assert.equal((await store.segments(owner, one.p.id)).filter(s => s.status === "succeeded").length, 1);
   await store.reserve(owner, one.p.id, one.p.version, {}, true);
   const output = await run(one.taskId);
@@ -157,6 +158,12 @@ try {
   const unknownClips = twoSegments.filter(s => s.vendor_task_id === "marketing-submission-unknown").length;
   assert(unknownClips >= 1);
   assert.equal((await store.get(owner, two.p.id))!.unknownSegments, unknownClips);
+  // The polled state carries the same task fields as the full project, without the draft or materials.
+  const full = (await store.get(owner, two.p.id))!;
+  const taskFields = ["id", "version", "taskId", "status", "progress", "stage", "error", "errorCode", "output", "unknownSegments"] as const;
+  assert.deepEqual(await store.taskState(owner, two.p.id), Object.fromEntries(taskFields.map(key => [key, full[key]])));
+  assert.equal(full.errorCode, "SUBMISSION_UNKNOWN");
+  assert.equal(await store.taskState("someone-else", two.p.id), null);
   assert.equal((await store.list(owner)).find(p => p.id === two.p.id)!.unknownSegments, unknownClips);
   await assert.rejects(store.releaseUnknownSegments(other, two.p.id), /不存在/);
   const holder = await db.pool.connect();
@@ -326,7 +333,10 @@ try {
     const storedErrors = (await db.pool.query("SELECT error FROM tasks WHERE id=$1 OR input->>'parentId'=$1::text", [protectedProject.taskId])).rows;
     const visible = await app.request(`/marketing/${protectedProject.p.id}`);
     assert.equal(visible.status, 200);
-    assert(!/SENTINEL|private\.example|material_token|Bearer/.test(JSON.stringify(storedErrors) + await visible.text() + diagnostics.join("\n")));
+    const polled = await app.request(`/marketing/${protectedProject.p.id}/status`);
+    const polledText = await polled.text();
+    assert.equal(JSON.parse(polledText).errorCode, "GENERATION_FAILED");
+    assert(!/SENTINEL|private\.example|material_token|Bearer/.test(JSON.stringify(storedErrors) + await visible.text() + polledText + diagnostics.join("\n")));
   } finally { globalThis.fetch = originalFetch; console.log = originalLog; deps.generation = originalGeneration; }
   const maximumShots = Array.from({ length: 15 }, () => ({ ...timedShots[0], durationSec: 4 }));
   let maximum = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ durationSec: 60, storyboard: maximumShots, script: storyboardScript(maximumShots) }));

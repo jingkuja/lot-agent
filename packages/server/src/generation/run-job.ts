@@ -1,4 +1,5 @@
 import { ProviderError } from "@lot-agent/core";
+import { GenerationError } from "./errors.js";
 import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
 import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
@@ -281,7 +282,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
         ? typeof referenceAudio === "string" ? publicStaticUrl(referenceAudio) : referenceAudio?.map(publicStaticUrl)
         : await publicReference(deps, referenceAudio);
       if (needsKlingVoices && preparedAudio) {
-        if (!deps.prepareKlingVoices) throw new Error("Kling 音色服务未配置，无法提交参考声音。");
+        if (!deps.prepareKlingVoices) throw new GenerationError("CONFIG_MISSING", "Kling 音色服务未配置，无法提交参考声音。");
         preparedAudio = await deps.prepareKlingVoices({
           taskId: deps.voiceScopeTaskId ?? job.id, userId: job.userId, referenceAudio: preparedAudio,
           signal: deps.signal, assertNotCancelled,
@@ -332,8 +333,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     for (;;) {
       await deps.updateProgress(job.id, p.progress);
       if (p.status === "completed") break;
-      if (p.status === "failed") throw new Error(p.error ?? "generation failed");
-      if (Date.now() - start > maxWaitMs) throw new Error("generation timed out");
+      if (p.status === "failed") throw new GenerationError("GENERATION_FAILED", p.error ?? "generation failed");
+      if (Date.now() - start > maxWaitMs) throw new GenerationError("TIMED_OUT", "generation timed out");
       await assertNotCancelled();
       await sleep(pollIntervalMs);
       p = await deps.provider.poll(vendorTaskId);

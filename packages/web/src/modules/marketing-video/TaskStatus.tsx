@@ -12,7 +12,7 @@ export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onReleas
   const active = pending || project.status === "running";
   const cancelled = project.status === "cancelled";
   const unknown = active ? 0 : project.unknownSegments ?? 0;
-  const failure = active || (cancelled && !unknown) ? undefined : videoFailure(project.error, project.stage, unknown);
+  const failure = active || (cancelled && !unknown) ? undefined : videoFailure(project.errorCode, unknown);
   const stage = project.stage?.startsWith("片段完成 ") ? t("片段完成 {0}", [project.stage.slice(5)]) : t(project.stage || "等待生成");
   return <div className="mv-progress">
     <strong>{t(pending ? "排队中" : active ? "正在制作完整视频" : cancelled ? "已取消" : "生成未完成")}</strong>

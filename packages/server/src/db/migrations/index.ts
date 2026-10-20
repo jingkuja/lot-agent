@@ -92,6 +92,7 @@ export const migrations: Migration[] = [
   deploymentFeedbackRequestId,
   marketingUnknownRelease,
   marketingTextOperationKinds,
+  taskErrorCode,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -104,3 +105,4 @@ import { marketingPrivateMaterials } from "./0047-marketing-private-materials.js
 import { deploymentFeedbackRequestId } from "./0048-deployment-feedback-request-id.js";
 import { marketingUnknownRelease } from "./0049-marketing-unknown-release.js";
 import { marketingTextOperationKinds } from "./0050-marketing-text-operation-kinds.js";
+import { taskErrorCode } from "./0051-task-error-code.js";

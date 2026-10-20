@@ -63,7 +63,7 @@ pnpm marketing-analysis:reconcile USER_ID ANALYSIS_UUID 'ocr:f0001' 1 /private/p
 
 语音检查点缺失时优先复用完整 ASR 回执，不重新解码或付费。源满七天仍按隐私期限清理，保留 selection、展示帧与回执；无可用回执且仍需原片时返回 `SOURCE_EXPIRED`。仅当源已过期、没有 speech 且尚无摘要/创作 intent 时，用户可显式选择仅画面继续，并保留缺音原因；unknown 继续等待核实，不修改已经提交摘要的身份。
 
-授权查询的 15 秒期限覆盖凭证、模型目录 fetch 和正文，取消与租约信号传递到提供器创建。create/resume/summarize 共用用户事务锁下的 3 个待处理任务上限；派发每用户选一个候选，并排除已有有效运行租约的用户。存储默认每用户 2 GiB、全局至少余 1 GiB，每个在途任务预留 512 MiB，取消但租约未结束仍占预留；配置由 `MARKETING_ANALYSIS_OWNER_BYTES` / `MARKETING_ANALYSIS_MIN_FREE_BYTES` 共享传给 API 和 Worker。抽帧后删除 `gray.raw`，七天清理覆盖遗留临时文件和清单外 JPEG，保留 snapshot.frames 与 selection 的并集。
+授权查询的 15 秒期限覆盖凭证、模型目录 fetch 和正文，取消与租约信号传递到提供器创建。create/resume 共用用户事务锁下的 3 个待处理任务上限；派发每用户选一个候选，并排除已有有效运行租约的用户。存储默认每用户 2 GiB、全局至少余 1 GiB，每个在途任务预留 512 MiB，取消但租约未结束仍占预留；配置由 `MARKETING_ANALYSIS_OWNER_BYTES` / `MARKETING_ANALYSIS_MIN_FREE_BYTES` 共享传给 API 和 Worker。抽帧后删除 `gray.raw`，七天清理覆盖遗留临时文件和清单外 JPEG，保留 snapshot.frames 与 selection 的并集。
 
 ## 来源、隔离与证据
 
@@ -102,12 +102,10 @@ OCR 只合并相邻一致文字；空结果、漏识别或价格/否定词变化
 | `GET /capabilities` | 是否启用、时长与平台 |
 | `POST /uploads` | multipart `{file,clientRequestId}`，幂等私有上传，返回 `{id,name}`，201 |
 | `POST /` | `{shareText?,uploadId?,clientRequestId,target?:{projectId,projectVersion,locale}}`，两个来源字段二选一，幂等创建并关联草稿，202 |
-| `GET /?offset=0` / `GET /:id` | 每页 20 条简要历史 / 完整结果与覆盖情况 |
+| `GET /:id` | 完整结果与覆盖情况 |
 | `GET /:id/frames/:frameId` | 私有 JPEG，`private,no-store` |
 | `POST /:id/cancel` | 持久化取消，Worker 中止请求和本地处理 |
-| `POST /:id/resume` / `POST /:id/summarize` | `{expectedRevision}`，显式付费动作，拒绝未知调用 |
-| `PATCH /:id/text` | `{expectedRevision,texts:[{id,text}]}`，保存新修订，保留原文 |
-| `POST /:id/apply-preview` / `POST /:id/apply` | `{expectedRevision,projectId,projectVersion,evidenceIds}`，兼容旧记录的预览 / 选用，新工作台不调用 |
+| `POST /:id/resume` | `{expectedRevision, visualOnly?}`，显式付费动作，拒绝未知调用；旧版文字编辑产生的修订（revision > 1）从摘要继续 |
 | `DELETE /:id` | 检查租约、用量和项目引用后删除私有内容 |
 | `GET /sessions` / `PUT /sessions/:platform` / `DELETE /sessions/:platform` | 登录态状态 / 导入 `{cookies}` / 撤销，不返回 Cookie |
 

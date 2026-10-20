@@ -34,11 +34,6 @@ export class PgAnalysisStore implements AnalysisJobStore {
   async get(owner: string, id: string) {
     try { return analysisRecord(await this.row(owner, id)); } catch (error) { if (error instanceof AnalysisError && error.status === 404) return null; throw error; }
   }
-  async list(owner: string, offset = 0) {
-    return (await this.pool.query(`SELECT id,user_id,revision,version,status,stage,error_code,created_at,updated_at,creation_context,
-      jsonb_build_object('source',snapshot->'source','frames','[]'::jsonb,'frameTexts','[]'::jsonb,'texts','[]'::jsonb,'observations','[]'::jsonb) AS snapshot
-      FROM marketing_reference_analyses WHERE user_id=$1 AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT 20 OFFSET $2`, [owner, offset])).rows.map(analysisRecord);
-  }
   private async admit(client: pg.PoolClient, owner: string) {
     const pending = (await client.query("SELECT count(*) AS count FROM marketing_reference_analyses WHERE user_id=$1 AND status IN ('queued','running') AND deleted_at IS NULL", [owner])).rows[0];
     if (this.capacity) {
@@ -173,15 +168,14 @@ export class PgAnalysisStore implements AnalysisJobStore {
     });
     return this.get(owner, id);
   }
-  async resume(owner: string, id: string, revision: number, summarizeOnly = false, visualOnly = false) {
+  async resume(owner: string, id: string, revision: number, visualOnly = false) {
     await this.transaction(async client => {
       await ownerLock(client, owner); const row = await this.row(owner, id, client, true);
       if (row.revision !== revision) throw new AnalysisError("REVISION_CONFLICT", 409);
       if (row.lease_until && new Date(row.lease_until).getTime() > Date.now()) throw new AnalysisError("ANALYSIS_BUSY", 409);
       if ((await client.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR (receipt->'usage' IS NULL AND receipt->>'outcome'<>'rejected'))`, [id])).rowCount) throw new AnalysisError("REQUEST_UNKNOWN", 409);
       if (row.status === "queued") return;
-      if (summarizeOnly && !row.snapshot.frames.length) throw new AnalysisError("EVIDENCE_REQUIRED", 409);
-      if (!summarizeOnly && row.status === "ready") return;
+      if (row.status === "ready") return;
       if (visualOnly) {
         if (!row.selection || row.snapshot.source.mediaKey || row.snapshot.speech || (await client.query(
           "SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND (step_id LIKE 'summary:%' OR step_id LIKE 'copy:%' OR (step_id='asr:source' AND receipt->>'outcome'='completed')) LIMIT 1", [id])).rowCount) throw new AnalysisError("MODEL_INPUT_CHANGED", 409);
@@ -195,23 +189,10 @@ export class PgAnalysisStore implements AnalysisJobStore {
       await client.query(`UPDATE marketing_analysis_steps SET retry_requested=
         (receipt->>'outcome'='rejected' OR step_id NOT LIKE 'ocr:%')
         WHERE analysis_id=$1 AND ((receipt->>'outcome'='failed' AND receipt->'usage' IS NOT NULL) OR receipt->>'outcome'='rejected')`, [id]);
+      // Rows revised by the former text editor (revision > 1) resume from the summary.
       await client.query(`UPDATE marketing_reference_analyses SET status='queued',mode=$2,reserved_cost=$3,cancel_requested=false,
-        lease_token=NULL,lease_until=NULL,error_code=NULL,scratch_cleaned_at=NULL,version=version+1,updated_at=now() WHERE id=$1`, [id, summarizeOnly || row.revision > 1 ? "summary" : "all", 0]);
+        lease_token=NULL,lease_until=NULL,error_code=NULL,scratch_cleaned_at=NULL,version=version+1,updated_at=now() WHERE id=$1`, [id, row.revision > 1 ? "summary" : "all", 0]);
       await client.query("UPDATE tasks SET status='pending',error=NULL,updated_at=now() WHERE id=$1", [id]);
-    });
-    return this.get(owner, id);
-  }
-  async edit(owner: string, id: string, revision: number, changes: Pick<ScreenText, "id" | "text">[]) {
-    await this.transaction(async client => {
-      const row = await this.row(owner, id, client, true);
-      if (row.revision !== revision) throw new AnalysisError("REVISION_CONFLICT", 409);
-      if (["queued", "running"].includes(row.status) || (row.lease_until && new Date(row.lease_until).getTime() > Date.now())) throw new AnalysisError("ANALYSIS_BUSY", 409);
-      const texts: ScreenText[] = row.snapshot.texts;
-      if (new Set(changes.map(t => t.id)).size !== changes.length || changes.some(t => !texts.some(old => old.id === t.id))) throw new AnalysisError("INVALID_TEXT_REFERENCE");
-      await client.query("INSERT INTO marketing_analysis_revisions(analysis_id,revision,snapshot) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", [id, revision, JSON.stringify(row.snapshot)]);
-      const snapshot: AnalysisSnapshot = { ...row.snapshot, texts: texts.map(t => ({ ...t, text: changes.find(change => change.id === t.id)?.text ?? t.text })) };
-      delete snapshot.summary; delete snapshot.summaryRevision; delete snapshot.creation;
-      await client.query("UPDATE marketing_reference_analyses SET snapshot=$2,revision=revision+1,version=version+1,status='partial',error_code=NULL,updated_at=now() WHERE id=$1", [id, JSON.stringify(snapshot)]);
     });
     return this.get(owner, id);
   }

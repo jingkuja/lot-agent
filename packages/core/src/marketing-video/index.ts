@@ -27,14 +27,23 @@ export function marketingAssetIds(value: string | string[] | undefined): string[
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
 
-export const MarketingDraftSchema = z.object({
+/** Older drafts may hold a cover image that never reached generation. Drop it before
+ * strict parsing, so stored drafts and frozen jobs keep loading. */
+function withoutLegacyCover(value: unknown) {
+  const assets = value && typeof value === "object" ? (value as { assets?: unknown }).assets : undefined;
+  if (!assets || typeof assets !== "object" || !("cover" in assets)) return value;
+  const { cover: _cover, ...rest } = assets as Record<string, unknown>;
+  return { ...(value as object), assets: rest };
+}
+export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),
   reference: z.string().max(6000).default(""),
   referenceUpload: z.object({ id: z.string().uuid(), name: z.string().min(1).max(255) }).strict().optional(),
   script: z.string().max(2000).default(""),
   durationSec: z.number().int().min(15).max(60).default(30),
-  mode: z.enum(["avatar", "recorded"]).default("avatar"),
+  // Only digital-presenter videos exist; drafts may still hold the never-offered "recorded".
+  mode: z.literal("avatar").catch("avatar"),
   background: z.string().max(600).default("简约演播室"),
   voice: z.string().max(100).default("自然旁白"),
   ratio: z.enum(["9:16", "16:9", "1:1"]).default("9:16"),
@@ -45,12 +54,12 @@ export const MarketingDraftSchema = z.object({
     portrait: MarketingImagesSchema.optional(), background: MarketingImagesSchema.optional(),
     scene: MarketingImagesSchema.optional(),
     voice: z.string().uuid().optional(), video: z.string().uuid().optional(),
-    music: z.string().uuid().optional(), cover: z.string().uuid().optional(),
+    music: z.string().uuid().optional(),
   }).strict().refine(assets => marketingAssetIds(assets.background).length + marketingAssetIds(assets.scene).length <= 3, { message: "背景与场景图片合计最多 3 张。" }).default({}),
   storyboard: MarketingStoryboardSchema.default([]),
   publishTitle: z.string().max(100).default(""),
   tags: z.string().max(160).default(""),
-}).strict();
+}).strict());
 export type MarketingDraft = z.infer<typeof MarketingDraftSchema>;
 /** Frozen input format. Versions before 2 predate reference checks; rules
  * always come from the profile of the recorded `modelId`. */
@@ -92,17 +101,30 @@ export const MarketingReviewSchema = z.object({
 }).strict();
 export type MarketingReview = z.infer<typeof MarketingReviewSchema>;
 export interface MarketingSegment { index: number; script: string; durationSec: number; }
+/** Why a video task stopped. The worker stores it with the error text; the UI maps
+ * it to guidance, so rewording a message never changes the offered actions. */
+export const MARKETING_FAILURE_CODES = [
+  "CONNECT_FAILED", "REAL_PERSON_REJECTED", "MODEL_AUTH_REQUIRED", "CONFIG_MISSING", "MODEL_QUOTA", "MODEL_RATE_LIMIT",
+  "JOB_BUSY", "DOWNLOAD_INCOMPLETE", "GENERATION_FAILED", "TIMED_OUT", "STATUS_UNCONFIRMED", "QUALITY_CHECK_FAILED",
+  "NOT_RECOVERABLE", "COMPOSITION_FAILED", "SUBMISSION_UNKNOWN",
+] as const;
+export type MarketingFailureCode = typeof MARKETING_FAILURE_CODES[number];
+export function isMarketingFailureCode(value: unknown): value is MarketingFailureCode {
+  return MARKETING_FAILURE_CODES.includes(value as MarketingFailureCode);
+}
 export interface MarketingProject {
   referenceAnalysis?: { id: string; acceptedRevision: number; evidenceIds: string[] };
   id: string; version: number; draft: MarketingDraft; updatedAt: string;
   review: MarketingReview | null; reviewedScript: string | null;
   taskId: string | null; status: string; progress: number; stage?: string;
-  error?: string; output?: { assetIds: string[]; assets: { url: string; mime: string }[] };
+  error?: string; errorCode?: MarketingFailureCode; output?: { assetIds: string[]; assets: { url: string; mime: string }[] };
   knowledgeItemId: string | null;
   knowledgeVersion?: number | null;
   /** Clips of the current job whose paid submission outcome is unknown. */
   unknownSegments?: number;
 }
+/** What a page polls while a video is being made: task fields only, no draft or material links. */
+export type MarketingTaskState = Pick<MarketingProject, "id" | "version" | "taskId" | "status" | "progress" | "stage" | "error" | "errorCode" | "output" | "unknownSegments">;
 /** A store is owner-scoped even for worker reads; infrastructure lives in server. */
 export interface MarketingProjectStore {
   get(owner: string, id: string): Promise<MarketingProject | null>;

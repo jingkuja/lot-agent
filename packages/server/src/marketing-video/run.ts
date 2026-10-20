@@ -7,6 +7,7 @@ import { PgMarketingProjectStore } from "./repository.js";
 import { composeMarketingVideo, inspectMedia, mediaCapabilities, ownedAssetPath } from "./media.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
+import { marketingFailureCode, MarketingRunError } from "./failure.js";
 import { publicStaticUrl } from "../util/public-base.js";
 
 const UNKNOWN = UNKNOWN_SUBMISSION;
@@ -34,10 +35,10 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
   let timer: ReturnType<typeof setInterval> | undefined;
   try {
     locked = (await connection.query("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked", [lockKey])).rows[0].locked;
-    if (!locked) throw new Error("该视频正在处理，请稍后查询原任务。");
+    if (!locked) throw new MarketingRunError("JOB_BUSY", "该视频正在处理，请稍后查询原任务。");
     const store = new PgMarketingProjectStore(deps.db.pool);
     const project = await store.get(job.userId, String(job.input.projectId));
-    if (!project || project.taskId !== job.id) throw new Error("视频任务不存在");
+    if (!project || project.taskId !== job.id) throw new MarketingRunError("NOT_RECOVERABLE", "视频任务不存在");
     const assertActive = async () => {
       if (controller.signal.aborted || await deps.db.getTaskStatus(job.id) === "cancelled") { abort(); throw new JobCancelledError(); }
     };
@@ -53,26 +54,29 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     // The frozen model's rules apply; version 1 inputs predate reference checks.
     const profile = marketingJobProfile(job.input);
     const referenceError = inputVersion >= 2 ? marketingReferenceError(draft, profile) : "";
-    if (referenceError) throw new Error(referenceError);
+    if (referenceError) throw new MarketingRunError("NOT_RECOVERABLE", referenceError);
     const segments = (await store.segments(job.userId, project.id)).map(segment => ({ ...segment, duration_sec: Number(segment.duration_sec) }));
     // Stop the entire mixed batch before any fresh paid intent if a sibling's
     // submission result is still unknown.
-    if (segments.some(segment => segmentRecoveryAction(segment) === "unknown")) throw new Error(UNKNOWN_SUBMISSION_MESSAGE);
+    if (segments.some(segment => segmentRecoveryAction(segment) === "unknown")) throw new MarketingRunError("SUBMISSION_UNKNOWN", UNKNOWN_SUBMISSION_MESSAGE);
     // Persisted boundaries are authoritative, including legacy jobs without a
     // storyboard. Never re-plan an already submitted video during recovery.
     // Check the full paid duration before resolving providers or sending a clip.
     if (!segments.length || segments.length > 15 || segments.some((s, i) => s.slot !== i || !Number.isInteger(s.duration_sec) || s.duration_sec < 4 || s.duration_sec > marketingShotMaxSeconds(draft, profile))
-      || !isMarketingDurationValid(draft.durationSec, segments.reduce((sum, s) => sum + s.duration_sec, 0))) throw new Error("视频分段配置不完整");
+      || !isMarketingDurationValid(draft.durationSec, segments.reduce((sum, s) => sum + s.duration_sec, 0))) throw new MarketingRunError("NOT_RECOVERABLE", "视频分段配置不完整");
     if (draft.storyboard.length) {
       const planned = resolveMarketingSegments(draft, profile);
-      if (planned.length !== segments.length || planned.some((p, i) => p.script !== segments[i].script || p.durationSec !== segments[i].duration_sec)) throw new Error("视频分段配置不完整");
-    } else if (segments.map(s => s.script).join("").trim() !== draft.script.trim()) throw new Error("视频分段配置不完整");
+      if (planned.length !== segments.length || planned.some((p, i) => p.script !== segments[i].script || p.durationSec !== segments[i].duration_sec)) throw new MarketingRunError("NOT_RECOVERABLE", "视频分段配置不完整");
+    } else if (segments.map(s => s.script).join("").trim() !== draft.script.trim()) throw new MarketingRunError("NOT_RECOVERABLE", "视频分段配置不完整");
     // Validate every remaining submission before any segment incurs a model or voice charge.
     // Completed/resumable vendor tasks keep using their original submitted prompts.
-    const prompts = segments.map((segment, index) => segmentRecoveryAction(segment) === "submit"
-      ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile) : undefined);
+    let prompts: (string | undefined)[];
+    try {
+      prompts = segments.map((segment, index) => segmentRecoveryAction(segment) === "submit"
+        ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile) : undefined);
+    } catch (error) { throw new MarketingRunError("NOT_RECOVERABLE", (error as Error).message); }
     // The API host's probe says nothing about this worker. Stop before any voice or clip is paid for.
-    if (!(await mediaCapabilities()).composition) throw new Error("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
+    if (!(await mediaCapabilities()).composition) throw new MarketingRunError("CONFIG_MISSING", "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
     // Kling: create each voice sample once per parent job, before clips run in
     // parallel, so clips never race to POST it. Clips that already hold a
     // per-clip voice checkpoint (jobs started before this change) keep it.
@@ -85,7 +89,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
         const { rows } = await deps.db.pool.query("SELECT DISTINCT task_id FROM generation_voice_tasks WHERE task_id::text=ANY($1::text[]) AND user_id=$2", [freshClips, job.userId]);
         for (const row of rows) legacyVoiceClips.add(String(row.task_id));
         if (freshClips.some(id => !legacyVoiceClips.has(id))) {
-          if (!voiceGen.prepareKlingVoices) throw new Error("Kling 音色服务未配置，无法提交参考声音。");
+          if (!voiceGen.prepareKlingVoices) throw new MarketingRunError("CONFIG_MISSING", "Kling 音色服务未配置，无法提交参考声音。");
           await voiceGen.prepareKlingVoices({ taskId: job.id, userId: job.userId, signal: controller.signal, assertNotCancelled: assertActive, resolveReferenceUrl: voiceGen.resolveReferenceUrl,
             referenceAudio: typeof referenceAudio === "string" ? publicStaticUrl(referenceAudio) : referenceAudio.map(publicStaticUrl) });
         }
@@ -100,7 +104,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
         const i = next++; const segment = segments[i];
         try {
           await assertActive();
-          if (segment.vendor_task_id === UNKNOWN) throw new Error("片段提交结果未知，请核实原任务；系统不会重复提交付费请求。");
+          if (segment.vendor_task_id === UNKNOWN) throw new MarketingRunError("SUBMISSION_UNKNOWN", UNKNOWN_SUBMISSION_MESSAGE);
           let output = segment.output;
           let generated = false;
           const child = { id: segment.task_id as string, userId: job.userId, input: { ...job.input, draft: undefined, durationSec: segment.duration_sec, generate_audio: generateAudio, reference_audio: generateAudio ? job.input.reference_audio : undefined } };
@@ -115,7 +119,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
             if (output?.retrySafe === true) {
               await deps.db.pool.query("UPDATE tasks SET vendor_task_id=NULL,output=NULL WHERE id=$1 AND user_id=$2", [segment.task_id, job.userId]);
             }
-            await deps.db.pool.query("UPDATE tasks SET status='running',error=NULL WHERE id=$1 AND user_id=$2 AND status<>'succeeded'", [segment.task_id, job.userId]);
+            await deps.db.pool.query("UPDATE tasks SET status='running',error=NULL,error_code=NULL WHERE id=$1 AND user_id=$2 AND status<>'succeeded'", [segment.task_id, job.userId]);
             // A known vendor task is polled/downloaded without rebuilding its old prompt.
             Object.assign(child.input, { prompt: prompts[i] ?? "" });
             const provider = gen.provider;
@@ -130,7 +134,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                 create: async (request) => {
                   await assertActive();
                   const claim = await deps.db.pool.query("UPDATE tasks SET vendor_task_id=$2 WHERE id=$1 AND vendor_task_id IS NULL RETURNING id", [child.id, UNKNOWN]);
-                  if (!claim.rowCount) throw new Error("片段提交结果未知，请核实原任务。");
+                  if (!claim.rowCount) throw new MarketingRunError("SUBMISSION_UNKNOWN", "片段提交结果未知，请核实原任务。");
                   await assertActive();
                   let result;
                   try { result = await provider.create(request); }
@@ -141,16 +145,16 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                       await deps.db.pool.query("UPDATE tasks SET vendor_task_id=NULL WHERE id=$1 AND vendor_task_id=$2", [child.id, UNKNOWN]);
                       throw error;
                     }
-                    throw new Error(UNKNOWN_SUBMISSION_MESSAGE);
+                    throw new MarketingRunError("SUBMISSION_UNKNOWN", UNKNOWN_SUBMISSION_MESSAGE);
                   }
-                  if (!result.taskId) throw new Error("片段提交结果未知，请核实原任务。");
+                  if (!result.taskId) throw new MarketingRunError("SUBMISSION_UNKNOWN", "片段提交结果未知，请核实原任务。");
                   // Persist immediately, including before another async operation can fail.
                   await deps.db.setTaskVendorId(child.id, result.taskId);
                   return result;
                 },
                 poll: async (id) => {
                   const result = await provider.poll(id);
-                  if (result.failureUnconfirmed) throw new Error("片段状态暂时无法确认，继续任务将查询原片段。");
+                  if (result.failureUnconfirmed) throw new MarketingRunError("STATUS_UNCONFIRMED", "片段状态暂时无法确认，继续任务将查询原片段。");
                   if (result.status === "failed") await deps.db.pool.query("UPDATE tasks SET output=$2 WHERE id=$1", [child.id, JSON.stringify({ retrySafe: true })]);
                   return result;
                 },
@@ -175,17 +179,17 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
               },
               updateProgress: async (_id, value) => { progress[i] = Math.min(99, Math.max(0, value)); await report(); },
             }, child, "video");
-            if (output.downloadFailed) throw new Error("片段已生成，下载未完成；重试将继续下载原片段。");
+            if (output.downloadFailed) throw new MarketingRunError("DOWNLOAD_INCOMPLETE", "片段已生成，下载未完成；重试将继续下载原片段。");
             generated = true;
           }
           if (!generated) await meter({ userId: job.userId, taskId: child.id, modelId: gen.modelId, usage: { inputCount: 0, outputCount: Number(segment.duration_sec) } });
           const asset = await deps.db.getAsset(output.assetIds[0]);
-          if (!asset || asset.user_id !== job.userId) throw new Error("片段素材不可用");
+          if (!asset || asset.user_id !== job.userId) throw new MarketingRunError("NOT_RECOVERABLE", "片段素材不可用");
           files[i] = await ownedAssetPath(deps.dataRoot, asset);
           const info = await inspectMedia(files[i], controller.signal);
           if (!info.video || (generateAudio && !info.audio) || info.duration < Number(segment.duration_sec) - 0.25) {
             await deps.db.pool.query("UPDATE tasks SET status='running',output=$2 WHERE id=$1 AND user_id=$3", [child.id, JSON.stringify({ retrySafe: true }), job.userId]);
-            throw new Error("生成片段缺少配音或时长不足；继续任务会重新生成该片段。");
+            throw new MarketingRunError("QUALITY_CHECK_FAILED", "生成片段缺少配音或时长不足；继续任务会重新生成该片段。");
           }
           await assertActive();
           await deps.db.pool.query("UPDATE tasks SET status='running' WHERE id=$1 AND user_id=$2 AND status IN ('failed','cancelled')", [child.id, job.userId]);
@@ -194,7 +198,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
         } catch (error) {
           failure ??= error;
           if (controller.signal.aborted) await deps.db.cancelTask(segment.task_id);
-          else await deps.db.setTaskError(segment.task_id, error instanceof Error ? error.message : "片段生成失败");
+          else await deps.db.setTaskError(segment.task_id, error instanceof Error ? error.message : "片段生成失败", marketingFailureCode(error));
         }
       }
     };
@@ -205,17 +209,27 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     let music: string | undefined;
     if (draft.assets.music) {
       const asset = await deps.db.getAsset(draft.assets.music);
-      if (!asset || asset.user_id !== job.userId) throw new Error("背景音乐不可用");
-      music = await ownedAssetPath(deps.dataRoot, asset);
+      if (!asset || asset.user_id !== job.userId) throw new MarketingRunError("NOT_RECOVERABLE", "背景音乐不可用");
+      music = await ownedAssetPath(deps.dataRoot, asset).catch(() => { throw new MarketingRunError("NOT_RECOVERABLE", "背景音乐不可用"); });
     }
-    const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, signal: controller.signal });
-    await assertActive();
-    const gen = await deps.generation(job, controller.signal);
-    const id = randomUUID(); const key = `${id}.mp4`;
-    const { url } = await gen.storage.put({ key, body: result.body, contentType: "video/mp4" });
-    await assertActive();
-    await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.body.length, durationSec: result.durationSec, width: result.width, height: result.height });
-    return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }] };
+    // Every clip is stored by now, so a retry reassembles them without a model call.
+    try {
+      const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, signal: controller.signal });
+      await assertActive();
+      const gen = await deps.generation(job, controller.signal);
+      const id = randomUUID(); const key = `${id}.mp4`;
+      const { url } = await gen.storage.put({ key, body: result.body, contentType: "video/mp4" });
+      await assertActive();
+      await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.body.length, durationSec: result.durationSec, width: result.width, height: result.height });
+      return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }] };
+    } catch (error) {
+      if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;
+      throw new MarketingRunError("COMPOSITION_FAILED", error instanceof Error ? error.message : "视频合成失败", { cause: error });
+    }
+  } catch (error) {
+    // The queue stores `errorCode` with the message; cancellation is recorded by status.
+    if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;
+    throw new MarketingRunError(marketingFailureCode(error), error instanceof Error ? error.message : String(error), { cause: error });
   } finally {
     if (timer) clearInterval(timer);
     signal.removeEventListener("abort", abort);

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { assertPublicUrl, type KlingVoiceProvider, type KlingVoiceStore, type ReferenceInput } from "@lot-agent/core";
+import { GenerationError } from "./errors.js";
 
 export interface PrepareKlingVoicesInput {
   taskId: string;
@@ -31,7 +32,7 @@ export class KlingVoicePreparation {
     for (const url of urls) {
       let parsed: URL;
       try { parsed = new URL(url); } catch {
-        throw new Error("参考声音需要公网地址，请配置 PUBLIC_BASE_URL 后重新提交。");
+        throw new GenerationError("CONFIG_MISSING", "参考声音需要公网地址，请配置 PUBLIC_BASE_URL 后重新提交。");
       }
       if (parsed.username || parsed.password) throw new Error("参考声音必须使用无凭证的公网音频地址。");
     }
@@ -73,8 +74,8 @@ export class KlingVoicePreparation {
       const start = now();
       while (task.status !== "succeed") {
         await input.assertNotCancelled();
-        if (task.status === "failed") throw new Error(task.error ? `Kling 音色创建失败：${task.error}` : "Kling 音色创建失败，请更换清晰的单人声音样例。");
-        if (now() - start >= (this.deps.maxWaitMs ?? 5 * 60_000)) throw new Error("Kling 音色创建超时，请查询原任务，勿重复提交。");
+        if (task.status === "failed") throw new GenerationError("GENERATION_FAILED", task.error ? `Kling 音色创建失败：${task.error}` : "Kling 音色创建失败，请更换清晰的单人声音样例。");
+        if (now() - start >= (this.deps.maxWaitMs ?? 5 * 60_000)) throw new GenerationError("TIMED_OUT", "Kling 音色创建超时，请查询原任务，勿重复提交。");
         await sleep(2500);
         await input.assertNotCancelled();
         task = await this.deps.provider.poll(task.taskId, input.signal);

@@ -16,7 +16,8 @@ import type { ModelCatalog } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
-import { MARKETING_VIDEO_MODEL } from "../modules/marketing-video/draft.js";
+// Display default only; the server substitutes its configured marketing model.
+import { DEFAULT_MARKETING_VIDEO_MODEL } from "@lot-agent/core/marketing-video";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveImageSelection, resolveLlmSelection } from "../lib/model-defaults.js";
 import { digitalEmployeeConversations as filterDigitalEmployeeConversations, withoutDigitalEmployee } from "../lib/product-agent-scope.js";
 import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
@@ -308,7 +309,7 @@ export function Workspace({
         if (kind === "image" || kind === "video" || kind === "marketing_video") {
           const modelId = kind === "image"
             ? resolveImageSelection(selectedModels.image, modelCatalog.image)
-            : kind === "marketing_video" ? MARKETING_VIDEO_MODEL : selectedModels.video;
+            : kind === "marketing_video" ? DEFAULT_MARKETING_VIDEO_MODEL : selectedModels.video;
           generateMedia(content, kind === "image" ? "image" : "video", settings, files, modelId ?? undefined);
         } else {
           send(content, files, undefined, selectedModels.llm ?? undefined, knowledgeBases);

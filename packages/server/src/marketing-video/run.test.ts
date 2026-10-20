@@ -81,16 +81,17 @@ describe("marketing segment submission failures", () => {
     return { result, released };
   }
   it("releases the claim after an explicit vendor rejection so the user can retry after fixing it", async () => {
-    for (const error of [new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 429 }), new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: 400 }), new ProviderError("generation", "create", "CONNECT_ERROR")]) {
+    for (const [error, errorCode] of [[new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 429 }), "MODEL_RATE_LIMIT"], [new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: 400 }), "REAL_PERSON_REJECTED"], [new ProviderError("generation", "create", "CONNECT_ERROR"), "CONNECT_FAILED"]] as const) {
       const f = await submitWith(error);
-      await expect(f.result).rejects.toBe(error);
+      // The queue stores the code; the original provider error stays as the cause.
+      await expect(f.result).rejects.toMatchObject({ errorCode, cause: error, message: error.message });
       expect(f.released()).toBe(true);
     }
   });
   it("keeps ambiguous submissions blocked to avoid paying twice", async () => {
     for (const error of [new ProviderError("generation", "create", "TRANSPORT_ERROR"), new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 502 }), new Error("socket hang up")]) {
       const f = await submitWith(error);
-      await expect(f.result).rejects.toThrow("片段提交结果未知");
+      await expect(f.result).rejects.toMatchObject({ errorCode: "SUBMISSION_UNKNOWN", message: expect.stringContaining("片段提交结果未知") });
       expect(f.released()).toBe(false);
     }
     vi.mocked(runGenerationJob).mockReset();

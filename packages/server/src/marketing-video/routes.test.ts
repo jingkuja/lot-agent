@@ -58,6 +58,19 @@ describe("marketing project HTTP boundaries", () => {
       expect(asset.url).toBe("/static/uploads/portrait.png");
     } finally { vi.unstubAllEnvs(); }
   });
+  it("serves polled task state without reading or signing materials", async () => {
+    const f = fixture();
+    const state = { id, version: 3, taskId: "task", status: "failed", progress: 40, error: "x", errorCode: "TIMED_OUT" };
+    Object.assign(f.store, { taskState: vi.fn(async (owner: string) => owner === "owner" ? state : null) });
+    const response = await f.call(`/${id}/status`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(state);
+    expect(f.service.db.getAsset).not.toHaveBeenCalled();
+    expect(f.store.get).not.toHaveBeenCalled();
+    const other = fixture("intruder");
+    Object.assign(other.store, { taskState: vi.fn(async (owner: string) => owner === "owner" ? state : null) });
+    expect((await other.call(`/${id}/status`)).status).toBe(404);
+  });
   it("serves the frontend's mounted list, capabilities and copy paths", async () => {
     const f = fixture();
     const list = await f.call("/");

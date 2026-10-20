@@ -46,7 +46,7 @@ try {
     ["digital_employee", "数字员工", "独立模块"],
   ].map(([id, name, description], sortOrder) => ({ id, name, description, type: id, installed: true, sortOrder }));
   const conversations = agents.filter((a) => a.id !== 'digital_employee').map((a) => ({ id: `history-${a.id}`, title: `${a.id} 历史记录`, agent_id: a.id, created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:00:00Z' }));
-  let taskState = 'running', sequence = 0;
+  let taskState = 'running', sequence = 0, statusPolls = 0;
   let apiUnavailable = true;
   let failNextReview = false, failNextStoryboard = false;
   let holdNextSave = false, releaseSave;
@@ -73,7 +73,7 @@ try {
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
     // The UI follows the server's clip profile. This fixture keeps Kling's clip limits under a
     // neutral ID with no image dimension limits, so the 1×1 fixture images pass upload checks.
-    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
+    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
     if (path === '/api/marketing-videos') {
       const query = new URL(request.url()).searchParams.get('q') ?? '';
       return json({ data: [...projects.values()].filter(p => !query || [p.draft.topic, p.draft.publishTitle, p.draft.script].some(text => text?.includes(query))) });
@@ -131,6 +131,11 @@ try {
       if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; return json(p); }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
       if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'] }; }
+      if (action === 'status') {
+        statusPolls++;
+        const { id: projectId, version, taskId, status, progress, stage, error, errorCode, output, unknownSegments } = p;
+        return json({ id: projectId, version, taskId, status, progress, stage, error, errorCode, output, unknownSegments });
+      }
       return json({ ...p, assets: Object.fromEntries(uploadedAssets) });
     }
     if (path.startsWith('/api/assets/') && request.method() === 'GET') {
@@ -574,7 +579,7 @@ try {
   await page.getByText('35% · Cancellation requested', { exact: true }).waitFor();
   await snap('marketing-video-cancelled-en-dark.png');
   // Unknown clip outcomes: no plain resume; one confirmed release, then one retry of the same job.
-  taskState = 'failed'; queued.stage = '片段完成 1/2'; queued.error = '片段提交结果未知，请核实原任务；系统不会重复提交付费请求。'; queued.unknownSegments = 2;
+  taskState = 'failed'; queued.stage = '片段完成 1/2'; queued.error = '片段提交结果未知，请核实原任务；系统不会重复提交付费请求。'; queued.errorCode = 'SUBMISSION_UNKNOWN'; queued.unknownSegments = 2;
   const generatedBeforeRelease = writes.filter(r => r.path.endsWith('/generate')).length;
   await page.reload(); await chooseAgent('Marketing video');
   await page.getByRole('button', { name: 'Resubmit unknown clips', exact: true }).waitFor();
@@ -592,6 +597,7 @@ try {
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-unavailable-en-dark.png');
   assert(materialRefreshes.length > 0, 'Expired or failed previews reauthorize through the owned asset API');
+  assert(statusPolls > 0, 'progress is polled from the task state endpoint');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []);
   console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, model subtitles without local subtitle support, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {

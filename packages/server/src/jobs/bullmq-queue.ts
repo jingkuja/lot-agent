@@ -161,8 +161,10 @@ export class BullmqJobQueue implements JobQueue {
             const message = err instanceof Error ? err.message : String(err);
             const retry = jobType !== "marketing.video" && attempts < (bullJob.opts.attempts ?? 1)
               && (err as Error)?.name !== "UnrecoverableError";
+            // Typed worker errors carry a cause code the UI can act on without parsing the message.
+            const errorCode = typeof (err as { errorCode?: unknown })?.errorCode === "string" ? (err as { errorCode: string }).errorCode : undefined;
             if (retry) await this.db.markTaskRetryPending(taskId, attempts);
-            else await this.db.setTaskError(taskId, message);
+            else await this.db.setTaskError(taskId, message, errorCode);
             throw err; // rethrow so BullMQ marks job as failed
           } finally {
             clearInterval(cancellationTimer);

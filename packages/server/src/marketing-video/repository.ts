@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
-import { MarketingDraftSchema, marketingJobProfile, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
+import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 import { UNKNOWN_SUBMISSION } from "./recovery.js";
 
 export class MarketingError extends Error {
@@ -13,22 +13,31 @@ export function renderKey(draft: MarketingDraft) {
   const { publishTitle: _title, tags: _tags, ...rest } = MarketingDraftSchema.parse(draft);
   return JSON.stringify(rest);
 }
-const select = `SELECT p.*, t.status, t.progress, t.stage, t.error, t.output,
+const taskColumns = `t.status, t.progress, t.stage, t.error, t.error_code, t.output,
   (SELECT count(*)::int FROM marketing_video_segments s JOIN tasks st ON st.id=s.task_id
-    WHERE s.project_id=p.id AND st.input->>'parentId'=p.task_id::text AND st.vendor_task_id='${UNKNOWN_SUBMISSION}') AS unknown_segments
-  FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
-function project(row: Record<string, any>): MarketingProject {
-  return { id: row.id, version: row.version, draft: MarketingDraftSchema.parse(row.draft), updatedAt: new Date(row.updated_at).toISOString(), review: row.review,
-    ...(row.reference_analysis_id ? { referenceAnalysis: { id: row.reference_analysis_id, acceptedRevision: row.reference_revision, evidenceIds: row.reference_evidence_ids ?? [] } } : {}),
-    reviewedScript: row.reviewed_script, taskId: row.task_id, status: row.status ?? "draft", progress: Number(row.progress ?? 0),
-    stage: row.stage ?? undefined, error: row.error ?? undefined, output: row.output ?? undefined, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version,
+    WHERE s.project_id=p.id AND st.input->>'parentId'=p.task_id::text AND st.vendor_task_id='${UNKNOWN_SUBMISSION}') AS unknown_segments`;
+const select = `SELECT p.*, ${taskColumns} FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
+function taskState(row: Record<string, any>): MarketingTaskState {
+  return { id: row.id, version: row.version, taskId: row.task_id, status: row.status ?? "draft", progress: Number(row.progress ?? 0),
+    stage: row.stage ?? undefined, error: row.error ?? undefined, ...(isMarketingFailureCode(row.error_code) ? { errorCode: row.error_code } : {}), output: row.output ?? undefined,
     ...(Number(row.unknown_segments) > 0 ? { unknownSegments: Number(row.unknown_segments) } : {}) };
+}
+function project(row: Record<string, any>): MarketingProject {
+  return { ...taskState(row), draft: MarketingDraftSchema.parse(row.draft), updatedAt: new Date(row.updated_at).toISOString(), review: row.review,
+    ...(row.reference_analysis_id ? { referenceAnalysis: { id: row.reference_analysis_id, acceptedRevision: row.reference_revision, evidenceIds: row.reference_evidence_ids ?? [] } } : {}),
+    reviewedScript: row.reviewed_script, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version };
 }
 export class PgMarketingProjectStore implements MarketingProjectStore {
   constructor(readonly pool: pg.Pool) {}
   async get(owner: string, id: string) {
     const { rows } = await this.pool.query(`${select} WHERE p.user_id=$1 AND p.id=$2`, [owner, id]);
     return rows[0] ? project(rows[0]) : null;
+  }
+  /** One indexed row per poll: no draft parsing, material lookups or link signing. */
+  async taskState(owner: string, id: string) {
+    const { rows } = await this.pool.query(`SELECT p.id, p.version, p.task_id, ${taskColumns}
+      FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id WHERE p.user_id=$1 AND p.id=$2`, [owner, id]);
+    return rows[0] ? taskState(rows[0]) : null;
   }
   async list(owner: string) {
     return (await this.page(owner)).data;
@@ -100,7 +109,7 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         if (retry) {
           const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [`marketing:${p.task_id}`]);
           if (!lock.rows[0].locked) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
-          await client.query(`UPDATE tasks SET status='pending',error=NULL,updated_at=now() WHERE id=$1 AND user_id=$2 AND status IN ('failed','cancelled')`, [p.task_id, owner]);
+          await client.query(`UPDATE tasks SET status='pending',error=NULL,error_code=NULL,updated_at=now() WHERE id=$1 AND user_id=$2 AND status IN ('failed','cancelled')`, [p.task_id, owner]);
         }
         await client.query("COMMIT"); return p.task_id as string;
       }

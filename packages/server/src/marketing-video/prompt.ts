@@ -44,7 +44,6 @@ export const MARKETING_STORYBOARD_RULES = [
 ].join("\n");
 
 export function marketingPresenterRequirement(draft: MarketingDraft, generateAudio = !draft.assets.video, concise = false): string {
-  if (draft.mode !== "avatar" && !draft.assets.portrait) return "";
   if (concise) return `Presenter in EVERY shot, face and upper body visible; ${draft.assets.portrait ? "use portrait identity" : "one consistent person"}. ${generateAudio ? "Speak or demonstrate" : "Silent demonstration, no lip-sync"}. No product/scenery/hands-only shots. Overrides conflicting visuals.`;
   return `Mandatory character requirement: the presenter must be visibly on camera in EVERY shot, with a recognizable face and upper body, ${generateAudio ? "speaking or demonstrating the product" : "silently demonstrating the product without speech or lip-sync"}. ${draft.assets.portrait ? "The presenter must match the supplied portrait identity; never substitute another person." : "Create one consistent presenter across all shots."} Include the presenter explicitly in each shot's visual and action. Product details may share the frame with the presenter; never use product-only, scenery-only, hands-only shots or off-screen narration. This requirement takes precedence over conflicting shot directions.`;
 }

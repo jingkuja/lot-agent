@@ -125,7 +125,17 @@ it("uses a Grok reference video alone and caps references at 720p", () => {
   expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: id } }), grok)).toContain("不会参与生成");
   expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { scene: id } }), grok)).toContain("720p");
   expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { video: id } }), grok)).toContain("720p");
-  expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { cover: id, voice: id } }), grok)).toBe("");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { voice: id } }), grok)).toBe("");
+});
+
+it("keeps loading drafts saved with the removed cover slot and recorded mode", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const legacy = MarketingDraftSchema.parse({ mode: "recorded", assets: { cover: id, portrait: id } });
+  expect(legacy.mode).toBe("avatar");
+  expect(legacy.assets).toEqual({ portrait: id });
+  // Re-parsing a parsed draft is stable, so frozen-draft comparisons still match.
+  expect(MarketingDraftSchema.parse(legacy)).toEqual(legacy);
+  expect(MarketingDraftSchema.safeParse({ assets: { cover: "https://evil.test/a.png", video: "https://evil.test/v.mp4" } }).success).toBe(false);
 });
 
 describe("located marketing review edits", () => {

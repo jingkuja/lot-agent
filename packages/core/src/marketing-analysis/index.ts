@@ -64,10 +64,8 @@ export interface ReferenceAnalysis {
 export const CreateAnalysisSchema = z.object({ shareText: z.string().trim().min(1).max(4000).optional(), uploadId: z.string().uuid().optional(), clientRequestId: z.string().uuid(),
   target: z.object({ projectId: z.string().uuid(), projectVersion: z.number().int().positive(), locale: z.enum(["zh", "en", "id"]) }).strict().optional(),
 }).strict().refine(value => !!value.shareText !== !!value.uploadId, { message: "Choose one analysis source" });
-export const EditAnalysisTextSchema = z.object({ expectedRevision: z.number().int().positive(), texts: z.array(z.object({ id: z.string().regex(/^t\d{4}$/), text: z.string().max(6000) }).strict()).max(120) }).strict();
 export interface AnalysisStore {
   get(ownerId: string, id: string): Promise<ReferenceAnalysis | null>;
-  list(ownerId: string, offset?: number): Promise<ReferenceAnalysis[]>;
 }
 export interface AnalysisQueue {
   deliver(id: string): Promise<void>;
@@ -93,8 +91,7 @@ export interface AnalysisJobStore extends AnalysisStore {
   checkpoint(lease: AnalysisLease, snapshot: AnalysisSnapshot, stage: string, selection?: unknown): Promise<void>;
   finish(lease: AnalysisLease, errorCode?: string): Promise<void>;
   cancel(ownerId: string, id: string): Promise<ReferenceAnalysis | null>;
-  resume(ownerId: string, id: string, revision: number, summarizeOnly?: boolean): Promise<ReferenceAnalysis | null>;
-  edit(ownerId: string, id: string, revision: number, changes: Pick<ScreenText, "id" | "text">[]): Promise<ReferenceAnalysis | null>;
+  resume(ownerId: string, id: string, revision: number, visualOnly?: boolean): Promise<ReferenceAnalysis | null>;
   remove(ownerId: string, id: string): Promise<void>;
 }
 export * from "./evidence.js";

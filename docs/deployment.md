@@ -138,7 +138,7 @@ docker compose logs -f server worker
 
 首次启动顺序由健康检查保证：`postgres` / `redis` 先 healthy，`server` 与 `worker` 才启动；`server` 启动时自动执行表结构迁移。
 
-升级营销影像时，先停止旧 Worker，由新 server 完成全部已注册迁移（当前至 0047），再启用同版本 Worker 和 Web。迁移 `0044-marketing-result-recovery` 引入恢复契约；0046/0047 引入队列隔离和私有素材。新版本保存文本恢复输入和摘要冻结输入，媒体 Worker 会检查新字段就绪。保留数据库备份；已有 `needs_apply` 记录时不能直接降级到不认识该状态的旧版本。历史记录的恢复限制及验证范围见 [恢复与升级契约](marketing-video-reference-analysis.md#恢复与升级契约)，私有素材发布步骤见[升级和发布验收](marketing-video.md#升级和发布验收)。
+升级营销影像时，先停止旧 Worker，由新 server 完成全部已注册迁移（当前至 0051；0051 为 `tasks.error_code`，Worker 写入失败原因码前必须完成），再启用同版本 Worker 和 Web。迁移 `0044-marketing-result-recovery` 引入恢复契约；0046/0047 引入队列隔离和私有素材。新版本保存文本恢复输入和摘要冻结输入，媒体 Worker 会检查新字段就绪。保留数据库备份；已有 `needs_apply` 记录时不能直接降级到不认识该状态的旧版本。历史记录的恢复限制及验证范围见 [恢复与升级契约](marketing-video-reference-analysis.md#恢复与升级契约)，私有素材发布步骤见[升级和发布验收](marketing-video.md#升级和发布验收)。
 
 启动成功的标志：
 

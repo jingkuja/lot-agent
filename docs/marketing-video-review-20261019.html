@@ -80,7 +80,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h1>营销影像 Agent 评审</h1>
   <p class="meta">评审日期：2026-10-19 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>，之后共 15 个提交）</p>
-  <p class="meta">更新：2026-10-20 第二轮修复 F02–F08（改动尚未提交）。第一轮修复已在提交 <code>87dad64</code> 中提交。</p>
+  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
 </header>
 
@@ -88,6 +88,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <a href="#overview">总览</a>
   <a href="#fixes">第一轮修复</a>
   <a href="#fixes2">第二轮修复</a>
+  <a href="#fixes3">第三轮修复</a>
   <a href="#tracking">旧评审跟踪</a>
   <a href="#features">1 功能完成度</a>
   <a href="#ui">2 操作 UI</a>
@@ -99,14 +100,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
+  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
   <div class="grid">
     <div class="stat"><strong>8 · 0 · 0</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
     <div class="stat"><strong>0 · 1 · 7</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
-    <div class="stat"><strong>0 高 · 2 中 · 4 低</strong><span>当前健壮性问题（两轮共修复 10 项）</span></div>
-    <div class="stat"><strong>2590 / 81</strong><span>第二轮后全量单测：通过 / 跳过</span></div>
+    <div class="stat"><strong>0 高 · 0 中 · 2 低</strong><span>当前健壮性问题（三轮共修复 14 项）</span></div>
+    <div class="stat"><strong>2589 / 81</strong><span>第三轮后全量单测：通过 / 跳过</span></div>
   </div>
-  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。两轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。全程没有调用付费模型。</p>
+  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。全程没有调用付费模型。</p>
 </section>
 
 <section class="card" id="fixes">
@@ -233,6 +234,66 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p class="meta">仍未处理：运营侧的费用核对工具和处理时限；生产环境的排队 P95 尚未实测，默认并发 2 未经压测。</p>
 </section>
 
+<section class="card" id="fixes3">
+  <h2>第三轮修复（2026-10-20） <span class="tag ok">4 项健壮性问题已修复</span></h2>
+  <p>本轮处理第 3 节剩余的 2 项中级和 2 项低级问题。原则不变：不改变付费请求的身份和重试规则；已存的草稿和冻结任务照常加载。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>修复</th><th>保护与边界</th></tr></thead>
+    <tbody>
+      <tr><td>失败分类用正则匹配文字</td><td>
+        <ul>
+          <li>新增迁移 <code>0051-task-error-code</code>，给 <code>tasks</code> 加 <code>error_code</code> 列。</li>
+          <li><code>run.ts</code> 抛出带码的 <code>MarketingRunError</code>；其余错误由 <code>marketing-video/failure.ts</code> 按错误类型、供应商错误码、阶段和 HTTP 状态归类。</li>
+          <li>生成模块的超时、生成失败、配置缺失和缺少模型密钥改为带码的 <code>GenerationError</code>，提示文字不变。</li>
+          <li>队列把码和错误文字一起写入；前端 <code>failure.ts</code> 按码选择指引。码表在 core 的 <code>MARKETING_FAILURE_CODES</code>。</li>
+        </ul></td><td>
+        <ul>
+          <li>不读错误文字，改写提示不会改变可选操作。</li>
+          <li>前端码表是完整映射，core 新增码而前端未补指引时类型检查失败。</li>
+          <li>迁移前的旧任务和前端不认识的码显示通用指引（继续生成 / 复制为新草稿）。</li>
+          <li>未知片段仍按服务端计数判断。</li>
+        </ul></td></tr>
+      <tr><td>轮询读取完整项目</td><td>
+        <ul>
+          <li>新增 <code>GET /api/marketing-videos/:id/status</code>：只读一行任务状态（<code>repository.ts → taskState</code>）。</li>
+          <li>前端 <code>useTaskPolling</code> 从 2.5 秒开始，状态不变时逐步放大到 15 秒；标签页隐藏时暂停，重新显示时立即查询。</li>
+          <li>读取完整项目时，已私有的素材不再重复写私有标记。</li>
+        </ul></td><td>
+        <ul>
+          <li>按用户隔离，其他用户返回 404。</li>
+          <li>不解析草稿、不查素材、不签名链接；打开草稿时才读完整项目。</li>
+          <li>仍未压测。</li>
+        </ul></td></tr>
+      <tr><td><code>ProjectStudio.tsx</code> 难维护</td><td>
+        <ul>
+          <li>界面拆为 <code>DraftLibrary</code>、<code>CopyStep</code>、<code>MaterialsStep</code>、<code>ProductionStep</code>、<code>ResultPanel</code> 和 <code>StudioFields</code>。</li>
+          <li><code>session.ts</code> 提供草稿会话守卫、单操作互斥和任务状态轮询，替代手写的 epoch、alive、lock。</li>
+          <li>上传校验移入 <code>materials.ts</code>，草稿列表状态移入 <code>useDraftLibrary</code>，项目请求移入 <code>api.ts</code>。</li>
+        </ul></td><td>
+        <ul>
+          <li>界面文案和行为不变，浏览器 UI 脚本拆分前后都通过。</li>
+          <li>主组件 567 行降到 499 行，仍有 19 个 useState、12 个 useRef（编辑器状态和付费请求 ID）。</li>
+          <li>没有组件级单测。</li>
+        </ul></td></tr>
+      <tr><td>死代码</td><td>
+        <ul>
+          <li>删除 Web <code>draft.ts</code> 的旧 9 步流程；<code>Workspace.tsx</code> 直接使用 core 的默认模型。</li>
+          <li>草稿只保留数字人模式，删除 <code>cover</code> 槽位和 <code>/generate</code> 的实拍分支。</li>
+          <li>删除参考分析的 <code>GET /</code>、<code>PATCH /:id/text</code>、<code>/summarize</code>、<code>/apply-preview</code>、<code>/apply</code>，以及只为它们服务的 <code>apply.ts</code>、<code>store.edit</code>、<code>store.list</code>。</li>
+          <li><code>/capabilities</code> 不再返回 <code>recordedLipSync</code>、<code>douyinPublish</code>。</li>
+        </ul></td><td>
+        <ul>
+          <li>旧草稿中的 <code>recorded</code> 按数字人读取，<code>cover</code> 读取时丢弃；草稿与冻结任务照常加载，比较结果稳定。</li>
+          <li>旧版文字编辑产生的分析修订（revision &gt; 1）继续从摘要恢复。</li>
+          <li>保留 <code>DELETE /:id</code>：它是用户删除私有分析数据的唯一入口，G05 计划在前端接入。</li>
+        </ul></td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>数据库：</strong>新增迁移 <code>0051</code>，不修改历史迁移。先由新 server 执行迁移，再启动新 Worker：新 Worker 写入失败时需要 <code>error_code</code> 列。</p>
+  <p><strong>界面与文档：</strong>没有新增界面文案。已更新 <code>docs/marketing-video.md</code>、<code>docs/agent-code-guide.md</code>、<code>docs/deployment.md</code> 和 <code>docs/marketing-video-reference-analysis.md</code>。</p>
+  <p class="meta">仍未处理：成片匿名访问、整文件读入内存（第 3 节）。</p>
+</section>
+
 <section class="card" id="tracking">
   <h2>10-15 评审问题跟踪</h2>
   <div class="legend"><span><span class="tag ok">已修复</span> 代码已处理</span><span><span class="tag mid">部分修复</span> 主要问题已处理，有残留</span><span><span class="tag high">未修复</span> 与旧评审描述一致</span></div>
@@ -307,7 +368,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p>最短路径点 5 次：填主题 → 生成文案和分镜 → 下一步 → 下一步 → 确认生成。三步结构合理，两次评审结论一致。</p>
   <h3>多余的内容</h3>
   <ul>
-    <li>分镜编辑器在第 1 步和第 3 步各出现一次（<code>ProjectStudio.tsx:457</code>、<code>:495</code>）。第 3 步只显示总览和变化，需要时再展开。<span class="tag ok">两次评审一致</span></li>
+    <li>分镜编辑器在第 1 步和第 3 步各出现一次（10-20 拆分后在 <code>CopyStep.tsx</code> 和 <code>ProductionStep.tsx</code>）。第 3 步只显示总览和变化，需要时再展开。<span class="tag ok">两次评审一致</span></li>
     <li>第 3 步叫"配音与字幕"，但里面还有画面比例、清晰度、分镜确认和生成。改名为"确认与制作"。<span class="tag ok">两次评审一致</span></li>
     <li>"文案与分镜检查"在每一步底部都显示（<code>:501</code>）。</li>
     <li>界面共有 32 段提示文字（<code>mv-hint</code>），文字太多。</li>
@@ -329,13 +390,13 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <li>全局错误显示在页面最底部（<code>:512</code>），离操作按钮很远。</li>
     <li>删除和取消用 <code>window.confirm</code>，和应用其他对话框风格不一致。</li>
     <li>文案生成最长 5 分钟，界面只显示"正在处理…"，没有进度或时间提示。</li>
-    <li><span class="tag ok">已修复</span> 打开草稿失败后，<code>textPending</code> 一直是 true（<code>:97</code>），编辑区全部禁用。用户只能点"开始新视频"恢复。2026-10-20：打开失败时恢复为 false。</li>
+    <li><span class="tag ok">已修复</span> 打开草稿失败后，<code>textPending</code> 一直是 true（<code>ProjectStudio.tsx</code> 的 <code>open</code>），编辑区全部禁用。用户只能点"开始新视频"恢复。2026-10-20：打开失败时恢复为 false。</li>
     <li>添加生成参考视频后，原生口播关闭，但已有分镜仍按有声口播编写。界面只给出提示，不建议重建分镜。<span class="tag new">采纳旧评审</span></li>
   </ul>
 </section>
 
 <section class="card" id="robustness">
-  <h2>3 代码健壮性 <span class="tag ok">高级别与 F02–F08 已修复</span></h2>
+  <h2>3 代码健壮性 <span class="tag ok">高级、中级已全部修复</span></h2>
   <p><strong>强项：</strong>请求幂等，有调用回执账本，提交结果未知时不重复付费，服务端校验归属，上传素材私有签名链接，媒体处理在沙箱里运行，ffprobe 只接受白名单格式，用 advisory lock 加事务创建任务，错误不回显供应商原文。测试覆盖面广。</p>
   <div class="legend"><span><span class="tag new">本次新增</span> 10-15 评审未提</span><span><span class="tag mid">旧问题</span> 来自 10-15 评审，仍存在</span></div>
   <div class="table-wrap"><table>
@@ -347,19 +408,19 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td><code>/review</code> 和 <code>/publication</code> 没有请求记录。断连后再次点击会产生新的模型调用。10-20：接入文本操作记录，同一请求 ID 只调用一次模型。</td><td><span class="tag mid">旧问题</span> F04</td><td><code>routes.ts</code></td></tr>
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td><code>/:id/storyboard</code> 不在用户级限流表中。用户可以在多个项目上同时发起付费创作。10-20：加入限流表，每用户最多 2 个在途请求。</td><td><span class="tag mid">旧问题</span> F07</td><td><code>index.ts:318-321</code></td></tr>
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td>服务端不检查参考图格式和尺寸。只有 Kling 前端上传时检查；切换模型后不重检。10-20：服务端在生成前按当前模型读取真实文件头检查。</td><td><span class="tag mid">旧问题</span> F08 残留</td><td><code>routes.ts</code> 的 ownedAssets</td></tr>
-      <tr><td><span class="tag mid">中</span></td><td><code>failure.ts</code> 用正则匹配中文错误文字来分类。改一句文案就可能分错类。应改用错误码。（未知片段已改用服务端计数判断，其余类别仍用正则。）</td><td><span class="tag new">本次新增</span></td><td><code>failure.ts</code></td></tr>
-      <tr><td><span class="tag mid">中</span></td><td><code>ProjectStudio.tsx</code> 有 520 行，22 个 useState、16 个 useRef，并发控制手写（epoch、alive、lock），一行写多条语句。难维护，也难测试。</td><td><span class="tag new">本次新增</span></td><td><code>ProjectStudio.tsx</code></td></tr>
-      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td>打开草稿失败后界面锁住（见第 2 节）。10-20 已修复。</td><td><span class="tag new">本次新增</span></td><td><code>ProjectStudio.tsx:97</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td><code>failure.ts</code> 用正则匹配中文错误文字来分类。改一句文案就可能分错类。10-20：Worker 把原因码写入 <code>tasks.error_code</code>（迁移 51），按错误类型、供应商错误码、阶段和 HTTP 状态归类；前端按码选择指引。旧任务没有码，显示通用指引。</td><td><span class="tag new">本次新增</span></td><td><code>failure.ts</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td><code>ProjectStudio.tsx</code> 有 520 行，22 个 useState、16 个 useRef，并发控制手写（epoch、alive、lock），一行写多条语句。10-20：界面拆为草稿列表、三个步骤、结果面板和字段组件；会话守卫、单操作互斥和轮询移入 <code>session.ts</code>，上传校验移入 <code>materials.ts</code>，草稿列表状态移入 <code>useDraftLibrary</code>。主组件仍有 19 个 useState、12 个 useRef（编辑器状态和付费请求 ID），没有组件级单测，由浏览器脚本覆盖。</td><td><span class="tag new">本次新增</span></td><td><code>ProjectStudio.tsx</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td>打开草稿失败后界面锁住（见第 2 节）。10-20 已修复。</td><td><span class="tag new">本次新增</span></td><td><code>ProjectStudio.tsx</code> 的 <code>open</code></td></tr>
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>同一视频每个片段重复创建音色。默认 Grok 不触发；切到 Kling 后会增加音色请求和等待。10-20：每个父任务和样例只创建一次。</td><td><span class="tag mid">旧问题</span> F03</td><td><code>run-job.ts:283</code></td></tr>
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>合成能力检查只执行 <code>-version</code>。缺编码器时，所有片段付费完成后才在合成阶段失败（可修复后重新合成）。10-20：探针短片检查，Worker 在付费前也检查。</td><td><span class="tag mid">旧问题</span> F05</td><td><code>media.ts</code></td></tr>
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>草稿列表只返回最近 50 条，更早的草稿找不到。10-20：分页与搜索。</td><td><span class="tag mid">旧问题</span> F06 残留</td><td><code>repository.ts</code></td></tr>
       <tr><td><span class="tag low">低</span></td><td>生成的片段和成片在 <code>/static/assets</code> 下可匿名读取，没有到期时间。</td><td><span class="tag mid">旧问题</span> F01 残留</td><td><code>index.ts:417</code></td></tr>
       <tr><td><span class="tag low">低</span></td><td>成片（最大 200 MB）和上传文件（最大 100 MB）整个读进内存。</td><td>两次评审均提</td><td><code>media.ts</code><br><code>marketing-analysis/routes.ts</code></td></tr>
-      <tr><td><span class="tag low">低</span></td><td>页面每 2.5 秒读取完整项目，每次为每个素材查库并重新签名链接。100 个活跃页面约 40 请求/秒，未压测。</td><td>两次评审均提</td><td><code>ProjectStudio.tsx</code> 轮询<br><code>routes.ts</code> GET /:id</td></tr>
-      <tr><td><span class="tag low">低</span></td><td>死代码：<code>draft.ts</code> 里旧的 9 步流程（只有 <code>MARKETING_VIDEO_MODEL</code> 还在用）、<code>recorded</code> 模式、<code>cover</code>；分析接口 apply-preview、apply、PATCH text、summarize、list、DELETE 前端都没调用；前端也不读 <code>recordedLipSync</code>、<code>douyinPublish</code>。</td><td><span class="tag new">本次新增</span></td><td>多处</td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>页面每 2.5 秒读取完整项目，每次为每个素材查库并重新签名链接。10-20：轮询改用 <code>GET /:id/status</code>，只读一行任务状态，不查素材、不签名；状态不变时间隔放大到 15 秒，标签页隐藏时暂停。仍未压测。</td><td>两次评审均提</td><td><code>ProjectStudio.tsx</code> 轮询<br><code>routes.ts</code> GET /:id</td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>死代码：<code>draft.ts</code> 里旧的 9 步流程（只有 <code>MARKETING_VIDEO_MODEL</code> 还在用）、<code>recorded</code> 模式、<code>cover</code>；分析接口 apply-preview、apply、PATCH text、summarize、list、DELETE 前端都没调用；前端也不读 <code>recordedLipSync</code>、<code>douyinPublish</code>。10-20：已删除旧 9 步流程、<code>recorded</code> 模式（旧草稿按数字人读取）、<code>cover</code> 槽位（旧草稿读取时丢弃）、上述分析接口中除 DELETE 外的全部，以及两个能力字段。DELETE 保留：它是用户删除私有分析数据的唯一入口，G05 计划在前端接入。</td><td><span class="tag new">本次新增</span></td><td>多处</td></tr>
     </tbody>
   </table></div>
-  <p class="meta">两个高级别问题和 F04 方向相反：F04 是保护不足，可能重复收费；高级别问题是保护没有出口，用户会被卡住。第一轮只增加"经用户确认、有记录"的出口，没有放宽自动重试；第二轮让审核和标题标签也接入调用记录（F04）。剩余 2 项中级（<code>failure.ts</code> 正则分类、<code>ProjectStudio.tsx</code> 体量）和 4 项低级未处理。</p>
+  <p class="meta">两个高级别问题和 F04 方向相反：F04 是保护不足，可能重复收费；高级别问题是保护没有出口，用户会被卡住。第一轮只增加"经用户确认、有记录"的出口，没有放宽自动重试；第二轮让审核和标题标签也接入调用记录（F04）。10-20 第三轮处理了 2 项中级（<code>failure.ts</code> 正则分类、<code>ProjectStudio.tsx</code> 体量）和 2 项低级（轮询、死代码）；剩余 2 项低级（成片匿名访问、整文件读入内存）未处理。</p>
 </section>
 
 <section class="card" id="architecture">
@@ -422,7 +483,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>10-20 <code>pnpm check:marketing-video:db</code>（临时 PostgreSQL，用后停止）</td><td>通过</td><td>新增断言：用户限额只算在队列中的任务、父任务音色单次领取、游标分页与字面搜索、审核回执恢复与冲突、视频提交后生成标题、在途上限 429</td></tr>
       <tr><td>10-20 <code>pnpm check:marketing-video:queue</code>（临时 PostgreSQL + Redis，用后停止）</td><td>通过</td><td>新增：两个槽位、每用户 1 个时，同用户第二个任务转为 delayed，其他用户使用空闲槽位。原场景改为显式单槽位</td></tr>
       <tr><td>10-20 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>通过</td><td>新增：审核和标题标签请求带请求 ID 和版本。夹具模型补充无尺寸限制的参考图规则。未操作新增的搜索框和"加载更多"</td></tr>
-      <tr><td>真实供应商</td><td>两轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
+      <tr><td>第三轮全量 Vitest</td><td>312 文件通过，14 文件跳过；2589 项通过，81 项跳过</td><td>新增：错误码归类、队列写入错误码、状态接口与用户隔离、前端按码选择指引、旧草稿兼容。删除：旧 9 步流程和证据预览的测试</td></tr>
+      <tr><td>第三轮严格类型检查</td><td>Core 14 项、Server 234 项，与基线数量相同，营销目录 0 项；Web 通过</td><td>—</td></tr>
+      <tr><td>第三轮 Core / Server / Web 构建</td><td>通过</td><td>Web 仍有既有的大 chunk 提示</td></tr>
+      <tr><td>第三轮 <code>pnpm check:marketing-video:db</code>（临时 PostgreSQL，用后删除）</td><td>通过</td><td>新增断言：失败后存入错误码、状态接口字段与完整项目一致、其他用户读不到状态、真实适配器失败经状态接口也不泄露私有内容</td></tr>
+      <tr><td>第三轮参考分析数据库脚本（临时 PostgreSQL，用后删除）</td><td>通过</td><td>已删除的接口返回 404。修订 2 的记录改用 SQL 构造。未设置 Redis，跳过队列部分</td></tr>
+      <tr><td>第三轮 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>拆分前后都通过</td><td>新增断言：制作中通过状态接口轮询</td></tr>
+      <tr><td>第三轮 <code>pnpm check:marketing-video:queue</code></td><td>未运行</td><td>本轮未改队列调度</td></tr>
+      <tr><td>真实供应商</td><td>三轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
     </tbody>
   </table></div>
   <p class="meta">跳过项不计为通过。严格类型检查仍未全绿，不能用构建成功代替。</p>
@@ -471,8 +539,8 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <div class="phase">
     <h3>E 维护</h3>
     <ol start="18">
-      <li>失败分类改用错误码，不再用正则匹配文字。<span class="ref">— 第 3 节</span></li>
-      <li>拆分 <code>ProjectStudio.tsx</code>，删除死代码。<span class="ref">— 第 3 节</span></li>
+      <li><span class="tag ok">已完成</span> 失败分类改用错误码，不再用正则匹配文字。<span class="ref">— 第 3 节</span></li>
+      <li><span class="tag ok">已完成</span> 拆分 <code>ProjectStudio.tsx</code>，删除死代码。<span class="ref">— 第 3 节</span></li>
       <li><span class="tag ok">已完成</span> 更新 <code>docs/agent-code-guide.md:22</code>。<span class="ref">— 第 1 节</span></li>
     </ol>
   </div>

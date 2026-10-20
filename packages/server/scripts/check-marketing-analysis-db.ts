@@ -18,7 +18,6 @@ import { PgAnalysisLedger } from "../src/marketing-analysis/ledger.js";
 import { AnalysisStorage } from "../src/marketing-analysis/storage.js";
 import { createAnalysisRoutes } from "../src/marketing-analysis/routes.js";
 import { analysisConfig } from "../src/marketing-analysis/config.js";
-import { applyAnalysis } from "../src/marketing-analysis/apply.js";
 import { PgMarketingProjectStore } from "../src/marketing-video/repository.js";
 import { dispatchAnalyses, analysisQueue, createAnalysisConsumer } from "../src/marketing-analysis/queue.js";
 import { knowledgeRedisOptions } from "../src/knowledge/ingestion/config.js";
@@ -81,16 +80,17 @@ try {
   await store.checkpoint(lease, snapshot, "summary"); await store.finish(lease);
   assert.equal((await store.get(owner, first.id))?.status, "ready");
   assert.equal(Number((await store.row(owner, first.id)).reserved_cost), 0);
-  const edited = (await store.edit(owner, first.id, 1, [{ id: "t0001", text: "不包邮 199元" }]))!;
-  assert.equal(edited.revision, 2); assert.equal(edited.snapshot.texts[0].rawText, "不包邮 99元"); assert.equal(edited.snapshot.summary, undefined);
-  await assert.rejects(store.edit(owner, first.id, 1, []), /REVISION_CONFLICT/);
-  await store.resume(owner, first.id, 2, true); const lease2 = (await store.claim(first.id))!;
+  // A row revised by the former text editor (revision 2) resumes from the summary.
+  const revised = { ...snapshot, texts: snapshot.texts.map(t => ({ ...t, text: "不包邮 199元" })) }; delete revised.summary; delete revised.summaryRevision;
+  await db.pool.query("UPDATE marketing_reference_analyses SET snapshot=$2,revision=2,version=version+1,status='partial' WHERE id=$1", [first.id, JSON.stringify(revised)]);
+  await assert.rejects(store.resume(owner, first.id, 1), /REVISION_CONFLICT/);
+  await store.resume(owner, first.id, 2); const lease2 = (await store.claim(first.id))!;
   const ledger2 = new PgAnalysisLedger(store, lease2);
   assert.equal(await ledger2.begin("summary:2", "summary-hash", "kimi-k3", 0), null);
   const failed = { text: "cut off", outcome: "failed" as const, usage: { promptTokens: 100, completionTokens: 10 } };
   await ledger2.finish("summary:2", failed); await store.finish(lease2, "MODEL_STEP_FAILED");
   assert.equal((await store.get(owner, first.id))?.status, "partial");
-  await store.resume(owner, first.id, 2, true); const lease3 = (await store.claim(first.id))!; const ledger3 = new PgAnalysisLedger(store, lease3);
+  await store.resume(owner, first.id, 2); const lease3 = (await store.claim(first.id))!; const ledger3 = new PgAnalysisLedger(store, lease3);
   assert.equal(await ledger3.begin("summary:2", "summary-hash", "kimi-k3", 0), null, "explicit resume permits one new known-failed attempt");
   await ledger3.finish("summary:2", { ...receipt, text: "summary" }); await store.finish(lease3);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id='summary:2'", [first.id])).rows[0].n, 2);
@@ -127,13 +127,11 @@ try {
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id LIKE 'ocr:%'", [full.id])).rows[0].n, 120);
   const projects = new PgMarketingProjectStore(db.pool);
   const project = await projects.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ script: "已有生产口播", reference: "旧参考" }));
-  const selection = { projectId: project.id, projectVersion: project.version, expectedRevision: 2, evidenceIds: ["t0001"] };
-  assert((await applyAnalysis(store, owner, first.id, selection, false)).reference.includes("199元"));
-  assert.equal((await projects.get(owner, project.id))?.draft.reference, "旧参考");
-  await applyAnalysis(store, owner, first.id, selection, true);
+  // Link the analysis the way an accepted creation does, keeping the project's reference text.
+  await db.pool.query("UPDATE marketing_video_projects SET reference_analysis_id=$3,reference_revision=2,reference_evidence_ids=$4 WHERE user_id=$1 AND id=$2",
+    [owner, project.id, first.id, JSON.stringify(["t0001"])]);
   const applied = (await projects.get(owner, project.id))!;
   assert.equal(applied.draft.script, "已有生产口播"); assert.equal(applied.referenceAnalysis?.acceptedRevision, 2);
-  await assert.rejects(applyAnalysis(store, owner, first.id, selection, true), /PROJECT_CONFLICT/);
   await assert.rejects(store.remove(owner, first.id), /ANALYSIS_IN_USE/);
   const clearReference = await projects.save(owner, project.id, applied.version, { ...applied.draft, reference: "手动替换" });
   assert.equal(clearReference.referenceAnalysis, undefined);
@@ -173,7 +171,13 @@ try {
   const image = await app.request(`/${first.id}/frames/f0001`, { headers: { "x-test-user": owner } });
   assert.equal(image.status, 200); assert.equal(image.headers.get("Cache-Control"), "private, no-store");
   assert.equal((await app.request(`/${first.id}/frames/f9999`, { headers: { "x-test-user": owner } })).status, 404);
-  assert.equal((await app.request(`/${first.id}/text`, { method: "PATCH", headers: { "x-test-user": owner, "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: 1, texts: [] }) })).status, 409);
+  const ownerJson = { "x-test-user": owner, "Content-Type": "application/json" };
+  assert.equal((await app.request(`/${first.id}/resume`, { method: "POST", headers: ownerJson, body: JSON.stringify({ expectedRevision: 1 }) })).status, 409);
+  // Editing, summarizing, applying and listing were removed with their unused client paths.
+  for (const [method, path] of [["PATCH", "text"], ["POST", "summarize"], ["POST", "apply"], ["POST", "apply-preview"]]) {
+    assert.equal((await app.request(`/${first.id}/${path}`, { method, headers: ownerJson, body: "{}" })).status, 404, path);
+  }
+  assert.equal((await app.request("/", { headers: { "x-test-user": owner } })).status, 404);
   const privateDirectory = await storage.directory(owner, first.id);
   await writeFile(join(privateDirectory, "source.mp4"), "fixture");
   await writeFile(join(privateDirectory, "gray.raw"), "scratch");
@@ -193,7 +197,7 @@ try {
   await assert.rejects(stat(join(privateDirectory, "gray.raw")), /ENOENT/);
   await store.remove(owner, first.id); assert.equal(await store.get(owner, first.id), null);
   await collectAnalysisFiles(store, storage); await assert.rejects(stat(privateDirectory), /ENOENT/);
-  assert.equal((await store.list(owner)).some(row => row.id === first.id), false);
+  assert.equal((await db.pool.query("SELECT 1 FROM marketing_reference_analyses WHERE id=$1 AND deleted_at IS NULL", [first.id])).rowCount, 0);
   // Existing account reassignment updates owned tables in one transaction,
   // with no guaranteed table order. Ownership must still hold at commit.
   const transfer = await db.pool.connect();

@@ -67,7 +67,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
           : ["voice", "music"].includes(slot) ? ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4"] : ["image/jpeg", "image/png", "image/webp"];
         const unsupported = !allowed.includes(asset.mime) || Number(asset.size_bytes) > (slot === "video" ? 150 : slot === "music" ? 30 : slot === "voice" ? 15 : 20) * 1024 * 1024;
         if (unsupported && !marketingAssetIds(historicalDraft?.assets[slot as keyof MarketingDraft["assets"]]).includes(id)) throw new MarketingError("素材格式或大小不支持");
-        if (asset.type === "upload") {
+        if (asset.type === "upload" && !asset.is_private) {
           await service.db.protectMarketingUpload(id, owner);
           asset.is_private = true;
         }
@@ -84,7 +84,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (operation.result) return operation.result;
     throw new MarketingError(operation.status === "failed" ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请先查看保存的创作记录。", 409);
   };
-  app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), recordedLipSync: false, douyinPublish: false, knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", model: activeProfile }));
+  app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", model: activeProfile }));
   app.get("/", async (c) => c.json(await store.page(c.get("userId"), { limit: Number(c.req.query("limit") ?? 20) || 20, cursor: c.req.query("cursor"), query: c.req.query("q") })));
   app.post("/copy", async (c) => {
     const body = await c.req.json().catch(() => null);
@@ -123,6 +123,12 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   app.get("/:id", async (c) => {
     const p = await requireProject(c.get("userId"), c.req.param("id"));
     return c.json({ ...p, assets: await ownedAssets(c.get("userId"), p.draft, true, p.draft, true) });
+  });
+  // Polled every few seconds while a video is being made; the full project is read once on open.
+  app.get("/:id/status", async (c) => {
+    const state = await store.taskState(c.get("userId"), c.req.param("id"));
+    if (!state) throw new MarketingError("草稿不存在", 404);
+    return c.json(state);
   });
   app.get("/:id/text-operations", async c => {
     const owner = c.get("userId"); const id = c.req.param("id");
@@ -275,7 +281,6 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       // Version 1 inputs predate reference checks.
       const referenceError = inputVersion >= 2 ? marketingReferenceError(draft, profile) : "";
       if (referenceError) throw new MarketingError(referenceError);
-      if (draft.mode !== "avatar") throw new MarketingError("实拍对口型服务尚未接入，请选择数字人制作。", 503);
     }
     const capabilities = await mediaCapabilities();
     if (!capabilities.composition) throw new MarketingError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);

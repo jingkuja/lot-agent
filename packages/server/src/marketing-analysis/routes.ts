@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { ANALYSIS_LIMITS, AnalysisPlatformSchema, CreateAnalysisSchema, EditAnalysisTextSchema } from "@lot-agent/core/marketing-analysis";
+import { ANALYSIS_LIMITS, AnalysisPlatformSchema, CreateAnalysisSchema } from "@lot-agent/core/marketing-analysis";
 import type { AgentService } from "../services/agent-service.js";
 import { analysisConfig, type AnalysisConfig } from "./config.js";
 import { PgAnalysisStore } from "./repository.js";
@@ -9,7 +9,6 @@ import { AnalysisError } from "./errors.js";
 import { analysisUserKey } from "./runtime.js";
 import { readAnalysisFile } from "./private-files.js";
 import { validateCookieFile } from "./download.js";
-import { applyAnalysis } from "./apply.js";
 import { storeAnalysisUpload } from "./uploads.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -58,11 +57,6 @@ export function createAnalysisRoutes(service: Pick<AgentService, "db" | "tokenhu
     await store.pool.query("DELETE FROM marketing_analysis_sessions WHERE user_id=$1 AND platform=$2", [c.get("userId"), platform.data]);
     return c.json({ ok: true });
   });
-  app.get("/", async c => {
-    const offset = Number(c.req.query("offset") ?? 0);
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100000) throw new AnalysisError("INVALID_PAGE");
-    return c.json({ data: await store.list(c.get("userId"), offset) });
-  });
   app.post("/", async c => {
     const input = CreateAnalysisSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) throw new AnalysisError("INVALID_SOURCE");
@@ -85,23 +79,12 @@ export function createAnalysisRoutes(service: Pick<AgentService, "db" | "tokenhu
     return c.body(new Uint8Array(bytes));
   });
   app.post("/:id/cancel", async c => c.json(await store.cancel(c.get("userId"), c.req.param("id"))));
-  for (const operation of ["resume", "summarize"] as const) app.post(`/:id/${operation}`, async c => {
+  app.post("/:id/resume", async c => {
     const body = await c.req.json().catch(() => null);
     if (!revision(body?.expectedRevision)) throw new AnalysisError("REVISION_CONFLICT", 409);
-    if (body.visualOnly !== undefined && (typeof body.visualOnly !== "boolean" || operation !== "resume")) throw new AnalysisError("INVALID_SOURCE");
+    if (body.visualOnly !== undefined && typeof body.visualOnly !== "boolean") throw new AnalysisError("INVALID_SOURCE");
     await authorize(c.get("userId"), c.req.raw.signal);
-    return c.json(await store.resume(c.get("userId"), c.req.param("id"), body.expectedRevision, operation === "summarize", body.visualOnly === true), 202);
-  });
-  app.patch("/:id/text", async c => {
-    const body = EditAnalysisTextSchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) throw new AnalysisError("INVALID_TEXT_REFERENCE");
-    return c.json(await store.edit(c.get("userId"), c.req.param("id"), body.data.expectedRevision, body.data.texts));
-  });
-  for (const operation of ["apply-preview", "apply"] as const) app.post(`/:id/${operation}`, async c => {
-    const body = await c.req.json().catch(() => null);
-    if (!body || !revision(body.expectedRevision) || !revision(body.projectVersion) || !uuid.test(body.projectId ?? "")
-      || !Array.isArray(body.evidenceIds) || body.evidenceIds.some((id: unknown) => typeof id !== "string")) throw new AnalysisError("INVALID_EVIDENCE_REFERENCE");
-    return c.json(await applyAnalysis(store, c.get("userId"), c.req.param("id"), body, operation === "apply"));
+    return c.json(await store.resume(c.get("userId"), c.req.param("id"), body.expectedRevision, body.visualOnly === true), 202);
   });
   app.delete("/:id", async c => {
     await store.remove(c.get("userId"), c.req.param("id"));

@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { SecretBox } from "../auth/secret-box.js";
+import { GenerationError } from "./errors.js";
 
 export interface PrivateMaterialAsset {
   id: string;
@@ -34,14 +35,14 @@ function publicBase(options: PrivateMaterialOptions): string {
   if (!value) return "";
   const base = new URL(value);
   if (!["https:", "http:"].includes(base.protocol) || base.username || base.password || base.search || base.hash) {
-    throw new Error("素材公网地址配置无效。");
+    throw new GenerationError("CONFIG_MISSING", "素材公网地址配置无效。");
   }
   return base.href.replace(/\/+$/, "");
 }
 
 function secretBox(options: PrivateMaterialOptions): SecretBox {
   const key = options.masterKey ?? process.env.SECRET_MASTER_KEY ?? "";
-  if (!key) throw new Error("私有素材访问服务未配置。");
+  if (!key) throw new GenerationError("CONFIG_MISSING", "私有素材访问服务未配置。");
   return new SecretBox(key);
 }
 

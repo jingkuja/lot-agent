@@ -135,7 +135,12 @@ describe("isolated task workers", () => {
     expect(f.db.markTaskRetryPending).toHaveBeenCalledWith("ordinary", 1);
     expect(f.db.setTaskError).not.toHaveBeenCalled();
     await expect(worker.run({ ...task, attemptsMade: 1 })).rejects.toThrow("temporary");
-    expect(f.db.setTaskError).toHaveBeenCalledWith("ordinary", "temporary");
+    expect(f.db.setTaskError).toHaveBeenCalledWith("ordinary", "temporary", undefined);
+  });
+  it("stores the cause code of a typed worker error next to its message", async () => {
+    const f = fixture(); f.queue.process("image.generate", async () => { throw Object.assign(new Error("timed out"), { errorCode: "TIMED_OUT" }); });
+    await expect(mocks.workers.get(DEFAULT_TASK_QUEUE).run(job("ordinary", "image.generate"))).rejects.toThrow("timed out");
+    expect(f.db.setTaskError).toHaveBeenCalledWith("ordinary", "timed out", "TIMED_OUT");
   });
   it("observes a cancellation that races the DB claim before entering the handler", async () => {
     const f = fixture(), handler = vi.fn(); f.queue.process("marketing.video", handler);

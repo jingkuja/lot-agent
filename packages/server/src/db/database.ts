@@ -1690,7 +1690,7 @@ export class DB {
    */
   async markTaskRunning(id: string, attempts: number): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      `UPDATE tasks SET status = 'running', attempts = $2, stage = NULL, error = NULL, updated_at = now()
+      `UPDATE tasks SET status = 'running', attempts = $2, stage = NULL, error = NULL, error_code = NULL, updated_at = now()
        WHERE id = $1 AND status IN ('pending','running')`,
       [id, attempts]
     );
@@ -1718,7 +1718,7 @@ export class DB {
         return "busy";
       }
       const { rowCount } = await client.query(
-        `UPDATE tasks SET status = 'running', attempts = $2, stage = NULL, error = NULL, updated_at = now()
+        `UPDATE tasks SET status = 'running', attempts = $2, stage = NULL, error = NULL, error_code = NULL, updated_at = now()
          WHERE id = $1 AND status IN ('pending','running')`,
         [id, attempts]
       );
@@ -1730,7 +1730,7 @@ export class DB {
   /** A configured BullMQ retry is still live, never a user-visible failure. */
   async markTaskRetryPending(id: string, attempts: number): Promise<void> {
     await this.pool.query(
-      `UPDATE tasks SET status = 'pending', stage = '等待自动重试', error = NULL, updated_at = now()
+      `UPDATE tasks SET status = 'pending', stage = '等待自动重试', error = NULL, error_code = NULL, updated_at = now()
        WHERE id = $1 AND status = 'running' AND attempts = $2`,
       [id, attempts]
     );
@@ -1810,11 +1810,12 @@ export class DB {
     );
   }
 
-  async setTaskError(id: string, error: string): Promise<void> {
+  /** `errorCode` is always written, so a later failure never shows an earlier cause. */
+  async setTaskError(id: string, error: string, errorCode?: string): Promise<void> {
     await this.pool.query(
-      `UPDATE tasks SET error = $1, status = 'failed', updated_at = now()
+      `UPDATE tasks SET error = $1, error_code = $3, status = 'failed', updated_at = now()
        WHERE id = $2 AND status IN ('pending','running')`,
-      [error, id]
+      [error, id, errorCode ?? null]
     );
   }
 }

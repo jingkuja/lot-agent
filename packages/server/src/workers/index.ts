@@ -18,6 +18,7 @@ import {
 import { loadLlmConfig } from "../config.js";
 import { loadGenerationConfig, loadKlingVoiceConfig, makeKlingVoiceProvider, makeImageProvider, makeVideoProvider } from "../generation/config.js";
 import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
+import { GenerationError } from "../generation/errors.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
 import { marketingQueueLimits } from "../jobs/task-queues.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
@@ -222,7 +223,7 @@ async function main() {
     const model = pickGenModel(mediaType, job.input, base.modelId);
     const apiKey = (await db.getUserApiKey(job.userId, managedKeysEnabled)) ?? "";
     if (!apiKey && (managedKeysEnabled || job.input.requireUserModelKey === true || job.input.featureScope)) {
-      throw new Error("数字员工生成任务缺少用户 TokenHub key");
+      throw new GenerationError("MODEL_AUTH_REQUIRED", "数字员工生成任务缺少用户 TokenHub key");
     }
     const provider = apiKey
       ? mediaType === "image"
