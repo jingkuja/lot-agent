@@ -39,6 +39,8 @@ export interface RunJobDeps {
   /** Authorize stable local material URLs, then mint an expiring vendor URL. */
   resolveReferenceUrl?: (url: string) => Promise<string>;
   prepareKlingVoices?: (input: PrepareKlingVoicesInput) => Promise<ReferenceInput>;
+  /** Voice checkpoint owner when it is not this job: a marketing parent shares one voice per sample across its clips. */
+  voiceScopeTaskId?: string;
   storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }> };
   db: {
     getAsset(id: string): Promise<{ user_id: string } | null | undefined>;
@@ -281,7 +283,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       if (needsKlingVoices && preparedAudio) {
         if (!deps.prepareKlingVoices) throw new Error("Kling 音色服务未配置，无法提交参考声音。");
         preparedAudio = await deps.prepareKlingVoices({
-          taskId: job.id, userId: job.userId, referenceAudio: preparedAudio,
+          taskId: deps.voiceScopeTaskId ?? job.id, userId: job.userId, referenceAudio: preparedAudio,
           signal: deps.signal, assertNotCancelled,
           resolveReferenceUrl: deps.resolveReferenceUrl,
         });

@@ -8,7 +8,8 @@ import { KLING_MARKETING_PROFILE, MarketingDraftSchema, planMarketingSegments, s
 import { DB } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migration-runner.js";
 import { migrations } from "../src/db/migrations/index.js";
-import { PgMarketingProjectStore } from "../src/marketing-video/repository.js";
+import { PgMarketingProjectStore, reviewText } from "../src/marketing-video/repository.js";
+import { PgKlingVoiceStore } from "../src/generation/kling-voice-store.js";
 import { PgMarketingTextOperations } from "../src/marketing-video/operations.js";
 import { runMarketingVideo, type MarketingRunDeps } from "../src/marketing-video/run.js";
 import { archiveMarketingVideo } from "../src/marketing-video/archive.js";
@@ -344,5 +345,75 @@ try {
     assert(Math.abs(assembled.durationSec - durationSec) < 0.3); assert(assembled.body.length > 0);
     assert.equal(assembled.width, durationSec === 45 ? 1280 : 720); assert.equal(assembled.height, 720);
   }
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  // F02: the per-owner render cap counts only renders still live in the queue.
+  const renders = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  for (const [index, id] of renders.entries()) await db.pool.query("INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.video','{}',$2,'lot-marketing-video')", [id, index === 3 ? other : owner]);
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[0], 1, owner, [], 1), "claimed");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[1], 1, owner, [renders[0]], 1), "busy");
+  assert.deepEqual([(await db.getTask(renders[1]))!.status, (await db.getTask(renders[1]))!.stage], ["pending", "排队中：同账号已有视频在制作"]);
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[3], 1, other, [renders[0]], 1), "claimed", "another owner is not blocked");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[1], 1, owner, [], 1), "claimed", "an orphaned running row does not block");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[2], 1, owner, [renders[0], renders[1]], 2), "busy");
+  await db.cancelTask(renders[2]);
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[2], 1, owner, [], 2), "stopped");
+  // F03: a parent render can own a shared voice checkpoint; the claim stays single-writer.
+  const voices = new PgKlingVoiceStore(db.pool);
+  const voiceScope = { taskId: renders[0], userId: owner, slot: 0, fingerprint: "fixture" };
+  const firstVoice = await voices.claim(voiceScope, randomUUID());
+  const secondVoice = await voices.claim(voiceScope, randomUUID());
+  assert.deepEqual([firstVoice.created, secondVoice.created, secondVoice.checkpoint.externalTaskId], [true, false, firstVoice.checkpoint.externalTaskId]);
+  await assert.rejects(voices.get({ ...voiceScope, userId: other }));
+
+  // F06: exact cursor paging (including equal timestamps) and literal search wildcards.
+  const pager = randomUUID();
+  await db.pool.query("INSERT INTO users(id,name) VALUES($1,'pager fixture')", [pager]);
+  const pagedIds: string[] = [];
+  for (const topic of ["分页 A", "分页 B", "分页 C", "100%_特价", "分页 D"]) pagedIds.push((await store.save(pager, randomUUID(), 0, MarketingDraftSchema.parse({ ...draft, topic }))).id);
+  await db.pool.query("UPDATE marketing_video_projects SET updated_at='2026-10-20 10:00:00.123456+00' WHERE id=ANY($1::uuid[])", [pagedIds.slice(0, 3)]);
+  const seen: string[] = [];
+  for (let cursor: string | undefined, guard = 0; guard < 10; guard++) {
+    const page = await store.page(pager, { limit: 2, cursor });
+    assert.ok(page.data.length <= 2);
+    seen.push(...page.data.map(p => p.id));
+    if (!(cursor = page.nextCursor)) break;
+  }
+  assert.deepEqual([...seen].sort(), [...pagedIds].sort(), "every draft appears exactly once");
+  assert.deepEqual((await store.page(pager, { query: "100%_" })).data.map(p => p.draft.topic), ["100%_特价"]);
+  assert.equal((await store.page(pager, { query: "分页_" })).data.length, 0, "_ is literal");
+  assert.equal((await store.page(owner, { query: "分页" })).data.length, 0, "search is owner-scoped");
+
+  // F04: review and publication receipts; F07: per-owner in-flight cap.
+  const operations = new PgMarketingTextOperations(db.pool);
+  const reviewed = await store.save(pager, randomUUID(), 0, draft);
+  const reviewId = randomUUID();
+  assert.equal((await operations.begin(pager, reviewId, reviewed.id, reviewed.version, "review", { version: reviewed.version, locale: "zh" })).fresh, true);
+  await operations.receipt(pager, reviewId, { text: JSON.stringify({ verdict: "pass", issues: [] }), outcome: "completed", usage: { promptTokens: 1, completionTokens: 1 } });
+  // A lost response is recovered from the saved receipt, with no second model call.
+  assert.equal((await operations.recover(pager, reviewed.id, reviewId)).status, "succeeded");
+  const afterReview = (await store.get(pager, reviewed.id))!;
+  assert.ok(afterReview.review);
+  assert.deepEqual([afterReview.version, afterReview.reviewedScript], [reviewed.version, reviewText(draft)]);
+  const replayed = await operations.begin(pager, reviewId, reviewed.id, reviewed.version, "review", { version: reviewed.version, locale: "zh" });
+  assert.deepEqual([replayed.fresh, replayed.operation.status], [false, "succeeded"]);
+  await assert.rejects(operations.begin(pager, reviewId, reviewed.id, reviewed.version, "review", { version: reviewed.version, locale: "en" }), { status: 409 });
+  // A stale review does not overwrite a newer draft.
+  const staleId = randomUUID();
+  await operations.begin(pager, staleId, reviewed.id, reviewed.version, "review", { version: reviewed.version, locale: "en" });
+  await store.save(pager, reviewed.id, reviewed.version, MarketingDraftSchema.parse({ ...draft, topic: "已修改" }));
+  assert.equal((await operations.finish(pager, staleId, { review: { verdict: "pass", issues: [] } })).status, "conflict");
+  // Titles stay editable after a video job exists; copy does not.
+  const { p: submitted } = await newProject();
+  const titleId = randomUUID();
+  await operations.begin(owner, titleId, submitted.id, submitted.version, "publication", { version: submitted.version, locale: "zh", fillMissing: false });
+  const titled = await operations.finish(owner, titleId, { draft: MarketingDraftSchema.parse({ ...submitted.draft, publishTitle: "新标题" }), analysis: "" });
+  assert.equal(titled.status, "succeeded");
+  assert.equal((await store.get(owner, submitted.id))!.draft.publishTitle, "新标题");
+  await assert.rejects(operations.begin(owner, randomUUID(), submitted.id, submitted.version + 1, "copy", {}), { status: 409 });
+  const busy = await Promise.all([0, 1, 2].map(() => store.save(pager, randomUUID(), 0, draft)));
+  const running = [randomUUID(), randomUUID()];
+  for (const [index, id] of running.entries()) await operations.begin(pager, id, busy[index].id, busy[index].version, "storyboard", { version: busy[index].version });
+  await assert.rejects(operations.begin(pager, randomUUID(), busy[2].id, busy[2].version, "storyboard", { version: busy[2].version }), { status: 429 });
+  await operations.fail(pager, running[0], false);
+  assert.equal((await operations.begin(pager, randomUUID(), busy[2].id, busy[2].version, "storyboard", { version: busy[2].version })).fresh, true);
+  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

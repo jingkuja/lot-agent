@@ -5,7 +5,7 @@ import { MarketingDraftSchema, marketingJobProfile, type MarketingDraft, type Ma
 import { UNKNOWN_SUBMISSION } from "./recovery.js";
 
 export class MarketingError extends Error {
-  constructor(message: string, readonly status: 400 | 404 | 409 | 503 = 400) { super(message); }
+  constructor(message: string, readonly status: 400 | 404 | 409 | 429 | 503 = 400) { super(message); }
 }
 export const reviewText = marketingReviewText;
 export function renderKey(draft: MarketingDraft) {
@@ -31,8 +31,30 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
     return rows[0] ? project(rows[0]) : null;
   }
   async list(owner: string) {
-    const { rows } = await this.pool.query(`${select} WHERE p.user_id=$1 ORDER BY p.updated_at DESC LIMIT 50`, [owner]);
-    return rows.map(project);
+    return (await this.page(owner)).data;
+  }
+  /** Newest first. The cursor carries the exact PG timestamp text, so no row is skipped or repeated. */
+  async page(owner: string, options: { limit?: number; cursor?: string; query?: string } = {}) {
+    const limit = Math.min(Math.max(Math.trunc(options.limit ?? 20), 1), 50);
+    let after: [string, string] | undefined;
+    if (options.cursor) {
+      try { after = JSON.parse(Buffer.from(options.cursor, "base64url").toString()); } catch { /* checked below */ }
+      if (!Array.isArray(after) || after.length !== 2 || !after.every(v => typeof v === "string") || Number.isNaN(Date.parse(after[0]))) throw new MarketingError("草稿列表参数无效。");
+    }
+    const query = options.query?.trim().slice(0, 100);
+    const params: unknown[] = [owner];
+    let where = "p.user_id=$1";
+    if (after) { params.push(after[0], after[1]); where += ` AND (p.updated_at, p.id::text) < ($2::timestamptz, $3)`; }
+    if (query) {
+      params.push(`%${query.replace(/[\\%_]/g, c => `\\${c}`)}%`);
+      const n = `$${params.length}`;
+      where += ` AND (p.draft->>'topic' ILIKE ${n} OR p.draft->>'publishTitle' ILIKE ${n} OR p.draft->>'script' ILIKE ${n} OR p.draft->>'tags' ILIKE ${n})`;
+    }
+    params.push(limit + 1);
+    const { rows } = await this.pool.query(`${select.replace("SELECT p.*,", "SELECT p.*, p.updated_at::text AS cursor_at,")} WHERE ${where}
+      ORDER BY p.updated_at DESC, p.id::text DESC LIMIT $${params.length}`, params);
+    const last = rows.length > limit ? rows[limit - 1] : undefined;
+    return { data: rows.slice(0, limit).map(project), nextCursor: last ? Buffer.from(JSON.stringify([last.cursor_at, String(last.id)])).toString("base64url") : undefined };
   }
   async save(owner: string, id: string, version: number, draft: MarketingDraft) {
     const client = await this.pool.connect();

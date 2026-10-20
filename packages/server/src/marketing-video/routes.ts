@@ -1,21 +1,22 @@
 import { PgMarketingTextOperations, type TextOperation } from "./operations.js";
 import { MarketingSourceSchema, marketingSourceKind } from "@lot-agent/core/marketing-video";
 import { creationPrompt, publicationPrompt, storyboardPrompt } from "./creation.js";
-import { invalidTextResult, parseTextResult } from "./text-result.js";
+import { invalidTextResult, parseOperationResult, parseTextResult } from "./text-result.js";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { estimateCost } from "@lot-agent/core";
-import { isMarketingDurationValid, MARKETING_INPUT_VERSION, marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { isMarketingDurationValid, MARKETING_INPUT_VERSION, marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, marketingReferenceImageIssue, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { KnowledgeError } from "../knowledge/errors.js";
 import { MarketingError, PgMarketingProjectStore, reviewText } from "./repository.js";
 import { inspectMedia, mediaCapabilities, ownedAssetPath } from "./media.js";
+import { readImageInfo } from "./image-size.js";
 import { archiveMarketingVideo } from "./archive.js";
 import { MarketingTextError } from "./text.js";
 import { marketingImageReferences, marketingSegmentPrompt } from "./prompt.js";
-import { normalizeMarketingReview, REVIEW_INSTRUCTION } from "./compliance.js";
+import { REVIEW_INSTRUCTION } from "./compliance.js";
 export { REVIEW_INSTRUCTION } from "./compliance.js";
 import { ownedAnalysisUpload } from "../marketing-analysis/uploads.js";
 import { AnalysisError } from "../marketing-analysis/errors.js";
@@ -84,7 +85,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     throw new MarketingError(operation.status === "failed" ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请先查看保存的创作记录。", 409);
   };
   app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), recordedLipSync: false, douyinPublish: false, knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", model: activeProfile }));
-  app.get("/", async (c) => c.json({ data: await store.list(c.get("userId")) }));
+  app.get("/", async (c) => c.json(await store.page(c.get("userId"), { limit: Number(c.req.query("limit") ?? 20) || 20, cursor: c.req.query("cursor"), query: c.req.query("q") })));
   app.post("/copy", async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = MarketingDraftSchema.safeParse(body?.draft);
@@ -197,28 +198,40 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       return c.json({ ...await requireProject(owner, p.id), operation });
     } catch (error) { await operations.fail(owner, body.clientRequestId, started, invalidTextResult(error)); throw error; }
   });
+  // Review and publication use the same request records as /copy: one model call
+  // per clientRequestId, the receipt is saved before the result is applied, and a
+  // repeated or lost request replays the saved outcome instead of paying again.
+  const recordedText = async (owner: string, projectId: string, body: { clientRequestId: string; version: number }, kind: "review" | "publication",
+    input: { version: number; locale: "zh" | "en" | "id"; fillMissing?: boolean }, prompt: (draft: MarketingDraft) => { system: string; input: string }) => {
+    const reserved = await operations.begin(owner, body.clientRequestId, projectId, body.version, kind, input);
+    let operation = reserved.operation;
+    if (reserved.fresh) {
+      try {
+        const request = prompt(reserved.draft);
+        const raw = await service.marketingText(request.system, request.input, owner, undefined, { onReceipt: receipt => operations.receipt(owner, body.clientRequestId, receipt) });
+        operation = await operations.finish(owner, body.clientRequestId, parseOperationResult(kind, raw, reserved.draft, input));
+      } catch (error) { await operations.fail(owner, body.clientRequestId, true, invalidTextResult(error)); throw error; }
+    } else replay(operation);
+    if (operation.status === "conflict") throw new MarketingError(kind === "review" ? "文案已更新，请重新检查。" : "草稿已更新，请重新生成标题和标签。", 409);
+    return { ...await requireProject(owner, projectId), operation };
+  };
   app.post("/:id/review", async (c) => {
-    const p = await requireProject(c.get("userId"), c.req.param("id"));
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
     if (!p.draft.script.trim()) throw new MarketingError("请先填写或生成视频文案。");
     const body = await c.req.json().catch(() => null);
     if (body?.locale !== undefined && !["zh", "en", "id"].includes(body.locale)) throw new MarketingError("检查语言无效。");
-    const locale = (body?.locale ?? "zh") as "zh" | "en" | "id";
-    const raw = await service.marketingText(`${REVIEW_INSTRUCTION}\nWrite reasons and suggested replacements in ${locale}. Keep excerpts exactly as supplied.`, reviewText(p.draft), c.get("userId"), c.req.raw.signal);
-    const review = normalizeMarketingReview(p.draft, raw, locale);
-    if (!review) throw new MarketingError("内容检查未返回完整且可定位的结果，请重试。", 503);
-    return c.json(await store.setReview(c.get("userId"), p, review));
+    if (!uuid.test(body?.clientRequestId ?? "") || !Number.isInteger(body?.version)) throw new MarketingError("检查参数无效。");
+    const locale = (body.locale ?? "zh") as "zh" | "en" | "id";
+    return c.json(await recordedText(owner, p.id, body, "review", { version: body.version, locale },
+      draft => ({ system: `${REVIEW_INSTRUCTION}\nWrite reasons and suggested replacements in ${locale}. Keep excerpts exactly as supplied.`, input: reviewText(draft) })));
   });
   app.post("/:id/publication", async (c) => {
     const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
     const body = await c.req.json().catch(() => null);
-    if (!["zh", "en", "id"].includes(body?.locale) || typeof body?.fillMissing !== "boolean" || !p.draft.script.trim()) throw new MarketingError("生成参数无效");
-    const prompt = publicationPrompt(p.draft.script, body.locale);
-    const value = await service.marketingText(prompt.system, prompt.input, owner, c.req.raw.signal) as Record<string, unknown>;
-    const draft = MarketingDraftSchema.safeParse({ ...p.draft,
-      publishTitle: body.fillMissing && p.draft.publishTitle ? p.draft.publishTitle : value?.publishTitle,
-      tags: body.fillMissing && p.draft.tags ? p.draft.tags : value?.tags });
-    if (!draft.success || !draft.data.publishTitle || !draft.data.tags) throw new MarketingError("文案生成失败，请重试。", 503);
-    return c.json(await store.save(owner, p.id, p.version, draft.data));
+    if (!["zh", "en", "id"].includes(body?.locale) || typeof body?.fillMissing !== "boolean" || !p.draft.script.trim()
+      || !uuid.test(body?.clientRequestId ?? "") || !Number.isInteger(body?.version)) throw new MarketingError("生成参数无效");
+    return c.json(await recordedText(owner, p.id, body, "publication", { version: body.version, locale: body.locale, fillMissing: body.fillMissing },
+      draft => publicationPrompt(draft.script, body.locale)));
   });
   app.post("/:id/generate", async (c) => {
     const owner = c.get("userId");
@@ -277,6 +290,16 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     catch (error) { throw new MarketingError((error as Error).message); }
     const billableSeconds = p.taskId ? segments.filter(s => segmentRecoveryAction(s) === "submit").reduce((sum, s) => sum + Number(s.duration_sec), 0) : planned.reduce((sum, s) => sum + s.durationSec, 0);
     const assets = await ownedAssets(owner, draft, !needsSubmission, needsSubmission ? undefined : draft);
+    // The stored MIME is the client's claim and the draft may predate the active
+    // model, so check each submitted image's real format and size against it here.
+    if (needsSubmission && inputVersion >= 2) {
+      for (const { assetId } of marketingImageReferences(draft)) {
+        const asset = (await service.db.getAsset(assetId))!;
+        const info = await readImageInfo(await ownedAssetPath(dataRoot, asset));
+        const issue = marketingReferenceImageIssue(profile, { mime: info?.mime ?? "", size: Number(asset.size_bytes), width: info?.width ?? 0, height: info?.height ?? 0 });
+        if (issue) throw new MarketingError(issue);
+      }
+    }
     if (needsSubmission && assets.video) {
       const video = (await service.db.getAsset(assets.video.id))!;
       const info = await inspectMedia(await ownedAssetPath(dataRoot, video), c.req.raw.signal);

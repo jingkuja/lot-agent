@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText } from "./index.js";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText } from "./index.js";
 
 const grok = GROK_MARKETING_PROFILE;
 const kling = KLING_MARKETING_PROFILE;
@@ -202,4 +202,20 @@ it("resolves model profiles for new and frozen jobs", () => {
   expect(marketingJobProfile({ modelId: "grok-imagine-video-1.5" })).toBe(grok);
   expect(marketingJobProfile({})).toBe(kling);
   expect(() => marketingJobProfile({ modelId: "retired-model" })).toThrow("不受支持");
+});
+
+describe("reference image contract per model", () => {
+  const image = { mime: "image/png", size: 1024, width: 800, height: 800 };
+  it("applies Kling's documented format, edge and aspect limits", () => {
+    expect(marketingReferenceImageIssue(KLING_MARKETING_PROFILE, image)).toBeUndefined();
+    expect(marketingReferenceImageIssue(KLING_MARKETING_PROFILE, { ...image, mime: "image/webp" })).toBe("当前视频模型的参考图仅支持 JPG、PNG 格式");
+    expect(marketingReferenceImageIssue(KLING_MARKETING_PROFILE, { ...image, width: 299 })).toBe("参考图宽高不能小于 300px");
+    expect(marketingReferenceImageIssue(KLING_MARKETING_PROFILE, { ...image, width: 2001 })).toBe("参考图宽高比需在 1:2.5–2.5:1 之间");
+  });
+  it("accepts any decodable JPG/PNG/WebP for Grok, which documents no dimension limits", () => {
+    expect(marketingReferenceImageIssue(GROK_MARKETING_PROFILE, { ...image, mime: "image/webp", width: 64, height: 4000 })).toBeUndefined();
+    expect(marketingReferenceImageIssue(GROK_MARKETING_PROFILE, { ...image, mime: "image/gif" })).toBe("当前视频模型的参考图仅支持 JPG、PNG、WebP 格式");
+    expect(marketingReferenceImageIssue(GROK_MARKETING_PROFILE, { ...image, width: 0 })).toBe("无法读取图片尺寸，请更换图片");
+    expect(marketingReferenceImageIssue(GROK_MARKETING_PROFILE, { ...image, size: 21 * 1024 * 1024 })).toBe("参考图大小不能超过 20MB");
+  });
 });

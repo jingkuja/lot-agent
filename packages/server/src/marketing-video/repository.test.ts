@@ -66,3 +66,25 @@ describe("deleting marketing drafts", () => {
     }
   });
 });
+
+describe("paging marketing drafts", () => {
+  const row = (id: string, at: string) => ({ id, user_id: "owner", version: 1, draft: {}, updated_at: at, cursor_at: `${at}+00`, status: null });
+  it("returns an exact cursor for the next page and escapes search wildcards", async () => {
+    const query = vi.fn(async (_sql: string, _params?: unknown[]) => ({ rows: [row("b", "2026-10-20 10:00:00.123456"), row("a", "2026-10-20 09:00:00.5")] }));
+    const store = new PgMarketingProjectStore({ query } as unknown as pg.Pool);
+    const first = await store.page("owner", { limit: 1, query: " 100%_咖啡 " });
+    expect(first.data.map(p => p.id)).toEqual(["b"]);
+    expect(JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString())).toEqual(["2026-10-20 10:00:00.123456+00", "b"]);
+    expect(query.mock.calls[0][1]).toEqual(["owner", "%100\\%\\_咖啡%", 2]);
+    await store.page("owner", { cursor: first.nextCursor });
+    expect(query.mock.calls[1][0]).toContain("(p.updated_at, p.id::text) < ($2::timestamptz, $3)");
+    expect(query.mock.calls[1][1]).toEqual(["owner", "2026-10-20 10:00:00.123456+00", "b", 21]);
+  });
+  it("rejects a malformed cursor and caps the page size", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const store = new PgMarketingProjectStore({ query } as unknown as pg.Pool);
+    await expect(store.page("owner", { cursor: "not-json" })).rejects.toMatchObject({ status: 400 });
+    expect((await store.page("owner", { limit: 500 })).nextCursor).toBeUndefined();
+    expect((query.mock.calls[0] as unknown[])[1]).toEqual(["owner", 51]);
+  });
+});

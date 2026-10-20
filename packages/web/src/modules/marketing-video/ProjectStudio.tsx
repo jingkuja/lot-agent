@@ -1,6 +1,6 @@
 import { TextOperationPanel } from "./TextOperationPanel.js";
 import { useEffect, useId, useRef, useState } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, MARKETING_SHOT_MAX_SECONDS, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, speechUnits, type MarketingDraft, type MarketingProject, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, MARKETING_SHOT_MAX_SECONDS, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingReferenceImageIssue, speechUnits, type MarketingDraft, type MarketingProject, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
@@ -8,7 +8,7 @@ import { validateTwinFile } from "../digital-twin/media.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { ReviewPanel } from "./ReviewPanel.js";
 import { TaskStatus } from "./TaskStatus.js";
-import { checkKlingReferenceImage, klingReferenceVideoIssue, readMediaDuration, readMediaMetadata } from "../../lib/video-references.js";
+import { readImageSize, klingReferenceVideoIssue, readMediaDuration, readMediaMetadata } from "../../lib/video-references.js";
 import { isKlingModel } from "../../lib/model-filter.js";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { ReferenceAnalysisPanel, analysisError } from "./ReferenceAnalysisPanel.js";
@@ -37,6 +37,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [draft, setDraft] = useState<MarketingDraft>(() => MarketingDraftSchema.parse({}));
   const [project, setProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [draftQuery, setDraftQuery] = useState(""); const [nextCursor, setNextCursor] = useState<string>();
+  const draftListRequest = useRef(0); const loadedDraftQuery = useRef("");
   const [assets, setAssets] = useState<Record<string, Asset>>({});
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   // The server picks the clip model; its limits drive validation and hints here.
@@ -65,7 +67,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const uploadController = useRef<AbortController | null>(null);
   const previewRefresh = useRef(new Map<string, number>());
   const storageKey = `lot:marketing-video:${ownerId}`;
-  const setCurrent = (p: Project) => { if (p.id === draftId.current && p.version < version.current) return; projectRef.current = p; setProject(p); setProjects(old => [p, ...old.filter(item => item.id !== p.id)].slice(0, 50)); };
+  const setCurrent = (p: Project) => { if (p.id === draftId.current && p.version < version.current) return; projectRef.current = p; setProject(p); setProjects(old => [p, ...old.filter(item => item.id !== p.id)]); };
   const remember = (id: string | null) => { try { if (id) localStorage.setItem(storageKey, id); else localStorage.removeItem(storageKey); } catch { /* Server drafts remain available. */ } };
   const active = project?.status === "pending" || project?.status === "running";
   const frozen = !!project?.taskId;
@@ -95,7 +97,10 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   async function open(id: string) {
     const token = ++epoch.current;
     setTextPending(true);
-    const p = await requestProject(`/marketing-videos/${id}`);
+    let p: Project;
+    // A failed open must not leave the editor locked as if a text request were pending.
+    try { p = await requestProject(`/marketing-videos/${id}`); }
+    catch (e) { if (alive.current && token === epoch.current) setTextPending(false); throw e; }
     if (!alive.current || token !== epoch.current) return;
     draftId.current = id; version.current = p.version; saved.current = JSON.stringify(p.draft);
     setSourceKind(p.draft.referenceUpload ? "upload" : p.draft.reference.trim() ? marketingSourceKind(p.draft.reference) : "video");
@@ -107,12 +112,14 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     setReady(false); setLoadError("");
-    void Promise.all([request<{ data: Project[] }>("/marketing-videos", { signal: controller.signal }), request<Capabilities>("/marketing-videos/capabilities", { signal: controller.signal })]).then(async ([list, caps]) => {
+    void Promise.all([request<{ data: Project[]; nextCursor?: string }>("/marketing-videos?limit=20", { signal: controller.signal }), request<Capabilities>("/marketing-videos/capabilities", { signal: controller.signal })]).then(async ([list, caps]) => {
       if (stopped) return;
-      setProjects(list.data.map(normalizeProject)); setCapabilities(caps);
+      setProjects(list.data.map(normalizeProject)); setNextCursor(list.nextCursor); setCapabilities(caps);
       let id: string | null = null; try { id = localStorage.getItem(storageKey); } catch { /* Optional preference. */ }
-      if (id && list.data.some(p => p.id === id)) {
-        try { await open(id); } catch (e) { if (!stopped) setError(errorMessage(e)); }
+      // The remembered draft may be older than the first page.
+      if (id) {
+        try { await open(id); }
+        catch (e) { if (e instanceof ApiClientError && e.status === 404 && !/^(404\s+)?Not Found$/i.test(e.message)) remember(null); else if (!stopped) setError(errorMessage(e)); }
       }
       if (!stopped) setReady(true);
     }).catch(e => {
@@ -120,6 +127,25 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     }).finally(() => clearTimeout(timeout));
     return () => { stopped = true; alive.current = false; epoch.current++; clearTimeout(timeout); controller.abort(); uploadController.current?.abort(); };
   }, [storageKey, loadAttempt]);
+  async function loadDrafts(query: string, cursor?: string) {
+    const token = ++draftListRequest.current;
+    const params = new URLSearchParams({ limit: "20" });
+    if (query.trim()) params.set("q", query.trim());
+    if (cursor) params.set("cursor", cursor);
+    const list = await request<{ data: Project[]; nextCursor?: string }>(`/marketing-videos?${params}`);
+    if (!alive.current || token !== draftListRequest.current) return;
+    const page = list.data.map(normalizeProject);
+    setProjects(old => cursor ? [...old, ...page.filter(p => !old.some(item => item.id === p.id))] : page);
+    setNextCursor(list.nextCursor);
+  }
+  useEffect(() => {
+    if (!ready || draftQuery === loadedDraftQuery.current) return;
+    const timer = setTimeout(() => {
+      loadedDraftQuery.current = draftQuery;
+      void loadDrafts(draftQuery).catch(e => { if (alive.current) setError(errorMessage(e)); });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [draftQuery, ready]);
   async function save(): Promise<Project> {
     if (flight.current) { await flight.current; return save(); }
     if (saved.current === JSON.stringify(draftRef.current) && projectRef.current) return projectRef.current;
@@ -158,10 +184,19 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     try { await work(); } catch (e) { if (alive.current) setError(errorMessage(e)); }
     finally { lock.current = false; if (alive.current) { setBusy(false); setWorking(""); } }
   }
+  // Review and title/tag requests are recorded like copy: the same ID replays a
+  // saved result after a lost response instead of calling the model again.
+  function recordedRequestId(kind: string, p: Project, ...input: unknown[]) {
+    const fingerprint = JSON.stringify([kind, p.id, p.version, locale, ...input]);
+    if (textRequest.current?.fingerprint !== fingerprint) textRequest.current = { fingerprint, id: crypto.randomUUID() };
+    return textRequest.current.id;
+  }
   async function review() {
     const p = await save();
-    const result = await requestProject(`/marketing-videos/${p.id}/review`, json("POST", { locale }));
-    if (alive.current) { setCurrent(result); setNotice(""); }
+    try {
+      const result = await requestProject(`/marketing-videos/${p.id}/review`, json("POST", { locale, version: p.version, clientRequestId: recordedRequestId("review", p) }));
+      if (alive.current) { setCurrent(result); setNotice(""); }
+    } finally { if (alive.current) setOperationReload(n => n + 1); }
   }
   async function applyReviewEdit(next: MarketingDraft) {
     await act(async () => {
@@ -212,16 +247,19 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       update(next.draft); setCurrent(next); setAnalysis(result.analysis);
     } finally { if (alive.current && token === epoch.current) setOperationReload(n => n + 1); }
   }
-  async function textOperationState(operation?: { id: string; status: string; appliedVersion?: number; result?: { analysis: string } }) {
+  async function textOperationState(operation?: { id: string; kind?: string; status: string; appliedVersion?: number; result?: { analysis?: string } }) {
     setTextPending(!!operation && ["running", "unknown", "needs_apply"].includes(operation.status));
     // A released intent keeps its ID on the server; the next creation needs a new one.
     if (operation?.status === "failed" || operation?.status === "released") textRequest.current = null;
-    if (operation?.status !== "succeeded" || !operation.appliedVersion || operation.appliedVersion <= version.current || dirty) return;
+    // A review keeps the version; reload when a recovered review is not shown yet.
+    const unseenReview = operation?.kind === "review" && operation.appliedVersion === version.current && projectRef.current?.reviewedScript !== reviewedText(draftRef.current);
+    if (operation?.status !== "succeeded" || !operation.appliedVersion || (operation.appliedVersion <= version.current && !unseenReview) || dirty) return;
     const token = epoch.current; const id = draftId.current;
     const p = await requestProject(`/marketing-videos/${id}`);
     if (!alive.current || token !== epoch.current || saved.current !== JSON.stringify(draftRef.current)) return;
     version.current = p.version; saved.current = JSON.stringify(p.draft);
-    update(p.draft); setCurrent(p); setAnalysis(operation.result?.analysis ?? "");
+    update(p.draft); setCurrent(p);
+    if (operation.kind !== "review" && operation.kind !== "publication") setAnalysis(operation.result?.analysis ?? "");
   }
 
   async function completedAnalysis(value: ReferenceAnalysis) {
@@ -234,10 +272,12 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }
   async function publication(fillMissing = false) {
     const p = await save();
-    const result = await requestProject(`/marketing-videos/${p.id}/publication`, json("POST", { locale, fillMissing }));
-    if (!alive.current) return;
-    version.current = result.version; saved.current = JSON.stringify(result.draft);
-    update(result.draft); setCurrent(result);
+    try {
+      const result = await requestProject(`/marketing-videos/${p.id}/publication`, json("POST", { locale, fillMissing, version: p.version, clientRequestId: recordedRequestId("publication", p, fillMissing) }));
+      if (!alive.current) return;
+      version.current = result.version; saved.current = JSON.stringify(result.draft);
+      update(result.draft); setCurrent(result);
+    } finally { if (alive.current) setOperationReload(n => n + 1); }
   }
   async function generate(retry = false) {
     // Retries resume a frozen job whose recorded model rules the server checks.
@@ -311,7 +351,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     if (slot === "scene" || slot === "voice" || slot === "portrait" || slot === "background" || slot === "cover") {
       await validateTwinFile(file, slot === "voice" ? "voice" : "portrait");
       // Portrait, background and scene images are model references; the cover is not.
-      const issue = multiple && isKlingModel(profile.modelId) ? await checkKlingReferenceImage(file) : undefined;
+      // The server re-checks the real file against the active model before submission.
+      const issue = multiple ? await readImageSize(file).then(size => marketingReferenceImageIssue(profile, { mime: file.type, size: file.size, ...size }),
+        (e: unknown) => e instanceof Error ? e.message : "无法读取图片尺寸，请更换图片") : undefined;
       if (issue) throw new Error(issue);
     }
     else if (slot === "video") {
@@ -410,7 +452,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   return <div className="mv-scroll"><div className="mv-studio">
     <header className="mv-heading"><div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div><button disabled={navigationBusy || saving || !ready} onClick={() => void act(() => newDraft(), true)}>{t("开始新视频")}</button></header>
     {loadError && <div className="mv-connection-error" role="alert"><p>{t(loadError)}</p><button onClick={() => { setLoadError(""); setLoadAttempt(value => value + 1); }}>{t("重新连接")}</button></div>}
-    <details className="mv-library"><summary>{t("我的视频草稿")} · {projects.length}</summary><div className="mv-draft-list">{projects.map(p => <div key={p.id} className="mv-draft-item"><button disabled={navigationBusy || saving} aria-pressed={p.id === project?.id} onClick={() => void act(async () => { if (dirty) await save(); await open(p.id); }, true)}><strong>{p.draft.publishTitle || p.draft.topic || t("未命名草稿")}</strong><span>{p.draft.durationSec}s · {t(({ draft: "草稿", pending: "等待生成", running: "生成中", succeeded: "已生成", failed: "生成未完成", cancelled: "已取消" } as Record<string, string>)[p.status] ?? p.status)}</span></button><button className="mv-draft-delete" disabled={busy || saving || ["pending", "running"].includes(p.status)} aria-label={t("删除草稿")} title={t(["pending", "running"].includes(p.status) ? "视频正在生成，请先取消，任务结束后再删除。" : "删除草稿")} onClick={() => void deleteDraft(p)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></svg></button></div>)}</div></details>
+    <details className="mv-library"><summary>{t("我的视频草稿")} · {projects.length}{nextCursor ? "+" : ""}</summary><input className="mv-draft-search" type="search" value={draftQuery} maxLength={100} placeholder={t("搜索标题、主题或文案")} aria-label={t("搜索草稿")} onChange={e => setDraftQuery(e.target.value)} />{!projects.length && !!draftQuery.trim() && <p className="mv-hint">{t("没有找到匹配的草稿")}</p>}<div className="mv-draft-list">{projects.map(p => <div key={p.id} className="mv-draft-item"><button disabled={navigationBusy || saving} aria-pressed={p.id === project?.id} onClick={() => void act(async () => { if (dirty) await save(); await open(p.id); }, true)}><strong>{p.draft.publishTitle || p.draft.topic || t("未命名草稿")}</strong><span>{p.draft.durationSec}s · {t(({ draft: "草稿", pending: "等待生成", running: "生成中", succeeded: "已生成", failed: "生成未完成", cancelled: "已取消" } as Record<string, string>)[p.status] ?? p.status)}</span></button><button className="mv-draft-delete" disabled={busy || saving || ["pending", "running"].includes(p.status)} aria-label={t("删除草稿")} title={t(["pending", "running"].includes(p.status) ? "视频正在生成，请先取消，任务结束后再删除。" : "删除草稿")} onClick={() => void deleteDraft(p)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></svg></button></div>)}</div>{nextCursor && <button className="mv-draft-more" disabled={navigationBusy} onClick={() => void act(() => loadDrafts(draftQuery, nextCursor), true)}>{t("加载更多草稿")}</button>}</details>
     {project && <TextOperationPanel key={project.id} projectId={project.id} reload={operationReload} onState={async operation => { if (project.id === draftId.current) await textOperationState(operation); }} />}
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}
     {project?.taskId ? <section className="mv-card mv-results"><div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => void act(() => newDraft(true))}>{t("复制为新草稿")}</button></div>

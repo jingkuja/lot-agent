@@ -1,4 +1,5 @@
 import { inspectMedia } from "./media.js";
+import { readImageInfo } from "./image-size.js";
 import { randomUUID } from "node:crypto";
 import { MarketingError } from "./repository.js";
 import type { PgMarketingTextOperations } from "./operations.js";
@@ -12,10 +13,11 @@ import { completeMarketingJson } from "./text.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 
 vi.mock("./media.js", () => ({ mediaCapabilities: async () => ({ composition: true, subtitles: false }), inspectMedia: vi.fn(), ownedAssetPath: vi.fn() }));
+vi.mock("./image-size.js", () => ({ readImageInfo: vi.fn(async () => ({ mime: "image/png", width: 800, height: 800 })) }));
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner") {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
-  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async () => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => {}), releaseUnknownSegments: vi.fn(async () => 1) };
+  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), page: vi.fn(async (..._args: unknown[]) => ({ data: [] as unknown[], nextCursor: undefined as string | undefined })), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async (..._args: unknown[]) => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => {}), releaseUnknownSegments: vi.fn(async () => 1) };
   const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
     begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, _input: unknown, draft?: typeof project.draft) => {
@@ -23,8 +25,9 @@ function fixture(owner = "owner") {
       return { fresh: true, operation: { id: requestId, kind, status: "running" }, draft: draft ?? project.draft };
     }),
     receipt: vi.fn(), fail: vi.fn(), list: vi.fn(async () => []), recover: vi.fn(), release: vi.fn(async (_owner: string, _project: string, operationId: string) => ({ id: operationId, kind: "copy", status: "released" })),
-    finish: vi.fn(async (owner: string, requestId: string, result: { draft: typeof project.draft; analysis: string }) => {
-      await store.save(owner, project.id, project.version, result.draft);
+    finish: vi.fn(async (owner: string, requestId: string, result: { draft?: typeof project.draft; analysis?: string; review?: any }) => {
+      if (result.review) await store.setReview(owner, project, result.review);
+      else await store.save(owner, project.id, project.version, result.draft!);
       return { id: requestId, status: "succeeded", result };
     }),
   };
@@ -32,7 +35,7 @@ function fixture(owner = "owner") {
   if (owner) app.use("*", async (c, next) => { c.set("userId", owner); await next(); });
   app.route("/api/marketing-videos", createMarketingVideoRoutes(service as unknown as AgentService, "/tmp", store as unknown as PgMarketingProjectStore, operations as unknown as PgMarketingTextOperations));
   const call = (path: string, value?: unknown, method = "POST") => {
-    const input = value && typeof value === "object" && (path === "/copy" || path.endsWith("/storyboard"))
+    const input = value && typeof value === "object" && (path === "/copy" || ["/storyboard", "/review", "/publication"].some(end => path.endsWith(end)))
       ? { clientRequestId: randomUUID(), projectId: id, version: 1, ...value } : value;
     return app.request(`/api/marketing-videos${path === "/" ? "" : path}`, input === undefined ? undefined : { method, body: JSON.stringify(input), headers: { "Content-Type": "application/json" } });
   };
@@ -59,7 +62,10 @@ describe("marketing project HTTP boundaries", () => {
     const f = fixture();
     const list = await f.call("/");
     expect(list.status).toBe(200); expect(await list.json()).toEqual({ data: [] });
-    expect(f.store.list).toHaveBeenCalledWith("owner");
+    expect(f.store.page).toHaveBeenCalledWith("owner", { limit: 20, cursor: undefined, query: undefined });
+    f.store.page.mockResolvedValueOnce({ data: [], nextCursor: "next" });
+    expect(await (await f.app.request("/api/marketing-videos?limit=10&cursor=abc&q=%E5%92%96%E5%95%A1")).json()).toEqual({ data: [], nextCursor: "next" });
+    expect(f.store.page).toHaveBeenLastCalledWith("owner", { limit: 10, cursor: "abc", query: "咖啡" });
     const capabilities = await f.call("/capabilities");
     expect(capabilities.status).toBe(200); expect(await capabilities.json()).toMatchObject({ composition: true });
     const generated = { shots: [1, 2].map(() => ({ script: "欢迎到店发现现磨咖啡与明亮空间。", visual: "明亮咖啡店", action: "展示咖啡", camera: "中景" })), publishTitle: "转角咖啡时光", tags: "#咖啡", analysis: "介绍卖点并邀请到店。" };
@@ -126,7 +132,9 @@ describe("marketing project HTTP boundaries", () => {
     f.project.draft = MarketingDraftSchema.parse({ script: "普通产品介绍。", background: "项目稳赚招牌", storyboard: [{ script: "产品100%见效。", visual: "产品海报", action: "展示产品", camera: "中景" }] });
     f.service.marketingText.mockResolvedValueOnce({ verdict: "pass", issues: [] });
     expect((await f.call(`/${id}/review`, { locale: "en" })).status).toBe(200);
-    expect(f.service.marketingText).toHaveBeenCalledWith(expect.stringContaining("Write reasons and suggested replacements in en"), expect.any(String), "owner", expect.any(AbortSignal));
+    // Recorded like /copy: not aborted by a browser disconnect, receipt saved before applying.
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.stringContaining("Write reasons and suggested replacements in en"), expect.any(String), "owner", undefined, expect.objectContaining({ onReceipt: expect.any(Function) }));
+    expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "review", { version: 1, locale: "en" });
     const input = JSON.parse(f.service.marketingText.mock.calls[0][1] as unknown as string);
     expect(input.fields).toEqual(expect.arrayContaining([
       { field: "background", text: "项目稳赚招牌" },
@@ -501,5 +509,70 @@ describe("historical generation recovery", () => {
     f.store.segments.mockResolvedValue([0, 1].map(slot => ({ slot, task_id: `child-${slot}`, duration_sec: 15, output: { assetIds: ["foreign-output"] } })));
     expect((await f.call(`/${id}/generate`, { version: 1, retry: true })).status).toBe(404);
     expect(f.store.reserve).not.toHaveBeenCalled();
+  });
+});
+
+describe("recorded review and publication requests", () => {
+  it("requires a request identity and project version before calling the model", async () => {
+    const f = fixture();
+    for (const path of ["review", "publication"]) {
+      const response = await f.app.request(`/api/marketing-videos/${id}/${path}`, { method: "POST", body: JSON.stringify({ locale: "zh", fillMissing: false }), headers: { "Content-Type": "application/json" } });
+      expect(response.status).toBe(400);
+    }
+    expect(f.operations.begin).not.toHaveBeenCalled(); expect(f.service.marketingText).not.toHaveBeenCalled();
+  });
+  it("replays a saved outcome for a repeated request without another model call", async () => {
+    const f = fixture();
+    f.operations.begin.mockResolvedValueOnce({ fresh: false, operation: { id: "op", kind: "review", status: "succeeded", result: { review: { verdict: "pass", issues: [] } } } } as never);
+    const response = await f.call(`/${id}/review`, {});
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id, operation: { id: "op", status: "succeeded" } });
+    expect(f.service.marketingText).not.toHaveBeenCalled();
+    f.operations.begin.mockResolvedValueOnce({ fresh: false, operation: { id: "op", kind: "publication", status: "unknown" } } as never);
+    expect((await f.call(`/${id}/publication`, { locale: "zh", fillMissing: false })).status).toBe(409);
+    expect(f.service.marketingText).not.toHaveBeenCalled();
+  });
+  it("fills only fields missing from the frozen draft and records the publication", async () => {
+    const f = fixture(); f.project.draft = MarketingDraftSchema.parse({ ...f.project.draft, publishTitle: "原标题" });
+    f.service.marketingText.mockResolvedValueOnce({ publishTitle: "新标题", tags: "#咖啡" });
+    expect((await f.call(`/${id}/publication`, { locale: "zh", fillMissing: true })).status).toBe(200);
+    expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "publication", { version: 1, locale: "zh", fillMissing: true });
+    expect(f.operations.finish).toHaveBeenCalledWith("owner", expect.any(String), expect.objectContaining({ draft: expect.objectContaining({ publishTitle: "原标题", tags: "#咖啡" }) }));
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", undefined, expect.objectContaining({ onReceipt: expect.any(Function) }));
+  });
+  it("reports a result that no longer matches the draft as a conflict", async () => {
+    const f = fixture();
+    f.service.marketingText.mockResolvedValueOnce({ verdict: "pass", issues: [] });
+    f.operations.finish.mockResolvedValueOnce({ id: "op", status: "conflict", result: {} } as never);
+    expect((await f.call(`/${id}/review`, {})).status).toBe(409);
+  });
+});
+
+describe("server reference image contract", () => {
+  const generate = (f: ReturnType<typeof fixture>) => f.call(`/${id}/generate`, { version: 1, retry: false });
+  function withImage(mime = "image/png") {
+    const f = fixture(); f.project.draft.assets = { portrait: id };
+    f.service.db.getAsset.mockImplementation(async () => ({ user_id: "owner", mime, size_bytes: 100, url: `/static/${id}`, original_name: "face.png" }) as never);
+    return f;
+  }
+  it("checks the file signature and size against the Kling contract before reserving", async () => {
+    process.env.MARKETING_VIDEO_MODEL = "kling-video-v3-omni";
+    try {
+      for (const info of [{ mime: "image/webp" as const, width: 800, height: 800 }, { mime: "image/png" as const, width: 200, height: 800 }, { mime: "image/png" as const, width: 2000, height: 600 }, null]) {
+        const f = withImage();
+        vi.mocked(readImageInfo).mockResolvedValueOnce(info);
+        const response = await generate(f);
+        expect(response.status).toBe(400);
+        expect((await response.json() as { error: string }).error).toMatch(/^(当前视频模型的参考图|参考图)/);
+        expect(f.store.reserve).not.toHaveBeenCalled(); expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+      }
+      expect((await generate(withImage())).status).toBe(202);
+    } finally { delete process.env.MARKETING_VIDEO_MODEL; }
+  });
+  it("accepts a real WebP for Grok but rejects an undecodable file", async () => {
+    vi.mocked(readImageInfo).mockResolvedValueOnce({ mime: "image/webp", width: 64, height: 64 });
+    expect((await generate(withImage("image/webp"))).status).toBe(202);
+    vi.mocked(readImageInfo).mockResolvedValueOnce(null);
+    expect((await generate(withImage())).status).toBe(400);
   });
 });

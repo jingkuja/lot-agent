@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { MarketingDraft } from "@lot-agent/core/marketing-video";
+import type { MarketingDraft, MarketingReview } from "@lot-agent/core/marketing-video";
 import { request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 
-type Operation = { id: string; status: string; appliedVersion?: number; result?: { draft: MarketingDraft; analysis: string } };
+type Operation = { id: string; kind?: "copy" | "storyboard" | "review" | "publication"; status: string; appliedVersion?: number; result?: { draft?: MarketingDraft; analysis?: string; review?: MarketingReview } };
+const RUNNING: Record<string, string> = { review: "正在检查文案与分镜", publication: "正在生成标题和标签" };
 export function TextOperationPanel({ projectId, reload, onState }: {
   projectId: string; reload: number; onState(operation?: Operation): Promise<void>;
 }) {
@@ -47,7 +48,7 @@ export function TextOperationPanel({ projectId, reload, onState }: {
   const pending = !!latest && ["running", "unknown", "needs_apply"].includes(latest.status);
   return <div className="ma-panel" aria-live="polite">
     {error && <p>{t("暂时无法查询进度，正在自动重试；无需重复生成。")}</p>}
-    {latest?.status === "running" && <p>{t("正在生成文案和分镜")}…</p>}
+    {latest?.status === "running" && <p>{t(RUNNING[latest.kind ?? ""] ?? "正在生成文案和分镜")}…</p>}
     {latest?.status === "unknown" && <p role="alert">{t("上次 AI 创作没有收到明确结果，可能已经计费。为避免重复扣费，系统不会自动重试。可以继续手动编辑文案，或放弃这次结果后重新创作（会再次计费）；如需核实费用，请联系客服并提供下方操作编号。")}</p>}
     {latest?.status === "needs_apply" && <p role="status">{t("AI 创作结果已收到，点击下方按钮即可填入草稿，不会再次扣费。")}</p>}
     {pending && <><p>{t("操作编号")}：{latest.id}</p><div className="mv-choices">
@@ -57,9 +58,11 @@ export function TextOperationPanel({ projectId, reload, onState }: {
     </div></>}
     {recoveryError && <p role="alert">{t(recoveryError)}</p>}
     {!!operations.length && <details onToggle={e => setExpanded(e.currentTarget.open)}><summary>{t("保存的创作记录")}</summary>{expanded && operations.map(operation => <article key={operation.id}>
-      <p>{t(({ succeeded: "创作结果已保存", conflict: "草稿已更新，创作结果单独保留", needs_apply: "AI 创作结果已收到，可恢复填入草稿。", failed: "创作未完成，再次生成可能产生费用。", unknown: "创作结果待核实，已阻止重复扣费。", released: "已放弃待核实的结果，该次请求可能已计费。", running: "正在生成文案和分镜" } as Record<string, string>)[operation.status] ?? operation.status)}</p>
+      <p>{t(({ succeeded: "创作结果已保存", conflict: "草稿已更新，创作结果单独保留", needs_apply: "AI 创作结果已收到，可恢复填入草稿。", failed: "创作未完成，再次生成可能产生费用。", unknown: "创作结果待核实，已阻止重复扣费。", released: "已放弃待核实的结果，该次请求可能已计费。", running: RUNNING[operation.kind ?? ""] ?? "正在生成文案和分镜" } as Record<string, string>)[operation.status] ?? operation.status)}</p>
       <p>{t("操作编号")}：{operation.id}</p>
-      {operation.result && <><p>{operation.result.analysis}</p><pre>{operation.result.draft.script}</pre>{operation.result.draft.storyboard.map((shot, index) => <p key={index}>{shot.durationSec}s · {shot.visual} · {shot.action} · {shot.camera}</p>)}</>}
+      {operation.result?.review && <p>{t("检查发现 {0} 处需关注的内容", [operation.result.review.issues.length])}</p>}
+      {operation.kind === "publication" && operation.result?.draft && <><p>{operation.result.draft.publishTitle}</p><p>{operation.result.draft.tags}</p></>}
+      {operation.kind !== "publication" && operation.result?.draft && <><p>{operation.result.analysis}</p><pre>{operation.result.draft.script}</pre>{operation.result.draft.storyboard.map((shot, index) => <p key={index}>{shot.durationSec}s · {shot.visual} · {shot.action} · {shot.camera}</p>)}</>}
     </article>)}</details>}
   </div>;
 }

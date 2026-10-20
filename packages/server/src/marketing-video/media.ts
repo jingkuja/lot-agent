@@ -26,12 +26,49 @@ export function mediaProcess(binary: string, args: string[], opts: { signal?: Ab
 }
 export const ffmpeg = () => process.env.MARKETING_FFMPEG_PATH || "ffmpeg";
 export const ffprobe = () => process.env.MARKETING_FFPROBE_PATH || "ffprobe";
+// Everything composeMarketingVideo needs: H.264/AAC encoders and its filters.
+const REQUIRED_ENCODERS = ["libx264", "aac"];
+const REQUIRED_FILTERS = ["scale", "pad", "setsar", "fps", "aresample", "apad", "anullsrc", "amix", "volume", "asplit", "color"];
+const PROBE_TTL_MS = 10 * 60_000;
+const probes = new Map<string, { at: number; result: Promise<boolean> }>();
+/** `-version` alone accepts any program that exits 0. Check the encoders and
+ * filters, then compose a tiny clip the same way as a real job, so a missing
+ * codec fails before any clip is paid for. Cached by binary paths and versions. */
 export async function mediaCapabilities() {
   try {
-    await mediaProcess(ffmpeg(), ["-version"], { timeoutMs: 5000 });
-    await mediaProcess(ffprobe(), ["-version"], { timeoutMs: 5000 });
-    return { composition: true };
+    const versions = await Promise.all([mediaProcess(ffmpeg(), ["-version"], { timeoutMs: 5000 }), mediaProcess(ffprobe(), ["-version"], { timeoutMs: 5000 })]);
+    const key = JSON.stringify([ffmpeg(), ffprobe(), ...versions.map(v => v.split("\n")[0])]);
+    let probe = probes.get(key);
+    if (!probe || Date.now() - probe.at > PROBE_TTL_MS) {
+      probe = { at: Date.now(), result: probeComposition() };
+      probes.set(key, probe);
+      // A failed probe is retried on the next call instead of being cached.
+      void probe.result.then(ok => { if (!ok) probes.delete(key); });
+    }
+    return { composition: await probe.result };
   } catch { return { composition: false }; }
+}
+async function probeComposition() {
+  const listed = (output: string) => new Set(output.split("\n").map(line => line.trim().split(/\s+/)[1]).filter(Boolean));
+  const encoders = listed(await mediaProcess(ffmpeg(), ["-hide_banner", "-encoders"], { timeoutMs: 5000 }).catch(() => ""));
+  const filters = listed(await mediaProcess(ffmpeg(), ["-hide_banner", "-filters"], { timeoutMs: 5000 }).catch(() => ""));
+  const missing = [...REQUIRED_ENCODERS.filter(name => !encoders.has(name)), ...REQUIRED_FILTERS.filter(name => !filters.has(name))];
+  if (missing.length) { console.warn("[marketing-video] FFmpeg is missing composition features", { missing }); return false; }
+  const folder = await mkdtemp(join(tmpdir(), "lot-marketing-probe-"));
+  try {
+    const encode = ["-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=25:d=0.4", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+      "-filter_complex", "[0:v]scale=64:64:force_original_aspect_ratio=decrease,pad=64:64:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25[v];[1:a]aresample=48000,apad,asplit[a1][a2];[a2]volume=0.5[b];[a1][b]amix=inputs=2:duration=first:normalize=0[a]",
+      "-map", "[v]", "-map", "[a]", "-t", "0.4", "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "clip.mp4"];
+    await mediaProcess(ffmpeg(), encode, { cwd: folder, timeoutMs: 20_000 });
+    await writeFile(join(folder, "clips.txt"), "file 'clip.mp4'\nfile 'clip.mp4'");
+    await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "1", "-i", "clips.txt", "-c", "copy", "-movflags", "+faststart", "joined.mp4"], { cwd: folder, timeoutMs: 20_000 });
+    const info = await inspectMedia(join(folder, "joined.mp4"));
+    if (!info.video || !info.audio) throw new Error("probe output incomplete");
+    return true;
+  } catch {
+    console.warn("[marketing-video] FFmpeg composition probe failed");
+    return false;
+  } finally { await rm(folder, { recursive: true, force: true }); }
 }
 export async function ownedAssetPath(root: string, asset: { type: string; storage_key: string; mime: string }) {
   const folder = await realpath(resolve(root, asset.type === "upload" ? "uploads" : "assets"));

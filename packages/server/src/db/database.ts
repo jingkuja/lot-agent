@@ -1697,6 +1697,36 @@ export class DB {
     return (rowCount ?? 0) > 0;
   }
 
+  /**
+   * markTaskRunning with a per-owner cap. Only rows still active in BullMQ
+   * (`liveIds`) count, so an orphaned running row cannot block the owner.
+   * The owner lock makes the check and the claim one step across workers.
+   */
+  async claimTaskWithinOwnerLimit(id: string, attempts: number, userId: string, liveIds: string[], limit: number): Promise<"claimed" | "busy" | "stopped"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`task-owner:${userId}`]);
+      const busy = await client.query(
+        `SELECT count(*)::int AS n FROM tasks t JOIN tasks self ON self.id=$1
+         WHERE t.user_id=$2 AND t.type=self.type AND t.status='running' AND t.id<>$1 AND t.id::text=ANY($3::text[])`,
+        [id, userId, liveIds]
+      );
+      if (busy.rows[0].n >= limit) {
+        await client.query(`UPDATE tasks SET stage='排队中：同账号已有视频在制作', updated_at=now() WHERE id=$1 AND status='pending'`, [id]);
+        await client.query("COMMIT");
+        return "busy";
+      }
+      const { rowCount } = await client.query(
+        `UPDATE tasks SET status = 'running', attempts = $2, stage = NULL, error = NULL, updated_at = now()
+         WHERE id = $1 AND status IN ('pending','running')`,
+        [id, attempts]
+      );
+      await client.query("COMMIT");
+      return rowCount ? "claimed" : "stopped";
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+
   /** A configured BullMQ retry is still live, never a user-visible failure. */
   async markTaskRetryPending(id: string, attempts: number): Promise<void> {
     await this.pool.query(

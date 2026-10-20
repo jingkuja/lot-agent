@@ -160,6 +160,9 @@
 .mv-library { margin: 0 0 16px; background: var(--bg-card); box-shadow: var(--neu-raise-sm); }
 .mv-draft-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; max-height: 240px; overflow: auto; }
 .mv-draft-item { position: relative; display: grid; }
+.mv-draft-search { width: 100%; margin: 0 0 10px; padding: 8px 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border-input); border-radius: var(--radius-md); font: inherit; font-size: 13px; }
+.mv-draft-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); outline: none; }
+.mv-studio .mv-draft-more { margin-top: 10px; }
 .mv-draft-list button { display: grid; gap: 4px; padding: 10px 12px; text-align: left; justify-items: start; background: var(--bg); }
 .mv-draft-list strong { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
 .mv-draft-list span { font-size: 11px; color: var(--text-muted); }

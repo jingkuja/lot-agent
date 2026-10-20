@@ -71,10 +71,13 @@ try {
     if (path === '/api/public/product') return json({ globle: 1 });
     if (path === '/api/marketing-video-analyses/capabilities') return json({ enabled: false });
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
-    // The UI follows the server's clip profile. This fixture keeps Kling's limits under a
-    // neutral ID, so vendor-specific upload checks do not reject the 1×1 fixture images.
-    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video' } });
-    if (path === '/api/marketing-videos') return json({ data: [...projects.values()] });
+    // The UI follows the server's clip profile. This fixture keeps Kling's clip limits under a
+    // neutral ID with no image dimension limits, so the 1×1 fixture images pass upload checks.
+    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, douyinPublish: false, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
+    if (path === '/api/marketing-videos') {
+      const query = new URL(request.url()).searchParams.get('q') ?? '';
+      return json({ data: [...projects.values()].filter(p => !query || [p.draft.topic, p.draft.publishTitle, p.draft.script].some(text => text?.includes(query))) });
+    }
     if (path.endsWith('/text-operations')) return json({ data: textOperations.get(path.split('/')[3]) ?? [] });
     if (path.endsWith('/release') && path.includes('/text-operations/')) {
       const [, , , projectId, , operationId] = path.split('/'), operation = textOperations.get(projectId).find(item => item.id === operationId);
@@ -109,6 +112,11 @@ try {
         const shots = current.map((shot, index) => body.instruction && (body.index === undefined || body.index === index) ? { ...shot, camera: 'AI 调整镜头' } : shot);
         p.version++; p.draft = { ...p.draft, storyboard: shots, script: storyboardScript(shots) }; p.review = null;
         return json(p);
+      }
+      if (['review', 'publication'].includes(action)) {
+        // Recorded like copy: a request ID and the version it was made from.
+        const body = request.postDataJSON();
+        assert.match(body.clientRequestId, /^[0-9a-f-]{36}$/); assert.equal(body.version, p.version);
       }
       if (action === 'review') {
         if (failNextReview) { failNextReview = false; return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ code: 'MARKETING_TEXT_TRUNCATED', error: '模型输出未完成，请重试；当前文案已保留。' }) }); }

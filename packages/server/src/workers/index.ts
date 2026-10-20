@@ -19,6 +19,7 @@ import { loadLlmConfig } from "../config.js";
 import { loadGenerationConfig, loadKlingVoiceConfig, makeKlingVoiceProvider, makeImageProvider, makeVideoProvider } from "../generation/config.js";
 import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
+import { marketingQueueLimits } from "../jobs/task-queues.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
 import { resolveMaterialReference } from "../generation/private-materials.js";
 import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
@@ -312,8 +313,9 @@ async function main() {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
     return runGenerationJob(await genDeps("video", j, ctl.signal), j, "video");
   });
+  const { segments: segmentConcurrency } = marketingQueueLimits();
   queue.process("marketing.video", async (job, ctl) => runMarketingVideo({
-    db, dataRoot: resolve(ROOT, "data"), generation: (child, signal) => genDeps("video", child, signal),
+    db, dataRoot: resolve(ROOT, "data"), segmentConcurrency, generation: (child, signal) => genDeps("video", child, signal),
   }, { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, ctl.signal));
   queue.process("opportunity.discover", async (job) => {
     const { runId } = job.input as { runId: string };

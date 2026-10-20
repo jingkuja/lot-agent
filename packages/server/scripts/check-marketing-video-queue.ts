@@ -47,8 +47,8 @@ function deferred() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
-async function until(check: () => Promise<boolean>, label: string) {
-  const deadline = Date.now() + 10_000;
+async function until(check: () => Promise<boolean>, label: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
   while (!await check()) {
     if (Date.now() > deadline) throw new Error(`Timed out: ${label}`);
     await new Promise(done => setTimeout(done, 20));
@@ -105,7 +105,8 @@ try {
   assert.equal((await marketingQueue.getJob(waitingId))?.id, waitingId);
 
   const starts = new Map<string, number>();
-  consumer = new BullmqJobQueue(db, createRedisConnection(redisRaw));
+  // The ordering checks below assume one render slot; fair sharing is checked separately.
+  consumer = new BullmqJobQueue(db, createRedisConnection(redisRaw), { concurrency: 1, perUser: 1, segments: 2 });
   consumer.process<{ kind: string }, unknown>("marketing.video", async job => {
     const count = (starts.get(job.id) ?? 0) + 1; starts.set(job.id, count);
     if (job.input.kind === "blocked") await releaseMarketing.promise;
@@ -186,6 +187,25 @@ try {
   assert.equal((await db.getTask(automaticId))?.attempts, 2);
 
   await consumer.close(); consumer = undefined;
+
+  // Two render slots, one per owner: the owner's second render waits (delayed,
+  // not failed) while another owner's render takes the free slot.
+  const otherOwner = randomUUID();
+  await db.pool.query("INSERT INTO users(id,name) VALUES($1,'other queue fixture')", [otherOwner]);
+  const releaseFair = deferred(), fairStarts: string[] = [];
+  consumer = new BullmqJobQueue(db, createRedisConnection(redisRaw), { concurrency: 2, perUser: 1, segments: 2 });
+  consumer.process<{ kind: string }, unknown>("marketing.video", async job => { fairStarts.push(job.id); await releaseFair.promise; return { fair: job.id }; });
+  const ownerRenders = [await publisher.enqueue("marketing.video", { kind: "fair" }, owner), await publisher.enqueue("marketing.video", { kind: "fair" }, owner)];
+  const otherRender = await publisher.enqueue("marketing.video", { kind: "fair" }, otherOwner);
+  await until(async () => fairStarts.includes(otherRender) && fairStarts.length === 2, "another owner uses the free slot");
+  const waiting = ownerRenders.find(id => !fairStarts.includes(id))!;
+  assert.equal(fairStarts.filter(id => ownerRenders.includes(id)).length, 1, "one render per owner");
+  assert.equal(await (await marketingQueue.getJob(waiting))?.getState(), "delayed");
+  assert.deepEqual([await db.getTaskStatus(waiting), (await db.getTask(waiting))?.stage], ["pending", "排队中：同账号已有视频在制作"]);
+  releaseFair.resolve();
+  await until(async () => await db.getTaskStatus(waiting) === "succeeded", "delayed render runs after the owner's slot frees", 30_000);
+  assert.ok((await Promise.all([...ownerRenders, otherRender].map(id => db.getTaskStatus(id)))).every(status => status === "succeeded"));
+  await consumer.close(); consumer = undefined;
   const events = new Set<string>();
   child = fork(fileURLToPath(import.meta.url), ["--cancellation-worker"], { stdio: ["ignore", "inherit", "inherit", "ipc"] });
   child.on("message", message => events.add((message as { event: string }).event));
@@ -197,7 +217,7 @@ try {
   assert.equal(await db.getTaskStatus(crossId), "cancelled");
   await until(async () => await publisher!.canResumePersisted(crossId), "child unwinds queue lock");
   assert.equal(await db.getTaskStatus(crossId), "cancelled", "late result cannot undo cancellation");
-  console.log("PASS: PG/Redis isolation, 0046 invariants, long pending diagnostics, delayed/missing delivery, terminal guard, automatic retry, same-ID resume and cross-process cancellation; no model calls");
+  console.log("PASS: PG/Redis isolation, per-owner fair share across render slots, 0046 invariants, long pending diagnostics, delayed/missing delivery, terminal guard, automatic retry, same-ID resume and cross-process cancellation; no model calls");
 } finally {
   releaseLegacy.resolve(); releaseMarketing.resolve();
   await legacyWorker?.close();

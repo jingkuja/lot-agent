@@ -80,12 +80,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h1>营销影像 Agent 评审</h1>
   <p class="meta">评审日期：2026-10-19 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>，之后共 15 个提交）</p>
+  <p class="meta">更新：2026-10-20 第二轮修复 F02–F08（改动尚未提交）。第一轮修复已在提交 <code>87dad64</code> 中提交。</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
 </header>
 
 <nav class="toc" aria-label="目录">
   <a href="#overview">总览</a>
-  <a href="#fixes">本次修复</a>
+  <a href="#fixes">第一轮修复</a>
+  <a href="#fixes2">第二轮修复</a>
   <a href="#tracking">旧评审跟踪</a>
   <a href="#features">1 功能完成度</a>
   <a href="#ui">2 操作 UI</a>
@@ -97,18 +99,18 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复，改动尚未提交。仍有两类主要问题：营销队列全局只能同时做 1 个视频；成片的音画质量不可控。</div>
+  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
   <div class="grid">
-    <div class="stat"><strong>1 · 3 · 4</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
+    <div class="stat"><strong>8 · 0 · 0</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
     <div class="stat"><strong>0 · 1 · 7</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
-    <div class="stat"><strong>0 高 · 7 中 · 7 低</strong><span>当前健壮性问题（2 项高级别已修复）</span></div>
-    <div class="stat"><strong>845 / 6</strong><span>修复后相关单测：通过 / 跳过</span></div>
+    <div class="stat"><strong>0 高 · 2 中 · 4 低</strong><span>当前健壮性问题（两轮共修复 10 项）</span></div>
+    <div class="stat"><strong>2590 / 81</strong><span>第二轮后全量单测：通过 / 跳过</span></div>
   </div>
-  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。修复阶段另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本。全程没有调用付费模型。</p>
+  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。两轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。全程没有调用付费模型。</p>
 </section>
 
 <section class="card" id="fixes">
-  <h2>本次修复（2026-10-19） <span class="tag ok">2 项高级别已修复</span></h2>
+  <h2>第一轮修复（2026-10-19） <span class="tag ok">2 项高级别已修复</span></h2>
   <p>修复同时处理两个方向：不让用户被"未知"状态卡死；也不增加静默重复收费。系统仍不会自动重试未知的付费请求。只有用户看到"可能重复计费"的确认后，才能放弃或重新提交，且每次都留下数据库记录。</p>
   <div class="table-wrap"><table>
     <thead><tr><th>问题</th><th>修复</th><th>防重复收费措施</th></tr></thead>
@@ -140,7 +142,95 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p><strong>数据库：</strong>新增迁移 <code>0049-marketing-unknown-release</code>，只追加列和状态值，不修改历史迁移。上线前需要执行迁移至 49，并同时更新 Web、API 和 Worker。</p>
   <p><strong>界面：</strong>两处操作都先弹出确认，提示"可能重复计费"。新增文案已补中文、英文和印尼文。</p>
   <p><strong>文档：</strong>已更新 <code>docs/marketing-video.md</code> 和 <code>docs/agent-code-guide.md</code> 中"只能找管理员核对"的旧说法。</p>
-  <p class="meta">仍未处理：F04（审核与标题标签没有请求记录，可能重复调用模型）；运营侧的费用核对工具和处理时限。</p>
+  <p class="meta">当时未处理的 F04 已在第二轮修复（见下节）。仍未处理：运营侧的费用核对工具和处理时限。</p>
+</section>
+
+<section class="card" id="fixes2">
+  <h2>第二轮修复（2026-10-20） <span class="tag ok">F02–F08 已修复</span></h2>
+  <p>本轮处理 10-15 评审遗留的代码问题 F02–F08。原则不变：不自动重试结果未知的付费请求；新增的检查都放在付费调用之前。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>编号</th><th>修复</th><th>保护与边界</th></tr></thead>
+    <tbody>
+      <tr><td>F02</td><td>
+        <ul>
+          <li>营销队列每个 Worker 进程的并发改为可配置：<code>MARKETING_VIDEO_CONCURRENCY</code>，默认 2（<code>jobs/task-queues.ts</code>）。</li>
+          <li>每个用户在所有 Worker 上同时制作的视频不超过 <code>MARKETING_VIDEO_USER_CONCURRENCY</code>，默认 1。</li>
+          <li>超限的任务保持 pending，转为 BullMQ delayed，15–20 秒后再试，界面显示"排队中：同账号已有视频在制作"。</li>
+          <li>首次领取时日志输出 <code>waitMs</code>，用于统计排队 P95。</li>
+        </ul></td><td>
+        <ul>
+          <li>检查和领取在一个事务里完成，持有用户级 advisory lock（<code>db.claimTaskWithinOwnerLimit</code>）。</li>
+          <li>只统计仍在 BullMQ active 列表里的任务，残留的 running 行不占名额。</li>
+          <li>延迟不算失败，不消耗尝试次数，可以正常取消。</li>
+          <li>取值 1–16，非法值启动即报错。</li>
+        </ul></td></tr>
+      <tr><td>F03</td><td>
+        <ul>
+          <li>Kling 音色按父任务和样例槽位只创建一次。<code>run.ts</code> 在片段并发前准备音色，各片段经 <code>RunJobDeps.voiceScopeTaskId</code> 复用同一检查点。</li>
+        </ul></td><td>
+        <ul>
+          <li>片段开始前音色已就绪，片段之间不会争抢 POST。</li>
+          <li>已有子片段级检查点的旧任务继续按子片段查询原请求，不重新创建。</li>
+          <li>复用现有 <code>generation_voice_tasks</code> 表，不需要迁移。</li>
+        </ul></td></tr>
+      <tr><td>F04</td><td>
+        <ul>
+          <li><code>/review</code> 和 <code>/publication</code> 接入 <code>marketing_text_operations</code>，需带 <code>clientRequestId</code> 和 <code>version</code>。</li>
+          <li>新增迁移 <code>0050-marketing-text-operation-kinds</code>，只追加 <code>review</code>、<code>publication</code> 两种 kind。</li>
+          <li>创作记录面板按类型显示审核和标题标签记录。</li>
+        </ul></td><td>
+        <ul>
+          <li>同一请求 ID 重复发送时返回已保存结果，不再调用模型；同 ID 不同输入返回 409。</li>
+          <li>结果只写回请求时的草稿版本；版本已变记为 <code>conflict</code>。</li>
+          <li>审核解析器版本含规则版本；规则升级后旧回执只能放弃，不能恢复。</li>
+          <li>标题标签在视频提交后仍可生成。计费方式不变。</li>
+        </ul></td></tr>
+      <tr><td>F05</td><td>
+        <ul>
+          <li><code>mediaCapabilities</code> 先检查 libx264、AAC 编码器和合成所需滤镜，再按真实流程编码一段 0.4 秒探针片段，用 concat 拼接，最后用 ffprobe 读回。</li>
+          <li>Worker 在准备音色和提交片段前再检查本机。</li>
+        </ul></td><td>
+        <ul>
+          <li>只回答 <code>-version</code> 的假程序不能通过。</li>
+          <li>结果按二进制路径和版本缓存 10 分钟；失败不缓存。</li>
+          <li>缺编码器时在付费前失败，不再等所有片段付费完成后才失败。</li>
+        </ul></td></tr>
+      <tr><td>F06</td><td>
+        <ul>
+          <li><code>GET /api/marketing-videos?limit=&amp;cursor=&amp;q=</code> 分页（默认 20、最多 50）并支持搜索主题、标题、正文和标签（<code>repository.ts → page</code>）。</li>
+          <li>草稿区增加搜索框和"加载更多草稿"。上次打开的草稿不在第一页时也能直接打开。</li>
+        </ul></td><td>
+        <ul>
+          <li>游标保存 PG 原始时间戳文本和 ID，时间戳相同也不重复或漏行。</li>
+          <li><code>%</code>、<code>_</code> 按字面匹配；搜索按用户隔离。</li>
+        </ul></td></tr>
+      <tr><td>F07</td><td>
+        <ul>
+          <li><code>/:id/storyboard</code> 加入用户级限流表（<code>index.ts</code>）。</li>
+          <li>每个用户在所有草稿上同时进行的文案类请求最多 2 个（<code>MAX_RUNNING_TEXT_OPERATIONS</code>），超出返回 429。</li>
+        </ul></td><td>
+        <ul>
+          <li>在用户级锁内计数，并发请求也不会超限。</li>
+          <li>超过 360 秒的 running 记录不计入，不会永久占名额。</li>
+        </ul></td></tr>
+      <tr><td>F08</td><td>
+        <ul>
+          <li><code>MarketingVideoProfile</code> 增加 <code>referenceImage</code> 规则，前后端共用 <code>marketingReferenceImageIssue</code>。</li>
+          <li><code>/generate</code> 在新提交前按当前模型读取每张参考图的真实文件头（<code>image-size.ts</code>，支持 PNG、JPEG、WebP）。</li>
+          <li>前端上传检查不再只针对 Kling。</li>
+        </ul></td><td>
+        <ul>
+          <li>格式取自文件签名，不信任上传声明的 MIME。</li>
+          <li>切换模型后已选的素材在生成时重检。</li>
+          <li>Kling：JPG/PNG，≤50 MB，短边 ≥300 px，宽高比 1:2.5–2.5:1。Grok：xAI 只公布了数量，因此只要求可读取尺寸的 JPG/PNG/WebP，≤20 MB。</li>
+        </ul></td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>顺带修复：</strong>打开草稿失败后编辑区不再锁住（第 2、3 节）。<code>docs/agent-code-guide.md</code> 中营销影像的旧描述已更新（第 1 节）。</p>
+  <p><strong>数据库：</strong>新增迁移 <code>0050</code>，不修改历史迁移。上线前需要执行迁移至 50，并同时更新 Web、API 和 Worker：旧前端调用审核和标题标签时不带请求 ID，会被新接口拒绝。</p>
+  <p><strong>配置：</strong><code>.env.example</code> 增加 <code>MARKETING_VIDEO_CONCURRENCY</code>、<code>MARKETING_VIDEO_USER_CONCURRENCY</code>、<code>MARKETING_VIDEO_SEGMENT_CONCURRENCY</code>（每条视频同时提交的片段数，默认 2，取值 1–15）。默认视频并发由 1 改为 2，所以单进程默认最多同时 4 个片段请求和 2 个合成。如需保持原行为，把视频并发设为 1。片段并发与参考视频分析的 <code>MARKETING_ANALYSIS_CONCURRENCY</code> 无关。</p>
+  <p><strong>界面与文档：</strong>新增文案已补英文和印尼文。已更新 <code>docs/marketing-video.md</code> 和 <code>docs/agent-code-guide.md</code>。</p>
+  <p class="meta">仍未处理：运营侧的费用核对工具和处理时限；生产环境的排队 P95 尚未实测，默认并发 2 未经压测。</p>
 </section>
 
 <section class="card" id="tracking">
@@ -151,13 +241,13 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <thead><tr><th>编号</th><th>旧问题</th><th>当前状态</th><th>核对依据与残留</th></tr></thead>
     <tbody>
       <tr><td>F01</td><td>上传素材可凭长期链接匿名读取</td><td><span class="tag ok">已修复</span></td><td>营销上传标记私有，<code>/static/uploads</code> 校验会话或 10 分钟签名令牌（<code>generation/private-materials.ts</code>、<code>index.ts:419</code>）。请求日志只记任务 ID、模型和时长（<code>run-job.ts:317</code>）。残留：生成的片段和成片在 <code>/static/assets</code>（<code>index.ts:417</code>）仍可匿名读取，成片可能含用户肖像。文档已声明这是范围边界。</td></tr>
-      <tr><td>F02</td><td>长视频占用共享普通队列</td><td><span class="tag mid">部分修复</span></td><td>营销父任务进入独立队列 <code>lot-marketing-video</code>（<code>jobs/task-queues.ts</code>），普通任务不再被阻塞。残留：营销队列并发固定为 1（<code>bullmq-queue.ts:153</code>），全部用户共用。没有父任务并发配置，也没有用户公平调度。</td></tr>
-      <tr><td>F03</td><td>同一视频每个片段重复创建音色</td><td><span class="tag high">未修复</span></td><td>音色仍按子任务 ID 创建（<code>run-job.ts:283</code>，<code>kling-voice-store.ts</code> 主键 <code>task_id + slot</code>）。实施记录只冻结了契约。默认模型已改为 Grok，只有切到 Kling 时才触发。</td></tr>
-      <tr><td>F04</td><td>审核与标题标签缺回执恢复</td><td><span class="tag high">未修复</span></td><td><code>/review</code>、<code>/publication</code> 仍直接调用 <code>marketingText</code>，没有 <code>clientRequestId</code>（<code>routes.ts</code>）。契约见实施记录"第二阶段"。</td></tr>
-      <tr><td>F05</td><td>合成能力检查不足</td><td><span class="tag high">未修复</span></td><td><code>mediaCapabilities</code> 仍只执行 <code>-version</code>（<code>media.ts</code>），只有测试设计。</td></tr>
-      <tr><td>F06</td><td>草稿管理止于 50 条，无删除</td><td><span class="tag mid">部分修复</span></td><td>已增加草稿删除（<code>DELETE /api/marketing-videos/:id</code>，提交 <code>dfd50d0</code>）。仍是 <code>LIMIT 50</code>（<code>repository.ts</code>），没有分页和搜索。</td></tr>
-      <tr><td>F07</td><td>分镜 AI 路由漏限流</td><td><span class="tag high">未修复</span></td><td>用户级限流表有 copy、review、publication、generate，没有 <code>/:id/storyboard</code>（<code>index.ts:318-321</code>）。<code>operations.begin</code> 只阻止同一项目的并发请求。</td></tr>
-      <tr><td>F08</td><td>参考图契约存在缺口</td><td><span class="tag mid">部分修复</span></td><td>Kling 模型下，前端在上传时检查 JPG/PNG、尺寸和宽高比（<code>lib/video-references.ts:157</code>，提交 <code>0ff10ad</code>）。残留：服务端仍允许 WebP，只检查 MIME 和大小；切换模型后不重检已选素材；默认 Grok 没有图片契约检查。</td></tr>
+      <tr><td>F02</td><td>长视频占用共享普通队列</td><td><span class="tag ok">已修复</span></td><td>营销父任务进入独立队列 <code>lot-marketing-video</code>（<code>jobs/task-queues.ts</code>），普通任务不再被阻塞。10-20：父任务并发可配置（默认 2），每用户并发上限默认 1，超限任务转为 delayed 让出槽位（<code>bullmq-queue.ts</code>、<code>db.claimTaskWithinOwnerLimit</code>）。残留：生产排队 P95 未实测。</td></tr>
+      <tr><td>F03</td><td>同一视频每个片段重复创建音色</td><td><span class="tag ok">已修复</span></td><td>10-20：<code>run.ts</code> 在片段并发前按父任务 ID 准备音色，片段经 <code>voiceScopeTaskId</code> 复用；旧任务的子片段检查点继续按原方式查询。默认模型 Grok 不走此路径。</td></tr>
+      <tr><td>F04</td><td>审核与标题标签缺回执恢复</td><td><span class="tag ok">已修复</span></td><td>10-20：两个接口接入 <code>marketing_text_operations</code>（迁移 50），带 <code>clientRequestId</code> 和 <code>version</code>，按冻结草稿解析并按版本写回（<code>routes.ts → recordedText</code>、<code>operations.ts</code>、<code>text-result.ts</code>）。</td></tr>
+      <tr><td>F05</td><td>合成能力检查不足</td><td><span class="tag ok">已修复</span></td><td>10-20：<code>mediaCapabilities</code> 检查编码器和滤镜清单，并合成探针短片；API 与 Worker 都在付费前检查（<code>media.ts</code>、<code>run.ts</code>）。</td></tr>
+      <tr><td>F06</td><td>草稿管理止于 50 条，无删除</td><td><span class="tag ok">已修复</span></td><td>已增加草稿删除（<code>DELETE /api/marketing-videos/:id</code>，提交 <code>dfd50d0</code>）。10-20：游标分页与搜索（<code>repository.ts → page</code>），界面增加搜索框和"加载更多草稿"。</td></tr>
+      <tr><td>F07</td><td>分镜 AI 路由漏限流</td><td><span class="tag ok">已修复</span></td><td>10-20：<code>/:id/storyboard</code> 加入限流表（<code>index.ts</code>）；<code>operations.begin</code> 增加每用户最多 2 个在途文案类请求。</td></tr>
+      <tr><td>F08</td><td>参考图契约存在缺口</td><td><span class="tag ok">已修复</span></td><td>10-20：参考图规则写入 <code>MarketingVideoProfile.referenceImage</code>，前端上传和服务端 <code>/generate</code> 共用检查；服务端按文件签名读取真实格式和尺寸（<code>image-size.ts</code>）。Grok 只有 xAI 公布的数量限制，因此只检查格式、大小和可读尺寸。</td></tr>
     </tbody>
   </table></div>
   <h3>功能缺口 G01–G08</h3>
@@ -194,10 +284,10 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>片段模型切换</td><td class="nowrap">C3 <span class="tag new">新</span></td><td>按 <code>MarketingVideoProfile</code> 切换 Grok / Kling，默认 Grok（提交 <code>cf8ab55</code>）。Grok 真实成片质量未验收。</td></tr>
       <tr><td>原生口播与参考音色</td><td class="nowrap">C2</td><td>不能保证逐字、跨段音色一致和口型准确。</td></tr>
       <tr><td>字幕</td><td class="nowrap">C2</td><td>由模型画进画面。没有可编辑字幕轨。</td></tr>
-      <tr><td>分段生成、合成与 BGM</td><td class="nowrap">C3</td><td>每镜 4–15 秒，最多 15 镜，2 段并行。FFmpeg 拼接并混入 BGM。</td></tr>
-      <tr><td>取消、续作与计量</td><td class="nowrap">C3</td><td>保留成功片段，未知结果不自动重发，计量有幂等键。用户确认后可只重提未知片段，并留有记录（2026-10-19 修复）。</td></tr>
+      <tr><td>分段生成、合成与 BGM</td><td class="nowrap">C3</td><td>每镜 4–15 秒，最多 15 镜，默认 2 段并行（可配置）。FFmpeg 拼接并混入 BGM。合成前用探针短片检查 FFmpeg（2026-10-20）。</td></tr>
+      <tr><td>取消、续作与计量</td><td class="nowrap">C3</td><td>保留成功片段，未知结果不自动重发，计量有幂等键。用户确认后可只重提未知片段，并留有记录（2026-10-19 修复）。审核与标题标签也有调用记录（2026-10-20）。</td></tr>
       <tr><td>失败原因与下一步</td><td class="nowrap">C3 <span class="tag new">新</span></td><td>停止后显示原因、下一步和可用操作（提交 <code>dfd50d0</code>）。分类方法有缺陷（见第 3 节）。</td></tr>
-      <tr><td>草稿管理</td><td class="nowrap">C3</td><td>自动保存、版本冲突保护、删除。只显示最近 50 条。</td></tr>
+      <tr><td>草稿管理</td><td class="nowrap">C3</td><td>自动保存、版本冲突保护、删除、分页与搜索（2026-10-20）。</td></tr>
       <tr><td>预览、下载、归档</td><td class="nowrap">C3</td><td>预览、下载、复制标题标签、存入知识库。</td></tr>
       <tr><td>实拍对口型 / 平台直发</td><td class="nowrap">C0</td><td>入口禁用。</td></tr>
     </tbody>
@@ -209,7 +299,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <li>提供片段预览。<span class="tag new">本次新增</span></li>
     <li>增加成片质量检查（G02）。</li>
   </ol>
-  <p><span class="tag low">文档</span> <code>docs/agent-code-guide.md:22</code> 写了"探店店铺介绍、主播宣传演讲"，当前代码已经没有这个方向选择。</p>
+  <p><span class="tag ok">已更新</span> <code>docs/agent-code-guide.md:22</code> 原写"探店店铺介绍、主播宣传演讲"，当前代码已经没有这个方向选择。2026-10-20 已改为当前三步流程。</p>
 </section>
 
 <section class="card" id="ui">
@@ -239,13 +329,13 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <li>全局错误显示在页面最底部（<code>:512</code>），离操作按钮很远。</li>
     <li>删除和取消用 <code>window.confirm</code>，和应用其他对话框风格不一致。</li>
     <li>文案生成最长 5 分钟，界面只显示"正在处理…"，没有进度或时间提示。</li>
-    <li>打开草稿失败后，<code>textPending</code> 一直是 true（<code>:97</code>），编辑区全部禁用。用户只能点"开始新视频"恢复。</li>
+    <li><span class="tag ok">已修复</span> 打开草稿失败后，<code>textPending</code> 一直是 true（<code>:97</code>），编辑区全部禁用。用户只能点"开始新视频"恢复。2026-10-20：打开失败时恢复为 false。</li>
     <li>添加生成参考视频后，原生口播关闭，但已有分镜仍按有声口播编写。界面只给出提示，不建议重建分镜。<span class="tag new">采纳旧评审</span></li>
   </ul>
 </section>
 
 <section class="card" id="robustness">
-  <h2>3 代码健壮性 <span class="tag high">2 个高级别问题</span></h2>
+  <h2>3 代码健壮性 <span class="tag ok">高级别与 F02–F08 已修复</span></h2>
   <p><strong>强项：</strong>请求幂等，有调用回执账本，提交结果未知时不重复付费，服务端校验归属，上传素材私有签名链接，媒体处理在沙箱里运行，ffprobe 只接受白名单格式，用 advisory lock 加事务创建任务，错误不回显供应商原文。测试覆盖面广。</p>
   <div class="legend"><span><span class="tag new">本次新增</span> 10-15 评审未提</span><span><span class="tag mid">旧问题</span> 来自 10-15 评审，仍存在</span></div>
   <div class="table-wrap"><table>
@@ -253,23 +343,23 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <tbody>
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为高</span></td><td>用户刷新或关闭页面会中止文案请求，状态写成 <code>unknown</code>，之后这个草稿不能再用 AI 创作。修复：请求不随浏览器断开而中止；真正未知时用户可确认后放弃。见"本次修复"。</td><td><span class="tag new">本次新增</span></td><td><code>routes.ts</code><br><code>operations.ts</code></td></tr>
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为高</span></td><td>提交片段时，任何传输错误都记为 <code>unknown</code>，整个任务被锁住，用户只能复制草稿并重付全部片段。修复：连接阶段失败不再记为未知；真正未知时用户可确认后只重提这些片段。见"本次修复"。</td><td><span class="tag mid">旧问题</span> 旧报告写"人工核对入口仍需完善"</td><td><code>run.ts</code><br><code>repository.ts</code></td></tr>
-      <tr><td><span class="tag mid">中</span></td><td>营销队列并发固定为 1，全部用户共用。每个视频要几分钟到十几分钟，后来的用户等待时间线性增长。</td><td><span class="tag mid">旧问题</span> F02 残留</td><td><code>bullmq-queue.ts:153</code></td></tr>
-      <tr><td><span class="tag mid">中</span></td><td><code>/review</code> 和 <code>/publication</code> 没有请求记录。断连后再次点击会产生新的模型调用。</td><td><span class="tag mid">旧问题</span> F04</td><td><code>routes.ts</code></td></tr>
-      <tr><td><span class="tag mid">中</span></td><td><code>/:id/storyboard</code> 不在用户级限流表中。用户可以在多个项目上同时发起付费创作。</td><td><span class="tag mid">旧问题</span> F07</td><td><code>index.ts:318-321</code></td></tr>
-      <tr><td><span class="tag mid">中</span></td><td>服务端不检查参考图格式和尺寸。只有 Kling 前端上传时检查；切换模型后不重检。</td><td><span class="tag mid">旧问题</span> F08 残留</td><td><code>routes.ts</code> 的 ownedAssets</td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td>营销队列并发固定为 1，全部用户共用。每个视频要几分钟到十几分钟，后来的用户等待时间线性增长。10-20：并发可配置，每用户限额，超限任务让出槽位。</td><td><span class="tag mid">旧问题</span> F02 残留</td><td><code>bullmq-queue.ts:153</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td><code>/review</code> 和 <code>/publication</code> 没有请求记录。断连后再次点击会产生新的模型调用。10-20：接入文本操作记录，同一请求 ID 只调用一次模型。</td><td><span class="tag mid">旧问题</span> F04</td><td><code>routes.ts</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td><code>/:id/storyboard</code> 不在用户级限流表中。用户可以在多个项目上同时发起付费创作。10-20：加入限流表，每用户最多 2 个在途请求。</td><td><span class="tag mid">旧问题</span> F07</td><td><code>index.ts:318-321</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td>服务端不检查参考图格式和尺寸。只有 Kling 前端上传时检查；切换模型后不重检。10-20：服务端在生成前按当前模型读取真实文件头检查。</td><td><span class="tag mid">旧问题</span> F08 残留</td><td><code>routes.ts</code> 的 ownedAssets</td></tr>
       <tr><td><span class="tag mid">中</span></td><td><code>failure.ts</code> 用正则匹配中文错误文字来分类。改一句文案就可能分错类。应改用错误码。（未知片段已改用服务端计数判断，其余类别仍用正则。）</td><td><span class="tag new">本次新增</span></td><td><code>failure.ts</code></td></tr>
       <tr><td><span class="tag mid">中</span></td><td><code>ProjectStudio.tsx</code> 有 520 行，22 个 useState、16 个 useRef，并发控制手写（epoch、alive、lock），一行写多条语句。难维护，也难测试。</td><td><span class="tag new">本次新增</span></td><td><code>ProjectStudio.tsx</code></td></tr>
-      <tr><td><span class="tag mid">中</span></td><td>打开草稿失败后界面锁住（见第 2 节）。</td><td><span class="tag new">本次新增</span></td><td><code>ProjectStudio.tsx:97</code></td></tr>
-      <tr><td><span class="tag low">低</span></td><td>同一视频每个片段重复创建音色。默认 Grok 不触发；切到 Kling 后会增加音色请求和等待。</td><td><span class="tag mid">旧问题</span> F03</td><td><code>run-job.ts:283</code></td></tr>
-      <tr><td><span class="tag low">低</span></td><td>合成能力检查只执行 <code>-version</code>。缺编码器时，所有片段付费完成后才在合成阶段失败（可修复后重新合成）。</td><td><span class="tag mid">旧问题</span> F05</td><td><code>media.ts</code></td></tr>
-      <tr><td><span class="tag low">低</span></td><td>草稿列表只返回最近 50 条，更早的草稿找不到。</td><td><span class="tag mid">旧问题</span> F06 残留</td><td><code>repository.ts</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为中</span></td><td>打开草稿失败后界面锁住（见第 2 节）。10-20 已修复。</td><td><span class="tag new">本次新增</span></td><td><code>ProjectStudio.tsx:97</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>同一视频每个片段重复创建音色。默认 Grok 不触发；切到 Kling 后会增加音色请求和等待。10-20：每个父任务和样例只创建一次。</td><td><span class="tag mid">旧问题</span> F03</td><td><code>run-job.ts:283</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>合成能力检查只执行 <code>-version</code>。缺编码器时，所有片段付费完成后才在合成阶段失败（可修复后重新合成）。10-20：探针短片检查，Worker 在付费前也检查。</td><td><span class="tag mid">旧问题</span> F05</td><td><code>media.ts</code></td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>草稿列表只返回最近 50 条，更早的草稿找不到。10-20：分页与搜索。</td><td><span class="tag mid">旧问题</span> F06 残留</td><td><code>repository.ts</code></td></tr>
       <tr><td><span class="tag low">低</span></td><td>生成的片段和成片在 <code>/static/assets</code> 下可匿名读取，没有到期时间。</td><td><span class="tag mid">旧问题</span> F01 残留</td><td><code>index.ts:417</code></td></tr>
       <tr><td><span class="tag low">低</span></td><td>成片（最大 200 MB）和上传文件（最大 100 MB）整个读进内存。</td><td>两次评审均提</td><td><code>media.ts</code><br><code>marketing-analysis/routes.ts</code></td></tr>
       <tr><td><span class="tag low">低</span></td><td>页面每 2.5 秒读取完整项目，每次为每个素材查库并重新签名链接。100 个活跃页面约 40 请求/秒，未压测。</td><td>两次评审均提</td><td><code>ProjectStudio.tsx</code> 轮询<br><code>routes.ts</code> GET /:id</td></tr>
       <tr><td><span class="tag low">低</span></td><td>死代码：<code>draft.ts</code> 里旧的 9 步流程（只有 <code>MARKETING_VIDEO_MODEL</code> 还在用）、<code>recorded</code> 模式、<code>cover</code>；分析接口 apply-preview、apply、PATCH text、summarize、list、DELETE 前端都没调用；前端也不读 <code>recordedLipSync</code>、<code>douyinPublish</code>。</td><td><span class="tag new">本次新增</span></td><td>多处</td></tr>
     </tbody>
   </table></div>
-  <p class="meta">两个高级别问题和 F04 方向相反：F04 是保护不足，可能重复收费；高级别问题是保护没有出口，用户会被卡住。本次修复只增加"经用户确认、有记录"的出口，没有放宽自动重试；F04 仍需单独处理。</p>
+  <p class="meta">两个高级别问题和 F04 方向相反：F04 是保护不足，可能重复收费；高级别问题是保护没有出口，用户会被卡住。第一轮只增加"经用户确认、有记录"的出口，没有放宽自动重试；第二轮让审核和标题标签也接入调用记录（F04）。剩余 2 项中级（<code>failure.ts</code> 正则分类、<code>ProjectStudio.tsx</code> 体量）和 4 项低级未处理。</p>
 </section>
 
 <section class="card" id="architecture">
@@ -278,7 +368,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <ul>
     <li>前后端共用 core 里的 schema，校验规则一致。</li>
     <li>视频模型的限制写在 <code>MarketingVideoProfile</code> 配置里，代码不写死模型名。冻结任务按原模型恢复。</li>
-    <li>PG 是唯一数据来源，BullMQ 只负责投递。营销视频已有独立队列（F02 主体已修复）。</li>
+    <li>PG 是唯一数据来源，BullMQ 只负责投递。营销视频已有独立队列，并发可配置，按用户公平调度（F02 已修复）。</li>
     <li>上传素材使用私有签名链接，日志只记标识（F01 已修复）。</li>
     <li>没有引入通用 DAG 或多 Agent 编排。<code>marketing_video</code> Agent 工具白名单为空，实际是固定流程的界面，由项目 API 控制制作。两次评审一致认为当前不需要编排框架。</li>
   </ul>
@@ -300,15 +390,15 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   </div>
   <div class="risk">
     <h3>R4 同步请求 <span class="tag mid">已缓解</span></h3>
-    <p>文案和分镜生成（最长 5 分钟）在 HTTP 请求里同步执行。本次已让模型请求不随浏览器断开而中止，所以刷新不再制造未知状态。请求仍占用一个 HTTP 连接，进程重启仍会中断请求。长期仍建议改成队列任务（参考视频分析已经这样做），并让审核和标题标签接入文本操作记录（F04）。</p>
+    <p>文案和分镜生成（最长 5 分钟）在 HTTP 请求里同步执行。本次已让模型请求不随浏览器断开而中止，所以刷新不再制造未知状态。请求仍占用一个 HTTP 连接，进程重启仍会中断请求。长期仍建议改成队列任务（参考视频分析已经这样做）。审核和标题标签已接入文本操作记录（F04，2026-10-20）。</p>
   </div>
   <div class="risk">
     <h3>R5 保护机制的出口 <span class="tag mid">部分解决</span></h3>
-    <p>可靠性工程做得比产品验证阶段更超前：营销相关迁移已有 17 个（含本次 0049）、回执账本、到处都有 unknown 保护。付费调用需要这些保护，两次评审都建议保留。本次已增加用户侧出口：用户确认后放弃或重提，并记录次数和时间。运营侧仍缺费用核对工具和处理时限。</p>
+    <p>可靠性工程做得比产品验证阶段更超前：营销相关迁移已有 18 个（含 0049、0050）、回执账本、到处都有 unknown 保护。付费调用需要这些保护，两次评审都建议保留。本次已增加用户侧出口：用户确认后放弃或重提，并记录次数和时间。运营侧仍缺费用核对工具和处理时限。</p>
   </div>
   <div class="risk">
-    <h3>R6 吞吐与公平 <span class="tag mid">规模</span></h3>
-    <p>营销队列全局并发为 1，每个视频内最多 2 段并行（F02 残留）。先给父任务并发和每用户并发加配置，再按队列等待 P95 调整。在补齐核实工具之前，不要只提高并发，因为提高并发会放大模型请求、文件读取和内存占用。</p>
+    <h3>R6 吞吐与公平 <span class="tag mid">已缓解</span></h3>
+    <p>2026-10-20 已增加父任务并发和每用户并发配置（默认 2 和 1），并在日志输出排队等待时间。每个视频内的片段并发也可配置（默认 2）。下一步按生产排队 P95 和内存调整默认值。在补齐核实工具之前，不要只提高并发，因为提高并发会放大模型请求、文件读取和内存占用。</p>
   </div>
 </section>
 
@@ -326,7 +416,13 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>Core / Server / Web 构建</td><td>通过</td><td>Web 仍有既有的大 chunk 提示</td></tr>
       <tr><td><code>pnpm check:marketing-video:db</code>（临时 PostgreSQL 容器，用后停止）</td><td>通过</td><td>新增：迁移 49、未知片段计数、放弃权限与锁、只重提未完成片段、文本记录放弃规则。该脚本自 <code>cf8ab55</code> 起已失效（夹具模型 ID 未登记），本次已修正夹具</td></tr>
       <tr><td><code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>通过</td><td>新增：放弃未知文案记录、重新提交未知片段。该脚本自 <code>dfd50d0</code> 起已失效（多处断言与当前文案不符，未处理取消确认框；<code>cf8ab55</code> 后默认 Grok 限 720p 也与夹具冲突），本次已按当前界面修正</td></tr>
-      <tr><td>Redis 队列脚本、真实供应商</td><td>本次未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
+      <tr><td>10-20 全量 Vitest</td><td>312 文件通过，14 文件跳过；2590 项通过，81 项跳过</td><td>新增：公平调度、父任务音色复用、审核与标题标签记录、探针检查、分页游标、文件头解析、参考图规则</td></tr>
+      <tr><td>10-20 严格类型检查</td><td>Core 14 项、Server 234 项，与基线数量相同，营销目录 0 项；Web 通过</td><td>—</td></tr>
+      <tr><td>10-20 全部包构建</td><td>通过</td><td>Web 仍有既有的大 chunk 提示</td></tr>
+      <tr><td>10-20 <code>pnpm check:marketing-video:db</code>（临时 PostgreSQL，用后停止）</td><td>通过</td><td>新增断言：用户限额只算在队列中的任务、父任务音色单次领取、游标分页与字面搜索、审核回执恢复与冲突、视频提交后生成标题、在途上限 429</td></tr>
+      <tr><td>10-20 <code>pnpm check:marketing-video:queue</code>（临时 PostgreSQL + Redis，用后停止）</td><td>通过</td><td>新增：两个槽位、每用户 1 个时，同用户第二个任务转为 delayed，其他用户使用空闲槽位。原场景改为显式单槽位</td></tr>
+      <tr><td>10-20 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>通过</td><td>新增：审核和标题标签请求带请求 ID 和版本。夹具模型补充无尺寸限制的参考图规则。未操作新增的搜索框和"加载更多"</td></tr>
+      <tr><td>真实供应商</td><td>两轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
     </tbody>
   </table></div>
   <p class="meta">跳过项不计为通过。严格类型检查仍未全绿，不能用构建成功代替。</p>
@@ -340,16 +436,16 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <ol>
       <li><span class="tag ok">已完成</span> 浏览器断开时不再中止上游请求。（没有改成队列，长期仍建议改，见 R4。）<span class="ref">— 高级别问题、R4</span></li>
       <li><span class="tag mid">部分完成</span> 用户确认后可以放弃未知的文案请求，或重新提交未知片段，并留有记录。运营侧费用核对工具和处理时限仍待补。<span class="ref">— 高级别问题、R5</span></li>
-      <li>审核和标题标签接入文本操作记录。<span class="ref">— F04</span></li>
-      <li>给 <code>/:id/storyboard</code> 加用户级限流和每用户在途上限。<span class="ref">— F07</span></li>
+      <li><span class="tag ok">已完成</span> 审核和标题标签接入文本操作记录。<span class="ref">— F04</span></li>
+      <li><span class="tag ok">已完成</span> 给 <code>/:id/storyboard</code> 加用户级限流和每用户在途上限。<span class="ref">— F07</span></li>
     </ol>
   </div>
   <div class="phase">
     <h3>B 规模</h3>
     <ol start="5">
-      <li>给营销队列配置父任务并发和用户公平调度。测量队列等待 P95。<span class="ref">— F02 残留、R6</span></li>
-      <li>同一父任务只创建一次音色（Kling 路径）。<span class="ref">— F03</span></li>
-      <li>增加合成就绪探针，检查 libx264、AAC 和所需滤镜。<span class="ref">— F05</span></li>
+      <li><span class="tag mid">部分完成</span> 给营销队列配置父任务并发和用户公平调度。测量队列等待 P95。（日志已输出 <code>waitMs</code>，生产 P95 尚未统计。）<span class="ref">— F02 残留、R6</span></li>
+      <li><span class="tag ok">已完成</span> 同一父任务只创建一次音色（Kling 路径）。<span class="ref">— F03</span></li>
+      <li><span class="tag ok">已完成</span> 增加合成就绪探针，检查 libx264、AAC 和所需滤镜。<span class="ref">— F05</span></li>
       <li>增加成功率、阶段耗时、排队和 unknown 积压指标。<span class="ref">— G06</span></li>
     </ol>
   </div>
@@ -358,10 +454,10 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <ol start="9">
       <li>生成前显示预计费用。<span class="ref">— G03</span></li>
       <li>支持成片后只重做一镜。提供片段预览。<span class="ref">— G04</span></li>
-      <li>服务端检查参考图格式和尺寸，提交前按当前模型重检。<span class="ref">— F08 残留</span></li>
+      <li><span class="tag ok">已完成</span> 服务端检查参考图格式和尺寸，提交前按当前模型重检。<span class="ref">— F08 残留</span></li>
       <li>删除粘贴 Cookies 的界面。参考来源改用单选按钮。分镜编辑器只保留一处。第 3 步改名为"确认与制作"。<span class="ref">— 第 2 节</span></li>
       <li>增加"主播全程 / 混合镜头"选项。允许跳过自动补标题标签。<span class="ref">— 第 2 节</span></li>
-      <li>草稿列表增加分页和搜索。<span class="ref">— F06 残留</span></li>
+      <li><span class="tag ok">已完成</span> 草稿列表增加分页和搜索。<span class="ref">— F06 残留</span></li>
     </ol>
   </div>
   <div class="phase">
@@ -377,12 +473,12 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <ol start="18">
       <li>失败分类改用错误码，不再用正则匹配文字。<span class="ref">— 第 3 节</span></li>
       <li>拆分 <code>ProjectStudio.tsx</code>，删除死代码。<span class="ref">— 第 3 节</span></li>
-      <li>更新 <code>docs/agent-code-guide.md:22</code>。<span class="ref">— 第 1 节</span></li>
+      <li><span class="tag ok">已完成</span> 更新 <code>docs/agent-code-guide.md:22</code>。<span class="ref">— 第 1 节</span></li>
     </ol>
   </div>
 </section>
 
-<footer>行号以提交 <code>c2013d9</code> 为准。代码修改后请重新核对。</footer>
+<footer>行号以提交 <code>c2013d9</code> 为准。2026-10-20 新增的依据只写文件和函数名，不写行号。代码修改后请重新核对。</footer>
 </main>
 </body>
 </html>

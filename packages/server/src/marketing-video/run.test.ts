@@ -11,6 +11,7 @@ vi.mock("./repository.js", () => ({ PgMarketingProjectStore: class {
 } }));
 vi.mock("./media.js", () => ({
   composeMarketingVideo: vi.fn(),
+  mediaCapabilities: vi.fn(async () => ({ composition: true })),
   inspectMedia: vi.fn(async () => ({ video: true, audio: true, duration: 15 })),
   ownedAssetPath: vi.fn(async () => "/tmp/fixture.mp4"),
 }));
@@ -94,5 +95,66 @@ describe("marketing segment submission failures", () => {
     }
     vi.mocked(runGenerationJob).mockReset();
     vi.mocked(runGenerationJob).mockImplementation(async (_deps: unknown, job: { id: string }) => ({ assetIds: [`asset-${job.id}`], assets: [] }) as never);
+  });
+});
+
+describe("Kling voice reuse within one parent job", () => {
+  const shot: MarketingShot = { durationSec: 10, script: "欢迎来喝咖啡。", visual: "人物展示咖啡", action: "端起杯子", camera: "中景" };
+  function voiceFixture(legacy: string[] = []) {
+    vi.mocked(runGenerationJob).mockClear();
+    const f = fixture([shot, shot, shot]);
+    f.job.input = { ...f.job.input, reference_audio: ["/static/uploads/voice.wav"] } as typeof f.job.input;
+    vi.mocked(f.db.pool.query as (sql: string) => Promise<{ rows: unknown[] }>).mockImplementation(async sql => ({ rows: sql.includes("generation_voice_tasks") ? legacy.map(task_id => ({ task_id })) : [] }));
+    const prepareKlingVoices = vi.fn(async () => ["voice-1"]);
+    f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", vendorModel: "kling-video-v3-omni", db: {}, provider: {}, prepareKlingVoices,
+      meter: { record: vi.fn() }, storage: { put: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
+    return { ...f, prepareKlingVoices };
+  }
+  it("creates the voice once for the parent before any clip and scopes every clip to it", async () => {
+    const f = voiceFixture();
+    await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+    expect(f.prepareKlingVoices).toHaveBeenCalledOnce();
+    expect(f.prepareKlingVoices).toHaveBeenCalledWith(expect.objectContaining({ taskId: "parent", userId: "owner" }));
+    expect(vi.mocked(runGenerationJob).mock.invocationCallOrder[0]).toBeGreaterThan(f.prepareKlingVoices.mock.invocationCallOrder[0]);
+    expect(vi.mocked(runGenerationJob).mock.calls.map(([deps]) => deps.voiceScopeTaskId)).toEqual(["parent", "parent", "parent"]);
+  });
+  it("keeps querying an older per-clip voice checkpoint", async () => {
+    const f = voiceFixture(["child-0", "child-1", "child-2"]);
+    await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+    expect(f.prepareKlingVoices).not.toHaveBeenCalled();
+    expect(vi.mocked(runGenerationJob).mock.calls.map(([deps]) => deps.voiceScopeTaskId).sort()).toEqual(["child-0", "child-1", "child-2"]);
+  });
+  it("does not prepare voices for a non-Kling model", async () => {
+    const f = voiceFixture();
+    f.generation.mockResolvedValue({ modelId: "grok-imagine-video-1.5", vendorModel: "grok-imagine-video-1.5", db: {}, provider: {}, prepareKlingVoices: f.prepareKlingVoices,
+      meter: { record: vi.fn() }, storage: { put: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
+    await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+    expect(f.prepareKlingVoices).not.toHaveBeenCalled();
+  });
+});
+
+describe("configurable clip concurrency", () => {
+  const shot: MarketingShot = { durationSec: 5, script: "欢迎来喝咖啡。", visual: "人物展示咖啡", action: "端起杯子", camera: "中景" };
+  async function peak(segmentConcurrency?: number) {
+    const f = fixture(Array.from({ length: 6 }, () => shot));
+    f.job.input.draft = MarketingDraftSchema.parse({ ...f.job.input.draft, durationSec: 30 });
+    if (segmentConcurrency) Object.assign(f.deps, { segmentConcurrency });
+    let running = 0, max = 0;
+    vi.mocked(runGenerationJob).mockReset();
+    vi.mocked(runGenerationJob).mockImplementation(async (_deps: unknown, job: { id: string }) => {
+      max = Math.max(max, ++running);
+      await new Promise(done => setTimeout(done, 5));
+      running--;
+      return { assetIds: [`asset-${job.id}`], assets: [] } as never;
+    });
+    await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+    expect(runGenerationJob).toHaveBeenCalledTimes(6);
+    return max;
+  }
+  it("submits two clips at once by default and the configured number otherwise", async () => {
+    expect(await peak()).toBe(2);
+    expect(await peak(4)).toBe(4);
+    // Never more workers than clips.
+    expect(await peak(15)).toBe(6);
   });
 });

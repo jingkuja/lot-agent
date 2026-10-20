@@ -3,8 +3,9 @@ import type Redis from "ioredis";
 import type { DB } from "../db/database.js";
 const mocks = vi.hoisted(() => ({ queues: new Map<string, any>(), workers: new Map<string, any>() }));
 vi.mock("bullmq", () => ({
+  DelayedError: class DelayedError extends Error {},
   Queue: class {
-    add = vi.fn(); getJob = vi.fn(async () => undefined); close = vi.fn();
+    add = vi.fn(); getJob = vi.fn(async () => undefined); getActive = vi.fn(async () => [] as any[]); close = vi.fn();
     constructor(name: string) { mocks.queues.set(name, this); }
   },
   Worker: class {
@@ -13,22 +14,23 @@ vi.mock("bullmq", () => ({
   },
 }));
 import { BullmqJobQueue } from "./bullmq-queue.js";
-import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE } from "./task-queues.js";
+import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, marketingQueueLimits } from "./task-queues.js";
 
-function fixture() {
+function fixture(limits = { concurrency: 2, perUser: 1, segments: 2 }) {
   const db = {
     createTask: vi.fn(), cancelTask: vi.fn(async () => true), markTaskRunning: vi.fn(async () => true),
+    claimTaskWithinOwnerLimit: vi.fn(async () => "claimed" as "claimed" | "busy" | "stopped"),
     getTask: vi.fn(async (id: string) => ({ id, type: id === "ordinary" ? "image.generate" : "marketing.video", status: "pending", input: { original: true }, user_id: "owner", created_at: "now", updated_at: "now" })),
     getTaskStatus: vi.fn(async () => "running"),
     setTaskResult: vi.fn(), setTaskError: vi.fn(), markTaskRetryPending: vi.fn(),
     findStalePendingTasks: vi.fn(async () => [{ id: "old-task" }]), setPendingTaskDiagnostic: vi.fn(),
   };
   const connection = { status: "ready", disconnect: vi.fn() };
-  const queue = new BullmqJobQueue(db as unknown as DB, connection as unknown as Redis);
+  const queue = new BullmqJobQueue(db as unknown as DB, connection as unknown as Redis, limits);
   return { queue, db, connection, ordinary: mocks.queues.get(DEFAULT_TASK_QUEUE), marketing: mocks.queues.get(MARKETING_VIDEO_QUEUE) };
 }
 function stored(state: string) { return { getState: vi.fn(async () => state), retry: vi.fn(), remove: vi.fn() }; }
-function job(id = "same-id", name = "marketing.video") { return { data: { taskId: id }, name, attemptsMade: 0, opts: { attempts: 1 }, updateProgress: vi.fn() }; }
+function job(id = "same-id", name = "marketing.video") { return { id, data: { taskId: id }, name, attemptsMade: 0, timestamp: Date.now(), opts: { attempts: 1 }, updateProgress: vi.fn(), moveToDelayed: vi.fn() }; }
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(done => { resolve = done; });
@@ -160,7 +162,7 @@ describe("isolated task workers", () => {
     f.queue.process("image.generate", async () => "ordinary-done");
     const marketing = mocks.workers.get(MARKETING_VIDEO_QUEUE), ordinary = mocks.workers.get(DEFAULT_TASK_QUEUE);
     expect(mocks.workers.size).toBe(2);
-    expect(marketing.options.concurrency).toBe(1); expect(ordinary.options.concurrency).toBe(1);
+    expect(marketing.options.concurrency).toBe(2); expect(ordinary.options.concurrency).toBe(1);
     const running = marketing.run(job()); await entered.promise;
     try {
       await expect(ordinary.run(job("ordinary", "image.generate"))).resolves.toBe("ordinary-done");
@@ -182,9 +184,29 @@ describe("isolated task workers", () => {
   });
   it("preserves the DB claim guard before running the dedicated handler", async () => {
     const f = fixture(), handler = vi.fn(); f.queue.process("marketing.video", handler);
-    f.db.markTaskRunning.mockResolvedValue(false);
+    f.db.claimTaskWithinOwnerLimit.mockResolvedValue("stopped");
     await mocks.workers.get(MARKETING_VIDEO_QUEUE).run(job());
     expect(handler).not.toHaveBeenCalled(); expect(f.db.setTaskResult).not.toHaveBeenCalled();
+  });
+  it("delays a render while the same owner already holds the per-user slot", async () => {
+    const f = fixture(), handler = vi.fn(); f.queue.process("marketing.video", handler);
+    f.marketing.getActive.mockResolvedValue([{ id: "same-id" }, { id: "other-render" }]);
+    f.db.claimTaskWithinOwnerLimit.mockResolvedValue("busy");
+    const entry = job();
+    await expect(mocks.workers.get(MARKETING_VIDEO_QUEUE).run(entry, "lock-token")).rejects.toThrow();
+    expect(f.db.claimTaskWithinOwnerLimit).toHaveBeenCalledWith("same-id", 1, "owner", ["other-render"], 1);
+    expect(entry.moveToDelayed).toHaveBeenCalledWith(expect.any(Number), "lock-token");
+    expect(handler).not.toHaveBeenCalled(); expect(f.db.setTaskError).not.toHaveBeenCalled(); expect(f.db.markTaskRunning).not.toHaveBeenCalled();
+  });
+  it("applies configured render concurrency and per-user limits", async () => {
+    const f = fixture({ concurrency: 4, perUser: 2, segments: 2 }); f.queue.process("marketing.video", vi.fn());
+    expect(mocks.workers.get(MARKETING_VIDEO_QUEUE).options.concurrency).toBe(4);
+    await mocks.workers.get(MARKETING_VIDEO_QUEUE).run(job());
+    expect(f.db.claimTaskWithinOwnerLimit).toHaveBeenCalledWith("same-id", 1, "owner", [], 2);
+    expect(marketingQueueLimits({})).toEqual({ concurrency: 2, perUser: 1, segments: 2 });
+    expect(marketingQueueLimits({ MARKETING_VIDEO_CONCURRENCY: "3", MARKETING_VIDEO_USER_CONCURRENCY: "2", MARKETING_VIDEO_SEGMENT_CONCURRENCY: "4" })).toEqual({ concurrency: 3, perUser: 2, segments: 4 });
+    expect(() => marketingQueueLimits({ MARKETING_VIDEO_CONCURRENCY: "0" })).toThrow("MARKETING_VIDEO_CONCURRENCY");
+    expect(() => marketingQueueLimits({ MARKETING_VIDEO_SEGMENT_CONCURRENCY: "16" })).toThrow("MARKETING_VIDEO_SEGMENT_CONCURRENCY must be an integer 1–15");
   });
   it("aborts a marketing handler and removes queued entries from both queues", async () => {
     const f = fixture(), entered = deferred();

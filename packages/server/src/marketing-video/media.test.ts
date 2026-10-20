@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { describe, expect, it, vi } from "vitest";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { inspectMedia, composeMarketingVideo } from "./media.js";
+import { inspectMedia, composeMarketingVideo, mediaCapabilities } from "./media.js";
 import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
 
 describe("marketing media safety", () => {
@@ -18,4 +19,23 @@ describe("marketing media safety", () => {
       await expect(inspectMedia(path)).rejects.toThrow("素材格式");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+});
+
+describe("composition readiness probe", () => {
+  const ffmpegInstalled = spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
+  it("rejects a program that only answers -version", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marketing-probe-test-"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const fake = join(root, "fake-ffmpeg");
+      await writeFile(fake, "#!/bin/sh\n[ \"$1\" = -version ] && echo 'ffmpeg version fake' && exit 0\nexit 0\n");
+      await chmod(fake, 0o755);
+      vi.stubEnv("MARKETING_FFMPEG_PATH", fake); vi.stubEnv("MARKETING_FFPROBE_PATH", fake);
+      expect(await mediaCapabilities()).toEqual({ composition: false });
+      expect(warn).toHaveBeenCalledWith("[marketing-video] FFmpeg is missing composition features", { missing: expect.arrayContaining(["libx264", "aac", "amix"]) });
+    } finally { vi.unstubAllEnvs(); warn.mockRestore(); await rm(root, { recursive: true, force: true }); }
+  });
+  it.skipIf(!ffmpegInstalled)("composes a probe clip with the installed FFmpeg", async () => {
+    expect(await mediaCapabilities()).toEqual({ composition: true });
+  }, 30_000);
 });

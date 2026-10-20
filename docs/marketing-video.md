@@ -7,7 +7,7 @@
 
 片段模型由服务端 `MARKETING_VIDEO_MODEL` 选择（默认 `grok-imagine-video-1.5`，可选 `kling-video-v3-omni`），经统一 `/videos` 接口由网关适配。见下方[模型配置与切换](#模型配置与切换)。数字人路径复用模型原生视频配音，支持已有肖像 / 音色库和背景参考图；不承诺逐字播报、音色跨段一致或精确口型。实拍对口型尚未接入，入口禁用。BGM 为用户上传的音频，在本地混入；字幕由视频模型按每段提示词生成，要求与该段旁白文字、语言和节奏一致；不使用本地 SRT 或 FFmpeg 字幕滤镜。生成前可关闭字幕，发布前需试听和校对。
 
-整片时长可按整数秒选择 **15–60 秒**。`kimi-k3` 根据内容选择镜数和节奏，每镜 **4–15 秒**，总长允许落在目标时长至目标 +5 秒之间，最长 **65 秒**，不强制额外加时。例如选择 60 秒可生成 62–65 秒；每片最多 15 镜。生成仍最多并发 2 个片段。AI 已给出容差范围内的时长时保持其分配；超出范围时在口播最低时长与单镜上限内按建议节奏重新分配整数秒。时长在付费生成前确定：API 和预留事务校验完整分镜，Worker 在调用任何视频提供器前再次校验持久化总长；例如 5 ×13 秒直接请求 65 秒，70 秒配置不会调用视频模型。FFmpeg 不承担将超额付费时长裁至 65 秒的策略。所选目标与实际分镜总长分开显示；合并、成片校验及产物时长都采用各镜时长之和，不把额外内容裁掉。
+整片时长可按整数秒选择 **15–60 秒**。`kimi-k3` 根据内容选择镜数和节奏，每镜 **4–15 秒**，总长允许落在目标时长至目标 +5 秒之间，最长 **65 秒**，不强制额外加时。例如选择 60 秒可生成 62–65 秒；每片最多 15 镜。每条视频同时提交的片段数由 `MARKETING_VIDEO_SEGMENT_CONCURRENCY` 配置（默认 2）。AI 已给出容差范围内的时长时保持其分配；超出范围时在口播最低时长与单镜上限内按建议节奏重新分配整数秒。时长在付费生成前确定：API 和预留事务校验完整分镜，Worker 在调用任何视频提供器前再次校验持久化总长；例如 5 ×13 秒直接请求 65 秒，70 秒配置不会调用视频模型。FFmpeg 不承担将超额付费时长裁至 65 秒的策略。所选目标与实际分镜总长分开显示；合并、成片校验及产物时长都采用各镜时长之和，不把额外内容裁掉。
 
 数字人模式要求每镜都有人物正面出镜，可辨认脸部及上半身；产品细节与人物同框。选择肖像时使用该肖像身份，未选肖像时安排同一人物。该约束同时进入文案/分镜创作、分镜修改和实际视频请求；后选肖像也生效。模型成片的出镜和身份一致性仍需实际预览验证。
 
@@ -24,8 +24,9 @@
 | `referenceMaxQuality` | 使用图片或参考视频时的最高清晰度 | 不限 | 720p |
 | `referenceVideo` | 参考视频时长、帧率、宽高、像素、宽高比限制 | 3–15.5 秒等官方限制 | 未公布，仅检查可读画面 |
 | `promptMaxChars` | 单镜提示词上限 | 3072 | 3072 |
+| `referenceImage` | 人物 / 背景 / 场景参考图格式、大小与尺寸 | JPG/PNG，≤50 MB，短边 ≥300 px，宽高比 1:2.5–2.5:1 | JPG/PNG/WebP，≤20 MB；[参考图文档](https://docs.x.ai/developers/model-capabilities/video/reference-to-video)只公布数量，不另设尺寸限制 |
 
-- 切换：服务端设置 `MARKETING_VIDEO_MODEL=<modelId>`，`marketing-video/model.ts` 启动时校验，未知 ID 直接报错。`GET /api/marketing-videos/capabilities` 返回当前配置的 `model`，前端据此校验并生成提示文案，无需重新构建。Kling 的图片 / 视频上传前检查由前端按模型 ID 选择。
+- 切换：服务端设置 `MARKETING_VIDEO_MODEL=<modelId>`，`marketing-video/model.ts` 启动时校验，未知 ID 直接报错。`GET /api/marketing-videos/capabilities` 返回当前配置的 `model`，前端据此校验并生成提示文案，无需重新构建。参考图上传前由前端按当前配置的 `referenceImage` 检查（`marketingReferenceImageIssue`，前后端共用）；`POST /:id/generate` 在新提交前再按当前模型读取每张参考图的真实文件头（`image-size.ts`，格式取自文件签名而非上传声明的 MIME）检查格式、大小和宽高，因此切换模型后已选的素材也会重检。Kling 的参考视频上传前检查仍由前端按模型 ID 选择。
 - 冻结任务：新任务的 `input.modelId` 记录提交时的模型，`marketingInputVersion: 3`。恢复时 `marketingJobProfile` 按记录的 `modelId` 取配置（缺少时视为 Kling），版本 1 的输入不做参考素材检查。已有任务可能引用的配置不可删除。
 - 新增模型（如 Seedance）：在 `models.ts` 增加配置并加入 `MARKETING_VIDEO_PROFILES`。若模型需要配置以外的行为（如 Seedance 提示词需按 `@Image1` 引用素材、带参考视频时时长与比例自适应），再给配置加字段，并在 `prompt.ts` / 路由中按字段分支，不按模型名写死。
 
@@ -41,7 +42,7 @@
 | 拆解来源 | `reference`、`referenceUpload` 及分析证据只用于文案和结构参考，不自动进入视频生成。 |
 | 肖像、背景、场景图片 | 按「肖像 → 背景 → 场景」及各组内顺序提交。肖像第一张为主身份，其余仅补充同一人；背景限定环境布局，场景参考相关构图与物品细节，不将其他人物替换为主角，也不强制拼贴所有参考。 |
 | 生成参考视频 | 仅 `assets.video` 直接参与生成，用于动作与构图，不复制原片台词、字幕或音乐。当前模式关闭原生口播，分镜按无声演示设计；开启字幕时显示该镜文案，关闭时通过画面动作表达。 |
-| 音色、BGM、封面 | 音色只提供声音身份，朗读当前文案而非样例台词；Kling 使用准备好的自定义音色（`run-job.ts` 按模型 ID 自动走音色链路），其他模型直接提交音频链接；不把它称作未提交的 `audio 1`。BGM 在合成时混入，封面不计入分镜图片编号。 |
+| 音色、BGM、封面 | 音色只提供声音身份，朗读当前文案而非样例台词；Kling 使用准备好的自定义音色（`run-job.ts` 按模型 ID 自动走音色链路），其他模型直接提交音频链接；不把它称作未提交的 `audio 1`。Kling 音色按父任务和样例槽位只创建一次：`run.ts` 在片段并发前以父任务 ID 准备音色，各片段经 `RunJobDeps.voiceScopeTaskId` 复用同一检查点；已有子片段级检查点的旧任务继续按子片段查询原请求。BGM 在合成时混入，封面不计入分镜图片编号。 |
 
 可编辑分镜按素材角色描述，不固化全局 `image N` 编号；最终 `marketingImageReferences` 同时用于请求图片列表和提示词编号，避免后补素材导致引用错位。当前比例、配音 / 字幕开关、素材角色约束优先于旧分镜中的冲突描述；选定背景 / 场景参考优先于不兼容的泛化背景文字，肖像身份优先于其他素材中的人物。单镜生成只带当前镜文案及画面、动作、镜头信息，保留素材原有标识，不额外生成水印、品牌标识或发布标题。上述为模型约束，素材还原、跨段一致性和字幕效果仍需以成片验证。
 
@@ -61,14 +62,18 @@
 
 `POST /api/marketing-videos/copy` 需要 `projectId`、`version`、`clientRequestId`、`draft`、`locale` 和 `source: {kind: "text" | "video"}`；省略 source 的旧客户端使用共享识别规则，视频类型返回 `VIDEO_ANALYSIS_REQUIRED`，必须通过参考视频分析入口。`POST /:id/storyboard` 在原参数基础上增加 `clientRequestId`。缺少请求 ID 的旧客户端会被拒绝，不回退到不持久化的付费路径；部署时同步更新 Web 和 API。
 
+内容检查（`POST /:id/review`）和标题标签（`POST /:id/publication`）同样写入 `marketing_text_operations`（迁移 50 增加 `review` / `publication` 两种 kind），请求需带 `clientRequestId` 和 `version`。输入快照冻结请求时的草稿：审核结果只在项目版本未变时写入 `review / reviewed_script`，版本已变则记为 `conflict` 并返回 409；标题标签的“只补缺失项”基于冻结草稿计算，按版本条件原子写回。审核解析器版本包含规则版本（`marketing-review-v1:<MARKETING_REVIEW_RULE_VERSION>`），规则升级后旧回执不能再恢复，只能放弃。标题标签在视频提交后仍可生成；文案和分镜仍只允许提交前修改。审核与标题标签沿用原计量方式（本地按用量计量），只增加回执与幂等。
+
+同一用户在所有草稿上同时进行的文案类请求（文案、分镜、审核、标题标签）最多 2 个（`MAX_RUNNING_TEXT_OPERATIONS`，在用户级锁内计数，超过 360 秒的 running 记录不计入），超出返回 429。`/copy`、`/:id/storyboard`、`/:id/review`、`/:id/publication` 都在 `server/index.ts` 的用户级限流表中。
+
 
 - `core/marketing-video` 保存共享 schema、口播长度估算、分段规划和存储接口。
 - `/api/marketing-videos` 为独立项目 API，沿用会话登录和用户凭证；文案/分镜初次创作由上游处理余额，其他制作请求保留既有额度检查。模型固定在服务端；输入素材只接受当前用户资产 ID，不接受客户端任意 URL。新项目不创建聊天会话，旧会话结果继续可读。
 - 迁移 36 增加 `marketing_video_projects`、`marketing_video_segments` 和 `usage_logs.idempotency_key`。草稿版本防止多页面覆盖；提交后制作配置固定，标题标签仍可修改。数据库 JSONB 比较须经过 schema 规范化，不能直接依赖键顺序。
-- 草稿自动保存；浏览器仅按用户 ID 保存最后打开的项目 ID。项目列表显示最近 50 条。断开页面不取消后台任务。
+- 草稿自动保存；浏览器仅按用户 ID 保存最后打开的项目 ID。`GET /api/marketing-videos?limit=&cursor=&q=` 按更新时间倒序分页（默认 20 条、最多 50 条），返回 `nextCursor`；游标保存 PG 原始时间戳文本和 ID，相同时间戳也不重复或漏行。`q` 按主题、发布标题、正文和标签做不区分大小写的包含匹配，`%` / `_` 按字面处理。草稿区提供搜索框和「加载更多草稿」；上次打开的草稿不在第一页时也会直接打开，已删除则忘记。断开页面不取消后台任务。
 - 草稿卡片右上角可删除（`DELETE /api/marketing-videos/:id`），确认后在一个事务中删除项目、分段关联和创作记录；生成中、取消后仍在收尾、或有进行中 / 待核实的文案创作与参考分析时返回 409。删除不移除输入素材和已生成视频，二者仍在「个人素材」，需用户另行永久删除。
 - PG 事务先持久化父任务、全部片段和不可变参数，再向 BullMQ 投递父任务 ID。Redis 故障后可在结果页点「重新排队」。不会自动重试付费提交。
-- Worker 持有父任务 advisory lock，最多并行执行两个片段。成功片段继续复用；已取得模型任务 ID 的片段继续查询 / 下载。模型明确失败或产物缺少音轨、时长不足时，用户点击继续才创建新生成请求。
+- Worker 持有父任务 advisory lock，最多并行执行 `MARKETING_VIDEO_SEGMENT_CONCURRENCY` 个片段（默认 2，取值 1–15，不超过该视频的片段数）。成功片段继续复用；已取得模型任务 ID 的片段继续查询 / 下载。模型明确失败或产物缺少音轨、时长不足时，用户点击继续才创建新生成请求。
 - 在模型 POST 前记录提交未知标记。收到任务 ID 后立即保存；未收到回执时，保留未知状态并停止再次 POST，系统不会自动清除标记重发。供应商明确拒绝创建（真人参考图，或 HTTP 400/401/402/403/404/413/422/429）或连接阶段即失败（`CONNECT_ERROR`：连接被拒、DNS 失败、连接超时、证书错误，请求未写出）时未创建任务，Worker 释放该片段的未知标记，用户修正原因后可显式继续；408/409、5xx、连接建立后的传输错误、请求超时和无效响应仍按未知处理（`run.ts → definiteRejection`）。确实未知的片段由用户确认“可能重复计费”后点击「重新提交未知片段」：`POST /:id/unknown-segments/release` 在父任务锁下只把这些片段改为可提交，并在 `marketing_video_segments.unknown_released_count / unknown_released_at`（迁移 49）记录；随后同一任务继续生成，已完成和已知供应商任务的片段继续复用。
 - 片段资产与恢复输出同一事务提交；计量用用户、片段、模型任务 ID 去重，避免工作进程重启造成重复计量。重新生成失败片段可能产生供应商费用。纯查询、下载和拼接恢复不做新增额度预检。
 - 结果页由 `TaskStatus.tsx` 展示进度；停止后由 `failure.ts` 将错误归类为「原因 + 下一步」并只给出可行操作：继续生成（同一任务，复用已完成片段）、复制为新草稿重新制作（冻结配置无法成功时，真人图片跳到素材步骤）或重新提交未知片段（按项目的 `unknownSegments` 计数判断，不依赖错误文字；确认后执行，同时展开任务编号与错误详情供核对费用）。合成阶段失败提示可直接重新合成，取消前需确认。
@@ -81,7 +86,7 @@
 
 新营销上传在落库时标记为私有。迁移 47 保护旧项目和冻结任务引用的上传素材。未携带所有者会话或有效临时令牌的请求返回 404。移除素材不会恢复公开访问。浏览器预览失败时经所有者接口重新取链接。Worker 只在新提交时签发链接；已有供应商任务继续查询原 ID。音色请求在本地素材准备成功后才保存意图，已有回执仍可恢复。
 
-营销父任务使用 `lot-marketing-video`，普通任务使用 `lot-tasks`。两个队列各有并发 1 的 Worker，仍由同一个 Worker 进程启动。营销父任务内部最多并行两个片段。旧队列作业保留原 ID 转发；旧 active 作业不会重复投递。取消、显式恢复和未启动任务超时保护覆盖两个队列。该改动隔离消费槽位，不等于主机资源隔离。
+营销父任务使用 `lot-marketing-video`，普通任务使用 `lot-tasks`，仍由同一个 Worker 进程启动。普通队列并发 1；营销队列每个 Worker 进程并发 `MARKETING_VIDEO_CONCURRENCY`（默认 2），每个用户在所有 Worker 上同时制作的视频不超过 `MARKETING_VIDEO_USER_CONCURRENCY`（默认 1），两者取值 1–16，非法值启动即报错。领取时 `claimTaskWithinOwnerLimit` 在用户级 advisory lock 内统计该用户仍在 BullMQ active 列表中的 running 任务，未超限才置为 running；孤立的 running 行不占名额。超限的任务保持 pending、stage 为“排队中：同账号已有视频在制作”，以 BullMQ delayed 让出槽位，15–20 秒后再试，不计为失败、不消耗尝试次数，可正常取消。首次领取时日志输出 `[queue] marketing render started` 及 `waitMs`（自入队起），用于统计排队 P95。每条视频内部同时提交的片段数为 `MARKETING_VIDEO_SEGMENT_CONCURRENCY`（默认 2，取值 1–15，仅 Worker 读取）。因此单进程同时最多有 `CONCURRENCY × SEGMENT_CONCURRENCY` 个片段请求（默认 4）和 `CONCURRENCY` 个合成。例如允许 2 个用户各自的视频同时提交 4 个片段：`MARKETING_VIDEO_CONCURRENCY=2`、`MARKETING_VIDEO_USER_CONCURRENCY=1`、`MARKETING_VIDEO_SEGMENT_CONCURRENCY=4`，共 8 个片段请求。提高并发前先确认供应商并发限额，并按排队 P95 和内存评估。该配置与参考视频分析的 `MARKETING_ANALYSIS_CONCURRENCY` 无关。旧队列作业保留原 ID 转发；旧 active 作业不会重复投递。取消、显式恢复和未启动任务超时保护覆盖两个队列。该改动隔离消费槽位，不等于主机资源隔离。
 
 升级前停止新提交，并等待已使用旧无签名素材地址的供应商任务完成。停止旧 Worker 后执行迁移至 47，再启动同版本服务。不要混跑仍提供匿名素材访问的旧 API。具体步骤见下方“升级和发布验收”。
 
@@ -94,6 +99,8 @@
 生成成片、生成图片及显式分享不因此改为私有；已不被任何草稿或冻结任务引用的历史上传无法自动判定营销用途，外部已保存的旧副本也无法撤回。Hono 不记录素材路径，Nginx `/static/uploads/` 关闭访问日志、错误日志和代理缓存；外层 CDN / 网关需保持相同约束。
 
 迁移 0046 只更新父任务队列元数据。旧 waiting 作业保留原 ID 转发，active 不重复投递，锁竞争停止迁移，终态不自动重跑。取消和恢复检查两条队列。三分钟未领取只触发诊断，健康等待或 Redis 未知不能写成失败；后续队列与取消契约见[实施记录](marketing-video-implementation-20261016.md)。
+
+合成就绪检查（`media.ts → mediaCapabilities`）不再只执行 `-version`：先确认 `libx264`、`aac` 编码器和合成所需滤镜（scale、pad、setsar、fps、aresample、apad、anullsrc、amix、volume、asplit、color），再按真实流程编码一段 0.4 秒探针片段、用 concat 拼接并 ffprobe 读回。结果按二进制路径和版本缓存 10 分钟，失败不缓存。API 在 `/generate` 前检查；Worker 在准备音色和提交任何片段前再检查一次本机，失败即停止，不产生费用。
 
 已有视频任务 ID 只查询/下载，成功片段复用原资产；音色 unknown 只查询原外部请求 ID，新音色授权或签名失败不写请求意图，并发仅 claim 胜者提交。计量键保留 `marketing:<片段任务 ID>:<供应商任务 ID>`。历史 WebM 可读取、移除或替换，新生成仍执行当前素材规则；Worker 按任务冻结的 `generate_audio` 恢复旧任务。
 
@@ -108,7 +115,7 @@
 
 ## 内容检查
 
-“检查当前文案”检查视频正文、发布标题、标签、背景及每个分镜的台词、画面、动作、镜头描述。接口为 `POST /api/marketing-videos/:id/review`，可传 `locale: zh | en | id`。审查读取已保存草稿并按用户所有权隔离；保存结果时仍校验版本，避免慢请求覆盖新草稿。
+“检查当前文案”检查视频正文、发布标题、标签、背景及每个分镜的台词、画面、动作、镜头描述。接口为 `POST /api/marketing-videos/:id/review`，需带 `clientRequestId`、`version`，可传 `locale: zh | en | id`。审查读取已保存草稿并按用户所有权隔离；调用记录与回执见上文“文案创作记录”，保存结果时校验版本，避免慢请求覆盖新草稿。
 
 ### 规则来源与边界
 

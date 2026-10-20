@@ -1,10 +1,14 @@
 import { publishPersistedJob } from "./persisted-job.js";
 import { randomUUID } from "node:crypto";
-import { Queue, Worker } from "bullmq";
+import { DelayedError, Queue, Worker } from "bullmq";
 import type Redis from "ioredis";
 import type { EnqueueOpts, JobControl, JobQueue, JobRecord } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
-import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, taskQueueName } from "./task-queues.js";
+import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, marketingQueueLimits, taskQueueName, type MarketingQueueLimits } from "./task-queues.js";
+
+// A render that waits for the same owner's earlier render frees its slot for
+// other users, then retries after this delay (plus jitter).
+const OWNER_BUSY_DELAY_MS = 15_000;
 
 /**
  * BullMQ-backed JobQueue implementation.
@@ -28,7 +32,8 @@ export class BullmqJobQueue implements JobQueue {
 
   constructor(
     private readonly db: DB,
-    private readonly connection: Redis
+    private readonly connection: Redis,
+    private readonly marketingLimits: MarketingQueueLimits = marketingQueueLimits()
   ) {
     for (const name of [DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE]) {
       this.queues.set(name, new Queue(name, { connection }));
@@ -67,7 +72,7 @@ export class BullmqJobQueue implements JobQueue {
     if (!this.workers.has(name)) {
       const worker = new Worker(
         name,
-        async (bullJob) => {
+        async (bullJob, token) => {
           const { taskId } = bullJob.data as { taskId: string };
           const jobType = bullJob.name;
 
@@ -91,7 +96,21 @@ export class BullmqJobQueue implements JobQueue {
           const attempts = bullJob.attemptsMade + 1;
           // A false claim means the task reached a terminal state (typically
           // cancelled while queued) before we got here — never run the handler.
-          const claimed = await this.db.markTaskRunning(taskId, attempts);
+          let claimed: boolean;
+          if (name === MARKETING_VIDEO_QUEUE) {
+            const owner = (await this.db.getTask(taskId))?.user_id;
+            if (!owner) return;
+            // Fair share: one user's batch must not hold every render slot.
+            const live = (await this.queues.get(name)!.getActive(0, 199)).flatMap(j => j.id && j.id !== taskId ? [j.id] : []);
+            const claim = await this.db.claimTaskWithinOwnerLimit(taskId, attempts, owner, live, this.marketingLimits.perUser);
+            if (claim === "busy") {
+              await bullJob.moveToDelayed(Date.now() + OWNER_BUSY_DELAY_MS + Math.floor(Math.random() * 5000), token);
+              throw new DelayedError();
+            }
+            claimed = claim === "claimed";
+            // Queue wait for P95 tracking: first run only, as resumes keep the original timestamp.
+            if (claimed && bullJob.attemptsMade === 0) console.info("[queue] marketing render started", { taskId, waitMs: Date.now() - bullJob.timestamp });
+          } else claimed = await this.db.markTaskRunning(taskId, attempts);
           if (!claimed) return;
           const row = await this.db.getTask(taskId);
           if (!row) {
@@ -150,7 +169,7 @@ export class BullmqJobQueue implements JobQueue {
             this.running.delete(taskId);
           }
         },
-        { connection: this.connection, concurrency: 1 }
+        { connection: this.connection, concurrency: name === MARKETING_VIDEO_QUEUE ? this.marketingLimits.concurrency : 1 }
       );
       this.workers.set(name, worker);
     }

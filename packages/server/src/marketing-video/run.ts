@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { ProviderError } from "@lot-agent/core";
+import { ProviderError, type ReferenceInput } from "@lot-agent/core";
 import { marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { PgMarketingProjectStore } from "./repository.js";
-import { composeMarketingVideo, inspectMedia, ownedAssetPath } from "./media.js";
+import { composeMarketingVideo, inspectMedia, mediaCapabilities, ownedAssetPath } from "./media.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
+import { publicStaticUrl } from "../util/public-base.js";
 
 const UNKNOWN = UNKNOWN_SUBMISSION;
 // 4xx answers reject the request itself; 408/409 and 5xx may still have created a task.
@@ -20,6 +21,8 @@ export interface MarketingRunDeps {
   db: DB; dataRoot: string;
   generation(job: { userId: string; input: Record<string, unknown> }, signal: AbortSignal): Promise<RunJobDeps>;
   compose?: typeof composeMarketingVideo;
+  /** Clips submitted and polled at once within this render (MARKETING_VIDEO_SEGMENT_CONCURRENCY). */
+  segmentConcurrency?: number;
 }
 export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: string; userId: string; input: Record<string, unknown> }, signal: AbortSignal) {
   const connection = await deps.db.pool.connect();
@@ -68,6 +71,26 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     // Completed/resumable vendor tasks keep using their original submitted prompts.
     const prompts = segments.map((segment, index) => segmentRecoveryAction(segment) === "submit"
       ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile) : undefined);
+    // The API host's probe says nothing about this worker. Stop before any voice or clip is paid for.
+    if (!(await mediaCapabilities()).composition) throw new Error("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
+    // Kling: create each voice sample once per parent job, before clips run in
+    // parallel, so clips never race to POST it. Clips that already hold a
+    // per-clip voice checkpoint (jobs started before this change) keep it.
+    const legacyVoiceClips = new Set<string>();
+    const referenceAudio = generateAudio ? job.input.reference_audio as ReferenceInput | undefined : undefined;
+    const freshClips = segments.filter(segment => segmentRecoveryAction(segment) === "submit").map(segment => segment.task_id as string);
+    if (referenceAudio?.length && freshClips.length) {
+      const voiceGen = await deps.generation(job, controller.signal);
+      if (/kling/i.test(voiceGen.vendorModel)) {
+        const { rows } = await deps.db.pool.query("SELECT DISTINCT task_id FROM generation_voice_tasks WHERE task_id::text=ANY($1::text[]) AND user_id=$2", [freshClips, job.userId]);
+        for (const row of rows) legacyVoiceClips.add(String(row.task_id));
+        if (freshClips.some(id => !legacyVoiceClips.has(id))) {
+          if (!voiceGen.prepareKlingVoices) throw new Error("Kling 音色服务未配置，无法提交参考声音。");
+          await voiceGen.prepareKlingVoices({ taskId: job.id, userId: job.userId, signal: controller.signal, assertNotCancelled: assertActive, resolveReferenceUrl: voiceGen.resolveReferenceUrl,
+            referenceAudio: typeof referenceAudio === "string" ? publicStaticUrl(referenceAudio) : referenceAudio.map(publicStaticUrl) });
+        }
+      }
+    }
     const progress: number[] = segments.map((s) => s.status === "succeeded" ? 100 : 0);
     const report = async () => deps.db.updateTaskProgress(job.id, Math.floor(progress.reduce((a, b) => a + b, 0) / segments.length * 0.85), `片段完成 ${progress.filter(p => p === 100).length}/${segments.length}`);
     const files: string[] = new Array(segments.length);
@@ -98,6 +121,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
             const provider = gen.provider;
             const baseDb = gen.db;
             output = await runGenerationJob({ ...gen,
+              voiceScopeTaskId: legacyVoiceClips.has(child.id) ? child.id : job.id,
               // Reuse persisted child outputs, not a generic cache that could
               // bring back a rejected short/silent clip after an explicit retry.
               cache: { get: async () => null, set: async () => {} },
@@ -174,7 +198,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
         }
       }
     };
-    await Promise.all([work(), work()]);
+    await Promise.all(Array.from({ length: Math.min(deps.segmentConcurrency ?? 2, segments.length) }, () => work()));
     if (failure) throw failure;
     await assertActive();
     await deps.db.updateTaskProgress(job.id, 90, "正在合成视频");
