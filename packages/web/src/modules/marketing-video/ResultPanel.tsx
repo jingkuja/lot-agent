@@ -27,7 +27,6 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, o
       <div className="mv-choices">
         <button disabled={busy} onClick={onCopyText}>{t("复制发布文案")}</button>
         <button disabled={busy || project.status !== "succeeded" || !knowledge} onClick={onArchive}>{t(archived)}</button>
-        <button disabled title={t("抖音发布权限尚未接入，请下载视频并复制文案发布。")}>{t("发布到抖音")}</button>
       </div>
       {notice && <p className="mv-hint" role="status">{t(notice)}</p>}
       <p className="mv-hint">{t("抖音发布权限尚未接入，请下载视频并复制文案发布。")}</p>

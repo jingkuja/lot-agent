@@ -1,6 +1,7 @@
 import type { MarketingProject } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { videoFailure } from "./failure.js";
+import { useConfirm } from "./ConfirmDialog.js";
 
 /** Progress of a submitted video, and for a stopped one: why, and the actions that can move it forward. */
 export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onRelease }: {
@@ -8,6 +9,7 @@ export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onReleas
   onResume(): void; onCancel(): void; onCopy(step: 1 | 2): void; onRelease(): void;
 }) {
   const { t } = useI18n();
+  const [confirmDialog, confirm] = useConfirm();
   const pending = project.status === "pending";
   const active = pending || project.status === "running";
   const cancelled = project.status === "cancelled";
@@ -25,10 +27,12 @@ export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onReleas
       <p><strong>{t("下一步")}</strong>{t(failure.next)}</p>
     </div>}
     <div className="mv-choices">
-      {active && <button disabled={busy} onClick={() => { if (window.confirm(t("确定取消视频生成吗？已提交给模型的片段仍可能计费；已完成的片段会保留，之后可以继续生成。"))) onCancel(); }}>{t("取消生成")}</button>}
+      {active && <button disabled={busy} onClick={() => void confirm({ title: "取消视频生成？", message: "确定取消视频生成吗？已提交给模型的片段仍可能计费；已完成的片段会保留，之后可以继续生成。",
+        confirm: "取消生成", cancel: "继续制作" }).then(ok => { if (ok) onCancel(); })}>{t("取消生成")}</button>}
       {pending && <button disabled={busy} onClick={onResume}>{t("重新排队")}</button>}
       {((cancelled && !unknown) || failure?.actions.includes("resume")) && <button className="mv-primary" disabled={busy} onClick={onResume}>{t("继续生成")}</button>}
-      {failure?.actions.includes("release") && <button className="mv-primary" disabled={busy} onClick={() => { if (window.confirm(t("有 {0} 个片段已发送给视频模型，但没有收到明确结果，可能已经计费。重新提交会再次请求这些片段，可能重复计费；已完成的片段会保留。确定重新提交吗？", [unknown]))) onRelease(); }}>{t("重新提交未知片段")}</button>}
+      {failure?.actions.includes("release") && <button className="mv-primary" disabled={busy} onClick={() => void confirm({ title: "重新提交未知片段？", message: "有 {0} 个片段已发送给视频模型，但没有收到明确结果，可能已经计费。重新提交会再次请求这些片段，可能重复计费；已完成的片段会保留。确定重新提交吗？",
+        values: [unknown], confirm: "重新提交" }).then(ok => { if (ok) onRelease(); })}>{t("重新提交未知片段")}</button>}
       {failure?.actions.includes("copy") && <button disabled={busy} onClick={() => onCopy(failure.copyStep ?? 2)}>{t("复制为新草稿重新制作")}</button>}
     </div>
     {pending && <p className="mv-hint">{t("长时间停留在排队状态时，可点击重新排队，不会重复创建任务。")}</p>}
@@ -37,5 +41,6 @@ export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onReleas
       <p>{t("任务编号")}：{project.taskId}</p>
       {project.error && <p>{t("错误详情")}：{project.error}</p>}
     </details>}
+    {confirmDialog}
   </div>;
 }

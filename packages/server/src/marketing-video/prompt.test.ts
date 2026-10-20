@@ -48,6 +48,20 @@ describe("marketing model subtitle instructions", () => {
     expect(created.draft.continuity).toBe("新造型");
     expect(parseCreation({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "结构" }, draft).draft.continuity).toBe("");
   });
+  it("records the audio setting each new full board was planned for", () => {
+    // Within every model's per-shot cap when a reference video is selected.
+    const shots = [
+      { durationSec: 8, script: "先看这杯咖啡。", visual: "吧台前人物端杯", action: "端起杯子", camera: "中景" },
+      { durationSec: 8, script: "欢迎来店里坐一坐。", visual: "座位区人物招手", action: "招手", camera: "中景" },
+    ];
+    const spoken = MarketingDraftSchema.parse({ durationSec: 16, storyboard: shots, script: shots.map(s => s.script).join("\n"), storyboardAudio: true });
+    const silent = { ...spoken, assets: { video: id } };
+    expect(parseCreation({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "结构" }, spoken).draft.storyboardAudio).toBe(true);
+    expect(parseCreation({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "结构" }, silent).draft.storyboardAudio).toBe(false);
+    expect(parseTextResult("storyboard", { shots }, silent).draft.storyboardAudio).toBe(false);
+    // A single-shot edit leaves the rest of the board as planned.
+    expect(parseTextResult("storyboard", { shots: [shots[1]] }, silent, 1).draft.storyboardAudio).toBe(true);
+  });
   it("lets mixed-presenter drafts plan venue and product shots without the presenter", () => {
     const draft = MarketingDraftSchema.parse({ presenter: "mixed", assets: { portrait: id }, durationSec: 17,
       storyboard: [{ durationSec: 6, script: "欢迎光临。", visual: "招牌菜特写", action: "热气升起", camera: "特写" }] });

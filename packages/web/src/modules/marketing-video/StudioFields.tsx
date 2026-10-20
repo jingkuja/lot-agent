@@ -24,11 +24,11 @@ export function Choices({ form, label, values, value, onChoose }: {
 
 type TextName = "topic" | "reference" | "script" | "background" | "continuity" | "publishTitle" | "tags";
 
-export function DraftText({ form, name, label, max, rows = 2 }: { form: DraftForm; name: TextName; label: string; max: number; rows?: number }) {
+export function DraftText({ form, name, label, max, rows = 2, placeholder }: { form: DraftForm; name: TextName; label: string; max: number; rows?: number; placeholder?: string }) {
   const { t } = useI18n();
   const locked = form.frozen && name !== "publishTitle" && name !== "tags";
   return <label className="mv-field"><span>{t(label)}</span>
-    <textarea value={form.draft[name]} rows={rows} maxLength={max} disabled={form.busy || !form.ready || locked} onChange={e => form.field(name, e.target.value)} />
+    <textarea value={form.draft[name]} rows={rows} maxLength={max} placeholder={placeholder && t(placeholder)} disabled={form.busy || !form.ready || locked} onChange={e => form.field(name, e.target.value)} />
   </label>;
 }
 
@@ -63,5 +63,17 @@ export function MaterialField({ form, slot, label, accept, handlers }: { form: D
         {(!item || item.issue) && <p className="mv-error">{t(!item ? "素材已不可用，请移除或替换后生成。" : "此历史素材不支持新生成，请移除或替换。")}</p>}
       </div>;
     })}
+  </div>;
+}
+
+/** The board was planned for the other audio setting; offer a rebuild before generating. */
+export function StoryboardAudioNotice({ video, busy, onRebuild, onKeep }: { video: boolean; busy: boolean; onRebuild(): void; onKeep(): void }) {
+  const { t } = useI18n();
+  return <div className="mv-audio-notice" role="status">
+    <p>{t(video ? "已添加参考视频，成片不生成口播，但当前分镜按有声口播编写。建议按无声展示重新生成分镜。" : "已移除参考视频，成片会生成口播，但当前分镜按无声展示编写。建议按口播重新生成分镜。")}</p>
+    <div className="mv-choices">
+      <button className="mv-primary" disabled={busy} onClick={onRebuild}>{t(video ? "按无声展示重新生成分镜" : "按口播重新生成分镜")}</button>
+      <button disabled={busy} onClick={onKeep}>{t("保留当前分镜")}</button>
+    </div>
   </div>;
 }

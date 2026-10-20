@@ -80,7 +80,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h1>营销影像 Agent 评审</h1>
   <p class="meta">评审日期：2026-10-19 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>，之后共 15 个提交）</p>
-  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。</p>
+  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
 </header>
 
@@ -90,6 +90,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <a href="#fixes2">第二轮修复</a>
   <a href="#fixes3">第三轮修复</a>
   <a href="#fixes4">第四轮修复</a>
+  <a href="#fixes5">第五轮修复</a>
   <a href="#tracking">旧评审跟踪</a>
   <a href="#features">1 功能完成度</a>
   <a href="#ui">2 操作 UI</a>
@@ -101,14 +102,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
+  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
   <div class="grid">
     <div class="stat"><strong>8 · 0 · 0</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
     <div class="stat"><strong>0 · 1 · 7</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
     <div class="stat"><strong>0 高 · 0 中 · 2 低</strong><span>当前健壮性问题（三轮共修复 14 项）</span></div>
-    <div class="stat"><strong>2637 / 81</strong><span>第四轮后全量单测：通过 / 跳过</span></div>
+    <div class="stat"><strong>2640 / 81</strong><span>第五轮后全量单测：通过 / 跳过</span></div>
   </div>
-  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。前三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。第四轮运行了构建和数据库脚本，未运行浏览器 UI 脚本（本机缺 Playwright）。全程没有调用付费模型。</p>
+  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。前三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。第四轮运行了构建和数据库脚本，未运行浏览器 UI 脚本（本机缺 Playwright）。第五轮运行了构建、数据库脚本和两个浏览器 UI 脚本。全程没有调用付费模型。</p>
 </section>
 
 <section class="card" id="fixes">
@@ -338,7 +339,38 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   </table></div>
   <p><strong>数据库：</strong>没有新增迁移。两个新字段存放在现有草稿 JSONB 中，带默认值。</p>
   <p><strong>界面与文档：</strong>新增文案已补中文、英文和印尼文；只使用现有样式。已更新 <code>docs/marketing-video.md</code>。另新增 <a href="marketing-video-tts-narration-plan-20261020.md">TTS 配音替换模型配音实施计划</a>（尚未实施，见 R1）。</p>
-  <p class="meta">仍未处理：第 2 节其余精简项（参考来源单选、Cookies 输入、分镜编辑器重复、第 3 步命名）。</p>
+  <p class="meta">第 2 节其余精简项（参考来源单选、Cookies 输入、分镜编辑器重复、第 3 步命名）已在第五轮处理。</p>
+</section>
+
+<section class="card" id="fixes5">
+  <h2>第五轮修复（2026-10-20） <span class="tag ok">第 2 节 12 项已处理</span></h2>
+  <p>本轮处理第 2 节"操作 UI"的"多余的内容""过度设计"和"交互不完善"。原则不变：付费保护（请求 ID、回执、未知状态不自动重试）不放宽；已存草稿和冻结任务照常加载。</p>
+  <h3>精简</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>修复</th><th>边界</th></tr></thead>
+    <tbody>
+      <tr><td>分镜编辑器出现两次</td><td>第 3 步只显示分镜总览（每镜时间段和画面）和"目标 / 分镜总长 / 分段数"，展开"修改分镜"后才显示编辑器和统一设定。本步刚生成的分镜自动展开。第 1 步编辑器不变。</td><td>没有保存可对比的旧版本，"变化"只用时长与分段统计表示，未做逐镜对比。</td></tr>
+      <tr><td>第 3 步名称</td><td>改名为"确认与制作"（中、英、印尼文）。</td><td>—</td></tr>
+      <tr><td>检查区每步都显示</td><td>"文案与分镜检查"只在第 3 步显示，位于生成按钮上方。三条说明合为一条"尚未检查，生成视频前会自动检查"，规则来源移到按钮提示。检查未通过时停留在第 3 步就地修改，不再跳回第 1 步。</td><td>生成前自动检查的逻辑不变。</td></tr>
+      <tr><td>提示文字太多</td><td>合并重复说明，删除时长说明；统一设定的说明改为输入框占位文字；分镜编辑器每种模式只留一条提示；参考视频说明合为一段。源码中 <code>mv-hint</code> 由 45 处减到 34 处（统计口径为模块全部 <code>.tsx</code>，与评审时的 32 段不同）。</td><td>多数提示是条件显示，单个页面实际看到的更少。</td></tr>
+      <tr><td>参考来源用复选框</td><td>改为两个单选："粘贴链接或文案"（默认）和"上传本地爆款视频"。链接与文案由 <code>marketingSourceKind</code> 自动识别，输入框下方显示识别结果。</td><td>普通官网链接按文案处理；服务端仍拒绝视频链接绕过分析进入 <code>/copy</code>。</td></tr>
+      <tr><td>文本操作内部状态外露</td><td><code>TextOperationPanel</code> 不再显示操作编号、"保存的创作记录"和"刷新创作状态"。已收到的回执自动填入草稿（<code>/recover</code> 只解析已存回执，不调用模型）；失败时才显示"重新填入"。服务端 3 条提到旧按钮的错误文案已改写。</td><td>"结果待核实"仍需用户确认后放弃，保护不变。</td></tr>
+      <tr><td>粘贴 Netscape Cookies</td><td>删除界面。需要登录或平台拒绝读取时，提示先保存视频到本地，再选"上传本地爆款视频"。</td><td>服务端 <code>/sessions</code> 接口保留，界面不再调用。</td></tr>
+      <tr><td>"发布到抖音"按钮一直禁用</td><td>删除按钮，同一提示只显示一次。</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <h3>交互</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>修复</th><th>边界</th></tr></thead>
+    <tbody>
+      <tr><td>全局错误在页面最底部</td><td>错误、通知和进度放进与步骤按钮一起吸底的停靠区（<code>.mv-dock</code>），滚动到任何位置都在操作按钮旁边。结果页没有步骤按钮，只在有错误或进行中时显示停靠区。</td><td>各面板内的就地错误（上传、参考分析等）位置不变。</td></tr>
+      <tr><td><code>window.confirm</code> 风格不一致</td><td>新增 <code>ConfirmDialog.tsx</code> 的 <code>useConfirm</code>，沿用 <code>AgentSwitchDialog</code> 的原生 <code>&lt;dialog&gt;</code> 样式。删除草稿、取消生成、重提未知片段、放弃待核实结果、跳过标题标签共 5 处全部替换；每个对话框有标题和明确的动作名（如"继续制作 / 取消生成"）。</td><td>其他模块的 <code>window.confirm</code> 不在本次范围。</td></tr>
+      <tr><td>文案生成只显示"正在处理…"</td><td>新增 <code>WaitStatus</code>：显示当前阶段（生成文案和分镜、生成或修改分镜、检查、生成标题标签、提交任务）、已用时，并说明最长 5 分钟、可离开页面、无需重复提交。文本操作记录返回 <code>createdAt</code>，刷新页面后从真实开始时间继续计时。</td><td>上游不报告进度，所以不显示百分比，只显示已用时。</td></tr>
+      <tr><td>加参考视频后分镜仍按有声口播</td><td>草稿新增 <code>storyboardAudio</code>，记录整板分镜按有声还是无声规划：服务端在文案创作和整板修改时写入，单镜修改保持原值，手动编排由前端写入；旧分镜在切换参考视频时补记。不一致时第 2 步参考视频区和第 3 步分镜总览提示，并提供"按无声展示 / 按口播重新生成分镜"和"保留当前分镜"；仍不一致时点生成会先确认。</td><td>重建走整板 AI 修改（付费，保持镜数与时长）。字段在草稿 JSONB 中，无需迁移，不进入片段提示词。</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>界面与文档：</strong>新增文案已补中文、英文和印尼文，颜色只用现有 CSS 变量，已检查浅色和深色主题。已更新 <code>docs/marketing-video.md</code> 和 <code>docs/agent-code-guide.md</code>。</p>
+  <p><strong>测试：</strong>新增单测覆盖不一致判断和服务端写入 <code>storyboardAudio</code>。两个浏览器 UI 脚本已按新流程更新，新增断言：自动识别来源、第 3 步分镜默认折叠、内部状态不外露、回执自动恢复、进度与已用时、错误在停靠区、应用内确认框（并断言没有原生对话框）、参考视频切换后的分镜提示与重建。UI 夹具补上了数字分身音色状态接口（878632d 起缺失）。</p>
 </section>
 
 <section class="card" id="tracking">
@@ -413,21 +445,21 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 </section>
 
 <section class="card" id="ui">
-  <h2>2 操作 UI <span class="tag mid">需精简</span></h2>
+  <h2>2 操作 UI <span class="tag ok">已精简（第五轮）</span></h2>
   <p>最短路径点 5 次：填主题 → 生成文案和分镜 → 下一步 → 下一步 → 确认生成。三步结构合理，两次评审结论一致。</p>
   <h3>多余的内容</h3>
   <ul>
-    <li>分镜编辑器在第 1 步和第 3 步各出现一次（10-20 拆分后在 <code>CopyStep.tsx</code> 和 <code>ProductionStep.tsx</code>）。第 3 步只显示总览和变化，需要时再展开。<span class="tag ok">两次评审一致</span></li>
-    <li>第 3 步叫"配音与字幕"，但里面还有画面比例、清晰度、分镜确认和生成。改名为"确认与制作"。<span class="tag ok">两次评审一致</span></li>
-    <li>"文案与分镜检查"在每一步底部都显示（<code>:501</code>）。</li>
-    <li>界面共有 32 段提示文字（<code>mv-hint</code>），文字太多。</li>
+    <li><span class="tag ok">已修复</span> 分镜编辑器在第 1 步和第 3 步各出现一次（10-20 拆分后在 <code>CopyStep.tsx</code> 和 <code>ProductionStep.tsx</code>）。第 3 步只显示总览和变化，需要时再展开。<span class="tag ok">两次评审一致</span></li>
+    <li><span class="tag ok">已修复</span> 第 3 步叫"配音与字幕"，但里面还有画面比例、清晰度、分镜确认和生成。改名为"确认与制作"。<span class="tag ok">两次评审一致</span></li>
+    <li><span class="tag ok">已修复</span> "文案与分镜检查"在每一步底部都显示（<code>:501</code>）。</li>
+    <li><span class="tag ok">已修复</span> 界面共有 32 段提示文字（<code>mv-hint</code>），文字太多。</li>
   </ul>
   <h3>过度设计</h3>
   <ul>
-    <li>参考来源用 3 个复选框做单选（<code>:430</code>）。改用单选按钮。链接和文字可以自动识别（已有 <code>marketingSourceKind</code>）。</li>
-    <li><code>TextOperationPanel</code> 向用户显示"操作编号""保存的创作记录""恢复已收到的结果"。这些是内部状态。</li>
-    <li>界面要求用户粘贴"Netscape 格式 Cookies"（<code>ReferenceAnalysisPanel.tsx:132</code>）。目标用户不会操作，而且有安全风险。建议删除，引导用户上传本地视频。</li>
-    <li>"发布到抖音"按钮一直禁用，同一条提示还显示两次（<code>:417</code>）。</li>
+    <li><span class="tag ok">已修复</span> 参考来源用 3 个复选框做单选（<code>:430</code>）。改用单选按钮。链接和文字可以自动识别（已有 <code>marketingSourceKind</code>）。</li>
+    <li><span class="tag ok">已修复</span> <code>TextOperationPanel</code> 向用户显示"操作编号""保存的创作记录""恢复已收到的结果"。这些是内部状态。</li>
+    <li><span class="tag ok">已修复</span> 界面要求用户粘贴"Netscape 格式 Cookies"（<code>ReferenceAnalysisPanel.tsx:132</code>）。目标用户不会操作，而且有安全风险。建议删除，引导用户上传本地视频。</li>
+    <li><span class="tag ok">已修复</span> "发布到抖音"按钮一直禁用，同一条提示还显示两次（<code>:417</code>）。</li>
   </ul>
   <h3>限制过严 <span class="tag new">采纳旧评审</span></h3>
   <ul>
@@ -436,11 +468,11 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   </ul>
   <h3>交互不完善</h3>
   <ul>
-    <li>全局错误显示在页面最底部（<code>:512</code>），离操作按钮很远。</li>
-    <li>删除和取消用 <code>window.confirm</code>，和应用其他对话框风格不一致。</li>
-    <li>文案生成最长 5 分钟，界面只显示"正在处理…"，没有进度或时间提示。</li>
+    <li><span class="tag ok">已修复</span> 全局错误显示在页面最底部（<code>:512</code>），离操作按钮很远。</li>
+    <li><span class="tag ok">已修复</span> 删除和取消用 <code>window.confirm</code>，和应用其他对话框风格不一致。</li>
+    <li><span class="tag ok">已修复</span> 文案生成最长 5 分钟，界面只显示"正在处理…"，没有进度或时间提示。</li>
     <li><span class="tag ok">已修复</span> 打开草稿失败后，<code>textPending</code> 一直是 true（<code>ProjectStudio.tsx</code> 的 <code>open</code>），编辑区全部禁用。用户只能点"开始新视频"恢复。2026-10-20：打开失败时恢复为 false。</li>
-    <li>添加生成参考视频后，原生口播关闭，但已有分镜仍按有声口播编写。界面只给出提示，不建议重建分镜。<span class="tag new">采纳旧评审</span></li>
+    <li><span class="tag ok">已修复</span> 添加生成参考视频后，原生口播关闭，但已有分镜仍按有声口播编写。界面只给出提示，不建议重建分镜。<span class="tag new">采纳旧评审</span> 2026-10-20：记录分镜规划时的口播设置，不一致时提示重建，见第五轮修复。</li>
   </ul>
 </section>
 
@@ -547,7 +579,13 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>第四轮 Core / Server / Web 构建</td><td>通过</td><td>Web 仍有既有的大 chunk 提示</td></tr>
       <tr><td>第四轮 <code>pnpm check:marketing-video:db</code>（临时 pgvector PostgreSQL 容器，用后停止）</td><td>通过</td><td>本轮未新增断言</td></tr>
       <tr><td>第四轮 <code>pnpm check:marketing-video:ui</code></td><td>未运行</td><td>本机未安装 Playwright。新增的出镜选项、统一设定输入框和跳过确认框没有浏览器验证</td></tr>
-      <tr><td>真实供应商</td><td>四轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
+      <tr><td>第五轮全量 Vitest</td><td>315 文件通过，14 文件跳过；2640 项通过，81 项跳过</td><td>新增：分镜口播设置不一致判断、文案创作与整板 / 单镜修改写入 <code>storyboardAudio</code></td></tr>
+      <tr><td>第五轮严格类型检查</td><td>Core 20 项、Server 236 项，与第四轮相同，营销目录 0 项；Web 通过</td><td>—</td></tr>
+      <tr><td>第五轮 Core / Server / Web 构建</td><td>通过</td><td>Web 仍有既有的大 chunk 提示</td></tr>
+      <tr><td>第五轮 <code>pnpm check:marketing-video:db</code>（临时 pgvector PostgreSQL 容器，用后删除）</td><td>通过</td><td>本轮未新增断言（文本操作记录新增的 <code>createdAt</code> 经该脚本的读取路径）</td></tr>
+      <tr><td>第五轮 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>通过（见右侧说明）</td><td>新增断言见第五轮修复。工作区同时有未提交的侧边栏改动（6 个快捷 Agent），与脚本中的启动器断言冲突；本次用临时副本跳过这 4 行启动器断言后全流程通过，脚本本身未改这部分</td></tr>
+      <tr><td>第五轮 <code>pnpm check:marketing-analysis:ui</code></td><td>通过</td><td>参考来源改为单选和自动识别后的断言</td></tr>
+      <tr><td>真实供应商</td><td>五轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
     </tbody>
   </table></div>
   <p class="meta">跳过项不计为通过。严格类型检查仍未全绿，不能用构建成功代替。</p>
@@ -580,7 +618,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <li>生成前显示预计费用。<span class="ref">— G03</span></li>
       <li>支持成片后只重做一镜。提供片段预览。<span class="ref">— G04</span></li>
       <li><span class="tag ok">已完成</span> 服务端检查参考图格式和尺寸，提交前按当前模型重检。<span class="ref">— F08 残留</span></li>
-      <li>删除粘贴 Cookies 的界面。参考来源改用单选按钮。分镜编辑器只保留一处。第 3 步改名为"确认与制作"。<span class="ref">— 第 2 节</span></li>
+      <li><span class="tag ok">已完成</span> 删除粘贴 Cookies 的界面。参考来源改用单选按钮。分镜编辑器只保留一处。第 3 步改名为"确认与制作"。错误就近显示，确认框统一，长请求显示已用时，参考视频切换后提示重建分镜。<span class="ref">— 第 2 节</span></li>
       <li><span class="tag ok">已完成</span> 增加"主播全程 / 混合镜头"选项。允许跳过自动补标题标签。<span class="ref">— 第 2 节</span></li>
       <li><span class="tag ok">已完成</span> 草稿列表增加分页和搜索。<span class="ref">— F06 残留</span></li>
     </ol>

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, type MarketingDraft, type MarketingProject, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, type MarketingDraft, type MarketingProject, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -13,19 +13,22 @@ import { ResultPanel } from "./ResultPanel.js";
 import { CopyStep, type SourceKind } from "./CopyStep.js";
 import { MaterialsStep } from "./MaterialsStep.js";
 import { ProductionStep } from "./ProductionStep.js";
-import type { DraftForm, MaterialHandlers } from "./StudioFields.js";
+import { StoryboardAudioNotice, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 import { checkMaterial, checkReferenceVideo, imageCount, isImageSlot, materialFor, type Material, type MaterialSlot } from "./materials.js";
 import { useDraftSession, useExclusive, useTaskPolling } from "./session.js";
+import { useConfirm } from "./ConfirmDialog.js";
+import { WaitStatus } from "./WaitStatus.js";
 
 type Capabilities = { composition: boolean; knowledge: boolean; model?: MarketingVideoProfile };
 type RequestIdentity = { fingerprint: string; id: string };
-const STEPS = ["确定文案", "确定素材", "配音与字幕"];
+/** The long request the open draft is waiting on. */
+type Wait = { label: string; started: number; textRequest: boolean };
+const STEPS = ["确定文案", "确定素材", "确认与制作"];
 const reviewedText = marketingReviewText;
 const unavailableMessage = "当前服务器尚不支持新版营销视频，请更新服务后重试。";
 const pollError = "暂时无法查询进度，正在自动重试；无需重复生成。";
 const errorMessage = (error: unknown) => error instanceof ApiClientError && error.status === 404 && /^(404\s+)?Not Found$/i.test(error.message)
   ? unavailableMessage : error instanceof Error ? error.message : "操作失败，请重试。";
-const sourceKindOf = (draft: MarketingDraft): SourceKind => draft.referenceUpload ? "upload" : draft.reference.trim() ? marketingSourceKind(draft.reference) : "video";
 /** The same ID while the request is unchanged, so a repeat after a lost response replays the
  * recorded result instead of paying for another model call. */
 function requestId(ref: MutableRefObject<RequestIdentity | null>, fingerprint: string) {
@@ -52,8 +55,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [working, setWorking] = useState("");
-  const [sourceKind, setSourceKind] = useState<SourceKind>("video");
+  const [working, setWorking] = useState<Wait | null>(null);
+  const [uploadSource, setUploadSource] = useState(false);
   const [uploadingReference, setUploadingReference] = useState(false);
   const [analysis, setAnalysis] = useState("");
   const [twinOpen, setTwinOpen] = useState<"portrait" | "voice" | null>(null);
@@ -81,6 +84,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const validReview = !!project?.review && project.reviewedScript === reviewedText(draft);
   const dirty = JSON.stringify(draft) !== saved.current;
   const library = useDraftLibrary(session, ready, e => setError(errorMessage(e)));
+  const [confirmDialog, confirm] = useConfirm();
+  // A pasted link or share text is analyzed as a video; anything else is rewritten as copy.
+  const sourceKind: SourceKind = uploadSource ? "upload" : draft.reference.trim() ? marketingSourceKind(draft.reference) : "video";
 
   function setCurrent(p: Project) {
     if (p.id === draftId.current && p.version < version.current) return;
@@ -107,6 +113,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       }
       // A reference video may lower the shot cap; keep the board and let the plan report conflicts.
       if (name === "assets" && !!next.assets.video !== !!draftRef.current.assets.video && next.storyboard.length) {
+        // Older boards carry no record; they were planned before this change.
+        next.storyboardAudio ??= !draftRef.current.assets.video;
         try { next.storyboard = timeMarketingStoryboard(next.storyboard, next.durationSec, marketingShotMaxSeconds(next, profile)); }
         catch { /* resolveMarketingSegments shows the error */ }
       }
@@ -128,7 +136,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     catch (e) { if (session.current(token)) setTextPending(false); throw e; }
     if (!session.current(token)) return;
     draftId.current = id;
-    setSourceKind(sourceKindOf(p.draft));
+    setUploadSource(!!p.draft.referenceUpload);
     load(p); setMaterials(p.assets ?? {});
     setStep(p.referenceAnalysis ? 0 : p.draft.storyboard.length ? 2 : 0);
     setAnalysisPending(!!p.referenceAnalysis && !p.referenceAnalysis.acceptedRevision);
@@ -197,13 +205,15 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     await exclusive.run(async () => {
       setError("");
       try { await work(); } catch (e) { if (session.alive) setError(errorMessage(e)); }
-      finally { if (session.alive) setWorking(""); }
+      finally { if (session.alive) setWorking(null); }
     });
   }
   // Review and title/tag requests are recorded like copy: the same ID replays a
   // saved result after a lost response instead of calling the model again.
+  const wait = (label: string, textRequest = true) => setWorking({ label, started: Date.now(), textRequest });
   const recordedRequestId = (kind: string, p: Project, ...input: unknown[]) => requestId(textRequest, JSON.stringify([kind, p.id, p.version, locale, ...input]));
   async function review() {
+    wait("正在检查文案与分镜");
     const p = await save();
     try {
       const result = await requestProject(`/marketing-videos/${p.id}/review`, json("POST", { locale, version: p.version, clientRequestId: recordedRequestId("review", p) }));
@@ -249,6 +259,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const p = await save();
     if (!session.current(token)) return;
     const clientRequestId = requestId(textRequest, JSON.stringify(["copy", p.id, p.version, p.draft, locale, sourceKind]));
+    wait("正在生成文案和分镜");
     try {
       const result = await request<{ project: Project; analysis: string }>("/marketing-videos/copy", json("POST", {
         draft: p.draft, locale, source: { kind: sourceKind === "upload" ? "video" : sourceKind }, projectId: p.id, version: p.version, clientRequestId,
@@ -278,6 +289,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     load(p); setAnalysis(value.snapshot.creation?.analysis ?? "");
   }
   async function publication(fillMissing = false) {
+    wait("正在生成标题和标签");
     const p = await save();
     try {
       const result = await requestProject(`/marketing-videos/${p.id}/publication`, json("POST", { locale, fillMissing, version: p.version, clientRequestId: recordedRequestId("publication", p, fillMissing) }));
@@ -289,17 +301,21 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const referenceError = retry ? "" : marketingReferenceError(draftRef.current, profile);
     if (referenceError) { setStep(1); throw new Error(referenceError); }
     if (!retry) resolveMarketingSegments(draftRef.current, profile);
+    if (!retry && marketingStoryboardAudioMismatch(draftRef.current) && !await confirm({ title: "分镜与参考视频设置不一致",
+      message: draftRef.current.assets.video ? "已添加参考视频，成片不生成口播，但当前分镜按有声口播编写。建议先重新生成分镜。仍要按当前分镜生成吗？" : "已移除参考视频，成片会生成口播，但当前分镜按无声展示编写。建议先重新生成分镜。仍要按当前分镜生成吗？",
+      confirm: "仍然生成" })) return;
     if (!retry && (!draftRef.current.publishTitle.trim() || !draftRef.current.tags.trim())) {
-      setWorking("正在补全标题和标签…");
       // Titles and tags are publishing metadata: they can be written after the
       // video, so a failed fill must not block production.
       try { await publication(true); }
-      catch (e) { if (!session.alive || !window.confirm(t("标题和标签补全失败：{0}\n可以跳过，成片后再生成或手动填写。是否跳过并继续生成视频？", [t(errorMessage(e))]))) throw e; }
+      catch (e) {
+        if (!session.alive || !await confirm({ title: "跳过标题和标签？", message: "标题和标签补全失败：{0}\n可以跳过，成片后再生成或手动填写。是否跳过并继续生成视频？", values: [t(errorMessage(e))], confirm: "跳过并继续生成" })) throw e;
+      }
     }
     let p = await save();
-    if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { setWorking("正在检查文案与分镜…"); await review(); p = projectRef.current!; }
-    if (p.review?.verdict === "reject") { setStep(0); throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。"); }
-    setWorking("正在提交生成任务…");
+    if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { await review(); p = projectRef.current!; }
+    if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。");
+    wait("正在提交生成任务", false);
     const result = await requestProject(`/marketing-videos/${p.id}/generate`, json("POST", { version: p.version, retry }));
     if (session.alive) setCurrent(result);
   }
@@ -308,6 +324,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const p = await save();
     if (!session.current(token)) return;
     const clientRequestId = requestId(textRequest, JSON.stringify(["storyboard", p.id, p.version, locale, instruction, index]));
+    wait(instruction ? "正在按要求修改分镜" : "正在生成分镜");
     try {
       const result = await requestProject(`/marketing-videos/${p.id}/storyboard`, json("POST", { version: p.version, locale, instruction, index, clientRequestId }));
       if (!session.current(token)) return;
@@ -320,15 +337,20 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       durationSec: part.durationSec, script: part.script, visual: current.background || t("展示产品与使用场景"),
       action: t(current.assets.video ? "人物正面出镜，无声展示产品，不做说话口型" : "人物正面出镜，自然讲述并展示产品"), camera: t("中景平稳拍摄，缓慢推近主体"),
     }));
-    update({ ...current, storyboard, script: storyboardScript(storyboard) });
+    update({ ...current, storyboard, script: storyboardScript(storyboard), storyboardAudio: !current.assets.video });
     await save();
   }
   const changeStoryboard = (storyboard: MarketingShot[]) => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) });
   const aiStoryboard = (instruction: string, index?: number) => void act(() => editStoryboard(instruction, index));
+  // The server plans every new board for the current audio setting.
+  const rebuildStoryboard = () => aiStoryboard(t(draftRef.current.assets.video
+    ? "已添加参考视频，成片不生成口播：请把每个分镜改为无声展示，人物不说话、不做口型，口播内容只作为字幕或画面信息；保持镜数和每镜时长。"
+    : "已移除参考视频，成片会生成口播：请把每个分镜改为人物自然讲述口播内容并展示产品；保持镜数和每镜时长。"));
+  const keepStoryboard = () => update({ ...draftRef.current, storyboardAudio: !draftRef.current.assets.video });
 
-  function chooseReferenceSource(kind: SourceKind) {
-    setSourceKind(kind);
-    if (kind !== "upload" && draftRef.current.referenceUpload) update({ ...draftRef.current, referenceUpload: undefined });
+  function chooseReferenceSource(upload: boolean) {
+    setUploadSource(upload);
+    if (!upload && draftRef.current.referenceUpload) update({ ...draftRef.current, referenceUpload: undefined });
   }
   async function selectReferenceVideo(file: File) {
     const token = session.token();
@@ -398,12 +420,13 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     setProject(null); setAnalysisPending(false); analysisRequest.current = null;
     const next = copy ? { ...draftRef.current } : MarketingDraftSchema.parse({});
     saved.current = copy ? "" : JSON.stringify(next);
-    setSourceKind(sourceKindOf(next));
+    setUploadSource(!!next.referenceUpload);
     update(next); if (!copy) setMaterials({});
     setStep(step); setAnalysis(""); remember(null);
   }
   async function deleteDraft(p: MarketingProject) {
-    if (!window.confirm(t("确定删除视频草稿“{0}”吗？删除后无法恢复。\n视频中使用的素材和已生成的视频仍保留在「个人素材」中，如需永久删除，请前往「个人素材」删除。", [p.draft.publishTitle || p.draft.topic || t("未命名草稿")]))) return;
+    if (!await confirm({ title: "删除视频草稿", message: "确定删除视频草稿“{0}”吗？删除后无法恢复。\n视频中使用的素材和已生成的视频仍保留在「个人素材」中，如需永久删除，请前往「个人素材」删除。",
+      values: [p.draft.publishTitle || p.draft.topic || t("未命名草稿")], confirm: "删除" })) return;
     await act(async () => {
       // Let an in-flight autosave settle so it cannot recreate the deleted row.
       if (flight.current) await flight.current.catch(() => {});
@@ -446,6 +469,15 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     : marketingReferenceError(draft, profile) || plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "");
   const nextStep = (target: number) => { if (target && !draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(target); };
 
+  const audioNotice = marketingStoryboardAudioMismatch(draft) && !frozen && <StoryboardAudioNotice video={!!draft.assets.video} busy={busy || !ready}
+    onRebuild={rebuildStoryboard} onKeep={keepStoryboard} />;
+  // Errors and progress stay next to the step buttons instead of the end of a long page.
+  const status = <>
+    {working && <WaitStatus key={working.started} label={working.label} started={working.started} textRequest={working.textRequest} />}
+    {error && <p className="mv-error" role="alert">{t(error)}</p>}
+    {!project?.taskId && notice && <p className="mv-notice" role="status">{t(notice)}</p>}
+  </>;
+
   return <div className="mv-scroll"><div className="mv-studio">
     <header className="mv-heading">
       <div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div>
@@ -472,31 +504,35 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           analysisPanel={referenceAnalysis
             ? <ReferenceAnalysisPanel key={`${ownerId}:${referenceAnalysis.id}`} id={referenceAnalysis.id} ownerId={ownerId} onActive={setAnalysisPending} onComplete={completedAnalysis} completedAction={copyAction} disabled={exclusive.busy || textPending || saving || !ready} />
             : copyAction}
-          onSourceKind={chooseReferenceSource} onReferenceFile={file => void act(() => selectReferenceVideo(file))}
+          onUploadSource={chooseReferenceSource} onReferenceFile={file => void act(() => selectReferenceVideo(file))}
           onStoryboard={changeStoryboard} onStoryboardAi={aiStoryboard} onPublication={() => void act(() => publication())} />}
-        {step === 1 && <MaterialsStep form={form} profile={profile} handlers={materialHandlers} referenceVideoStatus={referenceVideoStatus} onPickPortrait={() => setTwinOpen("portrait")} />}
+        {step === 1 && <MaterialsStep form={form} profile={profile} handlers={materialHandlers} referenceVideoStatus={referenceVideoStatus} onPickPortrait={() => setTwinOpen("portrait")}
+          audioNotice={audioNotice} />}
         {step === 2 && <ProductionStep form={form} profile={profile} handlers={materialHandlers} referenceVideoStatus={referenceVideoStatus} parts={plan.parts} planError={plan.error}
-          blocker={generationBlocker} blockerId={generationHintId} storyboardPanel={storyboardPanel}
-          buttonLabel={busy ? saving ? "正在保存…" : working || "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览"}
+          blocker={generationBlocker} blockerId={generationHintId} storyboardPanel={storyboardPanel} audioNotice={audioNotice}
+          reviewPanel={!!draft.script.trim() && <section className="mv-review-section" aria-label={t("文案与分镜检查")}>
+            <div className="mv-section-head"><h3>{t("文案与分镜检查")}</h3><button disabled={busy || !ready} onClick={() => void act(review)}
+              title={t("依据风险词规则表及抖音、小红书社区规则，检查文案、台词、标题标签和分镜内容。")}>{t("检查当前文案")}</button></div>
+            {validReview
+              ? <ReviewPanel key={project!.reviewedScript} review={project!.review!} draft={draft} busy={busy} onApply={applyReviewEdit} />
+              : <p className="mv-hint" role="status">{t("尚未检查，生成视频前会自动检查。")}</p>}
+          </section>}
+          buttonLabel={busy ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览"}
           onPickVoice={() => setTwinOpen("voice")} onStoryboard={changeStoryboard} onStoryboardAi={aiStoryboard} onEditCopy={() => setStep(0)}
           onGenerate={() => void act(() => draft.storyboard.length ? generate() : editStoryboard())} onManualStoryboard={() => void act(manualStoryboard)} />}
-        {!!draft.script.trim() && <section className="mv-review-section" aria-label={t("文案与分镜检查")}>
-          <div className="mv-section-head"><h3>{t("文案与分镜检查")}</h3><button disabled={busy || !ready} onClick={() => void act(review)}>{t("检查当前文案")}</button></div>
-          <p className="mv-hint">{t("依据风险词规则表及抖音、小红书社区规则，检查文案、台词、标题标签和分镜内容。")}</p>
-          {!draft.storyboard.length && <p className="mv-hint">{t("尚未生成分镜，生成后请再次检查画面、动作和镜头内容。")}</p>}
-          {validReview
-            ? <ReviewPanel key={project!.reviewedScript} review={project!.review!} draft={draft} busy={busy} onApply={applyReviewEdit} />
-            : <p className="mv-hint" role="status">{t("当前内容尚未检查，修改后需要重新检查。")}</p>}
-        </section>}
       </section>
+      <div className="mv-dock">
+      {status}
       <footer className="mv-footer">
         <button disabled={!step || busy || !ready} onClick={() => setStep(step - 1)}>{t("上一步")}</button>
         <button disabled={busy || saving || !ready || !dirty} onClick={() => void act(async () => { await save(); })}>{t("保存草稿")}</button>
         <span role="status">{t(saving ? "正在保存…" : dirty ? "等待保存" : project ? "草稿已保存" : "")}</span>
         <button className="mv-primary" disabled={step === 2 || busy || !ready} onClick={() => nextStep(step + 1)}>{t("下一步")}</button>
       </footer>
+      </div>
     </>}
-    {error && <p className="mv-error" role="alert">{t(error)}</p>}{!project?.taskId && notice && <p className="mv-hint" role="status">{t(notice)}</p>}
+    {project?.taskId && (working || error) && <div className="mv-dock">{status}</div>}
+    {confirmDialog}
     {twinOpen && <DigitalTwinPicker kind={twinOpen} onClose={() => { if (!exclusive.locked) setTwinOpen(null); }} onSelect={async (file, kind) => {
       if (exclusive.locked) throw new Error(t("正在处理…"));
       await exclusive.run(() => selectMaterial(file, kind === "voice" ? "voice" : "portrait"));

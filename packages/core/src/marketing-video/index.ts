@@ -64,10 +64,18 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   /** Presenter and setting look shared by all shots; every clip request repeats it verbatim
    * because each clip is generated independently. */
   continuity: z.string().max(400).default(""),
+  /** Whether the board was planned for native speech (no reference video). Absent on
+   * boards planned before this was recorded. */
+  storyboardAudio: z.boolean().optional(),
   publishTitle: z.string().max(100).default(""),
   tags: z.string().max(160).default(""),
 }).strict());
 export type MarketingDraft = z.infer<typeof MarketingDraftSchema>;
+/** True when the board was planned for the other audio setting: speech written for a
+ * silent reference-video render, or silent demonstration for a narrated one. */
+export function marketingStoryboardAudioMismatch(draft: MarketingDraft): boolean {
+  return !!draft.storyboard.length && draft.storyboardAudio !== undefined && draft.storyboardAudio === !!draft.assets.video;
+}
 /** Frozen input format. Versions before 2 predate reference checks; rules
  * always come from the profile of the recorded `modelId`. */
 export const MARKETING_INPUT_VERSION = 3;

@@ -7,6 +7,8 @@ import { parseOperationResult, textResultVersion, type TextOperationKind, type T
 
 export interface TextOperation {
   id: string; kind: TextOperationKind; status: "running" | "unknown" | "needs_apply" | "failed" | "succeeded" | "conflict" | "released";
+  /** When the request started, for showing how long it has run. */
+  createdAt?: string;
   result?: TextOperationResult; appliedVersion?: number;
 }
 // Review and publication metadata stay editable after a video job exists.
@@ -17,7 +19,7 @@ const STALE_RUNNING_MS = 360_000;
 export const MAX_RUNNING_TEXT_OPERATIONS = 2;
 const view = (row: Record<string, any>): TextOperation => ({ id: row.id, kind: row.kind,
   status: row.status === "running" && Date.now() - new Date(row.created_at).getTime() > STALE_RUNNING_MS ? "unknown" : row.status,
-  result: row.result ?? undefined, appliedVersion: row.applied_version ?? undefined });
+  createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined, result: row.result ?? undefined, appliedVersion: row.applied_version ?? undefined });
 
 export class PgMarketingTextOperations {
   constructor(readonly pool: pg.Pool) {}
@@ -50,7 +52,7 @@ export class PgMarketingTextOperations {
       const draft = MarketingDraftSchema.parse(project.draft);
       if (expectedDraft && JSON.stringify(draft) !== JSON.stringify(expectedDraft)) throw new MarketingError("草稿已更新，请重新确认。", 409);
       if ((await client.query("SELECT 1 FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2 AND status IN ('running','unknown','needs_apply')", [owner, projectId])).rowCount) {
-        throw new MarketingError("已有创作请求正在处理或结果待核实，请先查看保存的创作记录。", 409);
+        throw new MarketingError("已有创作请求正在处理或结果待核实，请等待页面顶部的处理结果。", 409);
       }
       const row = (await client.query(`INSERT INTO marketing_text_operations(id,user_id,project_id,project_version,kind,input_hash,model,protocol,status,input_snapshot,parser_version)
         VALUES($1,$2,$3,$4,$5,$6,$7,'marketing-json-v1','running',$8,$9) RETURNING *`, [id, owner, projectId, version, kind, hash, MARKETING_COPY_MODEL, JSON.stringify({ draft, input }), textResultVersion(kind)])).rows[0];
@@ -110,9 +112,9 @@ export class PgMarketingTextOperations {
       // A received result is recovered, never released, unless its parser or
       // review rules changed so it can no longer be applied.
       const recoverable = row.parser_version === textResultVersion(row.kind);
-      if (recoverable && (row.status === "needs_apply" || row.receipt?.outcome === "completed")) throw new MarketingError("创作结果已收到，请恢复已收到的结果，不会再次扣费。", 409);
+      if (recoverable && (row.status === "needs_apply" || row.receipt?.outcome === "completed")) throw new MarketingError("创作结果已收到，正在填入草稿，不会再次扣费。", 409);
       const status = view(row).status === "needs_apply" ? "unknown" : view(row).status;
-      if (status === "running") throw new MarketingError("创作请求仍在处理，请稍后刷新创作状态。", 409);
+      if (status === "running") throw new MarketingError("创作请求仍在处理，请稍候。", 409);
       if (status !== "unknown") throw new MarketingError("该创作记录没有待核实的结果。", 409);
       const released = (await client.query(`UPDATE marketing_text_operations SET status='released',released_at=now(),updated_at=now()
         WHERE user_id=$1 AND id=$2 RETURNING *`, [owner, id])).rows[0];

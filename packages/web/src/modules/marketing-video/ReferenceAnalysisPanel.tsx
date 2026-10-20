@@ -25,8 +25,8 @@ export function analysisError(value: unknown) {
     MODEL_INVALID_EVIDENCE: "文案整理未完成，点击继续生成将复用已有资料。",
     EVIDENCE_OUTSIDE_TIMELINE: "文案整理未完成，点击继续生成将复用已有资料。",
     ANALYSIS_IMAGE_BUDGET_EXHAUSTED: "画面处理已暂停，点击继续生成将复用已有资料。",
-    AUTH_REQUIRED: "该视频需要平台登录，请补充登录信息后继续。",
-    PLATFORM_SESSION_REQUIRED: "平台需要有效的浏览器访问信息，不一定需要登录账号。可补充访问信息，或选择“上传本地爆款视频”继续。",
+    AUTH_REQUIRED: "该视频需要登录平台才能读取。请先把视频保存到本地，再选择“上传本地爆款视频”继续。",
+    PLATFORM_SESSION_REQUIRED: "平台暂时不允许直接读取该视频。请先把视频保存到本地，再选择“上传本地爆款视频”继续。",
     PLATFORM_ACCESS_DENIED: "平台暂时拒绝了视频读取请求，无法确认是否需要登录。请稍后重试，或选择“上传本地爆款视频”继续。",
     NETWORK_BLOCKED: "暂时无法安全连接视频来源，请上传本地视频继续，或联系管理员。",
     DOWNLOAD_FAILED: "视频链接读取失败，请稍后重试，或选择“上传本地爆款视频”继续。",
@@ -43,7 +43,7 @@ export function analysisError(value: unknown) {
     ANALYSIS_REQUEST_LIMIT: "上传文件或请求内容过大，请缩小后重试。",
     SANDBOX_REQUIRED: "服务器的媒体隔离环境不可用，请联系管理员。",
     ANALYSIS_DISABLED: "参考视频分析尚未启用。",
-    UNSUPPORTED_SOURCE: "该链接不是支持的视频来源，请改用抖音、小红书或 B 站视频链接；普通官网链接请选择文字文案。",
+    UNSUPPORTED_SOURCE: "该链接不是支持的视频来源，请改用抖音、小红书或 B 站视频链接，或直接粘贴文案。",
     SINGLE_LINK_REQUIRED: "请仅填写一个完整视频链接（含 https://），多个视频请分别分析。",
     ANALYSIS_CONCURRENCY_LIMIT: "待处理任务已达上限，请等待已有任务结束后继续。",
     INVALID_SOURCE: "请填写抖音、小红书或 B 站视频链接，也可以直接粘贴文案。",
@@ -62,7 +62,7 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
   const [current, setCurrent] = useState<ReferenceAnalysis | null>(null);
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   const [frameId, setFrameId] = useState(""); const [frameUrl, setFrameUrl] = useState("");
-  const [cookies, setCookies] = useState(""); const [reload, setReload] = useState(0);
+  const [reload, setReload] = useState(0);
   const completed = useRef(""); const alive = useRef(true); const locked = useRef(false);
   useEffect(() => {
     alive.current = true;
@@ -127,15 +127,7 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
     {current?.errorCode && <p className="mv-error" role="alert">{t(analysisError(new Error(current.errorCode)))}</p>}
     {current?.status === "cancelled" && <p>{t("已取消")}</p>}
     {canResume && <p className="mv-hint">{t("继续生成可能重新调用模型并产生费用，已完成的有效结果会复用。")}</p>}
-    {current && !active(current) && !canResume && current.status !== "ready" && <p className="mv-hint">{t("此次分析暂时无法继续。请联系客服并提供分析编号 {0} 核实；也可以点击「开始新视频」重新拆解，或改用「文字文案」继续。", [current.id])}</p>}
-    {current?.status === "needs_auth" && current.snapshot.source.platform !== "local" && <details><summary>{t("补充平台访问信息")}</summary>
-      <label className="mv-field"><span>{t("个人平台 Cookies（Netscape 格式）")}</span><textarea rows={3} value={cookies} onChange={e => setCookies(e.target.value)} /></label>
-      <button disabled={busy || !cookies.trim()} onClick={() => void act(async () => {
-        await request(`${base}/sessions/${current.snapshot.source.platform}`, { method: "PUT", body: JSON.stringify({ cookies }) });
-        setCookies(""); await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision })); callbacks.current.onActive(true);
-      })}>{t("保存并继续")}</button>
-      <button disabled={busy} onClick={() => void act(() => request(`${base}/sessions/${current.snapshot.source.platform}`, { method: "DELETE" }))}>{t("清除平台访问信息")}</button>
-    </details>}
+    {current && !active(current) && !canResume && current.status !== "ready" && <p className="mv-hint">{t("此次分析暂时无法继续。请联系客服并提供分析编号 {0} 核实；也可以点击「开始新视频」重新拆解，或直接粘贴文案继续。", [current.id])}</p>}
     {current && !active(current) && current.snapshot.summary && <div className="mv-hint" role="status">
       <p>{t(!current.snapshot.creation && canResume ? "视频拆解结果已保存，文案和分镜尚未完成。继续生成会复用已有拆解结果。"
         : !hasSpeech || current.snapshot.coverage?.limitations.length || current.snapshot.summary.limitations.length || current.snapshot.coverage?.omittedOcrFrameIds.length || current.snapshot.coverage?.omittedVisualFrameIds.length ? "已完成，但参考证据存在缺口" : "参考画面分析已完成")}</p>

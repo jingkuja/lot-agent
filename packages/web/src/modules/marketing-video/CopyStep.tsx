@@ -6,15 +6,22 @@ import { Choices, DraftText, type DraftForm } from "./StudioFields.js";
 
 export type SourceKind = "text" | "video" | "upload";
 
+const SOURCE_HINTS: Record<SourceKind, string> = {
+  upload: "上传后点击一键拆解并生成，AI 读取视频画面、字幕和台词，生成文案与分镜。原视频私有保存 7 天。",
+  video: "已识别为视频链接，AI 读取视频画面、字幕和台词，生成文案与分镜。",
+  text: "已识别为参考文案，AI 按其结构改写文案与分镜。",
+};
+
 /** Step 1: write copy from a topic, or rewrite a reference video, link or text. */
-export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, analysis, planError, onSourceKind, onReferenceFile, onStoryboard, onStoryboardAi, onPublication }: {
+export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, analysis, planError, onUploadSource, onReferenceFile, onStoryboard, onStoryboardAi, onPublication }: {
   form: DraftForm; inputId: string; sourceKind: SourceKind; uploading: boolean;
   /** The copy button, or the reference analysis panel that ends with it. */
   analysisPanel: ReactNode;
   /** Structure notes returned with the latest copy. */
   analysis: string;
   planError: string;
-  onSourceKind(kind: SourceKind): void; onReferenceFile(file: File): void;
+  /** Links and pasted copy are told apart automatically; only uploads are chosen. */
+  onUploadSource(upload: boolean): void; onReferenceFile(file: File): void;
   onStoryboard(shots: MarketingShot[]): void; onStoryboardAi(instruction: string, index?: number): void; onPublication(): void;
 }) {
   const { t } = useI18n();
@@ -26,9 +33,9 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
         <div className="mv-reference-heading">
           <label htmlFor={inputId}>{t("视频链接或参考文案")}</label>
           <div className="mv-source-options" role="group" aria-label={t("参考内容类型")}>
-            {(["video", "text", "upload"] as const).map(kind => <label key={kind} className={sourceKind === kind ? "selected" : ""}>
-              <input type="checkbox" checked={sourceKind === kind} disabled={busy || frozen || !ready} onChange={() => onSourceKind(kind)} />
-              {t(kind === "video" ? "视频链接" : kind === "text" ? "文字文案" : "上传本地爆款视频")}
+            {[false, true].map(upload => <label key={String(upload)} className={(sourceKind === "upload") === upload ? "selected" : ""}>
+              <input type="radio" name={`${inputId}-source`} checked={(sourceKind === "upload") === upload} disabled={busy || frozen || !ready} onChange={() => onUploadSource(upload)} />
+              {t(upload ? "上传本地爆款视频" : "粘贴链接或文案")}
             </label>)}
           </div>
         </div>
@@ -43,12 +50,10 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
           <p className="mv-hint">{t("本地爆款视频支持 MP4、MOV、WebM，最大 100 MB，最长 180 秒，最高 1080p。")}</p>
         </div> : <textarea id={inputId} value={draft.reference} rows={4} maxLength={6000} disabled={busy || frozen || !ready} onChange={e => field("reference", e.target.value)} />}
       </div>
-      <p className="mv-hint">{t(sourceKind === "upload" ? "上传后点击一键拆解并生成，AI 读取视频画面、字幕和台词，生成文案与分镜。原视频私有保存 7 天。" : "粘贴视频链接、分享文本或文案，AI 自动拆解并生成文案和分镜。")}</p>
-      <p className="mv-hint">{t("拆解素材用于参考文案和结构，不会自动用于视频生成；需要画面参考时，请在“确定素材”中添加。")}</p>
+      <p className="mv-hint">{t(sourceKind !== "upload" && !draft.reference.trim() ? "粘贴视频链接、分享文本或文案，AI 自动识别并生成文案和分镜。" : SOURCE_HINTS[sourceKind])}</p>
       <details className="mv-creative-brief" open><summary>{t("补充产品与创作要求（选填）")}</summary><DraftText form={form} name="topic" label="产品、卖点和目标顾客" max={800} /></details>
     </> : <DraftText form={form} name="topic" label="产品、卖点和目标顾客" max={800} />}
     <label className="mv-field"><span>{t("整片时长（秒）")} · {draft.durationSec}s</span><input type="range" min="15" max="60" step="1" aria-label={t("整片时长（秒）")} value={draft.durationSec} disabled={busy} onChange={e => field("durationSec", Number(e.target.value))} /></label>
-    <p className="mv-hint">{t("选择 15–60 秒目标时长，AI 自动安排每镜 4–15 秒，可多出最多 5 秒，成片最长 65 秒。")}</p>
     <label className="mv-label">{t("人物出镜")}</label>
     <Choices form={form} label="人物出镜" values={[{ value: "always", label: "主播全程出镜" }, { value: "mixed", label: "混合镜头" }]} value={draft.presenter} onChoose={value => field("presenter", value as MarketingDraft["presenter"])} />
     <p className="mv-hint">{t(draft.presenter === "mixed" ? "主播出现在部分镜头，其余镜头可拍环境、菜品和产品特写，适合探店。" : "每个镜头都有主播正面出镜，适合主播宣传。")}</p>
@@ -57,8 +62,7 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
     {(draft.copyMode !== "rewrite" || !!draft.script.trim()) && <>
       <DraftText form={form} name="script" label="视频口播文案" max={2000} rows={6} />
       <p className="mv-hint">{t("预计口播 {0} 秒，实际以成片为准。", [Math.ceil(speechUnits(draft.script) / 4)])}</p>
-      {!!draft.storyboard.length && <DraftText form={form} name="continuity" label="统一人物与场景设定" max={400} rows={3} />}
-      {!!draft.storyboard.length && <p className="mv-hint">{t("每段视频都会带上这段描述，用于保持人物、服装和场景一致。")}</p>}
+      {!!draft.storyboard.length && <DraftText form={form} name="continuity" label="统一人物与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装和场景一致。" />}
       {!!draft.storyboard.length && <StoryboardEditor creation presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />}
       {draft.script.trim() && planError && <p className="mv-error" role="alert">{t(planError)}</p>}
       <details className="mv-script-review" open><summary>{t("标题标签")}</summary>

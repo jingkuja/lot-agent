@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText } from "./index.js";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch } from "./index.js";
 
 const grok = GROK_MARKETING_PROFILE;
 const kling = KLING_MARKETING_PROFILE;
@@ -235,5 +235,20 @@ describe("reference image contract per model", () => {
     expect(marketingReferenceImageIssue(GROK_MARKETING_PROFILE, { ...image, mime: "image/gif" })).toBe("当前视频模型的参考图仅支持 JPG、PNG、WebP 格式");
     expect(marketingReferenceImageIssue(GROK_MARKETING_PROFILE, { ...image, width: 0 })).toBe("无法读取图片尺寸，请更换图片");
     expect(marketingReferenceImageIssue(GROK_MARKETING_PROFILE, { ...image, size: 21 * 1024 * 1024 })).toBe("参考图大小不能超过 20MB");
+  });
+});
+
+describe("storyboard audio setting", () => {
+  const video = "11111111-1111-4111-8111-111111111111";
+  const storyboard = [{ durationSec: 15, script: "欢迎光临。", visual: "店内", action: "讲述", camera: "中景" }];
+  it("flags a board planned for the other audio setting", () => {
+    expect(marketingStoryboardAudioMismatch(MarketingDraftSchema.parse({ storyboard, storyboardAudio: true, assets: { video } }))).toBe(true);
+    expect(marketingStoryboardAudioMismatch(MarketingDraftSchema.parse({ storyboard, storyboardAudio: false }))).toBe(true);
+    expect(marketingStoryboardAudioMismatch(MarketingDraftSchema.parse({ storyboard, storyboardAudio: false, assets: { video } }))).toBe(false);
+    expect(marketingStoryboardAudioMismatch(MarketingDraftSchema.parse({ storyboard, storyboardAudio: true }))).toBe(false);
+  });
+  it("does not flag older boards without a record or drafts without a board", () => {
+    expect(marketingStoryboardAudioMismatch(MarketingDraftSchema.parse({ storyboard, assets: { video } }))).toBe(false);
+    expect(marketingStoryboardAudioMismatch(MarketingDraftSchema.parse({ storyboardAudio: true, assets: { video } }))).toBe(false);
   });
 });

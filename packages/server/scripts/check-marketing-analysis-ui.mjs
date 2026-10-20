@@ -140,18 +140,18 @@ try {
   const reference = page.getByRole("textbox", { name: "视频链接或参考文案", exact: true });
   const duration = page.getByRole("slider", { name: "整片时长（秒）", exact: true });
   assert.equal(await duration.inputValue(), "30");
-  assert.equal(await page.getByRole("checkbox", { name: "视频链接", exact: true }).isChecked(), true);
+  assert.equal(await page.getByRole("radio", { name: "粘贴链接或文案", exact: true }).isChecked(), true);
   assert.equal(await page.getByRole("button", { name: /^(15|30|45|60) 秒$/ }).count(), 0);
   const inputBounds = await reference.boundingBox();
   const optionBounds = await page.getByRole("group", { name: "参考内容类型", exact: true }).boundingBox();
-  assert(optionBounds.y + optionBounds.height <= inputBounds.y, "source checkboxes belong above the input");
+  assert(optionBounds.y + optionBounds.height <= inputBounds.y, "source options belong above the input");
   assert.equal(await page.locator(".mv-creative-brief").evaluate(el => el.open), true);
   assert.equal(await page.getByRole("textbox", { name: "产品、卖点和目标顾客", exact: true }).isVisible(), true);
-  await page.getByRole("checkbox", { name: "文字文案", exact: true }).check();
-  assert.equal(await page.getByRole("checkbox", { name: "视频链接", exact: true }).isChecked(), false);
   await duration.focus(); await duration.press("End");
   assert.equal(await duration.inputValue(), "60");
   await reference.fill("一家明亮的咖啡店，提供现磨咖啡，欢迎品尝。https://example.com/shop");
+  // A non-platform link is rewritten as copy without choosing a source type.
+  await page.getByText("已识别为参考文案，AI 按其结构改写文案与分镜。", { exact: true }).waitFor();
   assert.equal(await page.getByText("参考视频分析", { exact: true }).count(), 0);
   await page.getByRole("button", { name: "一键拆解并生成", exact: true }).click();
   await page.waitForFunction(() => document.querySelector('textarea') && [...document.querySelectorAll('textarea')].some(t => t.value.includes('在明亮空间')));
@@ -159,7 +159,7 @@ try {
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(b => b.textContent === '开始新视频').disabled);
   assert.equal(copyCalls, 1); assert.equal(starts, 0);
   await page.reload();
-  await page.getByText("保存的创作记录", { exact: true }).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(t => t.value.includes('在明亮空间')));
   assert.equal(copyCalls, 1, "refresh after a lost copy response must reuse the paid result");
   await page.getByRole("button", { name: /1\s*确定文案/ }).click();
   await page.getByText("0–13s · 13 秒", { exact: true }).waitFor();
@@ -175,6 +175,7 @@ try {
   await page.getByRole("button", { name: "开始新视频", exact: true }).click();
   await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
   await reference.fill("https://www.bilibili.com/video/BV1234567890");
+  await page.getByText("已识别为视频链接，AI 读取视频画面、字幕和台词，生成文案与分镜。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "一键拆解并生成", exact: true }).click();
   await page.getByRole("button", { name: "取消", exact: true }).waitFor();
   assert.equal(starts, 1);
@@ -220,7 +221,7 @@ try {
   await page.getByRole("button", { name: "下一步", exact: true }).click();
   await page.getByRole("button", { name: "选择数字分身素材", exact: true }).waitFor();
   await page.getByRole("button", { name: "上一步", exact: true }).click();
-  assert.equal(await page.getByRole("checkbox").count(), 3);
+  assert.equal(await page.getByRole("radio").count(), 2);
   assert(!/预算|已记录费用|选用预览|生成当前修订摘要/.test(await page.locator("body").innerText()));
   await page.getByText("当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。", { exact: true }).waitFor();
   assert.equal(await page.locator(".ma-panel > details.mv-script-review").evaluate(el => el.open), false);
@@ -300,7 +301,7 @@ try {
   await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("zh");
   await page.getByRole("button", { name: "开始新视频", exact: true }).click();
   await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
-  await page.getByRole("checkbox", { name: "上传本地爆款视频", exact: true }).check();
+  await page.getByRole("radio", { name: "上传本地爆款视频", exact: true }).check();
   assert.equal(await page.getByRole("button", { name: "一键拆解并生成", exact: true }).isDisabled(), true);
   await page.getByRole("button", { name: "智能生成文案", exact: true }).click();
   await page.getByRole("textbox", { name: "产品、卖点和目标顾客", exact: true }).fill("介绍一家本地咖啡店");
@@ -310,7 +311,7 @@ try {
   assert.equal(copyCalls, 2);
   await page.getByRole("button", { name: "开始新视频", exact: true }).click();
   await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
-  await page.getByRole("checkbox", { name: "上传本地爆款视频", exact: true }).check();
+  await page.getByRole("radio", { name: "上传本地爆款视频", exact: true }).check();
   const localVideo = join(temp, "local-reference.mp4");
   execFileSync(process.env.MARKETING_FFMPEG_PATH || "ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", localVideo]);
   const localInput = page.getByLabel("选择本地视频文件", { exact: true });
@@ -325,10 +326,10 @@ try {
   assert.equal(uploads, 2);
   await page.reload();
   await page.locator(".mv-local-reference").getByText("local-reference.mp4", { exact: true }).waitFor();
-  assert.equal(await page.getByRole("checkbox", { name: "上传本地爆款视频", exact: true }).isChecked(), true);
+  assert.equal(await page.getByRole("radio", { name: "上传本地爆款视频", exact: true }).isChecked(), true);
   assert.equal(uploads, 2); assert.equal(starts, 1);
   await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("en");
-  await page.getByRole("checkbox", { name: "Upload a local reference video", exact: true }).waitFor();
+  await page.getByRole("radio", { name: "Upload a local reference video", exact: true }).waitFor();
   await page.getByText("Local reference videos support MP4, MOV and WebM, up to 100 MB, 180 seconds and 1080p.", { exact: true }).waitFor();
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
@@ -340,7 +341,7 @@ try {
   await page.getByRole("button", { name: "取消", exact: true }).click(); await page.getByText("已取消", { exact: true }).waitFor();
   const sourceSaved = page.waitForResponse(response => response.url().endsWith(`/api/marketing-videos/${projectId}`)
     && response.request().method() === "PUT" && response.request().postDataJSON().draft.reference === "改为手动参考文字");
-  await page.getByRole("checkbox", { name: "文字文案", exact: true }).check();
+  await page.getByRole("radio", { name: "粘贴链接或文案", exact: true }).check();
   await reference.fill("改为手动参考文字");
   await page.getByText("已取消", { exact: true }).waitFor({ state: "hidden" });
   assert.equal(await page.getByText("查看参考资料", { exact: true }).count(), 0);

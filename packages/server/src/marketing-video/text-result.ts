@@ -44,7 +44,9 @@ export function parseTextResult(kind: "copy" | "storyboard", raw: unknown, draft
       : initial.map((shot, index) => index === selectedIndex ? { ...shots[0], durationSec: shot.durationSec } : shot);
     // Only a full-board answer may set the shared look; a single-shot edit keeps it.
     const continuity = selectedIndex === undefined && typeof (raw as { continuity?: unknown }).continuity === "string" ? ((raw as { continuity: string }).continuity).trim() : draft.continuity;
-    const updated = MarketingDraftSchema.parse({ ...draft, storyboard, script: storyboardScript(storyboard), continuity });
+    // A single-shot edit leaves the rest of the board as it was planned.
+    const storyboardAudio = selectedIndex === undefined ? !draft.assets.video : draft.storyboardAudio;
+    const updated = MarketingDraftSchema.parse({ ...draft, storyboard, script: storyboardScript(storyboard), continuity, storyboardAudio });
     resolveMarketingSegments(updated, profile);
     return { draft: updated, analysis: "" };
   } catch {

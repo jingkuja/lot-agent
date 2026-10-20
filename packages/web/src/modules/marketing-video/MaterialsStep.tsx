@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { MARKETING_SHOT_MAX_SECONDS, marketingReferenceError, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { imageCount } from "./materials.js";
@@ -6,10 +7,12 @@ import { DraftText, MaterialField, type DraftForm, type MaterialHandlers } from 
 const IMAGE_TYPES = "image/jpeg,image/png,image/webp";
 
 /** Step 2: presenter, scene and reference video for the video model. */
-export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, onPickPortrait }: {
+export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, audioNotice, onPickPortrait }: {
   form: DraftForm; profile: MarketingVideoProfile; handlers: MaterialHandlers;
   /** What a selected reference video changes about generation. */
   referenceVideoStatus: string;
+  /** Shown when the reference video changed what the board was planned for. */
+  audioNotice: ReactNode;
   onPickPortrait(): void;
 }) {
   const { t } = useI18n();
@@ -35,15 +38,15 @@ export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, o
     <section className="mv-material-group" aria-label={t("参考视频")}>
       <div className="mv-material-heading"><strong>{t("参考视频")}</strong><span>{t("最多 1 个")}</span></div>
       <MaterialField form={form} slot="video" label="上传参考视频（选填）" accept="video/mp4,video/quicktime" handlers={handlers} />
-      <p className="mv-hint">{[
+      {draft.assets.video ? <p className="mv-hint" role="status">{referenceVideoStatus}</p> : <p className="mv-hint">{[
+        t("用于参考动作和构图，不沿用原视频台词或音乐。"),
         t("参考视频支持 MP4、MOV，最大 150 MB。"),
         profile.referenceVideo ? t("时长 {0}–{1} 秒。", [profile.referenceVideo.minSeconds, profile.referenceVideo.maxSeconds]) : "",
         profile.imagesWithReferenceVideo ? t("选择参考视频后，人物与场景图片合计最多 {0} 张。", [profile.imagesWithReferenceVideo]) : t("选择参考视频后，人物与场景图片不参与生成。"),
         profile.referenceVideoShotMaxSeconds < MARKETING_SHOT_MAX_SECONDS ? t("选择参考视频后，每镜最长 {0} 秒。", [profile.referenceVideoShotMaxSeconds]) : "",
-      ].filter(Boolean).join(" ")}</p>
-      <p className="mv-hint">{t("此处视频参与生成，用于参考动作和构图；成片内容以已确认的文案与分镜为准，不沿用原视频台词或音乐。")}</p>
-      {draft.assets.video && <p className="mv-hint" role="status">{referenceVideoStatus}</p>}
+      ].filter(Boolean).join(" ")}</p>}
       {referenceError && <p className="mv-error" role="alert">{t(referenceError)}</p>}
+      {audioNotice}
     </section>
     <DraftText form={form} name="background" label="背景/场景补充描述" max={600} />
   </>;

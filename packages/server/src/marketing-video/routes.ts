@@ -82,7 +82,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   };
   const replay = (operation: TextOperation) => {
     if (operation.result) return operation.result;
-    throw new MarketingError(operation.status === "failed" ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请先查看保存的创作记录。", 409);
+    throw new MarketingError(operation.status === "failed" ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请等待页面顶部的处理结果。", 409);
   };
   app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", model: activeProfile }));
   app.get("/", async (c) => c.json(await store.page(c.get("userId"), { limit: Number(c.req.query("limit") ?? 20) || 20, cursor: c.req.query("cursor"), query: c.req.query("q") })));
