@@ -80,7 +80,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h1>营销影像 Agent 评审</h1>
   <p class="meta">评审日期：2026-10-19 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>，之后共 15 个提交）</p>
-  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。</p>
+  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
 </header>
 
@@ -89,6 +89,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <a href="#fixes">第一轮修复</a>
   <a href="#fixes2">第二轮修复</a>
   <a href="#fixes3">第三轮修复</a>
+  <a href="#fixes4">第四轮修复</a>
   <a href="#tracking">旧评审跟踪</a>
   <a href="#features">1 功能完成度</a>
   <a href="#ui">2 操作 UI</a>
@@ -100,14 +101,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
+  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
   <div class="grid">
     <div class="stat"><strong>8 · 0 · 0</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
     <div class="stat"><strong>0 · 1 · 7</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
     <div class="stat"><strong>0 高 · 0 中 · 2 低</strong><span>当前健壮性问题（三轮共修复 14 项）</span></div>
-    <div class="stat"><strong>2589 / 81</strong><span>第三轮后全量单测：通过 / 跳过</span></div>
+    <div class="stat"><strong>2637 / 81</strong><span>第四轮后全量单测：通过 / 跳过</span></div>
   </div>
-  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。全程没有调用付费模型。</p>
+  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。前三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。第四轮运行了构建和数据库脚本，未运行浏览器 UI 脚本（本机缺 Playwright）。全程没有调用付费模型。</p>
 </section>
 
 <section class="card" id="fixes">
@@ -294,6 +295,52 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p class="meta">仍未处理：成片匿名访问、整文件读入内存（第 3 节）。</p>
 </section>
 
+<section class="card" id="fixes4">
+  <h2>第四轮修复（2026-10-20） <span class="tag ok">2 项限制已放宽</span></h2>
+  <p>本轮处理第 2 节"限制过严"的 2 项，并按使用反馈改善跨镜一致性：30 秒视频分 3 段生成，即使传了肖像，各段人物也有差别；没有上传背景时，各段场景更不统一。原则不变：已存的草稿和冻结任务照常加载，恢复时已提交片段不重建提示词。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>修复</th><th>保护与边界</th></tr></thead>
+    <tbody>
+      <tr><td>人物必须每镜正面出镜</td><td>
+        <ul>
+          <li>草稿新增 <code>presenter</code>：<code>always</code>（主播全程出镜）或 <code>mixed</code>（混合镜头）。第 1 步"人物出镜"选择。</li>
+          <li>混合镜头：主播至少出现在一个镜头（优先开场），其余镜头可拍环境、菜品和产品特写；分镜画面写明是否出镜；无人物的镜头按画外旁白朗读台词。</li>
+          <li>同一约束进入文案创作、分镜修改和片段请求（<code>prompt.ts → marketingPresenterRequirement</code>）。分镜编辑区提示随选项变化。</li>
+        </ul></td><td>
+        <ul>
+          <li>旧草稿和冻结任务缺省为 <code>always</code>，提示词与修改前逐字相同。</li>
+          <li>提交后随其他制作配置冻结。切换选项不清空分镜，文档建议重新生成分镜。</li>
+          <li>混合镜头的实际出片效果尚未用真实模型验证。</li>
+        </ul></td></tr>
+      <tr><td>标题标签补全失败阻止制作</td><td>
+        <ul>
+          <li><code>ProjectStudio.tsx → generate()</code>：补全失败时显示原因，询问是否跳过；确认后继续文案检查和提交。</li>
+          <li>标题标签可在成片后再生成或手动填写（提交后仍允许）。</li>
+        </ul></td><td>
+        <ul>
+          <li>补全请求超时、结果待核实时，后续文案检查仍按创作记录规则被阻止，需先"放弃这次结果"。防重复计费的保护不变。</li>
+          <li>取消跳过时与修改前相同：停止并显示错误。</li>
+        </ul></td></tr>
+      <tr><td>跨镜人物与场景不一致 <span class="tag new">使用反馈</span></td><td>
+        <ul>
+          <li>草稿新增 <code>continuity</code>（统一人物与场景设定，建议 ≤300 字，上限 400）：人物年龄感、发型发色、妆容、服装与配饰，主场景布局、道具、配色，光线和色调。</li>
+          <li>文案创作和整板分镜修改时由 AI 写出；单镜修改保持不变。第 1 步和第 3 步分镜上方可编辑，结果页只读显示。</li>
+          <li>每个片段请求在 <code>confirmedShot</code> 中原样携带，并要求人物、服装、场景、光线严格一致；删除"允许切换场景"，只有分镜画面写明其他地点才换场景。</li>
+          <li>选了肖像时，设定只写服装造型，并要求忠实还原脸型、五官、肤色和年龄感，不美颜、不改造型。设定为空时退回背景描述，要求各镜布局、道具、光线和配色一致。</li>
+        </ul></td><td>
+        <ul>
+          <li>非空时纳入内容检查；为空的草稿审核键不变，已有检查结果不失效。</li>
+          <li>旧文本回执没有该字段，恢复时保留原设定，解析版本不变。</li>
+          <li>按各字段建议上限估算，设定 300 字时片段提示词约 2900 字，低于 3072 上限；超长时报错文案提示精简该设定。</li>
+          <li>提示词只能降低差异，不能保证各段一致。若样片仍有明显差别，下一步是先生成一张"人物 + 场景"定妆图，作为各段共同参考图。</li>
+        </ul></td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>数据库：</strong>没有新增迁移。两个新字段存放在现有草稿 JSONB 中，带默认值。</p>
+  <p><strong>界面与文档：</strong>新增文案已补中文、英文和印尼文；只使用现有样式。已更新 <code>docs/marketing-video.md</code>。另新增 <a href="marketing-video-tts-narration-plan-20261020.md">TTS 配音替换模型配音实施计划</a>（尚未实施，见 R1）。</p>
+  <p class="meta">仍未处理：第 2 节其余精简项（参考来源单选、Cookies 输入、分镜编辑器重复、第 3 步命名）。</p>
+</section>
+
 <section class="card" id="tracking">
   <h2>10-15 评审问题跟踪</h2>
   <div class="legend"><span><span class="tag ok">已修复</span> 代码已处理</span><span><span class="tag mid">部分修复</span> 主要问题已处理，有残留</span><span><span class="tag high">未修复</span> 与旧评审描述一致</span></div>
@@ -343,6 +390,8 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>文案与分镜风险检查</td><td class="nowrap">C3</td><td>规则表加模型审核，一键修改。服务端在提交前强制检查（<code>repository.ts</code> 的 reserve）。只检查文字，不检查成片。</td></tr>
       <tr><td>素材与参考视频</td><td class="nowrap">C3</td><td>肖像、背景、场景、数字分身库、1 个生成参考视频。</td></tr>
       <tr><td>片段模型切换</td><td class="nowrap">C3 <span class="tag new">新</span></td><td>按 <code>MarketingVideoProfile</code> 切换 Grok / Kling，默认 Grok（提交 <code>cf8ab55</code>）。Grok 真实成片质量未验收。</td></tr>
+      <tr><td>人物出镜方式</td><td class="nowrap">C3 <span class="tag new">新</span></td><td>主播全程 / 混合镜头（2026-10-20）。混合镜头真实成片未验收。</td></tr>
+      <tr><td>跨镜人物与场景一致</td><td class="nowrap">C2 <span class="tag new">新</span></td><td>统一人物与场景设定随每段请求提交（2026-10-20）。仅为提示词约束，未用真实样片验证，也没有成片一致性检查（G02）。</td></tr>
       <tr><td>原生口播与参考音色</td><td class="nowrap">C2</td><td>不能保证逐字、跨段音色一致和口型准确。</td></tr>
       <tr><td>字幕</td><td class="nowrap">C2</td><td>由模型画进画面。没有可编辑字幕轨。</td></tr>
       <tr><td>分段生成、合成与 BGM</td><td class="nowrap">C3</td><td>每镜 4–15 秒，最多 15 镜，默认 2 段并行（可配置）。FFmpeg 拼接并混入 BGM。合成前用探针短片检查 FFmpeg（2026-10-20）。</td></tr>
@@ -382,8 +431,8 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   </ul>
   <h3>限制过严 <span class="tag new">采纳旧评审</span></h3>
   <ul>
-    <li>人物必须每镜正面出镜（<code>prompt.ts:49</code>）。这适合主播宣传，不适合探店（需要环境、菜品和产品特写）。增加"主播全程 / 混合镜头"选项。</li>
-    <li>缺标题或标签时，生成前自动调用模型补全（<code>generate()</code>）。补全失败会阻止视频制作。允许用户跳过。</li>
+    <li><span class="tag ok">已修复</span> 人物必须每镜正面出镜（<code>prompt.ts:49</code>）。这适合主播宣传，不适合探店（需要环境、菜品和产品特写）。增加"主播全程 / 混合镜头"选项。2026-10-20：新增 <code>presenter</code> 选项，见第四轮修复。</li>
+    <li><span class="tag ok">已修复</span> 缺标题或标签时，生成前自动调用模型补全（<code>generate()</code>）。补全失败会阻止视频制作。允许用户跳过。2026-10-20：失败时可确认跳过，见第四轮修复。</li>
   </ul>
   <h3>交互不完善</h3>
   <ul>
@@ -440,6 +489,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <div class="flow"><span>TTS 整段音轨</span><i>→</i><span>按镜切分</span><i>→</i><span>音频驱动 / 对口型</span><i>→</i><span>本地合成</span></div>
     <p class="meta">保留当前方式作为"快速模式"，并写明质量边界。<code>marketing-video.md</code> 的"后续对口型服务候选"已经提出了这个方向。</p>
     <p class="meta">2026-10-20 补充：<a href="marketing-video-audio-subtitle-plan-20261020.md">R1 / R2 配音、字幕与对口型方案</a>，包含 TTS 云服务选型、统一时间轴、改造位置和验收门槛。当前为设计建议，尚未实施。</p>
+    <p class="meta">2026-10-20 补充：<a href="marketing-video-tts-narration-plan-20261020.md">TTS 配音替换模型配音实施计划</a>（逐镜合成、试听后再付费生成视频、片段无声生成、合成时替换音轨）。只做 TTS 时人物不再开口说话，数字人口播模式体验会倒退，因此该模式应与对口型一起上线；参考视频模式当前没有旁白，可先单独上线。对口型路径（图片音频驱动或 VideoRetalk）待选定。</p>
   </div>
   <div class="risk">
     <h3>R2 字幕 <span class="tag high">质量</span></h3>
@@ -492,7 +542,12 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>第三轮参考分析数据库脚本（临时 PostgreSQL，用后删除）</td><td>通过</td><td>已删除的接口返回 404。修订 2 的记录改用 SQL 构造。未设置 Redis，跳过队列部分</td></tr>
       <tr><td>第三轮 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>拆分前后都通过</td><td>新增断言：制作中通过状态接口轮询</td></tr>
       <tr><td>第三轮 <code>pnpm check:marketing-video:queue</code></td><td>未运行</td><td>本轮未改队列调度</td></tr>
-      <tr><td>真实供应商</td><td>三轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
+      <tr><td>第四轮全量 Vitest</td><td>315 文件通过，14 文件跳过；2637 项通过，81 项跳过</td><td>新增：混合镜头提示词、统一设定在每段请求中原样携带、整板修改可改设定而单镜修改保持、创作解析、设定的内容检查字段</td></tr>
+      <tr><td>第四轮严格类型检查</td><td>Core 20 项、Server 236 项，与本轮修改前逐条相同，营销目录 0 项；Web 通过</td><td>比第三轮多 Core 6 项、Server 2 项，全部在提交 <code>878632d</code>（TTS 接入）新增的测试文件中（<code>tts.test.ts</code>、<code>qwen-voices.test.ts</code>、<code>digital-twin/voices.test.ts</code>）</td></tr>
+      <tr><td>第四轮 Core / Server / Web 构建</td><td>通过</td><td>Web 仍有既有的大 chunk 提示</td></tr>
+      <tr><td>第四轮 <code>pnpm check:marketing-video:db</code>（临时 pgvector PostgreSQL 容器，用后停止）</td><td>通过</td><td>本轮未新增断言</td></tr>
+      <tr><td>第四轮 <code>pnpm check:marketing-video:ui</code></td><td>未运行</td><td>本机未安装 Playwright。新增的出镜选项、统一设定输入框和跳过确认框没有浏览器验证</td></tr>
+      <tr><td>真实供应商</td><td>四轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
     </tbody>
   </table></div>
   <p class="meta">跳过项不计为通过。严格类型检查仍未全绿，不能用构建成功代替。</p>
@@ -526,14 +581,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <li>支持成片后只重做一镜。提供片段预览。<span class="ref">— G04</span></li>
       <li><span class="tag ok">已完成</span> 服务端检查参考图格式和尺寸，提交前按当前模型重检。<span class="ref">— F08 残留</span></li>
       <li>删除粘贴 Cookies 的界面。参考来源改用单选按钮。分镜编辑器只保留一处。第 3 步改名为"确认与制作"。<span class="ref">— 第 2 节</span></li>
-      <li>增加"主播全程 / 混合镜头"选项。允许跳过自动补标题标签。<span class="ref">— 第 2 节</span></li>
+      <li><span class="tag ok">已完成</span> 增加"主播全程 / 混合镜头"选项。允许跳过自动补标题标签。<span class="ref">— 第 2 节</span></li>
       <li><span class="tag ok">已完成</span> 草稿列表增加分页和搜索。<span class="ref">— F06 残留</span></li>
     </ol>
   </div>
   <div class="phase">
     <h3>D 质量</h3>
     <ol start="15">
-      <li>评估"TTS 先行 + 本地字幕"路线，保留快速模式。<span class="ref">— G01、R1、R2</span></li>
+      <li><span class="tag mid">进行中</span> 评估"TTS 先行 + 本地字幕"路线，保留快速模式。TTS 替换配音已有实施计划；数字人模式需与对口型一起上线。<span class="ref">— G01、R1、R2</span></li>
       <li>增加成片质量检查：声音、字幕、黑帧和关键事实。<span class="ref">— G02</span></li>
       <li>用授权样片做真实验收（10-15 报告建议每组至少 30 条）。<span class="ref">— 旧报告验收门槛</span></li>
     </ol>
