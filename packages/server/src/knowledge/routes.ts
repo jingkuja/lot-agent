@@ -22,7 +22,8 @@ import { knowledgeContentPolicy } from "./content-policy.js";
 import { KNOWLEDGE_MIME_LIMITS } from "./private-storage.js";
 import type { KnowledgeRepository, KnowledgeCursor, KnowledgeFile } from "./repository.js";
 import type { TwinVoices } from "../digital-twin/voices.js";
-import { isQwenCreateRejected, ProviderError, TwinSpeechInputSchema } from "@lot-agent/core";
+import { isQwenCreateRejected, ProviderError, QwenVoiceError, TwinSpeechInputSchema } from "@lot-agent/core";
+import { voiceEnrollmentErrorMessage } from "../digital-twin/voice-errors.js";
 
 type Env = { Variables: { userId: string } };
 const invalid = () => new KnowledgeError("INVALID_REQUEST", 400, "请求参数无效");
@@ -174,11 +175,20 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
   });
   app.post("/items/:id/voice", async (c) => {
     if (!voices) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "声音复刻服务不可用");
+    const itemId = uuid(c.req.param("id"));
     try {
-      return c.json({ voice: await voices.enroll(c.get("userId"), uuid(c.req.param("id")), c.req.header("Authorization")?.replace(/^Bearer /, "") ?? "", c.req.raw.signal) });
+      return c.json({ voice: await voices.enroll(c.get("userId"), itemId, c.req.header("Authorization")?.replace(/^Bearer /, "") ?? "", c.req.raw.signal) });
     } catch (error) {
-      if (isQwenCreateRejected(error)) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "千问拒绝了本次声音复刻，请检查样例后重新复刻");
-      if (error instanceof ProviderError) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "声音复刻请求未完成，请刷新音色状态核实");
+      if (error instanceof ProviderError) {
+        const requestId = randomUUID();
+        console.warn("[digital-twin] voice enrollment failed", JSON.stringify({
+          requestId, itemId, provider: error.provider, phase: error.phase, code: error.code,
+          httpStatus: error.httpStatus, upstreamRequestId: error.requestId,
+          vendorCode: error instanceof QwenVoiceError ? error.vendorCode : undefined,
+          outcome: isQwenCreateRejected(error) ? "rejected" : "unconfirmed",
+        }));
+        return c.json({ error: { code: "KNOWLEDGE_UNAVAILABLE", message: voiceEnrollmentErrorMessage(error), retryable: false }, request_id: requestId }, 503);
+      }
       throw error;
     }
   });

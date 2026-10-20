@@ -1,28 +1,32 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { ProviderError, type QwenVoiceProvider, type SpeechProvider, type TwinVoiceRecord, type TwinVoiceScope, type TwinVoiceStore } from "@lot-agent/core";
+import { HttpQwenVoiceProvider, ProviderError, QwenVoiceError, type QwenVoiceProvider, type SpeechProvider, type TwinVoiceRecord, type TwinVoiceScope, type TwinVoiceStore } from "@lot-agent/core";
 import { KnowledgeError } from "../knowledge/errors.js";
 import { createKnowledgeManageRoutes } from "../knowledge/routes.js";
 import type { KnowledgeRepository } from "../knowledge/repository.js";
 import type { PrivateKnowledgeStorage } from "@lot-agent/core";
-import { TwinVoices, loadTwinVoiceConfig } from "./voices.js";
+import { TwinVoices, UNCONFIRMED_CREATE_RELEASE_MS, loadTwinVoiceConfig } from "./voices.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const revisionId = "22222222-2222-4222-8222-222222222222";
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 function fixture() {
   const rows = new Map<string, TwinVoiceRecord>();
+  const claimedAt = new Map<string, number>();
   const key = (s: TwinVoiceScope) => JSON.stringify(s);
   const store: TwinVoiceStore = {
     get: vi.fn(async s => rows.get(key(s)) ?? null),
     claim: vi.fn(async (s, record) => {
       const old = rows.get(key(s));
       if (old) return { created: false, record: old };
-      rows.set(key(s), { ...record }); return { created: true, record: { ...record } };
+      rows.set(key(s), { ...record }); claimedAt.set(key(s), Date.now()); return { created: true, record: { ...record } };
     }),
     save: vi.fn(async (s, record) => { rows.set(key(s), { ...record }); }),
-    release: vi.fn(async (s, record) => {
+    release: vi.fn(async (s, record, options) => {
       const old = rows.get(key(s));
-      if (old?.prefix === record.prefix && !old.voiceId && old.status === "unknown") rows.delete(key(s));
+      if (!old || old.prefix !== record.prefix || old.voiceId || old.status !== "unknown") return false;
+      if (options?.olderThanMs !== undefined && Date.now() - claimedAt.get(key(s))! < options.olderThanMs) return false;
+      return rows.delete(key(s));
     }),
   };
   const repository = {
@@ -97,6 +101,28 @@ describe("digital twin enrollment lifecycle", () => {
     const f = fixture(); vi.mocked(f.provider.create).mockRejectedValueOnce(error);
     await expect(f.enroll()).rejects.toBe(error);
     expect(await f.service.get("owner", id)).toMatchObject({ status: "unknown", voiceId: null });
+    expect(f.store.release).not.toHaveBeenCalled();
+  });
+  it("frees an unconfirmed create only after the vendor still lists nothing past the release age", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const f = fixture();
+    vi.mocked(f.provider.create).mockRejectedValueOnce(new QwenVoiceError("create", "HTTP_ERROR", { httpStatus: 500, vendorCode: "InternalError" }));
+    await expect(f.enroll()).rejects.toMatchObject({ httpStatus: 500 });
+    expect(await f.enroll()).toMatchObject({ status: "unknown", voiceId: null });
+    vi.setSystemTime(Date.now() + UNCONFIRMED_CREATE_RELEASE_MS);
+    await expect(f.enroll()).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+    expect(await f.service.get("owner", id)).toBeNull();
+    expect(f.provider.create).toHaveBeenCalledOnce();
+    expect(await f.enroll()).toMatchObject({ voiceId: "qwen-voice-1", status: "DEPLOYING" });
+    expect(f.provider.create).toHaveBeenCalledTimes(2);
+  });
+  it("adopts a late-listed voice instead of releasing its claim", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const f = fixture(); vi.mocked(f.provider.create).mockRejectedValueOnce(new Error("lost response"));
+    await expect(f.enroll()).rejects.toThrow("lost response");
+    vi.setSystemTime(Date.now() + UNCONFIRMED_CREATE_RELEASE_MS);
+    vi.mocked(f.provider.find).mockResolvedValueOnce({ voiceId: "late", status: "DEPLOYING" });
+    expect(await f.enroll()).toMatchObject({ voiceId: "late", status: "DEPLOYING" });
     expect(f.store.release).not.toHaveBeenCalled();
   });
   it("keeps the received ID when a subsequent query fails", async () => {
@@ -179,12 +205,66 @@ describe("authenticated enrollment routes", () => {
     expect((await app("other").app.request(`/items/${id}/voice`, { method: "POST" })).status).toBe(404);
     expect((await app("owner").app.request("/items/invalid/voice", { method: "POST" })).status).toBe(400);
   });
-  it("tells the user a refused enrollment can be retried", async () => {
+  it("logs a refused enrollment with a correlation ID without blaming the sample", async () => {
+    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
     const f = app("owner");
     vi.mocked(f.provider.create).mockRejectedValueOnce(new ProviderError("qwen-voice", "create", "TASK_FAILED", { httpStatus: 200 }));
     const refused = await f.app.request(`/items/${id}/voice`, { method: "POST" });
-    expect(refused.status).toBe(503); expect(await refused.json()).toMatchObject({ error: { message: "千问拒绝了本次声音复刻，请检查样例后重新复刻" } });
+    const body = await refused.json();
+    expect(refused.status).toBe(503); expect(body).toMatchObject({ error: { message: "千问未接受本次声音复刻，请联系管理员查看错误原因" } });
+    expect(log).toHaveBeenCalledOnce();
+    expect(JSON.parse(log.mock.calls[0][1])).toMatchObject({ itemId: id, requestId: body.request_id, outcome: "rejected", httpStatus: 200 });
     expect(await (await f.app.request(`/items/${id}/voice`)).json()).toEqual({ voice: null });
+  });
+  it.each([
+    [401, undefined, "鉴权或权限不足"],
+    [403, undefined, "鉴权或权限不足"],
+    [200, "InvalidApiKey", "鉴权或权限不足"],
+    [400, "Arrearage", "账号额度不足"],
+    [403, "Arrearage", "账号额度不足"],
+    [429, undefined, "请求受限"],
+    [200, "Throttling", "请求受限"],
+    [400, "BadRequest.InputDownloadFailed", "无法下载声音样例"],
+    [400, "Audio.PreprocessError", "未能处理声音样例"],
+    [400, "Audio.AudioRateError", "未能处理声音样例"],
+    [400, "InvalidParameter", "查看错误原因"],
+    [502, "Audio.PreprocessError", "刷新音色状态核实"],
+    [408, undefined, "刷新音色状态核实"],
+  ])("classifies HTTP %s / %s and preserves recovery semantics", async (httpStatus, vendorCode, message) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = app("owner");
+    vi.mocked(f.provider.create).mockRejectedValueOnce(new QwenVoiceError("create", httpStatus === 200 ? "TASK_FAILED" : "HTTP_ERROR", { httpStatus, vendorCode }));
+    const result = await f.app.request(`/items/${id}/voice`, { method: "POST" });
+    expect(result.status).toBe(503);
+    expect((await result.json()).error.message).toContain(message);
+    expect(f.provider.create).toHaveBeenCalledOnce();
+    if (httpStatus === 502 || httpStatus === 408) {
+      expect(f.store.release).not.toHaveBeenCalled();
+      expect(await f.service.get("owner", id)).toMatchObject({ status: "unknown" });
+    } else expect(await f.service.get("owner", id)).toBeNull();
+  });
+  it("logs real provider failures safely, including read-only recovery failures", async () => {
+    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = app("owner");
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({
+      code: "BadRequest.InputDownloadFailed", request_id: "req-abcdef123456",
+      message: "secret session-token temporary-ticket https://private.example/audio.wav",
+    }, { status: 400 })).mockRejectedValueOnce(new Error("secret session-token"));
+    vi.stubGlobal("fetch", fetcher);
+    vi.mocked(f.provider.create).mockImplementationOnce((input, signal) => new HttpQwenVoiceProvider(f.config).create(input, signal));
+    const result = await f.app.request(`/items/${id}/voice`, { method: "POST", headers: { Authorization: "Bearer session-token" } });
+    const body = await result.json();
+    expect(JSON.parse(log.mock.calls[0][1])).toMatchObject({
+      requestId: body.request_id, upstreamRequestId: "req-abcdef123456",
+      vendorCode: "BadRequest.InputDownloadFailed", phase: "create", httpStatus: 400,
+    });
+    await f.enroll();
+    vi.mocked(f.provider.query).mockImplementationOnce((voiceId, signal) => new HttpQwenVoiceProvider(f.config).query(voiceId, signal));
+    const poll = await f.app.request(`/items/${id}/voice`, { method: "POST" });
+    expect((await poll.json()).error.message).toContain("刷新音色状态核实");
+    expect(JSON.parse(log.mock.calls[1][1])).toMatchObject({ phase: "poll", code: "TRANSPORT_ERROR", outcome: "unconfirmed" });
+    expect(JSON.stringify(log.mock.calls) + JSON.stringify(body)).not.toMatch(/secret|session-token|temporary-ticket|private.example/);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
   it("reads persisted state without vendor I/O and ignores caller-supplied model/url/owner", async () => {
     const f = app("owner");

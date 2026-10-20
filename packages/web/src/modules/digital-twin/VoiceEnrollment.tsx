@@ -31,6 +31,7 @@ export function VoiceEnrollment({ itemId, revisionId, initialError }: { itemId: 
   const status = !voice ? "尚未复刻声音" : voice.status === "OK" ? "千问音色已就绪" : voice.status === "DEPLOYING" ? "千问音色处理中" : voice.status === "UNDEPLOYED" ? "千问音色未通过审核" : "复刻结果待核实，请刷新音色状态";
   return <div className="twin-voice-enrollment">
     <p role="status">{t(status)}</p>
+    {voice?.status === "unknown" && <small>{t("若千问未生成音色，约 2 分钟后刷新即可重新复刻")}</small>}
     {voice?.voiceId && <><small>{t("音色 ID")}: {voice.voiceId}</small><small>{t("语音模型")}: {voice.targetModel}</small></>}
     <div className="twin-actions">
       {(!voice || voice.status === "unknown" || voice.status === "DEPLOYING") && <button type="button" disabled={busy || loadFailed} onClick={() => void enroll()}>{busy ? t("正在处理素材…") : t(voice ? "刷新音色状态" : "复刻声音")}</button>}

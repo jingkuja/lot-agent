@@ -36,11 +36,17 @@ export function encodeWave(channels: Float32Array[], sampleRate: number): ArrayB
   return buffer;
 }
 
+/** Rejects recordings whose peak stays below -40 dBFS, e.g. a muted or wrong input device. */
+export function assertAudible(channels: Float32Array[]): void {
+  if (!channels.some((channel) => channel.some((sample) => Math.abs(sample) >= 0.01))) throw new Error("未录到声音，请检查麦克风输入后重新录音");
+}
+
 export async function recordingToWave(blob: Blob): Promise<File> {
   const context = new AudioContext();
   try {
     const audio = await context.decodeAudioData(await blob.arrayBuffer());
     const channels = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
+    assertAudible(channels);
     return new File([encodeWave(channels, audio.sampleRate)], `voice-${Date.now()}.wav`, { type: "audio/wav" });
   } finally { await context.close(); }
 }

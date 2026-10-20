@@ -1,5 +1,31 @@
 import { z } from "zod";
-import { ProviderError } from "./provider-error.js";
+import { ProviderError, type ProviderErrorCode, type ProviderPhase } from "./provider-error.js";
+
+// Only known codes may cross the provider boundary. Arbitrary vendor messages
+// and unknown codes can echo API keys, private sample URLs or user content.
+// Reference: https://help.aliyun.com/zh/model-studio/error-code
+const diagnosticCodes = new Set([
+  "InvalidApiKey", "AccessDenied", "Forbidden", "Arrearage",
+  "Throttling", "Throttling.RateQuota", "Throttling.AllocationQuota", "Throttling.Concurrency",
+  "InvalidParameter", "InvalidParameter.Model", "ModelNotFound",
+  "BadRequest.InputDownloadFailed", "InvalidFile.DownloadFailed",
+  "InvalidURL.ConnectionRefused", "InvalidURL.Timeout",
+  "BadRequest.UnsupportedFileFormat", "BadRequest.TooLarge",
+  "Audio.PreprocessError", "Audio.DecoderError", "Audio.AudioRateError",
+  "Audio.DurationLimitError", "Audio.AudioShortError", "Audio.AudioSilentError", "Audio.FileSizeExceed",
+  "DataInspectionFailed", "InternalError", "ServiceUnavailable",
+]);
+
+export class QwenVoiceError extends ProviderError {
+  readonly vendorCode?: string;
+  constructor(phase: ProviderPhase, code: ProviderErrorCode, options: {
+    httpStatus?: number; requestId?: unknown; vendorCode?: unknown; privateValues?: string[];
+  } = {}) {
+    super("qwen-voice", phase, code, options);
+    this.vendorCode = typeof options.vendorCode === "string" && diagnosticCodes.has(options.vendorCode)
+      && !options.privateValues?.some(value => value && options.vendorCode === value) ? options.vendorCode : undefined;
+  }
+}
 
 export type QwenVoiceStatus = "DEPLOYING" | "OK" | "UNDEPLOYED";
 export interface QwenVoice { voiceId: string; status: QwenVoiceStatus }
@@ -15,8 +41,9 @@ export interface TwinVoiceStore {
   get(scope: TwinVoiceScope): Promise<TwinVoiceRecord | null>;
   claim(scope: TwinVoiceScope, record: TwinVoiceRecord): Promise<{ created: boolean; record: TwinVoiceRecord }>;
   save(scope: TwinVoiceScope, record: TwinVoiceRecord): Promise<void>;
-  /** Drops an unresolved claim (same prefix, no voice ID) so enrollment can start over. */
-  release(scope: TwinVoiceScope, record: TwinVoiceRecord): Promise<void>;
+  /** Drops an unresolved claim (same prefix, no voice ID) so enrollment can start over.
+   * With olderThanMs, only a claim at least that old is dropped. Resolves whether one was. */
+  release(scope: TwinVoiceScope, record: TwinVoiceRecord, options?: { olderThanMs?: number }): Promise<boolean>;
 }
 /** Dubbing preview with a cloned voice. Model and voice ID come only from the stored record. */
 export const TwinSpeechInputSchema = z.object({
@@ -51,8 +78,8 @@ export class HttpQwenVoiceProvider implements QwenVoiceProvider {
     signal?.throwIfAborted();
     const deadline = AbortSignal.timeout(this.options.timeoutMs ?? 30_000);
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
-    const fail = (code: "TRANSPORT_ERROR" | "HTTP_ERROR" | "INVALID_RESPONSE" | "TASK_FAILED", status?: number, requestId?: unknown) =>
-      new ProviderError("qwen-voice", phase, code, { httpStatus: status, requestId, privateValues: [this.options.apiKey] });
+    const fail = (code: "TRANSPORT_ERROR" | "HTTP_ERROR" | "INVALID_RESPONSE" | "TASK_FAILED", status?: number, requestId?: unknown, vendorCode?: unknown) =>
+      new QwenVoiceError(phase, code, { httpStatus: status, requestId, vendorCode, privateValues: [this.options.apiKey] });
     // All operations use POST, but only create_voice writes. Never retry it.
     let response: Response; let json: Record<string, unknown> | null;
     try {
@@ -65,7 +92,8 @@ export class HttpQwenVoiceProvider implements QwenVoiceProvider {
     } catch { throw fail("TRANSPORT_ERROR"); }
     if (!response.ok || !json || json.code || !json.output || typeof json.output !== "object" || Array.isArray(json.output)) {
       // A 2xx carrying a vendor error code is a refusal; other malformed 2xx bodies stay uncertain.
-      throw fail(!response.ok ? "HTTP_ERROR" : typeof json?.code === "string" && json.code ? "TASK_FAILED" : "INVALID_RESPONSE", response.status, json?.request_id);
+      throw fail(!response.ok ? "HTTP_ERROR" : typeof json?.code === "string" && json.code ? "TASK_FAILED" : "INVALID_RESPONSE",
+        response.status, json?.request_id ?? response.headers.get("x-request-id"), json?.code);
     }
     return json.output as Record<string, unknown>;
   }

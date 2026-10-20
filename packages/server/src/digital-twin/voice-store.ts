@@ -29,8 +29,11 @@ export class PgTwinVoiceStore implements TwinVoiceStore {
       if (!current || current.voiceId !== record.voiceId || current.credentialScope !== record.credentialScope) throw new KnowledgeError("CONFLICT", 409, "音色记录已变化，请刷新后重试");
     }
   }
-  async release(scope: TwinVoiceScope, record: TwinVoiceRecord) {
-    await this.pool.query(`DELETE FROM digital_twin_voices
-      WHERE owner_id=$1 AND item_id=$2 AND revision_id=$3 AND prefix=$4 AND voice_id IS NULL AND status='unknown'`, [...args(scope), record.prefix]);
+  async release(scope: TwinVoiceScope, record: TwinVoiceRecord, options: { olderThanMs?: number } = {}) {
+    const result = await this.pool.query(`DELETE FROM digital_twin_voices
+      WHERE owner_id=$1 AND item_id=$2 AND revision_id=$3 AND prefix=$4 AND voice_id IS NULL AND status='unknown'
+        AND ($5::double precision IS NULL OR created_at <= now() - $5::double precision * interval '1 millisecond')`,
+    [...args(scope), record.prefix, options.olderThanMs ?? null]);
+    return (result.rowCount ?? 0) > 0;
   }
 }

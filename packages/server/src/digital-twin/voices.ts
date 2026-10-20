@@ -12,7 +12,9 @@ export function loadTwinVoiceConfig() {
     targetModel: process.env.QWEN_VOICE_TARGET_MODEL?.trim() || "qwen-audio-3.0-tts-plus",
   };
 }
-export type TwinVoiceView = Pick<TwinVoiceRecord, "targetModel" | "voiceId" | "status">;
+/** Age after which an unconfirmed create that the vendor never listed may be enrolled again. */
+export const UNCONFIRMED_CREATE_RELEASE_MS = 2 * 60_000;
+export type TwinVoiceView =Pick<TwinVoiceRecord, "targetModel" | "voiceId" | "status">;
 const view = ({ targetModel, voiceId, status }: TwinVoiceRecord): TwinVoiceView => ({ targetModel, voiceId, status });
 
 /** Speech goes through the user's own New API key so the gateway bills that user. */
@@ -89,7 +91,14 @@ export class TwinVoices {
       record = { ...record, voiceId, status: "DEPLOYING" };
     } else {
       const remote = record.voiceId ? await provider.query(record.voiceId, signal) : await provider.find(record.prefix, signal);
-      if (!remote) return view(record);
+      if (!remote) {
+        // create_voice answers within its 30 s deadline. A claim still missing from the
+        // vendor's list well after that produced no voice; free it instead of pending forever.
+        if (!record.voiceId && await this.deps.store.release(scope, record, { olderThanMs: UNCONFIRMED_CREATE_RELEASE_MS })) {
+          throw new KnowledgeError("CONFLICT", 409, "千问未生成该音色，请重新复刻声音");
+        }
+        return view(record);
+      }
       record = { ...record, ...remote };
     }
     await this.deps.store.save(scope, record);

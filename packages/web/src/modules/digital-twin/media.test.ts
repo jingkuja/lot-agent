@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { encodeWave, validateTwinFile, captureError } from "./media.js";
+import { assertAudible, encodeWave, validateTwinFile, captureError } from "./media.js";
 import { readMediaDuration } from "../../lib/video-references.js";
 vi.mock("../../lib/video-references.js", () => ({ readMediaDuration: vi.fn() }));
 afterEach(() => vi.resetAllMocks());
@@ -15,6 +15,11 @@ describe("digital twin voice samples", () => {
     expect(view.getUint32(24, true)).toBe(24000);
     expect(view.getUint32(40, true)).toBe(6);
     expect([0, 1, 2].map((i) => view.getInt16(44 + i * 2, true))).toEqual([-32768, 0, 32767]);
+  });
+  it("rejects silent recordings and accepts audible ones", () => {
+    expect(() => assertAudible([new Float32Array(48000), new Float32Array(48000).fill(0.005)])).toThrow("未录到声音");
+    const speech = new Float32Array(48000); speech[100] = -0.2;
+    expect(() => assertAudible([new Float32Array(48000), speech])).not.toThrow();
   });
   it("caps recordings at 15 seconds so timer delays cannot create oversized references", () => {
     const view = new DataView(encodeWave([new Float32Array(16000 * 16)], 16000));

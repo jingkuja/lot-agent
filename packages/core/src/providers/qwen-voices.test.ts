@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HttpQwenVoiceProvider, isQwenCreateRejected } from "./qwen-voices.js";
+import { HttpQwenVoiceProvider, isQwenCreateRejected, QwenVoiceError } from "./qwen-voices.js";
 
 const model = "qwen-audio-3.0-tts-flash";
 const voiceId = `${model}-abc123-unique`;
@@ -66,6 +66,29 @@ describe("Qwen enrollment HTTP contract", () => {
   it("retains safe HTTP diagnostics and rejects non-JSON errors", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("private gateway details", { status: 502 })));
     await expect(client().query(voiceId)).rejects.toThrow("HTTP 502");
+  });
+  it("preserves allowlisted rejection codes and upstream request IDs without vendor text", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      code: "BadRequest.InputDownloadFailed",
+      message: "private-key https://sample.example/a.wav?private=token",
+      request_id: "req-abcdef123456",
+    }, { status: 400 })));
+    const error = await client().create({ url: "https://sample.example/a.wav?private=token", prefix: "abc123" }).catch(e => e);
+    expect(error).toBeInstanceOf(QwenVoiceError);
+    expect(error).toMatchObject({ vendorCode: "BadRequest.InputDownloadFailed", requestId: "req-abcdef123456", httpStatus: 400 });
+    expect(JSON.stringify(error) + error.message).not.toMatch(/private-key|sample.example|private=token/);
+  });
+  it("drops unknown or credential-valued codes and uses safe header request IDs for non-JSON errors", async () => {
+    for (const vendorCode of ["private-key", "PrivateUserContent", "https://private.example", "Audio.PreprocessError"]) {
+      const error = new QwenVoiceError("create", "HTTP_ERROR", { vendorCode, privateValues: ["Audio.PreprocessError"] });
+      expect(error.vendorCode).toBeUndefined();
+    }
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("private details", {
+      status: 403, headers: { "x-request-id": "req-abcdef123456" },
+    })));
+    await expect(client().create({ url: "https://a.example", prefix: "abc123" })).rejects.toMatchObject({
+      requestId: "req-abcdef123456", httpStatus: 403, vendorCode: undefined,
+    });
   });
   it("passes cancellation to the request and does not start an already cancelled call", async () => {
     const abort = new AbortController(); abort.abort(); const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
