@@ -22,7 +22,7 @@ export function Choices({ form, label, values, value, onChoose }: {
   </div>;
 }
 
-type TextName = "topic" | "reference" | "script" | "background" | "publishTitle" | "tags";
+type TextName = "topic" | "reference" | "script" | "background" | "continuity" | "publishTitle" | "tags";
 
 export function DraftText({ form, name, label, max, rows = 2 }: { form: DraftForm; name: TextName; label: string; max: number; rows?: number }) {
   const { t } = useI18n();

@@ -47,6 +47,14 @@ describe("editable marketing storyboard", () => {
     const long = shots.map(shot => ({ ...shot, script: "字".repeat(100) }));
     expect(() => resolveMarketingSegments(MarketingDraftSchema.parse({ ...draft, storyboard: long, script: storyboardScript(long) }), grok)).toThrow("过长");
   });
+  it("reviews the shared look only when present, keeping older review keys", () => {
+    const draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots) });
+    expect(draft.continuity).toBe("");
+    expect(marketingReviewText(draft)).not.toContain("continuity");
+    const styled = MarketingDraftSchema.parse({ ...draft, continuity: "米色针织衫，木质吧台" });
+    expect(marketingReviewFieldText(styled, { field: "continuity" })).toBe("米色针织衫，木质吧台");
+    expect(updateMarketingReviewField(styled, { field: "continuity" }, "灰色外套")?.continuity).toBe("灰色外套");
+  });
   it("keeps old drafts readable but invalidates incomplete legacy review keys", () => {
     const draft = MarketingDraftSchema.parse({ script: "欢迎来到咖啡店，来这里喝一杯咖啡。" });
     expect(draft.storyboard).toEqual([]);

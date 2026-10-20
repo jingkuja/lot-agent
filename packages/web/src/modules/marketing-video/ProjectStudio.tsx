@@ -289,7 +289,13 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const referenceError = retry ? "" : marketingReferenceError(draftRef.current, profile);
     if (referenceError) { setStep(1); throw new Error(referenceError); }
     if (!retry) resolveMarketingSegments(draftRef.current, profile);
-    if (!retry && (!draftRef.current.publishTitle.trim() || !draftRef.current.tags.trim())) { setWorking("正在补全标题和标签…"); await publication(true); }
+    if (!retry && (!draftRef.current.publishTitle.trim() || !draftRef.current.tags.trim())) {
+      setWorking("正在补全标题和标签…");
+      // Titles and tags are publishing metadata: they can be written after the
+      // video, so a failed fill must not block production.
+      try { await publication(true); }
+      catch (e) { if (!session.alive || !window.confirm(t("标题和标签补全失败：{0}\n可以跳过，成片后再生成或手动填写。是否跳过并继续生成视频？", [t(errorMessage(e))]))) throw e; }
+    }
     let p = await save();
     if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { setWorking("正在检查文案与分镜…"); await review(); p = projectRef.current!; }
     if (p.review?.verdict === "reject") { setStep(0); throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。"); }

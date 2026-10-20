@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import type { MarketingDraft, MarketingSegment, MarketingShot, MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
-import { Choices, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
+import { Choices, DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 
 /** Step 3: voice, music, captions and format, then confirm the storyboard and generate. */
 export function ProductionStep({ form, profile, handlers, referenceVideoStatus, parts, planError, blocker, blockerId, buttonLabel, storyboardPanel, onPickVoice, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
@@ -37,7 +37,9 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
     {profile.referenceMaxQuality && <p className="mv-hint">{t("使用人物、场景图片或参考视频时最高支持 720p。")}</p>}
     {!hasBoard && !!parts.length && <details className="mv-script-review"><summary>{t("查看自动分段（{0} 段）", [parts.length])}</summary>{parts.map(p => <p key={p.index}>{p.index + 1} · {p.durationSec}s<br />{p.script}</p>)}</details>}
     <p className="mv-hint">{t("目标 {0} 秒，分镜共 {1} 秒，分 {2} 段生成。", [draft.durationSec, parts.reduce((sum, part) => sum + part.durationSec, 0), parts.length])}</p>
-    {hasBoard && <div ref={storyboardPanel} className="mv-storyboard-panel"><StoryboardEditor shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} /></div>}
+    {hasBoard && <DraftText form={form} name="continuity" label="统一人物与场景设定" max={400} rows={3} />}
+    {hasBoard && <p className="mv-hint">{t("每段视频都会带上这段描述，用于保持人物、服装和场景一致。")}</p>}
+    {hasBoard && <div ref={storyboardPanel} className="mv-storyboard-panel"><StoryboardEditor presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} /></div>}
     {!hasBoard && <p className="mv-hint">{t("先生成可编辑分镜，确认后再制作视频。")}</p>}
     {blocker && <div id={blockerId} role="alert"><p className="mv-error">{t(blocker)}</p>{planError && !hasBoard && <button disabled={busy || !ready} onClick={onEditCopy}>{t("修改文案或时长")}</button>}</div>}
     <button className="mv-primary mv-generate" disabled={busy || !!blocker} aria-describedby={blocker ? blockerId : undefined} onClick={onGenerate}>{t(buttonLabel)}</button>

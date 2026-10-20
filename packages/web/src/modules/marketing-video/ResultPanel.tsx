@@ -34,6 +34,7 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, o
       {!knowledge && <p className="mv-hint">{t("知识库尚未启用。")}</p>}
     </div>
     <details className="mv-script-review" open><summary>{t("查看制作分镜")}</summary>
+      {draft.continuity && <p className="mv-hint">{t("统一人物与场景设定")}：{draft.continuity}</p>}
       {draft.storyboard.length ? <StoryboardEditor shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}
       <button disabled={busy || saving} onClick={() => onCopyDraft(2)}>{t("修改分镜并重新制作")}</button>
     </details>

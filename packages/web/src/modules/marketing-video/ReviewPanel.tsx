@@ -3,10 +3,10 @@ import { applyMarketingReviewSuggestion, marketingReviewFieldText, updateMarketi
 import { useI18n } from "../../i18n/index.js";
 
 const fieldLabels = {
-  script: "视频口播文案", publishTitle: "视频发布标题", tags: "短视频检索标签", background: "背景/场景补充描述",
+  script: "视频口播文案", publishTitle: "视频发布标题", tags: "短视频检索标签", background: "背景/场景补充描述", continuity: "统一人物与场景设定",
   "storyboard.script": "分镜口播", "storyboard.visual": "画面内容", "storyboard.action": "人物与产品动作", "storyboard.camera": "景别与镜头运动",
 };
-const fieldLimits = { script: 2000, publishTitle: 100, tags: 160, background: 600, "storyboard.script": 600, "storyboard.visual": 600, "storyboard.action": 400, "storyboard.camera": 400 };
+const fieldLimits = { script: 2000, publishTitle: 100, tags: 160, background: 600, continuity: 400, "storyboard.script": 600, "storyboard.visual": 600, "storyboard.action": 400, "storyboard.camera": 400 };
 const sourceLabels = { "risk-table": "风险词规则表", douyin: "抖音社区规则", xiaohongshu: "小红书社区规则" };
 
 function ReviewIssue({ issue, draft, busy, onApply }: {

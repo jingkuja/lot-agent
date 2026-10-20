@@ -20,6 +20,7 @@ export const MarketingCreationSchema = z.object({
   publishTitle: z.string().trim().min(1).max(100),
   tags: z.string().max(160),
   analysis: z.string().trim().min(1).max(2000),
+  continuity: z.string().trim().max(400).optional(),
 }).strict();
 
 const MarketingImagesSchema = z.union([z.string().uuid(), z.array(z.string().uuid()).min(1).max(3)]);
@@ -44,6 +45,9 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   durationSec: z.number().int().min(15).max(60).default(30),
   // Only digital-presenter videos exist; drafts may still hold the never-offered "recorded".
   mode: z.literal("avatar").catch("avatar"),
+  // "always": presenter in every shot. "mixed": presenter in some shots; others may
+  // show the venue, dishes or product close-ups (store tours).
+  presenter: z.enum(["always", "mixed"]).default("always"),
   background: z.string().max(600).default("简约演播室"),
   voice: z.string().max(100).default("自然旁白"),
   ratio: z.enum(["9:16", "16:9", "1:1"]).default("9:16"),
@@ -57,6 +61,9 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
     music: z.string().uuid().optional(),
   }).strict().refine(assets => marketingAssetIds(assets.background).length + marketingAssetIds(assets.scene).length <= 3, { message: "背景与场景图片合计最多 3 张。" }).default({}),
   storyboard: MarketingStoryboardSchema.default([]),
+  /** Presenter and setting look shared by all shots; every clip request repeats it verbatim
+   * because each clip is generated independently. */
+  continuity: z.string().max(400).default(""),
   publishTitle: z.string().max(100).default(""),
   tags: z.string().max(160).default(""),
 }).strict());
@@ -83,7 +90,7 @@ export function marketingReferenceError(draft: MarketingDraft, profile: Marketin
   if (profile.referenceMaxQuality === "720p" && draft.quality === "1080p" && (images || draft.assets.video)) return "使用人物、场景图片或参考视频时最高支持 720p，请将视频质量改为默认。";
   return "";
 }
-export const MarketingReviewFieldSchema = z.enum(["script", "publishTitle", "tags", "background", "storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera"]);
+export const MarketingReviewFieldSchema = z.enum(["script", "publishTitle", "tags", "background", "continuity", "storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera"]);
 export const MarketingReviewIssueSchema = z.object({
   text: z.string().min(1).max(2000), reason: z.string().min(1).max(500), suggestion: z.string().max(2000),
   // Optional only for compatibility with already saved review cards.
@@ -225,6 +232,8 @@ export function marketingReviewFields(draft: MarketingDraft): { field: Marketing
   const normalized = MarketingDraftSchema.parse(draft);
   return [
     ...(["script", "publishTitle", "tags", "background"] as const).map(field => ({ field, text: normalized[field] })),
+    // Only when present, so drafts without it keep their existing review key.
+    ...(normalized.continuity ? [{ field: "continuity" as const, text: normalized.continuity }] : []),
     ...normalized.storyboard.flatMap((shot, shotIndex) => (["script", "visual", "action", "camera"] as const)
       .map(field => ({ field: `storyboard.${field}` as MarketingReviewField, shotIndex, text: shot[field] }))),
   ];

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
 import { marketingImageReferences, marketingSegmentPrompt } from "./prompt.js";
 import { activeMarketingVideoProfile } from "./model.js";
-import { creationPrompt, publicationPrompt, storyboardPrompt } from "./creation.js";
+import { creationPrompt, parseCreation, publicationPrompt, storyboardPrompt } from "./creation.js";
+import { parseTextResult } from "./text-result.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const shotData = (prompt: string) => JSON.parse(prompt.split("\nconfirmedShot: ")[1]);
@@ -20,6 +21,47 @@ describe("marketing model subtitle instructions", () => {
     expect(prompt).toContain("use portrait identity");
     expect(prompt).toContain("Overrides conflicting visuals");
     expect(prompt).toContain("Duration exactly 6 seconds");
+  });
+  it("repeats the shared presenter and setting look in every clip and keeps it across single-shot edits", () => {
+    const shots = [
+      { durationSec: 6, script: "先看这杯咖啡。", visual: "吧台前人物端杯", action: "端起杯子", camera: "中景" },
+      { durationSec: 11, script: "欢迎来店里坐一坐。", visual: "座位区人物招手", action: "招手", camera: "中景" },
+    ];
+    const look = "三十岁女性，齐肩黑发，米色针织衫；原木吧台、暖白灯光、柔和逆光";
+    const draft = MarketingDraftSchema.parse({ durationSec: 17, storyboard: shots, script: shots.map(s => s.script).join("\n"), continuity: look, assets: { portrait: id } });
+    for (const index of [0, 1]) {
+      const prompt = marketingSegmentPrompt(draft, { index, script: shots[index].script, durationSec: shots[index].durationSec }, 2);
+      expect(shotData(prompt).continuity).toBe(look);
+      expect(prompt).toContain("must match continuity exactly");
+      expect(prompt).toContain("Reproduce that face faithfully");
+      expect(prompt).not.toContain("allow deliberate scene changes");
+    }
+    expect(shotData(marketingSegmentPrompt({ ...draft, continuity: "" }, { index: 0, script: shots[0].script, durationSec: 6 }, 2))).not.toHaveProperty("continuity");
+    expect(creationPrompt(draft, "zh").system).toContain("continuity is ONE shared description");
+    expect(JSON.parse(storyboardPrompt(draft, "zh", shots, "").input).continuity).toBe(look);
+    expect(storyboardPrompt(draft, "zh", shots, "", 1).system).toContain("The supplied continuity is fixed");
+    const revised = shots.map(shot => ({ ...shot, camera: "缓慢推近" }));
+    expect(parseTextResult("storyboard", { shots: revised, continuity: "灰色西装，白色演播室" }, draft).draft.continuity).toBe("灰色西装，白色演播室");
+    expect(parseTextResult("storyboard", { shots: revised }, draft).draft.continuity).toBe(look);
+    expect(parseTextResult("storyboard", { shots: [revised[1]], continuity: "忽略" }, draft, 1).draft.continuity).toBe(look);
+    const created = parseCreation({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "结构", continuity: " 新造型 " }, draft);
+    expect(created.draft.continuity).toBe("新造型");
+    expect(parseCreation({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "结构" }, draft).draft.continuity).toBe("");
+  });
+  it("lets mixed-presenter drafts plan venue and product shots without the presenter", () => {
+    const draft = MarketingDraftSchema.parse({ presenter: "mixed", assets: { portrait: id }, durationSec: 17,
+      storyboard: [{ durationSec: 6, script: "欢迎光临。", visual: "招牌菜特写", action: "热气升起", camera: "特写" }] });
+    const creation = creationPrompt(draft, "zh");
+    expect(creation.system).toContain("Presenter mode is mixed");
+    expect(creation.system).toContain("in at least one shot");
+    expect(creation.system).not.toContain("in EVERY shot");
+    expect(JSON.parse(creation.input).presenter).toBe("mixed");
+    expect(storyboardPrompt(draft, "zh", draft.storyboard, "").system).toContain("Presenter mode is mixed");
+    const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2);
+    expect(prompt).toContain("Presenter only where visual calls for one");
+    expect(prompt).toContain("off-screen voice-over");
+    expect(prompt).not.toContain("Presenter in EVERY shot");
+    expect(marketingSegmentPrompt({ ...draft, assets: { video: id } }, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2)).toContain("Silent demonstration, no lip-sync");
   });
   it.each(["欢迎来到咖啡店。", "Welcome to our coffee shop."])("requests matching subtitles for each shot: %s", (script) => {
     const draft = MarketingDraftSchema.parse({ script: `${script}其他片段。`, subtitles: true });
@@ -110,7 +152,7 @@ it("keeps confirmed content in its fields and applies later material/ratio selec
   const prompt = marketingSegmentPrompt(draft, { index: 0, script, durationSec: 15 }, 1);
   expect(shotData(prompt)).toEqual({ script, visual: "窗边陈列台", action: "人物展示杯子", camera: "缓慢平移", backgroundDescription: draft.background, voiceStyle: draft.voice });
   expect(prompt).toContain("aspect ratio 16:9");
-  expect(prompt).toContain("allow deliberate scene changes");
+  expect(prompt).toContain("change location only if visual names another place");
   expect(prompt).toContain("Supplied setting references take precedence");
   expect(prompt).not.toContain("same presenter, outfit and environment throughout");
   expect(prompt).not.toContain(draft.publishTitle);

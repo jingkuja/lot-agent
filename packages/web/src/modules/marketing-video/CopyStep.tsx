@@ -49,12 +49,17 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
     </> : <DraftText form={form} name="topic" label="产品、卖点和目标顾客" max={800} />}
     <label className="mv-field"><span>{t("整片时长（秒）")} · {draft.durationSec}s</span><input type="range" min="15" max="60" step="1" aria-label={t("整片时长（秒）")} value={draft.durationSec} disabled={busy} onChange={e => field("durationSec", Number(e.target.value))} /></label>
     <p className="mv-hint">{t("选择 15–60 秒目标时长，AI 自动安排每镜 4–15 秒，可多出最多 5 秒，成片最长 65 秒。")}</p>
+    <label className="mv-label">{t("人物出镜")}</label>
+    <Choices form={form} label="人物出镜" values={[{ value: "always", label: "主播全程出镜" }, { value: "mixed", label: "混合镜头" }]} value={draft.presenter} onChoose={value => field("presenter", value as MarketingDraft["presenter"])} />
+    <p className="mv-hint">{t(draft.presenter === "mixed" ? "主播出现在部分镜头，其余镜头可拍环境、菜品和产品特写，适合探店。" : "每个镜头都有主播正面出镜，适合主播宣传。")}</p>
     {analysisPanel}
     {analysis && <details className="mv-script-review"><summary>{t("文案结构")}</summary><p>{analysis}</p></details>}
     {(draft.copyMode !== "rewrite" || !!draft.script.trim()) && <>
       <DraftText form={form} name="script" label="视频口播文案" max={2000} rows={6} />
       <p className="mv-hint">{t("预计口播 {0} 秒，实际以成片为准。", [Math.ceil(speechUnits(draft.script) / 4)])}</p>
-      {!!draft.storyboard.length && <StoryboardEditor creation shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />}
+      {!!draft.storyboard.length && <DraftText form={form} name="continuity" label="统一人物与场景设定" max={400} rows={3} />}
+      {!!draft.storyboard.length && <p className="mv-hint">{t("每段视频都会带上这段描述，用于保持人物、服装和场景一致。")}</p>}
+      {!!draft.storyboard.length && <StoryboardEditor creation presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />}
       {draft.script.trim() && planError && <p className="mv-error" role="alert">{t(planError)}</p>}
       <details className="mv-script-review" open><summary>{t("标题标签")}</summary>
         <DraftText form={form} name="publishTitle" label="视频发布标题" max={100} />

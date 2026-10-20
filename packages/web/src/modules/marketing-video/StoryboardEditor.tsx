@@ -1,9 +1,10 @@
 import { useState } from "react";
-import type { MarketingShot } from "@lot-agent/core/marketing-video";
+import type { MarketingDraft, MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 
-export function StoryboardEditor({ shots, busy, readOnly = false, creation = false, onChange, onAi }: {
+export function StoryboardEditor({ shots, presenter = "always", busy, readOnly = false, creation = false, onChange, onAi }: {
   shots: MarketingShot[];
+  presenter?: MarketingDraft["presenter"];
   busy: boolean;
   readOnly?: boolean;
   creation?: boolean;
@@ -17,7 +18,7 @@ export function StoryboardEditor({ shots, busy, readOnly = false, creation = fal
   const ends = shots.reduce<number[]>((times, shot) => [...times, (times.at(-1) ?? 0) + (shot.durationSec ?? 15)], []);
   return <div className="mv-storyboard">
     <div className="mv-section-head"><h3>{t(readOnly ? "制作分镜" : creation ? "生成分镜" : "确认分镜")}</h3><span>{t("{0} 个分镜 · 共 {1} 秒", [shots.length, ends.at(-1) ?? 0])}</span></div>
-    {!readOnly && <p className="mv-hint">{t("数字分身将在每个镜头出镜，保持人物形象一致。")}</p>}
+    {!readOnly && <p className="mv-hint">{t(presenter === "mixed" ? "数字分身出现在部分镜头，请在画面内容中写明该镜是否有人物出镜。" : "数字分身将在每个镜头出镜，保持人物形象一致。")}</p>}
     <p className="mv-hint">{t(readOnly ? "以下是本次制作使用的分镜。修改后需作为新视频重新生成。" : creation ? "文案和分镜已生成，可直接继续制作，也可按需修改。" : "可直接修改每段内容，或输入要求让 AI 调整；确认后才开始生成视频。")}</p>
     <div className="mv-shot-list">{shots.map((shot, index) => <article className="mv-shot" key={index} aria-label={t("第 {0} 镜", [index + 1])}>
       <header><h4>{t("第 {0} 镜", [index + 1])}</h4><span>{index ? ends[index - 1] : 0}–{ends[index]}s · {t("{0} 秒", [shot.durationSec ?? 15])}</span></header>
