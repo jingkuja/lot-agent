@@ -80,7 +80,7 @@ Web 与桌面登录页 `web/components/Login.tsx` 在登录前提供“用户协
 
 ### 4.2 聊天与工具
 
-工作台通过 `SidebarAgentTabs.tsx` 显示当前 Agent，默认展示两行三列、最多 6 个快捷选项；通用助手固定第一、营销影像固定第二，其余沿用历史排序；仅超过 6 个时显示九宫格“更多”按钮，点击后展开全部可用助手并允许滚动，点击“收起”恢复 6 个选项；展开 / 关闭面板或重复选择当前 Agent 不改变对话。`Workspace.tsx` 统一当前 Agent、历史筛选及新建会话目标；切换到不同 Agent 且已有会话、运行中任务或草稿时，通过 `AgentSwitchDialog.tsx` 确认后进入目标 Agent 的新对话。已发送的历史保留，后台任务继续；未发送的文字和附件在确认后清空。聊天区域顶部固定显示当前 Agent，输入框不再重复提供选择条。`routes/agents.ts` 对所有可见定义返回 `installed: true`；旧安装接口幂等成功，卸载接口拒绝，隐藏 Agent 仍不公开。
+侧栏顶部 `BrandHeader.tsx` 一行放 logo、产品名、账号头像和收起按钮；点击头像打开 `AccountMenu.tsx`（显示名称与账号，并包含飞书接入、充值、文件管理、“积分不足时使用灵渠 AI 余额”开关，国际模式下还有语言选择），积分卡只保留余额与充值。工作台通过 `SidebarAgentTabs.tsx` 显示当前 Agent，默认展示两行三列、最多 6 个快捷选项；通用助手固定第一、营销影像固定第二，其余沿用历史排序；仅超过 6 个时显示九宫格“更多”按钮，点击后展开全部可用助手并允许滚动，点击“收起”恢复 6 个选项；展开 / 关闭面板或重复选择当前 Agent 不改变对话。`Workspace.tsx` 统一当前 Agent、历史筛选及新建会话目标；切换到不同 Agent 且已有会话、运行中任务或草稿时，通过 `AgentSwitchDialog.tsx` 确认后进入目标 Agent 的新对话。已发送的历史保留，后台任务继续；未发送的文字和附件在确认后清空。聊天区域顶部固定显示当前 Agent，输入框不再重复提供选择条。`routes/agents.ts` 对所有可见定义返回 `installed: true`；旧安装接口幂等成功，卸载接口拒绝，隐藏 Agent 仍不公开。
 
 ```text
 InputBox / ChatPanel → useChat → POST /api/conversations/:id/messages

@@ -2479,4 +2479,6 @@ export const messages: Record<string, { en: string; id: string }> = {
   "保留当前分镜": {"en": "Keep current storyboard", "id": "Pertahankan storyboard saat ini"},
   "已添加参考视频，成片不生成口播：请把每个分镜改为无声展示，人物不说话、不做口型，口播内容只作为字幕或画面信息；保持镜数和每镜时长。": {"en": "A reference video was added and the video will have no narration: change every shot to a silent demonstration with no speech or lip-sync, using the script only as captions or on-screen information; keep the number of shots and each shot's duration.", "id": "Video referensi ditambahkan dan video tidak memiliki narasi: ubah setiap shot menjadi demonstrasi tanpa suara, tanpa bicara atau gerak bibir, gunakan naskah hanya sebagai subtitel atau informasi di layar; pertahankan jumlah shot dan durasi setiap shot."},
   "已移除参考视频，成片会生成口播：请把每个分镜改为人物自然讲述口播内容并展示产品；保持镜数和每镜时长。": {"en": "The reference video was removed and the video will have narration: change every shot so the presenter naturally speaks the script while showing the product; keep the number of shots and each shot's duration.", "id": "Video referensi dihapus dan video akan memiliki narasi: ubah setiap shot agar presenter membawakan naskah secara alami sambil menampilkan produk; pertahankan jumlah shot dan durasi setiap shot."},
+  "账号菜单：{0}": {"en": "Account menu: {0}", "id": "Menu akun: {0}"},
+  "语言": {"en": "Language", "id": "Bahasa"},
 };

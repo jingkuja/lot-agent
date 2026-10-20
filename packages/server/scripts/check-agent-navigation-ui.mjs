@@ -111,10 +111,18 @@ try {
   await checkCurrent('通用助手');
   // The balance fallback switch lives in the account menu, not on the points card.
   assert.equal(await page.locator('.brand-points-action input').count(), 0);
+  // The account avatar shares the brand row; its menu spans the row below.
+  const brandBox = await page.locator('.brand-card').boundingBox(), avatarBox = await page.locator('.account-chip').boundingBox();
+  assert(Math.abs((avatarBox.y + avatarBox.height / 2) - (brandBox.y + brandBox.height / 2)) <= 2);
+  assert.equal(await page.locator('.brand-actions').count(), 0);
   await page.locator('.account-chip').click();
+  assert(Math.abs((await page.locator('.account-popover').boundingBox()).width - brandBox.width) <= 1);
   const fallback = page.locator('.account-balance-fallback');
   assert.equal(await fallback.locator('input').isChecked(), true);
-  await snap('account-menu-fallback.png');
+  await snap('account-menu-zh-light.png');
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await snap('account-menu-zh-dark.png');
+  await page.evaluate(() => { delete document.documentElement.dataset.theme; });
   await fallback.click();
   await page.waitForFunction(() => document.querySelector('.account-balance-fallback input')?.checked === false);
   assert.equal(allowBalanceFallback, false);
@@ -216,7 +224,15 @@ try {
   await page.getByRole('heading', { name: '个人语音库', exact: true }).waitFor();
   await page.getByRole('heading', { name: '个人肖像库', exact: true }).waitFor();
   await page.keyboard.press('Escape');
-  await page.locator('.language-select').selectOption('en');
+  // Signed in, the language choice lives in the account menu beside the avatar.
+  assert.equal(await page.locator('.brand-card > .language-select').count(), 0);
+  await page.locator('.account-chip').click();
+  await page.locator('.account-language-row .language-select').selectOption('en');
+  await snap('account-menu-en-light.png');
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await snap('account-menu-en-dark.png');
+  await page.evaluate(() => { delete document.documentElement.dataset.theme; });
+  await page.locator('.account-chip').click();
   await checkCurrent('Contract comparison');
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await checkDefaultGrid();

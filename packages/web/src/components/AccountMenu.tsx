@@ -1,4 +1,4 @@
-import { useI18n } from "../i18n/index.js";
+import { LanguageSelect, useI18n } from "../i18n/index.js";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type ManagedUpload, type User } from "../api/client.js";
@@ -111,16 +111,19 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
   return (
     <>
       <div className="account-menu-root" ref={rootRef}>
+        {/* Avatar and chevron in a raised pill, so the menu reads as clickable without a
+            name; the name and account are shown at the top of the menu. */}
         <button
           type="button"
           className={`account-chip ${open ? "active" : ""}`}
           onClick={() => setOpen((value) => !value)}
           aria-haspopup="menu"
           aria-expanded={open}
+          aria-label={t("账号菜单：{0}", [account.email])}
+          title={account.email}
         >
           <span className="account-avatar" aria-hidden>{account.initial}</span>
-          <span className="account-chip-label" title={account.email}>{account.email}</span>
-          <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+          <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="m6 8 4 4 4-4" />
           </svg>
         </button>
@@ -144,6 +147,13 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
               <button type="button" role="menuitem" onClick={() => openDialog("files")}>
                 <span aria-hidden>▤</span>{t("文件管理")}</button>
               <BalanceFallbackRow />
+              {international && (
+                <label className="account-language-row">
+                  <span aria-hidden>文</span>
+                  <span>{t("语言")}</span>
+                  <LanguageSelect />
+                </label>
+              )}
               {!international && (boundPhone ? (
                 <div className="account-phone-row">
                   <span aria-hidden>☎</span>

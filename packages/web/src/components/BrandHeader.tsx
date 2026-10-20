@@ -17,7 +17,8 @@ interface BrandHeaderProps {
   balanceRefreshKey?: number;
 }
 
-/** Top-left identity strip: logo, product name, account, and workspace nav.
+/** Top-left identity strip: logo, product name, account avatar, and workspace nav.
+ *  The account menu also holds the language choice once a user is signed in.
  *  The new-chat button lives in the sidebar's 历史对话 header. */
 export function BrandHeader({
   user,
@@ -46,7 +47,7 @@ export function BrandHeader({
           <span className="brand-subtitle">{t("借势智算")}</span>
         </div>
 
-        <LanguageSelect />
+        {user ? <AccountMenu user={user} onLogout={onLogout} /> : <LanguageSelect />}
         <button
           className="brand-collapse"
           onClick={onCollapse}
@@ -55,10 +56,6 @@ export function BrandHeader({
         >
           ‹
         </button>
-      </div>
-
-      <div className="brand-actions">
-        {user && <AccountMenu user={user} onLogout={onLogout} />}
       </div>
 
       {(onOpenDigitalTwin || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (

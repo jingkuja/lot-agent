@@ -3440,6 +3440,7 @@ html, body, #root {
 .agent-tab-arrow:disabled { opacity: 0.35; cursor: default; }
 
 .brand-card {
+  position: relative; /* anchors the account menu across the full row */
   display: flex;
   align-items: center;
   gap: 10px;
@@ -3521,47 +3522,29 @@ html, body, #root {
   color: var(--text);
 }
 
-/* Single merged action row: account on the left, new-chat on the right */
-.brand-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  padding: 0;
-}
-
-.brand-account {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-}
-
-.brand-email {
-  font-size: 13px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ── Account chip, account popover and account dialogs ── */
-.account-menu-root { position: relative; width: 100%; }
+/* The avatar sits in the brand row; its menu spans the row below it. */
+.account-menu-root { flex: none; margin-left: auto; }
 .account-chip {
-  width: 100%; min-width: 0; height: 40px; padding: 4px 8px;
-  display: flex; align-items: center; gap: 8px;
-  border: 1px solid transparent; border-radius: 10px;
-  background: transparent;
-  color: var(--text-secondary); font: inherit; cursor: pointer;
-  box-shadow: none;
-  transition: border-color .14s ease, background .14s ease;
+  height: 34px; padding: 3px 7px 3px 3px;
+  display: flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-card); color: var(--text-muted); font: inherit; cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: border-color .14s ease, background .14s ease, color .14s ease;
 }
 .account-chip:hover, .account-chip.active {
-  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  color: var(--accent);
 }
+.account-chip > svg { flex: none; transition: transform .14s ease; }
+.account-chip.active > svg { transform: rotate(180deg); }
+.brand-card:has(.account-menu-root) .brand-collapse { margin-left: 0; }
+/* Keep the product name on one line beside the account pill in every language. */
+.brand-card:has(.account-menu-root) { gap: 8px; }
+.brand-card:has(.account-menu-root) .brand-title { white-space: nowrap; }
+.brand-card:has(.account-menu-root) .brand-title:not(:lang(zh)) { font-size: 15px; }
 .account-chip:focus-visible,
 .brand-collapse:focus-visible,
 .brand-quick-action:focus-visible,
@@ -3573,17 +3556,13 @@ html, body, #root {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
 }
-.account-chip:active { background: var(--bg-active); }
 .account-avatar {
   display: inline-grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center;
   border-radius: 50%; background: var(--accent); color: var(--text-on-accent);
   font-size: 13px; font-weight: 700; text-transform: uppercase;
 }
-.account-chip-label { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-.account-chip > svg { flex: none; color: var(--text-muted); transition: transform .14s ease; }
-.account-chip.active > svg { transform: rotate(180deg); }
 .account-popover {
-  position: absolute; z-index: 120; top: calc(100% + 6px); left: 0; width: 100%;
+  position: absolute; z-index: 120; top: calc(100% + 8px); left: 0; width: 100%;
   padding: 12px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--bg-card);
   box-shadow: var(--shadow-md);
@@ -3642,6 +3621,14 @@ html, body, #root {
 .account-balance-fallback input:checked + i::after { transform: translateX(13px); }
 .account-balance-fallback input:focus-visible + i { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
 .account-balance-fallback:has(input:disabled) { cursor: wait; opacity: .65; }
+.account-language-row {
+  min-width: 0; min-height: 36px; padding: 5px 8px 5px 12px;
+  display: flex; align-items: center; gap: 8px;
+  border-radius: 8px; color: var(--text); font-size: 13px; font-weight: 550;
+}
+.account-language-row > span:first-child { width: 16px; flex: 0 0 16px; font-size: 13px; text-align: center; }
+.account-language-row > span:nth-child(2) { flex: 1; }
+.account-language-row .language-select { max-width: none; padding: 4px 6px; font-size: 12px; }
 .account-balance-fallback-error { padding: 0 12px; color: var(--error); font-size: 11px; }
 .account-popover-legal { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 14px 0 1px; color: var(--text-muted); }
 .account-popover-legal button { border: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
