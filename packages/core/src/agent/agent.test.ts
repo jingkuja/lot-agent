@@ -184,7 +184,7 @@ describe("Agent.run", () => {
     const err = events.find((e) => e.type === "error");
     const message = err && "message" in err ? err.message : "";
     expect(message).toContain("积分余额不足");
-    expect(message).toContain("左侧管理区");
+    expect(message).toContain("账号菜单");
     expect(message).toContain("灵渠 AI 余额");
     expect(message).not.toContain("无效的令牌");
     expect(message).not.toContain("401");

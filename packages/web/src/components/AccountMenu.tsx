@@ -20,6 +20,43 @@ function accountText(user: User) {
   return { email, displayName, initial: (displayName.trim()[0] || "用").toUpperCase() };
 }
 
+/** Lets a managed account fall back to its 灵渠 AI balance when points run out.
+ * Hidden when the account has no managed key (the setting is undefined). */
+function BalanceFallbackRow() {
+  const { t } = useI18n();
+  const [enabled, setEnabled] = useState<boolean | undefined>();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void api.getManagedBalance()
+      .then((summary) => { if (alive) setEnabled(summary.allowBalanceFallback); })
+      .catch(() => { /* The row stays hidden; the points card reports load errors. */ });
+    return () => { alive = false; };
+  }, []);
+  if (enabled === undefined) return null;
+  const update = (next: boolean) => {
+    if (saving) return;
+    setSaving(true);
+    setError(false);
+    void api.setManagedBalanceFallback(next)
+      .then((result) => setEnabled(result.enabled))
+      .catch(() => setError(true))
+      .finally(() => setSaving(false));
+  };
+  return (
+    <>
+      <label className="account-balance-fallback" title={t("订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费")}>
+        <span aria-hidden>¥</span>
+        <span>{t("积分不足时使用灵渠 AI 余额")}</span>
+        <input type="checkbox" role="menuitemcheckbox" checked={enabled} disabled={saving} onChange={(event) => update(event.target.checked)} />
+        <i aria-hidden />
+      </label>
+      {error && <small className="account-balance-fallback-error" role="alert">{t("设置保存失败，请重试")}</small>}
+    </>
+  );
+}
+
 function maskPhone(phone: string | null | undefined) {
   const value = phone?.trim();
   if (!value) return null;
@@ -106,6 +143,7 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
                 <span aria-hidden>≡</span>{t("充值明细")}</button>
               <button type="button" role="menuitem" onClick={() => openDialog("files")}>
                 <span aria-hidden>▤</span>{t("文件管理")}</button>
+              <BalanceFallbackRow />
               {!international && (boundPhone ? (
                 <div className="account-phone-row">
                   <span aria-hidden>☎</span>

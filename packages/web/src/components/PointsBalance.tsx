@@ -11,7 +11,6 @@ interface BalanceSummary {
   totalUsed: number;
   totalRecharged: number;
   usedRatio: number;
-  allowBalanceFallback?: boolean;
 }
 
 interface PointsBalanceProps {
@@ -27,8 +26,6 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [fallbackSaving, setFallbackSaving] = useState(false);
-  const [fallbackError, setFallbackError] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -40,18 +37,6 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
   }, []);
 
   useEffect(load, [load, refreshKey]);
-
-  const updateBalanceFallback = useCallback((enabled: boolean) => {
-    if (!summary || fallbackSaving) return;
-    setFallbackSaving(true);
-    setFallbackError(false);
-    void api.setManagedBalanceFallback(enabled)
-      .then((result) => {
-        setSummary((current) => current ? { ...current, allowBalanceFallback: result.enabled } : current);
-      })
-      .catch(() => setFallbackError(true))
-      .finally(() => setFallbackSaving(false));
-  }, [fallbackSaving, summary]);
 
   return (
     <>
@@ -87,19 +72,6 @@ export function PointsBalance({ refreshKey = 0 }: PointsBalanceProps) {
             <span>{t("充值")}</span>
           </button>
         </div>
-        {summary?.allowBalanceFallback !== undefined && (
-          <label className="brand-balance-fallback" title={t("订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费")}>
-            <span>{t("积分不足时使用灵渠 AI 余额")}</span>
-            <input
-              type="checkbox"
-              checked={summary.allowBalanceFallback}
-              disabled={fallbackSaving}
-              onChange={(event) => updateBalanceFallback(event.target.checked)}
-            />
-            <i aria-hidden />
-          </label>
-        )}
-        {fallbackError && <small className="brand-balance-fallback-error">{t("设置保存失败，请重试")}</small>}
       </div>
 
       {detailsOpen && createPortal(

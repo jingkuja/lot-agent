@@ -12,7 +12,9 @@ interface SidebarAgentTabsProps {
   disabled?: boolean;
 }
 
-/** Show three quick choices by default; expand to browse all available Agents. */
+const DEFAULT_VISIBLE_AGENTS = 6;
+
+/** Show two rows of three quick choices; expand to browse additional Agents. */
 export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: SidebarAgentTabsProps) {
   const { t } = useI18n();
   const [feishuOpen, setFeishuOpen] = useState(false);
@@ -23,7 +25,9 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
   const current = agents.find((agent) => agent.id === activeId);
   const general = agents.find((agent) => agent.id === GENERAL_ID);
   const ordered = [...(general ? [general] : []), ...sortedSubAgents(agents)];
-  const visible = open ? ordered : ordered.slice(0, 3);
+  const hasMore = ordered.length > DEFAULT_VISIBLE_AGENTS;
+  const expanded = hasMore && open;
+  const visible = expanded ? ordered : ordered.slice(0, DEFAULT_VISIBLE_AGENTS);
 
   useEffect(() => {
     if (!open) return;
@@ -64,19 +68,19 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
             </span>
             <span>{t("飞书")}</span>
           </button>
-          {ordered.length > 3 && <button ref={trigger} type="button" className={`agent-grid-toggle ${open ? "active" : ""}`}
-            aria-expanded={open} aria-controls={gridId} aria-label={t(open ? "收起" : "更多")}
+          {hasMore && <button ref={trigger} type="button" className={`agent-grid-toggle ${expanded ? "active" : ""}`}
+            aria-expanded={expanded} aria-controls={gridId} aria-label={t(expanded ? "收起" : "更多")}
             title={t("切换 Agent")} disabled={disabled} onClick={() => setOpen((value) => !value)}>
             <span className="agent-grid-toggle-icon">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden>
                 {[4, 10, 16].flatMap((x) => [4, 10, 16].map((y) => <rect key={`${x}-${y}`} x={x} y={y} width="4" height="4" rx="1" />))}
               </svg>
             </span>
-            <span>{t(open ? "收起" : "更多")}</span>
+            <span>{t(expanded ? "收起" : "更多")}</span>
           </button>}
         </div>
         <div className="agent-launcher" id={gridId}>
-          <div className="agent-launcher-grid" role="group" aria-label={t("选择 Agent")}>
+          <div className={`agent-launcher-grid${expanded ? " is-expanded" : ""}`} role="group" aria-label={t("选择 Agent")}>
             {visible.map((agent) => (
               <button key={agent.id} type="button"
                 className={`agent-launcher-item ${agent.id === activeId ? "active" : ""}`}

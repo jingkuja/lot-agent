@@ -1,7 +1,7 @@
 /** Shown when the upstream LLM returns HTTP 401 (quota-exhausted keys
  * currently come back as "无效的令牌" rather than a dedicated quota error). */
 export const LLM_QUOTA_HINT =
-  "积分余额不足，请检查剩余积分是否足够。可在左侧管理区打开「积分不足时使用灵渠 AI 余额」。";
+  "积分余额不足，请检查剩余积分是否足够。可在左上角账号菜单中打开「积分不足时使用灵渠 AI 余额」。";
 
 export function isUnauthorizedLLMError(err: unknown): boolean {
   if (err && typeof err === "object") {

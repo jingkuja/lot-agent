@@ -72,13 +72,15 @@ Web 与桌面登录页 `web/components/Login.tsx` 在登录前提供“用户协
 
 密码登录经 RSA 公钥加密后发送，服务端解密并向网关认证；另外有 Token 登录、手机登录、微信登录和绑定流程。非 DEBUG 的服务默认启用托管 New API 凭证，所需配置在 `AgentService` 构造函数校验，凭证加密实现见 `auth/secret-box.ts`。
 
+“积分不足时使用灵渠 AI 余额”保存在 New API 的 `managed_api_keys.allow_balance_fallback`，新托管 Key 默认开启；小程序注册、Agent 注册和中转站账号首次进入 Agent 均由 New API 的 `model/managed_api_key.go → ensureManagedCredentialTx` 统一创建，后续登录保留用户手动关闭的选择。老账号统一开启使用 New API 仓库的 `scripts/enable-agent-balance-fallback.sql`，在中转站数据库手动执行。
+
 模型列表由 `models/catalog.ts` 结合用户可用模型与本地目录生成；LLM 列表优先展示 `deepseek-v4.1-flash`，其余非 Claude 模型保持原顺序、Claude 排末尾。用户未选择时默认使用列表首项，已有会话或显式选择优先；配置和文字类 Agent 默认模型同为 `deepseek-v4.1-flash`。`models/provider-factory.ts` 按用户凭证和选定模型创建提供器。托管凭证不可用时不能静默改用平台 Key。LLM 调用计量见 `billing/metered-llm.ts`，额度和用量见 `billing/meter.ts`；知识 embedding 另有真实网关回执核对流程。
 
 网页/桌面充值由 `routes/recharge.ts → tokenhub/client.ts` 调用 New API 原有支付流程。小程序通过 `pages/recharge/index.ts` 调用 `wx.requestVirtualPayment`；Agent 的 `payments/service.ts` 负责报价、订单持久化、微信查单、退款同步和发货，`payments/wechat-virtual.ts` 持有微信配置和签名逻辑，`payments/repository.ts` 实现数据库租约。`index.ts` 启动并停止后台补偿任务。New API 仅接收 HMAC 记账通知，原子生成小程序来源订单并对托管 Key 入账或回退，不保存微信配置。完整边界、配置和验收见 [微信虚拟支付](wechat-virtual-payment.md)。
 
 ### 4.2 聊天与工具
 
-工作台通过 `SidebarAgentTabs.tsx` 显示当前 Agent，默认展示 3 个快捷选项；通用助手固定第一、营销影像固定第二，其余沿用历史排序；九宫格按钮下方标注“更多”，点击后展开全部可用助手，点击“收起”恢复 3 个选项；展开 / 关闭面板或重复选择当前 Agent 不改变对话。`Workspace.tsx` 统一当前 Agent、历史筛选及新建会话目标；切换到不同 Agent 且已有会话、运行中任务或草稿时，通过 `AgentSwitchDialog.tsx` 确认后进入目标 Agent 的新对话。已发送的历史保留，后台任务继续；未发送的文字和附件在确认后清空。聊天区域顶部固定显示当前 Agent，输入框不再重复提供选择条。`routes/agents.ts` 对所有可见定义返回 `installed: true`；旧安装接口幂等成功，卸载接口拒绝，隐藏 Agent 仍不公开。
+工作台通过 `SidebarAgentTabs.tsx` 显示当前 Agent，默认展示两行三列、最多 6 个快捷选项；通用助手固定第一、营销影像固定第二，其余沿用历史排序；仅超过 6 个时显示九宫格“更多”按钮，点击后展开全部可用助手并允许滚动，点击“收起”恢复 6 个选项；展开 / 关闭面板或重复选择当前 Agent 不改变对话。`Workspace.tsx` 统一当前 Agent、历史筛选及新建会话目标；切换到不同 Agent 且已有会话、运行中任务或草稿时，通过 `AgentSwitchDialog.tsx` 确认后进入目标 Agent 的新对话。已发送的历史保留，后台任务继续；未发送的文字和附件在确认后清空。聊天区域顶部固定显示当前 Agent，输入框不再重复提供选择条。`routes/agents.ts` 对所有可见定义返回 `installed: true`；旧安装接口幂等成功，卸载接口拒绝，隐藏 Agent 仍不公开。
 
 ```text
 InputBox / ChatPanel → useChat → POST /api/conversations/:id/messages

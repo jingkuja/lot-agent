@@ -35,21 +35,23 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   const agents = [
     ["general", "通用助手", "通用 AI 助手"],
+    ["marketing_video", "营销影像", "营销影像制作"],
     ["image", "图片生成", "文字描述生成配图/封面/海报"],
     ["video", "视频生成", "脚本/描述生成短视频"],
     ["ppt", "PPT 制作", "明确受众与目标，确认可编辑大纲，生成带图表的 PPT 并逐页预览修改"],
     ["contract", "合同对比", "上传新旧两版合同，找出条款增删、内容变化与主体变更"],
     ["digital_employee", "数字员工", "独立模块"],
   ].map(([id, name, description], sortOrder) => ({ id, name, description, type: id, installed: true, sortOrder }));
+  let availableAgents = agents;
   const conversations = agents.filter((a) => a.id !== 'digital_employee').map((a) => ({ id: `history-${a.id}`, title: `${a.id} 历史记录`, agent_id: a.id, created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:00:00Z' }));
-  let taskState = 'running';
+  let taskState = 'running', allowBalanceFallback = true;
   await page.route("**/api/**", async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (!path.startsWith("/api/")) return route.continue();
     const json = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
     if (request.method() !== 'GET') writes.push({ path, body: request.postDataJSON() });
     if (path === '/api/public/product') return json({ globle: 1 });
-    if (path === '/api/agents') return json(agents);
+    if (path === '/api/agents') return json(availableAgents);
     if (path === '/api/conversations/projects') return json([]);
     if (path === '/api/conversations') {
       if (request.method() === 'POST') {
@@ -69,7 +71,8 @@ try {
       ] });
     }
     if (path === '/api/tasks/fixture-task') return json({ id: 'fixture-task', status: taskState, progress: 35, output: {} });
-    if (path === '/api/usage/balance') return json({ balance: 100, totalUsed: 0, totalRecharged: 100, usedRatio: 0 });
+    if (path === '/api/usage/balance') return json({ balance: 100, totalUsed: 0, totalRecharged: 100, usedRatio: 0, allowBalanceFallback });
+    if (path === '/api/usage/balance-fallback') { allowBalanceFallback = request.postDataJSON().enabled; return json({ enabled: allowBalanceFallback }); }
     if (path === '/api/knowledge-bases') return json([]);
     if (path.endsWith('/status')) return json({ ingestionEnabled: false });
     if (path.endsWith('/storage')) return json({ storedBytes: 0 });
@@ -89,28 +92,67 @@ try {
     assert.equal(await header.textContent(), name);
   };
   const snap = async (name) => { if (screenshotDir) { await mkdir(screenshotDir, { recursive: true }); await page.screenshot({ path: join(screenshotDir, name), animations: 'disabled' }); } };
+  const checkDefaultGrid = async () => {
+    assert.equal(await grid.getByRole('button').count(), 6);
+    const layout = await grid.evaluate((el) => {
+      const style = getComputedStyle(el), bounds = el.getBoundingClientRect();
+      return {
+        columns: style.gridTemplateColumns.split(' ').length,
+        rows: style.gridTemplateRows.split(' ').length,
+        clipped: el.scrollHeight > el.clientHeight + 1,
+        overflow: [...el.children].some((item) => {
+          const box = item.getBoundingClientRect();
+          return box.left < bounds.left || box.right > bounds.right || box.bottom > bounds.bottom;
+        }),
+      };
+    });
+    assert.deepEqual(layout, { columns: 3, rows: 2, clipped: false, overflow: false });
+  };
   await checkCurrent('通用助手');
+  // The balance fallback switch lives in the account menu, not on the points card.
+  assert.equal(await page.locator('.brand-points-action input').count(), 0);
+  await page.locator('.account-chip').click();
+  const fallback = page.locator('.account-balance-fallback');
+  assert.equal(await fallback.locator('input').isChecked(), true);
+  await snap('account-menu-fallback.png');
+  await fallback.click();
+  await page.waitForFunction(() => document.querySelector('.account-balance-fallback input')?.checked === false);
+  assert.equal(allowBalanceFallback, false);
+  await page.locator('.account-chip').click();
   assert.equal(await page.locator('.agent-switcher').count(), 0);
   assert.equal(await page.getByText('Studio 管理', { exact: true }).count(), 0);
-  assert.equal(await grid.getByRole('button').count(), 3);
-  assert.equal(await page.locator('.agent-grid-toggle[aria-controls]').innerText(), '更多');
-  await snap('agent-default-three.png');
-  // The default row is usable without opening More.
+  await checkDefaultGrid();
+  assert.equal(await page.locator('.agent-grid-toggle[aria-controls]').count(), 0);
+  await snap('agent-default-six.png');
+  // Both rows are usable without opening More, including the sixth Agent.
+  await grid.getByRole('button', { name: '合同对比', exact: true }).click();
+  await checkCurrent('合同对比');
   await grid.getByRole('button', { name: '图片生成', exact: true }).click();
   await checkCurrent('图片生成');
   await grid.getByRole('button', { name: '通用助手', exact: true }).click();
   await checkCurrent('通用助手');
+  // Only the seventh available Agent introduces More; it stays hidden until expanded.
+  availableAgents = [...agents, { id: 'extra', name: 'Additional assistant', description: 'Extra fixture Agent', type: 'general', installed: true, sortOrder: 99 }];
+  await page.reload();
+  await checkCurrent('通用助手');
+  await checkDefaultGrid();
+  assert.equal(await page.locator('.agent-grid-toggle[aria-controls]').innerText(), '更多');
+  assert.equal(await grid.getByRole('button', { name: 'Additional assistant', exact: true }).count(), 0);
   await toggle();
-  assert.equal(await grid.getByRole('button').count(), 5);
+  assert.equal(await grid.getByRole('button').count(), 7);
   assert.equal(await page.locator('.agent-grid-toggle[aria-controls]').innerText(), '收起');
   await toggle();
-  assert.equal(await grid.getByRole('button').count(), 3);
+  await checkDefaultGrid();
   await toggle();
   assert.equal(await grid.getByRole('button', { name: '数字员工', exact: true }).count(), 0);
   assert.equal(await grid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length), 3);
   await snap('agent-grid-light.png');
   await page.keyboard.press('Escape');
-  assert.equal(await grid.getByRole('button').count(), 3);
+  await checkDefaultGrid();
+  assert(await page.locator('.agent-grid-toggle[aria-controls]').evaluate((el) => el === document.activeElement));
+  await toggle();
+  await header.click();
+  await checkDefaultGrid();
   await checkCurrent('通用助手');
   await page.getByText('general 历史记录', { exact: true }).click();
   await page.getByText('general 之前的回答', { exact: true }).waitFor();
@@ -177,14 +219,19 @@ try {
   await page.locator('.language-select').selectOption('en');
   await checkCurrent('Contract comparison');
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await checkDefaultGrid();
+  await snap('agent-default-six-dark-en.png');
   await toggle();
   await snap('agent-grid-dark-en.png');
   await page.setViewportSize({ width: 900, height: 700 });
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   assert.equal(await page.locator('.workspace').count(), 1);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  assert(await grid.evaluate((el) => el.scrollHeight > el.clientHeight));
   await snap('agent-grid-compact.png');
   await page.keyboard.press('Escape');
+  await checkDefaultGrid();
+  await snap('agent-default-six-compact.png');
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
   assert(await header.isVisible());
   const headBox = await header.boundingBox(), expandBox = await page.locator('.sidebar-expand').boundingBox();
@@ -193,7 +240,7 @@ try {
   assert.equal(writes.filter((r) => /\/install|\/promote/.test(r.path)).length, 0);
   assert.deepEqual(errors, []);
   assert.deepEqual(unexpectedRequests, []);
-  console.log('PASS: Default three Agents, More/Collapse toggle, Agent grid, same-Agent no-op, synchronized history, cancel/confirm, selected-Agent submission, draft isolation, running-task switch, digital twin shortcut, EN/dark/compact/collapsed layouts.');
+  console.log('PASS: Default six Agents in two rows, More only above six, expand/collapse/scroll, Agent grid, same-Agent no-op, synchronized history, cancel/confirm, selected-Agent submission, draft isolation, running-task switch, digital twin shortcut, EN/dark/compact/collapsed layouts.');
 } catch (error) {
   console.error({ errors, unexpectedRequests, body: await page?.locator("body").innerText() });
   throw error;
