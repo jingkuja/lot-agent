@@ -87,6 +87,21 @@ x-app-env: &app-env
   KLING_VOICE_BASE_URL: ${KLING_VOICE_BASE_URL:-}
   KLING_VOICE_API_KEY: ${KLING_VOICE_API_KEY:-}
   DEBUG_LLM: ${DEBUG_LLM:-}
+  # Additional settings from .env.example and .env.
+  QWEN_VOICE_BASE_URL: ${QWEN_VOICE_BASE_URL:-https://maas.qianwenaiapi.com/api/v1}
+  QWEN_VOICE_API_KEY: ${QWEN_VOICE_API_KEY:-}
+  QWEN_VOICE_TARGET_MODEL: ${QWEN_VOICE_TARGET_MODEL:-qwen-audio-3.0-tts-plus}
+  PPT_PREVIEW: ${PPT_PREVIEW:-1}
+  # Production must never enable the local-development login bypass.
+  DEBUG: "0"
+  MARKETING_ANALYSIS_MACOS_SANDBOX: ${MARKETING_ANALYSIS_MACOS_SANDBOX:-0}
+  # Also pass as --build-arg when building Dockerfile.media-analysis;
+  # a runtime environment variable does not perform image download verification.
+  YTDLP_SHA256: ${YTDLP_SHA256:-}
+  MARKETING_VIDEO_CONCURRENCY: ${MARKETING_VIDEO_CONCURRENCY:-2}
+  MARKETING_VIDEO_USER_CONCURRENCY: ${MARKETING_VIDEO_USER_CONCURRENCY:-1}
+  MARKETING_VIDEO_SEGMENT_CONCURRENCY: ${MARKETING_VIDEO_SEGMENT_CONCURRENCY:-2}
+  MARKETING_VIDEO_MODEL: ${MARKETING_VIDEO_MODEL:-grok-imagine-video-1.5}
 
 services:
   postgres:

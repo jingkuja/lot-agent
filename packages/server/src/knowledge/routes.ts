@@ -21,6 +21,8 @@ import { KnowledgeError, KnowledgeDuplicateError } from "./errors.js";
 import { knowledgeContentPolicy } from "./content-policy.js";
 import { KNOWLEDGE_MIME_LIMITS } from "./private-storage.js";
 import type { KnowledgeRepository, KnowledgeCursor, KnowledgeFile } from "./repository.js";
+import type { TwinVoices } from "../digital-twin/voices.js";
+import { isQwenCreateRejected, ProviderError, TwinSpeechInputSchema } from "@lot-agent/core";
 
 type Env = { Variables: { userId: string } };
 const invalid = () => new KnowledgeError("INVALID_REQUEST", 400, "请求参数无效");
@@ -94,7 +96,7 @@ export async function content(c: Context, storage: Pick<PrivateKnowledgeStorage,
 }
 
 /** Mount ONLY below existing session auth. No caller-controlled owner field is accepted. */
-export function createKnowledgeManageRoutes(repository: KnowledgeRepository, storage: PrivateKnowledgeStorage, retriever?: KnowledgeRetriever, materials?: KnowledgeMaterials) {
+export function createKnowledgeManageRoutes(repository: KnowledgeRepository, storage: PrivateKnowledgeStorage, retriever?: KnowledgeRetriever, materials?: KnowledgeMaterials, voices?: TwinVoices) {
   const app = new Hono<Env>(); errorHandler(app);
   app.use("*", async (c, next) => { if (!c.get("userId")) throw new KnowledgeError("UNAUTHORIZED", 401, "请先登录"); await next(); });
   const keys = new KnowledgeKeys(repository.pool);
@@ -166,6 +168,35 @@ export function createKnowledgeManageRoutes(repository: KnowledgeRepository, sto
     return c.json(await repository.createItem(c.get("userId"), KnowledgeItemInputSchema.parse(await jsonBody(c)), idempotencyKey), 201);
   });
   app.get("/items/:id", async (c) => c.json(await repository.getItem(c.get("userId"), uuid(c.req.param("id")))));
+  app.get("/items/:id/voice", async (c) => {
+    if (!voices) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "声音复刻服务不可用");
+    return c.json({ voice: await voices.get(c.get("userId"), uuid(c.req.param("id"))) });
+  });
+  app.post("/items/:id/voice", async (c) => {
+    if (!voices) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "声音复刻服务不可用");
+    try {
+      return c.json({ voice: await voices.enroll(c.get("userId"), uuid(c.req.param("id")), c.req.header("Authorization")?.replace(/^Bearer /, "") ?? "", c.req.raw.signal) });
+    } catch (error) {
+      if (isQwenCreateRejected(error)) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "千问拒绝了本次声音复刻，请检查样例后重新复刻");
+      if (error instanceof ProviderError) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "声音复刻请求未完成，请刷新音色状态核实");
+      throw error;
+    }
+  });
+  app.post("/items/:id/voice/speech", async (c) => {
+    if (!voices) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "声音复刻服务不可用");
+    const itemId = uuid(c.req.param("id"));
+    const input = TwinSpeechInputSchema.parse(await jsonBody(c));
+    try {
+      const { audio, mime } = await voices.speak(c.get("userId"), itemId, input, c.req.raw.signal);
+      return c.body(audio as Uint8Array<ArrayBuffer>, 200, { "Content-Type": mime, "Content-Disposition": "inline" });
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        if (error.httpStatus === 401 || error.httpStatus === 403) throw new KnowledgeError("QUOTA_EXCEEDED", 402, "模型账号余额不足或未开通语音合成");
+        throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "配音合成失败，请稍后重试");
+      }
+      throw error;
+    }
+  });
   app.delete("/items/:id", async (c) => c.json(await repository.deleteItem(c.get("userId"), uuid(c.req.param("id")), KnowledgeDeleteSchema.parse(await jsonBody(c)).version)));
   app.put("/collections/:collectionId/items/:itemId", async (c) => {
     await repository.changeMembership(c.get("userId"), uuid(c.req.param("itemId")), uuid(c.req.param("collectionId")), true); return c.body(null, 204);

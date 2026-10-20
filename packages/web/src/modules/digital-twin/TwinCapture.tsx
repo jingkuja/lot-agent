@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/index.js";
 import { knowledgeApi } from "../knowledge/api.js";
+import { twinVoiceApi } from "./api.js";
 import { captureError, MAX_VOICE_SECONDS, recordingToWave, twinTag, validateTwinFile, type TwinKind } from "./media.js";
 
-export function TwinCapture({ kind, onSaved }: { kind: TwinKind; onSaved: () => Promise<void> }) {
+export function TwinCapture({ kind, onSaved }: { kind: TwinKind; onSaved: (enrollment?: { itemId: string; error: string }) => Promise<void> }) {
   const { t } = useI18n();
   const voice = kind === "voice";
   const [stage, setStage] = useState<"idle" | "starting" | "recording" | "camera" | "processing">("idle");
@@ -125,8 +126,14 @@ export function TwinCapture({ kind, onSaved }: { kind: TwinKind; onSaved: () => 
     try {
       const extension = draft.file.name.split(".").at(-1);
       const file = new File([draft.file], `${name.trim().replace(/[\\/\x00-\x1f]/g, "-")}.${extension}`, { type: draft.file.type });
-      await knowledgeApi.upload([], file, draft.key, (value) => { if (active.current) setProgress(value); }, true, [twinTag(kind)]);
-      if (active.current) { setDraft(null); await onSaved(); }
+      const saved = await knowledgeApi.upload([], file, draft.key, (value) => { if (active.current) setProgress(value); }, true, [twinTag(kind)]);
+      // The file is already saved. A failed enrollment must not invite another
+      // upload; its persisted intent is reconciled from the library card.
+      if (active.current) setDraft(null);
+      let enrollmentError: string | undefined;
+      try { if (voice) await twinVoiceApi.enroll(saved.id); }
+      catch (e) { enrollmentError = e instanceof Error ? e.message : "声音复刻暂不可用"; }
+      if (active.current) await onSaved(enrollmentError ? { itemId: saved.id, error: enrollmentError } : undefined);
     } catch (e) { if (active.current) setError(captureError(e)); }
     finally { savingRef.current = false; if (active.current) setSaving(false); }
   }
@@ -140,6 +147,7 @@ export function TwinCapture({ kind, onSaved }: { kind: TwinKind; onSaved: () => 
     {stage === "starting" && <p role="status">{t("正在请求设备权限…")} <button type="button" onClick={cancelCapture}>{t("取消")}</button></p>}
     {stage === "recording" && <div className="twin-recording"><p role="status">{t("正在录音 {0} / 15 秒", [seconds])}</p><p>{t("请自然朗读：你好，这是我的声音。我希望用它讲述故事，分享生活中的美好。")}</p><button type="button" onClick={() => { recorder.current?.stop(); setStage("processing"); }}>{t("结束录音")}</button><button type="button" onClick={cancelCapture}>{t("取消")}</button></div>}
     {stage === "processing" && <p role="status">{t("正在处理素材…")}</p>}
+    {saving && !draft && voice && <p role="status">{t("正在复刻声音…")}</p>}
     {stage === "camera" && <div className="twin-camera"><video ref={video} autoPlay playsInline muted onLoadedData={() => setCameraReady(true)} aria-label={t("摄像头预览")} /><div className="twin-actions"><button type="button" disabled={!cameraReady} onClick={() => void takePhoto()}>{t("拍摄照片")}</button><button type="button" onClick={cancelCapture}>{t("取消")}</button></div></div>}
     {draft && stage === "idle" && <div className="twin-draft">
       {voice ? <audio src={preview} controls aria-label={t("声音试听")} /> : <img src={preview} alt={t("肖像预览")} />}

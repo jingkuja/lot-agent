@@ -41,7 +41,8 @@ try {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("dialog", (dialog) => dialog.accept());
-  const items = new Map(); const keys = new Map(); let seq = 0;
+  const items = new Map(); const keys = new Map(); const voices = new Map(); let seq = 0;
+  let voiceCreates = 0; let failNextEnrollment = false;
   await page.route("**/api/**", async (route) => {
     const req = route.request(); const url = new URL(req.url()); const path = url.pathname;
     if (!path.startsWith("/api/")) return route.continue();
@@ -65,6 +66,23 @@ try {
       items.set(id, { item, body }); keys.set(key, id); return json({ id }, 201);
     }
     const id = path.split("/")[5];
+    if (path.endsWith("/voice")) {
+      assert(items.get(id)?.item.tags.includes("digital-twin:voice"));
+      if (req.method() === "GET") return json({ voice: voices.get(id) ?? null });
+      assert.equal(req.method(), "POST");
+      if (!voices.has(id)) {
+        voiceCreates++;
+        if (failNextEnrollment) {
+          failNextEnrollment = false;
+          voices.set(id, { targetModel: "qwen-audio-3.0-tts-flash", voiceId: null, status: "unknown" });
+          return json({ error: { message: "声音复刻请求未完成，请刷新音色状态核实" } }, 503);
+        }
+        voices.set(id, { targetModel: "qwen-audio-3.0-tts-flash", voiceId: `qwen-audio-3.0-tts-flash-sample-${id}`, status: "DEPLOYING" });
+      } else {
+        voices.set(id, { ...voices.get(id), voiceId: `qwen-audio-3.0-tts-flash-sample-${id}`, status: "OK" });
+      }
+      return json({ voice: voices.get(id) });
+    }
     if (path.endsWith("/content")) { const asset = items.get(id); return route.fulfill({ contentType: asset.item.mime, body: asset.body }); }
     if (req.method() === "DELETE") { assert.equal(JSON.parse(req.postData()).version, 1); items.delete(id); return json({ ok: true }); }
     throw new Error(`Unexpected request ${req.method()} ${path}`);
@@ -81,6 +99,10 @@ try {
   await voice.getByLabel("素材名称").fill("我的声音");
   await voice.getByRole("button", { name: "保存到个人库" }).click();
   await voice.locator(".twin-asset").waitFor();
+  await voice.getByText("千问音色处理中", { exact: true }).waitFor();
+  await voice.getByRole("button", { name: "刷新音色状态", exact: true }).click();
+  await voice.getByText("千问音色已就绪", { exact: true }).waitFor();
+  assert.equal(voiceCreates, 1);
   await portrait.getByRole("button", { name: "本机拍照" }).click();
   await portrait.getByRole("button", { name: "拍摄照片" }).click();
   await portrait.getByLabel("素材名称").fill("我的肖像");
@@ -90,9 +112,14 @@ try {
   assert(await page.evaluate(() => window.fixtureStreams.every(stream => stream.getTracks().every(track => track.readyState === "ended"))));
   // File upload follows the same private, tagged persistence path.
   const wav = [...items.values()].find(v => v.item.mime === 'audio/wav').body;
+  failNextEnrollment = true;
   await voice.locator('input[type="file"]').setInputFiles({ name: 'uploaded.wav', mimeType: 'audio/wav', buffer: wav });
   await voice.getByRole("button", { name: "保存到个人库" }).click();
   await page.waitForFunction(() => document.querySelectorAll('.twin-asset').length === 3);
+  await voice.getByText("复刻结果待核实，请刷新音色状态", { exact: true }).waitFor();
+  await voice.getByRole("button", { name: "刷新音色状态", exact: true }).click();
+  await voice.locator('.twin-asset').filter({ hasText: 'uploaded.wav' }).getByText("千问音色已就绪", { exact: true }).waitFor();
+  assert.equal(voiceCreates, 2); // No duplicate upload/enrollment after the lost response.
   await portrait.locator('input[type="file"]').setInputFiles({ name: 'uploaded.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') });
   await portrait.getByRole("button", { name: "保存到个人库" }).click();
   await page.waitForFunction(() => document.querySelectorAll('.twin-asset').length === 4);
@@ -129,9 +156,10 @@ try {
   await page.reload();
   await page.getByRole('button', { name: 'Digital twin', exact: true }).first().click();
   await page.getByRole('heading', { name: 'Personal voice library' }).waitFor();
+  await page.getByText('Qwen voice ready', { exact: true }).first().waitFor();
   await page.setViewportSize({ width: 760, height: 1000 });
   assert(await page.evaluate(() => document.querySelector('.digital-twin-panel').scrollWidth <= document.querySelector('.knowledge-main').clientWidth));
   if (screenshots) await page.screenshot({ animations: 'disabled', path: join(screenshots, 'digital-twin-en.png') });
   assert.deepEqual(errors, []);
-  console.log('PASS: capture, WAV conversion, file uploads, private metadata, preview, delete, remount, device cleanup, permission denial, video slots/prompts, dark theme and English responsive layout.');
+  console.log('PASS: capture, WAV conversion, uploads, Qwen enrollment/status/recovery, private metadata, preview, delete, remount, device cleanup, permission denial, video slots/prompts, dark theme and English responsive layout.');
 } catch (error) { console.error(await page?.locator("body").innerText().catch(() => "No page")); throw error; } finally { await browser?.close(); await vite?.close(); await rm(temp, { recursive: true, force: true }); }

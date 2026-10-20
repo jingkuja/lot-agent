@@ -439,10 +439,12 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <p>每一镜由视频模型单独生成配音。镜与镜之间音色不一致，口型也不准（G01）。这是成片质量的最大风险。</p>
     <div class="flow"><span>TTS 整段音轨</span><i>→</i><span>按镜切分</span><i>→</i><span>音频驱动 / 对口型</span><i>→</i><span>本地合成</span></div>
     <p class="meta">保留当前方式作为"快速模式"，并写明质量边界。<code>marketing-video.md</code> 的"后续对口型服务候选"已经提出了这个方向。</p>
+    <p class="meta">2026-10-20 补充：<a href="marketing-video-audio-subtitle-plan-20261020.md">R1 / R2 配音、字幕与对口型方案</a>，包含 TTS 云服务选型、统一时间轴、改造位置和验收门槛。当前为设计建议，尚未实施。</p>
   </div>
   <div class="risk">
     <h3>R2 字幕 <span class="tag high">质量</span></h3>
     <p>字幕由视频模型直接画进画面。模型画中文字容易出错，而且生成后改不了（G01）。建议用 TTS 时间轴生成 SRT/ASS 字幕，在本地烧录。</p>
+    <p class="meta">与 R1 共用最终配音时间轴。具体见<a href="marketing-video-audio-subtitle-plan-20261020.md">配音与字幕方案</a>；字幕改样式可只重新合成，改台词需更新配音和口型。</p>
   </div>
   <div class="risk">
     <h3>R3 参考视频分析太重 <span class="tag mid">成本</span></h3>

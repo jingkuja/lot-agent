@@ -4,6 +4,7 @@ export * from "./image-generation.js";
 export * from "./openai-images-image.js";
 export * from "./video-generation.js";
 export * from "./kling-voices.js";
+export * from "./qwen-voices.js";
 export * from "./placeholder.js";
 export * from "./tts.js";
 export * from "./asr.js";

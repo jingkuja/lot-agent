@@ -21,6 +21,8 @@ import { knowledgeQueueConfig } from "./knowledge/ingestion/config.js";
 import { KnowledgeRepository } from "./knowledge/repository.js";
 import { LocalKnowledgeStorage } from "./knowledge/private-storage.js";
 import { createKnowledgeManageRoutes, createKnowledgePreviewRoutes } from "./knowledge/routes.js";
+import { TwinVoices } from "./digital-twin/voices.js";
+import { PgTwinVoiceStore } from "./digital-twin/voice-store.js";
 import { KnowledgeConfigSchema } from "./knowledge/module.js";
 import "./load-env.js";
 import { serve } from "@hono/node-server";
@@ -356,9 +358,16 @@ async function main() {
     const storage = new LocalKnowledgeStorage(resolve(ROOT, "data/knowledge"));
     app.use("/api/rag/manage/*", authMw);
     app.on("POST", "/api/rag/manage/uploads", uploadRateLimit);
+    app.on("POST", "/api/rag/manage/items/:id/voice", uploadRateLimit);
+    app.on("POST", "/api/rag/manage/items/:id/voice/speech", generationRateLimit);
     const profile = indexProfile(process.env.OPENAI_BASE_URL ?? "https://tokenhub.wetok.ai/v1");
     const retriever = process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? new KnowledgeRetriever(service.db.pool, profile, (owner, selectedProfile) => createUserEmbedder(service.db, selectedProfile, owner)) : undefined;
-    app.route("/api/rag/manage", createKnowledgeManageRoutes(repository, storage, retriever, new KnowledgeMaterials(repository, storage, resolve(ROOT, "data"))));
+    const voices = new TwinVoices({
+      repository, storage, store: new PgTwinVoiceStore(service.db.pool),
+      // Same gateway and per-user key as other model calls; no shared env key fallback.
+      speech: { apiKey: (userId) => service.db.getUserApiKey(userId, service.managedKeysEnabled), baseUrl: () => process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1" },
+    });
+    app.route("/api/rag/manage", createKnowledgeManageRoutes(repository, storage, retriever, new KnowledgeMaterials(repository, storage, resolve(ROOT, "data")), voices));
     app.route("/api/rag/preview", createKnowledgePreviewRoutes(repository, storage));
     if (process.env.KNOWLEDGE_EXTERNAL_ENABLED === "1" && retriever) {
       const keys = new KnowledgeKeys(service.db.pool);

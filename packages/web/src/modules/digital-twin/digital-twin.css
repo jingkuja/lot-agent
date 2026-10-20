@@ -27,3 +27,9 @@
 .twin-picker .knowledge-main { flex: 1; }
 .twin-selection-notice { flex-shrink: 0; padding: 12px 26px; margin: 0; color: var(--accent); border-top: 1px solid var(--border); }
 @media (max-width: 850px) { .twin-libraries { grid-template-columns: minmax(0, 1fr); } }
+.twin-voice-enrollment small { display: block; overflow-wrap: anywhere; }
+.twin-speech { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.twin-speech label { display: grid; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.twin-speech textarea, .twin-speech input { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit; font-size: 13px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; resize: vertical; }
+.twin-speech audio { width: 100%; min-width: 0; }
+[data-theme="dark"] .twin-speech audio { color-scheme: dark; }

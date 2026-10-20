@@ -2,13 +2,14 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../../i18n/index.js";
 import { knowledgeApi, type Item } from "../knowledge/api.js";
 import { TwinCapture } from "./TwinCapture.js";
+import { VoiceEnrollment } from "./VoiceEnrollment.js";
 import { twinTag, type TwinKind } from "./media.js";
 import "../knowledge/knowledge.css";
 import "./digital-twin.css";
 
 export type SelectTwin = (file: File, kind: TwinKind) => Promise<void>;
 
-function TwinAsset({ item, kind, onRemove, onSelect }: { item: Item; kind: TwinKind; onRemove: () => Promise<void>; onSelect?: SelectTwin }) {
+function TwinAsset({ item, kind, onRemove, onSelect, enrollmentError }: { item: Item; kind: TwinKind; onRemove: () => Promise<void>; onSelect?: SelectTwin; enrollmentError?: string }) {
   const { t } = useI18n();
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -43,6 +44,7 @@ function TwinAsset({ item, kind, onRemove, onSelect }: { item: Item; kind: TwinK
     </div>
     <strong title={item.title}>{item.title}</strong>
     <small>{(item.size / 1024 / 1024).toFixed(2)} MB</small>
+    {kind === "voice" && <VoiceEnrollment itemId={item.id} revisionId={item.revisionId} initialError={enrollmentError} />}
     <div className="twin-actions">
       {onSelect && <button type="button" disabled={busy || !file} onClick={() => void act(() => onSelect(file!, kind))}>{t("用于视频制作")}</button>}
       {!file && error && <button type="button" onClick={() => setAttempt((n) => n + 1)}>{t("重试")}</button>}
@@ -59,6 +61,7 @@ function TwinLibrary({ kind, onSelect, onChanged }: { kind: TwinKind; onSelect?:
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [enrollmentErrors, setEnrollmentErrors] = useState<Record<string, string>>({});
   const mounted = useRef(true);
   const requestId = useRef(0);
   const load = useCallback(async (next?: string) => {
@@ -72,16 +75,20 @@ function TwinLibrary({ kind, onSelect, onChanged }: { kind: TwinKind; onSelect?:
     } catch (e) { if (mounted.current && request === requestId.current) setError(e instanceof Error ? e.message : "素材加载失败，请重试。"); }
     finally { if (mounted.current && request === requestId.current) setLoading(false); }
   }, [kind]);
-  const changed = async () => { await load(); await onChanged?.(); };
+  const changed = async (enrollment?: { itemId: string; error: string }) => {
+    if (enrollment) setEnrollmentErrors(old => ({ ...old, [enrollment.itemId]: enrollment.error }));
+    await load(); await onChanged?.();
+  };
   useEffect(() => { mounted.current = true; void load(); return () => { mounted.current = false; requestId.current++; }; }, [load]);
   return <section className="twin-library" aria-labelledby={id}>
     <header><span className="twin-library-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{kind === "voice" ? <><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2 M12 19v3 M8 22h8" /></> : <><circle cx="12" cy="8" r="4" /><path d="M4 22v-2a8 8 0 0 1 16 0v2 M3 5V2h3 M18 2h3v3" /></>}</svg></span><div><h4 id={id}>{t(kind === "voice" ? "个人语音库" : "个人肖像库")}</h4><p>{t(kind === "voice" ? "录制或上传清晰的人声样例，让视频参考你的音色。" : "拍照或上传清晰肖像，作为视频中的人物形象参考。")}</p></div></header>
     <p className="twin-spec">{t(kind === "voice" ? "MP3 / WAV · 2–15 秒 · 最大 15 MB；建议在安静环境中自然朗读。" : "JPG / PNG / WebP · 最大 20 MB；建议正面、光线充足、面部无遮挡。")}</p>
     <TwinCapture kind={kind} onSaved={changed} />
+    {kind === "voice" && <p className="twin-spec">{t("保存声音后将通过千问复刻音色，用于后续配音。建议录制 10–15 秒清晰人声。")}</p>}
     {error && <p className="twin-error" role="alert">{t(error)} <button type="button" disabled={loading} onClick={() => void load()}>{t("重试")}</button></p>}
     {loading && <p role="status">{t("正在加载…")}</p>}
     {!loading && !error && !items.length && <div className="twin-empty">{t(kind === "voice" ? "还没有声音样例，录制第一段个人声音吧。" : "还没有肖像，拍摄或上传第一张照片吧。")}</div>}
-    <div className="twin-assets">{items.map((item) => <TwinAsset key={item.id} item={item} kind={kind} onSelect={onSelect} onRemove={async () => { await knowledgeApi.remove(item); await changed(); }} />)}</div>
+    <div className="twin-assets">{items.map((item) => <TwinAsset key={item.id} item={item} kind={kind} onSelect={onSelect} enrollmentError={enrollmentErrors[item.id]} onRemove={async () => { await knowledgeApi.remove(item); await changed(); }} />)}</div>
     {cursor && <button type="button" disabled={loading} onClick={() => void load(cursor)}>{t("加载更多")}</button>}
   </section>;
 }

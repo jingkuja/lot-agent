@@ -9,7 +9,7 @@ export class ProviderError extends Error {
   readonly httpStatus?: number;
   readonly retryable: boolean;
   constructor(
-    readonly provider: "generation" | "kling-voice",
+    readonly provider: "generation" | "kling-voice" | "qwen-voice" | "speech",
     readonly phase: ProviderPhase,
     readonly code: ProviderErrorCode,
     options: { httpStatus?: number; requestId?: unknown; privateValues?: string[] } = {},
@@ -19,7 +19,7 @@ export class ProviderError extends Error {
       && !options.privateValues?.some(value => value && options.requestId === value) ? options.requestId : undefined;
     const summary = code === "REAL_PERSON_REJECTED"
       ? "参考图包含真人，需先完成真人认证"
-      : `${provider === "kling-voice" ? "Kling 音色" : "媒体供应商"}请求失败`;
+      : `${provider === "kling-voice" ? "Kling 音色" : provider === "qwen-voice" ? "千问音色" : provider === "speech" ? "语音合成" : "媒体供应商"}请求失败`;
     super(`${summary}（${phase}，${code}${status ? `，HTTP ${status}` : ""}${id ? `，request_id: ${id}` : ""}）`);
     this.httpStatus = status;
     this.requestId = id;
