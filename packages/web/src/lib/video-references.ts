@@ -74,9 +74,9 @@ export const GROK_REFERENCE_VIDEO_MAX_SECONDS = 8;
 
 /** Grok uses a reference video on its own; other references would be silently ignored. */
 export function grokReferencesIssue({ images, videos, audios, frames, durationSec }: { images: number; videos: number; audios: number; frames: number; durationSec?: number }): string | undefined {
-  if (videos > MAX_GROK_REFERENCE_VIDEOS) return "旗舰模型最多添加 1 段参考视频";
-  if (videos && (images || audios || frames)) return "旗舰模型使用参考视频时不会使用参考图、首尾帧和参考音频，请移除后再生成";
-  if (videos && durationSec != null && durationSec > GROK_REFERENCE_VIDEO_MAX_SECONDS) return "旗舰模型使用参考视频时单次最长 8 秒，请缩短视频时长";
+  if (videos > MAX_GROK_REFERENCE_VIDEOS) return "spacebunny 模型最多添加 1 段参考视频";
+  if (videos && (images || audios || frames)) return "spacebunny 模型使用参考视频时不会使用参考图、首尾帧和参考音频，请移除后再生成";
+  if (videos && durationSec != null && durationSec > GROK_REFERENCE_VIDEO_MAX_SECONDS) return "spacebunny 模型使用参考视频时单次最长 8 秒，请缩短视频时长";
   return undefined;
 }
 

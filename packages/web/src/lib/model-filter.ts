@@ -75,9 +75,9 @@ export function isGrokVideoModel(id: string | null | undefined): boolean {
   return (id ?? "").trim().toLowerCase() === "grok-imagine-video-1.5";
 }
 
-/** Video picker: Grok is shown as 旗舰; requests keep the real model id. */
+/** Video picker: Grok is shown as spacebunny; requests keep the real model id. */
 export function visibleVideoModels<T extends { id: string; label?: string }>(models: T[]): T[] {
-  return models.map((model) => isGrokVideoModel(model.id) ? { ...model, label: IMAGE_FLAGSHIP_LABEL } : model);
+  return models.map((model) => isGrokVideoModel(model.id) ? { ...model, label: "spacebunny" } : model);
 }
 
 /** MiniMax H3 Max (ids like `h3-max` / `minimax-video-h3-max`) uses 480P / 768P. */

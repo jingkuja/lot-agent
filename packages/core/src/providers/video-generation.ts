@@ -47,7 +47,7 @@ export function isSeedanceModel(model: string): boolean {
   return model.toLowerCase().includes("seedance");
 }
 
-/** xAI Grok Imagine 1.5, shown as 旗舰. The gateway adapts the shared `/videos` request. */
+/** xAI Grok Imagine 1.5, shown as spacebunny. The gateway adapts the shared `/videos` request. */
 export const GROK_VIDEO_MODEL = "grok-imagine-video-1.5";
 /** Reference images or a reference video limit Grok output to 720p. */
 export const GROK_REFERENCE_MAX_EDGE = 720;
@@ -83,17 +83,17 @@ export interface GrokVideoInputSummary {
 
 /** A reference video replaces every other reference, and references cap output at 720p. */
 export function grokVideoInputIssue(input: GrokVideoInputSummary): string | undefined {
-  if (input.videos > GROK_MAX_REFERENCE_VIDEOS) return "旗舰模型最多添加 1 段参考视频";
-  if (input.audios > GROK_MAX_REFERENCE_AUDIOS) return "旗舰模型最多添加 3 段参考音频";
+  if (input.videos > GROK_MAX_REFERENCE_VIDEOS) return "spacebunny 模型最多添加 1 段参考视频";
+  if (input.audios > GROK_MAX_REFERENCE_AUDIOS) return "spacebunny 模型最多添加 3 段参考音频";
   if (input.videos && (input.images || input.audios || input.firstFrame || input.lastFrame)) {
-    return "旗舰模型使用参考视频时不会使用参考图、首尾帧和参考音频，请移除后再生成";
+    return "spacebunny 模型使用参考视频时不会使用参考图、首尾帧和参考音频，请移除后再生成";
   }
   if (input.videos && input.durationSec != null && input.durationSec > GROK_REFERENCE_VIDEO_MAX_SECONDS) {
-    return "旗舰模型使用参考视频时单次最长 8 秒，请缩短视频时长";
+    return "spacebunny 模型使用参考视频时单次最长 8 秒，请缩短视频时长";
   }
   const edge = Math.max(0, ...input.resolutions.map((value) => videoTierEdge(value) ?? 0));
   if ((input.images || input.videos) && edge > GROK_REFERENCE_MAX_EDGE) {
-    return "旗舰模型使用参考图或参考视频时最高支持 720p，请调低清晰度";
+    return "spacebunny 模型使用参考图或参考视频时最高支持 720p，请调低清晰度";
   }
   return undefined;
 }

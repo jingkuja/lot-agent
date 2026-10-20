@@ -235,9 +235,9 @@ describe("missingSeedanceMentions", () => {
 });
 
 describe("visibleVideoModels", () => {
-  it("labels Grok Imagine 1.5 as 旗舰 and keeps its real id", () => {
+  it("labels Grok Imagine 1.5 as spacebunny and keeps its real id", () => {
     const listed = visibleVideoModels([{ id: "kling-video-v3-omni" }, { id: "grok-imagine-video-1.5" }, { id: "grok-imagine-video-1.5-lite" }]);
-    expect(listed).toEqual([{ id: "kling-video-v3-omni" }, { id: "grok-imagine-video-1.5", label: "旗舰" }, { id: "grok-imagine-video-1.5-lite" }]);
+    expect(listed).toEqual([{ id: "kling-video-v3-omni" }, { id: "grok-imagine-video-1.5", label: "spacebunny" }, { id: "grok-imagine-video-1.5-lite" }]);
     expect(isGrokVideoModel("Grok-Imagine-Video-1.5")).toBe(true);
     expect(isGrokVideoModel("grok-imagine-video")).toBe(false);
   });

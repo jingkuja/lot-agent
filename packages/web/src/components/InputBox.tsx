@@ -250,7 +250,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       // Duration reads cached each file's metadata, so this adds no extra I/O.
       const klingIssue = kind === "video" && klingVideo ? klingReferenceVideosIssue(next) : undefined;
       if (klingIssue) throw new Error(klingIssue);
-      if (kind === "video" && grokVideo && next.length > MAX_GROK_REFERENCE_VIDEOS) throw new Error("旗舰模型最多添加 1 段参考视频");
+      if (kind === "video" && grokVideo && next.length > MAX_GROK_REFERENCE_VIDEOS) throw new Error("spacebunny 模型最多添加 1 段参考视频");
       if (kind === "video") setReferenceVideoFiles(next);
       else setReferenceAudioFiles(next);
     } catch (error) {
