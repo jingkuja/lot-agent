@@ -80,7 +80,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h1>营销影像 Agent 评审</h1>
   <p class="meta">评审日期：2026-10-19 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>，之后共 15 个提交）</p>
-  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。第六轮（2026-10-21）完成功能缺口 G05（项目与素材生命周期），在提交 <code>887f160</code>。第七轮（2026-10-21）完成功能缺口 G04（单镜替换与重新合成）。</p>
+  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。第六轮（2026-10-21）完成功能缺口 G05（项目与素材生命周期），在提交 <code>887f160</code>。第七轮（2026-10-21）完成功能缺口 G04（单镜替换与重新合成），在提交 <code>9d4cc7a</code>。</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
 </header>
 
@@ -427,6 +427,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="fixes7">
   <h2>第七轮修复（2026-10-21） <span class="tag ok">G04 已完成</span></h2>
+  <p class="meta">提交：<code>9d4cc7a</code></p>
   <p>本轮处理功能缺口 G04。原状态：提交后草稿的制作配置固定，结果页分镜只读。要改一镜，只能复制为新草稿，所有片段重新生成和付费。</p>
   <div class="table-wrap"><table>
     <thead><tr><th>问题</th><th>修复</th><th>保护与边界</th></tr></thead>
@@ -487,7 +488,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>G01</td><td>逐字配音与字幕校正</td><td><span class="tag high">未完成</span></td><td>仍由视频模型生成配音和字幕。见 R1、R2。</td></tr>
       <tr><td>G02</td><td>成片质量检查</td><td><span class="tag high">未完成</span></td><td>Worker 只检查画面存在、音轨存在和时长（<code>run.ts</code>）。不检查错字、口播和人物一致性。</td></tr>
       <tr><td>G03</td><td>费用与用量说明</td><td><span class="tag high">未完成</span></td><td>生成前只做额度预检。文档写明"预计费用展示暂未加入"。</td></tr>
-      <tr><td>G04</td><td>单镜替换与重新合成</td><td><span class="tag ok">已完成</span><br><span class="meta">原为未完成</span></td><td>10-21：成片或任务停止后，可在结果页修改分镜文字或勾选镜头，只重新生成这些镜头。其余镜头直接引用原片段资产，不调用模型、不计量，然后重新合成（<code>POST /:id/revise</code>、<code>repository.ts → revise</code>）。残留：不能改镜数、时长和其他配置；没有片段预览。见<a href="#fixes7">第七轮修复</a>。</td></tr>
+      <tr><td>G04</td><td>单镜替换与重新合成</td><td><span class="tag ok">已完成</span><br><span class="meta">原为未完成</span></td><td>10-21（提交 <code>9d4cc7a</code>）：成片或任务停止后，可在结果页修改分镜文字或勾选镜头，只重新生成这些镜头。其余镜头直接引用原片段资产，不调用模型、不计量，然后重新合成（<code>POST /:id/revise</code>、<code>repository.ts → revise</code>）。残留：不能改镜数、时长和其他配置；没有片段预览。见<a href="#fixes7">第七轮修复</a>。</td></tr>
       <tr><td>G05</td><td>项目与素材生命周期</td><td><span class="tag ok">已完成</span><br><span class="meta">原为部分完成</span></td><td>10-21（提交 <code>887f160</code>）：删除草稿时在同一事务中删除该草稿的片段与成片资产和参考分析，提交后删除文件（<code>repository.ts → remove</code>）。草稿区显示空间用量（<code>GET /usage</code>）。上传素材按设计保留在「个人素材」。残留：本次之前删除的草稿留下的成片无法再关联，未自动清理；含未核实请求的分析保留。见<a href="#fixes6">第六轮修复</a>。</td></tr>
       <tr><td>G06</td><td>质量与性能看板</td><td><span class="tag high">未完成</span></td><td>没有成功率、阶段耗时、排队和 unknown 积压指标。</td></tr>
       <tr><td>G07</td><td>实拍对口型与完整 TTS</td><td><span class="tag low">C0</span></td><td>服务端拒绝 <code>mode: "recorded"</code>，没有界面。</td></tr>
