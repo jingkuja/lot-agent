@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
-import { MARKETING_SHOT_MAX_SECONDS, marketingReferenceError, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { MARKETING_SHOT_MAX_SECONDS, marketingImageCount, marketingReferenceError, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
-import { imageCount } from "./materials.js";
+import { imageCount, imageRoom } from "./materials.js";
 import { DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 
 const IMAGE_TYPES = "image/jpeg,image/png,image/webp";
 
-/** Step 2: presenter, scene and reference video for the video model. */
+/** Step 2: presenter, product, scene and reference video for the video model. Image
+ * limits come from the active model profile. */
 export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, audioNotice, onPickPortrait }: {
   form: DraftForm; profile: MarketingVideoProfile; handlers: MaterialHandlers;
   /** What a selected reference video changes about generation. */
@@ -18,20 +19,30 @@ export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, a
   const { t } = useI18n();
   const { draft, busy, frozen, ready } = form;
   const referenceError = marketingReferenceError(draft, profile);
+  const portrait = imageRoom("portrait", draft, profile), product = imageRoom("product", draft, profile), setting = imageRoom("scene", draft, profile);
+  const { total } = profile.referenceImages;
+  // Show the shared cap only when the sections can add up to more than it.
+  const capped = portrait.limit + product.limit + setting.limit > total;
   return <>
     <p className="mv-hint">{t("肖像用于确定出镜人物，第一张为主要参考，其余请使用同一人的照片；留空时由模型安排人物。")}</p>
+    {capped && <p className="mv-hint">{t("所有参考图片合计最多 {0} 张（已选 {1} 张）。", [total, marketingImageCount(draft.assets)])}</p>}
     <section className="mv-material-group" aria-label={t("人物")}>
-      <div className="mv-material-heading"><strong>{t("人物")}</strong><span>{t("合计最多 3 张（已选 {0} 张）", [imageCount("portrait", draft)])}</span></div>
+      <div className="mv-material-heading"><strong>{t("人物")}</strong><span>{t("最多 {0} 张（已选 {1} 张）", [portrait.limit, imageCount("portrait", draft)])}</span></div>
       <div className="mv-columns">
-        <div className="mv-upload"><button className="mv-upload-button" disabled={busy || frozen || !ready || imageCount("portrait", draft) >= 3} onClick={onPickPortrait}>{t("选择数字分身素材")}</button></div>
-        <MaterialField form={form} slot="portrait" label="上传肖像图片（选填）" accept={IMAGE_TYPES} handlers={handlers} />
+        <div className="mv-upload"><button className="mv-upload-button" disabled={busy || frozen || !ready || portrait.full} onClick={onPickPortrait}>{t("选择数字分身素材")}</button></div>
+        <MaterialField form={form} slot="portrait" label="上传肖像图片（选填）" accept={IMAGE_TYPES} handlers={handlers} full={portrait.full} />
       </div>
     </section>
+    <section className="mv-material-group" aria-label={t("产品")}>
+      <div className="mv-material-heading"><strong>{t("产品")}</strong><span>{t("最多 {0} 张（已选 {1} 张）", [product.limit, imageCount("product", draft)])}</span></div>
+      <MaterialField form={form} slot="product" label="上传产品样例图（选填）" accept={IMAGE_TYPES} handlers={handlers} full={product.full} />
+      <p className="mv-hint">{t("产品图用于还原产品外观、颜色、包装和标识，可上传同一产品的不同角度或细节；建议主体清晰、背景简洁。出现产品的镜头会按图还原，价格、功效等信息仍以文案为准。")}</p>
+    </section>
     <section className="mv-material-group" aria-label={t("场景")}>
-      <div className="mv-material-heading"><strong>{t("场景")}</strong><span>{t("合计最多 3 张（已选 {0} 张）", [imageCount("scene", draft)])}</span></div>
+      <div className="mv-material-heading"><strong>{t("场景")}</strong><span>{t("最多 {0} 张（已选 {1} 张）", [setting.limit, imageCount("scene", draft)])}</span></div>
       <div className="mv-columns">
-        <MaterialField form={form} slot="background" label="上传背景图片（选填）" accept={IMAGE_TYPES} handlers={handlers} />
-        <MaterialField form={form} slot="scene" label="上传场景图片（选填）" accept={IMAGE_TYPES} handlers={handlers} />
+        <MaterialField form={form} slot="background" label="上传背景图片（选填）" accept={IMAGE_TYPES} handlers={handlers} full={setting.full} />
+        <MaterialField form={form} slot="scene" label="上传场景图片（选填）" accept={IMAGE_TYPES} handlers={handlers} full={setting.full} />
       </div>
       <p className="mv-hint">{t("背景图参考环境与空间布局，场景图参考构图与物品细节。图片中的其他人物不会作为主角；每镜按分镜选用相关内容。")}</p>
     </section>
@@ -42,7 +53,7 @@ export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, a
         t("用于参考动作和构图，不沿用原视频台词或音乐。"),
         t("参考视频支持 MP4、MOV，最大 150 MB。"),
         profile.referenceVideo ? t("时长 {0}–{1} 秒。", [profile.referenceVideo.minSeconds, profile.referenceVideo.maxSeconds]) : "",
-        profile.imagesWithReferenceVideo ? t("选择参考视频后，人物与场景图片合计最多 {0} 张。", [profile.imagesWithReferenceVideo]) : t("选择参考视频后，人物与场景图片不参与生成。"),
+        profile.imagesWithReferenceVideo ? t("选择参考视频后，参考图片合计最多 {0} 张。", [profile.imagesWithReferenceVideo]) : t("选择参考视频后，参考图片不参与生成。"),
         profile.referenceVideoShotMaxSeconds < MARKETING_SHOT_MAX_SECONDS ? t("选择参考视频后，每镜最长 {0} 秒。", [profile.referenceVideoShotMaxSeconds]) : "",
       ].filter(Boolean).join(" ")}</p>}
       {referenceError && <p className="mv-error" role="alert">{t(referenceError)}</p>}

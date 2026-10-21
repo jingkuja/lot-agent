@@ -14,7 +14,7 @@ import { CopyStep, type SourceKind } from "./CopyStep.js";
 import { MaterialsStep } from "./MaterialsStep.js";
 import { ProductionStep } from "./ProductionStep.js";
 import { StoryboardAudioNotice, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
-import { checkMaterial, checkReferenceVideo, imageCount, isImageSlot, materialFor, type Material, type MaterialSlot } from "./materials.js";
+import { checkMaterial, checkReferenceVideo, imageLimitError, isImageSlot, materialFor, type Material, type MaterialSlot } from "./materials.js";
 import { useDraftSession, useExclusive, useTaskPolling } from "./session.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { WaitStatus } from "./WaitStatus.js";
@@ -436,7 +436,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     materials,
     onFiles: (slot, files) => void act(async () => {
       if (slot === "video" && files.length > 1) throw new Error("参考视频最多 1 个，请先移除已有视频。");
-      if (isImageSlot(slot) && imageCount(slot, draftRef.current) + files.length > 3) throw new Error("人物或场景区域各最多 3 张。");
+      const limitError = isImageSlot(slot) ? imageLimitError(slot, files.length, draftRef.current, profile) : "";
+      if (limitError) throw new Error(limitError);
       for (const file of files) await selectMaterial(file, slot);
     }),
     onRemove: (slot, id) => {
@@ -500,8 +501,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const copyReady = draft.copyMode === "rewrite" ? sourceKind === "upload" ? !!draft.referenceUpload : !!draft.reference.trim() : !!draft.topic.trim();
   const copyAction = <button className="mv-soft" disabled={busy || !copyReady || !ready} onClick={() => void act(writeCopy)}>{t(busy && !textUnknown ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜")}</button>;
   const referenceVideoStatus = profile.imagesWithReferenceVideo
-    ? t("已选择参考视频：人物与场景图片合计最多 {0} 张；不生成口播配音，音色设置不生效，可添加背景音乐。", [profile.imagesWithReferenceVideo])
-    : t("已选择参考视频：人物与场景图片不参与生成；不生成口播配音，音色设置不生效，可添加背景音乐。");
+    ? t("已选择参考视频：参考图片合计最多 {0} 张；不生成口播配音，音色设置不生效，可添加背景音乐。", [profile.imagesWithReferenceVideo])
+    : t("已选择参考视频：参考图片不参与生成；不生成口播配音，音色设置不生效，可添加背景音乐。");
   const unusableMaterial = Object.entries(draft.assets).some(([slot, value]) => marketingAssetIds(value).some(id => {
     const item = materialFor(materials, slot, id);
     return !item || item.issue;

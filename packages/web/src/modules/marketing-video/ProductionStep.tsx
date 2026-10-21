@@ -46,7 +46,7 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
     <label className="mv-label">{t("画面比例")}</label>
     <Choices form={form} label="画面比例" values={["9:16", "16:9", "1:1"].map(value => ({ value, label: value }))} value={draft.ratio} onChoose={value => field("ratio", value as MarketingDraft["ratio"])} />
     <Choices form={form} label="视频质量" values={[{ value: "720p", label: "默认" }, { value: "1080p", label: "高清" }]} value={draft.quality} onChoose={value => field("quality", value as MarketingDraft["quality"])} />
-    {profile.referenceMaxQuality && <p className="mv-hint">{t("使用人物、场景图片或参考视频时最高支持 720p。")}</p>}
+    {profile.referenceMaxQuality && <p className="mv-hint">{t("使用参考图片或参考视频时最高支持 720p。")}</p>}
     {hasBoard ? <div ref={storyboardPanel} className="mv-storyboard-panel">
       <div className="mv-section-head"><h3>{t("确认分镜")}</h3><span>{t("{0} 个分镜 · 共 {1} 秒", [draft.storyboard.length, ends.at(-1) ?? 0])}</span></div>
       {tally}

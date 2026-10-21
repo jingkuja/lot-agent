@@ -14,8 +14,15 @@ export interface MarketingVideoProfile {
   shotMaxSeconds: number;
   /** Longest shot when a generation reference video is selected. */
   referenceVideoShotMaxSeconds: number;
-  /** Portrait/background/scene images allowed with a reference video; 0 means the model ignores them. */
+  /** Reference images per request without a reference video: the total and each studio
+   * section (background and scene share `setting`). Section caps may add up to more than
+   * the total; the total still applies. */
+  referenceImages: { total: number; portrait: number; product: number; setting: number };
+  /** Reference images allowed with a reference video; 0 means the model ignores them. */
   imagesWithReferenceVideo: number;
+  /** How a clip prompt names the submitted image at `index` (0-based submission order):
+   * `${prefix}${index + firstNumber}${suffix}`. */
+  imagePromptTag: { prefix: string; suffix: string; firstNumber: 0 | 1 };
   /** Highest quality when any image or video reference is submitted. */
   referenceMaxQuality?: "720p";
   /** Documented reference video limits; omitted when the vendor publishes none. */
@@ -25,7 +32,7 @@ export interface MarketingVideoProfile {
   };
   /** Prompt length cap for one clip request. */
   promptMaxChars: number;
-  /** Portrait/background/scene image contract, checked on upload and again by the server before submission. */
+  /** Reference image contract, checked on upload and again by the server before submission. */
   referenceImage: {
     formats: readonly ("image/jpeg" | "image/png" | "image/webp")[];
     maxBytes: number;
@@ -35,11 +42,14 @@ export interface MarketingVideoProfile {
 }
 
 // https://cloud.tencent.com/document/product/1823/135742
+// Reference images and elements: at most 7 without a reference video, 4 with one.
 export const KLING_MARKETING_PROFILE: MarketingVideoProfile = {
   modelId: "kling-video-v3-omni",
   shotMaxSeconds: 15,
   referenceVideoShotMaxSeconds: 15,
+  referenceImages: { total: 7, portrait: 3, product: 3, setting: 3 },
   imagesWithReferenceVideo: 3,
+  imagePromptTag: { prefix: "image ", suffix: "", firstNumber: 1 },
   referenceVideo: { minSeconds: 3, maxSeconds: 15.5, minFps: 24, maxFps: 60, minEdge: 700, maxEdge: 4553, maxPixels: 8_294_400, minAspect: 0.4, maxAspect: 2 },
   promptMaxChars: 3072,
   referenceImage: { formats: ["image/jpeg", "image/png"], maxBytes: 50 * 1024 * 1024, minEdge: 300, minAspect: 1 / 2.5, maxAspect: 2.5 },
@@ -48,13 +58,17 @@ export const KLING_MARKETING_PROFILE: MarketingVideoProfile = {
 // https://docs.x.ai/developers/model-capabilities/video/generation
 // A reference video replaces image and voice references and fails over 8
 // seconds upstream. No prompt limit is documented, so Kling's cap is kept.
-// Reference images: only the count is documented (reference-to-video), so the
-// contract is a decodable JPG/PNG/WebP within the marketing upload size.
+// https://docs.x.ai/developers/model-capabilities/video/reference-to-video
+// Up to 14 reference images, named in the prompt by position from <IMAGE_0>. Only
+// the count is documented, so the contract is a decodable JPG/PNG/WebP within the
+// marketing upload size.
 export const GROK_MARKETING_PROFILE: MarketingVideoProfile = {
   modelId: "grok-imagine-video-1.5",
   shotMaxSeconds: 15,
   referenceVideoShotMaxSeconds: 8,
+  referenceImages: { total: 14, portrait: 4, product: 5, setting: 5 },
   imagesWithReferenceVideo: 0,
+  imagePromptTag: { prefix: "<IMAGE_", suffix: ">", firstNumber: 0 },
   referenceMaxQuality: "720p",
   promptMaxChars: 3072,
   referenceImage: { formats: ["image/jpeg", "image/png", "image/webp"], maxBytes: 20 * 1024 * 1024 },
@@ -62,6 +76,8 @@ export const GROK_MARKETING_PROFILE: MarketingVideoProfile = {
 
 export const MARKETING_VIDEO_PROFILES: readonly MarketingVideoProfile[] = [KLING_MARKETING_PROFILE, GROK_MARKETING_PROFILE];
 export const DEFAULT_MARKETING_VIDEO_MODEL = GROK_MARKETING_PROFILE.modelId;
+/** Largest image section of any profile; drafts store at most this many per slot. */
+export const MARKETING_MAX_SECTION_IMAGES = Math.max(...MARKETING_VIDEO_PROFILES.flatMap(profile => [profile.referenceImages.portrait, profile.referenceImages.product, profile.referenceImages.setting]));
 
 export function marketingVideoProfile(modelId: string | null | undefined): MarketingVideoProfile | undefined {
   return MARKETING_VIDEO_PROFILES.find(profile => profile.modelId === modelId);

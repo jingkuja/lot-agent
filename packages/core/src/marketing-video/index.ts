@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { KLING_MARKETING_PROFILE, marketingVideoProfile, type MarketingVideoProfile } from "./models.js";
+import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoProfile, type MarketingVideoProfile } from "./models.js";
 
 export * from "./models.js";
 
@@ -23,9 +23,23 @@ export const MarketingCreationSchema = z.object({
   continuity: z.string().trim().max(400).optional(),
 }).strict();
 
-const MarketingImagesSchema = z.union([z.string().uuid(), z.array(z.string().uuid()).min(1).max(3)]);
+// Per-model section and total limits are checked by marketingReferenceError, so stored
+// drafts and frozen jobs keep loading after the active model changes.
+const MarketingImagesSchema = z.union([z.string().uuid(), z.array(z.string().uuid()).min(1).max(MARKETING_MAX_SECTION_IMAGES)]);
 export function marketingAssetIds(value: string | string[] | undefined): string[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
+}
+/** Image slots in submission order: identity, then product, then setting. */
+export const MARKETING_IMAGE_SLOTS = ["portrait", "product", "background", "scene"] as const;
+export type MarketingImageSlot = typeof MARKETING_IMAGE_SLOTS[number];
+/** Studio sections with their own limit; background and scene share `setting`. */
+export type MarketingImageSection = keyof Omit<MarketingVideoProfile["referenceImages"], "total">;
+export const marketingImageSection = (slot: MarketingImageSlot): MarketingImageSection =>
+  slot === "background" || slot === "scene" ? "setting" : slot;
+/** Selected images in a section, or in all sections when omitted. */
+export function marketingImageCount(assets: Partial<Record<MarketingImageSlot, string | string[]>>, section?: MarketingImageSection): number {
+  return MARKETING_IMAGE_SLOTS.filter(slot => !section || marketingImageSection(slot) === section)
+    .reduce((sum, slot) => sum + marketingAssetIds(assets[slot]).length, 0);
 }
 
 /** Older drafts may hold a cover image that never reached generation. Drop it before
@@ -57,9 +71,11 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   assets: z.object({
     portrait: MarketingImagesSchema.optional(), background: MarketingImagesSchema.optional(),
     scene: MarketingImagesSchema.optional(),
+    /** Product samples that anchor the product's look (shape, colors, packaging, labels). */
+    product: MarketingImagesSchema.optional(),
     voice: z.string().uuid().optional(), video: z.string().uuid().optional(),
     music: z.string().uuid().optional(),
-  }).strict().refine(assets => marketingAssetIds(assets.background).length + marketingAssetIds(assets.scene).length <= 3, { message: "背景与场景图片合计最多 3 张。" }).default({}),
+  }).strict().refine(assets => marketingImageCount(assets) <= MARKETING_MAX_SECTION_IMAGES * 3, { message: "参考图片过多。" }).default({}),
   storyboard: MarketingStoryboardSchema.default([]),
   /** Presenter and setting look shared by all shots; every clip request repeats it verbatim
    * because each clip is generated independently. */
@@ -87,15 +103,26 @@ export function marketingJobProfile(input: { modelId?: unknown }): MarketingVide
   return profile;
 }
 
+const MARKETING_IMAGE_SECTION_NAMES: Record<MarketingImageSection, string> = { portrait: "人物", product: "产品", setting: "场景" };
+/** Section or total image limit of the model that `assets` exceed. */
+export function marketingImageLimitError(assets: Partial<Record<MarketingImageSlot, string | string[]>>, profile: MarketingVideoProfile): string {
+  for (const section of ["portrait", "product", "setting"] as const) {
+    const limit = profile.referenceImages[section];
+    if (marketingImageCount(assets, section) > limit) return `当前视频模型的${MARKETING_IMAGE_SECTION_NAMES[section]}图片最多 ${limit} 张，请移除多余图片。`;
+  }
+  return marketingImageCount(assets) > profile.referenceImages.total ? `当前视频模型的参考图片合计最多 ${profile.referenceImages.total} 张，请移除多余图片。` : "";
+}
 /** Reference combinations the model cannot use. */
 export function marketingReferenceError(draft: MarketingDraft, profile: MarketingVideoProfile): string {
-  const images = (["portrait", "background", "scene"] as const).reduce((sum, slot) => sum + marketingAssetIds(draft.assets[slot]).length, 0);
+  const images = marketingImageCount(draft.assets);
   if (draft.assets.video && images > profile.imagesWithReferenceVideo) {
     return profile.imagesWithReferenceVideo
-      ? `已选择参考视频，人物与场景图片合计不能超过 ${profile.imagesWithReferenceVideo} 张，请移除多余图片。`
-      : "已选择参考视频，人物与场景图片不会参与生成，请移除图片或参考视频。";
+      ? `已选择参考视频，参考图片合计不能超过 ${profile.imagesWithReferenceVideo} 张，请移除多余图片。`
+      : "已选择参考视频，参考图片不会参与生成，请移除图片或参考视频。";
   }
-  if (profile.referenceMaxQuality === "720p" && draft.quality === "1080p" && (images || draft.assets.video)) return "使用人物、场景图片或参考视频时最高支持 720p，请将视频质量改为默认。";
+  const limitError = marketingImageLimitError(draft.assets, profile);
+  if (limitError) return limitError;
+  if (profile.referenceMaxQuality === "720p" && draft.quality === "1080p" && (images || draft.assets.video)) return "使用参考图片或参考视频时最高支持 720p，请将视频质量改为默认。";
   return "";
 }
 export const MarketingReviewFieldSchema = z.enum(["script", "publishTitle", "tags", "background", "continuity", "storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera"]);

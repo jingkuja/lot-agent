@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
-import { marketingImageReferences, marketingSegmentPrompt } from "./prompt.js";
+import { KLING_MARKETING_PROFILE, MarketingDraftSchema } from "@lot-agent/core/marketing-video";
+import { marketingImageReferences, marketingPlanningContext, marketingSegmentPrompt, MARKETING_STORYBOARD_RULES } from "./prompt.js";
 import { activeMarketingVideoProfile } from "./model.js";
 import { creationPrompt, parseCreation, publicationPrompt, storyboardPrompt } from "./creation.js";
 import { parseTextResult } from "./text-result.js";
@@ -110,14 +110,31 @@ describe("marketing model subtitle instructions", () => {
   });
 });
 
-it("numbers portrait, background and scene references in submission order", () => {
+it("numbers portrait, background and scene references in submission order with Kling's image names", () => {
   const draft = MarketingDraftSchema.parse({ assets: { portrait: [id, id, id], background: [id, id], scene: [id] } });
-  const prompt = marketingSegmentPrompt(draft, { index: 0, script: "Hello", durationSec: 15 }, 1);
-  expect(prompt).toContain("Use image 3 for the presenter's identity only.");
-  expect(prompt).toContain("Use image 4 for the setting and spatial layout.");
+  const prompt = marketingSegmentPrompt(draft, { index: 0, script: "Hello", durationSec: 15 }, 1, true, KLING_MARKETING_PROFILE);
+  expect(prompt).toContain("Use image 1, image 2, image 3 for the presenter's identity only.");
+  expect(prompt).toContain("Use image 4, image 5 for the setting and spatial layout.");
   expect(prompt).toContain("Use image 6 for relevant scene composition, objects and details.");
   expect(prompt).not.toContain(id);
+});
 
+it("submits product images after the portrait and names them with Grok's zero-based tags", () => {
+  const draft = MarketingDraftSchema.parse({ assets: { scene: id, product: [id, id], portrait: id },
+    storyboard: [{ script: "这款保温杯一整天都热乎。", visual: "人物手持保温杯", action: "拧开杯盖", camera: "中景推近" }] });
+  expect(marketingImageReferences(draft).map(image => image.role)).toEqual(["portrait", "product", "product", "scene"]);
+  const prompt = marketingSegmentPrompt(draft, { index: 0, script: draft.storyboard[0].script, durationSec: 8 }, 2);
+  expect(prompt).toContain("Use <IMAGE_0> for the presenter's identity only.");
+  expect(prompt).toContain("Use <IMAGE_1>, <IMAGE_2> for the product's exact appearance.");
+  expect(prompt).toContain("Use <IMAGE_3> for relevant scene composition, objects and details.");
+  expect(prompt).toContain("never redesign it or substitute a generic or different product");
+  expect(prompt).toContain("Supplied setting references take precedence");
+  // Product alone is not a setting reference: the text background still applies.
+  const productOnly = marketingSegmentPrompt(MarketingDraftSchema.parse({ assets: { product: id } }), { index: 0, script: "Hello", durationSec: 8 }, 1);
+  expect(productOnly).toContain("backgroundDescription is the default setting");
+  expect(productOnly).not.toContain("Background/scene images guide");
+  expect(marketingPlanningContext(draft).materials).toMatchObject({ portrait: 1, product: 2, scene: 1 });
+  expect(MARKETING_STORYBOARD_RULES).toContain("never introduce a different or competing product");
 });
 
 it("uses reference video for silent visuals without requesting voice synthesis", () => {
@@ -142,7 +159,7 @@ it.each([
   const draft = MarketingDraftSchema.parse({ assets });
   expect(marketingImageReferences(draft)).toEqual(roles.map((role, index) => ({ role, imageNumber: index + 1, assetId: id })));
   const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 8 }, 2);
-  expect([...prompt.matchAll(/Use image (\d+) for/g)].map(match => Number(match[1]))).toEqual(roles.map((_, index) => index + 1));
+  expect([...prompt.matchAll(/<IMAGE_(\d+)>/g)].map(match => Number(match[1]))).toEqual(roles.map((_, index) => index));
 });
 
 it("honors persisted audio mode independently of the presence of a video reference", () => {
@@ -178,6 +195,11 @@ it("keeps ordinary six-image prompts compact and rejects oversize directions wit
     storyboard: [{ script: "欢迎来喝咖啡。", visual: "人物在窗边展示咖啡", action: "端起杯子", camera: "中景推近" }] });
   const segment = { index: 0, script: draft.storyboard[0].script, durationSec: 15 };
   expect(marketingSegmentPrompt(draft, segment, 2).length).toBeLessThanOrEqual(2500);
+  // Every image role at Grok's 14-image maximum, and Kling's 7, stays compact too.
+  const all = MarketingDraftSchema.parse({ ...draft, assets: { portrait: [id, id, id, id], product: [id, id, id, id, id], background: [id, id], scene: [id, id, id], voice: id } });
+  expect(marketingSegmentPrompt(all, segment, 2).length).toBeLessThanOrEqual(2500);
+  const kling = MarketingDraftSchema.parse({ ...draft, assets: { portrait: [id, id, id], product: [id, id], background: id, scene: id, voice: id } });
+  expect(marketingSegmentPrompt(kling, segment, 2, true, KLING_MARKETING_PROFILE).length).toBeLessThanOrEqual(2500);
   expect(activeMarketingVideoProfile().promptMaxChars).toBe(3072);
   const long = MarketingDraftSchema.parse({ ...draft, background: "背景".repeat(300), voice: "声音".repeat(50),
     storyboard: [{ ...draft.storyboard[0], visual: "画面".repeat(300), action: "动作".repeat(200), camera: "镜头".repeat(200) }] });

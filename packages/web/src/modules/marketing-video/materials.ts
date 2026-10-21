@@ -1,4 +1,4 @@
-import { marketingAssetIds, marketingReferenceImageIssue, type MarketingDraft, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { MARKETING_IMAGE_SLOTS, marketingAssetIds, marketingImageCount, marketingImageLimitError, marketingImageSection, marketingReferenceImageIssue, type MarketingDraft, type MarketingImageSlot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { validateTwinFile } from "../digital-twin/media.js";
 import { readImageSize, klingReferenceVideoIssue, readMediaDuration, readMediaMetadata } from "../../lib/video-references.js";
 import { isKlingModel } from "../../lib/model-filter.js";
@@ -6,15 +6,21 @@ import { isKlingModel } from "../../lib/model-filter.js";
 export type MaterialSlot = keyof MarketingDraft["assets"];
 export type Material = { id: string; url: string; name: string; mime: string; issue?: "unsupported" };
 
-/** Slots that hold up to three reference images. */
-export const isImageSlot = (slot: MaterialSlot): slot is "portrait" | "background" | "scene" => ["portrait", "background", "scene"].includes(slot);
+/** Slots that hold several reference images. */
+export const isImageSlot = (slot: MaterialSlot): slot is MarketingImageSlot => (MARKETING_IMAGE_SLOTS as readonly string[]).includes(slot);
 
-/** Background and scene images share one limit of three. */
-export function imageCount(slot: MaterialSlot, draft: MarketingDraft) {
-  return slot === "background" || slot === "scene"
-    ? marketingAssetIds(draft.assets.background).length + marketingAssetIds(draft.assets.scene).length
-    : marketingAssetIds(draft.assets[slot]).length;
+/** Images selected in the slot's section; background and scene share one section. */
+export const imageCount = (slot: MarketingImageSlot, draft: MarketingDraft) => marketingImageCount(draft.assets, marketingImageSection(slot));
+
+/** The model's limit for the slot's section, and whether the section or all sections are full. */
+export function imageRoom(slot: MarketingImageSlot, draft: MarketingDraft, profile: MarketingVideoProfile) {
+  const limit = profile.referenceImages[marketingImageSection(slot)];
+  return { limit, full: imageCount(slot, draft) >= limit || marketingImageCount(draft.assets) >= profile.referenceImages.total };
 }
+
+/** Error when adding `added` images to the slot would pass the model's limits. */
+export const imageLimitError = (slot: MarketingImageSlot, added: number, draft: MarketingDraft, profile: MarketingVideoProfile) =>
+  marketingImageLimitError({ ...draft.assets, [slot]: [...marketingAssetIds(draft.assets[slot]), ...Array.from({ length: added }, () => "")] }, profile);
 
 /** The stored material for an ID, including drafts that stored a single slot entry. */
 export function materialFor(materials: Record<string, Material>, slot: string, id: string) {
@@ -24,7 +30,8 @@ export function materialFor(materials: Record<string, Material>, slot: string, i
 /** Check a file before upload. The server re-checks the real file against the active
  * model before any submission. */
 export async function checkMaterial(file: File, slot: MaterialSlot, draft: MarketingDraft, profile: MarketingVideoProfile) {
-  if (isImageSlot(slot) && imageCount(slot, draft) >= 3) throw new Error("人物或场景区域各最多 3 张。");
+  const limitError = isImageSlot(slot) ? imageLimitError(slot, 1, draft, profile) : "";
+  if (limitError) throw new Error(limitError);
   if (isImageSlot(slot) || slot === "voice") {
     await validateTwinFile(file, slot === "voice" ? "voice" : "portrait");
     const issue = isImageSlot(slot) ? await readImageSize(file).then(size => marketingReferenceImageIssue(profile, { mime: file.type, size: file.size, ...size }),

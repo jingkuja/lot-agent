@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotChanged } from "./index.js";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotChanged } from "./index.js";
 
 const grok = GROK_MARKETING_PROFILE;
 const kling = KLING_MARKETING_PROFILE;
@@ -105,18 +105,29 @@ describe("editable marketing storyboard", () => {
   });
 });
 
-it("limits each image category to three UUIDs and accepts legacy single images", () => {
+it("stores up to the largest model section per image slot and accepts legacy single images", () => {
   const id = "11111111-1111-4111-8111-111111111111";
-  for (const slot of ["portrait", "background", "scene"]) {
-    for (const value of [id, [id], [id, id, id]]) expect(MarketingDraftSchema.safeParse({ assets: { [slot]: value } }).success).toBe(true);
-    for (const value of [[], [id, id, id, id], ["https://untrusted.test/image.png"]]) expect(MarketingDraftSchema.safeParse({ assets: { [slot]: value } }).success).toBe(false);
+  const many = (n: number) => Array.from({ length: n }, () => id);
+  expect(MARKETING_MAX_SECTION_IMAGES).toBe(5);
+  for (const slot of ["portrait", "product", "background", "scene"]) {
+    for (const value of [id, [id], many(MARKETING_MAX_SECTION_IMAGES)]) expect(MarketingDraftSchema.safeParse({ assets: { [slot]: value } }).success).toBe(true);
+    for (const value of [[], many(MARKETING_MAX_SECTION_IMAGES + 1), ["https://untrusted.test/image.png"]]) expect(MarketingDraftSchema.safeParse({ assets: { [slot]: value } }).success).toBe(false);
   }
 });
 
-it("shares the three-image allowance across background and scene", () => {
+it("applies each model's section and total image limits", () => {
   const id = "11111111-1111-4111-8111-111111111111";
-  expect(MarketingDraftSchema.safeParse({ assets: { portrait: [id, id, id], background: id, scene: [id, id] } }).success).toBe(true);
-  expect(MarketingDraftSchema.safeParse({ assets: { background: [id, id], scene: [id, id] } }).success).toBe(false);
+  const many = (n: number) => Array.from({ length: n }, () => id);
+  const error = (assets: object, profile = kling) => marketingReferenceError(MarketingDraftSchema.parse({ assets }), profile);
+  // Kling: 3 per section, 7 in all; background and scene share a section.
+  expect(error({ portrait: many(3), product: many(3), scene: id })).toBe("");
+  expect(error({ background: many(2), scene: many(2) })).toContain("场景图片最多 3 张");
+  expect(error({ product: many(4) })).toContain("产品图片最多 3 张");
+  expect(error({ portrait: many(3), product: many(3), background: id, scene: id })).toContain("参考图片合计最多 7 张");
+  // Grok: 4 people, 5 product, 5 setting, 14 in all.
+  expect(error({ portrait: many(4), product: many(5), background: many(2), scene: many(3) }, grok)).toBe("");
+  expect(error({ portrait: many(5) }, grok)).toContain("人物图片最多 4 张");
+  expect(error({ background: many(3), scene: many(3) }, grok)).toContain("场景图片最多 5 张");
 });
 
 it("applies Kling's three-image reference video rule", () => {

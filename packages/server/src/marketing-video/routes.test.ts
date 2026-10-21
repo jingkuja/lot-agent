@@ -396,21 +396,23 @@ it("checks ownership of every image in all three categories", async () => {
   }
 });
 
-it("restores all image metadata and submits six references in category order", async () => {
+it("restores all image metadata and submits references in category order", async () => {
   const f = fixture();
-  const ids = Array.from({ length: 6 }, () => randomUUID());
-  f.project.draft.assets = { scene: ids.slice(5), background: ids.slice(3, 5), portrait: ids.slice(0, 3) };
+  const ids = Array.from({ length: 8 }, () => randomUUID());
+  f.project.draft.assets = { scene: ids.slice(7), background: ids.slice(5, 7), product: ids.slice(3, 5), portrait: ids.slice(0, 3) };
   f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: "image/png", size_bytes: 100, url: `/static/${args[0]}.png` }));
   const restored = await (await f.call(`/${id}`)).json() as { assets: Record<string, { url: string }> };
   for (const assetId of ids) expect(restored.assets[assetId].url).toBe(`/static/${assetId}.png`);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
   expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ input_reference: ids.map(assetId => `/static/${assetId}.png`) }), false);
   const prompt = marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2);
-  const roles = [...prompt.matchAll(/Use image (\d+) for ([^.]+)\./g)].map(match => ({ image: Number(match[1]), role: match[2] }));
+  const roles = [...prompt.matchAll(/Use ((?:<IMAGE_\d+>(?:, )?)+) for ([^.]+)\./g)]
+    .flatMap(match => [...match[1].matchAll(/<IMAGE_(\d+)>/g)].map(tag => ({ image: Number(tag[1]), role: match[2] })));
   expect(roles).toEqual([
-    ...[1, 2, 3].map(image => ({ image, role: "the presenter's identity only" })),
-    ...[4, 5].map(image => ({ image, role: "the setting and spatial layout" })),
-    { image: 6, role: "relevant scene composition, objects and details" },
+    ...[0, 1, 2].map(image => ({ image, role: "the presenter's identity only" })),
+    ...[3, 4].map(image => ({ image, role: "the product's exact appearance" })),
+    ...[5, 6].map(image => ({ image, role: "the setting and spatial layout" })),
+    { image: 7, role: "relevant scene composition, objects and details" },
   ]);
 });
 
