@@ -130,6 +130,12 @@ export function DigitalPresenterStudio({ ownerId, onDraftChange }: { ownerId?: s
     const p = await save();
     apply(await presenterApi.review(p.id, p.version, locale), true);
   }
+  /** A fix from the check: the takes of the old text no longer apply, so they are reloaded for the new one. */
+  async function applyScript(script: string) {
+    set("script", script);
+    await review();
+    await loadTakes();
+  }
   async function synthesize(slots?: number[]) {
     const p = await save();
     const token = session.token();
@@ -172,6 +178,8 @@ export function DigitalPresenterStudio({ ownerId, onDraftChange }: { ownerId?: s
     : plan.error || presenterMaterialBlocker(draft) || presenterSpeechBlocker(draft)
     || (!takes || takeMs.length !== plan.segments.length ? "请先生成全部配音并试听。" : presenterTakesIssue(draft.mode, takeMs))
     || (!project?.review || dirty ? "请先完成当前文案检查。" : project.review.verdict === "reject" ? "文案检查存在高风险内容，请修改后重新检查。" : "");
+  const reviewSection = <ReviewSection review={dirty ? undefined : project?.review} script={draft.script} busy={locked}
+    onReview={() => void act("正在检查文案", review, true)} onApply={script => void act("正在检查文案", () => applyScript(script), true)} />;
   const nextStep = (target: number) => { if (target && !draft.script.trim()) setError("请先填写或生成口播文案。"); else { setStep(target); if (target === 2) void loadTakes(); } };
 
   return <div className="mv-scroll"><div className="mv-studio dp-studio">
@@ -206,11 +214,11 @@ export function DigitalPresenterStudio({ ownerId, onDraftChange }: { ownerId?: s
       <nav className="mv-steps" aria-label={t("数字主播创作步骤")}>{STEPS.map((label, i) => <button key={label} disabled={busy} aria-current={i === step ? "step" : undefined} className={i === step ? "active" : ""} onClick={() => nextStep(i)}><span>{i + 1}</span>{t(label)}</button>)}</nav>
       <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / 3</span></div>
         {step === 0 && <ScriptStep form={form} onWrite={() => void act("正在生成口播文案", writeScript, true)}
-          reviewPanel={!!draft.script.trim() && <ReviewSection review={dirty ? undefined : project?.review} busy={busy} onReview={() => void act("正在检查文案", review, true)} />} />}
+          reviewPanel={!!draft.script.trim() && reviewSection} />}
         {step === 1 && <PresenterStep form={form} materials={materials} speechAvailable={!!capabilities?.speech}
           onPickTwin={slot => setPicker(slot)} onPickVoice={() => setPicker("voice")} onUpload={(slot, file) => void act("正在上传素材", () => upload(slot, file))} />}
         {step === 2 && <>
-          <ReviewSection review={dirty ? undefined : project?.review} busy={busy} onReview={() => void act("正在检查文案", review, true)} />
+          {reviewSection}
           <TakesStep form={form} project={project} takes={takes} blocker={blocker}
             onSynthesize={slots => void act("正在合成配音", () => synthesize(slots))} onGenerate={() => void act("", generate)} />
         </>}

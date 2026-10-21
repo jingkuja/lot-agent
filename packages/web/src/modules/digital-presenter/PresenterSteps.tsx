@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { planPresenterSegments, presenterTrackMs, PRESENTER_SEGMENT_MAX_MS, type PresenterDraft, type PresenterReview, type PresenterTake } from "@lot-agent/core/digital-presenter";
+import { planPresenterSegments, presenterTrackMs, PRESENTER_SEGMENT_MAX_MS, type PresenterDraft, type PresenterReview, type PresenterReviewIssue, type PresenterTake } from "@lot-agent/core/digital-presenter";
 import { useI18n } from "../../i18n/index.js";
 import { takeAudio, type Material, type MaterialSlot, type Project } from "./api.js";
 
@@ -36,19 +36,41 @@ export function ScriptStep({ form, onWrite, reviewPanel }: { form: PresenterForm
   </>;
 }
 
-/** The marketing copy check, applied to the spoken script. */
-export function ReviewSection({ review, busy, onReview }: { review?: PresenterReview; busy: boolean; onReview(): void }) {
+/** One finding of the check: apply its suggestion where the excerpt occurs once, or edit the whole script. */
+function ReviewIssue({ issue, script, busy, onApply }: { issue: PresenterReviewIssue; script: string; busy: boolean; onApply(script: string): void }) {
+  const { t } = useI18n();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(script);
+  // Only an excerpt found exactly once can be replaced without guessing which occurrence is meant.
+  const located = !!issue.text && script.split(issue.text).length === 2;
+  const suggested = located && issue.suggestion && issue.suggestion !== issue.text ? script.replace(issue.text, issue.suggestion) : null;
+  return <article className="mv-review-issue">
+    <header><strong>{t("口播文案")}</strong><span>{t(issue.severity === "reject" ? "请修改风险内容" : "有内容需要核实")}</span></header>
+    <blockquote>{issue.text}</blockquote>
+    <p>{t("风险原因")}：{issue.reason}</p>
+    <p>{t("修改建议")}：{issue.suggestion || t("删除这段风险内容")}</p>
+    {editing ? <div className="mv-review-edit">
+      <label className="mv-field"><span>{t("修改内容")} · {t("口播文案")}</span><textarea autoFocus rows={5} maxLength={2000} value={value} disabled={busy} onChange={event => setValue(event.target.value)} /></label>
+      <div className="mv-review-actions">
+        <button disabled={busy || !value.trim() || value === script} onClick={() => onApply(value)}>{t("保存修改并重新检查")}</button>
+        <button disabled={busy} onClick={() => setEditing(false)}>{t("取消")}</button>
+      </div>
+    </div> : <div className="mv-review-actions">
+      <button disabled={busy || !suggested} onClick={() => { if (suggested) onApply(suggested); }}>{t("一键修改")}</button>
+      <button disabled={busy} onClick={() => { setValue(script); setEditing(true); }}>{t("自己修改")}</button>
+    </div>}
+    {!located && !editing && <p className="mv-hint">{t("此条建议需要结合上下文修改，请选择自己修改。")}</p>}
+  </article>;
+}
+
+/** The marketing copy check, applied to the spoken script. Edits save the script and check it again. */
+export function ReviewSection({ review, script, busy, onReview, onApply }: { review?: PresenterReview; script: string; busy: boolean; onReview(): void; onApply(script: string): void }) {
   const { t } = useI18n();
   return <section className="mv-review-section" aria-label={t("文案检查")}>
     <div className="mv-section-head"><h3>{t("文案检查")}</h3><button disabled={busy} onClick={onReview}>{t("检查当前文案")}</button></div>
     {review ? <div className={`mv-review mv-review-${review.verdict}`}>
       <strong role="status">{t(({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
-      {review.issues.map((issue, index) => <article key={index} className="mv-review-issue">
-        <header><strong>{t("口播文案")}</strong><span>{t(issue.severity === "reject" ? "请修改风险内容" : "有内容需要核实")}</span></header>
-        <blockquote>{issue.text}</blockquote>
-        <p>{t("风险原因")}：{issue.reason}</p>
-        <p>{t("修改建议")}：{issue.suggestion || t("删除这段风险内容")}</p>
-      </article>)}
+      {review.issues.map((issue, index) => <ReviewIssue key={`${review.reviewedAt}:${index}:${issue.text}`} issue={issue} script={script} busy={busy} onApply={onApply} />)}
     </div> : <p className="mv-hint" role="status">{t("生成视频前需完成文案检查；修改文案后需重新检查。")}</p>}
   </section>;
 }
