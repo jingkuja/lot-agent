@@ -381,7 +381,7 @@ try {
     assert.equal(await videoInput.isDisabled(), true);
     await page.getByRole('button', { name: '下一步', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: '生成分镜并预览', exact: true }).isDisabled(), true);
-    assert.equal(await page.getByRole('button', { name: '选择数字分身音色', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: '从数字分身语音库选择', exact: true }).count(), 0);
     await page.getByRole('button', { name: '上一步', exact: true }).click();
     await snap('marketing-video-reference-limit.png');
     await page.getByRole('region', { name: '参考视频', exact: true }).getByRole('button', { name: '移除', exact: true }).click();
@@ -392,8 +392,12 @@ try {
   await page.getByRole('button', { name: '下一步', exact: true }).click();
   assert.equal(await page.getByLabel('添加字幕', { exact: true }).isChecked(), true);
   assert.equal(await page.getByText('当前环境不支持字幕，可关闭字幕后生成。').count(), 0);
-  assert.equal(await page.getByLabel('上传音色样例（选填，2–15 秒）').isVisible(), true);
-  await page.getByRole('button', { name: '选择数字分身音色', exact: true }).click();
+  assert.equal(await page.getByLabel('上传声音样例（2–15 秒）').isVisible(), true);
+  const voiceModes = page.getByRole('group', { name: '配音方式', exact: true });
+  assert.equal(await voiceModes.getByRole('button', { name: /^AI 配音/ }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).isDisabled(), true);
+  assert.equal(await voiceModes.getByRole('button').count(), 2);
+  await page.getByRole('button', { name: '从数字分身语音库选择', exact: true }).click();
   const voicePicker = page.getByRole('dialog', { name: '选择数字分身音色' });
   assert.equal(await voicePicker.getByRole('heading', { name: '个人肖像库' }).count(), 0);
   await voicePicker.locator('.twin-asset').filter({ hasText: '我的声音' }).getByRole('button', { name: '用于视频制作' }).click();
@@ -501,7 +505,7 @@ try {
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), p.draft.script);
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.getByRole('button', { name: '确认与制作', exact: false }).click();
-  await page.getByRole('button', { name: '选择数字分身音色', exact: true }).click();
+  await page.getByRole('button', { name: '从数字分身语音库选择', exact: true }).click();
   await voicePicker.locator('.twin-asset').filter({ hasText: '我的声音' }).getByRole('button', { name: '用于视频制作' }).click();
   await voicePicker.getByRole('status').filter({ hasText: '我的声音' }).waitFor();
   await voicePicker.getByRole('button', { name: '完成', exact: true }).click();
@@ -523,9 +527,9 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.getByLabel('Spoken script').fill(script);
   await page.getByRole('button', { name: 'Confirm & produce', exact: false }).click();
-  assert.equal(await page.getByLabel('Upload voice sample (optional, 2–15 seconds)').isVisible(), true);
+  assert.equal(await page.getByLabel('Upload voice sample (2–15 seconds)').isVisible(), true);
   await snap('marketing-video-en-compact.png');
-  await page.getByRole('button', { name: 'Choose digital twin voice', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose from digital twin voices', exact: true }).click();
   await page.getByRole('dialog', { name: 'Choose digital twin voice' }).getByRole('heading', { name: 'Personal voice library' }).waitFor();
   await snap('marketing-video-voice-picker-en-dark.png');
   await page.getByRole('button', { name: 'Done', exact: true }).click();

@@ -4,6 +4,24 @@ import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { Choices, DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 
+/** How the narration is voiced. Only model voicing is built; the twin's own voice-over
+ * is listed so the difference is visible. Lip-synced presenters belong to a separate agent. */
+const VOICE_MODES = [
+  { title: "AI 配音", description: "视频模型生成人物语音，可用声音样例参考音色。", ready: true },
+  { title: "数字分身旁白", description: "用数字分身原声配画外旁白，画面人物不开口。", ready: false },
+];
+
+function VoiceModes({ form }: { form: DraftForm }) {
+  const { t } = useI18n();
+  return <div className="mv-voice-modes" role="group" aria-label={t("配音方式")}>
+    {VOICE_MODES.map(mode => <button key={mode.title} type="button" className={mode.ready ? "selected" : ""} aria-pressed={mode.ready}
+      disabled={!mode.ready || form.busy || form.frozen || !form.ready}>
+      <strong>{t(mode.title)}{!mode.ready && <em>{t("即将上线")}</em>}</strong>
+      <span>{t(mode.description)}</span>
+    </button>)}
+  </div>;
+}
+
 /** Step 3: voice, music, captions and format, then confirm the storyboard and generate. */
 export function ProductionStep({ form, profile, handlers, referenceVideoStatus, parts, planError, blocker, blockerId, buttonLabel, storyboardPanel, reviewPanel, audioNotice, onPickVoice, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
   form: DraftForm; profile: MarketingVideoProfile; handlers: MaterialHandlers; referenceVideoStatus: string;
@@ -34,11 +52,14 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
   const tally = <p className="mv-hint">{t("目标 {0} 秒，分镜共 {1} 秒，分 {2} 段生成。", [draft.durationSec, parts.reduce((sum, part) => sum + part.durationSec, 0), parts.length])}</p>;
   return <>
     {draft.assets.video ? <p className="mv-hint" role="status">{referenceVideoStatus}</p> : <>
+      <label className="mv-label">{t("配音方式")}</label>
+      <VoiceModes form={form} />
       <label className="mv-label">{t("旁白风格")}</label>
       <Choices form={form} label="旁白风格" values={["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value }))} value={draft.voice} onChoose={value => field("voice", value)} />
-      <button className="mv-soft" disabled={busy || frozen || !ready} onClick={onPickVoice}>{t("选择数字分身音色")}</button>
-      <MaterialField form={form} slot="voice" label="上传音色样例（选填，2–15 秒）" accept="audio/mpeg,audio/wav" handlers={handlers} />
-      <p className="mv-hint">{t("留空时按所选旁白风格使用模型原生配音；配音和字幕均由模型生成，发布前请试听成片。")}</p>
+      <label className="mv-label">{t("音色参考（选填）")}</label>
+      <button className="mv-soft" disabled={busy || frozen || !ready} onClick={onPickVoice}>{t("从数字分身语音库选择")}</button>
+      <MaterialField form={form} slot="voice" label="上传声音样例（2–15 秒）" accept="audio/mpeg,audio/wav" handlers={handlers} />
+      <p className="mv-hint">{t("留空时按所选旁白风格由模型配音。声音样例只作音色参考，成片声音与原声相近但不相同；配音和字幕均由模型生成，发布前请试听成片。")}</p>
     </>}
     <MaterialField form={form} slot="music" label="选择背景音乐（选填）" accept="audio/mpeg,audio/wav,audio/mp4" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
