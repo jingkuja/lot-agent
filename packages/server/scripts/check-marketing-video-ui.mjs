@@ -75,6 +75,8 @@ try {
     // The UI follows the server's clip profile. This fixture keeps Kling's clip limits under a
     // neutral ID with no image dimension limits, so the 1×1 fixture images pass upload checks.
     if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
+    if (path === '/api/marketing-videos/usage') return json({ videoBytes: 50 * 1024 * 1024, materialBytes: 1024 * 1024, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
+    if (request.method() === 'DELETE' && /^\/api\/marketing-videos\/[0-9a-f-]{36}$/.test(path)) { projects.delete(path.split('/')[3]); return json({ ok: true, removedBytes: 3 * 1024 * 1024, keptAnalyses: 1 }); }
     if (path === '/api/marketing-videos') {
       const query = new URL(request.url()).searchParams.get('q') ?? '';
       return json({ data: [...projects.values()].filter(p => !query || [p.draft.topic, p.draft.publishTitle, p.draft.script].some(text => text?.includes(query))) });
@@ -200,12 +202,12 @@ try {
     await dialog.getByRole('button', { name: action, exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
   };
-  const chooseAgent = async (name) => { await page.locator('.agent-grid-toggle[aria-controls]').click(); await page.locator('.agent-launcher-grid').getByRole('button', { name, exact: true }).click(); };
+  // Up to six agents show without expanding; the "More" toggle exists only beyond that.
+  const chooseAgent = async (name) => { const more = page.locator('.agent-grid-toggle[aria-controls]'); if (await more.count()) await more.click(); await page.locator('.agent-launcher-grid').getByRole('button', { name, exact: true }).click(); };
   await page.locator('.agent-launcher-item').nth(2).waitFor();
-  assert.deepEqual(await page.locator('.agent-launcher-item > span:nth-child(2)').allTextContents(), ['通用助手', '营销影像', '图片生成']);
-  await page.locator('.agent-grid-toggle[aria-controls]').click();
+  // The launcher lists every agent since the sidebar rework; the marketing agent stays second.
+  assert.deepEqual((await page.locator('.agent-launcher-item > span:nth-child(2)').allTextContents()).slice(0, 3), ['通用助手', '营销影像', '图片生成']);
   assert.equal(await page.locator('.agent-launcher-item > span:nth-child(2)').nth(1).textContent(), '营销影像');
-  await page.locator('.agent-grid-toggle[aria-controls]').click();
   await chooseAgent('营销影像');
   await page.getByRole('heading', { name: '确定文案', exact: true }).waitFor();
   assert.equal(await page.locator('.mv-steps button').count(), 3);
@@ -563,6 +565,8 @@ try {
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-unknown-en-dark.png');
   await page.locator('.mv-library > summary').click();
+  // Space usage shows when the library opens.
+  await page.getByText('Storage used 51.0 MB: videos and clips 50.0 MB · materials in use 1.0 MB · reference analyses 0 KB / 2.0 GB', { exact: true }).waitFor();
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
   await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), true, 'reopening the same project must keep its lock');
@@ -574,6 +578,15 @@ try {
   await page.getByRole('button', { name: 'Start a new video', exact: true }).click();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), false);
   assert.equal(await page.getByLabel('Spoken script').inputValue(), '');
+  // Deleting a draft removes its generated videos and analyses; uploads stay in Personal Assets.
+  await page.locator('.mv-draft-item').filter({ hasText: 'Other editable draft' }).getByRole('button', { name: 'Delete draft', exact: true }).click();
+  const deleteDialog = page.getByRole('dialog', { name: 'Delete video draft', exact: true });
+  assert.match(await deleteDialog.innerText(), /generated video and clips, and its reference video analysis will be permanently deleted[\s\S]*Uploaded materials remain in Personal Assets/);
+  await snap('marketing-video-delete-en-dark.png');
+  await confirmDialog('Delete video draft', 'Delete');
+  await page.getByText('Draft deleted. 3.0 MB freed. Uploaded materials remain in Personal Assets. 1 reference analyses have model requests awaiting verification and were not deleted yet.', { exact: true }).waitFor();
+  assert.equal(await page.locator('.mv-draft-item').filter({ hasText: 'Other editable draft' }).count(), 0);
+  assert.equal(projects.has(otherDraftId), false, 'the DELETE request reached the API');
   if (!await page.locator('.mv-library').evaluate(element => element.open)) await page.locator('.mv-library > summary').click();
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
   await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();

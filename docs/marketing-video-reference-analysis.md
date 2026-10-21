@@ -106,7 +106,7 @@ OCR 只合并相邻一致文字；空结果、漏识别或价格/否定词变化
 | `GET /:id/frames/:frameId` | 私有 JPEG，`private,no-store` |
 | `POST /:id/cancel` | 持久化取消，Worker 中止请求和本地处理 |
 | `POST /:id/resume` | `{expectedRevision, visualOnly?}`，显式付费动作，拒绝未知调用；旧版文字编辑产生的修订（revision > 1）从摘要继续 |
-| `DELETE /:id` | 检查租约、用量和项目引用后删除私有内容 |
+| `DELETE /:id` | 检查租约、用量和项目引用后删除私有内容。Web 不直接调用：删除营销草稿时服务端在同一事务删除为该草稿创建的分析（见 [marketing-video.md](marketing-video.md)） |
 | `GET /sessions` / `PUT /sessions/:platform` / `DELETE /sessions/:platform` | 登录态状态 / 导入 `{cookies}` / 撤销，不返回 Cookie |
 
 营销工作台点击“拆解爆款文案”后直接显示一个“视频链接或参考文案”输入框。产品补充要求可选，点击“一键拆解并生成”后自动完成，文案与分镜显示在当前步骤并可编辑。“查看参考资料”默认折叠，仅展示摘要、画面文字和私有帧；不再要求校对、勾选、手动生成摘要或预览选用。平台登录仅在来源要求登录时展开处理。页面状态和图片 URL 随账号切换销毁。

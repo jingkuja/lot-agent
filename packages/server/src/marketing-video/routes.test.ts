@@ -1,6 +1,9 @@
 import { inspectMedia } from "./media.js";
 import { readImageInfo } from "./image-size.js";
 import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { MarketingError } from "./repository.js";
 import type { PgMarketingTextOperations } from "./operations.js";
 import { describe, expect, it, vi } from "vitest";
@@ -17,7 +20,7 @@ vi.mock("./image-size.js", () => ({ readImageInfo: vi.fn(async () => ({ mime: "i
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner") {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
-  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), page: vi.fn(async (..._args: unknown[]) => ({ data: [] as unknown[], nextCursor: undefined as string | undefined })), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async (..._args: unknown[]) => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => {}), releaseUnknownSegments: vi.fn(async () => 1) };
+  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), page: vi.fn(async (..._args: unknown[]) => ({ data: [] as unknown[], nextCursor: undefined as string | undefined })), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async (..._args: unknown[]) => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => ({ files: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })), usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1) };
   const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
     begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, _input: unknown, draft?: typeof project.draft) => {
@@ -114,7 +117,9 @@ describe("marketing project HTTP boundaries", () => {
   it("deletes only the owner's draft and waits for a cancelled worker to finish", async () => {
     const f = fixture();
     const remove = () => f.app.request(`/api/marketing-videos/${id}`, { method: "DELETE" });
-    expect((await remove()).status).toBe(200);
+    const removed = await remove();
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toEqual({ ok: true, removedBytes: 2048, keptAnalyses: 1 });
     expect(f.store.remove).toHaveBeenCalledWith("owner", id);
     f.store.get.mockResolvedValueOnce(null as never);
     expect((await remove()).status).toBe(404);
@@ -123,6 +128,29 @@ describe("marketing project HTTP boundaries", () => {
     f.service.jobQueue.canResumePersisted.mockResolvedValueOnce(false);
     expect((await remove()).status).toBe(409);
     expect(f.store.remove).toHaveBeenCalledOnce();
+  });
+  it("reports the owner's draft space usage", async () => {
+    const f = fixture();
+    const response = await f.app.request("/api/marketing-videos/usage");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ videoBytes: 4096, materialBytes: 1024, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
+    expect(f.store.usage).toHaveBeenCalledWith("owner");
+  });
+  it("removes the deleted draft's generated files only inside the assets folder", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marketing-delete-"));
+    try {
+      await mkdir(join(root, "assets"));
+      await writeFile(join(root, "assets", "final.mp4"), "video");
+      await writeFile(join(root, "outside.mp4"), "keep");
+      const f = fixture();
+      f.store.remove.mockResolvedValueOnce({ files: ["final.mp4", "../outside.mp4"], removedBytes: 5, removedAnalyses: [], keptAnalyses: 0 });
+      const app = new Hono<{ Variables: { userId: string } }>();
+      app.use("*", async (c, next) => { c.set("userId", "owner"); await next(); });
+      app.route("/api/marketing-videos", createMarketingVideoRoutes(f.service as unknown as AgentService, root, f.store as unknown as PgMarketingProjectStore, f.operations as unknown as PgMarketingTextOperations));
+      expect((await app.request(`/api/marketing-videos/${id}`, { method: "DELETE" })).status).toBe(200);
+      expect(await readdir(join(root, "assets"))).toEqual([]);
+      expect(await readFile(join(root, "outside.mp4"), "utf8")).toBe("keep");
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("rejects foreign assets, owner overrides and invalid durations before saving", async () => {
     const f = fixture();

@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import { PgMarketingTextOperations, type TextOperation } from "./operations.js";
 import { MarketingSourceSchema, marketingSourceKind } from "@lot-agent/core/marketing-video";
 import { creationPrompt, publicationPrompt, storyboardPrompt } from "./creation.js";
@@ -20,6 +22,7 @@ import { REVIEW_INSTRUCTION } from "./compliance.js";
 export { REVIEW_INSTRUCTION } from "./compliance.js";
 import { ownedAnalysisUpload } from "../marketing-analysis/uploads.js";
 import { AnalysisError } from "../marketing-analysis/errors.js";
+import { AnalysisStorage, analysisOwnerLimit } from "../marketing-analysis/storage.js";
 import { signPrivateMaterial } from "../generation/private-materials.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 import { activeMarketingVideoProfile } from "./model.js";
@@ -29,6 +32,7 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export function createMarketingVideoRoutes(service: AgentService, dataRoot: string, store = new PgMarketingProjectStore(service.db.pool), operations = new PgMarketingTextOperations(service.db.pool)) {
   // New clips use the configured model; recovery uses each job's recorded model.
   const activeProfile = activeMarketingVideoProfile();
+  const analysisStorage = new AnalysisStorage(resolve(dataRoot, "marketing-analysis"));
   const app = new Hono<{ Variables: { userId: string } }>();
   app.use("*", bodyLimit({ maxSize: 128 * 1024, onError: (c) => c.json({ error: "请求正文过大" }, 413) }));
   app.use("*", async (c, next) => {
@@ -85,6 +89,11 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     throw new MarketingError(operation.status === "failed" ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请等待页面顶部的处理结果。", 409);
   };
   app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", model: activeProfile }));
+  app.get("/usage", async (c) => {
+    const owner = c.get("userId");
+    const [drafts, analysisBytes] = await Promise.all([store.usage(owner), analysisStorage.ownerBytes(owner)]);
+    return c.json({ ...drafts, analysisBytes, analysisLimitBytes: analysisOwnerLimit() });
+  });
   app.get("/", async (c) => c.json(await store.page(c.get("userId"), { limit: Number(c.req.query("limit") ?? 20) || 20, cursor: c.req.query("cursor"), query: c.req.query("q") })));
   app.post("/copy", async (c) => {
     const body = await c.req.json().catch(() => null);
@@ -173,8 +182,17 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
     // A cancelled job may still be queued or finishing in BullMQ.
     if (p.status === "cancelled" && p.taskId && !await (service.jobQueue as BullmqJobQueue).canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后再删除。", 409);
-    await store.remove(owner, p.id);
-    return c.json({ ok: true });
+    const removed = await store.remove(owner, p.id);
+    // Rows are gone; a file that fails to delete is only orphaned bytes, never a visible draft.
+    const folder = resolve(dataRoot, "assets");
+    const results = await Promise.allSettled([
+      ...removed.files.map(async key => { const path = resolve(folder, key); if (path.startsWith(folder + sep)) await rm(path, { force: true }); }),
+      // The media worker's cleanup retries analysis folders that remain.
+      ...removed.removedAnalyses.map(analysisId => analysisStorage.remove(owner, analysisId)),
+    ]);
+    const failed = results.filter(result => result.status === "rejected").length;
+    if (failed) console.warn("[marketing-video] draft files not removed", { projectId: p.id, failed });
+    return c.json({ ok: true, removedBytes: removed.removedBytes, keptAnalyses: removed.keptAnalyses });
   });
   app.post("/:id/storyboard", async (c) => {
     const owner = c.get("userId");

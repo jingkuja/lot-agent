@@ -1,7 +1,7 @@
 /** Opt-in integration check. Use a NEW, empty, disposable local database. No paid model calls. */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KLING_MARKETING_PROFILE, MarketingDraftSchema, planMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
@@ -18,6 +18,7 @@ import { KnowledgeRepository } from "../src/knowledge/repository.js";
 import { UsageMeter } from "../src/billing/meter.js";
 import { Hono } from "hono";
 import { createMarketingVideoRoutes } from "../src/marketing-video/routes.js";
+import { AnalysisStorage } from "../src/marketing-analysis/storage.js";
 import type { AgentService } from "../src/services/agent-service.js";
 import { HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
 
@@ -315,6 +316,43 @@ try {
   await run(oldVideoTask); assert.equal(creates, oldSent);
   assert.deepEqual((await store.segments(owner, oldVideo.id)).map(s => [s.task_id, s.vendor_task_id]), receiptsBefore);
   deps.generation = originalGeneration;
+
+  // Deleting a draft removes its generated clips and final video and the analyses made
+  // for it; an analysis with an unverified model request keeps its record.
+  const doomed = (await store.get(owner, oldVideo.id))!;
+  const generated = (await db.pool.query(`SELECT id, storage_key, size_bytes FROM assets WHERE user_id=$1 AND type='video'
+    AND task_id IN (SELECT $2::uuid UNION SELECT task_id FROM marketing_video_segments WHERE project_id=$3)`, [owner, doomed.taskId, doomed.id])).rows;
+  const generatedBytes = generated.reduce((sum, row) => sum + Number(row.size_bytes), 0);
+  assert(generated.length > 1, "clips and the final video");
+  for (const row of generated) await readFile(join(root, "assets", row.storage_key));
+  const usageBefore = await (await app.request("/marketing/usage")).json() as { videoBytes: number; analysisBytes: number };
+  assert(usageBefore.videoBytes >= generatedBytes);
+  const analysisStorage = new AnalysisStorage(join(root, "marketing-analysis"));
+  const [doomedAnalysis, unverifiedAnalysis] = [randomUUID(), randomUUID()];
+  for (const analysisId of [doomedAnalysis, unverifiedAnalysis]) {
+    const sourceId = randomUUID();
+    await db.pool.query("INSERT INTO marketing_reference_sources(id,user_id,share_text,platform) VALUES($1,$2,'sealed','douyin')", [sourceId, owner]);
+    await db.pool.query("INSERT INTO tasks(id,type,input,user_id) VALUES($1,'marketing.analysis','{}',$2)", [analysisId, owner]);
+    await db.pool.query(`INSERT INTO marketing_reference_analyses(id,user_id,source_id,client_request_id,input_hash,pipeline_version,status,snapshot,creation_context)
+      VALUES($1,$2,$3,$4,'hash','fixture','ready','{"frames":[]}',$5)`, [analysisId, owner, sourceId, randomUUID(), JSON.stringify({ projectId: doomed.id })]);
+    await writeFile(join(await analysisStorage.directory(owner, analysisId), "frame-0001.jpg"), "frame");
+  }
+  await db.pool.query(`INSERT INTO marketing_analysis_steps(analysis_id,user_id,step_id,attempt,input_hash,model,images,reserved_cost)
+    VALUES($1,$2,'summary:1',1,'hash','fixture',0,0)`, [unverifiedAnalysis, owner]);
+  assert.equal((await (await app.request("/marketing/usage")).json() as { analysisBytes: number }).analysisBytes, usageBefore.analysisBytes + 10);
+  const deleted = await app.request(`/marketing/${doomed.id}`, { method: "DELETE" });
+  assert.equal(deleted.status, 200, await deleted.clone().text());
+  assert.deepEqual(await deleted.json(), { ok: true, removedBytes: generatedBytes, keptAnalyses: 1 });
+  assert.equal(await store.get(owner, doomed.id), null);
+  assert.equal((await db.pool.query("SELECT 1 FROM assets WHERE id=ANY($1::uuid[])", [generated.map(row => row.id)])).rowCount, 0);
+  for (const row of generated) await assert.rejects(readFile(join(root, "assets", row.storage_key)), { code: "ENOENT" });
+  const analysisRows = (await db.pool.query("SELECT id, deleted_at, snapshot FROM marketing_reference_analyses WHERE id=ANY($1::uuid[])", [[doomedAnalysis, unverifiedAnalysis]])).rows;
+  const removedRow = analysisRows.find(row => row.id === doomedAnalysis), keptRow = analysisRows.find(row => row.id === unverifiedAnalysis);
+  assert.notEqual(removedRow.deleted_at, null); assert.deepEqual(removedRow.snapshot, {});
+  assert.equal(keptRow.deleted_at, null);
+  assert.deepEqual(await readdir(await analysisStorage.directory(owner, doomedAnalysis)), [], "the deleted analysis folder is removed");
+  const usageAfter = await (await app.request("/marketing/usage")).json() as { videoBytes: number };
+  assert.equal(usageAfter.videoBytes, usageBefore.videoBytes - generatedBytes);
 
   // Real adapter -> real worker -> real task.error -> real HTTP project view.
   // The only network surface is a synthetic fetch fixture, never a vendor.

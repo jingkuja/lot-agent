@@ -199,14 +199,27 @@ export class PgAnalysisStore implements AnalysisJobStore {
   async remove(owner: string, id: string) {
     await this.transaction(async client => {
       await ownerLock(client, owner); const row = await this.row(owner, id, client, true);
-      if (["queued", "running"].includes(row.status) || (row.lease_until && new Date(row.lease_until).getTime() > Date.now())) throw new AnalysisError("ANALYSIS_BUSY", 409);
-      if ((await client.query("SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR (receipt->'usage' IS NULL AND receipt->>'outcome'<>'rejected'))", [id])).rowCount) throw new AnalysisError("REQUEST_UNKNOWN", 409);
+      const blocked = await analysisDeleteBlocker(client, row);
+      if (blocked) throw new AnalysisError(blocked, 409);
       if ((await client.query("SELECT 1 FROM marketing_video_projects WHERE reference_analysis_id=$1", [id])).rowCount) throw new AnalysisError("ANALYSIS_IN_USE", 409);
-      await client.query("UPDATE marketing_reference_analyses SET deleted_at=now(),snapshot='{}'::jsonb,selection=NULL,creation_context=NULL WHERE id=$1", [id]);
-      await client.query("UPDATE marketing_reference_sources SET share_text='' WHERE id=$1", [row.source_id]);
-      await client.query("DELETE FROM marketing_analysis_revisions WHERE analysis_id=$1", [id]);
-      await client.query(`UPDATE marketing_analysis_steps SET receipt=receipt-'text',
-        reconciliation=(reconciliation-'note') #- '{previousReceipt,text}' WHERE analysis_id=$1`, [id]);
+      await deleteAnalysisRecord(client, row);
     });
   }
+}
+
+/** Call under `ownerLock` with the row locked. Unknown model requests keep their
+ * private record for reconciliation. */
+export async function analysisDeleteBlocker(client: Pick<pg.PoolClient, "query">, row: Record<string, any>) {
+  if (["queued", "running"].includes(row.status) || (row.lease_until && new Date(row.lease_until).getTime() > Date.now())) return "ANALYSIS_BUSY" as const;
+  if ((await client.query("SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR (receipt->'usage' IS NULL AND receipt->>'outcome'<>'rejected'))", [row.id])).rowCount) return "REQUEST_UNKNOWN" as const;
+  return null;
+}
+/** Erase private analysis content; receipts keep only usage. Files are removed by the
+ * caller or by `collectAnalysisFiles` (`deleted_at` set, `files_cleaned_at` empty). */
+export async function deleteAnalysisRecord(client: Pick<pg.PoolClient, "query">, row: Record<string, any>) {
+  await client.query("UPDATE marketing_reference_analyses SET deleted_at=now(),snapshot='{}'::jsonb,selection=NULL,creation_context=NULL WHERE id=$1", [row.id]);
+  await client.query("UPDATE marketing_reference_sources SET share_text='' WHERE id=$1", [row.source_id]);
+  await client.query("DELETE FROM marketing_analysis_revisions WHERE analysis_id=$1", [row.id]);
+  await client.query(`UPDATE marketing_analysis_steps SET receipt=receipt-'text',
+    reconciliation=(reconciliation-'note') #- '{previousReceipt,text}' WHERE analysis_id=$1`, [row.id]);
 }

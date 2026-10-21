@@ -80,7 +80,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h1>营销影像 Agent 评审</h1>
   <p class="meta">评审日期：2026-10-19 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>，之后共 15 个提交）</p>
-  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。</p>
+  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。第六轮（2026-10-21）完成功能缺口 G05（项目与素材生命周期）。</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
 </header>
 
@@ -91,6 +91,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <a href="#fixes3">第三轮修复</a>
   <a href="#fixes4">第四轮修复</a>
   <a href="#fixes5">第五轮修复</a>
+  <a href="#fixes6">第六轮修复</a>
   <a href="#tracking">旧评审跟踪</a>
   <a href="#features">1 功能完成度</a>
   <a href="#ui">2 操作 UI</a>
@@ -102,14 +103,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
+  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复，第六轮让删除草稿一并删除成片、片段和参考分析，并显示空间用量（G05）。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
   <div class="grid">
     <div class="stat"><strong>8 · 0 · 0</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
-    <div class="stat"><strong>0 · 1 · 7</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
+    <div class="stat"><strong>1 · 0 · 7</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
     <div class="stat"><strong>0 高 · 0 中 · 2 低</strong><span>当前健壮性问题（三轮共修复 14 项）</span></div>
-    <div class="stat"><strong>2640 / 81</strong><span>第五轮后全量单测：通过 / 跳过</span></div>
+    <div class="stat"><strong>2663 / 81</strong><span>第六轮后全量单测：通过 / 跳过</span></div>
   </div>
-  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。前三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。第四轮运行了构建和数据库脚本，未运行浏览器 UI 脚本（本机缺 Playwright）。第五轮运行了构建、数据库脚本和两个浏览器 UI 脚本。全程没有调用付费模型。</p>
+  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。前三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。第四轮运行了构建和数据库脚本，未运行浏览器 UI 脚本（本机缺 Playwright）。第五轮运行了构建、数据库脚本和两个浏览器 UI 脚本。第六轮运行了构建、两个数据库脚本和两个浏览器 UI 脚本。全程没有调用付费模型。</p>
 </section>
 
 <section class="card" id="fixes">
@@ -287,7 +288,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
         <ul>
           <li>旧草稿中的 <code>recorded</code> 按数字人读取，<code>cover</code> 读取时丢弃；草稿与冻结任务照常加载，比较结果稳定。</li>
           <li>旧版文字编辑产生的分析修订（revision &gt; 1）继续从摘要恢复。</li>
-          <li>保留 <code>DELETE /:id</code>：它是用户删除私有分析数据的唯一入口，G05 计划在前端接入。</li>
+          <li>保留 <code>DELETE /:id</code>：它是用户删除私有分析数据的唯一入口。<span class="tag ok">第六轮</span> 前端不直接调用，改为删除草稿时由服务端在同一事务中删除该草稿的分析（G05）。</li>
         </ul></td></tr>
     </tbody>
   </table></div>
@@ -373,6 +374,55 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p><strong>测试：</strong>新增单测覆盖不一致判断和服务端写入 <code>storyboardAudio</code>。两个浏览器 UI 脚本已按新流程更新，新增断言：自动识别来源、第 3 步分镜默认折叠、内部状态不外露、回执自动恢复、进度与已用时、错误在停靠区、应用内确认框（并断言没有原生对话框）、参考视频切换后的分镜提示与重建。UI 夹具补上了数字分身音色状态接口（878632d 起缺失）。</p>
 </section>
 
+<section class="card" id="fixes6">
+  <h2>第六轮修复（2026-10-21） <span class="tag ok">G05 已完成</span></h2>
+  <p>本轮处理功能缺口 G05。原状态：可以删除草稿，但成片、片段和参考分析留在服务器上；前端不调用参考分析的删除接口；页面不显示空间用量。核对时另发现一个问题：删除确认框写"已生成的视频仍保留在「个人素材」中"，但「个人素材」只列出上传文件，生成的视频不在其中，也没有删除入口。删除草稿后，成片变成用户看不到、也删不掉的文件，并且仍可通过 <code>/static/assets</code> 匿名读取。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>修复</th><th>保护与边界</th></tr></thead>
+    <tbody>
+      <tr><td>删除草稿不删成片和片段</td><td>
+        <ul>
+          <li><code>repository.ts → remove</code> 在删除草稿的同一事务中删除该草稿父任务和各片段任务的视频资产行，返回文件名和字节数。</li>
+          <li>提交后，<code>routes.ts</code> 删除 <code>data/assets</code> 中的对应文件。响应带 <code>removedBytes</code>。</li>
+        </ul></td><td>
+        <ul>
+          <li>原有拦截不变：生成中、取消后仍在收尾、有进行中或待核实的文案请求时返回 409。</li>
+          <li>先提交数据库，再删文件。删文件失败只留下孤立文件并记录日志，不会出现指向空文件的草稿。</li>
+          <li>只删除 <code>data/assets</code> 目录内的路径。</li>
+          <li>任务行、回执和计量记录保留，供费用核对。</li>
+          <li>已存入知识库的成片是独立副本，不受影响。</li>
+        </ul></td></tr>
+      <tr><td>参考分析删除接口无人调用</td><td>
+        <ul>
+          <li>删除草稿时，一并删除为该草稿创建的参考分析（<code>creation_context.projectId</code> 或当前引用）。</li>
+          <li><code>marketing-analysis/repository.ts</code> 拆出 <code>analysisDeleteBlocker</code> 和 <code>deleteAnalysisRecord</code>，原 <code>DELETE /api/marketing-video-analyses/:id</code> 与删除草稿共用。</li>
+          <li>提交后删除分析目录（帧和本地上传原片）；删除失败时由媒体 Worker 的清理任务补删。</li>
+        </ul></td><td>
+        <ul>
+          <li>锁顺序与分析任务一致：文本锁 → 分析用户锁 → 分析行 → 项目行，避免与分析写回死锁。</li>
+          <li>分析正在运行时，拒绝删除草稿（409）。</li>
+          <li>含未核实模型请求的分析不删除，保留给核对工具；仍被其他草稿引用的分析也不删除。响应带 <code>keptAnalyses</code>，界面提示条数。</li>
+          <li>前端不直接调用分析删除接口。接口保留。</li>
+        </ul></td></tr>
+      <tr><td>不显示空间用量</td><td>
+        <ul>
+          <li>新增 <code>GET /api/marketing-videos/usage</code>：现存草稿的片段与成片、草稿引用的上传素材（去重）、参考分析目录字节数，以及参考分析上限（<code>MARKETING_ANALYSIS_OWNER_BYTES</code>，默认 2 GiB）。</li>
+          <li>"我的视频草稿"展开时读取，显示一行"已用空间"；删除草稿后刷新。删除成功提示显示释放的空间。</li>
+        </ul></td><td>
+        <ul>
+          <li>按用户隔离。PG 的求和结果显式转为数字。</li>
+          <li>只在展开草稿区时扫描分析目录，不增加打开页面的请求。读取失败时不显示这一行，不影响其他操作。</li>
+          <li>视频和素材没有配额，只显示用量；参考分析显示已有的上限。</li>
+        </ul></td></tr>
+      <tr><td>删除确认文案与实际不符</td><td>确认框改为"草稿、已生成的视频和片段、参考视频分析将一起永久删除，无法恢复。如需保留成片，请先下载。上传的素材仍保留在「个人素材」中。"</td><td>上传素材可能被其他草稿、数字分身库或对话使用，所以不随草稿删除。</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>数据库：</strong>没有新增迁移。</p>
+  <p><strong>界面与文档：</strong>新增文案已补中文、英文和印尼文；只使用现有样式。已检查深色主题下的确认框。已更新 <code>docs/marketing-video.md</code>、<code>docs/marketing-video-reference-analysis.md</code> 和 <code>docs/agent-code-guide.md</code>。</p>
+  <p><strong>测试：</strong>单测覆盖删除事务（锁顺序、删除顺序、分析保留规则、未提交草稿不查资产）、文件只在资产目录内删除、用量接口和数字转换。数据库脚本在真实 PG 上验证：成片与片段的行和文件被删除，可删的分析被清除内容并删除目录，含未核实请求的分析保留，用量随之减少。UI 脚本新增：展开草稿区显示用量、确认框文案、删除后提示和列表更新。</p>
+  <p class="meta">残留：本次之前删除的草稿留下的成片已无法关联到草稿，没有自动清理，也不计入用量；如需回收，要按任务类型单独写清理脚本。草稿未删除时，用户换掉的旧参考分析一直保留到删除草稿（原片仍按 7 天清理）。</p>
+</section>
+
 <section class="card" id="tracking">
   <h2>10-15 评审问题跟踪</h2>
   <div class="legend"><span><span class="tag ok">已修复</span> 代码已处理</span><span><span class="tag mid">部分修复</span> 主要问题已处理，有残留</span><span><span class="tag high">未修复</span> 与旧评审描述一致</span></div>
@@ -398,7 +448,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>G02</td><td>成片质量检查</td><td><span class="tag high">未完成</span></td><td>Worker 只检查画面存在、音轨存在和时长（<code>run.ts</code>）。不检查错字、口播和人物一致性。</td></tr>
       <tr><td>G03</td><td>费用与用量说明</td><td><span class="tag high">未完成</span></td><td>生成前只做额度预检。文档写明"预计费用展示暂未加入"。</td></tr>
       <tr><td>G04</td><td>单镜替换与重新合成</td><td><span class="tag high">未完成</span></td><td>成片后改一镜仍需复制草稿，所有片段重新付费。</td></tr>
-      <tr><td>G05</td><td>项目与素材生命周期</td><td><span class="tag mid">部分完成</span></td><td>可删除草稿。删除不移除素材和成片。前端没有调用参考分析的删除接口，也不显示空间用量。</td></tr>
+      <tr><td>G05</td><td>项目与素材生命周期</td><td><span class="tag ok">已完成</span><br><span class="meta">原为部分完成</span></td><td>10-21：删除草稿时在同一事务中删除该草稿的片段与成片资产和参考分析，提交后删除文件（<code>repository.ts → remove</code>）。草稿区显示空间用量（<code>GET /usage</code>）。上传素材按设计保留在「个人素材」。残留：本次之前删除的草稿留下的成片无法再关联，未自动清理；含未核实请求的分析保留。见<a href="#fixes6">第六轮修复</a>。</td></tr>
       <tr><td>G06</td><td>质量与性能看板</td><td><span class="tag high">未完成</span></td><td>没有成功率、阶段耗时、排队和 unknown 积压指标。</td></tr>
       <tr><td>G07</td><td>实拍对口型与完整 TTS</td><td><span class="tag low">C0</span></td><td>服务端拒绝 <code>mode: "recorded"</code>，没有界面。</td></tr>
       <tr><td>G08</td><td>平台直发与封面</td><td><span class="tag low">C0</span></td><td>"发布到抖音"按钮禁用。<code>assets.cover</code> 只在 schema 里。</td></tr>
@@ -498,7 +548,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td><span class="tag low">低</span></td><td>生成的片段和成片在 <code>/static/assets</code> 下可匿名读取，没有到期时间。</td><td><span class="tag mid">旧问题</span> F01 残留</td><td><code>index.ts:417</code></td></tr>
       <tr><td><span class="tag low">低</span></td><td>成片（最大 200 MB）和上传文件（最大 100 MB）整个读进内存。</td><td>两次评审均提</td><td><code>media.ts</code><br><code>marketing-analysis/routes.ts</code></td></tr>
       <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>页面每 2.5 秒读取完整项目，每次为每个素材查库并重新签名链接。10-20：轮询改用 <code>GET /:id/status</code>，只读一行任务状态，不查素材、不签名；状态不变时间隔放大到 15 秒，标签页隐藏时暂停。仍未压测。</td><td>两次评审均提</td><td><code>ProjectStudio.tsx</code> 轮询<br><code>routes.ts</code> GET /:id</td></tr>
-      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>死代码：<code>draft.ts</code> 里旧的 9 步流程（只有 <code>MARKETING_VIDEO_MODEL</code> 还在用）、<code>recorded</code> 模式、<code>cover</code>；分析接口 apply-preview、apply、PATCH text、summarize、list、DELETE 前端都没调用；前端也不读 <code>recordedLipSync</code>、<code>douyinPublish</code>。10-20：已删除旧 9 步流程、<code>recorded</code> 模式（旧草稿按数字人读取）、<code>cover</code> 槽位（旧草稿读取时丢弃）、上述分析接口中除 DELETE 外的全部，以及两个能力字段。DELETE 保留：它是用户删除私有分析数据的唯一入口，G05 计划在前端接入。</td><td><span class="tag new">本次新增</span></td><td>多处</td></tr>
+      <tr><td><span class="tag ok">已修复</span><br><span class="meta">原为低</span></td><td>死代码：<code>draft.ts</code> 里旧的 9 步流程（只有 <code>MARKETING_VIDEO_MODEL</code> 还在用）、<code>recorded</code> 模式、<code>cover</code>；分析接口 apply-preview、apply、PATCH text、summarize、list、DELETE 前端都没调用；前端也不读 <code>recordedLipSync</code>、<code>douyinPublish</code>。10-20：已删除旧 9 步流程、<code>recorded</code> 模式（旧草稿按数字人读取）、<code>cover</code> 槽位（旧草稿读取时丢弃）、上述分析接口中除 DELETE 外的全部，以及两个能力字段。DELETE 保留：它是用户删除私有分析数据的唯一入口。10-21：删除草稿时服务端复用同一删除逻辑（G05）。</td><td><span class="tag new">本次新增</span></td><td>多处</td></tr>
     </tbody>
   </table></div>
   <p class="meta">两个高级别问题和 F04 方向相反：F04 是保护不足，可能重复收费；高级别问题是保护没有出口，用户会被卡住。第一轮只增加"经用户确认、有记录"的出口，没有放宽自动重试；第二轮让审核和标题标签也接入调用记录（F04）。10-20 第三轮处理了 2 项中级（<code>failure.ts</code> 正则分类、<code>ProjectStudio.tsx</code> 体量）和 2 项低级（轮询、死代码）；剩余 2 项低级（成片匿名访问、整文件读入内存）未处理。</p>
@@ -585,7 +635,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>第五轮 <code>pnpm check:marketing-video:db</code>（临时 pgvector PostgreSQL 容器，用后删除）</td><td>通过</td><td>本轮未新增断言（文本操作记录新增的 <code>createdAt</code> 经该脚本的读取路径）</td></tr>
       <tr><td>第五轮 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>通过（见右侧说明）</td><td>新增断言见第五轮修复。工作区同时有未提交的侧边栏改动（6 个快捷 Agent），与脚本中的启动器断言冲突；本次用临时副本跳过这 4 行启动器断言后全流程通过，脚本本身未改这部分</td></tr>
       <tr><td>第五轮 <code>pnpm check:marketing-analysis:ui</code></td><td>通过</td><td>参考来源改为单选和自动识别后的断言</td></tr>
-      <tr><td>真实供应商</td><td>五轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
+      <tr><td>第六轮全量 Vitest</td><td>315 文件通过，14 文件跳过；2663 项通过，81 项跳过</td><td>新增：删除事务、分析保留规则、资产目录外路径不删除、用量接口</td></tr>
+      <tr><td>第六轮严格类型检查</td><td>Core 20 项、Server 238 项，营销目录 0 项；Web 通过</td><td>Server 比第五轮多 2 项，在本轮开始时的 <code>main</code> 上已存在（不在营销目录），本轮未增加</td></tr>
+      <tr><td>第六轮全部包构建</td><td>通过</td><td>—</td></tr>
+      <tr><td>第六轮 <code>pnpm check:marketing-video:db</code>（临时 pgvector PostgreSQL 容器，用后停止）</td><td>通过</td><td>新增断言：删除草稿删除成片与片段的行和文件、清除可删分析并删除目录、保留含未核实请求的分析、用量减少</td></tr>
+      <tr><td>第六轮 <code>pnpm check:marketing-analysis:db</code>（同一临时容器）</td><td>通过</td><td>覆盖拆分后的分析删除接口。未设置 Redis，跳过队列部分</td></tr>
+      <tr><td>第六轮 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>通过</td><td>新增断言见第六轮修复。侧边栏改版（提交 <code>6c30ff9</code>、<code>bfba959</code>）后脚本在启动器断言处失效；本次改为只检查前 3 个 Agent，并在没有"更多"按钮时直接点选 Agent</td></tr>
+      <tr><td>第六轮 <code>pnpm check:marketing-analysis:ui</code></td><td>通过</td><td>—</td></tr>
+      <tr><td>真实供应商</td><td>六轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
     </tbody>
   </table></div>
   <p class="meta">跳过项不计为通过。严格类型检查仍未全绿，不能用构建成功代替。</p>
@@ -621,11 +678,12 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <li><span class="tag ok">已完成</span> 删除粘贴 Cookies 的界面。参考来源改用单选按钮。分镜编辑器只保留一处。第 3 步改名为"确认与制作"。错误就近显示，确认框统一，长请求显示已用时，参考视频切换后提示重建分镜。<span class="ref">— 第 2 节</span></li>
       <li><span class="tag ok">已完成</span> 增加"主播全程 / 混合镜头"选项。允许跳过自动补标题标签。<span class="ref">— 第 2 节</span></li>
       <li><span class="tag ok">已完成</span> 草稿列表增加分页和搜索。<span class="ref">— F06 残留</span></li>
+      <li><span class="tag ok">已完成</span> 删除草稿时一并删除成片、片段和参考分析；显示空间用量。<span class="ref">— G05</span></li>
     </ol>
   </div>
   <div class="phase">
     <h3>D 质量</h3>
-    <ol start="15">
+    <ol start="16">
       <li><span class="tag mid">进行中</span> 评估"TTS 先行 + 本地字幕"路线，保留快速模式。TTS 替换配音已有实施计划；数字人模式需与对口型一起上线。<span class="ref">— G01、R1、R2</span></li>
       <li>增加成片质量检查：声音、字幕、黑帧和关键事实。<span class="ref">— G02</span></li>
       <li>用授权样片做真实验收（10-15 报告建议每组至少 30 条）。<span class="ref">— 旧报告验收门槛</span></li>
@@ -633,7 +691,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   </div>
   <div class="phase">
     <h3>E 维护</h3>
-    <ol start="18">
+    <ol start="19">
       <li><span class="tag ok">已完成</span> 失败分类改用错误码，不再用正则匹配文字。<span class="ref">— 第 3 节</span></li>
       <li><span class="tag ok">已完成</span> 拆分 <code>ProjectStudio.tsx</code>，删除死代码。<span class="ref">— 第 3 节</span></li>
       <li><span class="tag ok">已完成</span> 更新 <code>docs/agent-code-guide.md:22</code>。<span class="ref">— 第 1 节</span></li>

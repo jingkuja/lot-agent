@@ -7,7 +7,7 @@ import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
 import { TextOperationPanel } from "./TextOperationPanel.js";
 import { ReviewPanel } from "./ReviewPanel.js";
 import { ReferenceAnalysisPanel, analysisError } from "./ReferenceAnalysisPanel.js";
-import { DraftLibrary, useDraftLibrary } from "./DraftLibrary.js";
+import { DraftLibrary, formatBytes, useDraftLibrary } from "./DraftLibrary.js";
 import { json, normalizeProject, requestProject, type Project } from "./api.js";
 import { ResultPanel } from "./ResultPanel.js";
 import { CopyStep, type SourceKind } from "./CopyStep.js";
@@ -425,16 +425,19 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     setStep(step); setAnalysis(""); remember(null);
   }
   async function deleteDraft(p: MarketingProject) {
-    if (!await confirm({ title: "删除视频草稿", message: "确定删除视频草稿“{0}”吗？删除后无法恢复。\n视频中使用的素材和已生成的视频仍保留在「个人素材」中，如需永久删除，请前往「个人素材」删除。",
+    if (!await confirm({ title: "删除视频草稿", message: "确定删除视频草稿“{0}”吗？草稿、已生成的视频和片段、参考视频分析将一起永久删除，无法恢复。如需保留成片，请先下载。\n上传的素材仍保留在「个人素材」中。",
       values: [p.draft.publishTitle || p.draft.topic || t("未命名草稿")], confirm: "删除" })) return;
     await act(async () => {
       // Let an in-flight autosave settle so it cannot recreate the deleted row.
       if (flight.current) await flight.current.catch(() => {});
-      await request(`/marketing-videos/${p.id}`, { method: "DELETE" });
+      const removed = await request<{ removedBytes: number; keptAnalyses: number }>(`/marketing-videos/${p.id}`, { method: "DELETE" });
       if (!session.alive) return;
-      library.remove(p.id);
+      library.remove(p.id); library.refreshUsage();
       if (p.id === draftId.current) { setTextPending(false); textRequest.current = null; resetDraft(); }
-      setNotice("草稿已删除。关联素材仍在「个人素材」中，如需永久删除请前往删除。");
+      // The notice is shown through t(); already translated text passes through unchanged.
+      setNotice([removed.removedBytes ? t("草稿已删除，释放 {0}。", [formatBytes(removed.removedBytes)]) : t("草稿已删除。"),
+        t("上传的素材仍在「个人素材」中。"),
+        ...(removed.keptAnalyses ? [t("{0} 条参考分析的模型请求结果待核实，暂未删除。", [removed.keptAnalyses])] : [])].join(locale === "zh" ? "" : " "));
     });
   }
   async function archive() {
@@ -486,7 +489,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     {loadError && <div className="mv-connection-error" role="alert"><p>{t(loadError)}</p><button onClick={() => { setLoadError(""); setLoadAttempt(value => value + 1); }}>{t("重新连接")}</button></div>}
     <DraftLibrary projects={library.projects} nextCursor={library.nextCursor} query={library.query} currentId={project?.id}
       openBusy={navigationBusy || saving} moreBusy={navigationBusy} deleteBusy={busy || saving}
-      onQuery={library.setQuery} onDelete={p => void deleteDraft(p)} onMore={() => void act(library.loadMore, true)}
+      onQuery={library.setQuery} onDelete={p => void deleteDraft(p)} onMore={() => void act(library.loadMore, true)} usage={library.usage} onShow={library.refreshUsage}
       onOpen={p => void act(async () => { if (dirty) await save(); await open(p.id); }, true)} />
     {project && <TextOperationPanel key={project.id} projectId={project.id} reload={operationReload} onState={async operation => { if (project.id === draftId.current) await textOperationState(operation); }} />}
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}

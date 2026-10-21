@@ -124,7 +124,7 @@ Kling 携带参考音频时，`generation/run-job.ts` 在缓存 / 视频任务�
 
 `generation/private-materials.ts` 处理营销上传的临时链接及静态访问控制。迁移 47 回填项目和冻结任务中的上传素材私有标记；`routes/uploads.ts` 接收 `purpose=marketing-video`。`generation/kling-voice-store.ts` 先读取既有检查点，新音色在本地素材准备成功后才记录意图。`jobs/task-queues.ts` 将营销父任务路由到 `lot-marketing-video`，`marketingQueueLimits` 读取 `MARKETING_VIDEO_CONCURRENCY`（每进程，默认 2）与 `MARKETING_VIDEO_USER_CONCURRENCY`（每用户，默认 1）与 `MARKETING_VIDEO_SEGMENT_CONCURRENCY`（每条视频的片段并发，默认 2，经 `MarketingRunDeps.segmentConcurrency` 传给 `run.ts`）；`bullmq-queue.ts` 独立消费并兼容旧 `lot-tasks` 作业，营销作业经 `db.claimTaskWithinOwnerLimit` 领取，同用户超限时转为 delayed 让出槽位。迁移 46 更新队列元数据，不修改任务 ID 或供应商回执。`db/database.ts` 的三分钟待领取扫描只触发 `BullmqJobQueue.diagnosePending`，检查两条队列后写等待、未知或投递缺失诊断，不生成失败终态；Redis 读取有界。终态拒绝隐式领取，允许的普通重试保持 pending。取消先持久化并由跨进程 Worker 轮询观察，API 的 `cancellationRequested` 表示已请求取消；队列不可读或原作业未收尾时拒绝恢复。详细边界见 [素材访问与队列隔离](marketing-video.md#素材访问与队列隔离)及[十月十六日实施与验收](marketing-video-implementation-20261016.md)。
 
-草稿按用户保存到数据库，页面只在账号隔离的 localStorage 里保存最后打开的项目 ID。制作配置提交后固定，发布标题 / 标签仍可编辑；`marketing-video/archive.ts` 将成片和发布信息归档到私有知识库，再次保存同步最新文案。首版实际对口型和抖音直发能力明确禁用，结果可预览、下载并复制发布文案；分镜只读展示，可复制为新草稿修改后重新制作。旧会话结果仍由包装组件展示，旧 `/api/video-drafts` 与会话生成接口保持兼容，其 4–15 秒限制不影响新项目链路。依赖、恢复语义和验收命令见 [营销视频制作](marketing-video.md)。
+草稿按用户保存到数据库，页面只在账号隔离的 localStorage 里保存最后打开的项目 ID。制作配置提交后固定，发布标题 / 标签仍可编辑；`marketing-video/archive.ts` 将成片和发布信息归档到私有知识库，再次保存同步最新文案。首版实际对口型和抖音直发能力明确禁用，结果可预览、下载并复制发布文案；分镜只读展示，可复制为新草稿修改后重新制作。删除草稿（`repository.ts → remove`）在同一事务中删除生成的片段与成片资产行和为该草稿创建的参考分析（复用 `marketing-analysis/repository.ts → deleteAnalysisRecord`），提交后由 `routes.ts` 删除文件；上传素材保留在个人素材。`GET /api/marketing-videos/usage` 汇总草稿视频、引用素材和参考分析目录的占用，`DraftLibrary.tsx` 展开时显示。旧会话结果仍由包装组件展示，旧 `/api/video-drafts` 与会话生成接口保持兼容，其 4–15 秒限制不影响新项目链路。依赖、恢复语义和验收命令见 [营销视频制作](marketing-video.md)。
 
 `AgentService.marketingText → marketing-video/text.ts` 统一处理文案 JSON 输出、完整结束检查、5 分钟超时及安全错误码。文案和分镜固定使用当前用户凭证的 `kimi-k3`，不回退到其他默认模型；数字人模式在分镜创作和实际片段请求中都要求人物每镜出镜；截断结果不作为审核通过，不自动重新采样，审核等既有请求仍经 `meterLLM` 记录。创作文案/分镜请求使用 `upstreamBilling`，不做本地额度检查或金额计算。
 
@@ -227,7 +227,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 | `/api/auth` | `routes/auth.ts`；登录等为公开入口，资料修改 / 绑定等在处理器内校验身份 |
 | `/api/conversations` | 聊天、项目、知识范围、生成与再生成；会话认证和资源归属 |
 | `/api/agents`、`/api/models` | Agent 目录与模型目录；会话认证 |
-| `/api/marketing-videos` | `marketing-video/routes.ts`；三步创作、用户草稿、文案检查、分段生成和知识库归档 |
+| `/api/marketing-videos` | `marketing-video/routes.ts`；三步创作、用户草稿（含删除与空间用量）、文案检查、分段生成和知识库归档 |
 | `/api/tasks`、`/api/assets`、`/api/uploads` | 异步任务、产物、附件；会话认证和资源归属 |
 | `/api/usage`、`/api/balance`、`/api/recharge` | 用量、余额、充值；会话认证 |
 | `/api/digital-employee` | 数字员工业务；会话认证、归属和功能作用域 |

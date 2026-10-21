@@ -31,39 +31,67 @@ describe("persisting confirmed marketing shots", () => {
 });
 
 describe("deleting marketing drafts", () => {
-  const store = (row: Record<string, unknown> | undefined, busy = { lock: true, text: 0, analysis: 0 }) => {
-    const query = vi.fn(async (sql: string, _params?: unknown[]) => {
+  type Busy = { lock: boolean; text: number; analyses: Record<string, unknown>[]; unknown: string[]; inUse: string[] };
+  const store = (row: Record<string, unknown> | undefined, options: Partial<Busy> = {}) => {
+    const busy: Busy = { lock: true, text: 0, analyses: [], unknown: [], inUse: [], ...options };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
       if (sql.includes("FOR UPDATE OF p")) return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+      if (sql.includes("FOR UPDATE OF a")) return { rows: busy.analyses, rowCount: busy.analyses.length };
       if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ locked: busy.lock }], rowCount: 1 };
       if (sql.startsWith("SELECT 1 FROM marketing_text_operations")) return { rows: [], rowCount: busy.text };
-      if (sql.startsWith("SELECT 1 FROM marketing_reference_analyses")) return { rows: [], rowCount: busy.analysis };
+      if (sql.startsWith("SELECT 1 FROM marketing_analysis_steps")) return { rows: [], rowCount: busy.unknown.includes(params![0] as string) ? 1 : 0 };
+      if (sql.startsWith("SELECT 1 FROM marketing_video_projects")) return { rows: [], rowCount: busy.inUse.includes(params![0] as string) ? 1 : 0 };
+      if (sql.startsWith("DELETE FROM assets")) return { rows: [{ storage_key: "final.mp4", size_bytes: 3000 }, { storage_key: "clip.mp4", size_bytes: "1500" }], rowCount: 2 };
       return { rows: [], rowCount: 1 };
     });
     const client = { query, release: vi.fn() };
     return { query, client, store: new PgMarketingProjectStore({ connect: async () => client } as unknown as pg.Pool) };
   };
-  it("removes the owner's operation records and project in one transaction", async () => {
-    const f = store({ id: "project", task_id: "task", status: "succeeded" });
-    await f.store.remove("owner", "project");
-    const deletes = f.query.mock.calls.filter(([sql]) => sql.startsWith("DELETE"));
-    expect(deletes.map(([sql, params]) => [sql.split(" WHERE")[0], params])).toEqual([
-      ["DELETE FROM marketing_text_operations", ["owner", "project"]], ["DELETE FROM marketing_video_projects", ["owner", "project"]]]);
+  const analysis = (id: string, status = "ready") => ({ id, source_id: `source-${id}`, status, lease_until: null });
+  it("removes the draft, its generated videos and its reference analyses in one transaction", async () => {
+    const f = store({ id: "project", task_id: "task", status: "succeeded" }, { analyses: [analysis("current"), analysis("old"), analysis("unknown", "needs_review"), analysis("shared")], unknown: ["unknown"], inUse: ["shared"] });
+    expect(await f.store.remove("owner", "project")).toEqual({ files: ["final.mp4", "clip.mp4"], removedBytes: 4500, removedAnalyses: ["current", "old"], keptAnalyses: 2 });
+    // Text lock, then the analysis jobs' order: owner lock, analysis rows, project row.
+    const at = (match: (sql: string, params?: unknown[]) => boolean) => f.query.mock.calls.findIndex(([sql, params]) => match(sql, params));
+    const order = [at((_, params) => params?.[0] === "marketing-text:owner"), at((_, params) => params?.[0] === "media-analysis-budget:owner"),
+      at(sql => sql.includes("FOR UPDATE OF a")), at(sql => sql.includes("FOR UPDATE OF p"))];
+    expect(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1]))).toBe(true);
+    const deletes = f.query.mock.calls.filter(([text]) => text.startsWith("DELETE"));
+    expect(deletes.map(([text, params]) => [text.split(/\s+WHERE/)[0], params])).toEqual([
+      ["DELETE FROM assets", ["owner", "task", "project"]],
+      ["DELETE FROM marketing_text_operations", ["owner", "project"]], ["DELETE FROM marketing_video_projects", ["owner", "project"]],
+      ["DELETE FROM marketing_analysis_revisions", ["current"]], ["DELETE FROM marketing_analysis_revisions", ["old"]]]);
+    expect(f.query.mock.calls.filter(([text]) => text.startsWith("UPDATE marketing_reference_analyses SET deleted_at")).map(([, params]) => params)).toEqual([["current"], ["old"]]);
     expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
     expect(f.client.release).toHaveBeenCalledOnce();
   });
+  it("does not look for generated videos on a draft that was never submitted", async () => {
+    const f = store({ id: "project", task_id: null });
+    expect(await f.store.remove("owner", "project")).toEqual({ files: [], removedBytes: 0, removedAnalyses: [], keptAnalyses: 0 });
+    expect(f.query.mock.calls.some(([text]) => text.startsWith("DELETE FROM assets"))).toBe(false);
+  });
   it("refuses missing, generating, finishing or pending creation drafts without deleting", async () => {
-    for (const [row, busy, status] of [
-      [undefined, undefined, 404],
-      [{ task_id: "task", status: "running" }, undefined, 409],
-      [{ task_id: "task", status: "cancelled" }, { lock: false, text: 0, analysis: 0 }, 409],
-      [{ task_id: null }, { lock: true, text: 1, analysis: 0 }, 409],
-      [{ task_id: null, reference_analysis_id: "analysis" }, { lock: true, text: 0, analysis: 1 }, 409],
-    ] as const) {
+    const cases: [Record<string, unknown> | undefined, Partial<Busy>, number][] = [
+      [undefined, {}, 404],
+      [{ task_id: "task", status: "running" }, {}, 409],
+      [{ task_id: "task", status: "cancelled" }, { lock: false }, 409],
+      [{ task_id: null }, { text: 1 }, 409],
+      [{ task_id: null }, { analyses: [analysis("running", "running")] }, 409],
+    ];
+    for (const [row, busy, status] of cases) {
       const f = store(row, busy);
       await expect(f.store.remove("owner", "project")).rejects.toMatchObject({ status });
-      expect(f.query.mock.calls.some(([sql]) => sql.startsWith("DELETE"))).toBe(false);
+      expect(f.query.mock.calls.some(([sql]) => sql.startsWith("DELETE") || sql.includes("deleted_at=now()"))).toBe(false);
       expect(f.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
     }
+  });
+});
+
+describe("marketing draft space usage", () => {
+  it("converts PG sums to numbers", async () => {
+    const query = vi.fn(async (_sql: string, _params?: unknown[]) => ({ rows: [{ video_bytes: "52428800", material_bytes: "0" }] }));
+    expect(await new PgMarketingProjectStore({ query } as unknown as pg.Pool).usage("owner")).toEqual({ videoBytes: 52428800, materialBytes: 0 });
+    expect(query.mock.calls[0][1]).toEqual(["owner"]);
   });
 });
 

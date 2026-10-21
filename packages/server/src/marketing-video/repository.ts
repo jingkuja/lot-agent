@@ -3,6 +3,7 @@ import type pg from "pg";
 import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
 import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 import { UNKNOWN_SUBMISSION } from "./recovery.js";
+import { analysisDeleteBlocker, deleteAnalysisRecord, ownerLock as analysisOwnerLock } from "../marketing-analysis/repository.js";
 
 export class MarketingError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409 | 429 | 503 = 400) { super(message); }
@@ -154,13 +155,20 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       return released.length;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
-  /** Remove the draft record only; uploaded materials and generated videos stay in the owner's personal assets. */
+  /** Remove the draft with its generated clips and final video, and the reference
+   * analyses made for it. Asset rows go in this transaction; the caller removes their
+   * files after commit. Uploaded materials stay in the owner's personal assets. */
   async remove(owner: string, id: string) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       // Same lock order as text operations: owner text lock, then the project row.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`marketing-text:${owner}`]);
+      // Same lock order as analysis jobs: owner analysis lock, analysis rows, project row.
+      await analysisOwnerLock(client, owner);
+      const analyses = (await client.query(`SELECT a.* FROM marketing_reference_analyses a WHERE a.user_id=$1 AND a.deleted_at IS NULL
+        AND (a.creation_context->>'projectId'=$2 OR a.id=(SELECT reference_analysis_id FROM marketing_video_projects WHERE user_id=$1 AND id=$2::uuid))
+        FOR UPDATE OF a`, [owner, id])).rows;
       const p = (await client.query(`${select} WHERE p.user_id=$1 AND p.id=$2 FOR UPDATE OF p`, [owner, id])).rows[0];
       if (!p) throw new MarketingError("草稿不存在", 404);
       if (p.task_id) {
@@ -168,14 +176,38 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [`marketing:${p.task_id}`]);
         if (!lock.rows[0].locked) throw new MarketingError("原任务正在收尾，请稍后再删除。", 409);
       }
+      const blockers = [];
+      for (const row of analyses) blockers.push(await analysisDeleteBlocker(client, row));
       if ((await client.query("SELECT 1 FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2 AND status IN ('running','unknown','needs_apply')", [owner, id])).rowCount
-        || (p.reference_analysis_id && (await client.query("SELECT 1 FROM marketing_reference_analyses WHERE id=$1 AND status IN ('queued','running')", [p.reference_analysis_id])).rowCount)) {
+        || blockers.includes("ANALYSIS_BUSY")) {
         throw new MarketingError("已有创作请求正在处理或结果待核实，请稍后再删除。", 409);
       }
+      const files = p.task_id ? (await client.query(`DELETE FROM assets WHERE user_id=$1 AND type='video'
+        AND task_id IN (SELECT $2::uuid UNION SELECT task_id FROM marketing_video_segments WHERE project_id=$3)
+        RETURNING storage_key, size_bytes`, [owner, p.task_id, id])).rows : [];
       await client.query("DELETE FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2", [owner, id]);
       await client.query("DELETE FROM marketing_video_projects WHERE user_id=$1 AND id=$2", [owner, id]);
+      const removedAnalyses: string[] = []; let keptAnalyses = 0;
+      for (const [i, row] of analyses.entries()) {
+        // An unknown model request keeps its record for reconciliation; another draft may still use the analysis.
+        if (blockers[i] || (await client.query("SELECT 1 FROM marketing_video_projects WHERE reference_analysis_id=$1", [row.id])).rowCount) { keptAnalyses++; continue; }
+        await deleteAnalysisRecord(client, row);
+        removedAnalyses.push(row.id);
+      }
       await client.query("COMMIT");
+      return { files: files.map(row => row.storage_key as string), removedBytes: files.reduce((sum, row) => sum + Number(row.size_bytes), 0), removedAnalyses, keptAnalyses };
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+  /** Space held by the owner's drafts: generated clips and final videos, and the uploads they use. */
+  async usage(owner: string) {
+    const { rows } = await this.pool.query(`WITH jobs AS (
+        SELECT task_id AS id FROM marketing_video_projects WHERE user_id=$1 AND task_id IS NOT NULL
+        UNION SELECT s.task_id FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id WHERE p.user_id=$1)
+      SELECT (SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE user_id=$1 AND type='video' AND task_id IN (SELECT id FROM jobs)) AS video_bytes,
+        (SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE user_id=$1 AND type='upload' AND id::text IN (
+          SELECT jsonb_array_elements_text(CASE jsonb_typeof(e.value) WHEN 'array' THEN e.value ELSE jsonb_build_array(e.value) END)
+          FROM marketing_video_projects p, jsonb_each(COALESCE(p.draft->'assets','{}'::jsonb)) e WHERE p.user_id=$1)) AS material_bytes`, [owner]);
+    return { videoBytes: Number(rows[0].video_bytes), materialBytes: Number(rows[0].material_bytes) };
   }
   async segments(owner: string, id: string) {
     return (await this.pool.query(`SELECT s.*,t.status,t.vendor_task_id,t.output,t.error FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id JOIN tasks t ON t.id=s.task_id

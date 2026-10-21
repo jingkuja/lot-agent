@@ -4,15 +4,23 @@ import { join, resolve } from "node:path";
 import { AnalysisError } from "./errors.js";
 import { ANALYSIS_LIMITS } from "@lot-agent/core/marketing-analysis";
 
+export const analysisOwnerLimit = () => Number(process.env.MARKETING_ANALYSIS_OWNER_BYTES ?? 2 * 1024 ** 3);
 export class AnalysisStorage {
   constructor(readonly root: string) {}
   async assertCapacity(owner: string, pending: number, globalPending: number) {
-    const ownerLimit = Number(process.env.MARKETING_ANALYSIS_OWNER_BYTES ?? 2 * 1024 ** 3);
+    const ownerLimit = analysisOwnerLimit();
     const freeMinimum = Number(process.env.MARKETING_ANALYSIS_MIN_FREE_BYTES ?? 1024 ** 3);
     if (![ownerLimit, freeMinimum].every(n => Number.isSafeInteger(n) && n >= ANALYSIS_LIMITS.temporaryBytes)) throw new AnalysisError("ANALYSIS_CONFIG_REQUIRED", 503);
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     const rootInfo = await lstat(this.root);
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new AnalysisError("INVALID_PRIVATE_FILE");
+    const bytes = await this.ownerBytes(owner);
+    if (bytes + (pending + 1) * ANALYSIS_LIMITS.temporaryBytes > ownerLimit) throw new AnalysisError("ANALYSIS_STORAGE_LIMIT", 409);
+    const disk = await statfs(this.root);
+    if (disk.bavail * disk.bsize < freeMinimum + (globalPending + 1) * ANALYSIS_LIMITS.temporaryBytes) throw new AnalysisError("ANALYSIS_DISK_LOW", 503);
+  }
+  /** Bytes currently stored for the owner: analyses and source uploads. */
+  async ownerBytes(owner: string) {
     const scan = async (path: string): Promise<number> => {
       let info;
       try { info = await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0; throw error; }
@@ -22,10 +30,7 @@ export class AnalysisStorage {
       for (const name of await readdir(path)) bytes += await scan(join(path, name));
       return bytes;
     };
-    const bytes = await scan(join(resolve(this.root), createHash("sha256").update(owner).digest("hex")));
-    if (bytes + (pending + 1) * ANALYSIS_LIMITS.temporaryBytes > ownerLimit) throw new AnalysisError("ANALYSIS_STORAGE_LIMIT", 409);
-    const disk = await statfs(this.root);
-    if (disk.bavail * disk.bsize < freeMinimum + (globalPending + 1) * ANALYSIS_LIMITS.temporaryBytes) throw new AnalysisError("ANALYSIS_DISK_LOW", 503);
+    return scan(join(resolve(this.root), createHash("sha256").update(owner).digest("hex")));
   }
   async uploadDirectory(owner: string, id: string) { return this.directory(owner, id, "uploads"); }
   async removeUpload(owner: string, id: string) { await rm(await this.uploadDirectory(owner, id), { recursive: true, force: true }); }
