@@ -30,6 +30,8 @@ data/knowledge/
 # Reference video originals, model receipts and signed share links are private.
 data/marketing-analysis/
 data/marketing-analysis-probes/
+# Per-draft twin narration takes (private user audio).
+data/marketing-narration/
 
 # Backups contain credentials/business data; evaluation vector caches are reproducible.
 data/backups/

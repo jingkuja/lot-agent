@@ -12,13 +12,14 @@ import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketin
 import { createMarketingVideoRoutes } from "./routes.js";
 import type { AgentService } from "../services/agent-service.js";
 import type { PgMarketingProjectStore } from "./repository.js";
+import type { MarketingNarrator } from "./narration.js";
 import { completeMarketingJson } from "./text.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 
 vi.mock("./media.js", () => ({ mediaCapabilities: async () => ({ composition: true, subtitles: false }), inspectMedia: vi.fn(), ownedAssetPath: vi.fn() }));
 vi.mock("./image-size.js", () => ({ readImageInfo: vi.fn(async () => ({ mime: "image/png", width: 800, height: 800 })) }));
 const id = "11111111-1111-4111-8111-111111111111";
-function fixture(owner = "owner") {
+function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
   const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), page: vi.fn(async (..._args: unknown[]) => ({ data: [] as unknown[], nextCursor: undefined as string | undefined })), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async (..._args: unknown[]) => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => ({ files: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })), usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1) };
   const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
@@ -36,7 +37,7 @@ function fixture(owner = "owner") {
   };
   const app = new Hono<{ Variables: { userId: string } }>();
   if (owner) app.use("*", async (c, next) => { c.set("userId", owner); await next(); });
-  app.route("/api/marketing-videos", createMarketingVideoRoutes(service as unknown as AgentService, "/tmp", store as unknown as PgMarketingProjectStore, operations as unknown as PgMarketingTextOperations));
+  app.route("/api/marketing-videos", createMarketingVideoRoutes(service as unknown as AgentService, "/tmp", store as unknown as PgMarketingProjectStore, operations as unknown as PgMarketingTextOperations, narrator as MarketingNarrator | undefined));
   const call = (path: string, value?: unknown, method = "POST") => {
     const input = value && typeof value === "object" && (path === "/copy" || ["/storyboard", "/review", "/publication"].some(end => path.endsWith(end)))
       ? { clientRequestId: randomUUID(), projectId: id, version: 1, ...value } : value;
@@ -435,7 +436,7 @@ it("validates reference video metadata and sends it with audio disabled", async 
   expect(f.store.reserve).not.toHaveBeenCalled();
   vi.mocked(inspectMedia).mockResolvedValueOnce(info);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
-  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 3, modelId: "grok-imagine-video-1.5", reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined }), false);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, modelId: "grok-imagine-video-1.5", reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined }), false);
 });
 
 it("submits new clips with the configured model profile", async () => {
@@ -573,7 +574,7 @@ describe("single shot redo", () => {
     const f = made();
     const response = await f.call(`/${id}/revise`, { version: 1, shots: [1] });
     expect(response.status).toBe(202);
-    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1]);
+    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1], {});
     expect(f.service.jobQueue.deliverPersisted).toHaveBeenCalledWith("revision", "marketing.video");
     expect(f.service.usageMeter.checkQuota).toHaveBeenCalledOnce();
     expect(f.store.reserve).not.toHaveBeenCalled();
@@ -672,5 +673,60 @@ describe("server reference image contract", () => {
     expect((await generate(withImage("image/webp"))).status).toBe(202);
     vi.mocked(readImageInfo).mockResolvedValueOnce(null);
     expect((await generate(withImage())).status).toBe(400);
+  });
+});
+
+describe("digital twin narration", () => {
+  const twinItemId = "33333333-3333-4333-8333-333333333333";
+  const shots = [0, 1].map(slot => ({ durationSec: 8, script: slot ? "第二句旁白" : "第一句旁白", visual: "门店", action: "展示", camera: "中景" }));
+  const takes = [0, 1].map(slot => ({ slot, key: `key-${slot}`, storageKey: `${id}/${randomUUID()}.wav`, durationMs: 3000 }));
+  function narrated(narrator: Partial<MarketingNarrator>) {
+    const f = fixture("owner", narrator);
+    Object.assign(f.project, { draft: MarketingDraftSchema.parse({ durationSec: 15, storyboard: shots, script: storyboardScript(shots), narration: { twinItemId } }), review: { verdict: "pass", issues: [] } });
+    f.service.db.getAsset.mockResolvedValue({ user_id: "owner", mime: "image/png", size_bytes: 100 });
+    return f;
+  }
+  it("freezes a take per shot and asks the clips for no speech, ignoring a voice sample", async () => {
+    const frozen = vi.fn(async () => takes);
+    const f = narrated({ frozen });
+    const voiceId = randomUUID();
+    f.project.draft.assets = { voice: voiceId };
+    f.service.db.getAsset.mockResolvedValue({ user_id: "owner", mime: "audio/mpeg", size_bytes: 100, url: "/static/voice.mp3", type: "upload", is_private: true } as never);
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+    expect(frozen).toHaveBeenCalledWith("owner", id, f.project.draft, expect.arrayContaining([expect.objectContaining({ index: 1, script: "第二句旁白" })]));
+    expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, generate_audio: false, reference_audio: undefined, narration: takes }), false);
+  });
+  it("refuses to submit clips before every shot has a fitting take", async () => {
+    const f = narrated({ frozen: vi.fn(async () => { throw new MarketingError("请先生成全部分镜的数字分身配音并试听。", 409); }) });
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(409);
+    expect(f.store.reserve).not.toHaveBeenCalled();
+  });
+  it("synthesizes only for the saved version and rejects invalid shot choices", async () => {
+    const synthesize = vi.fn(async () => ({ clips: [], error: "" }));
+    const f = narrated({ synthesize });
+    expect((await f.call(`/${id}/narration`, { version: 2 })).status).toBe(409);
+    expect((await f.call(`/${id}/narration`, { version: 1, slots: [0.5] })).status).toBe(400);
+    expect((await f.call(`/${id}/narration`, { version: 1, slots: [1] })).status).toBe(200);
+    expect(synthesize).toHaveBeenCalledOnce();
+    expect(synthesize).toHaveBeenCalledWith("owner", id, f.project.draft, expect.any(Array), [1]);
+  });
+  it("has no narration for a model-voiced draft", async () => {
+    const f = fixture("owner", { status: vi.fn() });
+    expect((await f.call(`/${id}/narration`)).status).toBe(400);
+  });
+  it("gives redone shots of a narrated video new takes and freezes them into the new job", async () => {
+    const synthesize = vi.fn(async () => ({ clips: [], error: "" }));
+    const frozen = vi.fn(async () => takes);
+    const f = narrated({ synthesize, frozen });
+    const draft = f.project.draft;
+    Object.assign(f.project, { taskId: "parent", status: "succeeded", revision: { draft, modelId: "grok-imagine-video-1.5", reusable: [true, true] } });
+    f.service.db.getTask.mockResolvedValue({ id: "parent", type: "marketing.video", user_id: "owner", status: "succeeded",
+      input: { projectId: id, draft, generate_audio: false, narration: takes, marketingInputVersion: 4, modelId: "grok-imagine-video-1.5" } });
+    f.store.segments.mockResolvedValue([0, 1].map(slot => ({ slot, task_id: `child-${slot}`, duration_sec: 8, script: shots[slot].script, output: { assetIds: [`clip-${slot}`] } })));
+    f.service.db.getAsset.mockImplementation((async (assetId: string) => ({ user_id: "owner", task_id: assetId === "clip-0" ? "child-0" : "child-1" })) as never);
+    Object.assign(f.store, { revise: vi.fn(async () => "revision") });
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [1] })).status).toBe(202);
+    expect(synthesize).toHaveBeenCalledOnce();
+    expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1], { narration: takes });
   });
 });

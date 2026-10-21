@@ -9,6 +9,7 @@ import { marketingSegmentPrompt } from "./prompt.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 import { marketingFailureCode, MarketingRunError } from "./failure.js";
 import { publicStaticUrl } from "../util/public-base.js";
+import { frozenNarration, narrationFile } from "./narration.js";
 
 const UNKNOWN = UNKNOWN_SUBMISSION;
 // 4xx answers reject the request itself; 408/409 and 5xx may still have created a task.
@@ -75,6 +76,15 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
       prompts = segments.map((segment, index) => segmentRecoveryAction(segment) === "submit"
         ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile) : undefined);
     } catch (error) { throw new MarketingRunError("NOT_RECOVERABLE", (error as Error).message); }
+    // Twin narration (version 4) was synthesized and confirmed before submission. Check the
+    // frozen takes before any clip is paid for; a missing file cannot be recreated here.
+    let narration: string[] | undefined;
+    if (inputVersion >= 4 && job.input.narration !== undefined) {
+      try {
+        const takes = frozenNarration(job.input.narration, segments.length);
+        narration = await Promise.all(takes.map(take => narrationFile(deps.dataRoot, project.id, take.storageKey)));
+      } catch { throw new MarketingRunError("NARRATION_INVALID", "配音文件已不可用，请复制为新草稿并重新生成配音。"); }
+    }
     // The API host's probe says nothing about this worker. Stop before any voice or clip is paid for.
     if (!(await mediaCapabilities()).composition) throw new MarketingRunError("CONFIG_MISSING", "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
     // Kling: create each voice sample once per parent job, before clips run in
@@ -215,7 +225,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     }
     // Every clip is stored by now, so a retry reassembles them without a model call.
     try {
-      const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, signal: controller.signal });
+      const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, narration, signal: controller.signal });
       await assertActive();
       const gen = await deps.generation(job, controller.signal);
       const id = randomUUID(); const key = `${id}.mp4`;

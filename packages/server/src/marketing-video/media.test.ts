@@ -38,4 +38,20 @@ describe("composition readiness probe", () => {
   it.skipIf(!ffmpegInstalled)("composes a probe clip with the installed FFmpeg", async () => {
     expect(await mediaCapabilities()).toEqual({ composition: true });
   }, 30_000);
+  it.skipIf(!ffmpegInstalled)("replaces each clip's own audio with its narration and pads it to the shot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marketing-narration-compose-"));
+    try {
+      const clip = join(root, "clip.mp4"); const voice = join(root, "voice.wav");
+      // A loud clip track that must not survive, and a quiet mono narration shorter than the shot.
+      spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=25:d=5", "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", clip]);
+      spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=24000", "-t", "2", voice]);
+      const segments = [0, 1, 2].map(index => ({ index, script: "欢迎", durationSec: 5 }));
+      const result = await composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => voice), segments });
+      const final = join(root, "final.mp4"); await writeFile(final, result.body);
+      expect((await inspectMedia(final)).duration).toBeCloseTo(15, 0);
+      const volume = spawnSync("ffmpeg", ["-v", "info", "-i", final, "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" }).stderr;
+      expect(volume).toMatch(/max_volume: -(9[0-9]|inf)/);
+      await expect(composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => clip), segments })).rejects.toThrow("配音与镜头时长不一致");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }, 60_000);
 });

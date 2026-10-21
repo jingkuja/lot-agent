@@ -60,7 +60,12 @@ try {
   const library = [
     { id: 'portrait', title: '我的肖像', mime: 'image/png', sourceType: 'image', tags: ['digital-twin:portrait'], size: png.length },
     { id: 'voice', title: '我的声音', mime: 'audio/wav', sourceType: 'audio', tags: ['digital-twin:voice'], size: wav.length },
+    { id: '00000000-0000-4000-8000-0000000000aa', title: '已复刻的声音', mime: 'audio/wav', sourceType: 'audio', tags: ['digital-twin:voice'], size: wav.length },
   ];
+  // Twin narration takes by draft and shot text; the first shot's take is longer than its shot.
+  const narrationTakes = new Map();
+  const narrationClips = (p) => p.draft.storyboard.map((shot, slot) => narrationTakes.has(`${p.id}:${shot.script}`)
+    ? { slot, status: 'succeeded', durationMs: narrationTakes.get(`${p.id}:${shot.script}`) } : { slot, status: 'missing' });
   const generated = new Map();
   const resultAssets = [{ url: '/static/fixture.mp4', mime: 'video/mp4' }];
   // Like the server, full project reads and saves of a made video offer single shot redo; every fixture clip can be kept.
@@ -77,7 +82,7 @@ try {
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
     // The UI follows the server's clip profile. This fixture keeps Kling's clip limits under a
     // neutral ID with no image dimension limits, so the 1×1 fixture images pass upload checks.
-    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
+    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, narration: true, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
     if (path === '/api/marketing-videos/usage') return json({ videoBytes: 50 * 1024 * 1024, materialBytes: 1024 * 1024, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
     if (request.method() === 'DELETE' && /^\/api\/marketing-videos\/[0-9a-f-]{36}$/.test(path)) { projects.delete(path.split('/')[3]); return json({ ok: true, removedBytes: 3 * 1024 * 1024, keptAnalyses: 1 }); }
     if (path === '/api/marketing-videos') {
@@ -139,6 +144,18 @@ try {
         p.review = { verdict: issues.length ? 'reject' : 'pass', issues }; p.reviewedScript = marketingReviewText(p.draft); return json(p);
       }
       if (action === 'publication') { p.version++; p.draft.publishTitle = '手冲咖啡与惬意时光'; p.draft.tags = '#咖啡'; p.review = null; return json(p); }
+      if (action === 'narration') {
+        const slot = path.split('/')[5];
+        if (slot !== undefined) return route.fulfill({ contentType: 'audio/wav', body: wav });
+        if (request.method() === 'POST') {
+          const body = request.postDataJSON(); assert.equal(body.version, p.version);
+          p.draft.storyboard.forEach((shot, i) => {
+            const key = `${p.id}:${shot.script}`;
+            if (!narrationTakes.has(key) || body.slots?.includes(i)) narrationTakes.set(key, i ? 2000 : shot.durationSec * 1000 + 1500);
+          });
+        }
+        return json({ version: p.version, clips: narrationClips(p), error: '' });
+      }
       if (action === 'unknown-segments') { delete p.unknownSegments; taskState = 'running'; return json({ released: 2, project: p }); }
       if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p); }
       if (action === 'revise') {
@@ -168,7 +185,7 @@ try {
     }
     if (path.endsWith('/items')) return json({ data: library.filter((item) => item.tags.includes(new URL(request.url()).searchParams.get('tag'))), nextCursor: null });
     // Voice-clone status shown by the digital twin voice picker: not cloned yet.
-    if (path.endsWith('/voice') && path.startsWith('/api/rag/manage/items/') && request.method() === 'GET') return json({ voice: null });
+    if (path.endsWith('/voice') && path.startsWith('/api/rag/manage/items/') && request.method() === 'GET') return json({ voice: path.includes('/00000000-0000-4000-8000-0000000000aa/') ? { status: 'OK', voiceId: 'fixture-voice', targetModel: 'qwen-audio-3.0-tts-plus' } : null });
     if (path.endsWith('/content')) { const voice = path.includes('/voice/'); return route.fulfill({ contentType: voice ? 'audio/wav' : 'image/png', body: voice ? wav : png }); }
     if (path === '/api/agents') return json(agents);
     if (path === '/api/conversations/projects') return json([]);
@@ -366,7 +383,7 @@ try {
   assert.equal(await portraitInput.isDisabled(), true);
   const sceneInput = page.getByLabel('上传场景图片（选填）');
   await sceneInput.setInputFiles([1, 2, 3, 4].map(i => ({ name: `scene-${i}.png`, mimeType: 'image/png', buffer: png })));
-  await page.getByRole('alert').filter({ hasText: '人物或场景区域各最多 3 张。' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: '当前视频模型的场景图片最多 3 张' }).waitFor();
   await sceneInput.setInputFiles([1, 2].map(i => ({ name: `scene-${i}.png`, mimeType: 'image/png', buffer: png })));
   await page.waitForFunction(() => document.querySelectorAll('.mv-asset-preview img').length === 6);
   assert.equal(await sceneInput.isDisabled(), true);
@@ -395,7 +412,7 @@ try {
   assert.equal(await page.getByLabel('上传声音样例（2–15 秒）').isVisible(), true);
   const voiceModes = page.getByRole('group', { name: '配音方式', exact: true });
   assert.equal(await voiceModes.getByRole('button', { name: /^AI 配音/ }).getAttribute('aria-pressed'), 'true');
-  assert.equal(await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).isDisabled(), true);
+  assert.equal(await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).isDisabled(), false);
   assert.equal(await voiceModes.getByRole('button').count(), 2);
   await page.getByRole('button', { name: '从数字分身语音库选择', exact: true }).click();
   const voicePicker = page.getByRole('dialog', { name: '选择数字分身音色' });
@@ -441,6 +458,30 @@ try {
   assert.equal(await firstShot.getByLabel('景别与镜头运动').inputValue(), 'AI 调整镜头');
   await page.getByRole('heading', { name: '确认分镜', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-storyboard.png');
+  // Twin narration: only a cloned voice can be picked; takes are generated and fitted before any clip.
+  await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).click();
+  assert.equal(await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.getByLabel('上传声音样例（2–15 秒）').count(), 0);
+  await page.getByRole('alert').filter({ hasText: '请先选择数字分身旁白音色。' }).waitFor();
+  await page.locator('.mv-narration-voice').getByRole('button', { name: '从数字分身语音库选择', exact: true }).click();
+  const narrationPicker = page.getByRole('dialog', { name: '选择旁白音色' });
+  await narrationPicker.locator('.twin-asset').filter({ hasText: '已复刻的声音' }).getByRole('button', { name: '用作旁白音色' }).click();
+  assert.equal(await narrationPicker.count(), 0);
+  await page.locator('.mv-narration-voice').getByText('已复刻的声音', { exact: true }).waitFor();
+  const narrationPanel = page.getByRole('region', { name: '数字分身配音', exact: true });
+  await page.getByRole('alert').filter({ hasText: '请先生成全部分镜的数字分身配音并试听。' }).waitFor();
+  await narrationPanel.getByRole('button', { name: '生成配音', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: '有分镜的配音长于镜头时长' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '确认分镜并生成视频' }).isDisabled(), true);
+  await narrationPanel.getByRole('button', { name: '按配音调整分镜时长', exact: true }).click();
+  await page.locator('.mv-generate:not([disabled])').waitFor();
+  assert.equal(await narrationPanel.locator('.mv-narration-long').count(), 0);
+  await narrationPanel.getByRole('button', { name: '试听', exact: true }).first().click();
+  await narrationPanel.locator('audio').waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/narration')).length, 1);
+  await snap('marketing-video-narration.png');
+  await voiceModes.getByRole('button', { name: /^AI 配音/ }).click();
+  assert.equal(await page.getByLabel('上传声音样例（2–15 秒）').isVisible(), true);
   await page.getByRole('button', { name: '确认分镜并生成视频' }).evaluate(button => { button.click(); button.click(); });
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);

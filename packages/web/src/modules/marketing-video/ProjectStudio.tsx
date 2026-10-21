@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, type MarketingDraft, type MarketingProject, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, fitMarketingNarration, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -13,13 +13,16 @@ import { ResultPanel } from "./ResultPanel.js";
 import { CopyStep, type SourceKind } from "./CopyStep.js";
 import { MaterialsStep } from "./MaterialsStep.js";
 import { ProductionStep } from "./ProductionStep.js";
+import { NarrationPanel } from "./NarrationPanel.js";
 import { StoryboardAudioNotice, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 import { checkMaterial, checkReferenceVideo, imageLimitError, isImageSlot, materialFor, type Material, type MaterialSlot } from "./materials.js";
 import { useDraftSession, useExclusive, useTaskPolling } from "./session.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { WaitStatus } from "./WaitStatus.js";
 
-type Capabilities = { composition: boolean; knowledge: boolean; model?: MarketingVideoProfile };
+type Capabilities = { composition: boolean; knowledge: boolean; narration?: boolean; model?: MarketingVideoProfile };
+/** Twin narration takes of one saved version of a draft. */
+type Narration = { projectId: string; version: number; clips: MarketingNarrationClip[] };
 type RequestIdentity = { fingerprint: string; id: string };
 /** The long request the open draft is waiting on. */
 type Wait = { label: string; started: number; textRequest: boolean };
@@ -62,7 +65,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [uploadSource, setUploadSource] = useState(false);
   const [uploadingReference, setUploadingReference] = useState(false);
   const [analysis, setAnalysis] = useState("");
-  const [twinOpen, setTwinOpen] = useState<"portrait" | "voice" | null>(null);
+  const [twinOpen, setTwinOpen] = useState<"portrait" | "voice" | "narration" | null>(null);
+  const [narration, setNarration] = useState<Narration | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -211,6 +215,19 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     }
   }, failed => setError(old => failed ? pollError : old === pollError ? "" : old));
 
+  // Takes belong to the saved text and voice settings; reload them for each saved version.
+  const voiceover = marketingVoiceover(draft);
+  const hasBoard = !!draft.storyboard.length;
+  useEffect(() => {
+    if (!ready || frozen || step !== 2 || !voiceover || !hasBoard || !draft.narration?.twinItemId || !project || dirty) return;
+    if (narration?.projectId === project.id && narration.version === project.version) return;
+    const token = session.token();
+    void request<{ version: number; clips: MarketingNarrationClip[] }>(`/marketing-videos/${project.id}/narration`).then(result => {
+      if (session.current(token)) setNarration({ projectId: project.id, version: result.version, clips: result.clips });
+    }).catch(e => { if (session.current(token)) setError(errorMessage(e)); });
+  }, [ready, frozen, step, voiceover, hasBoard, draft.narration?.twinItemId, project?.id, project?.version, dirty]);
+  const currentNarration = narration && project && narration.projectId === project.id && narration.version === project.version && !dirty ? narration.clips : null;
+
   async function act(work: () => Promise<void>, navigation = false) {
     if (exclusive.locked || analysisPending || (!navigation && textPending) || !ready) return;
     await exclusive.run(async () => {
@@ -230,6 +247,12 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   // saved result after a lost response instead of calling the model again.
   const wait = (label: string, textRequest = true) => setWorking({ label, started: Date.now(), textRequest });
   const recordedRequestId = (kind: string, p: Project, ...input: unknown[]) => requestId(textRequest, JSON.stringify([kind, p.id, p.version, locale, ...input]));
+  /** Text requests also run beside a finished video; name the step that failed and say the video is unaffected. */
+  function failedStep(step: string, error: unknown): Error {
+    const reason = t(errorMessage(error));
+    return new Error(projectRef.current?.status === "succeeded"
+      ? t("{0}未完成（已生成的视频不受影响）：{1}", [t(step), reason]) : t("{0}未完成：{1}", [t(step), reason]));
+  }
   async function review() {
     lastText.current = { kind: "review", run: review };
     wait("正在检查文案与分镜");
@@ -237,7 +260,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     try {
       const result = await requestProject(`/marketing-videos/${p.id}/review`, json("POST", { locale, version: p.version, clientRequestId: recordedRequestId("review", p) }));
       if (session.alive) { setCurrent(result); setNotice(""); }
-    } finally { if (session.alive) setOperationReload(n => n + 1); }
+    } catch (e) { throw failedStep("文案检查", e); }
+    finally { if (session.alive) setOperationReload(n => n + 1); }
   }
   async function applyReviewEdit(next: MarketingDraft) {
     await act(async () => {
@@ -318,6 +342,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     try {
       const result = await requestProject(`/marketing-videos/${p.id}/publication`, json("POST", { locale, fillMissing, version: p.version, clientRequestId: recordedRequestId("publication", p, fillMissing) }));
       if (session.alive) load(result);
+    } catch (e) {
+      // Filling missing fields before generating has its own skip prompt that names the step.
+      throw fillMissing ? e : failedStep("标题和标签生成", e);
     } finally { if (session.alive) setOperationReload(n => n + 1); }
   }
   async function generate(retry = false) {
@@ -357,6 +384,24 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const base = projectRef.current?.revision?.draft;
     if (base) update({ ...base, publishTitle: draftRef.current.publishTitle, tags: draftRef.current.tags });
   };
+  /** Paid speech requests, one per shot without a take, or the chosen shots again. */
+  async function synthesizeNarration(slots?: number[]) {
+    if (slots?.some(slot => currentNarration?.[slot]?.status === "succeeded") && !await confirm({ title: "重新生成配音",
+      message: "将重新合成第 {0} 镜配音，并再次计费。是否继续？", values: [slots.map(slot => slot + 1).join("、")], confirm: "重新生成" })) return;
+    const p = await save();
+    wait("正在生成数字分身配音", false);
+    const result = await request<{ version: number; clips: MarketingNarrationClip[]; error: string }>(`/marketing-videos/${p.id}/narration`, json("POST", { version: p.version, slots }));
+    if (!session.alive) return;
+    setNarration({ projectId: p.id, version: result.version, clips: result.clips });
+    if (result.error) setError(result.error);
+  }
+  /** Lengthen shots whose take does not fit; the takes stay valid since shot time is not part of them. */
+  function fitNarration() {
+    const clips = currentNarration;
+    if (!clips) return;
+    try { changeStoryboard(fitMarketingNarration(draftRef.current.storyboard, draftRef.current, profile, clips.map(clip => clip.durationMs))); }
+    catch (e) { setError(errorMessage(e)); }
+  }
   async function editStoryboard(instruction = "", index?: number) {
     const token = session.token();
     const p = await save();
@@ -374,7 +419,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const current = draftRef.current;
     const storyboard = planMarketingSegments(current.script, current.durationSec, marketingShotMaxSeconds(current, profile)).map(part => ({
       durationSec: part.durationSec, script: part.script, visual: current.background || t("展示产品与使用场景"),
-      action: t(current.assets.video ? "人物正面出镜，无声展示产品，不做说话口型" : "人物正面出镜，自然讲述并展示产品"), camera: t("中景平稳拍摄，缓慢推近主体"),
+      action: t(current.assets.video ? "人物正面出镜，无声展示产品，不做说话口型" : marketingVoiceover(current) ? "人物出镜自然展示产品，旁白在画外" : "人物正面出镜，自然讲述并展示产品"), camera: t("中景平稳拍摄，缓慢推近主体"),
     }));
     update({ ...current, storyboard, script: storyboardScript(storyboard), storyboardAudio: !current.assets.video });
     await save();
@@ -507,9 +552,16 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const item = materialFor(materials, slot, id);
     return !item || item.issue;
   }));
+  // A board is generated first; its takes are needed only before the clips are paid for.
+  const narrationBlocker = !voiceover ? ""
+    : !capabilities?.narration ? "数字分身配音服务未启用，请改用 AI 配音。"
+    : !draft.narration?.twinItemId ? "请先选择数字分身旁白音色。"
+    : !hasBoard || plan.error ? ""
+    : !currentNarration?.every(clip => clip.status === "succeeded") ? "请先生成全部分镜的数字分身配音并试听。"
+    : currentNarration.some((clip, i) => !marketingNarrationFits(clip.durationMs ?? 0, draft.storyboard[i]?.durationSec ?? 15)) ? "有分镜的配音长于镜头时长，请按配音调整分镜时长。" : "";
   const generationBlocker = !ready ? loadError || "正在加载草稿…"
     : unusableMaterial ? "素材已不可用或不支持新生成，请移除或替换。"
-    : marketingReferenceError(draft, profile) || plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "");
+    : marketingReferenceError(draft, profile) || plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "") || narrationBlocker;
   const nextStep = (target: number) => { if (target && !draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(target); };
 
   const audioNotice = marketingStoryboardAudioMismatch(draft) && !frozen && <StoryboardAudioNotice video={!!draft.assets.video} busy={busy || !ready}
@@ -563,6 +615,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           audioNotice={audioNotice} />}
         {step === 2 && <ProductionStep form={form} profile={profile} handlers={materialHandlers} referenceVideoStatus={referenceVideoStatus} parts={plan.parts} planError={plan.error}
           blocker={generationBlocker} blockerId={generationHintId} storyboardPanel={storyboardPanel} audioNotice={audioNotice}
+          narrationAvailable={!!capabilities?.narration} onPickNarrationVoice={() => setTwinOpen("narration")}
+          narrationPanel={voiceover && draft.narration?.twinItemId && <NarrationPanel projectId={project?.id} shots={draft.storyboard} clips={currentNarration} busy={busy || !ready}
+            onSynthesize={slots => void act(() => synthesizeNarration(slots))} onFit={fitNarration} />}
           reviewPanel={reviewSection}
           buttonLabel={busy && !textUnknown ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览"}
           onPickVoice={() => setTwinOpen("voice")} onStoryboard={changeStoryboard} onStoryboardAi={aiStoryboard} onEditCopy={() => setStep(0)}
@@ -580,7 +635,12 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     </>}
     {project?.taskId && <div className="mv-dock">{status}</div>}
     {confirmDialog}
-    {twinOpen && <DigitalTwinPicker kind={twinOpen} onClose={() => { if (!exclusive.locked) setTwinOpen(null); }} onSelect={async (file, kind) => {
+    {twinOpen === "narration" && <DigitalTwinPicker kind="voice" onClose={() => setTwinOpen(null)} onPickVoice={async item => {
+      const current = draftRef.current.narration;
+      if (current) field("narration", { ...current, twinItemId: item.id, voiceName: item.title.slice(0, 255) });
+      setTwinOpen(null);
+    }} />}
+    {twinOpen && twinOpen !== "narration" && <DigitalTwinPicker kind={twinOpen} onClose={() => { if (!exclusive.locked) setTwinOpen(null); }} onSelect={async (file, kind) => {
       if (exclusive.locked) throw new Error(t("正在处理…"));
       await exclusive.run(() => selectMaterial(file, kind === "voice" ? "voice" : "portrait"));
     }} />}

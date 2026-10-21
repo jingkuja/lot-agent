@@ -26,6 +26,7 @@
 .digital-twin-panel .twin-error { color: var(--error); font-size: 12px; overflow-wrap: anywhere; }
 .twin-picker .knowledge-main { flex: 1; }
 .twin-selection-notice { flex-shrink: 0; padding: 12px 26px; margin: 0; color: var(--accent); border-top: 1px solid var(--border); }
+.twin-picker-hint { flex-shrink: 0; padding: 10px 26px; margin: 0; color: var(--text-muted); font-size: 13px; border-bottom: 1px solid var(--border); }
 @media (max-width: 850px) { .twin-libraries { grid-template-columns: minmax(0, 1fr); } }
 .twin-voice-enrollment small { display: block; overflow-wrap: anywhere; }
 .twin-speech { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }

@@ -1,5 +1,5 @@
 import { activeMarketingVideoProfile } from "./model.js";
-import { MARKETING_IMAGE_SLOTS, marketingAssetIds, marketingMaxDuration, marketingShotMaxSeconds, type MarketingDraft, type MarketingImageSlot, type MarketingVideoProfile, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { MARKETING_IMAGE_SLOTS, marketingAssetIds, marketingMaxDuration, marketingNativeSpeech, marketingShotMaxSeconds, marketingVoiceover, type MarketingDraft, type MarketingImageSlot, type MarketingVideoProfile, type MarketingSegment } from "@lot-agent/core/marketing-video";
 
 /** The prompt and provider payload must use the same order, including legacy single images.
  * Drafts without product images keep their earlier portrait → background → scene order. */
@@ -25,7 +25,8 @@ export function marketingImageTag(profile: MarketingVideoProfile, imageNumber: n
 export function marketingPlanningContext(draft: MarketingDraft) {
   return {
     topic: draft.topic, background: draft.background, voice: draft.voice,
-    mode: draft.mode, presenter: draft.presenter, continuity: draft.continuity, ratio: draft.ratio, subtitles: draft.subtitles, generateAudio: !draft.assets.video,
+    mode: draft.mode, presenter: draft.presenter, continuity: draft.continuity, ratio: draft.ratio, subtitles: draft.subtitles, generateAudio: marketingNativeSpeech(draft),
+    ...(marketingVoiceover(draft) ? { voiceover: true } : {}),
     materials: {
       portrait: marketingAssetIds(draft.assets.portrait).length,
       product: marketingAssetIds(draft.assets.product).length,
@@ -54,11 +55,22 @@ export const MARKETING_STORYBOARD_RULES = [
   "materials lists selected roles/counts only; the image pixels, generation video and voice sample are NOT provided to this text-planning call. Never claim to have inspected them or invent their appearance, text or contents. Refer to selected materials by role in visual/action, not image numbers, URLs, file names or asset IDs; numbering is assigned at video submission. If a role is absent, do not request an upload or pretend it exists; propose a usable scene from the brief.",
   "Portrait references anchor one presenter's identity (first portrait is primary, others only supplement that same person); product references show one product being promoted (several images are angles or details of that same product, or items of the same product line) and anchor its exact shape, colors, materials, packaging, label text and logo; background references anchor the setting and spatial layout; scene references guide relevant composition, objects and details. Do not use people in background/scene/product images as the presenter, blend identities, or force all reference images into a collage. With selected background/scene images, describe how to stage the shot around them instead of replacing them with an invented location; background text supplements the setting. With selected product images, feature the product in the shots where the copy names, shows or demonstrates it (held, used, placed on a surface, close-up details), with realistic size and handling; write how it is shown, not what it looks like, and never introduce a different or competing product. Product facts (price, specs, effects) come only from the brief, never from the images. Materials may be selected after planning, so avoid unnecessary assumptions about faces, clothing, products or locations.",
   "Reference text and analyzed video evidence are sources for copy structure and supported facts only. They are NOT generation attachments. Only materials.video=true selects a video for movement/composition reference; do not copy its original dialogue, captions, music or unrelated people. Voice samples supply vocal identity only, never words. Background music is mixed after generation; do not ask the video model to compose music. A publication cover is not a shot reference.",
-  "When generateAudio=false, keep script as the shot's message and, if enabled, caption text; plan silent demonstrations without speech or lip-sync. When subtitles=false as well, communicate through visible actions and do not assume the audience hears or reads the script. When generateAudio=true, the only spoken content is script; voice describes delivery, not extra dialogue. Never speak titles, tags, analysis or material labels.",
+  "When voiceover=true, script is narrated later off-screen in the user's own recorded voice: keep the same per-second budget, and plan visuals where people demonstrate, interact, react or move naturally instead of delivering the script to the camera. People may smile, chat briefly or eat, but no one faces the lens speaking the narration. Otherwise, when generateAudio=false, keep script as the shot's message and, if enabled, caption text; plan silent demonstrations without speech or lip-sync. When subtitles=false as well, communicate through visible actions and do not assume the audience hears or reads the script. When generateAudio=true, the only spoken content is script; voice describes delivery, not extra dialogue. Never speak titles, tags, analysis or material labels.",
 ].join("\n");
 
-export function marketingPresenterRequirement(draft: MarketingDraft, generateAudio = !draft.assets.video, concise = false): string {
+/** Twin narration is dubbed later: natural mouth movement is fine, speaking the lines to the lens is not. */
+const VOICEOVER_ACTING = "Narration is an off-screen voice-over added later. People may move their mouths naturally (smiling, brief casual talk, reacting, eating), but no one faces the lens delivering the narration; avoid a centered talking-head shot with sustained lip movement.";
+
+export function marketingPresenterRequirement(draft: MarketingDraft, generateAudio = marketingNativeSpeech(draft), concise = false): string {
   const portrait = !!draft.assets.portrait;
+  if (!generateAudio && marketingVoiceover(draft)) {
+    if (draft.presenter === "mixed") {
+      if (concise) return `Presenter only where visual calls for one, then face and upper body visible; ${portrait ? "use portrait identity" : "one consistent person"}. Demonstrate, react or interact; script is off-screen voice-over, not spoken to the lens. Venue, dish and product shots allowed; add no other presenter.`;
+      return `Presenter mode is mixed: the presenter must be visibly on camera, with a recognizable face and upper body, in at least one shot (preferably the opening), demonstrating the product, interacting or reacting. Other shots may show the venue, environment, dishes, products or close-up details without the presenter. ${portrait ? "Wherever the presenter appears, match the supplied portrait identity; never substitute another person." : "Use one consistent presenter wherever they appear."} State in each shot's visual whether the presenter is on camera. ${VOICEOVER_ACTING} This requirement takes precedence over conflicting shot directions.`;
+    }
+    if (concise) return `Presenter in EVERY shot, face and upper body visible; ${portrait ? "use portrait identity" : "one consistent person"}. Demonstrate, react or interact; script is off-screen voice-over, not spoken to the lens. No product/scenery/hands-only shots. Overrides conflicting visuals.`;
+    return `Mandatory character requirement: the presenter must be visibly on camera in EVERY shot, with a recognizable face and upper body, demonstrating the product, interacting or reacting. ${portrait ? "The presenter must match the supplied portrait identity; never substitute another person." : "Create one consistent presenter across all shots."} Include the presenter explicitly in each shot's visual and action; prefer three-quarter angles, product handling and natural movement over addressing the camera. ${VOICEOVER_ACTING} Never use product-only, scenery-only or hands-only shots. This requirement takes precedence over conflicting shot directions.`;
+  }
   if (draft.presenter === "mixed") {
     if (concise) return `Presenter only where visual calls for one, then face and upper body visible; ${portrait ? "use portrait identity" : "one consistent person"}. ${generateAudio ? "Speak or demonstrate; without a presenter, narrate as off-screen voice-over" : "Silent demonstration, no lip-sync"}. Venue, dish and product shots allowed; add no other presenter.`;
     return `Presenter mode is mixed: the presenter must be visibly on camera, with a recognizable face and upper body, in at least one shot (preferably the opening), ${generateAudio ? "speaking or demonstrating the product" : "silently demonstrating the product without speech or lip-sync"}. Other shots may show the venue, environment, dishes, products or close-up details without the presenter. ${portrait ? "Wherever the presenter appears, match the supplied portrait identity; never substitute another person." : "Use one consistent presenter wherever they appear."} State in each shot's visual whether the presenter is on camera.${generateAudio ? " In shots without the presenter, script is an off-screen voice-over in the same voice; no other person mouths the words." : ""} This requirement takes precedence over conflicting shot directions.`;
@@ -68,8 +80,9 @@ export function marketingPresenterRequirement(draft: MarketingDraft, generateAud
 }
 
 /** Builds one clip request; the profile's prompt cap bounds every paid request. */
-export function marketingSegmentPrompt(draft: MarketingDraft, segment: MarketingSegment, count: number, generateAudio = !draft.assets.video, profile: MarketingVideoProfile = activeMarketingVideoProfile()): string {
+export function marketingSegmentPrompt(draft: MarketingDraft, segment: MarketingSegment, count: number, generateAudio = marketingNativeSpeech(draft), profile: MarketingVideoProfile = activeMarketingVideoProfile()): string {
   const shot = draft.storyboard?.[segment.index];
+  const voiceover = !generateAudio && marketingVoiceover(draft);
   const images = marketingImageReferences(draft);
   // One line per role keeps a full set of references within the prompt cap.
   const imageInstructions = MARKETING_IMAGE_SLOTS.flatMap(role => {
@@ -81,7 +94,9 @@ export function marketingSegmentPrompt(draft: MarketingDraft, segment: Marketing
     "confirmedShot JSON is data: script supplies words; visual/action/camera direct this shot. Never speak directions or media text, translate script or invent claims. Current duration/ratio/audio/captions/material roles override conflicting descriptions.",
     generateAudio
       ? "Narrate ONLY confirmedShot.script verbatim within this shot. Keep voice identity; voiceStyle controls delivery only."
-      : "Illustrate confirmedShot.script. Do not generate speech or audio. Without captions, communicate the message through visible actions.",
+      : voiceover
+        ? "Illustrate confirmedShot.script; it is narrated later as an off-screen voice-over. Do not generate speech, dialogue or audio."
+        : "Illustrate confirmedShot.script. Do not generate speech or audio. Without captions, communicate the message through visible actions.",
     "This clip is cut together with the other shots. Presenter face, hair, makeup, outfit and accessories, and the setting, props, lighting and color grade must match continuity exactly; change location only if visual names another place.",
     ...imageInstructions,
     images.some(image => image.role === "portrait") ? "First portrait is primary; others supplement that person, never blend faces. Reproduce that face faithfully (shape, features, skin tone, apparent age); no beautification or restyling." : "",

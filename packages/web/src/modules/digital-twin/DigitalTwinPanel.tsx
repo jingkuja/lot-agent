@@ -8,9 +8,12 @@ import "../knowledge/knowledge.css";
 import "./digital-twin.css";
 
 export type SelectTwin = (file: File, kind: TwinKind) => Promise<void>;
+/** Chooses a voice item itself (not a copy of its file); only a cloned, ready voice can be picked. */
+export type PickTwinVoice = (item: Item) => Promise<void>;
 
-function TwinAsset({ item, kind, onRemove, onSelect, enrollmentError }: { item: Item; kind: TwinKind; onRemove: () => Promise<void>; onSelect?: SelectTwin; enrollmentError?: string }) {
+function TwinAsset({ item, kind, onRemove, onSelect, onPickVoice, enrollmentError }: { item: Item; kind: TwinKind; onRemove: () => Promise<void>; onSelect?: SelectTwin; onPickVoice?: PickTwinVoice; enrollmentError?: string }) {
   const { t } = useI18n();
+  const [voiceReady, setVoiceReady] = useState(false);
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,8 +47,9 @@ function TwinAsset({ item, kind, onRemove, onSelect, enrollmentError }: { item: 
     </div>
     <strong title={item.title}>{item.title}</strong>
     <small>{(item.size / 1024 / 1024).toFixed(2)} MB</small>
-    {kind === "voice" && <VoiceEnrollment itemId={item.id} revisionId={item.revisionId} initialError={enrollmentError} />}
+    {kind === "voice" && <VoiceEnrollment itemId={item.id} revisionId={item.revisionId} initialError={enrollmentError} onReady={setVoiceReady} />}
     <div className="twin-actions">
+      {onPickVoice && kind === "voice" && <button type="button" disabled={busy || !voiceReady} onClick={() => void act(() => onPickVoice(item))}>{t("用作旁白音色")}</button>}
       {onSelect && <button type="button" disabled={busy || !file} onClick={() => void act(() => onSelect(file!, kind))}>{t("用于视频制作")}</button>}
       {!file && error && <button type="button" onClick={() => setAttempt((n) => n + 1)}>{t("重试")}</button>}
       <button type="button" disabled={busy} onClick={() => { if (window.confirm(t("删除分身素材“{0}”？", [item.title]))) void act(onRemove); }}>{t("删除")}</button>
@@ -54,7 +58,7 @@ function TwinAsset({ item, kind, onRemove, onSelect, enrollmentError }: { item: 
   </article>;
 }
 
-function TwinLibrary({ kind, onSelect, onChanged }: { kind: TwinKind; onSelect?: SelectTwin; onChanged?: () => Promise<void> }) {
+function TwinLibrary({ kind, onSelect, onPickVoice, onChanged }: { kind: TwinKind; onSelect?: SelectTwin; onPickVoice?: PickTwinVoice; onChanged?: () => Promise<void> }) {
   const { t } = useI18n();
   const id = useId();
   const [items, setItems] = useState<Item[]>([]);
@@ -88,29 +92,32 @@ function TwinLibrary({ kind, onSelect, onChanged }: { kind: TwinKind; onSelect?:
     {error && <p className="twin-error" role="alert">{t(error)} <button type="button" disabled={loading} onClick={() => void load()}>{t("重试")}</button></p>}
     {loading && <p role="status">{t("正在加载…")}</p>}
     {!loading && !error && !items.length && <div className="twin-empty">{t(kind === "voice" ? "还没有声音样例，录制第一段个人声音吧。" : "还没有肖像，拍摄或上传第一张照片吧。")}</div>}
-    <div className="twin-assets">{items.map((item) => <TwinAsset key={item.id} item={item} kind={kind} onSelect={onSelect} enrollmentError={enrollmentErrors[item.id]} onRemove={async () => { await knowledgeApi.remove(item); await changed(); }} />)}</div>
+    <div className="twin-assets">{items.map((item) => <TwinAsset key={item.id} item={item} kind={kind} onSelect={onSelect} onPickVoice={onPickVoice} enrollmentError={enrollmentErrors[item.id]} onRemove={async () => { await knowledgeApi.remove(item); await changed(); }} />)}</div>
     {cursor && <button type="button" disabled={loading} onClick={() => void load(cursor)}>{t("加载更多")}</button>}
   </section>;
 }
 
-export function DigitalTwinPanel({ onSelect, onChanged, kind }: { onSelect?: SelectTwin; onChanged?: () => Promise<void>; kind?: TwinKind }) {
+export function DigitalTwinPanel({ onSelect, onPickVoice, onChanged, kind }: { onSelect?: SelectTwin; onPickVoice?: PickTwinVoice; onChanged?: () => Promise<void>; kind?: TwinKind }) {
   const { t } = useI18n();
   return <div className="digital-twin-panel">
     <div className="knowledge-section-heading"><h3>{t("数字分身")}</h3><p>{t("保存你的声音和肖像，在视频制作中随时选用。")}</p></div>
-    <div className="twin-libraries">{(!kind || kind === "voice") && <TwinLibrary kind="voice" onSelect={onSelect} onChanged={onChanged} />}{(!kind || kind === "portrait") && <TwinLibrary kind="portrait" onSelect={onSelect} onChanged={onChanged} />}</div>
+    <div className="twin-libraries">{(!kind || kind === "voice") && <TwinLibrary kind="voice" onSelect={onSelect} onPickVoice={onPickVoice} onChanged={onChanged} />}{(!kind || kind === "portrait") && <TwinLibrary kind="portrait" onSelect={onSelect} onChanged={onChanged} />}</div>
     <p className="twin-footnote">{t("在视频制作输入框中点击“数字分身”即可选用素材。音色与肖像还原效果，以及真人肖像是否可用，取决于所选模型。")}</p>
   </div>;
 }
 
-export function DigitalTwinPicker({ onSelect, onClose, kind }: { onSelect: SelectTwin; onClose: () => void; kind?: TwinKind }) {
+/** `onSelect` copies a chosen file into the caller; `onPickVoice` picks a cloned voice item instead. */
+export function DigitalTwinPicker({ onSelect, onPickVoice, onClose, kind }: { onSelect?: SelectTwin; onPickVoice?: PickTwinVoice; onClose: () => void; kind?: TwinKind }) {
   const { t } = useI18n();
-  const title = kind === "voice" ? "选择数字分身音色" : "选择数字分身素材";
+  const title = onPickVoice ? "选择旁白音色" : kind === "voice" ? "选择数字分身音色" : "选择数字分身素材";
   const dialog = useRef<HTMLDialogElement>(null);
   const [notice, setNotice] = useState("");
   useEffect(() => { dialog.current?.showModal(); }, []);
   return <dialog ref={dialog} className="knowledge-dialog twin-picker" aria-label={t(title)} onCancel={(e) => { e.preventDefault(); onClose(); }}>
     <header className="knowledge-head knowledge-header"><h2>{t(title)}</h2><button type="button" onClick={onClose}>{t("完成")}</button></header>
-    <main className="knowledge-main"><DigitalTwinPanel kind={kind} onSelect={async (file, kind) => { await onSelect(file, kind); setNotice(t("已添加“{0}”，可继续选择其他素材。", [file.name])); }} /></main>
+    {onPickVoice && <p className="twin-picker-hint">{t("只能选择已复刻完成的声音；新声音请先点击“复刻声音”，就绪后再选择。")}</p>}
+    <main className="knowledge-main"><DigitalTwinPanel kind={kind} onPickVoice={onPickVoice}
+      onSelect={onSelect && (async (file, kind) => { await onSelect(file, kind); setNotice(t("已添加“{0}”，可继续选择其他素材。", [file.name])); })} /></main>
     {notice && <p className="twin-selection-notice" role="status">{notice}</p>}
   </dialog>;
 }

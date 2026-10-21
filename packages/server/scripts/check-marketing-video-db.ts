@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { KLING_MARKETING_PROFILE, MarketingDraftSchema, planMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
+import { spawnSync } from "node:child_process";
+import { KLING_MARKETING_PROFILE, MarketingDraftSchema, planMarketingSegments, resolveMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
 import { DB } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migration-runner.js";
 import { migrations } from "../src/db/migrations/index.js";
@@ -18,6 +19,7 @@ import { KnowledgeRepository } from "../src/knowledge/repository.js";
 import { UsageMeter } from "../src/billing/meter.js";
 import { Hono } from "hono";
 import { createMarketingVideoRoutes } from "../src/marketing-video/routes.js";
+import { MarketingNarrator } from "../src/marketing-video/narration.js";
 import { AnalysisStorage } from "../src/marketing-analysis/storage.js";
 import type { AgentService } from "../src/services/agent-service.js";
 import { HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
@@ -521,5 +523,34 @@ try {
   await assert.rejects(operations.begin(pager, randomUUID(), busy[2].id, busy[2].version, "storyboard", { version: busy[2].version }), { status: 429 });
   await operations.fail(pager, running[0], false);
   assert.equal((await operations.begin(pager, randomUUID(), busy[2].id, busy[2].version, "storyboard", { version: busy[2].version })).fresh, true);
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", shotRedo: "only chosen shots submitted and billed, kept clips reused, earlier jobs removed with the draft", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  // R1: twin narration takes on PG, a version 4 job composed from them, and cleanup with the draft.
+  const twin = randomUUID(), silentTake = join(root, "take.wav");
+  await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=24000", "-t", "3", silentTake]);
+  let speeches = 0;
+  const narrator = new MarketingNarrator(db.pool, root, {
+    ready: async (_owner: string, itemId: string) => { assert.equal(itemId, twin); return { targetModel: "qwen-audio-3.0-tts-plus", voiceId: "fixture-voice" }; },
+    speakAs: async () => { speeches++; await new Promise(done => setTimeout(done, 50)); return { audio: await readFile(silentTake), mime: "audio/wav" }; },
+  } as never);
+  let narrated = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ ...draft, narration: { twinItemId: twin } }));
+  narrated = await store.setReview(owner, narrated, { verdict: "pass", issues: [] });
+  const shots = resolveMarketingSegments(narrated.draft, KLING_MARKETING_PROFILE);
+  await assert.rejects(narrator.frozen(owner, narrated.id, narrated.draft, shots), /请先生成全部分镜/);
+  const [takesA, takesB] = await Promise.all([0, 1].map(() => narrator.synthesize(owner, narrated.id, narrated.draft, shots)));
+  assert.equal(speeches, shots.length, "concurrent requests pay for each shot once");
+  assert(takesA.clips.concat(takesB.clips).every(clip => clip.status === "succeeded" || clip.status === "running"));
+  assert.deepEqual((await narrator.status(owner, narrated.id, narrated.draft, shots)).map(clip => [clip.status, Math.round((clip.durationMs ?? 0) / 100)]), shots.map(() => ["succeeded", 30]));
+  assert.deepEqual((await narrator.status(other, narrated.id, narrated.draft, shots)).map(clip => clip.status), shots.map(() => "missing"), "takes are owner-scoped");
+  await narrator.synthesize(owner, narrated.id, narrated.draft, shots, [1]);
+  assert.equal(speeches, shots.length + 1, "only the chosen shot is redone");
+  const takes = await narrator.frozen(owner, narrated.id, narrated.draft, shots);
+  const narratedTask = await store.reserve(owner, narrated.id, narrated.version, { modelId: KLING_MARKETING_PROFILE.modelId, marketingInputVersion: 4, generate_audio: false, narration: takes }, false);
+  const narratedOutput = await run(narratedTask);
+  const narratedFile = join(root, "assets", (await db.getAsset(narratedOutput.assetIds[0]))!.storage_key);
+  assert(Math.abs((await inspectMedia(narratedFile)).duration - 30) < 0.3);
+  // The fixture clips carry a 440 Hz tone; only the silent takes may be heard.
+  assert.match(spawnSync(ffmpeg(), ["-v", "info", "-i", narratedFile, "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" }).stderr, /max_volume: -(9\d|inf)/);
+  await store.remove(owner, narrated.id); await narrator.removeFiles(narrated.id);
+  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_video_narrations WHERE project_id=$1", [narrated.id])).rows[0].n, 0);
+  await assert.rejects(readdir(join(root, "marketing-narration", narrated.id)));
+  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", twinNarration: "takes paid once per shot, owner-scoped, v4 job composed from them, removed with the draft", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", shotRedo: "only chosen shots submitted and billed, kept clips reused, earlier jobs removed with the draft", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

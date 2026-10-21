@@ -179,3 +179,40 @@ describe("clips kept by a shot redo", () => {
     expect(f.compose).toHaveBeenCalledOnce();
   });
 });
+
+describe("twin-narrated jobs", () => {
+  const shot: MarketingShot = { durationSec: 15, script: "欢迎来喝咖啡。", visual: "人物展示咖啡", action: "端起杯子", camera: "中景" };
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  async function narrated(writeFiles: boolean) {
+    const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os"); const { join } = await import("node:path");
+    const root = await mkdtemp(join(tmpdir(), "marketing-run-narration-"));
+    const takes = [0, 1].map(slot => ({ slot, key: `k${slot}`, storageKey: `${projectId}/0000000${slot}-0000-4000-8000-000000000000.wav`, durationMs: 4000 }));
+    await mkdir(join(root, "marketing-narration", projectId), { recursive: true });
+    if (writeFiles) for (const take of takes) await writeFile(join(root, "marketing-narration", take.storageKey), "wav");
+    const f = fixture([shot, shot]);
+    store.get.mockResolvedValue({ id: projectId, taskId: "parent" });
+    Object.assign(f.deps, { dataRoot: root });
+    Object.assign(f.job.input, { marketingInputVersion: 4, generate_audio: false, narration: takes, draft: { ...f.job.input.draft, narration: { twinItemId: projectId } } });
+    return { ...f, root };
+  }
+  it("composes the frozen takes in place of the clips' audio", async () => {
+    vi.mocked(runGenerationJob).mockReset().mockImplementation(async (_deps: unknown, job: { id: string }) => ({ assetIds: [`asset-${job.id}`], assets: [] }) as never);
+    const f = await narrated(true);
+    try {
+      await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+      const input = (f.compose.mock.calls[0] as unknown[])[0] as { narration: string[] };
+      expect(input.narration).toHaveLength(2);
+      expect(input.narration[1]).toContain(`${projectId}/00000001-`);
+      for (const [, child] of vi.mocked(runGenerationJob).mock.calls) expect(child.input.generate_audio).toBe(false);
+    } finally { const { rm } = await import("node:fs/promises"); await rm(f.root, { recursive: true, force: true }); }
+  });
+  it("stops before any clip is paid for when a frozen take is gone", async () => {
+    vi.mocked(runGenerationJob).mockClear();
+    const f = await narrated(false);
+    try {
+      await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).rejects.toMatchObject({ errorCode: "NARRATION_INVALID" });
+      expect(runGenerationJob).not.toHaveBeenCalled();
+    } finally { const { rm } = await import("node:fs/promises"); await rm(f.root, { recursive: true, force: true }); }
+  });
+});

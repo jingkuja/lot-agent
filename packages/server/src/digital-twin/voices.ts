@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { assertPublicUrl, HttpQwenVoiceProvider, isQwenCreateRejected, OpenAISpeechProvider, type QwenVoiceProvider, type SpeechProvider, type SpeechResult, type TwinSpeechInput, type TwinVoiceRecord, type TwinVoiceScope, type TwinVoiceStore } from "@lot-agent/core";
+import { assertPublicUrl, HttpQwenVoiceProvider, isQwenCreateRejected, OpenAISpeechProvider, type QwenVoiceProvider, type SpeechFormat, type SpeechProvider, type SpeechResult, type TwinSpeechInput, type TwinVoiceRecord, type TwinVoiceScope, type TwinVoiceStore } from "@lot-agent/core";
 import type { KnowledgeRepository } from "../knowledge/repository.js";
 import type { LocalKnowledgeStorage } from "../knowledge/private-storage.js";
 import { KnowledgeError } from "../knowledge/errors.js";
@@ -15,6 +15,7 @@ export function loadTwinVoiceConfig() {
 /** Age after which an unconfirmed create that the vendor never listed may be enrolled again. */
 export const UNCONFIRMED_CREATE_RELEASE_MS = 2 * 60_000;
 export type TwinVoiceView =Pick<TwinVoiceRecord, "targetModel" | "voiceId" | "status">;
+export type ReadyTwinVoice = { targetModel: string; voiceId: string };
 const view = ({ targetModel, voiceId, status }: TwinVoiceRecord): TwinVoiceView => ({ targetModel, voiceId, status });
 
 /** Speech goes through the user's own New API key so the gateway bills that user. */
@@ -106,16 +107,26 @@ export class TwinVoices {
     return view((await this.deps.store.get(scope))!);
   }
 
-  /** Synthesizes with the voice's own target model. One billed request; no retry. */
-  async speak(ownerId: string, itemId: string, input: TwinSpeechInput, signal?: AbortSignal): Promise<SpeechResult> {
+  /** The owner's cloned voice of a twin voice item, only once it can synthesize. */
+  async ready(ownerId: string, itemId: string): Promise<ReadyTwinVoice> {
     const record = await this.deps.store.get(await this.owned(ownerId, itemId));
     if (record?.status !== "OK" || !record.voiceId) throw new KnowledgeError("CONFLICT", 409, "音色尚未就绪，请先完成声音复刻");
+    return { targetModel: record.targetModel, voiceId: record.voiceId };
+  }
+
+  /** Synthesizes with the voice's own target model. One billed request; no retry. */
+  async speak(ownerId: string, itemId: string, input: TwinSpeechInput, signal?: AbortSignal): Promise<SpeechResult> {
+    return this.speakAs(ownerId, await this.ready(ownerId, itemId), input, "mp3", signal);
+  }
+
+  /** Synthesizes with a voice from `ready`, so callers can key results by that exact voice. */
+  async speakAs(ownerId: string, voice: ReadyTwinVoice, input: TwinSpeechInput, format: SpeechFormat, signal?: AbortSignal): Promise<SpeechResult> {
     const speech = this.deps.speech;
     if (!speech) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "语音合成服务不可用");
     const apiKey = await speech.apiKey(ownerId);
     if (!apiKey) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "模型账号不可用，请重新登录后重试");
     const options = { baseUrl: speech.baseUrl(), apiKey };
     const provider = speech.provider?.(options) ?? new OpenAISpeechProvider(options);
-    return provider.synthesize({ model: record.targetModel, text: input.text, voice: record.voiceId, format: "mp3", speed: input.speed, instructions: input.instructions }, signal);
+    return provider.synthesize({ model: voice.targetModel, text: input.text, voice: voice.voiceId, format, speed: input.speed, instructions: input.instructions }, signal);
   }
 }

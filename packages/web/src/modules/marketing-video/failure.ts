@@ -88,6 +88,12 @@ const failures: Record<MarketingFailureCode, VideoFailure> = {
     next: "请复制为新草稿，检查分镜和素材后重新制作。",
     actions: ["copy"],
   },
+  // The confirmed takes are part of the frozen job; new ones need a new draft.
+  NARRATION_INVALID: {
+    reason: "这次制作使用的数字分身配音文件已不可用。",
+    next: "请复制为新草稿，重新生成配音并试听后再制作。",
+    actions: ["copy"], copyStep: 2,
+  },
   // Every clip is stored before composition starts, so its errors never need a model call.
   COMPOSITION_FAILED: {
     reason: "所有片段都已生成，合成成片时出现问题。",

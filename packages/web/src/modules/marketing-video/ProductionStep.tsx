@@ -1,29 +1,55 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import type { MarketingDraft, MarketingSegment, MarketingShot, MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { MarketingNarrationSchema, type MarketingDraft, type MarketingSegment, type MarketingShot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { Choices, DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 
-/** How the narration is voiced. Only model voicing is built; the twin's own voice-over
- * is listed so the difference is visible. Lip-synced presenters belong to a separate agent. */
+/** How the narration is voiced: by the video model, or as the twin's own off-screen voice-over
+ * (people on screen may move naturally but never deliver the lines to the lens).
+ * Lip-synced presenters belong to the separate digital presenter agent. */
 const VOICE_MODES = [
-  { title: "AI 配音", description: "视频模型生成人物语音，可用声音样例参考音色。", ready: true },
-  { title: "数字分身旁白", description: "用数字分身原声配画外旁白，画面人物不开口。", ready: false },
+  { twin: false, title: "AI 配音", description: "视频模型生成人物语音，可用声音样例参考音色。" },
+  { twin: true, title: "数字分身旁白", description: "用数字分身原声朗读文案，AI 生成画面演绎内容。" },
 ];
 
-function VoiceModes({ form }: { form: DraftForm }) {
+function VoiceModes({ form, available }: { form: DraftForm; available: boolean }) {
   const { t } = useI18n();
+  const twin = !!form.draft.narration;
   return <div className="mv-voice-modes" role="group" aria-label={t("配音方式")}>
-    {VOICE_MODES.map(mode => <button key={mode.title} type="button" className={mode.ready ? "selected" : ""} aria-pressed={mode.ready}
-      disabled={!mode.ready || form.busy || form.frozen || !form.ready}>
-      <strong>{t(mode.title)}{!mode.ready && <em>{t("即将上线")}</em>}</strong>
+    {VOICE_MODES.map(mode => <button key={mode.title} type="button" className={mode.twin === twin ? "selected" : ""} aria-pressed={mode.twin === twin}
+      disabled={(mode.twin && !available && !twin) || form.busy || form.frozen || !form.ready}
+      onClick={() => { if (mode.twin !== twin) form.field("narration", mode.twin ? MarketingNarrationSchema.parse({}) : undefined); }}>
+      <strong>{t(mode.title)}{mode.twin && !available && <em>{t("暂不可用")}</em>}</strong>
       <span>{t(mode.description)}</span>
     </button>)}
   </div>;
 }
 
+/** The twin voice, its pace and tone. Changing any of them needs new takes. */
+function NarrationSettings({ form, onPickVoice }: { form: DraftForm; onPickVoice(): void }) {
+  const { t } = useI18n();
+  const { draft, busy, frozen, ready, field } = form;
+  const narration = draft.narration!;
+  const set = (changes: Partial<typeof narration>) => field("narration", { ...narration, ...changes });
+  const locked = busy || frozen || !ready;
+  return <>
+    <label className="mv-label">{t("旁白音色")}</label>
+    <div className="mv-narration-voice">
+      <span>{narration.twinItemId ? narration.voiceName || t("已选择数字分身音色") : t("尚未选择")}</span>
+      <button className="mv-soft" disabled={locked} onClick={onPickVoice}>{t(narration.twinItemId ? "更换音色" : "从数字分身语音库选择")}</button>
+    </div>
+    <label className="mv-field"><span>{t("语速 {0}×", [narration.speed.toFixed(2)])}</span>
+      <input aria-label={t("旁白语速")} type="range" min="0.8" max="1.25" step="0.05" value={narration.speed} disabled={locked} onChange={e => set({ speed: Number(e.target.value) })} />
+    </label>
+    <label className="mv-field"><span>{t("语气要求（可选）")}</span>
+      <input value={narration.instructions} maxLength={200} disabled={locked} placeholder={t("例如：语气热情，语速稍快")} onChange={e => set({ instructions: e.target.value })} />
+    </label>
+    <p className="mv-hint">{t("旁白使用数字分身复刻的原声，生成视频前逐镜合成并试听。画面人物可以自然活动，但不会对着镜头念台词。字幕仍由视频模型绘制，可能与配音节奏不完全一致。")}</p>
+  </>;
+}
+
 /** Step 3: voice, music, captions and format, then confirm the storyboard and generate. */
-export function ProductionStep({ form, profile, handlers, referenceVideoStatus, parts, planError, blocker, blockerId, buttonLabel, storyboardPanel, reviewPanel, audioNotice, onPickVoice, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
+export function ProductionStep({ form, profile, handlers, referenceVideoStatus, parts, planError, blocker, blockerId, buttonLabel, storyboardPanel, reviewPanel, audioNotice, narrationAvailable, narrationPanel, onPickVoice, onPickNarrationVoice, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
   form: DraftForm; profile: MarketingVideoProfile; handlers: MaterialHandlers; referenceVideoStatus: string;
   /** Clips the current draft would be generated as. */
   parts: MarketingSegment[];
@@ -35,7 +61,11 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
   reviewPanel: ReactNode;
   /** Shown when the reference video changed what the board was planned for. */
   audioNotice: ReactNode;
-  onPickVoice(): void; onStoryboard(shots: MarketingShot[]): void; onStoryboardAi(instruction: string, index?: number): void;
+  /** Whether this server can synthesize twin narration. */
+  narrationAvailable: boolean;
+  /** Per-shot takes, shown with the confirmed board in twin narration mode. */
+  narrationPanel: ReactNode;
+  onPickVoice(): void; onPickNarrationVoice(): void; onStoryboard(shots: MarketingShot[]): void; onStoryboardAi(instruction: string, index?: number): void;
   onEditCopy(): void; onGenerate(): void; onManualStoryboard(): void;
 }) {
   const { t } = useI18n();
@@ -53,13 +83,15 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
   return <>
     {draft.assets.video ? <p className="mv-hint" role="status">{referenceVideoStatus}</p> : <>
       <label className="mv-label">{t("配音方式")}</label>
-      <VoiceModes form={form} />
-      <label className="mv-label">{t("旁白风格")}</label>
-      <Choices form={form} label="旁白风格" values={["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value }))} value={draft.voice} onChoose={value => field("voice", value)} />
-      <label className="mv-label">{t("音色参考（选填）")}</label>
-      <button className="mv-soft" disabled={busy || frozen || !ready} onClick={onPickVoice}>{t("从数字分身语音库选择")}</button>
-      <MaterialField form={form} slot="voice" label="上传声音样例（2–15 秒）" accept="audio/mpeg,audio/wav" handlers={handlers} />
-      <p className="mv-hint">{t("留空时按所选旁白风格由模型配音。声音样例只作音色参考，成片声音与原声相近但不相同；配音和字幕均由模型生成，发布前请试听成片。")}</p>
+      <VoiceModes form={form} available={narrationAvailable} />
+      {draft.narration ? <NarrationSettings form={form} onPickVoice={onPickNarrationVoice} /> : <>
+        <label className="mv-label">{t("旁白风格")}</label>
+        <Choices form={form} label="旁白风格" values={["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value }))} value={draft.voice} onChoose={value => field("voice", value)} />
+        <label className="mv-label">{t("音色参考（选填）")}</label>
+        <button className="mv-soft" disabled={busy || frozen || !ready} onClick={onPickVoice}>{t("从数字分身语音库选择")}</button>
+        <MaterialField form={form} slot="voice" label="上传声音样例（2–15 秒）" accept="audio/mpeg,audio/wav" handlers={handlers} />
+        <p className="mv-hint">{t("留空时按所选旁白风格由模型配音。声音样例只作音色参考，成片声音与原声相近但不相同；配音和字幕均由模型生成，发布前请试听成片。")}</p>
+      </>}
     </>}
     <MaterialField form={form} slot="music" label="选择背景音乐（选填）" accept="audio/mpeg,audio/wav,audio/mp4" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
@@ -79,6 +111,7 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
         <DraftText form={form} name="continuity" label="统一人物与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装和场景一致。" />
         <StoryboardEditor compact presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />
       </details>
+      {narrationPanel}
     </div> : <>
       {!!parts.length && <details className="mv-script-review"><summary>{t("查看自动分段（{0} 段）", [parts.length])}</summary>{parts.map(p => <p key={p.index}>{p.index + 1} · {p.durationSec}s<br />{p.script}</p>)}</details>}
       {tally}

@@ -9,6 +9,7 @@ import { createFeishuRoutes, createFeishuPublicRoutes } from "./feishu/routes.js
 import { SecretBox } from "./auth/secret-box.js";
 import { createVideoDraftRoutes } from "./routes/video-drafts.js";
 import { createMarketingVideoRoutes } from "./marketing-video/routes.js";
+import { MarketingNarrator } from "./marketing-video/narration.js";
 import { createAnalysisRoutes } from "./marketing-analysis/routes.js";
 import { KnowledgeKeys } from "./knowledge/access/keys.js";
 import { RedisKnowledgeLimiter } from "./knowledge/access/limiter.js";
@@ -340,7 +341,20 @@ async function main() {
   app.route("/api/models", createModelRoutes(service));
   app.route("/api/tasks", createTaskRoutes(service));
   app.route("/api/video-drafts", createVideoDraftRoutes(service));
-  app.route("/api/marketing-videos", createMarketingVideoRoutes(service, resolve(ROOT, "data")));
+  // The digital twin lives in the private knowledge store; without it there is no cloned voice.
+  const knowledgeManagement = process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1" ? (() => {
+    const repository = new KnowledgeRepository(service.db.pool, process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? knowledgeQueueConfig().queueName : undefined);
+    const storage = new LocalKnowledgeStorage(resolve(ROOT, "data/knowledge"));
+    const voices = new TwinVoices({
+      repository, storage, store: new PgTwinVoiceStore(service.db.pool),
+      // Same gateway and per-user key as other model calls; no shared env key fallback.
+      speech: { apiKey: (userId) => service.db.getUserApiKey(userId, service.managedKeysEnabled), baseUrl: () => process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1" },
+    });
+    return { repository, storage, voices };
+  })() : undefined;
+  app.on("POST", "/api/marketing-videos/:id/narration", generationRateLimit);
+  app.route("/api/marketing-videos", createMarketingVideoRoutes(service, resolve(ROOT, "data"), undefined, undefined,
+    new MarketingNarrator(service.db.pool, resolve(ROOT, "data"), knowledgeManagement?.voices)));
   app.route("/api/marketing-video-analyses", createAnalysisRoutes(service, resolve(ROOT, "data/marketing-analysis")));
   app.route("/api/assets/shares", createImageShareRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
@@ -353,20 +367,14 @@ async function main() {
   app.route("/api/publish", createPublishRoutes(service));
   app.route("/api/knowledge-bases", createKnowledgeBaseRoutes(service));
   // Management can be developed independently while chat remains explicitly remote.
-  if (process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1") {
-    const repository = new KnowledgeRepository(service.db.pool, process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? knowledgeQueueConfig().queueName : undefined);
-    const storage = new LocalKnowledgeStorage(resolve(ROOT, "data/knowledge"));
+  if (knowledgeManagement) {
+    const { repository, storage, voices } = knowledgeManagement;
     app.use("/api/rag/manage/*", authMw);
     app.on("POST", "/api/rag/manage/uploads", uploadRateLimit);
     app.on("POST", "/api/rag/manage/items/:id/voice", uploadRateLimit);
     app.on("POST", "/api/rag/manage/items/:id/voice/speech", generationRateLimit);
     const profile = indexProfile(process.env.OPENAI_BASE_URL ?? "https://tokenhub.wetok.ai/v1");
     const retriever = process.env.KNOWLEDGE_INGESTION_ENABLED === "1" ? new KnowledgeRetriever(service.db.pool, profile, (owner, selectedProfile) => createUserEmbedder(service.db, selectedProfile, owner)) : undefined;
-    const voices = new TwinVoices({
-      repository, storage, store: new PgTwinVoiceStore(service.db.pool),
-      // Same gateway and per-user key as other model calls; no shared env key fallback.
-      speech: { apiKey: (userId) => service.db.getUserApiKey(userId, service.managedKeysEnabled), baseUrl: () => process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1" },
-    });
     app.route("/api/rag/manage", createKnowledgeManageRoutes(repository, storage, retriever, new KnowledgeMaterials(repository, storage, resolve(ROOT, "data")), voices));
     app.route("/api/rag/preview", createKnowledgePreviewRoutes(repository, storage));
     if (process.env.KNOWLEDGE_EXTERNAL_ENABLED === "1" && retriever) {

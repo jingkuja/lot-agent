@@ -93,6 +93,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <a href="#fixes5">第五轮修复</a>
   <a href="#fixes6">第六轮修复</a>
   <a href="#fixes7">第七轮修复</a>
+  <a href="#fixes8">第八轮修复</a>
   <a href="#tracking">旧评审跟踪</a>
   <a href="#features">1 功能完成度</a>
   <a href="#ui">2 操作 UI</a>
@@ -104,14 +105,14 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复，第六轮让删除草稿一并删除成片、片段和参考分析，并显示空间用量（G05），第七轮支持成片后只重做所选镜头，其他片段不再付费（G04）。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
+  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复，第六轮让删除草稿一并删除成片、片段和参考分析，并显示空间用量（G05），第七轮支持成片后只重做所选镜头，其他片段不再付费（G04），第八轮新增「数字分身旁白」：用数字分身原声逐镜配音并替换片段音轨，处理 R1 配音问题（G01 的配音部分）。仍有一类主要问题：字幕和成片质量不可控（G01 字幕部分、G02）。</div>
   <div class="grid">
     <div class="stat"><strong>8 · 0 · 0</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
-    <div class="stat"><strong>2 · 0 · 6</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
+    <div class="stat"><strong>2 · 1 · 5</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
     <div class="stat"><strong>0 高 · 0 中 · 2 低</strong><span>当前健壮性问题（三轮共修复 14 项）</span></div>
-    <div class="stat"><strong>2663 / 81</strong><span>第六轮后全量单测：通过 / 跳过</span></div>
+    <div class="stat"><strong>2690 / 81</strong><span>第八轮后全量单测：通过 / 跳过</span></div>
   </div>
-  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。前三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。第四轮运行了构建和数据库脚本，未运行浏览器 UI 脚本（本机缺 Playwright）。第五轮运行了构建、数据库脚本和两个浏览器 UI 脚本。第六轮运行了构建、两个数据库脚本和两个浏览器 UI 脚本。全程没有调用付费模型。</p>
+  <p class="meta">验证范围：评审阶段核对了代码，运行了单测和类型检查。前三轮修复都另外运行了构建、临时 PostgreSQL 上的数据库集成脚本和浏览器 UI 脚本；第二轮还在临时 Redis 上运行了队列脚本。第四轮运行了构建和数据库脚本，未运行浏览器 UI 脚本（本机缺 Playwright）。第五轮运行了构建、数据库脚本和两个浏览器 UI 脚本。第六轮运行了构建、两个数据库脚本和两个浏览器 UI 脚本。第八轮运行了构建、数据库脚本和营销视频浏览器 UI 脚本。全程没有调用付费模型。</p>
 </section>
 
 <section class="card" id="fixes">
@@ -464,6 +465,54 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p class="meta">残留：不能单独改某镜时长或镜数；没有单个片段预览；使用 Kling 参考音色时，新父任务会重新准备一次音色。</p>
 </section>
 
+<section class="card" id="fixes8">
+  <h2>第八轮修复（2026-10-21） <span class="tag ok">R1 配音已处理</span></h2>
+  <p class="meta">提交：尚未提交（改动在工作区）</p>
+  <p>本轮处理风险 R1（配音）。原状态：每镜由视频模型自己配音，镜间音色不一致，口型也对不上；第 3 步的「数字分身旁白」标为即将上线，不可选。</p>
+  <p><strong>需求补充（10-21）：</strong>旁白模式并不要求画面人物完全不开口，只要避免人物正对镜头念台词、口型又对不上的画面。人物可以自然活动、微笑、简短交谈或进食。卡片说明改为「用数字分身原声朗读文案，AI 生成画面演绎内容」。需要真人对口型的需求仍由独立的数字主播 Agent 负责（见 <a href="digital-presenter-plan-20261021.md">数字主播方案</a>）。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>修复</th><th>保护与边界</th></tr></thead>
+    <tbody>
+      <tr><td>模型配音音色不一致</td><td>
+        <ul>
+          <li>第 3 步「配音方式」可选「数字分身旁白」。只能选择已复刻完成（状态 OK）的数字分身音色，可调语速（0.8–1.25）和语气要求。</li>
+          <li>分镜确认后点「生成配音」，逐镜调用 <code>TwinVoices.speakAs</code> 合成 WAV（<code>marketing-video/narration.ts</code>，同时最多 3 镜）。每镜可试听、单独重新生成。</li>
+          <li>「AI 配音」保留原来的模型配音，作为快速模式。</li>
+        </ul></td><td>
+        <ul>
+          <li>用当前用户的 New API Key 走网关，网关计费，本地不新增计量。</li>
+          <li>先写 <code>running</code> 意图行再请求。同一镜、同一内容只合成一次：并发请求不会重复付费，失败或超时不自动重发，只有用户点「重新生成」才覆盖（重做已成功的配音会先确认）。</li>
+          <li>配音键包含模型、音色条目、音色 ID、语速、语气和该镜台词，任一项变化旧配音即失效。镜长不在键内，调整时长不需要重新合成。</li>
+          <li>文件存放在 <code>data/marketing-narration/&lt;草稿&gt;/</code>，只能经所有者接口读取，不进公开静态目录。</li>
+        </ul></td></tr>
+      <tr><td>画面口型对不上</td><td>
+        <ul>
+          <li>旁白模式的新片段一律无声生成：<code>generate_audio=false</code>，不传参考音色，Kling 不创建自定义音色。</li>
+          <li>片段和规划提示词改为「画外旁白」：人物演示、互动或自然反应，可以有自然的嘴部动作，但不对着镜头念旁白，避免居中口播特写（<code>prompt.ts</code>）。</li>
+        </ul></td><td>只是提示词约束，模型仍可能生成像在说话的画面，需要用真实样片统计比例。选了参考视频时整片无声，旁白不生效。</td></tr>
+      <tr><td>配音长度与镜头时长</td><td>
+        <ul>
+          <li>按 ffprobe 实测时长比较，每镜配音必须比镜头短至少 0.2 秒，否则阻止生成。</li>
+          <li>「按配音调整分镜时长」（<code>fitMarketingNarration</code>）只加长放不下的镜头，总长仍在目标至目标 +5 秒内。放不下时提示精简文案或调快语速。</li>
+          <li>合成时用配音替换片段自带音轨，不足镜长的部分补静音，再照常混入 BGM（<code>media.ts</code>）。</li>
+        </ul></td><td>配音长于镜头时直接报错，不截断已确认的台词。</td></tr>
+      <tr><td>冻结与恢复</td><td>
+        <ul>
+          <li>输入版本升为 4，<code>/generate</code> 把每镜配音（镜号、键、文件、时长）冻结进任务，缺任何一镜返回 409。</li>
+          <li>Worker 在付费提交片段前检查冻结的配音文件；文件不可用时报 <code>NARRATION_INVALID</code>，前端提示复制为新草稿。</li>
+          <li>单镜重做（G04）时，改过口播的镜头在 <code>/revise</code> 中各合成一次新配音并冻结进新任务；其余镜头沿用原配音。</li>
+        </ul></td><td>重新生成某镜配音会写新文件，不覆盖已冻结的文件，所以已提交的任务始终使用确认过的配音。版本 1–3 的旧任务仍按原 <code>generate_audio</code> 恢复。</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>数据库：</strong>迁移 55（<code>0055-marketing-video-narrations.ts</code>）新增 <code>marketing_video_narrations</code>，随草稿级联删除；删除草稿时同时删除配音文件。不改历史迁移。</p>
+  <p><strong>接口：</strong><code>GET/POST /api/marketing-videos/:id/narration</code>（POST 走生成限流）、<code>GET /:id/narration/:slot</code>（试听）。<code>/capabilities</code> 新增 <code>narration</code>，仅在 <code>KNOWLEDGE_MANAGEMENT_ENABLED=1</code>（数字分身可用）时为真。</p>
+  <p><strong>界面与文档：</strong>数字分身选择器新增「用作旁白音色」，按音色条目选择，不复制原件。新增文案已补中文、英文和印尼文，只使用现有 CSS 变量。已更新 <code>docs/marketing-video.md</code>、<code>docs/agent-code-guide.md</code> 和 <a href="marketing-video-tts-narration-plan-20261020.md">TTS 配音计划</a>。</p>
+  <p><strong>测试：</strong>单测覆盖配音键、并发与失败不重发、文件只能在本草稿目录内、按配音调整镜长、旁白提示词、路由冻结与 409、单镜重做补配音、Worker 用冻结配音合成及文件缺失时不提交片段；另有真实 FFmpeg 用例确认片段原音轨被配音替换。数据库脚本在临时 PostgreSQL 上验证：两个并发请求每镜只合成一次，配音按用户隔离，版本 4 任务成片只含配音音轨（夹具片段的 440 Hz 音调不在成片中），删除草稿后记录和目录都被删除。UI 脚本新增：选择已复刻音色（未复刻的不可选）、生成配音、配音过长时阻止生成、按配音调整时长后可生成、试听。</p>
+  <p><strong>结果页错误提示：</strong>成片后点「检查当前文案」或单镜重做前的自动检查失败时，原提示只有「文案模型暂时无法完成请求，请稍后重试。」，看起来像视频生成失败。本地记录显示这是一次网关无响应的文案检查（记为 <code>cancelled</code>，不计费），视频任务仍为成功。现在文案检查和「重新生成标题和标签」失败时注明步骤，有成片时注明「已生成的视频不受影响」。生成前自动补标题标签的失败仍走原有的跳过确认框。</p>
+  <p><strong>本地文件：</strong>配音文件目录 <code>data/marketing-narration/</code> 已加入 <code>.gitignore</code>。</p>
+  <p class="meta">残留：没有做计划中的系统预设音色，旁白只能用已复刻的数字分身音色；字幕仍由视频模型绘制，与配音节奏不同步（R2）；逐镜合成，镜与镜之间的语气衔接弱于整段合成；空间用量还未计入配音文件；尚未用真实网关和千问音色出样片，<code>response_format=wav</code>、<code>speed</code> 和 <code>instructions</code> 经网关的支持需要实测（TTS 计划第 1 步）。</p>
+</section>
+
 <section class="card" id="tracking">
   <h2>10-15 评审问题跟踪</h2>
   <div class="legend"><span><span class="tag ok">已修复</span> 代码已处理</span><span><span class="tag mid">部分修复</span> 主要问题已处理，有残留</span><span><span class="tag high">未修复</span> 与旧评审描述一致</span></div>
@@ -485,7 +534,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <div class="table-wrap"><table>
     <thead><tr><th>编号</th><th>旧缺口</th><th>当前状态</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td>G01</td><td>逐字配音与字幕校正</td><td><span class="tag high">未完成</span></td><td>仍由视频模型生成配音和字幕。见 R1、R2。</td></tr>
+      <tr><td>G01</td><td>逐字配音与字幕校正</td><td><span class="tag mid">部分完成</span><br><span class="meta">原为未完成</span></td><td>10-21：新增「数字分身旁白」，用 TTS 原声逐镜配音并替换片段音轨，配音逐字且全片音色一致（R1，见<a href="#fixes8">第八轮修复</a>）。「AI 配音」模式仍由模型配音；字幕仍由模型绘制，未与配音对齐（R2）。</td></tr>
       <tr><td>G02</td><td>成片质量检查</td><td><span class="tag high">未完成</span></td><td>Worker 只检查画面存在、音轨存在和时长（<code>run.ts</code>）。不检查错字、口播和人物一致性。</td></tr>
       <tr><td>G03</td><td>费用与用量说明</td><td><span class="tag high">未完成</span></td><td>生成前只做额度预检。文档写明"预计费用展示暂未加入"。</td></tr>
       <tr><td>G04</td><td>单镜替换与重新合成</td><td><span class="tag ok">已完成</span><br><span class="meta">原为未完成</span></td><td>10-21（提交 <code>9d4cc7a</code>）：成片或任务停止后，可在结果页修改分镜文字或勾选镜头，只重新生成这些镜头。其余镜头直接引用原片段资产，不调用模型、不计量，然后重新合成（<code>POST /:id/revise</code>、<code>repository.ts → revise</code>）。残留：不能改镜数、时长和其他配置；没有片段预览。见<a href="#fixes7">第七轮修复</a>。</td></tr>
@@ -515,7 +564,8 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>片段模型切换</td><td class="nowrap">C3 <span class="tag new">新</span></td><td>按 <code>MarketingVideoProfile</code> 切换 Grok / Kling，默认 Grok（提交 <code>cf8ab55</code>）。Grok 真实成片质量未验收。</td></tr>
       <tr><td>人物出镜方式</td><td class="nowrap">C3 <span class="tag new">新</span></td><td>主播全程 / 混合镜头（2026-10-20）。混合镜头真实成片未验收。</td></tr>
       <tr><td>跨镜人物与场景一致</td><td class="nowrap">C2 <span class="tag new">新</span></td><td>统一人物与场景设定随每段请求提交（2026-10-20）。仅为提示词约束，未用真实样片验证，也没有成片一致性检查（G02）。</td></tr>
-      <tr><td>原生口播与参考音色</td><td class="nowrap">C2</td><td>不能保证逐字、跨段音色一致和口型准确。</td></tr>
+      <tr><td>原生口播与参考音色</td><td class="nowrap">C2</td><td>「AI 配音」模式。不能保证逐字、跨段音色一致和口型准确。</td></tr>
+      <tr><td>数字分身旁白</td><td class="nowrap">C2 <span class="tag new">新</span></td><td>数字分身原声逐镜配音、试听、单镜重做，按配音调整镜长，合成时替换片段音轨（第八轮）。人物不对镜头念台词仅靠提示词约束；真实网关样片未验收。</td></tr>
       <tr><td>字幕</td><td class="nowrap">C2</td><td>由模型画进画面。没有可编辑字幕轨。</td></tr>
       <tr><td>分段生成、合成与 BGM</td><td class="nowrap">C3</td><td>每镜 4–15 秒，最多 15 镜，默认 2 段并行（可配置）。FFmpeg 拼接并混入 BGM。合成前用探针短片检查 FFmpeg（2026-10-20）。</td></tr>
       <tr><td>取消、续作与计量</td><td class="nowrap">C3</td><td>保留成功片段，未知结果不自动重发，计量有幂等键。用户确认后可只重提未知片段，并留有记录（2026-10-19 修复）。审核与标题标签也有调用记录（2026-10-20）。</td></tr>
@@ -607,12 +657,13 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   </ul>
   <h3>风险</h3>
   <div class="risk">
-    <h3>R1 配音 <span class="tag high">质量</span></h3>
+    <h3>R1 配音 <span class="tag ok">已处理</span></h3>
     <p>每一镜由视频模型单独生成配音。镜与镜之间音色不一致，口型也不准（G01）。这是成片质量的最大风险。</p>
     <div class="flow"><span>TTS 整段音轨</span><i>→</i><span>按镜切分</span><i>→</i><span>音频驱动 / 对口型</span><i>→</i><span>本地合成</span></div>
     <p class="meta">保留当前方式作为"快速模式"，并写明质量边界。<code>marketing-video.md</code> 的"后续对口型服务候选"已经提出了这个方向。</p>
     <p class="meta">2026-10-20 补充：<a href="marketing-video-audio-subtitle-plan-20261020.md">R1 / R2 配音、字幕与对口型方案</a>，包含 TTS 云服务选型、统一时间轴、改造位置和验收门槛。当前为设计建议，尚未实施。</p>
     <p class="meta">2026-10-20 补充：<a href="marketing-video-tts-narration-plan-20261020.md">TTS 配音替换模型配音实施计划</a>（逐镜合成、试听后再付费生成视频、片段无声生成、合成时替换音轨）。只做 TTS 时人物不再开口说话，数字人口播模式体验会倒退，因此该模式应与对口型一起上线；参考视频模式当前没有旁白，可先单独上线。对口型路径（图片音频驱动或 VideoRetalk）待选定。</p>
+    <p class="meta">2026-10-21 更新：真人对口型改由独立的数字主播 Agent 负责。营销影像新增「数字分身旁白」配音方式（<a href="#fixes8">第八轮修复</a>）：TTS 原声逐镜配音，片段无声生成，合成时替换音轨。按需求补充，画面人物可以自然活动，只是不对着镜头念台词，因此不必等对口型上线。「AI 配音」保留为快速模式。</p>
   </div>
   <div class="risk">
     <h3>R2 字幕 <span class="tag high">质量</span></h3>
@@ -683,7 +734,12 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>第六轮 <code>pnpm check:marketing-analysis:db</code>（同一临时容器）</td><td>通过</td><td>覆盖拆分后的分析删除接口。未设置 Redis，跳过队列部分</td></tr>
       <tr><td>第六轮 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>通过</td><td>新增断言见第六轮修复。侧边栏改版（提交 <code>6c30ff9</code>、<code>bfba959</code>）后脚本在启动器断言处失效；本次改为只检查前 3 个 Agent，并在没有"更多"按钮时直接点选 Agent</td></tr>
       <tr><td>第六轮 <code>pnpm check:marketing-analysis:ui</code></td><td>通过</td><td>—</td></tr>
-      <tr><td>真实供应商</td><td>六轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
+      <tr><td>第八轮全量 Vitest</td><td>317 文件通过，14 文件跳过；2690 项通过，81 项跳过</td><td>新增：配音记录与并发、配音文件路径限制、按配音调整镜长、旁白提示词、路由冻结与单镜重做补配音、Worker 冻结配音合成、真实 FFmpeg 音轨替换</td></tr>
+      <tr><td>第八轮严格类型检查</td><td>Core 20 项、Server 239 项，与本轮修改前逐条相同，营销目录 0 项新增；Web 通过</td><td>—</td></tr>
+      <tr><td>第八轮 Core / Server / Web 构建</td><td>通过</td><td>Web 仍有既有的大 chunk 提示</td></tr>
+      <tr><td>第八轮 <code>pnpm check:marketing-video:db</code>（临时 pgvector PostgreSQL 容器，用后停止）</td><td>通过</td><td>新增断言见第八轮修复（迁移 55、并发只合成一次、用户隔离、版本 4 成片只含配音、随草稿删除）</td></tr>
+      <tr><td>第八轮 <code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>通过</td><td>新增旁白流程断言。该脚本在提交 <code>485768c</code> 后已失效（素材上限提示改为按模型配置，断言仍是旧文案），本次已改为当前文案</td></tr>
+      <tr><td>真实供应商</td><td>八轮均未运行</td><td>历史记录见 <code>docs/marketing-video-implementation-20261016.md</code></td></tr>
     </tbody>
   </table></div>
   <p class="meta">跳过项不计为通过。严格类型检查仍未全绿，不能用构建成功代替。</p>
@@ -725,7 +781,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <div class="phase">
     <h3>D 质量</h3>
     <ol start="16">
-      <li><span class="tag mid">进行中</span> 评估"TTS 先行 + 本地字幕"路线，保留快速模式。TTS 替换配音已有实施计划；数字人模式需与对口型一起上线。<span class="ref">— G01、R1、R2</span></li>
+      <li><span class="tag mid">部分完成</span> "TTS 先行 + 本地字幕"路线：TTS 配音已作为「数字分身旁白」上线（第八轮），「AI 配音」保留为快速模式；本地字幕仍待做。真人对口型改由数字主播 Agent 负责。<span class="ref">— G01、R1、R2</span></li>
       <li>增加成片质量检查：声音、字幕、黑帧和关键事实。<span class="ref">— G02</span></li>
       <li>用授权样片做真实验收（10-15 报告建议每组至少 30 条）。<span class="ref">— 旧报告验收门槛</span></li>
     </ol>

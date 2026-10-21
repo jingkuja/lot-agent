@@ -7,7 +7,7 @@ import { invalidTextResult, parseOperationResult, parseTextResult } from "./text
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { estimateCost } from "@lot-agent/core";
-import { isMarketingDurationValid, MARKETING_INPUT_VERSION, marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, marketingReferenceImageIssue, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { isMarketingDurationValid, MARKETING_INPUT_VERSION, marketingJobProfile, marketingNativeSpeech, marketingVideoProfile, marketingVoiceover, type MarketingProject, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, marketingReferenceImageIssue, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
@@ -26,10 +26,12 @@ import { AnalysisStorage, analysisOwnerLimit } from "../marketing-analysis/stora
 import { signPrivateMaterial } from "../generation/private-materials.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 import { activeMarketingVideoProfile } from "./model.js";
+import { MarketingNarrator, type FrozenNarration } from "./narration.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
-export function createMarketingVideoRoutes(service: AgentService, dataRoot: string, store = new PgMarketingProjectStore(service.db.pool), operations = new PgMarketingTextOperations(service.db.pool)) {
+export function createMarketingVideoRoutes(service: AgentService, dataRoot: string, store = new PgMarketingProjectStore(service.db.pool), operations = new PgMarketingTextOperations(service.db.pool),
+  narrator = new MarketingNarrator(service.db.pool, dataRoot)) {
   // New clips use the configured model; recovery uses each job's recorded model.
   const activeProfile = activeMarketingVideoProfile();
   const analysisStorage = new AnalysisStorage(resolve(dataRoot, "marketing-analysis"));
@@ -108,7 +110,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     if (assets.voice || assets.music) {
       for (const slot of ["voice", "music"] as const) {
-        if (!assets[slot] || (slot === "voice" && (!needsSubmission || draft.assets.video))) continue;
+        // A voice sample only guides the model's own speech; twin narration and silent renders ignore it.
+        if (!assets[slot] || (slot === "voice" && (!needsSubmission || !marketingNativeSpeech(draft)))) continue;
         const asset = (await service.db.getAsset(assets[slot].id))!;
         const info = await inspectMedia(await ownedAssetPath(dataRoot, asset), signal);
         if (!info.audio || (slot === "voice" && (info.duration < 2 || info.duration > 15))) throw new MarketingError("声音样例时长需为 2–15 秒");
@@ -129,7 +132,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (operation.result) return operation.result;
     throw new MarketingError(["failed", "cancelled"].includes(operation.status) ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请查看页面底部的处理结果。", 409);
   };
-  app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", model: activeProfile }));
+  app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", narration: narrator.available, model: activeProfile }));
   app.get("/usage", async (c) => {
     const owner = c.get("userId");
     const [drafts, analysisBytes] = await Promise.all([store.usage(owner), analysisStorage.ownerBytes(owner)]);
@@ -228,6 +231,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const folder = resolve(dataRoot, "assets");
     const results = await Promise.allSettled([
       ...removed.files.map(async key => { const path = resolve(folder, key); if (path.startsWith(folder + sep)) await rm(path, { force: true }); }),
+      narrator.removeFiles(p.id),
       // The media worker's cleanup retries analysis folders that remain.
       ...removed.removedAnalyses.map(analysisId => analysisStorage.remove(owner, analysisId)),
     ]);
@@ -298,6 +302,32 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     return c.json(await recordedText(owner, p.id, body, "publication", { version: body.version, locale: body.locale, fillMissing: body.fillMissing },
       draft => publicationPrompt(draft.script, body.locale)));
   });
+  // Twin narration of the saved draft, shot by shot. Takes are paid speech requests made
+  // before any clip; /generate freezes them. A stopped video's shots keep its clip model's limits.
+  const narrationPlan = (p: MarketingProject) => {
+    if (!marketingVoiceover(p.draft)) throw new MarketingError("当前草稿未选择数字分身旁白。");
+    try { return resolveMarketingSegments(p.draft, (p.revision && marketingVideoProfile(p.revision.modelId)) || activeProfile); }
+    catch (error) { throw new MarketingError((error as Error).message); }
+  };
+  app.get("/:id/narration", async (c) => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    return c.json({ version: p.version, clips: await narrator.status(owner, p.id, p.draft, narrationPlan(p)) });
+  });
+  app.post("/:id/narration", async (c) => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    const body = await c.req.json().catch(() => null);
+    const slots: unknown = body?.slots ?? [];
+    if (!Number.isInteger(body?.version) || !Array.isArray(slots) || slots.length > 15 || !slots.every(slot => Number.isInteger(slot))) throw new MarketingError("配音参数无效。");
+    if (p.version !== body.version) throw new MarketingError("草稿已更新，请重新确认。", 409);
+    return c.json({ version: p.version, ...await narrator.synthesize(owner, p.id, p.draft, narrationPlan(p), slots as number[]) });
+  });
+  app.get("/:id/narration/:slot", async (c) => {
+    const slot = Number(c.req.param("slot"));
+    if (!Number.isInteger(slot) || slot < 0 || slot > 14) throw new MarketingError("该镜配音尚未生成。", 404);
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    const audio = await narrator.audio(owner, p.id, p.draft, narrationPlan(p), slot);
+    return c.body(new Uint8Array(audio), 200, { "Content-Type": "audio/wav", "Content-Disposition": "inline" });
+  });
   app.post("/:id/generate", async (c) => {
     const owner = c.get("userId");
     const p = await requireProject(owner, c.req.param("id"));
@@ -355,6 +385,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     catch (error) { throw new MarketingError((error as Error).message); }
     const billableSeconds = p.taskId ? segments.filter(s => segmentRecoveryAction(s) === "submit").reduce((sum, s) => sum + Number(s.duration_sec), 0) : planned.reduce((sum, s) => sum + s.durationSec, 0);
     const assets = await checkMaterials(owner, draft, profile, inputVersion, needsSubmission, c.req.raw.signal);
+    // A new twin-narrated video needs a confirmed take for every shot; recovery keeps the frozen ones.
+    const narration = !p.taskId && marketingVoiceover(p.draft) ? await narrator.frozen(owner, p.id, p.draft, planned) : undefined;
     const exceeded = await quotaExceeded(owner, profile, billableSeconds);
     if (exceeded) return c.json(exceeded, 402);
     if (p.taskId) {
@@ -371,8 +403,9 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       size: `${Math.round(edge * w / Math.min(w, h) / 8) * 8}x${Math.round(edge * h / Math.min(w, h) / 8) * 8}`,
       input_reference: marketingImageReferences(p.draft).flatMap(({ assetId }) => assets[assetId] ? [assets[assetId].url] : []),
       reference_video: assets.video ? [assets.video.url] : undefined,
-      generate_audio: !p.draft.assets.video,
-      reference_audio: !p.draft.assets.video && assets.voice ? [assets.voice.url] : undefined,
+      generate_audio: marketingNativeSpeech(p.draft),
+      reference_audio: marketingNativeSpeech(p.draft) && assets.voice ? [assets.voice.url] : undefined,
+      ...(narration ? { narration } : {}),
       requireUserModelKey: process.env.DEBUG !== "1" };
     const taskId = await store.reserve(owner, p.id, body.version, input, body.retry);
     try { await (service.jobQueue as BullmqJobQueue).deliverPersisted(taskId, "marketing.video"); }
@@ -416,7 +449,15 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     await checkMaterials(owner, p.draft, profile, Number(frozen.marketingInputVersion), true, c.req.raw.signal);
     const exceeded = await quotaExceeded(owner, profile, redo.reduce((sum, slot) => sum + plan[slot].durationSec, 0));
     if (exceeded) return c.json(exceeded, 402);
-    const taskId = await store.revise(owner, p.id, body.version, p.taskId, redo);
+    // Twin-narrated videos: a changed shot gets its new take now (one speech request each); the
+    // kept shots' text and voice settings are unchanged, so their takes are found as they are.
+    let narration: FrozenNarration[] | undefined;
+    if (frozen.narration !== undefined) {
+      const { error } = await narrator.synthesize(owner, p.id, p.draft, plan);
+      if (error) throw new MarketingError(error, 409);
+      narration = await narrator.frozen(owner, p.id, p.draft, plan);
+    }
+    const taskId = await store.revise(owner, p.id, body.version, p.taskId, redo, narration ? { narration } : {});
     try { await (service.jobQueue as BullmqJobQueue).deliverPersisted(taskId, "marketing.video"); }
     catch { throw new MarketingError("任务已保存，队列暂不可用；请重新打开草稿继续。", 503); }
     return c.json(await store.get(owner, p.id), 202);

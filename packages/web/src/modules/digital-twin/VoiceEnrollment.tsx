@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/index.js";
 import { twinVoiceApi, type TwinVoice } from "./api.js";
 
-export function VoiceEnrollment({ itemId, revisionId, initialError }: { itemId: string; revisionId: string; initialError?: string }) {
+/** `onReady` reports whether the cloned voice can synthesize now. */
+export function VoiceEnrollment({ itemId, revisionId, initialError, onReady }: { itemId: string; revisionId: string; initialError?: string; onReady?: (ready: boolean) => void }) {
   const { t } = useI18n();
   const [voice, setVoice] = useState<TwinVoice | null>(null);
   const [busy, setBusy] = useState(true);
@@ -18,6 +19,7 @@ export function VoiceEnrollment({ itemId, revisionId, initialError }: { itemId: 
       .finally(() => { if (!abort.signal.aborted) setBusy(false); });
     return () => abort.abort();
   }, [itemId, revisionId, refresh, initialError]);
+  useEffect(() => { onReady?.(voice?.status === "OK"); }, [voice, onReady]);
   async function enroll() {
     if (busy) return;
     setBusy(true); setError("");

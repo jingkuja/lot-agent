@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotChanged } from "./index.js";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotChanged, fitMarketingNarration, marketingNarrationFits, marketingVoiceover, marketingNativeSpeech, DEFAULT_MARKETING_VIDEO_PROFILE } from "./index.js";
 
 const grok = GROK_MARKETING_PROFILE;
 const kling = KLING_MARKETING_PROFILE;
@@ -282,5 +282,30 @@ describe("single shot redo", () => {
     expect(marketingShotChanged(shots[0], { ...shots[0] })).toBe(false);
     for (const key of ["script", "visual", "action", "camera"] as const) expect(marketingShotChanged(shots[0], { ...shots[0], [key]: "改" })).toBe(true);
     expect(marketingShotChanged(shots[0], undefined)).toBe(true);
+  });
+});
+
+describe("fitting shots to twin narration", () => {
+  const shots = ["第一句。", "第二句。", "第三句。"].map(script => ({ durationSec: 5, script, visual: "v", action: "a", camera: "c" }));
+  const draft = MarketingDraftSchema.parse({ durationSec: 15 });
+  it("lengthens only shots whose take does not fit, within the target range", () => {
+    expect(marketingNarrationFits(4800, 5)).toBe(true);
+    expect(marketingNarrationFits(4900, 5)).toBe(false);
+    const fitted = fitMarketingNarration(shots, draft, DEFAULT_MARKETING_VIDEO_PROFILE, [3000, 6200, 2000]);
+    expect(fitted.map(shot => shot.durationSec)[1]).toBeGreaterThanOrEqual(7);
+    expect(fitted.every((shot, i) => marketingNarrationFits([3000, 6200, 2000][i], shot.durationSec))).toBe(true);
+    const total = fitted.reduce((sum, shot) => sum + shot.durationSec, 0);
+    expect(total).toBeGreaterThanOrEqual(15); expect(total).toBeLessThanOrEqual(20);
+  });
+  it("asks to shorten copy instead of exceeding the duration range or the shot cap", () => {
+    expect(() => fitMarketingNarration(shots, draft, DEFAULT_MARKETING_VIDEO_PROFILE, [9000, 9000, 9000])).toThrow("配音总时长超过");
+    expect(() => fitMarketingNarration(shots, draft, DEFAULT_MARKETING_VIDEO_PROFILE, [3000, 16_000, 2000])).toThrow("有分镜的配音超过");
+  });
+  it("only applies to drafts without a reference video", () => {
+    const narrated = MarketingDraftSchema.parse({ narration: {} });
+    expect(marketingVoiceover(narrated)).toBe(true); expect(marketingNativeSpeech(narrated)).toBe(false);
+    const silent = MarketingDraftSchema.parse({ narration: {}, assets: { video: "11111111-1111-4111-8111-111111111111" } });
+    expect(marketingVoiceover(silent)).toBe(false); expect(marketingNativeSpeech(silent)).toBe(false);
+    expect(marketingNativeSpeech(MarketingDraftSchema.parse({}))).toBe(true);
   });
 });

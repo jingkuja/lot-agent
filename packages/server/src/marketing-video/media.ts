@@ -98,9 +98,10 @@ export async function inspectMedia(path: string, signal?: AbortSignal) {
   const [fpsNumerator, fpsDenominator = "1"] = String(video?.avg_frame_rate ?? "0/1").split("/");
   return { width: Number(video?.width ?? 0), height: Number(video?.height ?? 0), fps: Number(fpsNumerator) / Number(fpsDenominator), format, duration, audio: value.streams?.some((s: { codec_type: string }) => s.codec_type === "audio"), video: value.streams?.some((s: { codec_type: string }) => s.codec_type === "video") };
 }
-export async function composeMarketingVideo(input: { files: string[]; segments: MarketingSegment[]; draft: MarketingDraft; music?: string; signal?: AbortSignal }) {
+/** `narration`, when given, holds one audio file per clip that replaces the clip's own track. */
+export async function composeMarketingVideo(input: { files: string[]; segments: MarketingSegment[]; draft: MarketingDraft; music?: string; narration?: string[]; signal?: AbortSignal }) {
   const durationSec = input.segments.reduce((sum, segment) => sum + segment.durationSec, 0);
-  if (!input.segments.length || input.segments.length > 15 || input.files.length !== input.segments.length
+  if (!input.segments.length || input.segments.length > 15 || input.files.length !== input.segments.length || (input.narration && input.narration.length !== input.files.length)
     || input.segments.some((segment, index) => segment.index !== index || !Number.isInteger(segment.durationSec) || segment.durationSec < 4 || segment.durationSec > 15)
     || !isMarketingDurationValid(input.draft.durationSec, durationSec)) throw new Error("视频分段配置不完整");
   const folder = await mkdtemp(join(tmpdir(), "lot-marketing-"));
@@ -114,8 +115,15 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
       const duration = input.segments[i].durationSec;
       if (!info.video || info.duration < duration - 0.25) throw new Error("生成片段时长不足，请重新生成该片段。");
       const args = ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", info.format, "-i", input.files[i]];
-      if (!info.audio) args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
-      args.push("-map", "0:v:0", "-map", info.audio ? "0:a:0" : "1:a:0", "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25`, "-af", "aresample=48000,apad", "-t", String(duration), "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`);
+      let audio = info.audio ? "0:a:0" : "1:a:0";
+      if (input.narration) {
+        const voice = await inspectMedia(input.narration[i], input.signal);
+        // Never cut a confirmed line short: the clip must outlast it.
+        if (!voice.audio || voice.video || voice.duration > duration - 0.1) throw new Error("配音与镜头时长不一致，请重新生成配音。");
+        args.push("-protocol_whitelist", "file,pipe", "-f", voice.format, "-i", input.narration[i]);
+        audio = "1:a:0";
+      } else if (!info.audio) args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
+      args.push("-map", "0:v:0", "-map", audio, "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25`, "-af", "aresample=48000,apad", "-t", String(duration), "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`);
       await mediaProcess(ffmpeg(), args, { signal: input.signal, cwd: folder });
     }
     await writeFile(join(folder, "clips.txt"), input.files.map((_, i) => `file '${i}.mp4'`).join("\n"));

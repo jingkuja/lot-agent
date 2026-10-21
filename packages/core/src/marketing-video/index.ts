@@ -50,6 +50,17 @@ function withoutLegacyCover(value: unknown) {
   const { cover: _cover, ...rest } = assets as Record<string, unknown>;
   return { ...(value as object), assets: rest };
 }
+/** Off-screen narration in the user's own cloned voice (digital twin), synthesized per shot
+ * before any clip is paid for. Absent: the video model voices the script itself. */
+export const MarketingNarrationSchema = z.object({
+  /** Digital twin voice item; synthesis needs its cloned voice to be ready. */
+  twinItemId: z.string().uuid().optional(),
+  /** Display only, so the draft shows the chosen voice without another lookup. */
+  voiceName: z.string().max(255).optional(),
+  speed: z.number().min(0.8).max(1.25).default(1),
+  instructions: z.string().trim().max(200).default(""),
+}).strict();
+export type MarketingNarration = z.infer<typeof MarketingNarrationSchema>;
 export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),
@@ -83,6 +94,7 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   /** Whether the board was planned for native speech (no reference video). Absent on
    * boards planned before this was recorded. */
   storyboardAudio: z.boolean().optional(),
+  narration: MarketingNarrationSchema.optional(),
   publishTitle: z.string().max(100).default(""),
   tags: z.string().max(160).default(""),
 }).strict());
@@ -92,9 +104,13 @@ export type MarketingDraft = z.infer<typeof MarketingDraftSchema>;
 export function marketingStoryboardAudioMismatch(draft: MarketingDraft): boolean {
   return !!draft.storyboard.length && draft.storyboardAudio !== undefined && draft.storyboardAudio === !!draft.assets.video;
 }
-/** Frozen input format. Versions before 2 predate reference checks; rules
- * always come from the profile of the recorded `modelId`. */
-export const MARKETING_INPUT_VERSION = 3;
+/** Twin narration replaces the clips' audio. A reference video renders a silent film, so it has none. */
+export const marketingVoiceover = (draft: Pick<MarketingDraft, "narration" | "assets">) => !!draft.narration && !draft.assets.video;
+/** Whether new clips are asked to speak the script themselves. */
+export const marketingNativeSpeech = (draft: Pick<MarketingDraft, "narration" | "assets">) => !draft.narration && !draft.assets.video;
+/** Frozen input format. Versions before 2 predate reference checks; version 4 adds
+ * twin narration. Rules always come from the profile of the recorded `modelId`. */
+export const MARKETING_INPUT_VERSION = 4;
 
 /** Profile of a frozen job; inputs without a model id were submitted to Kling. */
 export function marketingJobProfile(input: { modelId?: unknown }): MarketingVideoProfile {
@@ -148,7 +164,7 @@ export interface MarketingSegment { index: number; script: string; durationSec: 
 export const MARKETING_FAILURE_CODES = [
   "CONNECT_FAILED", "REAL_PERSON_REJECTED", "MODEL_AUTH_REQUIRED", "CONFIG_MISSING", "MODEL_QUOTA", "MODEL_RATE_LIMIT",
   "JOB_BUSY", "DOWNLOAD_INCOMPLETE", "GENERATION_FAILED", "TIMED_OUT", "STATUS_UNCONFIRMED", "QUALITY_CHECK_FAILED",
-  "NOT_RECOVERABLE", "COMPOSITION_FAILED", "SUBMISSION_UNKNOWN",
+  "NOT_RECOVERABLE", "COMPOSITION_FAILED", "SUBMISSION_UNKNOWN", "NARRATION_INVALID",
 ] as const;
 export type MarketingFailureCode = typeof MARKETING_FAILURE_CODES[number];
 export function isMarketingFailureCode(value: unknown): value is MarketingFailureCode {
@@ -197,12 +213,13 @@ export function marketingShotMaxSeconds(draft: Pick<MarketingDraft, "assets">, p
 }
 
 /** Keep the AI's valid timing, or apportion integer seconds by its pacing
- * weights, bounded by narration length and the model's 4–maxShot second range. */
-export function allocateShotDurations(shots: { script: string; durationSec?: number }[], target: number, maxShot = MARKETING_SHOT_MAX_SECONDS): number[] {
+ * weights, bounded by narration length and the model's 4–maxShot second range.
+ * `floor` raises single shots' minimums, e.g. to fit measured narration. */
+export function allocateShotDurations(shots: { script: string; durationSec?: number }[], target: number, maxShot = MARKETING_SHOT_MAX_SECONDS, floor: (number | undefined)[] = []): number[] {
   const maximum = marketingMaxDuration(target);
   if (!isMarketingDurationValid(target, target) || !shots.length || shots.length > 15
     || shots.length * 4 > maximum || shots.length * maxShot < target) throw new Error("分镜数量与视频时长不一致，请重新生成分镜。");
-  const minimum = shots.map(shot => Math.max(4, Math.ceil(speechUnits(shot.script) / 4.5)));
+  const minimum = shots.map((shot, i) => Math.max(4, Math.ceil(speechUnits(shot.script) / 4.5), floor[i] ?? 0));
   const minimumTotal = minimum.reduce((a, b) => a + b, 0);
   if (minimum.some(n => n > maxShot) || minimumTotal > maximum) throw new Error("文案过长，请精简文案或增加视频时长。");
   const requested = shots.map(shot => shot.durationSec ?? 0);
@@ -221,6 +238,30 @@ export function allocateShotDurations(shots: { script: string; durationSec?: num
 export function timeMarketingStoryboard(shots: MarketingShot[], total: number, maxShot = MARKETING_SHOT_MAX_SECONDS): MarketingShot[] {
   const durations = allocateShotDurations(shots, total, maxShot);
   return shots.map((shot, index) => ({ ...shot, durationSec: durations[index] }));
+}
+
+/** Silence kept after a shot's narration; the clip must outlast its voice-over. */
+export const MARKETING_NARRATION_TAIL_MS = 200;
+export const marketingNarrationFits = (durationMs: number, durationSec: number) => durationMs + MARKETING_NARRATION_TAIL_MS <= durationSec * 1000;
+/** Shortest whole-second shot that holds this narration with a short pause. */
+export const marketingNarrationShotMinimum = (durationMs: number) => Math.max(4, Math.ceil((durationMs + 400) / 1000));
+/** Lengthen shots whose measured narration does not fit, within the draft's duration range.
+ * Shots that already fit keep their time when the total allows it. */
+export function fitMarketingNarration(shots: MarketingShot[], draft: Pick<MarketingDraft, "assets" | "durationSec">, profile: MarketingVideoProfile, durationsMs: (number | undefined)[]): MarketingShot[] {
+  const maxShot = marketingShotMaxSeconds(draft, profile);
+  const floor = durationsMs.map(ms => ms === undefined ? undefined : marketingNarrationShotMinimum(ms));
+  if (floor.some(n => n !== undefined && n > maxShot)) throw new Error(`有分镜的配音超过 ${maxShot} 秒，请精简该镜口播或调快语速。`);
+  let durations: number[];
+  try { durations = allocateShotDurations(shots, draft.durationSec, maxShot, floor); }
+  catch { throw new Error("配音总时长超过视频时长上限，请精简文案、调快语速或增加视频时长。"); }
+  return shots.map((shot, index) => ({ ...shot, durationSec: durations[index] }));
+}
+/** One shot's narration state as the studio shows it. */
+export interface MarketingNarrationClip {
+  slot: number;
+  /** missing: not synthesized for the current text and voice settings. */
+  status: "missing" | "running" | "succeeded" | "failed";
+  durationMs?: number;
 }
 
 /** Re-time saved shots that exceed the draft's cap, e.g. after a reference video is added. */

@@ -161,9 +161,10 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
   /** Redo the chosen shots of a stopped or finished video as a new job of the same draft.
+   * `inputChanges` carries what the redone shots need anew, e.g. their narration takes.
    * Every other shot keeps its clip: its new segment task is already succeeded and points
    * at the existing asset, so it is neither submitted nor billed again. */
-  async revise(owner: string, id: string, version: number, baseTaskId: string, redo: number[]) {
+  async revise(owner: string, id: string, version: number, baseTaskId: string, redo: number[], inputChanges: Record<string, unknown> = {}) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -184,7 +185,7 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       if (!redo.length || redo.some(slot => !plan[slot]) || required.some(slot => !redo.includes(slot))) throw new MarketingError("请重新选择需要重新生成的镜头。", 409);
       const taskId = randomUUID();
       await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.video',$2,$3,$4)`,
-        [taskId, JSON.stringify({ ...base.input, draft: p.draft, revisedFrom: baseTaskId }), owner, MARKETING_VIDEO_QUEUE]);
+        [taskId, JSON.stringify({ ...base.input, ...inputChanges, draft: p.draft, revisedFrom: baseTaskId }), owner, MARKETING_VIDEO_QUEUE]);
       for (const part of plan) {
         const childId = randomUUID(); const old = base.segments[part.index];
         const input = JSON.stringify({ parentId: taskId, ...part });

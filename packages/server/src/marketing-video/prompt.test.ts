@@ -108,6 +108,24 @@ describe("marketing model subtitle instructions", () => {
     expect(prompt).toContain("never the words in the voice sample");
     expect(prompt).not.toContain("Use audio 1");
   });
+  it("asks for silent clips under twin narration: natural mouth movement, no lines delivered to the lens", () => {
+    const draft = MarketingDraftSchema.parse({ narration: { twinItemId: id }, assets: { voice: id },
+      storyboard: [{ durationSec: 6, script: "欢迎光临。", visual: "店内", action: "人物介绍产品", camera: "中景" }], script: "欢迎光临。" });
+    const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 1);
+    expect(prompt).toContain("narrated later as an off-screen voice-over. Do not generate speech, dialogue or audio.");
+    expect(prompt).toContain("not spoken to the lens");
+    expect(prompt).not.toContain("Narrate ONLY");
+    expect(prompt).not.toContain("Use the supplied custom voice");
+    expect(prompt).not.toContain("Silent demonstration, no lip-sync");
+    expect(shotData(prompt)).not.toHaveProperty("voiceStyle");
+    expect(prompt).toContain("Caption ONLY confirmedShot.script verbatim");
+    const creation = creationPrompt(draft, "zh");
+    expect(creation.system).toContain("People may move their mouths naturally");
+    expect(JSON.parse(creation.input)).toMatchObject({ generateAudio: false, voiceover: true });
+    // A reference video renders a silent film; twin narration does not apply.
+    const silent = MarketingDraftSchema.parse({ ...draft, assets: { video: id } });
+    expect(marketingSegmentPrompt(silent, { index: 0, script: "欢迎光临。", durationSec: 6 }, 1)).toContain("Silent demonstration, no lip-sync");
+  });
 });
 
 it("numbers portrait, background and scene references in submission order with Kling's image names", () => {
