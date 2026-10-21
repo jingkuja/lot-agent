@@ -223,7 +223,7 @@ export function Workspace({
     (agentId: string) => {
       if (creatingConversation.current) return;
       setActiveAgentId(agentId);
-      if (agentId === "marketing_video") setStudioRevision((value) => value + 1);
+      if (agentId === "marketing_video" || agentId === "digital_presenter") setStudioRevision((value) => value + 1);
       setNewProjectId(null);
       setNewAgentId(agentId);
       // Sync the ref BEFORE the next render so in-flight stream events stop
@@ -491,7 +491,7 @@ export function Workspace({
             </header>
           )}
           <ChatPanel
-            key={openAgentId === "marketing_video" ? `${openAgentId}:${studioRevision}` : openAgentId}
+            key={openAgentId === "marketing_video" || openAgentId === "digital_presenter" ? `${openAgentId}:${studioRevision}` : openAgentId}
             onDraftChange={setHasDraft}
             attachment={knowledgeAttachment}
             onAttachmentConsumed={() => setKnowledgeAttachment(undefined)}

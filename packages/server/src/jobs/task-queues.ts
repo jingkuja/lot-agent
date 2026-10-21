@@ -14,7 +14,8 @@ export function marketingQueueLimits(env: NodeJS.ProcessEnv = process.env): Mark
     segments: read("MARKETING_VIDEO_SEGMENT_CONCURRENCY", 2, 15) };
 }
 
-/** Long marketing renders must not occupy the ordinary task worker. */
+export const DIGITAL_PRESENTER_TASK = "digital-presenter.video";
+/** Long renders (marketing videos and digital presenters) must not occupy the ordinary task worker. */
 export function taskQueueName(type: string): string {
-  return type === "marketing.video" ? MARKETING_VIDEO_QUEUE : DEFAULT_TASK_QUEUE;
+  return type === "marketing.video" || type === DIGITAL_PRESENTER_TASK ? MARKETING_VIDEO_QUEUE : DEFAULT_TASK_QUEUE;
 }

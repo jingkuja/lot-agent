@@ -32,6 +32,8 @@ data/marketing-analysis/
 data/marketing-analysis-probes/
 # Per-draft twin narration takes (private user audio).
 data/marketing-narration/
+# Digital presenter voice takes, prepared inputs and downloaded clips.
+data/digital-presenter/
 
 # Backups contain credentials/business data; evaluation vector caches are reproducible.
 data/backups/

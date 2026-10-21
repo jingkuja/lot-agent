@@ -3,6 +3,7 @@ import {
   GROK_VIDEO_MODEL,
   grokVideoInputIssue,
   isGrokVideoModel,
+  isPortraitVideoModel,
   videoTierEdge,
   HappyhorseVideoAdapter,
   OpenaiVideoAdapter,
@@ -363,5 +364,19 @@ describe("Grok Imagine 1.5 limits", () => {
     expect(grokVideoInputIssue({ ...base, resolutions: ["720p"], videos: 1, durationSec: 8 })).toBeUndefined();
     expect(grokVideoInputIssue({ ...base, resolutions: ["720p"], videos: 1, durationSec: 9 })).toContain("8 秒");
     expect(grokVideoInputIssue({ ...base, durationSec: 15 })).toBeUndefined();
+  });
+});
+
+describe("OpenaiVideoAdapter portrait models", () => {
+  const a = new OpenaiVideoAdapter();
+  it("sends wan2.2-s2v a portrait and voice track without prompt or audio flags", () => {
+    const body = a.buildCreateBody({ prompt: "", durationSec: 4.2, resolution: "720p", input_reference: "https://h/p.jpg", reference_audio: "https://h/a.wav", ratio: "9:16", generate_audio: true }, "wan2.2-s2v");
+    expect(body).toEqual({ model: "wan2.2-s2v", seconds: "5", input_reference: "https://h/p.jpg", reference_audio: "https://h/a.wav", metadata: { resolution: "720P" } });
+  });
+  it("sends videoretalk footage, voice and optional face without extending the footage", () => {
+    const body = a.buildCreateBody({ prompt: "", durationSec: 30, reference_video: "https://h/v.mp4", reference_audio: "https://h/a.wav" }, "videoretalk");
+    expect(body).toEqual({ model: "videoretalk", seconds: "30", reference_video: "https://h/v.mp4", reference_audio: "https://h/a.wav", metadata: { video_extension: false } });
+    expect(isPortraitVideoModel(" VideoRetalk ")).toBe(true);
+    expect(isPortraitVideoModel("kling-video-v3-omni")).toBe(false);
   });
 });

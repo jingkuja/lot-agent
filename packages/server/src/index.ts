@@ -10,6 +10,9 @@ import { SecretBox } from "./auth/secret-box.js";
 import { createVideoDraftRoutes } from "./routes/video-drafts.js";
 import { createMarketingVideoRoutes } from "./marketing-video/routes.js";
 import { MarketingNarrator } from "./marketing-video/narration.js";
+import { createDigitalPresenterRoutes } from "./digital-presenter/routes.js";
+import { PresenterVoicer } from "./digital-presenter/takes.js";
+import { createPresenterMediaRoutes } from "./digital-presenter/files.js";
 import { createAnalysisRoutes } from "./marketing-analysis/routes.js";
 import { KnowledgeKeys } from "./knowledge/access/keys.js";
 import { RedisKnowledgeLimiter } from "./knowledge/access/limiter.js";
@@ -242,7 +245,7 @@ async function main() {
   });
 
   const requestLogger = logger();
-  app.use("*", (c, next) => c.req.path.startsWith("/static/uploads/") || c.req.path.startsWith("/api/rag/preview/") || c.req.path.startsWith("/api/public/feishu/") || c.req.path.startsWith("/api/public/marketing-analysis-audio/") ? next() : requestLogger(c, next));
+  app.use("*", (c, next) => c.req.path.startsWith("/static/uploads/") || c.req.path.startsWith("/api/rag/preview/") || c.req.path.startsWith("/api/public/feishu/") || c.req.path.startsWith("/api/public/marketing-analysis-audio/") || c.req.path.startsWith("/api/public/digital-presenter-media/") ? next() : requestLogger(c, next));
   app.use("*", cors({
     origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
     credentials: true,
@@ -293,6 +296,8 @@ async function main() {
   app.use("/api/marketing-videos/*", authMw);
   app.use("/api/marketing-video-analyses", authMw);
   app.use("/api/marketing-video-analyses/*", authMw);
+  app.use("/api/digital-presenters", authMw);
+  app.use("/api/digital-presenters/*", authMw);
   app.use("/api/video-drafts/*", authMw);
   app.use("/api/assets", authMw);
   app.use("/api/assets/*", authMw);
@@ -326,6 +331,11 @@ async function main() {
   app.on("POST", "/api/marketing-video-analyses", generationRateLimit);
   app.on("POST", "/api/marketing-video-analyses/uploads", uploadRateLimit);
   app.on("POST", "/api/marketing-video-analyses/:id/resume", generationRateLimit);
+  app.on("POST", "/api/digital-presenters/script", messagesRateLimit);
+  app.on("POST", "/api/digital-presenters/:id/review", messagesRateLimit);
+  app.on("POST", "/api/digital-presenters/:id/speech", generationRateLimit);
+  app.on("POST", "/api/digital-presenters/:id/generate", generationRateLimit);
+  app.on("POST", "/api/digital-presenters/:id/resume", generationRateLimit);
   app.use("/api/digital-employee/*", digitalEmployeeRateLimit);
 
   // Protected API routes
@@ -356,6 +366,7 @@ async function main() {
   app.route("/api/marketing-videos", createMarketingVideoRoutes(service, resolve(ROOT, "data"), undefined, undefined,
     new MarketingNarrator(service.db.pool, resolve(ROOT, "data"), knowledgeManagement?.voices)));
   app.route("/api/marketing-video-analyses", createAnalysisRoutes(service, resolve(ROOT, "data/marketing-analysis")));
+  app.route("/api/digital-presenters", createDigitalPresenterRoutes(service, resolve(ROOT, "data"), new PresenterVoicer(service.db.pool, resolve(ROOT, "data"), knowledgeManagement?.voices)));
   app.route("/api/assets/shares", createImageShareRoutes(service));
   app.route("/api/assets", createAssetRoutes(service));
   app.route("/api/uploads", createUploadRoutes(service));
@@ -431,6 +442,8 @@ async function main() {
   // isolates active content (HTML, SVG) from same-origin inline rendering —
   // see contentPolicy() for the whitelist rationale.
   app.route("/api/public/marketing-analysis-audio", createAnalysisAudioRoutes(resolve(ROOT, "data/marketing-analysis")));
+  // Vendors read presenter inputs only through signed, expiring links.
+  app.route("/api/public/digital-presenter-media", createPresenterMediaRoutes(resolve(ROOT, "data")));
   app.get("/static/assets/:filename", staticFileHandler(ASSETS_DIR));
   app.get("/static/documents/:filename", staticFileHandler(DOCS_DIR));
   app.get("/static/uploads/:filename", staticFileHandler(UPLOADS_DIR, { authorize: createUploadAccessGuard(service.db, service.sessions) }));

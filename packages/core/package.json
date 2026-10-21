@@ -28,6 +28,10 @@
     "./marketing-analysis": {
       "types": "./dist/marketing-analysis/index.d.ts",
       "import": "./dist/marketing-analysis/index.js"
+    },
+    "./digital-presenter": {
+      "types": "./dist/digital-presenter/index.d.ts",
+      "import": "./dist/digital-presenter/index.js"
     }
   },
   "scripts": {

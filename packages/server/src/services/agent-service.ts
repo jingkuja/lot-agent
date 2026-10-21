@@ -41,6 +41,7 @@ import {
   imageDefinition,
   videoDefinition,
   marketingVideoDefinition,
+  digitalPresenterDefinition,
   pptDefinition,
   contractDefinition,
   digitalEmployeeDefinition,
@@ -789,6 +790,7 @@ export class AgentService {
     this.agentRegistry.register(imageDefinition);
     this.agentRegistry.register(videoDefinition);
     this.agentRegistry.register(marketingVideoDefinition);
+    this.agentRegistry.register(digitalPresenterDefinition);
     this.agentRegistry.register(pptDefinition);
     this.agentRegistry.register(contractDefinition);
   }

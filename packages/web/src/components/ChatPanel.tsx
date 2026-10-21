@@ -3,6 +3,7 @@ import { useDesktopWorkspace } from "../hooks/useDesktopWorkspace.js";
 import { useI18n } from "../i18n/index.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { MarketingVideoStudio } from "../modules/marketing-video/MarketingVideoStudio.js";
+import { DigitalPresenterStudio } from "../modules/digital-presenter/DigitalPresenterStudio.js";
 import { GenerationCard } from "./GenerationCard.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputMode } from "./InputBox.js";
@@ -258,6 +259,9 @@ export function ChatPanel({
         : message.role === "user" ? <details className="mv-script-review" key={message.id}><summary>{t("查看生成要求")}</summary><p>{message.content}</p></details> : null)}
     </MarketingVideoStudio>;
   }
+
+  // Presenter videos are durable drafts with their own jobs, never chat messages.
+  if (agent?.id === "digital_presenter") return <DigitalPresenterStudio key={userId ?? "anonymous"} ownerId={userId} onDraftChange={onDraftChange} />;
 
   // Empty conversation: center the (enlarged) input in the page.
   if (isEmpty) {

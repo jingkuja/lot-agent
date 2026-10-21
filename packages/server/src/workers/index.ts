@@ -20,7 +20,8 @@ import { loadGenerationConfig, loadKlingVoiceConfig, makeKlingVoiceProvider, mak
 import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { GenerationError } from "../generation/errors.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
-import { marketingQueueLimits } from "../jobs/task-queues.js";
+import { runDigitalPresenter } from "../digital-presenter/run.js";
+import { DIGITAL_PRESENTER_TASK, marketingQueueLimits } from "../jobs/task-queues.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
 import { resolveMaterialReference } from "../generation/private-materials.js";
 import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
@@ -317,6 +318,16 @@ async function main() {
   const { segments: segmentConcurrency } = marketingQueueLimits();
   queue.process("marketing.video", async (job, ctl) => runMarketingVideo({
     db, dataRoot: resolve(ROOT, "data"), segmentConcurrency, generation: (child, signal) => genDeps("video", child, signal),
+  }, { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, ctl.signal));
+  // Digital presenters always use the owner's own model key: the gateway bills the owner.
+  queue.process(DIGITAL_PRESENTER_TASK, async (job, ctl) => runDigitalPresenter({
+    db, dataRoot: resolve(ROOT, "data"), storage,
+    provider: async (userId, model) => {
+      const apiKey = await db.getUserApiKey(userId, managedKeysEnabled);
+      if (!apiKey) throw new GenerationError("MODEL_AUTH_REQUIRED", "模型账号不可用，请重新登录后继续生成。");
+      return providerFactory.video(model, apiKey);
+    },
+    download: (url, signal) => urlToBytes(url, VIDEO_MAX_BYTES, { signal, timeoutMs: VIDEO_DOWNLOAD_TIMEOUT_MS }),
   }, { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, ctl.signal));
   queue.process("opportunity.discover", async (job) => {
     const { runId } = job.input as { runId: string };

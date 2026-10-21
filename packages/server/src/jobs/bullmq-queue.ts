@@ -159,7 +159,7 @@ export class BullmqJobQueue implements JobQueue {
             return output;
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
-            const retry = jobType !== "marketing.video" && attempts < (bullJob.opts.attempts ?? 1)
+            const retry = taskQueueName(jobType) !== MARKETING_VIDEO_QUEUE && attempts < (bullJob.opts.attempts ?? 1)
               && (err as Error)?.name !== "UnrecoverableError";
             // Typed worker errors carry a cause code the UI can act on without parsing the message.
             const errorCode = typeof (err as { errorCode?: unknown })?.errorCode === "string" ? (err as { errorCode: string }).errorCode : undefined;

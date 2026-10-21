@@ -128,7 +128,8 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     let json: Record<string, unknown>;
     try { json = JSON.parse(text); }
     catch { throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : res.ok ? "INVALID_RESPONSE" : "HTTP_ERROR", { httpStatus: res.status }); }
-    const details = { httpStatus: res.status, requestId: json?.request_id, privateValues: [apiKey] };
+    const nested = json?.error && typeof json.error === "object" ? json.error as Record<string, unknown> : undefined;
+    const details = { httpStatus: res.status, requestId: json?.request_id, vendorCode: nested?.code ?? json?.code, privateValues: [apiKey] };
     if (!res.ok) throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : "HTTP_ERROR", details);
     let created: CreateResult;
     try { created = adapter.parseCreate(json); }

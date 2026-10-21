@@ -1,0 +1,3 @@
+/* Digital presenter reuses the marketing studio layout (mv-*); only its own additions live here. */
+.dp-studio .dp-take-text { flex: 1 1 100%; order: 3; margin: 2px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.dp-studio .mv-asset-preview img, .dp-studio .mv-asset-preview video { max-height: 180px; }

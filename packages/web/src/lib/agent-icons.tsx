@@ -31,6 +31,11 @@ export const AGENT_ICONS: Record<string, ReactNode> = {
       <rect x="3" y="7" width="18" height="14" rx="3" /><path d="m9 11 6 3-6 3zM4 7l3-4h14l-3 4M11 3l-3 4M17 3l-3 4" />
     </svg>
   ),
+  digital_presenter: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M18 7.5a3 3 0 0 1 0 5M20.5 5a6.5 6.5 0 0 1 0 10" />
+    </svg>
+  ),
   ppt: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="13" rx="2" />

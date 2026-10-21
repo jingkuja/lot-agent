@@ -97,6 +97,7 @@ export const migrations: Migration[] = [
   marketingShotRevisions,
   marketingTextCancelled,
   marketingVideoNarrations,
+  digitalPresenter,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -114,3 +115,4 @@ import { digitalTwinVoices } from "./0052-digital-twin-voices.js";
 import { marketingShotRevisions } from "./0053-marketing-shot-revisions.js";
 import { marketingTextCancelled } from "./0054-marketing-text-cancelled.js";
 import { marketingVideoNarrations } from "./0055-marketing-video-narrations.js";
+import { digitalPresenter } from "./0056-digital-presenter.js";

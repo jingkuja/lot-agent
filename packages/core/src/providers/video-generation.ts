@@ -60,6 +60,26 @@ export function isGrokVideoModel(model: string | null | undefined): boolean {
   return (model ?? "").trim().toLowerCase() === GROK_VIDEO_MODEL;
 }
 
+/** Ali digital presenter models: driven by a voice track, no prompt. The gateway maps
+ * `input_reference` / `reference_video` / `reference_audio` to the native fields. */
+export const PORTRAIT_VIDEO_MODELS = ["wan2.2-s2v", "videoretalk"] as const;
+export function isPortraitVideoModel(model: string | null | undefined): boolean {
+  return (PORTRAIT_VIDEO_MODELS as readonly string[]).includes((model ?? "").trim().toLowerCase());
+}
+
+/** `seconds` only sizes the gateway's pre-charge; the voice track sets the real length,
+ * which the gateway settles from the vendor's usage. VideoRetalk never loops footage to
+ * fit a longer track: callers trim the footage to the track instead. */
+function portraitCreateBody(req: VideoGenerationRequest, model: string): Record<string, unknown> {
+  const body: Record<string, unknown> = { model };
+  if (req.durationSec != null) body.seconds = String(Math.max(1, Math.ceil(req.durationSec)));
+  if (req.input_reference) body.input_reference = req.input_reference;
+  if (req.reference_video) body.reference_video = req.reference_video;
+  if (req.reference_audio) body.reference_audio = req.reference_audio;
+  body.metadata = model.toLowerCase() === "videoretalk" ? { video_extension: false } : { resolution: (req.resolution ?? "480P").toUpperCase() };
+  return body;
+}
+
 /** Short edge of a tier such as `720p`, `2k`, `4k` or a `WxH` size. */
 export function videoTierEdge(value: string | null | undefined): number | undefined {
   const text = (value ?? "").trim().toLowerCase();
@@ -211,6 +231,7 @@ export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
     return "/videos";
   }
   override buildCreateBody(req: VideoGenerationRequest, model: string): unknown {
+    if (isPortraitVideoModel(model)) return portraitCreateBody(req, model);
     const body: Record<string, unknown> = { model, prompt: req.prompt };
     body.generate_audio = resolveGenerateAudio(req);
     // TokenHub reads resolution from metadata, not a top-level resolution or quality.

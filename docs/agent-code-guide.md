@@ -23,6 +23,7 @@ Lot Agent 是共用账号、模型网关和计费体系的 AI 内容与办公工
 | 办公 | 文档导出、合同对比、PPT 大纲确认、生成与修改 | `server/tools/`、`server/ppt/`、`core/presentation/` |
 | 数字员工 | 营销资料、客户画像、商机建议、客户获客、文案与素材生成 | `web/modules/digital-employee/`、`server/digital-employee/` |
 | 个人知识库 | 资料 / 事实 / 素材管理、索引、混合检索、聊天引用、外部知识密钥 | `web/modules/knowledge/`、`server/knowledge/` |
+| 数字主播 | 数字分身原声配音 + 以图（`wan2.2-s2v`）或以视频（`videoretalk`）生成口播视频 | `core/digital-presenter/`、`server/digital-presenter/`、`web/modules/digital-presenter/` |
 | 数字分身 | 个人语音库 / 肖像库、麦克风录音、摄像头拍照、上传和视频参考素材选用 | `web/modules/digital-twin/`、`KnowledgePanel.tsx`、`InputBox.tsx` |
 | 项目组织 | 会话项目创建、列表、会话归入项目 | `routes/conversations.ts`、迁移 `0031`；不等同完整项目协作系统 |
 | 账号与积分 | 登录、注册、手机号 / 微信绑定、托管凭证、余额和充值记录 | `routes/auth.ts`、`routes/usage.ts`、`routes/recharge.ts` |
@@ -111,6 +112,8 @@ ReAct 的运行控制见 [ReAct 运行状态与恢复](react-runtime.md)：`core
 数字分身可从工作台品牌区的“数字分身”直接打开，也可从知识面板侧栏进入；`KnowledgePanel.initialSection` 指定初始面板。`DigitalTwinPanel.tsx` 分别管理个人语音与肖像。复用知识管理的鉴权上传、原件读取、分页和删除，以 `digital-twin:voice` / `digital-twin:portrait` 标签和媒体类型筛选，无新增数据库表。`TwinCapture.tsx` 使用浏览器设备权限采集，录音经 `media.ts` 转为最长 15 秒的单声道 WAV，拍照输出 JPEG；关闭面板会释放设备。上传声音限 MP3/WAV、2–15 秒、15 MB，肖像限 JPG/PNG/WebP、20 MB，服务端沿用私有存储的归属、流式大小和文件签名校验。素材保存在私有库；视频输入框通过 `DigitalTwinPicker` 读取所选文件并加入既有 `video_reference_audio` / `video_reference_image` 上传链路，同时补充提示词，发送后按现有视频附件方式提供给模型。参考声音用于所选模型的视频生成，不提供独立的长片配音服务；真人肖像支持以所选模型为准。macOS 打包权限说明位于 `packages/desktop/electron-builder.yml`。
 
 数字分身声音样例保存后，`TwinCapture.tsx → POST /api/rag/manage/items/:id/voice → digital-twin/voices.ts` 调用千问 `voice-enrollment/create_voice`，将音色 ID、目标模型及审核状态存入迁移 52 的 `digital_twin_voices`；旧样例通过 `VoiceEnrollment.tsx` 的“复刻声音”按钮接入。`GET` 同一路径只读取本地记录，“刷新音色状态”再次 `POST` 时仅查询已记录的音色 ID，未知创建结果（网络中断、408 / 5xx、格式异常的成功响应）按持久化随机前缀查询列表，不重发创建请求；千问明确拒绝（其余 4xx，或 2xx 中带错误码）时 `store.release` 删除该条未得到音色 ID 的记录，用户可用新前缀重新复刻。原件、类型、时长、公网地址和登录会话在持久化创建意图前校验；样例复用知识库绑定原用户会话的五分钟预览链接。服务端独立配置为 `QWEN_VOICE_BASE_URL`（默认 `https://maas.qianwenaiapi.com/api/v1`）、`QWEN_VOICE_API_KEY`、`QWEN_VOICE_TARGET_MODEL`（默认 `qwen-audio-3.0-tts-plus`），并要求供应商可访问的 `PUBLIC_BASE_URL`，不回退到其他模型密钥。`core/providers/qwen-voices.ts` 定义协议及存储接口，`digital-twin/voice-store.ts` 实现按用户 / 原件版本隔离的数据库存储。创建返回后先保存音色 ID，审核状态经刷新查询为 `DEPLOYING / OK / UNDEPLOYED`；查询结果为空时继续保留待核实状态；认领超过 2 分钟（`UNCONFIRMED_CREATE_RELEASE_MS`，创建请求期限为 30 秒）仍查不到时，`store.release` 按 `created_at` 删除该记录并返回 409，用户可重新复刻，避免千问 5xx 后永久卡在待核实。录音转 WAV 前 `media.ts → assertAudible` 拒绝峰值低于 -40 dBFS 的静音录音。切换密钥、地址或目标模型会阻止复用旧记录；删除本地样例后不再暴露其音色记录，供应商音色未自动删除。音色就绪后，`VoiceEnrollment.tsx` 提供配音试听：`POST /api/rag/manage/items/:id/voice/speech`（文案 ≤500 字、可选语气 ≤200 字、按生成类限流）→ `TwinVoices.speak` 仅从本地记录取音色 ID 和其绑定的目标模型，用当前用户的 New API Key 调用 `OPENAI_BASE_URL/audio/speech`（`core/providers/tts.ts` 的 `OpenAISpeechProvider`），费用由网关账号承担，Agent 不单独计费；无用户 Key 时不回退到环境密钥，合成请求不重试。网关阿里渠道需提供 `qwen-audio-3.0-tts-plus`，且与 `QWEN_VOICE_API_KEY` 属于同一千问账号，否则音色 ID 不可用。视频生成仍沿用既有参考音频路径，千问音色不写入 Kling metadata；营销视频整段配音、字幕与对口型见 [配音方案](marketing-video-audio-subtitle-plan-20261020.md)。协议依据：[千问声音复刻 HTTP API](https://platform.qianwenai.com/docs/api-reference/speech-synthesis/voice-cloning/http-api)。
+
+数字主播使用独立的 `digital_presenter` Agent（空工具白名单，固定排在营销影像之后），`ChatPanel → web/modules/digital-presenter/DigitalPresenterStudio` 提供三步：口播文案（`/script` 用用户凭证的 `kimi-k3` 写稿，`/review` 把口播当作营销草稿的 `script` 复用 `marketing-video/compliance.ts` 的风险表与模型审核；两者均 `upstreamBilling`）、形象与声音（以图：数字分身肖像或上传；以视频：口播底片 + 可选目标人脸；素材以 `purpose=marketing-video` 私有上传；音色只能选已复刻的数字分身声音；需勾选授权确认）、配音与生成。`core/digital-presenter` 的 `planPresenterSegments` 按句把文案分成约 12 秒的段（单句超 15 秒要求拆句，最多 12 段）；`server/digital-presenter/takes.ts → PresenterVoicer` 逐段用 `TwinVoices.speakAs` 合成 WAV，先写 `digital_presenter_takes` 意图行、不自动重发，键覆盖音色、语速、语气和文本。`POST /:id/generate` 冻结各段配音，检查以图每段 < 19.5 秒且总长 ≤ 90 秒、以视频总长 2.2–118 秒且底片不短于配音，在一个事务中写入 `digital-presenter.video` 父任务（走 `lot-marketing-video` 长任务队列）和 `digital_presenter_clips`。`run.ts` 先在 `data/digital-presenter/<草稿>/jobs/<任务>/` 一次性准备输入（肖像按比例裁成 720 短边、底片裁到配音长度并转静音 H.264、配音按 0.25 秒停顿拼成母带），用 `signPresenterFile` 签发 3 小时、绑定内容哈希的公网链接，片段先记 `submitting` 再提交：明确拒绝记 `failed` 可重试，其余未知结果停止并须用户 `/unknown-clips/release` 确认；`/resume` 继续轮询已知供应商任务、只重提失败片段。下载结果后由 `media.ts` 合成：以图每段用本段配音替换音轨、段间定格 0.25 秒并隔段轻微推近；以视频用本地母带替换音轨。视频调用经 `OpenaiVideoAdapter` 的人像模型分支（不发 prompt，`seconds` 只用于网关预扣，VideoRetalk 固定 `video_extension=false`），用户 Key 由网关计费，本地不计量。迁移 56 建三张表；方案与验收见 [数字主播方案](digital-presenter-plan-20261021.md)。
 
 声音复刻排障：`core/providers/qwen-voices.ts` 的 `QwenVoiceError` 仅保留白名单内的上游错误码及经过校验的请求 ID；`digital-twin/voice-errors.ts` 区分鉴权、额度、限流、样例下载、音频处理与未知拒绝，不再将所有 4xx 提示为样例问题。`knowledge/routes.ts` 在返回错误前向 server 标准错误输出 `[digital-twin] voice enrollment failed` 单行 JSON，包含 `itemId`、`phase`、`code`、`httpStatus`、`vendorCode`、`upstreamRequestId`、`outcome`，以及与响应 `request_id` 一致的本地 `requestId`。部署后通过 `docker compose logs --since=30m server | rg "voice enrollment failed"` 查询；这条同步调用不经过 Worker。未知上游错误码和原始 message 不记录，避免密钥、音频预览票据或用户内容泄露；缺失的历史日志无法补回，必要时用上游请求 ID 核查。
 
@@ -212,7 +215,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 
 ### 数据库
 
-正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0054-marketing-text-cancelled.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 45 的私有上传表，以及迁移 44 的摘要输入字段和既有创作上下文、清理字段就绪。
+正式迁移在 [db/migrations](../packages/server/src/db/migrations)，由 [migration-runner.ts](../packages/server/src/db/migration-runner.ts) 使用 advisory lock 和逐迁移事务执行，版本与名称写入 `schema_migrations`；同号异名会在执行迁移前报错。当前最新为 `0056-digital-presenter.ts`（已有数据库的版本 32 属于 `comic-drama`）。只有 server 负责迁移，Worker 使用已有 schema；知识 Worker 检查迁移 30 就绪，媒体分析 Worker 检查迁移 45 的私有上传表，以及迁移 44 的摘要输入字段和既有创作上下文、清理字段就绪。
 
 运行日志新增 `agent_runs / agent_steps`，结果核实保留原始回执；普通模型会话与媒体生成任务状态互不替代。
 
@@ -228,6 +231,7 @@ PPT 当前工作区链路：`propose_outline → OutlineCard → 确认协议 �
 | `/api/conversations` | 聊天、项目、知识范围、生成与再生成；会话认证和资源归属 |
 | `/api/agents`、`/api/models` | Agent 目录与模型目录；会话认证 |
 | `/api/marketing-videos` | `marketing-video/routes.ts`；三步创作、用户草稿（含删除与空间用量）、文案检查、分段生成和知识库归档 |
+| `/api/digital-presenters` | `digital-presenter/routes.ts`；数字主播草稿、口播文案、文案检查、逐段原声配音、生成 / 继续 / 释放未知片段；供应商只经 `/api/public/digital-presenter-media/:token`（`files.ts`，3 小时加密链接）读取输入 |
 | `/api/tasks`、`/api/assets`、`/api/uploads` | 异步任务、产物、附件；会话认证和资源归属 |
 | `/api/usage`、`/api/balance`、`/api/recharge` | 用量、余额、充值；会话认证 |
 | `/api/digital-employee` | 数字员工业务；会话认证、归属和功能作用域 |

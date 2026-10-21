@@ -333,6 +333,7 @@
   --agent-icon-video:   linear-gradient(160deg, #10b981, #22c55e);
   --agent-icon-ppt:      linear-gradient(160deg, #f59e0b, #f97316);
   --agent-icon-contract: linear-gradient(160deg, #64748b, #475569);
+  --agent-icon-digital_presenter: linear-gradient(160deg, #ec4899, #f43f5e);
   --accent-grad: linear-gradient(180deg, #1a9aa8, #0e7c8b);
   --gen-card-from: color-mix(in srgb, var(--accent) 14%, transparent);
   --gen-card-to: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -425,6 +426,7 @@
   --agent-icon-video:   linear-gradient(160deg, #34d399, #4ade80);
   --agent-icon-ppt:      linear-gradient(160deg, #fbbf24, #fb923c);
   --agent-icon-contract: linear-gradient(160deg, #94a3b8, #64748b);
+  --agent-icon-digital_presenter: linear-gradient(160deg, #f472b6, #fb7185);
   --accent-grad: linear-gradient(180deg, #5eead4, #22d3ee);
   --gen-card-from: color-mix(in srgb, var(--accent) 16%, transparent);
   --gen-card-to: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -5359,6 +5361,7 @@ html, body, #root {
 .agent-pill-icon--video   { background: var(--agent-icon-video); }
 .agent-pill-icon--ppt      { background: var(--agent-icon-ppt); }
 .agent-pill-icon--contract { background: var(--agent-icon-contract); }
+.agent-pill-icon--digital_presenter { background: var(--agent-icon-digital_presenter); }
 
 .de-chat-actions {
   display: flex;
