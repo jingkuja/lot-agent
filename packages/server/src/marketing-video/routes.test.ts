@@ -553,6 +553,61 @@ describe("historical generation recovery", () => {
   });
 });
 
+describe("single shot redo", () => {
+  const shots = [0, 1].map(slot => ({ durationSec: 8, script: `欢迎来到我们的店铺第${slot + 1}段。`, visual: "人物在店内", action: "展示产品", camera: "中景" }));
+  function made() {
+    const f = fixture();
+    const draft = MarketingDraftSchema.parse({ durationSec: 15, storyboard: shots, script: storyboardScript(shots) });
+    Object.assign(f.project, { draft, taskId: "parent", status: "succeeded", revision: { draft, modelId: "grok-imagine-video-1.5", reusable: [true, true] } });
+    f.service.db.getTask.mockResolvedValue({ id: "parent", type: "marketing.video", user_id: "owner", status: "succeeded",
+      input: { projectId: id, draft, generate_audio: true, marketingInputVersion: 3, modelId: "grok-imagine-video-1.5" } });
+    f.store.segments.mockResolvedValue([0, 1].map(slot => ({ slot, task_id: `child-${slot}`, duration_sec: 8, script: shots[slot].script,
+      output: { assetIds: [`clip-${slot}`], ...(slot ? { reusedFrom: "first-child-1" } : {}) } })));
+    f.service.db.getAsset.mockImplementation(async (assetId: string) => ({ user_id: "owner", task_id: assetId === "clip-0" ? "child-0" : "first-child-1" }) as never);
+    Object.assign(f.store, { revise: vi.fn(async () => "revision") });
+    return f as typeof f & { store: typeof f.store & { revise: ReturnType<typeof vi.fn> } };
+  }
+  it("submits only the chosen shot and checks quota for its seconds", async () => {
+    const f = made();
+    const response = await f.call(`/${id}/revise`, { version: 1, shots: [1] });
+    expect(response.status).toBe(202);
+    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1]);
+    expect(f.service.jobQueue.deliverPersisted).toHaveBeenCalledWith("revision", "marketing.video");
+    expect(f.service.usageMeter.checkQuota).toHaveBeenCalledOnce();
+    expect(f.store.reserve).not.toHaveBeenCalled();
+  });
+  it("refuses a video without a revision base, a stale version or an invalid choice before any charge", async () => {
+    const f = made();
+    for (const body of [{ version: 1, shots: [] }, { version: 1, shots: [1, 1] }, { version: 1, shots: [0.5] }, { version: 1 }]) {
+      expect((await f.call(`/${id}/revise`, body)).status).toBe(400);
+    }
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [2] })).status).toBe(400);
+    expect((await f.call(`/${id}/revise`, { version: 2, shots: [0] })).status).toBe(409);
+    f.service.jobQueue.canResumePersisted.mockResolvedValueOnce(false);
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [0] })).status).toBe(409);
+    Object.assign(f.project, { revision: undefined });
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [0] })).status).toBe(409);
+    expect(f.store.revise).not.toHaveBeenCalled(); expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+  it("keeps only clips that still belong to this owner and draft", async () => {
+    const f = made();
+    f.service.db.getAsset.mockImplementation(async () => ({ user_id: "owner", task_id: "somewhere-else" }) as never);
+    const response = await f.call(`/${id}/revise`, { version: 1, shots: [0] });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining("片段素材不可用") });
+    expect(f.store.revise).not.toHaveBeenCalled();
+  });
+  it("lets recovery reuse a kept clip owned by the segment task that made it", async () => {
+    const f = made();
+    Object.assign(f.project, { status: "failed", revision: undefined });
+    f.service.db.getTask.mockResolvedValue({ id: "parent", type: "marketing.video", user_id: "owner", status: "failed",
+      input: { projectId: id, draft: f.project.draft, generate_audio: true, marketingInputVersion: 3, modelId: "grok-imagine-video-1.5" } });
+    f.store.reserve.mockResolvedValue("parent");
+    expect((await f.call(`/${id}/generate`, { version: 1, retry: true })).status).toBe(202);
+    expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, {}, true);
+  });
+});
+
 describe("recorded review and publication requests", () => {
   it("requires a request identity and project version before calling the model", async () => {
     const f = fixture();

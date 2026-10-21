@@ -19,6 +19,7 @@ import type {
 } from "../types/index.js";
 import { mediaPartPlaceholder } from "../types/index.js";
 import { withLLMRetry } from "./retry.js";
+import { withGatewayRequestId } from "./gateway-request-id.js";
 import { logger } from "../logger/log.js";
 
 const log = logger.child({ mod: "llm.openai" });
@@ -70,7 +71,7 @@ export class OpenAIProvider implements LLMProvider {
     const createStream = () =>
       mapOpenAIStream(
         (async function* () {
-          const stream = await client.chat.completions.create(
+          const stream = await withGatewayRequestId(client.chat.completions.create(
             {
               model,
               messages: oaiMessages,
@@ -102,7 +103,7 @@ export class OpenAIProvider implements LLMProvider {
                   : {}),
             },
             { signal: opts?.signal }
-          );
+          ), opts?.onRequestId);
           yield* stream;
         })()
       );

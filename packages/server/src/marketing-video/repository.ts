@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
-import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
-import { UNKNOWN_SUBMISSION } from "./recovery.js";
+import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, marketingRevisionKey, marketingShotChanged, storyboardScript, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
+import { segmentRecoveryAction, UNKNOWN_SUBMISSION } from "./recovery.js";
 import { analysisDeleteBlocker, deleteAnalysisRecord, ownerLock as analysisOwnerLock } from "../marketing-analysis/repository.js";
 
 export class MarketingError extends Error {
@@ -28,11 +28,33 @@ function project(row: Record<string, any>): MarketingProject {
     ...(row.reference_analysis_id ? { referenceAnalysis: { id: row.reference_analysis_id, acceptedRevision: row.reference_revision, evidenceIds: row.reference_evidence_ids ?? [] } } : {}),
     reviewedScript: row.reviewed_script, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version };
 }
+/** The stopped or finished job of a draft whose single shots can be redone, with its clips.
+ * A clip whose vendor task is still open or unknown must be settled by the job first. */
+async function revisionBase(db: pg.Pool | pg.PoolClient, owner: string, id: string) {
+  const { rows } = await db.query(`SELECT t.status, t.input AS job_input, s.slot, s.script, s.task_id, st.vendor_task_id, st.output
+    FROM marketing_video_projects p JOIN tasks t ON t.id=p.task_id AND t.user_id=p.user_id AND t.type='marketing.video'
+    JOIN marketing_video_segments s ON s.project_id=p.id
+    JOIN tasks st ON st.id=s.task_id AND st.user_id=p.user_id AND st.type='marketing.segment' AND st.input->>'parentId'=p.task_id::text
+    WHERE p.user_id=$1 AND p.id=$2 ORDER BY s.slot`, [owner, id]);
+  const job = rows[0];
+  // Version 1 inputs predate the reference rules every new clip must meet.
+  if (!job || !["succeeded", "failed", "cancelled"].includes(job.status) || !(Number(job.job_input.marketingInputVersion) >= 2)) return undefined;
+  const draft = MarketingDraftSchema.parse(job.job_input.draft);
+  const actions = rows.map(row => segmentRecoveryAction(row));
+  if (draft.storyboard.length !== rows.length || rows.some((row, i) => row.slot !== i) || actions.some(action => action === "unknown" || action === "poll")) return undefined;
+  let modelId: string;
+  try { modelId = marketingJobProfile(job.job_input).modelId; } catch { return undefined; }
+  return { input: job.job_input as Record<string, unknown>, draft, modelId, segments: rows, reusable: actions.map(action => action === "reuse") };
+}
+async function withRevision(db: pg.Pool | pg.PoolClient, owner: string, p: MarketingProject): Promise<MarketingProject> {
+  const base = p.taskId ? await revisionBase(db, owner, p.id) : undefined;
+  return base ? { ...p, revision: { draft: base.draft, modelId: base.modelId, reusable: base.reusable } } : p;
+}
 export class PgMarketingProjectStore implements MarketingProjectStore {
   constructor(readonly pool: pg.Pool) {}
   async get(owner: string, id: string) {
     const { rows } = await this.pool.query(`${select} WHERE p.user_id=$1 AND p.id=$2`, [owner, id]);
-    return rows[0] ? project(rows[0]) : null;
+    return rows[0] ? withRevision(this.pool, owner, project(rows[0])) : null;
   }
   /** One indexed row per poll: no draft parsing, material lookups or link signing. */
   async taskState(owner: string, id: string) {
@@ -77,7 +99,15 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         if (!result.rowCount) throw new MarketingError("草稿保存冲突，请刷新后重试。", 409);
       } else {
         if (version !== old.version) throw new MarketingError("草稿已在其他页面更新，请重新打开。", 409);
-        if (old.task_id && renderKey(old.draft) !== renderKey(draft)) throw new MarketingError("已提交的制作配置不可修改，请复制为新草稿。", 409);
+        if (old.task_id && renderKey(old.draft) !== renderKey(draft)) {
+          // A stopped or finished video may change shot text to redo those shots; all else stays frozen.
+          const base = await revisionBase(client, owner, id);
+          if (!base) throw new MarketingError("已提交的制作配置不可修改，请复制为新草稿。", 409);
+          if (renderKey(base.draft) !== renderKey(draft)
+            && (marketingRevisionKey(base.draft) !== marketingRevisionKey(draft) || storyboardScript(draft.storyboard) !== draft.script.trim())) {
+            throw new MarketingError("成片只能修改分镜的口播、画面、动作和镜头，其他制作配置不可修改，请复制为新草稿。", 409);
+          }
+        }
         await client.query(`UPDATE marketing_video_projects SET draft=$3,version=version+1,updated_at=now(),
           reference_analysis_id=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_analysis_id ELSE NULL END,
           reference_revision=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_revision ELSE NULL END,
@@ -87,9 +117,9 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       }
       // Read our own version while holding the row lock. A post-commit read
       // could acknowledge a newer tab's version as if it were this save.
-      const saved = (await client.query(`${select} WHERE p.user_id=$1 AND p.id=$2`, [owner, id])).rows[0];
+      const saved = await withRevision(client, owner, project((await client.query(`${select} WHERE p.user_id=$1 AND p.id=$2`, [owner, id])).rows[0]));
       await client.query("COMMIT");
-      return project(saved);
+      return saved;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
   async setReview(owner: string, p: MarketingProject, review: MarketingReview) {
@@ -124,6 +154,48 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         const childId = randomUUID();
         // These tasks are executed by the parent, never delivered independently.
         await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.segment',$2,$3,'marketing-segments')`, [childId, JSON.stringify({ parentId: taskId, ...part }), owner]);
+        await client.query(`INSERT INTO marketing_video_segments(project_id,slot,task_id,script,duration_sec) VALUES($1,$2,$3,$4,$5)`, [id, part.index, childId, part.script, part.durationSec]);
+      }
+      await client.query(`UPDATE marketing_video_projects SET task_id=$3,updated_at=now() WHERE id=$1 AND user_id=$2`, [id, owner, taskId]);
+      await client.query("COMMIT"); return taskId;
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+  /** Redo the chosen shots of a stopped or finished video as a new job of the same draft.
+   * Every other shot keeps its clip: its new segment task is already succeeded and points
+   * at the existing asset, so it is neither submitted nor billed again. */
+  async revise(owner: string, id: string, version: number, baseTaskId: string, redo: number[]) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const p = (await client.query(`SELECT * FROM marketing_video_projects WHERE id=$1 AND user_id=$2 FOR UPDATE`, [id, owner])).rows[0];
+      if (!p) throw new MarketingError("草稿不存在", 404);
+      if (p.version !== version || p.task_id !== baseTaskId) throw new MarketingError("草稿已更新，请重新确认。", 409);
+      // Same key as the worker's job lock: never race a worker that is still finishing.
+      const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [`marketing:${baseTaskId}`]);
+      if (!lock.rows[0].locked) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
+      if (!p.review || p.reviewed_script !== reviewText(p.draft) || p.review.verdict === "reject") throw new MarketingError("请先完成当前文案检查。");
+      const base = await revisionBase(client, owner, id);
+      const draft = MarketingDraftSchema.parse(p.draft);
+      if (!base || marketingRevisionKey(base.draft) !== marketingRevisionKey(draft)) throw new MarketingError("当前视频不能单镜重做，请复制为新草稿。", 409);
+      const plan = resolveMarketingSegments(draft, marketingJobProfile(base.input));
+      // The caller confirmed the billed shots: a changed shot or a missing clip is never added silently.
+      const required = plan.filter(part => !base.reusable[part.index] || part.script !== base.segments[part.index].script
+        || marketingShotChanged(base.draft.storyboard[part.index], draft.storyboard[part.index])).map(part => part.index);
+      if (!redo.length || redo.some(slot => !plan[slot]) || required.some(slot => !redo.includes(slot))) throw new MarketingError("请重新选择需要重新生成的镜头。", 409);
+      const taskId = randomUUID();
+      await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.video',$2,$3,$4)`,
+        [taskId, JSON.stringify({ ...base.input, draft: p.draft, revisedFrom: baseTaskId }), owner, MARKETING_VIDEO_QUEUE]);
+      for (const part of plan) {
+        const childId = randomUUID(); const old = base.segments[part.index];
+        const input = JSON.stringify({ parentId: taskId, ...part });
+        if (redo.includes(part.index)) {
+          await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.segment',$2,$3,'marketing-segments')`, [childId, input, owner]);
+        } else {
+          // reusedFrom names the task that owns the asset, also across repeated redos.
+          const output = { assetIds: old.output.assetIds, assets: old.output.assets ?? [], reusedFrom: old.output.reusedFrom ?? old.task_id };
+          await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name,status,progress,output) VALUES($1,'marketing.segment',$2,$3,'marketing-segments','succeeded',100,$4)`,
+            [childId, input, owner, JSON.stringify(output)]);
+        }
         await client.query(`INSERT INTO marketing_video_segments(project_id,slot,task_id,script,duration_sec) VALUES($1,$2,$3,$4,$5)`, [id, part.index, childId, part.script, part.durationSec]);
       }
       await client.query(`UPDATE marketing_video_projects SET task_id=$3,updated_at=now() WHERE id=$1 AND user_id=$2`, [id, owner, taskId]);
@@ -182,8 +254,10 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         || blockers.includes("ANALYSIS_BUSY")) {
         throw new MarketingError("已有创作请求正在处理或结果待核实，请稍后再删除。", 409);
       }
+      // Earlier jobs of redone shots are reached through their segment rows.
       const files = p.task_id ? (await client.query(`DELETE FROM assets WHERE user_id=$1 AND type='video'
-        AND task_id IN (SELECT $2::uuid UNION SELECT task_id FROM marketing_video_segments WHERE project_id=$3)
+        AND task_id IN (SELECT $2::uuid UNION SELECT task_id FROM marketing_video_segments WHERE project_id=$3
+          UNION SELECT (st.input->>'parentId')::uuid FROM marketing_video_segments s JOIN tasks st ON st.id=s.task_id WHERE s.project_id=$3)
         RETURNING storage_key, size_bytes`, [owner, p.task_id, id])).rows : [];
       await client.query("DELETE FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2", [owner, id]);
       await client.query("DELETE FROM marketing_video_projects WHERE user_id=$1 AND id=$2", [owner, id]);
@@ -202,7 +276,9 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
   async usage(owner: string) {
     const { rows } = await this.pool.query(`WITH jobs AS (
         SELECT task_id AS id FROM marketing_video_projects WHERE user_id=$1 AND task_id IS NOT NULL
-        UNION SELECT s.task_id FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id WHERE p.user_id=$1)
+        UNION SELECT s.task_id FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id WHERE p.user_id=$1
+        UNION SELECT (st.input->>'parentId')::uuid FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id
+          JOIN tasks st ON st.id=s.task_id WHERE p.user_id=$1)
       SELECT (SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE user_id=$1 AND type='video' AND task_id IN (SELECT id FROM jobs)) AS video_bytes,
         (SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE user_id=$1 AND type='upload' AND id::text IN (
           SELECT jsonb_array_elements_text(CASE jsonb_typeof(e.value) WHEN 'array' THEN e.value ELSE jsonb_build_array(e.value) END)

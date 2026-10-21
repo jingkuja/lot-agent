@@ -4,6 +4,7 @@ import type { ChatChunk, ChatOptions, LLMProvider, LLMTool, Message } from "../t
 import { mediaPartPlaceholder } from "../types/index.js";
 import { LLMResponseError } from "./errors.js";
 import type { OpenAIProviderConfig } from "./openai.js";
+import { withGatewayRequestId } from "./gateway-request-id.js";
 
 /** Stateless Responses transport. Never replay an uncertain, potentially paid POST. */
 export class OpenAIResponsesProvider implements LLMProvider {
@@ -34,7 +35,7 @@ export class OpenAIResponsesProvider implements LLMProvider {
     };
     opts?.onAttempt?.();
     try {
-      const stream = await this.client.responses.create(request, { signal: opts?.signal });
+      const stream = await withGatewayRequestId(this.client.responses.create(request, { signal: opts?.signal }), opts?.onRequestId);
       yield* mapResponsesStream(stream, this.config.model, opts?.onResponseId);
       opts?.onAttemptEnd?.();
     } catch (error) {

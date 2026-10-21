@@ -181,6 +181,53 @@ try {
   await run(two.taskId); assert.equal(creates, before + resubmit, "only unfinished clips are submitted again");
   before = creates;
 
+  // G04: redo single shots of a made video. Kept clips need no model call or charge,
+  // and deleting the draft also removes the earlier jobs' final videos and clips.
+  let made = await store.setReview(owner, await store.save(owner, randomUUID(), 0, draft), { verdict: "pass", issues: [] });
+  const firstJob = await store.reserve(owner, made.id, made.version, { modelId: KLING_MARKETING_PROFILE.modelId, marketingInputVersion: 3 }, false);
+  assert.equal((await store.get(owner, made.id))!.revision, undefined, "a queued job cannot be revised");
+  await run(firstJob);
+  before = creates;
+  made = (await store.get(owner, made.id))!;
+  assert.deepEqual(made.revision?.reusable, [true, true]);
+  const firstClips = await store.segments(owner, made.id);
+  await assert.rejects(store.save(owner, made.id, made.version, { ...made.draft, ratio: "16:9" }), /只能修改分镜/);
+  await assert.rejects(store.save(owner, made.id, made.version, { ...made.draft, storyboard: made.draft.storyboard.map(shot => ({ ...shot, durationSec: shot.durationSec - 1 })) }), /只能修改分镜/);
+  made = await store.save(owner, made.id, made.version, { ...made.draft, storyboard: made.draft.storyboard.map((shot, i) => i === 1 ? { ...shot, visual: "人物在窗边喝咖啡" } : shot) });
+  assert.equal(made.review, null, "an edited shot needs a new text check");
+  await assert.rejects(store.revise(owner, made.id, made.version, firstJob, [1]), /文案检查/);
+  made = await store.setReview(owner, made, { verdict: "pass", issues: [] });
+  await assert.rejects(store.revise(owner, made.id, made.version, firstJob, [0]), /重新选择/, "an edited shot is never kept");
+  await assert.rejects(store.revise(other, made.id, made.version, firstJob, [1]), /不存在/);
+  const charges = async () => (await db.pool.query("SELECT count(*)::int AS n,COALESCE(sum(output_count),0)::int AS seconds FROM usage_logs WHERE user_id=$1", [owner])).rows[0];
+  const chargedBefore = await charges();
+  const secondJob = await store.revise(owner, made.id, made.version, firstJob, [1]);
+  await assert.rejects(store.revise(owner, made.id, made.version, firstJob, [1]), /已更新/, "a repeated request creates no second job");
+  assert.equal((await store.get(owner, made.id))!.revision, undefined);
+  const revised = await run(secondJob);
+  assert.equal(creates, before + 1, "only the redone shot is submitted");
+  assert.deepEqual(await charges(), { n: chargedBefore.n + 1, seconds: chargedBefore.seconds + 15 });
+  assert(Math.abs((await inspectMedia(join(root, "assets", (await db.getAsset(revised.assetIds[0]))!.storage_key))).duration - 30) < 0.05);
+  const secondClips = await store.segments(owner, made.id);
+  assert.deepEqual(secondClips[0].output.assetIds, firstClips[0].output.assetIds);
+  assert.equal(secondClips[0].output.reusedFrom, firstClips[0].task_id);
+  assert.notDeepEqual(secondClips[1].output.assetIds, firstClips[1].output.assetIds);
+  // Redo the same shot unchanged: the kept clip still names the task that made it.
+  made = (await store.get(owner, made.id))!;
+  const thirdJob = await store.revise(owner, made.id, made.version, secondJob, [1]);
+  await run(thirdJob);
+  assert.equal(creates, before + 2);
+  assert.equal((await store.segments(owner, made.id))[0].output.reusedFrom, firstClips[0].task_id);
+  before = creates;
+  const madeFiles = (await db.pool.query(`SELECT size_bytes FROM assets WHERE user_id=$1 AND type='video' AND task_id IN (
+    SELECT id FROM tasks WHERE id=ANY($2::uuid[]) OR input->>'parentId'=ANY($3::text[]))`, [owner, [firstJob, secondJob, thirdJob], [firstJob, secondJob, thirdJob]])).rows;
+  assert.equal(madeFiles.length, 7, "three final videos, two first clips and two redone clips");
+  const usageBeforeRevisionDelete = await store.usage(owner);
+  const removedRevision = await store.remove(owner, made.id);
+  assert.equal(removedRevision.files.length, 7);
+  assert.equal(removedRevision.removedBytes, madeFiles.reduce((sum, row) => sum + Number(row.size_bytes), 0));
+  assert.equal((await store.usage(owner)).videoBytes, usageBeforeRevisionDelete.videoBytes - removedRevision.removedBytes);
+
   // Unknown text creation: a live request cannot be released, a received result
   // must be recovered, and a released intent never applies a late result.
   const ops = new PgMarketingTextOperations(db.pool);
@@ -197,6 +244,17 @@ try {
   assert.notEqual((await db.pool.query("SELECT released_at FROM marketing_text_operations WHERE id=$1", [firstOp])).rows[0].released_at, null);
   await assert.rejects(ops.finish(owner, firstOp, { draft, analysis: "late" }), /状态已改变/);
   assert.equal((await store.get(owner, textProject.id))!.version, textProject.version);
+  // A request with nothing back ends cancelled: retryable at once, and its gateway request ID
+  // stays on record to match a rare charge for refund.
+  const cancelledOp = randomUUID();
+  await ops.begin(owner, cancelledOp, textProject.id, textProject.version, "copy", { n: "cancelled" });
+  await ops.receipt(owner, cancelledOp, { text: "", outcome: "cancelled", gatewayRequestId: "20261021100000fixture" });
+  await ops.fail(owner, cancelledOp, true, false);
+  assert.equal((await ops.list(owner, textProject.id))[0].status, "cancelled");
+  assert.equal((await db.pool.query("SELECT receipt->>'gatewayRequestId' AS id FROM marketing_text_operations WHERE id=$1 AND status='cancelled'", [cancelledOp])).rows[0].id, "20261021100000fixture");
+  const afterCancelled = randomUUID();
+  await ops.begin(owner, afterCancelled, textProject.id, textProject.version, "copy", { n: "retry" });
+  await ops.fail(owner, afterCancelled, false);
   const staleOp = randomUUID();
   assert.equal((await ops.begin(owner, staleOp, textProject.id, textProject.version, "copy", { n: 2 })).fresh, true);
   await db.pool.query("UPDATE marketing_text_operations SET created_at=now()-interval '7 minutes' WHERE id=$1", [staleOp]);
@@ -463,5 +521,5 @@ try {
   await assert.rejects(operations.begin(pager, randomUUID(), busy[2].id, busy[2].version, "storyboard", { version: busy[2].version }), { status: 429 });
   await operations.fail(pager, running[0], false);
   assert.equal((await operations.begin(pager, randomUUID(), busy[2].id, busy[2].version, "storyboard", { version: busy[2].version })).fresh, true);
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", shotRedo: "only chosen shots submitted and billed, kept clips reused, earlier jobs removed with the draft", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

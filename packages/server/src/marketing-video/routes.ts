@@ -7,7 +7,7 @@ import { invalidTextResult, parseOperationResult, parseTextResult } from "./text
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { estimateCost } from "@lot-agent/core";
-import { isMarketingDurationValid, MARKETING_INPUT_VERSION, marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, marketingReferenceImageIssue, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { isMarketingDurationValid, MARKETING_INPUT_VERSION, marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, marketingReferenceImageIssue, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
@@ -81,12 +81,53 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     return result;
   }
+  /** Material checks before any clip is paid for: owned and supported files, the real
+   * format of submitted images, reference video limits and voice / music samples. */
+  async function checkMaterials(owner: string, draft: MarketingDraft, profile: MarketingVideoProfile, inputVersion: number, needsSubmission: boolean, signal: AbortSignal) {
+    const assets = await ownedAssets(owner, draft, !needsSubmission, needsSubmission ? undefined : draft);
+    // The stored MIME is the client's claim and the draft may predate the active
+    // model, so check each submitted image's real format and size against it here.
+    if (needsSubmission && inputVersion >= 2) {
+      for (const { assetId } of marketingImageReferences(draft)) {
+        const asset = (await service.db.getAsset(assetId))!;
+        const info = await readImageInfo(await ownedAssetPath(dataRoot, asset));
+        const issue = marketingReferenceImageIssue(profile, { mime: info?.mime ?? "", size: Number(asset.size_bytes), width: info?.width ?? 0, height: info?.height ?? 0 });
+        if (issue) throw new MarketingError(issue);
+      }
+    }
+    if (needsSubmission && assets.video) {
+      const video = (await service.db.getAsset(assets.video.id))!;
+      const info = await inspectMedia(await ownedAssetPath(dataRoot, video), signal);
+      if (!info.video) throw new MarketingError("参考视频无法读取画面，请重新上传。");
+      const limits = profile.referenceVideo;
+      if (limits && (info.duration < limits.minSeconds || info.duration > limits.maxSeconds || !Number.isFinite(info.fps) || info.fps < limits.minFps || info.fps > limits.maxFps
+        || Math.min(info.width, info.height) < limits.minEdge || Math.max(info.width, info.height) > limits.maxEdge || info.width * info.height > limits.maxPixels
+        || info.width / info.height < limits.minAspect || info.width / info.height > limits.maxAspect)) {
+        throw new MarketingError(`参考视频需为 ${limits.minSeconds}–${limits.maxSeconds} 秒、${limits.minFps}–${limits.maxFps} fps，宽高各 ${limits.minEdge}–${limits.maxEdge} 像素，总像素不超过 ${limits.maxPixels}，宽高比 ${limits.minAspect}–${limits.maxAspect}。`);
+      }
+    }
+    if (assets.voice || assets.music) {
+      for (const slot of ["voice", "music"] as const) {
+        if (!assets[slot] || (slot === "voice" && (!needsSubmission || draft.assets.video))) continue;
+        const asset = (await service.db.getAsset(assets[slot].id))!;
+        const info = await inspectMedia(await ownedAssetPath(dataRoot, asset), signal);
+        if (!info.audio || (slot === "voice" && (info.duration < 2 || info.duration > 15))) throw new MarketingError("声音样例时长需为 2–15 秒");
+      }
+    }
+    return assets;
+  }
+  async function quotaExceeded(owner: string, profile: MarketingVideoProfile, billableSeconds: number) {
+    if (billableSeconds <= 0) return null;
+    const pricing = makePricingLookup((id) => service.modelRegistry.getConfig(id), service.modelCatalog, "video")(profile.modelId);
+    const quota = await service.usageMeter.checkQuota(owner, pricing ? estimateCost(pricing, { outputCount: billableSeconds }) : 0);
+    return quota.ok ? null : { error: quota.reason, code: quota.code };
+  }
   const requireProject = async (owner: string, id: string) => {
     const p = await store.get(owner, id); if (!p) throw new MarketingError("草稿不存在", 404); return p;
   };
   const replay = (operation: TextOperation) => {
     if (operation.result) return operation.result;
-    throw new MarketingError(operation.status === "failed" ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请等待页面顶部的处理结果。", 409);
+    throw new MarketingError(["failed", "cancelled"].includes(operation.status) ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请查看页面底部的处理结果。", 409);
   };
   app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", model: activeProfile }));
   app.get("/usage", async (c) => {
@@ -290,7 +331,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       for (const segment of segments.filter(s => segmentRecoveryAction(s) === "reuse")) {
         for (const assetId of segment.output.assetIds) {
           const asset = await service.db.getAsset(assetId);
-          if (!asset || asset.user_id !== owner || asset.task_id !== segment.task_id) throw new MarketingError("片段素材不可用", 404);
+          // A clip kept by a shot redo belongs to the earlier segment task that made it.
+          if (!asset || asset.user_id !== owner || asset.task_id !== (segment.output.reusedFrom ?? segment.task_id)) throw new MarketingError("片段素材不可用", 404);
         }
       }
     }
@@ -312,42 +354,9 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     catch (error) { throw new MarketingError((error as Error).message); }
     const billableSeconds = p.taskId ? segments.filter(s => segmentRecoveryAction(s) === "submit").reduce((sum, s) => sum + Number(s.duration_sec), 0) : planned.reduce((sum, s) => sum + s.durationSec, 0);
-    const assets = await ownedAssets(owner, draft, !needsSubmission, needsSubmission ? undefined : draft);
-    // The stored MIME is the client's claim and the draft may predate the active
-    // model, so check each submitted image's real format and size against it here.
-    if (needsSubmission && inputVersion >= 2) {
-      for (const { assetId } of marketingImageReferences(draft)) {
-        const asset = (await service.db.getAsset(assetId))!;
-        const info = await readImageInfo(await ownedAssetPath(dataRoot, asset));
-        const issue = marketingReferenceImageIssue(profile, { mime: info?.mime ?? "", size: Number(asset.size_bytes), width: info?.width ?? 0, height: info?.height ?? 0 });
-        if (issue) throw new MarketingError(issue);
-      }
-    }
-    if (needsSubmission && assets.video) {
-      const video = (await service.db.getAsset(assets.video.id))!;
-      const info = await inspectMedia(await ownedAssetPath(dataRoot, video), c.req.raw.signal);
-      if (!info.video) throw new MarketingError("参考视频无法读取画面，请重新上传。");
-      const limits = profile.referenceVideo;
-      if (limits && (info.duration < limits.minSeconds || info.duration > limits.maxSeconds || !Number.isFinite(info.fps) || info.fps < limits.minFps || info.fps > limits.maxFps
-        || Math.min(info.width, info.height) < limits.minEdge || Math.max(info.width, info.height) > limits.maxEdge || info.width * info.height > limits.maxPixels
-        || info.width / info.height < limits.minAspect || info.width / info.height > limits.maxAspect)) {
-        throw new MarketingError(`参考视频需为 ${limits.minSeconds}–${limits.maxSeconds} 秒、${limits.minFps}–${limits.maxFps} fps，宽高各 ${limits.minEdge}–${limits.maxEdge} 像素，总像素不超过 ${limits.maxPixels}，宽高比 ${limits.minAspect}–${limits.maxAspect}。`);
-      }
-    }
-    if (assets.voice || assets.music) {
-      for (const slot of ["voice", "music"] as const) {
-        if (!assets[slot] || (slot === "voice" && (!needsSubmission || draft.assets.video))) continue;
-        const asset = (await service.db.getAsset(assets[slot].id))!;
-        const info = await inspectMedia(await ownedAssetPath(dataRoot, asset), c.req.raw.signal);
-        if (!info.audio || (slot === "voice" && (info.duration < 2 || info.duration > 15))) throw new MarketingError("声音样例时长需为 2–15 秒");
-      }
-    }
-    const pricing = makePricingLookup((id) => service.modelRegistry.getConfig(id), service.modelCatalog, "video")(profile.modelId);
-    const estimatedCost = pricing ? estimateCost(pricing, { outputCount: billableSeconds }) : 0;
-    if (billableSeconds > 0) {
-      const quota = await service.usageMeter.checkQuota(owner, estimatedCost);
-      if (!quota.ok) return c.json({ error: quota.reason, code: quota.code }, 402);
-    }
+    const assets = await checkMaterials(owner, draft, profile, inputVersion, needsSubmission, c.req.raw.signal);
+    const exceeded = await quotaExceeded(owner, profile, billableSeconds);
+    if (exceeded) return c.json(exceeded, 402);
     if (p.taskId) {
       // reserve's recovery branch changes only status. Never rebuild the
       // frozen provider input, vendor IDs or segment billing identity.
@@ -366,6 +375,48 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       reference_audio: !p.draft.assets.video && assets.voice ? [assets.voice.url] : undefined,
       requireUserModelKey: process.env.DEBUG !== "1" };
     const taskId = await store.reserve(owner, p.id, body.version, input, body.retry);
+    try { await (service.jobQueue as BullmqJobQueue).deliverPersisted(taskId, "marketing.video"); }
+    catch { throw new MarketingError("任务已保存，队列暂不可用；请重新打开草稿继续。", 503); }
+    return c.json(await store.get(owner, p.id), 202);
+  });
+  // Redo chosen shots of a stopped or finished video. The other shots keep their clips
+  // without a model call or a charge; only the redone shots' seconds are billed.
+  app.post("/:id/revise", async (c) => {
+    const owner = c.get("userId");
+    const p = await requireProject(owner, c.req.param("id"));
+    const body = await c.req.json().catch(() => null);
+    const shots: unknown[] = Array.isArray(body?.shots) ? body.shots : [];
+    if (!Number.isInteger(body?.version) || !shots.length || shots.length > 15 || !shots.every(Number.isInteger) || new Set(shots).size !== shots.length) throw new MarketingError("重新生成参数无效");
+    const redo = shots as number[];
+    if (!p.taskId || !p.revision) throw new MarketingError("当前视频不能单镜重做，请复制为新草稿。", 409);
+    if (p.version !== body.version) throw new MarketingError("草稿已更新，请重新确认。", 409);
+    if (!await (service.jobQueue as BullmqJobQueue).canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
+    const original = await service.db.getTask(p.taskId);
+    const frozen = original?.input && typeof original.input === "object" && !Array.isArray(original.input) ? original.input as Record<string, unknown> : undefined;
+    if (!original || !frozen || original.user_id !== owner || original.type !== "marketing.video" || frozen.projectId !== p.id) throw new MarketingError("原任务不可恢复。", 409);
+    // Kept clips come from this model, so redone shots use it too.
+    const profile = marketingJobProfile(frozen);
+    let plan;
+    try {
+      plan = resolveMarketingSegments(p.draft, profile);
+      for (const slot of redo) {
+        if (!plan[slot]) throw new Error("请重新选择需要重新生成的镜头。");
+        marketingSegmentPrompt(p.draft, plan[slot], plan.length, frozen.generate_audio !== false, profile);
+      }
+    } catch (error) { throw new MarketingError((error as Error).message); }
+    const referenceError = marketingReferenceError(p.draft, profile);
+    if (referenceError) throw new MarketingError(referenceError);
+    if (!(await mediaCapabilities()).composition) throw new MarketingError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
+    for (const segment of (await store.segments(owner, p.id)).filter(s => !redo.includes(s.slot))) {
+      for (const assetId of segment.output?.assetIds ?? []) {
+        const asset = await service.db.getAsset(assetId);
+        if (!asset || asset.user_id !== owner || asset.task_id !== (segment.output.reusedFrom ?? segment.task_id)) throw new MarketingError("片段素材不可用，请一并重新生成该镜头。", 409);
+      }
+    }
+    await checkMaterials(owner, p.draft, profile, Number(frozen.marketingInputVersion), true, c.req.raw.signal);
+    const exceeded = await quotaExceeded(owner, profile, redo.reduce((sum, slot) => sum + plan[slot].durationSec, 0));
+    if (exceeded) return c.json(exceeded, 402);
+    const taskId = await store.revise(owner, p.id, body.version, p.taskId, redo);
     try { await (service.jobQueue as BullmqJobQueue).deliverPersisted(taskId, "marketing.video"); }
     catch { throw new MarketingError("任务已保存，队列暂不可用；请重新打开草稿继续。", 503); }
     return c.json(await store.get(owner, p.id), 202);

@@ -137,6 +137,9 @@ export interface MarketingProject {
   knowledgeVersion?: number | null;
   /** Clips of the current job whose paid submission outcome is unknown. */
   unknownSegments?: number;
+  /** Set when single shots of the current stopped or finished job can be redone: the
+   * draft it rendered, its clip model, and which of its clips can be kept unpaid. */
+  revision?: { draft: MarketingDraft; modelId: string; reusable: boolean[] };
 }
 /** What a page polls while a video is being made: task fields only, no draft or material links. */
 export type MarketingTaskState = Pick<MarketingProject, "id" | "version" | "taskId" | "status" | "progress" | "stage" | "error" | "errorCode" | "output" | "unknownSegments">;
@@ -234,6 +237,14 @@ export function planMarketingSegments(script: string, durationSec: number, maxSh
 
 /** Narration edits in the storyboard are also the project's editable copy. */
 export const storyboardScript = (shots: Pick<MarketingShot, "script">[]) => shots.map(shot => shot.script.trim()).join("\n");
+/** What a redo of single shots keeps from the rendered draft: every setting, the shot
+ * count and each shot's duration. Only shot text and publishing fields may differ. */
+export function marketingRevisionKey(draft: MarketingDraft): string {
+  const { publishTitle: _title, tags: _tags, script: _script, storyboard, ...rest } = MarketingDraftSchema.parse(draft);
+  return JSON.stringify({ ...rest, storyboard: storyboard.map(shot => shot.durationSec) });
+}
+export const marketingShotChanged = (rendered: MarketingShot, shot: MarketingShot | undefined) =>
+  !shot || (["script", "visual", "action", "camera"] as const).some(key => rendered[key] !== shot[key]);
 export const MARKETING_REVIEW_RULE_VERSION = "2026-10-15.1";
 export function marketingReviewFields(draft: MarketingDraft): { field: MarketingReviewField; shotIndex?: number; text: string }[] {
   // Worker reservation may read older raw JSONB rows before project() parsing.

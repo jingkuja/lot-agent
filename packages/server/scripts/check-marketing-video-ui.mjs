@@ -49,7 +49,7 @@ try {
   const conversations = agents.filter((a) => a.id !== 'digital_employee').map((a) => ({ id: `history-${a.id}`, title: `${a.id} 历史记录`, agent_id: a.id, created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:00:00Z' }));
   let taskState = 'running', sequence = 0, statusPolls = 0;
   let apiUnavailable = true;
-  let failNextReview = false, failNextStoryboard = false;
+  let failNextReview = false, failNextStoryboard = false, failNextCopyUnknown = false;
   let holdNextSave = false, releaseSave, holdNextCopy = false, releaseCopy;
   const projects = new Map();
   const textOperations = new Map(), uploadedAssets = new Map();
@@ -63,6 +63,9 @@ try {
   ];
   const generated = new Map();
   const resultAssets = [{ url: '/static/fixture.mp4', mime: 'video/mp4' }];
+  // Like the server, full project reads and saves of a made video offer single shot redo; every fixture clip can be kept.
+  const withRevision = (p) => p.rendered && p.status === 'succeeded'
+    ? { ...p, revision: { draft: p.rendered, modelId: KLING_MARKETING_PROFILE.modelId, reusable: p.rendered.storyboard.map(() => true) } } : p;
   await page.route("**/api/**", async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (!path.startsWith("/api/")) return route.continue();
@@ -94,6 +97,11 @@ try {
     if (path === '/api/marketing-videos/copy') {
       const body = request.postDataJSON(), p = projects.get(body.projectId);
       assert(p); assert.equal(body.version, p.version);
+      if (failNextCopyUnknown) {
+        // The model call ended without a clear result: the server keeps it as unknown.
+        failNextCopyUnknown = false; textOperations.set(body.projectId, [{ id: body.clientRequestId, kind: 'copy', status: 'unknown' }]);
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 'MARKETING_MODEL_UNAVAILABLE', error: '文案模型暂时无法完成请求，请稍后重试。' }) });
+      }
       if (holdNextCopy) { holdNextCopy = false; await new Promise(resolve => { releaseCopy = resolve; }); }
       p.version++; p.draft = { ...body.draft, storyboardAudio: !body.draft.assets?.video, storyboard: planMarketingSegments(script, body.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '咖啡店', action: '展示咖啡', camera: '中景' })), script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' };
       return json({ project: p, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
@@ -106,7 +114,7 @@ try {
         assert.equal(body.version, old?.version ?? 0);
         const p = { ...(old ?? { id, status: 'draft', progress: 0, taskId: null, review: null, reviewedScript: null, knowledgeItemId: null }), version: body.version + 1, draft: body.draft, updatedAt: new Date().toISOString() };
         if (p.reviewedScript !== marketingReviewText(p.draft)) p.review = null;
-        projects.set(id, p); return json(p);
+        projects.set(id, p); return json(withRevision(p));
       }
       const p = projects.get(id); assert(p, `project ${id} missing`);
       if (action === 'storyboard') {
@@ -132,7 +140,11 @@ try {
       }
       if (action === 'publication') { p.version++; p.draft.publishTitle = '手冲咖啡与惬意时光'; p.draft.tags = '#咖啡'; p.review = null; return json(p); }
       if (action === 'unknown-segments') { delete p.unknownSegments; taskState = 'running'; return json({ released: 2, project: p }); }
-      if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; return json(p); }
+      if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p); }
+      if (action === 'revise') {
+        const body = request.postDataJSON(); assert.equal(body.version, p.version); assert(p.review?.verdict === 'pass');
+        taskState = 'running'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p);
+      }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
       if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'] }; }
       if (action === 'status') {
@@ -140,7 +152,7 @@ try {
         const { id: projectId, version, taskId, status, progress, stage, error, errorCode, output, unknownSegments } = p;
         return json({ id: projectId, version, taskId, status, progress, stage, error, errorCode, output, unknownSegments });
       }
-      return json({ ...p, assets: Object.fromEntries(uploadedAssets) });
+      return json({ ...withRevision(p), assets: Object.fromEntries(uploadedAssets) });
     }
     if (path.startsWith('/api/assets/') && request.method() === 'GET') {
       assert.equal(request.headers()['authorization'], 'Bearer agent-navigation-test');
@@ -230,9 +242,19 @@ try {
   assert.equal(await page.getByRole('radio', { name: '粘贴链接或文案', exact: true }).isChecked(), true);
   await page.getByLabel('视频链接或参考文案').fill('先展示店铺环境，再讲特色，最后邀请到店。');
   await page.getByText('已识别为参考文案，AI 按其结构改写文案与分镜。', { exact: true }).waitFor();
+  // A copy request without a clear model result is explained beside the buttons, and
+  // one confirmed action discards it and sends the same request again.
+  failNextCopyUnknown = true;
+  await page.getByRole('button', { name: '一键拆解并生成', exact: true }).click();
+  const unknownPanel = page.locator('.mv-dock .ma-panel');
+  await unknownPanel.getByRole('alert').filter({ hasText: '上次 AI 创作没有收到明确结果' }).waitFor();
+  await page.locator('.mv-dock .mv-error').waitFor({ state: 'hidden' });
+  assert.equal(await page.getByRole('button', { name: '一键拆解并生成', exact: true }).isDisabled(), true);
+  await snap('marketing-video-copy-unknown-zh-light.png');
   failNextReview = true;
   holdNextCopy = true;
-  await page.getByRole('button', { name: '一键拆解并生成', exact: true }).click();
+  await unknownPanel.getByRole('button', { name: '放弃并重新生成', exact: true }).click();
+  await confirmDialog('放弃并重新生成？', '放弃并重新生成');
   const waitStatus = page.locator('.mv-dock .mv-wait');
   await waitStatus.getByText('正在生成文案和分镜…', { exact: true }).waitFor();
   assert.match(await waitStatus.innerText(), /已用时 0:0\d/);
@@ -241,7 +263,9 @@ try {
   await waitStatus.waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: '生成分镜', exact: true }).waitFor();
   assert.equal(await page.getByRole('region', { name: '文案与分镜检查' }).count(), 0, 'the copy check lives in the confirm step');
-  assert.equal(writes.filter(r => r.path.endsWith('/copy')).length, 1);
+  const copies = writes.filter(r => r.path.endsWith('/copy'));
+  assert.equal(copies.length, 2); assert.notEqual(copies[0].body.clientRequestId, copies[1].body.clientRequestId);
+  assert.equal(writes.filter(r => r.path.endsWith(`/text-operations/${copies[0].body.clientRequestId}/release`)).length, 1);
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
   // Review exact storyboard fields, including duplicate excerpts in different
   // shots. Applying one suggestion must not alter another shot or lose timing.
@@ -449,9 +473,29 @@ try {
   await page.getByRole('button', { name: '更新知识库草稿', exact: true }).click();
   await page.getByRole('button', { name: '已存入知识库', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/archive')).length, 2);
+  // G04: redo a single shot in place; the other shots keep their clips.
   assert.equal(await page.locator('.mv-results .mv-shot').count(), p.draft.storyboard.length);
-  assert.equal(await firstShot.getByLabel('分镜口播').getAttribute('readonly'), '');
-  await page.getByRole('button', { name: '修改分镜并重新制作', exact: true }).click();
+  assert(p.draft.storyboard.length >= 2);
+  assert.equal(await firstShot.getByLabel('分镜口播').getAttribute('readonly'), null);
+  assert.equal(await page.getByRole('button', { name: '选择要重新生成的镜头', exact: true }).isDisabled(), true);
+  const secondRedo = secondShot.getByRole('checkbox', { name: /重新生成此镜/ });
+  await secondShot.getByLabel('画面内容').fill('人物在窗边慢慢品尝咖啡');
+  await secondShot.getByText('已修改', { exact: true }).waitFor();
+  assert.equal(await secondRedo.isChecked(), true); assert.equal(await secondRedo.isDisabled(), true);
+  await page.locator('.mv-results').getByRole('heading', { name: '文案与分镜检查', exact: true }).waitFor();
+  await secondShot.scrollIntoViewIfNeeded(); await snap('marketing-video-shot-redo-zh-light.png');
+  await page.getByRole('button', { name: '重新生成 1 个镜头并合成', exact: true }).click();
+  await snap('marketing-video-shot-redo-confirm-zh-light.png');
+  await confirmDialog('重新生成镜头？', '重新生成');
+  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
+  const revisions = writes.filter(r => r.path.endsWith('/revise'));
+  assert.equal(revisions.length, 1); assert.deepEqual(revisions[0].body.shots, [1]);
+  assert.equal(projects.get(p.id).draft.storyboard[1].visual, '人物在窗边慢慢品尝咖啡');
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1, 'a shot redo is not a new video');
+  taskState = 'succeeded';
+  await page.locator('.mv-results video').waitFor();
+  await page.getByRole('button', { name: '选择要重新生成的镜头', exact: true }).waitFor();
+  await page.getByRole('button', { name: '复制为新草稿修改其他设置', exact: true }).click();
   await page.getByRole('button', { name: '确定文案', exact: false }).click();
   await page.getByRole('heading', { name: '确定文案', exact: true }).waitFor();
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), p.draft.script);
@@ -668,7 +712,7 @@ try {
   assert(materialRefreshes.length > 0, 'Expired or failed previews reauthorize through the owned asset API');
   assert(statusPolls > 0, 'progress is polled from the task state endpoint');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []); assert.deepEqual(nativeDialogs, []);
-  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, model subtitles without local subtitle support, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, duplicated/new drafts, dark and English responsive layouts.');
+  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, model subtitles without local subtitle support, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {
   console.error({ errors, unexpectedRequests, body: await page?.locator('body').innerText() });
   throw error;

@@ -298,3 +298,14 @@
 }
 
 .mv-asset-preview video { width: 100%; max-height: 200px; border-radius: var(--radius-sm); background: var(--bg); }
+
+/* Shot redo on a made video */
+.mv-shot.mv-shot-redo { border-color: var(--accent); }
+.mv-shot .mv-checkbox { margin: 10px 0 0; font-size: 12px; }
+.mv-shot .mv-checkbox em { font-style: normal; font-weight: 550; color: var(--text-secondary); }
+
+/* Text request state beside the step buttons */
+.mv-dock > .ma-panel { margin: 0; }
+.mv-dock > .ma-panel:not(:empty) { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); box-shadow: var(--neu-raise-sm); }
+.mv-dock > .ma-panel > p { padding: 0; border: 0; background: transparent; }
+.mv-dock > .ma-panel .mv-choices { margin: 0; }

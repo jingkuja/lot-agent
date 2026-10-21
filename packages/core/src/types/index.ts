@@ -86,6 +86,8 @@ export interface ChatOptions {
   onAttempt?: () => void;
   onAttemptEnd?: (error?: unknown) => void;
   onResponseId?: (id: string) => void;
+  /** The gateway's log ID for the HTTP request, also reported for error responses. */
+  onRequestId?: (id: string) => void;
 }
 
 /** Unified LLM provider interface */

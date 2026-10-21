@@ -51,6 +51,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [step, setStep] = useState(0);
   const [analysisPending, setAnalysisPending] = useState(false);
   const [textPending, setTextPending] = useState(false);
+  // The latest text request has no clear result: locked until the user discards it, not "processing".
+  const [textUnknown, setTextUnknown] = useState(false);
+  const [retryText, setRetryText] = useState(false);
   const [operationReload, setOperationReload] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -74,6 +77,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const saved = useRef(JSON.stringify(draft));
   const flight = useRef<Promise<Project> | null>(null);
   const textRequest = useRef<RequestIdentity | null>(null);
+  // The last text request sent from this page, repeated when the user discards its unknown result.
+  const lastText = useRef<{ kind: string; run: () => Promise<void> } | null>(null);
+  const shownUnknown = useRef<string | null>(null);
   const analysisRequest = useRef<{ fingerprint: string; body: unknown } | null>(null);
   const uploadRequest = useRef<RequestIdentity | null>(null);
   const uploadController = useRef<AbortController | null>(null);
@@ -129,7 +135,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
 
   async function open(id: string) {
     const token = session.next();
-    setTextPending(true);
+    setTextPending(true); setTextUnknown(false); setRetryText(false); lastText.current = null;
     let p: Project;
     // A failed open must not leave the editor locked as if a text request were pending.
     try { p = await requestProject(`/marketing-videos/${id}`); }
@@ -198,6 +204,11 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     if (!p || p.id !== state.id) return;
     setCurrent({ ...p, taskId: state.taskId, status: state.status, progress: state.progress, stage: state.stage, error: state.error,
       errorCode: state.errorCode, output: state.output, unknownSegments: state.unknownSegments });
+    // Whether single shots can be redone is known once the job stops; it comes with the full project.
+    if (state.status !== "pending" && state.status !== "running") {
+      const token = session.token();
+      void requestProject(`/marketing-videos/${p.id}`).then(fresh => { if (session.current(token)) setCurrent(fresh); }).catch(() => {});
+    }
   }, failed => setError(old => failed ? pollError : old === pollError ? "" : old));
 
   async function act(work: () => Promise<void>, navigation = false) {
@@ -208,11 +219,19 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       finally { if (session.alive) setWorking(null); }
     });
   }
+  // After a discarded unknown result, repeat the request once the refreshed state unlocks the page.
+  useEffect(() => {
+    if (!retryText || textPending) return;
+    setRetryText(false);
+    const work = lastText.current?.run;
+    if (work) void act(work);
+  }, [retryText, textPending]);
   // Review and title/tag requests are recorded like copy: the same ID replays a
   // saved result after a lost response instead of calling the model again.
   const wait = (label: string, textRequest = true) => setWorking({ label, started: Date.now(), textRequest });
   const recordedRequestId = (kind: string, p: Project, ...input: unknown[]) => requestId(textRequest, JSON.stringify([kind, p.id, p.version, locale, ...input]));
   async function review() {
+    lastText.current = { kind: "review", run: review };
     wait("正在检查文案与分镜");
     const p = await save();
     try {
@@ -255,6 +274,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }
   async function writeCopy() {
     if (draftRef.current.copyMode === "rewrite" && sourceKind !== "text") return analyzeReference();
+    lastText.current = { kind: "copy", run: writeCopy };
     const token = session.token();
     const p = await save();
     if (!session.current(token)) return;
@@ -270,8 +290,11 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }
   async function textOperationState(operation?: { id: string; kind?: string; status: string; appliedVersion?: number; result?: { analysis?: string } }) {
     setTextPending(!!operation && ["running", "unknown", "needs_apply"].includes(operation.status));
+    setTextUnknown(operation?.status === "unknown");
+    // The panel explains an unknown result and offers its actions; a "try again later" error would contradict it.
+    if (operation?.status === "unknown" && shownUnknown.current !== operation.id) { shownUnknown.current = operation.id; setError(""); }
     // A released intent keeps its ID on the server; the next creation needs a new one.
-    if (operation?.status === "failed" || operation?.status === "released") textRequest.current = null;
+    if (operation?.status === "failed" || operation?.status === "cancelled" || operation?.status === "released") textRequest.current = null;
     // A review keeps the version; reload when a recovered review is not shown yet.
     const unseenReview = operation?.kind === "review" && operation.appliedVersion === version.current && projectRef.current?.reviewedScript !== reviewedText(draftRef.current);
     if (operation?.status !== "succeeded" || !operation.appliedVersion || (operation.appliedVersion <= version.current && !unseenReview) || dirty) return;
@@ -289,6 +312,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     load(p); setAnalysis(value.snapshot.creation?.analysis ?? "");
   }
   async function publication(fillMissing = false) {
+    lastText.current = { kind: "publication", run: () => publication(fillMissing) };
     wait("正在生成标题和标签");
     const p = await save();
     try {
@@ -319,10 +343,25 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const result = await requestProject(`/marketing-videos/${p.id}/generate`, json("POST", { version: p.version, retry }));
     if (session.alive) setCurrent(result);
   }
+  /** Redo chosen shots of the current video; the server keeps every other clip unpaid. */
+  async function revise(shots: number[]) {
+    let p = await save();
+    if (!p.review || p.reviewedScript !== reviewedText(p.draft)) { await review(); p = projectRef.current!; }
+    if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再重新生成。");
+    wait("正在提交生成任务", false);
+    const result = await requestProject(`/marketing-videos/${p.id}/revise`, json("POST", { version: p.version, shots }));
+    if (session.alive) setCurrent(result);
+  }
+  // Back to what the video was made from; publishing fields are not part of it.
+  const revertShots = () => {
+    const base = projectRef.current?.revision?.draft;
+    if (base) update({ ...base, publishTitle: draftRef.current.publishTitle, tags: draftRef.current.tags });
+  };
   async function editStoryboard(instruction = "", index?: number) {
     const token = session.token();
     const p = await save();
     if (!session.current(token)) return;
+    lastText.current = { kind: "storyboard", run: () => editStoryboard(instruction, index) };
     const clientRequestId = requestId(textRequest, JSON.stringify(["storyboard", p.id, p.version, locale, instruction, index]));
     wait(instruction ? "正在按要求修改分镜" : "正在生成分镜");
     try {
@@ -416,7 +455,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     resetDraft(copy, step);
   }
   function resetDraft(copy = false, step = 0) {
-    session.next(); draftId.current = crypto.randomUUID(); version.current = 0; projectRef.current = null;
+    session.next(); lastText.current = null; setRetryText(false); setTextUnknown(false); draftId.current = crypto.randomUUID(); version.current = 0; projectRef.current = null;
     setProject(null); setAnalysisPending(false); analysisRequest.current = null;
     const next = copy ? { ...draftRef.current } : MarketingDraftSchema.parse({});
     saved.current = copy ? "" : JSON.stringify(next);
@@ -459,7 +498,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const referenceAnalysis = project?.draft.copyMode === draft.copyMode && project.draft.reference === draft.reference && project.draft.referenceUpload?.id === draft.referenceUpload?.id
     ? project.referenceAnalysis : undefined;
   const copyReady = draft.copyMode === "rewrite" ? sourceKind === "upload" ? !!draft.referenceUpload : !!draft.reference.trim() : !!draft.topic.trim();
-  const copyAction = <button className="mv-soft" disabled={busy || !copyReady || !ready} onClick={() => void act(writeCopy)}>{t(busy ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜")}</button>;
+  const copyAction = <button className="mv-soft" disabled={busy || !copyReady || !ready} onClick={() => void act(writeCopy)}>{t(busy && !textUnknown ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜")}</button>;
   const referenceVideoStatus = profile.imagesWithReferenceVideo
     ? t("已选择参考视频：人物与场景图片合计最多 {0} 张；不生成口播配音，音色设置不生效，可添加背景音乐。", [profile.imagesWithReferenceVideo])
     : t("已选择参考视频：人物与场景图片不参与生成；不生成口播配音，音色设置不生效，可添加背景音乐。");
@@ -474,8 +513,18 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
 
   const audioNotice = marketingStoryboardAudioMismatch(draft) && !frozen && <StoryboardAudioNotice video={!!draft.assets.video} busy={busy || !ready}
     onRebuild={rebuildStoryboard} onKeep={keepStoryboard} />;
+  const reviewSection = !!draft.script.trim() && <section className="mv-review-section" aria-label={t("文案与分镜检查")}>
+    <div className="mv-section-head"><h3>{t("文案与分镜检查")}</h3><button disabled={busy || !ready} onClick={() => void act(review)}
+      title={t("依据风险词规则表及抖音、小红书社区规则，检查文案、台词、标题标签和分镜内容。")}>{t("检查当前文案")}</button></div>
+    {validReview
+      ? <ReviewPanel key={project!.reviewedScript} review={project!.review!} draft={draft} busy={busy} onApply={applyReviewEdit} />
+      : <p className="mv-hint" role="status">{t("尚未检查，生成视频前会自动检查。")}</p>}
+  </section>;
   // Errors and progress stay next to the step buttons instead of the end of a long page.
   const status = <>
+    {project && <TextOperationPanel key={project.id} projectId={project.id} reload={operationReload} showRunning={!working?.textRequest}
+      onState={async operation => { if (project.id === draftId.current) await textOperationState(operation); }}
+      retry={lastText.current ? { kind: lastText.current.kind, run: () => setRetryText(true) } : undefined} />}
     {working && <WaitStatus key={working.started} label={working.label} started={working.started} textRequest={working.textRequest} />}
     {error && <p className="mv-error" role="alert">{t(error)}</p>}
     {!project?.taskId && notice && <p className="mv-notice" role="status">{t(notice)}</p>}
@@ -491,16 +540,16 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       openBusy={navigationBusy || saving} moreBusy={navigationBusy} deleteBusy={busy || saving}
       onQuery={library.setQuery} onDelete={p => void deleteDraft(p)} onMore={() => void act(library.loadMore, true)} usage={library.usage} onShow={library.refreshUsage}
       onOpen={p => void act(async () => { if (dirty) await save(); await open(p.id); }, true)} />
-    {project && <TextOperationPanel key={project.id} projectId={project.id} reload={operationReload} onState={async operation => { if (project.id === draftId.current) await textOperationState(operation); }} />}
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}
-    {project?.taskId ? <ResultPanel form={form} project={project} saving={saving} dirty={dirty} knowledge={!!capabilities?.knowledge} notice={notice}
+    {project?.taskId ? <ResultPanel form={form} project={project} saving={saving} dirty={dirty} knowledge={!!capabilities?.knowledge} notice={notice} reviewPanel={reviewSection}
       onCopyDraft={target => void act(() => newDraft(true, target))}
       onResume={() => void act(() => generate(true))}
       onCancel={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })}
       onRelease={() => void act(() => releaseUnknown(project.id))}
       onPublication={() => void act(() => publication())}
       onCopyText={() => void act(async () => { await save(); await navigator.clipboard.writeText([draft.publishTitle, draft.tags].filter(Boolean).join("\n")); setNotice("已复制"); })}
-      onArchive={() => void act(archive)} /> : <>
+      onArchive={() => void act(archive)}
+      onShots={changeStoryboard} onRevertShots={revertShots} onRevise={shots => void act(() => revise(shots))} /> : <>
       <nav className="mv-steps" aria-label={t("视频创作步骤")}>{STEPS.map((label, i) => <button key={label} disabled={busy || !ready} aria-current={i === step ? "step" : undefined} className={i === step ? "active" : ""} onClick={() => nextStep(i)}><span>{i + 1}</span>{t(label)}</button>)}</nav>
       <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / 3</span></div>
         {step === 0 && <CopyStep form={form} inputId={`${generationHintId}-reference`} sourceKind={sourceKind} uploading={uploadingReference} analysis={analysis} planError={plan.error}
@@ -513,14 +562,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           audioNotice={audioNotice} />}
         {step === 2 && <ProductionStep form={form} profile={profile} handlers={materialHandlers} referenceVideoStatus={referenceVideoStatus} parts={plan.parts} planError={plan.error}
           blocker={generationBlocker} blockerId={generationHintId} storyboardPanel={storyboardPanel} audioNotice={audioNotice}
-          reviewPanel={!!draft.script.trim() && <section className="mv-review-section" aria-label={t("文案与分镜检查")}>
-            <div className="mv-section-head"><h3>{t("文案与分镜检查")}</h3><button disabled={busy || !ready} onClick={() => void act(review)}
-              title={t("依据风险词规则表及抖音、小红书社区规则，检查文案、台词、标题标签和分镜内容。")}>{t("检查当前文案")}</button></div>
-            {validReview
-              ? <ReviewPanel key={project!.reviewedScript} review={project!.review!} draft={draft} busy={busy} onApply={applyReviewEdit} />
-              : <p className="mv-hint" role="status">{t("尚未检查，生成视频前会自动检查。")}</p>}
-          </section>}
-          buttonLabel={busy ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览"}
+          reviewPanel={reviewSection}
+          buttonLabel={busy && !textUnknown ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览"}
           onPickVoice={() => setTwinOpen("voice")} onStoryboard={changeStoryboard} onStoryboardAi={aiStoryboard} onEditCopy={() => setStep(0)}
           onGenerate={() => void act(() => draft.storyboard.length ? generate() : editStoryboard())} onManualStoryboard={() => void act(manualStoryboard)} />}
       </section>
@@ -534,7 +577,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       </footer>
       </div>
     </>}
-    {project?.taskId && (working || error) && <div className="mv-dock">{status}</div>}
+    {project?.taskId && <div className="mv-dock">{status}</div>}
     {confirmDialog}
     {twinOpen && <DigitalTwinPicker kind={twinOpen} onClose={() => { if (!exclusive.locked) setTwinOpen(null); }} onSelect={async (file, kind) => {
       if (exclusive.locked) throw new Error(t("正在处理…"));

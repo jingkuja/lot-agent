@@ -80,7 +80,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h1>营销影像 Agent 评审</h1>
   <p class="meta">评审日期：2026-10-19 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>，之后共 15 个提交）</p>
-  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。第六轮（2026-10-21）完成功能缺口 G05（项目与素材生命周期），在提交 <code>887f160</code>。</p>
+  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。第六轮（2026-10-21）完成功能缺口 G05（项目与素材生命周期），在提交 <code>887f160</code>。第七轮（2026-10-21）完成功能缺口 G04（单镜替换与重新合成）。</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
 </header>
 
@@ -92,6 +92,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <a href="#fixes4">第四轮修复</a>
   <a href="#fixes5">第五轮修复</a>
   <a href="#fixes6">第六轮修复</a>
+  <a href="#fixes7">第七轮修复</a>
   <a href="#tracking">旧评审跟踪</a>
   <a href="#features">1 功能完成度</a>
   <a href="#ui">2 操作 UI</a>
@@ -103,10 +104,10 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复，第六轮让删除草稿一并删除成片、片段和参考分析，并显示空间用量（G05）。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
+  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复，第六轮让删除草稿一并删除成片、片段和参考分析，并显示空间用量（G05），第七轮支持成片后只重做所选镜头，其他片段不再付费（G04）。仍有一类主要问题：成片的音画质量不可控（G01、G02）。</div>
   <div class="grid">
     <div class="stat"><strong>8 · 0 · 0</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
-    <div class="stat"><strong>1 · 0 · 7</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
+    <div class="stat"><strong>2 · 0 · 6</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
     <div class="stat"><strong>0 高 · 0 中 · 2 低</strong><span>当前健壮性问题（三轮共修复 14 项）</span></div>
     <div class="stat"><strong>2663 / 81</strong><span>第六轮后全量单测：通过 / 跳过</span></div>
   </div>
@@ -424,6 +425,44 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p class="meta">残留：本次之前删除的草稿留下的成片已无法关联到草稿，没有自动清理，也不计入用量；如需回收，要按任务类型单独写清理脚本。草稿未删除时，用户换掉的旧参考分析一直保留到删除草稿（原片仍按 7 天清理）。</p>
 </section>
 
+<section class="card" id="fixes7">
+  <h2>第七轮修复（2026-10-21） <span class="tag ok">G04 已完成</span></h2>
+  <p>本轮处理功能缺口 G04。原状态：提交后草稿的制作配置固定，结果页分镜只读。要改一镜，只能复制为新草稿，所有片段重新生成和付费。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>修复</th><th>保护与边界</th></tr></thead>
+    <tbody>
+      <tr><td>成片后不能改单镜</td><td>
+        <ul>
+          <li>结果页"分镜与单镜重做"（<code>ShotRevision.tsx</code>）可直接修改每镜的口播、画面、动作和镜头，也可只勾选"重新生成此镜"。</li>
+          <li>已修改的镜头和没有可用片段的镜头自动勾选，不能取消。提供"撤销分镜修改"。</li>
+          <li>完整项目响应新增 <code>revision</code>：制作时的草稿、片段模型和每镜是否可复用。任务停止后前端重新读取完整项目。</li>
+        </ul></td><td>
+        <ul>
+          <li>只有成功、失败或已取消的任务可以重做。有提交结果未知或仍在供应商处理的片段时不提供，需先继续生成或处理未知片段。</li>
+          <li><code>PUT /:id</code> 只放开分镜文字；<code>marketingRevisionKey</code> 要求其他配置、镜数和每镜时长与制作时一致，否则仍返回 409。</li>
+          <li>v1 旧任务和没有分镜的旧成片不提供重做，仍可复制为新草稿。</li>
+        </ul></td></tr>
+      <tr><td>所有片段重新付费</td><td>
+        <ul>
+          <li><code>POST /:id/revise { version, shots }</code> 只按所选镜头的秒数检查额度，并只提交这些镜头。</li>
+          <li><code>repository.ts → revise</code> 在一个事务中新建父任务（原冻结输入 + 修改后的草稿）。其余镜头的片段任务直接标为成功，<code>output</code> 引用原资产并记录 <code>reusedFrom</code>。</li>
+          <li><code>run.ts</code> 对 <code>reusedFrom</code> 片段不调用模型、不计量，只重新拼接并混入 BGM。</li>
+        </ul></td><td>
+        <ul>
+          <li>确认框列出重新生成的镜号、秒数和沿用的镜头数。已修改或没有片段的镜头必须由用户确认，服务端不会自动加入。</li>
+          <li>新镜头沿用原任务的片段模型和参考素材，重新校验提示词、素材、参考限制和文案检查。</li>
+          <li>持有原任务 advisory 锁，按版本和原任务 ID 检查；重复请求不会建第二个任务。</li>
+          <li>保留的片段资产必须仍属于该用户，且由记录的片段任务生成。继续生成时的恢复检查同样认 <code>reusedFrom</code>。</li>
+        </ul></td></tr>
+      <tr><td>多次制作的记录</td><td>迁移 53 把 <code>marketing_video_segments</code> 的主键改为 <code>task_id</code>，同一草稿保留每次制作的片段行。当前任务的查询按 <code>parentId</code> 过滤。</td><td>上一版成片和被替换的片段在删除草稿时一并删除，并计入空间用量。重做开始后结果页不再显示上一版成片，确认框提示先下载。</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>数据库：</strong>迁移 53（<code>0053-marketing-shot-revisions.ts</code>），只改主键并加索引，不改历史迁移。</p>
+  <p><strong>界面与文档：</strong>新增文案已补中文、英文和印尼文；只使用现有 CSS 变量。已更新 <code>docs/marketing-video.md</code> 和 <code>docs/agent-code-guide.md</code>。</p>
+  <p><strong>测试：</strong>单测覆盖 <code>marketingRevisionKey</code> / <code>marketingShotChanged</code>、Worker 不提交也不计量保留片段、<code>/revise</code> 的参数、版本、收尾、归属和额度检查，以及恢复时认 <code>reusedFrom</code>。数据库脚本在真实 PG 上验证：只能改分镜文字，改后需重新检查，已改镜头不能保留，只有所选镜头被提交和计量，成片时长正确，连续两次重做后 <code>reusedFrom</code> 仍指向最初片段，删除草稿删除三次制作的全部 7 个文件行。UI 脚本新增：结果页修改第 2 镜后自动勾选，确认后只提交 <code>shots: [1]</code>，不再调用 <code>/generate</code>。</p>
+  <p class="meta">残留：不能单独改某镜时长或镜数；没有单个片段预览；使用 Kling 参考音色时，新父任务会重新准备一次音色。</p>
+</section>
+
 <section class="card" id="tracking">
   <h2>10-15 评审问题跟踪</h2>
   <div class="legend"><span><span class="tag ok">已修复</span> 代码已处理</span><span><span class="tag mid">部分修复</span> 主要问题已处理，有残留</span><span><span class="tag high">未修复</span> 与旧评审描述一致</span></div>
@@ -448,7 +487,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>G01</td><td>逐字配音与字幕校正</td><td><span class="tag high">未完成</span></td><td>仍由视频模型生成配音和字幕。见 R1、R2。</td></tr>
       <tr><td>G02</td><td>成片质量检查</td><td><span class="tag high">未完成</span></td><td>Worker 只检查画面存在、音轨存在和时长（<code>run.ts</code>）。不检查错字、口播和人物一致性。</td></tr>
       <tr><td>G03</td><td>费用与用量说明</td><td><span class="tag high">未完成</span></td><td>生成前只做额度预检。文档写明"预计费用展示暂未加入"。</td></tr>
-      <tr><td>G04</td><td>单镜替换与重新合成</td><td><span class="tag high">未完成</span></td><td>成片后改一镜仍需复制草稿，所有片段重新付费。</td></tr>
+      <tr><td>G04</td><td>单镜替换与重新合成</td><td><span class="tag ok">已完成</span><br><span class="meta">原为未完成</span></td><td>10-21：成片或任务停止后，可在结果页修改分镜文字或勾选镜头，只重新生成这些镜头。其余镜头直接引用原片段资产，不调用模型、不计量，然后重新合成（<code>POST /:id/revise</code>、<code>repository.ts → revise</code>）。残留：不能改镜数、时长和其他配置；没有片段预览。见<a href="#fixes7">第七轮修复</a>。</td></tr>
       <tr><td>G05</td><td>项目与素材生命周期</td><td><span class="tag ok">已完成</span><br><span class="meta">原为部分完成</span></td><td>10-21（提交 <code>887f160</code>）：删除草稿时在同一事务中删除该草稿的片段与成片资产和参考分析，提交后删除文件（<code>repository.ts → remove</code>）。草稿区显示空间用量（<code>GET /usage</code>）。上传素材按设计保留在「个人素材」。残留：本次之前删除的草稿留下的成片无法再关联，未自动清理；含未核实请求的分析保留。见<a href="#fixes6">第六轮修复</a>。</td></tr>
       <tr><td>G06</td><td>质量与性能看板</td><td><span class="tag high">未完成</span></td><td>没有成功率、阶段耗时、排队和 unknown 积压指标。</td></tr>
       <tr><td>G07</td><td>实拍对口型与完整 TTS</td><td><span class="tag low">C0</span></td><td>服务端拒绝 <code>mode: "recorded"</code>，没有界面。</td></tr>
@@ -488,7 +527,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h3>建议新增（按优先级）</h3>
   <ol>
     <li>生成前显示预计费用（G03）。</li>
-    <li>成片后可以只重做一镜，其他片段复用（G04）。</li>
+    <li><span class="tag ok">已完成</span> 成片后可以只重做一镜，其他片段复用（G04）。</li>
     <li>提供片段预览。<span class="tag new">本次新增</span></li>
     <li>增加成片质量检查（G02）。</li>
   </ol>
@@ -674,7 +713,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <h3>C 体验</h3>
     <ol start="9">
       <li>生成前显示预计费用。<span class="ref">— G03</span></li>
-      <li>支持成片后只重做一镜。提供片段预览。<span class="ref">— G04</span></li>
+      <li><span class="tag ok">已完成</span> 支持成片后只重做一镜。<span class="ref">— G04</span> 片段预览仍未提供。</li>
       <li><span class="tag ok">已完成</span> 服务端检查参考图格式和尺寸，提交前按当前模型重检。<span class="ref">— F08 残留</span></li>
       <li><span class="tag ok">已完成</span> 删除粘贴 Cookies 的界面。参考来源改用单选按钮。分镜编辑器只保留一处。第 3 步改名为"确认与制作"。错误就近显示，确认框统一，长请求显示已用时，参考视频切换后提示重建分镜。<span class="ref">— 第 2 节</span></li>
       <li><span class="tag ok">已完成</span> 增加"主播全程 / 混合镜头"选项。允许跳过自动补标题标签。<span class="ref">— 第 2 节</span></li>

@@ -6,7 +6,7 @@ import type { MarketingTextReceipt } from "./text.js";
 import { parseOperationResult, textResultVersion, type TextOperationKind, type TextOperationResult } from "./text-result.js";
 
 export interface TextOperation {
-  id: string; kind: TextOperationKind; status: "running" | "unknown" | "needs_apply" | "failed" | "succeeded" | "conflict" | "released";
+  id: string; kind: TextOperationKind; status: "running" | "unknown" | "needs_apply" | "failed" | "cancelled" | "succeeded" | "conflict" | "released";
   /** When the request started, for showing how long it has run. */
   createdAt?: string;
   result?: TextOperationResult; appliedVersion?: number;
@@ -52,7 +52,7 @@ export class PgMarketingTextOperations {
       const draft = MarketingDraftSchema.parse(project.draft);
       if (expectedDraft && JSON.stringify(draft) !== JSON.stringify(expectedDraft)) throw new MarketingError("草稿已更新，请重新确认。", 409);
       if ((await client.query("SELECT 1 FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2 AND status IN ('running','unknown','needs_apply')", [owner, projectId])).rowCount) {
-        throw new MarketingError("已有创作请求正在处理或结果待核实，请等待页面顶部的处理结果。", 409);
+        throw new MarketingError("已有创作请求正在处理或结果待核实，请查看页面底部的处理结果。", 409);
       }
       const row = (await client.query(`INSERT INTO marketing_text_operations(id,user_id,project_id,project_version,kind,input_hash,model,protocol,status,input_snapshot,parser_version)
         VALUES($1,$2,$3,$4,$5,$6,$7,'marketing-json-v1','running',$8,$9) RETURNING *`, [id, owner, projectId, version, kind, hash, MARKETING_COPY_MODEL, JSON.stringify({ draft, input }), textResultVersion(kind)])).rows[0];
@@ -125,10 +125,16 @@ export class PgMarketingTextOperations {
   async fail(owner: string, id: string, started = true, invalidOutput = false) {
     // A missing receipt includes process/transport failure. Never infer that a
     // call did not happen, and never reopen this intent for another model POST.
-    await this.pool.query(`UPDATE marketing_text_operations SET status=CASE
+    // `cancelled` means sent with nothing back: kept with its gateway request ID for refund checks.
+    const { rows } = await this.pool.query(`UPDATE marketing_text_operations SET status=CASE
       WHEN $4::boolean OR NOT $3::boolean THEN 'failed'
       WHEN receipt->>'outcome'='completed' THEN 'needs_apply'
+      WHEN receipt->>'outcome'='cancelled' THEN 'cancelled'
       WHEN receipt->>'outcome' IN ('failed','rejected') THEN 'failed' ELSE 'unknown' END,updated_at=now()
-      WHERE user_id=$1 AND id=$2 AND status IN ('running','unknown','needs_apply')`, [owner, id, started, invalidOutput]);
+      WHERE user_id=$1 AND id=$2 AND status IN ('running','unknown','needs_apply')
+      RETURNING project_id, kind, status, receipt->>'gatewayRequestId' AS gateway_request_id`, [owner, id, started, invalidOutput]);
+    if (rows[0]?.status === "cancelled") {
+      console.warn("[marketing-video] text request cancelled without response", { operationId: id, projectId: rows[0].project_id, kind: rows[0].kind, gatewayRequestId: rows[0].gateway_request_id ?? null });
+    }
   }
 }

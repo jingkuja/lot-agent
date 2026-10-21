@@ -2,7 +2,10 @@ import { LLMResponseError, type LLMProvider } from "@lot-agent/core";
 
 export interface MarketingTextReceipt {
   text: string; responseId?: string; usage?: { promptTokens: number; completionTokens: number };
-  outcome: "completed" | "failed" | "unknown" | "rejected";
+  /** The gateway's log ID (`x-oneapi-request-id`), to match a charge in its logs. */
+  gatewayRequestId?: string;
+  /** `cancelled`: sent, but nothing came back; not charged, and a charge in the gateway logs is refunded. */
+  outcome: "completed" | "failed" | "unknown" | "rejected" | "cancelled";
 }
 export interface MarketingTextOptions { upstreamBilling?: boolean; onReceipt?: (receipt: MarketingTextReceipt) => Promise<void>; }
 
@@ -41,6 +44,15 @@ export async function completeMarketingJson(llm: LLMProvider, system: string, in
   let saved = false;
   let receiptWrites = Promise.resolve();
   let attempts = 0; let lastAttemptError: unknown;
+  // Save each identifier as it arrives, so even a lost process leaves them on record.
+  const checkpoint = () => {
+    if (!onReceipt) return;
+    receiptWrites = receiptWrites.then(() => onReceipt({ text: "", outcome: "unknown",
+      ...(receipt.responseId ? { responseId: receipt.responseId } : {}), ...(receipt.gatewayRequestId ? { gatewayRequestId: receipt.gatewayRequestId } : {}) }));
+    // Prevent an unhandled rejection while the stream is still active. The
+    // original promise is awaited before publishing any complete receipt.
+    void receiptWrites.catch(() => {});
+  };
   try {
     requestSignal.throwIfAborted();
     // Kimi rejects reasoning.effort=none. Keep its default reasoning policy
@@ -52,13 +64,9 @@ export async function completeMarketingJson(llm: LLMProvider, system: string, in
         if (onReceipt && attempts++ > 0) throw lastAttemptError ?? new Error("MARKETING_REQUEST_UNKNOWN");
       },
       onAttemptEnd: error => { lastAttemptError = error; },
-      params: { maxTokens: 8192, responseFormat: "json_object" }, onResponseId: id => {
-      receipt.responseId = id;
-      if (onReceipt) receiptWrites = receiptWrites.then(() => onReceipt({ text: "", outcome: "unknown", responseId: id }));
-      // Prevent an unhandled rejection while the stream is still active. The
-      // original promise is awaited before publishing any complete receipt.
-      void receiptWrites.catch(() => {});
-    } })) {
+      params: { maxTokens: 8192, responseFormat: "json_object" },
+      onResponseId: id => { receipt.responseId = id; checkpoint(); },
+      onRequestId: id => { receipt.gatewayRequestId = id; checkpoint(); } })) {
       if (chunk.type === "text") text += chunk.content ?? "";
       if (text.length > 100_000) throw new Error("MODEL_OUTPUT_LIMIT");
       if (chunk.type === "done") {
@@ -87,8 +95,12 @@ export async function completeMarketingJson(llm: LLMProvider, system: string, in
       await receiptWrites;
       receipt.text = text;
       if (error instanceof LLMResponseError && error.usage) { receipt.usage = error.usage; receipt.outcome = "failed"; }
+      // Nothing came back: an explicit refusal (auth, quota, rate limit) is a plain rejection.
+      // Any other error status, timeout or lost connection is "cancelled": not charged, the user
+      // may retry, and the gateway request ID matches a rare charge for refund. Anything
+      // received means the model ran: stay unknown.
       const status = (error as { status?: number })?.status;
-      if (!text && !receipt.usage && !receipt.responseId && [401, 402, 403, 429].includes(status ?? 0)) receipt.outcome = "rejected";
+      if (!text && !receipt.usage && !receipt.responseId) receipt.outcome = [401, 402, 403, 429].includes(status ?? 0) ? "rejected" : "cancelled";
       await onReceipt(receipt);
     }
     throw marketingTextError(error, requestSignal);

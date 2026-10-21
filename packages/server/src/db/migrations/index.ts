@@ -94,6 +94,8 @@ export const migrations: Migration[] = [
   marketingTextOperationKinds,
   taskErrorCode,
   digitalTwinVoices,
+  marketingShotRevisions,
+  marketingTextCancelled,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -108,3 +110,5 @@ import { marketingUnknownRelease } from "./0049-marketing-unknown-release.js";
 import { marketingTextOperationKinds } from "./0050-marketing-text-operation-kinds.js";
 import { taskErrorCode } from "./0051-task-error-code.js";
 import { digitalTwinVoices } from "./0052-digital-twin-voices.js";
+import { marketingShotRevisions } from "./0053-marketing-shot-revisions.js";
+import { marketingTextCancelled } from "./0054-marketing-text-cancelled.js";

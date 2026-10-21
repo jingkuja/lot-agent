@@ -182,7 +182,8 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
             if (output.downloadFailed) throw new MarketingRunError("DOWNLOAD_INCOMPLETE", "片段已生成，下载未完成；重试将继续下载原片段。");
             generated = true;
           }
-          if (!generated) await meter({ userId: job.userId, taskId: child.id, modelId: gen.modelId, usage: { inputCount: 0, outputCount: Number(segment.duration_sec) } });
+          // A clip kept from an earlier job of this draft was billed under that job's segment task.
+          if (!generated && !output.reusedFrom) await meter({ userId: job.userId, taskId: child.id, modelId: gen.modelId, usage: { inputCount: 0, outputCount: Number(segment.duration_sec) } });
           const asset = await deps.db.getAsset(output.assetIds[0]);
           if (!asset || asset.user_id !== job.userId) throw new MarketingRunError("NOT_RECOVERABLE", "片段素材不可用");
           files[i] = await ownedAssetPath(deps.dataRoot, asset);

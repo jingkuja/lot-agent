@@ -159,3 +159,23 @@ describe("configurable clip concurrency", () => {
     expect(await peak(15)).toBe(6);
   });
 });
+
+describe("clips kept by a shot redo", () => {
+  const shot: MarketingShot = { durationSec: 15, script: "欢迎来喝咖啡。", visual: "人物展示咖啡", action: "端起杯子", camera: "中景" };
+  it("composes a kept clip without submitting or metering it again", async () => {
+    vi.mocked(runGenerationJob).mockClear();
+    const f = fixture([shot, shot]);
+    const record = vi.fn();
+    f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", db: {}, provider: {}, meter: { record }, storage: { put: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
+    store.segments.mockResolvedValue([
+      { slot: 0, task_id: "child-0", script: shot.script, duration_sec: 15, status: "succeeded", vendor_task_id: null, output: { assetIds: ["kept"], assets: [], reusedFrom: "old-child-0" } },
+      { slot: 1, task_id: "child-1", script: shot.script, duration_sec: 15, status: "pending", vendor_task_id: null, output: null },
+    ]);
+    await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).resolves.toMatchObject({ assets: [{ url: "/static/result.mp4" }] });
+    expect(runGenerationJob).toHaveBeenCalledOnce();
+    expect(vi.mocked(runGenerationJob).mock.calls[0][1].id).toBe("child-1");
+    expect(record).not.toHaveBeenCalled();
+    expect(f.db.getAsset).toHaveBeenCalledWith("kept");
+    expect(f.compose).toHaveBeenCalledOnce();
+  });
+});

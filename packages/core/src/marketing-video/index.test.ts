@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch } from "./index.js";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotChanged } from "./index.js";
 
 const grok = GROK_MARKETING_PROFILE;
 const kling = KLING_MARKETING_PROFILE;
@@ -250,5 +250,26 @@ describe("storyboard audio setting", () => {
   it("does not flag older boards without a record or drafts without a board", () => {
     expect(marketingStoryboardAudioMismatch(MarketingDraftSchema.parse({ storyboard, assets: { video } }))).toBe(false);
     expect(marketingStoryboardAudioMismatch(MarketingDraftSchema.parse({ storyboardAudio: true, assets: { video } }))).toBe(false);
+  });
+});
+
+describe("single shot redo", () => {
+  const shots = [
+    { durationSec: 8, script: "欢迎来到咖啡店。", visual: "人物在门口", action: "挥手", camera: "中景" },
+    { durationSec: 8, script: "现磨咖啡很香。", visual: "人物端咖啡", action: "端起杯子", camera: "近景" },
+  ];
+  const draft = MarketingDraftSchema.parse({ durationSec: 15, storyboard: shots, script: storyboardScript(shots), publishTitle: "标题" });
+  it("keeps settings, shot count and durations while shot text and publishing fields may change", () => {
+    const edited = [shots[0], { ...shots[1], script: "咖啡现磨现做。", visual: "人物在吧台" }];
+    expect(marketingRevisionKey({ ...draft, storyboard: edited, script: storyboardScript(edited), publishTitle: "新标题", tags: "#咖啡" })).toBe(marketingRevisionKey(draft));
+    expect(marketingRevisionKey({ ...draft, storyboard: [shots[0], { ...shots[1], durationSec: 9 }] })).not.toBe(marketingRevisionKey(draft));
+    expect(marketingRevisionKey({ ...draft, storyboard: [shots[0]] })).not.toBe(marketingRevisionKey(draft));
+    expect(marketingRevisionKey({ ...draft, ratio: "16:9" })).not.toBe(marketingRevisionKey(draft));
+    expect(marketingRevisionKey({ ...draft, continuity: "同一位店员" })).not.toBe(marketingRevisionKey(draft));
+  });
+  it("marks a shot changed by any of its text fields", () => {
+    expect(marketingShotChanged(shots[0], { ...shots[0] })).toBe(false);
+    for (const key of ["script", "visual", "action", "camera"] as const) expect(marketingShotChanged(shots[0], { ...shots[0], [key]: "改" })).toBe(true);
+    expect(marketingShotChanged(shots[0], undefined)).toBe(true);
   });
 });

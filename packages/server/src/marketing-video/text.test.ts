@@ -23,9 +23,9 @@ it("records interrupted calls as unknown, never as free failures", async () => {
   expect(receipts.at(-1)).toMatchObject({ outcome: "unknown", text: '{"partial":' });
 });
 
-it("prevents hidden Chat Completions retries before the first response chunk", async () => {
+it("prevents hidden Chat Completions retries and records a gateway error as a plain failure", async () => {
   vi.useFakeTimers();
-  const fetch = vi.fn(async () => new Response('{"error":{"message":"fixture unavailable"}}', { status: 503, headers: { "Content-Type": "application/json" } }));
+  const fetch = vi.fn(async () => new Response('{"error":{"message":"fixture unavailable"}}', { status: 503, headers: { "Content-Type": "application/json", "X-Oneapi-Request-Id": "20261021100000fixture" } }));
 
   const receipts: MarketingTextReceipt[] = [];
   try {
@@ -35,6 +35,7 @@ it("prevents hidden Chat Completions retries before the first response chunk", a
     await vi.runAllTimersAsync();
     expect(await outcome).toMatchObject({ code: "MARKETING_MODEL_UNAVAILABLE" });
     expect(fetch).toHaveBeenCalledOnce();
-    expect(receipts.at(-1)).toMatchObject({ outcome: "unknown" });
+    // No response reached us: cancelled, retryable, with the gateway's log ID kept for refund checks.
+    expect(receipts.at(-1)).toMatchObject({ outcome: "cancelled", text: "", gatewayRequestId: "20261021100000fixture" });
   } finally { vi.useRealTimers(); }
 });
