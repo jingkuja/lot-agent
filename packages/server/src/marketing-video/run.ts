@@ -12,13 +12,20 @@ import { publicStaticUrl } from "../util/public-base.js";
 import { frozenNarration, narrationFile } from "./narration.js";
 
 const UNKNOWN = UNKNOWN_SUBMISSION;
-// 4xx answers reject the request itself; 408/409 and 5xx may still have created a task.
+// 4xx answers reject the request itself; 408/409 may still have created a task (5xx: see gatewayFailure).
 // CONNECT_ERROR means the POST was never written, so no vendor task can exist.
 const REJECTED_STATUS = new Set([400, 401, 402, 403, 404, 413, 422, 429]);
 export function definiteRejection(error: unknown) {
   return error instanceof ProviderError && error.phase === "create"
     && (error.code === "REAL_PERSON_REJECTED" || error.code === "CONNECT_ERROR" || (error.code === "HTTP_ERROR" && REJECTED_STATUS.has(error.httpStatus ?? 0)));
 }
+/** A gateway 5xx to a clip submission counts as not charged, like the marketing text
+ * requests: the clip is resubmitted on the next continue without a duplicate-charge
+ * confirmation, and its gateway request ID is kept to refund a rare real charge. */
+export function gatewayFailure(error: unknown): error is ProviderError {
+  return error instanceof ProviderError && error.phase === "create" && error.code === "HTTP_ERROR" && (error.httpStatus ?? 0) >= 500;
+}
+export const GATEWAY_FAILED_MESSAGE = "视频模型服务暂时出错，该片段没有生成；继续生成会重新提交该片段。";
 export interface MarketingRunDeps {
   db: DB; dataRoot: string;
   generation(job: { userId: string; input: Record<string, unknown> }, signal: AbortSignal): Promise<RunJobDeps>;
@@ -154,10 +161,16 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                   let result;
                   try { result = await provider.create(request); }
                   catch (error) {
-                    // An explicit vendor rejection created no task. Release the
+                    // Recorded before the claim is released: if this write fails, the clip stays unknown.
+                    if (gatewayFailure(error)) {
+                      await deps.db.pool.query(`INSERT INTO marketing_clip_gateway_failures(owner_id,project_id,task_id,http_status,gateway_request_id)
+                        VALUES($1,$2,$3,$4,$5)`, [job.userId, String(job.input.projectId), child.id, error.httpStatus, error.gatewayRequestId ?? null]);
+                    }
+                    // An explicit vendor rejection or a gateway 5xx created no task. Release the
                     // claim so an explicit retry may submit after the user fixes it.
-                    if (definiteRejection(error)) {
+                    if (definiteRejection(error) || gatewayFailure(error)) {
                       await deps.db.pool.query("UPDATE tasks SET vendor_task_id=NULL WHERE id=$1 AND vendor_task_id=$2", [child.id, UNKNOWN]);
+                      if (gatewayFailure(error)) throw new MarketingRunError("GATEWAY_FAILED", GATEWAY_FAILED_MESSAGE, { cause: error });
                       throw error;
                     }
                     throw new MarketingRunError("SUBMISSION_UNKNOWN", UNKNOWN_SUBMISSION_MESSAGE);

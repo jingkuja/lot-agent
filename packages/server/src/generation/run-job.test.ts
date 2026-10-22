@@ -481,6 +481,8 @@ describe("runGenerationJob", () => {
       urlToBytes: vi.fn(async () => { throw new Error("download timed out"); }),
     });
     const out = await runGenerationJob(deps, job, "video");
+    // Tried three times before giving up.
+    expect(deps.urlToBytes).toHaveBeenCalledTimes(3);
     expect(out.downloadFailed).toBe(true);
     expect(out.sourceUrl).toBe("https://vendor.example/out.mp4");
     expect(out.assets).toHaveLength(0);
@@ -490,6 +492,34 @@ describe("runGenerationJob", () => {
     expect(last.metadata.sourceUrl).toBe("https://vendor.example/out.mp4");
     expect(last.metadata.error).toContain("TRANSPORT_ERROR");
     expect(last.metadata.error).not.toContain("download timed out");
+  });
+
+  it("downloads produced media again after a transient failure, logging only fixed fields", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://vendor.example/out.mp4?sig=secret" })),
+    };
+    const reset = Object.assign(new TypeError("fetch failed https://vendor.example/out.mp4?sig=secret"), { cause: { code: "ECONNRESET" } });
+    const urlToBytes = vi.fn()
+      .mockRejectedValueOnce(reset)
+      .mockRejectedValueOnce(Object.assign(new Error("download failed: HTTP 503"), { status: 503 }))
+      .mockResolvedValueOnce({ body: Buffer.from("mp4"), mime: "video/mp4" });
+    const sleep = vi.fn(async () => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, calls } = fakeDeps(provider, { urlToBytes, sleep, extFor: () => "mp4" });
+    const out = await runGenerationJob(deps, job, "video");
+    expect(urlToBytes).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledWith(2000);
+    expect(sleep).toHaveBeenCalledWith(5000);
+    expect(out.downloadFailed).toBeUndefined();
+    expect(calls.metered).toBe(true);
+    const logged = warn.mock.calls.filter(([tag]) => tag === "[generation.download] failed").map(([, fields]) => fields);
+    expect(logged).toEqual([
+      { taskId: job.id, attempt: 1, final: false, errorType: "TypeError", errorCode: "ECONNRESET" },
+      { taskId: job.id, attempt: 2, final: false, errorType: "Error", httpStatus: 503 },
+    ]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret");
+    warn.mockRestore();
   });
 
   it("finalizes a cancellation observed during download as cancelled, not download_failed", async () => {

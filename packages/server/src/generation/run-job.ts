@@ -164,10 +164,39 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
   };
 }
 
+/** Pauses between download attempts. The media already exists at the vendor, so the GET is
+ * free and safe to repeat; a dropped connection or a slow CDN often succeeds on the next try. */
+const DOWNLOAD_RETRY_DELAYS_MS = [2000, 5000];
+
+/** Fixed fields of a download failure for the log; the message and URL are left out
+ * because a signed URL or a vendor body could appear in them. */
+export function downloadFailureFields(error: unknown) {
+  const e = (error ?? {}) as { name?: unknown; status?: unknown; code?: unknown; cause?: { code?: unknown } };
+  const code = [e.code, e.cause?.code].find(value => typeof value === "string" && /^[A-Z][A-Z0-9_]{1,40}$/.test(value));
+  return { errorType: typeof e.name === "string" ? e.name : typeof error,
+    ...(typeof e.status === "number" ? { httpStatus: e.status } : {}), ...(code ? { errorCode: code as string } : {}) };
+}
+
+async function fetchProduced(deps: RunJobDeps, taskId: string, sourceUrl: string) {
+  const sleep = deps.sleep ?? realSleep;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await deps.urlToBytes(sourceUrl, { signal: deps.signal });
+    } catch (err) {
+      if (deps.signal?.aborted) throw new JobCancelledError();
+      const last = attempt >= DOWNLOAD_RETRY_DELAYS_MS.length;
+      console.warn("[generation.download] failed", { taskId, attempt: attempt + 1, final: last, ...downloadFailureFields(err) });
+      if (last) throw err;
+      await sleep(DOWNLOAD_RETRY_DELAYS_MS[attempt]);
+      if (deps.signal?.aborted) throw new JobCancelledError();
+    }
+  }
+}
+
 /**
  * Download the vendor's finished media into our own storage, register the
- * asset, meter it, and flip the message to `completed`. If the download (or
- * store) fails after the vendor already produced the media, classify it as a
+ * asset, meter it, and flip the message to `completed`. If the download (after
+ * its retries, or the store) fails once the vendor produced the media, classify it as a
  * recoverable `download_failed` — persist `sourceUrl` on the message and return
  * a `downloadFailed` output rather than failing the whole generation. A
  * cancellation observed mid-download is re-raised so the caller marks the
@@ -182,7 +211,7 @@ async function downloadAndFinalize(
   setMsg: (status: string, extra: Record<string, unknown>) => Promise<void>
 ): Promise<GenOut> {
   try {
-    const { body, mime } = await deps.urlToBytes(sourceUrl, { signal: deps.signal });
+    const { body, mime } = await fetchProduced(deps, job.id, sourceUrl);
     const assetId = randomUUID();
     const key = `${assetId}.${deps.extFor(mime)}`;
     const { url } = await deps.storage.put({ key, body, contentType: mime });

@@ -166,7 +166,7 @@ export interface MarketingSegment { index: number; script: string; durationSec: 
 export const MARKETING_FAILURE_CODES = [
   "CONNECT_FAILED", "REAL_PERSON_REJECTED", "MODEL_AUTH_REQUIRED", "CONFIG_MISSING", "MODEL_QUOTA", "MODEL_RATE_LIMIT",
   "JOB_BUSY", "DOWNLOAD_INCOMPLETE", "GENERATION_FAILED", "TIMED_OUT", "STATUS_UNCONFIRMED", "QUALITY_CHECK_FAILED",
-  "NOT_RECOVERABLE", "COMPOSITION_FAILED", "SUBMISSION_UNKNOWN", "NARRATION_INVALID",
+  "NOT_RECOVERABLE", "COMPOSITION_FAILED", "SUBMISSION_UNKNOWN", "NARRATION_INVALID", "GATEWAY_FAILED",
 ] as const;
 export type MarketingFailureCode = typeof MARKETING_FAILURE_CODES[number];
 export function isMarketingFailureCode(value: unknown): value is MarketingFailureCode {

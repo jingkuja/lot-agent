@@ -72,15 +72,15 @@ describe("marketing prompt submission preflight", () => {
 
 describe("marketing segment submission failures", () => {
   const shot: MarketingShot = { durationSec: 15, script: "欢迎来喝咖啡。", visual: "人物展示咖啡", action: "端起杯子", camera: "中景" };
-  async function submitWith(error: Error) {
+  async function submitWith(error: Error, query = async (_sql: string) => ({ rows: [], rowCount: 1 })) {
     const f = fixture([shot, shot]);
-    f.db.pool.query.mockImplementation(async () => ({ rows: [], rowCount: 1 }) as never);
+    f.db.pool.query.mockImplementation(query as never);
     const create = vi.fn(async () => { throw error; });
     f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", db: {}, provider: { create }, meter: { record: vi.fn() }, storage: { put: vi.fn() } } as never);
     vi.mocked(runGenerationJob).mockImplementation(async (deps) => { await deps.provider.create({} as never); throw new Error("unreachable"); });
     const result = runMarketingVideo(f.deps, f.job, new AbortController().signal);
     const released = () => (f.db.pool.query.mock.calls as unknown[][]).some(([sql]) => String(sql).includes("SET vendor_task_id=NULL WHERE id=$1 AND vendor_task_id=$2"));
-    return { result, released };
+    return { result, released, db: f.db };
   }
   it("releases the claim after an explicit vendor rejection so the user can retry after fixing it", async () => {
     for (const [error, errorCode] of [[new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 429 }), "MODEL_RATE_LIMIT"], [new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: 400 }), "REAL_PERSON_REJECTED"], [new ProviderError("generation", "create", "CONNECT_ERROR"), "CONNECT_FAILED"]] as const) {
@@ -90,8 +90,27 @@ describe("marketing segment submission failures", () => {
       expect(f.released()).toBe(true);
     }
   });
+  it("counts a gateway 5xx as not charged: records its request ID and releases the clip for the next continue", async () => {
+    for (const status of [500, 502]) {
+      const error = new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: status, gatewayRequestId: "20261022054753752798000zwvf9kakt1kd2rFO" });
+      const f = await submitWith(error);
+      await expect(f.result).rejects.toMatchObject({ errorCode: "GATEWAY_FAILED", cause: error, message: expect.stringContaining("继续生成会重新提交") });
+      expect(f.released()).toBe(true);
+      const calls = f.db.pool.query.mock.calls as unknown as [string, unknown[]][];
+      const recorded = calls.find(([sql]) => sql.includes("INSERT INTO marketing_clip_gateway_failures"));
+      expect(recorded?.[1]).toEqual(["owner", "project", "child-0", status, "20261022054753752798000zwvf9kakt1kd2rFO"]);
+    }
+  });
+  it("keeps a gateway 5xx clip unknown when its record cannot be written", async () => {
+    const f = await submitWith(new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 500 }), async sql => {
+      if (sql.includes("marketing_clip_gateway_failures")) throw new Error("db down");
+      return { rows: [], rowCount: 1 };
+    });
+    await expect(f.result).rejects.toThrow();
+    expect(f.released()).toBe(false);
+  });
   it("keeps ambiguous submissions blocked to avoid paying twice", async () => {
-    for (const error of [new ProviderError("generation", "create", "TRANSPORT_ERROR"), new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 502 }), new Error("socket hang up")]) {
+    for (const error of [new ProviderError("generation", "create", "TRANSPORT_ERROR"), new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 408 }), new Error("socket hang up")]) {
       const f = await submitWith(error);
       await expect(f.result).rejects.toMatchObject({ errorCode: "SUBMISSION_UNKNOWN", message: expect.stringContaining("片段提交结果未知") });
       expect(f.released()).toBe(false);

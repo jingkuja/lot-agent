@@ -9,12 +9,14 @@ export class ProviderError extends Error {
   readonly httpStatus?: number;
   /** The gateway's or vendor's fixed error identifier (e.g. `invalid_request`), for logs only. */
   readonly vendorCode?: string;
+  /** The gateway's log ID for the failed request (`x-oneapi-request-id`), to match a charge in its logs. */
+  readonly gatewayRequestId?: string;
   readonly retryable: boolean;
   constructor(
     readonly provider: "generation" | "kling-voice" | "qwen-voice" | "speech",
     readonly phase: ProviderPhase,
     readonly code: ProviderErrorCode,
-    options: { httpStatus?: number; requestId?: unknown; vendorCode?: unknown; privateValues?: string[] } = {},
+    options: { httpStatus?: number; requestId?: unknown; vendorCode?: unknown; gatewayRequestId?: string; privateValues?: string[] } = {},
   ) {
     const status = Number.isInteger(options.httpStatus) && options.httpStatus! >= 100 && options.httpStatus! <= 599 ? options.httpStatus : undefined;
     const id = typeof options.requestId === "string" && /^(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|req[-_][a-f0-9]{8,64})$/i.test(options.requestId)
@@ -27,6 +29,7 @@ export class ProviderError extends Error {
     this.requestId = id;
     // Identifiers only: free text could echo prompts, URLs or credentials.
     if (typeof options.vendorCode === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(options.vendorCode)) this.vendorCode = options.vendorCode;
+    if (options.gatewayRequestId && !options.privateValues?.includes(options.gatewayRequestId)) this.gatewayRequestId = options.gatewayRequestId;
     // Only reads may be retried. A failed POST can have an unknown outcome.
     this.retryable = phase !== "create" && code !== "TASK_FAILED" && code !== "REAL_PERSON_REJECTED";
   }

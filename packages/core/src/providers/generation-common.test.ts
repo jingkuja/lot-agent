@@ -6,6 +6,7 @@ import {
   HttpGenerationClient,
   type VendorAdapter,
 } from "./generation-common.js";
+import type { ProviderError } from "./provider-error.js";
 
 describe("parseSize", () => {
   it("parses WxH", () => {
@@ -92,6 +93,14 @@ describe("HttpGenerationClient.create", () => {
     const err = await c.create({}).catch(e => e as Error);
     expect(err.message).toContain("REAL_PERSON_REJECTED");
     expect(err.message).not.toContain("content[0]");
+  });
+  it("keeps the gateway request ID of a failed create", async () => {
+    const headers = new Headers({ "x-oneapi-request-id": "20261022054753752798000zwvf9kakt1kd2rFO" });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, headers, text: async () => JSON.stringify({ error: { code: "upstream_error" } }) })) as unknown as typeof fetch);
+    const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
+    const err = await c.create({}).then(() => undefined, (e: ProviderError) => e);
+    expect(err).toMatchObject({ code: "HTTP_ERROR", httpStatus: 500, gatewayRequestId: "20261022054753752798000zwvf9kakt1kd2rFO" });
+    expect(err?.message).not.toContain("20261022054753752798000zwvf9kakt1kd2rFO");
   });
   it("returns the task when a create response carries a task id", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => JSON.stringify({ task_id: "task_1", status: "queued" }) }));

@@ -1,4 +1,5 @@
 import { ProviderError, type ProviderPhase } from "./provider-error.js";
+import { gatewayRequestId } from "../llm/gateway-request-id.js";
 import { randomUUID } from "node:crypto";
 import { placeholderSvgDataUrl } from "./placeholder.js";
 
@@ -127,9 +128,9 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     const realPerson = isRealPersonRejection(text);
     let json: Record<string, unknown>;
     try { json = JSON.parse(text); }
-    catch { throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : res.ok ? "INVALID_RESPONSE" : "HTTP_ERROR", { httpStatus: res.status }); }
+    catch { throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : res.ok ? "INVALID_RESPONSE" : "HTTP_ERROR", { httpStatus: res.status, gatewayRequestId: gatewayRequestId(res.headers), privateValues: [apiKey] }); }
     const nested = json?.error && typeof json.error === "object" ? json.error as Record<string, unknown> : undefined;
-    const details = { httpStatus: res.status, requestId: json?.request_id, vendorCode: nested?.code ?? json?.code, privateValues: [apiKey] };
+    const details = { httpStatus: res.status, requestId: json?.request_id, vendorCode: nested?.code ?? json?.code, gatewayRequestId: gatewayRequestId(res.headers), privateValues: [apiKey] };
     if (!res.ok) throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : "HTTP_ERROR", details);
     let created: CreateResult;
     try { created = adapter.parseCreate(json); }

@@ -94,6 +94,12 @@ const failures: Record<MarketingFailureCode, VideoFailure> = {
     next: "请复制为新草稿，重新生成配音并试听后再制作。",
     actions: ["copy"], copyStep: 2,
   },
+  // The gateway answered with an error: treated as not charged, so no duplicate-charge confirmation.
+  GATEWAY_FAILED: {
+    reason: "视频模型服务暂时出错，部分片段没有生成。",
+    next: "请稍后点击继续生成，只会重新提交这些片段，已完成的片段不会重做。",
+    actions: ["resume"],
+  },
   // Every clip is stored before composition starts, so its errors never need a model call.
   COMPOSITION_FAILED: {
     reason: "所有片段都已生成，合成成片时出现问题。",

@@ -125,7 +125,7 @@
 - `GET /api/marketing-videos/usage` 返回当前用户草稿占用：`videoBytes`（现存草稿的片段与成片，含单镜重做前各次制作）、`materialBytes`（草稿引用的上传素材，去重）、`analysisBytes`（参考分析私有目录，含本地上传原片）和 `analysisLimitBytes`（`MARKETING_ANALYSIS_OWNER_BYTES`，默认 2 GiB）。草稿区展开时读取并显示一行「已用空间」，删除后刷新；读取失败不影响页面。
 - PG 事务先持久化父任务、全部片段和不可变参数，再向 BullMQ 投递父任务 ID。Redis 故障后可在结果页点「重新排队」。不会自动重试付费提交。
 - Worker 持有父任务 advisory lock，最多并行执行 `MARKETING_VIDEO_SEGMENT_CONCURRENCY` 个片段（默认 2，取值 1–15，不超过该视频的片段数）。成功片段继续复用；已取得模型任务 ID 的片段继续查询 / 下载。模型明确失败或产物缺少音轨（「AI 配音」时）、时长不足时，用户点击继续才创建新生成请求。
-- 在模型 POST 前记录提交未知标记。收到任务 ID 后立即保存；未收到回执时，保留未知状态并停止再次 POST，系统不会自动清除标记重发。供应商明确拒绝创建（真人参考图，或 HTTP 400/401/402/403/404/413/422/429）或连接阶段即失败（`CONNECT_ERROR`：连接被拒、DNS 失败、连接超时、证书错误，请求未写出）时未创建任务，Worker 释放该片段的未知标记，用户修正原因后可显式继续；408/409、5xx、连接建立后的传输错误、请求超时和无效响应仍按未知处理（`run.ts → definiteRejection`）。确实未知的片段由用户确认“可能重复计费”后点击「重新提交未知片段」：`POST /:id/unknown-segments/release` 在父任务锁下只把这些片段改为可提交，并在 `marketing_video_segments.unknown_released_count / unknown_released_at`（迁移 49）记录；随后同一任务继续生成，已完成和已知供应商任务的片段继续复用。
+- 在模型 POST 前记录提交未知标记。收到任务 ID 后立即保存；未收到回执时，保留未知状态并停止再次 POST，系统不会自动清除标记重发。供应商明确拒绝创建（真人参考图，或 HTTP 400/401/402/403/404/413/422/429）或连接阶段即失败（`CONNECT_ERROR`：连接被拒、DNS 失败、连接超时、证书错误，请求未写出）时未创建任务，Worker 释放该片段的未知标记，用户修正原因后可显式继续；网关返回 5xx 时按未计费处理，与文案请求相同：Worker 先把用户、草稿、片段任务、HTTP 状态和网关请求 ID（响应头 `x-oneapi-request-id`）写入 `marketing_clip_gateway_failures`（迁移 57），再释放未知标记；片段报 `GATEWAY_FAILED`，用户点继续生成即重新提交，不需确认。偶发扣费时按 `SELECT owner_id, project_id, task_id, http_status, gateway_request_id, created_at FROM marketing_clip_gateway_failures ORDER BY created_at DESC;` 对照网关日志退费；记录写入失败时片段保持未知。408/409、连接建立后的传输错误、请求超时和无效响应仍按未知处理（`run.ts → definiteRejection / gatewayFailure`）。片段已生成但下载失败时，Worker 间隔 2 秒、5 秒共尝试 3 次（`run-job.ts → fetchProduced`），每次失败在日志输出 `[generation.download] failed`，只含任务 ID、次数、错误类型、HTTP 状态和系统错误码，不含 URL；仍失败则报 `DOWNLOAD_INCOMPLETE`，继续生成只重新下载原片段。确实未知的片段由用户确认“可能重复计费”后点击「重新提交未知片段」：`POST /:id/unknown-segments/release` 在父任务锁下只把这些片段改为可提交，并在 `marketing_video_segments.unknown_released_count / unknown_released_at`（迁移 49）记录；随后同一任务继续生成，已完成和已知供应商任务的片段继续复用。
 - 片段资产与恢复输出同一事务提交；计量用用户、片段、模型任务 ID 去重，避免工作进程重启造成重复计量。重新生成失败片段可能产生供应商费用。纯查询、下载和拼接恢复不做新增额度预检。
 - 制作中页面每 2.5 秒请求 `GET /:id/status`（只读一行任务状态，不解析草稿、不查素材、不签发链接），状态不变时间隔逐步放大到 15 秒，标签页隐藏时暂停、重新显示时立即查询（`session.ts → useTaskPolling`）。打开草稿时才读取完整项目。
 - Worker 失败时把原因码与错误文字一起写入 `tasks.error_code`（迁移 51）：`run.ts` 抛出带码的 `MarketingRunError`，其余错误由 `marketing-video/failure.ts` 按错误类型、供应商错误码、阶段和 HTTP 状态归类，不读错误文字；队列 `setTaskError` 原样存储。码表见 `core/marketing-video` 的 `MARKETING_FAILURE_CODES`。
@@ -210,7 +210,7 @@
 
 音色样例继续使用 `KLING_VOICE_BASE_URL` / `KLING_VOICE_API_KEY`，视频推理仍使用当前用户模型凭证；素材引用需要正确的 `PUBLIC_BASE_URL`。营销上传素材为私有，API 和 Worker 必须使用相同的现有 `SECRET_MASTER_KEY`。浏览器和供应商使用有效期 10 分钟的临时链接。「AI 配音」未选择音色样例时使用模型原生旁白。「数字分身旁白」需要 `KNOWLEDGE_MANAGEMENT_ENABLED=1`，经 `OPENAI_BASE_URL/audio/speech` 用当前用户的模型凭证合成，配音文件保存在 `data/marketing-narration`（API 与 Worker 须共享该数据目录）。
 
-页面先检查草稿列表和服务能力，成功后才启用编辑、自动保存和生成；接口未部署返回 404 时显示更新服务提示，连接失败可点「重新连接」。普通本地开发代理连接 `localhost:3000`，仅桌面开发模式跟随桌面服务器设置。线上升级必须同时更新 Web、API、Worker 和 Nginx 配置，并执行迁移至 54（49 增加未知结果的放弃记录，53 允许同一草稿保留多次制作的片段记录，54 增加文案请求的 `cancelled` 状态）；只更新 Web 会导致新接口 `Not Found`。文案和分镜生成后自动保存；风险检查可按需执行，提交制作前仍会自动检查当前内容。
+页面先检查草稿列表和服务能力，成功后才启用编辑、自动保存和生成；接口未部署返回 404 时显示更新服务提示，连接失败可点「重新连接」。普通本地开发代理连接 `localhost:3000`，仅桌面开发模式跟随桌面服务器设置。线上升级必须同时更新 Web、API、Worker 和 Nginx 配置，并执行迁移至 57（49 增加未知结果的放弃记录，53 允许同一草稿保留多次制作的片段记录，54 增加文案请求的 `cancelled` 状态，55 增加数字分身旁白配音记录，57 增加片段提交的网关失败记录）；只更新 Web 会导致新接口 `Not Found`。文案和分镜生成后自动保存；风险检查可按需执行，提交制作前仍会自动检查当前内容。
 
 ```bash
 pnpm --filter @lot-agent/core build
