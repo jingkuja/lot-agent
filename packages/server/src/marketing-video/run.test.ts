@@ -57,6 +57,22 @@ describe("marketing prompt submission preflight", () => {
     expect(f.connection.release).toHaveBeenCalledOnce();
   });
 
+  it("burns the captions of a model-voiced job locally and keeps the cues with the video", async () => {
+    vi.mocked(runGenerationJob).mockClear();
+    const f = fixture([short, short]);
+    Object.assign(f.job.input, { local_subtitles: true });
+    const captions = [{ shot: 0, start: 0.2, end: 3, text: "欢迎来喝咖啡" }];
+    f.compose.mockResolvedValueOnce({ body: Buffer.from("fixture"), durationSec: 30, width: 720, height: 1280, captions } as never);
+    await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).resolves.toMatchObject({ captions });
+    const input = (f.compose.mock.calls[0] as unknown[])[0] as { subtitles: boolean; speech: boolean; narration?: string[] };
+    expect(input).toMatchObject({ subtitles: true, speech: true });
+    expect(input.narration).toBeUndefined();
+    for (const [, child] of vi.mocked(runGenerationJob).mock.calls) {
+      expect(child.input.prompt).toContain("Narrate ONLY confirmedShot.script verbatim");
+      expect(child.input.prompt).toContain("Do not add any on-screen text, captions or subtitles");
+    }
+  });
+
   it("continues already-submitted shots without applying new prompt limits to their recovery", async () => {
     vi.mocked(runGenerationJob).mockClear();
     const f = fixture([long, long], true);

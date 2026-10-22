@@ -81,7 +81,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p class="meta">评审日期：2026-10-19 · 最近更新：2026-10-22 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>）</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
-  <p class="meta">本版把十二轮修复合并为一张表，并把所有未完成的事项按重要程度重新编号（第 1 节）。第一至十轮的逐项说明和验证明细见本文件在提交 <code>72a186f</code> 中的版本。</p>
+  <p class="meta">本版把十三轮修复合并为一张表，并把所有未完成的事项按重要程度重新编号（第 1 节）。第一至十轮的逐项说明和验证明细见本文件在提交 <code>72a186f</code> 中的版本。</p>
 </header>
 
 <nav class="toc" aria-label="目录">
@@ -97,11 +97,11 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，付费保护充分，已用真实网关跑通。10-15 评审的代码问题 F01–F08 全部修复；功能缺口中 G04、G05 已完成，G01 部分完成，G07 移交数字主播，G08 暂缓。10-22 首次用真实网关和视频模型跑通 5 个用例：主流程、数字分身旁白、本地字幕、只重新合成和单镜重做都可用，验收中暴露的网关 5xx 和下载失败已在第十一轮修复。当前最大的问题是成片质量不可控：跨镜人物和产品不一致，没有成片质量检查，真实样本远少于验收门槛（P01–P03）。第十二轮加了定妆图（P01）和不调模型的本地成片检查（P02），两者都只经本地回归，尚未用真实网关出样片验证，所以仍列为待验收。</div>
+  <div class="verdict">主流程完整，付费保护充分，已用真实网关跑通。10-15 评审的代码问题 F01–F08 全部修复；功能缺口中 G04、G05 已完成，G01 部分完成，G07 移交数字主播，G08 暂缓。10-22 首次用真实网关和视频模型跑通 5 个用例：主流程、数字分身旁白、本地字幕、只重新合成和单镜重做都可用，验收中暴露的网关 5xx 和下载失败已在第十一轮修复。当前最大的问题是成片质量不可控：跨镜人物和产品不一致，没有成片质量检查，真实样本远少于验收门槛（P01–P03）。第十二轮加了定妆图（P01）和不调模型的本地成片检查（P02）；第十三轮把「AI 配音」和参考视频模式的字幕也改为本地烧录（P09），并在「修改成片」中加入字幕调整（P12）。这四项都只经本地回归，尚未用真实网关出样片验证，所以仍列为待验收。</div>
   <div class="grid">
     <div class="stat"><strong>8 / 8</strong><span>旧代码问题 F01–F08 已修复</span></div>
     <div class="stat"><strong>2 · 2 · 2</strong><span>旧功能缺口 G01–G06：完成 · 部分 · 未完成（G07 移交，G08 暂缓）</span></div>
-    <div class="stat"><strong>3 · 8 · 10</strong><span>待优化与修复问题：高 · 中 · 低（P01、P02 第十二轮已处理，待真实验收）</span></div>
+    <div class="stat"><strong>3 · 8 · 10</strong><span>待优化与修复问题：高 · 中 · 低（P01、P02 第十二轮，P09、P12 第十三轮已处理，待真实验收）</span></div>
     <div class="stat"><strong>5 / 5</strong><span>真实验收用例通过（其中 1 个手动恢复 2 次）</span></div>
   </div>
 </section>
@@ -120,10 +120,10 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>P06</td><td><span class="tag mid">中</span></td><td>旁白模式每镜结尾空 1.4–2 秒。镜头要比配音多留静音并取整到整秒，所以 18 秒草稿的成片是 21 秒，多计 3 秒视频费用。</td><td>按配音总长分配镜长，尽量不超出目标时长；或缩短镜尾静音、允许配音跨镜延续。</td><td>验收</td></tr>
       <tr><td>P07</td><td><span class="tag mid">中</span></td><td>运营侧没有费用核对工具和处理时限。待核对的记录分散在未知文案请求、未知片段和 <code>marketing_clip_gateway_failures</code> 三处。</td><td>提供管理端列表，按网关请求 ID 对照网关日志，并规定处理时限。</td><td>R5、第一和第十一轮残留</td></tr>
       <tr><td>P08</td><td><span class="tag mid">中</span></td><td>没有质量与性能指标：成功率、阶段耗时、排队 P95、未知积压。默认并发未经压测。</td><td>先用日志（已输出 <code>waitMs</code>）统计，再按 P95 和内存调整并发默认值。不要在 P07 完成前只提高并发。</td><td>G06、R6、F02 残留</td></tr>
-      <tr><td>P09</td><td><span class="tag mid">中</span></td><td>「AI 配音」和参考视频模式的字幕仍由模型画进画面，可能错字，生成后不能修改。没有 SRT 下载，也不能只改字幕后重新合成。</td><td>片段改为不画文字，字幕取自确认文案；「AI 配音」用 ASR 对齐或停顿检测计时，参考视频模式按镜头时长显示；合成时烧录，并提供 SRT 下载。</td><td>G01 剩余、R2</td></tr>
+      <tr><td>P09</td><td><span class="tag mid">中</span></td><td>「AI 配音」和参考视频模式的字幕仍由模型画进画面，可能错字，生成后不能修改。没有 SRT 下载，也不能只改字幕后重新合成。<br><span class="tag ok">第十三轮</span> 已处理：所有新任务的片段都不画文字，字幕取自确认文案，在合成时本地烧录。「AI 配音」按片段自带人声的首尾静音和停顿计时，参考视频模式按字数铺满整镜；结果页可下载 SRT。待真实样片确认：模型是否真的不画字，以及片段带环境声时停顿检测是否可用。模型不保证逐字照念，字幕以确认文案为准。</td><td>片段改为不画文字，字幕取自确认文案；「AI 配音」用<s> ASR 对齐或</s>停顿检测计时（不加 ASR，不增加费用），参考视频模式按镜头时长显示；合成时烧录，并提供 SRT 下载。</td><td>G01 剩余、R2</td></tr>
       <tr><td>P10</td><td><span class="tag mid">中</span></td><td>参考视频分析太重：单条最多 131 次模型请求，涉及 4 个供应商，成本、耗时和维护风险都高。</td><td>本地上传作首选；用相同素材对比快速与完整分析，再降低 OCR 密度，或改用支持视频输入的多模态模型。</td><td>R3</td></tr>
       <tr><td>P11</td><td><span class="tag mid">中</span></td><td>数字主播的片段提交仍把网关 5xx 记为未知，用户要确认"可能重复计费"后才能重提。</td><td>按第十一轮的同一规则处理，并记录网关请求 ID。</td><td>第十一轮残留</td></tr>
-      <tr><td>P12</td><td><span class="tag low">低</span></td><td>旁白模式成片后不能按镜微调字幕时间。</td><td>在「只重新合成」上加每镜偏移（步长 0.05 秒）和全片偏移，限制在本镜范围内；需要实时预览时另存一份无字幕成片。「AI 配音」模式要先完成 P09。</td><td>第十轮（字幕微调可行性）</td></tr>
+      <tr><td>P12</td><td><span class="tag low">低</span></td><td>旁白模式成片后不能按镜微调字幕时间。<br><span class="tag ok">第十三轮</span> 已处理：「修改成片 → 成片设置 → 调整字幕」可改字号、位置、全片和每镜提前或延后（±1 秒，步长 0.05 秒）以及每镜断行，点「重新合成成片」生效，不调用视频模型。断行只能改换行和标点，不能改字。仍没有实时预览和逐条改时间。</td><td>在「只重新合成」上加每镜偏移（步长 0.05 秒）和全片偏移，限制在本镜范围内；<s>需要实时预览时另存一份无字幕成片</s>（暂不做，先看真实使用是否需要）。「AI 配音」模式要先完成 P09（已完成）。</td><td>第十轮（字幕微调可行性）</td></tr>
       <tr><td>P13</td><td><span class="tag low">低</span></td><td>同步请求耗时长。<code>/revise</code> 在请求内合成改动镜头的配音，实测 48.6 秒，而首次合成 4 镜只用 4.2 秒，原因未查。文案和分镜生成最长 5 分钟，也在 HTTP 请求内执行，进程重启会中断。</td><td>先查清配音慢的原因；长期改为队列任务（参考视频分析已经这样做）。</td><td>验收、R4</td></tr>
       <tr><td>P14</td><td><span class="tag low">低</span></td><td>制作进度会倒退，例如 17% → 0% → 7%，进度条来回跳。</td><td>父任务进度只增不减。</td><td>验收</td></tr>
       <tr><td>P15</td><td><span class="tag low">低</span></td><td>没有单个片段预览，单镜重做前看不到各镜画面。</td><td>结果页按镜显示片段。</td><td>G04 残留</td></tr>
@@ -168,13 +168,13 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>素材与人物出镜</td><td class="nowrap">C3</td><td>肖像、产品、背景、场景、数字分身库、参考视频；主播全程或混合镜头；服务端按当前模型检查参考图真实格式和尺寸。混合镜头真实效果未验证（P03）。</td></tr>
       <tr><td>片段模型</td><td class="nowrap">C3</td><td>按 <code>MarketingVideoProfile</code> 切换 Grok / Kling，默认 Grok。Grok 已出真实成片，Kling 未验证。</td></tr>
       <tr><td>跨镜人物与场景一致</td><td class="nowrap">C3</td><td>统一设定随每段请求提交；可先生成定妆图，作为每段和单镜重做的共同参考图（第十二轮）。此前真实样片明显不一致，定妆图的效果未经真实验收（P01）。</td></tr>
-      <tr><td>「AI 配音」</td><td class="nowrap">C2</td><td>视频模型自己配音和画字幕，不能保证逐字、跨段音色一致和口型（P09）。</td></tr>
+      <tr><td>「AI 配音」</td><td class="nowrap">C2</td><td>视频模型配音，不能保证逐字、跨段音色一致和口型。字幕已改为本地烧录，按片段人声停顿切换（第十三轮，P09）。</td></tr>
       <tr><td>数字分身旁白</td><td class="nowrap">C3</td><td>数字分身原声逐镜配音、试听、单镜重做，按配音调整镜长，合成时替换音轨；真实样片 1 条通过。镜尾空档偏长（P06）。</td></tr>
-      <tr><td>字幕</td><td class="nowrap">C2</td><td>旁白模式按确认文案本地烧录，按配音停顿切换，真实样片同步；其他模式由模型绘制；没有 SRT 下载和字幕微调（P09、P12）。</td></tr>
+      <tr><td>字幕</td><td class="nowrap">C3</td><td>所有新任务按确认文案本地烧录（第十三轮）：旁白按配音停顿切换，真实样片同步；「AI 配音」按片段人声停顿切换，参考视频按字数铺满整镜，两者未经真实样片验证。成片后可调字号、位置、偏移和断行，可下载 SRT（P09、P12）。此前的「AI 配音」和参考视频成片仍由模型绘制。</td></tr>
       <tr><td>分段生成与合成</td><td class="nowrap">C3</td><td>片段并行（默认 2），FFmpeg 拼接并混入 BGM；付费前用探针检查编码器和字幕能力。</td></tr>
       <tr><td>成片检查</td><td class="nowrap">C3</td><td>本地 FFmpeg 检查黑屏、画面静止、无声、时长和字幕条数，按镜号显示（第十二轮）。不检查错字、事实和人物一致性；阈值未经真实样片校准（P02）。</td></tr>
       <tr><td>取消、续作与计量</td><td class="nowrap">C3</td><td>保留成功片段，未知结果不自动重发，计量带幂等键；网关 5xx 按未扣费处理，下载失败自动重试（第十一轮）。</td></tr>
-      <tr><td>成片后修改</td><td class="nowrap">C3</td><td>单镜重做只提交所选镜头；换音乐、音量、字幕开关和旁白设置只重新合成；旁白任务改口播保留画面。均已真实验收。没有片段预览（P15）。</td></tr>
+      <tr><td>成片后修改</td><td class="nowrap">C3</td><td>单镜重做只提交所选镜头；换音乐、音量、字幕开关和旁白设置只重新合成；旁白任务改口播保留画面。均已真实验收。第十三轮加字幕调整，也只重新合成，未真实验收。没有片段预览（P15）。</td></tr>
       <tr><td>失败原因与下一步</td><td class="nowrap">C3</td><td>按错误码给出原因、下一步和可用操作。</td></tr>
       <tr><td>草稿与空间</td><td class="nowrap">C3</td><td>自动保存、版本冲突保护、分页搜索；删除草稿一并删除成片、片段、配音和参考分析；显示空间用量（不含配音，P20）。</td></tr>
       <tr><td>预览、下载、归档</td><td class="nowrap">C3</td><td>预览、下载、复制标题标签、存入知识库。不显示预计费用（P04）。</td></tr>
@@ -184,7 +184,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 </section>
 
 <section class="card" id="fixes">
-  <h2>4 修复记录 <span class="tag ok">十二轮</span></h2>
+  <h2>4 修复记录 <span class="tag ok">十三轮</span></h2>
   <p>各轮原则一致：不自动重发结果未知的付费请求；新增检查都放在付费调用之前；已存草稿和冻结任务照常加载；新增文案补齐中文、英文和印尼文，只用现有 CSS 变量。</p>
   <div class="table-wrap"><table>
     <thead><tr><th>轮次</th><th>日期 / 提交</th><th>处理</th><th>迁移</th></tr></thead>
@@ -199,13 +199,15 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr id="fixes8"><td>八</td><td>10-21<br><code>f6c8d5a</code></td><td>R1：新增「数字分身旁白」。逐镜用已复刻音色合成 WAV，可试听和单镜重做，先写意图行、不自动重发；片段无声生成；配音冻结进任务，合成时替换片段音轨；可按配音调整镜长。</td><td>55</td></tr>
       <tr id="fixes9"><td>九</td><td>10-22<br><code>1a3e86d</code></td><td>R2 的旁白部分：片段不画文字，字幕取自确认文案，按配音实测时长和停顿切换，在逐镜规范化时用 libass 烧录；付费前检查字幕能力。</td><td>—</td></tr>
       <tr id="fixes10"><td>十</td><td>10-22<br><code>b37d572</code>、<code>74d3a2d</code>、<code>84b7d50</code>、<code>72a186f</code></td><td>减少模型重跑：检查改用 <code>deepseek-v4.1-flash</code> 并只复查改动字段；按建议修改不自动重查；成片后换音乐、音量、字幕开关和旁白设置只重新合成；旁白任务改口播保留画面；先提交视频，制作期间再补标题标签。附带字幕微调可行性分析（见 P12）。</td><td>—</td></tr>
-      <tr id="fixes11"><td>十一</td><td>10-22<br>本报告同一提交</td><td>处理真实验收中让任务停下的两个问题。<br>① 片段提交收到网关 5xx 时按未扣费处理：<code>run.ts → gatewayFailure</code> 先把用户、草稿、片段任务、HTTP 状态和网关请求 ID（响应头 <code>x-oneapi-request-id</code>，存于 <code>ProviderError.gatewayRequestId</code>）写入 <code>marketing_clip_gateway_failures</code>，再释放占位；片段报 <code>GATEWAY_FAILED</code>，用户点「继续生成」直接重提，不再确认。记录写入失败时片段保持未知；超时、断连和 408 / 409 仍按未知处理；不自动重提。<br>② 片段下载失败时（<code>run-job.ts → fetchProduced</code>）间隔 2 秒、5 秒共试 3 次，每次记录 <code>[generation.download] failed</code>，只含任务 ID、次数、错误类型、HTTP 状态和系统错误码，不含 URL 和原始错误文字。</td><td>57</td></tr>
-      <tr id="fixes12"><td>十二</td><td>10-22<br>本报告同一提交</td><td>P01、P02，原则是不再增加模型检查。<br>① 定妆图：第 3 步「确认分镜」下可生成一张人物在主场景中的图片（<code>key-art.ts → MarketingKeyArtist</code>，<code>POST /:id/key-art</code>）。图片模型由 <code>MARKETING_KEY_ART_MODEL</code> 指定（默认 <code>gpt-image-2.5-flare</code>，失败时不自动换其他模型重发），用户 Key 经网关计费，本地不计量；参考第一张肖像、前两张产品图、第一张背景和场景图。先写意图行，同一外观同时只允许一个请求，不自动重发；外观键覆盖提示词、比例和参考图。图片存为私有上传素材。<code>/generate</code> 把它追加在参考图之后并冻结 <code>input.key_art</code>，每段和单镜重做都附同一张；没有定妆图时生成前确认。删除草稿时一并删除，空间用量计入。<br>② 成片检查：拼接后、混入 BGM 前用 FFmpeg 检查黑屏（<code>blackdetect</code>）、画面静止（<code>freezedetect</code>）和应有语音时的无声（<code>silencedetect</code>），记录时长和烧录字幕条数，按镜号写入 <code>output.quality</code>，结果页显示。只提示不拦截；检查失败时记为未检查，成片照常保存。</td><td>58</td></tr>
+      <tr id="fixes11"><td>十一</td><td>10-22<br><code>e0a6011</code></td><td>处理真实验收中让任务停下的两个问题。<br>① 片段提交收到网关 5xx 时按未扣费处理：<code>run.ts → gatewayFailure</code> 先把用户、草稿、片段任务、HTTP 状态和网关请求 ID（响应头 <code>x-oneapi-request-id</code>，存于 <code>ProviderError.gatewayRequestId</code>）写入 <code>marketing_clip_gateway_failures</code>，再释放占位；片段报 <code>GATEWAY_FAILED</code>，用户点「继续生成」直接重提，不再确认。记录写入失败时片段保持未知；超时、断连和 408 / 409 仍按未知处理；不自动重提。<br>② 片段下载失败时（<code>run-job.ts → fetchProduced</code>）间隔 2 秒、5 秒共试 3 次，每次记录 <code>[generation.download] failed</code>，只含任务 ID、次数、错误类型、HTTP 状态和系统错误码，不含 URL 和原始错误文字。</td><td>57</td></tr>
+      <tr id="fixes12"><td>十二</td><td>10-22<br><code>3c7ed09</code></td><td>P01、P02，原则是不再增加模型检查。<br>① 定妆图：第 3 步「确认分镜」下可生成一张人物在主场景中的图片（<code>key-art.ts → MarketingKeyArtist</code>，<code>POST /:id/key-art</code>）。图片模型由 <code>MARKETING_KEY_ART_MODEL</code> 指定（默认 <code>gpt-image-2.5-flare</code>，失败时不自动换其他模型重发），用户 Key 经网关计费，本地不计量；参考第一张肖像、前两张产品图、第一张背景和场景图。先写意图行，同一外观同时只允许一个请求，不自动重发；外观键覆盖提示词、比例和参考图。图片存为私有上传素材。<code>/generate</code> 把它追加在参考图之后并冻结 <code>input.key_art</code>，每段和单镜重做都附同一张；没有定妆图时生成前确认。删除草稿时一并删除，空间用量计入。<br>② 成片检查：拼接后、混入 BGM 前用 FFmpeg 检查黑屏（<code>blackdetect</code>）、画面静止（<code>freezedetect</code>）和应有语音时的无声（<code>silencedetect</code>），记录时长和烧录字幕条数，按镜号写入 <code>output.quality</code>，结果页显示。只提示不拦截；检查失败时记为未检查，成片照常保存。</td><td>58</td></tr>
+      <tr id="fixes13"><td>十三</td><td>10-22<br>本报告同一提交</td><td>P09、P12，不调用任何模型或 ASR。<br>① 本地字幕扩展到所有新任务：<code>/generate</code> 对「AI 配音」、旁白和参考视频都冻结 <code>local_subtitles: true</code>，片段提示词要求不画任何文字并让底部五分之一避开人脸和产品。<code>media.ts → composeMarketingVideo</code> 的计时依据依次是配音文件、片段自带人声（只读镜头时长内的部分，<code>silencedetect</code> 找首尾静音和停顿）、无声时按字数铺满整镜。开字幕的新草稿在本机不能烧录时阻止生成（以前只拦旁白草稿）。烧录的每条字幕写入 <code>output.captions</code>，结果页按它生成 SRT 下载。旧任务没有该标记，恢复和单镜重做仍由模型画字幕。<br>② 字幕调整：草稿新增 <code>captions</code>（<code>MarketingCaptionsSchema</code>：字号、位置、全片偏移，以及每镜的断行和偏移）。切行和版式从 server 移到 <code>core/marketing-video/captions.ts</code>，前后端共用。<code>CaptionSettings.tsx</code> 放在「成片设置」中，仅本地字幕任务显示；模型画字的旧成片提示需复制为新草稿。<code>marketingRevisionKey</code> 对本地字幕任务放行 <code>captions</code>，只重新合成。<code>offsetCues</code> 整体平移本镜字幕，首末条至少留 0.3 秒在镜内。每镜断行记录所基于的口播，口播改了即失效；去掉空白和标点后必须与口播相同，否则前端禁用重新合成，<code>/revise</code> 和 <code>/generate</code> 返回 400，不需要重新做文案检查。</td><td>—</td></tr>
     </tbody>
   </table></div>
   <h3>上线须知</h3>
   <ul>
     <li>同时更新 Web、API 和 Worker，先由新 server 执行迁移至 58，再启动新 Worker。旧前端调用审核和标题标签时不带请求 ID，会被拒绝。</li>
+    <li>第十三轮起，所有开字幕的新视频都在 API 和 Worker 上本地烧录字幕。上线前确认两边 <code>/capabilities</code> 的 <code>subtitles</code> 为真；否则开字幕的「AI 配音」草稿也会被阻止生成。</li>
     <li>配置：<code>MARKETING_VIDEO_CONCURRENCY</code>（默认 2）、<code>MARKETING_VIDEO_USER_CONCURRENCY</code>（默认 1）、<code>MARKETING_VIDEO_SEGMENT_CONCURRENCY</code>（默认 2）、<code>MARKETING_SUBTITLE_FONT</code>（默认 Noto Sans CJK SC）、<code>MARKETING_KEY_ART_MODEL</code>（默认 <code>gpt-image-2.5-flare</code>，须是网关上可用的、支持图片编辑的图像模型）。</li>
     <li>本地字幕需要带 libass 的 FFmpeg 和中文字体。生产 Docker 镜像已满足；Homebrew 默认的 ffmpeg 不含 libass。</li>
     <li>数字分身旁白要求 <code>KNOWLEDGE_MANAGEMENT_ENABLED=1</code>，网关阿里渠道与音色复刻使用同一千问账号。</li>
@@ -232,7 +234,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <div class="table-wrap"><table>
     <thead><tr><th>编号</th><th>旧缺口</th><th>状态</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td>G01</td><td>逐字配音与字幕校正</td><td><span class="tag mid">部分完成</span></td><td>旁白模式逐字配音、本地字幕（第八、九轮）。「AI 配音」模式未改（P09）。</td></tr>
+      <tr><td>G01</td><td>逐字配音与字幕校正</td><td><span class="tag mid">部分完成</span></td><td>旁白模式逐字配音、本地字幕（第八、九轮）；所有新任务本地字幕并可在成片后调整（第十三轮，P09、P12）。「AI 配音」仍由模型说话，不保证逐字。</td></tr>
       <tr><td>G02</td><td>成片质量检查</td><td><span class="tag mid">部分完成</span></td><td>第十二轮：本地成片检查和定妆图。模型检查按成本原则不做；待真实验收（P01、P02）。</td></tr>
       <tr><td>G03</td><td>费用与用量说明</td><td><span class="tag high">未完成</span></td><td>P04。空间用量已显示（第六轮）。</td></tr>
       <tr><td>G04</td><td>单镜替换与重新合成</td><td><span class="tag ok">已完成</span></td><td>第七、十轮，已真实验收。片段预览见 P15。</td></tr>
@@ -260,7 +262,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
     <thead><tr><th>编号</th><th>风险</th><th>状态</th><th>说明</th><th>后续</th></tr></thead>
     <tbody>
       <tr><td>R1</td><td>配音：视频模型逐镜配音，音色和口型不一致</td><td><span class="tag ok">已处理</span></td><td>数字分身旁白上线（第八轮）；「AI 配音」保留为快速模式；真人对口型移交数字主播。方案见<a href="marketing-video-audio-subtitle-plan-20261020.md">配音、字幕与对口型方案</a>和 <a href="marketing-video-tts-narration-plan-20261020.md">TTS 配音实施计划</a>。</td><td>—</td></tr>
-      <tr><td>R2</td><td>字幕：模型画字容易错，生成后改不了</td><td><span class="tag mid">旁白模式已处理</span></td><td>旁白模式本地烧录（第九轮），没有字级时间戳。</td><td>P09、P12</td></tr>
+      <tr><td>R2</td><td>字幕：模型画字容易错，生成后改不了</td><td><span class="tag ok">已处理</span></td><td>旁白模式本地烧录（第九轮）；所有新任务本地烧录，成片后可调整和下载 SRT（第十三轮）。没有字级时间戳，「AI 配音」按停顿检测计时，效果待真实样片确认。</td><td>P03</td></tr>
       <tr><td>R3</td><td>参考视频分析太重</td><td><span class="tag mid">未处理</span></td><td>yt-dlp、无头 Chromium、逐帧 OCR、视觉理解、ASR、摘要，单条最多 131 次模型请求。</td><td>P10</td></tr>
       <tr><td>R4</td><td>同步请求</td><td><span class="tag mid">已缓解</span></td><td>请求不随浏览器断开而中止（第一轮），但仍占用 HTTP 连接，进程重启会中断。</td><td>P13</td></tr>
       <tr><td>R5</td><td>保护机制的出口</td><td><span class="tag mid">部分解决</span></td><td>用户侧出口已有（第一、七、十一轮）；运营侧没有核对工具和处理时限。</td><td>P07</td></tr>
@@ -274,15 +276,16 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <div class="table-wrap"><table>
     <thead><tr><th>检查</th><th>最近结果</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td>真实供应商</td><td>10-22，5 个用例通过</td><td>见<a href="#live">第 2 节</a>。第一至十轮和第十二轮没有调用付费模型；定妆图的图片模型（包括 <code>gpt-image-2.5-flare</code> 能否带参考图走图片编辑接口）和成片检查阈值未经真实验证。</td></tr>
-      <tr><td>定向 Vitest（core 营销与供应商、server 营销视频 / 生成 / 数字主播 / 数据库与迁移、Web 营销模块与 i18n）</td><td>第十二轮：62 文件，601 项通过</td><td>新增定妆图（意图行、并发、失败不重发、外观键、参考图上限）、成片检查（真实 FFmpeg 黑屏 / 无声、按镜归类）和 <code>key_art</code> 冻结单测。第十一轮按另一组目录统计为 68 文件、657 项</td></tr>
+      <tr><td>真实供应商</td><td>10-22，5 个用例通过</td><td>见<a href="#live">第 2 节</a>。第一至十轮、第十二和十三轮没有调用付费模型；第十三轮「AI 配音」片段的停顿检测和模型不画字的效果也未经真实验证；定妆图的图片模型（包括 <code>gpt-image-2.5-flare</code> 能否带参考图走图片编辑接口）和成片检查阈值未经真实验证。</td></tr>
+      <tr><td>定向 Vitest（core 营销与供应商、server 营销视频 / 生成 / 数字主播 / 数据库与迁移、Web 营销模块与 i18n）</td><td>第十三轮：core 全部、server 营销视频与参考分析、Web 全部，123 文件，1170 项通过，6 项跳过</td><td>第十三轮新增字幕切行与断行校验、偏移、SRT、<code>captions</code> 修订键、「AI 配音」冻结 <code>local_subtitles</code>、改字被拒和 Worker 不带配音时烧录的单测。第十二轮：62 文件，601 项，新增定妆图（意图行、并发、失败不重发、外观键、参考图上限）、成片检查（真实 FFmpeg 黑屏 / 无声、按镜归类）和 <code>key_art</code> 冻结单测。第十一轮按另一组目录统计为 68 文件、657 项</td></tr>
       <tr><td>全量 Vitest</td><td>第八轮：2690 项通过，81 项跳过</td><td>跳过项不计为通过</td></tr>
-      <tr><td>严格类型检查</td><td>第十二轮：Server 241 项、Core 20 项，与修改前相同，营销目录没有诊断；Web 通过</td><td>未全绿（P21），不能用构建成功代替</td></tr>
-      <tr><td>Core / Server / Web 构建</td><td>第十二轮通过</td><td>Web 有既有的大 chunk 提示</td></tr>
-      <tr><td><code>pnpm check:marketing-video:db</code>（临时 pgvector PostgreSQL 容器，用后删除）</td><td>第十二轮通过</td><td>迁移 58 在空库上执行成功；新增定妆图：同一外观并发请求只付费一次、按用户隔离、改外观需新图、只在明确重做时再次付费、随草稿删除；覆盖归属、并发预留、版本、续作、未知保护、单镜重做、只重新合成、旁白配音、删除清理和真实 FFmpeg 合成</td></tr>
-      <tr><td><code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>第十二轮通过</td><td>覆盖三步流程、旁白、成片设置与单镜重做；新增生成定妆图、无定妆图时的生成确认和结果页成片检查。第十二轮未重新查看截图</td></tr>
+      <tr><td>严格类型检查</td><td>第十三轮：Server 241 项、Core 20 项，与修改前相同；营销目录只有 1 项既有诊断（<code>routes.test.ts</code> 的 mock 类型，第十二轮漏记）；Web 通过</td><td>未全绿（P21），不能用构建成功代替</td></tr>
+      <tr><td>Core / Server / Web 构建</td><td>第十三轮通过</td><td>Web 有既有的大 chunk 提示</td></tr>
+      <tr><td><code>pnpm check:marketing-video:db</code>（临时 pgvector PostgreSQL 容器，用后删除）</td><td>第十三轮通过</td><td>迁移 58 在空库上执行成功；新增定妆图：同一外观并发请求只付费一次、按用户隔离、改外观需新图、只在明确重做时再次付费、随草稿删除；覆盖归属、并发预留、版本、续作、未知保护、单镜重做、只重新合成、旁白配音、删除清理和真实 FFmpeg 合成</td></tr>
+      <tr><td><code>pnpm check:marketing-video:ui</code>（真实 React + Chrome，模拟 API）</td><td>第十三轮通过</td><td>覆盖三步流程、旁白、成片设置与单镜重做、定妆图和成片检查。第十三轮新增：本机不能烧录字幕时「AI 配音」和旁白草稿都被阻止；SRT 下载内容；调整字号、全片和每镜偏移、断行后只重新合成，改字时禁用重新合成。已查看字幕调整的浅色和深色截图</td></tr>
       <tr><td><code>pnpm check:marketing-video:queue</code>（临时 PostgreSQL + Redis）</td><td>第二轮通过</td><td>覆盖每用户限额和槽位让出</td></tr>
       <tr><td>本地烧录字幕（Debian FFmpeg 7.1.5 + libass + Noto CJK）</td><td>第九轮通过</td><td>三种画幅，断行全部落在配音停顿上</td></tr>
+      <tr><td>「AI 配音」片段烧录字幕（本机 Homebrew FFmpeg 9.0.2，带 libass）</td><td>第十三轮通过</td><td><code>media.test.ts</code>：片段 1–3 秒有声，字幕从 0.9 秒显示到 3.5 秒，第 2 镜偏移 0.5 秒生效，说话时字幕区有白字、说完后没有。未在 Debian 部署镜像中重跑</td></tr>
     </tbody>
   </table></div>
 </section>

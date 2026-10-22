@@ -59,6 +59,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     // allowed WebM plus native narration. Never infer audio from today's draft.
     const generateAudio = job.input.generate_audio !== false;
     // Clips of jobs submitted with this flag carry no text; captions are burned in locally.
+    // Every new job has it; twin-narrated jobs got it first, older jobs have model-drawn captions.
     const localSubtitles = job.input.local_subtitles === true;
     const inputVersion = typeof job.input.marketingInputVersion === "number" ? job.input.marketingInputVersion : 1;
     // The frozen model's rules apply; version 1 inputs predate reference checks.
@@ -97,7 +98,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     // The API host's probe says nothing about this worker. Stop before any voice or clip is paid for.
     const capabilities = await mediaCapabilities();
     if (!capabilities.composition) throw new MarketingRunError("CONFIG_MISSING", "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
-    const burnSubtitles = localSubtitles && draft.subtitles && !!narration;
+    const burnSubtitles = localSubtitles && draft.subtitles;
     if (burnSubtitles && !capabilities.subtitles) throw new MarketingRunError("CONFIG_MISSING", SUBTITLES_UNAVAILABLE);
     // Kling: create each voice sample once per parent job, before clips run in
     // parallel, so clips never race to POST it. Clips that already hold a
@@ -251,7 +252,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
       const { url } = await gen.storage.put({ key, body: result.body, contentType: "video/mp4" });
       await assertActive();
       await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.body.length, durationSec: result.durationSec, width: result.width, height: result.height });
-      return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}) };
+      return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}), ...(result.captions ? { captions: result.captions } : {}) };
     } catch (error) {
       if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;
       throw new MarketingRunError("COMPOSITION_FAILED", error instanceof Error ? error.message : "视频合成失败", { cause: error });

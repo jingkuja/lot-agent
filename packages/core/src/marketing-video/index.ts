@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { MarketingCaption } from "./captions.js";
 import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoProfile, type MarketingVideoProfile } from "./models.js";
 
 export * from "./models.js";
@@ -63,6 +64,23 @@ export const MarketingNarrationSchema = z.object({
   instructions: z.string().trim().max(200).default(""),
 }).strict();
 export type MarketingNarration = z.infer<typeof MarketingNarrationSchema>;
+const CaptionOffsetSchema = z.number().min(-1).max(1);
+/** How locally burned captions look and when they show. A made video composes again with
+ * changes here, without the video model. */
+export const MarketingCaptionsSchema = z.object({
+  size: z.enum(["small", "medium", "large"]).default("medium"),
+  position: z.enum(["low", "medium", "high"]).default("medium"),
+  /** Seconds every caption moves; negative shows them earlier. */
+  offsetSec: CaptionOffsetSchema.default(0),
+  /** Per shot; an entry applies only while its shot still says `script`. `lines` may move
+   * line breaks and punctuation, never the words. */
+  shots: z.array(z.object({
+    script: z.string().max(600),
+    lines: z.array(z.string().trim().min(1).max(200)).min(1).max(40).optional(),
+    offsetSec: CaptionOffsetSchema.default(0),
+  }).strict().nullable()).max(15).default([]),
+}).strict();
+export type MarketingCaptions = z.infer<typeof MarketingCaptionsSchema>;
 export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),
@@ -80,6 +98,7 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   ratio: z.enum(["9:16", "16:9", "1:1"]).default("9:16"),
   quality: z.enum(["720p", "1080p"]).default("720p"),
   subtitles: z.boolean().default(true),
+  captions: MarketingCaptionsSchema.optional(),
   musicVolume: z.number().min(0).max(0.5).default(0.12),
   assets: z.object({
     portrait: MarketingImagesSchema.optional(), background: MarketingImagesSchema.optional(),
@@ -210,8 +229,9 @@ export interface MarketingProject {
   review: MarketingReview | null; reviewedScript: string | null;
   taskId: string | null; status: string; progress: number; stage?: string;
   error?: string; errorCode?: MarketingFailureCode;
-  /** `quality`: local checks of the made video; absent on videos made before them. */
-  output?: { assetIds: string[]; assets: { url: string; mime: string }[]; quality?: MarketingQualityReport };
+  /** `quality`: local checks of the made video; absent on videos made before them.
+   * `captions`: the cues burned in locally. */
+  output?: { assetIds: string[]; assets: { url: string; mime: string }[]; quality?: MarketingQualityReport; captions?: MarketingCaption[] };
   knowledgeItemId: string | null;
   knowledgeVersion?: number | null;
   /** Clips of the current job whose paid submission outcome is unknown. */
@@ -350,7 +370,8 @@ export function marketingRenderKey(draft: MarketingDraft): string {
 }
 /** What a made video's local composition adds to its clips. Background music always; with
  * twin narration the clips are silent and the voice replaces their audio, and with local
- * subtitles the captions are burned in then too. */
+ * subtitles (every job submitted since they apply to all voice modes) the captions are
+ * burned in then too. */
 export interface MarketingComposition { narration: boolean; localSubtitles: boolean }
 /** What a redo keeps from the rendered draft: every setting the clips were made with, the shot
  * count and each shot's duration. Shot text, publishing fields and, given the job's
@@ -359,8 +380,8 @@ export function marketingRevisionKey(draft: MarketingDraft, composition?: Market
   const { publishTitle: _title, tags: _tags, script: _script, storyboard, ...rest } = MarketingDraftSchema.parse(draft);
   const durations = storyboard.map(shot => shot.durationSec);
   if (!composition) return JSON.stringify({ ...rest, storyboard: durations });
-  const { musicVolume: _volume, subtitles, narration, assets: { music: _music, ...assets }, ...clips } = rest;
-  return JSON.stringify({ ...clips, assets, storyboard: durations, ...(composition.localSubtitles ? {} : { subtitles }),
+  const { musicVolume: _volume, subtitles, captions, narration, assets: { music: _music, ...assets }, ...clips } = rest;
+  return JSON.stringify({ ...clips, assets, storyboard: durations, ...(composition.localSubtitles ? {} : { subtitles, captions }),
     // The voice mode stays; only the twin voice, pace and tone of a narrated job may change.
     narration: composition.narration && narration ? true : narration });
 }
@@ -442,3 +463,4 @@ export function resolveMarketingSegments(draft: MarketingDraft, profile: Marketi
 }
 
 export * from "./source.js";
+export * from "./captions.js";

@@ -112,4 +112,28 @@ describe("composition readiness probe", () => {
       expect(peak(9.5)).toBeLessThan(40);
     } finally { await rm(root, { recursive: true, force: true }); }
   }, 120_000);
+  it.skipIf(!ffmpegInstalled)("times an AI-voiced clip's captions to its own speech, with the saved offset", async ctx => {
+    if (!(await mediaCapabilities()).subtitles) ctx.skip();
+    const root = await mkdtemp(join(tmpdir(), "marketing-ai-captions-"));
+    try {
+      // The clip speaks from 1 s to 3 s of its 5 s.
+      const clip = join(root, "clip.mp4");
+      spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=360x640:r=25:d=5", "-f", "lavfi", "-i", "sine=f=440:sample_rate=48000:d=5",
+        "-af", "volume=enable='lt(t,1)+gt(t,3)':volume=0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", clip]);
+      const segments = [0, 1, 2].map(index => ({ index, script: "欢迎光临", durationSec: 5 }));
+      const draft = MarketingDraftSchema.parse({ durationSec: 15, captions: { shots: [null, { script: "欢迎光临", offsetSec: 0.5 }] } });
+      const result = await composeMarketingVideo({ draft, files: segments.map(() => clip), subtitles: true, speech: true, segments });
+      expect(result.quality).toMatchObject({ subtitles: "burned", captions: 3 });
+      expect(result.captions!.map(cue => cue.shot)).toEqual([0, 1, 2]);
+      expect(result.captions![0].start).toBeCloseTo(0.9, 1);
+      expect(result.captions![0].end).toBeCloseTo(3.5, 1);
+      expect(result.captions![1].start).toBeCloseTo(6.4, 1);
+      expect(result.captions![2].start).toBeCloseTo(10.9, 1);
+      const final = join(root, "final.mp4"); await writeFile(final, result.body);
+      const peak = (at: number) => Number(/YMAX=(\d+)/.exec(spawnSync("ffmpeg", ["-v", "error", "-ss", String(at), "-i", final, "-frames:v", "1",
+        "-vf", "crop=iw:ih*0.2:0:ih*0.65,signalstats,metadata=mode=print:key=lavfi.signalstats.YMAX:file=-", "-f", "null", "-"], { encoding: "utf8" }).stdout)?.[1]);
+      expect(peak(2)).toBeGreaterThan(200);
+      expect(peak(4.5)).toBeLessThan(40);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }, 120_000);
 });

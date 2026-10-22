@@ -51,6 +51,9 @@ try {
   let apiUnavailable = true;
   let failNextReview = false, failNextStoryboard = false, failNextCopyUnknown = false;
   let holdNextSave = false, releaseSave, holdNextCopy = false, releaseCopy;
+  // Whether this host can burn captions in; every new video's captions are burned in locally.
+  let subtitleSupport = true;
+  const savedDraft = (has) => page.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/api/marketing-videos/') && (response.request().postData() ?? '').includes(has));
   const projects = new Map();
   const textOperations = new Map(), uploadedAssets = new Map();
   const script = '欢迎来到转角咖啡店。我们用现磨咖啡迎接每一位客人，明亮的空间适合休息和聊天。你可以选择喜欢的位置，点上一杯手冲咖啡，慢慢享受今天的时光。欢迎来店里坐一坐，发现属于你的咖啡时刻。';
@@ -70,6 +73,7 @@ try {
   const generated = new Map();
   const resultAssets = [{ url: '/static/fixture.mp4', mime: 'video/mp4' }];
   // Local checks of the made video (no model): a black stretch at the start of shot 2.
+  const burnedCaptions = [{ shot: 0, start: 0.2, end: 2.4, text: '欢迎光临' }, { shot: 0, start: 2.4, end: 4.8, text: '一起喝杯咖啡' }];
   const quality = { checked: true, durationSec: 60.02, expectedSec: 60, subtitles: 'model', speech: true, issues: [{ kind: 'black', shot: 1, start: 15, end: 15.8 }] };
   // Like the server, full project reads and saves of a made video offer single shot redo; every fixture clip can be kept.
   const withRevision = (p) => p.rendered && p.status === 'succeeded'
@@ -85,7 +89,7 @@ try {
     if (apiUnavailable && path.startsWith('/api/marketing-videos')) return route.fulfill({ status: 404, contentType: 'text/plain', body: '404 Not Found' });
     // The UI follows the server's clip profile. This fixture keeps Kling's clip limits under a
     // neutral ID with no image dimension limits, so the 1×1 fixture images pass upload checks.
-    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: false, knowledge: true, narration: true, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
+    if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: subtitleSupport, knowledge: true, narration: true, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
     if (path === '/api/marketing-videos/usage') return json({ videoBytes: 50 * 1024 * 1024, materialBytes: 1024 * 1024, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
     if (request.method() === 'DELETE' && /^\/api\/marketing-videos\/[0-9a-f-]{36}$/.test(path)) { projects.delete(path.split('/')[3]); return json({ ok: true, removedBytes: 3 * 1024 * 1024, keptAnalyses: 1 }); }
     if (path === '/api/marketing-videos') {
@@ -174,7 +178,7 @@ try {
         taskState = 'running'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p);
       }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
-      if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'], quality }; }
+      if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'], quality, captions: burnedCaptions }; }
       if (action === 'status') {
         statusPolls++;
         const { id: projectId, version, taskId, status, progress, stage, error, errorCode, output, unknownSegments } = p;
@@ -490,11 +494,16 @@ try {
   await page.getByRole('alert').filter({ hasText: '请先选择数字分身旁白音色。' }).waitFor();
   await page.locator('.mv-narration-voice').getByRole('button', { name: '从数字分身语音库选择', exact: true }).click();
   const narrationPicker = page.getByRole('dialog', { name: '选择旁白音色' });
+  const narrationSaved = savedDraft('已复刻的声音');
   await narrationPicker.locator('.twin-asset').filter({ hasText: '已复刻的声音' }).getByRole('button', { name: '用作旁白音色' }).click();
   assert.equal(await narrationPicker.count(), 0);
   await page.locator('.mv-narration-voice').getByText('已复刻的声音', { exact: true }).waitFor();
   const narrationPanel = page.getByRole('region', { name: '数字分身配音', exact: true });
-  // Narrated captions are burned in locally; without that support the user turns them off.
+  // Captions are burned in locally; on a host without that support the user turns them off.
+  await narrationSaved;
+  subtitleSupport = false;
+  await page.reload(); await chooseAgent('营销影像');
+  await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
   await page.getByRole('alert').filter({ hasText: '当前环境不支持字幕，可关闭字幕后生成。' }).waitFor();
   assert.equal(await page.getByRole('button', { name: '确认分镜并生成视频' }).isDisabled(), true);
   await page.getByLabel('添加字幕', { exact: true }).uncheck();
@@ -511,8 +520,15 @@ try {
   await snap('marketing-video-narration.png');
   await voiceModes.getByRole('button', { name: /^AI 配音/ }).click();
   assert.equal(await page.getByLabel('上传声音样例（2–15 秒）').isVisible(), true);
-  // The video model draws AI-voice captions, so they need no local subtitle support.
+  // AI-voice captions are burned in locally as well, so they need the same support.
+  const captionsSaved = savedDraft('"subtitles":true');
   await page.getByLabel('添加字幕', { exact: true }).check();
+  await page.getByRole('alert').filter({ hasText: '当前环境不支持字幕，可关闭字幕后生成。' }).waitFor();
+  await captionsSaved;
+  subtitleSupport = true;
+  await page.reload(); await chooseAgent('营销影像');
+  await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
+  assert.equal(await page.getByLabel('添加字幕', { exact: true }).isChecked(), true);
   await page.locator('.mv-generate:not([disabled])').waitFor();
   await page.getByRole('button', { name: '确认分镜并生成视频' }).evaluate(button => { button.click(); button.click(); });
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
@@ -545,6 +561,8 @@ try {
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);
   assert.equal(await page.getByRole('button', { name: '发布到抖音', exact: true }).count(), 0);
   assert.equal(await page.getByText('抖音发布权限尚未接入，请下载视频并复制文案发布。', { exact: true }).count(), 1);
+  const srt = await page.getByRole('link', { name: '下载字幕（SRT）', exact: true }).getAttribute('href');
+  assert.equal(decodeURIComponent(srt.split(',').slice(1).join(',')), '1\n00:00:00,200 --> 00:00:02,400\n欢迎光临\n\n2\n00:00:02,400 --> 00:00:04,800\n一起喝杯咖啡\n');
   await page.getByLabel('视频发布标题').fill('欢迎到转角咖啡坐坐');
   await page.getByRole('button', { name: '存草稿到知识库', exact: true }).click();
   await page.getByRole('button', { name: '已存入知识库', exact: true }).waitFor();
@@ -582,6 +600,35 @@ try {
   await page.reload(); await chooseAgent('营销影像');
   await page.locator('.mv-results video').waitFor();
   const composition = page.getByRole('group', { name: '成片设置', exact: true });
+  // Locally burned captions: size, offsets and line breaks change, the words never do.
+  const captionPanel = composition.getByRole('group', { name: '调整字幕', exact: true });
+  await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '大', exact: true }).click();
+  await captionPanel.getByLabel('全片提前或延后（秒）').fill('0.2');
+  await captionPanel.getByText('逐镜调整断行和时间', { exact: true }).click();
+  const firstCaption = captionPanel.getByLabel('第 1 镜字幕', { exact: true });
+  const autoLines = await firstCaption.inputValue();
+  await firstCaption.fill(`${autoLines}多加的字`);
+  await page.getByRole('alert').filter({ hasText: '字幕只能调整断行和标点；要改文字，请修改该镜口播。' }).first().waitFor();
+  assert.equal(await page.getByRole('button', { name: '重新合成成片', exact: true }).isDisabled(), true);
+  await firstCaption.fill(`${autoLines.slice(0, 2)}\n${autoLines.slice(2)}`);
+  await captionPanel.getByLabel('本镜提前或延后（秒）').first().fill('-0.15');
+  await captionPanel.getByRole('button', { name: '恢复自动断行', exact: true }).waitFor();
+  assert.equal(await page.getByRole('alert').filter({ hasText: '字幕只能调整断行和标点' }).count(), 0);
+  await captionPanel.scrollIntoViewIfNeeded(); await snap('marketing-video-captions-zh-light.png');
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await snap('marketing-video-captions-zh-dark.png');
+  await page.evaluate(() => document.documentElement.dataset.theme = 'light');
+  await page.getByRole('button', { name: '重新合成成片', exact: true }).click();
+  await confirmDialog('重新合成成片？', '重新合成');
+  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
+  assert.deepEqual(writes.filter(r => r.path.endsWith('/revise')).at(-1).body.shots, []);
+  const captions = projects.get(p.id).draft.captions;
+  assert.equal(captions.size, 'large'); assert.equal(captions.offsetSec, 0.2);
+  assert.equal(captions.shots[0].script, projects.get(p.id).draft.storyboard[0].script);
+  assert.equal(captions.shots[0].offsetSec, -0.15);
+  assert.deepEqual(captions.shots[0].lines, `${autoLines.slice(0, 2)}\n${autoLines.slice(2)}`.split('\n').map(line => line.trim()).filter(Boolean));
+  taskState = 'succeeded';
+  await page.locator('.mv-results video').waitFor();
   await composition.getByRole('checkbox', { name: '添加字幕' }).uncheck();
   await page.getByRole('button', { name: '撤销修改', exact: true }).waitFor();
   await composition.scrollIntoViewIfNeeded(); await snap('marketing-video-composition-zh-light.png');
@@ -838,7 +885,7 @@ try {
   assert(materialRefreshes.length > 0, 'Expired or failed previews reauthorize through the owned asset API');
   assert(statusPolls > 0, 'progress is polled from the task state endpoint');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []); assert.deepEqual(nativeDialogs, []);
-  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, model subtitles without local subtitle support, twin narration blocked until subtitles are off when local subtitles are unsupported, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, recomposing captions and reworded narrated lines without a redone shot, titles filled and checked after submission, duplicated/new drafts, dark and English responsive layouts.');
+  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, AI-voice and narrated captions blocked until subtitles are off when local subtitles are unsupported, SRT download, adjusting caption size, offsets and line breaks (never words) and recomposing, recomposing captions and reworded narrated lines without a redone shot, titles filled and checked after submission, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {
   console.error({ errors, unexpectedRequests, body: await page?.locator('body').innerText() });
   throw error;

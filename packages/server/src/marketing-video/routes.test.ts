@@ -8,7 +8,7 @@ import { MarketingError } from "./repository.js";
 import type { PgMarketingTextOperations } from "./operations.js";
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
+import { CAPTION_WORDS_CHANGED, MarketingCaptionsSchema, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
 import { createMarketingVideoRoutes } from "./routes.js";
 import type { AgentService } from "../services/agent-service.js";
 import type { PgMarketingProjectStore } from "./repository.js";
@@ -483,7 +483,22 @@ it("validates reference video metadata and sends it with audio disabled", async 
   expect(f.store.reserve).not.toHaveBeenCalled();
   vi.mocked(inspectMedia).mockResolvedValueOnce(info);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
-  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, modelId: "grok-imagine-video-1.5", reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined }), false);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, modelId: "grok-imagine-video-1.5", reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined, local_subtitles: true }), false);
+});
+it("burns the captions of a model-voiced video locally, so it needs a host that can burn them", async () => {
+  const f = fixture();
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ generate_audio: true, local_subtitles: true }), false);
+  expect((f.store.reserve.mock.calls[0] as unknown[])[3]).not.toHaveProperty("narration");
+  vi.mocked(mediaCapabilities).mockResolvedValue({ composition: true, subtitles: false });
+  try {
+    const blocked = fixture();
+    const response = await blocked.call(`/${id}/generate`, { version: 1, retry: false });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: "当前环境不支持字幕，可关闭字幕后生成。" });
+    blocked.project.draft.subtitles = false;
+    expect((await blocked.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+  } finally { vi.mocked(mediaCapabilities).mockResolvedValue({ composition: true, subtitles: true }); }
 });
 
 it("submits new clips with the configured model profile", async () => {
@@ -617,6 +632,19 @@ describe("single shot redo", () => {
     Object.assign(f.store, { revise: vi.fn(async () => "revision") });
     return f as typeof f & { store: typeof f.store & { revise: ReturnType<typeof vi.fn> } };
   }
+  it("composes again with new caption line breaks, but never with changed caption words", async () => {
+    const f = made();
+    f.service.db.getTask.mockResolvedValue({ id: "parent", type: "marketing.video", user_id: "owner", status: "succeeded",
+      input: { projectId: id, draft: f.project.draft, generate_audio: true, local_subtitles: true, marketingInputVersion: 4, modelId: "grok-imagine-video-1.5" } });
+    const caption = (lines: string[]) => ({ shots: [{ script: shots[0].script, lines, offsetSec: 0.2 }] });
+    f.project.draft = { ...f.project.draft, captions: MarketingCaptionsSchema.parse(caption(["欢迎来到", "我们的店铺第1段"])) };
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [] })).status).toBe(202);
+    f.project.draft = { ...f.project.draft, captions: MarketingCaptionsSchema.parse(caption(["欢迎来到", "你们的店铺第1段"])) };
+    const refused = await f.call(`/${id}/revise`, { version: 1, shots: [] });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ error: CAPTION_WORDS_CHANGED });
+    expect(f.store.revise).toHaveBeenCalledOnce();
+  });
   it("submits only the chosen shot and checks quota for its seconds", async () => {
     const f = made();
     const response = await f.call(`/${id}/revise`, { version: 1, shots: [1] });

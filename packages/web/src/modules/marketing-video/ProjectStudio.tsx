@@ -21,7 +21,7 @@ import { useDraftSession, useExclusive, useTaskPolling } from "./session.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { WaitStatus } from "./WaitStatus.js";
 
-/** `subtitles`: captions of twin-narrated videos can be burned in on this server. */
+/** `subtitles`: captions can be burned in on this server; every new video needs it when captioned. */
 type Capabilities = { composition: boolean; subtitles?: boolean; knowledge: boolean; narration?: boolean; model?: MarketingVideoProfile };
 /** Twin narration takes of one saved version of a draft. */
 type Narration = { projectId: string; version: number; clips: MarketingNarrationClip[] };
@@ -590,13 +590,13 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const narrationBlocker = !voiceover ? ""
     : !capabilities?.narration ? "数字分身配音服务未启用，请改用 AI 配音。"
     : !draft.narration?.twinItemId ? "请先选择数字分身旁白音色。"
-    : draft.subtitles && !capabilities?.subtitles ? "当前环境不支持字幕，可关闭字幕后生成。"
     : !hasBoard || plan.error ? ""
     : !currentNarration?.every(clip => clip.status === "succeeded") ? "请先生成全部分镜的数字分身配音并试听。"
     : currentNarration.some((clip, i) => !marketingNarrationFits(clip.durationMs ?? 0, draft.storyboard[i]?.durationSec ?? 15)) ? "有分镜的配音长于镜头时长，请按配音调整分镜时长。" : "";
   const generationBlocker = !ready ? loadError || "正在加载草稿…"
     : unusableMaterial ? "素材已不可用或不支持新生成，请移除或替换。"
-    : marketingReferenceError(draft, profile) || plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "") || narrationBlocker;
+    : marketingReferenceError(draft, profile) || plan.error || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "")
+      || (draft.subtitles && !capabilities?.subtitles ? "当前环境不支持字幕，可关闭字幕后生成。" : "") || narrationBlocker;
   const nextStep = (target: number) => { if (target && !draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(target); };
 
   const audioNotice = marketingStoryboardAudioMismatch(draft) && !frozen && <StoryboardAudioNotice video={!!draft.assets.video} busy={busy || !ready}

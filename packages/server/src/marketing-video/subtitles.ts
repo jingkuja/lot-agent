@@ -1,70 +1,11 @@
-import { speechUnits } from "@lot-agent/core/marketing-video";
+import { captionLayout, speechUnits, type MarketingCaptions } from "@lot-agent/core/marketing-video";
+
+export { captionCells, captionLayout, captionLines } from "@lot-agent/core/marketing-video";
 
 /** One caption line, in seconds from the start of its shot. */
 export interface Cue { start: number; end: number; text: string }
 /** A silent stretch of a narration take, in seconds. */
 export interface Pause { start: number; end: number }
-
-const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
-/** Display width in full-width cells; Latin letters and digits are about half a cell. */
-export function captionCells(text: string) {
-  let cells = 0;
-  for (const char of text) cells += WIDE.test(char) ? 1 : 0.55;
-  return cells;
-}
-
-const ALWAYS_BREAK = /[，。！？；、：…!?;\n]/;
-// Latin , . : break only before a space or the end, so 1,999 and 3.5 stay whole.
-const SOFT_BREAK = /[,.:]/;
-const CLOSING = /[”’」』）》】)"'\]]/;
-const TRAILING = /[，。、；：,.;:\s]+$/;
-
-/** Clauses of the confirmed copy, each with its own punctuation. */
-function clauses(script: string) {
-  const out: string[] = [];
-  const chars = Array.from(script);
-  let current = "";
-  for (let i = 0; i < chars.length; i++) {
-    current += chars[i];
-    const next = chars[i + 1];
-    if (!ALWAYS_BREAK.test(chars[i]) && !(SOFT_BREAK.test(chars[i]) && (next === undefined || /\s/.test(next)))) continue;
-    while (chars[i + 1] && (CLOSING.test(chars[i + 1]) || ALWAYS_BREAK.test(chars[i + 1]))) current += chars[++i];
-    out.push(current); current = "";
-  }
-  out.push(current);
-  return out.filter(clause => clause.replace(TRAILING, "").trim());
-}
-
-/** Splits an over-long clause into near-equal pieces, never inside a Latin word or number. */
-function wrap(clause: string, maxCells: number) {
-  const total = captionCells(clause);
-  if (total <= maxCells) return [clause];
-  const target = total / Math.ceil(total / maxCells);
-  // Latin words and numbers (with their decimal points, separators and units) stay whole.
-  const tokens = clause.match(/[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ.,%'’+\-/]*|\s+|./gu) ?? [];
-  const pieces: string[] = [];
-  let current = "";
-  for (const token of tokens) {
-    if (current.trim() && captionCells(current + token) > target + 0.3) { pieces.push(current); current = ""; }
-    current += token;
-  }
-  pieces.push(current);
-  return pieces.filter(piece => piece.trim());
-}
-
-/** Caption lines of one shot's confirmed copy: split at punctuation, short clauses joined,
- * long ones wrapped to `maxCells`. The words are the copy's own; only line-final
- * commas and full stops are dropped, as is usual for subtitles. */
-export function captionLines(script: string, maxCells: number) {
-  const merged: string[] = [];
-  for (const clause of clauses(script)) {
-    const last = merged.at(-1);
-    if (last !== undefined && (captionCells(last.replace(TRAILING, "")) < 4 || captionCells(clause.replace(TRAILING, "")) < 3)
-      && captionCells((last + clause).replace(TRAILING, "")) <= maxCells) merged[merged.length - 1] = last + clause;
-    else merged.push(clause);
-  }
-  return merged.flatMap(clause => wrap(clause, maxCells)).map(line => line.replace(TRAILING, "").trim()).filter(Boolean);
-}
 
 /** Times one shot's lines against its narration take. Speech spans the take minus its
  * leading and trailing silence; line breaks fall in proportion to the spoken text and
@@ -106,11 +47,15 @@ export function timeCaptions(lines: string[], voiceSec: number, shotSec: number,
   return lines.map((text, index) => ({ start: starts[index], end: index + 1 < lines.length ? starts[index + 1] : last, text }));
 }
 
-/** Caption box of a frame size: font size, line width and bottom margin. Vertical videos
- * keep captions above the area that short-video apps cover with their own controls. */
-export function captionLayout(width: number, height: number) {
-  const fontSize = Math.round(Math.min(width, height) * 0.055);
-  return { fontSize, maxCells: Math.floor(width * 0.8 / fontSize), marginV: Math.round(height * (height > width ? 0.16 : 0.08)) };
+/** Moves a shot's cues by `offset` seconds, as far as the shot allows: the first line keeps at
+ * least `min` seconds after the start and the last one before the end, so no line is lost. */
+export function offsetCues(cues: Cue[], offset: number, shotSec: number, min = 0.3): Cue[] {
+  if (!offset || !cues.length) return cues;
+  const limit = shotSec - 0.05;
+  const shift = Math.min(Math.max(offset, min - cues[0].end), limit - min - cues.at(-1)!.start);
+  if ((offset < 0 && shift > 0) || (offset > 0 && shift < 0)) return cues;
+  const at = (sec: number) => Math.min(limit, Math.max(0, sec + shift));
+  return cues.map(cue => ({ ...cue, start: at(cue.start), end: at(cue.end) }));
 }
 
 const assTime = (sec: number) => {
@@ -122,8 +67,8 @@ const assText = (text: string) => text.replace(/\\/g, "＼").replace(/\{/g, "｛
 
 /** An ASS script for one shot at the composed frame size. The font must exist on the host;
  * the Docker image installs Noto CJK (MARKETING_SUBTITLE_FONT overrides the family). */
-export function captionAss(cues: Cue[], width: number, height: number) {
-  const { fontSize, marginV } = captionLayout(width, height);
+export function captionAss(cues: Cue[], width: number, height: number, style?: Pick<MarketingCaptions, "size" | "position">) {
+  const { fontSize, marginV } = captionLayout(width, height, style);
   const font = (process.env.MARKETING_SUBTITLE_FONT || "Noto Sans CJK SC").replace(/[,\r\n]/g, " ");
   const outline = Math.max(2, Math.round(fontSize * 0.08));
   const side = Math.round(width * 0.06);

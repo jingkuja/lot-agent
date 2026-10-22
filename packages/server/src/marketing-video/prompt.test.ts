@@ -77,9 +77,19 @@ describe("marketing model subtitle instructions", () => {
     expect(prompt).not.toContain("Presenter in EVERY shot");
     expect(marketingSegmentPrompt({ ...draft, assets: { video: id } }, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2)).toContain("Silent demonstration, no lip-sync");
   });
-  it.each(["欢迎来到咖啡店。", "Welcome to our coffee shop."])("requests matching subtitles for each shot: %s", (script) => {
+  it("asks AI-voiced clips for speech without any text: captions are burned in afterwards", () => {
+    const draft = MarketingDraftSchema.parse({ script: "欢迎来到咖啡店。其他片段。", subtitles: true });
+    const prompt = marketingSegmentPrompt(draft, { index: 1, script: "欢迎来到咖啡店。", durationSec: 15 }, 4);
+    expect(prompt).toContain("Narrate ONLY confirmedShot.script verbatim");
+    expect(prompt).toContain("Do not add any on-screen text, captions or subtitles; captions are added after generation.");
+    expect(prompt).toContain("Keep faces and key product details out of the bottom fifth of the frame.");
+    expect(prompt).not.toContain("subtitles matching ONLY this shot's narration verbatim");
+    expect(prompt).not.toContain("Consistent captions near bottom safe margins");
+  });
+  // Jobs submitted before local captions keep model-drawn captions on recovery and shot redo.
+  it.each(["欢迎来到咖啡店。", "Welcome to our coffee shop."])("requests matching subtitles for each shot of an older job: %s", (script) => {
     const draft = MarketingDraftSchema.parse({ script: `${script}其他片段。`, subtitles: true });
-    const prompt = marketingSegmentPrompt(draft, { index: 1, script, durationSec: 15 }, 4);
+    const prompt = marketingSegmentPrompt(draft, { index: 1, script, durationSec: 15 }, 4, undefined, undefined, false);
     expect(prompt).toContain("Create shot 2 of 4");
     expect(prompt).toContain("Narrate ONLY confirmedShot.script verbatim");
     expect(shotData(prompt).script).toBe(script);
@@ -166,7 +176,8 @@ it("uses reference video for silent visuals without requesting voice synthesis",
   expect(prompt).toContain("Use video 1 as a reference");
   expect(prompt).toContain("Do not generate speech or audio");
   expect(prompt).toContain("Silent demonstration, no lip-sync");
-  expect(prompt).toContain("no speech synchronization is needed");
+  expect(prompt).toContain("captions are added after generation");
+  expect(marketingSegmentPrompt(draft, { index: 0, script: "Hello", durationSec: 5 }, 1, undefined, undefined, false)).toContain("no speech synchronization is needed");
   expect(prompt).not.toContain("Use audio 1");
   expect(prompt).not.toContain("Use the supplied custom voice");
   expect(prompt).not.toContain("Narrate ONLY");

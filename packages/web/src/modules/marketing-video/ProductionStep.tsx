@@ -93,7 +93,7 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
         <label className="mv-label">{t("音色参考（选填）")}</label>
         <button className="mv-soft" disabled={busy || frozen || !ready} onClick={onPickVoice}>{t("从数字分身语音库选择")}</button>
         <MaterialField form={form} slot="voice" label="上传声音样例（2–15 秒）" accept="audio/mpeg,audio/wav" handlers={handlers} />
-        <p className="mv-hint">{t("留空时按所选旁白风格由模型配音。声音样例只作音色参考，成片声音与原声相近但不相同；配音和字幕均由模型生成，发布前请试听成片。")}</p>
+        <p className="mv-hint">{t("留空时按所选旁白风格由模型配音。声音样例只作音色参考，成片声音与原声相近但不相同，也不保证逐字照念。字幕按确认文案在合成时加入，并按人声停顿切换，成片后可以调整；发布前请试听成片。")}</p>
       </>}
     </>}
     <MaterialField form={form} slot="music" label="选择背景音乐（选填）" accept="audio/mpeg,audio/wav,audio/mp4" handlers={handlers} />

@@ -1,16 +1,19 @@
 import type { ReactNode } from "react";
-import type { MarketingComposition, MarketingProject, MarketingQualityReport, MarketingShot } from "@lot-agent/core/marketing-video";
+import { marketingCaptionSrt, type MarketingCaption, type MarketingComposition, type MarketingProject, type MarketingQualityReport, type MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { ShotRevision } from "./ShotRevision.js";
 import { TaskStatus } from "./TaskStatus.js";
 import { DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 import { NarrationSettings } from "./ProductionStep.js";
+import { CaptionSettings } from "./CaptionSettings.js";
 
 /** Settings only the local composition of a made video uses. Changing them composes the kept
  * clips again, without the video model. */
-function CompositionSettings({ form, composition, handlers, onPickNarrationVoice }: {
+function CompositionSettings({ form, composition, captions, handlers, onPickNarrationVoice }: {
   form: DraftForm; composition: MarketingComposition; handlers: MaterialHandlers; onPickNarrationVoice(): void;
+  /** Cues burned into the current video, shown beside each shot's captions. */
+  captions?: MarketingCaption[];
 }) {
   const { t } = useI18n();
   // The video's other settings stay frozen; the server accepts only these and shot text.
@@ -26,6 +29,8 @@ function CompositionSettings({ form, composition, handlers, onPickNarrationVoice
     <MaterialField form={open} slot="music" label="选择背景音乐（选填）" accept="audio/mpeg,audio/wav,audio/mp4" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
     {composition.localSubtitles && <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label>}
+    {composition.localSubtitles && draft.subtitles && <CaptionSettings form={open} captions={captions} />}
+    {!composition.localSubtitles && draft.subtitles && <p className="mv-hint">{t("这条视频的字幕由视频模型画在画面里，不能单独调整；复制为新草稿重新制作后，字幕改为合成时加入，可以调整。")}</p>}
   </div>;
 }
 
@@ -70,7 +75,9 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
   return <section className="mv-card mv-results">
     <div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => onCopyDraft(0)}>{t("复制为新草稿")}</button></div>
     {result
-      ? <><video className="mv-result-video" controls src={result.url} /><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
+      ? <><video className="mv-result-video" controls src={result.url} />
+        <div className="mv-downloads"><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
+          {!!project.output?.captions?.length && <a className="mv-download" href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(project.output.captions))}`} download="captions.srt">{t("下载字幕（SRT）")}</a>}</div>
         {project.output?.quality && <QualityReport quality={project.output.quality} redo={!!project.revision} />}</>
       : <TaskStatus project={project} busy={busy} onResume={onResume} onCancel={onCancel} onCopy={onCopyDraft} onRelease={onRelease} />}
     <div className="mv-publication">
@@ -86,7 +93,7 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
       {!knowledge && <p className="mv-hint">{t("知识库尚未启用。")}</p>}
     </div>
     <details className="mv-script-review" open><summary>{t(project.revision ? "修改成片" : "查看制作分镜")}</summary>
-      {project.revision && <CompositionSettings form={form} composition={project.revision.composition} handlers={handlers} onPickNarrationVoice={onPickNarrationVoice} />}
+      {project.revision && <CompositionSettings form={form} composition={project.revision.composition} captions={project.output?.captions} handlers={handlers} onPickNarrationVoice={onPickNarrationVoice} />}
       {draft.continuity && <p className="mv-hint">{t("统一人物与场景设定")}：{draft.continuity}</p>}
       {project.revision ? <ShotRevision key={project.taskId} project={project} revision={project.revision} draft={draft} busy={busy} saving={saving} reviewPanel={reviewPanel}
           onChange={onShots} onRevert={onRevertShots} onRevise={onRevise} />

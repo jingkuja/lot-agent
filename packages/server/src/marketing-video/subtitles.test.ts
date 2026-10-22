@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captionAss, captionLayout, captionLines, timeCaptions } from "./subtitles.js";
+import { captionAss, captionLayout, captionLines, offsetCues, timeCaptions } from "./subtitles.js";
 
 describe("caption lines", () => {
   it("splits the confirmed copy at punctuation and keeps its words", () => {
@@ -37,9 +37,29 @@ describe("caption timing", () => {
   });
 });
 
+describe("caption offset", () => {
+  const cues = [{ start: 0.2, end: 1.5, text: "一" }, { start: 1.5, end: 3, text: "二" }, { start: 3, end: 4.2, text: "三" }];
+  it("moves every line by the offset and keeps the gaps between them", () => {
+    offsetCues(cues, 0.4, 6).flatMap(cue => [cue.start, cue.end]).forEach((at, i) => expect(at).toBeCloseTo([0.6, 1.9, 1.9, 3.4, 3.4, 4.6][i]));
+    expect(offsetCues(cues, 0, 6)).toBe(cues);
+  });
+  // The film's and the shot's offsets add up to at most two seconds.
+  it("stops where the first or last line would be squeezed out of the shot", () => {
+    const early = offsetCues(cues, -2, 6);
+    expect(early[0].start).toBe(0);
+    expect(early[0].end).toBeCloseTo(0.3);
+    const late = offsetCues(cues, 2, 4.5);
+    expect(late.at(-1)!.start).toBeCloseTo(4.15);
+    expect(late.at(-1)!.end).toBeCloseTo(4.45);
+    for (const moved of [early, late]) for (let i = 1; i < moved.length; i++) expect(moved[i].start).toBeCloseTo(moved[i - 1].end);
+  });
+});
+
 describe("ASS script", () => {
   it("lays captions out for the frame and shows ASS control characters as text", () => {
     expect(captionLayout(720, 1280)).toEqual({ fontSize: 40, maxCells: 14, marginV: 205 });
+    expect(captionLayout(720, 1280, { size: "large", position: "high" })).toEqual({ fontSize: 49, maxCells: 11, marginV: 307 });
+    expect(captionLayout(1280, 720, { size: "small", position: "low" })).toEqual({ fontSize: 32, maxCells: 32, marginV: 36 });
     const ass = captionAss([{ start: 0, end: 61.234, text: "{\\b1}价格" }], 720, 1280);
     expect(ass).toContain("PlayResX: 720\nPlayResY: 1280");
     expect(ass).toContain("Dialogue: 0,0:00:00.00,0:01:01.23,Default,,0,0,0,,｛＼b1｝价格");

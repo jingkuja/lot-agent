@@ -7,7 +7,7 @@ import { invalidTextResult, parseOperationResult, parseTextResult } from "./text
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { estimateCost } from "@lot-agent/core";
-import { isMarketingDurationValid, MARKETING_INPUT_VERSION, marketingJobProfile, marketingNativeSpeech, marketingVideoProfile, marketingVoiceover, type MarketingProject, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, marketingReferenceImageIssue, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { CAPTION_WORDS_CHANGED, isMarketingDurationValid, marketingCaptionErrors, MARKETING_INPUT_VERSION, marketingJobProfile, marketingNativeSpeech, marketingVideoProfile, marketingVoiceover, type MarketingProject, marketingReferenceError, marketingShotMaxSeconds, capMarketingStoryboard, marketingAssetIds, marketingReferenceImageIssue, MarketingDraftSchema, resolveMarketingSegments, planMarketingSegments, type MarketingDraft, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
@@ -411,8 +411,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     const capabilities = await mediaCapabilities();
     if (!capabilities.composition) throw new MarketingError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
-    // Twin-narrated clips carry no text; their captions are burned in at composition.
-    if ((p.taskId ? originalLocalSubtitles : marketingVoiceover(draft)) && draft.subtitles && !capabilities.subtitles) {
+    // New clips carry no text; their captions are burned in at composition.
+    if ((p.taskId ? originalLocalSubtitles : true) && draft.subtitles && !capabilities.subtitles) {
       throw new MarketingError(p.taskId ? SUBTITLES_UNAVAILABLE : "当前环境不支持字幕，可关闭字幕后生成。", 503);
     }
     // A new video submits the still made for its current look, if any.
@@ -420,7 +420,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     let planned;
     try {
       planned = p.taskId ? segments.map((segment, index) => ({ index, script: segment.script, durationSec: Number(segment.duration_sec) })) : resolveMarketingSegments(draft, profile);
-      if (!p.taskId) planned.forEach(segment => marketingSegmentPrompt(draft, segment, planned.length, undefined, profile, undefined, !!keyArt));
+      if (!p.taskId) {
+        planned.forEach(segment => marketingSegmentPrompt(draft, segment, planned.length, undefined, profile, true, !!keyArt));
+        if (marketingCaptionErrors(draft).length) throw new Error(CAPTION_WORDS_CHANGED);
+      }
       else segments.forEach((segment, index) => {
         if (segmentRecoveryAction(segment) === "submit") marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: Number(segment.duration_sec) }, segments.length, originalAudio, profile, originalLocalSubtitles, originalKeyArt);
       });
@@ -449,7 +452,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       reference_video: assets.video ? [assets.video.url] : undefined,
       generate_audio: marketingNativeSpeech(p.draft),
       reference_audio: marketingNativeSpeech(p.draft) && assets.voice ? [assets.voice.url] : undefined,
-      ...(narration ? { narration, local_subtitles: true } : {}),
+      ...(narration ? { narration } : {}), local_subtitles: true,
       requireUserModelKey: process.env.DEBUG !== "1" };
     const taskId = await store.reserve(owner, p.id, body.version, input, body.retry);
     try { await (service.jobQueue as BullmqJobQueue).deliverPersisted(taskId, "marketing.video"); }
@@ -481,6 +484,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
         if (!plan[slot]) throw new Error("请重新选择需要重新生成的镜头。");
         marketingSegmentPrompt(p.draft, plan[slot], plan.length, frozen.generate_audio !== false, profile, frozen.local_subtitles === true, typeof frozen.key_art === "string");
       }
+      if (frozen.local_subtitles === true && marketingCaptionErrors(p.draft).length) throw new Error(CAPTION_WORDS_CHANGED);
     } catch (error) { throw new MarketingError((error as Error).message); }
     const referenceError = marketingReferenceError(p.draft, profile);
     if (referenceError) throw new MarketingError(referenceError);

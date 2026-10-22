@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { marketingRenderKey, marketingReviewText, marketingShotNeedsClip, marketingVideoProfile, resolveMarketingSegments, type MarketingDraft, type MarketingProject, type MarketingShot } from "@lot-agent/core/marketing-video";
+import { CAPTION_WORDS_CHANGED, marketingCaptionErrors, marketingRenderKey, marketingReviewText, marketingShotNeedsClip, marketingVideoProfile, resolveMarketingSegments, type MarketingDraft, type MarketingProject, type MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { useConfirm } from "./ConfirmDialog.js";
@@ -36,6 +36,7 @@ export function ShotRevision({ project, revision, draft, busy, saving, reviewPan
   let planError = "";
   try { if (profile) resolveMarketingSegments(draft, profile); }
   catch (error) { planError = error instanceof Error ? error.message : ""; }
+  if (!planError && composition.localSubtitles && draft.subtitles && marketingCaptionErrors(draft).length) planError = CAPTION_WORDS_CHANGED;
   const toggle = (index: number) => setPicked(old => old.includes(index) ? old.filter(value => value !== index) : [...old, index]);
   const submit = async () => {
     const message = [shots.length ? "将重新生成第 {0} 镜，共 {1} 秒，按视频模型计费；其余 {2} 个镜头沿用已生成的片段，不再计费。" : "将沿用全部已生成的片段重新合成成片，不调用视频模型。",

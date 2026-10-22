@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep, join } from "node:path";
-import { isMarketingDurationValid, type MarketingDraft, type MarketingQualityIssue, type MarketingQualityReport, type MarketingSegment } from "@lot-agent/core/marketing-video";
-import { captionAss, captionLayout, captionLines, timeCaptions, type Pause } from "./subtitles.js";
+import { isMarketingDurationValid, marketingCaptionLines, marketingCaptionOffset, marketingFrameSize, type MarketingCaption, type MarketingDraft, type MarketingQualityIssue, type MarketingQualityReport, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { captionAss, captionLayout, offsetCues, timeCaptions, type Pause } from "./subtitles.js";
 
 export function mediaProcess(binary: string, args: string[], opts: { signal?: AbortSignal; cwd?: string; timeoutMs?: number } = {}): Promise<string> {
   opts.signal?.throwIfAborted();
@@ -30,7 +30,7 @@ export const ffprobe = () => process.env.MARKETING_FFPROBE_PATH || "ffprobe";
 // Everything composeMarketingVideo needs: H.264/AAC encoders and its filters.
 const REQUIRED_ENCODERS = ["libx264", "aac"];
 const REQUIRED_FILTERS = ["scale", "pad", "setsar", "fps", "aresample", "apad", "anullsrc", "amix", "volume", "asplit", "color"];
-// Local captions for twin narration: libass rendering and pause detection.
+// Local captions: libass rendering and pause detection.
 const SUBTITLE_FILTERS = ["subtitles", "silencedetect", "ametadata"];
 export const SUBTITLES_UNAVAILABLE = "视频合成工具不支持字幕烧录，请配置带 libass 的 FFmpeg 和中文字体。";
 const PROBE_TTL_MS = 10 * 60_000;
@@ -123,10 +123,11 @@ export async function inspectMedia(path: string, signal?: AbortSignal) {
   const [fpsNumerator, fpsDenominator = "1"] = String(video?.avg_frame_rate ?? "0/1").split("/");
   return { width: Number(video?.width ?? 0), height: Number(video?.height ?? 0), fps: Number(fpsNumerator) / Number(fpsDenominator), format, duration, audio: value.streams?.some((s: { codec_type: string }) => s.codec_type === "audio"), video: value.streams?.some((s: { codec_type: string }) => s.codec_type === "video") };
 }
-/** Silent stretches of a narration take, from FFmpeg's silencedetect. */
+/** Silent stretches of a narration take or a clip's own voice, from FFmpeg's silencedetect.
+ * Only the first `durationSec` seconds are read. */
 export async function narrationPauses(path: string, format: string, durationSec: number, signal?: AbortSignal): Promise<Pause[]> {
-  const output = await mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", format, "-i", path,
-    "-af", "silencedetect=noise=-35dB:d=0.12,ametadata=mode=print:file=-", "-f", "null", "-"], { signal, timeoutMs: 30_000 });
+  const output = await mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", format, "-t", String(durationSec), "-i", path,
+    "-vn", "-af", "silencedetect=noise=-35dB:d=0.12,ametadata=mode=print:file=-", "-f", "null", "-"], { signal, timeoutMs: 30_000 });
   const pauses: Pause[] = [];
   let start: number | undefined;
   for (const line of output.split("\n")) {
@@ -188,44 +189,53 @@ export async function inspectFilmQuality(path: string, durations: number[], spee
 }
 
 /** `narration`, when given, holds one audio file per clip that replaces the clip's own track.
- * `subtitles` burns each shot's confirmed copy as captions timed to its narration take;
- * the clips must be free of model-drawn text. `speech`: the film should be voiced, so long
+ * `subtitles` burns each shot's confirmed copy as captions, with the line breaks, offsets and
+ * style of `draft.captions`; the clips must be free of model-drawn text. Captions are timed to
+ * the narration take, else to the clip's own voice (AI voice), else spread over the shot. `speech`: the film should be voiced, so long
  * silences are reported; a reference-video film is silent by design. */
 export async function composeMarketingVideo(input: { files: string[]; segments: MarketingSegment[]; draft: MarketingDraft; music?: string; narration?: string[]; subtitles?: boolean; speech?: boolean; signal?: AbortSignal }) {
   const durationSec = input.segments.reduce((sum, segment) => sum + segment.durationSec, 0);
-  if (!input.segments.length || input.segments.length > 15 || input.files.length !== input.segments.length || (input.narration && input.narration.length !== input.files.length) || (input.subtitles && !input.narration)
+  if (!input.segments.length || input.segments.length > 15 || input.files.length !== input.segments.length || (input.narration && input.narration.length !== input.files.length)
     || input.segments.some((segment, index) => segment.index !== index || !Number.isInteger(segment.durationSec) || segment.durationSec < 4 || segment.durationSec > 15)
     || !isMarketingDurationValid(input.draft.durationSec, durationSec)) throw new Error("视频分段配置不完整");
   const folder = await mkdtemp(join(tmpdir(), "lot-marketing-"));
   try {
-    const edge = input.draft.quality === "1080p" ? 1080 : 720;
-    const [rw, rh] = input.draft.ratio.split(":").map(Number);
-    const width = Math.round(edge * rw / Math.min(rw, rh) / 2) * 2;
-    const height = Math.round(edge * rh / Math.min(rw, rh) / 2) * 2;
-    let captionCount = 0;
+    const { width, height } = marketingFrameSize(input.draft);
+    const captions: MarketingCaption[] = [];
+    let shotStart = 0;
     for (let i = 0; i < input.files.length; i++) {
       const info = await inspectMedia(input.files[i], input.signal);
       const duration = input.segments[i].durationSec;
       if (!info.video || info.duration < duration - 0.25) throw new Error("生成片段时长不足，请重新生成该片段。");
       const args = ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", info.format, "-i", input.files[i]];
       let audio = info.audio ? "0:a:0" : "1:a:0";
-      let captions = "";
+      let captionFilter = "";
+      // What the captions are timed to: the take, the clip's own voice, or nothing (silent).
+      let speech: { path: string; format: string; sec: number } | undefined;
       if (input.narration) {
         const voice = await inspectMedia(input.narration[i], input.signal);
         // Never cut a confirmed line short: the clip must outlast it.
         if (!voice.audio || voice.video || voice.duration > duration - 0.1) throw new Error("配音与镜头时长不一致，请重新生成配音。");
         args.push("-protocol_whitelist", "file,pipe", "-f", voice.format, "-i", input.narration[i]);
         audio = "1:a:0";
-        if (input.subtitles) {
-          // Burned while the clip is re-encoded anyway; the file name is fixed, never user text.
-          const lines = captionLines(input.segments[i].script, captionLayout(width, height).maxCells);
-          const cues = timeCaptions(lines, voice.duration, duration, await narrationPauses(input.narration[i], voice.format, voice.duration, input.signal));
-          await writeFile(join(folder, `${i}.ass`), captionAss(cues, width, height));
-          captionCount += cues.length;
-          captions = `,subtitles=filename=${i}.ass`;
-        }
+        speech = { path: input.narration[i], format: voice.format, sec: voice.duration };
       } else if (!info.audio) args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
-      args.push("-map", "0:v:0", "-map", audio, "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25${captions}`, "-af", "aresample=48000,apad", "-t", String(duration), "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`);
+      else if (input.speech) speech = { path: input.files[i], format: info.format, sec: Math.min(info.duration, duration) };
+      if (input.subtitles) {
+        // Burned while the clip is re-encoded anyway; the file name is fixed, never user text.
+        const { script } = input.segments[i];
+        const lines = marketingCaptionLines(input.draft, i, script, captionLayout(width, height, input.draft.captions).maxCells);
+        const timed = speech
+          ? timeCaptions(lines, speech.sec, duration, await narrationPauses(speech.path, speech.format, speech.sec, input.signal))
+          : timeCaptions(lines, duration, duration);
+        const cues = offsetCues(timed, marketingCaptionOffset(input.draft, i, script), duration);
+        await writeFile(join(folder, `${i}.ass`), captionAss(cues, width, height, input.draft.captions));
+        const at = (sec: number) => Math.round((shotStart + sec) * 100) / 100;
+        captions.push(...cues.map(cue => ({ shot: i, start: at(cue.start), end: at(cue.end), text: cue.text })));
+        captionFilter = `,subtitles=filename=${i}.ass`;
+      }
+      shotStart += duration;
+      args.push("-map", "0:v:0", "-map", audio, "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25${captionFilter}`, "-af", "aresample=48000,apad", "-t", String(duration), "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`);
       await mediaProcess(ffmpeg(), args, { signal: input.signal, cwd: folder });
     }
     await writeFile(join(folder, "clips.txt"), input.files.map((_, i) => `file '${i}.mp4'`).join("\n"));
@@ -246,7 +256,7 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
       if (!music.audio) throw new Error("背景音乐不含音轨");
       args.push("-stream_loop", "-1", "-protocol_whitelist", "file,pipe", "-f", music.format, "-i", input.music, "-filter_complex", `[1:a]volume=${input.draft.musicVolume}[bgm];[0:a][bgm]amix=inputs=2:duration=first:normalize=0[a]`, "-map", "0:v:0", "-map", "[a]");
     }
-    // Captions are burned into the shots above, or drawn by the video model.
+    // Captions are burned into the shots above, or drawn by the video model (older jobs).
     args.push("-c:v", "copy");
     args.push("-c:a", "aac", "-t", String(durationSec), "-threads", "2", "-movflags", "+faststart", "final.mp4");
     await mediaProcess(ffmpeg(), args, { cwd: folder, signal: input.signal });
@@ -255,7 +265,7 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
     if (Math.abs(info.duration - durationSec) > 0.3) throw new Error("成片时长校验失败");
     if ((await stat(output)).size > 200 * 1024 * 1024) throw new Error("成片超过知识库存储限制，请降低清晰度。");
     const quality: MarketingQualityReport = { checked: !!issues, durationSec: Math.round(info.duration * 100) / 100, expectedSec: durationSec,
-      subtitles: input.subtitles ? "burned" : input.draft.subtitles ? "model" : "off", ...(input.subtitles ? { captions: captionCount } : {}), speech, issues: issues ?? [] };
-    return { body: await readFile(output), durationSec: info.duration, width, height, quality };
+      subtitles: input.subtitles ? "burned" : input.draft.subtitles ? "model" : "off", ...(input.subtitles ? { captions: captions.length } : {}), speech, issues: issues ?? [] };
+    return { body: await readFile(output), durationSec: info.duration, width, height, quality, ...(input.subtitles ? { captions } : {}) };
   } finally { await rm(folder, { recursive: true, force: true }); }
 }

@@ -82,10 +82,10 @@ export function marketingPresenterRequirement(draft: MarketingDraft, generateAud
 }
 
 /** Builds one clip request; the profile's prompt cap bounds every paid request. */
-/** `localSubtitles`: captions are burned in after generation (twin narration), so the clip
+/** `localSubtitles`: captions are burned in after generation (every new job), so the clip
  * must carry no text. `keyArt`: the job submits a key-art still after the chosen images.
  * Frozen jobs pass the values they were submitted with. */
-export function marketingSegmentPrompt(draft: MarketingDraft, segment: MarketingSegment, count: number, generateAudio = marketingNativeSpeech(draft), profile: MarketingVideoProfile = activeMarketingVideoProfile(), localSubtitles = marketingVoiceover(draft), keyArt = false): string {
+export function marketingSegmentPrompt(draft: MarketingDraft, segment: MarketingSegment, count: number, generateAudio = marketingNativeSpeech(draft), profile: MarketingVideoProfile = activeMarketingVideoProfile(), localSubtitles = true, keyArt = false): string {
   const shot = draft.storyboard?.[segment.index];
   const voiceover = !generateAudio && marketingVoiceover(draft);
   const images = marketingImageReferences(draft, keyArt ? "key-art" : undefined);
