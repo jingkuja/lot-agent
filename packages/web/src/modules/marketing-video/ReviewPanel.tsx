@@ -10,7 +10,7 @@ const fieldLimits = { script: 2000, publishTitle: 100, tags: 160, background: 60
 const sourceLabels = { "risk-table": "风险词规则表", douyin: "抖音社区规则", xiaohongshu: "小红书社区规则" };
 
 function ReviewIssue({ issue, draft, busy, onApply }: {
-  issue: MarketingReviewIssue; draft: MarketingDraft; busy: boolean; onApply: (draft: MarketingDraft) => Promise<void>;
+  issue: MarketingReviewIssue; draft: MarketingDraft; busy: boolean; onApply: (draft: MarketingDraft) => void;
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
@@ -29,9 +29,9 @@ function ReviewIssue({ issue, draft, busy, onApply }: {
     {editing ? <div className="mv-review-edit">
       <label className="mv-field"><span>{t("修改内容")} · {location}</span><textarea autoFocus rows={4} maxLength={issue.field ? fieldLimits[issue.field] : 2000} value={value} disabled={busy} onChange={event => setValue(event.target.value)} /></label>
       {issue.field === "script" && !!draft.storyboard.length && <p className="mv-hint">{t("修改整篇口播文案后需要重新生成分镜。")}</p>}
-      <div className="mv-review-actions"><button disabled={busy || !edited} onClick={() => { if (edited) void onApply(edited); }}>{t("保存修改并重新检查")}</button><button disabled={busy} onClick={() => setEditing(false)}>{t("取消")}</button></div>
+      <div className="mv-review-actions"><button disabled={busy || !edited} onClick={() => { if (edited) onApply(edited); }}>{t("保存修改")}</button><button disabled={busy} onClick={() => setEditing(false)}>{t("取消")}</button></div>
     </div> : <div className="mv-review-actions">
-      <button disabled={busy || !suggested} onClick={() => { if (suggested) void onApply(suggested); }}>{t("一键修改")}</button>
+      <button disabled={busy || !suggested} onClick={() => { if (suggested) onApply(suggested); }}>{t("一键修改")}</button>
       <button disabled={busy || original === null} onClick={() => { setValue(original ?? ""); setEditing(true); }}>{t("自己修改")}</button>
     </div>}
     {original === null && <p className="mv-hint">{t("无法准确定位此条内容，请在正文或分镜中修改后重新检查。")}</p>}
@@ -39,12 +39,16 @@ function ReviewIssue({ issue, draft, busy, onApply }: {
   </article>;
 }
 
-export function ReviewPanel({ review, draft, busy, onApply }: {
-  review: MarketingReview; draft: MarketingDraft; busy: boolean; onApply: (draft: MarketingDraft) => Promise<void>;
+/** Fixes only change the draft. A `stale` check is the last one before those edits: it lists the
+ * findings whose excerpt is still there until the user checks again. */
+export function ReviewPanel({ review, draft, busy, onApply, stale = false }: {
+  review: MarketingReview; draft: MarketingDraft; busy: boolean; onApply: (draft: MarketingDraft) => void; stale?: boolean;
 }) {
   const { t } = useI18n();
-  return <div className={`mv-review mv-review-${review.verdict}`}>
-    <strong role="status">{t(({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
-    {review.issues.map((issue, index) => <ReviewIssue key={`${issue.field}:${issue.shotIndex}:${index}:${issue.text}`} issue={issue} draft={draft} busy={busy} onApply={onApply} />)}
+  const issues = stale ? review.issues.filter(issue => marketingReviewFieldText(draft, issue)?.includes(issue.text)) : review.issues;
+  const verdict = !stale ? review.verdict : issues.some(issue => issue.severity === "reject") ? "reject" : issues.length ? "suspect" : "";
+  return <div className={`mv-review${verdict ? ` mv-review-${verdict}` : ""}`}>
+    <strong role="status">{t(stale ? "内容已修改，请点击“检查当前文案”重新检查。" : ({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
+    {issues.map((issue, index) => <ReviewIssue key={`${issue.field}:${issue.shotIndex}:${index}:${issue.text}`} issue={issue} draft={draft} busy={busy} onApply={onApply} />)}
   </div>;
 }

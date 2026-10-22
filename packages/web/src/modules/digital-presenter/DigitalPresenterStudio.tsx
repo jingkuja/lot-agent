@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { planPresenterSegments, presenterMaterialBlocker, presenterSpeechBlocker, presenterTakesIssue, PresenterDraftSchema, type PresenterDraft, type PresenterTake, type PresenterTaskState } from "@lot-agent/core/digital-presenter";
+import { planPresenterSegments, presenterMaterialBlocker, presenterSpeechBlocker, presenterTakesIssue, PresenterDraftSchema, type PresenterDraft, type PresenterReview, type PresenterTake, type PresenterTaskState } from "@lot-agent/core/digital-presenter";
 import { api } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
@@ -44,6 +44,9 @@ export function DigitalPresenterStudio({ ownerId, onDraftChange }: { ownerId?: s
   const projectRef = useRef(project); projectRef.current = project;
   const idRef = useRef<string>(crypto.randomUUID());
   const dirty = snapshot(draft) !== saved;
+  // The last check of this draft stays visible after edits, so its findings can be fixed one by one.
+  const [lastReview, setLastReview] = useState<{ id: string; review: PresenterReview } | null>(null);
+  useEffect(() => { if (!dirty && project?.review) setLastReview({ id: project.id, review: project.review }); }, [dirty, project?.id, project?.review]);
   const busy = exclusive.busy || !ready;
   const locked = busy || !!project?.taskId;
   useEffect(() => { onDraftChange?.(dirty); }, [dirty]);
@@ -130,10 +133,11 @@ export function DigitalPresenterStudio({ ownerId, onDraftChange }: { ownerId?: s
     const p = await save();
     apply(await presenterApi.review(p.id, p.version, locale), true);
   }
-  /** A fix from the check: the takes of the old text no longer apply, so they are reloaded for the new one. */
+  /** A fix from the check only saves the script; the user checks again when ready. The takes of
+   * the old text no longer apply, so they are reloaded for the new one. */
   async function applyScript(script: string) {
     set("script", script);
-    await review();
+    await save();
     await loadTakes();
   }
   async function synthesize(slots?: number[]) {
@@ -178,8 +182,10 @@ export function DigitalPresenterStudio({ ownerId, onDraftChange }: { ownerId?: s
     : plan.error || presenterMaterialBlocker(draft) || presenterSpeechBlocker(draft)
     || (!takes || takeMs.length !== plan.segments.length ? "请先生成全部配音并试听。" : presenterTakesIssue(draft.mode, takeMs))
     || (!project?.review || dirty ? "请先完成当前文案检查。" : project.review.verdict === "reject" ? "文案检查存在高风险内容，请修改后重新检查。" : "");
-  const reviewSection = <ReviewSection review={dirty ? undefined : project?.review} script={draft.script} busy={locked}
-    onReview={() => void act("正在检查文案", review, true)} onApply={script => void act("正在检查文案", () => applyScript(script), true)} />;
+  const currentReview = dirty ? undefined : project?.review;
+  const staleReview = !currentReview && project && lastReview?.id === project.id ? lastReview.review : undefined;
+  const reviewSection = <ReviewSection review={currentReview ?? staleReview} stale={!currentReview} script={draft.script} busy={locked}
+    onReview={() => void act("正在检查文案", review, true)} onApply={script => void act("", () => applyScript(script))} />;
   const nextStep = (target: number) => { if (target && !draft.script.trim()) setError("请先填写或生成口播文案。"); else { setStep(target); if (target === 2) void loadTakes(); } };
 
   return <div className="mv-scroll"><div className="mv-studio dp-studio">

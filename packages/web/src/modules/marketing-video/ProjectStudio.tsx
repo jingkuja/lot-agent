@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, fitMarketingNarration, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, fitMarketingNarration, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingReview, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -93,6 +93,10 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const active = project?.status === "pending" || project?.status === "running";
   const frozen = !!project?.taskId;
   const validReview = !!project?.review && project.reviewedScript === reviewedText(draft);
+  // The last check of this draft stays visible after edits, so its findings can be fixed one by one.
+  const [lastReview, setLastReview] = useState<{ projectId: string; review: MarketingReview } | null>(null);
+  useEffect(() => { if (validReview && project?.review) setLastReview({ projectId: project.id, review: project.review }); }, [validReview, project?.id, project?.review]);
+  const staleReview = !validReview && project && lastReview?.projectId === project.id ? lastReview.review : undefined;
   const dirty = JSON.stringify(draft) !== saved.current;
   const library = useDraftLibrary(session, ready, e => setError(errorMessage(e)));
   const [confirmDialog, confirm] = useConfirm();
@@ -264,11 +268,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     } catch (e) { throw failedStep("文案检查", e); }
     finally { if (session.alive) setOperationReload(n => n + 1); }
   }
-  async function applyReviewEdit(next: MarketingDraft) {
-    await act(async () => {
-      update(next);
-      await review();
-    });
+  /** A fix only changes the draft; autosave stores it and the user checks again when ready. */
+  function applyReviewEdit(next: MarketingDraft) {
+    if (!busy && ready) update(next);
   }
   async function analyzeReference() {
     const token = session.token();
@@ -573,6 +575,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       title={t("依据风险词规则表及抖音、小红书社区规则，检查文案、台词、标题标签和分镜内容。")}>{t("检查当前文案")}</button></div>
     {validReview
       ? <ReviewPanel key={project!.reviewedScript} review={project!.review!} draft={draft} busy={busy} onApply={applyReviewEdit} />
+      : staleReview ? <ReviewPanel key="stale" stale review={staleReview} draft={draft} busy={busy} onApply={applyReviewEdit} />
       : <p className="mv-hint" role="status">{t("尚未检查，生成视频前会自动检查。")}</p>}
   </section>;
   // Errors and progress stay next to the step buttons instead of the end of a long page.

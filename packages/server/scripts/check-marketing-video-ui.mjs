@@ -309,7 +309,7 @@ try {
   await secondCopyShot.getByLabel('景别与镜头运动').fill('推进副业必赚招牌');
   const narrationBeforeReviewFix = await page.getByLabel('视频口播文案').inputValue();
   await confirmStep.click();
-  await page.getByText('尚未检查，生成视频前会自动检查。', { exact: true }).waitFor();
+  await page.getByText('内容已修改，请点击“检查当前文案”重新检查。', { exact: true }).waitFor();
   assert.equal(await page.getByText('文案检查完成，未发现明显风险', { exact: true }).count(), 0);
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   const firstRisk = page.locator('.mv-review-issue').filter({ hasText: '第 1 镜 · 画面内容' });
@@ -321,8 +321,11 @@ try {
   await page.locator('.mv-dock').getByRole('alert').filter({ hasText: '文案检查发现需要修改的内容' }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
   // A rejected check keeps the user on the confirm step, next to the issues.
+  // A fix only replaces the text; the check stays until the user runs it again.
+  const reviewsBeforeFix = writes.filter(r => r.path.endsWith('/review')).length;
   await firstRisk.getByRole('button', { name: '一键修改', exact: true }).click();
   await firstRisk.waitFor({ state: 'hidden' });
+  await page.getByText('内容已修改，请点击“检查当前文案”重新检查。', { exact: true }).waitFor();
   await secondRisk.getByRole('button', { name: '自己修改', exact: true }).waitFor();
   assert.equal(await firstCopyShot.getByLabel('画面内容').inputValue(), '招牌上写着了解副业的投入与风险');
   assert.equal(await secondCopyShot.getByLabel('景别与镜头运动').inputValue(), '推进副业必赚招牌');
@@ -331,7 +334,10 @@ try {
   await secondRisk.getByRole('textbox').fill('镜头缓慢推近咖啡杯');
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-risk-manual-zh-dark.png');
-  await secondRisk.getByRole('button', { name: '保存修改并重新检查', exact: true }).click();
+  await secondRisk.getByRole('button', { name: '保存修改', exact: true }).click();
+  await secondRisk.waitFor({ state: 'hidden' });
+  assert.equal(writes.filter(r => r.path.endsWith('/review')).length, reviewsBeforeFix);
+  await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   await page.getByText('文案检查完成，未发现明显风险', { exact: true }).waitFor();
   assert.equal(await secondCopyShot.getByLabel('景别与镜头运动').inputValue(), '镜头缓慢推近咖啡杯');
   await copyStep.click();
@@ -340,6 +346,8 @@ try {
   await confirmStep.click();
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   await page.locator('.mv-review-issue').getByRole('button', { name: '一键修改', exact: true }).click();
+  await page.getByText('内容已修改，请点击“检查当前文案”重新检查。', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   await page.getByText('文案检查完成，未发现明显风险', { exact: true }).waitFor();
   assert.equal(await firstCopyShot.getByLabel('分镜口播').inputValue(), '这个了解副业的投入与风险。');
   assert.equal(await page.locator('.mv-shot').count(), originalShotCount);

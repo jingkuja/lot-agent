@@ -52,7 +52,7 @@ function ReviewIssue({ issue, script, busy, onApply }: { issue: PresenterReviewI
     {editing ? <div className="mv-review-edit">
       <label className="mv-field"><span>{t("修改内容")} · {t("口播文案")}</span><textarea autoFocus rows={5} maxLength={2000} value={value} disabled={busy} onChange={event => setValue(event.target.value)} /></label>
       <div className="mv-review-actions">
-        <button disabled={busy || !value.trim() || value === script} onClick={() => onApply(value)}>{t("保存修改并重新检查")}</button>
+        <button disabled={busy || !value.trim() || value === script} onClick={() => onApply(value)}>{t("保存修改")}</button>
         <button disabled={busy} onClick={() => setEditing(false)}>{t("取消")}</button>
       </div>
     </div> : <div className="mv-review-actions">
@@ -63,14 +63,17 @@ function ReviewIssue({ issue, script, busy, onApply }: { issue: PresenterReviewI
   </article>;
 }
 
-/** The marketing copy check, applied to the spoken script. Edits save the script and check it again. */
-export function ReviewSection({ review, script, busy, onReview, onApply }: { review?: PresenterReview; script: string; busy: boolean; onReview(): void; onApply(script: string): void }) {
+/** The marketing copy check, applied to the spoken script. Fixes only save the script; a `stale`
+ * check is the last one before those edits and lists the findings still in the text. */
+export function ReviewSection({ review, script, busy, onReview, onApply, stale = false }: { review?: PresenterReview; script: string; busy: boolean; onReview(): void; onApply(script: string): void; stale?: boolean }) {
   const { t } = useI18n();
+  const issues = review && stale ? review.issues.filter(issue => script.includes(issue.text)) : review?.issues ?? [];
+  const verdict = !stale ? review?.verdict : issues.some(issue => issue.severity === "reject") ? "reject" : issues.length ? "suspect" : "";
   return <section className="mv-review-section" aria-label={t("文案检查")}>
     <div className="mv-section-head"><h3>{t("文案检查")}</h3><button disabled={busy} onClick={onReview}>{t("检查当前文案")}</button></div>
-    {review ? <div className={`mv-review mv-review-${review.verdict}`}>
-      <strong role="status">{t(({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
-      {review.issues.map((issue, index) => <ReviewIssue key={`${review.reviewedAt}:${index}:${issue.text}`} issue={issue} script={script} busy={busy} onApply={onApply} />)}
+    {review ? <div className={`mv-review${verdict ? ` mv-review-${verdict}` : ""}`}>
+      <strong role="status">{t(stale ? "内容已修改，请点击“检查当前文案”重新检查。" : ({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
+      {issues.map((issue, index) => <ReviewIssue key={`${review.reviewedAt}:${index}:${issue.text}`} issue={issue} script={script} busy={busy} onApply={onApply} />)}
     </div> : <p className="mv-hint" role="status">{t("生成视频前需完成文案检查；修改文案后需重新检查。")}</p>}
   </section>;
 }
