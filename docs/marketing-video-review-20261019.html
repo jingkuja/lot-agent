@@ -101,7 +101,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <div class="grid">
     <div class="stat"><strong>8 / 8</strong><span>旧代码问题 F01–F08 已修复</span></div>
     <div class="stat"><strong>2 · 2 · 2</strong><span>旧功能缺口 G01–G06：完成 · 部分 · 未完成（G07 移交，G08 暂缓）</span></div>
-    <div class="stat"><strong>3 · 8 · 10</strong><span>待优化与修复问题：高 · 中 · 低（P01、P02 第十二轮，P09、P12 第十三轮已处理，待真实验收）</span></div>
+    <div class="stat"><strong>3 · 8 · 11</strong><span>待优化与修复问题：高 · 中 · 低（P01、P02 第十二轮，P09、P12 第十三轮已处理，待真实验收）</span></div>
     <div class="stat"><strong>5 / 5</strong><span>真实验收用例通过（其中 1 个手动恢复 2 次）</span></div>
   </div>
 </section>
@@ -132,7 +132,8 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <tr><td>P18</td><td><span class="tag low">低</span></td><td>「AI 修改分镜」选「全部分镜」时，不提示会让已生成的配音全部失效。</td><td>确认时提示。</td><td>第十轮（重跑审计）</td></tr>
       <tr><td>P19</td><td><span class="tag low">低</span></td><td>原本关字幕的成片再开字幕时，片段没有为字幕留出底部区域。</td><td>开字幕时提示可能遮挡画面，并建议重做相关镜头。</td><td>第十轮残留</td></tr>
       <tr><td>P20</td><td><span class="tag low">低</span></td><td>空间用量不含配音文件；第六轮之前删除的草稿留下的成片没有清理。</td><td>用量加上配音目录；写一次性清理脚本。</td><td>第八轮残留、G05 残留</td></tr>
-      <tr><td>P21</td><td><span class="tag low">低</span></td><td>严格类型检查未全绿：Core 20 项、Server 241 项，都不在营销目录。</td><td>单独清理，之后把类型检查加入 CI。</td><td>验证</td></tr>
+      <tr><td>P21</td><td><span class="tag low">低</span></td><td>严格类型检查未全绿：Core 20 项、Server 241 项，营销目录只有 1 项（<code>routes.test.ts</code> 的 mock 类型）。</td><td>单独清理，之后把类型检查加入 CI。</td><td>验证</td></tr>
+      <tr><td>P22</td><td><span class="tag low">低</span></td><td>不支持花字（画面文字特效），例如特写镜头弹出"哇"。片段提示词要求模型不写任何字，第十三轮之前也只允许底部字幕（<code>no other text overlays</code>），分镜规则也不让在画面描述里写字。模型画的中文容易错字，字体和出现时间不可控，生成后改不了，还可能和本地字幕重叠，所以不放开给模型画。<br><span class="tag new">暂不做</span> 客户试用期间留意是否有这类反馈，有明确需求再做。</td><td>做成本地烧录的花字，与字幕走同一条路：每镜可加若干条，设置文字、出现时间和时长、位置（上方、中间等）、样式（弹出、放大、抖动、描边颜色）；合成时用 ASS 动画烧录，不调用视频模型、不计费；成片后在「调整字幕」旁增删改，只重新合成。写分镜时 AI 可建议花字，由创作者确认。花字是新增的画面文字，须作为新字段纳入文案检查（只复查改动字段）。工作量与第十三轮字幕调整相当。</td><td>第十三轮讨论</td></tr>
     </tbody>
   </table></div>
 </section>
