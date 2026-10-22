@@ -179,6 +179,7 @@ export function DigitalPresenterStudio({ ownerId, onDraftChange }: { ownerId?: s
   const plan = planPresenterSegments(draft.script, draft.voice.speed);
   const takeMs = takes?.flatMap(take => take.durationMs === undefined ? [] : [take.durationMs]) ?? [];
   const blocker = !capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。"
+    : draft.subtitles && !capabilities.subtitles ? "当前环境不支持字幕，可关闭字幕后生成。"
     : plan.error || presenterMaterialBlocker(draft) || presenterSpeechBlocker(draft)
     || (!takes || takeMs.length !== plan.segments.length ? "请先生成全部配音并试听。" : presenterTakesIssue(draft.mode, takeMs))
     || (!project?.review || dirty ? "请先完成当前文案检查。" : project.review.verdict === "reject" ? "文案检查存在高风险内容，请修改后重新检查。" : "");
@@ -216,7 +217,8 @@ export function DigitalPresenterStudio({ ownerId, onDraftChange }: { ownerId?: s
       onCancel={() => void act("", async () => { await api.cancelTask(project.taskId!); await open(project.id); })}
       onResume={() => void act("", async () => apply(await presenterApi.resume(project.id)))}
       onRelease={() => void act("", async () => { await presenterApi.release(project.id); apply(await presenterApi.resume(project.id)); })}
-      onCopy={() => fresh({ ...draft })} /> : <>
+      onCopy={() => fresh({ ...draft })}
+      onCaptions={captions => void act("", async () => apply(await presenterApi.recompose(project.id, project.version, captions)))} /> : <>
       <nav className="mv-steps" aria-label={t("数字主播创作步骤")}>{STEPS.map((label, i) => <button key={label} disabled={busy} aria-current={i === step ? "step" : undefined} className={i === step ? "active" : ""} onClick={() => nextStep(i)}><span>{i + 1}</span>{t(label)}</button>)}</nav>
       <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / 3</span></div>
         {step === 0 && <ScriptStep form={form} onWrite={() => void act("正在生成口播文案", writeScript, true)}

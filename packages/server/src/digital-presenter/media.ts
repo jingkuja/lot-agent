@@ -2,8 +2,10 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PRESENTER_SEGMENT_GAP_MS, type PresenterDraft } from "@lot-agent/core/digital-presenter";
-import { ffmpeg, inspectMedia, mediaProcess } from "../marketing-video/media.js";
+import { marketingCaptionLines, marketingCaptionOffset, type MarketingCaption, type MarketingCaptions } from "@lot-agent/core/marketing-video";
+import { ffmpeg, inspectMedia, mediaProcess, narrationPauses } from "../marketing-video/media.js";
 import { readImageInfo } from "../marketing-video/image-size.js";
+import { captionAss, captionLayout, offsetCues, timeCaptions, type Cue } from "../marketing-video/subtitles.js";
 
 const gap = PRESENTER_SEGMENT_GAP_MS / 1000;
 const even = (value: number) => Math.max(2, Math.round(value / 2) * 2);
@@ -74,13 +76,30 @@ export async function prepareFootage(input: string, output: string, durationSec:
   return prepared;
 }
 
+/** Captions to burn: each take's text, with the style, line breaks and offsets of `settings`. */
+export interface PresenterCaptionInput { texts: string[]; settings?: MarketingCaptions }
+
+/** Caption cues of take `index`, in seconds from the take's start, timed to its pauses and moved by
+ * its offset. No line shows after `spanSec`, the take plus the pause that follows it. */
+export async function takeCues(take: { path: string; format: string; speechSec: number }, index: number, captions: PresenterCaptionInput, spanSec: number, frame: { width: number; height: number }, signal?: AbortSignal): Promise<Cue[]> {
+  const draft = { captions: captions.settings };
+  const text = captions.texts[index];
+  const lines = marketingCaptionLines(draft, index, text, captionLayout(frame.width, frame.height, captions.settings).maxCells);
+  const cues = timeCaptions(lines, take.speechSec, spanSec, await narrationPauses(take.path, take.format, take.speechSec, signal));
+  return offsetCues(cues, marketingCaptionOffset(draft, index, text), spanSec);
+}
+const filmCues = (cues: Cue[], shot: number, at: number): MarketingCaption[] =>
+  cues.map(cue => ({ shot, start: Math.round((at + cue.start) * 100) / 100, end: Math.round((at + cue.end) * 100) / 100, text: cue.text }));
+
 /** Image mode: one clip per take. Each clip keeps its own take as audio and holds its last
- * frame through the pause; every other clip is framed slightly closer, so the cuts read as edits. */
-export async function composeImageMode(input: { clips: string[]; takes: string[]; takeMs: number[]; frame: { width: number; height: number }; signal?: AbortSignal }) {
+ * frame through the pause; every other clip is framed slightly closer, so the cuts read as edits.
+ * `captions`, when given, are burned into each clip and returned in seconds of the film. */
+export async function composeImageMode(input: { clips: string[]; takes: string[]; takeMs: number[]; captions?: PresenterCaptionInput; frame: { width: number; height: number }; signal?: AbortSignal }) {
   const folder = await mkdtemp(join(tmpdir(), "lot-presenter-"));
   try {
     const { width, height } = input.frame;
     let expected = 0;
+    const burned: MarketingCaption[] = [];
     for (let i = 0; i < input.clips.length; i++) {
       const clip = await inspectMedia(input.clips[i], input.signal);
       const take = await inspectMedia(input.takes[i], input.signal);
@@ -89,20 +108,30 @@ export async function composeImageMode(input: { clips: string[]; takes: string[]
       if (clip.duration < speech - 0.5) throw new Error("生成片段短于配音，请重新生成该段。");
       const pause = i < input.clips.length - 1 ? gap : 0;
       const length = speech + pause;
+      const start = expected;
       expected += length;
       const zoom = i % 2 ? "crop=iw*0.9:ih*0.9," : "";
+      let captions = "";
+      if (input.captions) {
+        // The file name is fixed, never user text.
+        const cues = await takeCues({ path: input.takes[i], format: take.format, speechSec: speech }, i, input.captions, length, input.frame, input.signal);
+        await writeFile(join(folder, `${i}.ass`), captionAss(cues, width, height, input.captions.settings));
+        burned.push(...filmCues(cues, i, start));
+        captions = `,subtitles=filename=${i}.ass`;
+      }
       await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", clip.format, "-i", input.clips[i],
         "-protocol_whitelist", "file,pipe", "-f", take.format, "-i", input.takes[i], "-map", "0:v:0", "-map", "1:a:0",
-        "-vf", `${zoom}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=25,tpad=stop_mode=clone:stop_duration=${(pause + 1).toFixed(3)}`,
+        "-vf", `${zoom}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=25,tpad=stop_mode=clone:stop_duration=${(pause + 1).toFixed(3)}${captions}`,
         "-af", "aresample=48000,apad", "-t", length.toFixed(3), "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`],
       { signal: input.signal, cwd: folder });
     }
-    return await joinParts(folder, input.clips.length, expected, input.signal);
+    return { ...await joinParts(folder, input.clips.length, expected, input.signal), ...(input.captions ? { captions: burned } : {}) };
   } finally { await rm(folder, { recursive: true, force: true }); }
 }
 
-/** Video mode: the lip-synced clip with the local voice track in place of the vendor's re-encoded audio. */
-export async function composeVideoMode(input: { clip: string; track: string; trackSec: number; signal?: AbortSignal }) {
+/** Video mode: the lip-synced clip with the local voice track in place of the vendor's re-encoded audio.
+ * `captions`, when given, burns each take's script at the take's place in the track. */
+export async function composeVideoMode(input: { clip: string; track: string; trackSec: number; captions?: PresenterCaptionInput & { takes: string[]; takeMs: number[] }; signal?: AbortSignal }) {
   const folder = await mkdtemp(join(tmpdir(), "lot-presenter-"));
   try {
     const clip = await inspectMedia(input.clip, input.signal);
@@ -110,12 +139,28 @@ export async function composeVideoMode(input: { clip: string; track: string; tra
     if (!clip.video || !track.audio) throw new Error("片段文件不可用，请重新生成。");
     if (clip.duration < input.trackSec - 1) throw new Error("生成视频短于配音，请重新生成。");
     const size = { width: even(clip.width), height: even(clip.height) };
+    let captions = "";
+    const burned: MarketingCaption[] = [];
+    if (input.captions) {
+      // The track holds the takes back to back with a pause between them; see buildTrack.
+      let at = 0;
+      for (let i = 0; i < input.captions.takes.length; i++) {
+        const take = await inspectMedia(input.captions.takes[i], input.signal);
+        const speechSec = input.captions.takeMs[i] / 1000;
+        const span = i < input.captions.takes.length - 1 ? speechSec + gap : Math.max(speechSec, input.trackSec - at);
+        burned.push(...filmCues(await takeCues({ path: input.captions.takes[i], format: take.format, speechSec }, i, input.captions, span, size, input.signal), i, at));
+        at += speechSec + gap;
+      }
+      const cues = burned.map(cue => ({ start: cue.start, end: cue.end, text: cue.text }));
+      await writeFile(join(folder, "0.ass"), captionAss(cues, size.width, size.height, input.captions.settings));
+      captions = ",subtitles=filename=0.ass";
+    }
     await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", clip.format, "-i", input.clip,
       "-protocol_whitelist", "file,pipe", "-f", track.format, "-i", input.track, "-map", "0:v:0", "-map", "1:a:0",
-      "-vf", `scale=${size.width}:${size.height},setsar=1,tpad=stop_mode=clone:stop_duration=1`, "-af", "aresample=48000,apad",
+      "-vf", `scale=${size.width}:${size.height},setsar=1,tpad=stop_mode=clone:stop_duration=1${captions}`, "-af", "aresample=48000,apad",
       "-t", input.trackSec.toFixed(3), "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", "-movflags", "+faststart", "0.mp4"],
     { signal: input.signal, cwd: folder, timeoutMs: 600_000 });
-    return await finish(join(folder, "0.mp4"), input.trackSec, input.signal);
+    return { ...await finish(join(folder, "0.mp4"), input.trackSec, input.signal), ...(input.captions ? { captions: burned } : {}) };
   } finally { await rm(folder, { recursive: true, force: true }); }
 }
 

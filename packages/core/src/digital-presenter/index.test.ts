@@ -39,7 +39,7 @@ describe("digital presenter limits", () => {
   });
   it("needs materials and consent before generating", () => {
     const draft = PresenterDraftSchema.parse({});
-    expect(draft).toMatchObject({ mode: "image", ratio: "9:16", resolution: "720P", voice: { speed: 1, instructions: "" }, consent: false });
+    expect(draft).toMatchObject({ mode: "image", ratio: "9:16", resolution: "720P", voice: { speed: 1, instructions: "" }, subtitles: true, consent: false });
     expect(presenterMaterialBlocker(draft)).toMatch(/肖像/);
     expect(presenterMaterialBlocker({ ...draft, mode: "video" })).toMatch(/底片/);
     expect(presenterMaterialBlocker({ ...draft, portrait: "00000000-0000-4000-8000-000000000000" })).toMatch(/授权/);

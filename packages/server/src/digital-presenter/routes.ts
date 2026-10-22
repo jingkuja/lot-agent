@@ -2,22 +2,22 @@ import { rm } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { MARKETING_REVIEW_MODEL, MarketingDraftSchema, marketingReviewText } from "@lot-agent/core/marketing-video";
-import { planPresenterSegments, presenterMaterialBlocker, presenterModel, presenterSpeechBlocker, presenterTakesIssue, presenterTrackMs, PresenterDraftSchema, PRESENTER_IMAGE_MODEL, PRESENTER_INPUT_VERSION, PRESENTER_VIDEO_MODEL,
+import { MARKETING_REVIEW_MODEL, MarketingCaptionsSchema, marketingCaptionsValue, MarketingDraftSchema, marketingReviewText } from "@lot-agent/core/marketing-video";
+import { planPresenterSegments, presenterCaptionErrors, presenterMaterialBlocker, presenterModel, presenterSpeechBlocker, presenterTakesIssue, presenterTrackMs, PresenterDraftSchema, PRESENTER_IMAGE_MODEL, PRESENTER_INPUT_VERSION, PRESENTER_VIDEO_MODEL,
   type PresenterDraft } from "@lot-agent/core/digital-presenter";
 import type { AgentService } from "../services/agent-service.js";
 import type { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { DIGITAL_PRESENTER_TASK } from "../jobs/task-queues.js";
 import { KnowledgeError } from "../knowledge/errors.js";
 import { signPrivateMaterial } from "../generation/private-materials.js";
-import { inspectMedia, mediaCapabilities, ownedAssetPath } from "../marketing-video/media.js";
+import { inspectMedia, mediaCapabilities, ownedAssetPath, SUBTITLES_UNAVAILABLE } from "../marketing-video/media.js";
 import { readImageInfo } from "../marketing-video/image-size.js";
 import { MarketingTextError } from "../marketing-video/text.js";
 import { normalizeMarketingReview, REVIEW_INSTRUCTION } from "../marketing-video/compliance.js";
 import { PresenterError } from "./errors.js";
 import { removePresenterFiles } from "./files.js";
 import { PgPresenterStore } from "./repository.js";
-import { PresenterVoicer } from "./takes.js";
+import { PresenterVoicer, type FrozenTake } from "./takes.js";
 import type { PresenterJobInput } from "./run.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -190,7 +190,9 @@ export function createDigitalPresenterRoutes(service: AgentService, dataRoot: st
     if (blocker) throw new PresenterError(blocker);
     if (!p.review) throw new PresenterError("请先完成当前文案检查。");
     if (p.review.verdict === "reject") throw new PresenterError("文案检查存在高风险内容，请修改后重新检查。");
-    if (!(await mediaCapabilities()).composition) throw new PresenterError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
+    const capabilities = await mediaCapabilities();
+    if (!capabilities.composition) throw new PresenterError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
+    if (p.draft.subtitles && !capabilities.subtitles) throw new PresenterError(SUBTITLES_UNAVAILABLE, 503);
     const segments = segmentsOf(p.draft);
     const takes = await voicer.frozen(owner, p.id, p.draft, segments);
     const issue = presenterTakesIssue(p.draft.mode, takes.map(take => take.durationMs));
@@ -210,11 +212,38 @@ export function createDigitalPresenterRoutes(service: AgentService, dataRoot: st
     }
     const model = presenterModel(p.draft.mode);
     const input: Omit<PresenterJobInput, "projectId"> = {
-      presenterInputVersion: PRESENTER_INPUT_VERSION, mode: p.draft.mode, model, resolution: p.draft.resolution, ratio: p.draft.ratio, takes,
+      presenterInputVersion: PRESENTER_INPUT_VERSION, mode: p.draft.mode, model, resolution: p.draft.resolution, ratio: p.draft.ratio, takes, subtitles: p.draft.subtitles,
+      ...(p.draft.subtitles && p.draft.captions ? { captions: p.draft.captions } : {}),
       ...(p.draft.mode === "image" ? { portrait: p.draft.portrait } : { baseVideo: p.draft.baseVideo, ...(p.draft.faceReference ? { faceReference: p.draft.faceReference } : {}) }),
     };
     const clips = p.draft.mode === "image" ? takes.map(take => ({ slot: take.slot, model })) : [{ slot: 0, model }];
     const taskId = await store.reserve(owner, p.id, version, input, clips);
+    await deliver(taskId);
+    return c.json(await requireProject(owner, p.id), 202);
+  });
+  // Compose a finished video again with changed captions. Every clip is reused: no model call, no charge.
+  app.post("/:id/captions", async c => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    const body = await c.req.json().catch(() => null);
+    const version = versionOf(body);
+    const parsed = MarketingCaptionsSchema.safeParse(body?.captions ?? {});
+    if (!parsed.success) throw new PresenterError("字幕参数无效。");
+    if (!p.taskId || p.status !== "succeeded") throw new PresenterError("视频生成完成后才能调整字幕。", 409);
+    if (p.version !== version) throw new PresenterError("草稿已更新，请重新打开。", 409);
+    if (!await queue().canResumePersisted(p.taskId)) throw new PresenterError("原任务正在收尾，请稍后再试。", 409);
+    const original = await service.db.getTask(p.taskId);
+    const frozen = original?.input && typeof original.input === "object" && !Array.isArray(original.input) ? original.input as Record<string, unknown> : undefined;
+    if (!original || !frozen || original.user_id !== owner || original.type !== DIGITAL_PRESENTER_TASK || frozen.projectId !== p.id || !Array.isArray(frozen.takes)) throw new PresenterError("原任务不可恢复。", 409);
+    if (frozen.subtitles !== true) throw new PresenterError("该视频没有字幕，请复制为新草稿并开启字幕后重新生成。", 409);
+    const captions = marketingCaptionsValue(parsed.data);
+    if (presenterCaptionErrors(captions, (frozen.takes as FrozenTake[]).map(take => take.text)).length) throw new PresenterError("字幕只能调整断行和标点。");
+    const before = MarketingCaptionsSchema.safeParse(frozen.captions ?? {});
+    if (JSON.stringify(captions ?? null) === JSON.stringify((before.success ? marketingCaptionsValue(before.data) : undefined) ?? null)) throw new PresenterError("字幕设置没有修改，无需重新合成。", 409);
+    const capabilities = await mediaCapabilities();
+    if (!capabilities.composition) throw new PresenterError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
+    if (!capabilities.subtitles) throw new PresenterError(SUBTITLES_UNAVAILABLE, 503);
+    const { projectId: _project, draft: _draft, recomposedFrom: _from, captions: _captions, ...input } = frozen;
+    const taskId = await store.recompose(owner, p.id, version, p.taskId, { ...input, ...(captions ? { captions } : {}) }, captions);
     await deliver(taskId);
     return c.json(await requireProject(owner, p.id), 202);
   });

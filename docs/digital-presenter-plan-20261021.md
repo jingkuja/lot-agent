@@ -269,4 +269,13 @@ DigitalPresenterDraftSchema = z.object({
   - 供应商输入不经营销私有素材的 10 分钟链接，而由 `/api/public/digital-presenter-media/:token` 提供 3 小时、绑定内容哈希的加密链接，解决第 5 节的排队超时问题。
   - 结果下载到草稿私有目录后再合成；只有成片进入 `assets`。
   - 段间未做交叉淡化，改为定格 0.25 秒停顿并隔段轻微推近。
-- 尚未实现：单段重做、字幕与 BGM、发布标题标签、归档知识库、营销影像跳转入口、`wan2.2-s2v-detect` 预检。
+- 尚未实现：单段重做、BGM、发布标题标签、归档知识库、营销影像跳转入口、`wan2.2-s2v-detect` 预检。
+
+## 实施记录（2026-10-22）
+
+- 字幕：草稿 `subtitles` 缺省开启，第 3 步可关闭；`/generate` 把开关冻结为任务输入 `subtitles`，此前冻结的任务没有该字段，继续生成时不加字幕。
+- 内容取自各段配音的冻结文本，按营销影像的 `captionLines` 切行，按该段配音的 `silencedetect` 停顿计时（`marketing-video/subtitles.ts → timeCaptions`），不调用模型或 ASR。以图在每段合成时烧录，末行最多显示到段间停顿结束；以视频按各段在母带中的位置一次烧录。
+- 需要带 libass 的 FFmpeg 和中文字体：`/generate` 与 Worker 都在付费前检查 `mediaCapabilities().subtitles`，不支持时提示关闭字幕。
+- 成片后调整字幕：结果页「调整字幕」沿用营销影像的设置格式（草稿 `captions`，即 `MarketingCaptionsSchema`，每段条目的 `script` 为该段文本），可改字号、位置、全片和每段偏移（±1 秒，步长 0.05）和每段断行；断行只能改换行和标点，改字时前端禁用、接口返回 400。
+- `POST /:id/captions` 只在任务成功且冻结了 `subtitles` 时可用：`PgPresenterStore.recompose` 在一个事务中新建 `digital-presenter.video` 任务（输入带新 `captions` 和 `recomposedFrom`），复制原任务全部已完成片段行（不调用视频模型、不计费），并把草稿 `captions` 和 `task_id` 更新为新任务；设置没有变化时返回 409。Worker 见片段均已完成，直接重新合成；以视频重新拼接母带。
+- 烧录的字幕写入 `output.captions`（`shot` 为段号），成片尺寸写入 `output.frame`；结果页提供 SRT 下载。删除草稿时删除该草稿所有任务的成片。

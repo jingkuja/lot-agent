@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { marketingCaptionLinesMatch, MarketingCaptionsSchema, marketingShotCaption, type MarketingCaption, type MarketingCaptions } from "../marketing-video/index.js";
 
 /** Vendor models behind the gateway's OpenAI-compatible `/videos` endpoint. */
 export const PRESENTER_IMAGE_MODEL = "wan2.2-s2v";
@@ -48,6 +49,11 @@ export const PresenterDraftSchema = z.object({
   /** Image mode: the portrait is cropped to this ratio, which the output keeps. */
   ratio: z.enum(["9:16", "16:9", "1:1"]).default("9:16"),
   resolution: z.enum(["480P", "720P"]).default("720P"),
+  /** Burn the script as captions, timed to each take's pauses. */
+  subtitles: z.boolean().default(true),
+  /** Caption style and per-segment line breaks, as in marketing videos; an entry's `script` is
+   * its segment's text. A made video composes again with changes here, without the model. */
+  captions: MarketingCaptionsSchema.optional(),
   /** The user confirmed the portrait / footage and voice are their own or authorized. */
   consent: z.boolean().default(false),
 }).strict();
@@ -64,7 +70,8 @@ export interface PresenterReview { verdict: "pass" | "suspect" | "reject"; issue
 export interface PresenterTaskState {
   id: string; version: number; taskId?: string; status: PresenterTaskStatus; progress: number;
   stage?: string; error?: string; errorCode?: string;
-  output?: { assetIds?: string[]; assets?: { url: string; mime: string; durationSec?: number }[] };
+  /** `captions`: cues burned in, in seconds of the film (`shot` is the segment); `frame`: the film's size. */
+  output?: { assetIds?: string[]; assets?: { url: string; mime: string; durationSec?: number }[]; captions?: MarketingCaption[]; frame?: { width: number; height: number } };
   /** Clips sent to the model without a known outcome; resending may charge again. */
   unknownClips?: number;
 }
@@ -167,4 +174,12 @@ export function presenterMaterialBlocker(draft: PresenterDraft): string {
   if (draft.mode === "video" && !draft.baseVideo) return "请上传口播底片视频。";
   if (!draft.consent) return "请确认肖像、底片和声音均为本人或已获授权。";
   return "";
+}
+
+/** Segments whose edited caption lines no longer hold their words. */
+export function presenterCaptionErrors(captions: MarketingCaptions | undefined, texts: string[]) {
+  return texts.flatMap((text, index) => {
+    const lines = marketingShotCaption({ captions }, index, text)?.lines;
+    return lines && !marketingCaptionLinesMatch(text, lines) ? [index] : [];
+  });
 }

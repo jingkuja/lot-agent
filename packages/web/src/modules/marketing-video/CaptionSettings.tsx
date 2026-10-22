@@ -4,13 +4,13 @@ import { captionLayout, captionLines, marketingCaptionLinesMatch, marketingCapti
 import { useI18n } from "../../i18n/index.js";
 import { Choices, type DraftForm } from "./StudioFields.js";
 
-const SIZES = [{ value: "small", label: "小" }, { value: "medium", label: "标准" }, { value: "large", label: "大" }];
-const POSITIONS = [{ value: "low", label: "靠下" }, { value: "medium", label: "标准" }, { value: "high", label: "靠上" }];
+export const CAPTION_SIZES = [{ value: "small", label: "小" }, { value: "medium", label: "标准" }, { value: "large", label: "大" }];
+export const CAPTION_POSITIONS = [{ value: "low", label: "靠下" }, { value: "medium", label: "标准" }, { value: "high", label: "靠上" }];
 const parseLines = (text: string) => text.split("\n").map(line => line.trim()).filter(Boolean);
-const same = (a: string[], b: string[]) => a.length === b.length && a.every((line, i) => line === b[i]);
+export const sameLines = (a: string[], b: string[]) => a.length === b.length && a.every((line, i) => line === b[i]);
 
 /** Seconds a caption moves, -1 to 1 in 0.05 steps; empty means none. */
-function OffsetField({ label, value, busy, onChange }: { label: string; value: number; busy: boolean; onChange(value: number): void }) {
+export function OffsetField({ label, value, busy, onChange }: { label: string; value: number; busy: boolean; onChange(value: number): void }) {
   const { t } = useI18n();
   return <label className="mv-field mv-caption-offset"><span>{t(label)}</span>
     <input type="number" min={-1} max={1} step={0.05} value={value} disabled={busy}
@@ -18,30 +18,35 @@ function OffsetField({ label, value, busy, onChange }: { label: string; value: n
   </label>;
 }
 
+/** Message keys of one caption unit; marketing videos edit shots, digital presenters segments. */
+export interface CaptionUnitCopy { title: string; aria: string; empty: string; mismatch: string; offset: string }
+const SHOT_COPY: CaptionUnitCopy = { title: "第 {0} 镜", aria: "第 {0} 镜字幕", empty: "每镜至少保留一行字幕。",
+  mismatch: "字幕只能调整断行和标点；要改文字，请修改该镜口播。", offset: "本镜提前或延后（秒）" };
+
 /** One shot's caption lines as editable text, one caption per line. The text is kept while the
  * user types blank lines; a change made elsewhere (undo, reworded shot) replaces it. */
-function ShotCaption({ index, start, end, lines, auto, mismatch, offsetSec, busy, burned, onLines, onOffset }: {
-  index: number; start: number; end: number; lines: string[]; auto: boolean; mismatch: boolean; offsetSec: number; busy: boolean;
-  burned: MarketingCaption[]; onLines(lines: string[] | undefined): void; onOffset(value: number): void;
+export function ShotCaption({ index, start, end, lines, auto, mismatch, offsetSec, busy, burned, onLines, onOffset, copy = SHOT_COPY }: {
+  index: number; start?: number; end?: number; lines: string[]; auto: boolean; mismatch: boolean; offsetSec: number; busy: boolean;
+  burned: MarketingCaption[]; onLines(lines: string[] | undefined): void; onOffset(value: number): void; copy?: CaptionUnitCopy;
 }) {
   const { t } = useI18n();
   const [text, setText] = useState(lines.join("\n"));
-  useEffect(() => { if (!same(parseLines(text), lines)) setText(lines.join("\n")); }, [lines.join("\n")]);
+  useEffect(() => { if (!sameLines(parseLines(text), lines)) setText(lines.join("\n")); }, [lines.join("\n")]);
   const [error, setError] = useState(false);
   return <li className="mv-caption-shot">
-    <span>{t("第 {0} 镜", [index + 1])} · {start}–{end}s
+    <span>{t(copy.title, [index + 1])}{start !== undefined && end !== undefined && <> · {start}–{end}s</>}
       {!!burned.length && <small>{t("成片中 {0}–{1} 秒，{2} 条", [burned[0].start.toFixed(2), burned.at(-1)!.end.toFixed(2), burned.length])}</small>}</span>
-    <textarea aria-label={t("第 {0} 镜字幕", [index + 1])} rows={Math.max(2, lines.length)} value={text} disabled={busy}
+    <textarea aria-label={t(copy.aria, [index + 1])} rows={Math.max(2, lines.length)} value={text} disabled={busy}
       onChange={e => {
         setText(e.target.value);
         const next = parseLines(e.target.value);
         setError(!next.length);
         if (next.length) onLines(next);
       }} />
-    {error && <p className="mv-error" role="alert">{t("每镜至少保留一行字幕。")}</p>}
-    {mismatch && <p className="mv-error" role="alert">{t("字幕只能调整断行和标点；要改文字，请修改该镜口播。")}</p>}
+    {error && <p className="mv-error" role="alert">{t(copy.empty)}</p>}
+    {mismatch && <p className="mv-error" role="alert">{t(copy.mismatch)}</p>}
     <div className="mv-caption-row">
-      <OffsetField label="本镜提前或延后（秒）" value={offsetSec} busy={busy} onChange={onOffset} />
+      <OffsetField label={copy.offset} value={offsetSec} busy={busy} onChange={onOffset} />
       {!auto && <button type="button" disabled={busy} onClick={() => { setError(false); onLines(undefined); }}>{t("恢复自动断行")}</button>}
     </div>
   </li>;
@@ -69,9 +74,9 @@ export function CaptionSettings({ form, captions: burned, recompose }: { form: D
     <p className="mv-hint">{t("字幕文字来自确认的口播，这里只能调整断行、标点、出现时间、字号和位置；要改文字，请修改下方分镜的口播。")}</p>
     <div className="mv-caption-row">
       <div className="mv-caption-choice"><span>{t("字号")}</span>
-        <Choices form={form} label="字号" values={SIZES} value={captions.size} onChoose={value => update({ size: value as MarketingCaptions["size"] })} /></div>
+        <Choices form={form} label="字号" values={CAPTION_SIZES} value={captions.size} onChoose={value => update({ size: value as MarketingCaptions["size"] })} /></div>
       <div className="mv-caption-choice"><span>{t("位置")}</span>
-        <Choices form={form} label="位置" values={POSITIONS} value={captions.position} onChoose={value => update({ position: value as MarketingCaptions["position"] })} /></div>
+        <Choices form={form} label="位置" values={CAPTION_POSITIONS} value={captions.position} onChoose={value => update({ position: value as MarketingCaptions["position"] })} /></div>
     </div>
     {captions.position === "low" && height > width && <p className="mv-hint">{t("竖屏字幕靠下时，可能被短视频平台的按钮和标题遮挡。")}</p>}
     <div className="mv-caption-row">
@@ -88,7 +93,7 @@ export function CaptionSettings({ form, captions: burned, recompose }: { form: D
         return <ShotCaption key={index} index={index} start={index ? ends[index - 1] : 0} end={ends[index]} lines={lines} auto={!entry?.lines}
           mismatch={!!entry?.lines && !marketingCaptionLinesMatch(shot.script, entry.lines)} offsetSec={entry?.offsetSec ?? 0} busy={busy}
           burned={burned?.filter(cue => cue.shot === index) ?? []}
-          onLines={next => updateShot(index, { lines: next && !same(next, auto) ? next : undefined })} onOffset={offsetSec => updateShot(index, { offsetSec })} />;
+          onLines={next => updateShot(index, { lines: next && !sameLines(next, auto) ? next : undefined })} onOffset={offsetSec => updateShot(index, { offsetSec })} />;
       })}</ol>
     </details>
   </fieldset>;

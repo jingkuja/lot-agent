@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
+import type { MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { PresenterDraftSchema, type PresenterDraft, type PresenterProject, type PresenterReview, type PresenterTaskState } from "@lot-agent/core/digital-presenter";
 import { DIGITAL_PRESENTER_TASK, MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
 import { isPresenterFailureCode, PresenterError } from "./errors.js";
@@ -99,6 +100,30 @@ export class PgPresenterStore {
       return taskId;
     });
   }
+  /** A finished video composed again with changed captions. The new job reuses every clip of the
+   * finished one, so no model is called; the draft keeps the captions the new job burns. */
+  async recompose(owner: string, id: string, version: number, baseTaskId: string, input: Record<string, unknown>, captions: MarketingCaptions | undefined) {
+    return inTransaction(this.pool, async client => {
+      const p = (await client.query(`SELECT p.*,t.status FROM digital_presenter_projects p JOIN tasks t ON t.id=p.task_id AND t.user_id=p.user_id
+        WHERE p.id=$1 AND p.user_id=$2 FOR UPDATE OF p`, [id, owner])).rows[0];
+      if (!p) throw new PresenterError("草稿不存在", 404);
+      if (p.version !== version || p.task_id !== baseTaskId) throw new PresenterError("草稿已更新，请重新打开。", 409);
+      if (p.status !== "succeeded") throw new PresenterError("视频生成完成后才能调整字幕。", 409);
+      const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [presenterLockKey(baseTaskId)]);
+      if (!lock.rows[0].locked) throw new PresenterError("原任务正在收尾，请稍后再试。", 409);
+      const { captions: _old, ...rest } = PresenterDraftSchema.parse(p.draft);
+      const draft: PresenterDraft = { ...rest, ...(captions ? { captions } : {}) };
+      const taskId = randomUUID();
+      await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,$2,$3,$4,$5)`,
+        [taskId, DIGITAL_PRESENTER_TASK, JSON.stringify({ ...input, projectId: id, draft, recomposedFrom: baseTaskId }), owner, MARKETING_VIDEO_QUEUE]);
+      const copied = await client.query(`INSERT INTO digital_presenter_clips(task_id,slot,model,status,vendor_task_id,file,seconds)
+        SELECT $1,slot,model,status,vendor_task_id,file,seconds FROM digital_presenter_clips WHERE task_id=$2 AND status='succeeded'`, [taskId, baseTaskId]);
+      const total = (await client.query("SELECT count(*)::int AS n FROM digital_presenter_clips WHERE task_id=$1", [baseTaskId])).rows[0].n;
+      if (!copied.rowCount || copied.rowCount !== total) throw new PresenterError("原视频的片段不完整，请复制为新草稿重新生成。", 409);
+      await client.query(`UPDATE digital_presenter_projects SET task_id=$3,draft=$4,version=version+1,updated_at=now() WHERE id=$1 AND user_id=$2`, [id, owner, taskId, JSON.stringify(draft)]);
+      return taskId;
+    });
+  }
   /** Continue a stopped job: finished clips are kept and known vendor tasks are polled again. */
   async resume(owner: string, id: string) {
     return inTransaction(this.pool, async client => {
@@ -143,7 +168,9 @@ export class PgPresenterStore {
         const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [presenterLockKey(p.task_id)]);
         if (!lock.rows[0].locked) throw new PresenterError("原任务正在收尾，请稍后再删除。", 409);
       }
-      const files = p.task_id ? (await client.query(`DELETE FROM assets WHERE user_id=$1 AND type='video' AND task_id=$2 RETURNING storage_key`, [owner, p.task_id])).rows : [];
+      // Videos of every job of the draft, including those replaced by a recomposed one.
+      const files = p.task_id ? (await client.query(`DELETE FROM assets WHERE user_id=$1 AND type='video' AND task_id IN
+        (SELECT id FROM tasks WHERE user_id=$1 AND type=$3 AND input->>'projectId'=$2) RETURNING storage_key`, [owner, id, DIGITAL_PRESENTER_TASK])).rows : [];
       await client.query("DELETE FROM digital_presenter_projects WHERE user_id=$1 AND id=$2", [owner, id]);
       return { files: files.map(row => row.storage_key as string) };
     });

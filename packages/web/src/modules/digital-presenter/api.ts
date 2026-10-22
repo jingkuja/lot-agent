@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import { PresenterDraftSchema, type PresenterProject, type PresenterTake, type PresenterTaskState } from "@lot-agent/core/digital-presenter";
+import type { MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { ApiClientError, getToken, request } from "../../api/client.js";
 
 export type MaterialSlot = "portrait" | "baseVideo" | "faceReference";
 export type Material = { id: string; url: string; name: string; mime: string };
 /** A project as the editor reads it; opening a draft also returns its material previews. */
 export type Project = PresenterProject & { materials?: Partial<Record<MaterialSlot, Material>> };
-export interface Capabilities { composition: boolean; speech: boolean; models: { image: string; video: string } }
+export interface Capabilities { composition: boolean; subtitles: boolean; speech: boolean; models: { image: string; video: string } }
 
 // Stored drafts may predate newly added fields; normalize before computing the dirty snapshot.
 export const normalizeProject = (project: Project): Project => ({ ...project, draft: PresenterDraftSchema.parse(project.draft) });
@@ -26,6 +27,8 @@ export const presenterApi = {
   synthesize: (id: string, version: number, slots: number[] = []) => request<{ version: number; takes: PresenterTake[]; error: string }>(`${base}/${id}/speech`, json("POST", { version, slots })),
   generate: async (id: string, version: number) => normalizeProject(await request<Project>(`${base}/${id}/generate`, json("POST", { version }))),
   resume: async (id: string) => normalizeProject(await request<Project>(`${base}/${id}/resume`, { method: "POST" })),
+  /** Compose the made video again with changed captions; the clips are reused without the model. */
+  recompose: async (id: string, version: number, captions: MarketingCaptions | undefined) => normalizeProject(await request<Project>(`${base}/${id}/captions`, json("POST", { version, captions }))),
   release: (id: string) => request<{ released: number }>(`${base}/${id}/unknown-clips/release`, { method: "POST" }),
 };
 

@@ -216,6 +216,8 @@ export function TakesStep({ form, project, takes, blocker, onSynthesize, onGener
       })}</ol>
       {complete && <p className="mv-hint">{t("配音总长 {0} 秒，成片时长与配音一致。", [seconds(presenterTrackMs(durations))])}</p>}
     </section>
+    <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={form.locked} onChange={e => form.set("subtitles", e.target.checked)} />{t("添加字幕")}</label>
+    {draft.subtitles && <p className="mv-hint">{t("字幕按口播文案在合成时加入，并按配音停顿切换。")}</p>}
     {blocker && <p className="mv-error" role="alert">{t(blocker)}</p>}
     <button className="mv-primary mv-generate" disabled={busy || !!blocker} onClick={onGenerate}>{t("生成主播视频")}</button>
     <p className="mv-hint">{t(draft.mode === "image" ? "以图生成按片段秒数计费，每段约需 5–10 分钟，多段会排队生成。" : "以视频生成按成片秒数计费，通常需要 5–15 分钟。")}</p>

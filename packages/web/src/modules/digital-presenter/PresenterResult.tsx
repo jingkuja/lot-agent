@@ -1,6 +1,8 @@
+import { marketingCaptionSrt, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { useConfirm } from "../marketing-video/ConfirmDialog.js";
 import type { Project } from "./api.js";
+import { PresenterCaptions } from "./PresenterCaptions.js";
 
 /** Guidance per stop reason; rewording a server message never changes the offered actions. */
 const FAILURES: Record<string, { reason: string; next: string; resume?: boolean }> = {
@@ -18,8 +20,10 @@ const FAILURES: Record<string, { reason: string; next: string; resume?: boolean 
 };
 
 /** A submitted video: progress, or why it stopped and what can move it forward, or the result. */
-export function PresenterResult({ project, busy, onCancel, onResume, onRelease, onCopy }: {
+export function PresenterResult({ project, busy, onCancel, onResume, onRelease, onCopy, onCaptions }: {
   project: Project; busy: boolean; onCancel(): void; onResume(): void; onRelease(): void; onCopy(): void;
+  /** Compose the made video again with changed captions. */
+  onCaptions(captions: MarketingCaptions | undefined): void;
 }) {
   const { t } = useI18n();
   const [confirmDialog, confirm] = useConfirm();
@@ -34,8 +38,10 @@ export function PresenterResult({ project, busy, onCancel, onResume, onRelease, 
     <div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy} onClick={onCopy}>{t("复制为新草稿")}</button></div>
     {result ? <>
       <video className="mv-result-video" controls src={result.url} />
-      <a className="mv-download" href={result.url} download>{t("下载视频")}</a>
+      <div className="mv-downloads"><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
+        {!!project.output?.captions?.length && <a className="mv-download" href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(project.output.captions))}`} download="captions.srt">{t("下载字幕（SRT）")}</a>}</div>
       <p className="mv-hint">{t("口型、表情和身份一致性以实际成片为准，发布前请完整观看。")}</p>
+      {project.draft.subtitles && project.output?.frame && <PresenterCaptions key={project.taskId} project={project} frame={project.output.frame} busy={busy} onApply={onCaptions} />}
     </> : <div className="mv-progress">
       <strong>{t(pending ? "排队中" : active ? "正在生成主播视频" : cancelled ? "已取消" : "生成未完成")}</strong>
       <progress aria-label={t("视频制作进度")} max="100" value={project.progress} />

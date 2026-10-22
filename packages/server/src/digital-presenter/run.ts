@@ -3,9 +3,10 @@ import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ProviderError, VideoGenerationProvider, VideoGenerationRequest } from "@lot-agent/core";
 import { presenterTrackMs, PRESENTER_INPUT_VERSION, type PresenterDraft } from "@lot-agent/core/digital-presenter";
+import { MarketingCaptionsSchema, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError } from "../generation/run-job.js";
-import { inspectMedia, mediaCapabilities, ownedAssetPath } from "../marketing-video/media.js";
+import { inspectMedia, mediaCapabilities, ownedAssetPath, SUBTITLES_UNAVAILABLE } from "../marketing-video/media.js";
 import { definiteRejection } from "../marketing-video/run.js";
 import { PresenterRunError, UNKNOWN_CLIP_MESSAGE } from "./errors.js";
 import { presenterFile, presenterPath, signPresenterFile } from "./files.js";
@@ -18,6 +19,12 @@ export interface PresenterJobInput {
   presenterInputVersion: number; projectId: string; mode: PresenterDraft["mode"]; model: string;
   resolution: PresenterDraft["resolution"]; ratio: PresenterDraft["ratio"];
   takes: FrozenTake[]; portrait?: string; baseVideo?: string; faceReference?: string;
+  /** Burn each take's text as captions. Jobs frozen before captions have none. */
+  subtitles?: boolean;
+  /** Caption style, line breaks and offsets; a recomposed job carries the changed ones. */
+  captions?: MarketingCaptions;
+  /** The finished job whose clips a recomposed job reuses. */
+  recomposedFrom?: string;
 }
 
 export interface PresenterRunDeps {
@@ -44,7 +51,9 @@ function frozenInput(value: Record<string, unknown>): PresenterJobInput {
   if (input.presenterInputVersion !== PRESENTER_INPUT_VERSION || !["image", "video"].includes(input.mode) || typeof input.model !== "string" || !takes.length
     || takes.some((take, slot) => !take || take.slot !== slot || typeof take.file !== "string" || !Number.isInteger(take.durationMs) || take.durationMs <= 0)
     || (input.mode === "image" ? !input.portrait : !input.baseVideo)) throw new PresenterRunError("NOT_RECOVERABLE", "生成任务配置不完整");
-  return { ...input, takes };
+  const captions = input.captions === undefined ? undefined : MarketingCaptionsSchema.safeParse(input.captions);
+  if (captions && !captions.success) throw new PresenterRunError("NOT_RECOVERABLE", "生成任务配置不完整");
+  return { ...input, takes, captions: captions?.data };
 }
 
 export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: string; userId: string; input: Record<string, unknown> }, signal: AbortSignal) {
@@ -68,7 +77,9 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     timer = setInterval(() => { void assertActive().catch(abort); }, 1000);
     await assertActive();
     const existing = (await deps.db.pool.query("SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 AND type='video' ORDER BY created_at LIMIT 1", [job.id, job.userId])).rows[0];
-    if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime, durationSec: Number(existing.duration_sec) || undefined }] };
+    // Finished before the task was marked done; the burned cues are not kept with the asset.
+    if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime, durationSec: Number(existing.duration_sec) || undefined }],
+      ...(existing.width && existing.height ? { frame: { width: Number(existing.width), height: Number(existing.height) } } : {}) };
 
     const clips = await store.clips(job.id);
     const expected = input.mode === "image" ? input.takes.length : 1;
@@ -79,7 +90,10 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     try { takes = await Promise.all(input.takes.map(take => presenterFile(deps.dataRoot, input.projectId, take.file))); }
     catch { throw new PresenterRunError("NOT_RECOVERABLE", "配音文件已不可用，请复制为新草稿并重新生成配音。"); }
     // The API host's probe says nothing about this worker. Stop before any clip is paid for.
-    if (!(await mediaCapabilities()).composition) throw new PresenterRunError("CONFIG_MISSING", "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
+    const capabilities = await mediaCapabilities();
+    if (!capabilities.composition) throw new PresenterRunError("CONFIG_MISSING", "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
+    const subtitles = input.subtitles === true;
+    if (subtitles && !capabilities.subtitles) throw new PresenterRunError("CONFIG_MISSING", SUBTITLES_UNAVAILABLE);
 
     const jobFile = (name: string) => `jobs/${job.id}/${name}`;
     const local = (name: string) => presenterPath(deps.dataRoot, input.projectId, jobFile(name));
@@ -221,11 +235,13 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     await deps.db.updateTaskProgress(job.id, 92, "正在合成视频");
     const done = await store.clips(job.id);
     const files = await Promise.all(done.map(clip => presenterFile(deps.dataRoot, input.projectId, clip.file)));
+    const takeMs = input.takes.map(take => take.durationMs);
+    const captions = subtitles ? { texts: input.takes.map(take => take.text), ...(input.captions ? { settings: input.captions } : {}) } : undefined;
     let result;
     try {
       result = input.mode === "image"
-        ? await (deps.compose?.image ?? composeImageMode)({ clips: files, takes, takeMs: input.takes.map(take => take.durationMs), frame: portraitFrame(input.ratio, input.resolution), signal: controller.signal })
-        : await (deps.compose?.video ?? composeVideoMode)({ clip: files[0], track: local("track.wav"), trackSec, signal: controller.signal });
+        ? await (deps.compose?.image ?? composeImageMode)({ clips: files, takes, takeMs, captions, frame: portraitFrame(input.ratio, input.resolution), signal: controller.signal })
+        : await (deps.compose?.video ?? composeVideoMode)({ clip: files[0], track: local("track.wav"), trackSec, ...(captions ? { captions: { ...captions, takes, takeMs } } : {}), signal: controller.signal });
     } catch (error) {
       if (controller.signal.aborted) throw new JobCancelledError();
       throw new PresenterRunError("COMPOSITION_FAILED", error instanceof Error ? error.message : "视频合成失败", { cause: error });
@@ -234,7 +250,8 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     const id = randomUUID(); const key = `${id}.mp4`;
     const { url } = await deps.storage.put({ key, body: result.body, contentType: "video/mp4" });
     await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.body.length, durationSec: result.durationSec, width: result.width, height: result.height });
-    return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }] };
+    return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], frame: { width: result.width, height: result.height },
+      ...(result.captions ? { captions: result.captions } : {}) };
   } catch (error) {
     if (error instanceof JobCancelledError || error instanceof PresenterRunError) throw error;
     throw new PresenterRunError("UNKNOWN", error instanceof Error ? error.message : String(error), { cause: error });

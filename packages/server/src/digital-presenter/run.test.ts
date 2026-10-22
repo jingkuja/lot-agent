@@ -27,7 +27,8 @@ vi.mock("./media.js", async () => {
   };
 });
 vi.mock("../marketing-video/media.js", () => ({
-  mediaCapabilities: vi.fn(async () => ({ composition: true })),
+  mediaCapabilities: vi.fn(async () => ({ composition: true, subtitles: true })),
+  SUBTITLES_UNAVAILABLE: "视频合成工具不支持字幕烧录",
   inspectMedia: vi.fn(async () => ({ video: true, audio: true, duration: 4.2 })),
   ownedAssetPath: vi.fn(async () => "/tmp/upload.png"),
 }));
@@ -59,7 +60,7 @@ function fixture(clips: Partial<ClipRow>[], provider: { create: ReturnType<typeo
   };
   const db = { pool, getTaskStatus: vi.fn(async () => "running"), updateTaskProgress: vi.fn(), getAsset: vi.fn(async () => ({ id: "upload", user_id: "owner", type: "upload" })), createAsset: vi.fn() };
   const compose = {
-    image: vi.fn(async () => ({ body: Buffer.from("video"), durationSec: 7.55, width: 720, height: 1280 })),
+    image: vi.fn(async () => ({ body: Buffer.from("video"), durationSec: 7.55, width: 720, height: 1280, captions: [{ shot: 0, start: 0, end: 1, text: "大家好" }] })),
     video: vi.fn(async () => ({ body: Buffer.from("video"), durationSec: 9, width: 1080, height: 1920 })),
   };
   const deps: PresenterRunDeps = {
@@ -68,7 +69,7 @@ function fixture(clips: Partial<ClipRow>[], provider: { create: ReturnType<typeo
     storage: { put: vi.fn(async ({ key }) => ({ url: `/static/assets/${key}` })) },
     sleep: async () => {}, compose, sign: vi.fn(async (_root: string, _project: string, file: string) => `https://pub.example/${file}`),
   };
-  const input = { presenterInputVersion: 1, projectId: PROJECT, mode, model: rows[0].model, resolution: "720P", ratio: "9:16", takes,
+  const input = { presenterInputVersion: 1, projectId: PROJECT, mode, model: rows[0].model, resolution: "720P", ratio: "9:16", takes, subtitles: true,
     ...(mode === "image" ? { portrait: "portrait-id" } : { baseVideo: "video-id" }) };
   return { deps, rows, queries, db, compose, job: { id: "job", userId: "owner", input } };
 }
@@ -87,9 +88,9 @@ describe("digital presenter worker", () => {
       { prompt: "", model: "wan2.2-s2v", resolution: "720P", durationSec: 3.1, input_reference: "https://pub.example/jobs/job/portrait.jpg", reference_audio: "https://pub.example/b.wav" },
     ]);
     expect(f.rows.map(row => [row.status, row.vendor_task_id])).toEqual([["succeeded", "vendor-1"], ["succeeded", "vendor-2"]]);
-    expect(f.compose.image).toHaveBeenCalledWith(expect.objectContaining({ takeMs: [4200, 3100], frame: { width: 720, height: 1280 } }));
+    expect(f.compose.image).toHaveBeenCalledWith(expect.objectContaining({ takeMs: [4200, 3100], captions: { texts: ["大家好。", "欢迎光临。"] }, frame: { width: 720, height: 1280 } }));
     expect(f.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({ taskId: "job", userId: "owner", type: "video", mime: "video/mp4" }));
-    expect(output.assets[0]).toMatchObject({ mime: "video/mp4", durationSec: 7.55 });
+    expect(output).toMatchObject({ assets: [{ mime: "video/mp4", durationSec: 7.55 }], frame: { width: 720, height: 1280 }, captions: [{ shot: 0, start: 0, end: 1, text: "大家好" }] });
     // The intent is recorded before the paid request.
     const claim = f.queries.findIndex(q => q.sql.includes("status='submitting'"));
     const submitted = f.queries.findIndex(q => q.sql.includes("status='running',vendor_task_id=$3"));
@@ -139,6 +140,39 @@ describe("digital presenter worker", () => {
     expect(provider.create).toHaveBeenCalledOnce();
     expect(provider.create.mock.calls[0][0]).toEqual({ prompt: "", model: "videoretalk", durationSec: 7.55,
       reference_video: "https://pub.example/jobs/job/footage.mp4", reference_audio: "https://pub.example/jobs/job/track.wav" });
-    expect(f.compose.video).toHaveBeenCalledWith(expect.objectContaining({ trackSec: 7.55 }));
+    expect(f.compose.video).toHaveBeenCalledWith(expect.objectContaining({ trackSec: 7.55, captions: { texts: ["大家好。", "欢迎光临。"], takes: [join(root.dir, "a.wav"), join(root.dir, "b.wav")], takeMs: [4200, 3100] } }));
+  });
+
+  it("composes jobs frozen before captions without them", async () => {
+    const provider = { create: vi.fn(async () => ({ taskId: "vendor", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://oss.example/out.mp4" })) };
+    const f = fixture([{}, {}], provider);
+    delete (f.job.input as Record<string, unknown>).subtitles;
+    await runDigitalPresenter(f.deps, f.job, new AbortController().signal);
+    expect(f.compose.image).toHaveBeenCalledWith(expect.objectContaining({ captions: undefined }));
+  });
+
+  it("recomposes with changed captions from the reused clips without calling the model", async () => {
+    const provider = { create: vi.fn(), poll: vi.fn() };
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(root.dir, "jobs", "old"), { recursive: true });
+    await writeFile(join(root.dir, "jobs/old/clip-0.mp4"), "clip");
+    await writeFile(join(root.dir, "jobs/old/clip-1.mp4"), "clip");
+    const f = fixture([{ status: "succeeded", file: "jobs/old/clip-0.mp4" }, { status: "succeeded", file: "jobs/old/clip-1.mp4" }], provider);
+    const settings = { size: "large", position: "high", offsetSec: -0.2, shots: [] };
+    Object.assign(f.job.input, { captions: settings, recomposedFrom: "old" });
+    await runDigitalPresenter(f.deps, f.job, new AbortController().signal);
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(f.compose.image).toHaveBeenCalledWith(expect.objectContaining({ clips: [join(root.dir, "jobs/old/clip-0.mp4"), join(root.dir, "jobs/old/clip-1.mp4")],
+      captions: { texts: ["大家好。", "欢迎光临。"], settings } }));
+  });
+
+  it("stops before any clip is paid for when captions cannot be burned", async () => {
+    const provider = { create: vi.fn(), poll: vi.fn() };
+    const media = await import("../marketing-video/media.js");
+    vi.mocked(media.mediaCapabilities).mockResolvedValueOnce({ composition: true, subtitles: false });
+    const f = fixture([{}, {}], provider);
+    await expect(runDigitalPresenter(f.deps, f.job, new AbortController().signal)).rejects.toMatchObject({ errorCode: "CONFIG_MISSING" });
+    expect(provider.create).not.toHaveBeenCalled();
   });
 });
