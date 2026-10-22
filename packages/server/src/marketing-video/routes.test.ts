@@ -298,14 +298,32 @@ describe("marketing storyboard editing", () => {
   });
   it("supports AI-selected shot counts and unequal durations summing to the total", async () => {
     const f = fixture(); f.project.draft.durationSec = 17;
-    const shots = [4, 6, 7].map(durationSec => ({ durationSec, script: "欢迎来喝咖啡。", visual: "人物在吧台前正面出镜", action: "人物端起杯子", camera: "中景" }));
+    const shots = [8, 9].map(durationSec => ({ durationSec, script: "欢迎来喝咖啡。", visual: "人物在吧台前正面出镜", action: "人物端起杯子", camera: "中景" }));
     f.service.marketingText.mockResolvedValueOnce({ shots });
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "增加一个开场镜头" })).status).toBe(200);
     expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ storyboard: shots }));
     Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
     f.service.marketingText.mockResolvedValueOnce({ shots: [{ ...shots[1], durationSec: 15, camera: "缓慢推进" }] });
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "镜头推进", index: 1 })).status).toBe(200);
-    expect(f.store.save.mock.calls.at(-1)?.[3].storyboard.map(s => s.durationSec)).toEqual([4, 6, 7]);
+    expect(f.store.save.mock.calls.at(-1)?.[3].storyboard.map(s => s.durationSec)).toEqual([8, 9]);
+  });
+  it("joins adjacent AI shots that fit one clip, but never on a single-shot edit", async () => {
+    const f = fixture(); f.project.draft.durationSec = 17;
+    const shot = (durationSec: number, script: string) => ({ durationSec, script, visual: `${script}画面`, action: "端起杯子", camera: "中景" });
+    f.service.marketingText.mockResolvedValueOnce({ shots: [shot(4, "欢迎。"), shot(6, "来喝咖啡。"), shot(7, "现磨咖啡等你来。")] });
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(200);
+    const saved = f.store.save.mock.calls.at(-1)![3];
+    expect(saved.storyboard).toEqual([
+      { durationSec: 10, script: "欢迎。\n来喝咖啡。", visual: "欢迎。画面\n来喝咖啡。画面", action: "端起杯子\n端起杯子", camera: "中景\n中景" },
+      shot(7, "现磨咖啡等你来。"),
+    ]);
+    // The copy reads the same as before the shots were joined.
+    expect(saved.script).toBe("欢迎。\n来喝咖啡。\n现磨咖啡等你来。");
+    const board = [shot(5, "欢迎。"), shot(5, "来喝咖啡。"), shot(7, "现磨咖啡等你来。")];
+    Object.assign(f.project.draft, { storyboard: board, script: storyboardScript(board) });
+    f.service.marketingText.mockResolvedValueOnce({ shots: [{ ...board[1], camera: "缓慢推进" }] });
+    expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "镜头推进", index: 1 })).status).toBe(200);
+    expect(f.store.save.mock.calls.at(-1)?.[3].storyboard.map(s => s.durationSec)).toEqual([5, 5, 7]);
   });
   const shots = [
     { durationSec: 15, script: "欢迎到店喝咖啡。", visual: "明亮咖啡店", action: "端起咖啡杯", camera: "中景推进" },

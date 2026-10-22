@@ -1,6 +1,6 @@
 import { MarketingDraftSchema, MarketingCreationSchema, marketingShotMaxSeconds, resolveMarketingSegments, storyboardScript, timeMarketingStoryboard, type MarketingDraft, type MarketingShot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { activeMarketingVideoProfile } from "./model.js";
-import { MARKETING_STORYBOARD_RULES, marketingPlanningContext, marketingPresenterRequirement, marketingPromptInput, marketingTimingRequirement } from "./prompt.js";
+import { MARKETING_STORYBOARD_RULES, marketingPlanningContext, marketingPresenterRequirement, marketingPromptInput, marketingTimingRequirement, mergeMarketingStoryboard } from "./prompt.js";
 
 /** Both text references and video evidence produce the same editable result. */
 export function creationPrompt(draft: MarketingDraft, locale: string, evidence?: unknown, speechAvailable = false) {
@@ -55,7 +55,7 @@ export function publicationPrompt(script: string, locale: string) {
 
 export function parseCreation(raw: unknown, draft: MarketingDraft, profile: MarketingVideoProfile = activeMarketingVideoProfile()) {
   const value = MarketingCreationSchema.parse(raw);
-  const result = MarketingDraftSchema.parse({ ...draft, storyboard: timeMarketingStoryboard(value.shots, draft.durationSec, marketingShotMaxSeconds(draft, profile)), script: storyboardScript(value.shots), publishTitle: value.publishTitle, tags: value.tags, continuity: value.continuity ?? "", storyboardAudio: !draft.assets.video });
+  const result = MarketingDraftSchema.parse({ ...draft, storyboard: timeMarketingStoryboard(mergeMarketingStoryboard(value.shots, draft, profile), draft.durationSec, marketingShotMaxSeconds(draft, profile)), script: storyboardScript(value.shots), publishTitle: value.publishTitle, tags: value.tags, continuity: value.continuity ?? "", storyboardAudio: !draft.assets.video });
   resolveMarketingSegments(result, profile);
   return { draft: result, analysis: value.analysis };
 }

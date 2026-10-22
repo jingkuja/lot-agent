@@ -1,6 +1,7 @@
 import { capMarketingStoryboard, MARKETING_REVIEW_RULE_VERSION, MarketingDraftSchema, MarketingStoryboardSchema, marketingShotMaxSeconds, planMarketingSegments, resolveMarketingSegments, storyboardScript, timeMarketingStoryboard, type MarketingDraft, type MarketingReview, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { activeMarketingVideoProfile } from "./model.js";
 import { parseCreation } from "./creation.js";
+import { mergeMarketingStoryboard } from "./prompt.js";
 import { MarketingTextError } from "./text.js";
 import { normalizeMarketingReview, type MarketingReviewDelta } from "./compliance.js";
 
@@ -40,7 +41,8 @@ export function parseTextResult(kind: "copy" | "storyboard", raw: unknown, draft
       .map(part => ({ durationSec: part.durationSec, script: part.script, visual: "", action: "", camera: "" }));
     const shots = MarketingStoryboardSchema.parse((raw as { shots?: unknown })?.shots);
     if (!shots.length || (selectedIndex !== undefined && (shots.length !== 1 || !initial[selectedIndex]))) throw new Error("Invalid shots");
-    const storyboard = selectedIndex === undefined ? timeMarketingStoryboard(shots, draft.durationSec, maxShot)
+    // A whole board may join short neighbours; a single-shot edit keeps every shot's place.
+    const storyboard = selectedIndex === undefined ? timeMarketingStoryboard(mergeMarketingStoryboard(shots, draft, profile), draft.durationSec, maxShot)
       : initial.map((shot, index) => index === selectedIndex ? { ...shots[0], durationSec: shot.durationSec } : shot);
     // Only a full-board answer may set the shared look; a single-shot edit keeps it.
     const continuity = selectedIndex === undefined && typeof (raw as { continuity?: unknown }).continuity === "string" ? ((raw as { continuity: string }).continuity).trim() : draft.continuity;

@@ -56,6 +56,8 @@ try {
   const savedDraft = (has) => page.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/api/marketing-videos/') && (response.request().postData() ?? '').includes(has));
   const projects = new Map();
   const textOperations = new Map(), uploadedAssets = new Map();
+  // The mocked AI picks shorter shots than the manual split, so a narration take can outgrow its shot.
+  const aiPlan = (text, duration) => planMarketingSegments(text, duration, 12);
   const script = '欢迎来到转角咖啡店。我们用现磨咖啡迎接每一位客人，明亮的空间适合休息和聊天。你可以选择喜欢的位置，点上一杯手冲咖啡，慢慢享受今天的时光。欢迎来店里坐一坐，发现属于你的咖啡时刻。';
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
   const wav = Buffer.alloc(44 + 16000 * 3 * 2);
@@ -115,7 +117,7 @@ try {
         return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 'MARKETING_MODEL_UNAVAILABLE', error: '文案模型暂时无法完成请求，请稍后重试。' }) });
       }
       if (holdNextCopy) { holdNextCopy = false; await new Promise(resolve => { releaseCopy = resolve; }); }
-      p.version++; p.draft = { ...body.draft, storyboardAudio: !body.draft.assets?.video, storyboard: planMarketingSegments(script, body.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '咖啡店', action: '展示咖啡', camera: '中景' })), script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' };
+      p.version++; p.draft = { ...body.draft, storyboardAudio: !body.draft.assets?.video, storyboard: aiPlan(script, body.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '咖啡店', action: '展示咖啡', camera: '中景' })), script, publishTitle: '来发现你的下一杯咖啡', tags: '#探店 #咖啡' };
       return json({ project: p, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
     }
     if (path.startsWith('/api/marketing-videos/')) {
@@ -132,7 +134,7 @@ try {
       if (action === 'storyboard') {
         if (failNextStoryboard) { failNextStoryboard = false; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'AI 分镜生成失败，原分镜已保留，请重试。' }) }); }
         const body = request.postDataJSON(); assert.equal(body.version, p.version);
-        const current = p.draft.storyboard.length ? p.draft.storyboard : planMarketingSegments(p.draft.script, p.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '木质吧台和咖啡产品特写', action: '自然讲述并展示咖啡', camera: '缓慢推近' }));
+        const current = p.draft.storyboard.length ? p.draft.storyboard : aiPlan(p.draft.script, p.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '木质吧台和咖啡产品特写', action: '自然讲述并展示咖啡', camera: '缓慢推近' }));
         const shots = current.map((shot, index) => body.instruction && (body.index === undefined || body.index === index) ? { ...shot, camera: 'AI 调整镜头' } : shot);
         p.version++; p.draft = { ...p.draft, storyboard: shots, script: storyboardScript(shots), storyboardAudio: body.index === undefined ? !p.draft.assets.video : p.draft.storyboardAudio }; p.review = null;
         return json(p);
@@ -464,7 +466,7 @@ try {
   await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
   assert.equal(writes.filter(r => r.path.endsWith('/storyboard')).length, 1);
-  assert.equal(await page.locator('.mv-shot').count(), planMarketingSegments(script, 60).length);
+  assert.equal(await page.locator('.mv-shot').count(), aiPlan(script, 60).length);
   const firstShot = page.getByRole('article', { name: '第 1 镜', exact: true });
   const secondShot = page.getByRole('article', { name: '第 2 镜', exact: true });
   await firstShot.getByLabel('分镜口播').fill('欢迎来到转角咖啡店，一起喝杯咖啡。');

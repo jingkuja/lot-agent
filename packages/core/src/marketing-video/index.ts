@@ -297,6 +297,23 @@ export function timeMarketingStoryboard(shots: MarketingShot[], total: number, m
   return shots.map((shot, index) => ({ ...shot, durationSec: durations[index] }));
 }
 
+/** Joins adjacent shots that together fit in one clip, in order. Every clip is generated on its
+ * own, so fewer clips leave less room for the person, product or setting to drift between them.
+ * A joined shot keeps both parts of each field, one per line, so the copy reads the same.
+ * `fits` may still refuse one, e.g. when its clip prompt would be too long. */
+export function mergeMarketingShots(shots: MarketingShot[], maxShot = MARKETING_SHOT_MAX_SECONDS, fits: (shot: MarketingShot) => boolean = () => true): MarketingShot[] {
+  const join = (a: string, b: string) => [a.trim(), b.trim()].filter(Boolean).join("\n");
+  const merged: MarketingShot[] = [];
+  for (const shot of shots) {
+    const last = merged.at(-1);
+    const joined = last && MarketingShotSchema.safeParse({ durationSec: last.durationSec + shot.durationSec, script: join(last.script, shot.script),
+      visual: join(last.visual, shot.visual), action: join(last.action, shot.action), camera: join(last.camera, shot.camera) });
+    if (joined?.success && joined.data.durationSec <= maxShot && Math.ceil(speechUnits(joined.data.script) / 4.5) <= maxShot && fits(joined.data)) merged[merged.length - 1] = joined.data;
+    else merged.push(shot);
+  }
+  return merged;
+}
+
 /** Silence kept after a shot's narration; the clip must outlast its voice-over. */
 export const MARKETING_NARRATION_TAIL_MS = 200;
 export const marketingNarrationFits = (durationMs: number, durationSec: number) => durationMs + MARKETING_NARRATION_TAIL_MS <= durationSec * 1000;
@@ -336,7 +353,8 @@ export function planMarketingSegments(script: string, durationSec: number, maxSh
   if (units > marketingMaxDuration(durationSec) * 4.5) throw new Error("文案过长，请精简文案或增加视频时长。");
   // Preserve every character, including whitespace and punctuation. Long
   // sentences may be split at a comma, space, or ultimately a character edge.
-  const count = Math.max(Math.ceil(durationSec / maxShot), Math.min(Math.ceil(durationSec / 8), Math.floor(units / 4)));
+  // As few clips as the length and narration allow: each clip is generated on its own.
+  const count = Math.max(Math.ceil(durationSec / maxShot), Math.ceil(units / (maxShot * 3.5)));
   if (units < count * 4) throw new Error("文案过短，请补充内容。");
   const chars = Array.from(script.trim());
   if (chars.length < count) throw new Error("文案过短，请补充内容。");

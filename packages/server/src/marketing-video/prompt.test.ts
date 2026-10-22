@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { KLING_MARKETING_PROFILE, MarketingDraftSchema } from "@lot-agent/core/marketing-video";
-import { marketingImageReferences, marketingPlanningContext, marketingSegmentPrompt, MARKETING_STORYBOARD_RULES } from "./prompt.js";
+import { marketingImageReferences, marketingPlanningContext, marketingSegmentPrompt, marketingTimingRequirement, mergeMarketingStoryboard, MARKETING_STORYBOARD_RULES } from "./prompt.js";
 import { activeMarketingVideoProfile } from "./model.js";
 import { creationPrompt, parseCreation, publicationPrompt, storyboardPrompt } from "./creation.js";
 import { parseTextResult } from "./text-result.js";
@@ -305,5 +305,20 @@ describe("copy and storyboard source boundaries", () => {
     expect(JSON.parse(prompt.input)).toEqual({ script: "原样保留的咖啡介绍。" });
     expect(prompt.system).toContain("publication metadata, not narration");
     expect(prompt.system).toContain("one string of space-separated hashtags");
+  });
+});
+
+describe("fewest clips", () => {
+  const draft = MarketingDraftSchema.parse({ durationSec: 30 });
+  it("asks the planner for the fewest shots and to join neighbours that fit one clip", () => {
+    const timing = marketingTimingRequirement(draft, KLING_MARKETING_PROFILE);
+    expect(timing).toContain("ideally 2");
+    expect(timing).toContain("never leave two adjacent shots that together last 15 seconds or less");
+  });
+  it("joins short neighbours unless the joined clip prompt would be too long", () => {
+    const shot = (visual: string) => ({ durationSec: 6, script: "欢迎来喝咖啡。", visual, action: "端起杯子", camera: "中景" });
+    expect(mergeMarketingStoryboard([shot("吧台"), shot("窗边")], draft, KLING_MARKETING_PROFILE)).toHaveLength(1);
+    const long = [shot("画".repeat(590)), shot("面".repeat(590))];
+    expect(mergeMarketingStoryboard(long, draft, KLING_MARKETING_PROFILE)).toEqual(long);
   });
 });
