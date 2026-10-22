@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, fitMarketingNarration, marketingKeyArtIssue, type MarketingKeyArt, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingReview, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, fitMarketingNarration, marketingKeyArtIssue, marketingImageCount, type MarketingKeyArt, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingReview, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -377,8 +377,12 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     // Without the still, shots keep the same person and setting only through the text.
     if (!retry && !marketingKeyArtIssue(p.draft, profile)) {
       const { keyArt: still } = await request<{ keyArt: MarketingKeyArt }>(`/marketing-videos/${p.id}/key-art`);
+      // With no reference image either, nothing but text ties the shots together.
       if (still.status !== "succeeded" && !await confirm({ title: "未使用定妆图",
-        message: "没有定妆图时，各镜头只靠文字描述保持人物、服装和场景一致，容易出现不一致。建议先在「确认分镜」下生成定妆图。仍要直接生成视频吗？", confirm: "仍然生成" })) return;
+        message: marketingImageCount(p.draft.assets)
+          ? "没有定妆图时，各镜头只靠文字描述保持人物、服装和场景一致，容易出现不一致。建议先在「确认分镜」下生成定妆图。仍要直接生成视频吗？"
+          : "没有定妆图，也没有上传肖像、产品或空间参考图，各镜头只靠文字描述，人物、产品和场景可能每镜都不一样。成片后重新生成单镜画面仍按视频模型计费。建议先在「确认分镜」下生成定妆图。确定直接生成视频吗？",
+        confirm: "仍然生成" })) return;
     }
     if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { await review(); p = projectRef.current!; }
     if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。");

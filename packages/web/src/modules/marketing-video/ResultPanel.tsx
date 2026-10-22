@@ -10,8 +10,10 @@ import { CaptionSettings } from "./CaptionSettings.js";
 
 /** Settings only the local composition of a made video uses. Changing them composes the kept
  * clips again, without the video model. */
-function CompositionSettings({ form, composition, captions, handlers, onPickNarrationVoice }: {
+function CompositionSettings({ form, composition, captions, recompose, handlers, onPickNarrationVoice }: {
   form: DraftForm; composition: MarketingComposition; handlers: MaterialHandlers; onPickNarrationVoice(): void;
+  /** Composes the kept clips again; shown beside the caption settings. */
+  recompose: ReactNode;
   /** Cues burned into the current video, shown beside each shot's captions. */
   captions?: MarketingCaption[];
 }) {
@@ -21,7 +23,7 @@ function CompositionSettings({ form, composition, captions, handlers, onPickNarr
   const { draft, busy, field } = open;
   return <div className="mv-composition" role="group" aria-label={t("成片设置")}>
     <h3>{t("成片设置")}</h3>
-    <p className="mv-hint">{t(composition.localSubtitles ? "修改背景音乐、音量或字幕后，点击下方「重新合成成片」：沿用全部已生成的片段，不调用视频模型。" : "修改背景音乐或音量后，点击下方「重新合成成片」：沿用全部已生成的片段，不调用视频模型。")}</p>
+    <p className="mv-hint">{t(composition.localSubtitles ? "修改背景音乐、音量或字幕后，点击「重新合成成片」：沿用全部已生成的片段，不调用视频模型。" : "修改背景音乐或音量后，点击下方「重新合成成片」：沿用全部已生成的片段，不调用视频模型。")}</p>
     {composition.narration && draft.narration && <>
       <NarrationSettings form={open} onPickVoice={onPickNarrationVoice} made />
       <p className="mv-hint">{t("修改旁白音色、语速或语气会重新合成全部配音，按语音合成计费；画面不变。")}</p>
@@ -29,7 +31,7 @@ function CompositionSettings({ form, composition, captions, handlers, onPickNarr
     <MaterialField form={open} slot="music" label="选择背景音乐（选填）" accept="audio/mpeg,audio/wav,audio/mp4" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
     {composition.localSubtitles && <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label>}
-    {composition.localSubtitles && draft.subtitles && <CaptionSettings form={open} captions={captions} />}
+    {composition.localSubtitles && draft.subtitles && <CaptionSettings form={open} captions={captions} recompose={recompose} />}
     {!composition.localSubtitles && draft.subtitles && <p className="mv-hint">{t("这条视频的字幕由视频模型画在画面里，不能单独调整；复制为新草稿重新制作后，字幕改为合成时加入，可以调整。")}</p>}
   </div>;
 }
@@ -71,6 +73,7 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
   const { t } = useI18n();
   const { draft, busy } = form;
   const result = project.status === "succeeded" ? project.output?.assets?.[0] : undefined;
+  const continuity = draft.continuity && <p className="mv-hint">{t("统一人物、产品与场景设定")}：{draft.continuity}</p>;
   const archived = project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库草稿" : "存草稿到知识库";
   return <section className="mv-card mv-results">
     <div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => onCopyDraft(0)}>{t("复制为新草稿")}</button></div>
@@ -93,11 +96,13 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
       {!knowledge && <p className="mv-hint">{t("知识库尚未启用。")}</p>}
     </div>
     <details className="mv-script-review" open><summary>{t(project.revision ? "修改成片" : "查看制作分镜")}</summary>
-      {project.revision && <CompositionSettings form={form} composition={project.revision.composition} captions={project.output?.captions} handlers={handlers} onPickNarrationVoice={onPickNarrationVoice} />}
-      {draft.continuity && <p className="mv-hint">{t("统一人物与场景设定")}：{draft.continuity}</p>}
       {project.revision ? <ShotRevision key={project.taskId} project={project} revision={project.revision} draft={draft} busy={busy} saving={saving} reviewPanel={reviewPanel}
+          settings={recompose => <>
+            <CompositionSettings form={form} composition={project.revision!.composition} captions={project.output?.captions} recompose={recompose} handlers={handlers} onPickNarrationVoice={onPickNarrationVoice} />
+            {continuity}
+          </>}
           onChange={onShots} onRevert={onRevertShots} onRevise={onRevise} />
-        : draft.storyboard.length ? <StoryboardEditor shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}
+        : <>{continuity}{draft.storyboard.length ? <StoryboardEditor shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}</>}
       <button disabled={busy || saving} onClick={() => onCopyDraft(2)}>{t(project.revision ? "复制为新草稿修改其他设置" : "修改分镜并重新制作")}</button>
     </details>
   </section>;

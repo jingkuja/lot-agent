@@ -92,8 +92,17 @@ describe("key-art stills", () => {
     expect(prompt).toContain("image 1 is the presenter's face");
     expect(prompt).toContain("image 2, image 3 show the product");
     expect(prompt).toContain("image 4, image 5 show the setting");
-    expect(prompt).toContain("Presenter and setting (follow exactly): 红色围裙");
+    expect(prompt).toContain("Presenter, product and setting (follow exactly): 红色围裙");
+    expect(prompt).not.toContain("one specific, realistic design");
     expect(marketingKeyArtPrompt(MarketingDraftSchema.parse({}))).toContain("Invent one ordinary, natural-looking presenter");
+  });
+  it("shows the product in the still, and fixes one design for it when no product image is chosen", () => {
+    const draft = MarketingDraftSchema.parse({ topic: "登山鞋，防滑耐磨", continuity: "米色针织短袖", assets: { portrait: [portrait] } });
+    const prompt = marketingKeyArtPrompt(draft);
+    expect(prompt).toContain("holding or beside the featured product");
+    expect(prompt).toContain("only to tell which product it is): 登山鞋，防滑耐磨");
+    expect(prompt).toContain("one specific, realistic design");
+    expect(keyArtBasis(MarketingDraftSchema.parse({ ...draft, topic: "徒步背包" }), "gpt-image-2.5-flare")).not.toBe(keyArtBasis(draft, "gpt-image-2.5-flare"));
   });
   it("writes the intent row before the one paid request and keeps the still private", async () => {
     const f = await fixture();

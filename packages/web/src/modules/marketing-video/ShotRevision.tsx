@@ -7,9 +7,11 @@ import { useConfirm } from "./ConfirmDialog.js";
 /** Redo single shots of a stopped or made video: edit their text or just choose them.
  * The other shots keep their clips; only the chosen shots' seconds are billed. With no shot
  * chosen, changed music, captions or narration only compose the kept clips again. */
-export function ShotRevision({ project, revision, draft, busy, saving, reviewPanel, onChange, onRevert, onRevise }: {
+export function ShotRevision({ project, revision, draft, busy, saving, reviewPanel, settings, onChange, onRevert, onRevise }: {
   project: MarketingProject; revision: NonNullable<MarketingProject["revision"]>; draft: MarketingDraft;
   busy: boolean; saving: boolean; reviewPanel: ReactNode;
+  /** Composition settings shown above the shots, given a button that only composes again. */
+  settings(recompose: ReactNode): ReactNode;
   onChange(shots: MarketingShot[]): void; onRevert(): void; onRevise(shots: number[]): void;
 }) {
   const { t, locale } = useI18n();
@@ -44,7 +46,13 @@ export function ShotRevision({ project, revision, draft, busy, saving, reviewPan
     if (await confirm({ title: shots.length ? "重新生成镜头？" : "重新合成成片？", confirm: shots.length ? "重新生成" : "重新合成", message,
       values: [shots.map(index => index + 1).join(locale === "zh" ? "、" : ", "), seconds, rendered.length - shots.length, takes] })) onRevise(shots);
   };
+  // Beside the caption settings, so a caption change needs no scrolling; shot redos stay below.
+  const recompose = <>
+    <button className="mv-primary" disabled={busy || saving || !changed || !!planError || !!shots.length} onClick={() => void submit()}>{t("重新合成成片")}</button>
+    {!!shots.length && <p className="mv-hint">{t("已选择要重新生成的镜头，请在下方分镜处提交。")}</p>}
+  </>;
   return <>
+    {settings(recompose)}
     <StoryboardEditor shots={draft.storyboard} busy={busy} onChange={onChange} redo={{ selected, reasons, notes, onToggle: toggle }} />
     {!made && edited && <p className="mv-hint">{t("「继续生成」按原分镜制作；要使用修改后的镜头，请点击下方的重新生成。")}</p>}
     {(edited || reviewIssue) && reviewPanel}

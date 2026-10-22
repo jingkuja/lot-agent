@@ -73,6 +73,15 @@ describe("marketing prompt submission preflight", () => {
     }
   });
 
+  it("reports a draft this worker cannot read as a server problem before any provider is resolved", async () => {
+    vi.mocked(runGenerationJob).mockClear();
+    const f = fixture([short]);
+    Object.assign(f.job.input, { draft: { ...f.job.input.draft, newerField: true } });
+    await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).rejects.toMatchObject({ errorCode: "CONFIG_MISSING" });
+    expect(f.generation).not.toHaveBeenCalled();
+    expect(runGenerationJob).not.toHaveBeenCalled();
+  });
+
   it("continues already-submitted shots without applying new prompt limits to their recovery", async () => {
     vi.mocked(runGenerationJob).mockClear();
     const f = fixture([long, long], true);

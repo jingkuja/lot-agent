@@ -609,7 +609,10 @@ try {
   const autoLines = await firstCaption.inputValue();
   await firstCaption.fill(`${autoLines}多加的字`);
   await page.getByRole('alert').filter({ hasText: '字幕只能调整断行和标点；要改文字，请修改该镜口播。' }).first().waitFor();
-  assert.equal(await page.getByRole('button', { name: '重新合成成片', exact: true }).isDisabled(), true);
+  // The caption panel has its own compose button next to the whole-video offset.
+  const captionRecompose = captionPanel.getByRole('button', { name: '重新合成成片', exact: true });
+  assert.equal(await captionRecompose.isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '重新合成成片', exact: true }).last().isDisabled(), true);
   await firstCaption.fill(`${autoLines.slice(0, 2)}\n${autoLines.slice(2)}`);
   await captionPanel.getByLabel('本镜提前或延后（秒）').first().fill('-0.15');
   await captionPanel.getByRole('button', { name: '恢复自动断行', exact: true }).waitFor();
@@ -618,7 +621,7 @@ try {
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-captions-zh-dark.png');
   await page.evaluate(() => document.documentElement.dataset.theme = 'light');
-  await page.getByRole('button', { name: '重新合成成片', exact: true }).click();
+  await captionRecompose.click();
   await confirmDialog('重新合成成片？', '重新合成');
   await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
   assert.deepEqual(writes.filter(r => r.path.endsWith('/revise')).at(-1).body.shots, []);
@@ -674,6 +677,7 @@ try {
   await snap('marketing-video-dark.png');
   await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
   // The copied draft has no still yet: generating without it needs a confirmation.
+  await page.getByRole('dialog', { name: '未使用定妆图', exact: true }).getByText('各镜头只靠文字描述保持人物、服装和场景一致', { exact: false }).waitFor();
   await confirmDialog('未使用定妆图', '仍然生成');
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 2);
@@ -711,6 +715,15 @@ try {
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.getByRole('heading', { name: 'Review storyboard', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-storyboard-en-compact.png');
+  // No still and no reference image at all: the warning names the paid shot redo, and cancelling submits nothing.
+  const generatesBefore = writes.filter(r => r.path.endsWith('/generate')).length;
+  await page.getByRole('button', { name: 'Confirm storyboard and generate video' }).click();
+  const bareDialog = page.getByRole('dialog', { name: 'No key-art still', exact: true });
+  await bareDialog.getByText('no portrait, product or setting reference image', { exact: false }).waitFor();
+  await bareDialog.getByText('still billed by the video model', { exact: false }).waitFor();
+  await bareDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await bareDialog.waitFor({ state: 'hidden' });
+  assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, generatesBefore);
 
   await page.getByRole('button', { name: 'Write copy', exact: false }).click();
   {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { captionLayout, captionLines, marketingCaptionLinesMatch, marketingCaptionsValue, marketingFrameSize, marketingShotCaption, MarketingCaptionsSchema,
   type MarketingCaption, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
@@ -48,8 +48,8 @@ function ShotCaption({ index, start, end, lines, auto, mismatch, offsetSec, busy
 }
 
 /** Captions burned in when a made video is composed: line breaks, timing, size and position.
- * The words stay the confirmed copy; changes here compose the kept clips again. */
-export function CaptionSettings({ form, captions: burned }: { form: DraftForm; captions?: MarketingCaption[] }) {
+ * The words stay the confirmed copy; changes here compose the kept clips again with `recompose`. */
+export function CaptionSettings({ form, captions: burned, recompose }: { form: DraftForm; captions?: MarketingCaption[]; recompose?: ReactNode }) {
   const { t } = useI18n();
   const { draft, busy, field } = form;
   const captions = draft.captions ?? MarketingCaptionsSchema.parse({});
@@ -74,7 +74,10 @@ export function CaptionSettings({ form, captions: burned }: { form: DraftForm; c
         <Choices form={form} label="位置" values={POSITIONS} value={captions.position} onChoose={value => update({ position: value as MarketingCaptions["position"] })} /></div>
     </div>
     {captions.position === "low" && height > width && <p className="mv-hint">{t("竖屏字幕靠下时，可能被短视频平台的按钮和标题遮挡。")}</p>}
-    <OffsetField label="全片提前或延后（秒）" value={captions.offsetSec} busy={busy} onChange={offsetSec => update({ offsetSec })} />
+    <div className="mv-caption-row">
+      <OffsetField label="全片提前或延后（秒）" value={captions.offsetSec} busy={busy} onChange={offsetSec => update({ offsetSec })} />
+      {recompose}
+    </div>
     <p className="mv-hint">{t("负数提前、正数延后，每次 0.05 秒；字幕不会移出所在镜头。看成片时觉得字幕比声音早或晚，就在这里调整。")}</p>
     <details className="mv-caption-shots"><summary>{t("逐镜调整断行和时间")}</summary>
       <p className="mv-hint">{t("每行是一条字幕，可以拆分或合并行、增减标点。")}</p>

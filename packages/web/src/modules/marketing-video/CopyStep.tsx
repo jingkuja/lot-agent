@@ -62,7 +62,7 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
     {(draft.copyMode !== "rewrite" || !!draft.script.trim()) && <>
       <DraftText form={form} name="script" label="视频口播文案" max={2000} rows={6} />
       <p className="mv-hint">{t("预计口播 {0} 秒，实际以成片为准。", [Math.ceil(speechUnits(draft.script) / 4)])}</p>
-      {!!draft.storyboard.length && <DraftText form={form} name="continuity" label="统一人物与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装和场景一致。" />}
+      {!!draft.storyboard.length && <DraftText form={form} name="continuity" label="统一人物、产品与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装、产品和场景一致。" />}
       {!!draft.storyboard.length && <StoryboardEditor creation presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />}
       {draft.script.trim() && planError && <p className="mv-error" role="alert">{t(planError)}</p>}
       <details className="mv-script-review" open><summary>{t("标题标签")}</summary>

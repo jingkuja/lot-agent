@@ -54,7 +54,11 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     await assertActive();
     const existing = (await deps.db.pool.query("SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 ORDER BY created_at LIMIT 1", [job.id, job.userId])).rows[0];
     if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime }] };
-    const draft = MarketingDraftSchema.parse(job.input.draft);
+    // The API validated this draft on submission, so a rejection here means this worker runs
+    // older code than the API (e.g. a draft field it does not know yet), not a model failure.
+    const parsedDraft = MarketingDraftSchema.safeParse(job.input.draft);
+    if (!parsedDraft.success) throw new MarketingRunError("CONFIG_MISSING", "视频任务服务版本不一致，请重启或更新后点击继续生成。", { cause: parsedDraft.error });
+    const draft = parsedDraft.data;
     // Persisted provider options govern recovery, including pre-v2 jobs that
     // allowed WebM plus native narration. Never infer audio from today's draft.
     const generateAudio = job.input.generate_audio !== false;

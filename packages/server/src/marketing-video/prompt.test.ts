@@ -38,6 +38,14 @@ describe("marketing model subtitle instructions", () => {
     }
     expect(shotData(marketingSegmentPrompt({ ...draft, continuity: "" }, { index: 0, script: shots[0].script, durationSec: 6 }, 2))).not.toHaveProperty("continuity");
     expect(creationPrompt(draft, "zh").system).toContain("continuity is ONE shared description");
+    expect(creationPrompt(draft, "zh").system).toContain("the featured product's exact look");
+    // The key-art still decides the product only when no product image does.
+    const shot = { index: 0, script: shots[0].script, durationSec: shots[0].durationSec };
+    expect(marketingSegmentPrompt(draft, shot, 2, undefined, undefined, true, true)).toContain("its product's design, colors and details");
+    const withProduct = MarketingDraftSchema.parse({ ...draft, assets: { portrait: id, product: id } });
+    const productPrompt = marketingSegmentPrompt(withProduct, shot, 2, undefined, undefined, true, true);
+    expect(productPrompt).not.toContain("its product's design");
+    expect(productPrompt).toContain("product images still decide the product");
     expect(JSON.parse(storyboardPrompt(draft, "zh", shots, "").input).continuity).toBe(look);
     expect(storyboardPrompt(draft, "zh", shots, "", 1).system).toContain("The supplied continuity is fixed");
     const revised = shots.map(shot => ({ ...shot, camera: "缓慢推近" }));

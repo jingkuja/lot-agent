@@ -261,7 +261,7 @@ describe("marketing project HTTP boundaries", () => {
     f.project.draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots), background: "背景".repeat(300) });
     const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
     expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ error: "生成提示词过长，请精简分镜画面、动作、镜头、背景描述或统一人物与场景设定。" });
+    expect(await response.json()).toMatchObject({ error: "生成提示词过长，请精简分镜画面、动作、镜头、背景描述或统一人物、产品与场景设定。" });
     expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
     expect(f.store.reserve).not.toHaveBeenCalled();
     expect(f.service.marketingText).not.toHaveBeenCalled();

@@ -111,7 +111,7 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
         <span>{t("第 {0} 镜", [index + 1])} · {index ? ends[index - 1] : 0}–{ends[index]}s</span><p>{shot.visual || shot.script}</p>
       </li>)}</ol>
       <details className="mv-storyboard-edit" open={editing} onToggle={e => { if (e.target === e.currentTarget) setEditing(e.currentTarget.open); }}><summary>{t("修改分镜")}</summary>
-        <DraftText form={form} name="continuity" label="统一人物与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装和场景一致。" />
+        <DraftText form={form} name="continuity" label="统一人物、产品与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装、产品和场景一致。" />
         <StoryboardEditor compact presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />
       </details>
       {keyArtPanel}
