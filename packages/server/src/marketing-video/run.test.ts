@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MarketingDraftSchema, storyboardScript, type MarketingShot } from "@lot-agent/core/marketing-video";
 import { runMarketingVideo, type MarketingRunDeps } from "./run.js";
+import { mediaCapabilities } from "./media.js";
 import { runGenerationJob } from "../generation/run-job.js";
 import { ProviderError } from "@lot-agent/core";
 
@@ -11,7 +12,8 @@ vi.mock("./repository.js", () => ({ PgMarketingProjectStore: class {
 } }));
 vi.mock("./media.js", () => ({
   composeMarketingVideo: vi.fn(),
-  mediaCapabilities: vi.fn(async () => ({ composition: true })),
+  mediaCapabilities: vi.fn(async () => ({ composition: true, subtitles: true })),
+  SUBTITLES_UNAVAILABLE: "字幕不可用",
   inspectMedia: vi.fn(async () => ({ video: true, audio: true, duration: 15 })),
   ownedAssetPath: vi.fn(async () => "/tmp/fixture.mp4"),
 }));
@@ -201,10 +203,38 @@ describe("twin-narrated jobs", () => {
     const f = await narrated(true);
     try {
       await runMarketingVideo(f.deps, f.job, new AbortController().signal);
-      const input = (f.compose.mock.calls[0] as unknown[])[0] as { narration: string[] };
+      const input = (f.compose.mock.calls[0] as unknown[])[0] as { narration: string[]; subtitles: boolean };
       expect(input.narration).toHaveLength(2);
       expect(input.narration[1]).toContain(`${projectId}/00000001-`);
-      for (const [, child] of vi.mocked(runGenerationJob).mock.calls) expect(child.input.generate_audio).toBe(false);
+      // Submitted before local captions: the model drew them, so none are burned in.
+      expect(input.subtitles).toBe(false);
+      for (const [, child] of vi.mocked(runGenerationJob).mock.calls) {
+        expect(child.input.generate_audio).toBe(false);
+        expect(child.input.prompt).toContain("Caption ONLY confirmedShot.script verbatim");
+      }
+    } finally { const { rm } = await import("node:fs/promises"); await rm(f.root, { recursive: true, force: true }); }
+  });
+  it("asks for clips without text and burns the captions in when the job has local subtitles", async () => {
+    vi.mocked(runGenerationJob).mockReset().mockImplementation(async (_deps: unknown, job: { id: string }) => ({ assetIds: [`asset-${job.id}`], assets: [] }) as never);
+    const f = await narrated(true);
+    Object.assign(f.job.input, { local_subtitles: true });
+    try {
+      await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+      expect(((f.compose.mock.calls[0] as unknown[])[0] as { subtitles: boolean }).subtitles).toBe(true);
+      for (const [, child] of vi.mocked(runGenerationJob).mock.calls) {
+        expect(child.input.prompt).toContain("Do not add any on-screen text, captions or subtitles");
+        expect(child.input.prompt).not.toContain("Caption ONLY");
+      }
+    } finally { const { rm } = await import("node:fs/promises"); await rm(f.root, { recursive: true, force: true }); }
+  });
+  it("stops before any clip is paid for when this worker cannot burn captions", async () => {
+    vi.mocked(runGenerationJob).mockClear();
+    vi.mocked(mediaCapabilities).mockResolvedValueOnce({ composition: true, subtitles: false });
+    const f = await narrated(true);
+    Object.assign(f.job.input, { local_subtitles: true });
+    try {
+      await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).rejects.toMatchObject({ errorCode: "CONFIG_MISSING", message: "字幕不可用" });
+      expect(runGenerationJob).not.toHaveBeenCalled();
     } finally { const { rm } = await import("node:fs/promises"); await rm(f.root, { recursive: true, force: true }); }
   });
   it("stops before any clip is paid for when a frozen take is gone", async () => {

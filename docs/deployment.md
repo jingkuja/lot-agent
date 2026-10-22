@@ -53,8 +53,8 @@
 
 视频拼接依赖 `ffmpeg` 和 `ffprobe`，由根目录 `Dockerfile` 的生产阶段安装到
 `lot-agent-app` 共用镜像，server、worker 和 knowledge-worker 都可使用。
-视频编码使用 H.264（libx264）和 AAC；营销视频字幕由模型根据提示词生成，
-不要求 FFmpeg 的 libass 字幕支持。容器以 `node` 用户执行这些命令，无需 root 权限。
+视频编码使用 H.264（libx264）和 AAC。营销视频「数字分身旁白」的字幕在本地用 libass 烧录，
+需要 Debian ffmpeg 自带的 libass 和镜像中的 `fonts-noto-cjk`；`/api/marketing-videos/capabilities` 的 `subtitles` 为假时不能生成带字幕的旁白视频。容器以 `node` 用户执行这些命令，无需 root 权限。
 只在宿主机安装不能让容器直接调用；在运行中容器临时安装则会随容器重建丢失。
 应重建应用镜像并重新创建使用它的容器，无需把宿主机二进制或 Docker socket 挂进容器。
 

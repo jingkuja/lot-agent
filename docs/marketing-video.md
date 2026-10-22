@@ -85,7 +85,7 @@
 | 片段请求 | `generate_audio=true`，提示词要求逐字朗读本镜口播 | `generate_audio=false`，不传参考音色，Kling 不创建自定义音色 |
 | 画面人物 | 可以对着镜头讲述 | 演示、互动或自然反应，可以有自然的嘴部动作，但不对着镜头念旁白，避免居中口播特写 |
 | 成片音轨 | 片段自带音轨 | 合成时用配音替换片段音轨，不足镜长处补静音，再混入 BGM |
-| 字幕 | 模型按本镜口播绘制 | 同左，与配音节奏不逐字同步（R2 待做） |
+| 字幕 | 模型按本镜口播绘制 | 片段不画文字；按确认文案本地烧录，按配音停顿切换 |
 
 数字分身旁白流程：
 
@@ -94,7 +94,8 @@
 3. 记录：迁移 55 的 `marketing_video_narrations` 以（用户、草稿、镜号、配音键）为主键。配音键是模型、音色条目、音色 ID、语速、语气、该镜台词和格式的 SHA-256，改动任一项旧配音即失效；镜长不在键内。请求前先插入 `running` 意图行（`ON CONFLICT DO NOTHING`），所以并发请求每镜只付费一次。失败或超过 120 秒仍为 `running` 的记录显示为失败，不自动重发；只有带 `slots` 的显式「重新生成」才会覆盖（前端对已成功的配音先确认再次计费）。每次合成写新文件，不覆盖旧文件。
 4. 试听与时长：`GET /:id/narration` 只读当前草稿对应的状态，`GET /:id/narration/:slot` 返回配音音频（仅所有者，不进公开静态目录）。每镜配音须比镜头短至少 0.2 秒；否则前端阻止生成并提供「按配音调整分镜时长」（`fitMarketingNarration`：只加长放不下的镜头，总长仍在目标至目标 +5 秒内，单镜不超过模型上限），放不下时提示精简文案或调快语速。
 5. 生成：`/generate` 要求每镜都有当前键的成功配音且放得下，否则 409；任务输入版本 4，冻结 `narration: [{ slot, key, storageKey, durationMs }]`。Worker 在付费提交片段前检查冻结的文件（只能位于本草稿目录），缺失时报 `NARRATION_INVALID`，前端提示复制为新草稿。`composeMarketingVideo` 的 `narration` 参数逐镜替换音轨，配音长于镜头直接报错，不截断。
-6. 删除草稿时配音记录随草稿级联删除，`DELETE` 接口随后删除该草稿的配音目录。空间用量暂未计入配音文件。
+6. 字幕：新任务同时冻结 `local_subtitles: true`，片段提示词要求不加任何屏幕文字，并让画面底部五分之一避开人脸和产品细节。开启字幕时，`marketing-video/subtitles.ts` 按标点切分每镜确认口播（合并过短分句，过长的按画面宽度均分，英文单词和数字不拆开，只去掉行末逗号和句号）。每镜时间来自配音实测时长，首尾静音除外；镜内断行先按字数比例估算，再对齐到 `silencedetect` 检测出的最近停顿。生成的 ASS 在逐镜规范化时用 libass 烧录，不增加编码次数。字号为短边的 5.5%，竖屏底边距 16%，横屏和方形 8%；字体默认 `Noto Sans CJK SC`（`MARKETING_SUBTITLE_FONT` 可覆盖）。10-21 提交、没有该标记的旁白任务恢复和单镜重做时仍由模型绘制字幕。没有 SRT 下载，也不能只改字幕重新合成。
+7. 删除草稿时配音记录随草稿级联删除，`DELETE` 接口随后删除该草稿的配音目录。空间用量暂未计入配音文件。
 
 `/capabilities` 的 `narration` 只在 `KNOWLEDGE_MANAGEMENT_ENABLED=1`（数字分身可用）时为真；否则「数字分身旁白」显示暂不可用。网关阿里渠道须与 `QWEN_VOICE_API_KEY` 属于同一千问账号，否则复刻的音色 ID 不可用。尚未用真实网关出样片验证 `wav`、`speed` 与 `instructions` 的支持和人物嘴型比例，见 [TTS 配音计划](marketing-video-tts-narration-plan-20261020.md)。真人对口型不在营销影像中提供，见 [数字主播方案](digital-presenter-plan-20261021.md)。
 
@@ -198,7 +199,7 @@
 
 ## 环境和验证
 
-先由 API 执行迁移，再启动 Worker。API 和普通视频 Worker 均需要 `ffmpeg`、`ffprobe`；编码需要 libx264、AAC；模型字幕不依赖 libass 或本地字幕字体。可用 `MARKETING_FFMPEG_PATH` / `MARKETING_FFPROBE_PATH` 指定程序路径。容器配置参见 [部署](deployment.md)。拼接能力检查失败时界面阻止生成；字幕选项仅控制模型提示词，不参与本地能力检查。
+先由 API 执行迁移，再启动 Worker。API 和普通视频 Worker 均需要 `ffmpeg`、`ffprobe`；编码需要 libx264、AAC。数字分身旁白的本地字幕还需要带 libass 的 FFmpeg（`subtitles`、`silencedetect`、`ametadata` 滤镜）和中文字体：Docker 镜像已安装 Debian ffmpeg 与 `fonts-noto-cjk`，Homebrew 默认的 ffmpeg 不含 libass。可用 `MARKETING_FFMPEG_PATH` / `MARKETING_FFPROBE_PATH` 指定程序路径。容器配置参见 [部署](deployment.md)。拼接能力检查失败时界面阻止生成。`/capabilities` 的 `subtitles` 来自一次中英文探针烧录；不支持时，开启字幕的旁白草稿会被阻止生成（提示可关闭字幕），已提交任务在付费前报 `CONFIG_MISSING`。「AI 配音」的字幕仍只控制模型提示词，不依赖本地能力。
 
 音色样例继续使用 `KLING_VOICE_BASE_URL` / `KLING_VOICE_API_KEY`，视频推理仍使用当前用户模型凭证；素材引用需要正确的 `PUBLIC_BASE_URL`。营销上传素材为私有，API 和 Worker 必须使用相同的现有 `SECRET_MASTER_KEY`。浏览器和供应商使用有效期 10 分钟的临时链接。「AI 配音」未选择音色样例时使用模型原生旁白。「数字分身旁白」需要 `KNOWLEDGE_MANAGEMENT_ENABLED=1`，经 `OPENAI_BASE_URL/audio/speech` 用当前用户的模型凭证合成，配音文件保存在 `data/marketing-narration`（API 与 Worker 须共享该数据目录）。
 
@@ -216,7 +217,7 @@ pnpm --filter @lot-agent/server build
 pnpm --filter @lot-agent/web build
 ```
 
-数据库脚本只使用模拟模型和本地合成素材，验证升级迁移、归属、并发预留、版本检查、失败续作、未知提交保护、单镜重做（只提交和计量所选镜头、复用片段、删除时清理各次制作）、取消、下载恢复、计量去重和知识库更新 / 重建，并实际拼接 15 / 17 / 30 / 45 / 60 秒视频和 BGM，以及目标 60 秒、实际 65 秒的视频。字幕提示词及无本地字幕能力时的提交由单元测试和浏览器脚本覆盖；模型字幕实际效果需真实生成后校对。浏览器脚本使用模拟接口，可通过 `PLAYWRIGHT_MODULE` 指定 Playwright，`MARKETING_SCREENSHOTS_DIR` 保存截图。上述结果不替代真实模型音画质量或抖音发布验收。
+数据库脚本只使用模拟模型和本地合成素材，验证升级迁移、归属、并发预留、版本检查、失败续作、未知提交保护、单镜重做（只提交和计量所选镜头、复用片段、删除时清理各次制作）、取消、下载恢复、计量去重和知识库更新 / 重建，并实际拼接 15 / 17 / 30 / 45 / 60 秒视频和 BGM，以及目标 60 秒、实际 65 秒的视频。字幕提示词、本地字幕切行与计时、无本地字幕能力时的提交由单元测试和浏览器脚本覆盖；`media.test.ts` 的烧录用例只在 FFmpeg 带 libass 时运行（可用 `MARKETING_FFMPEG_PATH` 指向部署镜像中的 FFmpeg）。模型字幕和本地字幕的实际效果都需真实生成后校对。浏览器脚本使用模拟接口，可通过 `PLAYWRIGHT_MODULE` 指定 Playwright，`MARKETING_SCREENSHOTS_DIR` 保存截图。上述结果不替代真实模型音画质量或抖音发布验收。
 
 文案生成、审核、标题和分镜 AI 修改使用 `marketing-video/text.ts`：请求 JSON 模式和最多 8192 输出 token，固定选择 `kimi-k3`，保留模型默认推理设置，不发送该模型不支持的 `reasoning.effort=none`；300 秒超时并传递请求取消。必须收到正常完成标记后才解析 JSON；空结果、截断、格式异常均不能写入审核结果，也不会自动重新采样。已知模型用量包含失败回执并记录一次。错误按授权、额度、连接和输出完整性返回安全提示与错误码，日志不记录文案、模型思考、原始响应或凭证。
 

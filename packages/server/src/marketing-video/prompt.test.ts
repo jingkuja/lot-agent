@@ -118,7 +118,12 @@ describe("marketing model subtitle instructions", () => {
     expect(prompt).not.toContain("Use the supplied custom voice");
     expect(prompt).not.toContain("Silent demonstration, no lip-sync");
     expect(shotData(prompt)).not.toHaveProperty("voiceStyle");
-    expect(prompt).toContain("Caption ONLY confirmedShot.script verbatim");
+    // Captions are burned in from the confirmed copy after generation: the clip carries no text.
+    expect(prompt).toContain("Do not add any on-screen text, captions or subtitles; captions are added after generation.");
+    expect(prompt).not.toContain("Caption ONLY confirmedShot.script verbatim");
+    expect(prompt).not.toContain("Consistent captions near bottom safe margins");
+    // Twin-narrated jobs submitted before local captions keep model-drawn captions on recovery.
+    expect(marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 1, false, undefined, false)).toContain("Caption ONLY confirmedShot.script verbatim");
     const creation = creationPrompt(draft, "zh");
     expect(creation.system).toContain("People may move their mouths naturally");
     expect(JSON.parse(creation.input)).toMatchObject({ generateAudio: false, voiceover: true });

@@ -4,7 +4,7 @@ import { marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, 
 import type { DB } from "../db/database.js";
 import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { PgMarketingProjectStore } from "./repository.js";
-import { composeMarketingVideo, inspectMedia, mediaCapabilities, ownedAssetPath } from "./media.js";
+import { composeMarketingVideo, inspectMedia, mediaCapabilities, ownedAssetPath, SUBTITLES_UNAVAILABLE } from "./media.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 import { marketingFailureCode, MarketingRunError } from "./failure.js";
@@ -51,6 +51,8 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     // Persisted provider options govern recovery, including pre-v2 jobs that
     // allowed WebM plus native narration. Never infer audio from today's draft.
     const generateAudio = job.input.generate_audio !== false;
+    // Clips of jobs submitted with this flag carry no text; captions are burned in locally.
+    const localSubtitles = job.input.local_subtitles === true;
     const inputVersion = typeof job.input.marketingInputVersion === "number" ? job.input.marketingInputVersion : 1;
     // The frozen model's rules apply; version 1 inputs predate reference checks.
     const profile = marketingJobProfile(job.input);
@@ -74,7 +76,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     let prompts: (string | undefined)[];
     try {
       prompts = segments.map((segment, index) => segmentRecoveryAction(segment) === "submit"
-        ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile) : undefined);
+        ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile, localSubtitles) : undefined);
     } catch (error) { throw new MarketingRunError("NOT_RECOVERABLE", (error as Error).message); }
     // Twin narration (version 4) was synthesized and confirmed before submission. Check the
     // frozen takes before any clip is paid for; a missing file cannot be recreated here.
@@ -86,7 +88,10 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
       } catch { throw new MarketingRunError("NARRATION_INVALID", "配音文件已不可用，请复制为新草稿并重新生成配音。"); }
     }
     // The API host's probe says nothing about this worker. Stop before any voice or clip is paid for.
-    if (!(await mediaCapabilities()).composition) throw new MarketingRunError("CONFIG_MISSING", "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
+    const capabilities = await mediaCapabilities();
+    if (!capabilities.composition) throw new MarketingRunError("CONFIG_MISSING", "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。");
+    const burnSubtitles = localSubtitles && draft.subtitles && !!narration;
+    if (burnSubtitles && !capabilities.subtitles) throw new MarketingRunError("CONFIG_MISSING", SUBTITLES_UNAVAILABLE);
     // Kling: create each voice sample once per parent job, before clips run in
     // parallel, so clips never race to POST it. Clips that already hold a
     // per-clip voice checkpoint (jobs started before this change) keep it.
@@ -225,7 +230,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     }
     // Every clip is stored by now, so a retry reassembles them without a model call.
     try {
-      const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, narration, signal: controller.signal });
+      const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, narration, subtitles: burnSubtitles, signal: controller.signal });
       await assertActive();
       const gen = await deps.generation(job, controller.signal);
       const id = randomUUID(); const key = `${id}.mp4`;

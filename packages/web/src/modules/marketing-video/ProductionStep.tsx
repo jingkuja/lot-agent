@@ -44,7 +44,7 @@ function NarrationSettings({ form, onPickVoice }: { form: DraftForm; onPickVoice
     <label className="mv-field"><span>{t("语气要求（可选）")}</span>
       <input value={narration.instructions} maxLength={200} disabled={locked} placeholder={t("例如：语气热情，语速稍快")} onChange={e => set({ instructions: e.target.value })} />
     </label>
-    <p className="mv-hint">{t("旁白使用数字分身复刻的原声，生成视频前逐镜合成并试听。画面人物可以自然活动，但不会对着镜头念台词。字幕仍由视频模型绘制，可能与配音节奏不完全一致。")}</p>
+    <p className="mv-hint">{t("旁白使用数字分身复刻的原声，生成视频前逐镜合成并试听。画面人物可以自然活动，但不会对着镜头念台词。字幕按确认文案在合成时加入，并按配音停顿切换，视频模型不绘制文字。")}</p>
   </>;
 }
 

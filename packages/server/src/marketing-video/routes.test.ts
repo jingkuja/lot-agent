@@ -1,4 +1,4 @@
-import { inspectMedia } from "./media.js";
+import { inspectMedia, mediaCapabilities } from "./media.js";
 import { readImageInfo } from "./image-size.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -16,7 +16,7 @@ import type { MarketingNarrator } from "./narration.js";
 import { completeMarketingJson } from "./text.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 
-vi.mock("./media.js", () => ({ mediaCapabilities: async () => ({ composition: true, subtitles: false }), inspectMedia: vi.fn(), ownedAssetPath: vi.fn() }));
+vi.mock("./media.js", () => ({ mediaCapabilities: vi.fn(async () => ({ composition: true, subtitles: true })), SUBTITLES_UNAVAILABLE: "字幕不可用", inspectMedia: vi.fn(), ownedAssetPath: vi.fn() }));
 vi.mock("./image-size.js", () => ({ readImageInfo: vi.fn(async () => ({ mime: "image/png", width: 800, height: 800 })) }));
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
@@ -694,7 +694,19 @@ describe("digital twin narration", () => {
     f.service.db.getAsset.mockResolvedValue({ user_id: "owner", mime: "audio/mpeg", size_bytes: 100, url: "/static/voice.mp3", type: "upload", is_private: true } as never);
     expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
     expect(frozen).toHaveBeenCalledWith("owner", id, f.project.draft, expect.arrayContaining([expect.objectContaining({ index: 1, script: "第二句旁白" })]));
-    expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, generate_audio: false, reference_audio: undefined, narration: takes }), false);
+    expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, generate_audio: false, reference_audio: undefined, narration: takes, local_subtitles: true }), false);
+  });
+  it("blocks a captioned narrated video when this host cannot burn captions, but not an uncaptioned one", async () => {
+    vi.mocked(mediaCapabilities).mockResolvedValue({ composition: true, subtitles: false });
+    try {
+      const f = narrated({ frozen: vi.fn(async () => takes) });
+      const blocked = await f.call(`/${id}/generate`, { version: 1, retry: false });
+      expect(blocked.status).toBe(503);
+      expect(await blocked.json()).toMatchObject({ error: "当前环境不支持字幕，可关闭字幕后生成。" });
+      expect(f.store.reserve).not.toHaveBeenCalled();
+      f.project.draft.subtitles = false;
+      expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+    } finally { vi.mocked(mediaCapabilities).mockResolvedValue({ composition: true, subtitles: true }); }
   });
   it("refuses to submit clips before every shot has a fitting take", async () => {
     const f = narrated({ frozen: vi.fn(async () => { throw new MarketingError("请先生成全部分镜的数字分身配音并试听。", 409); }) });

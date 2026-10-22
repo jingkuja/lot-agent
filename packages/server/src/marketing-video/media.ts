@@ -3,6 +3,7 @@ import { mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { resolve, sep, join } from "node:path";
 import { isMarketingDurationValid, type MarketingDraft, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { captionAss, captionLayout, captionLines, timeCaptions, type Pause } from "./subtitles.js";
 
 export function mediaProcess(binary: string, args: string[], opts: { signal?: AbortSignal; cwd?: string; timeoutMs?: number } = {}): Promise<string> {
   opts.signal?.throwIfAborted();
@@ -29,12 +30,17 @@ export const ffprobe = () => process.env.MARKETING_FFPROBE_PATH || "ffprobe";
 // Everything composeMarketingVideo needs: H.264/AAC encoders and its filters.
 const REQUIRED_ENCODERS = ["libx264", "aac"];
 const REQUIRED_FILTERS = ["scale", "pad", "setsar", "fps", "aresample", "apad", "anullsrc", "amix", "volume", "asplit", "color"];
+// Local captions for twin narration: libass rendering and pause detection.
+const SUBTITLE_FILTERS = ["subtitles", "silencedetect", "ametadata"];
+export const SUBTITLES_UNAVAILABLE = "视频合成工具不支持字幕烧录，请配置带 libass 的 FFmpeg 和中文字体。";
 const PROBE_TTL_MS = 10 * 60_000;
-const probes = new Map<string, { at: number; result: Promise<boolean> }>();
+type Capabilities = { composition: boolean; subtitles: boolean };
+const probes = new Map<string, { at: number; result: Promise<Capabilities> }>();
 /** `-version` alone accepts any program that exits 0. Check the encoders and
  * filters, then compose a tiny clip the same way as a real job, so a missing
- * codec fails before any clip is paid for. Cached by binary paths and versions. */
-export async function mediaCapabilities() {
+ * codec fails before any clip is paid for. Cached by binary paths and versions.
+ * `subtitles`: captions can be burned in (libass with a CJK-capable font setup). */
+export async function mediaCapabilities(): Promise<Capabilities> {
   try {
     const versions = await Promise.all([mediaProcess(ffmpeg(), ["-version"], { timeoutMs: 5000 }), mediaProcess(ffprobe(), ["-version"], { timeoutMs: 5000 })]);
     const key = JSON.stringify([ffmpeg(), ffprobe(), ...versions.map(v => v.split("\n")[0])]);
@@ -43,17 +49,23 @@ export async function mediaCapabilities() {
       probe = { at: Date.now(), result: probeComposition() };
       probes.set(key, probe);
       // A failed probe is retried on the next call instead of being cached.
-      void probe.result.then(ok => { if (!ok) probes.delete(key); });
+      void probe.result.then(ok => { if (!ok.composition) probes.delete(key); });
     }
-    return { composition: await probe.result };
-  } catch { return { composition: false }; }
+    return await probe.result;
+  } catch { return { composition: false, subtitles: false }; }
 }
-async function probeComposition() {
+async function probeComposition(): Promise<Capabilities> {
   const listed = (output: string) => new Set(output.split("\n").map(line => line.trim().split(/\s+/)[1]).filter(Boolean));
   const encoders = listed(await mediaProcess(ffmpeg(), ["-hide_banner", "-encoders"], { timeoutMs: 5000 }).catch(() => ""));
   const filters = listed(await mediaProcess(ffmpeg(), ["-hide_banner", "-filters"], { timeoutMs: 5000 }).catch(() => ""));
   const missing = [...REQUIRED_ENCODERS.filter(name => !encoders.has(name)), ...REQUIRED_FILTERS.filter(name => !filters.has(name))];
-  if (missing.length) { console.warn("[marketing-video] FFmpeg is missing composition features", { missing }); return false; }
+  if (missing.length) { console.warn("[marketing-video] FFmpeg is missing composition features", { missing }); return { composition: false, subtitles: false }; }
+  const composition = await probeClip();
+  const missingSubtitles = SUBTITLE_FILTERS.filter(name => !filters.has(name));
+  if (missingSubtitles.length) console.warn("[marketing-video] FFmpeg cannot burn subtitles", { missing: missingSubtitles });
+  return { composition, subtitles: composition && !missingSubtitles.length && await probeSubtitles() };
+}
+async function probeClip() {
   const folder = await mkdtemp(join(tmpdir(), "lot-marketing-probe-"));
   try {
     const encode = ["-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=25:d=0.4", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
@@ -67,6 +79,19 @@ async function probeComposition() {
     return true;
   } catch {
     console.warn("[marketing-video] FFmpeg composition probe failed");
+    return false;
+  } finally { await rm(folder, { recursive: true, force: true }); }
+}
+/** Burns a Chinese and English caption the way a real shot does. */
+async function probeSubtitles() {
+  const folder = await mkdtemp(join(tmpdir(), "lot-marketing-probe-"));
+  try {
+    await writeFile(join(folder, "probe.ass"), captionAss([{ start: 0, end: 0.4, text: "字幕 Subtitle 99" }], 64, 64));
+    await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=25:d=0.4", "-vf", "subtitles=filename=probe.ass",
+      "-t", "0.4", "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p", "clip.mp4"], { cwd: folder, timeoutMs: 20_000 });
+    return true;
+  } catch {
+    console.warn("[marketing-video] FFmpeg subtitle probe failed");
     return false;
   } finally { await rm(folder, { recursive: true, force: true }); }
 }
@@ -98,10 +123,29 @@ export async function inspectMedia(path: string, signal?: AbortSignal) {
   const [fpsNumerator, fpsDenominator = "1"] = String(video?.avg_frame_rate ?? "0/1").split("/");
   return { width: Number(video?.width ?? 0), height: Number(video?.height ?? 0), fps: Number(fpsNumerator) / Number(fpsDenominator), format, duration, audio: value.streams?.some((s: { codec_type: string }) => s.codec_type === "audio"), video: value.streams?.some((s: { codec_type: string }) => s.codec_type === "video") };
 }
-/** `narration`, when given, holds one audio file per clip that replaces the clip's own track. */
-export async function composeMarketingVideo(input: { files: string[]; segments: MarketingSegment[]; draft: MarketingDraft; music?: string; narration?: string[]; signal?: AbortSignal }) {
+/** Silent stretches of a narration take, from FFmpeg's silencedetect. */
+export async function narrationPauses(path: string, format: string, durationSec: number, signal?: AbortSignal): Promise<Pause[]> {
+  const output = await mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", format, "-i", path,
+    "-af", "silencedetect=noise=-35dB:d=0.12,ametadata=mode=print:file=-", "-f", "null", "-"], { signal, timeoutMs: 30_000 });
+  const pauses: Pause[] = [];
+  let start: number | undefined;
+  for (const line of output.split("\n")) {
+    const match = /^lavfi\.silence_(start|end)=(-?[\d.]+)/.exec(line.trim());
+    if (!match) continue;
+    const at = Math.min(durationSec, Math.max(0, Number(match[2])));
+    if (match[1] === "start") start = at;
+    else if (start !== undefined) { pauses.push({ start, end: at }); start = undefined; }
+  }
+  if (start !== undefined) pauses.push({ start, end: durationSec });
+  return pauses;
+}
+
+/** `narration`, when given, holds one audio file per clip that replaces the clip's own track.
+ * `subtitles` burns each shot's confirmed copy as captions timed to its narration take;
+ * the clips must be free of model-drawn text. */
+export async function composeMarketingVideo(input: { files: string[]; segments: MarketingSegment[]; draft: MarketingDraft; music?: string; narration?: string[]; subtitles?: boolean; signal?: AbortSignal }) {
   const durationSec = input.segments.reduce((sum, segment) => sum + segment.durationSec, 0);
-  if (!input.segments.length || input.segments.length > 15 || input.files.length !== input.segments.length || (input.narration && input.narration.length !== input.files.length)
+  if (!input.segments.length || input.segments.length > 15 || input.files.length !== input.segments.length || (input.narration && input.narration.length !== input.files.length) || (input.subtitles && !input.narration)
     || input.segments.some((segment, index) => segment.index !== index || !Number.isInteger(segment.durationSec) || segment.durationSec < 4 || segment.durationSec > 15)
     || !isMarketingDurationValid(input.draft.durationSec, durationSec)) throw new Error("视频分段配置不完整");
   const folder = await mkdtemp(join(tmpdir(), "lot-marketing-"));
@@ -116,14 +160,22 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
       if (!info.video || info.duration < duration - 0.25) throw new Error("生成片段时长不足，请重新生成该片段。");
       const args = ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", info.format, "-i", input.files[i]];
       let audio = info.audio ? "0:a:0" : "1:a:0";
+      let captions = "";
       if (input.narration) {
         const voice = await inspectMedia(input.narration[i], input.signal);
         // Never cut a confirmed line short: the clip must outlast it.
         if (!voice.audio || voice.video || voice.duration > duration - 0.1) throw new Error("配音与镜头时长不一致，请重新生成配音。");
         args.push("-protocol_whitelist", "file,pipe", "-f", voice.format, "-i", input.narration[i]);
         audio = "1:a:0";
+        if (input.subtitles) {
+          // Burned while the clip is re-encoded anyway; the file name is fixed, never user text.
+          const lines = captionLines(input.segments[i].script, captionLayout(width, height).maxCells);
+          const cues = timeCaptions(lines, voice.duration, duration, await narrationPauses(input.narration[i], voice.format, voice.duration, input.signal));
+          await writeFile(join(folder, `${i}.ass`), captionAss(cues, width, height));
+          captions = `,subtitles=filename=${i}.ass`;
+        }
       } else if (!info.audio) args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
-      args.push("-map", "0:v:0", "-map", audio, "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25`, "-af", "aresample=48000,apad", "-t", String(duration), "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`);
+      args.push("-map", "0:v:0", "-map", audio, "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25${captions}`, "-af", "aresample=48000,apad", "-t", String(duration), "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`);
       await mediaProcess(ffmpeg(), args, { signal: input.signal, cwd: folder });
     }
     await writeFile(join(folder, "clips.txt"), input.files.map((_, i) => `file '${i}.mp4'`).join("\n"));
@@ -134,7 +186,7 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
       if (!music.audio) throw new Error("背景音乐不含音轨");
       args.push("-stream_loop", "-1", "-protocol_whitelist", "file,pipe", "-f", music.format, "-i", input.music, "-filter_complex", `[1:a]volume=${input.draft.musicVolume}[bgm];[0:a][bgm]amix=inputs=2:duration=first:normalize=0[a]`, "-map", "0:v:0", "-map", "[a]");
     }
-    // Captions are already part of the model-generated frames.
+    // Captions are burned into the shots above, or drawn by the video model.
     args.push("-c:v", "copy");
     args.push("-c:a", "aac", "-t", String(durationSec), "-threads", "2", "-movflags", "+faststart", "final.mp4");
     await mediaProcess(ffmpeg(), args, { cwd: folder, signal: input.signal });

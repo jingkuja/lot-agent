@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmod, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { inspectMedia, composeMarketingVideo, mediaCapabilities } from "./media.js";
+import { inspectMedia, composeMarketingVideo, mediaCapabilities, narrationPauses } from "./media.js";
 import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
 
 describe("marketing media safety", () => {
@@ -31,12 +31,12 @@ describe("composition readiness probe", () => {
       await writeFile(fake, "#!/bin/sh\n[ \"$1\" = -version ] && echo 'ffmpeg version fake' && exit 0\nexit 0\n");
       await chmod(fake, 0o755);
       vi.stubEnv("MARKETING_FFMPEG_PATH", fake); vi.stubEnv("MARKETING_FFPROBE_PATH", fake);
-      expect(await mediaCapabilities()).toEqual({ composition: false });
+      expect(await mediaCapabilities()).toEqual({ composition: false, subtitles: false });
       expect(warn).toHaveBeenCalledWith("[marketing-video] FFmpeg is missing composition features", { missing: expect.arrayContaining(["libx264", "aac", "amix"]) });
     } finally { vi.unstubAllEnvs(); warn.mockRestore(); await rm(root, { recursive: true, force: true }); }
   });
   it.skipIf(!ffmpegInstalled)("composes a probe clip with the installed FFmpeg", async () => {
-    expect(await mediaCapabilities()).toEqual({ composition: true });
+    expect(await mediaCapabilities()).toMatchObject({ composition: true });
   }, 30_000);
   it.skipIf(!ffmpegInstalled)("replaces each clip's own audio with its narration and pads it to the shot", async () => {
     const root = await mkdtemp(join(tmpdir(), "marketing-narration-compose-"));
@@ -54,4 +54,35 @@ describe("composition readiness probe", () => {
       await expect(composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => clip), segments })).rejects.toThrow("配音与镜头时长不一致");
     } finally { await rm(root, { recursive: true, force: true }); }
   }, 60_000);
+  it.skipIf(!ffmpegInstalled)("finds the pauses of a narration take", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marketing-pauses-"));
+    try {
+      const voice = join(root, "voice.wav");
+      // Tone 0–1s, silence 1–1.4s, tone 1.4–2.6s.
+      spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=f=440:d=1", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-f", "lavfi", "-i", "sine=f=600:d=1.2",
+        "-filter_complex", "[1]atrim=0:0.4[s];[0][s][2]concat=n=3:v=0:a=1", voice]);
+      const pauses = await narrationPauses(voice, "wav", 2.6);
+      expect(pauses).toHaveLength(1);
+      expect(pauses[0].start).toBeCloseTo(1, 1);
+      expect(pauses[0].end).toBeCloseTo(1.4, 1);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }, 30_000);
+  // Needs FFmpeg with libass, e.g. MARKETING_FFMPEG_PATH pointing at the deployment image's FFmpeg.
+  it.skipIf(!ffmpegInstalled)("burns each shot's captions while its narration is spoken", async ctx => {
+    if (!(await mediaCapabilities()).subtitles) ctx.skip();
+    const root = await mkdtemp(join(tmpdir(), "marketing-captions-"));
+    try {
+      const clip = join(root, "clip.mp4"); const voice = join(root, "voice.wav");
+      spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=360x640:r=25:d=5", "-c:v", "libx264", "-pix_fmt", "yuv420p", clip]);
+      spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=24000:duration=2", voice]);
+      const segments = [0, 1, 2].map(index => ({ index, script: "欢迎光临 Price ¥19.9", durationSec: 5 }));
+      const result = await composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => voice), subtitles: true, segments });
+      const final = join(root, "final.mp4"); await writeFile(final, result.body);
+      // Brightest pixel of the caption band: white text on the black clip while spoken, nothing after.
+      const peak = (at: number) => Number(/YMAX=(\d+)/.exec(spawnSync("ffmpeg", ["-v", "error", "-ss", String(at), "-i", final, "-frames:v", "1",
+        "-vf", "crop=iw:ih*0.2:0:ih*0.65,signalstats,metadata=mode=print:key=lavfi.signalstats.YMAX:file=-", "-f", "null", "-"], { encoding: "utf8" }).stdout)?.[1]);
+      expect(peak(6)).toBeGreaterThan(200);
+      expect(peak(9.5)).toBeLessThan(40);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }, 120_000);
 });
