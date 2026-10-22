@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MARKETING_REVIEW_RULE_VERSION, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
-import { localMarketingReview, normalizeMarketingReview, REVIEW_INSTRUCTION } from "./compliance.js";
+import { localMarketingReview, marketingReviewDelta, normalizeMarketingReview, REVIEW_INSTRUCTION } from "./compliance.js";
 import { MARKETING_RISK_TABLE } from "./compliance-rules.js";
 
 const cleanModel = { verdict: "pass", issues: [] };
@@ -68,5 +68,29 @@ describe("marketing content compliance", () => {
     expect(REVIEW_INSTRUCTION).toContain("NOT verified evidence");
     expect(REVIEW_INSTRUCTION).toContain("platform-minors");
     expect(REVIEW_INSTRUCTION).toContain("platform-copyright");
+  });
+
+  it("re-checks only edited fields and carries the findings of unchanged ones", () => {
+    const shots = [{ script: "第一镜口播。", visual: "门店外景", action: "推门", camera: "中景" }, { script: "第二镜口播。", visual: "产品特写", action: "拿起", camera: "近景" }];
+    const draft = MarketingDraftSchema.parse({ script: storyboardScript(shots), storyboard: shots, publishTitle: "门店" });
+    const issue = (field: string, text: string, shotIndex?: number) => ({ field, ...(shotIndex === undefined ? {} : { shotIndex }), text, reason: "需要核实", suggestion: "", severity: "suspect", source: "douyin", ruleId: "platform-misleading-claims" });
+    const review = { verdict: "suspect" as const, ruleVersion: MARKETING_REVIEW_RULE_VERSION, reviewedAt: "2026-10-22T00:00:00.000Z",
+      issues: [issue("storyboard.visual", "门店外景", 0), issue("storyboard.script", "第二镜", 1), issue("script", "第一镜"), issue("script", "第二镜")] as never };
+    const edited = { ...shots[1], script: "第二镜新口播。" };
+    const next = MarketingDraftSchema.parse({ ...draft, storyboard: [shots[0], edited], script: storyboardScript([shots[0], edited]) });
+    const delta = marketingReviewDelta(next, { draft, review })!;
+    // Mirrored copy is not checked again; its finding stays while the excerpt is still there.
+    expect(delta.fields).toEqual([{ field: "storyboard.script", shotIndex: 1 }]);
+    expect(delta.carried.map(item => `${item.field}:${item.shotIndex ?? ""}:${item.text}`)).toEqual(["storyboard.visual:0:门店外景", "script::第一镜", "script::第二镜"]);
+    const merged = normalizeMarketingReview(next, cleanModel, "zh", delta.carried)!;
+    expect(merged.verdict).toBe("suspect");
+    expect(merged.issues.map(item => item.field)).toEqual(["storyboard.visual", "script", "script"]);
+    // A carried finding whose excerpt is gone is dropped.
+    const removed = MarketingDraftSchema.parse({ ...next, storyboard: [{ ...shots[0], visual: "门店" }, edited] });
+    expect(normalizeMarketingReview(removed, cleanModel, "zh", delta.carried)!.issues.some(item => item.text === "门店外景")).toBe(false);
+    // No usable base, nothing kept or nothing changed: review the whole draft.
+    expect(marketingReviewDelta(next, { draft, review: { ...review, ruleVersion: "old" } })).toBeUndefined();
+    expect(marketingReviewDelta(next, { draft: MarketingDraftSchema.parse({ script: "其他文案。", background: "户外" }), review })).toBeUndefined();
+    expect(marketingReviewDelta(draft, { draft, review })).toBeUndefined();
   });
 });

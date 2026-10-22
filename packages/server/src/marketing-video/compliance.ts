@@ -1,6 +1,6 @@
 import {
-  MARKETING_REVIEW_RULE_VERSION, MarketingReviewSchema, marketingReviewFields, marketingReviewFieldText,
-  type MarketingDraft, type MarketingReview, type MarketingReviewIssue,
+  MARKETING_REVIEW_RULE_VERSION, MarketingReviewSchema, marketingReviewFields, marketingReviewFieldText, storyboardScript,
+  type MarketingDraft, type MarketingReview, type MarketingReviewField, type MarketingReviewIssue,
 } from "@lot-agent/core/marketing-video";
 import { MARKETING_RISK_TABLE } from "./compliance-rules.js";
 
@@ -125,13 +125,38 @@ export function localMarketingReview(draft: MarketingDraft, locale: ReviewLocale
   return issues;
 }
 
+/** A re-check after an edit: the model checks only `fields`, findings in unchanged fields carry over. */
+export interface MarketingReviewDelta { fields: { field: MarketingReviewField; shotIndex?: number }[]; carried: MarketingReviewIssue[] }
+const fieldKey = (entry: Pick<MarketingReviewIssue, "field" | "shotIndex">) => `${entry.field}:${entry.shotIndex ?? ""}`;
+
+/** Fields are compared by name and shot index, so a reordered or regenerated board is checked
+ * again in full. Copy mirrored from the board is not checked twice: its edits are the shots'
+ * edits, and a finding in it carries over while its excerpt is still there. Without a usable
+ * base or with nothing kept, the caller reviews the whole draft. */
+export function marketingReviewDelta(draft: MarketingDraft, base?: { draft: MarketingDraft; review: MarketingReview }): MarketingReviewDelta | undefined {
+  if (!base || base.review.ruleVersion !== MARKETING_REVIEW_RULE_VERSION) return undefined;
+  const previous = new Map(marketingReviewFields(base.draft).map(entry => [fieldKey(entry), entry.text]));
+  const current = marketingReviewFields(draft);
+  const mirrored = !!draft.storyboard.length && storyboardScript(draft.storyboard) === draft.script.trim();
+  const changed = current.filter(entry => previous.get(fieldKey(entry)) !== entry.text && !(mirrored && entry.field === "script"));
+  const unchanged = current.filter(entry => previous.get(fieldKey(entry)) === entry.text);
+  if (!changed.length || !unchanged.some(entry => entry.text.trim())) return undefined;
+  const kept = new Set(unchanged.map(fieldKey));
+  return {
+    fields: changed.map(({ field, shotIndex }) => ({ field, ...(shotIndex === undefined ? {} : { shotIndex }) })),
+    carried: base.review.issues.filter(issue => kept.has(fieldKey(issue)) || (mirrored && issue.field === "script" && draft.script.includes(issue.text))),
+  };
+}
+
+export const reviewDeltaInstruction = (delta: MarketingReviewDelta) => `Incremental re-check: since the last review only these fields changed: ${JSON.stringify(delta.fields)}. Report issues only in these fields; read the other fields as context, for example a claim completed by another shot. Findings in unchanged fields are kept from the last review. The verdict covers only the issues you report.`;
+
 function validRule(issue: MarketingReviewIssue): boolean {
   if (issue.source === "risk-table") return issue.ruleId === "risk-table-blacklist" || MARKETING_RISK_TABLE.conditionalRules.some(rule => rule.id === issue.ruleId);
   return PLATFORM_REVIEW_RULES.some(rule => rule.id === issue.ruleId && rule.scope.split(",").includes(issue.source ?? ""));
 }
 
 /** Model output cannot establish an unlocated or contradictory passing result. */
-export function normalizeMarketingReview(draft: MarketingDraft, raw: unknown, locale: ReviewLocale = "zh"): MarketingReview | null {
+export function normalizeMarketingReview(draft: MarketingDraft, raw: unknown, locale: ReviewLocale = "zh", carried: MarketingReviewIssue[] = []): MarketingReview | null {
   const parsed = MarketingReviewSchema.safeParse(raw);
   if (!parsed.success) return null;
   const model = parsed.data;
@@ -143,7 +168,9 @@ export function normalizeMarketingReview(draft: MarketingDraft, raw: unknown, lo
   }
   if (model.verdict === "reject" && !model.issues.some(issue => issue.severity === "reject")) return null;
   if (model.verdict === "suspect" && model.issues.some(issue => issue.severity === "reject")) return null;
-  const combined = [...localMarketingReview(draft, locale), ...model.issues].sort((a, b) => Number(b.severity === "reject") - Number(a.severity === "reject"));
+  // Local rules always run on the whole draft; carried findings must still quote the current text.
+  const kept = carried.filter(issue => marketingReviewFieldText(draft, issue)?.includes(issue.text));
+  const combined = [...localMarketingReview(draft, locale), ...model.issues, ...kept].sort((a, b) => Number(b.severity === "reject") - Number(a.severity === "reject"));
   const issues = combined.filter((issue, index) => !combined.slice(0, index).some(previous => previous.field === issue.field && previous.shotIndex === issue.shotIndex && previous.text === issue.text && previous.ruleId === issue.ruleId));
   // Deduplicate narration only when it is actually mirrored in a shot. A second,
   // different script must still be reviewed and shown to the user.

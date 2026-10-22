@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
-import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
+import { MARKETING_REVIEW_RULE_VERSION, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
 import { PgMarketingTextOperations } from "../src/marketing-video/operations.js";
 import { PgMarketingProjectStore } from "../src/marketing-video/repository.js";
 import { PgAnalysisStore } from "../src/marketing-analysis/repository.js";
@@ -20,8 +20,32 @@ import { AnalysisStorage } from "../src/marketing-analysis/storage.js";
 import { collectAnalysisFiles } from "../src/marketing-analysis/cleanup.js";
 import { runAnalysis } from "../src/marketing-analysis/runtime.js";
 
+/** A review after an edit re-checks only the changed fields of the last applied review in the same language. */
+export async function checkIncrementalReview(pool: pg.Pool) {
+  const owner = randomUUID();
+  await pool.query("INSERT INTO users(id,name) VALUES($1,'incremental review fixture')", [owner]);
+  const projects = new PgMarketingProjectStore(pool);
+  const operations = new PgMarketingTextOperations(pool);
+  const shots = [{ script: "第一镜口播。", visual: "门店外景", action: "推门", camera: "中景" }, { script: "第二镜口播。", visual: "产品特写", action: "拿起", camera: "近景" }];
+  let p = await projects.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ topic: "门店", script: storyboardScript(shots), storyboard: shots }));
+  const first = await operations.begin(owner, randomUUID(), p.id, p.version, "review", { version: p.version, locale: "zh" });
+  assert.deepEqual(first.input, { version: p.version, locale: "zh" });
+  const carried = { field: "storyboard.visual" as const, shotIndex: 0, text: "门店外景", reason: "需要核实", suggestion: "", severity: "suspect" as const, source: "douyin" as const, ruleId: "platform-misleading-claims" };
+  await operations.finish(owner, first.operation.id, { review: { verdict: "suspect", issues: [carried], ruleVersion: MARKETING_REVIEW_RULE_VERSION, reviewedAt: new Date().toISOString() } });
+  const edited = [shots[0], { ...shots[1], visual: "产品摆在桌上" }];
+  p = await projects.save(owner, p.id, p.version, { ...p.draft, storyboard: edited });
+  const requestId = randomUUID();
+  const second = await operations.begin(owner, requestId, p.id, p.version, "review", { version: p.version, locale: "zh" });
+  assert.deepEqual(second.input, { version: p.version, locale: "zh", delta: { fields: [{ field: "storyboard.visual", shotIndex: 1 }], carried: [carried] } });
+  assert.deepEqual((await pool.query("SELECT input_snapshot FROM marketing_text_operations WHERE id=$1", [requestId])).rows[0].input_snapshot.input, second.input);
+  await operations.fail(owner, requestId, true, true);
+  // Findings written in another language are not reused.
+  assert.deepEqual((await operations.begin(owner, randomUUID(), p.id, p.version, "review", { version: p.version, locale: "en" })).input, { version: p.version, locale: "en" });
+}
+
 export async function checkReviewFixes(pool: pg.Pool) {
   await checkTextResultRecovery(pool);
+  await checkIncrementalReview(pool);
   const owner = randomUUID(), other = randomUUID();
   await pool.query("INSERT INTO users(id,name) VALUES($1,'review fixture'),($2,'other review fixture')", [owner, other]);
   const projects = new PgMarketingProjectStore(pool);

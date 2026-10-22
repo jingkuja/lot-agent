@@ -24,9 +24,9 @@ function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
   const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), page: vi.fn(async (..._args: unknown[]) => ({ data: [] as unknown[], nextCursor: undefined as string | undefined })), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async (..._args: unknown[]) => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => ({ files: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })), usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1) };
   const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
-    begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, _input: unknown, draft?: typeof project.draft) => {
+    begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, input: unknown, draft?: typeof project.draft): Promise<{ fresh: boolean; operation: { id: string; kind: string; status: string }; draft: typeof project.draft; input: unknown }> => {
       if (version !== project.version || project.taskId) throw new MarketingError("草稿已更新", 409);
-      return { fresh: true, operation: { id: requestId, kind, status: "running" }, draft: draft ?? project.draft };
+      return { fresh: true, operation: { id: requestId, kind, status: "running" }, draft: draft ?? project.draft, input };
     }),
     receipt: vi.fn(), fail: vi.fn(), list: vi.fn(async () => []), recover: vi.fn(), release: vi.fn(async (_owner: string, _project: string, operationId: string) => ({ id: operationId, kind: "copy", status: "released" })),
     finish: vi.fn(async (owner: string, requestId: string, result: { draft?: typeof project.draft; analysis?: string; review?: any }) => {
@@ -191,6 +191,20 @@ describe("marketing project HTTP boundaries", () => {
     expect((await invalid.call(`/${id}/review`, {})).status).toBe(503);
     expect(invalid.store.setReview).not.toHaveBeenCalled();
     expect((await invalid.call(`/${id}/review`, { locale: "invalid" })).status).toBe(400);
+  });
+  it("re-checks only the fields frozen in the review delta and keeps carried findings", async () => {
+    const f = fixture();
+    f.project.draft = MarketingDraftSchema.parse({ script: "普通产品介绍。", publishTitle: "门店" });
+    const carried = { field: "publishTitle", text: "门店", reason: "需要核实", suggestion: "", severity: "suspect", source: "douyin", ruleId: "platform-misleading-claims" };
+    f.operations.begin.mockImplementationOnce(async (_owner, requestId, _project, _version, kind, input) =>
+      ({ fresh: true, operation: { id: requestId, kind, status: "running" }, draft: f.project.draft, input: { ...(input as object), delta: { fields: [{ field: "script" }], carried: [carried] } } }));
+    f.service.marketingText.mockResolvedValueOnce({ verdict: "pass", issues: [] });
+    expect((await f.call(`/${id}/review`, {})).status).toBe(200);
+    expect(f.service.marketingText.mock.calls[0][0]).toContain('only these fields changed: [{"field":"script"}]');
+    expect(f.store.setReview).toHaveBeenCalledWith("owner", f.project, expect.objectContaining({ verdict: "suspect", issues: [expect.objectContaining({ field: "publishTitle", text: "门店" })] }));
+    f.service.marketingText.mockResolvedValueOnce({ verdict: "pass", issues: [] });
+    await f.call(`/${id}/review`, {});
+    expect(f.service.marketingText.mock.calls[1][0]).not.toContain("Incremental re-check");
   });
   it("returns a recoverable truncation error and saves only a complete retry result", async () => {
     const f = fixture(); let truncated = true;

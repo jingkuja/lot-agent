@@ -2,7 +2,7 @@ import { capMarketingStoryboard, MARKETING_REVIEW_RULE_VERSION, MarketingDraftSc
 import { activeMarketingVideoProfile } from "./model.js";
 import { parseCreation } from "./creation.js";
 import { MarketingTextError } from "./text.js";
-import { normalizeMarketingReview } from "./compliance.js";
+import { normalizeMarketingReview, type MarketingReviewDelta } from "./compliance.js";
 
 // Persist this version with the original input. Recovery must never silently
 // reinterpret an old receipt with a different parser or current project draft.
@@ -15,9 +15,9 @@ export interface TextOperationResult { draft?: MarketingDraft; analysis?: string
 export const textResultVersion = (kind: TextOperationKind) => kind === "review" ? REVIEW_RESULT_VERSION : kind === "publication" ? PUBLICATION_RESULT_VERSION : TEXT_RESULT_VERSION;
 
 /** Parse a model answer against the frozen draft and request input of its operation. */
-export function parseOperationResult(kind: TextOperationKind, raw: unknown, draft: MarketingDraft, input: { index?: number; locale?: string; fillMissing?: boolean } = {}): TextOperationResult {
+export function parseOperationResult(kind: TextOperationKind, raw: unknown, draft: MarketingDraft, input: { index?: number; locale?: string; fillMissing?: boolean; delta?: MarketingReviewDelta } = {}): TextOperationResult {
   if (kind === "review") {
-    const review = normalizeMarketingReview(draft, raw, (input.locale ?? "zh") as "zh" | "en" | "id");
+    const review = normalizeMarketingReview(draft, raw, (input.locale ?? "zh") as "zh" | "en" | "id", input.delta?.carried);
     if (!review) throw new MarketingTextError("内容检查未返回完整且可定位的结果，请重试。", "MARKETING_TEXT_INVALID_RESULT", 503);
     return { review };
   }

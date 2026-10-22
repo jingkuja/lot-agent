@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_COPY_MODEL, MARKETING_REVIEW_MODEL, MarketingDraftSchema, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { MarketingError, reviewText } from "./repository.js";
+import { marketingReviewDelta } from "./compliance.js";
 import type { MarketingTextReceipt } from "./text.js";
 import { parseOperationResult, textResultVersion, type TextOperationKind, type TextOperationResult } from "./text-result.js";
 
@@ -54,9 +55,20 @@ export class PgMarketingTextOperations {
       if ((await client.query("SELECT 1 FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2 AND status IN ('running','unknown','needs_apply')", [owner, projectId])).rowCount) {
         throw new MarketingError("已有创作请求正在处理或结果待核实，请查看页面底部的处理结果。", 409);
       }
+      // A review re-checks only what changed since the last applied review in the same language.
+      // The delta is frozen with the input, so recovery reproduces the same result; the hash
+      // above stays on the request alone, so a repeated request still replays.
+      let frozen = input;
+      if (kind === "review") {
+        const base = (await client.query(`SELECT input_snapshot,result FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2
+          AND kind='review' AND status='succeeded' AND parser_version=$3 ORDER BY created_at DESC LIMIT 1`, [owner, projectId, textResultVersion(kind)])).rows[0];
+        const delta = base?.result?.review && base.input_snapshot?.input?.locale === (input as { locale?: string }).locale
+          ? marketingReviewDelta(draft, { draft: MarketingDraftSchema.parse(base.input_snapshot.draft), review: base.result.review }) : undefined;
+        if (delta) frozen = { ...(input as object), delta };
+      }
       const row = (await client.query(`INSERT INTO marketing_text_operations(id,user_id,project_id,project_version,kind,input_hash,model,protocol,status,input_snapshot,parser_version)
-        VALUES($1,$2,$3,$4,$5,$6,$7,'marketing-json-v1','running',$8,$9) RETURNING *`, [id, owner, projectId, version, kind, hash, kind === "review" ? MARKETING_REVIEW_MODEL : MARKETING_COPY_MODEL, JSON.stringify({ draft, input }), textResultVersion(kind)])).rows[0];
-      return { fresh: true as const, operation: view(row), draft };
+        VALUES($1,$2,$3,$4,$5,$6,$7,'marketing-json-v1','running',$8,$9) RETURNING *`, [id, owner, projectId, version, kind, hash, kind === "review" ? MARKETING_REVIEW_MODEL : MARKETING_COPY_MODEL, JSON.stringify({ draft, input: frozen }), textResultVersion(kind)])).rows[0];
+      return { fresh: true as const, operation: view(row), draft, input: frozen };
     });
   }
   async receipt(owner: string, id: string, receipt: MarketingTextReceipt) {
