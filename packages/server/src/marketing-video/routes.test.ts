@@ -595,7 +595,7 @@ describe("single shot redo", () => {
   });
   it("refuses a video without a revision base, a stale version or an invalid choice before any charge", async () => {
     const f = made();
-    for (const body of [{ version: 1, shots: [] }, { version: 1, shots: [1, 1] }, { version: 1, shots: [0.5] }, { version: 1 }]) {
+    for (const body of [{ version: 1, shots: [1, 1] }, { version: 1, shots: [0.5] }, { version: 1 }]) {
       expect((await f.call(`/${id}/revise`, body)).status).toBe(400);
     }
     expect((await f.call(`/${id}/revise`, { version: 1, shots: [2] })).status).toBe(400);
@@ -605,6 +605,12 @@ describe("single shot redo", () => {
     Object.assign(f.project, { revision: undefined });
     expect((await f.call(`/${id}/revise`, { version: 1, shots: [0] })).status).toBe(409);
     expect(f.store.revise).not.toHaveBeenCalled(); expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+  it("composes the kept clips again when no shot is chosen", async () => {
+    const f = made();
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [] })).status).toBe(202);
+    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [], {});
+    expect(f.service.jobQueue.deliverPersisted).toHaveBeenCalledWith("revision", "marketing.video");
   });
   it("keeps only clips that still belong to this owner and draft", async () => {
     const f = made();
@@ -754,5 +760,9 @@ describe("digital twin narration", () => {
     expect((await f.call(`/${id}/revise`, { version: 1, shots: [1] })).status).toBe(202);
     expect(synthesize).toHaveBeenCalledOnce();
     expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1], { narration: takes });
+    // New voice settings or reworded lines without a redone shot: new takes, every clip kept.
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [] })).status).toBe(202);
+    expect(synthesize).toHaveBeenCalledTimes(2);
+    expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenLastCalledWith("owner", id, 1, "parent", [], { narration: takes });
   });
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
-import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, marketingRevisionKey, marketingShotChanged, storyboardScript, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
+import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, marketingRenderKey, marketingRevisionKey, marketingShotNeedsClip, storyboardScript, type MarketingComposition, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION } from "./recovery.js";
 import { analysisDeleteBlocker, deleteAnalysisRecord, ownerLock as analysisOwnerLock } from "../marketing-analysis/repository.js";
 
@@ -9,11 +9,10 @@ export class MarketingError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409 | 429 | 503 = 400) { super(message); }
 }
 export const reviewText = marketingReviewText;
-export function renderKey(draft: MarketingDraft) {
-  // PG JSONB reorders object keys. Normalize through the schema before comparing.
-  const { publishTitle: _title, tags: _tags, ...rest } = MarketingDraftSchema.parse(draft);
-  return JSON.stringify(rest);
-}
+export const renderKey = marketingRenderKey;
+/** What a job's composition adds: frozen takes are used from input version 4 on. */
+const jobComposition = (input: Record<string, any>): MarketingComposition => ({
+  narration: Number(input.marketingInputVersion) >= 4 && input.narration !== undefined, localSubtitles: input.local_subtitles === true });
 const taskColumns = `t.status, t.progress, t.stage, t.error, t.error_code, t.output,
   (SELECT count(*)::int FROM marketing_video_segments s JOIN tasks st ON st.id=s.task_id
     WHERE s.project_id=p.id AND st.input->>'parentId'=p.task_id::text AND st.vendor_task_id='${UNKNOWN_SUBMISSION}') AS unknown_segments`;
@@ -44,11 +43,11 @@ async function revisionBase(db: pg.Pool | pg.PoolClient, owner: string, id: stri
   if (draft.storyboard.length !== rows.length || rows.some((row, i) => row.slot !== i) || actions.some(action => action === "unknown" || action === "poll")) return undefined;
   let modelId: string;
   try { modelId = marketingJobProfile(job.job_input).modelId; } catch { return undefined; }
-  return { input: job.job_input as Record<string, unknown>, draft, modelId, segments: rows, reusable: actions.map(action => action === "reuse") };
+  return { input: job.job_input as Record<string, unknown>, draft, modelId, segments: rows, reusable: actions.map(action => action === "reuse"), composition: jobComposition(job.job_input) };
 }
 async function withRevision(db: pg.Pool | pg.PoolClient, owner: string, p: MarketingProject): Promise<MarketingProject> {
   const base = p.taskId ? await revisionBase(db, owner, p.id) : undefined;
-  return base ? { ...p, revision: { draft: base.draft, modelId: base.modelId, reusable: base.reusable } } : p;
+  return base ? { ...p, revision: { draft: base.draft, modelId: base.modelId, reusable: base.reusable, composition: base.composition } } : p;
 }
 export class PgMarketingProjectStore implements MarketingProjectStore {
   constructor(readonly pool: pg.Pool) {}
@@ -100,12 +99,13 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       } else {
         if (version !== old.version) throw new MarketingError("草稿已在其他页面更新，请重新打开。", 409);
         if (old.task_id && renderKey(old.draft) !== renderKey(draft)) {
-          // A stopped or finished video may change shot text to redo those shots; all else stays frozen.
+          // A stopped or finished video may change shot text to redo those shots, and the settings
+          // only its composition uses; all else stays frozen.
           const base = await revisionBase(client, owner, id);
           if (!base) throw new MarketingError("已提交的制作配置不可修改，请复制为新草稿。", 409);
           if (renderKey(base.draft) !== renderKey(draft)
-            && (marketingRevisionKey(base.draft) !== marketingRevisionKey(draft) || storyboardScript(draft.storyboard) !== draft.script.trim())) {
-            throw new MarketingError("成片只能修改分镜的口播、画面、动作和镜头，其他制作配置不可修改，请复制为新草稿。", 409);
+            && (marketingRevisionKey(base.draft, base.composition) !== marketingRevisionKey(draft, base.composition) || storyboardScript(draft.storyboard) !== draft.script.trim())) {
+            throw new MarketingError("成片只能修改分镜内容、背景音乐、字幕和旁白音色，其他制作配置不可修改，请复制为新草稿。", 409);
           }
         }
         await client.query(`UPDATE marketing_video_projects SET draft=$3,version=version+1,updated_at=now(),
@@ -177,12 +177,15 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       if (!p.review || p.reviewed_script !== reviewText(p.draft) || p.review.verdict === "reject") throw new MarketingError("请先完成当前文案检查。");
       const base = await revisionBase(client, owner, id);
       const draft = MarketingDraftSchema.parse(p.draft);
-      if (!base || marketingRevisionKey(base.draft) !== marketingRevisionKey(draft)) throw new MarketingError("当前视频不能单镜重做，请复制为新草稿。", 409);
+      if (!base || marketingRevisionKey(base.draft, base.composition) !== marketingRevisionKey(draft, base.composition)) throw new MarketingError("当前视频不能单镜重做，请复制为新草稿。", 409);
       const plan = resolveMarketingSegments(draft, marketingJobProfile(base.input));
       // The caller confirmed the billed shots: a changed shot or a missing clip is never added silently.
-      const required = plan.filter(part => !base.reusable[part.index] || part.script !== base.segments[part.index].script
-        || marketingShotChanged(base.draft.storyboard[part.index], draft.storyboard[part.index])).map(part => part.index);
-      if (!redo.length || redo.some(slot => !plan[slot]) || required.some(slot => !redo.includes(slot))) throw new MarketingError("请重新选择需要重新生成的镜头。", 409);
+      // A narrated job keeps the picture of reworded shots; their new takes come with the job.
+      const required = plan.filter(part => !base.reusable[part.index] || (part.script !== base.segments[part.index].script && !base.composition.narration)
+        || marketingShotNeedsClip(base.draft.storyboard[part.index], draft.storyboard[part.index], base.composition)).map(part => part.index);
+      if (redo.some(slot => !plan[slot]) || required.some(slot => !redo.includes(slot))) throw new MarketingError("请重新选择需要重新生成的镜头。", 409);
+      // Without a redone shot the job only composes the kept clips again with the changed settings.
+      if (!redo.length && renderKey(base.draft) === renderKey(draft)) throw new MarketingError("成片设置和分镜都没有修改，无需重新合成。", 409);
       const taskId = randomUUID();
       await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.video',$2,$3,$4)`,
         [taskId, JSON.stringify({ ...base.input, ...inputChanges, draft: p.draft, revisedFrom: baseTaskId }), owner, MARKETING_VIDEO_QUEUE]);

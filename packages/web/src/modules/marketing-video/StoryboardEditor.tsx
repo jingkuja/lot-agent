@@ -10,8 +10,9 @@ export function StoryboardEditor({ shots, presenter = "always", busy, readOnly =
   creation?: boolean;
   /** Inside a panel that already shows the heading and totals. */
   compact?: boolean;
-  /** A made video: the shots to redo. A shot with a reason (edited, no usable clip) stays chosen. */
-  redo?: { selected: boolean[]; reasons: (string | undefined)[]; onToggle(index: number): void };
+  /** A made video: the shots to redo. A shot with a reason (edited, no usable clip) stays chosen;
+   * a note says what happens to an optional one that is left out. */
+  redo?: { selected: boolean[]; reasons: (string | undefined)[]; notes?: (string | undefined)[]; onToggle(index: number): void };
   onChange?: (shots: MarketingShot[]) => void;
   onAi?: (instruction: string, index?: number) => void;
 }) {
@@ -28,7 +29,7 @@ export function StoryboardEditor({ shots, presenter = "always", busy, readOnly =
     <div className="mv-shot-list">{shots.map((shot, index) => <article className={redo?.selected[index] ? "mv-shot mv-shot-redo" : "mv-shot"} key={index} aria-label={t("第 {0} 镜", [index + 1])}>
       <header><h4>{t("第 {0} 镜", [index + 1])}</h4><span>{index ? ends[index - 1] : 0}–{ends[index]}s · {t("{0} 秒", [shot.durationSec ?? 15])}</span></header>
       {redo && <label className="mv-checkbox"><input type="checkbox" checked={redo.selected[index]} disabled={busy || !!redo.reasons[index]} onChange={() => redo.onToggle(index)} />
-        {t("重新生成此镜")}{redo.reasons[index] && <em>{t(redo.reasons[index])}</em>}</label>}
+        {t("重新生成此镜")}{redo.reasons[index] ? <em>{t(redo.reasons[index])}</em> : redo.notes?.[index] && !redo.selected[index] && <em>{t(redo.notes[index])}</em>}</label>}
       {fields.map(({ key, label, max }) => <label className="mv-field" key={key}><span>{t(label)}</span><textarea rows={key === "visual" ? 3 : 2} maxLength={max} value={shot[key]} readOnly={readOnly} disabled={busy} onChange={e => onChange?.(shots.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value))} /></label>)}
     </article>)}</div>
     {!readOnly && onAi && <details className="mv-storyboard-ai" open><summary>{t("调整分镜（选填）")}</summary>

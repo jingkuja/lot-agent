@@ -80,7 +80,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <h1>营销影像 Agent 评审</h1>
   <p class="meta">评审日期：2026-10-19 · 基线提交：<code>c2013d9</code> · 写作方式：参照 ASD-STE100 原则（短句、主动语态、一句一事、术语统一）</p>
   <p class="meta">对照文档：<a href="../output/pdf/marketing-video-review-20261015.pdf">2026-10-15 营销影像子 Agent 评审报告</a>（基线 <code>8739509</code>，之后共 15 个提交）</p>
-  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。第六轮（2026-10-21）完成功能缺口 G05（项目与素材生命周期），在提交 <code>887f160</code>。第七轮（2026-10-21）完成功能缺口 G04（单镜替换与重新合成），在提交 <code>9d4cc7a</code>。</p>
+  <p class="meta">更新：2026-10-20 第三轮修复 4 项健壮性问题（错误码、轮询、<code>ProjectStudio.tsx</code> 拆分、死代码）。第一轮修复在提交 <code>87dad64</code>，第二轮（F02–F08）在提交 <code>d797fd2</code>。第四轮（2026-10-20）处理第 2 节"限制过严"的 2 项，并用提示词改善跨镜人物与场景一致性，在提交 <code>3f38e9a</code>。第五轮（2026-10-20）处理第 2 节"操作 UI"的精简和交互问题，共 12 项。第六轮（2026-10-21）完成功能缺口 G05（项目与素材生命周期），在提交 <code>887f160</code>。第七轮（2026-10-21）完成功能缺口 G04（单镜替换与重新合成），在提交 <code>9d4cc7a</code>。第十轮（2026-10-22）减少第 3 步和成片后的模型重跑：文案检查改用快速模型并只复查改动字段，修改后不自动重查；成片后可只重新合成；标题标签改为提交视频后补全。</p>
   <p class="meta">范围：<code>packages/web/src/modules/marketing-video</code>、<code>packages/server/src/marketing-video</code>、<code>packages/server/src/marketing-analysis</code>、<code>packages/core/src/marketing-video</code></p>
 </header>
 
@@ -95,6 +95,8 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <a href="#fixes7">第七轮修复</a>
   <a href="#fixes8">第八轮修复</a>
   <a href="#fixes9">第九轮修复</a>
+  <a href="#fixes10">第十轮修复</a>
+  <a href="#rerun">第 3 步重跑审计</a>
   <a href="#tracking">旧评审跟踪</a>
   <a href="#features">1 功能完成度</a>
   <a href="#ui">2 操作 UI</a>
@@ -106,7 +108,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
 
 <section class="card" id="overview">
   <h2>总览</h2>
-  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复，第六轮让删除草稿一并删除成片、片段和参考分析，并显示空间用量（G05），第七轮支持成片后只重做所选镜头，其他片段不再付费（G04），第八轮新增「数字分身旁白」：用数字分身原声逐镜配音并替换片段音轨，处理 R1 配音问题（G01 的配音部分），第九轮让旁白模式的字幕改为按确认文案本地烧录，并按配音停顿切换（R2 的旁白部分）。仍有一类主要问题：「AI 配音」模式的字幕和成片质量不可控（G01 剩余部分、G02），且尚未用真实样片验收。</div>
+  <div class="verdict">主流程完整，安全保护充分。10-15 评审的两个 P1 问题已处理：素材私有访问已修复，队列已隔离。本次评审发现的两个高级别问题（"未知"状态卡住用户）已在 2026-10-19 修复并提交。2026-10-20 第二轮修复了旧代码问题 F02–F08，第三轮修复了剩余的 2 项中级和 2 项低级健壮性问题，第四轮放宽了人物出镜和标题标签补全两项限制，并用提示词改善跨镜一致性，第五轮完成第 2 节操作 UI 的精简和交互修复，第六轮让删除草稿一并删除成片、片段和参考分析，并显示空间用量（G05），第七轮支持成片后只重做所选镜头，其他片段不再付费（G04），第八轮新增「数字分身旁白」：用数字分身原声逐镜配音并替换片段音轨，处理 R1 配音问题（G01 的配音部分），第九轮让旁白模式的字幕改为按确认文案本地烧录，并按配音停顿切换（R2 的旁白部分），第十轮减少第 3 步和成片后的模型重跑（见<a href="#rerun">第 3 步重跑审计</a>）。仍有一类主要问题：「AI 配音」模式的字幕和成片质量不可控（G01 剩余部分、G02），且尚未用真实样片验收。</div>
   <div class="grid">
     <div class="stat"><strong>8 · 0 · 0</strong><span>旧代码问题 F01–F08：已修复 · 部分修复 · 未修复</span></div>
     <div class="stat"><strong>2 · 1 · 5</strong><span>旧功能缺口 G01–G08：完成 · 部分 · 未完成</span></div>
@@ -556,6 +558,83 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <p class="meta">残留：「AI 配音」模式和参考视频（无声）模式的字幕仍由模型绘制；没有单独的 SRT / ASS 字幕下载，也不能只改字幕后重新合成；镜内时间不是字级时间戳；没有抽帧检查模型是否仍画出文字；尚未用真实网关和千问音色出样片验收字幕误差。</p>
 </section>
 
+<section class="card" id="fixes10">
+  <h2>第十轮修复（2026-10-22） <span class="tag ok">第 3 步重跑已处理</span></h2>
+  <p class="meta">提交：<code>b37d572</code>、<code>74d3a2d</code>、<code>84b7d50</code>，其余改动与本报告同一提交</p>
+  <p>模型调用耗时较长。本轮按<a href="#rerun">第 3 步重跑审计</a>处理会让模型把已有内容整体重做的操作。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>修复</th><th>保护与边界</th></tr></thead>
+    <tbody>
+      <tr><td>文案检查慢，且改一处就整篇重查</td><td>
+        <ul>
+          <li>营销影像和数字主播的 <code>/review</code> 改用 <code>deepseek-v4.1-flash</code>（<code>MARKETING_REVIEW_MODEL</code>）；文案、分镜和标题标签仍用 <code>kimi-k3</code>。</li>
+          <li><code>operations.begin</code> 取同一草稿、同语言、同规则版本的上一次已应用检查，<code>compliance.ts → marketingReviewDelta</code> 按字段和镜号比对，只让模型复查改动字段，整篇作上下文；未改字段的结果沿用。</li>
+        </ul></td><td>比对范围随输入快照冻结，回执恢复结果一致；本地风险表仍全篇执行；没有可用基准或没有保留字段时整篇检查。数字主播只有一段口播，不做增量。</td></tr>
+      <tr><td>按建议修改后自动重查</td><td>「一键修改」「保存修改」只替换并保存。上次结果标为「内容已修改」，只列出原文仍在的问题，由用户点「检查当前文案」重查。</td><td>营销影像生成前未检查时仍自动检查一次，作为付费前的风险闸门。</td></tr>
+      <tr><td>成片后换背景音乐、调音量、开关字幕、改旁白设置要复制为新草稿，全部片段重新生成</td><td>
+        <ul>
+          <li><code>ResultPanel</code> 新增「成片设置」；<code>marketingRevisionKey(draft, composition)</code> 按 <code>revision.composition</code>（任务的 <code>narration</code>、<code>local_subtitles</code>）放行只在合成时生效的设置。</li>
+          <li><code>/revise</code> 允许 <code>shots</code> 为空：沿用全部片段，只重新合成，不调视频模型、不计视频费用。改旁白音色、语速或语气时重新合成全部配音（按语音合成计费）。</li>
+        </ul></td><td>字幕开关只限本地烧录字幕的任务；草稿与制作时完全相同时拒绝重新合成。配音长于镜头时长时拒绝，镜头时长成片后不可改。</td></tr>
+      <tr><td>旁白任务只改口播措辞也要重做画面</td><td><code>marketingShotNeedsClip</code>：旁白任务只改口播时默认保留画面，只为该镜重新合成配音并按新文案烧录字幕；界面提示「口播已修改，保留画面，只更新配音和字幕」，用户可勾选重新生成画面。</td><td>「AI 配音」任务口播由模型说出，改口播仍须重做；改画面、动作或镜头必须重做。</td></tr>
+      <tr><td>标题标签为空时，先等一次 <code>kimi-k3</code> 才提交视频</td><td>先提交视频，制作期间补全标题标签并只复查这两个字段。</td><td>补全失败只提示，不影响视频；删除原「跳过标题和标签？」确认框。</td></tr>
+      <tr><td>UI 检查脚本自 <code>1a3e86d</code> 起失败</td><td>旁白模式在环境不支持本地字幕时先提示关闭字幕，脚本改为断言该提示、关闭字幕后继续，再在「AI 配音」生成前重新打开字幕。</td><td>保留原有的「模型字幕不需要本地字幕能力」用例。</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>测试：</strong>core、server 营销与数字主播、web 共 43 个测试文件 422 项通过；新增修订键、保留画面规则、增量检查、空 <code>shots</code> 重新合成和旁白任务重新合成的单测。Core / Server / Web 构建通过。</p>
+  <p><strong>集成检查：</strong><code>pnpm check:marketing-video:db</code>（临时 PostgreSQL 容器，用后停止）通过，新增断言：改音量后只重新合成，不提交片段、不计费；旁白任务改一镜口播只多合成 1 条配音、不提交片段；改语速重新合成全部配音；改画面仍须重做。增量检查的基准选取另用临时 PostgreSQL 验证。<code>pnpm check:marketing-video:ui</code> 通过，新增：按建议修改不发检查请求、关字幕后重新合成、改口播显示保留画面、先提交视频再补并复查标题标签；已查看浅色和深色截图。</p>
+  <p class="meta">残留：尚未用真实视频模型和网关验收重新合成；原本关字幕的成片再开字幕时，片段没有为字幕留出底部区域；成片后字幕逐镜微调尚未实现（见<a href="#subtitle-tune">字幕微调</a>）。</p>
+</section>
+
+<section class="card" id="rerun">
+  <h2>第 3 步重跑审计（2026-10-22） <span class="tag new">新</span></h2>
+  <p>模型调用耗时较长。本节逐项检查「确认与制作」及成片后的操作：哪些会让模型把已有内容整体重做一遍、是否必要、怎样缩小范围。依据当前代码，未做实际耗时测量。</p>
+  <h3>已处理</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>操作</th><th>原来</th><th>现在</th><th>提交</th></tr></thead>
+    <tbody>
+      <tr><td>文案与分镜检查</td><td>用 <code>kimi-k3</code>；任何字段改动后都整篇重查</td><td>改用 <code>deepseek-v4.1-flash</code>；按字段和镜号比对上次已应用的检查，只让模型复查改动字段，整篇作上下文，未改字段的结果沿用；本地风险表仍全篇执行</td><td><code>b37d572</code>、<code>74d3a2d</code></td></tr>
+      <tr><td>检查结果的「一键修改」「自己修改」</td><td>替换后立即自动整篇重查</td><td>只替换并保存；上次结果标为「内容已修改」，只列出原文仍在的问题，由用户点「检查当前文案」重查</td><td><code>84b7d50</code></td></tr>
+    </tbody>
+  </table></div>
+  <h3>生成前</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>操作</th><th>触发的调用</th><th>评估</th><th>建议</th></tr></thead>
+    <tbody>
+      <tr><td>点「确认分镜并生成视频」时标题或标签为空</td><td>先串行调用一次 <code>kimi-k3</code> 补标题标签（<code>publication(true)</code>），完成后才提交视频</td><td><span class="tag ok">已修改</span> 标题标签不参与片段生成，原来挡在提交前面，用户要多等一次模型调用</td><td>已改为先提交视频，制作期间补全标题标签并只复查这两个字段；失败只提示，不影响成片</td></tr>
+      <tr><td>生成时检查未完成</td><td>自动检查一次（增量、flash 模型）</td><td><span class="tag ok">保留</span> 这是付费生成前的风险闸门</td><td>无</td></tr>
+      <tr><td>改旁白音色、语速或语气</td><td>全部分镜配音失效，需全部重新合成（TTS 计费）</td><td><span class="tag ok">必要</span> 每镜音频都变了；改回原设置时旧配音按键找回，不重复计费</td><td>无</td></tr>
+      <tr><td>改某一镜口播</td><td>只有该镜配音失效；检查只复查该字段</td><td><span class="tag ok">已是最小范围</span></td><td>无</td></tr>
+      <tr><td>「AI 修改分镜」范围选「全部分镜」</td><td>全部分镜由 <code>kimi-k3</code> 重写，全部配音失效</td><td><span class="tag low">用户主动选择</span> 单镜范围已支持，只返回该镜</td><td>可在选「全部分镜」时提示会让已生成的配音全部失效</td></tr>
+      <tr><td>增删参考视频后点「重新生成分镜」</td><td>全部分镜重写（有声 / 无声写法不同）</td><td><span class="tag ok">必要</span> 同时提供「保留当前分镜」</td><td>无</td></tr>
+      <tr><td>画面比例、清晰度、背景音乐、字幕开关</td><td>无模型调用</td><td><span class="tag ok">无影响</span></td><td>无</td></tr>
+    </tbody>
+  </table></div>
+  <h3>成片后</h3>
+  <p>成片后只允许改分镜文字（<code>marketingRevisionKey</code>），其他设置要「复制为新草稿」，新草稿会把全部片段交给视频模型重新生成。这是最贵、最慢的一类。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>操作</th><th>现在</th><th>评估</th><th>建议</th></tr></thead>
+    <tbody>
+      <tr><td>换背景音乐、调音量、开关字幕（旁白模式）</td><td>只能复制为新草稿，全部片段重新生成</td><td><span class="tag ok">已修改</span> 这些只在本地 FFmpeg 合成时生效（<code>run.ts</code> 把背景音乐、配音和字幕交给 <code>composeMarketingVideo</code>），片段完全可以复用</td><td>已新增「成片设置」和「重新合成成片」：<code>/revise</code> 允许不选镜头，复用全部片段，本地重新合成，不调视频模型、不计视频费用</td></tr>
+      <tr><td>改旁白音色、语速或语气</td><td>同上，全部片段重新生成</td><td><span class="tag ok">已修改</span> 旁白模式的片段本身无声，配音在合成时替换音轨</td><td>已走同一通道：重新合成全部配音（TTS 计费），片段复用，再本地合成</td></tr>
+      <tr><td>旁白模式下只改某镜口播措辞（如按检查建议替换风险词）</td><td>该镜视频片段重新生成，并重配该镜</td><td><span class="tag ok">已修改</span> 片段无声，画面只是演绎口播；小幅改措辞通常不需要新画面</td><td>已默认保留画面，只为该镜重新合成配音并按新文案烧录字幕，用户也可勾选重新生成画面；「AI 配音」模式口播由模型说出，仍须重做片段</td></tr>
+      <tr><td>改画面比例、清晰度、画面 / 动作 / 镜头、统一设定、配音方式</td><td>重做相应片段或复制为新草稿</td><td><span class="tag ok">必要</span> 这些都是视频模型的输入</td><td>无</td></tr>
+      <tr><td>「重新生成标题和标签」</td><td>一次 <code>kimi-k3</code></td><td><span class="tag ok">无影响</span> 独立于成片</td><td>无</td></tr>
+      <tr><td>继续生成、重新提交未知片段</td><td>只处理失败或未知的片段</td><td><span class="tag ok">已是最小范围</span></td><td>无</td></tr>
+    </tbody>
+  </table></div>
+  <h3 id="subtitle-tune">成片后字幕微调（可行性）</h3>
+  <p>需求：成片后按镜调整字幕时间，例如每次前移或后移 0.05 秒。</p>
+  <ul>
+    <li><strong>「数字分身旁白」模式：可以做。</strong>字幕是合成时按镜生成 ASS 再烧录的（<code>media.ts</code> 逐镜调用 <code>timeCaptions</code> → <code>captionAss</code>），给每镜的字幕时间加一个偏移量即可。偏移后要限制在本镜范围内，不能盖到下一镜。这项依赖上表的「只重新合成」通道：调整后本地重新合成，不调模型、不计费，耗时是本地把全部分镜重新编码一次。</li>
+    <li><strong>预览：</strong>烧录后要等重新合成完才能看到效果。如果要实时预览，可以在合成时另存一份无字幕成片和字幕时间表，网页播放器用叠加层按偏移显示，确认后再烧录。代价是每条成片多存一份视频，计入空间用量。</li>
+    <li><strong>画面与配音的相对位置：</strong>也可以按镜移动配音起点（在镜内补静音或截掉片头）。画面不能超出该片段已生成的时长；画面往后移需要定格补帧。</li>
+    <li><strong>「AI 配音」和参考视频模式：目前做不到。</strong>这两种模式的字幕由视频模型直接画在画面里，无法再调整。要支持，需先把它们改为本地字幕；「AI 配音」还需要对模型生成的音频做语音识别才能计时。</li>
+  </ul>
+  <p>「只重新合成」已完成（见上表）。下一步可在其上加每镜字幕偏移（步长 0.05 秒，可加一个全片统一偏移），最后视需要做实时预览。</p>
+  <p class="meta">验证：core、server 营销与数字主播、web 共 43 个测试文件 422 项通过；营销视频 DB 检查（真实 Postgres + FFmpeg 合成）通过，覆盖改音量后只重新合成（不提交片段、不计费）、旁白任务改口播只多合成 1 条配音、改语速重配全部配音、改画面仍须重做；浏览器 UI 检查通过，覆盖关字幕后重新合成、改口播显示保留画面、先提交视频再补并复查标题标签。尚未用真实视频模型和网关验收。</p>
+</section>
+
 <section class="card" id="tracking">
   <h2>10-15 评审问题跟踪</h2>
   <div class="legend"><span><span class="tag ok">已修复</span> 代码已处理</span><span><span class="tag mid">部分修复</span> 主要问题已处理，有残留</span><span><span class="tag high">未修复</span> 与旧评审描述一致</span></div>
@@ -821,11 +900,16 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <li><span class="tag ok">已完成</span> 增加"主播全程 / 混合镜头"选项。允许跳过自动补标题标签。<span class="ref">— 第 2 节</span></li>
       <li><span class="tag ok">已完成</span> 草稿列表增加分页和搜索。<span class="ref">— F06 残留</span></li>
       <li><span class="tag ok">已完成</span> 删除草稿时一并删除成片、片段和参考分析；显示空间用量。<span class="ref">— G05</span></li>
+      <li><span class="tag ok">已完成</span> 文案检查改用 flash 模型，改动后只复查改动字段，按建议修改后不自动重查。<span class="ref">— <a href="#rerun">第 3 步重跑审计</a></span></li>
+      <li><span class="tag ok">已完成</span> 成片后「只重新合成」：换背景音乐、调音量、开关字幕、改旁白设置时复用全部片段，不再复制为新草稿重做。<span class="ref">— <a href="#rerun">第 3 步重跑审计</a></span></li>
+      <li><span class="tag ok">已完成</span> 旁白模式只改口播措辞时默认保留画面，只更新配音和字幕。<span class="ref">— <a href="#rerun">第 3 步重跑审计</a></span></li>
+      <li><span class="tag ok">已完成</span> 点生成时先提交视频，标题和标签在制作期间补全并复查。<span class="ref">— <a href="#rerun">第 3 步重跑审计</a></span></li>
+      <li>旁白模式成片后按镜微调字幕时间（依赖「只重新合成」）。<span class="ref">— <a href="#subtitle-tune">字幕微调</a></span></li>
     </ol>
   </div>
   <div class="phase">
     <h3>D 质量</h3>
-    <ol start="16">
+    <ol start="21">
       <li><span class="tag mid">部分完成</span> "TTS 先行 + 本地字幕"路线：TTS 配音已作为「数字分身旁白」上线（第八轮），「AI 配音」保留为快速模式；旁白模式的本地字幕已完成（第九轮），「AI 配音」模式的字幕、SRT 下载和只改字幕重新合成仍待做。真人对口型改由数字主播 Agent 负责。<span class="ref">— G01、R1、R2</span></li>
       <li>增加成片质量检查：声音、字幕、黑帧和关键事实。<span class="ref">— G02</span></li>
       <li>用授权样片做真实验收（10-15 报告建议每组至少 30 条）。<span class="ref">— 旧报告验收门槛</span></li>
@@ -833,7 +917,7 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   </div>
   <div class="phase">
     <h3>E 维护</h3>
-    <ol start="19">
+    <ol start="24">
       <li><span class="tag ok">已完成</span> 失败分类改用错误码，不再用正则匹配文字。<span class="ref">— 第 3 节</span></li>
       <li><span class="tag ok">已完成</span> 拆分 <code>ProjectStudio.tsx</code>，删除死代码。<span class="ref">— 第 3 节</span></li>
       <li><span class="tag ok">已完成</span> 更新 <code>docs/agent-code-guide.md:22</code>。<span class="ref">— 第 1 节</span></li>

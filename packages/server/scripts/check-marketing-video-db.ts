@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { KLING_MARKETING_PROFILE, MarketingDraftSchema, planMarketingSegments, resolveMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
+import { KLING_MARKETING_PROFILE, MarketingDraftSchema, planMarketingSegments, resolveMarketingSegments, storyboardScript, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { DB } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migration-runner.js";
 import { migrations } from "../src/db/migrations/index.js";
@@ -221,12 +221,23 @@ try {
   assert.equal(creates, before + 2);
   assert.equal((await store.segments(owner, made.id))[0].output.reusedFrom, firstClips[0].task_id);
   before = creates;
+  // Composition-only change: every clip is kept and nothing is submitted or billed.
+  made = (await store.get(owner, made.id))!;
+  await assert.rejects(store.revise(owner, made.id, made.version, thirdJob, []), /无需重新合成/);
+  made = await store.save(owner, made.id, made.version, { ...made.draft, musicVolume: 0.3 });
+  assert.equal(made.review?.verdict, "pass", "music is not part of the text check");
+  const chargedBeforeRecompose = await charges();
+  const fourthJob = await store.revise(owner, made.id, made.version, thirdJob, []);
+  await run(fourthJob);
+  assert.equal(creates, before, "composing again submits no clip");
+  assert.deepEqual(await charges(), chargedBeforeRecompose);
+  assert((await store.segments(owner, made.id)).every(segment => segment.output.reusedFrom));
   const madeFiles = (await db.pool.query(`SELECT size_bytes FROM assets WHERE user_id=$1 AND type='video' AND task_id IN (
-    SELECT id FROM tasks WHERE id=ANY($2::uuid[]) OR input->>'parentId'=ANY($3::text[]))`, [owner, [firstJob, secondJob, thirdJob], [firstJob, secondJob, thirdJob]])).rows;
-  assert.equal(madeFiles.length, 7, "three final videos, two first clips and two redone clips");
+    SELECT id FROM tasks WHERE id=ANY($2::uuid[]) OR input->>'parentId'=ANY($3::text[]))`, [owner, [firstJob, secondJob, thirdJob, fourthJob], [firstJob, secondJob, thirdJob, fourthJob]])).rows;
+  assert.equal(madeFiles.length, 8, "four final videos, two first clips and two redone clips");
   const usageBeforeRevisionDelete = await store.usage(owner);
   const removedRevision = await store.remove(owner, made.id);
-  assert.equal(removedRevision.files.length, 7);
+  assert.equal(removedRevision.files.length, 8);
   assert.equal(removedRevision.removedBytes, madeFiles.reduce((sum, row) => sum + Number(row.size_bytes), 0));
   assert.equal((await store.usage(owner)).videoBytes, usageBeforeRevisionDelete.videoBytes - removedRevision.removedBytes);
 
@@ -549,8 +560,34 @@ try {
   assert(Math.abs((await inspectMedia(narratedFile)).duration - 30) < 0.3);
   // The fixture clips carry a 440 Hz tone; only the silent takes may be heard.
   assert.match(spawnSync(ffmpeg(), ["-v", "info", "-i", narratedFile, "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" }).stderr, /max_volume: -(9\d|inf)/);
+  // A narrated video keeps the picture of a reworded shot and of new voice settings: only takes are paid.
+  const recomposeNarrated = async (change: (value: MarketingDraft) => MarketingDraft, base: string) => {
+    let p = (await store.get(owner, narrated.id))!;
+    p = await store.save(owner, p.id, p.version, change(p.draft));
+    p = await store.setReview(owner, p, { verdict: "pass", issues: [] });
+    const plan = resolveMarketingSegments(p.draft, KLING_MARKETING_PROFILE);
+    await narrator.synthesize(owner, p.id, p.draft, plan);
+    const job = await store.revise(owner, p.id, p.version, base, [], { narration: await narrator.frozen(owner, p.id, p.draft, plan) });
+    await run(job);
+    return job;
+  };
+  const clipsBefore = creates, speechesBefore = speeches;
+  const reworded = await recomposeNarrated(value => {
+    const storyboard = value.storyboard.map((shot, i) => i === 1 ? { ...shot, script: "欢迎来店里坐一坐，挑一杯喜欢的咖啡。" } : shot);
+    return { ...value, storyboard, script: storyboardScript(storyboard) };
+  }, narratedTask);
+  assert.equal(creates, clipsBefore, "a reworded narrated shot keeps its clip");
+  assert.equal(speeches, speechesBefore + 1, "only the reworded shot gets a new take");
+  assert.equal((await store.segments(owner, narrated.id))[1].script, "欢迎来店里坐一坐，挑一杯喜欢的咖啡。");
+  await recomposeNarrated(value => ({ ...value, narration: { ...value.narration!, speed: 1.1 } }), reworded);
+  assert.equal(creates, clipsBefore, "new voice settings keep every clip");
+  assert.equal(speeches, speechesBefore + 1 + shots.length, "new voice settings need every take again");
+  const picture = (await store.get(owner, narrated.id))!;
+  await store.save(owner, picture.id, picture.version, { ...picture.draft, storyboard: picture.draft.storyboard.map((shot, i) => i ? { ...shot, camera: "推近" } : shot) });
+  const changedPicture = (await store.setReview(owner, (await store.get(owner, narrated.id))!, { verdict: "pass", issues: [] }));
+  await assert.rejects(store.revise(owner, narrated.id, changedPicture.version, changedPicture.taskId!, []), /重新选择/, "a changed picture is never kept");
   await store.remove(owner, narrated.id); await narrator.removeFiles(narrated.id);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_video_narrations WHERE project_id=$1", [narrated.id])).rows[0].n, 0);
   await assert.rejects(readdir(join(root, "marketing-narration", narrated.id)));
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", twinNarration: "takes paid once per shot, owner-scoped, v4 job composed from them, removed with the draft", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", shotRedo: "only chosen shots submitted and billed, kept clips reused, earlier jobs removed with the draft", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", twinNarration: "takes paid once per shot, owner-scoped, v4 job composed from them, removed with the draft", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", shotRedo: "only chosen shots submitted and billed, kept clips reused, composition-only and narrated rewording/voice changes recomposed without clips, earlier jobs removed with the draft", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

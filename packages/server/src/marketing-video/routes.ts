@@ -426,8 +426,9 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const owner = c.get("userId");
     const p = await requireProject(owner, c.req.param("id"));
     const body = await c.req.json().catch(() => null);
+    // No shot means composing the kept clips again with changed music, captions or narration.
     const shots: unknown[] = Array.isArray(body?.shots) ? body.shots : [];
-    if (!Number.isInteger(body?.version) || !shots.length || shots.length > 15 || !shots.every(Number.isInteger) || new Set(shots).size !== shots.length) throw new MarketingError("重新生成参数无效");
+    if (!Number.isInteger(body?.version) || !Array.isArray(body?.shots) || shots.length > 15 || !shots.every(Number.isInteger) || new Set(shots).size !== shots.length) throw new MarketingError("重新生成参数无效");
     const redo = shots as number[];
     if (!p.taskId || !p.revision) throw new MarketingError("当前视频不能单镜重做，请复制为新草稿。", 409);
     if (p.version !== body.version) throw new MarketingError("草稿已更新，请重新确认。", 409);

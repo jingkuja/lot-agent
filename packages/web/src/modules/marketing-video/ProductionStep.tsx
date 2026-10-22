@@ -25,8 +25,9 @@ function VoiceModes({ form, available }: { form: DraftForm; available: boolean }
   </div>;
 }
 
-/** The twin voice, its pace and tone. Changing any of them needs new takes. */
-function NarrationSettings({ form, onPickVoice }: { form: DraftForm; onPickVoice(): void }) {
+/** The twin voice, its pace and tone. Changing any of them needs new takes. `made`: shown
+ * with a made video, where the takes are made when it is composed again. */
+export function NarrationSettings({ form, onPickVoice, made = false }: { form: DraftForm; onPickVoice(): void; made?: boolean }) {
   const { t } = useI18n();
   const { draft, busy, frozen, ready, field } = form;
   const narration = draft.narration!;
@@ -44,7 +45,7 @@ function NarrationSettings({ form, onPickVoice }: { form: DraftForm; onPickVoice
     <label className="mv-field"><span>{t("语气要求（可选）")}</span>
       <input value={narration.instructions} maxLength={200} disabled={locked} placeholder={t("例如：语气热情，语速稍快")} onChange={e => set({ instructions: e.target.value })} />
     </label>
-    <p className="mv-hint">{t("旁白使用数字分身复刻的原声，生成视频前逐镜合成并试听。画面人物可以自然活动，但不会对着镜头念台词。字幕按确认文案在合成时加入，并按配音停顿切换，视频模型不绘制文字。")}</p>
+    {!made && <p className="mv-hint">{t("旁白使用数字分身复刻的原声，生成视频前逐镜合成并试听。画面人物可以自然活动，但不会对着镜头念台词。字幕按确认文案在合成时加入，并按配音停顿切换，视频模型不绘制文字。")}</p>}
   </>;
 }
 

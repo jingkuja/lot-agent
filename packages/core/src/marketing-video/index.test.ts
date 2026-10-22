@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotChanged, fitMarketingNarration, marketingNarrationFits, marketingVoiceover, marketingNativeSpeech, DEFAULT_MARKETING_VIDEO_PROFILE } from "./index.js";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotNeedsClip, marketingShotChanged, fitMarketingNarration, marketingNarrationFits, marketingVoiceover, marketingNativeSpeech, DEFAULT_MARKETING_VIDEO_PROFILE } from "./index.js";
 
 const grok = GROK_MARKETING_PROFILE;
 const kling = KLING_MARKETING_PROFILE;
@@ -282,6 +282,31 @@ describe("single shot redo", () => {
     expect(marketingShotChanged(shots[0], { ...shots[0] })).toBe(false);
     for (const key of ["script", "visual", "action", "camera"] as const) expect(marketingShotChanged(shots[0], { ...shots[0], [key]: "改" })).toBe(true);
     expect(marketingShotChanged(shots[0], undefined)).toBe(true);
+  });
+  it("lets settings only the composition uses change, given the job's composition", () => {
+    const music = "11111111-1111-4111-8111-111111111111";
+    const plain = { narration: false, localSubtitles: false };
+    const narrated = { narration: true, localSubtitles: true };
+    const twin = MarketingDraftSchema.parse({ ...draft, narration: { speed: 1 }, subtitles: true });
+    const key = (value: typeof draft, composition?: typeof plain) => marketingRevisionKey(value, composition);
+    // Background music and its volume are mixed in locally for every job.
+    expect(key({ ...draft, assets: { music }, musicVolume: 0.3 }, plain)).toBe(key(draft, plain));
+    expect(key({ ...draft, assets: { music } })).not.toBe(key(draft));
+    // Model-drawn captions are part of the clips; locally burned ones are not.
+    expect(key({ ...draft, subtitles: !draft.subtitles }, plain)).not.toBe(key(draft, plain));
+    expect(key({ ...twin, subtitles: false }, narrated)).toBe(key(twin, narrated));
+    // A narrated job may change the twin voice, pace and tone, but not the voice mode.
+    expect(key(MarketingDraftSchema.parse({ ...twin, narration: { speed: 1.2, instructions: "热情" } }), narrated)).toBe(key(twin, narrated));
+    expect(key({ ...twin, narration: undefined }, narrated)).not.toBe(key(twin, narrated));
+    expect(key({ ...draft, narration: MarketingDraftSchema.parse(twin).narration }, plain)).not.toBe(key(draft, plain));
+    expect(key({ ...twin, ratio: "16:9" }, narrated)).not.toBe(key(twin, narrated));
+  });
+  it("keeps the picture of a narrated shot whose line alone changed", () => {
+    const narrated = { narration: true, localSubtitles: true };
+    expect(marketingShotNeedsClip(shots[0], { ...shots[0], script: "改" }, narrated)).toBe(false);
+    expect(marketingShotNeedsClip(shots[0], { ...shots[0], script: "改" })).toBe(true);
+    expect(marketingShotNeedsClip(shots[0], { ...shots[0], camera: "改" }, narrated)).toBe(true);
+    expect(marketingShotNeedsClip(shots[0], undefined, narrated)).toBe(true);
   });
 });
 

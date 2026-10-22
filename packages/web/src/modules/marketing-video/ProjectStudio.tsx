@@ -358,20 +358,20 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     if (!retry && marketingStoryboardAudioMismatch(draftRef.current) && !await confirm({ title: "分镜与参考视频设置不一致",
       message: draftRef.current.assets.video ? "已添加参考视频，成片不生成口播，但当前分镜按有声口播编写。建议先重新生成分镜。仍要按当前分镜生成吗？" : "已移除参考视频，成片会生成口播，但当前分镜按无声展示编写。建议先重新生成分镜。仍要按当前分镜生成吗？",
       confirm: "仍然生成" })) return;
-    if (!retry && (!draftRef.current.publishTitle.trim() || !draftRef.current.tags.trim())) {
-      // Titles and tags are publishing metadata: they can be written after the
-      // video, so a failed fill must not block production.
-      try { await publication(true); }
-      catch (e) {
-        if (!session.alive || !await confirm({ title: "跳过标题和标签？", message: "标题和标签补全失败：{0}\n可以跳过，成片后再生成或手动填写。是否跳过并继续生成视频？", values: [t(errorMessage(e))], confirm: "跳过并继续生成" })) throw e;
-      }
-    }
     let p = await save();
     if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { await review(); p = projectRef.current!; }
     if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。");
     wait("正在提交生成任务", false);
     const result = await requestProject(`/marketing-videos/${p.id}/generate`, json("POST", { version: p.version, retry }));
-    if (session.alive) setCurrent(result);
+    if (!session.alive) return;
+    setCurrent(result);
+    // Titles and tags are publishing metadata, not part of the video: fill missing ones while
+    // it is being made instead of before submitting it, then check just them before they are
+    // published. A failure leaves them to the user.
+    if (!retry && (!result.draft.publishTitle.trim() || !result.draft.tags.trim())) {
+      try { await publication(true); await review(); }
+      catch (e) { if (session.alive) setNotice(t("标题和标签补全失败：{0}。视频生成不受影响，可稍后点击「重新生成标题和标签」或手动填写。", [t(errorMessage(e))])); }
+    }
   }
   /** Redo chosen shots of the current video; the server keeps every other clip unpaid. */
   async function revise(shots: number[]) {
@@ -600,6 +600,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       onOpen={p => void act(async () => { if (dirty) await save(); await open(p.id); }, true)} />
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}
     {project?.taskId ? <ResultPanel form={form} project={project} saving={saving} dirty={dirty} knowledge={!!capabilities?.knowledge} notice={notice} reviewPanel={reviewSection}
+      handlers={materialHandlers} onPickNarrationVoice={() => setTwinOpen("narration")}
       onCopyDraft={target => void act(() => newDraft(true, target))}
       onResume={() => void act(() => generate(true))}
       onCancel={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })}
