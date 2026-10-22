@@ -231,9 +231,9 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       return released.length;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
-  /** Remove the draft with its generated clips and final video, and the reference
-   * analyses made for it. Asset rows go in this transaction; the caller removes their
-   * files after commit. Uploaded materials stay in the owner's personal assets. */
+  /** Remove the draft with its generated clips, final video and key-art stills, and the
+   * reference analyses made for it. Asset rows go in this transaction; the caller removes
+   * their files after commit. Uploaded materials stay in the owner's personal assets. */
   async remove(owner: string, id: string) {
     const client = await this.pool.connect();
     try {
@@ -263,6 +263,8 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         AND task_id IN (SELECT $2::uuid UNION SELECT task_id FROM marketing_video_segments WHERE project_id=$3
           UNION SELECT (st.input->>'parentId')::uuid FROM marketing_video_segments s JOIN tasks st ON st.id=s.task_id WHERE s.project_id=$3)
         RETURNING storage_key, size_bytes`, [owner, p.task_id, id])).rows : [];
+      const keyArts = (await client.query(`DELETE FROM assets WHERE user_id=$1 AND type='upload'
+        AND id IN (SELECT asset_id FROM marketing_video_key_arts WHERE owner_id=$1 AND project_id=$2) RETURNING storage_key, size_bytes`, [owner, id])).rows;
       await client.query("DELETE FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2", [owner, id]);
       await client.query("DELETE FROM marketing_video_projects WHERE user_id=$1 AND id=$2", [owner, id]);
       const removedAnalyses: string[] = []; let keptAnalyses = 0;
@@ -273,10 +275,12 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         removedAnalyses.push(row.id);
       }
       await client.query("COMMIT");
-      return { files: files.map(row => row.storage_key as string), removedBytes: files.reduce((sum, row) => sum + Number(row.size_bytes), 0), removedAnalyses, keptAnalyses };
+      return { files: files.map(row => row.storage_key as string), keyArtFiles: keyArts.map(row => row.storage_key as string),
+        removedBytes: [...files, ...keyArts].reduce((sum, row) => sum + Number(row.size_bytes), 0), removedAnalyses, keptAnalyses };
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
-  /** Space held by the owner's drafts: generated clips and final videos, and the uploads they use. */
+  /** Space held by the owner's drafts: generated clips and final videos, and the uploads and
+   * key-art stills they use. */
   async usage(owner: string) {
     const { rows } = await this.pool.query(`WITH jobs AS (
         SELECT task_id AS id FROM marketing_video_projects WHERE user_id=$1 AND task_id IS NOT NULL
@@ -284,9 +288,10 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         UNION SELECT (st.input->>'parentId')::uuid FROM marketing_video_segments s JOIN marketing_video_projects p ON p.id=s.project_id
           JOIN tasks st ON st.id=s.task_id WHERE p.user_id=$1)
       SELECT (SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE user_id=$1 AND type='video' AND task_id IN (SELECT id FROM jobs)) AS video_bytes,
-        (SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE user_id=$1 AND type='upload' AND id::text IN (
+        (SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE user_id=$1 AND type='upload' AND (id::text IN (
           SELECT jsonb_array_elements_text(CASE jsonb_typeof(e.value) WHEN 'array' THEN e.value ELSE jsonb_build_array(e.value) END)
-          FROM marketing_video_projects p, jsonb_each(COALESCE(p.draft->'assets','{}'::jsonb)) e WHERE p.user_id=$1)) AS material_bytes`, [owner]);
+          FROM marketing_video_projects p, jsonb_each(COALESCE(p.draft->'assets','{}'::jsonb)) e WHERE p.user_id=$1)
+          OR id IN (SELECT asset_id FROM marketing_video_key_arts WHERE owner_id=$1))) AS material_bytes`, [owner]);
     return { videoBytes: Number(rows[0].video_bytes), materialBytes: Number(rows[0].material_bytes) };
   }
   async segments(owner: string, id: string) {

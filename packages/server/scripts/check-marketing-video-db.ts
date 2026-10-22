@@ -20,6 +20,7 @@ import { UsageMeter } from "../src/billing/meter.js";
 import { Hono } from "hono";
 import { createMarketingVideoRoutes } from "../src/marketing-video/routes.js";
 import { MarketingNarrator } from "../src/marketing-video/narration.js";
+import { MarketingKeyArtist } from "../src/marketing-video/key-art.js";
 import { AnalysisStorage } from "../src/marketing-analysis/storage.js";
 import type { AgentService } from "../src/services/agent-service.js";
 import { HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
@@ -589,5 +590,36 @@ try {
   await store.remove(owner, narrated.id); await narrator.removeFiles(narrated.id);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_video_narrations WHERE project_id=$1", [narrated.id])).rows[0].n, 0);
   await assert.rejects(readdir(join(root, "marketing-narration", narrated.id)));
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", twinNarration: "takes paid once per shot, owner-scoped, v4 job composed from them, removed with the draft", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", shotRedo: "only chosen shots submitted and billed, kept clips reused, composition-only and narrated rewording/voice changes recomposed without clips, earlier jobs removed with the draft", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  // P01: key-art stills on PG: one paid image per look even when asked twice at once,
+  // owner-scoped, a new look needs a new still, and the images go with the draft.
+  await mkdir(join(root, "uploads"), { recursive: true });
+  const stillBytes = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(stillBytes);
+  stillBytes.write("IHDR", 12, "ascii"); stillBytes.writeUInt32BE(1024, 16); stillBytes.writeUInt32BE(1536, 20);
+  let images = 0;
+  const artist = new MarketingKeyArtist(db.pool, root, {
+    provider: async () => ({
+      create: async () => { images++; await new Promise(done => setTimeout(done, 100)); return { taskId: "still", status: "completed", progress: 100 }; },
+      poll: async () => ({ status: "completed", progress: 100, urls: [`data:image/png;base64,${stillBytes.toString("base64")}`] }),
+    }),
+    getAsset: id => db.getAsset(id) as never, createAsset: asset => db.createAsset(asset),
+    storage: { put: async ({ key, body }) => { await writeFile(join(root, "uploads", key), body); return { url: `/static/uploads/${key}` }; } },
+    sign: asset => `${asset.url}?material_token=fixture`,
+  });
+  const looked = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ ...draft, continuity: "短发女店员，米色针织衫，木质吧台" }));
+  await Promise.all([0, 1].map(() => artist.generate(owner, looked.id, looked.draft, KLING_MARKETING_PROFILE, false)));
+  assert.equal(images, 1, "concurrent requests pay for one still");
+  assert.equal((await artist.status(owner, looked.id, looked.draft)).status, "succeeded");
+  assert.equal((await artist.status(other, looked.id, looked.draft)).status, "missing", "stills are owner-scoped");
+  assert.equal((await artist.status(owner, looked.id, { ...looked.draft, continuity: "长发" })).status, "missing", "a new look needs a new still");
+  await artist.generate(owner, looked.id, looked.draft, KLING_MARKETING_PROFILE, true);
+  assert.equal(images, 2, "only an explicit redo pays again");
+  const still = await artist.frozen(owner, looked.id, looked.draft, KLING_MARKETING_PROFILE);
+  assert(still && still.user_id === owner && still.type === "upload" && (still as { is_private?: boolean }).is_private);
+  assert((await store.usage(owner)).materialBytes >= 66, "stills count as draft materials");
+  const removedStills = await store.remove(owner, looked.id);
+  assert.equal(removedStills.keyArtFiles.length, 2);
+  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_video_key_arts WHERE project_id=$1", [looked.id])).rows[0].n, 0);
+  assert.equal(await db.getAsset(still.id), null);
+  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", keyArt: "one paid still per look under concurrency, owner-scoped, redo only on request, removed with the draft", twinNarration: "takes paid once per shot, owner-scoped, v4 job composed from them, removed with the draft", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", shotRedo: "only chosen shots submitted and billed, kept clips reused, composition-only and narrated rewording/voice changes recomposed without clips, earlier jobs removed with the draft", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

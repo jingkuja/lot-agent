@@ -50,7 +50,7 @@ export function NarrationSettings({ form, onPickVoice, made = false }: { form: D
 }
 
 /** Step 3: voice, music, captions and format, then confirm the storyboard and generate. */
-export function ProductionStep({ form, profile, handlers, referenceVideoStatus, parts, planError, blocker, blockerId, buttonLabel, storyboardPanel, reviewPanel, audioNotice, narrationAvailable, narrationPanel, onPickVoice, onPickNarrationVoice, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
+export function ProductionStep({ form, profile, handlers, referenceVideoStatus, parts, planError, blocker, blockerId, buttonLabel, storyboardPanel, reviewPanel, audioNotice, narrationAvailable, narrationPanel, keyArtPanel, onPickVoice, onPickNarrationVoice, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
   form: DraftForm; profile: MarketingVideoProfile; handlers: MaterialHandlers; referenceVideoStatus: string;
   /** Clips the current draft would be generated as. */
   parts: MarketingSegment[];
@@ -66,6 +66,8 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
   narrationAvailable: boolean;
   /** Per-shot takes, shown with the confirmed board in twin narration mode. */
   narrationPanel: ReactNode;
+  /** The shared key-art still, shown with the confirmed board. */
+  keyArtPanel: ReactNode;
   onPickVoice(): void; onPickNarrationVoice(): void; onStoryboard(shots: MarketingShot[]): void; onStoryboardAi(instruction: string, index?: number): void;
   onEditCopy(): void; onGenerate(): void; onManualStoryboard(): void;
 }) {
@@ -112,6 +114,7 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
         <DraftText form={form} name="continuity" label="统一人物与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装和场景一致。" />
         <StoryboardEditor compact presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />
       </details>
+      {keyArtPanel}
       {narrationPanel}
     </div> : <>
       {!!parts.length && <details className="mv-script-review"><summary>{t("查看自动分段（{0} 段）", [parts.length])}</summary>{parts.map(p => <p key={p.index}>{p.index + 1} · {p.durationSec}s<br />{p.script}</p>)}</details>}

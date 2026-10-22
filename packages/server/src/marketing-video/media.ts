@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep, join } from "node:path";
-import { isMarketingDurationValid, type MarketingDraft, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { isMarketingDurationValid, type MarketingDraft, type MarketingQualityIssue, type MarketingQualityReport, type MarketingSegment } from "@lot-agent/core/marketing-video";
 import { captionAss, captionLayout, captionLines, timeCaptions, type Pause } from "./subtitles.js";
 
 export function mediaProcess(binary: string, args: string[], opts: { signal?: AbortSignal; cwd?: string; timeoutMs?: number } = {}): Promise<string> {
@@ -140,10 +140,58 @@ export async function narrationPauses(path: string, format: string, durationSec:
   return pauses;
 }
 
+/** Paired `<key>start=` / `<key>end=` values printed by an FFmpeg detector's metadata. An
+ * interval still open at the end of the film ends there. */
+export function detectedIntervals(output: string, key: string, filmSec: number) {
+  const found: { start: number; end: number }[] = [];
+  let start: number | undefined;
+  const pattern = new RegExp(`^lavfi\\.${key.replace(/\./g, "\\.")}(start|end)=(-?[\\d.]+)`);
+  for (const line of output.split("\n")) {
+    const match = pattern.exec(line.trim());
+    if (!match) continue;
+    const at = Math.min(filmSec, Math.max(0, Number(match[2])));
+    if (match[1] === "start") start = at;
+    else if (start !== undefined) { found.push({ start, end: at }); start = undefined; }
+  }
+  if (start !== undefined) found.push({ start, end: filmSec });
+  return found;
+}
+/** Detected intervals as issues of the shot each starts in, to a tenth of a second. A freeze
+ * inside a black stretch is the same problem and is left out. */
+export function qualityIssues(found: { kind: MarketingQualityIssue["kind"]; start: number; end: number }[], durations: number[]): MarketingQualityIssue[] {
+  const ends = durations.reduce<number[]>((times, seconds) => [...times, (times.at(-1) ?? 0) + seconds], []);
+  const black = found.filter(item => item.kind === "black");
+  const round = (value: number) => Math.round(value * 10) / 10;
+  const shot = (at: number) => { const index = ends.findIndex(end => at < end); return index < 0 ? Math.max(0, ends.length - 1) : index; };
+  return found
+    .filter(item => item.end > item.start && !(item.kind === "freeze" && black.some(b => b.start <= item.start && b.end >= item.end)))
+    .map(item => ({ kind: item.kind, shot: shot(item.start), start: round(item.start), end: round(item.end) }))
+    .sort((a, b) => a.start - b.start || a.kind.localeCompare(b.kind));
+}
+// Black: at least half a second of near-black frames. Freeze: an unchanged picture for 2 s.
+// Silence: 2 s without speech; a shot's short pause after its line stays below that.
+const BLACK_FILTER = "blackdetect=d=0.5:pix_th=0.10";
+const FREEZE_FILTER = "freezedetect=n=-60dB:d=2";
+const SILENCE_FILTER = "silencedetect=noise=-35dB:d=2";
+/** Black, frozen and (when the film should speak) silent stretches of a joined film before
+ * music is mixed in. Local FFmpeg passes only; no model is called. */
+export async function inspectFilmQuality(path: string, durations: number[], speech: boolean, signal?: AbortSignal): Promise<MarketingQualityIssue[]> {
+  const filmSec = durations.reduce((sum, seconds) => sum + seconds, 0);
+  const pass = (args: string[]) => mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", "mov", "-i", path, ...args, "-f", "null", "-"], { signal, timeoutMs: 180_000 });
+  const video = await pass(["-an", "-vf", `${BLACK_FILTER},${FREEZE_FILTER},metadata=mode=print:file=-`, "-threads", "2"]);
+  const audio = speech ? await pass(["-vn", "-af", `${SILENCE_FILTER},ametadata=mode=print:file=-`]) : "";
+  return qualityIssues([
+    ...detectedIntervals(video, "black_", filmSec).map(item => ({ kind: "black" as const, ...item })),
+    ...detectedIntervals(video, "freezedetect.freeze_", filmSec).map(item => ({ kind: "freeze" as const, ...item })),
+    ...detectedIntervals(audio, "silence_", filmSec).map(item => ({ kind: "silence" as const, ...item })),
+  ], durations);
+}
+
 /** `narration`, when given, holds one audio file per clip that replaces the clip's own track.
  * `subtitles` burns each shot's confirmed copy as captions timed to its narration take;
- * the clips must be free of model-drawn text. */
-export async function composeMarketingVideo(input: { files: string[]; segments: MarketingSegment[]; draft: MarketingDraft; music?: string; narration?: string[]; subtitles?: boolean; signal?: AbortSignal }) {
+ * the clips must be free of model-drawn text. `speech`: the film should be voiced, so long
+ * silences are reported; a reference-video film is silent by design. */
+export async function composeMarketingVideo(input: { files: string[]; segments: MarketingSegment[]; draft: MarketingDraft; music?: string; narration?: string[]; subtitles?: boolean; speech?: boolean; signal?: AbortSignal }) {
   const durationSec = input.segments.reduce((sum, segment) => sum + segment.durationSec, 0);
   if (!input.segments.length || input.segments.length > 15 || input.files.length !== input.segments.length || (input.narration && input.narration.length !== input.files.length) || (input.subtitles && !input.narration)
     || input.segments.some((segment, index) => segment.index !== index || !Number.isInteger(segment.durationSec) || segment.durationSec < 4 || segment.durationSec > 15)
@@ -154,6 +202,7 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
     const [rw, rh] = input.draft.ratio.split(":").map(Number);
     const width = Math.round(edge * rw / Math.min(rw, rh) / 2) * 2;
     const height = Math.round(edge * rh / Math.min(rw, rh) / 2) * 2;
+    let captionCount = 0;
     for (let i = 0; i < input.files.length; i++) {
       const info = await inspectMedia(input.files[i], input.signal);
       const duration = input.segments[i].durationSec;
@@ -172,6 +221,7 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
           const lines = captionLines(input.segments[i].script, captionLayout(width, height).maxCells);
           const cues = timeCaptions(lines, voice.duration, duration, await narrationPauses(input.narration[i], voice.format, voice.duration, input.signal));
           await writeFile(join(folder, `${i}.ass`), captionAss(cues, width, height));
+          captionCount += cues.length;
           captions = `,subtitles=filename=${i}.ass`;
         }
       } else if (!info.audio) args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
@@ -180,6 +230,16 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
     }
     await writeFile(join(folder, "clips.txt"), input.files.map((_, i) => `file '${i}.mp4'`).join("\n"));
     await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "1", "-i", "clips.txt", "-c", "copy", "joined.mp4"], { cwd: folder, signal: input.signal });
+    // Checked before the music is mixed in, so silence means no voice. A failed check
+    // leaves the report unchecked instead of failing a video that is already paid for.
+    const durations = input.segments.map(segment => segment.durationSec);
+    const speech = !!input.speech;
+    let issues: MarketingQualityIssue[] | undefined;
+    try { issues = await inspectFilmQuality(join(folder, "joined.mp4"), durations, speech, input.signal); }
+    catch (error) {
+      input.signal?.throwIfAborted();
+      console.warn("[marketing-video] quality check failed", { errorType: (error as Error)?.name });
+    }
     const args = ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", "joined.mp4"];
     if (input.music) {
       const music = await inspectMedia(input.music, input.signal);
@@ -194,6 +254,8 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
     const info = await inspectMedia(output, input.signal);
     if (Math.abs(info.duration - durationSec) > 0.3) throw new Error("成片时长校验失败");
     if ((await stat(output)).size > 200 * 1024 * 1024) throw new Error("成片超过知识库存储限制，请降低清晰度。");
-    return { body: await readFile(output), durationSec: info.duration, width, height };
+    const quality: MarketingQualityReport = { checked: !!issues, durationSec: Math.round(info.duration * 100) / 100, expectedSec: durationSec,
+      subtitles: input.subtitles ? "burned" : input.draft.subtitles ? "model" : "off", ...(input.subtitles ? { captions: captionCount } : {}), speech, issues: issues ?? [] };
+    return { body: await readFile(output), durationSec: info.duration, width, height, quality };
   } finally { await rm(folder, { recursive: true, force: true }); }
 }

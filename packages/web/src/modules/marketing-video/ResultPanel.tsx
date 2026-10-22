@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { MarketingComposition, MarketingProject, MarketingShot } from "@lot-agent/core/marketing-video";
+import type { MarketingComposition, MarketingProject, MarketingQualityReport, MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { ShotRevision } from "./ShotRevision.js";
@@ -29,6 +29,28 @@ function CompositionSettings({ form, composition, handlers, onPickNarrationVoice
   </div>;
 }
 
+const QUALITY_KINDS = { black: "黑屏", freeze: "画面静止", silence: "无声（不含背景音乐）" } as const;
+/** Local checks of the made video: black, frozen and silent stretches by shot, length and captions.
+ * They do not judge faces or wording, so the video still needs a full watch. */
+function QualityReport({ quality, redo }: { quality: MarketingQualityReport; redo: boolean }) {
+  const { t } = useI18n();
+  return <section className="mv-quality" aria-label={t("成片检查")}>
+    <h3>{t("成片检查")}</h3>
+    {!quality.checked ? <p className="mv-hint" role="status">{t("本次未能完成成片检查，请完整观看成片。")}</p> : <>
+      <p className="mv-hint">{t("成片 {0} 秒，分镜共 {1} 秒。", [quality.durationSec.toFixed(1), quality.expectedSec])}</p>
+      {quality.issues.length ? <>
+        <ul className="mv-quality-list">{quality.issues.map((issue, i) => <li key={i}>
+          <span>{t("第 {0} 镜", [issue.shot + 1])}</span>{t(QUALITY_KINDS[issue.kind])}<small>{issue.start.toFixed(1)}–{issue.end.toFixed(1)}s</small>
+        </li>)}</ul>
+        {redo && <p className="mv-hint">{t("如有需要，可在下方「修改成片」中只重新生成这些镜头。")}</p>}
+      </> : <p className="mv-quality-ok" role="status">{t(quality.speech ? "未发现黑屏、画面静止或超过 2 秒的无声片段。" : "未发现黑屏或画面静止。")}</p>}
+    </>}
+    <p className="mv-hint">{quality.subtitles === "burned" ? t("字幕按确认文案烧录，共 {0} 条。", [quality.captions ?? 0])
+      : t(quality.subtitles === "model" ? "字幕由视频模型绘制，未自动检查，请逐句校对。" : "未添加字幕。")}</p>
+    <p className="mv-hint">{t("检查只看黑屏、静止画面、无声和时长，不判断人物是否一致或文字是否正确，发布前请完整观看。")}</p>
+  </section>;
+}
+
 /** A submitted video: progress or result, publication copy, and the storyboard it used. */
 export function ResultPanel({ form, project, saving, dirty, knowledge, notice, reviewPanel, handlers, onPickNarrationVoice, onCopyDraft, onResume, onCancel, onRelease, onPublication, onCopyText, onArchive, onShots, onRevertShots, onRevise }: {
   form: DraftForm; project: MarketingProject; saving: boolean; dirty: boolean; knowledge: boolean; notice: string;
@@ -48,7 +70,8 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
   return <section className="mv-card mv-results">
     <div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => onCopyDraft(0)}>{t("复制为新草稿")}</button></div>
     {result
-      ? <><video className="mv-result-video" controls src={result.url} /><a className="mv-download" href={result.url} download>{t("下载视频")}</a></>
+      ? <><video className="mv-result-video" controls src={result.url} /><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
+        {project.output?.quality && <QualityReport quality={project.output.quality} redo={!!project.revision} />}</>
       : <TaskStatus project={project} busy={busy} onResume={onResume} onCancel={onCancel} onCopy={onCopyDraft} onRelease={onRelease} />}
     <div className="mv-publication">
       <button disabled={busy} onClick={onPublication}>{t("重新生成标题和标签")}</button>

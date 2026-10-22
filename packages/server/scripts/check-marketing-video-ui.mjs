@@ -64,10 +64,13 @@ try {
   ];
   // Twin narration takes by draft and shot text; the first shot's take is longer than its shot.
   const narrationTakes = new Map();
+  const keyArts = new Map();
   const narrationClips = (p) => p.draft.storyboard.map((shot, slot) => narrationTakes.has(`${p.id}:${shot.script}`)
     ? { slot, status: 'succeeded', durationMs: narrationTakes.get(`${p.id}:${shot.script}`) } : { slot, status: 'missing' });
   const generated = new Map();
   const resultAssets = [{ url: '/static/fixture.mp4', mime: 'video/mp4' }];
+  // Local checks of the made video (no model): a black stretch at the start of shot 2.
+  const quality = { checked: true, durationSec: 60.02, expectedSec: 60, subtitles: 'model', speech: true, issues: [{ kind: 'black', shot: 1, start: 15, end: 15.8 }] };
   // Like the server, full project reads and saves of a made video offer single shot redo; every fixture clip can be kept.
   const withRevision = (p) => p.rendered && p.status === 'succeeded'
     ? { ...p, revision: { draft: p.rendered, modelId: KLING_MARKETING_PROFILE.modelId, reusable: p.rendered.storyboard.map(() => true), composition: p.composition ?? { narration: false, localSubtitles: false } } } : p;
@@ -156,6 +159,14 @@ try {
         }
         return json({ version: p.version, clips: narrationClips(p), error: '' });
       }
+      if (action === 'key-art') {
+        // One still per draft here; the server keys it by the look and bills each request.
+        if (request.method() === 'POST') {
+          const body = request.postDataJSON(); assert.equal(body.version, p.version);
+          keyArts.set(p.id, { status: 'succeeded', url: `data:image/png;base64,${png.toString('base64')}` });
+        }
+        return json({ version: p.version, keyArt: keyArts.get(p.id) ?? { status: 'missing' }, error: '' });
+      }
       if (action === 'unknown-segments') { delete p.unknownSegments; taskState = 'running'; return json({ released: 2, project: p }); }
       if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p); }
       if (action === 'revise') {
@@ -163,7 +174,7 @@ try {
         taskState = 'running'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p);
       }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
-      if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'] }; }
+      if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'], quality }; }
       if (action === 'status') {
         statusPolls++;
         const { id: projectId, version, taskId, status, progress, stage, error, errorCode, output, unknownSegments } = p;
@@ -317,6 +328,12 @@ try {
   await firstRisk.getByRole('button', { name: '一键修改', exact: true }).waitFor();
   await firstRisk.scrollIntoViewIfNeeded();
   await snap('marketing-video-risk-zh-light.png');
+  // The shared still is made on request, before any clip, and shown for the saved look.
+  const keyArtPanel = page.getByRole('region', { name: '定妆图', exact: true });
+  await keyArtPanel.getByRole('button', { name: '生成定妆图', exact: true }).click();
+  await keyArtPanel.getByRole('img', { name: '定妆图' }).waitFor();
+  assert.equal(writes.filter(r => r.path.endsWith('/key-art')).length, 1);
+  await keyArtPanel.getByRole('button', { name: '换一张', exact: true }).waitFor();
   await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
   await page.locator('.mv-dock').getByRole('alert').filter({ hasText: '文案检查发现需要修改的内容' }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
@@ -521,6 +538,10 @@ try {
   await page.reload(); await chooseAgent('营销影像');
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
+  const qualityReport = page.getByRole('region', { name: '成片检查', exact: true });
+  await qualityReport.getByText('第 2 镜', { exact: true }).waitFor();
+  assert.match(await qualityReport.locator('.mv-quality-list').innerText(), /黑屏\s*15\.0–15\.8s/);
+  await qualityReport.getByText('字幕由视频模型绘制，未自动检查，请逐句校对。', { exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);
   assert.equal(await page.getByRole('button', { name: '发布到抖音', exact: true }).count(), 0);
   assert.equal(await page.getByText('抖音发布权限尚未接入，请下载视频并复制文案发布。', { exact: true }).count(), 1);
@@ -605,6 +626,8 @@ try {
   await page.getByRole('heading', { name: '确认分镜', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-dark.png');
   await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
+  // The copied draft has no still yet: generating without it needs a confirmation.
+  await confirmDialog('未使用定妆图', '仍然生成');
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 2);
   await page.waitForFunction(() => [...document.querySelectorAll('input, textarea')].some(field => field.value === '手冲咖啡与惬意时光'));

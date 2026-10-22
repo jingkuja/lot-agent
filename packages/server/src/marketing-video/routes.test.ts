@@ -13,6 +13,7 @@ import { createMarketingVideoRoutes } from "./routes.js";
 import type { AgentService } from "../services/agent-service.js";
 import type { PgMarketingProjectStore } from "./repository.js";
 import type { MarketingNarrator } from "./narration.js";
+import type { MarketingKeyArtist } from "./key-art.js";
 import { completeMarketingJson } from "./text.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 
@@ -21,7 +22,7 @@ vi.mock("./image-size.js", () => ({ readImageInfo: vi.fn(async () => ({ mime: "i
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
-  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), page: vi.fn(async (..._args: unknown[]) => ({ data: [] as unknown[], nextCursor: undefined as string | undefined })), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async (..._args: unknown[]) => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => ({ files: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })), usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1) };
+  const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), page: vi.fn(async (..._args: unknown[]) => ({ data: [] as unknown[], nextCursor: undefined as string | undefined })), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async (..._args: unknown[]) => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => ({ files: [] as string[], keyArtFiles: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })), usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1) };
   const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
     begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, input: unknown, draft?: typeof project.draft): Promise<{ fresh: boolean; operation: { id: string; kind: string; status: string }; draft: typeof project.draft; input: unknown }> => {
@@ -37,13 +38,14 @@ function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
   };
   const app = new Hono<{ Variables: { userId: string } }>();
   if (owner) app.use("*", async (c, next) => { c.set("userId", owner); await next(); });
-  app.route("/api/marketing-videos", createMarketingVideoRoutes(service as unknown as AgentService, "/tmp", store as unknown as PgMarketingProjectStore, operations as unknown as PgMarketingTextOperations, narrator as MarketingNarrator | undefined));
+  const keyArtist = { frozen: vi.fn(async (): Promise<any> => undefined), status: vi.fn(async () => ({ status: "missing" })), generate: vi.fn(async () => ({ keyArt: { status: "succeeded" }, error: "" })) };
+  app.route("/api/marketing-videos", createMarketingVideoRoutes(service as unknown as AgentService, "/tmp", store as unknown as PgMarketingProjectStore, operations as unknown as PgMarketingTextOperations, narrator as MarketingNarrator | undefined, keyArtist as unknown as MarketingKeyArtist));
   const call = (path: string, value?: unknown, method = "POST") => {
     const input = value && typeof value === "object" && (path === "/copy" || ["/storyboard", "/review", "/publication"].some(end => path.endsWith(end)))
       ? { clientRequestId: randomUUID(), projectId: id, version: 1, ...value } : value;
     return app.request(`/api/marketing-videos${path === "/" ? "" : path}`, input === undefined ? undefined : { method, body: JSON.stringify(input), headers: { "Content-Type": "application/json" } });
   };
-  return { app, call, store, service, project, operations };
+  return { app, call, store, service, project, operations, keyArtist };
 }
 describe("marketing project HTTP boundaries", () => {
   it("protects a legacy marketing upload and signs only its preview, leaving the canonical URL intact", async () => {
@@ -137,19 +139,22 @@ describe("marketing project HTTP boundaries", () => {
     expect(await response.json()).toEqual({ videoBytes: 4096, materialBytes: 1024, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
     expect(f.store.usage).toHaveBeenCalledWith("owner");
   });
-  it("removes the deleted draft's generated files only inside the assets folder", async () => {
+  it("removes the deleted draft's generated files only inside the assets and uploads folders", async () => {
     const root = await mkdtemp(join(tmpdir(), "marketing-delete-"));
     try {
       await mkdir(join(root, "assets"));
+      await mkdir(join(root, "uploads"));
       await writeFile(join(root, "assets", "final.mp4"), "video");
+      await writeFile(join(root, "uploads", "still.png"), "image");
       await writeFile(join(root, "outside.mp4"), "keep");
       const f = fixture();
-      f.store.remove.mockResolvedValueOnce({ files: ["final.mp4", "../outside.mp4"], removedBytes: 5, removedAnalyses: [], keptAnalyses: 0 });
+      f.store.remove.mockResolvedValueOnce({ files: ["final.mp4", "../outside.mp4"], keyArtFiles: ["still.png", "../outside.mp4"], removedBytes: 5, removedAnalyses: [], keptAnalyses: 0 } as never);
       const app = new Hono<{ Variables: { userId: string } }>();
       app.use("*", async (c, next) => { c.set("userId", "owner"); await next(); });
       app.route("/api/marketing-videos", createMarketingVideoRoutes(f.service as unknown as AgentService, root, f.store as unknown as PgMarketingProjectStore, f.operations as unknown as PgMarketingTextOperations));
       expect((await app.request(`/api/marketing-videos/${id}`, { method: "DELETE" })).status).toBe(200);
       expect(await readdir(join(root, "assets"))).toEqual([]);
+      expect(await readdir(join(root, "uploads"))).toEqual([]);
       expect(await readFile(join(root, "outside.mp4"), "utf8")).toBe("keep");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
@@ -429,6 +434,34 @@ it("restores all image metadata and submits references in category order", async
     ...[5, 6].map(image => ({ image, role: "the setting and spatial layout" })),
     { image: 7, role: "relevant scene composition, objects and details" },
   ]);
+});
+
+it("submits the key-art still after the chosen images and freezes it for shot redos", async () => {
+  const f = fixture();
+  const portrait = randomUUID(); const still = randomUUID();
+  f.project.draft.assets = { portrait: [portrait] };
+  f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: "image/png", size_bytes: 100, url: `/static/${args[0]}.png` }));
+  f.keyArtist.frozen.mockResolvedValueOnce({ id: still, user_id: "owner", url: `/static/uploads/${still}.png` });
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ input_reference: [`/static/${portrait}.png`, `/static/uploads/${still}.png`], key_art: still }), false);
+  const prompt = marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2, undefined, undefined, undefined, true);
+  expect(prompt).toContain("Use <IMAGE_0> for the presenter's identity only.");
+  expect(prompt).toContain("<IMAGE_1> is the key-art still shared by every shot");
+  expect(prompt).toContain("portraits still decide the face");
+  expect(marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2)).not.toContain("key-art");
+});
+
+it("makes a key-art still only for an unsubmitted draft at its saved version", async () => {
+  const f = fixture();
+  expect((await f.call(`/${id}/key-art`, { version: 0 })).status).toBe(409);
+  expect((await f.call(`/${id}/key-art`, { version: 1, redo: "yes" })).status).toBe(400);
+  const made = await f.call(`/${id}/key-art`, { version: 1, redo: true });
+  expect(made.status).toBe(200);
+  expect(await made.json()).toEqual({ version: 1, keyArt: { status: "succeeded" }, error: "" });
+  expect(f.keyArtist.generate).toHaveBeenCalledWith("owner", id, f.project.draft, expect.anything(), true);
+  Object.assign(f.project, { taskId: "task" });
+  expect((await f.call(`/${id}/key-art`, { version: 1 })).status).toBe(409);
+  expect(f.keyArtist.generate).toHaveBeenCalledOnce();
 });
 
 it("rejects video with four images before billing or task creation", async () => {

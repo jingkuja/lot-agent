@@ -27,11 +27,25 @@ import { signPrivateMaterial } from "../generation/private-materials.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 import { activeMarketingVideoProfile } from "./model.js";
 import { MarketingNarrator, type FrozenNarration } from "./narration.js";
+import { MarketingKeyArtist } from "./key-art.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
+/** Key-art stills use the owner's own model key, like every other marketing model call. */
+export function marketingKeyArtist(service: AgentService, dataRoot: string) {
+  return new MarketingKeyArtist(service.db.pool, dataRoot, {
+    provider: async (owner, model) => {
+      const apiKey = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+      if (!apiKey) throw new MarketingError("模型账号不可用，请重新登录后再生成定妆图。", 409);
+      return service.providerFactory.image(model, apiKey);
+    },
+    getAsset: id => service.db.getAsset(id), createAsset: asset => service.db.createAsset(asset),
+    storage: service.uploadStorage, sign: asset => signPrivateMaterial(asset),
+  });
+}
+
 export function createMarketingVideoRoutes(service: AgentService, dataRoot: string, store = new PgMarketingProjectStore(service.db.pool), operations = new PgMarketingTextOperations(service.db.pool),
-  narrator = new MarketingNarrator(service.db.pool, dataRoot)) {
+  narrator = new MarketingNarrator(service.db.pool, dataRoot), keyArtist = marketingKeyArtist(service, dataRoot)) {
   // New clips use the configured model; recovery uses each job's recorded model.
   const activeProfile = activeMarketingVideoProfile();
   const analysisStorage = new AnalysisStorage(resolve(dataRoot, "marketing-analysis"));
@@ -229,8 +243,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const removed = await store.remove(owner, p.id);
     // Rows are gone; a file that fails to delete is only orphaned bytes, never a visible draft.
     const folder = resolve(dataRoot, "assets");
+    const uploads = resolve(dataRoot, "uploads");
     const results = await Promise.allSettled([
       ...removed.files.map(async key => { const path = resolve(folder, key); if (path.startsWith(folder + sep)) await rm(path, { force: true }); }),
+      ...removed.keyArtFiles.map(async key => { const path = resolve(uploads, key); if (path.startsWith(uploads + sep)) await rm(path, { force: true }); }),
       narrator.removeFiles(p.id),
       // The media worker's cleanup retries analysis folders that remain.
       ...removed.removedAnalyses.map(analysisId => analysisStorage.remove(owner, analysisId)),
@@ -330,6 +346,21 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const audio = await narrator.audio(owner, p.id, p.draft, narrationPlan(p), slot);
     return c.body(new Uint8Array(audio), 200, { "Content-Type": "audio/wav", "Content-Disposition": "inline" });
   });
+  // A still of the presenter in the main setting, made before any clip and submitted with
+  // every clip and shot redo of the video. One paid image request each, never resent.
+  app.get("/:id/key-art", async (c) => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    return c.json({ version: p.version, keyArt: await keyArtist.status(owner, p.id, p.draft) });
+  });
+  app.post("/:id/key-art", async (c) => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    const body = await c.req.json().catch(() => null);
+    if (!Number.isInteger(body?.version) || typeof (body?.redo ?? false) !== "boolean") throw new MarketingError("定妆图参数无效。");
+    if (p.version !== body.version) throw new MarketingError("草稿已更新，请重新确认。", 409);
+    if (p.taskId) throw new MarketingError("视频已提交制作，定妆图不会再改变；如需新的定妆图请复制为新草稿。", 409);
+    await ownedAssets(owner, p.draft);
+    return c.json({ version: p.version, ...await keyArtist.generate(owner, p.id, p.draft, activeProfile, body.redo === true) });
+  });
   app.post("/:id/generate", async (c) => {
     const owner = c.get("userId");
     const p = await requireProject(owner, c.req.param("id"));
@@ -344,6 +375,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     let draft = p.draft;
     let originalAudio: boolean | undefined;
     let originalLocalSubtitles: boolean | undefined;
+    let originalKeyArt = false;
     // Recovery keeps the frozen job's model and reference rules.
     let inputVersion = MARKETING_INPUT_VERSION;
     let profile = activeProfile;
@@ -356,6 +388,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       draft = MarketingDraftSchema.parse(frozen.draft);
       originalAudio = frozen.generate_audio !== false;
       originalLocalSubtitles = frozen.local_subtitles === true;
+      originalKeyArt = typeof frozen.key_art === "string";
       inputVersion = typeof frozen.marketingInputVersion === "number" ? frozen.marketingInputVersion : 1;
       try { profile = marketingJobProfile(frozen); }
       catch (error) { throw new MarketingError((error as Error).message, 409); }
@@ -382,12 +415,14 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if ((p.taskId ? originalLocalSubtitles : marketingVoiceover(draft)) && draft.subtitles && !capabilities.subtitles) {
       throw new MarketingError(p.taskId ? SUBTITLES_UNAVAILABLE : "当前环境不支持字幕，可关闭字幕后生成。", 503);
     }
+    // A new video submits the still made for its current look, if any.
+    const keyArt = p.taskId ? undefined : await keyArtist.frozen(owner, p.id, draft, profile);
     let planned;
     try {
       planned = p.taskId ? segments.map((segment, index) => ({ index, script: segment.script, durationSec: Number(segment.duration_sec) })) : resolveMarketingSegments(draft, profile);
-      if (!p.taskId) planned.forEach(segment => marketingSegmentPrompt(draft, segment, planned.length, undefined, profile));
+      if (!p.taskId) planned.forEach(segment => marketingSegmentPrompt(draft, segment, planned.length, undefined, profile, undefined, !!keyArt));
       else segments.forEach((segment, index) => {
-        if (segmentRecoveryAction(segment) === "submit") marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: Number(segment.duration_sec) }, segments.length, originalAudio, profile, originalLocalSubtitles);
+        if (segmentRecoveryAction(segment) === "submit") marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: Number(segment.duration_sec) }, segments.length, originalAudio, profile, originalLocalSubtitles, originalKeyArt);
       });
     }
     catch (error) { throw new MarketingError((error as Error).message); }
@@ -409,7 +444,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const [w, h] = p.draft.ratio.split(":").map(Number);
     const input = { marketingInputVersion: MARKETING_INPUT_VERSION, modelId: profile.modelId, quality: p.draft.quality, resolution: p.draft.quality, ratio: p.draft.ratio,
       size: `${Math.round(edge * w / Math.min(w, h) / 8) * 8}x${Math.round(edge * h / Math.min(w, h) / 8) * 8}`,
-      input_reference: marketingImageReferences(p.draft).flatMap(({ assetId }) => assets[assetId] ? [assets[assetId].url] : []),
+      input_reference: [...marketingImageReferences(p.draft).flatMap(({ assetId }) => assets[assetId] ? [assets[assetId].url] : []), ...(keyArt ? [keyArt.url] : [])],
+      ...(keyArt ? { key_art: keyArt.id } : {}),
       reference_video: assets.video ? [assets.video.url] : undefined,
       generate_audio: marketingNativeSpeech(p.draft),
       reference_audio: marketingNativeSpeech(p.draft) && assets.voice ? [assets.voice.url] : undefined,
@@ -443,7 +479,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       plan = resolveMarketingSegments(p.draft, profile);
       for (const slot of redo) {
         if (!plan[slot]) throw new Error("请重新选择需要重新生成的镜头。");
-        marketingSegmentPrompt(p.draft, plan[slot], plan.length, frozen.generate_audio !== false, profile, frozen.local_subtitles === true);
+        marketingSegmentPrompt(p.draft, plan[slot], plan.length, frozen.generate_audio !== false, profile, frozen.local_subtitles === true, typeof frozen.key_art === "string");
       }
     } catch (error) { throw new MarketingError((error as Error).message); }
     const referenceError = marketingReferenceError(p.draft, profile);
@@ -458,6 +494,11 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       }
     }
     await checkMaterials(owner, p.draft, profile, Number(frozen.marketingInputVersion), true, c.req.raw.signal);
+    // Redone shots get the video's own key-art still, the same reference as the kept ones.
+    if (typeof frozen.key_art === "string" && redo.length) {
+      const still = await service.db.getAsset(frozen.key_art);
+      if (!still || still.user_id !== owner) throw new MarketingError("该视频的定妆图已不可用，请复制为新草稿后重新制作。", 409);
+    }
     const exceeded = await quotaExceeded(owner, profile, redo.reduce((sum, slot) => sum + plan[slot].durationSec, 0));
     if (exceeded) return c.json(exceeded, 402);
     // Twin-narrated videos: a changed shot gets its new take now (one speech request each); the

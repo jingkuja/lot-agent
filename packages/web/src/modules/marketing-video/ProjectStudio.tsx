@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, fitMarketingNarration, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingReview, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, fitMarketingNarration, marketingKeyArtIssue, type MarketingKeyArt, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingReview, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -14,6 +14,7 @@ import { CopyStep, type SourceKind } from "./CopyStep.js";
 import { MaterialsStep } from "./MaterialsStep.js";
 import { ProductionStep } from "./ProductionStep.js";
 import { NarrationPanel } from "./NarrationPanel.js";
+import { KeyArtPanel } from "./KeyArtPanel.js";
 import { StoryboardAudioNotice, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 import { checkMaterial, checkReferenceVideo, imageLimitError, isImageSlot, materialFor, type Material, type MaterialSlot } from "./materials.js";
 import { useDraftSession, useExclusive, useTaskPolling } from "./session.js";
@@ -24,6 +25,8 @@ import { WaitStatus } from "./WaitStatus.js";
 type Capabilities = { composition: boolean; subtitles?: boolean; knowledge: boolean; narration?: boolean; model?: MarketingVideoProfile };
 /** Twin narration takes of one saved version of a draft. */
 type Narration = { projectId: string; version: number; clips: MarketingNarrationClip[] };
+/** The key-art still of one saved version of a draft. */
+type KeyArt = { projectId: string; version: number; keyArt: MarketingKeyArt };
 type RequestIdentity = { fingerprint: string; id: string };
 /** The long request the open draft is waiting on. */
 type Wait = { label: string; started: number; textRequest: boolean };
@@ -68,6 +71,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [analysis, setAnalysis] = useState("");
   const [twinOpen, setTwinOpen] = useState<"portrait" | "voice" | "narration" | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
+  const [keyArt, setKeyArt] = useState<KeyArt | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -232,6 +236,17 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     }).catch(e => { if (session.current(token)) setError(errorMessage(e)); });
   }, [ready, frozen, step, voiceover, hasBoard, draft.narration?.twinItemId, project?.id, project?.version, dirty]);
   const currentNarration = narration && project && narration.projectId === project.id && narration.version === project.version && !dirty ? narration.clips : null;
+  // The still belongs to the saved look; reload it for each saved version.
+  const keyArtIssue = marketingKeyArtIssue(draft, profile);
+  useEffect(() => {
+    if (!ready || frozen || step !== 2 || keyArtIssue || !hasBoard || !project || dirty) return;
+    if (keyArt?.projectId === project.id && keyArt.version === project.version) return;
+    const token = session.token();
+    void request<{ version: number; keyArt: MarketingKeyArt }>(`/marketing-videos/${project.id}/key-art`).then(result => {
+      if (session.current(token)) setKeyArt({ projectId: project.id, version: result.version, keyArt: result.keyArt });
+    }).catch(e => { if (session.current(token)) setError(errorMessage(e)); });
+  }, [ready, frozen, step, keyArtIssue, hasBoard, project?.id, project?.version, dirty]);
+  const currentKeyArt = keyArt && project && keyArt.projectId === project.id && keyArt.version === project.version && !dirty ? keyArt.keyArt : null;
 
   async function act(work: () => Promise<void>, navigation = false) {
     if (exclusive.locked || analysisPending || (!navigation && textPending) || !ready) return;
@@ -359,6 +374,12 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       message: draftRef.current.assets.video ? "已添加参考视频，成片不生成口播，但当前分镜按有声口播编写。建议先重新生成分镜。仍要按当前分镜生成吗？" : "已移除参考视频，成片会生成口播，但当前分镜按无声展示编写。建议先重新生成分镜。仍要按当前分镜生成吗？",
       confirm: "仍然生成" })) return;
     let p = await save();
+    // Without the still, shots keep the same person and setting only through the text.
+    if (!retry && !marketingKeyArtIssue(p.draft, profile)) {
+      const { keyArt: still } = await request<{ keyArt: MarketingKeyArt }>(`/marketing-videos/${p.id}/key-art`);
+      if (still.status !== "succeeded" && !await confirm({ title: "未使用定妆图",
+        message: "没有定妆图时，各镜头只靠文字描述保持人物、服装和场景一致，容易出现不一致。建议先在「确认分镜」下生成定妆图。仍要直接生成视频吗？", confirm: "仍然生成" })) return;
+    }
     if (!retry && (!p.review || p.reviewedScript !== reviewedText(p.draft))) { await review(); p = projectRef.current!; }
     if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。");
     wait("正在提交生成任务", false);
@@ -396,6 +417,16 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     const result = await request<{ version: number; clips: MarketingNarrationClip[]; error: string }>(`/marketing-videos/${p.id}/narration`, json("POST", { version: p.version, slots }));
     if (!session.alive) return;
     setNarration({ projectId: p.id, version: result.version, clips: result.clips });
+    if (result.error) setError(result.error);
+  }
+  /** One paid image request: a still for the current look, or another one on `redo`. */
+  async function makeKeyArt(redo: boolean) {
+    if (redo && !await confirm({ title: "重新生成定妆图", message: "将重新生成一张定妆图，并再次按图片生成计费。是否继续？", confirm: "重新生成" })) return;
+    const p = await save();
+    wait("正在生成定妆图", false);
+    const result = await request<{ version: number; keyArt: MarketingKeyArt; error: string }>(`/marketing-videos/${p.id}/key-art`, json("POST", { version: p.version, redo }));
+    if (!session.alive) return;
+    setKeyArt({ projectId: p.id, version: result.version, keyArt: result.keyArt });
     if (result.error) setError(result.error);
   }
   /** Lengthen shots whose take does not fit; the takes stay valid since shot time is not part of them. */
@@ -622,6 +653,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
         {step === 2 && <ProductionStep form={form} profile={profile} handlers={materialHandlers} referenceVideoStatus={referenceVideoStatus} parts={plan.parts} planError={plan.error}
           blocker={generationBlocker} blockerId={generationHintId} storyboardPanel={storyboardPanel} audioNotice={audioNotice}
           narrationAvailable={!!capabilities?.narration} onPickNarrationVoice={() => setTwinOpen("narration")}
+          keyArtPanel={keyArtIssue !== "video" && <KeyArtPanel keyArt={currentKeyArt} full={keyArtIssue === "full"} total={profile.referenceImages.total} busy={busy || !ready}
+            onGenerate={redo => void act(() => makeKeyArt(redo))} />}
           narrationPanel={voiceover && draft.narration?.twinItemId && <NarrationPanel projectId={project?.id} shots={draft.storyboard} clips={currentNarration} busy={busy || !ready}
             onSynthesize={slots => void act(() => synthesizeNarration(slots))} onFit={fitNarration} />}
           reviewPanel={reviewSection}

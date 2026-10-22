@@ -83,7 +83,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     let prompts: (string | undefined)[];
     try {
       prompts = segments.map((segment, index) => segmentRecoveryAction(segment) === "submit"
-        ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile, localSubtitles) : undefined);
+        ? marketingSegmentPrompt(draft, { index, script: segment.script, durationSec: segment.duration_sec }, segments.length, generateAudio, profile, localSubtitles, typeof job.input.key_art === "string") : undefined);
     } catch (error) { throw new MarketingRunError("NOT_RECOVERABLE", (error as Error).message); }
     // Twin narration (version 4) was synthesized and confirmed before submission. Check the
     // frozen takes before any clip is paid for; a missing file cannot be recreated here.
@@ -243,14 +243,15 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     }
     // Every clip is stored by now, so a retry reassembles them without a model call.
     try {
-      const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, narration, subtitles: burnSubtitles, signal: controller.signal });
+      const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, narration, subtitles: burnSubtitles,
+        speech: generateAudio || !!narration, signal: controller.signal });
       await assertActive();
       const gen = await deps.generation(job, controller.signal);
       const id = randomUUID(); const key = `${id}.mp4`;
       const { url } = await gen.storage.put({ key, body: result.body, contentType: "video/mp4" });
       await assertActive();
       await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.body.length, durationSec: result.durationSec, width: result.width, height: result.height });
-      return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }] };
+      return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}) };
     } catch (error) {
       if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;
       throw new MarketingRunError("COMPOSITION_FAILED", error instanceof Error ? error.message : "视频合成失败", { cause: error });

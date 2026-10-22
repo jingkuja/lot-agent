@@ -143,7 +143,39 @@ export function marketingReferenceError(draft: MarketingDraft, profile: Marketin
   if (profile.referenceMaxQuality === "720p" && draft.quality === "1080p" && (images || draft.assets.video)) return "使用参考图片或参考视频时最高支持 720p，请将视频质量改为默认。";
   return "";
 }
-export const MarketingReviewFieldSchema = z.enum(["script", "publishTitle", "tags", "background", "continuity", "storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera"]);
+/** Why a key-art still cannot join this draft's clips: a reference video is used instead of
+ * images ("video"), or the still's reference image place is taken ("full"). */
+export function marketingKeyArtIssue(draft: Pick<MarketingDraft, "assets">, profile: MarketingVideoProfile): "video" | "full" | undefined {
+  if (draft.assets.video) return "video";
+  return marketingImageCount(draft.assets) >= profile.referenceImages.total ? "full" : undefined;
+}
+/** The key-art still of a draft's current look (presenter, setting and reference images).
+ * missing: none was made for this look yet. */
+export interface MarketingKeyArt {
+  status: "missing" | "running" | "succeeded" | "failed";
+  /** Short-lived preview link of a succeeded still. */
+  url?: string;
+}
+/** Local checks of a composed video; no model is called. Times are seconds in the film. */
+export interface MarketingQualityIssue {
+  kind: "silence" | "black" | "freeze";
+  /** 0-based shot the issue starts in. */
+  shot: number;
+  start: number; end: number;
+}
+export interface MarketingQualityReport {
+  /** False when the checks could not run; the video itself was still made. */
+  checked: boolean;
+  durationSec: number; expectedSec: number;
+  /** burned: captions from the confirmed copy were burned in locally (`captions` cues);
+   * model: drawn by the video model, not checked; off: no captions. */
+  subtitles: "burned" | "model" | "off";
+  captions?: number;
+  /** Whether the speech track was checked for silence; a reference-video film is silent. */
+  speech: boolean;
+  issues: MarketingQualityIssue[];
+}
+export const MarketingReviewFieldSchema =z.enum(["script", "publishTitle", "tags", "background", "continuity", "storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera"]);
 export const MarketingReviewIssueSchema = z.object({
   text: z.string().min(1).max(2000), reason: z.string().min(1).max(500), suggestion: z.string().max(2000),
   // Optional only for compatibility with already saved review cards.
@@ -177,7 +209,9 @@ export interface MarketingProject {
   id: string; version: number; draft: MarketingDraft; updatedAt: string;
   review: MarketingReview | null; reviewedScript: string | null;
   taskId: string | null; status: string; progress: number; stage?: string;
-  error?: string; errorCode?: MarketingFailureCode; output?: { assetIds: string[]; assets: { url: string; mime: string }[] };
+  error?: string; errorCode?: MarketingFailureCode;
+  /** `quality`: local checks of the made video; absent on videos made before them. */
+  output?: { assetIds: string[]; assets: { url: string; mime: string }[]; quality?: MarketingQualityReport };
   knowledgeItemId: string | null;
   knowledgeVersion?: number | null;
   /** Clips of the current job whose paid submission outcome is unknown. */

@@ -363,6 +363,7 @@ async function main() {
     return { repository, storage, voices };
   })() : undefined;
   app.on("POST", "/api/marketing-videos/:id/narration", generationRateLimit);
+  app.on("POST", "/api/marketing-videos/:id/key-art", generationRateLimit);
   app.route("/api/marketing-videos", createMarketingVideoRoutes(service, resolve(ROOT, "data"), undefined, undefined,
     new MarketingNarrator(service.db.pool, resolve(ROOT, "data"), knowledgeManagement?.voices)));
   app.route("/api/marketing-video-analyses", createAnalysisRoutes(service, resolve(ROOT, "data/marketing-analysis")));

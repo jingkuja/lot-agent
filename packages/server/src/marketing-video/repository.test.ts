@@ -41,6 +41,7 @@ describe("deleting marketing drafts", () => {
       if (sql.startsWith("SELECT 1 FROM marketing_text_operations")) return { rows: [], rowCount: busy.text };
       if (sql.startsWith("SELECT 1 FROM marketing_analysis_steps")) return { rows: [], rowCount: busy.unknown.includes(params![0] as string) ? 1 : 0 };
       if (sql.startsWith("SELECT 1 FROM marketing_video_projects")) return { rows: [], rowCount: busy.inUse.includes(params![0] as string) ? 1 : 0 };
+      if (sql.startsWith("DELETE FROM assets") && sql.includes("marketing_video_key_arts")) return { rows: [{ storage_key: "still.png", size_bytes: 500 }], rowCount: 1 };
       if (sql.startsWith("DELETE FROM assets")) return { rows: [{ storage_key: "final.mp4", size_bytes: 3000 }, { storage_key: "clip.mp4", size_bytes: "1500" }], rowCount: 2 };
       return { rows: [], rowCount: 1 };
     });
@@ -50,7 +51,7 @@ describe("deleting marketing drafts", () => {
   const analysis = (id: string, status = "ready") => ({ id, source_id: `source-${id}`, status, lease_until: null });
   it("removes the draft, its generated videos and its reference analyses in one transaction", async () => {
     const f = store({ id: "project", task_id: "task", status: "succeeded" }, { analyses: [analysis("current"), analysis("old"), analysis("unknown", "needs_review"), analysis("shared")], unknown: ["unknown"], inUse: ["shared"] });
-    expect(await f.store.remove("owner", "project")).toEqual({ files: ["final.mp4", "clip.mp4"], removedBytes: 4500, removedAnalyses: ["current", "old"], keptAnalyses: 2 });
+    expect(await f.store.remove("owner", "project")).toEqual({ files: ["final.mp4", "clip.mp4"], keyArtFiles: ["still.png"], removedBytes: 5000, removedAnalyses: ["current", "old"], keptAnalyses: 2 });
     // Text lock, then the analysis jobs' order: owner lock, analysis rows, project row.
     const at = (match: (sql: string, params?: unknown[]) => boolean) => f.query.mock.calls.findIndex(([sql, params]) => match(sql, params));
     const order = [at((_, params) => params?.[0] === "marketing-text:owner"), at((_, params) => params?.[0] === "media-analysis-budget:owner"),
@@ -58,17 +59,17 @@ describe("deleting marketing drafts", () => {
     expect(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1]))).toBe(true);
     const deletes = f.query.mock.calls.filter(([text]) => text.startsWith("DELETE"));
     expect(deletes.map(([text, params]) => [text.split(/\s+WHERE/)[0], params])).toEqual([
-      ["DELETE FROM assets", ["owner", "task", "project"]],
+      ["DELETE FROM assets", ["owner", "task", "project"]], ["DELETE FROM assets", ["owner", "project"]],
       ["DELETE FROM marketing_text_operations", ["owner", "project"]], ["DELETE FROM marketing_video_projects", ["owner", "project"]],
       ["DELETE FROM marketing_analysis_revisions", ["current"]], ["DELETE FROM marketing_analysis_revisions", ["old"]]]);
     expect(f.query.mock.calls.filter(([text]) => text.startsWith("UPDATE marketing_reference_analyses SET deleted_at")).map(([, params]) => params)).toEqual([["current"], ["old"]]);
     expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
     expect(f.client.release).toHaveBeenCalledOnce();
   });
-  it("does not look for generated videos on a draft that was never submitted", async () => {
+  it("does not look for generated videos on a draft that was never submitted, only its key-art stills", async () => {
     const f = store({ id: "project", task_id: null });
-    expect(await f.store.remove("owner", "project")).toEqual({ files: [], removedBytes: 0, removedAnalyses: [], keptAnalyses: 0 });
-    expect(f.query.mock.calls.some(([text]) => text.startsWith("DELETE FROM assets"))).toBe(false);
+    expect(await f.store.remove("owner", "project")).toEqual({ files: [], keyArtFiles: ["still.png"], removedBytes: 500, removedAnalyses: [], keptAnalyses: 0 });
+    expect(f.query.mock.calls.filter(([text]) => text.startsWith("DELETE FROM assets")).map(([text]) => text.includes("marketing_video_key_arts"))).toEqual([true]);
   });
   it("refuses missing, generating, finishing or pending creation drafts without deleting", async () => {
     const cases: [Record<string, unknown> | undefined, Partial<Busy>, number][] = [

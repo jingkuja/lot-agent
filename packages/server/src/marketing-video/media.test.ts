@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmod, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { inspectMedia, composeMarketingVideo, mediaCapabilities, narrationPauses } from "./media.js";
+import { inspectMedia, composeMarketingVideo, detectedIntervals, mediaCapabilities, narrationPauses, qualityIssues } from "./media.js";
 import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
 
 describe("marketing media safety", () => {
@@ -18,6 +18,28 @@ describe("marketing media safety", () => {
       await writeFile(path, "#EXTM3U\n#EXTINF:15,\nfile:///etc/passwd");
       await expect(inspectMedia(path)).rejects.toThrow("素材格式");
     } finally { await rm(root, { recursive: true, force: true }); }
+  });
+});
+
+describe("composed video quality checks", () => {
+  it("pairs detector start and end values and closes an interval open at the end", () => {
+    const output = "frame:0 pts:0 pts_time:0\nlavfi.black_start=0\nlavfi.black_end=1.52\nlavfi.freezedetect.freeze_start=4\nlavfi.freezedetect.freeze_duration=3\nlavfi.black_start=9.5\n";
+    expect(detectedIntervals(output, "black_", 12)).toEqual([{ start: 0, end: 1.52 }, { start: 9.5, end: 12 }]);
+    expect(detectedIntervals(output, "freezedetect.freeze_", 12)).toEqual([{ start: 4, end: 12 }]);
+    expect(detectedIntervals("", "silence_", 12)).toEqual([]);
+  });
+  it("reports each issue in the shot it starts in and drops freezes inside black stretches", () => {
+    expect(qualityIssues([
+      { kind: "silence", start: 5.04, end: 7.91 },
+      { kind: "black", start: 0, end: 1.52 },
+      { kind: "freeze", start: 0.2, end: 1.4 },
+      { kind: "freeze", start: 9, end: 12 },
+      { kind: "black", start: 12, end: 12 },
+    ], [5, 4, 3])).toEqual([
+      { kind: "black", shot: 0, start: 0, end: 1.5 },
+      { kind: "silence", shot: 1, start: 5, end: 7.9 },
+      { kind: "freeze", shot: 2, start: 9, end: 12 },
+    ]);
   });
 });
 
@@ -46,11 +68,15 @@ describe("composition readiness probe", () => {
       spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=25:d=5", "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", clip]);
       spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=24000", "-t", "2", voice]);
       const segments = [0, 1, 2].map(index => ({ index, script: "欢迎", durationSec: 5 }));
-      const result = await composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => voice), segments });
+      const result = await composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => voice), speech: true, segments });
       const final = join(root, "final.mp4"); await writeFile(final, result.body);
       expect((await inspectMedia(final)).duration).toBeCloseTo(15, 0);
       const volume = spawnSync("ffmpeg", ["-v", "info", "-i", final, "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" }).stderr;
       expect(volume).toMatch(/max_volume: -(9[0-9]|inf)/);
+      // Local checks only: the black, silent film is reported per shot, not rejected.
+      expect(result.quality).toMatchObject({ checked: true, expectedSec: 15, subtitles: "model", speech: true });
+      expect(result.quality.issues.map(issue => [issue.kind, issue.shot, issue.start])).toEqual([["black", 0, 0], ["silence", 0, 0]]);
+      expect(result.quality.issues.every(issue => issue.end > 14.5)).toBe(true);
       await expect(composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => clip), segments })).rejects.toThrow("配音与镜头时长不一致");
     } finally { await rm(root, { recursive: true, force: true }); }
   }, 60_000);
@@ -82,6 +108,7 @@ describe("composition readiness probe", () => {
       const peak = (at: number) => Number(/YMAX=(\d+)/.exec(spawnSync("ffmpeg", ["-v", "error", "-ss", String(at), "-i", final, "-frames:v", "1",
         "-vf", "crop=iw:ih*0.2:0:ih*0.65,signalstats,metadata=mode=print:key=lavfi.signalstats.YMAX:file=-", "-f", "null", "-"], { encoding: "utf8" }).stdout)?.[1]);
       expect(peak(6)).toBeGreaterThan(200);
+      expect(result.quality).toMatchObject({ subtitles: "burned", captions: 3 });
       expect(peak(9.5)).toBeLessThan(40);
     } finally { await rm(root, { recursive: true, force: true }); }
   }, 120_000);

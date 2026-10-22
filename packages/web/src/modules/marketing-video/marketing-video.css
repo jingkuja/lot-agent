@@ -82,6 +82,16 @@
 .mv-narration-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .mv-narration-actions audio { height: 32px; max-width: 240px; }
 .mv-narration-error { color: var(--error); font-size: 12px; }
+.mv-key-art { margin: 16px 0 0; padding: 14px 0 0; border-top: 1px solid var(--border); }
+.mv-key-art-image { display: block; max-width: min(100%, 240px); max-height: 320px; margin: 10px 0 0; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.mv-quality { display: grid; gap: 6px; margin: 14px 0 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.mv-quality h3 { margin: 0; font-size: 14px; }
+.mv-quality .mv-hint { margin: 0; }
+.mv-quality-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.mv-quality-list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; color: var(--de-warning); font-size: 12px; }
+.mv-quality-list li > span { color: var(--text-secondary); font-weight: 550; }
+.mv-quality-list li > small { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mv-quality-ok { margin: 0; color: var(--text); font-size: 12px; }
 
 .mv-scenes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .mv-scenes button { min-width: 0; padding: 8px 8px 13px; font-size: 12px; }

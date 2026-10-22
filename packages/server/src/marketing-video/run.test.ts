@@ -222,8 +222,10 @@ describe("twin-narrated jobs", () => {
     const f = await narrated(true);
     try {
       await runMarketingVideo(f.deps, f.job, new AbortController().signal);
-      const input = (f.compose.mock.calls[0] as unknown[])[0] as { narration: string[]; subtitles: boolean };
+      const input = (f.compose.mock.calls[0] as unknown[])[0] as { narration: string[]; subtitles: boolean; speech: boolean };
       expect(input.narration).toHaveLength(2);
+      // The takes are speech, so long silences in the joined film are reported.
+      expect(input.speech).toBe(true);
       expect(input.narration[1]).toContain(`${projectId}/00000001-`);
       // Submitted before local captions: the model drew them, so none are burned in.
       expect(input.subtitles).toBe(false);
@@ -236,13 +238,18 @@ describe("twin-narrated jobs", () => {
   it("asks for clips without text and burns the captions in when the job has local subtitles", async () => {
     vi.mocked(runGenerationJob).mockReset().mockImplementation(async (_deps: unknown, job: { id: string }) => ({ assetIds: [`asset-${job.id}`], assets: [] }) as never);
     const f = await narrated(true);
-    Object.assign(f.job.input, { local_subtitles: true });
+    Object.assign(f.job.input, { local_subtitles: true, key_art: "still" });
+    const quality = { checked: true, durationSec: 30, expectedSec: 30, subtitles: "burned", captions: 4, speech: true, issues: [] };
+    f.compose.mockResolvedValueOnce({ body: Buffer.from("fixture"), durationSec: 30, width: 720, height: 1280, quality } as never);
     try {
-      await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+      // The local check result is kept with the video for the result page.
+      await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).resolves.toMatchObject({ quality });
       expect(((f.compose.mock.calls[0] as unknown[])[0] as { subtitles: boolean }).subtitles).toBe(true);
       for (const [, child] of vi.mocked(runGenerationJob).mock.calls) {
         expect(child.input.prompt).toContain("Do not add any on-screen text, captions or subtitles");
         expect(child.input.prompt).not.toContain("Caption ONLY");
+        // The frozen key-art still is named in every clip prompt.
+        expect(child.input.prompt).toContain("is the key-art still shared by every shot");
       }
     } finally { const { rm } = await import("node:fs/promises"); await rm(f.root, { recursive: true, force: true }); }
   });
