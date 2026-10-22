@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
-import { MARKETING_COPY_MODEL, MarketingDraftSchema, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { MARKETING_COPY_MODEL, MARKETING_REVIEW_MODEL, MarketingDraftSchema, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { MarketingError, reviewText } from "./repository.js";
 import type { MarketingTextReceipt } from "./text.js";
 import { parseOperationResult, textResultVersion, type TextOperationKind, type TextOperationResult } from "./text-result.js";
@@ -55,7 +55,7 @@ export class PgMarketingTextOperations {
         throw new MarketingError("已有创作请求正在处理或结果待核实，请查看页面底部的处理结果。", 409);
       }
       const row = (await client.query(`INSERT INTO marketing_text_operations(id,user_id,project_id,project_version,kind,input_hash,model,protocol,status,input_snapshot,parser_version)
-        VALUES($1,$2,$3,$4,$5,$6,$7,'marketing-json-v1','running',$8,$9) RETURNING *`, [id, owner, projectId, version, kind, hash, MARKETING_COPY_MODEL, JSON.stringify({ draft, input }), textResultVersion(kind)])).rows[0];
+        VALUES($1,$2,$3,$4,$5,$6,$7,'marketing-json-v1','running',$8,$9) RETURNING *`, [id, owner, projectId, version, kind, hash, kind === "review" ? MARKETING_REVIEW_MODEL : MARKETING_COPY_MODEL, JSON.stringify({ draft, input }), textResultVersion(kind)])).rows[0];
       return { fresh: true as const, operation: view(row), draft };
     });
   }

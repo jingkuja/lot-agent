@@ -2,7 +2,7 @@ import { rm } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { MarketingDraftSchema, marketingReviewText } from "@lot-agent/core/marketing-video";
+import { MARKETING_REVIEW_MODEL, MarketingDraftSchema, marketingReviewText } from "@lot-agent/core/marketing-video";
 import { planPresenterSegments, presenterMaterialBlocker, presenterModel, presenterSpeechBlocker, presenterTakesIssue, presenterTrackMs, PresenterDraftSchema, PRESENTER_IMAGE_MODEL, PRESENTER_INPUT_VERSION, PRESENTER_VIDEO_MODEL,
   type PresenterDraft } from "@lot-agent/core/digital-presenter";
 import type { AgentService } from "../services/agent-service.js";
@@ -140,7 +140,7 @@ export function createDigitalPresenterRoutes(service: AgentService, dataRoot: st
     if (p.version !== version) throw new PresenterError("草稿已更新，请重新检查。", 409);
     if (!p.draft.script.trim()) throw new PresenterError("请先填写口播文案。");
     const draft = MarketingDraftSchema.parse({ script: p.draft.script, background: "" });
-    const raw = await service.marketingText(`${REVIEW_INSTRUCTION}\nWrite reasons and suggested replacements in ${locale}. Keep excerpts exactly as supplied.`, marketingReviewText(draft), owner, undefined, { upstreamBilling: true });
+    const raw = await service.marketingText(`${REVIEW_INSTRUCTION}\nWrite reasons and suggested replacements in ${locale}. Keep excerpts exactly as supplied.`, marketingReviewText(draft), owner, undefined, { upstreamBilling: true, model: MARKETING_REVIEW_MODEL });
     const review = normalizeMarketingReview(draft, raw, locale);
     if (!review) throw new PresenterError("文案检查结果无效，请重新检查。", 409);
     const issues = review.issues.map(issue => ({ field: issue.field ?? "script", text: issue.text, reason: issue.reason, ...(issue.suggestion ? { suggestion: issue.suggestion } : {}),

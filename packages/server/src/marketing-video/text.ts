@@ -7,7 +7,7 @@ export interface MarketingTextReceipt {
   /** `cancelled`: sent, but nothing came back; not charged, and a charge in the gateway logs is refunded. */
   outcome: "completed" | "failed" | "unknown" | "rejected" | "cancelled";
 }
-export interface MarketingTextOptions { upstreamBilling?: boolean; onReceipt?: (receipt: MarketingTextReceipt) => Promise<void>; }
+export interface MarketingTextOptions { upstreamBilling?: boolean; onReceipt?: (receipt: MarketingTextReceipt) => Promise<void>; model?: string; }
 
 export class MarketingTextError extends Error {
   constructor(message: string, readonly code: string, readonly status: 400 | 402 | 502 | 503 | 504 = 502) {

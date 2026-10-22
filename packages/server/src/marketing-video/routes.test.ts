@@ -175,7 +175,7 @@ describe("marketing project HTTP boundaries", () => {
     f.service.marketingText.mockResolvedValueOnce({ verdict: "pass", issues: [] });
     expect((await f.call(`/${id}/review`, { locale: "en" })).status).toBe(200);
     // Recorded like /copy: not aborted by a browser disconnect, receipt saved before applying.
-    expect(f.service.marketingText).toHaveBeenCalledWith(expect.stringContaining("Write reasons and suggested replacements in en"), expect.any(String), "owner", undefined, expect.objectContaining({ onReceipt: expect.any(Function) }));
+    expect(f.service.marketingText).toHaveBeenCalledWith(expect.stringContaining("Write reasons and suggested replacements in en"), expect.any(String), "owner", undefined, expect.objectContaining({ onReceipt: expect.any(Function), model: "deepseek-v4.1-flash" }));
     expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "review", { version: 1, locale: "en" });
     const input = JSON.parse(f.service.marketingText.mock.calls[0][1] as unknown as string);
     expect(input.fields).toEqual(expect.arrayContaining([

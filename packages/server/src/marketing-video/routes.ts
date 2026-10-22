@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { PgMarketingTextOperations, type TextOperation } from "./operations.js";
-import { MarketingSourceSchema, marketingSourceKind } from "@lot-agent/core/marketing-video";
+import { MARKETING_REVIEW_MODEL, MarketingSourceSchema, marketingSourceKind } from "@lot-agent/core/marketing-video";
 import { creationPrompt, publicationPrompt, storyboardPrompt } from "./creation.js";
 import { invalidTextResult, parseOperationResult, parseTextResult } from "./text-result.js";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -277,7 +277,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (reserved.fresh) {
       try {
         const request = prompt(reserved.draft);
-        const raw = await service.marketingText(request.system, request.input, owner, undefined, { onReceipt: receipt => operations.receipt(owner, body.clientRequestId, receipt) });
+        const raw = await service.marketingText(request.system, request.input, owner, undefined, { onReceipt: receipt => operations.receipt(owner, body.clientRequestId, receipt),
+          ...(kind === "review" ? { model: MARKETING_REVIEW_MODEL } : {}) });
         operation = await operations.finish(owner, body.clientRequestId, parseOperationResult(kind, raw, reserved.draft, input));
       } catch (error) { await operations.fail(owner, body.clientRequestId, true, invalidTextResult(error)); throw error; }
     } else replay(operation);

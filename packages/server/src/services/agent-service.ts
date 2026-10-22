@@ -1004,8 +1004,9 @@ export class AgentService {
         const quota = await this.usageMeter.checkQuota(userId, 0);
         if (!quota.ok) throw new MarketingTextError("文案处理额度已达上限，请检查每日或每月用量限制。", "MARKETING_USAGE_LIMIT", 402);
       }
-      const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, modelId: MARKETING_COPY_MODEL });
-      if (usedModelId !== MARKETING_COPY_MODEL) throw new MarketingTextError("文案模型授权不可用，请检查账号的模型权限和积分后重试。", "MARKETING_MODEL_AUTH", 503);
+      const model = options.model ?? MARKETING_COPY_MODEL;
+      const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, modelId: model });
+      if (usedModelId !== model) throw new MarketingTextError("文案模型授权不可用，请检查账号的模型权限和积分后重试。", "MARKETING_MODEL_AUTH", 503);
       const metered = options.upstreamBilling ? llm : meterLLM(llm, usage => this.meterUtilityUsage("marketing text", usedModelId, userId, usage));
       invoked = true;
       return await completeMarketingJson(metered, system, input, signal, options.onReceipt);
