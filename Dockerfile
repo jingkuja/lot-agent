@@ -5,7 +5,7 @@
 # ─────────────────────────────────────────────────────────────
 
 # ---------- Stage 1: build ----------
-FROM node:20-bookworm-slim AS builder
+FROM node:22.23.4-bookworm-slim AS builder
 WORKDIR /app
 RUN corepack enable
 
@@ -28,7 +28,7 @@ RUN pnpm --filter @lot-agent/core run build \
  && pnpm --filter @lot-agent/server run build
 
 # ---------- Stage 2: production runtime ----------
-FROM node:20-bookworm-slim AS runtime
+FROM node:22.23.4-bookworm-slim AS runtime
 ENV NODE_ENV=production
 # Video composition (ffmpeg + ffprobe) and PPT thumbnails (PPT_PREVIEW=0 to disable).
 # CJK fonts also support FFmpeg's libass subtitle renderer.
@@ -66,7 +66,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 USER node
 EXPOSE 3000
 
-# Liveness probe (server role). Node 20 has global fetch; no curl/wget needed.
+# Liveness probe (server role). Node has global fetch; no curl/wget needed.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
