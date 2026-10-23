@@ -140,14 +140,20 @@ export function marketingJobProfile(input: { modelId?: unknown }): MarketingVide
   return profile;
 }
 
-const MARKETING_IMAGE_SECTION_NAMES: Record<MarketingImageSection, string> = { portrait: "人物", product: "产品", setting: "场景" };
+// One whole sentence per section, so each translates as a unit.
+const MARKETING_IMAGE_SECTION_LIMITS: Record<MarketingImageSection, (limit: number) => string> = {
+  portrait: limit => `当前视频模型的人物图片最多 ${limit} 张，请移除多余图片。`,
+  product: limit => `当前视频模型的产品图片最多 ${limit} 张，请移除多余图片。`,
+  setting: limit => `当前视频模型的场景图片最多 ${limit} 张，请移除多余图片。`,
+};
 /** Section or total image limit of the model that `assets` exceed. */
 export function marketingImageLimitError(assets: Partial<Record<MarketingImageSlot, string | string[]>>, profile: MarketingVideoProfile): string {
   for (const section of ["portrait", "product", "setting"] as const) {
     const limit = profile.referenceImages[section];
-    if (marketingImageCount(assets, section) > limit) return `当前视频模型的${MARKETING_IMAGE_SECTION_NAMES[section]}图片最多 ${limit} 张，请移除多余图片。`;
+    if (marketingImageCount(assets, section) > limit) return MARKETING_IMAGE_SECTION_LIMITS[section](limit);
   }
-  return marketingImageCount(assets) > profile.referenceImages.total ? `当前视频模型的参考图片合计最多 ${profile.referenceImages.total} 张，请移除多余图片。` : "";
+  const { total } = profile.referenceImages;
+  return marketingImageCount(assets) > total ? `当前视频模型的参考图片合计最多 ${total} 张，请移除多余图片。` : "";
 }
 /** Reference combinations the model cannot use. */
 export function marketingReferenceError(draft: MarketingDraft, profile: MarketingVideoProfile): string {
@@ -258,6 +264,16 @@ export function speechUnits(text: string): number {
   const words = text.replace(/[\u3400-\u9fff\u3040-\u30ff]/g, " ").match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
   return cjk + words * 2;
 }
+/** Speech units per second that copy is planned and estimated at; prompts ask for no more. */
+export const MARKETING_SPEECH_PACE = 4;
+/** The fastest pace a shot's line may need. A longer line does not fit its shot. */
+export const MARKETING_MAX_SPEECH_PACE = 4.5;
+/** Pace that decides how many clips a script split without AI needs. */
+export const MARKETING_SPLIT_SPEECH_PACE = 3.5;
+/** Whole seconds a line needs at the fastest allowed pace. */
+export const marketingSpeechMinimumSeconds = (text: string) => Math.ceil(speechUnits(text) / MARKETING_MAX_SPEECH_PACE);
+/** Estimated speaking time of a script at the planning pace. */
+export const marketingSpeechSeconds = (text: string) => Math.ceil(speechUnits(text) / MARKETING_SPEECH_PACE);
 
 /** The selected duration is a target; allow up to five extra seconds for pacing. */
 export const marketingMaxDuration = (target: number) => Math.min(65, target + 5);
@@ -280,7 +296,7 @@ export function allocateShotDurations(shots: { script: string; durationSec?: num
   const maximum = marketingMaxDuration(target);
   if (!isMarketingDurationValid(target, target) || !shots.length || shots.length > 15
     || shots.length * 4 > maximum || shots.length * maxShot < target) throw new Error("分镜数量与视频时长不一致，请重新生成分镜。");
-  const minimum = shots.map((shot, i) => Math.max(4, measured[i] ?? Math.ceil(speechUnits(shot.script) / 4.5)));
+  const minimum = shots.map((shot, i) => Math.max(4, measured[i] ?? marketingSpeechMinimumSeconds(shot.script)));
   const minimumTotal = minimum.reduce((a, b) => a + b, 0);
   if (minimum.some(n => n > maxShot) || minimumTotal > maximum) throw new Error("文案过长，请精简文案或增加视频时长。");
   const total = Math.max(target, minimumTotal);
@@ -314,7 +330,8 @@ export function mergeMarketingShots(shots: MarketingShot[], maxShot = MARKETING_
     const last = merged.at(-1);
     const joined = last && MarketingShotSchema.safeParse({ durationSec: last.durationSec + shot.durationSec, script: join(last.script, shot.script),
       visual: join(last.visual, shot.visual), action: join(last.action, shot.action), camera: join(last.camera, shot.camera) });
-    if (joined?.success && joined.data.durationSec <= maxShot && Math.ceil(speechUnits(joined.data.script) / 4.5) <= maxShot && fits(joined.data)) merged[merged.length - 1] = joined.data;
+    const fitsClip = joined?.success && joined.data.durationSec <= maxShot && marketingSpeechMinimumSeconds(joined.data.script) <= maxShot;
+    if (fitsClip && fits(joined.data)) merged[merged.length - 1] = joined.data;
     else merged.push(shot);
   }
   return merged;
@@ -366,11 +383,11 @@ export function capMarketingStoryboard(shots: MarketingShot[], draft: Pick<Marke
 export function planMarketingSegments(script: string, durationSec: number, maxShot = MARKETING_SHOT_MAX_SECONDS): MarketingSegment[] {
   if (!Number.isInteger(durationSec) || durationSec < 15 || durationSec > 60 || !script.trim()) throw new Error("请填写文案并选择 15–60 秒的整片时长。");
   const units = speechUnits(script);
-  if (units > marketingMaxDuration(durationSec) * 4.5) throw new Error("文案过长，请精简文案或增加视频时长。");
+  if (units > marketingMaxDuration(durationSec) * MARKETING_MAX_SPEECH_PACE) throw new Error("文案过长，请精简文案或增加视频时长。");
   // Preserve every character, including whitespace and punctuation. Long
   // sentences may be split at a comma, space, or ultimately a character edge.
   // As few clips as the length and narration allow: each clip is generated on its own.
-  const count = Math.max(Math.ceil(durationSec / maxShot), Math.ceil(units / (maxShot * 3.5)));
+  const count = Math.max(Math.ceil(durationSec / maxShot), Math.ceil(units / (maxShot * MARKETING_SPLIT_SPEECH_PACE)));
   if (units < count * 4) throw new Error("文案过短，请补充内容。");
   const chars = Array.from(script.trim());
   if (chars.length < count) throw new Error("文案过短，请补充内容。");
@@ -389,7 +406,7 @@ export function planMarketingSegments(script: string, durationSec: number, maxSh
   }
   parts.push(chars.slice(start).join(""));
   if (parts.some((text) => speechUnits(text) === 0)) throw new Error("文案过短，请补充内容。");
-  if (parts.some((text) => speechUnits(text) > maxShot * 4.5)) throw new Error("部分段落过长，请缩短句子后重试。");
+  if (parts.some((text) => speechUnits(text) > maxShot * MARKETING_MAX_SPEECH_PACE)) throw new Error("部分段落过长，请缩短句子后重试。");
   const durations = allocateShotDurations(parts.map(script => ({ script })), durationSec, maxShot);
   return parts.map((text, index) => ({ index, script: text, durationSec: durations[index] }));
 }
@@ -491,10 +508,11 @@ export function resolveMarketingSegments(draft: MarketingDraft, profile: Marketi
   return draft.storyboard.map((shot, index) => {
     if (![shot.script, shot.visual, shot.action, shot.camera].every(value => value.trim())) throw new Error("请补全每段分镜的口播、画面、动作和镜头信息。");
     if (!speechUnits(shot.script)) throw new Error("文案过短，请补充内容。");
-    if (speechUnits(shot.script) > durations[index] * 4.5) throw new Error("部分段落过长，请缩短句子后重试。");
+    if (speechUnits(shot.script) > durations[index] * MARKETING_MAX_SPEECH_PACE) throw new Error("部分段落过长，请缩短句子后重试。");
     return { index, script: shot.script, durationSec: durations[index] };
   });
 }
 
 export * from "./source.js";
 export * from "./captions.js";
+export * from "./materials.js";

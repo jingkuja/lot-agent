@@ -67,3 +67,15 @@ describe("translation catalog", () => {
     expect([...missing]).toEqual([]);
   });
 });
+
+describe("formatted service messages", () => {
+  it("translates a nested message and lists inside a matched template", () => {
+    expect(translate("定妆图不符合当前视频模型的要求：参考图大小不能超过 20MB", "en"))
+      .toBe("The key-art still does not meet the current video model's requirements: Reference images must be 20 MB or smaller");
+    // An exact entry wins; other values fall back to the template.
+    expect(translate("当前视频模型的参考图仅支持 JPG、PNG 格式", "id")).toBe("Model video saat ini hanya menerima gambar referensi JPG dan PNG");
+    expect(translate("当前视频模型的参考图仅支持 JPG、WebP 格式", "id")).toBe("Model video saat ini hanya menerima gambar referensi berformat JPG, WebP");
+    expect(translate("第 3 镜配音长于镜头时长，请按配音调整分镜时长。", "en")).toBe("The narration of shot 3 is longer than the shot. Fit the shots to the narration.");
+    expect(translate("当前视频模型的参考图仅支持 JPG、PNG 格式", "zh")).toBe("当前视频模型的参考图仅支持 JPG、PNG 格式");
+  });
+});

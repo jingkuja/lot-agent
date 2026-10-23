@@ -39,7 +39,7 @@ export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onReleas
     {!active && project.taskId && <details className="mv-task-details" open={failure?.actions.includes("support")}>
       <summary>{t("联系客服时提供的信息")}</summary>
       <p>{t("任务编号")}：{project.taskId}</p>
-      {project.error && <p>{t("错误详情")}：{project.error}</p>}
+      {project.error && <p>{t("错误详情")}：{t(project.error)}</p>}
     </details>}
     {confirmDialog}
   </div>;

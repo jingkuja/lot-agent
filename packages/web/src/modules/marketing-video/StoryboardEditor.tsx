@@ -33,7 +33,9 @@ export function StoryboardEditor({ shots, presenter = "always", busy, readOnly =
       {redo && <label className="mv-checkbox"><input type="checkbox" checked={redo.selected[index]} disabled={busy || !!redo.reasons[index]} onChange={() => redo.onToggle(index)} />
         {t("重新生成此镜")}{redo.reasons[index] ? <em>{t(redo.reasons[index])}</em> : redo.notes?.[index] && !redo.selected[index] && <em>{t(redo.notes[index])}</em>}</label>}
       {redo?.clips?.[index] && <ShotClip url={redo.clips[index]!} index={index} />}
-      {fields.map(({ key, label, max }) => <label className="mv-field" key={key}><span>{t(label)}</span><textarea rows={key === "visual" ? 3 : 2} maxLength={max} value={shot[key]} readOnly={readOnly} disabled={busy} onChange={e => onChange?.(shots.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value))} /></label>)}
+      {fields.map(({ key, label, max }) => <label className="mv-field" key={key}><span>{t(label)}</span>
+        <textarea rows={key === "visual" ? 3 : 2} maxLength={max} value={shot[key]} readOnly={readOnly} disabled={busy}
+          onChange={e => onChange?.(shots.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value))} /></label>)}
     </article>)}</div>
     {!readOnly && onAi && <details className="mv-storyboard-ai" open><summary>{t("调整分镜（选填）")}</summary>
       <label className="mv-field"><span>{t("AI 修改范围")}</span><select value={target} disabled={busy} onChange={e => setTarget(e.target.value)}><option value="all">{t("全部分镜")}</option>{shots.map((_, index) => <option key={index} value={index}>{t("第 {0} 镜", [index + 1])}</option>)}</select></label>

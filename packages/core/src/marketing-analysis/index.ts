@@ -3,6 +3,8 @@ import type { MarketingDraft } from "../marketing-video/index.js";
 
 export const ANALYSIS_VERSION = "frames-v1";
 export const ANALYSIS_LIMITS = Object.freeze({ durationMs: 180_000, downloadBytes: 100 * 1024 * 1024, temporaryBytes: 512 * 1024 * 1024, candidates: 361, ocrImages: 120, visualImages: 48, batchImages: 6, requestBytes: 24 * 1024 * 1024 });
+/** Formats of a local video uploaded for analysis; the browser checks them before upload. */
+export const ANALYSIS_UPLOAD_MIMES: readonly string[] = ["video/mp4", "video/quicktime", "video/webm"];
 export const AnalysisPlatformSchema = z.enum(["douyin", "xiaohongshu", "bilibili"]);
 export type AnalysisPlatform = z.infer<typeof AnalysisPlatformSchema>;
 const ms = z.number().int().min(0).max(ANALYSIS_LIMITS.durationMs);

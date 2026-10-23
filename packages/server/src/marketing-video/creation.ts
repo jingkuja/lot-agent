@@ -55,7 +55,9 @@ export function publicationPrompt(script: string, locale: string) {
 
 export function parseCreation(raw: unknown, draft: MarketingDraft, profile: MarketingVideoProfile = activeMarketingVideoProfile()) {
   const value = MarketingCreationSchema.parse(raw);
-  const result = MarketingDraftSchema.parse({ ...draft, storyboard: timeMarketingStoryboard(mergeMarketingStoryboard(value.shots, draft, profile), draft.durationSec, marketingShotMaxSeconds(draft, profile)), script: storyboardScript(value.shots), publishTitle: value.publishTitle, tags: value.tags, continuity: value.continuity ?? "", storyboardAudio: !draft.assets.video });
+  const storyboard = timeMarketingStoryboard(mergeMarketingStoryboard(value.shots, draft, profile), draft.durationSec, marketingShotMaxSeconds(draft, profile));
+  const result = MarketingDraftSchema.parse({ ...draft, storyboard, script: storyboardScript(value.shots), publishTitle: value.publishTitle, tags: value.tags,
+    continuity: value.continuity ?? "", storyboardAudio: !draft.assets.video });
   resolveMarketingSegments(result, profile);
   return { draft: result, analysis: value.analysis };
 }

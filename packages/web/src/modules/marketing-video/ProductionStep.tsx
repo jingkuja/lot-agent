@@ -50,7 +50,9 @@ export function NarrationSettings({ form, onPickVoice, made = false }: { form: D
 }
 
 /** Step 3: voice, music, captions and format, then confirm the storyboard and generate. */
-export function ProductionStep({ form, profile, handlers, referenceVideoStatus, parts, planError, blocker, blockerId, buttonLabel, storyboardPanel, reviewPanel, audioNotice, narrationAvailable, narrationPanel, keyArtPanel, onPickVoice, onPickNarrationVoice, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
+export function ProductionStep({ form, profile, handlers, referenceVideoStatus, parts, planError, blocker, blockerId, buttonLabel, storyboardPanel, reviewPanel,
+  audioNotice, narrationAvailable, narrationPanel, keyArtPanel, onPickVoice, onPickNarrationVoice, onStoryboard, onStoryboardAi, onEditCopy, onGenerate,
+  onManualStoryboard }: {
   form: DraftForm; profile: MarketingVideoProfile; handlers: MaterialHandlers; referenceVideoStatus: string;
   /** Clips the current draft would be generated as. */
   parts: MarketingSegment[];

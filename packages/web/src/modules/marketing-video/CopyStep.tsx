@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { speechUnits, type MarketingDraft, type MarketingShot } from "@lot-agent/core/marketing-video";
+import { marketingSpeechSeconds, type MarketingDraft, type MarketingShot } from "@lot-agent/core/marketing-video";
+import { analysisUploadRule } from "./materials.js";
 import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { Choices, DraftText, type DraftForm } from "./StudioFields.js";
@@ -47,7 +48,7 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
             }} />
           </label>
           {draft.referenceUpload && <div className="mv-local-reference"><span>{draft.referenceUpload.name}</span><button type="button" disabled={busy || frozen || !ready} onClick={() => field("referenceUpload", undefined)}>{t("移除")}</button></div>}
-          <p className="mv-hint">{t("本地爆款视频支持 MP4、MOV、WebM，最大 100 MB，最长 180 秒，最高 1080p。")}</p>
+          <p className="mv-hint">{t(analysisUploadRule())}</p>
         </div> : <textarea id={inputId} value={draft.reference} rows={4} maxLength={6000} disabled={busy || frozen || !ready} onChange={e => field("reference", e.target.value)} />}
       </div>
       <p className="mv-hint">{t(sourceKind !== "upload" && !draft.reference.trim() ? "粘贴视频链接、分享文本或文案，AI 自动识别并生成文案和分镜。" : SOURCE_HINTS[sourceKind])}</p>
@@ -61,7 +62,7 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
     {analysis && <details className="mv-script-review"><summary>{t("文案结构")}</summary><p>{analysis}</p></details>}
     {(draft.copyMode !== "rewrite" || !!draft.script.trim()) && <>
       <DraftText form={form} name="script" label="视频口播文案" max={2000} rows={6} />
-      <p className="mv-hint">{t("预计口播 {0} 秒，实际以成片为准。", [Math.ceil(speechUnits(draft.script) / 4)])}</p>
+      <p className="mv-hint">{t("预计口播 {0} 秒，实际以成片为准。", [marketingSpeechSeconds(draft.script)])}</p>
       {!!draft.storyboard.length && <DraftText form={form} name="continuity" label="统一人物、产品与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装、产品和场景一致。" />}
       {!!draft.storyboard.length && <StoryboardEditor creation presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />}
       {draft.script.trim() && planError && <p className="mv-error" role="alert">{t(planError)}</p>}

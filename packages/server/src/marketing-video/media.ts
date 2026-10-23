@@ -122,7 +122,9 @@ export async function inspectMedia(path: string, signal?: AbortSignal) {
   if (value.streams?.some((s: { width?: number; height?: number }) => (s.width ?? 0) > 7680 || (s.height ?? 0) > 7680)) throw new Error("素材分辨率过大");
   const video = value.streams?.find((s: { codec_type: string }) => s.codec_type === "video");
   const [fpsNumerator, fpsDenominator = "1"] = String(video?.avg_frame_rate ?? "0/1").split("/");
-  return { width: Number(video?.width ?? 0), height: Number(video?.height ?? 0), fps: Number(fpsNumerator) / Number(fpsDenominator), format, duration, audio: value.streams?.some((s: { codec_type: string }) => s.codec_type === "audio"), video: value.streams?.some((s: { codec_type: string }) => s.codec_type === "video") };
+  const has = (type: string) => value.streams?.some((s: { codec_type: string }) => s.codec_type === type);
+  return { width: Number(video?.width ?? 0), height: Number(video?.height ?? 0), fps: Number(fpsNumerator) / Number(fpsDenominator), format, duration,
+    audio: has("audio"), video: has("video") };
 }
 /** Silent stretches of a narration take or a clip's own voice, from FFmpeg's silencedetect.
  * Only the first `durationSec` seconds are read. */

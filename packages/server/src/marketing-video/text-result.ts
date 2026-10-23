@@ -1,4 +1,5 @@
-import { capMarketingStoryboard, MARKETING_REVIEW_RULE_VERSION, MarketingDraftSchema, MarketingStoryboardSchema, marketingShotMaxSeconds, planMarketingSegments, resolveMarketingSegments, storyboardScript, timeMarketingStoryboard, type MarketingDraft, type MarketingReview, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { capMarketingStoryboard, MARKETING_REVIEW_RULE_VERSION, MarketingDraftSchema, MarketingStoryboardSchema, marketingShotMaxSeconds, planMarketingSegments,
+  resolveMarketingSegments, storyboardScript, timeMarketingStoryboard, type MarketingDraft, type MarketingReview, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { activeMarketingVideoProfile } from "./model.js";
 import { parseCreation } from "./creation.js";
 import { mergeMarketingStoryboard } from "./prompt.js";

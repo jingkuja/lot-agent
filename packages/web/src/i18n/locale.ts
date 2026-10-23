@@ -33,11 +33,17 @@ export function translate<T>(source: T, locale: Locale, values: readonly unknown
       const match = template.pattern.exec(source);
       if (!match) continue;
       const captures: unknown[] = [];
-      template.slots.forEach((slot, index) => { captures[slot] = match[index + 1]; });
+      template.slots.forEach((slot, index) => { captures[slot] = capturedValue(match[index + 1], source, locale); });
       return template.entry[locale].replace(/\{(\d+)\}/g, (token, index: string) =>
         captures[Number(index)] == null ? token : String(captures[Number(index)])) as T;
     }
   }
   return text.replace(/\{(\d+)\}/g, (match, index: string) =>
     Number(index) < values.length ? String(values[Number(index)]) : match) as T;
+}
+
+/** A value matched inside a formatted service message. A nested message or interface word is
+ * translated as well; a Chinese list separator becomes a comma. */
+function capturedValue(value: string, message: string, locale: Locale) {
+  return /[一-鿿]/.test(value) && value.length < message.length ? translate(value, locale) : value.replace(/、/g, ", ");
 }

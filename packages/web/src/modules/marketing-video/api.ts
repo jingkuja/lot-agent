@@ -11,6 +11,10 @@ export async function requestProject(path: string, init?: RequestInit): Promise<
   return normalizeProject(await request<Project>(path, init));
 }
 export const json = (method: string, value: unknown) => ({ method, body: JSON.stringify(value) });
+export const unavailableMessage = "当前服务器尚不支持新版营销视频，请更新服务后重试。";
+/** The text to show for a failed action; a missing route means the server predates the studio. */
+export const errorMessage = (error: unknown) => error instanceof ApiClientError && error.status === 404 && /^(404\s+)?Not Found$/i.test(error.message)
+  ? unavailableMessage : error instanceof Error ? error.message : "操作失败，请重试。";
 /** A shot's twin narration take for listening; reading it is free. */
 export async function narrationAudio(projectId: string, slot: number, signal?: AbortSignal): Promise<Blob> {
   const response = await fetch(`/api/marketing-videos/${projectId}/narration/${slot}`, { signal, headers: { Authorization: `Bearer ${getToken() ?? ""}` } });

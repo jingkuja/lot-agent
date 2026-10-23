@@ -1,4 +1,6 @@
-import { MARKETING_IMAGE_SLOTS, marketingAssetIds, marketingImageCount, marketingImageLimitError, marketingImageSection, marketingReferenceImageIssue, type MarketingDraft, type MarketingImageSlot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { MARKETING_IMAGE_SLOTS, MARKETING_MATERIAL_RULES, marketingAssetIds, marketingImageCount, marketingImageLimitError, marketingImageSection,
+  marketingMegabytes, marketingReferenceImageIssue, type MarketingDraft, type MarketingImageSlot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { ANALYSIS_LIMITS, ANALYSIS_UPLOAD_MIMES } from "@lot-agent/core/marketing-analysis";
 import { validateTwinFile } from "../digital-twin/media.js";
 import { readImageSize, klingReferenceVideoIssue, readMediaDuration, readMediaMetadata } from "../../lib/video-references.js";
 import { isKlingModel } from "../../lib/model-filter.js";
@@ -39,20 +41,30 @@ export async function checkMaterial(file: File, slot: MaterialSlot, draft: Marke
     if (issue) throw new Error(issue);
   } else if (slot === "video") {
     if (draft.assets.video) throw new Error("参考视频最多 1 个，请先移除已有视频。");
-    if (!file.size || file.size > 150 * 1024 * 1024 || !["video/mp4", "video/quicktime"].includes(file.type)) throw new Error("参考视频支持 MP4、MOV，最大 150 MB。");
+    if (!fitsRule(file, MARKETING_MATERIAL_RULES.video)) throw new Error(referenceVideoRule());
     const metadata = await readMediaMetadata(file);
     if (!metadata.width || !metadata.height) throw new Error("无法读取参考视频分辨率，请更换文件");
     const issue = isKlingModel(profile.modelId) ? klingReferenceVideoIssue(file, metadata) : undefined;
     if (issue) throw new Error(issue);
   } else {
-    if (!file.size || file.size > 30 * 1024 * 1024 || !["audio/mpeg", "audio/wav", "audio/mp4"].includes(file.type)) throw new Error("背景音乐支持 MP3、WAV、M4A，最大 30 MB。");
-    if (await readMediaDuration(file) > 600) throw new Error("背景音乐最长 10 分钟。");
+    const { maxBytes, maxSeconds } = MARKETING_MATERIAL_RULES.music;
+    if (!fitsRule(file, MARKETING_MATERIAL_RULES.music)) throw new Error(`背景音乐支持 MP3、WAV、M4A，最大 ${marketingMegabytes(maxBytes)} MB。`);
+    if (await readMediaDuration(file) > maxSeconds) throw new Error(`背景音乐最长 ${maxSeconds / 60} 分钟。`);
   }
 }
 
+const fitsRule = (file: File, rule: { formats: readonly string[]; maxBytes: number }) =>
+  !!file.size && file.size <= rule.maxBytes && rule.formats.includes(file.type);
+/** Formats and size of a generation reference video, shown as a hint and as the upload error. */
+export const referenceVideoRule = () => `参考视频支持 MP4、MOV，最大 ${marketingMegabytes(MARKETING_MATERIAL_RULES.video.maxBytes)} MB。`;
+/** Formats and limits of a local video for analysis, shown as a hint and as the upload error. */
+export const analysisUploadRule = () =>
+  `本地爆款视频支持 MP4、MOV、WebM，最大 ${marketingMegabytes(ANALYSIS_LIMITS.downloadBytes)} MB，最长 ${ANALYSIS_LIMITS.durationMs / 1000} 秒，最高 1080p。`;
+
 /** Check a local reference video for analysis before upload. */
 export async function checkReferenceVideo(file: File) {
-  if (!file.size || file.size > 100 * 1024 * 1024 || !["video/mp4", "video/quicktime", "video/webm"].includes(file.type)) throw new Error("本地爆款视频支持 MP4、MOV、WebM，最大 100 MB，最长 180 秒，最高 1080p。");
+  if (!fitsRule(file, { formats: ANALYSIS_UPLOAD_MIMES, maxBytes: ANALYSIS_LIMITS.downloadBytes })) throw new Error(analysisUploadRule());
   const duration = await readMediaDuration(file);
-  if (!Number.isFinite(duration) || duration <= 0 || duration > 180) throw new Error("参考视频最长 180 秒。");
+  const maxSeconds = ANALYSIS_LIMITS.durationMs / 1000;
+  if (!Number.isFinite(duration) || duration <= 0 || duration > maxSeconds) throw new Error(`参考视频最长 ${maxSeconds} 秒。`);
 }

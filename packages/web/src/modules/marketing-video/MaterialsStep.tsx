@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { MARKETING_SHOT_MAX_SECONDS, marketingImageCount, marketingReferenceError, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
-import { imageCount, imageRoom } from "./materials.js";
+import { imageCount, imageRoom, referenceVideoRule } from "./materials.js";
 import { DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 
 const IMAGE_TYPES = "image/jpeg,image/png,image/webp";
@@ -51,7 +51,7 @@ export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, a
       <MaterialField form={form} slot="video" label="上传参考视频（选填）" accept="video/mp4,video/quicktime" handlers={handlers} />
       {draft.assets.video ? <p className="mv-hint" role="status">{referenceVideoStatus}</p> : <p className="mv-hint">{[
         t("用于参考动作和构图，不沿用原视频台词或音乐。"),
-        t("参考视频支持 MP4、MOV，最大 150 MB。"),
+        t(referenceVideoRule()),
         profile.referenceVideo ? t("时长 {0}–{1} 秒。", [profile.referenceVideo.minSeconds, profile.referenceVideo.maxSeconds]) : "",
         profile.imagesWithReferenceVideo ? t("选择参考视频后，参考图片合计最多 {0} 张。", [profile.imagesWithReferenceVideo]) : t("选择参考视频后，参考图片不参与生成。"),
         profile.referenceVideoShotMaxSeconds < MARKETING_SHOT_MAX_SECONDS ? t("选择参考视频后，每镜最长 {0} 秒。", [profile.referenceVideoShotMaxSeconds]) : "",

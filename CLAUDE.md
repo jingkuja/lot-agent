@@ -10,6 +10,7 @@
 
 - Before starting, check `git status --short` and preserve the user's existing changes; modify only what the current task requires.
 - Use pnpm, retain `.js` extensions in TypeScript / ESM imports, and use 2-space indentation.
+- Keep new and changed TypeScript / JavaScript lines within 160 code characters (string contents do not count); wrap older long lines when you change them.
 - Define interfaces for DB / Redis-dependent capabilities in core and implement them in server; do not add `pg` / `ioredis` to core.
 - Add database changes to `packages/server/src/db/migrations/` and register them in `index.ts`; do not modify historical migrations that have already run. Explicitly convert PG `NUMERIC` values before calculations.
 - Use existing CSS variables for web colors instead of hardcoded hex / rgba values; check the dark theme and both Chinese and English copy.
@@ -25,5 +26,6 @@
 
 - Run tests and builds relevant to the scope of the changes, and report actual validation results; for documentation-only changes, checking content, paths, and links is sufficient.
 - For code changes, run `pnpm typecheck` (strict, including tests) and keep it at zero errors; a passing build does not replace it.
+- For code changes, also run `pnpm check:line-width`; it checks the lines changed since `HEAD`.
 - Update `docs/agent-code-guide.md` when feature entry points or architecture change; keep this file limited to brief development conventions.
 - Keep the conventions in `AGENTS.md` and `CLAUDE.md` consistent.

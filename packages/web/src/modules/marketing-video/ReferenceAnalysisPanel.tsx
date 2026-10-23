@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
+import { ANALYSIS_LIMITS, type ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
+import { marketingMegabytes } from "@lot-agent/core/marketing-video";
 import { ApiClientError, getToken, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 
@@ -33,9 +34,9 @@ export function analysisError(value: unknown) {
     BROWSER_UNAVAILABLE: "服务器的视频网页读取组件不可用，请联系管理员，或选择“上传本地爆款视频”继续。",
     BROWSER_READ_FAILED: "已尝试读取公开视频，但暂时未获取到可用视频。请稍后重试，或选择“上传本地爆款视频”继续。",
     CHALLENGE_REQUIRED: "请先在视频平台完成验证，再继续。",
-    DURATION_LIMIT: "参考视频最长 180 秒。",
+    DURATION_LIMIT: `参考视频最长 ${ANALYSIS_LIMITS.durationMs / 1000} 秒。`,
     PIXEL_LIMIT: "本地爆款视频最高支持 1080p，请降低分辨率后上传。",
-    UPLOAD_LIMIT: "本地爆款视频最大 100 MB，请压缩后上传。",
+    UPLOAD_LIMIT: `本地爆款视频最大 ${marketingMegabytes(ANALYSIS_LIMITS.downloadBytes)} MB，请压缩后上传。`,
     UPLOAD_FORMAT: "本地爆款视频格式无效，请上传 MP4、MOV 或 WebM 视频。",
     UPLOAD_NOT_FOUND: "本地视频不存在，请重新上传。",
     UPLOAD_EXPIRED: "本地视频已过期，请重新上传。",
@@ -147,8 +148,13 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
       {speech?.status === "completed" && <details><summary>{t("视频语音转写")}</summary><p>{speech.text || t("未识别到语音内容。")}</p><p className="mv-hint">{t("语音转写未提供逐字时间戳，内容可能存在识别误差。")}</p></details>}
       {current.snapshot.summary?.summary.map((item, i) => <p key={i}>{item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}
       {current.snapshot.summary?.marketingPoints.map((item, i) => <p key={i}>{item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}
-      {current.errorCode === "PROJECT_CONFLICT" && current.snapshot.creation && <><p>{current.snapshot.creation.analysis}</p><pre>{current.snapshot.creation.draft.script}</pre>{current.snapshot.creation.draft.storyboard.map((shot, i) => <article key={i}><p>{shot.visual}</p><p>{shot.action}</p><p>{shot.camera}</p></article>)}</>}
-      {!!current.snapshot.summary?.timeline.length && <details><summary>{t("原片证据时间线")}</summary>{current.snapshot.summary.timeline.map((item, i) => <p key={i}>{seconds(item.startMs)}–{seconds(item.endMs)} · {item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}</details>}
+      {current.errorCode === "PROJECT_CONFLICT" && current.snapshot.creation && <><p>{current.snapshot.creation.analysis}</p>
+        <pre>{current.snapshot.creation.draft.script}</pre>
+        {current.snapshot.creation.draft.storyboard.map((shot, i) =>
+          <article key={i}><p>{shot.visual}</p><p>{shot.action}</p><p>{shot.camera}</p></article>)}</>}
+      {!!current.snapshot.summary?.timeline.length && <details><summary>{t("原片证据时间线")}</summary>{current.snapshot.summary.timeline.map((item, i) =>
+        <p key={i}>{seconds(item.startMs)}–{seconds(item.endMs)} · {item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")}
+          {" · "}{item.evidenceIds.join(", ")}</p>)}</details>}
       {!!current.snapshot.observations.length && <details><summary>{t("画面观察")}</summary>{current.snapshot.observations.map((item, i) => <p key={i}>{item.description} · {item.frameIds.join(", ")}{item.uncertainty && ` · ${item.uncertainty}`}</p>)}</details>}
       {!!current.snapshot.texts.length && <details><summary>{t("画面文字")}</summary>{current.snapshot.texts.map(text => <p key={text.id}>{text.id} · {seconds(text.firstSeenMs)}–{seconds(text.lastSeenMs)} · {text.text}</p>)}</details>}
       {!!current.snapshot.frames.length && <details><summary>{t("参考画面")}</summary>

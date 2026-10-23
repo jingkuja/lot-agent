@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
-import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, marketingRenderKey, marketingRevisionKey, marketingShotNeedsClip, storyboardScript, type MarketingComposition, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview, resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
+import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, marketingRenderKey, marketingRevisionKey, marketingShotNeedsClip, storyboardScript,
+  type MarketingComposition, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview,
+  resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION } from "./recovery.js";
 import { analysisDeleteBlocker, deleteAnalysisRecord, ownerLock as analysisOwnerLock } from "../marketing-analysis/repository.js";
 

@@ -4,14 +4,13 @@ import { link, open, rename, rm } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { join } from "node:path";
 import type pg from "pg";
-import { ANALYSIS_LIMITS, type AnalysisSource } from "@lot-agent/core/marketing-analysis";
+import { ANALYSIS_LIMITS, ANALYSIS_UPLOAD_MIMES, type AnalysisSource } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
 import type { AnalysisStorage } from "./storage.js";
 import { meteredUpload, UploadTooLargeError } from "../util/metered-upload.js";
 
 type Upload = { id: string; user_id: string; original_name: string; media_key: string; mime: string; size_bytes: number | string; source_hash: string; expired_at?: unknown };
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-export const ANALYSIS_UPLOAD_MIMES = ["video/mp4", "video/quicktime", "video/webm"];
 
 export async function ownedAnalysisUpload(db: Pick<pg.Pool, "query">, owner: string, id: string, lock = false): Promise<Upload> {
   const row = (await db.query(`SELECT * FROM marketing_analysis_uploads WHERE id=$1 AND user_id=$2${lock ? " FOR UPDATE" : ""}`, [id, owner])).rows[0];
