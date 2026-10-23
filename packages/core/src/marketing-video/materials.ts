@@ -30,5 +30,13 @@ export function marketingMaterialRule(slot: string): MarketingMaterialRule {
   return MARKETING_MATERIAL_RULES[slot === "video" || slot === "music" || slot === "voice" ? slot : "image"];
 }
 
+const FORMAT_NAMES: Record<string, string> = {
+  "audio/mpeg": "MP3", "audio/wav": "WAV", "audio/x-wav": "WAV", "audio/mp4": "M4A", "image/jpeg": "JPG", "image/png": "PNG", "image/webp": "WebP",
+  "video/mp4": "MP4", "video/quicktime": "MOV", "video/webm": "WebM",
+};
+
+/** File types of a rule as users know them, e.g. "MP3、WAV、M4A". */
+export const marketingFormatNames = (formats: readonly string[]) => [...new Set(formats.map(format => FORMAT_NAMES[format] ?? format))].join("、");
+
 /** Whole megabytes of a byte limit, as shown to users. */
 export const marketingMegabytes = (bytes: number) => Math.round(bytes / MB);

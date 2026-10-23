@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { translate } from "./locale.js";
 import { messages } from "./messages.js";
 
 // Server and core code of the marketing studio returns formatted Chinese messages, and the studio
@@ -49,5 +50,27 @@ describe("marketing studio messages", () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it("translates formatted messages through their own template, without Chinese left over", () => {
+    const wrong: string[] = [];
+    for (const folder of folders) {
+      for (const name of readdirSync(join(root, folder))) {
+        if (!/\.tsx?$/.test(name) || name.includes(".test.") || dataFiles.has(name)) continue;
+        for (const key of chineseMessages(join(root, folder, name))) {
+          if (!/\{\d+\}/.test(key) || notShown.has(key)) continue;
+          // As the server sends it: placeholders already filled with plain numbers.
+          const formatted = key.replace(/\{(\d+)\}/g, (_, index: string) => String(Number(index) + 7));
+          for (const locale of ["en", "id"] as const) {
+            const expected = messages[key][locale].replace(/\{(\d+)\}/g, (_, index: string) => String(Number(index) + 7));
+            const actual = translate(formatted, locale);
+            if (actual !== expected) wrong.push(`${locale}: ${formatted} → ${actual}`);
+          }
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(translate("声音样例时长需为 2–15 秒", "en")).toBe("Voice samples must be 2–15 seconds long.");
+    expect(translate("声音样例时长需为 2–15 秒", "id")).toBe("Durasi sampel suara harus 2–15 detik.");
   });
 });

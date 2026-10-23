@@ -15,14 +15,15 @@ export function resolveLocale(globle: unknown, saved: string | null): Locale {
 
 // Some existing services return already-formatted interface status/error strings.
 // Match only complete catalog templates at explicit UI call sites; never scan chat content.
+// The template with the most fixed text wins, so "声音样例时长需为 {0}–{1} 秒" is tried before "{0} 秒".
 const templates = Object.entries(messages).filter(([key]) => /\{\d+\}/.test(key)).map(([key, entry]) => {
   const slots: number[] = [];
   const parts = key.split(/(\{\d+\})/).map((part) => {
     if (/^\{\d+\}$/.test(part)) { slots.push(Number(part.slice(1, -1))); return "([\\s\\S]*?)"; }
     return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   });
-  return { pattern: new RegExp(`^${parts.join("")}$`), slots, entry };
-});
+  return { pattern: new RegExp(`^${parts.join("")}$`), slots, entry, fixed: key.replace(/\{\d+\}/g, "").length };
+}).sort((a, b) => b.fixed - a.fixed);
 
 export function translate<T>(source: T, locale: Locale, values: readonly unknown[] = []): T {
   if (typeof source !== "string") return source;

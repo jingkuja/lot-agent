@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const MarketingSourceSchema = z.object({ kind: z.enum(["text", "video"]) }).strict();
+export type MarketingSource = z.infer<typeof MarketingSourceSchema>;
 
 /** Shared token boundaries for pasted Chinese/English share text and Markdown.
  * Match whole URLs first so a video hostname inside a foreign URL is not a link. */

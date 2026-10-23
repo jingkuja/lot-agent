@@ -30,7 +30,7 @@ function CompositionSettings({ form, composition, renderedSubtitles, captions, r
       <NarrationSettings form={open} onPickVoice={onPickNarrationVoice} made />
       <p className="mv-hint">{t("修改旁白音色、语速或语气会重新合成全部配音，按语音合成计费；画面不变。")}</p>
     </>}
-    <MaterialField form={open} slot="music" label="选择背景音乐（选填）" accept="audio/mpeg,audio/wav,audio/mp4" handlers={handlers} />
+    <MaterialField form={open} slot="music" label="选择背景音乐（选填）" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
     {composition.localSubtitles && <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label>}
     {composition.localSubtitles && draft.subtitles && !renderedSubtitles && <p className="mv-hint" role="note">{t("这条视频制作时没有开字幕，片段没有为字幕留出底部区域，字幕可能遮挡人脸或产品。重新合成后请检查；遮挡明显的镜头可在下方勾选「重新生成此镜」，按视频模型计费。")}</p>}

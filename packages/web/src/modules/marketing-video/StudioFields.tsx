@@ -1,6 +1,6 @@
 import { marketingAssetIds, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
-import { isImageSlot, materialFor, type Material, type MaterialSlot } from "./materials.js";
+import { isImageSlot, materialAccept, materialFor, type Material, type MaterialSlot } from "./materials.js";
 
 /** The open draft and whether it can be edited. A submitted (frozen) draft keeps only
  * its publication title and tags editable. */
@@ -41,14 +41,17 @@ export interface MaterialHandlers {
   onRefresh(id: string): void;
 }
 
-/** `full` disables adding images once the model's section or total limit is reached. */
-export function MaterialField({ form, slot, label, accept, handlers, full: imagesFull = false }: { form: DraftForm; slot: MaterialSlot; label: string; accept: string; handlers: MaterialHandlers; full?: boolean }) {
+/** `full` disables adding images once the model's section or total limit is reached. The picker offers the slot's upload formats. */
+export function MaterialField({ form, slot, label, handlers, full: imagesFull = false }: {
+  form: DraftForm; slot: MaterialSlot; label: string; handlers: MaterialHandlers; full?: boolean;
+}) {
   const { t } = useI18n();
   const { draft, busy, frozen, ready } = form;
   const multiple = isImageSlot(slot);
   const full = (slot === "video" && !!draft.assets.video) || (multiple && imagesFull);
   return <div className="mv-upload">
-    <label className="mv-upload-button">{t(label)}<input aria-label={t(label)} type="file" accept={accept} multiple={multiple} disabled={busy || frozen || !ready || full} onChange={e => {
+    <label className="mv-upload-button">{t(label)}<input aria-label={t(label)} type="file" accept={materialAccept(slot)} multiple={multiple}
+      disabled={busy || frozen || !ready || full} onChange={e => {
       const files = Array.from(e.target.files ?? []); e.target.value = "";
       if (files.length) handlers.onFiles(slot, files);
     }} /></label>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { MarketingNarrationSchema, type MarketingDraft, type MarketingSegment, type MarketingShot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
+import { voiceUploadLabel } from "./materials.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { Choices, DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 
@@ -94,11 +95,11 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
         <Choices form={form} label="旁白风格" values={["自然旁白", "温柔女声", "沉稳男声", "活力讲述"].map(value => ({ value, label: value }))} value={draft.voice} onChoose={value => field("voice", value)} />
         <label className="mv-label">{t("音色参考（选填）")}</label>
         <button className="mv-soft" disabled={busy || frozen || !ready} onClick={onPickVoice}>{t("从数字分身语音库选择")}</button>
-        <MaterialField form={form} slot="voice" label="上传声音样例（2–15 秒）" accept="audio/mpeg,audio/wav" handlers={handlers} />
+        <MaterialField form={form} slot="voice" label={voiceUploadLabel()} handlers={handlers} />
         <p className="mv-hint">{t("留空时按所选旁白风格由模型配音。声音样例只作音色参考，成片声音与原声相近但不相同，也不保证逐字照念。字幕按确认文案在合成时加入，并按人声停顿切换，成片后可以调整；发布前请试听成片。")}</p>
       </>}
     </>}
-    <MaterialField form={form} slot="music" label="选择背景音乐（选填）" accept="audio/mpeg,audio/wav,audio/mp4" handlers={handlers} />
+    <MaterialField form={form} slot="music" label="选择背景音乐（选填）" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
     <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label>
     <label className="mv-label">{t("画面比例")}</label>

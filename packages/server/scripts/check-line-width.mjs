@@ -9,18 +9,19 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const MAX_CODE_WIDTH = 160;
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const ts = createRequire(join(root, "package.json"))("typescript");
-const SOURCE = /\.(?:ts|tsx|mts|mjs)$/;
+export const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const LITERALS = new Set([ts.SyntaxKind.StringLiteral, ts.SyntaxKind.NoSubstitutionTemplateLiteral, ts.SyntaxKind.TemplateHead,
   ts.SyntaxKind.TemplateMiddle, ts.SyntaxKind.TemplateTail, ts.SyntaxKind.JsxText]);
 
 /** Code width of every line of a file: characters outside string and template literal contents. */
 export function lineWidths(text, fileName) {
-  const kind = fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : fileName.endsWith(".mjs") ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+  const kind = /\.tsx$/.test(fileName) ? ts.ScriptKind.TSX : /\.jsx$/.test(fileName) ? ts.ScriptKind.JSX
+    : /\.[cm]?js$/.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
   const file = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, kind);
   const content = new Uint8Array(text.length);
   (function visit(node) {
@@ -62,27 +63,35 @@ function changedLines(base) {
   return lines;
 }
 
+/** Source files under `path`. Inside the repository, Git decides what is ignored (dist, release builds, node_modules). */
 function filesUnder(path) {
   const full = join(root, path);
   if (!statSync(full).isDirectory()) return SOURCE.test(path) ? [path] : [];
+  if (!path.startsWith("..")) {
+    return git("ls-files", "--cached", "--others", "--exclude-standard", "--", path || ".").split("\n").filter(file => SOURCE.test(file));
+  }
   return readdirSync(full).flatMap(name => name === "node_modules" || name === "dist" ? [] : filesUnder(join(path, name)));
 }
 
-const args = process.argv.slice(2);
-const all = args[0] === "--all";
-const base = args[0] === "--base" ? args[1] : "HEAD";
-const named = () => args.slice(1).flatMap(path => filesUnder(relative(root, resolve(process.cwd(), path))));
-const targets = all ? new Map(named().map(file => [file, "all"])) : changedLines(base);
-const failures = [];
-for (const [file, numbers] of targets) {
-  let text;
-  try { text = readFileSync(join(root, file), "utf8"); } catch { continue; }
-  lineWidths(text, file).forEach((width, index) => {
-    if ((numbers === "all" || numbers.has(index + 1)) && width > MAX_CODE_WIDTH) failures.push(`${file}:${index + 1}: ${width} code characters`);
-  });
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main();
+
+function main() {
+  const args = process.argv.slice(2);
+  const all = args[0] === "--all";
+  const base = args[0] === "--base" ? args[1] : "HEAD";
+  const named = () => args.slice(1).flatMap(path => filesUnder(relative(root, resolve(process.cwd(), path))));
+  const targets = all ? new Map(named().map(file => [file, "all"])) : changedLines(base);
+  const failures = [];
+  for (const [file, numbers] of targets) {
+    let text;
+    try { text = readFileSync(join(root, file), "utf8"); } catch { continue; }
+    lineWidths(text, file).forEach((width, index) => {
+      if ((numbers === "all" || numbers.has(index + 1)) && width > MAX_CODE_WIDTH) failures.push(`${file}:${index + 1}: ${width} code characters`);
+    });
+  }
+  if (failures.length) {
+    console.error(`Lines over ${MAX_CODE_WIDTH} code characters (string contents not counted):\n${failures.join("\n")}`);
+    process.exit(1);
+  }
+  console.log(`Line width OK: ${targets.size} file(s) checked, at most ${MAX_CODE_WIDTH} code characters per line.`);
 }
-if (failures.length) {
-  console.error(`Lines over ${MAX_CODE_WIDTH} code characters (string contents not counted):\n${failures.join("\n")}`);
-  process.exit(1);
-}
-console.log(`Line width OK: ${targets.size} file(s) checked, at most ${MAX_CODE_WIDTH} code characters per line.`);

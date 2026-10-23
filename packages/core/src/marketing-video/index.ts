@@ -264,16 +264,23 @@ export function speechUnits(text: string): number {
   const words = text.replace(/[\u3400-\u9fff\u3040-\u30ff]/g, " ").match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
   return cjk + words * 2;
 }
+// Three paces, each for one job. The studio shows the estimate as the range between the fastest and the
+// planning pace next to the longest allowed video, so copy the checks accept never looks too long.
 /** Speech units per second that copy is planned and estimated at; prompts ask for no more. */
 export const MARKETING_SPEECH_PACE = 4;
 /** The fastest pace a shot's line may need. A longer line does not fit its shot. */
 export const MARKETING_MAX_SPEECH_PACE = 4.5;
-/** Pace that decides how many clips a script split without AI needs. */
+/** Pace that decides how many clips a script split without AI needs; slower, so each clip has room to breathe. */
 export const MARKETING_SPLIT_SPEECH_PACE = 3.5;
 /** Whole seconds a line needs at the fastest allowed pace. */
 export const marketingSpeechMinimumSeconds = (text: string) => Math.ceil(speechUnits(text) / MARKETING_MAX_SPEECH_PACE);
 /** Estimated speaking time of a script at the planning pace. */
 export const marketingSpeechSeconds = (text: string) => Math.ceil(speechUnits(text) / MARKETING_SPEECH_PACE);
+/** Estimated speaking time as "fastest–planned" whole seconds, or one number when both agree. */
+export function marketingSpeechEstimate(text: string): string {
+  const fastest = marketingSpeechMinimumSeconds(text), planned = marketingSpeechSeconds(text);
+  return fastest === planned ? String(planned) : `${fastest}–${planned}`;
+}
 
 /** The selected duration is a target; allow up to five extra seconds for pacing. */
 export const marketingMaxDuration = (target: number) => Math.min(65, target + 5);

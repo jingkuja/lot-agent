@@ -1,13 +1,10 @@
 import { rm } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import { PgMarketingTextOperations, type TextOperation } from "./operations.js";
-import { MARKETING_REVIEW_MODEL, MarketingSourceSchema, marketingSourceKind } from "@lot-agent/core/marketing-video";
-import { creationPrompt, publicationPrompt, storyboardPrompt } from "./creation.js";
-import { invalidTextResult, parseOperationResult, parseTextResult } from "./text-result.js";
+import { PgMarketingTextOperations } from "./operations.js";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { marketingVideoProfile, marketingVoiceover, type MarketingProject, marketingShotMaxSeconds, capMarketingStoryboard, MarketingDraftSchema,
-  resolveMarketingSegments, planMarketingSegments, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { marketingVideoProfile, marketingVoiceover, type MarketingProject, MarketingDraftSchema, MarketingSourceSchema, marketingSourceKind,
+  resolveMarketingSegments } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import type { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { KnowledgeError } from "../knowledge/errors.js";
@@ -15,7 +12,6 @@ import { MarketingError, PgMarketingProjectStore } from "./repository.js";
 import { mediaCapabilities } from "./media.js";
 import { archiveMarketingVideo } from "./archive.js";
 import { MarketingTextError } from "./text.js";
-import { marketingReviewInput, REVIEW_INSTRUCTION, reviewDeltaInstruction, type MarketingReviewDelta } from "./compliance.js";
 export { REVIEW_INSTRUCTION } from "./compliance.js";
 import { AnalysisStorage, analysisOwnerLimit } from "../marketing-analysis/storage.js";
 import { signPrivateMaterial } from "../generation/private-materials.js";
@@ -24,8 +20,10 @@ import { MarketingNarrator } from "./narration.js";
 import { MarketingKeyArtist } from "./key-art.js";
 import { MarketingMaterials } from "./materials.js";
 import { MarketingProduction } from "./production.js";
+import { MarketingWriting, type MarketingLocale } from "./writing.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const isLocale = (value: unknown): value is MarketingLocale => value === "zh" || value === "en" || value === "id";
 
 /** Key-art stills use the owner's own model key, like every other marketing model call. */
 export function marketingKeyArtist(service: AgentService, dataRoot: string) {
@@ -64,13 +62,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   });
   const materials = new MarketingMaterials(service.db, dataRoot);
   const production = new MarketingProduction({ service, store, narrator, keyArtist, materials, activeProfile });
+  const writing = new MarketingWriting({ service, store, operations, activeProfile });
   const queue = () => service.jobQueue as BullmqJobQueue;
   const requireProject = async (owner: string, id: string) => {
     const p = await store.get(owner, id); if (!p) throw new MarketingError("草稿不存在", 404); return p;
-  };
-  const replay = (operation: TextOperation) => {
-    if (operation.result) return operation.result;
-    throw new MarketingError(["failed", "cancelled"].includes(operation.status) ? "本次创作未完成，已有调用记录已保存；如需重新付费创作，请发起新请求。" : "已有创作请求正在处理或结果待核实，请查看页面底部的处理结果。", 409);
   };
   app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", narration: narrator.available, model: activeProfile }));
   app.get("/usage", async (c) => {
@@ -82,7 +77,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   app.post("/copy", async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = MarketingDraftSchema.safeParse(body?.draft);
-    if (!parsed.success || !["zh", "en", "id"].includes(body?.locale)) throw new MarketingError("创作参数无效。");
+    if (!parsed.success || !isLocale(body?.locale)) throw new MarketingError("创作参数无效。");
     const draft = parsed.data;
     if (draft.copyMode === "rewrite" ? !draft.reference.trim() : !draft.topic.trim()) throw new MarketingError("请填写创作主题或参考内容。");
     const source = MarketingSourceSchema.safeParse(body.source ?? { kind: marketingSourceKind(draft.reference) });
@@ -91,21 +86,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       return c.json({ error: "视频链接需先完成参考视频分析。", code: "VIDEO_ANALYSIS_REQUIRED" }, 400);
     }
     if (!uuid.test(body.clientRequestId ?? "") || !uuid.test(body.projectId ?? "") || !Number.isInteger(body.version)) throw new MarketingError("创作参数无效。");
-    const owner = c.get("userId");
-    const reserved = await operations.begin(owner, body.clientRequestId, body.projectId, body.version, "copy",
-      { draft, locale: body.locale, source: source.data, version: body.version }, draft);
-    if (!reserved.fresh) return c.json({ ...replay(reserved.operation), operation: reserved.operation, project: await requireProject(owner, body.projectId) });
-    try {
-      const prompt = creationPrompt(reserved.draft, body.locale);
-      // Not tied to the browser connection: a refresh or closed tab must not turn
-      // a paid request into an unknown one. The 300 s request deadline still applies,
-      // and the saved result is applied here and shown by the operation records.
-      const raw = await service.marketingText(prompt.system, prompt.input, owner, undefined,
-        { upstreamBilling: true, onReceipt: receipt => operations.receipt(owner, body.clientRequestId, receipt) });
-      const result = parseTextResult("copy", raw, reserved.draft);
-      const operation = await operations.finish(owner, body.clientRequestId, result);
-      return c.json({ ...result, operation, project: await requireProject(owner, body.projectId) });
-    } catch (error) { await operations.fail(owner, body.clientRequestId, true, invalidTextResult(error)); throw error; }
+    return c.json(await writing.copy(c.get("userId"), body.projectId,
+      { clientRequestId: body.clientRequestId, version: body.version, locale: body.locale, draft, source: source.data }));
   });
   const validateId: MiddlewareHandler = async (c, next) => {
     if (!uuid.test(c.req.param("id") ?? "")) return c.json({ error: "草稿不存在" }, 404);
@@ -183,72 +165,30 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   });
   app.post("/:id/storyboard", async (c) => {
     const owner = c.get("userId");
-    let p = await requireProject(owner, c.req.param("id"));
+    const p = await requireProject(owner, c.req.param("id"));
     const body = await c.req.json().catch(() => null);
-    if (!body || !Number.isInteger(body.version) || !["zh", "en", "id"].includes(body.locale)
+    if (!body || !Number.isInteger(body.version) || !isLocale(body.locale)
       || typeof body.instruction !== "string" || body.instruction.length > 1000
       || (body.index !== undefined && (!Number.isInteger(body.index) || body.index < 0 ))) throw new MarketingError("分镜修改参数无效。");
     if (!uuid.test(body.clientRequestId ?? "")) throw new MarketingError("分镜修改参数无效。");
-    const reserved = await operations.begin(owner, body.clientRequestId, p.id, body.version, "storyboard",
-      { version: body.version, locale: body.locale, instruction: body.instruction, index: body.index });
-    if (!reserved.fresh) { replay(reserved.operation); return c.json({ ...p, operation: reserved.operation }); }
-    p = { ...p, draft: reserved.draft, version: body.version };
-    let started = false;
-    try {
-      if (body.index !== undefined && body.index >= p.draft.storyboard.length) throw new MarketingError("分镜修改参数无效。");
-      let initial;
-      try {
-        initial = p.draft.storyboard.length ? capMarketingStoryboard(p.draft.storyboard, p.draft, activeProfile)
-          : planMarketingSegments(p.draft.script, p.draft.durationSec, marketingShotMaxSeconds(p.draft, activeProfile))
-            .map(part => ({ durationSec: part.durationSec, script: part.script, visual: "", action: "", camera: "" }));
-      }
-      catch (error) { throw new MarketingError((error as Error).message); }
-      const prompt = storyboardPrompt(p.draft, body.locale, initial, body.instruction, body.index);
-      started = true;
-      // Same as /copy: finish and record the paid result even if the browser disconnects.
-      const raw = await service.marketingText(prompt.system, prompt.input, owner, undefined,
-        { upstreamBilling: true, onReceipt: receipt => operations.receipt(owner, body.clientRequestId, receipt) });
-      const result = parseTextResult("storyboard", raw, p.draft, body.index);
-      const operation = await operations.finish(owner, body.clientRequestId, result);
-      return c.json({ ...await requireProject(owner, p.id), operation });
-    } catch (error) { await operations.fail(owner, body.clientRequestId, started, invalidTextResult(error)); throw error; }
+    return c.json(await writing.storyboard(owner, p,
+      { clientRequestId: body.clientRequestId, version: body.version, locale: body.locale, instruction: body.instruction, index: body.index }));
   });
-  // Review and publication use the same request records as /copy: one model call
-  // per clientRequestId, the receipt is saved before the result is applied, and a
-  // repeated or lost request replays the saved outcome instead of paying again.
-  const recordedText = async (owner: string, projectId: string, body: { clientRequestId: string; version: number }, kind: "review" | "publication",
-    input: { version: number; locale: "zh" | "en" | "id"; fillMissing?: boolean }, prompt: (draft: MarketingDraft, delta?: MarketingReviewDelta) => { system: string; input: string }) => {
-    const reserved = await operations.begin(owner, body.clientRequestId, projectId, body.version, kind, input);
-    let operation = reserved.operation;
-    if (reserved.fresh) {
-      try {
-        const frozen = reserved.input as typeof input & { delta?: MarketingReviewDelta };
-        const request = prompt(reserved.draft, frozen.delta);
-        const raw = await service.marketingText(request.system, request.input, owner, undefined, { onReceipt: receipt => operations.receipt(owner, body.clientRequestId, receipt),
-          ...(kind === "review" ? { model: MARKETING_REVIEW_MODEL } : {}) });
-        operation = await operations.finish(owner, body.clientRequestId, parseOperationResult(kind, raw, reserved.draft, frozen));
-      } catch (error) { await operations.fail(owner, body.clientRequestId, true, invalidTextResult(error)); throw error; }
-    } else replay(operation);
-    if (operation.status === "conflict") throw new MarketingError(kind === "review" ? "文案已更新，请重新检查。" : "草稿已更新，请重新生成标题和标签。", 409);
-    return { ...await requireProject(owner, projectId), operation };
-  };
   app.post("/:id/review", async (c) => {
     const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
     if (!p.draft.script.trim()) throw new MarketingError("请先填写或生成视频文案。");
     const body = await c.req.json().catch(() => null);
-    if (body?.locale !== undefined && !["zh", "en", "id"].includes(body.locale)) throw new MarketingError("检查语言无效。");
+    if (body?.locale !== undefined && !isLocale(body.locale)) throw new MarketingError("检查语言无效。");
     if (!uuid.test(body?.clientRequestId ?? "") || !Number.isInteger(body?.version)) throw new MarketingError("检查参数无效。");
-    const locale = (body.locale ?? "zh") as "zh" | "en" | "id";
-    return c.json(await recordedText(owner, p.id, body, "review", { version: body.version, locale },
-      (draft, delta) => ({ system: `${REVIEW_INSTRUCTION}\nWrite reasons and suggested replacements in ${locale}. Keep excerpts exactly as supplied.${delta ? `\n${reviewDeltaInstruction(delta)}` : ""}`, input: marketingReviewInput(draft) })));
+    return c.json(await writing.review(owner, p.id, { clientRequestId: body.clientRequestId, version: body.version, locale: body.locale ?? "zh" }));
   });
   app.post("/:id/publication", async (c) => {
     const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
     const body = await c.req.json().catch(() => null);
-    if (!["zh", "en", "id"].includes(body?.locale) || typeof body?.fillMissing !== "boolean" || !p.draft.script.trim()
+    if (!isLocale(body?.locale) || typeof body?.fillMissing !== "boolean" || !p.draft.script.trim()
       || !uuid.test(body?.clientRequestId ?? "") || !Number.isInteger(body?.version)) throw new MarketingError("生成参数无效");
-    return c.json(await recordedText(owner, p.id, body, "publication", { version: body.version, locale: body.locale, fillMissing: body.fillMissing },
-      draft => publicationPrompt(draft.script, body.locale)));
+    return c.json(await writing.publication(owner, p.id,
+      { clientRequestId: body.clientRequestId, version: body.version, locale: body.locale, fillMissing: body.fillMissing }));
   });
   // Twin narration of the saved draft, shot by shot. Takes are paid speech requests made
   // before any clip; /generate freezes them. A stopped video's shots keep its clip model's limits.

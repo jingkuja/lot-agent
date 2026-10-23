@@ -334,7 +334,7 @@ try {
   assert.equal(uploads, 2); assert.equal(starts, 1);
   await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("en");
   await page.getByRole("radio", { name: "Upload a local reference video", exact: true }).waitFor();
-  await page.getByText("Local reference videos support MP4, MOV and WebM, up to 100 MB, 180 seconds and 1080p.", { exact: true }).waitFor();
+  await page.getByText("Local reference videos support MP4, MOV, WebM, up to 100 MB, 180 seconds and 1080p.", { exact: true }).waitFor();
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
   if (screenshots) await page.screenshot({ path: join(screenshots, "local-reference-dark-en.png"), fullPage: true });

@@ -62,7 +62,8 @@ export function useDraftEditor({ ownerId, session, profile, onEdit, onProject }:
       return p;
     } finally {
       if (flight.current === pending) flight.current = null;
-      if (session.current(token)) setSaving(false);
+      // Saves never overlap, so this one ending clears the flag even after another draft opened.
+      if (session.alive) setSaving(false);
     }
   }
   /** Start an unsaved draft: empty, or a copy of the current content. */

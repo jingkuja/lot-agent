@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MarketingDraftSchema, resolveMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
 import { stableRequestId, withDraftField } from "./draft-editor.js";
 
 const shot = (durationSec: number, script = "欢迎来到转角咖啡店，现磨咖啡等你来。") => ({ durationSec, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" });
@@ -17,10 +17,13 @@ describe("draft field edits", () => {
     const draft = board([shot(15), shot(15)], 30);
     expect(withDraftField(draft, "durationSec", 20, GROK_MARKETING_PROFILE).storyboard.map(s => s.durationSec)).toEqual([10, 10]);
   });
-  it("drops shots that no longer fit the new duration (assessment D01: the shots came from a paid request)", () => {
+  it("keeps shots that no longer fit the new duration, and fits them again when it allows (assessment D01)", () => {
     const long = "欢".repeat(60);
     const draft = board([shot(15, long), shot(15, long), shot(15, long), shot(15, long)], 60);
-    expect(withDraftField(draft, "durationSec", 20, GROK_MARKETING_PROFILE).storyboard).toEqual([]);
+    const shorter = withDraftField(draft, "durationSec", 20, GROK_MARKETING_PROFILE);
+    expect(shorter.storyboard).toEqual(draft.storyboard);
+    expect(() => resolveMarketingSegments(shorter, GROK_MARKETING_PROFILE)).toThrow("分镜总时长");
+    expect(withDraftField(shorter, "durationSec", 60, GROK_MARKETING_PROFILE)).toEqual(draft);
   });
   it("records what a board was planned for when the reference video changes, and fits it to the new shot limit", () => {
     const draft = board([shot(15), shot(15)], 30);
