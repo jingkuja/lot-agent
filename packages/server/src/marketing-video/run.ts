@@ -4,7 +4,7 @@ import { marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, 
 import type { DB } from "../db/database.js";
 import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { PgMarketingProjectStore } from "./repository.js";
-import { composeMarketingVideo, inspectMedia, mediaCapabilities, ownedAssetPath, SUBTITLES_UNAVAILABLE } from "./media.js";
+import { composeMarketingVideo, inspectMedia, mediaCapabilities, ownedAssetPath, storeComposedVideo, SUBTITLES_UNAVAILABLE } from "./media.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 import { marketingFailureCode, MarketingRunError } from "./failure.js";
@@ -123,7 +123,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
       }
     }
     const progress: number[] = segments.map((s) => s.status === "succeeded" ? 100 : 0);
-    const report = async () => deps.db.updateTaskProgress(job.id, Math.floor(progress.reduce((a, b) => a + b, 0) / segments.length * 0.85), `片段完成 ${progress.filter(p => p === 100).length}/${segments.length}`);
+    const report = async () => deps.db.raiseTaskProgress(job.id, Math.floor(progress.reduce((a, b) => a + b, 0) / segments.length * 0.85), `片段完成 ${progress.filter(p => p === 100).length}/${segments.length}`);
     const files: string[] = new Array(segments.length);
     let next = 0; let failure: unknown;
     const work = async () => {
@@ -210,7 +210,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                 getTaskVendorId: (id) => baseDb.getTaskVendorId(id), setTaskVendorId: (id, vendor) => baseDb.setTaskVendorId(id, vendor),
                 getTaskStatus: async (id) => { await assertActive(); return baseDb.getTaskStatus(id); },
               },
-              updateProgress: async (_id, value) => { progress[i] = Math.min(99, Math.max(0, value)); await report(); },
+              updateProgress: async (_id, value) => { progress[i] = Math.min(99, Math.max(progress[i], Number(value) || 0)); await report(); },
             }, child, "video");
             if (output.downloadFailed) throw new MarketingRunError("DOWNLOAD_INCOMPLETE", "片段已生成，下载未完成；重试将继续下载原片段。");
             generated = true;
@@ -239,7 +239,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     await Promise.all(Array.from({ length: Math.min(deps.segmentConcurrency ?? 2, segments.length) }, () => work()));
     if (failure) throw failure;
     await assertActive();
-    await deps.db.updateTaskProgress(job.id, 90, "正在合成视频");
+    await deps.db.raiseTaskProgress(job.id, 90, "正在合成视频");
     let music: string | undefined;
     if (draft.assets.music) {
       const asset = await deps.db.getAsset(draft.assets.music);
@@ -250,12 +250,15 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     try {
       const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, narration, subtitles: burnSubtitles,
         speech: generateAudio || !!narration, signal: controller.signal });
-      await assertActive();
-      const gen = await deps.generation(job, controller.signal);
       const id = randomUUID(); const key = `${id}.mp4`;
-      const { url } = await gen.storage.put({ key, body: result.body, contentType: "video/mp4" });
+      let url: string;
+      try {
+        await assertActive();
+        const gen = await deps.generation(job, controller.signal);
+        ({ url } = await storeComposedVideo(gen.storage, key, result));
+      } finally { await result.dispose(); }
       await assertActive();
-      await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.body.length, durationSec: result.durationSec, width: result.width, height: result.height });
+      await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.sizeBytes, durationSec: result.durationSec, width: result.width, height: result.height });
       return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}), ...(result.captions ? { captions: result.captions } : {}) };
     } catch (error) {
       if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;

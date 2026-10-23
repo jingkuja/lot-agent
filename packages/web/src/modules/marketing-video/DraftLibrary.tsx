@@ -8,7 +8,7 @@ import type { DraftSession } from "./session.js";
 const statusLabels: Record<string, string> = { draft: "草稿", pending: "等待生成", running: "生成中", succeeded: "已生成", failed: "生成未完成", cancelled: "已取消" };
 
 /** Space held by the owner's drafts (`GET /marketing-videos/usage`). */
-export interface DraftUsage { videoBytes: number; materialBytes: number; analysisBytes: number; analysisLimitBytes: number }
+export interface DraftUsage { videoBytes: number; materialBytes: number; narrationBytes?: number; analysisBytes: number; analysisLimitBytes: number }
 
 export function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
@@ -24,9 +24,9 @@ export function DraftLibrary({ projects, nextCursor, query, currentId, usage, op
 }) {
   const { t } = useI18n();
   return <details className="mv-library" onToggle={e => { if (e.currentTarget.open) onShow(); }}><summary>{t("我的视频草稿")} · {projects.length}{nextCursor ? "+" : ""}</summary>
-    {usage && <p className="mv-hint mv-usage">{t("已用空间 {0}：成片与片段 {1} · 使用的素材 {2} · 参考分析 {3} / {4}", [
-      formatBytes(usage.videoBytes + usage.materialBytes + usage.analysisBytes), formatBytes(usage.videoBytes), formatBytes(usage.materialBytes),
-      formatBytes(usage.analysisBytes), formatBytes(usage.analysisLimitBytes)])}</p>}
+    {usage && <p className="mv-hint mv-usage">{t("已用空间 {0}：成片与片段 {1} · 使用的素材 {2} · 配音 {3} · 参考分析 {4} / {5}", [
+      formatBytes(usage.videoBytes + usage.materialBytes + (usage.narrationBytes ?? 0) + usage.analysisBytes), formatBytes(usage.videoBytes), formatBytes(usage.materialBytes),
+      formatBytes(usage.narrationBytes ?? 0), formatBytes(usage.analysisBytes), formatBytes(usage.analysisLimitBytes)])}</p>}
     <input className="mv-draft-search" type="search" value={query} maxLength={100} placeholder={t("搜索标题、主题或文案")} aria-label={t("搜索草稿")} onChange={e => onQuery(e.target.value)} />
     {!projects.length && !!query.trim() && <p className="mv-hint">{t("没有找到匹配的草稿")}</p>}
     <div className="mv-draft-list">{projects.map(p => {

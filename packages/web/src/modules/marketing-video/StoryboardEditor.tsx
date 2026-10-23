@@ -12,7 +12,9 @@ export function StoryboardEditor({ shots, presenter = "always", busy, readOnly =
   compact?: boolean;
   /** A made video: the shots to redo. A shot with a reason (edited, no usable clip) stays chosen;
    * a note says what happens to an optional one that is left out. */
-  redo?: { selected: boolean[]; reasons: (string | undefined)[]; notes?: (string | undefined)[]; onToggle(index: number): void };
+  redo?: { selected: boolean[]; reasons: (string | undefined)[]; notes?: (string | undefined)[]; onToggle(index: number): void;
+    /** The clip each shot has now, watched before choosing to redo it. */
+    clips?: (string | null | undefined)[] };
   onChange?: (shots: MarketingShot[]) => void;
   onAi?: (instruction: string, index?: number) => void;
 }) {
@@ -30,6 +32,7 @@ export function StoryboardEditor({ shots, presenter = "always", busy, readOnly =
       <header><h4>{t("第 {0} 镜", [index + 1])}</h4><span>{index ? ends[index - 1] : 0}–{ends[index]}s · {t("{0} 秒", [shot.durationSec ?? 15])}</span></header>
       {redo && <label className="mv-checkbox"><input type="checkbox" checked={redo.selected[index]} disabled={busy || !!redo.reasons[index]} onChange={() => redo.onToggle(index)} />
         {t("重新生成此镜")}{redo.reasons[index] ? <em>{t(redo.reasons[index])}</em> : redo.notes?.[index] && !redo.selected[index] && <em>{t(redo.notes[index])}</em>}</label>}
+      {redo?.clips?.[index] && <ShotClip url={redo.clips[index]!} index={index} />}
       {fields.map(({ key, label, max }) => <label className="mv-field" key={key}><span>{t(label)}</span><textarea rows={key === "visual" ? 3 : 2} maxLength={max} value={shot[key]} readOnly={readOnly} disabled={busy} onChange={e => onChange?.(shots.map((value, i) => i === index ? { ...value, [key]: e.target.value } : value))} /></label>)}
     </article>)}</div>
     {!readOnly && onAi && <details className="mv-storyboard-ai" open><summary>{t("调整分镜（选填）")}</summary>
@@ -38,4 +41,12 @@ export function StoryboardEditor({ shots, presenter = "always", busy, readOnly =
       <button className="mv-soft" disabled={busy || !instruction.trim()} onClick={() => onAi?.(instruction.trim(), target === "all" ? undefined : Number(target))}>{t(busy ? "正在处理…" : "AI 修改分镜")}</button>
     </details>}
   </div>;
+}
+
+/** A kept clip, loaded only once opened so a long storyboard does not fetch every video. */
+function ShotClip({ url, index }: { url: string; index: number }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return <details className="mv-shot-clip" onToggle={e => setOpen(e.currentTarget.open)}><summary>{t("查看本镜片段")}</summary>
+    {open && <video controls preload="metadata" src={url} aria-label={t("第 {0} 镜片段", [index + 1])} />}</details>;
 }

@@ -3,7 +3,7 @@ import type { AgentService } from "../services/agent-service.js";
 
 type Variables = { userId: string };
 
-export function createTraceRoutes(service: AgentService): Hono {
+export function createTraceRoutes(service: AgentService) {
   const app = new Hono<{ Variables: Variables }>();
 
   /** Cross-user access collapses to 404 so resource existence never leaks. */

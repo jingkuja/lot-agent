@@ -1,6 +1,6 @@
 import { publishPersistedJob } from "./persisted-job.js";
 import { randomUUID } from "node:crypto";
-import { DelayedError, Queue, Worker } from "bullmq";
+import { DelayedError, Queue, Worker, type ConnectionOptions } from "bullmq";
 import type Redis from "ioredis";
 import type { EnqueueOpts, JobControl, JobQueue, JobRecord } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
@@ -36,7 +36,7 @@ export class BullmqJobQueue implements JobQueue {
     private readonly marketingLimits: MarketingQueueLimits = marketingQueueLimits()
   ) {
     for (const name of [DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE]) {
-      this.queues.set(name, new Queue(name, { connection }));
+      this.queues.set(name, new Queue(name, { connection: bullConnection(connection) }));
     }
   }
 
@@ -171,7 +171,7 @@ export class BullmqJobQueue implements JobQueue {
             this.running.delete(taskId);
           }
         },
-        { connection: this.connection, concurrency: name === MARKETING_VIDEO_QUEUE ? this.marketingLimits.concurrency : 1 }
+        { connection: bullConnection(this.connection), concurrency: name === MARKETING_VIDEO_QUEUE ? this.marketingLimits.concurrency : 1 }
       );
       this.workers.set(name, worker);
     }
@@ -300,6 +300,9 @@ export class BullmqJobQueue implements JobQueue {
     this.connection.disconnect();
   }
 }
+
+/** BullMQ bundles its own ioredis typings; the client is the same library at runtime. */
+const bullConnection = (connection: Redis) => connection as unknown as ConnectionOptions;
 
 async function queueDeadline<T>(read: () => Promise<T>): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;

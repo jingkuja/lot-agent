@@ -75,6 +75,8 @@ export async function marketingMetrics(pool: pg.Pool, hours: number, env: NodeJS
       FROM tasks s JOIN tasks p ON p.id = (s.input->>'parentId')::uuid WHERE ${clipFilter} AND s.status='failed' GROUP BY 1, 2`), r => r.model, r => [r.code, r.n]);
     const gateway5xx = group(await q(`SELECT http_status::text AS status, count(*)::int AS n FROM marketing_clip_gateway_failures
       WHERE created_at >= $1 GROUP BY 1`), () => "all", r => [r.status, r.n]).get("all") ?? {};
+    const presenterGateway5xx = group(await q(`SELECT http_status::text AS status, count(*)::int AS n FROM digital_presenter_clip_gateway_failures
+      WHERE created_at >= $1 GROUP BY 1`), () => "all", r => [r.status, r.n]).get("all") ?? {};
     const presenterClips = group(await q(`SELECT c.model, c.status, count(*)::int AS n FROM digital_presenter_clips c JOIN tasks t ON t.id=c.task_id
       WHERE t.created_at >= $1 AND NOT (t.input ? 'recomposedFrom') GROUP BY 1, 2`), r => r.model, r => [r.status, r.n]);
 
@@ -127,6 +129,7 @@ export async function marketingMetrics(pool: pg.Pool, hours: number, env: NodeJS
       clips: clips.map(r => ({ model: r.model, ...timed(r), failures: clipFailures.get(r.model) ?? {}, lastRunSec: r.last_run as Durations })),
       gateway5xx,
       presenterClips: Object.fromEntries(presenterClips),
+      presenterGateway5xx,
       textRequests: text.map(r => ({ kind: r.kind, model: r.model, total: r.total, statuses: textStatuses.get(`${r.kind}\n${r.model}`) ?? {}, respondedSec: r.responded as Durations })),
       narrations, presenterTakes,
       keyArts: { statuses: keyArts, respondedSec: keyArtTime.responded as Durations },

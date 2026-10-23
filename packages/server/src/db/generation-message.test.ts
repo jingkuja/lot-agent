@@ -4,7 +4,7 @@ import { DB } from "./database.js";
 describe("updateMessageGeneration", () => {
   it("scopes the UPDATE to the owning conversation and user", async () => {
     const db = Object.create(DB.prototype) as DB;
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     // @ts-expect-error inject a fake pool
     db.pool = { query };
     await db.updateMessageGeneration(
@@ -29,7 +29,7 @@ describe("updateMessageGeneration", () => {
     // route's post-enqueue write lands. That write must not drag a completed/
     // failed/cancelled message back to 'generating' and drop its assets.
     const db = Object.create(DB.prototype) as DB;
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     // @ts-expect-error inject a fake pool
     db.pool = { query };
     await db.updateMessageGeneration(
@@ -45,7 +45,7 @@ describe("updateMessageGeneration", () => {
 describe("addMessage generation status", () => {
   it("persists the caller-provided status column on insert", async () => {
     const db = Object.create(DB.prototype) as DB;
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     // @ts-expect-error inject a fake pool
     db.pool = { query };
     await db.addMessage("m1", "c1", "assistant", "", { status: "generating" });
@@ -56,7 +56,7 @@ describe("addMessage generation status", () => {
 
   it("defaults the status column to 'completed'", async () => {
     const db = Object.create(DB.prototype) as DB;
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     // @ts-expect-error inject a fake pool
     db.pool = { query };
     await db.addMessage("m1", "c1", "user", "hi");
@@ -68,7 +68,7 @@ describe("addMessage generation status", () => {
 describe("getGenerationMessage", () => {
   it("scopes the read to the owning conversation + user and parses metadata", async () => {
     const db = Object.create(DB.prototype) as DB;
-    const query = vi.fn(async () => ({
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({
       rows: [{ status: "download_failed", metadata: { kind: "generation", sourceUrl: "https://v/x.mp4" } }],
     }));
     // @ts-expect-error inject a fake pool
@@ -95,7 +95,7 @@ describe("getGenerationMessage", () => {
 
   it("returns null when no owned row exists", async () => {
     const db = Object.create(DB.prototype) as DB;
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     // @ts-expect-error inject a fake pool
     db.pool = { query };
     expect(await db.getGenerationMessage("m1", "c1", "u1")).toBeNull();
@@ -105,7 +105,7 @@ describe("getGenerationMessage", () => {
 describe("resetGenerationForRedownload", () => {
   it("only reopens a 'download_failed' message back to 'generating', scoped to owner", async () => {
     const db = Object.create(DB.prototype) as DB;
-    const query = vi.fn(async () => ({ rowCount: 1 }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rowCount: 1 }));
     // @ts-expect-error inject a fake pool
     db.pool = { query };
     const ok = await db.resetGenerationForRedownload("m1", { conversationId: "c1", userId: "u1" });
@@ -119,7 +119,7 @@ describe("resetGenerationForRedownload", () => {
 
   it("returns false when the guard matched no row (already retried / wrong state)", async () => {
     const db = Object.create(DB.prototype) as DB;
-    const query = vi.fn(async () => ({ rowCount: 0 }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rowCount: 0 }));
     // @ts-expect-error inject a fake pool
     db.pool = { query };
     expect(await db.resetGenerationForRedownload("m1", { conversationId: "c1", userId: "u1" })).toBe(false);

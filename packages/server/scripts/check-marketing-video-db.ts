@@ -1,6 +1,8 @@
 /** Opt-in integration check. Use a NEW, empty, disposable local database. No paid model calls. */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +28,7 @@ import type { AgentService } from "../src/services/agent-service.js";
 import { HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
 import { marketingMetrics } from "../src/admin/metrics.js";
 import { marketingReconciliation } from "../src/admin/reconciliation.js";
+import { collectMarketingOrphans } from "../src/marketing-video/orphans.js";
 
 const raw = process.env.MARKETING_CHECK_DATABASE_URL;
 if (!raw) throw new Error("Set MARKETING_CHECK_DATABASE_URL to an empty local database named marketing_check_<suffix>");
@@ -47,7 +50,8 @@ const deps: MarketingRunDeps = {
   generation: async (_job, signal) => ({
     modelId: "fixture", vendorModel: "fixture", signal, db, meter,
     cache: { get: async () => null, set: async () => {} },
-    storage: { put: async ({ key, body }) => { await writeFile(join(root, "assets", key), body); return { url: `/static/assets/${key}` }; } },
+    storage: { put: async ({ key, body }) => { await writeFile(join(root, "assets", key), body); return { url: `/static/assets/${key}` }; },
+      putStream: async (key, body) => { await pipeline(body, createWriteStream(join(root, "assets", key))); return { url: `/static/assets/${key}` }; } },
     updateProgress: async () => {}, extFor: () => "mp4", pollIntervalMs: 1,
     urlToBytes: async () => { if (downloadFail) throw new Error("fixture download unavailable"); return { body: await readFile(fixture), mime: "video/mp4" }; },
     provider: {
@@ -196,6 +200,8 @@ try {
   made = (await store.get(owner, made.id))!;
   assert.deepEqual(made.revision?.reusable, [true, true]);
   const firstClips = await store.segments(owner, made.id);
+  // Each kept clip can be watched before choosing to redo it.
+  assert.deepEqual(made.revision?.clips, firstClips.map(clip => clip.output.assets[0].url));
   await assert.rejects(store.save(owner, made.id, made.version, { ...made.draft, ratio: "16:9" }), /只能修改分镜/);
   await assert.rejects(store.save(owner, made.id, made.version, { ...made.draft, storyboard: made.draft.storyboard.map(shot => ({ ...shot, durationSec: shot.durationSec - 1 })) }), /只能修改分镜/);
   made = await store.save(owner, made.id, made.version, { ...made.draft, storyboard: made.draft.storyboard.map((shot, i) => i === 1 ? { ...shot, visual: "人物在窗边喝咖啡" } : shot) });
@@ -399,8 +405,10 @@ try {
   const generatedBytes = generated.reduce((sum, row) => sum + Number(row.size_bytes), 0);
   assert(generated.length > 1, "clips and the final video");
   for (const row of generated) await readFile(join(root, "assets", row.storage_key));
-  const usageBefore = await (await app.request("/marketing/usage")).json() as { videoBytes: number; analysisBytes: number };
+  const usageBefore = await (await app.request("/marketing/usage")).json() as { videoBytes: number; narrationBytes: number; analysisBytes: number };
   assert(usageBefore.videoBytes >= generatedBytes);
+  // P20: takes on disk count toward the space used.
+  assert.equal(typeof usageBefore.narrationBytes, "number");
   const analysisStorage = new AnalysisStorage(join(root, "marketing-analysis"));
   const [doomedAnalysis, unverifiedAnalysis] = [randomUUID(), randomUUID()];
   for (const analysisId of [doomedAnalysis, unverifiedAnalysis]) {
@@ -420,6 +428,22 @@ try {
   assert.equal(await store.get(owner, doomed.id), null);
   assert.equal((await db.pool.query("SELECT 1 FROM assets WHERE id=ANY($1::uuid[])", [generated.map(row => row.id)])).rowCount, 0);
   for (const row of generated) await assert.rejects(readFile(join(root, "assets", row.storage_key)), { code: "ENOENT" });
+  // P20: a video and a take folder left by a draft deleted before deletion removed them.
+  const lostDraft = randomUUID(); const lostJob = randomUUID(); const lostAsset = randomUUID();
+  await db.pool.query("INSERT INTO tasks(id,type,input,user_id,status) VALUES($1,'marketing.video',$2,$3,'succeeded')", [lostJob, JSON.stringify({ projectId: lostDraft }), owner]);
+  await db.pool.query("INSERT INTO assets(id,task_id,user_id,type,storage_key,url,mime,size_bytes) VALUES($1,$2,$3,'video',$4,$5,'video/mp4',5)", [lostAsset, lostJob, owner, `${lostAsset}.mp4`, `/static/assets/${lostAsset}.mp4`]);
+  await writeFile(join(root, "assets", `${lostAsset}.mp4`), "video");
+  await mkdir(join(root, "marketing-narration", lostDraft), { recursive: true });
+  await writeFile(join(root, "marketing-narration", lostDraft, "take.wav"), "wav");
+  const keptVideos = (await db.pool.query("SELECT count(*)::int AS n FROM assets WHERE type='video'")).rows[0].n;
+  const listed = await collectMarketingOrphans(db.pool, root);
+  assert.deepEqual({ videos: listed.videos, videoBytes: listed.videoBytes, narrationFolders: listed.narrationFolders, applied: listed.applied }, { videos: 1, videoBytes: 5, narrationFolders: 1, applied: false });
+  await readFile(join(root, "assets", `${lostAsset}.mp4`));
+  const cleaned = await collectMarketingOrphans(db.pool, root, true);
+  assert.deepEqual({ videos: cleaned.videos, failedFiles: cleaned.failedFiles }, { videos: 1, failedFiles: 0 });
+  await assert.rejects(readFile(join(root, "assets", `${lostAsset}.mp4`)), { code: "ENOENT" });
+  await assert.rejects(readdir(join(root, "marketing-narration", lostDraft)), { code: "ENOENT" });
+  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM assets WHERE type='video'")).rows[0].n, keptVideos - 1, "live drafts keep their videos");
   const analysisRows = (await db.pool.query("SELECT id, deleted_at, snapshot FROM marketing_reference_analyses WHERE id=ANY($1::uuid[])", [[doomedAnalysis, unverifiedAnalysis]])).rows;
   const removedRow = analysisRows.find(row => row.id === doomedAnalysis), keptRow = analysisRows.find(row => row.id === unverifiedAnalysis);
   assert.notEqual(removedRow.deleted_at, null); assert.deepEqual(removedRow.snapshot, {});
@@ -464,7 +488,8 @@ try {
     const configured = { ...draft, durationSec, ratio: durationSec === 45 ? "16:9" as const : "1:1" as const, subtitles: true };
     const segments = planMarketingSegments(durationSec === 15 ? script.slice(0, 30) : script, durationSec);
     const assembled = await composeMarketingVideo({ files: segments.map(() => fixture), segments, draft: configured, music });
-    assert(Math.abs(assembled.durationSec - durationSec) < 0.3); assert(assembled.body.length > 0);
+    assert(Math.abs(assembled.durationSec - durationSec) < 0.3); assert(assembled.sizeBytes > 0);
+    await assembled.dispose();
     assert.equal(assembled.width, durationSec === 45 ? 1280 : 720); assert.equal(assembled.height, 720);
   }
   // F02: the per-owner render cap counts only renders still live in the queue.

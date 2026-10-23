@@ -4,7 +4,7 @@ import { DigitalEmployeeRepository } from "./repository.js";
 describe("DigitalEmployeeRepository persistence parameters", () => {
   it("persists customer region as one plain text column", async () => {
     const now = new Date().toISOString();
-    const query = vi.fn(async () => ({ rows: [{
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [{
       id: "p1", user_id: "u1", owner_user_id: "u1", display_name: "李姐",
       aliases: [], customer_kind: "person", customer_region: "华东 / 深圳南山区及周边",
       relationship_stage: "lead", overall_health: "healthy", tags: [], custom_fields: {},
@@ -27,7 +27,7 @@ describe("DigitalEmployeeRepository persistence parameters", () => {
   });
 
   it("serializes capture draft JSONB arrays as JSON rather than PostgreSQL arrays", async () => {
-    const query = vi.fn(async () => ({ rows: [{
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [{
       id: "d1",
       user_id: "u1",
       conversation_id: null,
@@ -61,7 +61,7 @@ describe("DigitalEmployeeRepository persistence parameters", () => {
   });
 
   it("serializes product-state list fields for JSONB columns", async () => {
-    const query = vi.fn(async () => ({ rows: [{
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [{
       id: "s1", user_id: "u1", profile_id: "p1", product_key: "compute",
       product_name: "算力设备出租", marketing_product_id: "00000000-0000-0000-0000-000000000123",
       journey_stage: "evaluating", sentiment: "neutral",
@@ -87,7 +87,7 @@ describe("DigitalEmployeeRepository persistence parameters", () => {
   });
 
   it("persists the cohort summary generation method for audit", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     const repository = new DigitalEmployeeRepository({ query } as any);
 
     await repository.upsertCohortSnapshot("u1", {
@@ -107,7 +107,7 @@ describe("DigitalEmployeeRepository persistence parameters", () => {
   });
 
   it("selects nightly cohort work only for users who explicitly enabled it", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     const repository = new DigitalEmployeeRepository({ query } as any);
 
     await repository.listUsersMissingCohortSnapshot("2026-08-18");

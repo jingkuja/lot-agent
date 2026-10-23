@@ -4,7 +4,7 @@ import { userWechat } from "./0022-user-wechat.js";
 
 describe("user wechat migration", () => {
   it("adds openid/unionid columns and a partial unique index", async () => {
-    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [], rowCount: 0 }));
     await userWechat.up({ query } as any);
     const sql = String(query.mock.calls[0][0]);
     expect(sql).toContain("wechat_openid VARCHAR(64)");

@@ -10,8 +10,10 @@ import { CaptionSettings } from "./CaptionSettings.js";
 
 /** Settings only the local composition of a made video uses. Changing them composes the kept
  * clips again, without the video model. */
-function CompositionSettings({ form, composition, captions, recompose, handlers, onPickNarrationVoice }: {
+function CompositionSettings({ form, composition, renderedSubtitles, captions, recompose, handlers, onPickNarrationVoice }: {
   form: DraftForm; composition: MarketingComposition; handlers: MaterialHandlers; onPickNarrationVoice(): void;
+  /** Whether the kept clips were made for captions, with the bottom of the frame kept clear. */
+  renderedSubtitles: boolean;
   /** Composes the kept clips again; shown beside the caption settings. */
   recompose: ReactNode;
   /** Cues burned into the current video, shown beside each shot's captions. */
@@ -31,6 +33,7 @@ function CompositionSettings({ form, composition, captions, recompose, handlers,
     <MaterialField form={open} slot="music" label="选择背景音乐（选填）" accept="audio/mpeg,audio/wav,audio/mp4" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
     {composition.localSubtitles && <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label>}
+    {composition.localSubtitles && draft.subtitles && !renderedSubtitles && <p className="mv-hint" role="note">{t("这条视频制作时没有开字幕，片段没有为字幕留出底部区域，字幕可能遮挡人脸或产品。重新合成后请检查；遮挡明显的镜头可在下方勾选「重新生成此镜」，按视频模型计费。")}</p>}
     {composition.localSubtitles && draft.subtitles && <CaptionSettings form={open} captions={captions} recompose={recompose} />}
     {!composition.localSubtitles && draft.subtitles && <p className="mv-hint">{t("这条视频的字幕由视频模型画在画面里，不能单独调整；复制为新草稿重新制作后，字幕改为合成时加入，可以调整。")}</p>}
   </div>;
@@ -98,7 +101,7 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
     <details className="mv-script-review" open><summary>{t(project.revision ? "修改成片" : "查看制作分镜")}</summary>
       {project.revision ? <ShotRevision key={project.taskId} project={project} revision={project.revision} draft={draft} busy={busy} saving={saving} reviewPanel={reviewPanel}
           settings={recompose => <>
-            <CompositionSettings form={form} composition={project.revision!.composition} captions={project.output?.captions} recompose={recompose} handlers={handlers} onPickNarrationVoice={onPickNarrationVoice} />
+            <CompositionSettings form={form} composition={project.revision!.composition} renderedSubtitles={project.revision!.draft.subtitles} captions={project.output?.captions} recompose={recompose} handlers={handlers} onPickNarrationVoice={onPickNarrationVoice} />
             {continuity}
           </>}
           onChange={onShots} onRevert={onRevertShots} onRevise={onRevise} />

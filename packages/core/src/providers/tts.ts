@@ -1,4 +1,5 @@
 import { ProviderError } from "./provider-error.js";
+import { gatewayRequestId } from "../llm/gateway-request-id.js";
 
 export interface TTSRequest { text: string; voice?: string; }
 export interface TTSResult { audioUrl: string; characters: number; raw?: unknown; }
@@ -21,7 +22,11 @@ export interface SpeechRequest {
   speed?: number;
   instructions?: string;
 }
-export interface SpeechResult { audio: Uint8Array; mime: string }
+export interface SpeechResult {
+  audio: Uint8Array; mime: string;
+  /** The gateway's log ID (`x-oneapi-request-id`), to match a charge or a slow request in its logs. */
+  gatewayRequestId?: string;
+}
 export interface SpeechProvider { synthesize(req: SpeechRequest, signal?: AbortSignal): Promise<SpeechResult> }
 
 const SPEECH_MIME: Record<SpeechFormat, string[]> = {
@@ -38,8 +43,9 @@ export class OpenAISpeechProvider implements SpeechProvider {
     const format = req.format ?? "mp3";
     const deadline = AbortSignal.timeout(this.options.timeoutMs ?? 120_000);
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    let requestId: string | undefined;
     const fail = (code: "TRANSPORT_ERROR" | "HTTP_ERROR" | "INVALID_RESPONSE", status?: number) =>
-      new ProviderError("speech", "create", code, { httpStatus: status, privateValues: [this.options.apiKey] });
+      new ProviderError("speech", "create", code, { httpStatus: status, gatewayRequestId: requestId, privateValues: [this.options.apiKey] });
     // Synthesis is billed per request. Never retry, even when no response arrived.
     let response: Response;
     try {
@@ -49,6 +55,7 @@ export class OpenAISpeechProvider implements SpeechProvider {
         body: JSON.stringify({ model: req.model, input: req.text, voice: req.voice, response_format: format, speed: req.speed, instructions: req.instructions || undefined }),
       });
     } catch { signal?.throwIfAborted(); throw fail("TRANSPORT_ERROR"); }
+    requestId = gatewayRequestId(response.headers);
     if (!response.ok) { await response.body?.cancel().catch(() => {}); throw fail("HTTP_ERROR", response.status); }
     const mime = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() ?? "";
     if (!SPEECH_MIME[format].includes(mime)) { await response.body?.cancel().catch(() => {}); throw fail("INVALID_RESPONSE", response.status); }
@@ -70,6 +77,6 @@ export class OpenAISpeechProvider implements SpeechProvider {
     if (!size) throw fail("INVALID_RESPONSE");
     const audio = new Uint8Array(size); let offset = 0;
     for (const part of parts) { audio.set(part, offset); offset += part.byteLength; }
-    return { audio, mime: SPEECH_MIME[format][0] };
+    return { audio, mime: SPEECH_MIME[format][0], ...(requestId ? { gatewayRequestId: requestId } : {}) };
   }
 }

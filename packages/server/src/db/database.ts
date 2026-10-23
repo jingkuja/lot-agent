@@ -1786,6 +1786,15 @@ export class DB {
     );
   }
 
+  /** Progress of a render that is resumed and runs clips in parallel: a lower value (a clip
+   * restarting, a vendor reporting less) never moves the shown bar back. */
+  async raiseTaskProgress(id: string, progress: number, stage: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE tasks SET progress = GREATEST(COALESCE(progress, 0), $1), stage = $3, updated_at = now() WHERE id = $2",
+      [progress, id, stage]
+    );
+  }
+
   async updateTaskProgress(id: string, progress: number, stage?: string): Promise<void> {
     if (stage === undefined) {
       await this.pool.query(

@@ -13,6 +13,7 @@
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
     "test": "vitest run",
+    "typecheck": "pnpm --filter @lot-agent/core run build && tsc --noEmit -p packages/core && tsc --noEmit -p packages/server && tsc --noEmit -p packages/web",
     "test:knowledge": "pnpm --filter @lot-agent/core run build && vitest run packages/core/src/knowledge packages/server/src/knowledge packages/server/src/services/agent-service.knowledge-source.test.ts packages/server/src/services/rag-client.test.ts",
     "check:knowledge:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-db.ts",
     "check:knowledge:parsers": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-knowledge-parsers.ts",
@@ -49,7 +50,8 @@
     "check:marketing-analysis:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-db.ts",
     "check:marketing-analysis:ui": "node packages/server/scripts/check-marketing-analysis-ui.mjs",
     "check:marketing-analysis:audio-url": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-audio-url.ts",
-    "marketing-analysis:reconcile": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reconcile-marketing-analysis.ts"
+    "marketing-analysis:reconcile": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/reconcile-marketing-analysis.ts",
+    "marketing-video:clean-orphans": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/clean-marketing-orphans.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

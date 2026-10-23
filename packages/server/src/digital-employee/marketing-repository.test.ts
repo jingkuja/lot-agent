@@ -30,7 +30,7 @@ function repositoryWith(query: ReturnType<typeof vi.fn>) {
 
 describe("MarketingMaterialsRepository listProducts", () => {
   it("搜索词通过绑定参数过滤而不是拼接进SQL", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     await repositoryWith(query).listProducts("u1", { query: "会员'; DROP TABLE marketing_products;--", page: 2, limit: 20 });
     const [countSql, countParams] = query.mock.calls[0];
     const [selectSql, selectParams] = query.mock.calls[1];
@@ -45,20 +45,20 @@ describe("MarketingMaterialsRepository listProducts", () => {
   });
 
   it("未提供状态时默认只返回有效产品", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     await repositoryWith(query).listProducts("u1", { page: 1, limit: 20 });
     expect(query.mock.calls[0][1].slice(0, 2)).toEqual(["u1", "active"]);
   });
 
   it("按当前用户和规范名称精确查找有效产品", async () => {
-    const query = vi.fn(async () => ({ rows: [productRow()] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [productRow()] }));
     const result = await repositoryWith(query).findActiveProductByName("u1", "会员版");
     expect(query).toHaveBeenCalledWith(expect.stringContaining("lower(name) = lower($2)"), ["u1", "会员版"]);
     expect(result).toMatchObject({ name: "会员版", status: "active" });
   });
 
   it("从客户原话中查找明确提到的有效产品", async () => {
-    const query = vi.fn(async () => ({ rows: [productRow({ name: "agent代销" })] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [productRow({ name: "agent代销" })] }));
     const result = await repositoryWith(query).findActiveProductsMentionedInText(
       "u1",
       "张老师今天咨询 agent代销，但对于入场金额太高犹豫了"
@@ -81,7 +81,7 @@ describe("MarketingMaterialsRepository listProducts", () => {
 
 describe("MarketingMaterialsRepository products write", () => {
   it("创建产品时JSONB列以JSON字符串写入", async () => {
-    const query = vi.fn(async () => ({ rows: [productRow()] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [productRow()] }));
     await repositoryWith(query).createProduct("u1", "00000000-0000-0000-0000-000000000001", {
       name: "会员版",
       coreValues: ["省心"],
@@ -97,7 +97,7 @@ describe("MarketingMaterialsRepository products write", () => {
   });
 
   it("部分更新时未提供的JSONB字段传null交给COALESCE保留旧值", async () => {
-    const query = vi.fn(async () => ({ rows: [productRow({ version: "4" })] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [productRow({ version: "4" })] }));
     const product = await repositoryWith(query).updateProduct("u1", "00000000-0000-0000-0000-000000000001", {
       positioning: "新定位",
       version: 3,
@@ -108,24 +108,24 @@ describe("MarketingMaterialsRepository products write", () => {
     expect(params[2]).toBe(3);
     expect(params[4]).toBe("新定位");
     expect([params[6], params[7], params[8], params[10]]).toEqual([null, null, null, null]);
-    expect(product.version).toBe(4);
+    expect(product!.version).toBe(4);
   });
 
   it("归档仅在有效且版本匹配的行上生效", async () => {
-    const query = vi.fn(async () => ({ rows: [productRow({ status: "archived", version: "4", archived_at: now })] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [productRow({ status: "archived", version: "4", archived_at: now })] }));
     const product = await repositoryWith(query).archiveProduct("u1", "00000000-0000-0000-0000-000000000001", 3);
     const [sql, params] = query.mock.calls[0];
     expect(sql).toContain("status = 'archived'");
     expect(sql).toContain("version = $3 AND status = 'active'");
     expect(params).toEqual(["u1", "00000000-0000-0000-0000-000000000001", 3]);
-    expect(product.status).toBe("archived");
-    expect(product.archivedAt).toBe(now);
+    expect(product!.status).toBe("archived");
+    expect(product!.archivedAt).toBe(now);
   });
 });
 
 describe("MarketingMaterialsRepository brand assets", () => {
   it("品牌更新携带版本条件并序列化视觉资产", async () => {
-    const query = vi.fn(async () => ({ rows: [{ id: "b1", user_id: "u1", tone: ["专业克制"], visual_assets: [], standard_calls_to_action: ["预约咨询"], version: "3", created_at: now, updated_at: now }] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [{ id: "b1", user_id: "u1", tone: ["专业克制"], visual_assets: [], standard_calls_to_action: ["预约咨询"], version: "3", created_at: now, updated_at: now }] }));
     const brand = await repositoryWith(query).updateBrandAssets("u1", {
       tone: ["专业克制"],
       visualAssets: [{ name: "logo", url: "/static/assets/logo.png" }],
@@ -135,6 +135,6 @@ describe("MarketingMaterialsRepository brand assets", () => {
     const [sql, params] = query.mock.calls[0];
     expect(sql).toContain("WHERE user_id = $1 AND version = $2");
     expect(params).toEqual(["u1", 2, ["专业克制"], '[{"name":"logo","url":"/static/assets/logo.png"}]', ["预约咨询"]]);
-    expect(brand.version).toBe(3);
+    expect(brand!.version).toBe(3);
   });
 });

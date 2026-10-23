@@ -43,7 +43,7 @@ function fakeService(
     usageMeter: { record: vi.fn(async () => 0) },
     generateTitle: AgentService.prototype.generateTitle,
   };
-  return fake as unknown as AgentService & typeof fake;
+  return fake;
 }
 
 describe("generateTitle model resolution", () => {

@@ -3,7 +3,7 @@ import { OpportunityService } from "./opportunity-service.js";
 
 describe("OpportunityService settings", () => {
   it("uses consistent explicit parameter types when saving settings", async () => {
-    const query = vi.fn(async () => ({
+    const query = vi.fn(async (_sql: string, _params?: any[]) => ({
       rows: [{
         enabled: true,
         timezone: "Asia/Shanghai",
@@ -31,7 +31,7 @@ describe("OpportunityService settings", () => {
 
   it("casts the next-run timestamp so Postgres does not treat Date+$interval as interval", async () => {
     const now = new Date("2026-08-20T01:00:00.000Z");
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_automation_settings")) {
         return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
       }
@@ -57,7 +57,7 @@ describe("OpportunityService settings", () => {
   });
 
   it("retries today's failed discovery instead of blocking on the unique daily row", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) return { rows: [] };
       if (sql.includes("SELECT id, task_id, status FROM de_follow_up_suggestion_runs")) {
         return { rows: [{ id: "run-1", task_id: null, status: "failed" }] };
@@ -78,7 +78,7 @@ describe("OpportunityService settings", () => {
 
   it("starts a fresh task for every manual discovery request", async () => {
     const insertedIds = ["run-1", "run-2"];
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) {
         return { rows: [{ id: insertedIds.shift() }] };
       }
@@ -105,7 +105,7 @@ describe("OpportunityService settings", () => {
 
   it("does not advance next_run_at when daily enqueue fails", async () => {
     const now = new Date("2026-08-20T01:00:00.000Z");
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_automation_settings")) {
         return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
       }
@@ -126,7 +126,7 @@ describe("OpportunityService settings", () => {
 
   it("retries a same-day enqueue_failed run on the next scan without skipping the schedule", async () => {
     const now = new Date("2026-08-20T01:00:00.000Z");
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_automation_settings") && sql.includes("next_run_at")) {
         return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
       }
@@ -146,7 +146,7 @@ describe("OpportunityService settings", () => {
 
   it("advances the schedule for an already queued same-day run without enqueueing again", async () => {
     const now = new Date("2026-08-20T01:00:00.000Z");
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_automation_settings") && sql.includes("next_run_at")) {
         return { rows: [{ user_id: "u1", timezone: "Asia/Shanghai" }] };
       }
@@ -167,7 +167,7 @@ describe("OpportunityService settings", () => {
 
 describe("OpportunityService personal work queue", () => {
   it("builds the today view from due actions and pending results", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_automation_settings")) return { rows: [] };
       if (sql.includes("FROM de_follow_up_suggestion_runs")) return { rows: [] };
       if (sql.includes("count(*)::int AS count FROM de_customer_profiles")) return { rows: [{ count: 1 }] };
@@ -197,7 +197,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("returns zero for every opportunity view when there is no data", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_automation_settings")) return { rows: [] };
       if (sql.includes("FROM de_follow_up_suggestion_runs")) return { rows: [] };
       if (sql.includes("count(*)::int AS count FROM de_customer_profiles")) return { rows: [{ count: 0 }] };
@@ -214,7 +214,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("lists currently snoozed suggestions in the later queue", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_automation_settings")) return { rows: [] };
       if (sql.includes("FROM de_follow_up_suggestion_runs")) return { rows: [] };
       if (sql.includes("count(*)::int AS count FROM de_customer_profiles")) return { rows: [{ count: 1 }] };
@@ -233,7 +233,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("cancels open tasks and dismisses suggestions when a profile is archived", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     const service = new OpportunityService({ pool: { query } } as any);
     await service.cancelOpenWorkForProfile("u1", "p1");
     const sql = query.mock.calls.map((call) => String(call[0])).join("\n");
@@ -243,7 +243,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("excludes archived customers from the pending suggestion queue", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_automation_settings")) return { rows: [] };
       if (sql.includes("FROM de_follow_up_suggestion_runs")) return { rows: [] };
       if (sql.includes("count(*)::int AS count FROM de_customer_profiles")) return { rows: [{ count: 1 }] };
@@ -257,7 +257,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("accepts a personal opportunity without creating an acquisition content project", async () => {
-    const clientQuery = vi.fn(async (sql: string) => {
+    const clientQuery = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_suggestions suggestion")) {
         return { rows: [{
           id: "o1", status: "suggested", profile_id: "p1", display_name: "李静", organization: "星海科技",
@@ -278,7 +278,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("generates a conversational talk track from the selected customer context", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_tasks task")) return { rows: [{
         id: "o1", action_id: "a1", profile_id: "p1", action_status: "pending", action_source: "manual",
         display_name: "李姐", organization: "星海科技", relationship_stage: "prospect",
@@ -317,7 +317,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("persists generated outreach against the selected customer", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_tasks task")) return { rows: [{
         id: "o1", action_id: "a1", profile_id: "p1", action_status: "pending", action_source: "manual",
         display_name: "李静", organization: null, relationship_stage: "prospect",
@@ -350,7 +350,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("writes a contact observation and refreshes profile cadence when a result is recorded", async () => {
-    const clientQuery = vi.fn(async (sql: string) => {
+    const clientQuery = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_tasks WHERE id")) {
         return { rows: [{
           id: "a1", user_id: "u1", profile_id: "p1", status: "awaiting_result",
@@ -389,7 +389,7 @@ describe("OpportunityService personal work queue", () => {
   });
 
   it("marks last contact when an action is executed, even before the result is filled in", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("RETURNING *") && sql.includes("executed_at")) {
         return { rows: [{ id: "a1", profile_id: "p1", executed_at: "2026-08-20T05:00:00.000Z" }] };
       }

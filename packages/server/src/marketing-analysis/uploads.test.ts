@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -34,7 +34,7 @@ async function fixture() {
     return { rows: [], rowCount: 0 };
   });
   const pool = { query, connect: async () => ({ query, release: vi.fn() }) } as unknown as pg.Pool;
-  const input = { pool, storage, owner: "owner", id: randomUUID(), name: "本地爆款.mp4", mime: "video/mp4", bytes };
+  const input = { pool, storage, owner: "owner", id: randomUUID(), name: "本地爆款.mp4", mime: "video/mp4", body: [bytes] };
   return { root, storage, rows, query, pool, input };
 }
 
@@ -65,9 +65,12 @@ it("stores private bytes idempotently and refuses another owner or changed bytes
   expect(result).toEqual({ id: input.id, name: "本地爆款.mp4" });
   expect(await readFile(join(await storage.uploadDirectory(input.owner, input.id), "source.mp4"))).toEqual(bytes);
   expect(await storeAnalysisUpload(input)).toEqual(result);
-  expect(storage.assertCapacity).toHaveBeenCalledTimes(1);
+  // Before streaming and under the lock, for the first request only.
+  expect(storage.assertCapacity).toHaveBeenCalledTimes(2);
+  // Nothing staged is left behind.
+  expect((await readdir(await storage.uploadDirectory(input.owner, input.id))).sort()).toEqual(["source.mp4"]);
   await expect(storeAnalysisUpload({ ...input, owner: "other" })).rejects.toThrow("REQUEST_CONFLICT");
-  await expect(storeAnalysisUpload({ ...input, bytes: Buffer.concat([bytes, Buffer.from([1])]) })).rejects.toThrow("REQUEST_CONFLICT");
+  await expect(storeAnalysisUpload({ ...input, body: [Buffer.concat([bytes, Buffer.from([1])])] })).rejects.toThrow("REQUEST_CONFLICT");
   await expect(ownedAnalysisUpload(input.pool, "other", input.id)).rejects.toThrow("UPLOAD_NOT_FOUND");
   rows.get(input.id).expired_at = new Date();
   await expect(ownedAnalysisUpload(input.pool, input.owner, input.id)).rejects.toThrow("UPLOAD_EXPIRED");
@@ -111,4 +114,24 @@ it("accepts authenticated multipart uploads through the bounded analysis route a
   const invalid = await app.request("/analysis/uploads", { method: "POST", headers: { authorization: "Bearer owner" }, body: body(Buffer.from("not a video")) });
   expect(invalid.status).toBe(400); expect(await invalid.json()).toEqual({ error: "UPLOAD_FORMAT", code: "UPLOAD_FORMAT" });
   expect((await app.request("/analysis/uploads", { method: "POST", headers: { authorization: "Bearer owner", "content-length": String(102 * 1024 * 1024) }, body: "oversized" })).status).toBe(413);
+});
+
+it("streams a raw upload with its name and request ID from the headers and URL", async () => {
+  const { pool, storage } = await fixture();
+  const app = new Hono<{ Variables: { userId: string } }>();
+  app.use("*", async (c, next) => { c.set("userId", "owner"); await next(); });
+  app.route("/analysis", createAnalysisRoutes({ db: { pool } } as any, storage.root, { storage, config: { ...analysisConfig(), enabled: true } }));
+  const id = randomUUID();
+  const raw = (body: ConstructorParameters<typeof Response>[0], type = "video/mp4") => app.request(`/analysis/uploads?clientRequestId=${id}`, { method: "POST",
+    headers: { "content-type": type, "x-file-name": encodeURIComponent("门店 爆款.mp4") }, body });
+  const result = await raw(bytes);
+  expect(result.status).toBe(201); expect(await result.json()).toEqual({ id, name: "门店 爆款.mp4" });
+  expect(await readFile(join(await storage.uploadDirectory("owner", id), "source.mp4"))).toEqual(bytes);
+  expect((await raw(bytes, "video/x-msvideo")).status).toBe(400);
+  // Over 100 MB without a Content-Length: stopped while streaming, nothing kept.
+  const other = randomUUID(); const chunk = new Uint8Array(1024 * 1024); let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({ pull(controller) { if (sent++ < 110) controller.enqueue(chunk); else controller.close(); } });
+  const large = await app.request(`/analysis/uploads?clientRequestId=${other}`, { method: "POST", headers: { "content-type": "video/mp4" }, body: stream, duplex: "half" } as RequestInit);
+  expect(large.status).toBe(413);
+  expect(await readdir(await storage.uploadDirectory("owner", other))).toEqual([]);
 });

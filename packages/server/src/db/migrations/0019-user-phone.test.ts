@@ -4,7 +4,7 @@ import { userPhone } from "./0019-user-phone.js";
 
 describe("user phone migration", () => {
   it("adds the local display-safe phone column", async () => {
-    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [], rowCount: 0 }));
 
     await userPhone.up({ query } as any);
 

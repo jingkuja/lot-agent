@@ -167,7 +167,7 @@ describe("HttpVideoGenerationProvider", () => {
     const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "vm" });
     const r = await p.create({ prompt: "hi" });
     expect(r).toEqual({ taskId: "task_1", status: "queued", progress: 0 });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://api/v1/video/generations");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer k");
     expect(JSON.parse(init.body as string)).toMatchObject({ model: "vm", prompt: "hi" });
@@ -178,7 +178,7 @@ describe("HttpVideoGenerationProvider", () => {
     const p = new HttpVideoGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseVideoAdapter(), model: "vm" });
     const r = await p.poll("task_1");
     expect(r.status).toBe("completed");
-    expect((fetchMock.mock.calls[0] as [string])[0]).toBe("https://api/v1/videos/task_1");
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe("https://api/v1/videos/task_1");
   });
   it("create keeps HTTP status without copying vendor text", async () => {
     // The real tokenhub /video/generations response for an unsubscribed model:

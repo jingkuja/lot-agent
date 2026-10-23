@@ -13,6 +13,7 @@ import type { AttachmentRef } from "./attachment-extractor.js";
 function fakeStorage(bytes: Buffer): ObjectStorage {
   return {
     put: async () => ({ url: "" }),
+    putStream: async () => ({ url: "" }), exists: async () => true,
     getUrl: () => "",
     delete: async () => {},
     get: async () => bytes,
@@ -89,6 +90,7 @@ describe("extractAttachment", () => {
     let read = false;
     const s: ObjectStorage = {
       put: async () => ({ url: "" }),
+    putStream: async () => ({ url: "" }), exists: async () => true,
       getUrl: () => "",
       delete: async () => {},
       get: async () => {
@@ -107,6 +109,7 @@ describe("extractAttachment", () => {
   it("degrades gracefully when the stored file is missing", async () => {
     const s: ObjectStorage = {
       put: async () => ({ url: "" }),
+    putStream: async () => ({ url: "" }), exists: async () => true,
       getUrl: () => "",
       delete: async () => {},
       get: async () => {

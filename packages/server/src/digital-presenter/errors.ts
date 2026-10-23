@@ -4,7 +4,7 @@ export class PresenterError extends Error {
 }
 
 export const PRESENTER_FAILURE_CODES = ["JOB_BUSY", "NOT_RECOVERABLE", "INPUT_INVALID", "CONFIG_MISSING", "MODEL_AUTH_REQUIRED", "SUBMISSION_UNKNOWN", "STATUS_UNCONFIRMED",
-  "GENERATION_FAILED", "REJECTED", "TIMED_OUT", "DOWNLOAD_INCOMPLETE", "QUALITY_CHECK_FAILED", "COMPOSITION_FAILED", "UNKNOWN"] as const;
+  "GENERATION_FAILED", "REJECTED", "GATEWAY_FAILED", "TIMED_OUT", "DOWNLOAD_INCOMPLETE", "QUALITY_CHECK_FAILED", "COMPOSITION_FAILED", "UNKNOWN"] as const;
 export type PresenterFailureCode = typeof PRESENTER_FAILURE_CODES[number];
 export const isPresenterFailureCode = (value: unknown): value is PresenterFailureCode => (PRESENTER_FAILURE_CODES as readonly unknown[]).includes(value);
 

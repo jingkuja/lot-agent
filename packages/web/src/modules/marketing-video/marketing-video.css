@@ -351,6 +351,9 @@
 .mv-shot.mv-shot-redo { border-color: var(--accent); }
 .mv-shot .mv-checkbox { margin: 10px 0 0; font-size: 12px; }
 .mv-shot .mv-checkbox em { font-style: normal; font-weight: 550; color: var(--text-secondary); }
+.mv-shot-clip { margin: 10px 0 0; font-size: 12px; }
+.mv-shot-clip summary { cursor: pointer; color: var(--accent); font-weight: 550; }
+.mv-shot-clip video { display: block; max-width: 100%; max-height: 320px; margin: 8px auto 0; border-radius: var(--radius-md); background: var(--bg); }
 
 /* Text request state beside the step buttons */
 .mv-dock > .ma-panel { margin: 0; }

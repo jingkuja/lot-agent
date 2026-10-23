@@ -55,7 +55,7 @@ function mount() {
     create: vi.fn().mockResolvedValue({ transactionId: "LV123456", status: "pending", paymentKind: "virtual", virtualPay: { mode: "short_series_goods", signData: '{"env":0}', paySig: "payment-signature" } }),
     status: vi.fn().mockResolvedValue(null),
   } satisfies MiniPaymentService;
-  const app = new Hono();
+  const app = new Hono<{ Variables: { userId: string } }>();
   app.use("*", async (c, next) => { c.set("userId", "local-1"); await next(); });
   app.route("/", createRechargeRoutes(service, payments));
   return { app, service, payments };
@@ -165,7 +165,7 @@ describe("managed recharge routes", () => {
     expect(mockedExchange).toHaveBeenCalledWith("wxcode-1");
     expect(payments.create).toHaveBeenCalledWith({ userId: "local-1", externalUserId: 7, points: 1000, openid: "oMiniUser123", platform: "other", expectedAmountFen: 1000 });
     expect(service.tokenhub.createManagedRechargeOrder).not.toHaveBeenCalled();
-    const data = await response.json();
+    const data: any = await response.json();
     expect(data.virtualPay.signature).toBe(createHmac("sha256", "private-session").update(data.virtualPay.signData).digest("hex"));
     expect(JSON.stringify(data)).not.toContain("private-session");
   });
@@ -217,7 +217,7 @@ describe("mini-program payer and recharge account", () => {
     expect(payments.create).toHaveBeenCalledWith({
       userId: "local-1", externalUserId: 7, points: 1, openid: "current-payer", platform: "other", expectedAmountFen: 1,
     });
-    const data = await response.json();
+    const data: any = await response.json();
     expect(data.virtualPay.signature).toBe(createHmac("sha256", "payer-session-key").update(data.virtualPay.signData).digest("hex"));
     expect(JSON.stringify(data)).not.toContain("payer-session-key");
     expect(service.tokenhub.createManagedRechargeOrder).not.toHaveBeenCalled();

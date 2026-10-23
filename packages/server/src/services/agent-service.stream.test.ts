@@ -190,13 +190,13 @@ describe("streamAgentResponse tool-result persistence", () => {
 
     // One assistant message carrying BOTH tool calls…
     expect(repo.saveAssistantWithToolCalls).toHaveBeenCalledTimes(1);
-    const savedCalls = repo.saveAssistantWithToolCalls.mock.calls[0][2] as {
+    const savedCalls = (repo.saveAssistantWithToolCalls.mock.calls[0] as unknown[])[2] as {
       id: string;
     }[];
     expect(savedCalls.map((tc) => tc.id)).toEqual(["a", "b"]);
     // …and BOTH results persisted, each under its own call id.
     expect(repo.saveToolResult).toHaveBeenCalledTimes(2);
-    expect(repo.saveToolResult.mock.calls.map((c) => [c[1], c[2]])).toEqual([
+    expect((repo.saveToolResult.mock.calls as unknown[][]).map((c) => [c[1], c[2]])).toEqual([
       ["a", "out-1"],
       ["b", "out-2"],
     ]);
@@ -217,7 +217,7 @@ describe("streamAgentResponse usage metering", () => {
     );
 
     expect(usageMeter.record).toHaveBeenCalledTimes(2);
-    expect(usageMeter.record.mock.calls[0][0]).toMatchObject({
+    expect((usageMeter.record.mock.calls[0] as unknown[])[0]).toMatchObject({
       userId: "u1",
       modelId: "m-explicit",
       usage: { inputCount: 7, outputCount: 3 },
@@ -232,7 +232,7 @@ describe("streamAgentResponse usage metering", () => {
 
     await drain(fake.streamAgentResponse("c1", "hi", "general", "u1"));
 
-    expect(usageMeter.record.mock.calls[0][0]).toMatchObject({ modelId: "m-conv" });
+    expect((usageMeter.record.mock.calls[0] as unknown[])[0]).toMatchObject({ modelId: "m-conv" });
   });
 });
 

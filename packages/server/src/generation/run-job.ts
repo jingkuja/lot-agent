@@ -42,7 +42,8 @@ export interface RunJobDeps {
   prepareKlingVoices?: (input: PrepareKlingVoicesInput) => Promise<ReferenceInput>;
   /** Voice checkpoint owner when it is not this job: a marketing parent shares one voice per sample across its clips. */
   voiceScopeTaskId?: string;
-  storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }> };
+  storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }>;
+    putStream(key: string, body: NodeJS.ReadableStream, contentType: string, sizeHint?: number): Promise<{ url: string }> };
   db: {
     getAsset(id: string): Promise<{ user_id: string } | null | undefined>;
     createAsset(a: Record<string, unknown>): Promise<void>;

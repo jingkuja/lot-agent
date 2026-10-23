@@ -222,12 +222,12 @@ describe("clientIp", () => {
     const res = await app.request("/ip", {
       headers: { "x-forwarded-for": " 1.2.3.4 , 5.6.7.8" },
     });
-    expect((await res.json()).ip).toBe("1.2.3.4");
+    expect((await res.json() as any).ip).toBe("1.2.3.4");
   });
 
   it("falls back to 'unknown' when no header and no socket info", async () => {
     const app = buildIpApp();
     const res = await app.request("/ip");
-    expect((await res.json()).ip).toBe("unknown");
+    expect((await res.json() as any).ip).toBe("unknown");
   });
 });

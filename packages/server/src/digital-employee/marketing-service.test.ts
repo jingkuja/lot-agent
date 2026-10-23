@@ -47,12 +47,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 describe("MarketingMaterialsService products", () => {
   it("查询不到产品时抛出NotFoundError", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     await expect(serviceWith(query).getProduct("u1", "missing")).rejects.toThrow(NotFoundError);
   });
 
   it("创建产品时生成新ID并按用户落库", async () => {
-    const query = vi.fn(async () => ({ rows: [productRow()] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [productRow()] }));
     const product = await serviceWith(query).createProduct("u1", { name: "会员版" });
     expect(product.name).toBe("会员版");
     expect(product.verifiableFacts).toEqual([{ statement: "支持7天无理由退订", evidence: "官网公告" }]);
@@ -68,7 +68,7 @@ describe("MarketingMaterialsService products", () => {
   });
 
   it("更新命中时返回递增版本的产品", async () => {
-    const query = vi.fn(async () => ({ rows: [productRow({ version: 4 })] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [productRow({ version: 4 })] }));
     const product = await serviceWith(query).updateProduct("u1", "00000000-0000-0000-0000-000000000001", { positioning: "新定位", version: 3 });
     expect(product.version).toBe(4);
     expect(query).toHaveBeenCalledTimes(1);
@@ -101,7 +101,7 @@ describe("MarketingMaterialsService products", () => {
       .mockResolvedValueOnce({ rows: [] });
     await expect(serviceWith(missing).archiveProduct("u1", "missing", 1)).rejects.toThrow(NotFoundError);
 
-    const archived = vi.fn(async () => ({ rows: [productRow({ status: "archived", version: 4, archived_at: now })] }));
+    const archived = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [productRow({ status: "archived", version: 4, archived_at: now })] }));
     const result = await serviceWith(archived).archiveProduct("u1", "00000000-0000-0000-0000-000000000001", 3);
     expect(result.status).toBe("archived");
     expect(result.archivedAt).toBe(now);
@@ -126,7 +126,7 @@ describe("MarketingMaterialsService brand assets", () => {
   });
 
   it("品牌资料已存在时不带version的保存被拒绝", async () => {
-    const query = vi.fn(async () => ({ rows: [brandRow()] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [brandRow()] }));
     await expect(serviceWith(query).saveBrandAssets("u1", { tone: ["热情"] })).rejects.toThrow("品牌资料已存在，请刷新后再保存");
     expect(query).toHaveBeenCalledTimes(1);
   });

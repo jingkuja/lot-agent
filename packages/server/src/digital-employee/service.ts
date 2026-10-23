@@ -410,7 +410,7 @@ export class DigitalEmployeeService {
 
       let saved: StoredCustomerProfile;
       if (draft.operation === "create") {
-        const create = draft.proposedPatch as CreateCustomerProfileInput;
+        const create = draft.proposedPatch as unknown as CreateCustomerProfileInput;
         const profileId = randomUUID();
         saved = await this.repository.createProfile(
           this.newProfileRow(userId, profileId, create, buildProfileSummary(profileSummaryInput(create), [])),

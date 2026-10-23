@@ -11,6 +11,8 @@ const FAILURES: Record<string, { reason: string; next: string; resume?: boolean 
   DOWNLOAD_INCOMPLETE: { reason: "片段已生成，但下载未完成。", next: "点击继续生成重新下载原片段，不会重复计费。", resume: true },
   TIMED_OUT: { reason: "片段等待时间过长。", next: "点击继续生成会继续查询原片段。", resume: true },
   GENERATION_FAILED: { reason: "模型未能生成片段，通常是肖像或底片中的人脸不清晰。", next: "可直接继续生成重试失败的片段，或复制为新草稿更换素材。", resume: true },
+  // The gateway answered with an error: treated as not charged, so no duplicate-charge confirmation.
+  GATEWAY_FAILED: { reason: "数字人视频模型服务暂时出错，部分片段没有生成。", next: "请稍后点击继续生成，只会重新提交这些片段，已完成的片段不会重做。", resume: true },
   REJECTED: { reason: "模型拒绝了本次请求。", next: "检查模型账号、素材后继续生成，或复制为新草稿修改。", resume: true },
   INPUT_INVALID: { reason: "素材不符合模型要求。", next: "复制为新草稿，更换肖像或底片后重新生成。" },
   COMPOSITION_FAILED: { reason: "片段已全部生成，合成成片时出错。", next: "点击继续生成重新合成，不会再次调用模型。", resume: true },

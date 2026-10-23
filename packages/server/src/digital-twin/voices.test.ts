@@ -210,7 +210,7 @@ describe("authenticated enrollment routes", () => {
     const f = app("owner");
     vi.mocked(f.provider.create).mockRejectedValueOnce(new ProviderError("qwen-voice", "create", "TASK_FAILED", { httpStatus: 200 }));
     const refused = await f.app.request(`/items/${id}/voice`, { method: "POST" });
-    const body = await refused.json();
+    const body: any = await refused.json();
     expect(refused.status).toBe(503); expect(body).toMatchObject({ error: { message: "千问未接受本次声音复刻，请联系管理员查看错误原因" } });
     expect(log).toHaveBeenCalledOnce();
     expect(JSON.parse(log.mock.calls[0][1])).toMatchObject({ itemId: id, requestId: body.request_id, outcome: "rejected", httpStatus: 200 });
@@ -236,7 +236,7 @@ describe("authenticated enrollment routes", () => {
     vi.mocked(f.provider.create).mockRejectedValueOnce(new QwenVoiceError("create", httpStatus === 200 ? "TASK_FAILED" : "HTTP_ERROR", { httpStatus, vendorCode }));
     const result = await f.app.request(`/items/${id}/voice`, { method: "POST" });
     expect(result.status).toBe(503);
-    expect((await result.json()).error.message).toContain(message);
+    expect((await result.json() as any).error.message).toContain(message);
     expect(f.provider.create).toHaveBeenCalledOnce();
     if (httpStatus === 502 || httpStatus === 408) {
       expect(f.store.release).not.toHaveBeenCalled();
@@ -253,7 +253,7 @@ describe("authenticated enrollment routes", () => {
     vi.stubGlobal("fetch", fetcher);
     vi.mocked(f.provider.create).mockImplementationOnce((input, signal) => new HttpQwenVoiceProvider(f.config).create(input, signal));
     const result = await f.app.request(`/items/${id}/voice`, { method: "POST", headers: { Authorization: "Bearer session-token" } });
-    const body = await result.json();
+    const body: any = await result.json();
     expect(JSON.parse(log.mock.calls[0][1])).toMatchObject({
       requestId: body.request_id, upstreamRequestId: "req-abcdef123456",
       vendorCode: "BadRequest.InputDownloadFailed", phase: "create", httpStatus: 400,
@@ -261,16 +261,16 @@ describe("authenticated enrollment routes", () => {
     await f.enroll();
     vi.mocked(f.provider.query).mockImplementationOnce((voiceId, signal) => new HttpQwenVoiceProvider(f.config).query(voiceId, signal));
     const poll = await f.app.request(`/items/${id}/voice`, { method: "POST" });
-    expect((await poll.json()).error.message).toContain("刷新音色状态核实");
+    expect((await poll.json() as any).error.message).toContain("刷新音色状态核实");
     expect(JSON.parse(log.mock.calls[1][1])).toMatchObject({ phase: "poll", code: "TRANSPORT_ERROR", outcome: "unconfirmed" });
     expect(JSON.stringify(log.mock.calls) + JSON.stringify(body)).not.toMatch(/secret|session-token|temporary-ticket|private.example/);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
   it("reads persisted state without vendor I/O and ignores caller-supplied model/url/owner", async () => {
     const f = app("owner");
-    const read = await f.app.request(`/items/${id}/voice`); expect(await read.json()).toEqual({ voice: null }); expect(f.provider.create).not.toHaveBeenCalled();
+    const read = await f.app.request(`/items/${id}/voice`); expect(await read.json() as any).toEqual({ voice: null }); expect(f.provider.create).not.toHaveBeenCalled();
     const result = await f.app.request(`/items/${id}/voice`, { method: "POST", headers: { Authorization: "Bearer session-token" }, body: JSON.stringify({ ownerId: "other", target_model: "wrong", url: "http://localhost/private" }) });
-    expect(result.status).toBe(200); expect(await result.json()).toMatchObject({ voice: { targetModel: f.config.targetModel, status: "DEPLOYING" } });
+    expect(result.status).toBe(200); expect(await result.json() as any).toMatchObject({ voice: { targetModel: f.config.targetModel, status: "DEPLOYING" } });
     expect(await (await f.app.request(`/items/${id}/voice`)).json()).toMatchObject({ voice: { voiceId: "qwen-voice-1" } });
   });
   it("returns synthesized audio and ignores caller-supplied model or voice", async () => {

@@ -97,13 +97,14 @@ describe.skipIf(!testUrl)("admin marketing metrics and reconciliation on Postgre
     expect(m.unknownBacklog.presenterClips).toEqual({ count: 0, oldestSec: null });
     expect(m.concurrency).toEqual({ concurrency: 2, perUser: 1, segments: 2 });
     expect(m.gateway5xx).toEqual({ 502: 1 });
+    expect(m.presenterGateway5xx).toEqual({});
     expect(m.textRequests).toEqual([{ kind: "copy", model: "kimi-k3", total: 2, statuses: { succeeded: 1, unknown: 1 },
       respondedSec: expect.objectContaining({ n: 1, p95: expect.closeTo(40, 0) }) }]);
     expect(m.unknownBacklog.textRequests).toMatchObject({ count: 1 });
   });
 
   it("lists charges to check against the gateway logs, with gateway account IDs and no keys", async () => {
-    await db.pool.query("TRUNCATE tasks, marketing_text_operations, marketing_clip_gateway_failures CASCADE");
+    await db.pool.query("TRUNCATE tasks, marketing_text_operations, marketing_clip_gateway_failures, digital_presenter_clip_gateway_failures CASCADE");
     const user = randomUUID();
     await db.pool.query("INSERT INTO users(id,name,external_user_id,managed_token_id,managed_api_key) VALUES($1,'gateway user',42,7,'sk-secret')", [user]);
     const project = randomUUID();
@@ -125,15 +126,19 @@ describe.skipIf(!testUrl)("admin marketing metrics and reconciliation on Postgre
     await db.pool.query("UPDATE tasks SET user_id=$2, status='failed', vendor_task_id=$3 WHERE id=$1", [clip, user, UNKNOWN_SUBMISSION]);
     await db.pool.query("INSERT INTO marketing_video_segments(project_id,slot,task_id,script,duration_sec) VALUES($1,2,$2,'s',5)", [project, clip]);
     await db.pool.query("INSERT INTO marketing_clip_gateway_failures(owner_id,project_id,task_id,http_status,gateway_request_id) VALUES($1,$2,$3,503,'req-5xx')", [user, project, clip]);
+    await db.pool.query(`INSERT INTO digital_presenter_clip_gateway_failures(owner_id,project_id,task_id,slot,model,http_status,gateway_request_id)
+      VALUES($1,$2,$3,1,'wan2.2-s2v',502,'req-presenter')`, [user, randomUUID(), randomUUID()]);
     await db.pool.query(`INSERT INTO marketing_video_narrations(owner_id,project_id,slot,narration_key,status,updated_at)
       VALUES($1,$2,0,'k','running',now() - interval '1 hour'),($1,$2,1,'k','running',now())`, [user, project]);
 
     const r = await marketingReconciliation(db.pool, 24);
-    expect(r.counts).toEqual({ text_no_response: 1, text_unknown: 1, text_released: 1, clip_gateway_5xx: 1, clip_unknown: 1, narration_stuck: 1 });
+    expect(r.counts).toEqual({ text_no_response: 1, text_unknown: 1, text_released: 1, clip_gateway_5xx: 1, clip_unknown: 1, narration_stuck: 1, presenter_clip_gateway_5xx: 1 });
     expect(r.truncated).toEqual([]);
     expect(r.items.find(i => i.category === "text_no_response")).toMatchObject({ expectedCharge: "none", open: false, recordId: noResponse,
       gatewayRequestId: "req-cancelled", gatewayUserId: "42", gatewayTokenId: "7", requestKind: "review", model: "flash" });
     expect(r.items.find(i => i.category === "clip_gateway_5xx")).toMatchObject({ expectedCharge: "none", taskId: clip, model: "grok", httpStatus: 503, gatewayRequestId: "req-5xx" });
+    expect(r.items.find(i => i.category === "presenter_clip_gateway_5xx")).toMatchObject({ expectedCharge: "none", slot: 1, model: "wan2.2-s2v", httpStatus: 502,
+      gatewayRequestId: "req-presenter", gatewayUserId: "42" });
     expect(r.items.find(i => i.category === "clip_unknown")).toMatchObject({ expectedCharge: "unknown", open: true, projectId: project, taskId: clip, slot: 2, model: "grok" });
     expect(r.items.find(i => i.category === "narration_stuck")).toMatchObject({ slot: 0, ageHours: 1 });
     expect(JSON.stringify(r)).not.toContain("sk-secret");

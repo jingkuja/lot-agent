@@ -104,3 +104,21 @@ describe("marketing twin narration", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });
+
+describe("narration space", () => {
+  it("counts every take file of the owner's drafts and ignores other folders", async () => {
+    const root = await mkdtemp(join(tmpdir(), "narration-bytes-"));
+    try {
+      const other = "22222222-2222-4222-8222-222222222222";
+      for (const [folder, bytes] of [[projectId, 300], [other, 50]] as const) {
+        await mkdir(join(root, "marketing-narration", folder), { recursive: true });
+        await writeFile(join(root, "marketing-narration", folder, "a.wav"), Buffer.alloc(bytes));
+      }
+      await writeFile(join(root, "marketing-narration", projectId, "b.wav"), Buffer.alloc(200));
+      const query = vi.fn(async () => ({ rows: [{ id: projectId }, { id: "44444444-4444-4444-8444-444444444444" }] }));
+      const narrator = new MarketingNarrator({ query } as never, root);
+      expect(await narrator.ownerBytes("owner")).toBe(500);
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("WHERE user_id=$1"), ["owner"]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+});

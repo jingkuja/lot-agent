@@ -4,7 +4,7 @@ import { migrations } from "./index.js";
 
 describe("customer acquisition migration", () => {
   it("registers the independent cohort-marketing lifecycle", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     await customerAcquisition.up({ query } as any);
     const ddl = query.mock.calls.map((call) => String(call[0])).join("\n");
     expect(customerAcquisition.version).toBe(13);

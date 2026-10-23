@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile, rm, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { inspectMedia, composeMarketingVideo, detectedIntervals, mediaCapabilities, narrationPauses, qualityIssues } from "./media.js";
@@ -69,7 +69,7 @@ describe("composition readiness probe", () => {
       spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=24000", "-t", "2", voice]);
       const segments = [0, 1, 2].map(index => ({ index, script: "欢迎", durationSec: 5 }));
       const result = await composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => voice), speech: true, segments });
-      const final = join(root, "final.mp4"); await writeFile(final, result.body);
+      const final = join(root, "final.mp4"); await copyFile(result.file, final); await result.dispose();
       expect((await inspectMedia(final)).duration).toBeCloseTo(15, 0);
       const volume = spawnSync("ffmpeg", ["-v", "info", "-i", final, "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" }).stderr;
       expect(volume).toMatch(/max_volume: -(9[0-9]|inf)/);
@@ -103,7 +103,7 @@ describe("composition readiness probe", () => {
       spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=24000:duration=2", voice]);
       const segments = [0, 1, 2].map(index => ({ index, script: "欢迎光临 Price ¥19.9", durationSec: 5 }));
       const result = await composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => voice), subtitles: true, segments });
-      const final = join(root, "final.mp4"); await writeFile(final, result.body);
+      const final = join(root, "final.mp4"); await copyFile(result.file, final); await result.dispose();
       // Brightest pixel of the caption band: white text on the black clip while spoken, nothing after.
       const peak = (at: number) => Number(/YMAX=(\d+)/.exec(spawnSync("ffmpeg", ["-v", "error", "-ss", String(at), "-i", final, "-frames:v", "1",
         "-vf", "crop=iw:ih*0.2:0:ih*0.65,signalstats,metadata=mode=print:key=lavfi.signalstats.YMAX:file=-", "-f", "null", "-"], { encoding: "utf8" }).stdout)?.[1]);
@@ -129,7 +129,7 @@ describe("composition readiness probe", () => {
       expect(result.captions![0].end).toBeCloseTo(3.5, 1);
       expect(result.captions![1].start).toBeCloseTo(6.4, 1);
       expect(result.captions![2].start).toBeCloseTo(10.9, 1);
-      const final = join(root, "final.mp4"); await writeFile(final, result.body);
+      const final = join(root, "final.mp4"); await copyFile(result.file, final); await result.dispose();
       const peak = (at: number) => Number(/YMAX=(\d+)/.exec(spawnSync("ffmpeg", ["-v", "error", "-ss", String(at), "-i", final, "-frames:v", "1",
         "-vf", "crop=iw:ih*0.2:0:ih*0.65,signalstats,metadata=mode=print:key=lavfi.signalstats.YMAX:file=-", "-f", "null", "-"], { encoding: "utf8" }).stdout)?.[1]);
       expect(peak(2)).toBeGreaterThan(200);

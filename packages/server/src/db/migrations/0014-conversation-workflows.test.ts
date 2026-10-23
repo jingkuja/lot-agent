@@ -4,7 +4,7 @@ import { migrations } from "./index.js";
 
 describe("conversation workflow migration", () => {
   it("adds confirmation drafts, outreach versions and campaign results", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     await conversationWorkflows.up({ query } as any);
     const ddl = query.mock.calls.map((call) => String(call[0])).join("\n");
     expect(conversationWorkflows.version).toBe(14);

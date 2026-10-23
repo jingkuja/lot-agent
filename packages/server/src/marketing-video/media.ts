@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { mkdtemp, open, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep, join } from "node:path";
 import { isMarketingDurationValid, marketingCaptionLines, marketingCaptionOffset, marketingFrameSize, type MarketingCaption, type MarketingDraft, type MarketingQualityIssue, type MarketingQualityReport, type MarketingSegment } from "@lot-agent/core/marketing-video";
@@ -199,6 +200,7 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
     || input.segments.some((segment, index) => segment.index !== index || !Number.isInteger(segment.durationSec) || segment.durationSec < 4 || segment.durationSec > 15)
     || !isMarketingDurationValid(input.draft.durationSec, durationSec)) throw new Error("视频分段配置不完整");
   const folder = await mkdtemp(join(tmpdir(), "lot-marketing-"));
+  const dispose = () => rm(folder, { recursive: true, force: true });
   try {
     const { width, height } = marketingFrameSize(input.draft);
     const captions: MarketingCaption[] = [];
@@ -263,9 +265,20 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
     const output = join(folder, "final.mp4");
     const info = await inspectMedia(output, input.signal);
     if (Math.abs(info.duration - durationSec) > 0.3) throw new Error("成片时长校验失败");
-    if ((await stat(output)).size > 200 * 1024 * 1024) throw new Error("成片超过知识库存储限制，请降低清晰度。");
+    const sizeBytes = (await stat(output)).size;
+    if (sizeBytes > 200 * 1024 * 1024) throw new Error("成片超过知识库存储限制，请降低清晰度。");
     const quality: MarketingQualityReport = { checked: !!issues, durationSec: Math.round(info.duration * 100) / 100, expectedSec: durationSec,
       subtitles: input.subtitles ? "burned" : input.draft.subtitles ? "model" : "off", ...(input.subtitles ? { captions: captions.length } : {}), speech, issues: issues ?? [] };
-    return { body: await readFile(output), durationSec: info.duration, width, height, quality, ...(input.subtitles ? { captions } : {}) };
-  } finally { await rm(folder, { recursive: true, force: true }); }
+    const composed: ComposedVideo = { file: output, sizeBytes, dispose };
+    return { ...composed, durationSec: info.duration, width, height, quality, ...(input.subtitles ? { captions } : {}) };
+  } catch (error) { await dispose(); throw error; }
+}
+
+/** A finished video left in its temporary folder, so it is streamed to storage instead of
+ * read into memory (up to 200 MB). The caller stores it, then calls `dispose`. */
+export interface ComposedVideo { file: string; sizeBytes: number; dispose(): Promise<void> }
+export type VideoStreamStorage = { putStream(key: string, body: NodeJS.ReadableStream, contentType: string, sizeHint?: number): Promise<{ url: string }> };
+/** Streams a composed video to storage. The caller still disposes of it. */
+export function storeComposedVideo(storage: VideoStreamStorage, key: string, video: ComposedVideo) {
+  return storage.putStream(key, createReadStream(video.file), "video/mp4", video.sizeBytes);
 }

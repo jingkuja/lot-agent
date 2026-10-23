@@ -4,20 +4,28 @@ import { createUploadRoutes } from "./uploads.js";
 
 function makeService() {
   const created: any[] = [];
-  return {
+  const service: any = {
     created,
     uploadStorage: {
       put: vi.fn(async () => ({ url: "" })),
+      // Reads the stream as a real store would; `stored` keeps what arrived.
+      stored: [] as Buffer[],
+      putStream: vi.fn(async function (this: void, key: string, body: AsyncIterable<Buffer>) {
+        const parts: Buffer[] = []; for await (const part of body) parts.push(part);
+        service.uploadStorage.stored.push(Buffer.concat(parts));
+        return { url: `/static/uploads/${key}` };
+      }),
       getUrl: (k: string) => `/static/uploads/${k}`,
       get: vi.fn(),
-      delete: vi.fn(),
+      delete: vi.fn(async () => {}),
     },
     db: { createAsset: vi.fn(async (a: any) => { created.push(a); }) },
-  } as any;
+  };
+  return service;
 }
 
 function appFor(service: any) {
-  const wrap = new Hono();
+  const wrap = new Hono<{ Variables: { userId: string } }>();
   wrap.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
   wrap.route("/", createUploadRoutes(service));
   return wrap;
@@ -69,7 +77,7 @@ describe("POST /uploads", () => {
     const app = appFor(service);
     const res = await app.request("/", { method: "POST", body: fileBody("note.txt", "text/plain", new Uint8Array([104, 105])) });
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json: any = await res.json();
     expect(json).toMatchObject({ filename: "note.txt", mime: "text/plain", size: 2, kind: "doc" });
     expect(json.assetId).toBeTruthy();
     expect(service.created.length).toBe(1);
@@ -109,7 +117,7 @@ describe("POST /uploads", () => {
       ),
     });
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json: any = await res.json();
     expect(json.kind).toBe("doc");
   });
 
@@ -120,5 +128,33 @@ describe("POST /uploads", () => {
     const audio = await app.request("/", { method: "POST", body: fileBody("ref.mp3", "audio/mpeg", new Uint8Array([0, 1])) });
     expect(video.status).toBe(200);
     expect(audio.status).toBe(200);
+  });
+
+  it("streams a raw upload to storage with its name, type and purpose from the headers", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      const service = makeService();
+      const res = await appFor(service).request("/?purpose=marketing-video", { method: "POST",
+        headers: { "content-type": "video/mp4", "x-file-name": encodeURIComponent("探店 01.mp4") }, body: new Uint8Array([0, 0, 0, 24, 102, 116]) });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ filename: "探店 01.mp4", mime: "video/mp4", size: 6, kind: "doc", url: expect.stringContaining("material_token=") });
+      expect(service.uploadStorage.put).not.toHaveBeenCalled();
+      expect(service.uploadStorage.stored[0]).toEqual(Buffer.from([0, 0, 0, 24, 102, 116]));
+      expect(service.created[0]).toMatchObject({ sizeBytes: 6, originalName: "探店 01.mp4", isPrivate: true, mime: "video/mp4" });
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("stops a raw upload past the size limit while streaming and removes the partial file", async () => {
+    const service = makeService();
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    // No Content-Length: only the streaming cap can stop it.
+    const body = new ReadableStream<Uint8Array>({ pull(controller) { if (sent++ < 160) controller.enqueue(chunk); else controller.close(); } });
+    const res = await appFor(service).request("/", { method: "POST", headers: { "content-type": "audio/wav" }, body, duplex: "half" } as RequestInit);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "media too large (max 150MB)" });
+    expect(sent).toBeLessThan(160);
+    expect(service.uploadStorage.delete).toHaveBeenCalledOnce();
+    expect(service.created).toEqual([]);
   });
 });

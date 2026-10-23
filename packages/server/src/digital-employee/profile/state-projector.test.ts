@@ -15,7 +15,7 @@ function profile(overrides: Partial<CustomerProfile> = {}): CustomerProfile {
 
 function product(overrides: Partial<CustomerProductState> = {}): CustomerProductState {
   return {
-    id: "s1", userId: "u1", profileId: "p1", productKey: "edge", productName: "边缘算力",
+    id: "s1", userId: "u1", profileId: "p1", productKey: "edge", productName: "边缘算力", marketingProductId: null,
     journeyStage: "using", sentiment: "neutral", satisfaction: "neutral", health: "healthy",
     needs: [], objections: [], currentIssues: [], manualLockFields: [], lastObservationId: null,
     lastConfirmedAt: null, version: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",

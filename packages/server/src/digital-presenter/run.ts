@@ -6,8 +6,8 @@ import { presenterTrackMs, PRESENTER_INPUT_VERSION, type PresenterDraft } from "
 import { MarketingCaptionsSchema, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError } from "../generation/run-job.js";
-import { inspectMedia, mediaCapabilities, ownedAssetPath, SUBTITLES_UNAVAILABLE } from "../marketing-video/media.js";
-import { definiteRejection } from "../marketing-video/run.js";
+import { inspectMedia, mediaCapabilities, ownedAssetPath, storeComposedVideo, SUBTITLES_UNAVAILABLE, type VideoStreamStorage } from "../marketing-video/media.js";
+import { definiteRejection, gatewayFailure } from "../marketing-video/run.js";
 import { PresenterRunError, UNKNOWN_CLIP_MESSAGE } from "./errors.js";
 import { presenterFile, presenterPath, signPresenterFile } from "./files.js";
 import { buildTrack, composeImageMode, composeVideoMode, portraitFrame, prepareFace, prepareFootage, preparePortrait } from "./media.js";
@@ -33,7 +33,7 @@ export interface PresenterRunDeps {
   provider(userId: string, model: string): Promise<VideoGenerationProvider>;
   /** SSRF-guarded, size-capped download of a vendor result. */
   download(url: string, signal: AbortSignal): Promise<{ body: Buffer; mime: string }>;
-  storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }> };
+  storage: VideoStreamStorage;
   clipConcurrency?: number; pollIntervalMs?: number; maxWaitMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   compose?: { image: typeof composeImageMode; video: typeof composeVideoMode };
@@ -125,7 +125,7 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     }
     if (clips.some(clip => clip.status === "pending" || clip.status === "failed")) {
       // Inputs are prepared before any clip is paid for.
-      await deps.db.updateTaskProgress(job.id, 2, "正在准备素材");
+      await deps.db.raiseTaskProgress(job.id, 2, "正在准备素材");
       if (input.mode === "image") await prepare("portrait.jpg", async output => preparePortrait(await owned(input.portrait, "人物肖像"), output, input.ratio, controller.signal));
       else {
         await prepare("footage.mp4", async output => prepareFootage(await owned(input.baseVideo, "口播底片"), output, trackSec, controller.signal));
@@ -137,7 +137,7 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     const provider = await deps.provider(job.userId, input.model);
     const sign = deps.sign ?? signPresenterFile;
     const progress: number[] = clips.map(clip => clip.status === "succeeded" ? 100 : 0);
-    const report = () => deps.db.updateTaskProgress(job.id, Math.floor(5 + progress.reduce((a, b) => a + b, 0) / clips.length * 0.85),
+    const report = () => deps.db.raiseTaskProgress(job.id, Math.floor(5 + progress.reduce((a, b) => a + b, 0) / clips.length * 0.85),
       `片段完成 ${progress.filter(p => p === 100).length}/${clips.length}`);
     const setClip = (slot: number, fields: string, values: unknown[], where = "") =>
       deps.db.pool.query(`UPDATE digital_presenter_clips SET ${fields},updated_at=now() WHERE task_id=$1 AND slot=$2${where}`, [job.id, slot, ...values]);
@@ -170,6 +170,14 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
         let created;
         try { created = await provider.create(body); }
         catch (error) {
+          // A gateway 5xx counts as not charged, as for marketing clips. Recorded before the claim
+          // is released: if this write fails, the clip stays unknown.
+          if (gatewayFailure(error)) {
+            await deps.db.pool.query(`INSERT INTO digital_presenter_clip_gateway_failures(owner_id,project_id,task_id,slot,model,http_status,gateway_request_id)
+              VALUES($1,$2,$3,$4,$5,$6,$7)`, [job.userId, input.projectId, job.id, clip.slot, input.model, error.httpStatus, error.gatewayRequestId ?? null]);
+            await setClip(clip.slot, "status='failed',error=$3", [`gateway ${error.httpStatus}`]);
+            throw new PresenterRunError("GATEWAY_FAILED", "数字人视频模型服务暂时出错，该片段没有生成；继续生成会重新提交该片段。", { cause: error });
+          }
           // An explicit rejection created nothing; the clip may be submitted again after a fix.
           if (definiteRejection(error)) {
             const { httpStatus: status, vendorCode, requestId } = error as ProviderError;
@@ -232,7 +240,7 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     await Promise.all(Array.from({ length: Math.min(deps.clipConcurrency ?? 2, clips.length) }, work));
     if (failure) throw failure;
     await assertActive();
-    await deps.db.updateTaskProgress(job.id, 92, "正在合成视频");
+    await deps.db.raiseTaskProgress(job.id, 92, "正在合成视频");
     const done = await store.clips(job.id);
     const files = await Promise.all(done.map(clip => presenterFile(deps.dataRoot, input.projectId, clip.file)));
     const takeMs = input.takes.map(take => take.durationMs);
@@ -246,10 +254,13 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
       if (controller.signal.aborted) throw new JobCancelledError();
       throw new PresenterRunError("COMPOSITION_FAILED", error instanceof Error ? error.message : "视频合成失败", { cause: error });
     }
-    await assertActive();
     const id = randomUUID(); const key = `${id}.mp4`;
-    const { url } = await deps.storage.put({ key, body: result.body, contentType: "video/mp4" });
-    await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.body.length, durationSec: result.durationSec, width: result.width, height: result.height });
+    let url: string;
+    try {
+      await assertActive();
+      ({ url } = await storeComposedVideo(deps.storage, key, result));
+    } finally { await result.dispose(); }
+    await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.sizeBytes, durationSec: result.durationSec, width: result.width, height: result.height });
     return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], frame: { width: result.width, height: result.height },
       ...(result.captions ? { captions: result.captions } : {}) };
   } catch (error) {

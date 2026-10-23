@@ -4,7 +4,7 @@ import { cohortAutomationSettings } from "./0020-cohort-automation-settings.js";
 
 describe("cohort automation settings migration", () => {
   it("creates a default-off per-user setting", async () => {
-    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [], rowCount: 0 }));
 
     await cohortAutomationSettings.up({ query } as any);
 

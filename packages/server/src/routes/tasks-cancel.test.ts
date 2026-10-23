@@ -25,7 +25,7 @@ function app(service: any) {
   return a;
 }
 
-const cancel = (a: Hono) => a.request("/tasks/task-1/cancel", { method: "POST" });
+const cancel = (a: { request: Hono["request"] }) => a.request("/tasks/task-1/cancel", { method: "POST" });
 
 describe("POST /tasks/:id/cancel", () => {
   it("cancels the caller's own task", async () => {

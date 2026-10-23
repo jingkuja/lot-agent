@@ -3,7 +3,7 @@ import { DB } from "./database.js";
 
 function fakeDb(rowCount: number | null) {
   const db = Object.create(DB.prototype) as DB;
-  const query = vi.fn(async () => ({ rows: [], rowCount }));
+  const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [], rowCount }));
   // @ts-expect-error inject a fake pool
   db.pool = { query };
   return { db, query };

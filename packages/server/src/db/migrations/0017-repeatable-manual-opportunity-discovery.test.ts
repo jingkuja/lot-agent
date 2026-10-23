@@ -4,7 +4,7 @@ import { migrations } from "./index.js";
 
 describe("repeatable manual opportunity discovery migration", () => {
   it("removes daily uniqueness while retaining a scan-date lookup index", async () => {
-    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [], rowCount: 0 }));
 
     await repeatableManualOpportunityDiscovery.up({ query } as any);
 

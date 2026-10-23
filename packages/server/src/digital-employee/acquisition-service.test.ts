@@ -27,7 +27,7 @@ function availability(overrides: Partial<CampaignModelAvailability> = {}): Campa
 describe("CustomerAcquisitionService", () => {
   it("propagates cancellation through copy generation and never saves its late result or a fallback", async () => {
     const controller = new AbortController();
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{ id: "p1", name: "Product", version: 1 }] };
       if (sql.includes("INSERT INTO de_customer_segment_snapshots")) return { rows: [{
         id: "s1", audience_description: "Public", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date(),
@@ -51,7 +51,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("sends only aggregate audience data and approved product facts to copy generation", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-0000-0000-000000000101", user_id: "u1", name: "边缘算力",
         positioning: "快速部署", core_values: ["部署简单"], verifiable_facts: [{ statement: "已确认事实" }],
@@ -98,7 +98,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("never exposes individual member names to recommendation generation", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("de_customer_cohort_snapshots")) return { rows: [{ snapshot_date: "2026-08-20", summary: "聚合总结", metrics: { totalProfiles: 5 }, generated_at: new Date(), generation_method: "logic", model_id: null }] };
       if (sql.includes("FROM de_customer_segments segment")) return { rows: [{ id: "s1", name: "制造业潜客", description: "聚合客群", criteria: {}, status: "active", created_at: new Date(), updated_at: new Date(), snapshot_id: "ss1", snapshot_metrics: { totalProfiles: 5 }, snapshot_sampled_at: new Date() }] };
       if (sql.includes("FROM marketing_products WHERE user_id")) return { rows: [{ id: "p1", name: "产品A", positioning: "定位", core_values: ["价值"], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [], version: 1 }] };
@@ -117,7 +117,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("does not resurrect adopted or ignored recommendations when the same theme conflicts", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("de_customer_cohort_snapshots")) return { rows: [{ snapshot_date: "2026-08-20", summary: "聚合总结", metrics: { totalProfiles: 5 }, generated_at: new Date(), generation_method: "logic", model_id: null }] };
       if (sql.includes("FROM de_customer_segments segment")) return { rows: [] };
       if (sql.includes("FROM marketing_products WHERE user_id")) return { rows: [{ id: "p1", name: "产品A", positioning: "定位", core_values: ["价值"], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [], version: 1 }] };
@@ -141,7 +141,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("expires leftover pending recommendations that are not in the new batch", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("de_customer_cohort_snapshots")) return { rows: [{ snapshot_date: "2026-08-20", summary: "聚合总结", metrics: { totalProfiles: 5 }, generated_at: new Date(), generation_method: "logic", model_id: null }] };
       if (sql.includes("FROM de_customer_segments segment")) return { rows: [] };
       if (sql.includes("FROM marketing_products WHERE user_id")) return { rows: [{ id: "p1", name: "产品A", positioning: "定位", core_values: ["价值"], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [], version: 1 }] };
@@ -171,7 +171,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("evaluates segment-product fit with aggregate metrics only", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_customer_segment_snapshots")) return { rows: [{
         id: "ss1", segment_id: "s1", audience_description: "华东制造业潜客", criteria: {},
         profile_ids: ["secret-profile"], excluded_profile_ids: [],
@@ -218,7 +218,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("blocks media generation when no image models are available", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
       }] };
@@ -243,7 +243,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("uses the requested image model when it is in the user's catalog", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
         positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
@@ -281,7 +281,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("forwards image settings and reference images into the generation job", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
         positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
@@ -325,7 +325,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("passes knowledge bases and attachments into copy generation", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", user_id: "u1", name: "边缘算力",
         positioning: "快速部署", core_values: ["部署简单"], verifiable_facts: [],
@@ -369,7 +369,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("blocks copy generation before creating an activity when no LLM models are available", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
       }] };
@@ -394,7 +394,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("rejects a media model that is not in the user's catalog", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
       }] };
@@ -418,7 +418,7 @@ describe("CustomerAcquisitionService", () => {
   it("reuses an existing campaign snapshot and brief instead of creating another activity", async () => {
     const campaignId = "00000000-0000-4000-8000-000000000201";
     const snapshotId = "00000000-0000-4000-8000-000000000202";
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_marketing_campaigns WHERE id=")) return { rows: [{
         id: campaignId, product_id: "00000000-0000-4000-8000-000000000101",
         segment_snapshot_id: snapshotId, objective: "获得咨询", channels: ["朋友圈"],
@@ -468,7 +468,7 @@ describe("CustomerAcquisitionService", () => {
 
   it("does not enqueue a media job before the asset row is persisted", async () => {
     const events: string[] = [];
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
         positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
@@ -502,7 +502,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("does not enqueue when persisting the media asset fails", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
         positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
@@ -530,7 +530,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("cancels the queued job if linking the task id fails", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
         id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
         positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
@@ -560,7 +560,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("turns a stored campaign opportunity into a marketing campaign", async () => {
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_campaign_opportunities WHERE id=")) return { rows: [{
         id: "o1", status: "suggested", title: "部署简单主题", objective: "获得咨询",
         product_id: "p1", segment_snapshot_id: "ss1", suggested_channels: ["朋友圈"],
@@ -646,7 +646,7 @@ describe("deployment feedback idempotency", () => {
       id: "00000000-0000-4000-8000-000000000401", deployment_id: deploymentId, impressions: 50,
       interactions: null, conversions: null, feedback_text: "", recorded_at: "2026-10-18T00:00:00Z",
     };
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("SELECT id FROM de_asset_deployments")) return { rows: [{ id: deploymentId }] };
       if (sql.includes("INSERT INTO de_deployment_feedback")) return { rows: [] };
       if (sql.includes("FROM de_deployment_feedback WHERE")) return { rows: [original] };

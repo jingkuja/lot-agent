@@ -43,11 +43,13 @@ async function revisionBase(db: pg.Pool | pg.PoolClient, owner: string, id: stri
   if (draft.storyboard.length !== rows.length || rows.some((row, i) => row.slot !== i) || actions.some(action => action === "unknown" || action === "poll")) return undefined;
   let modelId: string;
   try { modelId = marketingJobProfile(job.job_input).modelId; } catch { return undefined; }
-  return { input: job.job_input as Record<string, unknown>, draft, modelId, segments: rows, reusable: actions.map(action => action === "reuse"), composition: jobComposition(job.job_input) };
+  const reusable = actions.map(action => action === "reuse");
+  const clips = rows.map((row, i) => { const url = row.output?.assets?.[0]?.url; return reusable[i] && typeof url === "string" ? url : null; });
+  return { input: job.job_input as Record<string, unknown>, draft, modelId, segments: rows, reusable, clips, composition: jobComposition(job.job_input) };
 }
 async function withRevision(db: pg.Pool | pg.PoolClient, owner: string, p: MarketingProject): Promise<MarketingProject> {
   const base = p.taskId ? await revisionBase(db, owner, p.id) : undefined;
-  return base ? { ...p, revision: { draft: base.draft, modelId: base.modelId, reusable: base.reusable, composition: base.composition } } : p;
+  return base ? { ...p, revision: { draft: base.draft, modelId: base.modelId, reusable: base.reusable, composition: base.composition, clips: base.clips } } : p;
 }
 export class PgMarketingProjectStore implements MarketingProjectStore {
   constructor(readonly pool: pg.Pool) {}

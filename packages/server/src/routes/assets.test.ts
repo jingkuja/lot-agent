@@ -28,7 +28,7 @@ function makeApp(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   } as any;
-  const app = new Hono();
+  const app = new Hono<{ Variables: { userId: string } }>();
   app.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
   app.route("/", createAssetRoutes(service));
   return { app, service };

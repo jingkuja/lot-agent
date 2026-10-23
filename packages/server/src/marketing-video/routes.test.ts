@@ -23,7 +23,7 @@ const id = "11111111-1111-4111-8111-111111111111";
 function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
   const project = { id, version: 1, draft: MarketingDraftSchema.parse({ script: "欢迎来到我们的店铺。来这里发现你喜欢的产品。" }), taskId: null, status: "draft" };
   const store = { segments: vi.fn(async (): Promise<any[]> => []), get: vi.fn(async () => project), list: vi.fn(async () => []), page: vi.fn(async (..._args: unknown[]) => ({ data: [] as unknown[], nextCursor: undefined as string | undefined })), save: vi.fn(async (..._args: Parameters<PgMarketingProjectStore["save"]>) => project), setReview: vi.fn(async (..._args: unknown[]) => project), reserve: vi.fn(async () => "task"), remove: vi.fn(async () => ({ files: [] as string[], keyArtFiles: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })), usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1) };
-  const service = { db: { pool: {}, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async () => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
+  const service = { db: { pool: { query: vi.fn(async () => ({ rows: [] })) }, getTask: vi.fn(async (): Promise<any> => null), getAsset: vi.fn(async (_id: string): Promise<Record<string, unknown>> => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) }, marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})), jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) }, modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} } };
   const operations = {
     begin: vi.fn(async (_owner: string, requestId: string, _project: string, version: number, kind: string, input: unknown, draft?: typeof project.draft): Promise<{ fresh: boolean; operation: { id: string; kind: string; status: string }; draft: typeof project.draft; input: unknown }> => {
       if (version !== project.version || project.taskId) throw new MarketingError("草稿已更新", 409);
@@ -136,7 +136,7 @@ describe("marketing project HTTP boundaries", () => {
     const f = fixture();
     const response = await f.app.request("/api/marketing-videos/usage");
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ videoBytes: 4096, materialBytes: 1024, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
+    expect(await response.json()).toEqual({ videoBytes: 4096, materialBytes: 1024, narrationBytes: 0, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
     expect(f.store.usage).toHaveBeenCalledWith("owner");
   });
   it("removes the deleted draft's generated files only inside the assets and uploads folders", async () => {

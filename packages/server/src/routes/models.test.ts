@@ -22,7 +22,7 @@ function svc(cacheHit: string | null) {
 }
 
 function mount(service: import("../services/agent-service.js").AgentService) {
-  const app = new Hono();
+  const app = new Hono<{ Variables: { userId: string } }>();
   app.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
   app.route("/", createModelRoutes(service));
   return app;
@@ -33,7 +33,7 @@ describe("GET /api/models", () => {
     const service = svc(null);
     const res = await mount(service).request("/");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.llm[0]).toMatchObject({ id: "gpt-5.4", provider: "openai" });
     expect(body.video[0].provider).toBe("happyhorse");
     expect(service.redis.set as ReturnType<typeof vi.fn>).toHaveBeenCalled();
@@ -55,7 +55,7 @@ describe("GET /api/models", () => {
     });
     const service = svc(cached);
     const res = await mount(service).request("/");
-    expect((await res.json()).llm.map((model: { id: string }) => model.id)).toEqual(["gpt-5.4", "claude-sonnet-4"]);
+    expect((await res.json() as any).llm.map((model: { id: string }) => model.id)).toEqual(["gpt-5.4", "claude-sonnet-4"]);
     expect(service.tokenhub.listModels).not.toHaveBeenCalled();
   });
 
@@ -67,7 +67,7 @@ describe("GET /api/models", () => {
     );
     const res = await mount(service).request("/");
     expect(res.status).toBe(200);
-    expect((await res.json()).llm[0].id).toBe("gpt-5.4");
+    expect((await res.json() as any).llm[0].id).toBe("gpt-5.4");
     expect(service.tokenhub.listModels).toHaveBeenCalledWith("sk-user");
   });
 
@@ -81,7 +81,7 @@ describe("GET /api/models", () => {
     } as unknown as import("../services/agent-service.js").AgentService;
     const res = await mount(service).request("/");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ llm: [], image: [], video: [] });
+    expect(await res.json() as any).toEqual({ llm: [], image: [], video: [] });
     expect(service.tokenhub.listModels).not.toHaveBeenCalled();
   });
 });

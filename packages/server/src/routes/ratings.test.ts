@@ -30,7 +30,7 @@ function app(service: any) {
   return a;
 }
 
-const post = (a: Hono, body: unknown) =>
+const post = (a: { request: Hono["request"] }, body: unknown) =>
   a.request("/ratings/m1", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -17,7 +17,7 @@ export async function checkMarketingUploads(pool: pg.Pool, storage: AnalysisStor
   const owner = randomUUID(), other = randomUUID();
   await pool.query("INSERT INTO users(id,name) VALUES($1,'local video fixture'),($2,'other local video fixture')", [owner, other]);
   const bytes = Buffer.from("000000186674797069736f6d0000020069736f6d69736f32", "hex");
-  const input = { pool, storage, owner, id: randomUUID(), name: "本地.mp4", mime: "video/mp4", bytes };
+  const input = { pool, storage, owner, id: randomUUID(), name: "本地.mp4", mime: "video/mp4", body: [bytes] };
   const copies = await Promise.all([storeAnalysisUpload(input), storeAnalysisUpload(input)]);
   assert.deepEqual(copies[0], copies[1]);
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM marketing_analysis_uploads WHERE id=$1", [input.id])).rows[0].n, 1);

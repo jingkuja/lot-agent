@@ -48,6 +48,9 @@ const CATEGORIES: { category: string; expectedCharge: ExpectedCharge; open: bool
       'released ' || ms.unknown_released_count AS status, ms.unknown_released_at AS at
     FROM marketing_video_segments ms JOIN tasks s ON s.id=ms.task_id JOIN tasks p ON p.id=(s.input->>'parentId')::uuid
     WHERE ms.unknown_released_at >= :since` },
+  { category: "presenter_clip_gateway_5xx", expectedCharge: "none", open: false, sql: `SELECT owner_id, project_id::text, task_id::text, slot, id::text AS record_id,
+      NULL AS request_kind, model, gateway_request_id, http_status, 'gateway_failed' AS status, created_at AS at
+    FROM digital_presenter_clip_gateway_failures WHERE created_at >= :since` },
   { category: "presenter_clip_unknown", expectedCharge: "unknown", open: true, sql: `SELECT t.user_id AS owner_id, t.input->>'projectId' AS project_id, c.task_id::text, c.slot, NULL AS record_id,
       NULL AS request_kind, c.model, NULL AS gateway_request_id, NULL::int AS http_status, c.status, c.updated_at AS at
     FROM digital_presenter_clips c JOIN tasks t ON t.id=c.task_id WHERE c.status='submitting' AND t.status NOT IN ('pending','running')` },

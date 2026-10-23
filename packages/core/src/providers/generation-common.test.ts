@@ -90,7 +90,7 @@ describe("HttpGenerationClient.create", () => {
   it("classifies a non-JSON HTTP 400 real-person rejection", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 400, text: async () => REAL_PERSON_BODY })) as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: taskIdAdapter, model: "m" });
-    const err = await c.create({}).catch(e => e as Error);
+    const err = await c.create({}).catch(e => e as Error) as Error;
     expect(err.message).toContain("REAL_PERSON_REJECTED");
     expect(err.message).not.toContain("content[0]");
   });
@@ -196,7 +196,7 @@ describe("HttpGenerationClient.poll", () => {
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     const c = new HttpGenerationClient({ baseUrl: "https://api", apiKey: "k", adapter: passthrough, model: "m" });
     await c.poll("t1");
-    const init = fetchMock.mock.calls[0][1] as { signal?: unknown };
+    const init = (fetchMock.mock.calls[0] as unknown[])[1] as { signal?: unknown };
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });

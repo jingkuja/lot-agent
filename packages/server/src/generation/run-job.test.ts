@@ -13,7 +13,7 @@ function fakeDeps(provider: JobGenerationProvider, over: Partial<RunJobDeps> = {
   const calls: any = { progress: [], asset: null, message: [], metered: false, cacheSet: null, vendorIdSet: null };
   const deps: RunJobDeps = {
     provider,
-    storage: { put: vi.fn(async ({ key }) => ({ url: `/static/assets/${key}` })) },
+    storage: { put: vi.fn(async ({ key }) => ({ url: `/static/assets/${key}` })), putStream: vi.fn() },
     db: {
       createAsset: vi.fn(async (a) => { calls.asset = a; }),
       updateMessageGeneration: vi.fn(async (id, patch) => { calls.message.push({ id, ...patch }); }),

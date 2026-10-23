@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PRESENTER_SEGMENT_GAP_MS, type PresenterDraft } from "@lot-agent/core/digital-presenter";
@@ -96,6 +96,7 @@ const filmCues = (cues: Cue[], shot: number, at: number): MarketingCaption[] =>
  * `captions`, when given, are burned into each clip and returned in seconds of the film. */
 export async function composeImageMode(input: { clips: string[]; takes: string[]; takeMs: number[]; captions?: PresenterCaptionInput; frame: { width: number; height: number }; signal?: AbortSignal }) {
   const folder = await mkdtemp(join(tmpdir(), "lot-presenter-"));
+  const dispose = () => rm(folder, { recursive: true, force: true });
   try {
     const { width, height } = input.frame;
     let expected = 0;
@@ -125,14 +126,15 @@ export async function composeImageMode(input: { clips: string[]; takes: string[]
         "-af", "aresample=48000,apad", "-t", length.toFixed(3), "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`],
       { signal: input.signal, cwd: folder });
     }
-    return { ...await joinParts(folder, input.clips.length, expected, input.signal), ...(input.captions ? { captions: burned } : {}) };
-  } finally { await rm(folder, { recursive: true, force: true }); }
+    return { ...await joinParts(folder, input.clips.length, expected, input.signal), dispose, ...(input.captions ? { captions: burned } : {}) };
+  } catch (error) { await dispose(); throw error; }
 }
 
 /** Video mode: the lip-synced clip with the local voice track in place of the vendor's re-encoded audio.
  * `captions`, when given, burns each take's script at the take's place in the track. */
 export async function composeVideoMode(input: { clip: string; track: string; trackSec: number; captions?: PresenterCaptionInput & { takes: string[]; takeMs: number[] }; signal?: AbortSignal }) {
   const folder = await mkdtemp(join(tmpdir(), "lot-presenter-"));
+  const dispose = () => rm(folder, { recursive: true, force: true });
   try {
     const clip = await inspectMedia(input.clip, input.signal);
     const track = await inspectMedia(input.track, input.signal);
@@ -160,8 +162,8 @@ export async function composeVideoMode(input: { clip: string; track: string; tra
       "-vf", `scale=${size.width}:${size.height},setsar=1,tpad=stop_mode=clone:stop_duration=1${captions}`, "-af", "aresample=48000,apad",
       "-t", input.trackSec.toFixed(3), "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", "-movflags", "+faststart", "0.mp4"],
     { signal: input.signal, cwd: folder, timeoutMs: 600_000 });
-    return { ...await finish(join(folder, "0.mp4"), input.trackSec, input.signal), ...(input.captions ? { captions: burned } : {}) };
-  } finally { await rm(folder, { recursive: true, force: true }); }
+    return { ...await finish(join(folder, "0.mp4"), input.trackSec, input.signal), dispose, ...(input.captions ? { captions: burned } : {}) };
+  } catch (error) { await dispose(); throw error; }
 }
 
 async function joinParts(folder: string, count: number, expected: number, signal?: AbortSignal) {
@@ -174,6 +176,8 @@ async function joinParts(folder: string, count: number, expected: number, signal
 async function finish(output: string, expected: number, signal?: AbortSignal) {
   const info = await inspectMedia(output, signal);
   if (!info.video || !info.audio || Math.abs(info.duration - expected) > 0.5) throw new Error("成片时长校验失败");
-  if ((await stat(output)).size > 200 * 1024 * 1024) throw new Error("成片过大，请降低清晰度或缩短文案。");
-  return { body: await readFile(output), durationSec: info.duration, width: info.width, height: info.height };
+  const sizeBytes = (await stat(output)).size;
+  if (sizeBytes > 200 * 1024 * 1024) throw new Error("成片过大，请降低清晰度或缩短文案。");
+  // Left in the job's temporary folder and streamed to storage (see ComposedVideo).
+  return { file: output, sizeBytes, durationSec: info.duration, width: info.width, height: info.height };
 }

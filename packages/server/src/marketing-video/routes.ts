@@ -149,8 +149,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   app.get("/capabilities", async (c) => c.json({ ...(await mediaCapabilities()), knowledge: process.env.KNOWLEDGE_MANAGEMENT_ENABLED === "1", narration: narrator.available, model: activeProfile }));
   app.get("/usage", async (c) => {
     const owner = c.get("userId");
-    const [drafts, analysisBytes] = await Promise.all([store.usage(owner), analysisStorage.ownerBytes(owner)]);
-    return c.json({ ...drafts, analysisBytes, analysisLimitBytes: analysisOwnerLimit() });
+    const [drafts, narrationBytes, analysisBytes] = await Promise.all([store.usage(owner), narrator.ownerBytes(owner), analysisStorage.ownerBytes(owner)]);
+    return c.json({ ...drafts, narrationBytes, analysisBytes, analysisLimitBytes: analysisOwnerLimit() });
   });
   app.get("/", async (c) => c.json(await store.page(c.get("userId"), { limit: Number(c.req.query("limit") ?? 20) || 20, cursor: c.req.query("cursor"), query: c.req.query("q") })));
   app.post("/copy", async (c) => {
@@ -463,6 +463,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   // without a model call or a charge; only the redone shots' seconds are billed.
   app.post("/:id/revise", async (c) => {
     const owner = c.get("userId");
+    // Stage times of this request, logged once at the end (P13: one acceptance run took 48.6 s).
+    const started = Date.now(); const stages: Record<string, number> = {};
+    let last = started;
+    const lap = (name: string) => { const now = Date.now(); stages[name] = now - last; last = now; };
     const p = await requireProject(owner, c.req.param("id"));
     const body = await c.req.json().catch(() => null);
     // No shot means composing the kept clips again with changed music, captions or narration.
@@ -472,6 +476,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (!p.taskId || !p.revision) throw new MarketingError("当前视频不能单镜重做，请复制为新草稿。", 409);
     if (p.version !== body.version) throw new MarketingError("草稿已更新，请重新确认。", 409);
     if (!await (service.jobQueue as BullmqJobQueue).canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
+    lap("queue");
     const original = await service.db.getTask(p.taskId);
     const frozen = original?.input && typeof original.input === "object" && !Array.isArray(original.input) ? original.input as Record<string, unknown> : undefined;
     if (!original || !frozen || original.user_id !== owner || original.type !== "marketing.video" || frozen.projectId !== p.id) throw new MarketingError("原任务不可恢复。", 409);
@@ -488,7 +493,9 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     } catch (error) { throw new MarketingError((error as Error).message); }
     const referenceError = marketingReferenceError(p.draft, profile);
     if (referenceError) throw new MarketingError(referenceError);
+    lap("plan");
     const capabilities = await mediaCapabilities();
+    lap("capabilities");
     if (!capabilities.composition) throw new MarketingError("视频合成工具不可用，请配置 FFmpeg 和 FFprobe。", 503);
     if (frozen.local_subtitles === true && p.draft.subtitles && !capabilities.subtitles) throw new MarketingError(SUBTITLES_UNAVAILABLE, 503);
     for (const segment of (await store.segments(owner, p.id)).filter(s => !redo.includes(s.slot))) {
@@ -498,6 +505,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       }
     }
     await checkMaterials(owner, p.draft, profile, Number(frozen.marketingInputVersion), true, c.req.raw.signal);
+    lap("materials");
     // Redone shots get the video's own key-art still, the same reference as the kept ones.
     if (typeof frozen.key_art === "string" && redo.length) {
       const still = await service.db.getAsset(frozen.key_art);
@@ -505,6 +513,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     const exceeded = await quotaExceeded(owner, profile, redo.reduce((sum, slot) => sum + plan[slot].durationSec, 0));
     if (exceeded) return c.json(exceeded, 402);
+    lap("quota");
     // Twin-narrated videos: a changed shot gets its new take now (one speech request each); the
     // kept shots' text and voice settings are unchanged, so their takes are found as they are.
     let narration: FrozenNarration[] | undefined;
@@ -512,10 +521,14 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       const { error } = await narrator.synthesize(owner, p.id, p.draft, plan);
       if (error) throw new MarketingError(error, 409);
       narration = await narrator.frozen(owner, p.id, p.draft, plan);
+      lap("narration");
     }
     const taskId = await store.revise(owner, p.id, body.version, p.taskId, redo, narration ? { narration } : {});
+    lap("save");
     try { await (service.jobQueue as BullmqJobQueue).deliverPersisted(taskId, "marketing.video"); }
     catch { throw new MarketingError("任务已保存，队列暂不可用；请重新打开草稿继续。", 503); }
+    lap("deliver");
+    console.log("[marketing-video] revise timing", { projectId: p.id, taskId, shots: redo.length, totalMs: Date.now() - started, stagesMs: stages });
     return c.json(await store.get(owner, p.id), 202);
   });
   app.post("/:id/archive", async (c) => {

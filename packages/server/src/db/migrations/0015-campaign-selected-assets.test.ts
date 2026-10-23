@@ -4,7 +4,7 @@ import { migrations } from "./index.js";
 
 describe("campaign selected assets migration", () => {
   it("adds selected_assets onto marketing campaigns", async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [] }));
     await campaignSelectedAssets.up({ query } as any);
     expect(campaignSelectedAssets.version).toBe(15);
     expect(migrations).toContain(campaignSelectedAssets);

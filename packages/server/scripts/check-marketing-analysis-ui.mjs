@@ -29,13 +29,15 @@ try {
   vite = await createServer({ configFile: false, root: temp, esbuild: { jsx: "automatic" }, optimizeDeps: { include: ["react", "react-dom/client", "react/jsx-runtime"] },
     plugins: [{ name: "fixture-local-upload", configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url !== "/api/marketing-video-analyses/uploads") return next();
+        if (!req.url.startsWith("/api/marketing-video-analyses/uploads?")) return next();
         void (async () => {
           assert.equal(req.headers.authorization, "Bearer fixture-token");
-          assert(req.headers["content-type"].startsWith("multipart/form-data; boundary="));
+          // P17: the video is the raw body, streamed by the server; the request ID is in the URL.
+          assert.equal(req.headers["content-type"], "video/mp4");
+          assert.equal(decodeURIComponent(req.headers["x-file-name"]), "local-reference.mp4");
           const chunks = []; for await (const chunk of req) chunks.push(chunk);
-          const raw = Buffer.concat(chunks); assert(raw.includes(Buffer.from("ftyp")), "HTTP server receives actual MP4 bytes");
-          const requestId = raw.toString().match(/name="clientRequestId"\r\n\r\n([^\r]+)/)?.[1]; assert(requestId);
+          const raw = Buffer.concat(chunks); assert.equal(raw.toString("ascii", 4, 8), "ftyp", "HTTP server receives actual MP4 bytes");
+          const requestId = new URL(req.url, "http://fixture").searchParams.get("clientRequestId"); assert(requestId);
           uploads++;
           if (uploads === 1) uploadRequestId = requestId;
           assert.equal(requestId, uploadRequestId, "an explicitly retried lost upload response must reuse its request ID");
@@ -53,7 +55,7 @@ try {
     const original = window.fetch; let lostUpload = false;
     window.fetch = async (...args) => {
       const response = await original(...args);
-      if (String(args[0]).endsWith("/marketing-video-analyses/uploads") && !lostUpload) {
+      if (String(args[0]).includes("/marketing-video-analyses/uploads?") && !lostUpload) {
         lostUpload = true; await response.arrayBuffer(); throw new TypeError("fixture lost upload response");
       }
       return response;
@@ -76,7 +78,7 @@ try {
     if (!path.startsWith("/api/")) return route.continue();
     const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/api/public/product") return json({ globle: 1 });
-    if (path === "/api/marketing-videos/capabilities") return json({ composition: true, knowledge: false });
+    if (path === "/api/marketing-videos/capabilities") return json({ composition: true, subtitles: true, knowledge: false });
     if (path === "/api/marketing-videos") return json({ data: account === "owner" ? [...projects.values()] : [] });
     if (path.endsWith("/text-operations")) return json({ data: textOperations.get(path.split("/").at(-2)) ?? [] });
     if (path === "/api/marketing-videos/copy") {
@@ -121,6 +123,8 @@ try {
       return json(value);
     }
     if (path.endsWith("/cancel")) { value.status = "cancelled"; return json(value); }
+    // The production step reads the draft's key-art still; none exists in this flow.
+    if (/^\/api\/marketing-videos\/[a-f0-9-]+\/key-art$/.test(path) && req.method() === "GET") return json({ version: projects.get(path.split("/").at(-2))?.version ?? 0, keyArt: { status: "missing" }, error: "" });
     if (/^\/api\/marketing-videos\/[a-f0-9-]+$/.test(path)) {
       const pid = path.split("/").at(-1);
       if (req.method() === "PUT") {

@@ -8,6 +8,7 @@ import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
+import type { StoredMessage } from "../db/database.js";
 import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
 import {
@@ -92,7 +93,7 @@ function storedKnowledgeBases(metadata: Record<string, unknown> | undefined): Kn
     .slice(0, MAX_KNOWLEDGE_BASES);
 }
 
-export function createConversationRoutes(service: AgentService): Hono {
+export function createConversationRoutes(service: AgentService) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.get("/projects", async (c) => c.json(await service.db.listConversationProjects(c.get("userId"))));
@@ -156,7 +157,8 @@ export function createConversationRoutes(service: AgentService): Hono {
   // Create conversation — owned by current user
   app.post("/", async (c) => {
     const userId = c.get("userId");
-    const body = await c.req.json<{ title?: string; agentId?: string; featureScope?: string; projectId?: string; videoPublication?: unknown }>().catch(() => ({}));
+    type CreateBody = { title?: string; agentId?: string; featureScope?: string; projectId?: string; videoPublication?: unknown };
+    const body = await c.req.json<CreateBody>().catch((): CreateBody => ({}));
     if (body.projectId !== undefined && (typeof body.projectId !== "string" || !await service.db.ownsConversationProject(body.projectId, userId))) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -256,7 +258,8 @@ export function createConversationRoutes(service: AgentService): Hono {
                 input: tc.tool_input,
               }))
             )
-          : m.tool_calls,
+          // Not a StoredMessage column; kept for rows that carry it.
+          : (m as StoredMessage & { tool_calls?: unknown }).tool_calls,
         // Add tool_name for tool result messages
         tool_name: toolName ?? null,
       };

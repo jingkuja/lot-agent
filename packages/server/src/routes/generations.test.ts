@@ -63,10 +63,10 @@ describe("POST /conversations/:id/generations", () => {
     let finish!: (title: string) => void;
     service.generateTitle = vi.fn(() => new Promise<string>((resolve) => { finish = resolve; }));
     let responded = false;
-    const response = app(service).request("/conversations/c1/generations", {
+    const response = Promise.resolve(app(service).request("/conversations/c1/generations", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: "菊花", mediaType: "image" }),
-    }).then((r) => { responded = true; return r; });
+    })).then((r) => { responded = true; return r; });
     try {
       await vi.waitFor(() => expect(responded).toBe(true), { timeout: 200 });
       expect((await response).status).toBe(202);
@@ -80,7 +80,7 @@ describe("POST /conversations/:id/generations", () => {
       body: JSON.stringify({ prompt: "菊花", mediaType: "image", settings: { size: "1024x1024", n: 1 } }),
     });
     expect(res.status).toBe(202);
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.taskId).toBe("task-1");
     expect(body.userMessage.content).toBe("菊花");
     expect(body.assistantMessage.status).toBe("generating");
@@ -103,7 +103,7 @@ describe("POST /conversations/:id/generations", () => {
       body: JSON.stringify({ prompt: "菊花", mediaType: "image", settings: { n: 1 } }),
     });
     expect(res.status).toBe(202);
-    const body = await res.json();
+    const body: any = await res.json();
     expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], {
       userId: "u1",
       digitalEmployee: false,
@@ -159,7 +159,7 @@ describe("POST /conversations/:id/generations", () => {
       }),
     });
     expect(res.status).toBe(202);
-    const body = await res.json();
+    const body: any = await res.json();
     const input = service.jobQueue.enqueue.mock.calls[0][1];
     expect(input.assistantMessageId).toBe(body.assistantMessage.id);
     expect(input.conversationId).toBe("c1");
@@ -287,7 +287,7 @@ describe("POST /conversations/:id/generations", () => {
       body: JSON.stringify({ prompt: "视频", mediaType: "video", settings: { resolution, ratio: "1:1" } }),
     });
     expect(res.status).toBe(202);
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.assistantMessage.metadata.settings).toMatchObject({ resolution, ratio: "1:1" });
     expect(service.jobQueue.enqueue).toHaveBeenCalledWith("video.generate", expect.objectContaining({ resolution, ratio: "1:1" }), "u1");
   });
@@ -300,7 +300,7 @@ describe("POST /conversations/:id/generations", () => {
       body: JSON.stringify({ prompt: "无声视频", mediaType: "video", settings: {} }),
     });
     expect(res.status).toBe(202);
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.assistantMessage.metadata.settings.generate_audio).toBe(false);
     expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
       "video.generate",
@@ -514,7 +514,7 @@ describe("POST /conversations/:id/generations/:messageId/redownload", () => {
     const service = fakeService();
     const res = await app(service).request("/conversations/c1/generations/m1/redownload", { method: "POST" });
     expect(res.status).toBe(202);
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.taskId).toBe("task-1");
     expect(service.db.resetGenerationForRedownload).toHaveBeenCalledWith("m1", { conversationId: "c1", userId: "u1" });
     expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
@@ -564,7 +564,7 @@ describe.each(["miniprogram", "marketing_video"])("%s video duplicate protection
     service.db.getConversation.mockResolvedValue({ id: "c1", user_id: "u1", agent_id: client === "marketing_video" ? "marketing_video" : "video" });
     return service;
   };
-  const submit = (a: Hono) => a.request("/conversations/c1/generations", {
+  const submit = (a: ReturnType<typeof app>) => a.request("/conversations/c1/generations", {
     method: "POST", headers: { "Content-Type": "application/json", "X-Lot-Client": client === "miniprogram" ? "miniprogram" : "web" },
     body: JSON.stringify({ prompt: "视频", mediaType: "video" }),
   });
@@ -572,7 +572,7 @@ describe.each(["miniprogram", "marketing_video"])("%s video duplicate protection
     const service = scenarioService(); const a = app(service);
     expect((await submit(a)).status).toBe(202);
     const replay = await submit(a);
-    expect(replay.status).toBe(202); expect((await replay.json()).taskId).toBe("task-1");
+    expect(replay.status).toBe(202); expect((await replay.json() as { taskId: string }).taskId).toBe("task-1");
     expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(1);
     expect(service.usageMeter.checkQuota).toHaveBeenCalledTimes(1);
     expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(2);

@@ -33,7 +33,7 @@ function app(service: any) {
   return a;
 }
 
-const regenerate = (a: Hono, afterMessageId: string) =>
+const regenerate = (a: { request: Hono["request"] }, afterMessageId: string) =>
   a.request("/conversations/c1/regenerate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

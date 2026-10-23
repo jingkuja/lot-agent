@@ -38,7 +38,7 @@ describe("agents routes", () => {
   it("GET annotates installed + sortOrder", async () => {
     const res = await app(fakeService(new Map([["general", 0], ["image", 1]]))).request("/agents");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body: any = await res.json();
     const byId = Object.fromEntries(body.map((a: any) => [a.id, a]));
     expect(byId.general.installed).toBe(true);
     expect(byId.digital_employee).toMatchObject({ installed: true, sortOrder: -1 });
@@ -50,13 +50,13 @@ describe("agents routes", () => {
   it("GET exposes default-installed PPT as ready to use", async () => {
     const res = await app(fakeService(new Map([["image", 0], ["video", 1], ["ppt", 2]]))).request("/agents");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.find((agent: any) => agent.id === "ppt")).toMatchObject({ installed: true, sortOrder: 2 });
   });
 
   it("GET omits hidden agents (even if previously installed)", async () => {
     const res = await app(fakeService(new Map([["copywriting", 2]]))).request("/agents");
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.map((a: any) => a.id)).not.toContain("copywriting");
   });
 
@@ -115,7 +115,7 @@ describe("agents routes", () => {
   it("GET exposes every visible agent even for accounts with no installation rows", async () => {
     const svc = fakeService(new Map());
     const res = await app(svc).request("/agents");
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.length).toBe(6);
     expect(body.every((agent: any) => agent.installed)).toBe(true);
     expect(svc.db.getUserAgents).toHaveBeenCalledWith("u1");

@@ -35,7 +35,7 @@ describe("Qwen enrollment HTTP contract", () => {
     [Response.json({ output: { voice_id: "wrong-model-abc123-id" } }), false],
   ])("classifies only explicit create refusals as rejected (%#)", async (response, rejected) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
-    const error = await client().create({ url: "https://a.example", prefix: "abc123" }).catch(e => e as Error);
+    const error = await client().create({ url: "https://a.example", prefix: "abc123" }).catch(e => e as Error) as Error;
     expect(isQwenCreateRejected(error)).toBe(rejected); expect(error.message).not.toContain("private-key");
   });
   it("never treats transport failures or read-only phases as refusals", async () => {

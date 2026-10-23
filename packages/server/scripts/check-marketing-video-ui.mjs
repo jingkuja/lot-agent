@@ -79,7 +79,7 @@ try {
   const quality = { checked: true, durationSec: 60.02, expectedSec: 60, subtitles: 'model', speech: true, issues: [{ kind: 'black', shot: 1, start: 15, end: 15.8 }] };
   // Like the server, full project reads and saves of a made video offer single shot redo; every fixture clip can be kept.
   const withRevision = (p) => p.rendered && p.status === 'succeeded'
-    ? { ...p, revision: { draft: p.rendered, modelId: KLING_MARKETING_PROFILE.modelId, reusable: p.rendered.storyboard.map(() => true), composition: p.composition ?? { narration: false, localSubtitles: false } } } : p;
+    ? { ...p, revision: { draft: p.rendered, modelId: KLING_MARKETING_PROFILE.modelId, reusable: p.rendered.storyboard.map(() => true), clips: p.rendered.storyboard.map((_, index) => `/static/assets/clip-${index}.mp4`), composition: p.composition ?? { narration: false, localSubtitles: false } } } : p;
   await page.route("**/api/**", async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (!path.startsWith("/api/")) return route.continue();
@@ -92,7 +92,7 @@ try {
     // The UI follows the server's clip profile. This fixture keeps Kling's clip limits under a
     // neutral ID with no image dimension limits, so the 1×1 fixture images pass upload checks.
     if (path === '/api/marketing-videos/capabilities') return json({ composition: true, subtitles: subtitleSupport, knowledge: true, narration: true, model: { ...KLING_MARKETING_PROFILE, modelId: 'fixture-video', referenceImage: { formats: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 20 * 1024 * 1024 } } });
-    if (path === '/api/marketing-videos/usage') return json({ videoBytes: 50 * 1024 * 1024, materialBytes: 1024 * 1024, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
+    if (path === '/api/marketing-videos/usage') return json({ videoBytes: 50 * 1024 * 1024, materialBytes: 1024 * 1024, narrationBytes: 2 * 1024 * 1024, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
     if (request.method() === 'DELETE' && /^\/api\/marketing-videos\/[0-9a-f-]{36}$/.test(path)) { projects.delete(path.split('/')[3]); return json({ ok: true, removedBytes: 3 * 1024 * 1024, keptAnalyses: 1 }); }
     if (path === '/api/marketing-videos') {
       const query = new URL(request.url()).searchParams.get('q') ?? '';
@@ -196,8 +196,11 @@ try {
       return json(asset);
     }
     if (path === '/api/uploads') {
-      assert(request.postDataBuffer()?.includes(Buffer.from('marketing-video')), 'Marketing uploads declare the private purpose');
-      sequence++; const asset = { assetId: `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`, filename: 'asset', mime: request.postDataBuffer()?.includes(Buffer.from('audio/wav')) ? 'audio/wav' : request.postDataBuffer()?.includes(Buffer.from('video/mp4')) ? 'video/mp4' : 'image/png', url: `/static/upload-${sequence}.png`, size: 100 };
+      // P17: the file is the raw body; its type, name and purpose travel in the headers and URL.
+      assert.equal(new URL(request.url()).searchParams.get('purpose'), 'marketing-video', 'Marketing uploads declare the private purpose');
+      assert(request.headers()['x-file-name'], 'Raw uploads carry the file name');
+      const type = request.headers()['content-type'];
+      sequence++; const asset = { assetId: `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`, filename: 'asset', mime: type === 'audio/wav' ? 'audio/wav' : type === 'video/mp4' ? 'video/mp4' : 'image/png', url: `/static/upload-${sequence}.png`, size: 100 };
       uploadedAssets.set(asset.assetId, { id: asset.assetId, name: asset.filename, mime: asset.mime, url: asset.url }); return json(asset);
     }
     if (path.endsWith('/items')) return json({ data: library.filter((item) => item.tags.includes(new URL(request.url()).searchParams.get('tag'))), nextCursor: null });
@@ -581,6 +584,10 @@ try {
   assert(p.draft.storyboard.length >= 2);
   assert.equal(await firstShot.getByLabel('分镜口播').getAttribute('readonly'), null);
   assert.equal(await page.getByRole('button', { name: '选择要重新生成的镜头', exact: true }).isDisabled(), true);
+  // P15: each kept clip can be watched; the video loads only once the preview is opened.
+  assert.equal(await firstShot.locator('.mv-shot-clip video').count(), 0);
+  await firstShot.getByText('查看本镜片段', { exact: true }).click();
+  assert.equal(await firstShot.getByLabel('第 1 镜片段').getAttribute('src'), '/static/assets/clip-0.mp4');
   const secondRedo = secondShot.getByRole('checkbox', { name: /重新生成此镜/ });
   await secondShot.getByLabel('画面内容').fill('人物在窗边慢慢品尝咖啡');
   await secondShot.getByText('已修改', { exact: true }).waitFor();
@@ -800,7 +807,7 @@ try {
   await snap('marketing-video-unknown-en-dark.png');
   await page.locator('.mv-library > summary').click();
   // Space usage shows when the library opens.
-  await page.getByText('Storage used 51.0 MB: videos and clips 50.0 MB · materials in use 1.0 MB · reference analyses 0 KB / 2.0 GB', { exact: true }).waitFor();
+  await page.getByText('Storage used 53.0 MB: videos and clips 50.0 MB · materials in use 1.0 MB · narration 2.0 MB · reference analyses 0 KB / 2.0 GB', { exact: true }).waitFor();
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
   await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), true, 'reopening the same project must keep its lock');

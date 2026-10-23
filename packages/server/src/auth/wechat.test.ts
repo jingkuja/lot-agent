@@ -28,7 +28,7 @@ describe("wechat mini program auth helpers", () => {
   it("exchanges a wx.login code for openid and never returns session_key", async () => {
     vi.stubEnv("WECHAT_MP_APPID", "wxapp");
     vi.stubEnv("WECHAT_MP_SECRET", "secret");
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: string) => ({
       ok: true,
       status: 200,
       json: async () => ({ openid: "o-user", unionid: "u-user", session_key: "DO-NOT-LEAK" }),

@@ -4,7 +4,7 @@ import { migrations } from "./index.js";
 
 describe("managed New API key migration", () => {
   it("adds encrypted managed credential columns", async () => {
-    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [], rowCount: 0 }));
     await managedNewApiKey.up({ query } as any);
     const ddl = query.mock.calls.map((call) => String(call[0])).join("\n");
     expect(ddl).toContain("managed_api_key TEXT");

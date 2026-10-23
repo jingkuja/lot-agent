@@ -52,14 +52,14 @@ function app(service: any) {
   return a;
 }
 
-const sendMessage = (a: Hono, content = "hello") =>
+const sendMessage = (a: { request: Hono["request"] }, content = "hello") =>
   a.request("/conversations/c1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
   });
 
-const regenerate = (a: Hono, afterMessageId = "m1") =>
+const regenerate = (a: { request: Hono["request"] }, afterMessageId = "m1") =>
   a.request("/conversations/c1/regenerate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

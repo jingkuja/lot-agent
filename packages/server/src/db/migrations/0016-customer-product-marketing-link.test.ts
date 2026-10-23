@@ -4,7 +4,7 @@ import { migrations } from "./index.js";
 
 describe("customer product marketing link migration", () => {
   it("adds and backfills marketing product references", async () => {
-    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [], rowCount: 0 }));
     await customerProductMarketingLink.up({ query } as any);
 
     const ddl = query.mock.calls.map((call) => String(call[0])).join("\n");

@@ -68,7 +68,7 @@ const storedManagedUser = {
 async function encryptFor(app: ReturnType<typeof createAuthRoutes>, pw: string) {
   const { publicEncrypt, constants } = await import("node:crypto");
   const res = await app.request("/public-key");
-  const { publicKey } = await res.json();
+  const { publicKey } = await res.json() as { publicKey: string };
   return publicEncrypt(
     { key: publicKey, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
     Buffer.from(pw, "utf-8")
@@ -94,7 +94,7 @@ describe("auth login", () => {
       body: JSON.stringify({ username: "138", encryptedPassword }),
     });
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json: any = await res.json();
     expect(json.token).toBe("tok-1");
     expect(json.user).toEqual({
       id: "u1", name: "138", username: "138",
@@ -122,7 +122,7 @@ describe("auth login", () => {
       body: JSON.stringify({ username: "138", encryptedPassword }),
     });
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json: any = await res.json();
     expect(json.token).toBe("tok-1");
     expect(json.user).toMatchObject({ apiKeys: [], activeKeyIndex: -1 });
   });
@@ -138,7 +138,7 @@ describe("auth login", () => {
       body: JSON.stringify({ username: "138", encryptedPassword }),
     });
     expect(res.status).toBe(401);
-    expect((await res.json()).error).toBe("登录失败，请稍后再试或者联系管理员");
+    expect((await res.json() as any).error).toBe("登录失败，请稍后再试或者联系管理员");
   });
 
   it("returns generic 401 when decryption fails", async () => {
@@ -172,7 +172,7 @@ describe("auth token-login", () => {
       body: JSON.stringify({ token: "jwt.abc.def" }),
     });
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json: any = await res.json();
     expect(json.token).toBe("tok-1");
     expect(json.user).toMatchObject({ id: "u1", username: "Root" });
     expect(JSON.stringify(json)).not.toContain("sk-SECRETSECRET");
@@ -192,7 +192,7 @@ describe("auth token-login", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(401);
-    expect((await res.json()).error).toBe("登录失败，请稍后再试或者联系管理员");
+    expect((await res.json() as any).error).toBe("登录失败，请稍后再试或者联系管理员");
     expect(svc.tokenhub.tokenLogin).not.toHaveBeenCalled();
   });
 
@@ -208,7 +208,7 @@ describe("auth token-login", () => {
       body: JSON.stringify({ token: "bad" }),
     });
     expect(res.status).toBe(401);
-    expect((await res.json()).error).toBe("登录失败，请稍后再试或者联系管理员");
+    expect((await res.json() as any).error).toBe("登录失败，请稍后再试或者联系管理员");
   });
 });
 
@@ -221,7 +221,7 @@ describe("managed contact verification", () => {
       body: JSON.stringify({ username: "alice", encryptedPassword: "not-used" }),
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("注册必须绑定邮箱并完成邮箱验证");
+    expect((await res.json() as any).error).toBe("注册必须绑定邮箱并完成邮箱验证");
     expect(svc.tokenhub.registerAgentUser).not.toHaveBeenCalled();
   });
 
@@ -236,7 +236,7 @@ describe("managed contact verification", () => {
       body: JSON.stringify({ email: "used@example.com" }),
     });
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ error: "该邮箱已被其他用户使用", code: "email_taken" });
+    expect(await res.json() as any).toMatchObject({ error: "该邮箱已被其他用户使用", code: "email_taken" });
   });
 
   it("forwards password reset requests to new-api with the public Lot Agent page", async () => {
@@ -254,7 +254,7 @@ describe("managed contact verification", () => {
       body: JSON.stringify({ email: "alice@example.com" }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, expiresIn: 600 });
+    expect(await res.json() as any).toMatchObject({ ok: true, expiresIn: 600 });
     expect(svc.tokenhub.sendAgentPasswordResetEmail).toHaveBeenCalledWith(
       "alice@example.com",
       "https://lot.example/reset-password"
@@ -274,7 +274,7 @@ describe("managed contact verification", () => {
       }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await res.json() as any).toEqual({ ok: true });
     expect(svc.tokenhub.resetAgentPassword).toHaveBeenCalledWith({
       email: "alice@example.com",
       token: "reset-token",
@@ -321,7 +321,7 @@ describe("managed contact verification", () => {
       body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ token: "tok-managed", user: { id: "u7", username: "alice" } });
+    expect(await res.json() as any).toMatchObject({ token: "tok-managed", user: { id: "u7", username: "alice" } });
     expect(svc.tokenhub.authenticateAgentUserByPhone).toHaveBeenCalledWith("13800138000", "123456");
   });
 
@@ -348,7 +348,7 @@ describe("managed contact verification", () => {
       body: JSON.stringify({ phone: "13800138000", verificationCode: "123456" }),
     });
     expect(bind.status).toBe(200);
-    expect(await bind.json()).toEqual({ ok: true, phone: "138****8000" });
+    expect(await bind.json() as any).toEqual({ ok: true, phone: "138****8000" });
     expect(svc.tokenhub.bindAgentPhone).toHaveBeenCalledWith(7, "13800138000", "123456");
     expect(svc.db.updateUserPhone).toHaveBeenCalledWith("u7", "13800138000");
   });
@@ -384,7 +384,7 @@ describe("managed contact verification", () => {
       body: JSON.stringify({ displayName: "  印社老板  " }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, user: { name: "印社老板" } });
+    expect(await res.json() as any).toMatchObject({ ok: true, user: { name: "印社老板" } });
     expect(svc.tokenhub.updateAgentDisplayName).toHaveBeenCalledWith(7, "印社老板");
     expect(svc.db.updateUserDisplayName).toHaveBeenCalledWith("u7", "印社老板");
   });
@@ -399,7 +399,7 @@ describe("auth mode", () => {
     const app = createAuthRoutes(svc);
     const res = await app.request("/mode");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
+    expect(await res.json() as any).toEqual({
       debug: false,
       user: null,
       managedRegistration: false,
@@ -411,7 +411,7 @@ describe("auth mode", () => {
     const svc = fakeService();
     (svc as { debug: boolean; debugUserId: string }).debug = true;
     (svc as { debugUserId: string }).debugUserId = "u-debug";
-    (svc.db as { getUserById: ReturnType<typeof vi.fn> }).getUserById = vi
+    (svc.db as unknown as { getUserById: ReturnType<typeof vi.fn> }).getUserById = vi
       .fn()
       .mockResolvedValue({
         id: "u-debug", email: null, name: "debug", created_at: "t",
@@ -420,7 +420,7 @@ describe("auth mode", () => {
     const app = createAuthRoutes(svc);
     const res = await app.request("/mode");
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json: any = await res.json();
     expect(json.debug).toBe(true);
     expect(json.user).toMatchObject({ id: "u-debug", username: "debug" });
   });
@@ -463,7 +463,7 @@ describe("wechat mini program login", () => {
       username: "wx_mini_8",
       name: "wx_mini",
     });
-    (svc.db as { bindUserWechat?: ReturnType<typeof vi.fn> }).bindUserWechat = vi
+    (svc.db as unknown as { bindUserWechat?: ReturnType<typeof vi.fn> }).bindUserWechat = vi
       .fn()
       .mockResolvedValue("ok");
     const res = await createAuthRoutes(svc).request("/wechat-login", {
@@ -472,12 +472,12 @@ describe("wechat mini program login", () => {
       body: JSON.stringify({ code: "fresh" }),
     });
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json: any = await res.json();
     expect(json.token).toBe("tok-managed");
     expect(json.user).toMatchObject({ username: "wx_mini_8", name: "wx_mini" });
     expect(json.needBind).toBeUndefined();
     expect(svc.tokenhub.authenticateWechatMiniUser).toHaveBeenCalledWith("o-new", "u-new");
-    expect((svc.db as { bindUserWechat: ReturnType<typeof vi.fn> }).bindUserWechat)
+    expect((svc.db as unknown as { bindUserWechat: ReturnType<typeof vi.fn> }).bindUserWechat)
       .toHaveBeenCalledWith("u7", "o-new", "u-new");
   });
 
@@ -509,7 +509,7 @@ describe("wechat mini program login", () => {
       body: JSON.stringify({ code: "phone-code" }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, adopted: false });
+    expect(await res.json() as any).toMatchObject({ ok: true, adopted: false });
     expect(svc.tokenhub.bindWechatMiniPhone).toHaveBeenCalledWith(7, "13800138000");
     expect(svc.db.updateUserPhone).toHaveBeenCalledWith("u7", "13800138000");
   });
@@ -627,14 +627,14 @@ describe("wechat mini program login", () => {
       id: "u99",
       external_user_id: 99,
     });
-    (svc.sessions as { revoke?: ReturnType<typeof vi.fn> }).revoke = vi.fn().mockResolvedValue(undefined);
+    (svc.sessions as unknown as { revoke?: ReturnType<typeof vi.fn> }).revoke = vi.fn().mockResolvedValue(undefined);
     const res = await createAuthRoutes(svc).request("/wechat-phone-bind/confirm", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer tok-managed" },
       body: JSON.stringify({ ticket }),
     });
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json: any = await res.json();
     expect(json.adopted).toBe(true);
     expect(json.user).toMatchObject({ id: "u99", username: "phone-owner" });
     expect(svc.tokenhub.mergeWechatMiniPhone).toHaveBeenCalledWith(7, "13900139000");

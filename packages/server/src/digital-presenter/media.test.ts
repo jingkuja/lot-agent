@@ -59,9 +59,12 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     expect(image.durationSec).toBeCloseTo(2.25, 0);
     const video = await composeVideoMode({ clip: join(dir, "prepared.mp4"), track: join(dir, "track.wav"), trackSec: 2.25 });
     expect(video.durationSec).toBeCloseTo(2.25, 0);
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(join(dir, "final.mp4"), video.body);
-    expect(await inspectMedia(join(dir, "final.mp4"))).toMatchObject({ video: true, audio: true });
+    // The video is left in a temporary folder for streaming to storage, until disposed of.
+    expect(await inspectMedia(video.file)).toMatchObject({ video: true, audio: true });
+    expect(video.sizeBytes).toBeGreaterThan(0);
+    await Promise.all([image.dispose(), video.dispose()]);
+    const { access } = await import("node:fs/promises");
+    await expect(access(video.file)).rejects.toThrow();
   });
 
   it("times a take's captions within its span, with the user's line breaks and offsets", async () => {
@@ -91,5 +94,6 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     const video = await composeVideoMode({ clip: join(dir, "prepared.mp4"), track: join(dir, "track.wav"), trackSec: 2.25, captions: { ...captions, takes, takeMs: [1200, 800] } });
     expect(video.durationSec).toBeCloseTo(2.25, 0);
     expect(video.captions?.at(-1)!.end).toBeLessThanOrEqual(2.25);
+    await Promise.all([image.dispose(), video.dispose()]);
   });
 });

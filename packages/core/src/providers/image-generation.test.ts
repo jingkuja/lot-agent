@@ -50,7 +50,7 @@ describe("HttpImageGenerationProvider", () => {
     const p = new HttpImageGenerationProvider({ baseUrl: "https://api/v1", apiKey: "k", adapter: new HappyhorseImageAdapter(), model: "im" });
     const r = await p.create({ prompt: "hi" });
     expect(r).toEqual({ taskId: "task_1", status: "queued", progress: 0 });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://api/v1/image/generations");
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer k");
@@ -63,7 +63,7 @@ describe("HttpImageGenerationProvider", () => {
     const r = await p.poll("task_1");
     expect(r.status).toBe("completed");
     expect(r.url).toBe("https://x/y.png");
-    expect((fetchMock.mock.calls[0] as [string])[0]).toBe("https://api/v1/images/task_1");
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe("https://api/v1/images/task_1");
   });
   it("throws on non-ok create/poll", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, text: async () => "boom" })) as unknown as typeof fetch);

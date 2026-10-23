@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AgentService } from "../services/agent-service.js";
 
-export function createKnowledgeBaseRoutes(service: AgentService): Hono {
+export function createKnowledgeBaseRoutes(service: AgentService) {
   const app = new Hono<{ Variables: { userId: string } }>();
 
   app.get("/", async (c) => {

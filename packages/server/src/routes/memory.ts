@@ -4,7 +4,7 @@ import type { AgentService } from "../services/agent-service.js";
 
 type Variables = { userId: string };
 
-export function createMemoryRoutes(service: AgentService): Hono {
+export function createMemoryRoutes(service: AgentService) {
   const app = new Hono<{ Variables: Variables }>();
 
   function getMemory(userId: string): AgentMemoryStore {

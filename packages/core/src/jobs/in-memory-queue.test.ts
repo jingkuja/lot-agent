@@ -83,7 +83,7 @@ describe("InMemoryJobQueue", () => {
     await new Promise((r) => setTimeout(r, 0));
 
     const r1 = await queue.get(id);
-    (r1 as Record<string, unknown>).status = "pending"; // mutate returned clone
+    (r1 as unknown as Record<string, unknown>).status = "pending"; // mutate returned clone
 
     const r2 = await queue.get(id);
     expect(r2!.status).toBe("succeeded"); // internal record unchanged

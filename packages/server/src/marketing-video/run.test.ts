@@ -16,12 +16,15 @@ vi.mock("./media.js", () => ({
   SUBTITLES_UNAVAILABLE: "字幕不可用",
   inspectMedia: vi.fn(async () => ({ video: true, audio: true, duration: 15 })),
   ownedAssetPath: vi.fn(async () => "/tmp/fixture.mp4"),
+  storeComposedVideo: vi.fn((storage: { putStream: (...args: unknown[]) => unknown }, key: string, video: { file: string; sizeBytes: number }) => storage.putStream(key, video.file, "video/mp4", video.sizeBytes)),
 }));
 vi.mock("../generation/run-job.js", async importOriginal => ({
   ...await importOriginal<typeof import("../generation/run-job.js")>(),
   runGenerationJob: vi.fn(async (_deps: unknown, job: { id: string }) => ({ assetIds: [`asset-${job.id}`], assets: [] })),
 }));
 
+// A composed video left on disk; the mocked store hands its path to storage.
+const composed = () => ({ file: "/tmp/composed.mp4", sizeBytes: 7, dispose: vi.fn(async () => {}), durationSec: 30, width: 720, height: 1280 });
 function fixture(shots: MarketingShot[], submitted = false) {
   const draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots), background: "背景".repeat(300) });
   store.get.mockResolvedValue({ id: "project", taskId: "parent" });
@@ -30,15 +33,15 @@ function fixture(shots: MarketingShot[], submitted = false) {
   const connection = { query: vi.fn(async () => ({ rows: [{ locked: true }] })), release: vi.fn() };
   const db = {
     pool: { connect: vi.fn(async () => connection), query: vi.fn(async () => ({ rows: [] })) },
-    getTaskStatus: vi.fn(async () => "running"), updateTaskProgress: vi.fn(),
+    getTaskStatus: vi.fn(async () => "running"), updateTaskProgress: vi.fn(), raiseTaskProgress: vi.fn(),
     getTaskVendorId: vi.fn(async (id: string) => `vendor-${id}`),
     getAsset: vi.fn(async () => ({ user_id: "owner" })),
     setTaskResult: vi.fn(), setTaskError: vi.fn(), createAsset: vi.fn(),
   };
   const gen = { modelId: "kling-video-v3-omni", db: {}, provider: {},
-    meter: { record: vi.fn() }, storage: { put: vi.fn(async () => ({ url: "/static/result.mp4" })) } };
+    meter: { record: vi.fn() }, storage: { putStream: vi.fn(async () => ({ url: "/static/result.mp4" })) } };
   const generation = vi.fn(async () => gen);
-  const compose = vi.fn(async () => ({ body: Buffer.from("fixture"), durationSec: 30, width: 720, height: 1280 }));
+  const compose = vi.fn(async () => composed());
   const deps = { db, dataRoot: "/tmp", generation, compose } as unknown as MarketingRunDeps;
   const job = { id: "parent", userId: "owner", input: { projectId: "project", draft, generate_audio: true } };
   return { deps, job, generation, connection, db, compose };
@@ -62,7 +65,7 @@ describe("marketing prompt submission preflight", () => {
     const f = fixture([short, short]);
     Object.assign(f.job.input, { local_subtitles: true });
     const captions = [{ shot: 0, start: 0.2, end: 3, text: "欢迎来喝咖啡" }];
-    f.compose.mockResolvedValueOnce({ body: Buffer.from("fixture"), durationSec: 30, width: 720, height: 1280, captions } as never);
+    f.compose.mockResolvedValueOnce({ ...composed(), captions } as never);
     await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).resolves.toMatchObject({ captions });
     const input = (f.compose.mock.calls[0] as unknown[])[0] as { subtitles: boolean; speech: boolean; narration?: string[] };
     expect(input).toMatchObject({ subtitles: true, speech: true });
@@ -80,6 +83,20 @@ describe("marketing prompt submission preflight", () => {
     await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).rejects.toMatchObject({ errorCode: "CONFIG_MISSING" });
     expect(f.generation).not.toHaveBeenCalled();
     expect(runGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it("never moves a clip's progress back when the vendor reports less", async () => {
+    vi.mocked(runGenerationJob).mockClear();
+    const f = fixture([short, short]);
+    vi.mocked(runGenerationJob).mockImplementationOnce(async (deps, job) => {
+      for (const value of [40, 0, 20, 60]) await deps.updateProgress(job.id, value);
+      return { assetIds: [`asset-${job.id}`], assets: [] } as never;
+    });
+    await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+    const shown = f.db.raiseTaskProgress.mock.calls.map(call => (call as unknown[])[1]);
+    expect(shown.slice(0, 4)).toEqual([17, 17, 17, 25]);
+    expect(shown).toEqual([...shown].sort((a, b) => Number(a) - Number(b)));
+    expect(shown.at(-1)).toBe(90);
   });
 
   it("continues already-submitted shots without applying new prompt limits to their recovery", async () => {
@@ -101,7 +118,7 @@ describe("marketing segment submission failures", () => {
     const f = fixture([shot, shot]);
     f.db.pool.query.mockImplementation(query as never);
     const create = vi.fn(async () => { throw error; });
-    f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", db: {}, provider: { create }, meter: { record: vi.fn() }, storage: { put: vi.fn() } } as never);
+    f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", db: {}, provider: { create }, meter: { record: vi.fn() }, storage: { putStream: vi.fn() } } as never);
     vi.mocked(runGenerationJob).mockImplementation(async (deps) => { await deps.provider.create({} as never); throw new Error("unreachable"); });
     const result = runMarketingVideo(f.deps, f.job, new AbortController().signal);
     const released = () => (f.db.pool.query.mock.calls as unknown[][]).some(([sql]) => String(sql).includes("SET vendor_task_id=NULL WHERE id=$1 AND vendor_task_id=$2"));
@@ -154,7 +171,7 @@ describe("Kling voice reuse within one parent job", () => {
     vi.mocked(f.db.pool.query as (sql: string) => Promise<{ rows: unknown[] }>).mockImplementation(async sql => ({ rows: sql.includes("generation_voice_tasks") ? legacy.map(task_id => ({ task_id })) : [] }));
     const prepareKlingVoices = vi.fn(async () => ["voice-1"]);
     f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", vendorModel: "kling-video-v3-omni", db: {}, provider: {}, prepareKlingVoices,
-      meter: { record: vi.fn() }, storage: { put: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
+      meter: { record: vi.fn() }, storage: { putStream: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
     return { ...f, prepareKlingVoices };
   }
   it("creates the voice once for the parent before any clip and scopes every clip to it", async () => {
@@ -174,7 +191,7 @@ describe("Kling voice reuse within one parent job", () => {
   it("does not prepare voices for a non-Kling model", async () => {
     const f = voiceFixture();
     f.generation.mockResolvedValue({ modelId: "grok-imagine-video-1.5", vendorModel: "grok-imagine-video-1.5", db: {}, provider: {}, prepareKlingVoices: f.prepareKlingVoices,
-      meter: { record: vi.fn() }, storage: { put: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
+      meter: { record: vi.fn() }, storage: { putStream: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
     await runMarketingVideo(f.deps, f.job, new AbortController().signal);
     expect(f.prepareKlingVoices).not.toHaveBeenCalled();
   });
@@ -212,7 +229,7 @@ describe("clips kept by a shot redo", () => {
     vi.mocked(runGenerationJob).mockClear();
     const f = fixture([shot, shot]);
     const record = vi.fn();
-    f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", db: {}, provider: {}, meter: { record }, storage: { put: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
+    f.generation.mockResolvedValue({ modelId: "kling-video-v3-omni", db: {}, provider: {}, meter: { record }, storage: { putStream: vi.fn(async () => ({ url: "/static/result.mp4" })) } } as never);
     store.segments.mockResolvedValue([
       { slot: 0, task_id: "child-0", script: shot.script, duration_sec: 15, status: "succeeded", vendor_task_id: null, output: { assetIds: ["kept"], assets: [], reusedFrom: "old-child-0" } },
       { slot: 1, task_id: "child-1", script: shot.script, duration_sec: 15, status: "pending", vendor_task_id: null, output: null },
@@ -265,7 +282,7 @@ describe("twin-narrated jobs", () => {
     const f = await narrated(true);
     Object.assign(f.job.input, { local_subtitles: true, key_art: "still" });
     const quality = { checked: true, durationSec: 30, expectedSec: 30, subtitles: "burned", captions: 4, speech: true, issues: [] };
-    f.compose.mockResolvedValueOnce({ body: Buffer.from("fixture"), durationSec: 30, width: 720, height: 1280, quality } as never);
+    f.compose.mockResolvedValueOnce({ ...composed(), quality } as never);
     try {
       // The local check result is kept with the video for the result page.
       await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).resolves.toMatchObject({ quality });

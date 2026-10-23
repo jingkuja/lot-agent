@@ -24,5 +24,6 @@
 ## Validation and Delivery
 
 - Run tests and builds relevant to the scope of the changes, and report actual validation results; for documentation-only changes, checking content, paths, and links is sufficient.
+- For code changes, run `pnpm typecheck` (strict, including tests) and keep it at zero errors; a passing build does not replace it.
 - Update `docs/agent-code-guide.md` when feature entry points or architecture change; keep this file limited to brief development conventions.
 - Keep the conventions in `AGENTS.md` and `CLAUDE.md` consistent.

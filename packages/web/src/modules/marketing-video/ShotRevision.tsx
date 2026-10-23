@@ -53,7 +53,7 @@ export function ShotRevision({ project, revision, draft, busy, saving, reviewPan
   </>;
   return <>
     {settings(recompose)}
-    <StoryboardEditor shots={draft.storyboard} busy={busy} onChange={onChange} redo={{ selected, reasons, notes, onToggle: toggle }} />
+    <StoryboardEditor shots={draft.storyboard} busy={busy} onChange={onChange} redo={{ selected, reasons, notes, onToggle: toggle, clips: revision.clips }} />
     {!made && edited && <p className="mv-hint">{t("「继续生成」按原分镜制作；要使用修改后的镜头，请点击下方的重新生成。")}</p>}
     {(edited || reviewIssue) && reviewPanel}
     {planError && <p className="mv-error" role="alert">{t(planError)}</p>}

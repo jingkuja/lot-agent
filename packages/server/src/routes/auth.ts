@@ -338,7 +338,7 @@ export function createAuthRoutes(service: AgentService): Hono {
     }
     const resolved = await resolveSessionUser(c.req.header("Authorization"));
     const externalUserId = resolved?.user.external_user_id ?? null;
-    if (externalUserId == null) return c.json({ error: "Unauthorized" }, 401);
+    if (!resolved || externalUserId == null) return c.json({ error: "Unauthorized" }, 401);
     let body: { phone?: string; verificationCode?: string };
     try {
       body = await c.req.json();

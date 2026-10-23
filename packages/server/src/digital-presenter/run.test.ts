@@ -31,6 +31,7 @@ vi.mock("../marketing-video/media.js", () => ({
   SUBTITLES_UNAVAILABLE: "视频合成工具不支持字幕烧录",
   inspectMedia: vi.fn(async () => ({ video: true, audio: true, duration: 4.2 })),
   ownedAssetPath: vi.fn(async () => "/tmp/upload.png"),
+  storeComposedVideo: vi.fn((storage: { putStream: (...args: unknown[]) => unknown }, key: string, video: { file: string; sizeBytes: number }) => storage.putStream(key, video.file, "video/mp4", video.sizeBytes)),
 }));
 
 const PROJECT = "11111111-1111-4111-8111-111111111111";
@@ -42,7 +43,7 @@ function fixture(clips: Partial<ClipRow>[], provider: { create: ReturnType<typeo
   store.clips.mockImplementation(async () => rows.map(row => ({ ...row })));
   const queries: { sql: string; values: unknown[] }[] = [];
   const pool = {
-    connect: vi.fn(async () => ({ query: vi.fn(async () => ({ rows: [{ locked: true }] })), release: vi.fn() })),
+    connect: vi.fn(async () => ({ query: vi.fn(async (_sql: string, _params: any[]) => ({ rows: [{ locked: true }] })), release: vi.fn() })),
     query: vi.fn(async (sql: string, values: unknown[] = []) => {
       queries.push({ sql, values });
       // Keep the in-memory clip rows in step with the worker's updates.
@@ -58,20 +59,22 @@ function fixture(clips: Partial<ClipRow>[], provider: { create: ReturnType<typeo
       return { rows: [], rowCount: 1 };
     }),
   };
-  const db = { pool, getTaskStatus: vi.fn(async () => "running"), updateTaskProgress: vi.fn(), getAsset: vi.fn(async () => ({ id: "upload", user_id: "owner", type: "upload" })), createAsset: vi.fn() };
+  const db = { pool, getTaskStatus: vi.fn(async () => "running"), updateTaskProgress: vi.fn(), raiseTaskProgress: vi.fn(), getAsset: vi.fn(async () => ({ id: "upload", user_id: "owner", type: "upload" })), createAsset: vi.fn() };
+  // A composed video left on disk; the mocked store hands its path to storage.
+  const file = { file: "/tmp/composed.mp4", sizeBytes: 5, dispose: vi.fn(async () => {}) };
   const compose = {
-    image: vi.fn(async () => ({ body: Buffer.from("video"), durationSec: 7.55, width: 720, height: 1280, captions: [{ shot: 0, start: 0, end: 1, text: "大家好" }] })),
-    video: vi.fn(async () => ({ body: Buffer.from("video"), durationSec: 9, width: 1080, height: 1920 })),
+    image: vi.fn(async () => ({ ...file, durationSec: 7.55, width: 720, height: 1280, captions: [{ shot: 0, start: 0, end: 1, text: "大家好" }] })),
+    video: vi.fn(async () => ({ ...file, durationSec: 9, width: 1080, height: 1920 })),
   };
   const deps: PresenterRunDeps = {
     db: db as never, dataRoot: root.dir, provider: vi.fn(async () => provider as never),
     download: vi.fn(async () => ({ body: Buffer.from("clip"), mime: "video/mp4" })),
-    storage: { put: vi.fn(async ({ key }) => ({ url: `/static/assets/${key}` })) },
+    storage: { putStream: vi.fn(async (key: string) => ({ url: `/static/assets/${key}` })) },
     sleep: async () => {}, compose, sign: vi.fn(async (_root: string, _project: string, file: string) => `https://pub.example/${file}`),
   };
   const input = { presenterInputVersion: 1, projectId: PROJECT, mode, model: rows[0].model, resolution: "720P", ratio: "9:16", takes, subtitles: true,
     ...(mode === "image" ? { portrait: "portrait-id" } : { baseVideo: "video-id" }) };
-  return { deps, rows, queries, db, compose, job: { id: "job", userId: "owner", input } };
+  return { deps, rows, queries, db, compose, file, job: { id: "job", userId: "owner", input } };
 }
 
 beforeEach(async () => { root.dir = await mkdtemp(join(tmpdir(), "presenter-run-")); });
@@ -83,13 +86,16 @@ describe("digital presenter worker", () => {
       poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://oss.example/out.mp4" })) };
     const f = fixture([{}, {}], provider);
     const output = await runDigitalPresenter(f.deps, f.job, new AbortController().signal);
-    expect(provider.create.mock.calls.map(call => call[0])).toEqual([
+    expect((provider.create.mock.calls as unknown[][]).map(call => call[0])).toEqual([
       { prompt: "", model: "wan2.2-s2v", resolution: "720P", durationSec: 4.2, input_reference: "https://pub.example/jobs/job/portrait.jpg", reference_audio: "https://pub.example/a.wav" },
       { prompt: "", model: "wan2.2-s2v", resolution: "720P", durationSec: 3.1, input_reference: "https://pub.example/jobs/job/portrait.jpg", reference_audio: "https://pub.example/b.wav" },
     ]);
     expect(f.rows.map(row => [row.status, row.vendor_task_id])).toEqual([["succeeded", "vendor-1"], ["succeeded", "vendor-2"]]);
     expect(f.compose.image).toHaveBeenCalledWith(expect.objectContaining({ takeMs: [4200, 3100], captions: { texts: ["大家好。", "欢迎光临。"] }, frame: { width: 720, height: 1280 } }));
-    expect(f.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({ taskId: "job", userId: "owner", type: "video", mime: "video/mp4" }));
+    expect(f.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({ taskId: "job", userId: "owner", type: "video", mime: "video/mp4", sizeBytes: 5 }));
+    // The composed file is streamed to storage, then its temporary folder is removed.
+    expect(f.deps.storage.putStream).toHaveBeenCalledWith(expect.stringMatching(/\.mp4$/), "/tmp/composed.mp4", "video/mp4", 5);
+    expect(f.file.dispose).toHaveBeenCalledOnce();
     expect(output).toMatchObject({ assets: [{ mime: "video/mp4", durationSec: 7.55 }], frame: { width: 720, height: 1280 }, captions: [{ shot: 0, start: 0, end: 1, text: "大家好" }] });
     // The intent is recorded before the paid request.
     const claim = f.queries.findIndex(q => q.sql.includes("status='submitting'"));
@@ -107,6 +113,33 @@ describe("digital presenter worker", () => {
     provider.create.mockClear();
     await expect(runDigitalPresenter(f.deps, f.job, new AbortController().signal)).rejects.toMatchObject({ errorCode: "SUBMISSION_UNKNOWN" });
     expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("records a gateway 5xx as not charged and resubmits the clip on continue without confirmation", async () => {
+    const provider = { create: vi.fn(async () => { throw new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 502, gatewayRequestId: "req-1" }); }),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "https://oss.example/out.mp4" })) };
+    const f = fixture([{}], provider);
+    f.job.input.takes = [takes[0]];
+    await expect(runDigitalPresenter(f.deps, f.job, new AbortController().signal)).rejects.toMatchObject({ errorCode: "GATEWAY_FAILED" });
+    expect(f.rows[0].status).toBe("failed");
+    const recorded = f.queries.find(q => q.sql.includes("digital_presenter_clip_gateway_failures"));
+    expect(recorded?.values).toEqual(["owner", PROJECT, "job", 0, "wan2.2-s2v", 502, "req-1"]);
+    // Recorded before the claim is released.
+    expect(f.queries.indexOf(recorded!)).toBeLessThan(f.queries.findIndex(q => q.sql.includes("status='failed'")));
+    provider.create.mockResolvedValueOnce({ taskId: "vendor-2", status: "queued", progress: 0 } as never);
+    await runDigitalPresenter(f.deps, f.job, new AbortController().signal);
+    expect(f.rows[0].status).toBe("succeeded");
+  });
+
+  it("keeps the clip unknown when the gateway failure cannot be recorded", async () => {
+    const provider = { create: vi.fn(async () => { throw new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 503 }); }), poll: vi.fn() };
+    const f = fixture([{}], provider);
+    f.job.input.takes = [takes[0]];
+    const query = f.deps.db.pool.query as unknown as ReturnType<typeof vi.fn>;
+    const base = query.getMockImplementation()!;
+    query.mockImplementation(async (sql: string, values?: unknown[]) => { if (sql.includes("gateway_failures")) throw new Error("db down"); return base(sql, values); });
+    await expect(runDigitalPresenter(f.deps, f.job, new AbortController().signal)).rejects.toThrow();
+    expect(f.rows[0].status).toBe("submitting");
   });
 
   it("marks an explicit rejection retry-safe", async () => {
@@ -138,7 +171,7 @@ describe("digital presenter worker", () => {
     const f = fixture([{}], provider, "video");
     await runDigitalPresenter(f.deps, f.job, new AbortController().signal);
     expect(provider.create).toHaveBeenCalledOnce();
-    expect(provider.create.mock.calls[0][0]).toEqual({ prompt: "", model: "videoretalk", durationSec: 7.55,
+    expect((provider.create.mock.calls[0] as unknown[])[0]).toEqual({ prompt: "", model: "videoretalk", durationSec: 7.55,
       reference_video: "https://pub.example/jobs/job/footage.mp4", reference_audio: "https://pub.example/jobs/job/track.wav" });
     expect(f.compose.video).toHaveBeenCalledWith(expect.objectContaining({ trackSec: 7.55, captions: { texts: ["大家好。", "欢迎光临。"], takes: [join(root.dir, "a.wav"), join(root.dir, "b.wav")], takeMs: [4200, 3100] } }));
   });

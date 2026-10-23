@@ -459,13 +459,11 @@ export const api = {
     }),
 
   uploadFile: async (file: File, signal?: AbortSignal, purpose?: "marketing-video"): Promise<UploadedAttachment> => {
-    const fd = new FormData();
-    fd.append("file", file);
-    if (purpose) fd.append("purpose", purpose);
-    const res = await fetch(`${BASE}/uploads`, {
+    // The file itself is the body, so the server streams it to disk instead of buffering a form.
+    const res = await fetch(`${BASE}/uploads${purpose ? `?purpose=${purpose}` : ""}`, {
       method: "POST",
-      headers: { ...authHeaders() }, // 不要手动设 Content-Type，浏览器自动带 boundary
-      body: fd,
+      headers: { ...authHeaders(), "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) },
+      body: file,
       signal,
     });
     if (res.status === 401) {

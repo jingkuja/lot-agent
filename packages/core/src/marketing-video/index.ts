@@ -239,7 +239,9 @@ export interface MarketingProject {
   /** Set when single shots of the current stopped or finished job can be redone: the
    * draft it rendered, its clip model, which of its clips can be kept unpaid, and what its
    * local composition adds to them. */
-  revision?: { draft: MarketingDraft; modelId: string; reusable: boolean[]; composition: MarketingComposition };
+  revision?: { draft: MarketingDraft; modelId: string; reusable: boolean[]; composition: MarketingComposition;
+    /** Each kept clip's video, to watch a shot before redoing it; null when it has none. */
+    clips?: (string | null)[] };
 }
 /** What a page polls while a video is being made: task fields only, no draft or material links. */
 export type MarketingTaskState = Pick<MarketingProject, "id" | "version" | "taskId" | "status" | "progress" | "stage" | "error" | "errorCode" | "output" | "unknownSegments">;

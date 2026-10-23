@@ -403,7 +403,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     let p = await save();
     if (!p.review || p.reviewedScript !== reviewedText(p.draft)) { await review(); p = projectRef.current!; }
     if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再重新生成。");
-    wait("正在提交生成任务", false);
+    // A changed shot of a twin-narrated video gets its new take inside this request.
+    wait(marketingVoiceover(p.draft) ? "正在合成改动镜头的配音并提交生成任务" : "正在提交生成任务", false);
     const result = await requestProject(`/marketing-videos/${p.id}/revise`, json("POST", { version: p.version, shots }));
     if (session.alive) setCurrent(result);
   }
@@ -463,7 +464,19 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     await save();
   }
   const changeStoryboard = (storyboard: MarketingShot[]) => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) });
-  const aiStoryboard = (instruction: string, index?: number) => void act(() => editStoryboard(instruction, index));
+  const aiStoryboard = (instruction: string, index?: number) => void act(async () => {
+    // A whole-board edit may reword or re-split every shot, and a take only fits its own text.
+    // The takes are read for the saved draft here: the production step may not have loaded them.
+    let takes = 0;
+    if (index === undefined && marketingVoiceover(draftRef.current) && draftRef.current.narration?.twinItemId && draftRef.current.storyboard.length) {
+      const p = await save();
+      takes = await request<{ clips: MarketingNarrationClip[] }>(`/marketing-videos/${p.id}/narration`)
+        .then(result => result.clips.filter(clip => clip.status === "succeeded").length, () => 0);
+    }
+    if (takes && !await confirm({ title: "修改全部分镜？", confirm: "继续修改", values: [takes],
+      message: "已生成 {0} 个镜头的数字分身配音。AI 修改全部分镜后，口播或镜头有变化的配音会失效，需要重新生成并按语音合成计费。是否继续？" })) return;
+    await editStoryboard(instruction, index);
+  });
   // The server plans every new board for the current audio setting.
   const rebuildStoryboard = () => aiStoryboard(t(draftRef.current.assets.video
     ? "已添加参考视频，成片不生成口播：请把每个分镜改为无声展示，人物不说话、不做口型，口播内容只作为字幕或画面信息；保持镜数和每镜时长。"
@@ -480,9 +493,10 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     if (!session.current(token)) return;
     const clientRequestId = requestId(uploadRequest, JSON.stringify([ownerId, file.name, file.size, file.lastModified]));
     const controller = new AbortController(); uploadController.current = controller; setUploadingReference(true);
-    const body = new FormData(); body.append("file", file); body.append("clientRequestId", clientRequestId);
     try {
-      const upload = await request<{ id: string; name: string }>("/marketing-video-analyses/uploads", { method: "POST", body, signal: controller.signal });
+      // The video itself is the body, so the server streams it to disk instead of buffering a form.
+      const upload = await request<{ id: string; name: string }>(`/marketing-video-analyses/uploads?clientRequestId=${clientRequestId}`, { method: "POST", body: file, signal: controller.signal,
+        headers: { "Content-Type": file.type, "X-File-Name": encodeURIComponent(file.name) } });
       if (!session.current(token)) return;
       update({ ...draftRef.current, reference: "", referenceUpload: upload });
       await save();

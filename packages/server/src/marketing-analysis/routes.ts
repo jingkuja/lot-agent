@@ -10,6 +10,7 @@ import { analysisUserKey } from "./runtime.js";
 import { readAnalysisFile } from "./private-files.js";
 import { validateCookieFile } from "./download.js";
 import { storeAnalysisUpload } from "./uploads.js";
+import { uploadFileName } from "../util/metered-upload.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const revision = (n: unknown): n is number => Number.isSafeInteger(n) && Number(n) > 0;
@@ -34,12 +35,24 @@ export function createAnalysisRoutes(service: Pick<AgentService, "db" | "tokenhu
   });
   app.get("/capabilities", c => c.json({ enabled: config.enabled, durationMs: 180000, platforms: ["douyin", "xiaohongshu", "bilibili"] }));
   app.use("*", async (_c, next) => { if (!config.enabled) throw new AnalysisError("ANALYSIS_DISABLED", 503); await next(); });
+  // The web client sends the video as the raw body (type in Content-Type, URI-encoded name in
+  // X-File-Name, ?clientRequestId=), streamed to disk. Multipart is kept for older clients.
   app.post("/uploads", async c => {
-    const body = await c.req.parseBody();
-    if (!(body.file instanceof File) || typeof body.clientRequestId !== "string" || !uuid.test(body.clientRequestId)) throw new AnalysisError("INVALID_SOURCE");
-    if (!body.file.size || body.file.size > ANALYSIS_LIMITS.downloadBytes) throw new AnalysisError("UPLOAD_LIMIT", 413);
-    return c.json(await storeAnalysisUpload({ pool: store.pool, storage, owner: c.get("userId"), id: body.clientRequestId,
-      name: body.file.name, mime: body.file.type, bytes: Buffer.from(await body.file.arrayBuffer()), signal: c.req.raw.signal }), 201);
+    const contentType = c.req.header("content-type") ?? "";
+    let file: { id: unknown; name: string; mime: string; size?: number; body: AsyncIterable<Uint8Array> | null };
+    if (/^multipart\/form-data/i.test(contentType)) {
+      const body = await c.req.parseBody();
+      if (!(body.file instanceof File)) throw new AnalysisError("INVALID_SOURCE");
+      file = { id: body.clientRequestId, name: body.file.name, mime: body.file.type, size: body.file.size, body: body.file.stream() };
+    } else {
+      const length = Number(c.req.header("content-length"));
+      file = { id: c.req.query("clientRequestId"), name: uploadFileName(c.req.header("x-file-name")), mime: contentType.split(";")[0].trim().toLowerCase(),
+        size: Number.isFinite(length) ? length : undefined, body: c.req.raw.body };
+    }
+    if (typeof file.id !== "string" || !uuid.test(file.id) || !file.body) throw new AnalysisError("INVALID_SOURCE");
+    if (file.size !== undefined && (!file.size || file.size > ANALYSIS_LIMITS.downloadBytes)) throw new AnalysisError("UPLOAD_LIMIT", 413);
+    return c.json(await storeAnalysisUpload({ pool: store.pool, storage, owner: c.get("userId"), id: file.id,
+      name: file.name, mime: file.mime, body: file.body, signal: c.req.raw.signal }), 201);
   });
   app.get("/sessions", async c => c.json({ data: (await store.pool.query("SELECT platform,updated_at FROM marketing_analysis_sessions WHERE user_id=$1", [c.get("userId")])).rows }));
   app.put("/sessions/:platform", async c => {

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
 import type pg from "pg";
 import { ProviderError } from "@lot-agent/core";
 import { marketingNarrationFits, type MarketingDraft, type MarketingNarration, type MarketingNarrationClip, type MarketingSegment } from "@lot-agent/core/marketing-video";
@@ -113,7 +113,11 @@ export class MarketingNarrator {
     try {
       if (Array.from(segment.script).length > 500) throw new MarketingError("单镜口播过长，请精简后再生成配音。");
       // Not tied to the browser connection: a closed tab must not discard a billed take.
+      const started = Date.now();
       const result = await this.voices!.speakAs(owner, voice, { text: segment.script, speed: settings.speed, instructions: settings.instructions || undefined }, "wav");
+      // Identifiers and timing only: a slow take is looked up in the gateway logs by this ID.
+      console.log("[marketing-video] narration take", { projectId, slot: segment.index, requestMs: Date.now() - started, chars: Array.from(segment.script).length,
+        gatewayRequestId: result.gatewayRequestId ?? null });
       const storageKey = `${projectId}/${randomUUID()}.wav`;
       const path = resolve(narrationRoot(this.dataRoot), storageKey);
       await mkdir(dirname(path), { recursive: true });
@@ -130,7 +134,7 @@ export class MarketingNarrator {
       await this.pool.query(`UPDATE marketing_video_narrations SET status='failed',updated_at=now() WHERE ${where} AND status='running'`, ids);
       if (error instanceof ProviderError) {
         // The gateway request ID lets support reconcile a rare charge for a failed take.
-        console.warn("[marketing-video] narration failed", { projectId, slot: segment.index, code: error.code, httpStatus: error.httpStatus, upstreamRequestId: error.requestId });
+        console.warn("[marketing-video] narration failed", { projectId, slot: segment.index, code: error.code, httpStatus: error.httpStatus, upstreamRequestId: error.requestId, gatewayRequestId: error.gatewayRequestId ?? null });
         if (error.httpStatus === 401 || error.httpStatus === 402 || error.httpStatus === 403) return "模型账号余额不足或未开通语音合成。";
         return "配音合成失败，请稍后重新生成该镜配音。";
       }
@@ -161,6 +165,22 @@ export class MarketingNarrator {
     if (row?.status !== "succeeded") throw new MarketingError("该镜配音尚未生成。", 404);
     try { return await readFile(await narrationFile(this.dataRoot, projectId, row.storage_key)); }
     catch { throw new MarketingError("该镜配音文件不可用，请重新生成。", 404); }
+  }
+
+  /** Space the takes of the owner's drafts hold on disk (every take, also replaced ones). */
+  async ownerBytes(owner: string) {
+    const { rows } = await this.pool.query<{ id: string }>("SELECT id FROM marketing_video_projects WHERE user_id=$1", [owner]);
+    let bytes = 0;
+    for (const { id } of rows) {
+      if (!uuid.test(id)) continue;
+      const folder = resolve(narrationRoot(this.dataRoot), id);
+      const names = await readdir(folder).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return [] as string[]; throw error; });
+      for (const name of names) {
+        const info = await lstat(join(folder, name)).catch(() => null);
+        if (info?.isFile()) bytes += info.size;
+      }
+    }
+    return bytes;
   }
 
   /** Rows go with the draft (ON DELETE CASCADE); this removes the files. */
