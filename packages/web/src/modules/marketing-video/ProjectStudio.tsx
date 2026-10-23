@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, fitMarketingNarration, marketingKeyArtIssue, marketingImageCount, type MarketingKeyArt, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingReview, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingReferenceError, marketingShotMaxSeconds, marketingAssetIds, marketingSourceKind, MarketingDraftSchema, planMarketingSegments, timeMarketingStoryboard, resolveMarketingSegments, storyboardScript, marketingReviewText, marketingStoryboardAudioMismatch, marketingVoiceover, marketingNarrationFits, marketingNarrationSpareSec, fitMarketingNarration, marketingKeyArtIssue, marketingImageCount, type MarketingKeyArt, type MarketingNarrationClip, type MarketingDraft, type MarketingProject, type MarketingReview, type MarketingShot, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { ReferenceAnalysis } from "@lot-agent/core/marketing-analysis";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -660,6 +660,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           keyArtPanel={keyArtIssue !== "video" && <KeyArtPanel keyArt={currentKeyArt} full={keyArtIssue === "full"} total={profile.referenceImages.total} busy={busy || !ready}
             onGenerate={redo => void act(() => makeKeyArt(redo))} />}
           narrationPanel={voiceover && draft.narration?.twinItemId && <NarrationPanel projectId={project?.id} shots={draft.storyboard} clips={currentNarration} busy={busy || !ready}
+            spareSec={currentNarration ? marketingNarrationSpareSec(draft.storyboard, draft, profile, currentNarration.map(clip => clip.durationMs)) : 0}
             onSynthesize={slots => void act(() => synthesizeNarration(slots))} onFit={fitNarration} />}
           reviewPanel={reviewSection}
           buttonLabel={busy && !textUnknown ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览"}

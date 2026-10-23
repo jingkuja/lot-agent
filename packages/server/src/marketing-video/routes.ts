@@ -12,13 +12,13 @@ import type { AgentService } from "../services/agent-service.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { KnowledgeError } from "../knowledge/errors.js";
-import { MarketingError, PgMarketingProjectStore, reviewText } from "./repository.js";
+import { MarketingError, PgMarketingProjectStore } from "./repository.js";
 import { inspectMedia, mediaCapabilities, ownedAssetPath, SUBTITLES_UNAVAILABLE } from "./media.js";
 import { readImageInfo } from "./image-size.js";
 import { archiveMarketingVideo } from "./archive.js";
 import { MarketingTextError } from "./text.js";
 import { marketingImageReferences, marketingSegmentPrompt } from "./prompt.js";
-import { REVIEW_INSTRUCTION, reviewDeltaInstruction, type MarketingReviewDelta } from "./compliance.js";
+import { marketingReviewInput, REVIEW_INSTRUCTION, reviewDeltaInstruction, type MarketingReviewDelta } from "./compliance.js";
 export { REVIEW_INSTRUCTION } from "./compliance.js";
 import { ownedAnalysisUpload } from "../marketing-analysis/uploads.js";
 import { AnalysisError } from "../marketing-analysis/errors.js";
@@ -310,7 +310,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (!uuid.test(body?.clientRequestId ?? "") || !Number.isInteger(body?.version)) throw new MarketingError("检查参数无效。");
     const locale = (body.locale ?? "zh") as "zh" | "en" | "id";
     return c.json(await recordedText(owner, p.id, body, "review", { version: body.version, locale },
-      (draft, delta) => ({ system: `${REVIEW_INSTRUCTION}\nWrite reasons and suggested replacements in ${locale}. Keep excerpts exactly as supplied.${delta ? `\n${reviewDeltaInstruction(delta)}` : ""}`, input: reviewText(draft) })));
+      (draft, delta) => ({ system: `${REVIEW_INSTRUCTION}\nWrite reasons and suggested replacements in ${locale}. Keep excerpts exactly as supplied.${delta ? `\n${reviewDeltaInstruction(delta)}` : ""}`, input: marketingReviewInput(draft) })));
   });
   app.post("/:id/publication", async (c) => {
     const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));

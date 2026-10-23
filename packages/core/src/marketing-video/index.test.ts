@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, mergeMarketingShots, speechUnits, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotNeedsClip, marketingShotChanged, fitMarketingNarration, marketingNarrationFits, marketingVoiceover, marketingNativeSpeech, DEFAULT_MARKETING_VIDEO_PROFILE } from "./index.js";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL, marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema, planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard, mergeMarketingShots, speechUnits, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText, marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotNeedsClip, marketingShotChanged, fitMarketingNarration, marketingNarrationFits, marketingNarrationSpareSec, marketingVoiceover, marketingNativeSpeech, DEFAULT_MARKETING_VIDEO_PROFILE } from "./index.js";
 
 const grok = GROK_MARKETING_PROFILE;
 const kling = KLING_MARKETING_PROFILE;
@@ -345,6 +345,23 @@ describe("fitting shots to twin narration", () => {
     expect(fitted.every((shot, i) => marketingNarrationFits([3000, 6200, 2000][i], shot.durationSec))).toBe(true);
     const total = fitted.reduce((sum, shot) => sum + shot.durationSec, 0);
     expect(total).toBeGreaterThanOrEqual(15); expect(total).toBeLessThanOrEqual(20);
+  });
+  it("times measured takes instead of the text estimate and does not run past the target", () => {
+    // Acceptance case: an 18-second board planned 5+5+5+6 from its text, takes of 3.0–4.4 seconds.
+    const long = ["一二三四五六七八九十一二三四五六七八九十", "一二三四五六七八九十一二三四五六七八九十", "一二三四五六七八九十一二三四五六七八九十", "一二三四五六七八九十一二三四五六七八九十一二三四五"]
+      .map((script, i) => ({ durationSec: [5, 5, 5, 6][i], script, visual: "v", action: "a", camera: "c" }));
+    const target = MarketingDraftSchema.parse({ durationSec: 18 });
+    const takes = [3400, 3000, 3600, 4400];
+    const fitted = fitMarketingNarration(long, target, DEFAULT_MARKETING_VIDEO_PROFILE, takes).map(shot => shot.durationSec);
+    expect(fitted.reduce((a, b) => a + b, 0)).toBe(18);
+    expect(fitted.every((sec, i) => marketingNarrationFits(takes[i], sec))).toBe(true);
+    expect(marketingNarrationSpareSec(long, target, DEFAULT_MARKETING_VIDEO_PROFILE, takes)).toBe(3);
+    // Takes that need more than the target keep only the seconds they need.
+    const needed = fitMarketingNarration(long, MarketingDraftSchema.parse({ durationSec: 15 }), DEFAULT_MARKETING_VIDEO_PROFILE, [4200, 4200, 4200, 4200]);
+    expect(needed.map(shot => shot.durationSec)).toEqual([5, 5, 5, 5]);
+    // A board that already holds its takes within the target is kept as planned.
+    expect(fitMarketingNarration(shots, draft, DEFAULT_MARKETING_VIDEO_PROFILE, [3000, 3000, 3000])).toEqual(shots);
+    expect(marketingNarrationSpareSec(shots, draft, DEFAULT_MARKETING_VIDEO_PROFILE, [3000, undefined, 3000])).toBe(0);
   });
   it("asks to shorten copy instead of exceeding the duration range or the shot cap", () => {
     expect(() => fitMarketingNarration(shots, draft, DEFAULT_MARKETING_VIDEO_PROFILE, [9000, 9000, 9000])).toThrow("配音总时长超过");

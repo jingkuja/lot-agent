@@ -271,17 +271,21 @@ export function marketingShotMaxSeconds(draft: Pick<MarketingDraft, "assets">, p
 
 /** Keep the AI's valid timing, or apportion integer seconds by its pacing
  * weights, bounded by narration length and the model's 4–maxShot second range.
- * `floor` raises single shots' minimums, e.g. to fit measured narration. */
-export function allocateShotDurations(shots: { script: string; durationSec?: number }[], target: number, maxShot = MARKETING_SHOT_MAX_SECONDS, floor: (number | undefined)[] = []): number[] {
+ * `measured` gives single shots a measured minimum, e.g. the seconds a narration take
+ * needs, in place of the estimate from their text. Once anything is measured, the
+ * board is no longer than the target or what the shots need: every second is billed. */
+export function allocateShotDurations(shots: { script: string; durationSec?: number }[], target: number, maxShot = MARKETING_SHOT_MAX_SECONDS, measured: (number | undefined)[] = []): number[] {
   const maximum = marketingMaxDuration(target);
   if (!isMarketingDurationValid(target, target) || !shots.length || shots.length > 15
     || shots.length * 4 > maximum || shots.length * maxShot < target) throw new Error("分镜数量与视频时长不一致，请重新生成分镜。");
-  const minimum = shots.map((shot, i) => Math.max(4, Math.ceil(speechUnits(shot.script) / 4.5), floor[i] ?? 0));
+  const minimum = shots.map((shot, i) => Math.max(4, measured[i] ?? Math.ceil(speechUnits(shot.script) / 4.5)));
   const minimumTotal = minimum.reduce((a, b) => a + b, 0);
   if (minimum.some(n => n > maxShot) || minimumTotal > maximum) throw new Error("文案过长，请精简文案或增加视频时长。");
-  const requested = shots.map(shot => shot.durationSec ?? 0);
-  if (requested.every((n, i) => Number.isInteger(n) && n >= minimum[i] && n <= maxShot) && isMarketingDurationValid(target, requested.reduce((a, b) => a + b, 0))) return requested;
   const total = Math.max(target, minimumTotal);
+  const requested = shots.map(shot => shot.durationSec ?? 0);
+  const requestedTotal = requested.reduce((a, b) => a + b, 0);
+  if (requested.every((n, i) => Number.isInteger(n) && n >= minimum[i] && n <= maxShot) && isMarketingDurationValid(target, requestedTotal)
+    && (requestedTotal <= total || !measured.some(n => n !== undefined))) return requested;
   const weights = shots.map(shot => Math.max(1, shot.durationSec ?? speechUnits(shot.script)));
   const result = [...minimum];
   for (let remaining = total - result.reduce((a, b) => a + b, 0); remaining > 0; remaining--) {
@@ -319,8 +323,10 @@ export const MARKETING_NARRATION_TAIL_MS = 200;
 export const marketingNarrationFits = (durationMs: number, durationSec: number) => durationMs + MARKETING_NARRATION_TAIL_MS <= durationSec * 1000;
 /** Shortest whole-second shot that holds this narration with a short pause. */
 export const marketingNarrationShotMinimum = (durationMs: number) => Math.max(4, Math.ceil((durationMs + 400) / 1000));
-/** Lengthen shots whose measured narration does not fit, within the draft's duration range.
- * Shots that already fit keep their time when the total allows it. */
+/** Time shots to their measured narration within the draft's duration range: lengthen shots
+ * whose take does not fit, and shorten a board that runs past both the target and what the
+ * takes need, so shots do not end in long silences that are billed as video. Shots keep
+ * their time when that already holds. */
 export function fitMarketingNarration(shots: MarketingShot[], draft: Pick<MarketingDraft, "assets" | "durationSec">, profile: MarketingVideoProfile, durationsMs: (number | undefined)[]): MarketingShot[] {
   const maxShot = marketingShotMaxSeconds(draft, profile);
   const floor = durationsMs.map(ms => ms === undefined ? undefined : marketingNarrationShotMinimum(ms));
@@ -329,6 +335,14 @@ export function fitMarketingNarration(shots: MarketingShot[], draft: Pick<Market
   try { durations = allocateShotDurations(shots, draft.durationSec, maxShot, floor); }
   catch { throw new Error("配音总时长超过视频时长上限，请精简文案、调快语速或增加视频时长。"); }
   return shots.map((shot, index) => ({ ...shot, durationSec: durations[index] }));
+}
+/** Seconds fitting would take off a board, e.g. one timed from its text before the takes were
+ * measured; 0 while a take is missing or nothing can be saved. */
+export function marketingNarrationSpareSec(shots: MarketingShot[], draft: Pick<MarketingDraft, "assets" | "durationSec">, profile: MarketingVideoProfile, durationsMs: (number | undefined)[]): number {
+  if (!shots.length || durationsMs.length !== shots.length || durationsMs.some(ms => ms === undefined)) return 0;
+  const total = (list: MarketingShot[]) => list.reduce((sum, shot) => sum + shot.durationSec, 0);
+  try { return Math.max(0, total(shots) - total(fitMarketingNarration(shots, draft, profile, durationsMs))); }
+  catch { return 0; }
 }
 /** One shot's narration state as the studio shows it. */
 export interface MarketingNarrationClip {

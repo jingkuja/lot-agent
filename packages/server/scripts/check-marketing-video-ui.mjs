@@ -516,6 +516,8 @@ try {
   await narrationPanel.getByRole('button', { name: '按配音调整分镜时长', exact: true }).click();
   await page.locator('.mv-generate:not([disabled])').waitFor();
   assert.equal(await narrationPanel.locator('.mv-narration-long').count(), 0);
+  // Fitted shots hold their takes without spare seconds, so no shortening is offered.
+  assert.equal(await narrationPanel.locator('.mv-audio-notice').count(), 0);
   await narrationPanel.getByRole('button', { name: '试听', exact: true }).first().click();
   await narrationPanel.locator('audio').waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/narration')).length, 1);

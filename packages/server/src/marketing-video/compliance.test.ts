@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MARKETING_REVIEW_RULE_VERSION, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
-import { localMarketingReview, marketingReviewDelta, normalizeMarketingReview, REVIEW_INSTRUCTION } from "./compliance.js";
+import { MARKETING_REVIEW_RULE_VERSION, MarketingDraftSchema, marketingReviewText, storyboardScript } from "@lot-agent/core/marketing-video";
+import { localMarketingReview, marketingReviewDelta, marketingReviewInput, normalizeMarketingReview, REVIEW_INSTRUCTION } from "./compliance.js";
 import { MARKETING_RISK_TABLE } from "./compliance-rules.js";
 
 const cleanModel = { verdict: "pass", issues: [] };
@@ -68,6 +68,23 @@ describe("marketing content compliance", () => {
     expect(REVIEW_INSTRUCTION).toContain("NOT verified evidence");
     expect(REVIEW_INSTRUCTION).toContain("platform-minors");
     expect(REVIEW_INSTRUCTION).toContain("platform-copyright");
+  });
+
+  it("passes the merchant's own facts as context without changing the review key", () => {
+    const storyboard = [{ script: "骨汤熬足 8 小时，手工拉面，29 元套餐。", visual: "厨房", action: "拉面", camera: "近景" }];
+    const draft = MarketingDraftSchema.parse({ topic: "面馆：骨汤熬 8 小时，手工拉面，29 元套餐", script: storyboardScript(storyboard), storyboard });
+    const input = JSON.parse(marketingReviewInput(draft));
+    expect(input.merchantInfo).toEqual({ topic: draft.topic });
+    expect(input.fields).toEqual(JSON.parse(marketingReviewText(draft)).fields);
+    // Merchant info only spares facts from the model's check; the local table ignores it.
+    expect(localMarketingReview(draft)).toEqual([]);
+    expect(REVIEW_INSTRUCTION).toContain("do not report it as unverifiable");
+    expect(REVIEW_INSTRUCTION).toContain("This never exempts risk-table terms");
+    // A brief's input is the plain review text; reference text counts only in rewrite mode.
+    const plain = MarketingDraftSchema.parse({ script: "欢迎光临。", reference: "旧参考：99 元" });
+    expect(marketingReviewInput(plain)).toBe(marketingReviewText(plain));
+    const rewrite = MarketingDraftSchema.parse({ ...plain, copyMode: "rewrite" });
+    expect(JSON.parse(marketingReviewInput(rewrite)).merchantInfo).toEqual({ reference: "旧参考：99 元" });
   });
 
   it("re-checks only edited fields and carries the findings of unchanged ones", () => {

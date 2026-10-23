@@ -50,5 +50,6 @@ export function ReviewPanel({ review, draft, busy, onApply, stale = false }: {
   return <div className={`mv-review${verdict ? ` mv-review-${verdict}` : ""}`}>
     <strong role="status">{t(stale ? "内容已修改，请点击“检查当前文案”重新检查。" : ({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
     {issues.map((issue, index) => <ReviewIssue key={`${issue.field}:${issue.shotIndex}:${index}:${issue.text}`} issue={issue} draft={draft} busy={busy} onApply={onApply} />)}
+    {!stale && draft.topic.trim() && <p className="mv-hint">{t("主题中商家提供的价格、用料、做法等事实按商家自述检查，不因无法核实而判为风险；请保留相关依据，以备平台核查。")}</p>}
   </div>;
 }

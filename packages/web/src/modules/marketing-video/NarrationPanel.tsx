@@ -31,11 +31,13 @@ function TakePlayer({ projectId, slot, durationMs }: { projectId: string; slot: 
 }
 
 /** Per-shot twin narration: generate, listen, redo single shots, and fit shot times to the takes. */
-export function NarrationPanel({ projectId, shots, clips, busy, onSynthesize, onFit }: {
+export function NarrationPanel({ projectId, shots, clips, busy, spareSec = 0, onSynthesize, onFit }: {
   projectId: string | undefined; shots: MarketingShot[];
   /** Takes of the saved draft; null until they are loaded for its current version. */
   clips: MarketingNarrationClip[] | null;
   busy: boolean;
+  /** Seconds fitting the shots to the takes would save; every video second is billed. */
+  spareSec?: number;
   onSynthesize(slots?: number[]): void; onFit(): void;
 }) {
   const { t } = useI18n();
@@ -61,8 +63,9 @@ export function NarrationPanel({ projectId, shots, clips, busy, onSynthesize, on
         </div>
       </li>;
     })}</ol>
-    {tooLong && <div className="mv-audio-notice" role="status">
-      <p>{t("有分镜的配音长于镜头时长。可按配音自动加长这些分镜（总时长仍在目标至目标 +5 秒内），或精简口播、调快语速后重新生成。")}</p>
+    {(tooLong || spareSec > 0) && <div className="mv-audio-notice" role="status">
+      <p>{tooLong ? t("有分镜的配音长于镜头时长。可按配音自动加长这些分镜（总时长仍在目标至目标 +5 秒内），或精简口播、调快语速后重新生成。")
+        : t("分镜比配音所需长 {0} 秒，镜头结尾会留空。可按配音缩短分镜，总时长不少于目标时长；视频按秒计费。", [spareSec])}</p>
       <button className="mv-primary" disabled={busy} onClick={onFit}>{t("按配音调整分镜时长")}</button>
     </div>}
   </section>;
