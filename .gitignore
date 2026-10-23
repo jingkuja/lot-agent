@@ -23,6 +23,7 @@ packages/desktop/release/
 packages/miniprogram/project.private.config.json
 packages/miniprogram/miniprogram/miniprogram_npm/
 design/
+/docs/
 
 # Private knowledge originals must never be committed or served as static files.
 data/knowledge/
