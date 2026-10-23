@@ -195,9 +195,58 @@ Worker 在拼接全部镜头后、混入背景音乐前，对拼接结果做本�
 
 新营销上传在落库时标记为私有。迁移 47 保护旧项目和冻结任务引用的上传素材。未携带所有者会话或有效临时令牌的请求返回 404。移除素材不会恢复公开访问。浏览器预览失败时经所有者接口重新取链接。Worker 只在新提交时签发链接；已有供应商任务继续查询原 ID。音色请求在本地素材准备成功后才保存意图，已有回执仍可恢复。
 
-营销父任务使用 `lot-marketing-video`，普通任务使用 `lot-tasks`，仍由同一个 Worker 进程启动。普通队列并发 1；营销队列每个 Worker 进程并发 `MARKETING_VIDEO_CONCURRENCY`（默认 2），每个用户在所有 Worker 上同时制作的视频不超过 `MARKETING_VIDEO_USER_CONCURRENCY`（默认 1），两者取值 1–16，非法值启动即报错。领取时 `claimTaskWithinOwnerLimit` 在用户级 advisory lock 内统计该用户仍在 BullMQ active 列表中的 running 任务，未超限才置为 running；孤立的 running 行不占名额。超限的任务保持 pending、stage 为“排队中：同账号已有视频在制作”，以 BullMQ delayed 让出槽位，15–20 秒后再试，不计为失败、不消耗尝试次数，可正常取消。首次领取时日志输出 `[queue] marketing render started` 及 `waitMs`（自入队起），用于统计排队 P95。每条视频内部同时提交的片段数为 `MARKETING_VIDEO_SEGMENT_CONCURRENCY`（默认 2，取值 1–15，仅 Worker 读取）。因此单进程同时最多有 `CONCURRENCY × SEGMENT_CONCURRENCY` 个片段请求（默认 4）和 `CONCURRENCY` 个合成。例如允许 2 个用户各自的视频同时提交 4 个片段：`MARKETING_VIDEO_CONCURRENCY=2`、`MARKETING_VIDEO_USER_CONCURRENCY=1`、`MARKETING_VIDEO_SEGMENT_CONCURRENCY=4`，共 8 个片段请求。提高并发前先确认供应商并发限额，并按排队 P95 和内存评估。该配置与参考视频分析的 `MARKETING_ANALYSIS_CONCURRENCY` 无关。旧队列作业保留原 ID 转发；旧 active 作业不会重复投递。取消、显式恢复和未启动任务超时保护覆盖两个队列。该改动隔离消费槽位，不等于主机资源隔离。
+营销父任务使用 `lot-marketing-video`，普通任务使用 `lot-tasks`，仍由同一个 Worker 进程启动。普通队列并发 1；营销队列每个 Worker 进程并发 `MARKETING_VIDEO_CONCURRENCY`（默认 2），每个用户在所有 Worker 上同时制作的视频不超过 `MARKETING_VIDEO_USER_CONCURRENCY`（默认 1），两者取值 1–16，非法值启动即报错。领取时 `claimTaskWithinOwnerLimit` 在用户级 advisory lock 内统计该用户仍在 BullMQ active 列表中的 running 任务，未超限才置为 running；孤立的 running 行不占名额。超限的任务保持 pending、stage 为“排队中：同账号已有视频在制作”，以 BullMQ delayed 让出槽位，15–20 秒后再试，不计为失败、不消耗尝试次数，可正常取消。首次领取时日志输出 `[queue] marketing render started` 及 `waitMs`（自入队起）；排队 P95 等指标见下方[运维指标](#运维指标)。每条视频内部同时提交的片段数为 `MARKETING_VIDEO_SEGMENT_CONCURRENCY`（默认 2，取值 1–15，仅 Worker 读取）。因此单进程同时最多有 `CONCURRENCY × SEGMENT_CONCURRENCY` 个片段请求（默认 4）和 `CONCURRENCY` 个合成。例如允许 2 个用户各自的视频同时提交 4 个片段：`MARKETING_VIDEO_CONCURRENCY=2`、`MARKETING_VIDEO_USER_CONCURRENCY=1`、`MARKETING_VIDEO_SEGMENT_CONCURRENCY=4`，共 8 个片段请求。提高并发前先确认供应商并发限额，并按排队 P95 和内存评估。该配置与参考视频分析的 `MARKETING_ANALYSIS_CONCURRENCY` 无关。旧队列作业保留原 ID 转发；旧 active 作业不会重复投递。取消、显式恢复和未启动任务超时保护覆盖两个队列。该改动隔离消费槽位，不等于主机资源隔离。
 
 升级前停止新提交，并等待已使用旧无签名素材地址的供应商任务完成。停止旧 Worker 后执行迁移至 47，再启动同版本服务。不要混跑仍提供匿名素材访问的旧 API。具体步骤见下方“升级和发布验收”。
+
+### 运维指标
+
+没有管理界面。指标与[费用对账](#费用对账)共用一个固定密钥。配置 `ADMIN_API_KEY`（至少 32 个字符，未配置时接口不挂载、返回 404）后，可用固定密钥读取只读指标，按 IP 每分钟 30 次：
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_API_KEY" "https://<域名>/api/admin/metrics/marketing?hours=24"
+```
+
+`hours` 为 1–720，默认 24。`admin/metrics.ts` 在只读事务中直接查任务表和请求表（语句超时 15 秒），返回：
+
+| 字段 | 含义 |
+| --- | --- |
+| `renders` | 营销视频 / 数字主播父任务，按 `generate`、`revise`（单镜重做与只重新合成）、`recompose`（数字主播调整字幕）分组：数量、成功率（成功 ÷ 成功 + 失败，不含取消和进行中）、失败原因 `error_code`；`queueWaitSec`（入队到首次领取）、`lastRunSec`（最后一次领取到成功）、`endToEndSec`（入队到成功），均为 `{n, p50, p95, max}` 秒 |
+| `composeSec` | 营销视频合成阶段：本次运行最后一个片段完成到成片完成；全部复用片段时从领取算起 |
+| `clips` | 营销视频片段按视频模型分组：成功率、失败原因、单片段耗时（提交、轮询、下载）；不含复用片段和未开始的片段 |
+| `gateway5xx` | 片段提交网关 5xx 次数，按状态码 |
+| `presenterClips` | 数字主播片段按模型和状态计数（无耗时） |
+| `textRequests` | 文案、分镜、审核、标题标签请求按类型和模型：状态计数和响应耗时（创建到回执，含写入草稿的少量本地时间） |
+| `narrations`、`presenterTakes`、`keyArts` | 数字分身配音、数字主播配音（按最近一次尝试）和定妆图状态计数；定妆图另有耗时 |
+| `queue` | 当前排队与执行中的父任务数、最久排队秒数 |
+| `unknownBacklog` | 当前待核实：父任务已停止的提交未知片段、`submitting` 的数字主播片段、未知或超过 15 分钟仍 `running` 的文字请求、超过 15 分钟未写入的文字结果、超过 15 分钟仍 `running` 的配音和定妆图 |
+| `releasedInWindow` | 时间窗内用户放弃的未知片段与文字请求、网关无响应（`cancelled`）的文字请求 |
+| `concurrency` | API 进程读到的营销队列并发配置；Worker 的取值可能不同 |
+
+时间窗按创建时间计。耗时来自迁移 59：触发器在任务进入 `running` 时记录首次领取 `started_at` 和最近一次 `run_started_at`，进入终态时记录 `finished_at`、恢复时清空；迁移前的任务只有数量和成功率。
+
+### 费用对账
+
+同一密钥读取需要对照网关日志的请求，默认最近 168 小时，按时间从早到晚：
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_API_KEY" "https://<域名>/api/admin/reconciliation/marketing?hours=168"
+```
+
+`admin/reconciliation.ts` 汇总三处记录，每条带用户 ID、网关用户 ID（`users.external_user_id`）和托管令牌 ID（`managed_token_id`），从不读取密钥；有网关请求 ID 时一并给出。`expectedCharge` 为 `none` 的应未扣费，网关日志里有扣费就退款；为 `unknown` 的由网关日志判断，扣了费而用户没拿到结果时补偿。
+
+| `category` | 来源 | `expectedCharge` | 定位 |
+| --- | --- | --- | --- |
+| `clip_gateway_5xx` | 片段提交收到网关 5xx（`marketing_clip_gateway_failures`） | `none` | 网关请求 ID、HTTP 状态 |
+| `text_no_response` | 文字请求网关无响应（`cancelled`） | `none` | 网关请求 ID |
+| `text_unknown` | 文字请求结果未知，或超过 15 分钟仍 `running` | `unknown` | 网关请求 ID（发出后才有） |
+| `text_released` | 用户放弃的未知文字请求 | `unknown` | 网关请求 ID |
+| `clip_unknown` | 父任务已停止、提交结果未知的营销片段 | `unknown` | 用户、模型、时间 |
+| `clip_released` | 用户确认后重提的未知营销片段，`status` 含放弃次数 | `unknown` | 用户、模型、时间 |
+| `presenter_clip_unknown`、`presenter_clip_released` | 数字主播片段，同上 | `unknown` | 用户、模型、时间 |
+| `narration_stuck`、`presenter_take_stuck`、`key_art_stuck` | 超过 15 分钟仍 `running` 的配音、定妆图请求 | `unknown` | 用户、时间 |
+
+`open: true` 的条目仍未确定，不受时间窗限制，状态变化后自动消失；其余条目按发生时间落在时间窗内。每类最多 200 条，超出时类别名列在 `truncated`。接口不记录"已处理"：运维每个工作日按 `hours=48` 检查前一天的条目，在 72 小时内完成网关日志核对与退款，结论记在工单里。片段和配音请求没有保存网关请求 ID，需按网关用户 ID、令牌 ID、模型和 `since` 前后几分钟查找。
 
 ### 私有素材与兼容边界
 

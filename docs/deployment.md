@@ -283,6 +283,7 @@ SSE 被中间层缓冲所致。本方案已在 `deploy/nginx.conf` 对 `/api/` �
 
 - `.env` 含明文密钥，已被 `.gitignore` 忽略，**切勿提交**；生产建议用密钥管理服务注入。
 - `PG_PASSWORD`、`REDIS_PASSWORD` 使用强随机口令；Redis 已启用 `requirepass`。
+- `ADMIN_API_KEY` 开启只读运维接口 `/api/admin/*`（见[营销视频运维指标](marketing-video.md#运维指标)和[费用对账](marketing-video.md#费用对账)；对账列表含用户和网关账号 ID），只发给运维人员和脚本；只在内网使用时可在反向代理上屏蔽该路径。
 - 默认未对外暴露 `postgres`/`redis`/`server` 端口，仅 `web` 对外。对公网开放时请在 `web` 前加 TLS（反代/负载均衡终止 HTTPS）并把 `CORS_ORIGIN` 设为 `https://` 域名。
 
 ---

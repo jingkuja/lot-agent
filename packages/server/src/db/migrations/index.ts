@@ -100,6 +100,7 @@ export const migrations: Migration[] = [
   digitalPresenter,
   marketingClipGatewayFailures,
   marketingVideoKeyArts,
+  taskTiming,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -120,3 +121,4 @@ import { marketingVideoNarrations } from "./0055-marketing-video-narrations.js";
 import { digitalPresenter } from "./0056-digital-presenter.js";
 import { marketingClipGatewayFailures } from "./0057-marketing-clip-gateway-failures.js";
 import { marketingVideoKeyArts } from "./0058-marketing-video-key-arts.js";
+import { taskTiming } from "./0059-task-timing.js";

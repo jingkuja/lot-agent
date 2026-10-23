@@ -102,6 +102,8 @@ x-app-env: &app-env
   MARKETING_VIDEO_USER_CONCURRENCY: ${MARKETING_VIDEO_USER_CONCURRENCY:-1}
   MARKETING_VIDEO_SEGMENT_CONCURRENCY: ${MARKETING_VIDEO_SEGMENT_CONCURRENCY:-2}
   MARKETING_VIDEO_MODEL: ${MARKETING_VIDEO_MODEL:-grok-imagine-video-1.5}
+  # Operations API key (>= 32 characters); empty leaves /api/admin unmounted.
+  ADMIN_API_KEY: ${ADMIN_API_KEY:-}
 
 services:
   postgres:

@@ -11,6 +11,9 @@ import { createVideoDraftRoutes } from "./routes/video-drafts.js";
 import { createMarketingVideoRoutes } from "./marketing-video/routes.js";
 import { MarketingNarrator } from "./marketing-video/narration.js";
 import { createDigitalPresenterRoutes } from "./digital-presenter/routes.js";
+import { adminApiKey, createAdminRoutes } from "./admin/routes.js";
+import { marketingMetrics } from "./admin/metrics.js";
+import { marketingReconciliation } from "./admin/reconciliation.js";
 import { PresenterVoicer } from "./digital-presenter/takes.js";
 import { createPresenterMediaRoutes } from "./digital-presenter/files.js";
 import { createAnalysisRoutes } from "./marketing-analysis/routes.js";
@@ -221,6 +224,8 @@ async function main() {
     // Customer-profile CRUD is bounded separately from chat. Natural-language
     // capture still runs through the existing message limit above.
     digitalEmployee: { prefix: "rl:digital-employee", limit: 90, windowMs: 60 * 1000 },
+    // Fixed-key operations API, keyed by IP: bounds key guessing and heavy metric queries.
+    admin: { prefix: "rl:admin", limit: 30, windowMs: 60 * 1000 },
   } as const;
   const loginRateLimit = rateLimit({ store: rateLimitStore, keyFn: clientIp, ...RATE_LIMITS.login });
   const uploadRateLimit = rateLimit({
@@ -275,6 +280,16 @@ async function main() {
   app.route("/api/public/shares", createPublicImageShareRoutes(service));
   app.use("/api/public/feishu/*", loginRateLimit);
   app.route("/api/public/feishu", createFeishuPublicRoutes(feishu));
+
+  // Operations API: a fixed key from ADMIN_API_KEY, not a user session. Unmounted when unset.
+  const adminKey = adminApiKey();
+  if (adminKey) {
+    app.use("/api/admin/*", rateLimit({ store: rateLimitStore, keyFn: clientIp, ...RATE_LIMITS.admin }));
+    app.route("/api/admin", createAdminRoutes({
+      marketingMetrics: (hours) => marketingMetrics(service.db.pool, hours),
+      marketingReconciliation: (hours) => marketingReconciliation(service.db.pool, hours),
+    }, adminKey));
+  }
 
   // Auth guard for all other /api/* routes
   const authMw = createAuthMiddleware(service.sessions, {
