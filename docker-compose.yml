@@ -13,42 +13,41 @@
 # them at /static, so they MUST see the same files.
 #
 # Secrets come from `.env` (copy from deploy/.env.example). Nothing secret is
-# hard-coded here.
+# hard-coded here. Local development without Docker uses the root .env.example.
 # ─────────────────────────────────────────────────────────────
 
 # Shared app environment for server & worker (YAML anchor, merged per service).
+# Every variable here is read by the app; defaults match the code. Template: deploy/.env.example.
 x-app-env: &app-env
   NODE_ENV: production
+  # Production must never enable the local-development login bypass.
+  DEBUG: "0"
+  LOG_LEVEL: ${LOG_LEVEL:-info}
   globle: ${globle:-0}
   PG_HOST: postgres
   PG_PORT: "5432"
   PG_USER: ${PG_USER:-postgres}
   PG_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required}
   PG_DATABASE: ${PG_DATABASE:-lot}
-  SECRET_MASTER_KEY: ${SECRET_MASTER_KEY:-}
-  REDIS_HOST: redis
-  REDIS_PORT: "6379"
+  # Worker PG pool (4–200); must be at least 2 × MARKETING_VIDEO_CONCURRENCY + 2.
+  PG_POOL_MAX: ${PG_POOL_MAX:-20}
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+  SECRET_MASTER_KEY: ${SECRET_MASTER_KEY:-}
+  # Text models
   LLM_DEFAULT: ${LLM_DEFAULT:-openai}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://tokenhub.wetok.ai/v1}
-  TOKENHUB_BASE_URL: ${TOKENHUB_BASE_URL:-https://tokenhub.wetok.ai/api/agent-market}
   OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4.1-flash}
   OPENAI_PROTOCOL: ${OPENAI_PROTOCOL:-chat-completions}
-  MARKETING_ANALYSIS_ENABLED: ${MARKETING_ANALYSIS_ENABLED:-0}
-  MARKETING_ANALYSIS_CONCURRENCY: ${MARKETING_ANALYSIS_CONCURRENCY:-2}
-  MARKETING_ANALYSIS_OCR_CONCURRENCY: ${MARKETING_ANALYSIS_OCR_CONCURRENCY:-8}
-  MARKETING_ANALYSIS_VISUAL_CONCURRENCY: ${MARKETING_ANALYSIS_VISUAL_CONCURRENCY:-3}
-  MARKETING_ANALYSIS_DECODE_THREADS: ${MARKETING_ANALYSIS_DECODE_THREADS:-4}
-  MARKETING_ANALYSIS_OWNER_BYTES: ${MARKETING_ANALYSIS_OWNER_BYTES:-2147483648}
-  MARKETING_ANALYSIS_MIN_FREE_BYTES: ${MARKETING_ANALYSIS_MIN_FREE_BYTES:-1073741824}
-  YTDLP_VERSION: ${YTDLP_VERSION:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
-  # Image/video generation (tokenhub). WITHOUT a key the providers fall back to
-  # the in-memory Stub/Mock (placeholder output) — both server and worker need
-  # it. IMAGE_GEN_API_KEY / VIDEO_GEN_API_KEY override TOKENHUB_API_KEY per media
-  # type (leave empty to share the one key).
+  BIGMODEL_API_KEY: ${BIGMODEL_API_KEY:-}
+  DEBUG_LLM: ${DEBUG_LLM:-}
+  # Hosts web_fetch may reach on private addresses (comma-separated); empty keeps them blocked.
+  WEB_FETCH_ALLOW_HOSTS: ${WEB_FETCH_ALLOW_HOSTS:-}
+  # Gateway (New API / TokenHub). Image/video generation needs a key on both server
+  # and worker; IMAGE_GEN_API_KEY / VIDEO_GEN_API_KEY override TOKENHUB_API_KEY per media.
+  TOKENHUB_BASE_URL: ${TOKENHUB_BASE_URL:-https://tokenhub.wetok.ai/api/agent-market}
   TOKENHUB_API_KEY: ${TOKENHUB_API_KEY:-}
   IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
   VIDEO_GEN_API_KEY: ${VIDEO_GEN_API_KEY:-}
@@ -58,9 +57,9 @@ x-app-env: &app-env
   NEW_API_AGENT_KEY: ${NEW_API_AGENT_KEY:-}
   NEW_API_MANAGED_KEYS: ${NEW_API_MANAGED_KEYS:-1}
   NEW_API_INTERNAL_BASE_URL: ${NEW_API_INTERNAL_BASE_URL:-https://tokenhub.wetok.ai/api/internal}
-  NEW_API_INTERNAL_CLIENT_ID: ${NEW_API_INTERNAL_CLIENT_ID:-}
+  NEW_API_INTERNAL_CLIENT_ID: ${NEW_API_INTERNAL_CLIENT_ID:-lot-agent}
   NEW_API_INTERNAL_CLIENT_SECRET: ${NEW_API_INTERNAL_CLIENT_SECRET:-}
-  BIGMODEL_API_KEY: ${BIGMODEL_API_KEY:-}
+  # Public addresses
   CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
   # Absolute base for static file URLs (assets/documents/uploads). Leave empty
   # for same-origin access; set to the box address so generated download links
@@ -68,6 +67,9 @@ x-app-env: &app-env
   PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
   LOT_AGENT_PUBLIC_URL: ${LOT_AGENT_PUBLIC_URL:-}
   TOKENHUB_PUBLIC_URL: ${TOKENHUB_PUBLIC_URL:-https://tokenhub.todoucloud.com}
+  # Model configuration page linked from the digital employee; empty uses https://wetok.ai/.
+  TOKENHUB_WEB_URL: ${TOKENHUB_WEB_URL:-}
+  # Knowledge base
   RAG_API_URL: ${RAG_API_URL:-https://ai-rag.gafz.com.cn}
   RAG_INTEGRATION_KEY: ${RAG_INTEGRATION_KEY:-}
   KNOWLEDGE_MANAGEMENT_ENABLED: ${KNOWLEDGE_MANAGEMENT_ENABLED:-0}
@@ -76,6 +78,7 @@ x-app-env: &app-env
   KNOWLEDGE_INGESTION_ENABLED: ${KNOWLEDGE_INGESTION_ENABLED:-0}
   KNOWLEDGE_QUEUE: ${KNOWLEDGE_QUEUE:-lot-knowledge}
   KNOWLEDGE_CONCURRENCY: ${KNOWLEDGE_CONCURRENCY:-2}
+  # WeChat mini program and virtual payment (Agent server only)
   WECHAT_MP_APPID: ${WECHAT_MP_APPID:-}
   WECHAT_MP_SECRET: ${WECHAT_MP_SECRET:-}
   WECHAT_VIRTUAL_PAY_ENABLED: ${WECHAT_VIRTUAL_PAY_ENABLED:-0}
@@ -84,26 +87,37 @@ x-app-env: &app-env
   WECHAT_VIRTUAL_PAY_APP_KEY: ${WECHAT_VIRTUAL_PAY_APP_KEY:-}
   WECHAT_VIRTUAL_PAY_SANDBOX_APP_KEY: ${WECHAT_VIRTUAL_PAY_SANDBOX_APP_KEY:-}
   WECHAT_VIRTUAL_PAY_GOODS: ${WECHAT_VIRTUAL_PAY_GOODS:-}
-  KLING_VOICE_BASE_URL: ${KLING_VOICE_BASE_URL:-}
+  # Voice services (dedicated keys, no fallback to other credentials)
+  KLING_VOICE_BASE_URL: ${KLING_VOICE_BASE_URL:-https://tokenhub.tencentmaas.com/v1}
   KLING_VOICE_API_KEY: ${KLING_VOICE_API_KEY:-}
-  DEBUG_LLM: ${DEBUG_LLM:-}
-  # Additional settings from .env.example and .env.
   QWEN_VOICE_BASE_URL: ${QWEN_VOICE_BASE_URL:-https://maas.qianwenaiapi.com/api/v1}
   QWEN_VOICE_API_KEY: ${QWEN_VOICE_API_KEY:-}
   QWEN_VOICE_TARGET_MODEL: ${QWEN_VOICE_TARGET_MODEL:-qwen-audio-3.0-tts-plus}
+  # PPT thumbnails
   PPT_PREVIEW: ${PPT_PREVIEW:-1}
-  # Production must never enable the local-development login bypass.
-  DEBUG: "0"
-  MARKETING_ANALYSIS_MACOS_SANDBOX: ${MARKETING_ANALYSIS_MACOS_SANDBOX:-0}
-  # Also pass as --build-arg when building Dockerfile.media-analysis;
-  # a runtime environment variable does not perform image download verification.
-  YTDLP_SHA256: ${YTDLP_SHA256:-}
+  PPT_SOFFICE_PATH: ${PPT_SOFFICE_PATH:-soffice}
+  PPT_PDFTOPPM_PATH: ${PPT_PDFTOPPM_PATH:-pdftoppm}
+  # Marketing video
+  MARKETING_VIDEO_MODEL: ${MARKETING_VIDEO_MODEL:-grok-imagine-video-1.5}
+  MARKETING_KEY_ART_MODEL: ${MARKETING_KEY_ART_MODEL:-gpt-image-2.5-flare}
   MARKETING_VIDEO_CONCURRENCY: ${MARKETING_VIDEO_CONCURRENCY:-2}
   MARKETING_VIDEO_USER_CONCURRENCY: ${MARKETING_VIDEO_USER_CONCURRENCY:-1}
-  MARKETING_VIDEO_SEGMENT_CONCURRENCY: ${MARKETING_VIDEO_SEGMENT_CONCURRENCY:-2}
-  MARKETING_VIDEO_MODEL: ${MARKETING_VIDEO_MODEL:-grok-imagine-video-1.5}
+  MARKETING_VIDEO_SEGMENT_CONCURRENCY: ${MARKETING_VIDEO_SEGMENT_CONCURRENCY:-4}
+  MARKETING_FFMPEG_PATH: ${MARKETING_FFMPEG_PATH:-ffmpeg}
+  MARKETING_FFPROBE_PATH: ${MARKETING_FFPROBE_PATH:-ffprobe}
+  MARKETING_SUBTITLE_FONT: ${MARKETING_SUBTITLE_FONT:-Noto Sans CJK SC}
   # Operations API key (>= 32 characters); empty leaves /api/admin unmounted.
   ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+  # Reference video analysis (media-analysis worker profile). YTDLP_SHA256 is a build
+  # argument of Dockerfile.media-analysis only; the runtime checks YTDLP_VERSION.
+  MARKETING_ANALYSIS_ENABLED: ${MARKETING_ANALYSIS_ENABLED:-0}
+  MARKETING_ANALYSIS_CONCURRENCY: ${MARKETING_ANALYSIS_CONCURRENCY:-2}
+  MARKETING_ANALYSIS_OCR_CONCURRENCY: ${MARKETING_ANALYSIS_OCR_CONCURRENCY:-8}
+  MARKETING_ANALYSIS_VISUAL_CONCURRENCY: ${MARKETING_ANALYSIS_VISUAL_CONCURRENCY:-3}
+  MARKETING_ANALYSIS_DECODE_THREADS: ${MARKETING_ANALYSIS_DECODE_THREADS:-4}
+  MARKETING_ANALYSIS_OWNER_BYTES: ${MARKETING_ANALYSIS_OWNER_BYTES:-2147483648}
+  MARKETING_ANALYSIS_MIN_FREE_BYTES: ${MARKETING_ANALYSIS_MIN_FREE_BYTES:-1073741824}
+  YTDLP_VERSION: ${YTDLP_VERSION:-}
 
 services:
   postgres:
