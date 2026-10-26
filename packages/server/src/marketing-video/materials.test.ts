@@ -13,7 +13,8 @@ const assets: Record<string, Record<string, unknown>> = {
   [voice]: { id: voice, user_id: "owner", type: "upload", is_private: true, url: "/static/uploads/v.wav", mime: "audio/wav", size_bytes: 1024, original_name: "v.wav" },
 };
 function materials() {
-  const db = { pool: { query: vi.fn() }, getAsset: vi.fn(async (id: string) => assets[id] ? { ...assets[id] } : null), protectMarketingUpload: vi.fn() };
+  const db = { pool: { query: vi.fn() }, getAsset: vi.fn(async (id: string) => assets[id] ? { ...assets[id] } : null), protectMarketingUpload: vi.fn(),
+    getAssets: vi.fn(async (ids: string[]) => ids.flatMap(id => assets[id] ? [{ id, ...assets[id] }] : [])) };
   return { db, materials: new MarketingMaterials(db as never, "/data") };
 }
 const signal = new AbortController().signal;

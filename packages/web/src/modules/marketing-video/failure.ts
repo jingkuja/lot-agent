@@ -20,7 +20,7 @@ const segmentFailed: VideoFailure = {
 // names only the first failure, and released clips must stop showing this.
 const unknownSubmission: VideoFailure = {
   reason: "有片段已发送给视频模型，但没有收到明确结果。为避免重复扣费，系统不会自动重新提交。",
-  next: "可以确认后只重新提交这些片段（可能重复计费），已完成的片段会保留；如需核实费用，请联系客服并提供任务编号。",
+  next: "可以点击「核实后重试」只重新提交这些片段（可能重复计费），已完成的片段会保留；如需核实费用，请联系客服并提供任务编号。",
   actions: ["release", "support"],
 };
 // A full record: adding a code in core fails type checking until it has guidance here.

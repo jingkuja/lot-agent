@@ -95,7 +95,7 @@ describe.skipIf(!testUrl)("admin marketing metrics and reconciliation on Postgre
     expect(m.queue).toEqual([{ type: "digital-presenter.video", pending: 1, running: 0, oldestPendingSec: expect.any(Number) }]);
     expect(m.unknownBacklog.marketingClips).toMatchObject({ count: 1 });
     expect(m.unknownBacklog.presenterClips).toEqual({ count: 0, oldestSec: null });
-    expect(m.concurrency).toEqual({ concurrency: 2, perUser: 1, segments: 2 });
+    expect(m.concurrency).toEqual({ concurrency: 2, perUser: 1, segments: 4 });
     expect(m.gateway5xx).toEqual({ 502: 1 });
     expect(m.presenterGateway5xx).toEqual({});
     expect(m.textRequests).toEqual([{ kind: "copy", model: "kimi-k3", total: 2, statuses: { succeeded: 1, unknown: 1 },

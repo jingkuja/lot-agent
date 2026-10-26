@@ -169,28 +169,34 @@ function validRule(issue: MarketingReviewIssue): boolean {
   return PLATFORM_REVIEW_RULES.some(rule => rule.id === issue.ruleId && rule.scope.split(",").includes(issue.source ?? ""));
 }
 
-/** Model output cannot establish an unlocated or contradictory passing result. */
+/** A finding the user can act on: a supplied rule and an excerpt that is really in its field. */
+function locatedIssue(draft: MarketingDraft, issue: MarketingReviewIssue): boolean {
+  const value = marketingReviewFieldText(draft, issue);
+  return !!issue.field && !!issue.severity && !!issue.source && validRule(issue)
+    && value !== null && value.includes(issue.text) && issue.text !== issue.suggestion;
+}
+
+/** Model output cannot establish a contradictory passing result. The check is already paid for, so a
+ * finding that cannot be located is dropped and counted instead of failing the whole check; any drop
+ * keeps the verdict at "suspect" or above. */
 export function normalizeMarketingReview(draft: MarketingDraft, raw: unknown, locale: ReviewLocale = "zh", carried: MarketingReviewIssue[] = []): MarketingReview | null {
   const parsed = MarketingReviewSchema.safeParse(raw);
   if (!parsed.success) return null;
   const model = parsed.data;
   if ((model.verdict === "pass") !== (model.issues.length === 0)) return null;
-  for (const issue of model.issues) {
-    const value = marketingReviewFieldText(draft, issue);
-    if (!issue.field || !issue.severity || !issue.source || !validRule(issue) || value === null || !value.includes(issue.text)) return null;
-    if (issue.text === issue.suggestion) return null;
-  }
   if (model.verdict === "reject" && !model.issues.some(issue => issue.severity === "reject")) return null;
   if (model.verdict === "suspect" && model.issues.some(issue => issue.severity === "reject")) return null;
+  const located = model.issues.filter(issue => locatedIssue(draft, issue));
+  const dropped = model.issues.length - located.length;
   // Local rules always run on the whole draft; carried findings must still quote the current text.
   const kept = carried.filter(issue => marketingReviewFieldText(draft, issue)?.includes(issue.text));
-  const combined = [...localMarketingReview(draft, locale), ...model.issues, ...kept].sort((a, b) => Number(b.severity === "reject") - Number(a.severity === "reject"));
+  const combined = [...localMarketingReview(draft, locale), ...located, ...kept].sort((a, b) => Number(b.severity === "reject") - Number(a.severity === "reject"));
   const issues = combined.filter((issue, index) => !combined.slice(0, index).some(previous => previous.field === issue.field && previous.shotIndex === issue.shotIndex && previous.text === issue.text && previous.ruleId === issue.ruleId));
   // Deduplicate narration only when it is actually mirrored in a shot. A second,
   // different script must still be reviewed and shown to the user.
   const unique = issues.filter(issue => issue.field !== "script" || !issues.some(other => other.field === "storyboard.script" && other.text === issue.text && other.ruleId === issue.ruleId && other.severity === issue.severity));
-  const verdict = unique.some(issue => issue.severity === "reject") ? "reject" : unique.length ? "suspect" : "pass";
+  const verdict = unique.some(issue => issue.severity === "reject") ? "reject" : unique.length || dropped ? "suspect" : "pass";
   // Never silently drop a high-risk tail because a document has many findings.
   if (unique.length > 80) return null;
-  return { verdict, issues: unique, ruleVersion: MARKETING_REVIEW_RULE_VERSION, reviewedAt: new Date().toISOString() };
+  return { verdict, issues: unique, ...(dropped ? { dropped } : {}), ruleVersion: MARKETING_REVIEW_RULE_VERSION, reviewedAt: new Date().toISOString() };
 }

@@ -33,7 +33,9 @@ function fakePool() {
       Object.assign(row, { status: "running", storage_key: null, duration_ms: null, updated_at: new Date() });
       return { rows: [{}], rowCount: 1 };
     }
-    if (row?.status === "running") Object.assign(row, sql.includes("'succeeded'") ? { status: "succeeded", storage_key: params[4], duration_ms: params[5] } : { status: "failed" });
+    if (row?.status === "running") {
+      Object.assign(row, sql.includes("'succeeded'") ? { status: "succeeded", storage_key: params[4], duration_ms: params[5] } : { status: "failed", error: params[4] });
+    }
     return { rows: [], rowCount: row ? 1 : 0 };
   });
   return { rows, query };
@@ -67,12 +69,27 @@ describe("marketing twin narration", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const first = await f.narrator.synthesize("owner", projectId, draft, segments.slice(0, 1));
-      expect(first).toEqual({ clips: [{ slot: 0, status: "failed" }], error: "配音合成失败，请稍后重新生成该镜配音。" });
+      expect(first).toEqual({ clips: [{ slot: 0, status: "failed", error: "配音合成失败，请稍后重新生成该镜配音。" }], error: "配音合成失败，请稍后重新生成该镜配音。" });
       await f.narrator.synthesize("owner", projectId, draft, segments.slice(0, 1));
       expect(speakAs).toHaveBeenCalledOnce();
       await f.narrator.synthesize("owner", projectId, draft, segments.slice(0, 1), [0]);
       expect(speakAs).toHaveBeenCalledTimes(2);
     } finally { warn.mockRestore(); await rm(f.root, { recursive: true, force: true }); }
+  });
+  it("claims every take before answering and makes them after it in the background", async () => {
+    let finish!: () => void;
+    const speakAs = vi.fn(async () => { await new Promise<void>(done => { finish = done; }); return { audio: new Uint8Array([1]), mime: "audio/wav" }; });
+    const f = await setup(speakAs as never);
+    try {
+      const started = await f.narrator.synthesize("owner", projectId, draft, segments.slice(0, 1), [], { background: true });
+      expect(started).toEqual({ clips: [{ slot: 0, status: "running" }], error: "" });
+      // Asking again while it runs neither waits nor pays again.
+      await f.narrator.synthesize("owner", projectId, draft, segments.slice(0, 1), [], { background: true });
+      await vi.waitFor(() => expect(speakAs).toHaveBeenCalledOnce());
+      finish();
+      await f.narrator.settled();
+      expect(await f.narrator.status("owner", projectId, draft, segments.slice(0, 1))).toEqual([{ slot: 0, status: "succeeded", durationMs: 2500 }]);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
   });
   it("freezes takes only when every shot has one that fits its duration", async () => {
     const f = await setup();

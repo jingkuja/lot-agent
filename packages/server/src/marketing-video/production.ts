@@ -2,7 +2,7 @@ import { estimateCost } from "@lot-agent/core";
 import {
   CAPTION_WORDS_CHANGED, isMarketingDurationValid, marketingCaptionErrors, marketingFrameSize, MARKETING_INPUT_VERSION, marketingJobProfile,
   marketingNativeSpeech, marketingReferenceError, marketingShotMaxSeconds, marketingVoiceover, MarketingDraftSchema, resolveMarketingSegments,
-  type MarketingDraft, type MarketingProject, type MarketingSegment, type MarketingVideoProfile,
+  type MarketingDraft, type MarketingNarrationClip, type MarketingProject, type MarketingSegment, type MarketingVideoProfile,
 } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import type { BullmqJobQueue } from "../jobs/bullmq-queue.js";
@@ -25,8 +25,10 @@ export interface MarketingProductionDeps {
   activeProfile: MarketingVideoProfile;
 }
 
-/** The project after its job was saved and delivered, or the owner's quota refusal. */
-export type MarketingProductionResult = { project: MarketingProject | null } | { quota: { error?: string; code?: string } };
+/** The project after its job was saved and delivered, the owner's quota refusal, or the narration takes a shot
+ * redo is still waiting for: they are made in the background, and the same redo is sent again once they stop. */
+export type MarketingProductionResult = { project: MarketingProject | null } | { quota: { error?: string; code?: string } }
+  | { narration: MarketingNarrationClip[] };
 
 type SegmentRow = Awaited<ReturnType<PgMarketingProjectStore["segments"]>>[number];
 /** Options a stopped job was submitted with; recovery never infers them from today's draft. */
@@ -87,7 +89,9 @@ export class MarketingProduction {
 
   /** Redoes chosen shots of a stopped or finished video. The other shots keep their clips without
    * a model call or a charge; only the redone shots' seconds are billed. No shot means composing the
-   * kept clips again with changed music, captions or narration. `started` begins the timing log. */
+   * kept clips again with changed music, captions or narration. `started` begins the timing log.
+   * A twin-narrated video whose changed shots need new takes starts them in the background and returns
+   * `narration`: no paid request is held by the HTTP request, and the next try reuses every take. */
   async revise(owner: string, p: MarketingProject, request: { version: number; shots: number[] }, signal: AbortSignal,
     started = Date.now()): Promise<MarketingProductionResult> {
     // Stage times of this request, logged once at the end (P13: one acceptance run took 48.6 s).
@@ -133,14 +137,16 @@ export class MarketingProduction {
     const quota = await this.quotaExceeded(owner, profile, redo.reduce((sum, slot) => sum + plan[slot].durationSec, 0));
     if (quota) return { quota };
     lap("quota");
-    // Twin-narrated videos: a changed shot gets its new take now (one speech request each); the
-    // kept shots' text and voice settings are unchanged, so their takes are found as they are.
+    // Twin-narrated videos: a changed shot gets its new take (one speech request each); the kept
+    // shots' text and voice settings are unchanged, so their takes are found as they are.
     let narration: FrozenNarration[] | undefined;
     if (frozen.narration !== undefined) {
-      const { error } = await this.deps.narrator.synthesize(owner, p.id, p.draft, plan);
-      if (error) throw new MarketingError(error, 409);
-      narration = await this.deps.narrator.frozen(owner, p.id, p.draft, plan);
+      const { clips } = await this.deps.narrator.synthesize(owner, p.id, p.draft, plan, [], { background: true });
       lap("narration");
+      if (clips.some(clip => clip.status === "running")) return { narration: clips };
+      const failed = clips.find(clip => clip.status === "failed" && clip.error);
+      if (failed) throw new MarketingError(failed.error!, 409);
+      narration = await this.deps.narrator.frozen(owner, p.id, p.draft, plan);
     }
     const taskId = await this.deps.store.revise(owner, p.id, request.version, p.taskId, redo, narration ? { narration } : {});
     lap("save");

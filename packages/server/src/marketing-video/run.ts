@@ -12,6 +12,9 @@ import { publicStaticUrl } from "../util/public-base.js";
 import { frozenNarration, narrationFile } from "./narration.js";
 
 const UNKNOWN = UNKNOWN_SUBMISSION;
+/** The queue already watches the task status; this slower check only backs it up. Every paid step
+ * also checks right before it starts. */
+export const CANCEL_CHECK_MS = 3000;
 // 4xx answers reject the request itself; 408/409 may still have created a task (5xx: see gatewayFailure).
 // CONNECT_ERROR means the POST was never written, so no vendor task can exist.
 const REJECTED_STATUS = new Set([400, 401, 402, 403, 404, 413, 422, 429]);
@@ -50,7 +53,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     const assertActive = async () => {
       if (controller.signal.aborted || await deps.db.getTaskStatus(job.id) === "cancelled") { abort(); throw new JobCancelledError(); }
     };
-    timer = setInterval(() => { void assertActive().catch(abort); }, 1000);
+    timer = setInterval(() => { void assertActive().catch(abort); }, CANCEL_CHECK_MS);
     await assertActive();
     const existing = (await deps.db.pool.query("SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 ORDER BY created_at LIMIT 1", [job.id, job.userId])).rows[0];
     if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime }] };
@@ -199,8 +202,9 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                   const assetConnection = await deps.db.pool.connect();
                   try {
                     await assetConnection.query("BEGIN");
-                    await assetConnection.query(`INSERT INTO assets(id,task_id,user_id,type,storage_key,url,mime,size_bytes,duration_sec)
-                      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [a.id, child.id, job.userId, "video", a.storageKey, a.url, a.mime, a.sizeBytes, a.durationSec]);
+                    // Private: a clip can show the owner's portrait (served only to the owner or by a signed link).
+                    await assetConnection.query(`INSERT INTO assets(id,task_id,user_id,type,storage_key,url,mime,size_bytes,duration_sec,is_private)
+                      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true)`, [a.id, child.id, job.userId, "video", a.storageKey, a.url, a.mime, a.sizeBytes, a.durationSec]);
                     await assetConnection.query("UPDATE tasks SET output=$2 WHERE id=$1 AND user_id=$3", [child.id, JSON.stringify({ assetIds: [a.id], assets: [{ url: a.url, mime: a.mime }] }), job.userId]);
                     await assetConnection.query("COMMIT");
                   } catch (error) { await assetConnection.query("ROLLBACK"); throw error; }
@@ -236,7 +240,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(deps.segmentConcurrency ?? 2, segments.length) }, () => work()));
+    await Promise.all(Array.from({ length: Math.min(deps.segmentConcurrency ?? 4, segments.length) }, () => work()));
     if (failure) throw failure;
     await assertActive();
     await deps.db.raiseTaskProgress(job.id, 90, "正在合成视频");
@@ -258,7 +262,8 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
         ({ url } = await storeComposedVideo(gen.storage, key, result));
       } finally { await result.dispose(); }
       await assertActive();
-      await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.sizeBytes, durationSec: result.durationSec, width: result.width, height: result.height });
+      await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.sizeBytes,
+        durationSec: result.durationSec, width: result.width, height: result.height, isPrivate: true });
       return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}), ...(result.captions ? { captions: result.captions } : {}) };
     } catch (error) {
       if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;

@@ -7,7 +7,7 @@ import { MarketingCaptionsSchema, type MarketingCaptions } from "@lot-agent/core
 import type { DB } from "../db/database.js";
 import { JobCancelledError } from "../generation/run-job.js";
 import { inspectMedia, mediaCapabilities, ownedAssetPath, storeComposedVideo, SUBTITLES_UNAVAILABLE, type VideoStreamStorage } from "../marketing-video/media.js";
-import { definiteRejection, gatewayFailure } from "../marketing-video/run.js";
+import { CANCEL_CHECK_MS, definiteRejection, gatewayFailure } from "../marketing-video/run.js";
 import { PresenterRunError, UNKNOWN_CLIP_MESSAGE } from "./errors.js";
 import { presenterFile, presenterPath, signPresenterFile } from "./files.js";
 import { buildTrack, composeImageMode, composeVideoMode, portraitFrame, prepareFace, prepareFootage, preparePortrait } from "./media.js";
@@ -74,7 +74,7 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     const assertActive = async () => {
       if (controller.signal.aborted || await deps.db.getTaskStatus(job.id) === "cancelled") { abort(); throw new JobCancelledError(); }
     };
-    timer = setInterval(() => { void assertActive().catch(abort); }, 1000);
+    timer = setInterval(() => { void assertActive().catch(abort); }, CANCEL_CHECK_MS);
     await assertActive();
     const existing = (await deps.db.pool.query("SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 AND type='video' ORDER BY created_at LIMIT 1", [job.id, job.userId])).rows[0];
     // Finished before the task was marked done; the burned cues are not kept with the asset.

@@ -24,7 +24,7 @@ export interface OwnedMaterialOptions {
 
 /** Ownership and file checks of a draft's materials. */
 export class MarketingMaterials {
-  constructor(private readonly db: Pick<DB, "pool" | "getAsset" | "protectMarketingUpload">, private readonly dataRoot: string) {}
+  constructor(private readonly db: Pick<DB, "pool" | "getAsset" | "getAssets" | "protectMarketingUpload">, private readonly dataRoot: string) {}
 
   /** The owner's materials of `draft`, keyed by asset ID and, for the first one of a slot, by slot. */
   async owned(owner: string, draft: MarketingDraft, options: OwnedMaterialOptions = {}): Promise<Record<string, OwnedMaterial>> {
@@ -38,9 +38,10 @@ export class MarketingMaterials {
       }
     }
     const result: Record<string, OwnedMaterial> = {};
+    const found = new Map((await this.db.getAssets(Object.values(draft.assets).flatMap(value => marketingAssetIds(value)))).map(asset => [asset.id, asset]));
     for (const [slot, value] of Object.entries(draft.assets)) {
       for (const id of marketingAssetIds(value)) {
-        const asset = await this.db.getAsset(id);
+        const asset = found.get(id);
         if (asset && asset.user_id !== owner) throw new MarketingError("素材不存在", 404);
         if (!asset) {
           if (allowMissing) continue;

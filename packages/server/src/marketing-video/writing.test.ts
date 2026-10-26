@@ -3,6 +3,7 @@ import { GROK_MARKETING_PROFILE, MARKETING_REVIEW_MODEL, MarketingDraftSchema, s
 import { MarketingTextError } from "./text.js";
 import type { TextOperation } from "./operations.js";
 import { MarketingWriting, type MarketingWritingDeps } from "./writing.js";
+import { REVIEW_INSTRUCTION } from "./compliance.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
@@ -82,5 +83,22 @@ describe("marketing text requests", () => {
     expect(system).toContain("Write reasons and suggested replacements in en.");
     expect(options).toMatchObject({ model: MARKETING_REVIEW_MODEL });
     expect(options).not.toHaveProperty("upstreamBilling");
+  });
+  it("starts every check with the same fixed rules, so the gateway can cache them, and logs the cached share", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const { deps, writing } = fixture({ verdict: "pass", issues: [] });
+      deps.service.marketingText.mockImplementation(async (_system, _input, _owner, _signal, options) => {
+        await options.onReceipt?.({ outcome: "completed", usage: { promptTokens: 7000, completionTokens: 20, cachedPromptTokens: 6900 } });
+        return { verdict: "pass", issues: [] };
+      });
+      await writing.review("owner", id, { ...request, locale: "en" });
+      deps.operations.begin.mockResolvedValueOnce({ draft, input: { delta: { fields: [{ field: "script" }], carried: [] } }, fresh: true, operation: operation("running") });
+      await writing.review("owner", id, request);
+      const systems = deps.service.marketingText.mock.calls.map(call => call[0]);
+      for (const system of systems) expect(system.startsWith(REVIEW_INSTRUCTION)).toBe(true);
+      expect(systems[1]).toContain("Incremental re-check");
+      expect(log).toHaveBeenCalledWith("[marketing-video] text usage", { kind: "review", promptTokens: 7000, cachedPromptTokens: 6900, completionTokens: 20 });
+    } finally { log.mockRestore(); }
   });
 });

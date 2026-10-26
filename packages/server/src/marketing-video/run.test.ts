@@ -215,9 +215,9 @@ describe("configurable clip concurrency", () => {
     expect(runGenerationJob).toHaveBeenCalledTimes(6);
     return max;
   }
-  it("submits two clips at once by default and the configured number otherwise", async () => {
-    expect(await peak()).toBe(2);
-    expect(await peak(4)).toBe(4);
+  it("submits four clips at once by default and the configured number otherwise", async () => {
+    expect(await peak()).toBe(4);
+    expect(await peak(2)).toBe(2);
     // Never more workers than clips.
     expect(await peak(15)).toBe(6);
   });

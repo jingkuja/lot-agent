@@ -20,6 +20,7 @@ export interface MarketingWritingDeps {
 /** Common to every paid text request: one model call per clientRequestId. */
 interface TextRequest { clientRequestId: string; version: number; locale: MarketingLocale }
 type Prompt = { system: string; input: string };
+type TextKind = "copy" | "storyboard" | "review" | "publication";
 
 /** Paid copy, storyboard, review and publication requests. Each request is recorded before the model call,
  * the receipt is saved before the result is applied, and a repeated or lost request replays the saved
@@ -36,7 +37,7 @@ export class MarketingWriting {
     if (!reserved.fresh) return { ...replay(reserved.operation), operation: reserved.operation, project: await this.project(owner, projectId) };
     try {
       const prompt = creationPrompt(reserved.draft, locale);
-      const result = parseTextResult("copy", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true }), reserved.draft);
+      const result = parseTextResult("copy", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true }, "copy"), reserved.draft);
       const operation = await operations.finish(owner, clientRequestId, result);
       return { ...result, operation, project: await this.project(owner, projectId) };
     } catch (error) { await operations.fail(owner, clientRequestId, true, invalidTextResult(error)); throw error; }
@@ -61,7 +62,7 @@ export class MarketingWriting {
       catch (error) { throw new MarketingError((error as Error).message); }
       const prompt = storyboardPrompt(draft, locale, initial, instruction, index);
       started = true;
-      const result = parseTextResult("storyboard", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true }), draft, index);
+      const result = parseTextResult("storyboard", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true }, "storyboard"), draft, index);
       const operation = await operations.finish(owner, clientRequestId, result);
       return { ...await this.project(owner, p.id), operation };
     } catch (error) { await operations.fail(owner, clientRequestId, started, invalidTextResult(error)); throw error; }
@@ -71,6 +72,7 @@ export class MarketingWriting {
   review(owner: string, projectId: string, request: TextRequest) {
     const { locale } = request;
     return this.recorded(owner, projectId, request, "review", { version: request.version, locale }, (draft, delta) => ({
+      // The fixed rules come first and are the same for every check, so the gateway can cache them.
       system: `${REVIEW_INSTRUCTION}\nWrite reasons and suggested replacements in ${locale}. Keep excerpts exactly as supplied.`
         + (delta ? `\n${reviewDeltaInstruction(delta)}` : ""),
       input: marketingReviewInput(draft),
@@ -92,7 +94,7 @@ export class MarketingWriting {
       try {
         const frozen = reserved.input as typeof input & { delta?: MarketingReviewDelta };
         const raw = await this.call(owner, request.clientRequestId, prompt(reserved.draft, frozen.delta),
-          kind === "review" ? { model: MARKETING_REVIEW_MODEL } : {});
+          kind === "review" ? { model: MARKETING_REVIEW_MODEL } : {}, kind);
         operation = await operations.finish(owner, request.clientRequestId, parseOperationResult(kind, raw, reserved.draft, frozen));
       } catch (error) { await operations.fail(owner, request.clientRequestId, true, invalidTextResult(error)); throw error; }
     } else replay(operation);
@@ -100,10 +102,16 @@ export class MarketingWriting {
     return { ...await this.project(owner, projectId), operation };
   }
 
-  /** One model call whose receipt is saved as soon as the gateway returns it. */
-  private call(owner: string, clientRequestId: string, prompt: Prompt, options: { upstreamBilling?: boolean; model?: string }) {
-    return this.deps.service.marketingText(prompt.system, prompt.input, owner, undefined,
-      { ...options, onReceipt: receipt => this.deps.operations.receipt(owner, clientRequestId, receipt) });
+  /** One model call whose receipt is saved as soon as the gateway returns it. Every prompt starts with its fixed
+   * instruction, so the gateway can cache that prefix; the log shows how much of each prompt it served from cache. */
+  private call(owner: string, clientRequestId: string, prompt: Prompt, options: { upstreamBilling?: boolean; model?: string }, kind: TextKind) {
+    return this.deps.service.marketingText(prompt.system, prompt.input, owner, undefined, { ...options, onReceipt: receipt => {
+      if (receipt.outcome === "completed" && receipt.usage) {
+        const { promptTokens, completionTokens, cachedPromptTokens } = receipt.usage;
+        console.log("[marketing-video] text usage", { kind, promptTokens, cachedPromptTokens: cachedPromptTokens ?? null, completionTokens });
+      }
+      return this.deps.operations.receipt(owner, clientRequestId, receipt);
+    } });
   }
 
   private async project(owner: string, id: string) {

@@ -22,7 +22,7 @@ import { UsageMeter } from "../src/billing/meter.js";
 import { Hono } from "hono";
 import { createMarketingVideoRoutes } from "../src/marketing-video/routes.js";
 import { MarketingNarrator } from "../src/marketing-video/narration.js";
-import { MarketingKeyArtist } from "../src/marketing-video/key-art.js";
+import { keyArtBasis, MarketingKeyArtist, marketingKeyArtModel } from "../src/marketing-video/key-art.js";
 import { AnalysisStorage } from "../src/marketing-analysis/storage.js";
 import type { AgentService } from "../src/services/agent-service.js";
 import { HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
@@ -34,6 +34,8 @@ const raw = process.env.MARKETING_CHECK_DATABASE_URL;
 if (!raw) throw new Error("Set MARKETING_CHECK_DATABASE_URL to an empty local database named marketing_check_<suffix>");
 const url = new URL(raw);
 if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || !/^\/marketing_check_[a-z0-9_]+$/.test(url.pathname)) throw new Error("Only an isolated local marketing_check_* database is allowed");
+// A throwaway key for the signed links of private files (T15); this database is disposable.
+process.env.SECRET_MASTER_KEY ||= "11".repeat(32);
 const db = new DB({ host: url.hostname, port: Number(url.port || 5432), user: decodeURIComponent(url.username), password: decodeURIComponent(url.password), database: url.pathname.slice(1) });
 const store = new PgMarketingProjectStore(db.pool);
 const root = await mkdtemp(join(tmpdir(), "lot-marketing-integration-"));
@@ -200,8 +202,9 @@ try {
   made = (await store.get(owner, made.id))!;
   assert.deepEqual(made.revision?.reusable, [true, true]);
   const firstClips = await store.segments(owner, made.id);
-  // Each kept clip can be watched before choosing to redo it.
-  assert.deepEqual(made.revision?.clips, firstClips.map(clip => clip.output.assets[0].url));
+  // Each kept clip can be watched before choosing to redo it, through a signed link (T15).
+  assert.deepEqual(made.revision?.clips?.map(url => url?.split("?")[0]), firstClips.map(clip => clip.output.assets[0].url));
+  assert(made.revision?.clips?.every(url => url?.includes("material_token=")));
   await assert.rejects(store.save(owner, made.id, made.version, { ...made.draft, ratio: "16:9" }), /只能修改分镜/);
   await assert.rejects(store.save(owner, made.id, made.version, { ...made.draft, storyboard: made.draft.storyboard.map(shot => ({ ...shot, durationSec: shot.durationSec - 1 })) }), /只能修改分镜/);
   made = await store.save(owner, made.id, made.version, { ...made.draft, storyboard: made.draft.storyboard.map((shot, i) => i === 1 ? { ...shot, visual: "人物在窗边喝咖啡" } : shot) });
@@ -219,6 +222,13 @@ try {
   assert.equal(creates, before + 1, "only the redone shot is submitted");
   assert.deepEqual(await charges(), { n: chargedBefore.n + 1, seconds: chargedBefore.seconds + 15 });
   assert(Math.abs((await inspectMedia(join(root, "assets", (await db.getAsset(revised.assetIds[0]))!.storage_key))).duration - 30) < 0.05);
+  // T15: made videos and their clips are private; /static/assets finds them by storage key and the studio gets signed links.
+  const film = (await db.getAsset(revised.assetIds[0]))!;
+  assert.equal((await db.getGeneratedByStorageKey(film.storage_key))?.is_private, true, "made video is private");
+  for (const clip of await store.segments(owner, made.id)) assert.equal((await db.getAsset(clip.output.assetIds[0]))?.is_private, true, "clips are private");
+  assert.match((await store.get(owner, made.id))!.output!.assets[0].url, /material_token=/, "the owner's view has a signed link");
+  // T09: one query reads all of a draft's materials, and missing IDs are left out.
+  assert.deepEqual((await db.getAssets([film.id, randomUUID()])).map(asset => asset.id), [film.id]);
   const secondClips = await store.segments(owner, made.id);
   assert.deepEqual(secondClips[0].output.assetIds, firstClips[0].output.assetIds);
   assert.equal(secondClips[0].output.reusedFrom, firstClips[0].task_id);
@@ -635,17 +645,47 @@ try {
   });
   const looked = await store.save(owner, randomUUID(), 0, MarketingDraftSchema.parse({ ...draft, continuity: "短发女店员，米色针织衫，木质吧台" }));
   await Promise.all([0, 1].map(() => artist.generate(owner, looked.id, looked.draft, KLING_MARKETING_PROFILE, false)));
+  await artist.settled();
   assert.equal(images, 1, "concurrent requests pay for one still");
   assert.equal((await artist.status(owner, looked.id, looked.draft)).status, "succeeded");
   assert.equal((await artist.status(other, looked.id, looked.draft)).status, "missing", "stills are owner-scoped");
   assert.equal((await artist.status(owner, looked.id, { ...looked.draft, continuity: "长发" })).status, "missing", "a new look needs a new still");
   await artist.generate(owner, looked.id, looked.draft, KLING_MARKETING_PROFILE, true);
+  await artist.settled();
   assert.equal(images, 2, "only an explicit redo pays again");
   const still = await artist.frozen(owner, looked.id, looked.draft, KLING_MARKETING_PROFILE);
   assert(still && still.user_id === owner && still.type === "upload" && (still as { is_private?: boolean }).is_private);
   assert((await store.usage(owner)).materialBytes >= 66, "stills count as draft materials");
+  // T05: the result link is saved before the download; a failed download, or a wait cut short by a restart,
+  // is fetched again from the saved result or task without a new image request.
+  let downloads = 0;
+  const linked = new MarketingKeyArtist(db.pool, root, {
+    provider: async () => ({
+      create: async () => { images++; return { taskId: "linked", status: "completed", progress: 100 }; },
+      poll: async () => ({ status: "completed", progress: 100, urls: ["https://cdn.example/still.png"] }),
+    }),
+    getAsset: id => db.getAsset(id) as never, createAsset: asset => db.createAsset(asset),
+    storage: { put: async ({ key, body }) => { await writeFile(join(root, "uploads", key), body); return { url: `/static/uploads/${key}` }; } },
+    sign: asset => `${asset.url}?material_token=fixture`,
+    download: async () => { if (downloads++ === 0) throw new Error("timeout"); return { body: stillBytes, mime: "image/png" }; },
+  });
+  const linkedLook = { ...looked.draft, continuity: "长发店员，蓝色围裙" };
+  await linked.generate(owner, looked.id, linkedLook, KLING_MARKETING_PROFILE, false); await linked.settled();
+  assert.deepEqual(await linked.status(owner, looked.id, linkedLook), { status: "failed", resumable: true,
+    error: "定妆图已生成，保存未完成；点击「继续获取」重新下载，不会再次计费。" });
+  assert.equal(images, 3);
+  await linked.generate(owner, looked.id, linkedLook, KLING_MARKETING_PROFILE, true); await linked.settled();
+  assert.equal((await linked.status(owner, looked.id, linkedLook)).status, "succeeded");
+  assert.equal(images, 3, "a saved result is downloaded again without paying");
+  const lostLook = { ...looked.draft, continuity: "卷发店员，白衬衫" };
+  await db.pool.query(`INSERT INTO marketing_video_key_arts(id,owner_id,project_id,basis,status,vendor_task_id,updated_at)
+    VALUES($1,$2,$3,$4,'running','lost-task',now() - interval '1 hour')`, [randomUUID(), owner, looked.id, keyArtBasis(lostLook, marketingKeyArtModel())]);
+  assert.equal((await linked.status(owner, looked.id, lostLook)).resumable, true, "a stale still with a saved task is free to fetch");
+  await linked.generate(owner, looked.id, lostLook, KLING_MARKETING_PROFILE, false); await linked.settled();
+  assert.equal((await linked.status(owner, looked.id, lostLook)).status, "succeeded");
+  assert.equal(images, 3, "the saved task is asked again, not paid for again");
   const removedStills = await store.remove(owner, looked.id);
-  assert.equal(removedStills.keyArtFiles.length, 2);
+  assert.equal(removedStills.keyArtFiles.length, 4);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_video_key_arts WHERE project_id=$1", [looked.id])).rows[0].n, 0);
   assert.equal(await db.getAsset(still.id), null);
   // P08 / P07: the timing trigger sees the real run writes, and the admin views read them.

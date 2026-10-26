@@ -3,6 +3,9 @@ import { useI18n } from "../../i18n/index.js";
 import { videoFailure } from "./failure.js";
 import { useConfirm } from "./ConfirmDialog.js";
 
+/** Same action and wording as an unknown text result (TextOperationPanel); clips name how many are retried. */
+export const UNKNOWN_CLIPS_MESSAGE = "有 {0} 个片段已发送给模型，但没有收到明确结果，可能已经计费。重试只重新提交这些片段，可能重复计费；已完成的片段会保留。确定继续吗？";
+
 /** Progress of a submitted video, and for a stopped one: why, and the actions that can move it forward. */
 export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onRelease }: {
   project: MarketingProject; busy: boolean;
@@ -31,8 +34,8 @@ export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onReleas
         confirm: "取消生成", cancel: "继续制作" }).then(ok => { if (ok) onCancel(); })}>{t("取消生成")}</button>}
       {pending && <button disabled={busy} onClick={onResume}>{t("重新排队")}</button>}
       {((cancelled && !unknown) || failure?.actions.includes("resume")) && <button className="mv-primary" disabled={busy} onClick={onResume}>{t("继续生成")}</button>}
-      {failure?.actions.includes("release") && <button className="mv-primary" disabled={busy} onClick={() => void confirm({ title: "重新提交未知片段？", message: "有 {0} 个片段已发送给视频模型，但没有收到明确结果，可能已经计费。重新提交会再次请求这些片段，可能重复计费；已完成的片段会保留。确定重新提交吗？",
-        values: [unknown], confirm: "重新提交" }).then(ok => { if (ok) onRelease(); })}>{t("重新提交未知片段")}</button>}
+      {failure?.actions.includes("release") && <button className="mv-primary" disabled={busy} onClick={() => void confirm({ title: "核实后重试？", message: UNKNOWN_CLIPS_MESSAGE,
+        values: [unknown], confirm: "重试" }).then(ok => { if (ok) onRelease(); })}>{t("核实后重试")}</button>}
       {failure?.actions.includes("copy") && <button disabled={busy} onClick={() => onCopy(failure.copyStep ?? 2)}>{t("复制为新草稿重新制作")}</button>}
     </div>
     {pending && <p className="mv-hint">{t("长时间停留在排队状态时，可点击重新排队，不会重复创建任务。")}</p>}

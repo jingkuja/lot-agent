@@ -21,7 +21,7 @@ import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../g
 import { GenerationError } from "../generation/errors.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
 import { runDigitalPresenter } from "../digital-presenter/run.js";
-import { DIGITAL_PRESENTER_TASK, marketingQueueLimits } from "../jobs/task-queues.js";
+import { DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
 import { resolveMaterialReference } from "../generation/private-materials.js";
 import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
@@ -84,6 +84,13 @@ function imageMimeForUpload(key: string, body: Buffer): string | null {
   return null;
 }
 
+/** Connections of this worker's PG pool (PG_POOL_MAX, default 20). */
+function workerPoolMax() {
+  const max = Number(process.env.PG_POOL_MAX ?? 20);
+  if (!Number.isInteger(max) || max < 4 || max > 200) throw new Error("PG_POOL_MAX must be an integer 4–200");
+  return max;
+}
+
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
   if (!pgPassword) throw new Error("PG_PASSWORD is required");
@@ -97,7 +104,10 @@ async function main() {
     user: process.env.PG_USER ?? "postgres",
     password: pgPassword,
     database: process.env.PG_DATABASE ?? "lot",
+    max: workerPoolMax(),
   });
+  const poolIssue = marketingPoolIssue(marketingQueueLimits(), workerPoolMax());
+  if (poolIssue) throw new Error(poolIssue);
 
   // The worker intentionally does NOT run migrations: schema is owned and
   // migrated by the server process (see DB.migrate / agent-service.ts). The

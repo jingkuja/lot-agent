@@ -40,20 +40,30 @@ describe("marketing content compliance", () => {
       expect(normalizeMarketingReview(MarketingDraftSchema.parse({ script }), cleanModel)?.verdict).toBe("suspect");
     expect(localMarketingReview(MarketingDraftSchema.parse({ script: "不承诺投资项目必赚。" }))).toEqual([]);
   });
-  it("rejects invented locations, excerpts, rule sources and contradictory verdicts", () => {
+  it("rejects contradictory verdicts", () => {
     const draft = MarketingDraftSchema.parse({ script: "欢迎了解产品。" });
     const issue = { text: "产品", reason: "核实来源", suggestion: "商品", field: "script", source: "xiaohongshu", ruleId: "platform-copyright", severity: "suspect" };
-    for (const invalid of [
-      { verdict: "pass", issues: [issue] }, { verdict: "reject", issues: [] },
-      { verdict: "suspect", issues: [{ ...issue, text: "从未出现" }] },
-      { verdict: "suspect", issues: [{ ...issue, field: "storyboard.visual", shotIndex: 0 }] },
-      { verdict: "suspect", issues: [{ ...issue, field: "script", shotIndex: 0 }] },
-      { verdict: "suspect", issues: [{ ...issue, ruleId: "invented-law" }] },
-      { verdict: "suspect", issues: [{ ...issue, source: "douyin", ruleId: "platform-diversion" }] },
-      { verdict: "suspect", issues: [{ text: "产品", reason: "核实", suggestion: "商品" }] },
-      { verdict: "reject", issues: [issue] },
-    ]) expect(normalizeMarketingReview(draft, invalid)).toBeNull();
+    for (const invalid of [{ verdict: "pass", issues: [issue] }, { verdict: "reject", issues: [] }, { verdict: "reject", issues: [issue] }]) {
+      expect(normalizeMarketingReview(draft, invalid)).toBeNull();
+    }
     expect(normalizeMarketingReview(draft, { verdict: "suspect", issues: [issue] })?.verdict).toBe("suspect");
+  });
+  it("drops and counts invented locations, excerpts and rule sources instead of failing the paid check", () => {
+    const draft = MarketingDraftSchema.parse({ script: "欢迎了解产品。" });
+    const issue = { text: "产品", reason: "核实来源", suggestion: "商品", field: "script", source: "xiaohongshu", ruleId: "platform-copyright", severity: "suspect" };
+    const unlocated = [
+      { ...issue, text: "从未出现" }, { ...issue, field: "storyboard.visual", shotIndex: 0 }, { ...issue, field: "script", shotIndex: 0 },
+      { ...issue, ruleId: "invented-law" }, { ...issue, source: "douyin", ruleId: "platform-diversion" }, { text: "产品", reason: "核实", suggestion: "商品" },
+      { ...issue, suggestion: "产品" },
+    ];
+    for (const invalid of unlocated) {
+      const review = normalizeMarketingReview(draft, { verdict: "suspect", issues: [invalid] })!;
+      expect(review).toMatchObject({ verdict: "suspect", issues: [], dropped: 1 });
+    }
+    const mixed = normalizeMarketingReview(draft, { verdict: "reject", issues: [issue, { ...issue, text: "从未出现", severity: "reject" }] })!;
+    expect(mixed).toMatchObject({ verdict: "suspect", dropped: 1 });
+    expect(mixed.issues).toEqual([issue]);
+    expect(normalizeMarketingReview(draft, { verdict: "suspect", issues: [issue] })).not.toHaveProperty("dropped");
   });
   it("preserves the strongest finding and deduplicates mirrored narration", () => {
     const storyboard = [{ script: "项目稳赚。", visual: "普通场景", action: "展示", camera: "中景" }];

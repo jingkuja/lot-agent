@@ -50,10 +50,18 @@ export const POLL_MAX_MS = 15000;
 /** Poll a running video's task state. The interval grows while nothing changes, and a
  * hidden tab stops polling until it is shown again. */
 export function useTaskPolling(projectId: string | undefined, active: boolean, onState: (state: MarketingTaskState) => void, onError: (failed: boolean) => void) {
-  const callbacks = useRef({ onState, onError });
-  callbacks.current = { onState, onError };
+  usePolling<MarketingTaskState>(projectId && `/marketing-videos/${projectId}/status`, active, onState, onError,
+    state => JSON.stringify([state.status, state.progress, state.stage]));
+}
+
+/** Poll `path` while `active`, with the backoff of useTaskPolling: reading a state is free and never
+ * starts paid work. `fingerprint` tells whether a state changed. */
+export function usePolling<T>(path: string | undefined, active: boolean, onState: (state: T) => void, onError: (failed: boolean) => void,
+  fingerprint: (state: T) => string = state => JSON.stringify(state)) {
+  const callbacks = useRef({ onState, onError, fingerprint });
+  callbacks.current = { onState, onError, fingerprint };
   useEffect(() => {
-    if (!active || !projectId) return;
+    if (!active || !path) return;
     let stopped = false; let inFlight = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let delay = POLL_MIN_MS; let last = "";
@@ -62,11 +70,11 @@ export function useTaskPolling(projectId: string | undefined, active: boolean, o
       if (document.visibilityState === "hidden") return;
       inFlight = true;
       try {
-        const state = await request<MarketingTaskState>(`/marketing-videos/${projectId}/status`);
+        const state = await request<T>(path);
         if (stopped) return;
-        const fingerprint = JSON.stringify([state.status, state.progress, state.stage]);
-        delay = fingerprint === last ? Math.min(Math.round(delay * 1.5), POLL_MAX_MS) : POLL_MIN_MS;
-        last = fingerprint;
+        const current = callbacks.current.fingerprint(state);
+        delay = current === last ? Math.min(Math.round(delay * 1.5), POLL_MAX_MS) : POLL_MIN_MS;
+        last = current;
         callbacks.current.onState(state); callbacks.current.onError(false);
       } catch { if (!stopped) callbacks.current.onError(true); }
       finally { inFlight = false; }
@@ -76,5 +84,5 @@ export function useTaskPolling(projectId: string | undefined, active: boolean, o
     document.addEventListener("visibilitychange", shown);
     schedule(1000);
     return () => { stopped = true; clearTimeout(timer); document.removeEventListener("visibilitychange", shown); };
-  }, [active, projectId]);
+  }, [active, path]);
 }

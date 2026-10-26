@@ -119,7 +119,8 @@ export function parseRange(header: string | undefined, size: number): ByteRange 
  * `contentPolicy`.
  */
 export function staticFileHandler(dir: string, options: {
-  authorize?: (c: Context, filename: string) => Promise<boolean>;
+  /** `true` serves the file as private and uncached; `"public"` serves it with the normal cache policy. */
+  authorize?: (c: Context, filename: string) => Promise<boolean | "public">;
 } = {}) {
   return async (c: Context): Promise<Response> => {
     if (options.authorize) c.header("Cache-Control", "private, no-store");
@@ -128,7 +129,9 @@ export function staticFileHandler(dir: string, options: {
       return c.text("bad request", 400);
     }
 
-    if (options.authorize && !await options.authorize(c, filename)) return c.text("not found", 404);
+    const access = options.authorize ? await options.authorize(c, filename) : "public";
+    if (!access) return c.text("not found", 404);
+    const privateFile = access !== "public";
 
     const path = resolve(dir, filename);
     let size: number;
@@ -147,7 +150,7 @@ export function staticFileHandler(dir: string, options: {
       "Content-Type": contentType,
       "X-Content-Type-Options": "nosniff",
       "Accept-Ranges": "bytes",
-      "Cache-Control": options.authorize ? "private, no-store" : "private, max-age=3600",
+      "Cache-Control": privateFile ? "private, no-store" : "private, max-age=3600",
     };
     if (disposition === "attachment") {
       // filename is already validated above (no `/`, no `..`); still quote

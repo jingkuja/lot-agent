@@ -6,6 +6,7 @@ import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, mark
   resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION } from "./recovery.js";
 import { analysisDeleteBlocker, deleteAnalysisRecord, ownerLock as analysisOwnerLock } from "../marketing-analysis/repository.js";
+import { signPrivateOutput } from "../generation/private-materials.js";
 
 export class MarketingError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409 | 429 | 503 = 400) { super(message); }
@@ -19,9 +20,15 @@ const taskColumns = `t.status, t.progress, t.stage, t.error, t.error_code, t.out
   (SELECT count(*)::int FROM marketing_video_segments s JOIN tasks st ON st.id=s.task_id
     WHERE s.project_id=p.id AND st.input->>'parentId'=p.task_id::text AND st.vendor_task_id='${UNKNOWN_SUBMISSION}') AS unknown_segments`;
 const select = `SELECT p.*, ${taskColumns} FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
+/** The made video with links its owner's browser can play: private videos are served only by signed links. */
+function signedOutput(owner: string, output: MarketingTaskState["output"] | null): MarketingTaskState["output"] {
+  if (!output || !Array.isArray(output.assets)) return output ?? undefined;
+  return { ...output, assets: output.assets.map(asset => typeof asset?.url === "string" ? { ...asset, url: signPrivateOutput(owner, asset.url) } : asset) };
+}
 function taskState(row: Record<string, any>): MarketingTaskState {
   return { id: row.id, version: row.version, taskId: row.task_id, status: row.status ?? "draft", progress: Number(row.progress ?? 0),
-    stage: row.stage ?? undefined, error: row.error ?? undefined, ...(isMarketingFailureCode(row.error_code) ? { errorCode: row.error_code } : {}), output: row.output ?? undefined,
+    stage: row.stage ?? undefined, error: row.error ?? undefined, ...(isMarketingFailureCode(row.error_code) ? { errorCode: row.error_code } : {}),
+    output: signedOutput(row.user_id, row.output),
     ...(Number(row.unknown_segments) > 0 ? { unknownSegments: Number(row.unknown_segments) } : {}) };
 }
 function project(row: Record<string, any>): MarketingProject {
@@ -46,7 +53,10 @@ async function revisionBase(db: pg.Pool | pg.PoolClient, owner: string, id: stri
   let modelId: string;
   try { modelId = marketingJobProfile(job.job_input).modelId; } catch { return undefined; }
   const reusable = actions.map(action => action === "reuse");
-  const clips = rows.map((row, i) => { const url = row.output?.assets?.[0]?.url; return reusable[i] && typeof url === "string" ? url : null; });
+  const clips = rows.map((row, i) => {
+    const url = row.output?.assets?.[0]?.url;
+    return reusable[i] && typeof url === "string" ? signPrivateOutput(owner, url) : null;
+  });
   return { input: job.job_input as Record<string, unknown>, draft, modelId, segments: rows, reusable, clips, composition: jobComposition(job.job_input) };
 }
 async function withRevision(db: pg.Pool | pg.PoolClient, owner: string, p: MarketingProject): Promise<MarketingProject> {
@@ -61,7 +71,7 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
   }
   /** One indexed row per poll: no draft parsing, material lookups or link signing. */
   async taskState(owner: string, id: string) {
-    const { rows } = await this.pool.query(`SELECT p.id, p.version, p.task_id, ${taskColumns}
+    const { rows } = await this.pool.query(`SELECT p.id, p.user_id, p.version, p.task_id, ${taskColumns}
       FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id WHERE p.user_id=$1 AND p.id=$2`, [owner, id]);
     return rows[0] ? taskState(rows[0]) : null;
   }

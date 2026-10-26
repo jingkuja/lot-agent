@@ -3,8 +3,8 @@ import { resolve, sep } from "node:path";
 import { PgMarketingTextOperations } from "./operations.js";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { marketingVideoProfile, marketingVoiceover, type MarketingProject, MarketingDraftSchema, MarketingSourceSchema, marketingSourceKind,
-  resolveMarketingSegments } from "@lot-agent/core/marketing-video";
+import { marketingVideoProfile, marketingVoiceover, type MarketingDraft, type MarketingProject, MarketingDraftSchema, MarketingSourceSchema,
+  marketingSourceKind, resolveMarketingSegments } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import type { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { KnowledgeError } from "../knowledge/errors.js";
@@ -24,6 +24,7 @@ import { MarketingWriting, type MarketingLocale } from "./writing.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const isLocale = (value: unknown): value is MarketingLocale => value === "zh" || value === "en" || value === "id";
+const materialsKey = (draft: MarketingDraft) => JSON.stringify([draft.assets, draft.referenceUpload?.id ?? null]);
 
 /** Key-art stills use the owner's own model key, like every other marketing model call. */
 export function marketingKeyArtist(service: AgentService, dataRoot: string) {
@@ -141,7 +142,10 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (!parsed.success || !Number.isInteger(body?.version) || body.version < 0) throw new MarketingError("草稿参数无效");
     // Deleted input material must not prevent editing a finished video's title.
     const old = await store.get(c.get("userId"), c.req.param("id"));
-    await materials.owned(c.get("userId"), parsed.data, { allowMissing: !!old?.taskId, historicalDraft: old?.draft });
+    // Autosave mostly resends the materials checked when they were added; check only a change.
+    if (!old || materialsKey(old.draft) !== materialsKey(parsed.data)) {
+      await materials.owned(c.get("userId"), parsed.data, { allowMissing: !!old?.taskId, historicalDraft: old?.draft });
+    }
     return c.json(await store.save(c.get("userId"), c.req.param("id"), body.version, parsed.data));
   });
   app.delete("/:id", async (c) => {
@@ -237,6 +241,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const body = await c.req.json().catch(() => null);
     if (!Number.isInteger(body?.version) || typeof body?.retry !== "boolean") throw new MarketingError("生成参数无效");
     const result = await production.generate(owner, p, { version: body.version, retry: body.retry }, c.req.raw.signal);
+    if ("narration" in result) throw new MarketingError("请先生成全部分镜的数字分身配音并试听。", 409);
     return "quota" in result ? c.json(result.quota, 402) : c.json(result.project, 202);
   });
   // Redo chosen shots of a stopped or finished video. The other shots keep their clips
@@ -253,6 +258,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
       throw new MarketingError("重新生成参数无效");
     }
     const result = await production.revise(owner, p, { version: body.version, shots: shots as number[] }, c.req.raw.signal, started);
+    if ("narration" in result) return c.json({ narrationPending: true, clips: result.narration }, 202);
     return "quota" in result ? c.json(result.quota, 402) : c.json(result.project, 202);
   });
   app.post("/:id/archive", async (c) => {

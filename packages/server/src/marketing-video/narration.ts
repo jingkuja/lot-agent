@@ -42,11 +42,14 @@ export function frozenNarration(value: unknown, count: number): FrozenNarration[
   return list;
 }
 
-type Row = { slot: number; narration_key: string; status: "running" | "succeeded" | "failed"; storage_key: string | null; duration_ms: number | null; updated_at: Date };
+type Row = { slot: number; narration_key: string; status: "running" | "succeeded" | "failed"; storage_key: string | null; duration_ms: number | null; updated_at: Date;
+  error?: string | null };
+const INTERRUPTED = "配音合成被中断，请重新生成该镜配音。";
 
 /** Per-shot twin narration of a draft. Speech goes through the owner's own model key, so the
  * gateway bills the owner; every synthesis is one request, never resent automatically. */
 export class MarketingNarrator {
+  private readonly active = new Set<Promise<unknown>>();
   constructor(private readonly pool: pg.Pool, private readonly dataRoot: string,
     private readonly voices?: Pick<TwinVoices, "ready" | "speakAs">, private readonly inspect = inspectMedia) {}
   get available() { return !!this.voices; }
@@ -64,14 +67,15 @@ export class MarketingNarrator {
     return { voice, settings, keys: segments.map(segment => narrationKey(voice, settings, segment.script)) };
   }
   private async rows(owner: string, projectId: string, keys: string[]): Promise<(Row | undefined)[]> {
-    const { rows } = await this.pool.query<Row>(`SELECT slot,narration_key,status,storage_key,duration_ms,updated_at FROM marketing_video_narrations
+    const { rows } = await this.pool.query<Row>(`SELECT slot,narration_key,status,storage_key,duration_ms,updated_at,error FROM marketing_video_narrations
       WHERE owner_id=$1 AND project_id=$2 AND narration_key=ANY($3::text[])`, [owner, projectId, keys]);
     return keys.map((key, slot) => rows.find(row => row.slot === slot && row.narration_key === key));
   }
   private clip(row: Row | undefined, slot: number): MarketingNarrationClip {
     if (!row) return { slot, status: "missing" };
-    if (row.status === "running" && Date.now() - new Date(row.updated_at).getTime() > NARRATION_STALE_MS) return { slot, status: "failed" };
-    return { slot, status: row.status, ...(row.status === "succeeded" ? { durationMs: Number(row.duration_ms) } : {}) };
+    if (row.status === "running" && Date.now() - new Date(row.updated_at).getTime() > NARRATION_STALE_MS) return { slot, status: "failed", error: INTERRUPTED };
+    return { slot, status: row.status, ...(row.status === "succeeded" ? { durationMs: Number(row.duration_ms) } : {}),
+      ...(row.status === "failed" && row.error ? { error: row.error } : {}) };
   }
 
   async status(owner: string, projectId: string, draft: MarketingDraft, segments: MarketingSegment[]): Promise<MarketingNarrationClip[]> {
@@ -80,36 +84,56 @@ export class MarketingNarrator {
   }
 
   /** Synthesizes shots without a take for the current text and settings, plus `redo` shots.
-   * A failed shot stays failed until the user asks for it again. */
-  async synthesize(owner: string, projectId: string, draft: MarketingDraft, segments: MarketingSegment[], redo: number[] = []) {
+   * A failed shot stays failed until the user asks for it again. With `background`, the takes are
+   * claimed before it returns and their speech requests go on after it; callers poll `status`. */
+  async synthesize(owner: string, projectId: string, draft: MarketingDraft, segments: MarketingSegment[], redo: number[] = [],
+    options: { background?: boolean } = {}) {
     const { voice, settings, keys } = await this.plan(owner, draft, segments);
     const current = (await this.rows(owner, projectId, keys)).map((row, slot) => this.clip(row, slot));
     const targets = segments.filter(segment => current[segment.index].status === "missing"
       || (redo.includes(segment.index) && current[segment.index].status !== "running"));
+    const claimed: MarketingSegment[] = [];
+    for (const segment of targets) {
+      if (await this.claim(owner, projectId, keys[segment.index], segment, current[segment.index].status !== "missing")) claimed.push(segment);
+    }
     let error = "";
     let next = 0;
     const work = async () => {
-      while (next < targets.length) {
-        const segment = targets[next++];
-        const message = await this.take(owner, projectId, voice, settings, keys[segment.index], segment, current[segment.index].status !== "missing");
-        error ||= message;
+      while (next < claimed.length) {
+        const segment = claimed[next++];
+        error ||= await this.take(owner, projectId, voice, settings, keys[segment.index], segment);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, work));
+    const all = Promise.all(Array.from({ length: Math.min(CONCURRENCY, claimed.length) }, work));
+    if (options.background) {
+      const running = all.finally(() => this.active.delete(running));
+      this.active.add(running);
+    } else await all;
     return { clips: await this.status(owner, projectId, draft, segments), error };
   }
 
-  /** One billed take. The intent row is written first; a lost answer leaves it running.
-   * Only an explicit redo may replace an existing row, so concurrent requests never pay twice. */
-  private async take(owner: string, projectId: string, voice: ReadyTwinVoice, settings: MarketingNarration, key: string, segment: MarketingSegment, redo: boolean): Promise<string> {
-    const where = "owner_id=$1 AND project_id=$2 AND slot=$3 AND narration_key=$4";
+  /** Waits for takes this process synthesizes in the background; for tests and shutdown. */
+  async settled() { await Promise.allSettled([...this.active]); }
+
+  /** The intent row of one take, written before its billed request. Only an explicit redo may
+   * replace an existing row, so concurrent requests never pay twice. */
+  private async claim(owner: string, projectId: string, key: string, segment: MarketingSegment, redo: boolean) {
     const ids = [owner, projectId, segment.index, key];
     const claim = redo
-      ? await this.pool.query(`UPDATE marketing_video_narrations SET status='running',storage_key=NULL,duration_ms=NULL,updated_at=now()
-          WHERE ${where} AND (status<>'running' OR updated_at < now() - $5::double precision * interval '1 millisecond') RETURNING slot`, [...ids, NARRATION_STALE_MS])
+      ? await this.pool.query(`UPDATE marketing_video_narrations SET status='running',storage_key=NULL,duration_ms=NULL,error=NULL,updated_at=now()
+          WHERE owner_id=$1 AND project_id=$2 AND slot=$3 AND narration_key=$4
+            AND (status<>'running' OR updated_at < now() - $5::double precision * interval '1 millisecond') RETURNING slot`, [...ids, NARRATION_STALE_MS])
       : await this.pool.query(`INSERT INTO marketing_video_narrations(owner_id,project_id,slot,narration_key,status) VALUES($1,$2,$3,$4,'running')
           ON CONFLICT (owner_id,project_id,slot,narration_key) DO NOTHING RETURNING slot`, ids);
-    if (!claim.rowCount) return "";
+    return !!claim.rowCount;
+  }
+
+  /** One billed take of a claimed row; a lost answer leaves it running. Never rejects: the outcome
+   * is written to the row, and the message is returned. */
+  private async take(owner: string, projectId: string, voice: ReadyTwinVoice, settings: MarketingNarration, key: string,
+    segment: MarketingSegment): Promise<string> {
+    const where = "owner_id=$1 AND project_id=$2 AND slot=$3 AND narration_key=$4";
+    const ids = [owner, projectId, segment.index, key];
     try {
       if (Array.from(segment.script).length > 500) throw new MarketingError("单镜口播过长，请精简后再生成配音。");
       // Not tied to the browser connection: a closed tab must not discard a billed take.
@@ -131,17 +155,24 @@ export class MarketingNarrator {
         [...ids, storageKey, Math.round(info.duration * 1000)]);
       return "";
     } catch (error) {
-      await this.pool.query(`UPDATE marketing_video_narrations SET status='failed',updated_at=now() WHERE ${where} AND status='running'`, ids);
-      if (error instanceof ProviderError) {
-        // The gateway request ID lets support reconcile a rare charge for a failed take.
-        console.warn("[marketing-video] narration failed", { projectId, slot: segment.index, code: error.code, httpStatus: error.httpStatus, upstreamRequestId: error.requestId, gatewayRequestId: error.gatewayRequestId ?? null });
-        if (error.httpStatus === 401 || error.httpStatus === 402 || error.httpStatus === 403) return "模型账号余额不足或未开通语音合成。";
-        return "配音合成失败，请稍后重新生成该镜配音。";
-      }
-      if (error instanceof MarketingError || error instanceof KnowledgeError) return error.message;
-      console.warn("[marketing-video] narration failed", { projectId, slot: segment.index, errorType: (error as Error)?.name });
+      const message = this.message(projectId, segment, error);
+      await this.pool.query(`UPDATE marketing_video_narrations SET status='failed',error=$5,updated_at=now() WHERE ${where} AND status='running'`, [...ids, message])
+        .catch(() => console.warn("[marketing-video] narration state not saved", { projectId, slot: segment.index }));
+      return message;
+    }
+  }
+
+  private message(projectId: string, segment: MarketingSegment, error: unknown) {
+    if (error instanceof ProviderError) {
+      // The gateway request ID lets support reconcile a rare charge for a failed take.
+      console.warn("[marketing-video] narration failed", { projectId, slot: segment.index, code: error.code, httpStatus: error.httpStatus,
+        upstreamRequestId: error.requestId, gatewayRequestId: error.gatewayRequestId ?? null });
+      if (error.httpStatus === 401 || error.httpStatus === 402 || error.httpStatus === 403) return "模型账号余额不足或未开通语音合成。";
       return "配音合成失败，请稍后重新生成该镜配音。";
     }
+    if (error instanceof MarketingError || error instanceof KnowledgeError) return error.message;
+    console.warn("[marketing-video] narration failed", { projectId, slot: segment.index, errorType: (error as Error)?.name });
+    return "配音合成失败，请稍后重新生成该镜配音。";
   }
 
   /** What a new job freezes: a fitting take for every shot of the current draft. */

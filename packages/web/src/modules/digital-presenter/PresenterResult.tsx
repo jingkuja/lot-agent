@@ -1,6 +1,7 @@
 import { marketingCaptionSrt, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { useConfirm } from "../marketing-video/ConfirmDialog.js";
+import { UNKNOWN_CLIPS_MESSAGE } from "../marketing-video/TaskStatus.js";
 import type { Project } from "./api.js";
 import { PresenterCaptions } from "./PresenterCaptions.js";
 
@@ -58,9 +59,8 @@ export function PresenterResult({ project, busy, onCancel, onResume, onRelease, 
         {active && <button disabled={busy} onClick={() => void confirm({ title: "取消视频生成？", message: "已提交给模型的片段仍可能计费；已完成的片段会保留，之后可以继续生成。", confirm: "取消生成", cancel: "继续制作" }).then(ok => { if (ok) onCancel(); })}>{t("取消生成")}</button>}
         {pending && <button disabled={busy} onClick={onResume}>{t("重新排队")}</button>}
         {!active && !unknown && (cancelled || failure?.resume) && <button className="mv-primary" disabled={busy} onClick={onResume}>{t("继续生成")}</button>}
-        {!active && !!unknown && <button className="mv-primary" disabled={busy} onClick={() => void confirm({ title: "重新提交未知片段？",
-          message: "有 {0} 个片段已发送给模型，但没有收到明确结果，可能已经计费。重新提交会再次请求这些片段，可能重复计费；已完成的片段会保留。确定重新提交吗？",
-          values: [unknown], confirm: "重新提交" }).then(ok => { if (ok) onRelease(); })}>{t("重新提交未知片段")}</button>}
+        {!active && !!unknown && <button className="mv-primary" disabled={busy} onClick={() => void confirm({ title: "核实后重试？",
+          message: UNKNOWN_CLIPS_MESSAGE, values: [unknown], confirm: "重试" }).then(ok => { if (ok) onRelease(); })}>{t("核实后重试")}</button>}
       </div>
       {!active && <details className="mv-task-details">
         <summary>{t("联系客服时提供的信息")}</summary>

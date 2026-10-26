@@ -35,6 +35,31 @@ export function imageInfo(buffer: Buffer): ImageInfo | null {
   return null;
 }
 
+/** EXIF orientation (1–8) of a JPEG; 1 when it has none or it cannot be read. */
+export function jpegOrientation(buffer: Buffer): number {
+  try {
+    if (buffer[0] !== 0xff || buffer[1] !== 0xd8) return 1;
+    let offset = 2;
+    while (offset + 4 <= buffer.length && buffer[offset] === 0xff) {
+      const marker = buffer[offset + 1];
+      if (marker === 0xda || marker === 0xd9) return 1;
+      if (marker === 0xe1 && buffer.toString("latin1", offset + 4, offset + 10) === "Exif\0\0") {
+        const tiff = offset + 10;
+        const little = buffer.toString("latin1", tiff, tiff + 2) === "II";
+        const u16 = (at: number) => little ? buffer.readUInt16LE(at) : buffer.readUInt16BE(at);
+        const ifd = tiff + (little ? buffer.readUInt32LE(tiff + 4) : buffer.readUInt32BE(tiff + 4));
+        for (let i = 0, count = u16(ifd); i < count; i++) {
+          const entry = ifd + 2 + i * 12;
+          if (u16(entry) === 0x0112) { const value = u16(entry + 8); return value >= 1 && value <= 8 ? value : 1; }
+        }
+        return 1;
+      }
+      offset += 2 + buffer.readUInt16BE(offset + 2);
+    }
+  } catch { /* A truncated header has no usable orientation. */ }
+  return 1;
+}
+
 export async function readImageInfo(path: string): Promise<ImageInfo | null> {
   const handle = await open(path, "r");
   try {

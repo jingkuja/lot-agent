@@ -14,7 +14,7 @@ vi.mock("bullmq", () => ({
   },
 }));
 import { BullmqJobQueue } from "./bullmq-queue.js";
-import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, marketingQueueLimits } from "./task-queues.js";
+import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, marketingPoolIssue, marketingQueueLimits } from "./task-queues.js";
 
 function fixture(limits = { concurrency: 2, perUser: 1, segments: 2 }) {
   const db = {
@@ -208,10 +208,16 @@ describe("isolated task workers", () => {
     expect(mocks.workers.get(MARKETING_VIDEO_QUEUE).options.concurrency).toBe(4);
     await mocks.workers.get(MARKETING_VIDEO_QUEUE).run(job());
     expect(f.db.claimTaskWithinOwnerLimit).toHaveBeenCalledWith("same-id", 1, "owner", [], 2);
-    expect(marketingQueueLimits({})).toEqual({ concurrency: 2, perUser: 1, segments: 2 });
+    expect(marketingQueueLimits({})).toEqual({ concurrency: 2, perUser: 1, segments: 4 });
     expect(marketingQueueLimits({ MARKETING_VIDEO_CONCURRENCY: "3", MARKETING_VIDEO_USER_CONCURRENCY: "2", MARKETING_VIDEO_SEGMENT_CONCURRENCY: "4" })).toEqual({ concurrency: 3, perUser: 2, segments: 4 });
     expect(() => marketingQueueLimits({ MARKETING_VIDEO_CONCURRENCY: "0" })).toThrow("MARKETING_VIDEO_CONCURRENCY");
     expect(() => marketingQueueLimits({ MARKETING_VIDEO_SEGMENT_CONCURRENCY: "16" })).toThrow("MARKETING_VIDEO_SEGMENT_CONCURRENCY must be an integer 1–15");
+  });
+  it("refuses to start when the worker pool cannot hold every render's lock beside its clips", () => {
+    expect(marketingPoolIssue({ concurrency: 2 }, 20)).toBe("");
+    expect(marketingPoolIssue({ concurrency: 9 }, 20)).toBe("");
+    expect(marketingPoolIssue({ concurrency: 10 }, 20)).toContain("PG_POOL_MAX (20) must be at least 22");
+    expect(marketingPoolIssue({ concurrency: 16 }, 34)).toBe("");
   });
   it("aborts a marketing handler and removes queued entries from both queues", async () => {
     const f = fixture(), entered = deferred();

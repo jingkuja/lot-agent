@@ -180,6 +180,11 @@ export interface MarketingKeyArt {
   status: "missing" | "running" | "succeeded" | "failed";
   /** Short-lived preview link of a succeeded still. */
   url?: string;
+  /** Why the newest attempt failed; an earlier still of the same look may still be shown. */
+  error?: string;
+  /** The newest attempt was paid for and only its download or wait was cut short: trying again
+   * fetches that result without a new image request. */
+  resumable?: boolean;
 }
 /** Local checks of a composed video; no model is called. Times are seconds in the film. */
 export interface MarketingQualityIssue {
@@ -213,6 +218,8 @@ export type MarketingReviewField = z.infer<typeof MarketingReviewFieldSchema>;
 export const MarketingReviewSchema = z.object({
   verdict: z.enum(["pass", "suspect", "reject"]),
   issues: z.array(MarketingReviewIssueSchema).max(80),
+  /** Model findings left out because their excerpt or rule could not be located in the draft. */
+  dropped: z.number().int().min(1).max(80).optional(),
   ruleVersion: z.string().max(80).optional(),
   reviewedAt: z.string().datetime().optional(),
 }).strict();
@@ -376,6 +383,8 @@ export interface MarketingNarrationClip {
   /** missing: not synthesized for the current text and voice settings. */
   status: "missing" | "running" | "succeeded" | "failed";
   durationMs?: number;
+  /** Why a failed take failed. */
+  error?: string;
 }
 
 /** Re-time saved shots that exceed the draft's cap, e.g. after a reference video is added. */

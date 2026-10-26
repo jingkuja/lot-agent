@@ -40,7 +40,7 @@ import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { staticFileHandler } from "./static-files.js";
-import { createUploadAccessGuard } from "./generation/private-materials.js";
+import { createOutputAccessGuard, createUploadAccessGuard } from "./generation/private-materials.js";
 import { AgentService, type ServiceConfig } from "./services/agent-service.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
@@ -243,6 +243,13 @@ async function main() {
     keyFn: (c) => c.get("userId"),
     ...RATE_LIMITS.generation,
   });
+  // Same bucket as other generations, with a message the studio can show as it is.
+  const marketingGenerationRateLimit = rateLimit({
+    store: rateLimitStore,
+    keyFn: (c) => c.get("userId"),
+    ...RATE_LIMITS.generation,
+    message: "生成请求过于频繁，请 1 分钟后再试。",
+  });
   const digitalEmployeeRateLimit = rateLimit({
     store: rateLimitStore,
     keyFn: (c) => c.get("userId"),
@@ -342,7 +349,8 @@ async function main() {
   app.on("POST", "/api/marketing-videos/:id/review", messagesRateLimit);
   app.on("POST", "/api/marketing-videos/:id/storyboard", messagesRateLimit);
   app.on("POST", "/api/marketing-videos/:id/publication", messagesRateLimit);
-  app.on("POST", "/api/marketing-videos/:id/generate", generationRateLimit);
+  app.on("POST", "/api/marketing-videos/:id/generate", marketingGenerationRateLimit);
+  app.on("POST", "/api/marketing-videos/:id/revise", marketingGenerationRateLimit);
   app.on("POST", "/api/marketing-video-analyses", generationRateLimit);
   app.on("POST", "/api/marketing-video-analyses/uploads", uploadRateLimit);
   app.on("POST", "/api/marketing-video-analyses/:id/resume", generationRateLimit);
@@ -377,8 +385,8 @@ async function main() {
     });
     return { repository, storage, voices };
   })() : undefined;
-  app.on("POST", "/api/marketing-videos/:id/narration", generationRateLimit);
-  app.on("POST", "/api/marketing-videos/:id/key-art", generationRateLimit);
+  app.on("POST", "/api/marketing-videos/:id/narration", marketingGenerationRateLimit);
+  app.on("POST", "/api/marketing-videos/:id/key-art", marketingGenerationRateLimit);
   app.route("/api/marketing-videos", createMarketingVideoRoutes(service, resolve(ROOT, "data"), undefined, undefined,
     new MarketingNarrator(service.db.pool, resolve(ROOT, "data"), knowledgeManagement?.voices)));
   app.route("/api/marketing-video-analyses", createAnalysisRoutes(service, resolve(ROOT, "data/marketing-analysis")));
@@ -460,7 +468,8 @@ async function main() {
   app.route("/api/public/marketing-analysis-audio", createAnalysisAudioRoutes(resolve(ROOT, "data/marketing-analysis")));
   // Vendors read presenter inputs only through signed, expiring links.
   app.route("/api/public/digital-presenter-media", createPresenterMediaRoutes(resolve(ROOT, "data")));
-  app.get("/static/assets/:filename", staticFileHandler(ASSETS_DIR));
+  // Marketing clips and made videos are private; other generated files stay public.
+  app.get("/static/assets/:filename", staticFileHandler(ASSETS_DIR, { authorize: createOutputAccessGuard(service.db, service.sessions) }));
   app.get("/static/documents/:filename", staticFileHandler(DOCS_DIR));
   app.get("/static/uploads/:filename", staticFileHandler(UPLOADS_DIR, { authorize: createUploadAccessGuard(service.db, service.sessions) }));
 

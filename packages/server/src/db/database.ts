@@ -1052,8 +1052,20 @@ export class DB {
     return rows[0] ?? null;
   }
 
+  /** The rows of `ids` that exist, in one query; ids must be UUIDs. */
+  async getAssets(ids: string[]): Promise<StoredAsset[]> {
+    if (!ids.length) return [];
+    return (await this.pool.query("SELECT * FROM assets WHERE id = ANY($1::uuid[])", [ids])).rows;
+  }
+
   async getUploadByStorageKey(key: string): Promise<StoredAsset | null> {
     const { rows } = await this.pool.query("SELECT * FROM assets WHERE type='upload' AND storage_key=$1", [key]);
+    return rows[0] ?? null;
+  }
+
+  /** A generated file (not an upload) by its storage key, for the /static/assets access check. */
+  async getGeneratedByStorageKey(key: string): Promise<StoredAsset | null> {
+    const { rows } = await this.pool.query("SELECT * FROM assets WHERE type<>'upload' AND storage_key=$1 ORDER BY is_private DESC LIMIT 1", [key]);
     return rows[0] ?? null;
   }
 

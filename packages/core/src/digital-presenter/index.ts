@@ -66,7 +66,7 @@ export interface PresenterTake { slot: number; status: PresenterTakeStatus; dura
 export type PresenterTaskStatus = "draft" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
 /** The marketing copy check applied to the spoken script. */
 export interface PresenterReviewIssue { field: string; text: string; reason: string; suggestion?: string; severity?: "reject" | "suspect"; source?: string }
-export interface PresenterReview { verdict: "pass" | "suspect" | "reject"; issues: PresenterReviewIssue[]; reviewedAt?: string }
+export interface PresenterReview { verdict: "pass" | "suspect" | "reject"; issues: PresenterReviewIssue[]; dropped?: number; reviewedAt?: string }
 export interface PresenterTaskState {
   id: string; version: number; taskId?: string; status: PresenterTaskStatus; progress: number;
   stage?: string; error?: string; errorCode?: string;

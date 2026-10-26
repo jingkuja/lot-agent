@@ -5,7 +5,7 @@ import { request } from "../../api/client.js";
 import { errorMessage, json, normalizeProject, requestProject, type Project } from "./api.js";
 import type { ConfirmRequest } from "./ConfirmDialog.js";
 import { audioMismatchConfirmation, missingKeyArtConfirmation } from "./production-checks.js";
-import { useTaskPolling, type DraftSession } from "./session.js";
+import { POLL_MAX_MS, POLL_MIN_MS, usePolling, useTaskPolling, type DraftSession } from "./session.js";
 import type { DraftEditor } from "./useDraftEditor.js";
 import type { TextRequests } from "./useTextRequests.js";
 
@@ -68,6 +68,12 @@ export function useProduction({ editor, text, session, profile, ready, step, set
     }).catch(e => { if (session.current(token)) setError(errorMessage(e)); });
   }, [ready, frozen, step, keyArtIssue, hasBoard, project?.id, project?.version, dirty]);
   const currentKeyArt = current(keyArt)?.keyArt ?? null;
+  // The still is made in the background; follow it until it stops, also after reopening the draft.
+  const keyArtRunning = currentKeyArt?.status === "running";
+  usePolling<{ version: number; keyArt: MarketingKeyArt }>(keyArtRunning ? `/marketing-videos/${project?.id}/key-art` : undefined, keyArtRunning, result => {
+    const p = projectRef.current;
+    if (p && keyArt && p.id === keyArt.projectId) setKeyArt({ projectId: p.id, version: result.version, keyArt: result.keyArt });
+  }, failed => setError(old => failed ? POLL_ERROR : old === POLL_ERROR ? "" : old));
 
   /** Submit the draft as a video, or continue its stopped job (`retry`) with the frozen input. */
   async function generate(retry = false) {
@@ -81,6 +87,7 @@ export function useProduction({ editor, text, session, profile, ready, step, set
     // Without the still, shots keep the same person and setting only through the text.
     if (!retry && !marketingKeyArtIssue(p.draft, profile)) {
       const { keyArt: still } = await request<{ keyArt: MarketingKeyArt }>(`/marketing-videos/${p.id}/key-art`);
+      if (still.status === "running") throw new Error("定妆图正在生成，完成后再生成视频。");
       if (still.status !== "succeeded" && !await confirm(missingKeyArtConfirmation(p.draft))) return;
     }
     if (!retry && (!p.review || p.reviewedScript !== marketingReviewText(p.draft))) { await text.review(); p = projectRef.current!; }
@@ -99,15 +106,31 @@ export function useProduction({ editor, text, session, profile, ready, step, set
       }
     }
   }
-  /** Redo chosen shots of the current video; the server keeps every other clip unpaid. */
+  /** Redo chosen shots of the current video; the server keeps every other clip unpaid. Changed shots of a
+   * twin-narrated video first get their new takes in the background; once none is being made, the same redo
+   * is sent again and reuses them, so leaving the page never pays for a take twice. */
   async function revise(shots: number[]) {
     let p = await save();
     if (!p.review || p.reviewedScript !== marketingReviewText(p.draft)) { await text.review(); p = projectRef.current!; }
     if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再重新生成。");
-    // A changed shot of a twin-narrated video gets its new take inside this request.
-    wait(marketingVoiceover(p.draft) ? "正在合成改动镜头的配音并提交生成任务" : "正在提交生成任务", false);
-    const result = await requestProject(`/marketing-videos/${p.id}/revise`, json("POST", { version: p.version, shots }));
-    if (session.alive) setCurrent(result);
+    for (;;) {
+      wait("正在提交生成任务", false);
+      const result = await request<Project | { narrationPending: true }>(`/marketing-videos/${p.id}/revise`, json("POST", { version: p.version, shots }));
+      if (!session.alive) return;
+      if (!("narrationPending" in result)) { setCurrent(normalizeProject(result)); return; }
+      wait("正在合成改动镜头的配音", false);
+      if (!await narrationSettled(p.id)) return;
+    }
+  }
+  /** Reads the takes, with the task polling backoff, until none is being made; false once the user left the draft. */
+  async function narrationSettled(projectId: string) {
+    const token = session.token();
+    for (let delay = POLL_MIN_MS; ; delay = Math.min(Math.round(delay * 1.5), POLL_MAX_MS)) {
+      await new Promise(done => setTimeout(done, delay));
+      if (!session.current(token)) return false;
+      const { clips } = await request<{ clips: MarketingNarrationClip[] }>(`/marketing-videos/${projectId}/narration`);
+      if (!clips.some(clip => clip.status === "running")) return session.current(token);
+    }
   }
   // Back to what the video was made from; publishing fields are not part of it.
   const revertShots = () => {
@@ -126,15 +149,16 @@ export function useProduction({ editor, text, session, profile, ready, step, set
     setNarration({ projectId: p.id, version: result.version, clips: result.clips });
     if (result.error) setError(result.error);
   }
-  /** One paid image request: a still for the current look, or another one on `redo`. */
+  /** One paid image request: a still for the current look, or another one on `redo`. The server starts it
+   * and answers at once; the panel follows it by polling. A still that was paid for and cut short is
+   * fetched again for free instead, so it asks for no confirmation. */
   async function makeKeyArt(redo: boolean) {
-    if (redo && !await confirm({ title: "重新生成定妆图", message: "将重新生成一张定妆图，并再次按图片生成计费。是否继续？", confirm: "重新生成" })) return;
+    const free = currentKeyArt?.resumable === true;
+    if (redo && !free && !await confirm({ title: "重新生成定妆图", message: "将重新生成一张定妆图，并再次按图片生成计费。是否继续？", confirm: "重新生成" })) return;
     const p = await save();
-    wait("正在生成定妆图", false);
-    const result = await request<{ version: number; keyArt: MarketingKeyArt; error: string }>(`/marketing-videos/${p.id}/key-art`, json("POST", { version: p.version, redo }));
-    if (!session.alive) return;
-    setKeyArt({ projectId: p.id, version: result.version, keyArt: result.keyArt });
-    if (result.error) setError(result.error);
+    wait(free ? "正在获取定妆图" : "正在提交定妆图生成", false);
+    const result = await request<{ version: number; keyArt: MarketingKeyArt }>(`/marketing-videos/${p.id}/key-art`, json("POST", { version: p.version, redo: redo && !free }));
+    if (session.alive) setKeyArt({ projectId: p.id, version: result.version, keyArt: result.keyArt });
   }
   /** Lengthen shots whose take does not fit; the takes stay valid since shot time is not part of them. */
   function fitNarration() {

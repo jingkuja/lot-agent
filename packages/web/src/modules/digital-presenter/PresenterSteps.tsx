@@ -74,6 +74,7 @@ export function ReviewSection({ review, script, busy, onReview, onApply, stale =
     {review ? <div className={`mv-review${verdict ? ` mv-review-${verdict}` : ""}`}>
       <strong role="status">{t(stale ? "内容已修改，请点击“检查当前文案”重新检查。" : ({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
       {issues.map((issue, index) => <ReviewIssue key={`${review.reviewedAt}:${index}:${issue.text}`} issue={issue} script={script} busy={busy} onApply={onApply} />)}
+      {!stale && !!review.dropped && <p className="mv-hint">{t("另有 {0} 条检查结果无法在文案中定位，已忽略；请人工复核全文。", [review.dropped])}</p>}
     </div> : <p className="mv-hint" role="status">{t("生成视频前需完成文案检查；修改文案后需重新检查。")}</p>}
   </section>;
 }

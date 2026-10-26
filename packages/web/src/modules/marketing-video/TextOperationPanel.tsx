@@ -6,6 +6,9 @@ import { useConfirm } from "./ConfirmDialog.js";
 import { WaitStatus } from "./WaitStatus.js";
 
 type Operation = { id: string; kind?: "copy" | "storyboard" | "review" | "publication"; status: string; createdAt?: string; appliedVersion?: number; result?: { draft?: MarketingDraft; analysis?: string; review?: MarketingReview } };
+/** Every paid request without a clear result, text or clips, offers the same single action with the same warning. */
+export const UNKNOWN_NOTICE = "上次请求没有收到明确结果，可能已经计费。为避免重复扣费，系统不会自动重试；可以核实后重试（会再次计费）。";
+export const UNKNOWN_RETRY_MESSAGE = "上次请求没有收到明确结果，可能已经计费。重试会放弃这次结果并再次计费。确定继续吗？";
 const RUNNING: Record<string, string> = { review: "正在检查文案与分镜", publication: "正在生成标题和标签" };
 export function TextOperationPanel({ projectId, reload, showRunning = true, onState, retry }: {
   projectId: string; reload: number;
@@ -39,10 +42,10 @@ export function TextOperationPanel({ projectId, reload, showRunning = true, onSt
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
   }, [projectId, reload, refresh]);
+  /** The one action for an unknown result: the user accepts a possible second charge, the result is discarded,
+   * and the page repeats the request when it can (`again`); otherwise the user starts it again. */
   async function release(id: string, again = false) {
-    if (recovering || !await confirm(again
-      ? { title: "放弃并重新生成？", message: "上次 AI 创作可能已经计费。放弃这次结果并重新生成会再次计费。确定继续吗？", confirm: "放弃并重新生成" }
-      : { title: "放弃这次结果？", message: "上次 AI 创作可能已经计费。放弃这次结果后可以重新创作，但会再次计费。确定放弃吗？", confirm: "放弃这次结果" })) return;
+    if (recovering || !await confirm({ title: "核实后重试？", message: UNKNOWN_RETRY_MESSAGE, confirm: "重试" })) return;
     setRecovering(true); setRecoveryError("");
     let released = false;
     try { await request(`/marketing-videos/${projectId}/text-operations/${id}/release`, { method: "POST" }); released = true; }
@@ -71,10 +74,9 @@ export function TextOperationPanel({ projectId, reload, showRunning = true, onSt
       ? <WaitStatus key={latest.id} label={RUNNING[latest.kind ?? ""] ?? "正在生成文案和分镜"} started={Date.parse(latest.createdAt)} />
       : <p>{t(RUNNING[latest.kind ?? ""] ?? "正在生成文案和分镜")}…</p>)}
     {latest?.status === "unknown" && <>
-      <p role="alert">{t("上次 AI 创作没有收到明确结果，可能已经计费。为避免重复扣费，系统不会自动重试。可以放弃这次结果后重新创作（会再次计费）。")}</p>
+      <p role="alert">{t(UNKNOWN_NOTICE)}</p>
       <div className="mv-choices">
-        {retry?.kind === latest.kind && <button className="mv-primary" disabled={recovering} onClick={() => void release(latest.id, true)}>{t("放弃并重新生成")}</button>}
-        <button disabled={recovering} onClick={() => void release(latest.id)}>{t("放弃这次结果")}</button>
+        <button className="mv-primary" disabled={recovering} onClick={() => void release(latest.id, retry?.kind === latest.kind)}>{t("核实后重试")}</button>
       </div>
     </>}
     {latest?.status === "needs_apply" && <>

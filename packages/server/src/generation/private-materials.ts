@@ -20,11 +20,19 @@ export interface PrivateMaterialOptions {
 interface UploadLookup {
   getUploadByStorageKey(key: string): Promise<PrivateMaterialAsset | null | undefined>;
 }
+interface GeneratedLookup {
+  /** A generated file (not an upload) stored under `key`. */
+  getGeneratedByStorageKey(key: string): Promise<Pick<PrivateMaterialAsset, "user_id" | "storage_key" | "is_private"> | null | undefined>;
+}
 
 const TOKEN_PARAMETER = "material_token";
 const TOKEN_TTL_MS = 10 * 60_000;
 const UPLOAD_PATH = "/static/uploads/";
 const PURPOSE = "marketing-material:v1";
+const OUTPUT_PATH = "/static/assets/";
+const OUTPUT_PURPOSE = "private-output:v1";
+/** A made video is watched and scrubbed for a while; each Range request checks the same link. */
+const OUTPUT_TTL_MS = 6 * 60 * 60_000;
 
 function safeKey(key: string): boolean {
   return !!key && key.length <= 500 && !/[\\/\u0000-\u001f\u007f]/.test(key) && !key.includes("..");
@@ -56,18 +64,66 @@ export function signPrivateMaterial(asset: PrivateMaterialAsset, options: Privat
   return `${publicBase(options)}${UPLOAD_PATH}${encodeURIComponent(asset.storage_key)}?${TOKEN_PARAMETER}=${token}`;
 }
 
-function validCapability(token: string | undefined, asset: PrivateMaterialAsset, options: PrivateMaterialOptions): boolean {
-  if (!token || token.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(token)) return false;
+/** A short-lived link to the owner's private generated file (`/static/assets/<key>`), such as a marketing clip or
+ * made video, for the browser to play and download. Any other URL, and every URL when links cannot be signed
+ * here, is returned as it is. */
+export function signPrivateOutput(owner: string, url: string, options: PrivateMaterialOptions = {}): string {
+  if (typeof url !== "string") return url;
+  try {
+    // Workers store links under PUBLIC_BASE_URL when it is set; the signed link keeps that form.
+    const base = url.startsWith(OUTPUT_PATH) ? "" : publicBase(options);
+    if (!url.startsWith(`${base}${OUTPUT_PATH}`)) return url;
+    const key = decodeURIComponent(url.slice(base.length + OUTPUT_PATH.length).split(/[?#]/)[0]);
+    if (!owner || !safeKey(key)) return url;
+    const claim = { purpose: OUTPUT_PURPOSE, owner, key, expires: (options.now ?? Date.now)() + OUTPUT_TTL_MS };
+    const token = Buffer.from(secretBox(options).seal(JSON.stringify(claim))).toString("base64url");
+    return `${base}${OUTPUT_PATH}${encodeURIComponent(key)}?${TOKEN_PARAMETER}=${token}`;
+  } catch { return url; }
+}
+
+/** The decrypted claim of a well-formed token, or null. */
+function openCapability(token: string | undefined, options: PrivateMaterialOptions): Record<string, unknown> | null {
+  if (!token || token.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(token)) return null;
   try {
     const envelope = Buffer.from(token, "base64url").toString("utf8");
-    if (Buffer.from(envelope).toString("base64url") !== token || !envelope.startsWith("enc:v1:")) return false;
+    if (Buffer.from(envelope).toString("base64url") !== token || !envelope.startsWith("enc:v1:")) return null;
     const parts = envelope.slice(7).split(":");
-    if (parts.length !== 3 || parts.some(part => !/^[A-Za-z0-9+/]+={0,2}$/.test(part) || Buffer.from(part, "base64").toString("base64") !== part)) return false;
+    if (parts.length !== 3 || parts.some(part => !/^[A-Za-z0-9+/]+={0,2}$/.test(part) || Buffer.from(part, "base64").toString("base64") !== part)) return null;
     const claim = JSON.parse(secretBox(options).open(envelope));
-    const now = (options.now ?? Date.now)();
-    return claim?.purpose === PURPOSE && claim.id === asset.id && claim.owner === asset.user_id && claim.key === asset.storage_key
-      && Number.isSafeInteger(claim.expires) && claim.expires > now && claim.expires <= now + TOKEN_TTL_MS;
-  } catch { return false; }
+    return claim && typeof claim === "object" ? claim : null;
+  } catch { return null; }
+}
+
+function validCapability(token: string | undefined, asset: PrivateMaterialAsset, options: PrivateMaterialOptions): boolean {
+  const claim = openCapability(token, options);
+  const now = (options.now ?? Date.now)();
+  return claim?.purpose === PURPOSE && claim.id === asset.id && claim.owner === asset.user_id && claim.key === asset.storage_key
+    && Number.isSafeInteger(claim.expires) && (claim.expires as number) > now && (claim.expires as number) <= now + TOKEN_TTL_MS;
+}
+
+/** Called before reading a generated file. A private one (marketing clips and made videos) needs its owner's
+ * session or a link from signPrivateOutput; a file without a private row stays public and cacheable as before.
+ * Lookup failures fail closed. */
+export function createOutputAccessGuard(
+  db: GeneratedLookup,
+  sessions: { resolve(token: string): Promise<{ userId: string } | null | undefined> },
+  options: PrivateMaterialOptions = {}
+) {
+  return async (c: Context, filename: string): Promise<boolean | "public"> => {
+    if (!safeKey(filename)) return false;
+    try {
+      const asset = await db.getGeneratedByStorageKey(filename);
+      if (!asset?.is_private) return "public";
+      const claim = openCapability(c.req.query(TOKEN_PARAMETER), options);
+      const now = (options.now ?? Date.now)();
+      if (claim?.purpose === OUTPUT_PURPOSE && claim.owner === asset.user_id && claim.key === filename
+        && Number.isSafeInteger(claim.expires) && (claim.expires as number) > now && (claim.expires as number) <= now + OUTPUT_TTL_MS) return true;
+      const header = c.req.header("Authorization");
+      const token = header?.startsWith("Bearer ") ? header.slice(7).trim() : "";
+      if (!token) return false;
+      return (await sessions.resolve(token))?.userId === asset.user_id;
+    } catch { return false; }
+  };
 }
 
 /** Called before reading any bytes. Missing rows and unavailable auth fail closed. */

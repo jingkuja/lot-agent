@@ -1,7 +1,8 @@
 import { LLMResponseError, type LLMProvider } from "@lot-agent/core";
 
 export interface MarketingTextReceipt {
-  text: string; responseId?: string; usage?: { promptTokens: number; completionTokens: number };
+  /** `cachedPromptTokens`: prompt tokens the gateway served from its prefix cache, when it reports them. */
+  text: string; responseId?: string; usage?: { promptTokens: number; completionTokens: number; cachedPromptTokens?: number };
   /** The gateway's log ID (`x-oneapi-request-id`), to match a charge in its logs. */
   gatewayRequestId?: string;
   /** `cancelled`: sent, but nothing came back; not charged, and a charge in the gateway logs is refunded. */

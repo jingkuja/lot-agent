@@ -47,7 +47,7 @@ try {
     ["digital_employee", "数字员工", "独立模块"],
   ].map(([id, name, description], sortOrder) => ({ id, name, description, type: id, installed: true, sortOrder }));
   const conversations = agents.filter((a) => a.id !== 'digital_employee').map((a) => ({ id: `history-${a.id}`, title: `${a.id} 历史记录`, agent_id: a.id, created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:00:00Z' }));
-  let taskState = 'running', sequence = 0, statusPolls = 0;
+  let taskState = 'running', sequence = 0, statusPolls = 0, keyArtPolls = 0;
   let apiUnavailable = true;
   let failNextReview = false, failNextStoryboard = false, failNextCopyUnknown = false;
   let holdNextSave = false, releaseSave, holdNextCopy = false, releaseCopy;
@@ -69,9 +69,11 @@ try {
   ];
   // Twin narration takes by draft and shot text; the first shot's take is longer than its shot.
   const narrationTakes = new Map();
+  // Takes a shot redo started in the background; the next narration read finishes them, like a slow speech request.
+  const backgroundTakes = new Set();
   const keyArts = new Map();
-  const narrationClips = (p) => p.draft.storyboard.map((shot, slot) => narrationTakes.has(`${p.id}:${shot.script}`)
-    ? { slot, status: 'succeeded', durationMs: narrationTakes.get(`${p.id}:${shot.script}`) } : { slot, status: 'missing' });
+  const narrationClips = (p) => p.draft.storyboard.map((shot, slot) => backgroundTakes.has(`${p.id}:${shot.script}`) ? { slot, status: 'running' }
+    : narrationTakes.has(`${p.id}:${shot.script}`) ? { slot, status: 'succeeded', durationMs: narrationTakes.get(`${p.id}:${shot.script}`) } : { slot, status: 'missing' });
   const generated = new Map();
   const resultAssets = [{ url: '/static/fixture.mp4', mime: 'video/mp4' }];
   // Local checks of the made video (no model): a black stretch at the start of shot 2.
@@ -163,20 +165,32 @@ try {
             if (!narrationTakes.has(key) || body.slots?.includes(i)) narrationTakes.set(key, i ? 2000 : shot.durationSec * 1000 + 1500);
           });
         }
-        return json({ version: p.version, clips: narrationClips(p), error: '' });
+        const clips = narrationClips(p);
+        for (const key of backgroundTakes) if (key.startsWith(`${p.id}:`)) { backgroundTakes.delete(key); narrationTakes.set(key, 2000); }
+        return json({ version: p.version, clips, error: '' });
       }
       if (action === 'key-art') {
         // One still per draft here; the server keys it by the look and bills each request.
+        // The server starts the still and answers at once; the studio polls until it is made.
         if (request.method() === 'POST') {
           const body = request.postDataJSON(); assert.equal(body.version, p.version);
-          keyArts.set(p.id, { status: 'succeeded', url: `data:image/png;base64,${png.toString('base64')}` });
+          keyArts.set(p.id, { status: 'running' });
+          return json({ version: p.version, keyArt: { status: 'running' } });
         }
-        return json({ version: p.version, keyArt: keyArts.get(p.id) ?? { status: 'missing' }, error: '' });
+        const keyArt = keyArts.get(p.id) ?? { status: 'missing' };
+        if (keyArt.status === 'running') { keyArtPolls++; keyArts.set(p.id, { status: 'succeeded', url: `data:image/png;base64,${png.toString('base64')}` }); }
+        return json({ version: p.version, keyArt });
       }
       if (action === 'unknown-segments') { delete p.unknownSegments; taskState = 'running'; return json({ released: 2, project: p }); }
       if (action === 'generate') { p.taskId = 'fixture-task'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p); }
       if (action === 'revise') {
         const body = request.postDataJSON(); assert.equal(body.version, p.version); assert(p.review?.verdict === 'pass');
+        // A narrated video's changed lines get their takes in the background first; the studio sends the redo again.
+        const missing = p.composition?.narration ? p.draft.storyboard.filter(shot => !narrationTakes.has(`${p.id}:${shot.script}`)) : [];
+        if (missing.length) {
+          for (const shot of missing) backgroundTakes.add(`${p.id}:${shot.script}`);
+          return json({ narrationPending: true, clips: narrationClips(p) }, 202);
+        }
         taskState = 'running'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p);
       }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
@@ -284,14 +298,15 @@ try {
   failNextCopyUnknown = true;
   await page.getByRole('button', { name: '一键拆解并生成', exact: true }).click();
   const unknownPanel = page.locator('.mv-dock .ma-panel');
-  await unknownPanel.getByRole('alert').filter({ hasText: '上次 AI 创作没有收到明确结果' }).waitFor();
+  await unknownPanel.getByRole('alert').filter({ hasText: '上次请求没有收到明确结果' }).waitFor();
   await page.locator('.mv-dock .mv-error').waitFor({ state: 'hidden' });
   assert.equal(await page.getByRole('button', { name: '一键拆解并生成', exact: true }).isDisabled(), true);
   await snap('marketing-video-copy-unknown-zh-light.png');
   failNextReview = true;
   holdNextCopy = true;
-  await unknownPanel.getByRole('button', { name: '放弃并重新生成', exact: true }).click();
-  await confirmDialog('放弃并重新生成？', '放弃并重新生成');
+  assert.equal(await unknownPanel.getByRole('button').count(), 1);
+  await unknownPanel.getByRole('button', { name: '核实后重试', exact: true }).click();
+  await confirmDialog('核实后重试？', '重试');
   const waitStatus = page.locator('.mv-dock .mv-wait');
   await waitStatus.getByText('正在生成文案和分镜…', { exact: true }).waitFor();
   assert.match(await waitStatus.innerText(), /已用时 0:0\d/);
@@ -340,8 +355,11 @@ try {
   // The shared still is made on request, before any clip, and shown for the saved look.
   const keyArtPanel = page.getByRole('region', { name: '定妆图', exact: true });
   await keyArtPanel.getByRole('button', { name: '生成定妆图', exact: true }).click();
+  // T05: made in the background; the panel follows it without a reload.
+  await keyArtPanel.getByText('正在生成定妆图，可以离开页面，完成后会自动显示。', { exact: true }).waitFor();
   await keyArtPanel.getByRole('img', { name: '定妆图' }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/key-art')).length, 1);
+  assert.equal(keyArtPolls, 1, 'the still was polled, not requested again');
   await keyArtPanel.getByRole('button', { name: '换一张', exact: true }).waitFor();
   await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
   await page.locator('.mv-dock').getByRole('alert').filter({ hasText: '文案检查发现需要修改的内容' }).waitFor();
@@ -663,8 +681,12 @@ try {
   await firstShot.scrollIntoViewIfNeeded(); await snap('marketing-video-recompose-zh-light.png');
   await page.getByRole('button', { name: '重新合成成片', exact: true }).click();
   await page.getByRole('dialog', { name: '重新合成成片？', exact: true }).getByText('1 个镜头的配音需要重新合成', { exact: false }).waitFor();
+  const revisesBefore = writes.filter(r => r.path.endsWith('/revise')).length;
   await confirmDialog('重新合成成片？', '重新合成');
-  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
+  // T05: the reworded line's take is made in the background; the studio waits for it, then sends the same redo once more.
+  await page.getByText('正在合成改动镜头的配音', { exact: false }).waitFor();
+  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor({ timeout: 20000 });
+  assert.equal(writes.filter(r => r.path.endsWith('/revise')).length, revisesBefore + 2);
   assert.deepEqual(writes.filter(r => r.path.endsWith('/revise')).at(-1).body.shots, []);
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
@@ -799,7 +821,7 @@ try {
   textOperations.set(blockedId, [{ id: '55555555-5555-4555-8555-555555555555', status: 'unknown' }]);
   await page.evaluate(id => localStorage.setItem('lot:marketing-video:fixture', id), blockedId);
   await page.reload(); await chooseAgent('Marketing video');
-  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last request got no clear result' }).waitFor();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), true);
   assert(!/Operation ID|Saved creation records|Refresh creation status/.test(await page.locator('.mv-studio').innerText()), 'internal operation state stays hidden');
   assert.equal(await page.getByRole('button', { name: 'Start a new video', exact: true }).isDisabled(), false);
@@ -809,13 +831,13 @@ try {
   // Space usage shows when the library opens.
   await page.getByText('Storage used 53.0 MB: videos and clips 50.0 MB · materials in use 1.0 MB · narration 2.0 MB · reference analyses 0 KB / 2.0 GB', { exact: true }).waitFor();
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
-  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last request got no clear result' }).waitFor();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), true, 'reopening the same project must keep its lock');
   await page.locator('.mv-draft-list button').filter({ hasText: 'Other editable draft' }).click();
-  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor({ state: 'hidden' });
+  await page.getByRole('alert').filter({ hasText: 'The last request got no clear result' }).waitFor({ state: 'hidden' });
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(input => input.rows === 6 && !input.disabled));
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
-  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last request got no clear result' }).waitFor();
   await page.getByRole('button', { name: 'Start a new video', exact: true }).click();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), false);
   assert.equal(await page.getByLabel('Spoken script').inputValue(), '');
@@ -830,22 +852,23 @@ try {
   assert.equal(projects.has(otherDraftId), false, 'the DELETE request reached the API');
   if (!await page.locator('.mv-library').evaluate(element => element.open)) await page.locator('.mv-library > summary').click();
   await page.locator('.mv-draft-list button').filter({ hasText: 'Waiting receipt' }).click();
-  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last request got no clear result' }).waitFor();
   const paidBeforeRecovery = writes.filter(r => r.path.endsWith('/copy') || r.path.endsWith('/storyboard')).length;
   const operation = textOperations.get(blockedId)[0];
   operation.status = 'needs_apply'; operation.result = { draft: { ...blocked.draft, script: 'Recovered local receipt' }, analysis: 'Local recovery' };
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(input => input.value === 'Recovered local receipt' && !input.disabled), null, { timeout: 15000 });
   assert.equal(writes.filter(r => r.path.endsWith('/recover')).length, 1);
   assert.equal(writes.filter(r => r.path.endsWith('/copy') || r.path.endsWith('/storyboard')).length, paidBeforeRecovery);
-  // A confirmed discard unlocks AI creation for this project without any model request.
+  // A confirmed retry it cannot repeat itself unlocks AI creation for this project without any model request.
   const discarded = '77777777-7777-4777-8777-777777777777';
   textOperations.set(blockedId, [{ id: discarded, status: 'unknown' }, ...textOperations.get(blockedId)]);
   await page.reload(); await chooseAgent('Marketing video');
-  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'The last request got no clear result' }).waitFor();
   assert.equal(await page.getByLabel('Spoken script').isDisabled(), true);
-  await page.locator('.ma-panel').getByRole('button', { name: 'Discard this result', exact: true }).click();
-  await confirmDialog('Discard this result?', 'Discard this result');
-  await page.getByRole('alert').filter({ hasText: 'The last AI creation returned no clear result' }).waitFor({ state: 'hidden' });
+  // The one action for an unknown result: here the page cannot repeat that request, so it only unlocks.
+  await page.locator('.ma-panel').getByRole('button', { name: 'Verify and retry', exact: true }).click();
+  await confirmDialog('Verify and retry?', 'Retry');
+  await page.getByRole('alert').filter({ hasText: 'The last request got no clear result' }).waitFor({ state: 'hidden' });
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(input => input.rows === 6 && !input.disabled));
   assert.equal(writes.filter(r => r.path.endsWith(`/text-operations/${discarded}/release`)).length, 1);
   assert.equal(writes.filter(r => r.path.endsWith('/copy') || r.path.endsWith('/storyboard')).length, paidBeforeRecovery);
@@ -891,11 +914,11 @@ try {
   taskState = 'failed'; queued.stage = '片段完成 1/2'; queued.error = '片段提交结果未知，请核实原任务；系统不会重复提交付费请求。'; queued.errorCode = 'SUBMISSION_UNKNOWN'; queued.unknownSegments = 2;
   const generatedBeforeRelease = writes.filter(r => r.path.endsWith('/generate')).length;
   await page.reload(); await chooseAgent('Marketing video');
-  await page.getByRole('button', { name: 'Resubmit unknown clips', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Verify and retry', exact: true }).waitFor();
   assert.equal(await page.locator('.mv-progress').getByRole('button', { name: 'Continue creation', exact: true }).count(), 0);
   await snap('marketing-video-unknown-clips-en-dark.png');
-  await page.getByRole('button', { name: 'Resubmit unknown clips', exact: true }).click();
-  await confirmDialog('Resubmit unknown clips?', 'Resubmit');
+  await page.getByRole('button', { name: 'Verify and retry', exact: true }).click();
+  await confirmDialog('Verify and retry?', 'Retry');
   await page.locator('.mv-progress strong').filter({ hasText: 'Creating your video' }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/unknown-segments/release')).length, 1);
   const retries = writes.filter(r => r.path.endsWith('/generate')).slice(generatedBeforeRelease);

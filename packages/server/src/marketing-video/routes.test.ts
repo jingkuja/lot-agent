@@ -30,9 +30,13 @@ function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
     remove: vi.fn(async () => ({ files: [] as string[], keyArtFiles: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })),
     usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1),
   };
+  const getAsset = vi.fn(async (_id: string): Promise<Record<string, unknown>> => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 }));
   const service = {
-    db: { pool: { query: vi.fn(async () => ({ rows: [] })) }, getTask: vi.fn(async (): Promise<any> => null),
-      getAsset: vi.fn(async (_id: string): Promise<Record<string, unknown>> => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 })) },
+    db: { pool: { query: vi.fn(async () => ({ rows: [] })) }, getTask: vi.fn(async (): Promise<any> => null), getAsset,
+      // One query in the server; here it reads each row through the getAsset mock.
+      getAssets: async (ids: string[]) => (await Promise.all(ids.map(async assetId => {
+        const asset = await getAsset(assetId); return asset ? { id: assetId, ...asset } : null;
+      }))).filter(Boolean) },
     marketingText: vi.fn(async (..._args: Parameters<AgentService["marketingText"]>) => ({})),
     jobQueue: { deliverPersisted: vi.fn(), canResumePersisted: vi.fn(async () => true) }, usageMeter: { checkQuota: vi.fn(async () => ({ ok: true })) },
     modelRegistry: { getConfig: () => undefined }, modelCatalog: { defaultPricing: {}, pricing: {} },
@@ -204,8 +208,14 @@ describe("marketing project HTTP boundaries", () => {
       { field: "storyboard.camera", shotIndex: 0, text: "中景" },
     ]));
     expect(f.store.setReview).toHaveBeenCalledWith("owner", f.project, expect.objectContaining({ verdict: "suspect", issues: expect.arrayContaining([expect.objectContaining({ field: "storyboard.script", shotIndex: 0, reason: expect.stringContaining("Contextual risk term") })]) }));
+    // A paid check keeps its located findings; one that cannot be located is only counted.
+    const unlocated = fixture();
+    const finding = { reason: "风险", suggestion: "删除", source: "douyin", ruleId: "platform-sexual", severity: "suspect" };
+    unlocated.service.marketingText.mockResolvedValueOnce({ verdict: "suspect", issues: [{ ...finding, field: "storyboard.visual", shotIndex: 14, text: "不存在" }] });
+    expect((await unlocated.call(`/${id}/review`, {})).status).toBe(200);
+    expect(unlocated.store.setReview).toHaveBeenCalledWith("owner", unlocated.project, expect.objectContaining({ verdict: "suspect", dropped: 1 }));
     const invalid = fixture();
-    invalid.service.marketingText.mockResolvedValueOnce({ verdict: "suspect", issues: [{ field: "storyboard.visual", shotIndex: 14, text: "不存在", reason: "风险", suggestion: "删除", source: "douyin", ruleId: "platform-sexual", severity: "suspect" }] });
+    invalid.service.marketingText.mockResolvedValueOnce({ verdict: "pass", issues: [{ ...finding, field: "script", text: "普通" }] });
     expect((await invalid.call(`/${id}/review`, {})).status).toBe(503);
     expect(invalid.store.setReview).not.toHaveBeenCalled();
     expect((await invalid.call(`/${id}/review`, { locale: "invalid" })).status).toBe(400);
@@ -445,6 +455,17 @@ it("checks ownership of every image in all three categories", async () => {
     expect(f.service.db.getAsset).toHaveBeenCalledTimes(2);
     expect(f.store.save).not.toHaveBeenCalled();
   }
+});
+
+it("skips the material lookup when an autosave keeps the saved materials", async () => {
+  const f = fixture();
+  f.project.draft.assets = { portrait: [id] };
+  const response = await f.call(`/${id}`, { version: 1, draft: { script: "改了一句口播。", assets: { portrait: [id] } } }, "PUT");
+  expect(response.status).toBe(200);
+  expect(f.service.db.getAsset).not.toHaveBeenCalled();
+  expect(f.store.save).toHaveBeenCalledOnce();
+  // A changed material is looked up again and refused when it is not the owner's.
+  expect((await f.call(`/${id}`, { version: 1, draft: { assets: { portrait: [id, randomUUID()] } } }, "PUT")).status).toBe(404);
 });
 
 it("restores all image metadata and submits references in category order", async () => {
@@ -855,6 +876,20 @@ describe("digital twin narration", () => {
     // New voice settings or reworded lines without a redone shot: new takes, every clip kept.
     expect((await f.call(`/${id}/revise`, { version: 1, shots: [] })).status).toBe(202);
     expect(synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesize).toHaveBeenLastCalledWith("owner", id, draft, expect.any(Array), [], { background: true });
     expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenLastCalledWith("owner", id, 1, "parent", [], { narration: takes });
+    // Takes still being made: no job yet, and the studio sends the same redo again once they stop.
+    const revise = (f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise;
+    synthesize.mockResolvedValueOnce({ clips: [{ slot: 0, status: "succeeded" }, { slot: 1, status: "running" }] as never, error: "" });
+    const pending = await f.call(`/${id}/revise`, { version: 1, shots: [1] });
+    expect(pending.status).toBe(202);
+    expect(await pending.json()).toEqual({ narrationPending: true, clips: [{ slot: 0, status: "succeeded" }, { slot: 1, status: "running" }] });
+    expect(revise).toHaveBeenCalledTimes(2);
+    // A take that failed in the background gives its own reason.
+    synthesize.mockResolvedValueOnce({ clips: [{ slot: 1, status: "failed", error: "模型账号余额不足或未开通语音合成。" }] as never, error: "" });
+    const failed = await f.call(`/${id}/revise`, { version: 1, shots: [1] });
+    expect(failed.status).toBe(409);
+    expect(await failed.json()).toEqual({ error: "模型账号余额不足或未开通语音合成。" });
+    expect(revise).toHaveBeenCalledTimes(2);
   });
 });

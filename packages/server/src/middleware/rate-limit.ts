@@ -22,6 +22,8 @@ export interface RateLimitOptions {
   /** Derives the bucket identity from the request — typically the caller's
    * IP (public routes) or userId (authenticated routes). */
   keyFn: (c: Context) => string;
+  /** Error text of a refused request; defaults to "too many requests". */
+  message?: string;
 }
 
 /**
@@ -56,7 +58,7 @@ export function clientIp(c: Context): string {
  * request is admitted and the error is logged.
  */
 export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
-  const { store, prefix, limit, windowMs, keyFn } = opts;
+  const { store, prefix, limit, windowMs, keyFn, message = "too many requests" } = opts;
   return async (c, next) => {
     const key = `${prefix}:${keyFn(c)}`;
     try {
@@ -84,7 +86,7 @@ export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
         if (!Number.isFinite(ttlMs) || ttlMs < 0) ttlMs = windowMs;
         const retryAfterSec = Math.ceil(ttlMs / 1000);
         c.header("Retry-After", String(retryAfterSec));
-        return c.json({ error: "too many requests" }, 429);
+        return c.json({ error: message }, 429);
       }
     } catch (err) {
       console.warn(`[rateLimit] store failure for prefix "${prefix}", failing open:`, err);
