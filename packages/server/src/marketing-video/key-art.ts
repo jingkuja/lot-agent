@@ -53,10 +53,10 @@ type Stage = "create" | "wait" | "save";
 /** A failure the image model confirmed; asking again would not change it. */
 class ConfirmedFailure extends Error {}
 
-const INTERRUPTED_PAID = "定妆图生成被中断，已保存原任务；点击「继续获取」查询原结果，不会再次计费。";
-const INTERRUPTED_UNKNOWN = "定妆图生成被中断，结果未知；重新生成会再次计费。";
-const SAVE_RESUMABLE = "定妆图已生成，保存未完成；点击「继续获取」重新下载，不会再次计费。";
-const WAIT_RESUMABLE = "定妆图暂时无法查询结果；点击「继续获取」查询原任务，不会再次计费。";
+const INTERRUPTED_PAID = "定妆图生成被中断，已保存原任务；点击「继续获取」查询原结果，不收费。";
+const INTERRUPTED_UNKNOWN = "定妆图生成被中断，结果未知；重新生成会再次产生费用。";
+const SAVE_RESUMABLE = "定妆图已生成，保存未完成；点击「继续获取」重新下载，不收费。";
+const WAIT_RESUMABLE = "定妆图暂时无法查询结果；点击「继续获取」查询原任务，不收费。";
 
 /** Key-art stills of a draft. Each still is one paid image request through the owner's key, written as an
  * intent row first and never resent automatically. The request runs in the background so a closed tab or a
@@ -104,7 +104,7 @@ export class MarketingKeyArtist {
    * `redo` says, so it is never paid for twice. A failure keeps an earlier still of the same look. */
   async generate(owner: string, projectId: string, draft: MarketingDraft, profile: MarketingVideoProfile, redo: boolean): Promise<{ keyArt: MarketingKeyArt }> {
     const issue = marketingKeyArtIssue(draft, profile);
-    if (issue) throw new MarketingError(issue === "video" ? "已选择参考视频，定妆图不参与生成。" : `定妆图占用 1 张参考图，当前视频模型合计最多 ${profile.referenceImages.total} 张，请先移除一张参考图。`, 409);
+    if (issue) throw new MarketingError(issue === "video" ? "已选择动作参考视频，定妆图不参与生成。" : `定妆图占用 1 张参考图，当前视频模型合计最多 ${profile.referenceImages.total} 张，请先移除一张参考图。`, 409);
     const model = marketingKeyArtModel();
     const basis = keyArtBasis(draft, model);
     await this.expire(owner, projectId, basis);

@@ -2,12 +2,23 @@ import { useState } from "react";
 import type { MarketingDraft, MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 
-export function StoryboardEditor({ shots, presenter = "always", busy, readOnly = false, creation = false, compact = false, redo, onChange, onAi }: {
+const shotEnds = (shots: Pick<MarketingShot, "durationSec">[]) =>
+  shots.reduce<number[]>((times, shot) => [...times, (times.at(-1) ?? 0) + (shot.durationSec ?? 15)], []);
+
+/** One line per shot: its time span and what it shows. */
+export function ShotOverview({ shots }: { shots: MarketingShot[] }) {
+  const { t } = useI18n();
+  const ends = shotEnds(shots);
+  return <ol className="mv-shot-overview">{shots.map((shot, index) => <li key={index}>
+    <span>{t("第 {0} 镜", [index + 1])} · {index ? ends[index - 1] : 0}–{ends[index]}s</span><p>{shot.visual || shot.script}</p>
+  </li>)}</ol>;
+}
+
+export function StoryboardEditor({ shots, presenter = "always", busy, readOnly = false, compact = false, redo, onChange, onAi }: {
   shots: MarketingShot[];
   presenter?: MarketingDraft["presenter"];
   busy: boolean;
   readOnly?: boolean;
-  creation?: boolean;
   /** Inside a panel that already shows the heading and totals. */
   compact?: boolean;
   /** A made video: the shots to redo. A shot with a reason (edited, no usable clip) stays chosen;
@@ -22,12 +33,12 @@ export function StoryboardEditor({ shots, presenter = "always", busy, readOnly =
   const [instruction, setInstruction] = useState("");
   const [target, setTarget] = useState("all");
   const fields = [{ key: "script", label: "分镜口播", max: 600 }, { key: "visual", label: "画面内容", max: 600 }, { key: "action", label: "人物与产品动作", max: 400 }, { key: "camera", label: "景别与镜头运动", max: 400 }] as const;
-  const ends = shots.reduce<number[]>((times, shot) => [...times, (times.at(-1) ?? 0) + (shot.durationSec ?? 15)], []);
+  const ends = shotEnds(shots);
   return <div className="mv-storyboard">
-    {!compact && <div className="mv-section-head"><h3>{t(readOnly || redo ? "制作分镜" : creation ? "生成分镜" : "确认分镜")}</h3><span>{t("{0} 个分镜 · 共 {1} 秒", [shots.length, ends.at(-1) ?? 0])}</span></div>}
-    <p className="mv-hint">{t(redo ? "修改镜头内容或勾选「重新生成此镜」，只重新生成这些镜头并重新合成；其余镜头沿用已生成的片段，不再计费。镜数和每镜时长不可修改。"
+    {!compact && <div className="mv-section-head"><h3>{t(readOnly || redo ? "制作分镜" : "确认分镜")}</h3><span>{t("{0} 个分镜 · 共 {1} 秒", [shots.length, ends.at(-1) ?? 0])}</span></div>}
+    <p className="mv-hint">{t(redo ? "修改镜头内容或勾选「重新生成此镜」，只重新生成这些镜头并重新合成；其余镜头沿用已生成的片段，不收费。镜数和每镜时长不可修改。"
       : readOnly ? "以下是本次制作使用的分镜。修改后需作为新视频重新生成。"
-      : presenter === "mixed" ? "数字分身出现在部分镜头，请在画面内容中写明该镜是否有人物出镜。" : "数字分身将在每个镜头出镜，保持人物形象一致。")}</p>
+      : presenter === "mixed" ? "出镜人物只出现在部分镜头，请在画面内容中写明该镜是否有人物出镜。" : "出镜人物将在每个镜头出镜，保持形象一致。")}</p>
     <div className="mv-shot-list">{shots.map((shot, index) => <article className={redo?.selected[index] ? "mv-shot mv-shot-redo" : "mv-shot"} key={index} aria-label={t("第 {0} 镜", [index + 1])}>
       <header><h4>{t("第 {0} 镜", [index + 1])}</h4><span>{index ? ends[index - 1] : 0}–{ends[index]}s · {t("{0} 秒", [shot.durationSec ?? 15])}</span></header>
       {redo && <label className="mv-checkbox"><input type="checkbox" checked={redo.selected[index]} disabled={busy || !!redo.reasons[index]} onChange={() => redo.onToggle(index)} />

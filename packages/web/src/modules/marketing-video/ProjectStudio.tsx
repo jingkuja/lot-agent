@@ -12,14 +12,14 @@ import { errorMessage, requestProject, unavailableMessage, type Project } from "
 import { ResultPanel } from "./ResultPanel.js";
 import { CopyStep } from "./CopyStep.js";
 import { MaterialsStep } from "./MaterialsStep.js";
-import { ProductionStep } from "./ProductionStep.js";
+import { ConfirmStep, ProductionStep } from "./ProductionStep.js";
 import { NarrationPanel } from "./NarrationPanel.js";
 import { KeyArtPanel } from "./KeyArtPanel.js";
 import { StoryboardAudioNotice, type DraftForm } from "./StudioFields.js";
 import { useDraftSession, useExclusive } from "./session.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { WaitStatus } from "./WaitStatus.js";
-import { generationBlocker, type StudioCapabilities } from "./production-checks.js";
+import { CONFIRM_STEP, generationBlocker, generationChecks, type StudioCapabilities } from "./production-checks.js";
 import { useDraftAutosave, useDraftEditor } from "./useDraftEditor.js";
 import { useTextRequests } from "./useTextRequests.js";
 import { useProduction } from "./useProduction.js";
@@ -27,9 +27,9 @@ import { useStudioMaterials } from "./useStudioMaterials.js";
 
 /** The long request the open draft is waiting on. */
 type Wait = { label: string; started: number; textRequest: boolean };
-const STEPS = ["确定文案", "确定素材", "确认与制作"];
+const STEPS = ["确定文案", "确定素材", "配音与画面", "确认与生成"];
 
-/** The marketing video studio: the draft library, three creation steps and the made video. The
+/** The marketing video studio: the draft library, four creation steps and the made video. The
  * hooks hold the draft (`useDraftEditor`), its text requests (`useTextRequests`), materials
  * (`useStudioMaterials`) and production (`useProduction`); this component opens drafts and lays out the steps. */
 export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: string; onDraftChange?: (dirty: boolean) => void }) {
@@ -73,7 +73,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const form: DraftForm = { draft, busy, frozen, ready, field: editor.field };
 
   useEffect(() => {
-    if (!frozen && step === 2 && draft.storyboard.length) storyboardPanel.current?.scrollIntoView({ block: "start" });
+    if (!frozen && step === CONFIRM_STEP && draft.storyboard.length) storyboardPanel.current?.scrollIntoView({ block: "start" });
   }, [draft.storyboard.length, frozen, step]);
 
   async function open(id: string) {
@@ -87,7 +87,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     editor.draftId.current = id;
     text.opened(p);
     editor.load(p); materials.setMaterials(p.assets ?? {});
-    setStep(p.referenceAnalysis ? 0 : p.draft.storyboard.length ? 2 : 0);
+    setStep(p.referenceAnalysis ? 0 : p.draft.storyboard.length ? CONFIRM_STEP : 0);
     editor.remember(id);
   }
   useEffect(() => {
@@ -144,8 +144,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     setStep(target);
   }
   async function deleteDraft(p: MarketingProject) {
-    const message = "确定删除视频草稿“{0}”吗？草稿、已生成的视频和片段、参考视频分析将一起永久删除，无法恢复。如需保留成片，请先下载。\n上传的素材仍保留在「个人素材」中。";
-    if (!await confirm({ title: "删除视频草稿", message, values: [p.draft.publishTitle || p.draft.topic || t("未命名草稿")], confirm: "删除" })) return;
+    const message = "确定删除视频草稿「{0}」吗？草稿、已生成的视频和片段、爆款视频分析将一起永久删除，无法恢复。如需保留成片，请先下载。\n上传的素材仍保留在「个人素材」中。";
+    if (!await confirm({ title: "删除视频草稿", message, values: [p.draft.publishTitle || p.draft.topic || t("未命名草稿")], confirm: "删除", danger: true })) return;
     await act(async () => {
       // Let an in-flight autosave settle so it cannot recreate the deleted row.
       if (editor.flight.current) await editor.flight.current.catch(() => {});
@@ -169,12 +169,17 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const referenceAnalysis = sameSource ? project.referenceAnalysis : undefined;
   const copyReady = draft.copyMode === "rewrite" ? text.sourceKind === "upload" ? !!draft.referenceUpload : !!draft.reference.trim() : !!draft.topic.trim();
   const copyLabel = busy && !text.unknown ? "正在处理…" : draft.copyMode === "rewrite" ? "一键拆解并生成" : "生成文案和分镜";
-  const copyAction = <button className="mv-soft" disabled={busy || !copyReady || !ready} onClick={() => void act(() => text.writeCopy(open))}>{t(copyLabel)}</button>;
+  // The step's main action until there is copy; then "next" is.
+  const copyAction = <button className={draft.script.trim() ? "mv-soft" : "mv-primary"} disabled={busy || !copyReady || !ready}
+    onClick={() => void act(() => text.writeCopy(open))}>{t(copyLabel)}</button>;
   const referenceVideoStatus = profile.imagesWithReferenceVideo
-    ? t("已选择参考视频：参考图片合计最多 {0} 张；不生成口播配音，音色设置不生效，可添加背景音乐。", [profile.imagesWithReferenceVideo])
-    : t("已选择参考视频：参考图片不参与生成；不生成口播配音，音色设置不生效，可添加背景音乐。");
+    ? t("已选择动作参考视频：参考图片合计最多 {0} 张；不生成口播配音，音色设置不生效，可添加背景音乐。", [profile.imagesWithReferenceVideo])
+    : t("已选择动作参考视频：参考图片不参与生成；不生成口播配音，音色设置不生效，可添加背景音乐。");
+  const keyArtMade = production.currentKeyArt?.status === "succeeded";
   const blocker = generationBlocker({ ready, loadError, draft, profile, capabilities, materials: materials.materials, planError: plan.error,
-    narration: production.currentNarration, keyArt: production.currentKeyArt?.status === "succeeded" });
+    narration: production.currentNarration, keyArt: keyArtMade });
+  const checks = generationChecks(draft, { keyArt: production.keyArtIssue || !production.currentKeyArt ? undefined : keyArtMade,
+    review: validReview ? project?.review?.verdict : undefined });
   const nextStep = (target: number) => { if (target && !draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(target); };
 
   const audioNotice = marketingStoryboardAudioMismatch(draft) && !frozen && <StoryboardAudioNotice video={!!draft.assets.video} busy={busy || !ready}
@@ -207,11 +212,11 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     clips={narrationClips} busy={busy || !ready}
     spareSec={narrationClips ? marketingNarrationSpareSec(draft.storyboard, draft, profile, narrationClips.map(clip => clip.durationMs)) : 0}
     onSynthesize={slots => void act(() => production.synthesizeNarration(slots))} onFit={production.fitNarration} />;
-  const generateLabel = busy && !text.unknown ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜并预览";
+  const generateLabel = busy && !text.unknown ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜";
 
   return <div className="mv-scroll"><div className="mv-studio">
     <header className="mv-heading">
-      <div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("三步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div>
+      <div><span className="mv-eyebrow">{t("营销影像")}</span><h1>{t("四步，把卖点变成视频。")}</h1><p>{t("15–60 秒 · 自动分镜合成 · 抖音发布素材")}</p></div>
       <button disabled={navigationBusy || saving || !ready} onClick={() => void act(() => newDraft(), true)}>{t("开始新视频")}</button>
     </header>
     {loadError && <div className="mv-connection-error" role="alert"><p>{t(loadError)}</p>
@@ -234,7 +239,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       onRevise={(shots, narrationRedo) => void act(() => production.revise(shots, narrationRedo))} /> : <>
       <nav className="mv-steps" aria-label={t("视频创作步骤")}>{STEPS.map((label, i) => <button key={label} disabled={busy || !ready}
         aria-current={i === step ? "step" : undefined} className={i === step ? "active" : ""} onClick={() => nextStep(i)}><span>{i + 1}</span>{t(label)}</button>)}</nav>
-      <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / 3</span></div>
+      <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / {STEPS.length}</span></div>
         {step === 0 && <CopyStep form={form} inputId={`${generationHintId}-reference`} sourceKind={text.sourceKind} uploading={text.uploadingReference}
           analysis={text.analysis} planError={plan.error}
           analysisPanel={referenceAnalysis
@@ -243,14 +248,16 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
               onComplete={text.completedAnalysis} completedAction={copyAction} disabled={exclusive.busy || text.pending || saving || !ready} />
             : copyAction}
           onUploadSource={text.chooseReferenceSource} onReferenceFile={file => void act(() => text.selectReferenceVideo(file))}
-          onStoryboard={editor.setShots} onStoryboardAi={text.aiStoryboard} onPublication={() => void act(() => text.publication())} />}
+          onPublication={() => void act(() => text.publication())} />}
         {step === 1 && <MaterialsStep form={form} profile={profile} handlers={materials.handlers} referenceVideoStatus={referenceVideoStatus}
           onPickPortrait={() => setTwinOpen("portrait")} audioNotice={audioNotice} />}
         {step === 2 && <ProductionStep form={form} profile={profile} handlers={materials.handlers} referenceVideoStatus={referenceVideoStatus}
-          parts={plan.parts} planError={plan.error} blocker={blocker} blockerId={generationHintId} storyboardPanel={storyboardPanel} audioNotice={audioNotice}
-          narrationAvailable={!!capabilities?.narration} onPickNarrationVoice={() => setTwinOpen("narration")}
-          keyArtPanel={keyArtPanel} narrationPanel={narrationPanel} reviewPanel={reviewSection} buttonLabel={generateLabel}
-          onPickVoice={() => setTwinOpen("voice")} onStoryboard={editor.setShots} onStoryboardAi={text.aiStoryboard} onEditCopy={() => setStep(0)}
+          narrationAvailable={!!capabilities?.narration} keyArt={keyArtMade}
+          onPickVoice={() => setTwinOpen("voice")} onPickNarrationVoice={() => setTwinOpen("narration")} />}
+        {step === CONFIRM_STEP && <ConfirmStep form={form} parts={plan.parts} planError={plan.error} blocker={blocker} blockerId={generationHintId}
+          buttonLabel={generateLabel} checks={checks} storyboardPanel={storyboardPanel} audioNotice={audioNotice} reviewPanel={reviewSection}
+          keyArtPanel={keyArtPanel} narrationPanel={narrationPanel} onStoryboard={editor.setShots} onStoryboardAi={text.aiStoryboard}
+          onEditCopy={() => setStep(0)}
           onGenerate={() => void act(() => draft.storyboard.length ? production.generate() : text.editStoryboard())}
           onManualStoryboard={() => void act(text.manualStoryboard)} />}
       </section>
@@ -260,7 +267,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
         <button disabled={!step || busy || !ready} onClick={() => setStep(step - 1)}>{t("上一步")}</button>
         <button disabled={busy || saving || !ready || !dirty} onClick={() => void act(async () => { await editor.save(); })}>{t("保存草稿")}</button>
         <span role="status">{t(saving ? "正在保存…" : dirty ? "等待保存" : project ? "草稿已保存" : "")}</span>
-        <button className="mv-primary" disabled={step === 2 || busy || !ready} onClick={() => nextStep(step + 1)}>{t("下一步")}</button>
+        {/* The last step's main action is generating, beside the board. */}
+        {step < CONFIRM_STEP && <button className={!step && !draft.script.trim() ? undefined : "mv-primary"} disabled={busy || !ready}
+          onClick={() => nextStep(step + 1)}>{t("下一步")}</button>}
       </footer>
       </div>
     </>}

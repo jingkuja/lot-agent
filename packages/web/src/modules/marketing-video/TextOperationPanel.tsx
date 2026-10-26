@@ -7,9 +7,16 @@ import { WaitStatus } from "./WaitStatus.js";
 
 type Operation = { id: string; kind?: "copy" | "storyboard" | "review" | "publication"; status: string; createdAt?: string; appliedVersion?: number; result?: { draft?: MarketingDraft; analysis?: string; review?: MarketingReview } };
 /** Every paid request without a clear result, text or clips, offers the same single action with the same warning. */
-export const UNKNOWN_NOTICE = "上次请求没有收到明确结果，可能已经计费。为避免重复扣费，系统不会自动重试；可以核实后重试（会再次计费）。";
-export const UNKNOWN_RETRY_MESSAGE = "上次请求没有收到明确结果，可能已经计费。重试会放弃这次结果并再次计费。确定继续吗？";
+export const UNKNOWN_NOTICE = "上次请求没有收到明确结果，可能已产生费用。为避免重复收费，系统不会自动重试；核实后可以重试，重试会再次产生费用。";
+export const UNKNOWN_RETRY_MESSAGE = "上次请求没有收到明确结果，可能已产生费用。重试会放弃这次结果，并再次产生费用。确定继续吗？";
 const RUNNING: Record<string, string> = { review: "正在检查文案与分镜", publication: "正在生成标题和标签" };
+/** A received result being filled in, and waiting to be, named by request type; copy by default. */
+const RECEIVED: Record<string, [string, string]> = {
+  copy: ["正在填入文案和分镜，不收费…", "文案和分镜已收到，可填入草稿，不收费。"],
+  storyboard: ["正在填入分镜，不收费…", "分镜已收到，可填入草稿，不收费。"],
+  review: ["正在填入文案检查结果，不收费…", "文案检查结果已收到，可填入草稿，不收费。"],
+  publication: ["正在填入标题和标签，不收费…", "标题和标签已收到，可填入草稿，不收费。"],
+};
 export function TextOperationPanel({ projectId, reload, showRunning = true, onState, retry }: {
   projectId: string; reload: number;
   /** False while the page already shows its own progress for this request. */
@@ -45,7 +52,7 @@ export function TextOperationPanel({ projectId, reload, showRunning = true, onSt
   /** The one action for an unknown result: the user accepts a possible second charge, the result is discarded,
    * and the page repeats the request when it can (`again`); otherwise the user starts it again. */
   async function release(id: string, again = false) {
-    if (recovering || !await confirm({ title: "核实后重试？", message: UNKNOWN_RETRY_MESSAGE, confirm: "重试" })) return;
+    if (recovering || !await confirm({ title: "核实后重试？", message: UNKNOWN_RETRY_MESSAGE, confirm: "重试", danger: true })) return;
     setRecovering(true); setRecoveryError("");
     let released = false;
     try { await request(`/marketing-videos/${projectId}/text-operations/${id}/release`, { method: "POST" }); released = true; }
@@ -80,7 +87,7 @@ export function TextOperationPanel({ projectId, reload, showRunning = true, onSt
       </div>
     </>}
     {latest?.status === "needs_apply" && <>
-      <p role="status">{t(recovering ? "正在填入 AI 创作结果，不会再次扣费…" : "AI 创作结果已收到，可填入草稿，不会再次扣费。")}</p>
+      <p role="status">{t((RECEIVED[latest.kind ?? ""] ?? RECEIVED.copy)[recovering ? 0 : 1])}</p>
       {!recovering && recoveryError && <button className="mv-primary" onClick={() => void recover(latest.id)}>{t("重新填入")}</button>}
     </>}
     {recoveryError && <p role="alert">{t(recoveryError)}</p>}

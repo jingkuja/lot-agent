@@ -42,7 +42,7 @@ export function useStudioMaterials({ editor, session, profile, act, setError }: 
   const handlers: MaterialHandlers = {
     materials,
     onFiles: (slot, files) => void act(async () => {
-      if (slot === "video" && files.length > 1) throw new Error("参考视频最多 1 个，请先移除已有视频。");
+      if (slot === "video" && files.length > 1) throw new Error("动作参考视频最多 1 个，请先移除已有视频。");
       const limitError = isImageSlot(slot) ? imageLimitError(slot, files.length, draftRef.current, profile) : "";
       if (limitError) throw new Error(limitError);
       for (const file of files) await selectMaterial(file, slot);

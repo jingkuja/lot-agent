@@ -10,7 +10,7 @@ import { InputBox, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
-import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile, VideoPublication } from "../api/client.js";
+import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile } from "../api/client.js";
 import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
 
 const miniProgramCode = new URL("../assets/mini-program-code.jpg", import.meta.url).href;
@@ -22,7 +22,7 @@ interface ChatPanelProps {
   onAttachmentConsumed?: () => void;
   onManageKnowledge?: () => void;
   messages: DisplayMessage[];
-  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings, knowledgeBases?: KnowledgeBaseRef[], videoPublication?: VideoPublication) => void | Promise<void>;
+  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings, knowledgeBases?: KnowledgeBaseRef[]) => void | Promise<void>;
   onStop: () => void;
   isStreaming: boolean;
   activeConversationId: string | null;
@@ -252,7 +252,6 @@ export function ChatPanel({
 
   if (agent?.id === "marketing_video") {
     return <MarketingVideoStudio key={activeConversationId ?? "new"} ownerId={userId}
-      onSubmit={(content, files, settings, publication) => onSend(content, files, settings, [], publication)}
       onDraftChange={onDraftChange} onNewVideo={onNewVideo} busy={isStreaming} hasMessages={!isEmpty} publication={videoPublication}>
       {messages.map((message) => message.generation
         ? <GenerationCard key={message.id} generation={message.generation} messageId={message.id} onRedownload={onRedownloadGeneration} />

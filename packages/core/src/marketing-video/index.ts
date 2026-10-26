@@ -53,6 +53,15 @@ function withoutLegacyCover(value: unknown) {
   const { cover: _cover, ...rest } = assets as Record<string, unknown>;
   return { ...(value as object), assets: rest };
 }
+/** The studio once had a separate setting description beside the shared look. It reads as part
+ * of the shared look now, so one field describes the setting. */
+function withoutLegacyBackground(value: unknown) {
+  const draft = value && typeof value === "object" ? value as { background?: unknown; continuity?: unknown } : undefined;
+  const background = typeof draft?.background === "string" ? draft.background.trim() : "";
+  if (!background || background === MARKETING_DEFAULT_BACKGROUND) return value;
+  const continuity = typeof draft!.continuity === "string" ? draft!.continuity.trim() : "";
+  return { ...draft, background: "", continuity: [continuity, background].filter(Boolean).join("\n").slice(0, MARKETING_CONTINUITY_MAX_LENGTH) };
+}
 /** Off-screen narration in the user's own cloned voice (digital twin), synthesized per shot
  * before any clip is paid for. Absent: the video model voices the script itself. */
 export const MarketingNarrationSchema = z.object({
@@ -84,7 +93,12 @@ export type MarketingCaptions = z.infer<typeof MarketingCaptionsSchema>;
 /** The setting the prompts use when the draft names none. Drafts once stored it as their default,
  * shown as Chinese text in every language; it reads as empty now. */
 export const MARKETING_DEFAULT_BACKGROUND = "简约演播室";
-export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
+/** Tone the video model is asked for when the draft names none. Drafts once stored it as their
+ * default, shown as Chinese text in every language; it reads as empty now. */
+export const MARKETING_DEFAULT_VOICE = "自然旁白";
+/** Room for a shared look of 400 characters joined with an older setting description of up to 600. */
+const MARKETING_CONTINUITY_MAX_LENGTH = 1000;
+export const MarketingDraftSchema = z.preprocess(value => withoutLegacyBackground(withoutLegacyCover(value)), z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),
   reference: z.string().max(6000).default(""),
@@ -96,8 +110,10 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   // "always": presenter in every shot. "mixed": presenter in some shots; others may
   // show the venue, dishes or product close-ups (store tours).
   presenter: z.enum(["always", "mixed"]).default("always"),
+  /** Always empty once parsed: the setting is part of `continuity`. Kept so stored drafts, checks and jobs keep loading. */
   background: z.string().max(600).default("").transform(value => value === MARKETING_DEFAULT_BACKGROUND ? "" : value),
-  voice: z.string().max(100).default("自然旁白"),
+  /** Tone of the video model's own voice, written by the user. */
+  voice: z.string().max(100).default("").transform(value => value === MARKETING_DEFAULT_VOICE ? "" : value),
   ratio: z.enum(["9:16", "16:9", "1:1"]).default("9:16"),
   quality: z.enum(["720p", "1080p"]).default("720p"),
   subtitles: z.boolean().default(true),
@@ -114,7 +130,7 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   storyboard: MarketingStoryboardSchema.default([]),
   /** Presenter and setting look shared by all shots; every clip request repeats it verbatim
    * because each clip is generated independently. */
-  continuity: z.string().max(400).default(""),
+  continuity: z.string().max(MARKETING_CONTINUITY_MAX_LENGTH).default(""),
   /** Whether the board was planned for native speech (no reference video). Absent on
    * boards planned before this was recorded. */
   storyboardAudio: z.boolean().optional(),
@@ -160,23 +176,26 @@ export function marketingImageLimitError(assets: Partial<Record<MarketingImageSl
 }
 /** Setting description sent to the models. */
 export const marketingBackground = (draft: Pick<MarketingDraft, "background">) => draft.background.trim() || MARKETING_DEFAULT_BACKGROUND;
+/** Tone sent to the video model when it voices the script. */
+export const marketingVoiceStyle = (draft: Pick<MarketingDraft, "voice">) => draft.voice.trim() || MARKETING_DEFAULT_VOICE;
 /** Reference combinations the model cannot use. `keyArt`: the clips also carry the key-art still,
  * which is one more reference image. */
 export function marketingReferenceError(draft: MarketingDraft, profile: MarketingVideoProfile, keyArt = false): string {
   const images = marketingImageCount(draft.assets);
   if (draft.assets.video && images > profile.imagesWithReferenceVideo) {
     return profile.imagesWithReferenceVideo
-      ? `已选择参考视频，参考图片合计不能超过 ${profile.imagesWithReferenceVideo} 张，请移除多余图片。`
-      : "已选择参考视频，参考图片不会参与生成，请移除图片或参考视频。";
+      ? `已选择动作参考视频，参考图片合计不能超过 ${profile.imagesWithReferenceVideo} 张，请移除多余图片。`
+      : "已选择动作参考视频，参考图片不会参与生成，请移除图片或动作参考视频。";
   }
   const limitError = marketingImageLimitError(draft.assets, profile);
   if (limitError) return limitError;
-  if (profile.referenceMaxQuality === "720p" && draft.quality === "1080p") {
-    if (images || draft.assets.video) return "使用参考图片或参考视频时最高支持 720p，请将视频质量改为默认。";
-    if (keyArt) return "使用定妆图时最高支持 720p，请将视频质量改为默认。";
-  }
+  if (draft.quality === "1080p" && marketingHdUnavailable(draft, profile)) return "使用参考图片或动作参考视频时最高支持 720p，请将画质改为 720p。";
+  if (draft.quality === "1080p" && marketingHdUnavailable(draft, profile, keyArt)) return "使用定妆图时最高支持 720p，请将画质改为 720p。";
   return "";
 }
+/** Whether the model renders this draft at 720p at most: it does with any reference image, reference video or the key-art still. */
+export const marketingHdUnavailable = (draft: Pick<MarketingDraft, "assets">, profile: MarketingVideoProfile, keyArt = false) =>
+  profile.referenceMaxQuality === "720p" && (!!marketingImageCount(draft.assets) || !!draft.assets.video || keyArt);
 /** Why a key-art still cannot join this draft's clips: a reference video is used instead of
  * images ("video"), or the still's reference image place is taken ("full"). */
 export function marketingKeyArtIssue(draft: Pick<MarketingDraft, "assets">, profile: MarketingVideoProfile): "video" | "full" | undefined {

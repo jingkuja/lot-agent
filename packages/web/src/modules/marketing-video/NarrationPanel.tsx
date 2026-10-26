@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { marketingNarrationFits, type MarketingNarrationClip, type MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { narrationAudio } from "./api.js";
+import { Hint } from "./StudioFields.js";
 
 /** Listening is free: the saved take is read back, never synthesized again. */
 function TakePlayer({ projectId, slot, durationMs }: { projectId: string; slot: number; durationMs: number }) {
@@ -48,7 +49,8 @@ export function NarrationPanel({ projectId, shots, clips, busy, spareSec = 0, on
     <div className="mv-section-head"><h3>{t("数字分身配音")}</h3>
       <button className="mv-soft" disabled={busy || !projectId || !missing} onClick={() => onSynthesize()}>{t(clips?.some(clip => clip.status !== "missing") ? "生成缺少的配音" : "生成配音")}</button>
     </div>
-    <p className="mv-hint">{t("逐镜用数字分身原声合成并保存，生成视频前请逐镜试听。修改某镜口播、音色、语速或语气后需重新生成；每次合成由模型账号计费。")}</p>
+    <Hint text="逐镜合成数字分身配音，生成视频前请逐镜试听。"
+      more={[t("修改某镜口播、音色、语速或语气后，需重新合成该镜配音。"), t("每次合成会产生费用。")]} />
     <ol className="mv-narration-list">{shots.map((shot, i) => {
       const clip = clips?.[i];
       const fits = clip?.durationMs === undefined || marketingNarrationFits(clip.durationMs, shot.durationSec ?? 15);
@@ -65,7 +67,7 @@ export function NarrationPanel({ projectId, shots, clips, busy, spareSec = 0, on
     })}</ol>
     {(tooLong || spareSec > 0) && <div className="mv-audio-notice" role="status">
       <p>{tooLong ? t("有分镜的配音长于镜头时长。可按配音自动加长这些分镜（总时长仍在目标至目标 +5 秒内），或精简口播、调快语速后重新生成。")
-        : t("分镜比配音所需长 {0} 秒，镜头结尾会留空。可按配音缩短分镜，总时长不少于目标时长；视频按秒计费。", [spareSec])}</p>
+        : t("分镜比配音所需长 {0} 秒，镜头结尾会留空。可按配音缩短分镜，总时长不少于目标时长，费用也更低。", [spareSec])}</p>
       <button className="mv-primary" disabled={busy} onClick={onFit}>{t("按配音调整分镜时长")}</button>
     </div>}
   </section>;

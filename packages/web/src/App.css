@@ -307,6 +307,7 @@
   --accent-hover: #0a6b78;
   --error: #e0342a;
   --success: #2faa55;
+  --warning: #bd7621;
   --de-accent: #0f8f83;
   --de-accent-strong: #087166;
   --de-accent-soft: #e4f5f1;
@@ -403,6 +404,7 @@
   --accent-hover: #5adbe8;
   --error: #ff5a52;
   --success: #34c759;
+  --warning: #f0ad55;
   --de-accent: #38d7c3;
   --de-accent-strong: #7ce7d9;
   --de-accent-soft: #14342f;
@@ -3927,6 +3929,31 @@ html, body, #root {
 .sidebar-expand:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+.workspace-sidebar-backdrop { display: none; }
+
+/* Narrow screens: the open sidebar covers the main area; tapping outside closes it. */
+@media (max-width: 760px) {
+  .workspace { position: relative; }
+  /* Opening or closing over the main area must not squeeze it while the width animates. */
+  .workspace-sidebar { transition: none; }
+  .workspace-sidebar:not(.collapsed) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min(272px, 86vw);
+    min-width: 0;
+    box-shadow: var(--shadow-lg);
+  }
+  .workspace-sidebar:not(.collapsed) + .workspace-sidebar-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 29;
+    background: color-mix(in srgb, var(--login-hero) 35%, transparent);
+    cursor: pointer;
+  }
 }
 
 .workspace-sidebar .sidebar {

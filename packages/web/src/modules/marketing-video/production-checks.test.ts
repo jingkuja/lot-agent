@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GROK_MARKETING_PROFILE, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
-import { audioMismatchConfirmation, generationBlocker, missingKeyArtConfirmation, narrationBlocker, unusableMaterial } from "./production-checks.js";
+import { generationBlocker, generationChecks, generationConfirmation, narrationBlocker, unusableMaterial } from "./production-checks.js";
 
 const image = "11111111-1111-4111-8111-111111111111";
 const shots = [1, 2].map(() => ({ durationSec: 15, script: "欢迎来到转角咖啡店，现磨咖啡等你来。", visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
@@ -22,7 +22,7 @@ describe("generation blockers", () => {
     // A key-art still is submitted with the clips, so 1080p is refused before anything is paid.
     const hd = MarketingDraftSchema.parse({ ...draft, quality: "1080p" });
     expect(generationBlocker({ ...state, draft: hd })).toBe("");
-    expect(generationBlocker({ ...state, draft: hd, keyArt: true })).toBe("使用定妆图时最高支持 720p，请将视频质量改为默认。");
+    expect(generationBlocker({ ...state, draft: hd, keyArt: true })).toBe("使用定妆图时最高支持 720p，请将画质改为 720p。");
   });
   it("blocks a material that is gone or no longer accepted", () => {
     const withImage = MarketingDraftSchema.parse({ ...draft, assets: { portrait: [image] } });
@@ -44,14 +44,28 @@ describe("generation blockers", () => {
   });
 });
 
-describe("confirmations before generating", () => {
-  it("asks when the board was planned for the other reference video setting", () => {
-    expect(audioMismatchConfirmation(draft)).toBeUndefined();
-    const silent = MarketingDraftSchema.parse({ ...draft, storyboardAudio: false });
-    expect(audioMismatchConfirmation(silent)?.message).toContain("已移除参考视频");
+describe("checks before generating", () => {
+  const confirmed = (checks: ReturnType<typeof generationChecks>) => checks.filter(check => check.confirm).map(check => check.text);
+  it("lists what generating does, and asks once for everything that needs accepting", () => {
+    const titled = MarketingDraftSchema.parse({ ...draft, publishTitle: "标题", tags: "#咖啡" });
+    const ready = generationChecks(titled, { keyArt: true, review: "pass" });
+    expect(ready.map(check => check.state)).toEqual(["ok", "ok"]);
+    expect(generationConfirmation(ready, text => text)).toBeUndefined();
+    // Not checked yet, no titles: both happen while generating, without a question.
+    expect(generationChecks(draft, { keyArt: true }).map(check => check.state)).toEqual(["ok", "auto", "auto"]);
+    expect(generationChecks(draft, { review: "reject" }).find(check => check.state === "block")?.text).toContain("请修改后再生成");
+    // A check with findings to verify is shown, but does not ask.
+    expect(confirmed(generationChecks(draft, { review: "suspect" }))).toEqual([]);
   });
-  it("warns more strongly without a key-art still and without any reference image", () => {
-    expect(missingKeyArtConfirmation(draft).message).toContain("人物、产品和场景可能每镜都不一样");
-    expect(missingKeyArtConfirmation(MarketingDraftSchema.parse({ ...draft, assets: { portrait: [image] } })).message).toContain("容易出现不一致");
+  it("asks about a board planned for the other reference video setting and a missing key-art still in one dialog", () => {
+    const silent = MarketingDraftSchema.parse({ ...draft, storyboardAudio: false });
+    const checks = generationChecks(silent, { keyArt: false });
+    expect(confirmed(checks)).toEqual(["已移除动作参考视频，但分镜按无声展示编写。建议先重新生成分镜。", "未生成定妆图，也没有参考图，各镜头的人物、产品和场景可能不同。"]);
+    const dialog = generationConfirmation(checks, text => `[${text}]`)!;
+    expect(dialog.message.split("\n")).toEqual([...confirmed(checks).map(text => `[${text}]`), "[仍要生成视频吗？]"]);
+    const withImage = MarketingDraftSchema.parse({ ...draft, assets: { portrait: [image] } });
+    expect(confirmed(generationChecks(withImage, { keyArt: false }))).toEqual(["未生成定妆图，各镜头只靠文字保持人物和场景一致。"]);
+    // A video that takes no still has no line about it.
+    expect(generationChecks(draft, {}).some(check => check.text.includes("定妆图"))).toBe(false);
   });
 });

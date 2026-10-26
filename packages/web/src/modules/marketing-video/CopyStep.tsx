@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { marketingMaxDuration, marketingSpeechEstimate, type MarketingDraft, type MarketingShot } from "@lot-agent/core/marketing-video";
+import { marketingMaxDuration, marketingSpeechEstimate, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { analysisUploadRule } from "./materials.js";
 import { useI18n } from "../../i18n/index.js";
-import { StoryboardEditor } from "./StoryboardEditor.js";
+import { ShotOverview } from "./StoryboardEditor.js";
 import { Choices, DraftText, type DraftForm } from "./StudioFields.js";
 
 export type SourceKind = "text" | "video" | "upload";
@@ -13,8 +13,9 @@ const SOURCE_HINTS: Record<SourceKind, string> = {
   text: "已识别为参考文案，AI 按其结构改写文案与分镜。",
 };
 
-/** Step 1: write copy from a topic, or rewrite a reference video, link or text. */
-export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, analysis, planError, onUploadSource, onReferenceFile, onStoryboard, onStoryboardAi, onPublication }: {
+/** Step 1: write copy from a topic, or rewrite a reference video, link or text. The shots it plans are
+ * listed here and edited in the confirmation step. */
+export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, analysis, planError, onUploadSource, onReferenceFile, onPublication }: {
   form: DraftForm; inputId: string; sourceKind: SourceKind; uploading: boolean;
   /** The copy button, or the reference analysis panel that ends with it. */
   analysisPanel: ReactNode;
@@ -22,8 +23,7 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
   analysis: string;
   planError: string;
   /** Links and pasted copy are told apart automatically; only uploads are chosen. */
-  onUploadSource(upload: boolean): void; onReferenceFile(file: File): void;
-  onStoryboard(shots: MarketingShot[]): void; onStoryboardAi(instruction: string, index?: number): void; onPublication(): void;
+  onUploadSource(upload: boolean): void; onReferenceFile(file: File): void; onPublication(): void;
 }) {
   const { t } = useI18n();
   const { draft, busy, frozen, ready, field } = form;
@@ -55,17 +55,22 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
       <details className="mv-creative-brief" open><summary>{t("补充产品与创作要求（选填）")}</summary><DraftText form={form} name="topic" label="产品、卖点和目标顾客" max={800} /></details>
     </> : <DraftText form={form} name="topic" label="产品、卖点和目标顾客" max={800} />}
     <label className="mv-field"><span>{t("整片时长（秒）")} · {draft.durationSec}s</span><input type="range" min="15" max="60" step="1" aria-label={t("整片时长（秒）")} value={draft.durationSec} disabled={busy} onChange={e => field("durationSec", Number(e.target.value))} /></label>
-    <label className="mv-label">{t("人物出镜")}</label>
-    <Choices form={form} label="人物出镜" values={[{ value: "always", label: "主播全程出镜" }, { value: "mixed", label: "混合镜头" }]} value={draft.presenter} onChoose={value => field("presenter", value as MarketingDraft["presenter"])} />
-    <p className="mv-hint">{t(draft.presenter === "mixed" ? "主播出现在部分镜头，其余镜头可拍环境、菜品和产品特写，适合探店。" : "每个镜头都有主播正面出镜，适合主播宣传。")}</p>
+    <label className="mv-label">{t("出镜人物")}</label>
+    <Choices form={form} label="出镜人物" values={[{ value: "always", label: "全程出镜" }, { value: "mixed", label: "部分镜头出镜" }]} value={draft.presenter}
+      onChoose={value => field("presenter", value as MarketingDraft["presenter"])} />
+    <p className="mv-hint">{t(draft.presenter === "mixed" ? "出镜人物只出现在部分镜头，其余镜头可拍环境、菜品和产品特写，适合探店。" : "每个镜头都有出镜人物正面出镜，适合口播宣传。")}</p>
     {analysisPanel}
     {analysis && <details className="mv-script-review"><summary>{t("文案结构")}</summary><p>{analysis}</p></details>}
     {(draft.copyMode !== "rewrite" || !!draft.script.trim()) && <>
       <DraftText form={form} name="script" label="视频口播文案" max={2000} rows={6} />
       <p className="mv-hint">{t("预计口播 {0} 秒，{1} 秒视频最长可到 {2} 秒，实际以成片为准。", [
         marketingSpeechEstimate(draft.script), draft.durationSec, marketingMaxDuration(draft.durationSec)])}</p>
-      {!!draft.storyboard.length && <DraftText form={form} name="continuity" label="统一人物、产品与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装、产品和场景一致。" />}
-      {!!draft.storyboard.length && <StoryboardEditor creation presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />}
+      {!!draft.storyboard.length && <div className="mv-storyboard-panel">
+        <div className="mv-section-head"><h3>{t("分镜总览")}</h3>
+          <span>{t("{0} 个分镜 · 共 {1} 秒", [draft.storyboard.length, draft.storyboard.reduce((sum, shot) => sum + (shot.durationSec ?? 15), 0)])}</span></div>
+        <ShotOverview shots={draft.storyboard} />
+        <p className="mv-hint">{t("分镜和统一设定在「确认与生成」中修改。")}</p>
+      </div>}
       {draft.script.trim() && planError && <p className="mv-error" role="alert">{t(planError)}</p>}
       <details className="mv-script-review" open><summary>{t("标题标签")}</summary>
         <DraftText form={form} name="publishTitle" label="视频发布标题" max={100} />

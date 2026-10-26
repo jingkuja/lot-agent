@@ -177,7 +177,9 @@ export class BullmqJobQueue implements JobQueue {
     }
   }
 
-  /** Queue latency is diagnostic only. Redis errors are unknown, never missing. */
+  /** Queue latency is diagnostic only. Redis errors are unknown, never missing. A marketing video whose
+   * delivery is confirmed missing is delivered again by its own ID: it was never claimed, so nothing
+   * paid has started, and the same ID cannot create a second task. */
   async diagnosePending(staleMs: number): Promise<void> {
     let readable = this.connection.status === "ready";
     for (const row of await this.db.findStalePendingTasks(staleMs)) {
@@ -199,6 +201,12 @@ export class BullmqJobQueue implements JobQueue {
           }
         }
       } catch { readable = false; stage = "队列状态待核实"; }
+      if (stage === "投递未完成，可恢复排队" && row.type === "marketing.video") {
+        try {
+          await queueDeadline(() => this.deliverPersisted(row.id, row.type));
+          stage = "等待队列处理";
+        } catch { readable = false; }
+      }
       await this.db.setPendingTaskDiagnostic(row.id, stage);
     }
   }

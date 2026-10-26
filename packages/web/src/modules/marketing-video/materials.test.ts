@@ -29,7 +29,7 @@ describe("studio material checks", () => {
     expect(materialAccept("voice")).toBe(MARKETING_MATERIAL_RULES.voice.formats.join(","));
     expect(materialAccept("scene")).toBe("image/jpeg,image/png,image/webp");
     expect(materialRule("music")).toBe("背景音乐支持 MP3、WAV、M4A，最大 30 MB。");
-    expect(materialRule("video")).toBe("参考视频支持 MP4、MOV，最大 150 MB。");
+    expect(materialRule("video")).toBe("动作参考视频支持 MP4、MOV，最大 150 MB。");
     expect(voiceUploadLabel()).toBe("上传声音样例（2–15 秒）");
   });
 });

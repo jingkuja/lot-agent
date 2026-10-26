@@ -197,7 +197,7 @@ describe("key-art stills", () => {
     f.deps.download.mockRejectedValueOnce(new Error("timeout"));
     try {
       const failed = (await f.make()).keyArt;
-      expect(failed).toMatchObject({ status: "failed", resumable: true, error: expect.stringContaining("不会再次计费") });
+      expect(failed).toMatchObject({ status: "failed", resumable: true, error: expect.stringContaining("不收费") });
       expect(f.db.rows[0]).toMatchObject({ result_url: link, vendor_task_id: "images_1" });
       // Even a paid redo request fetches the saved result first.
       const { keyArt } = await f.make(true);

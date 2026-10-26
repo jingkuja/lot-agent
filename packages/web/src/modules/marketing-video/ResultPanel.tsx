@@ -8,6 +8,7 @@ import { TaskStatus } from "./TaskStatus.js";
 import { DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 import { NarrationSettings } from "./ProductionStep.js";
 import { CaptionSettings } from "./CaptionSettings.js";
+import { CONFIRM_STEP } from "./production-checks.js";
 
 /** Settings only the local composition of a made video uses. Changing them composes the kept
  * clips again, without the video model. */
@@ -29,12 +30,12 @@ function CompositionSettings({ form, composition, renderedSubtitles, captions, r
     <p className="mv-hint">{t(composition.localSubtitles ? "修改背景音乐、音量或字幕后，点击「重新合成成片」：沿用全部已生成的片段，不调用视频模型。" : "修改背景音乐或音量后，点击下方「重新合成成片」：沿用全部已生成的片段，不调用视频模型。")}</p>
     {composition.narration && draft.narration && <>
       <NarrationSettings form={open} onPickVoice={onPickNarrationVoice} made />
-      <p className="mv-hint">{t("修改旁白音色、语速或语气会重新合成全部配音，按语音合成计费；画面不变。")}</p>
+      <p className="mv-hint">{t("修改旁白音色、语速或语气会重新合成全部配音，会产生费用；画面不变。")}</p>
     </>}
     <MaterialField form={open} slot="music" label="选择背景音乐（选填）" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
     {composition.localSubtitles && <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label>}
-    {composition.localSubtitles && draft.subtitles && !renderedSubtitles && <p className="mv-hint" role="note">{t("这条视频制作时没有开字幕，片段没有为字幕留出底部区域，字幕可能遮挡人脸或产品。重新合成后请检查；遮挡明显的镜头可在下方勾选「重新生成此镜」，按视频模型计费。")}</p>}
+    {composition.localSubtitles && draft.subtitles && !renderedSubtitles && <p className="mv-hint" role="note">{t("这条视频制作时没有开字幕，片段没有为字幕留出底部区域，字幕可能遮挡人脸或产品。重新合成后请检查；遮挡明显的镜头可在下方勾选「重新生成此镜」，会产生费用。")}</p>}
     {composition.localSubtitles && draft.subtitles && <CaptionSettings form={open} captions={captions} recompose={recompose} />}
     {!composition.localSubtitles && draft.subtitles && <p className="mv-hint">{t("这条视频的字幕由视频模型画在画面里，不能单独调整；复制为新草稿重新制作后，字幕改为合成时加入，可以调整。")}</p>}
   </div>;
@@ -81,7 +82,7 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
   const { draft, busy } = form;
   const result = project.status === "succeeded" ? project.output?.assets?.[0] : undefined;
   const continuity = draft.continuity && <p className="mv-hint">{t("统一人物、产品与场景设定")}：{draft.continuity}</p>;
-  const archived = project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库草稿" : "存草稿到知识库";
+  const archived = project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库中的视频" : "保存视频到知识库";
   return <section className="mv-card mv-results">
     <div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => onCopyDraft(0)}>{t("复制为新草稿")}</button></div>
     {result
@@ -91,9 +92,9 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
         {project.output?.quality && <QualityReport quality={project.output.quality} redo={!!project.revision} />}</>
       : <TaskStatus project={project} busy={busy} onResume={onResume} onCancel={onCancel} onCopy={onCopyDraft} onRelease={onRelease} />}
     <div className="mv-publication">
-      <button disabled={busy} onClick={onPublication}>{t("重新生成标题和标签")}</button>
       <DraftText form={form} name="publishTitle" label="视频发布标题" max={100} />
       <DraftText form={form} name="tags" label="短视频检索标签" max={160} />
+      <button disabled={busy} onClick={onPublication}>{t("重新生成标题和标签")}</button>
       <div className="mv-choices">
         <button disabled={busy} onClick={onCopyText}>{t("复制发布文案")}</button>
         <button disabled={busy || project.status !== "succeeded" || !knowledge} onClick={onArchive}>{t(archived)}</button>
@@ -110,7 +111,7 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
           </>}
           onChange={onShots} onRevert={onRevertShots} onRevise={onRevise} />
         : <>{continuity}{draft.storyboard.length ? <StoryboardEditor shots={draft.storyboard} busy={busy} readOnly /> : <p className="mv-hint">{t("旧视频未保存详细分镜，可复制草稿补充分镜后重新制作。")}</p>}</>}
-      <button disabled={busy || saving} onClick={() => onCopyDraft(2)}>{t(project.revision ? "复制为新草稿修改其他设置" : "修改分镜并重新制作")}</button>
+      <button disabled={busy || saving} onClick={() => onCopyDraft(CONFIRM_STEP)}>{t(project.revision ? "复制为新草稿修改其他设置" : "修改分镜并重新制作")}</button>
     </details>
   </section>;
 }

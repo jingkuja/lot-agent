@@ -672,7 +672,7 @@ try {
   const linkedLook = { ...looked.draft, continuity: "长发店员，蓝色围裙" };
   await linked.generate(owner, looked.id, linkedLook, KLING_MARKETING_PROFILE, false); await linked.settled();
   assert.deepEqual(await linked.status(owner, looked.id, linkedLook), { status: "failed", resumable: true,
-    error: "定妆图已生成，保存未完成；点击「继续获取」重新下载，不会再次计费。" });
+    error: "定妆图已生成，保存未完成；点击「继续获取」重新下载，不收费。" });
   assert.equal(images, 3);
   await linked.generate(owner, looked.id, linkedLook, KLING_MARKETING_PROFILE, true); await linked.settled();
   assert.equal((await linked.status(owner, looked.id, linkedLook)).status, "succeeded");

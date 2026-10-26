@@ -11,13 +11,15 @@ describe("marketing content compliance", () => {
     expect(MARKETING_RISK_TABLE.exceptions).toHaveLength(14);
     expect(MARKETING_RISK_TABLE.conditionalRules.find(rule => rule.id === "risk-table-4")?.terms).toEqual(["100%"]);
   });
-  it("checks narration, every storyboard field, title, tags and background even if the model passes", () => {
+  it("checks narration, every storyboard field, title, tags and the shared look even if the model passes", () => {
     const shot = { script: "投资项目必赚。", visual: "展示100%治愈的产品海报。", action: "演员举起产品宣传根治。", camera: "特写保健品抗癌字样。" };
     const draft = MarketingDraftSchema.parse({ script: "欢迎了解产品。", storyboard: [shot], background: "背景招牌写着零风险投资项目", publishTitle: "专利配方食品", tags: "#原单奢侈品" });
     const review = normalizeMarketingReview(draft, cleanModel)!;
     expect(review.verdict).toBe("suspect");
     expect(review.ruleVersion).toBe(MARKETING_REVIEW_RULE_VERSION);
-    expect(new Set(review.issues.map(issue => issue.field))).toEqual(new Set(["storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera", "background", "publishTitle", "tags"]));
+    expect(new Set(review.issues.map(issue => issue.field))).toEqual(new Set(["storyboard.script", "storyboard.visual", "storyboard.action", "storyboard.camera", "continuity", "publishTitle", "tags"]));
+    // An older setting description is read as part of the shared look and checked there.
+    expect(draft.continuity).toBe("背景招牌写着零风险投资项目");
   });
   it("scopes harmless senses locally and never lets one whitelist bypass the document", () => {
     const draft = MarketingDraftSchema.parse({ script: "视频剪辑特效非常有趣。食品100%治愈疾病。投资项目稳赚。", storyboard: [{ script: "带你加入赌博平台下注。", visual: "视频特效画面", action: "展示咖啡", camera: "固定" }] });

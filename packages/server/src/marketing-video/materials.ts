@@ -95,7 +95,7 @@ export class MarketingMaterials {
 
   private async checkReferenceVideo(assetId: string, profile: MarketingVideoProfile, signal: AbortSignal) {
     const info = await this.inspect(assetId, signal);
-    if (!info.video) throw new MarketingError("参考视频无法读取画面，请重新上传。");
+    if (!info.video) throw new MarketingError("动作参考视频无法读取画面，请重新上传。");
     const limits = profile.referenceVideo;
     if (!limits) return;
     const shortEdge = Math.min(info.width, info.height), longEdge = Math.max(info.width, info.height), aspect = info.width / info.height;
@@ -105,7 +105,7 @@ export class MarketingMaterials {
       || aspect < limits.minAspect || aspect > limits.maxAspect;
     if (outside) {
       const { minSeconds, maxSeconds, minFps, maxFps, minEdge, maxEdge, maxPixels, minAspect, maxAspect } = limits;
-      throw new MarketingError(`参考视频需为 ${minSeconds}–${maxSeconds} 秒、${minFps}–${maxFps} fps，宽高各 ${minEdge}–${maxEdge} 像素，总像素不超过 ${maxPixels}，宽高比 ${minAspect}–${maxAspect}。`);
+      throw new MarketingError(`动作参考视频需为 ${minSeconds}–${maxSeconds} 秒、${minFps}–${maxFps} fps，宽高各 ${minEdge}–${maxEdge} 像素，总像素不超过 ${maxPixels}，宽高比 ${minAspect}–${maxAspect}。`);
     }
   }
 }

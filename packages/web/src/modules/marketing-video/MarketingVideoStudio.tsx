@@ -1,13 +1,11 @@
 import { useState, type ReactNode } from "react";
-import type { PickedFile, VideoPublication } from "../../api/client.js";
-import type { VideoSettings } from "../../components/MediaSettings.js";
+import type { VideoPublication } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { ProjectStudio } from "./ProjectStudio.js";
 import "./marketing-video.css";
 
 interface Props {
   ownerId?: string;
-  onSubmit: (content: string, files: PickedFile[], settings: VideoSettings, publication: VideoPublication) => void | Promise<void>;
   onDraftChange?: (dirty: boolean) => void;
   onNewVideo?: () => void;
   busy: boolean;

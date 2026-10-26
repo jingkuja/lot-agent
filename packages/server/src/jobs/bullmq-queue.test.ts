@@ -23,7 +23,7 @@ function fixture(limits = { concurrency: 2, perUser: 1, segments: 2 }) {
     getTask: vi.fn(async (id: string) => ({ id, type: id === "ordinary" ? "image.generate" : "marketing.video", status: "pending", input: { original: true }, user_id: "owner", created_at: "now", updated_at: "now" })),
     getTaskStatus: vi.fn(async () => "running"),
     setTaskResult: vi.fn(), setTaskError: vi.fn(), markTaskRetryPending: vi.fn(),
-    findStalePendingTasks: vi.fn(async () => [{ id: "old-task" }]), setPendingTaskDiagnostic: vi.fn(),
+    findStalePendingTasks: vi.fn(async (): Promise<{ id: string; type?: string }[]> => [{ id: "old-task" }]), setPendingTaskDiagnostic: vi.fn(),
   };
   const connection = { status: "ready", disconnect: vi.fn() };
   const queue = new BullmqJobQueue(db as unknown as DB, connection as unknown as Redis, limits);
@@ -56,6 +56,22 @@ describe("pending diagnostics", () => {
     await f.queue.diagnosePending(180_000);
     expect(f.db.setPendingTaskDiagnostic).toHaveBeenLastCalledWith("old-task", "投递未完成，可恢复排队");
     expect(f.db.setTaskError).not.toHaveBeenCalled();
+  });
+  it("delivers a marketing video again by its own ID once its delivery is confirmed missing", async () => {
+    const f = fixture(); f.db.findStalePendingTasks.mockResolvedValue([{ id: "old-task", type: "marketing.video" }]);
+    await f.queue.diagnosePending(180_000);
+    expect(f.marketing.add).toHaveBeenCalledOnce();
+    expect(f.marketing.add).toHaveBeenCalledWith("marketing.video", { taskId: "old-task" }, expect.objectContaining({ jobId: "old-task", attempts: 1 }));
+    expect(f.db.setPendingTaskDiagnostic).toHaveBeenCalledWith("old-task", "等待队列处理");
+    // Unknown queue state and other task types are only reported.
+    const other = fixture(); other.db.findStalePendingTasks.mockResolvedValue([{ id: "ordinary", type: "image.generate" }]);
+    await other.queue.diagnosePending(180_000);
+    expect(other.ordinary.add).not.toHaveBeenCalled();
+    expect(other.db.setPendingTaskDiagnostic).toHaveBeenCalledWith("ordinary", "投递未完成，可恢复排队");
+    const unreadable = fixture(); unreadable.db.findStalePendingTasks.mockResolvedValue([{ id: "old-task", type: "marketing.video" }]);
+    unreadable.marketing.getJob.mockRejectedValue(new Error("Redis unavailable"));
+    await unreadable.queue.diagnosePending(180_000);
+    expect(unreadable.marketing.add).not.toHaveBeenCalled();
   });
   it("bounds a hung Redis read without assuming delivery is missing", async () => {
     vi.useFakeTimers();

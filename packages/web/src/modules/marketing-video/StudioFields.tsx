@@ -13,16 +13,26 @@ export interface DraftForm {
 }
 
 export function Choices({ form, label, values, value, onChoose }: {
-  form: DraftForm; label: string; values: { value: string; label: string }[]; value: string; onChoose(value: string): void;
+  form: DraftForm; label: string; values: { value: string; label: string; disabled?: boolean }[]; value: string; onChoose(value: string): void;
 }) {
   const { t } = useI18n();
   return <div className="mv-choices" role="group" aria-label={t(label)}>
-    {values.map(item => <button key={item.value} type="button" disabled={form.busy || form.frozen || !form.ready} className={value === item.value ? "selected" : ""}
-      aria-pressed={value === item.value} onClick={() => onChoose(item.value)}>{t(item.label)}</button>)}
+    {values.map(item => <button key={item.value} type="button" disabled={form.busy || form.frozen || !form.ready || item.disabled}
+      className={value === item.value ? "selected" : ""} aria-pressed={value === item.value} onClick={() => onChoose(item.value)}>{t(item.label)}</button>)}
   </div>;
 }
 
-type TextName = "topic" | "reference" | "script" | "background" | "continuity" | "publishTitle" | "tags";
+/** A hint of one or two short sentences. `more`: translated sentences of detail, shown on demand. */
+export function Hint({ text, values, more = [] }: { text: string; values?: unknown[]; more?: (string | false | undefined)[] }) {
+  const { t, locale } = useI18n();
+  const details = more.filter(Boolean).join(locale === "zh" ? "" : " ");
+  return <>
+    <p className="mv-hint">{t(text, values)}</p>
+    {details && <details className="mv-more"><summary>{t("了解更多")}</summary><p>{details}</p></details>}
+  </>;
+}
+
+type TextName = "topic" | "reference" | "script" | "continuity" | "publishTitle" | "tags";
 
 export function DraftText({ form, name, label, max, rows = 2, placeholder }: { form: DraftForm; name: TextName; label: string; max: number; rows?: number; placeholder?: string }) {
   const { t } = useI18n();
@@ -60,7 +70,7 @@ export function MaterialField({ form, slot, label, handlers, full: imagesFull = 
       const refresh = () => handlers.onRefresh(id);
       return <div key={id} className="mv-asset-preview">
         {item && (item.mime.startsWith("audio/") ? <audio controls src={item.url} onError={refresh} aria-label={t("声音试听")} />
-          : item.mime.startsWith("video/") ? <video controls preload="metadata" src={item.url} onError={refresh} aria-label={t("参考视频预览")} />
+          : item.mime.startsWith("video/") ? <video controls preload="metadata" src={item.url} onError={refresh} aria-label={t("动作参考视频预览")} />
           : <img src={item.url} onError={refresh} alt={t(label)} />)}
         <span>{item?.name ?? t(label)}</span>
         <button disabled={busy || frozen} onClick={() => handlers.onRemove(slot, id)}>{t("移除")}</button>
@@ -74,7 +84,7 @@ export function MaterialField({ form, slot, label, handlers, full: imagesFull = 
 export function StoryboardAudioNotice({ video, busy, onRebuild, onKeep }: { video: boolean; busy: boolean; onRebuild(): void; onKeep(): void }) {
   const { t } = useI18n();
   return <div className="mv-audio-notice" role="status">
-    <p>{t(video ? "已添加参考视频，成片不生成口播，但当前分镜按有声口播编写。建议按无声展示重新生成分镜。" : "已移除参考视频，成片会生成口播，但当前分镜按无声展示编写。建议按口播重新生成分镜。")}</p>
+    <p>{t(video ? "已添加动作参考视频，成片不生成口播，但当前分镜按有声口播编写。建议按无声展示重新生成分镜。" : "已移除动作参考视频，成片会生成口播，但当前分镜按无声展示编写。建议按口播重新生成分镜。")}</p>
     <div className="mv-choices">
       <button className="mv-primary" disabled={busy} onClick={onRebuild}>{t(video ? "按无声展示重新生成分镜" : "按口播重新生成分镜")}</button>
       <button disabled={busy} onClick={onKeep}>{t("保留当前分镜")}</button>

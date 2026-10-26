@@ -84,7 +84,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const source = MarketingSourceSchema.safeParse(body.source ?? { kind: marketingSourceKind(draft.reference) });
     if (!source.success) throw new MarketingError("创作参数无效。");
     if (draft.copyMode === "rewrite" && (draft.referenceUpload || source.data.kind === "video" || marketingSourceKind(draft.reference) === "video")) {
-      return c.json({ error: "视频链接需先完成参考视频分析。", code: "VIDEO_ANALYSIS_REQUIRED" }, 400);
+      return c.json({ error: "视频链接需先完成爆款视频分析。", code: "VIDEO_ANALYSIS_REQUIRED" }, 400);
     }
     if (!uuid.test(body.clientRequestId ?? "") || !uuid.test(body.projectId ?? "") || !Number.isInteger(body.version)) throw new MarketingError("创作参数无效。");
     return c.json(await writing.copy(c.get("userId"), body.projectId,

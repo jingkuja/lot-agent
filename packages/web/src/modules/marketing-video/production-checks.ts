@@ -1,5 +1,5 @@
 import { marketingAssetIds, marketingImageCount, marketingNarrationFits, marketingReferenceError, marketingStoryboardAudioMismatch, marketingVoiceover,
-  type MarketingDraft, type MarketingNarrationClip, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+  type MarketingDraft, type MarketingNarrationClip, type MarketingReview, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { ConfirmRequest } from "./ConfirmDialog.js";
 import { materialFor, type Material } from "./materials.js";
 
@@ -43,18 +43,35 @@ export function generationBlocker(state: {
     || narrationBlocker(draft, capabilities, state.planError, state.narration);
 }
 
-/** Confirmation needed when the board was planned for the other reference video setting. */
-export function audioMismatchConfirmation(draft: MarketingDraft): ConfirmRequest | undefined {
-  if (!marketingStoryboardAudioMismatch(draft)) return undefined;
-  return { title: "分镜与参考视频设置不一致", confirm: "仍然生成", message: draft.assets.video
-    ? "已添加参考视频，成片不生成口播，但当前分镜按有声口播编写。建议先重新生成分镜。仍要按当前分镜生成吗？"
-    : "已移除参考视频，成片会生成口播，但当前分镜按无声展示编写。建议先重新生成分镜。仍要按当前分镜生成吗？" };
+/** The creation step where the board is confirmed and the video generated. */
+export const CONFIRM_STEP = 3;
+
+/** One line of the list above the generate button. ok: done; auto: done while generating; warn: worth a look,
+ * and with `confirm` the user accepts it once before generating; block: to be fixed first. */
+export type GenerationCheck = { text: string; state: "ok" | "auto" | "warn" | "block"; confirm?: boolean };
+
+/** What generating the draft does or risks, in that order. `keyArt`: whether a still of the current look exists,
+ * undefined when this video takes none or it is not known yet. `review`: verdict of a check of the current text. */
+export function generationChecks(draft: MarketingDraft, { keyArt, review }: { keyArt?: boolean; review?: MarketingReview["verdict"] }): GenerationCheck[] {
+  const checks: GenerationCheck[] = [];
+  if (marketingStoryboardAudioMismatch(draft)) checks.push({ state: "warn", confirm: true, text: draft.assets.video
+    ? "已添加动作参考视频，但分镜按有声口播编写。建议先重新生成分镜。" : "已移除动作参考视频，但分镜按无声展示编写。建议先重新生成分镜。" });
+  // Without the still, shots keep the same person and setting only through the text.
+  if (keyArt === true) checks.push({ state: "ok", text: "已生成定妆图，各镜头共用这张参考图。" });
+  else if (keyArt === false) checks.push({ state: "warn", confirm: true, text: marketingImageCount(draft.assets)
+    ? "未生成定妆图，各镜头只靠文字保持人物和场景一致。" : "未生成定妆图，也没有参考图，各镜头的人物、产品和场景可能不同。" });
+  checks.push(review === "pass" ? { state: "ok", text: "文案检查已通过。" }
+    : review === "suspect" ? { state: "warn", text: "文案检查有内容需要核实，发布前请核实。" }
+    : review === "reject" ? { state: "block", text: "文案检查发现需要修改的内容，请修改后再生成。" }
+    : { state: "auto", text: "生成前会自动检查文案。" });
+  if (!draft.publishTitle.trim() || !draft.tags.trim()) checks.push({ state: "auto", text: "提交后自动补全标题和标签，并再次检查。" });
+  return checks;
 }
 
-/** Confirmation needed when the shots have no key-art still. Without any reference image either,
- * nothing but text ties the shots together, and a redone shot is billed as video. */
-export function missingKeyArtConfirmation(draft: MarketingDraft): ConfirmRequest {
-  return { title: "未使用定妆图", confirm: "仍然生成", message: marketingImageCount(draft.assets)
-    ? "没有定妆图时，各镜头只靠文字描述保持人物、服装和场景一致，容易出现不一致。建议先在「确认分镜」下生成定妆图。仍要直接生成视频吗？"
-    : "没有定妆图，也没有上传肖像、产品或空间参考图，各镜头只靠文字描述，人物、产品和场景可能每镜都不一样。成片后重新生成单镜画面仍按视频模型计费。建议先在「确认分镜」下生成定妆图。确定直接生成视频吗？" };
+/** One confirmation for every check the user has to accept; undefined when there is none. */
+export function generationConfirmation(checks: GenerationCheck[], t: (source: string) => string): ConfirmRequest | undefined {
+  const accepted = checks.filter(check => check.confirm);
+  if (!accepted.length) return undefined;
+  // Each line is translated here; the dialog shows the joined text as it is.
+  return { title: "确认生成视频？", confirm: "仍然生成", message: [...accepted.map(check => t(check.text)), t("仍要生成视频吗？")].join("\n") };
 }

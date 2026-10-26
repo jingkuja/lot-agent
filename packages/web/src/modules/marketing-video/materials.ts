@@ -34,7 +34,7 @@ export function materialFor(materials: Record<string, Material>, slot: string, i
 export async function checkMaterial(file: File, slot: MaterialSlot, draft: MarketingDraft, profile: MarketingVideoProfile) {
   const limitError = isImageSlot(slot) ? imageLimitError(slot, 1, draft, profile) : "";
   if (limitError) throw new Error(limitError);
-  if (slot === "video" && draft.assets.video) throw new Error("参考视频最多 1 个，请先移除已有视频。");
+  if (slot === "video" && draft.assets.video) throw new Error("动作参考视频最多 1 个，请先移除已有视频。");
   if (!fitsRule(file, marketingMaterialRule(slot))) throw new Error(materialRule(slot));
   if (isImageSlot(slot)) {
     const issue = await readImageSize(file).then(size => marketingReferenceImageIssue(profile, { mime: file.type, size: file.size, ...size }),
@@ -42,7 +42,7 @@ export async function checkMaterial(file: File, slot: MaterialSlot, draft: Marke
     if (issue) throw new Error(issue);
   } else if (slot === "video") {
     const metadata = await readMediaMetadata(file);
-    if (!metadata.width || !metadata.height) throw new Error("无法读取参考视频分辨率，请更换文件");
+    if (!metadata.width || !metadata.height) throw new Error("无法读取动作参考视频分辨率，请更换文件");
     const issue = isKlingModel(profile.modelId) ? klingReferenceVideoIssue(file, metadata) : undefined;
     if (issue) throw new Error(issue);
   } else if (slot === "voice") {
@@ -62,7 +62,7 @@ export const materialAccept = (slot: MaterialSlot) => marketingMaterialRule(slot
 export function materialRule(slot: MaterialSlot) {
   const { formats, maxBytes } = marketingMaterialRule(slot);
   const names = marketingFormatNames(formats), megabytes = marketingMegabytes(maxBytes);
-  if (slot === "video") return `参考视频支持 ${names}，最大 ${megabytes} MB。`;
+  if (slot === "video") return `动作参考视频支持 ${names}，最大 ${megabytes} MB。`;
   if (slot === "music") return `背景音乐支持 ${names}，最大 ${megabytes} MB。`;
   if (slot === "voice") return `声音样例支持 ${names}，最大 ${megabytes} MB。`;
   return `图片支持 ${names}，最大 ${megabytes} MB。`;
@@ -78,5 +78,5 @@ export async function checkReferenceVideo(file: File) {
   if (!fitsRule(file, { formats: ANALYSIS_UPLOAD_MIMES, maxBytes: ANALYSIS_LIMITS.downloadBytes })) throw new Error(analysisUploadRule());
   const duration = await readMediaDuration(file);
   const maxSeconds = ANALYSIS_LIMITS.durationMs / 1000;
-  if (!Number.isFinite(duration) || duration <= 0 || duration > maxSeconds) throw new Error(`参考视频最长 ${maxSeconds} 秒。`);
+  if (!Number.isFinite(duration) || duration <= 0 || duration > maxSeconds) throw new Error(`爆款视频最长 ${maxSeconds} 秒。`);
 }

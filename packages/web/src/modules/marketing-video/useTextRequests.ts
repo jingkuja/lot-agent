@@ -176,7 +176,7 @@ export function useTextRequests({ editor, session, profile, ownerId, locale, t, 
   async function manualStoryboard() {
     const current = draftRef.current;
     const shots = planMarketingSegments(current.script, current.durationSec, marketingShotMaxSeconds(current, profile)).map(part => ({
-      durationSec: part.durationSec, script: part.script, visual: current.background || t("展示产品与使用场景"),
+      durationSec: part.durationSec, script: part.script, visual: t("展示产品与使用场景"),
       action: t(current.assets.video ? "人物正面出镜，无声展示产品，不做说话口型" : marketingVoiceover(current) ? "人物出镜自然展示产品，旁白在画外" : "人物正面出镜，自然讲述并展示产品"),
       camera: t("中景平稳拍摄，缓慢推近主体"),
     }));
@@ -193,13 +193,13 @@ export function useTextRequests({ editor, session, profile, ownerId, locale, t, 
         .then(result => result.clips.filter(clip => clip.status === "succeeded").length, () => 0);
     }
     if (takes && !await confirm({ title: "修改全部分镜？", confirm: "继续修改", values: [takes],
-      message: "已生成 {0} 个镜头的数字分身配音。AI 修改全部分镜后，口播或镜头有变化的配音会失效，需要重新生成并按语音合成计费。是否继续？" })) return;
+      message: "已生成 {0} 个镜头的数字分身配音。AI 修改全部分镜后，口播或镜头有变化的配音会失效，需要重新生成，会产生费用。是否继续？" })) return;
     await editStoryboard(instruction, index);
   });
   // The server plans every new board for the current audio setting.
   const rebuildStoryboard = () => aiStoryboard(t(draftRef.current.assets.video
-    ? "已添加参考视频，成片不生成口播：请把每个分镜改为无声展示，人物不说话、不做口型，口播内容只作为字幕或画面信息；保持镜数和每镜时长。"
-    : "已移除参考视频，成片会生成口播：请把每个分镜改为人物自然讲述口播内容并展示产品；保持镜数和每镜时长。"));
+    ? "已添加动作参考视频，成片不生成口播：请把每个分镜改为无声展示，人物不说话、不做口型，口播内容只作为字幕或画面信息；保持镜数和每镜时长。"
+    : "已移除动作参考视频，成片会生成口播：请把每个分镜改为人物自然讲述口播内容并展示产品；保持镜数和每镜时长。"));
   const keepStoryboard = () => update({ ...draftRef.current, storyboardAudio: !draftRef.current.assets.video });
 
   function chooseReferenceSource(upload: boolean) {

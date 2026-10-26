@@ -277,14 +277,19 @@ try {
     await dialog.waitFor({ state: 'hidden' });
   };
   // Up to six agents show without expanding; the "More" toggle exists only beyond that.
-  const chooseAgent = async (name) => { const more = page.locator('.agent-grid-toggle[aria-controls]'); if (await more.count()) await more.click(); await page.locator('.agent-launcher-grid').getByRole('button', { name, exact: true }).click(); };
+  // Narrow screens start with the sidebar collapsed; choosing an agent closes it again.
+  const chooseAgent = async (name) => {
+    const expand = page.locator('.sidebar-expand'); if (await expand.count()) await expand.click();
+    const more = page.locator('.agent-grid-toggle[aria-controls]'); if (await more.count()) await more.click();
+    await page.locator('.agent-launcher-grid').getByRole('button', { name, exact: true }).click();
+  };
   await page.locator('.agent-launcher-item').nth(2).waitFor();
   // The launcher lists every agent since the sidebar rework; the marketing agent stays second.
   assert.deepEqual((await page.locator('.agent-launcher-item > span:nth-child(2)').allTextContents()).slice(0, 3), ['通用助手', '营销影像', '图片生成']);
   assert.equal(await page.locator('.agent-launcher-item > span:nth-child(2)').nth(1).textContent(), '营销影像');
   await chooseAgent('营销影像');
   await page.getByRole('heading', { name: '确定文案', exact: true }).waitFor();
-  assert.equal(await page.locator('.mv-steps button').count(), 3);
+  assert.equal(await page.locator('.mv-steps button').count(), 4);
   await page.getByRole('alert').filter({ hasText: '当前服务器尚不支持新版营销视频' }).waitFor();
   assert.equal(await page.getByRole('button', { name: '生成文案和分镜', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: '保存草稿', exact: true }).isDisabled(), true);
@@ -324,20 +329,28 @@ try {
   assert.match(await waitStatus.innerText(), /最长需要 5 分钟/);
   releaseCopy();
   await waitStatus.waitFor({ state: 'hidden' });
-  await page.getByRole('heading', { name: '生成分镜', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '分镜总览', exact: true }).waitFor();
   assert.equal(await page.getByRole('region', { name: '文案与分镜检查' }).count(), 0, 'the copy check lives in the confirm step');
+  // R02: step 1 lists the shots; they are edited only in the confirmation step.
+  assert.equal(await page.locator('.mv-shot').count(), 0);
+  // U03: once there is copy, "next" is the step's main action.
+  assert.equal(await page.getByRole('button', { name: '一键拆解并生成', exact: true }).getAttribute('class'), 'mv-soft');
+  assert.equal(await page.getByRole('button', { name: '下一步', exact: true }).getAttribute('class'), 'mv-primary');
   const copies = writes.filter(r => r.path.endsWith('/copy'));
   assert.equal(copies.length, 2); assert.notEqual(copies[0].body.clientRequestId, copies[1].body.clientRequestId);
   assert.equal(writes.filter(r => r.path.endsWith(`/text-operations/${copies[0].body.clientRequestId}/release`)).length, 1);
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
   // Review exact storyboard fields, including duplicate excerpts in different
   // shots. Applying one suggestion must not alter another shot or lose timing.
-  const originalShotCount = await page.locator('.mv-shot').count();
+  const originalShotCount = await page.locator('.mv-shot-overview li').count();
   const firstCopyShot = page.locator('.mv-shot').nth(0), secondCopyShot = page.locator('.mv-shot').nth(1);
-  const confirmStep = page.getByRole('button', { name: '确认与制作', exact: false });
+  const confirmStep = page.getByRole('button', { name: '确认与生成', exact: false });
+  const voiceStep = page.getByRole('button', { name: '配音与画面', exact: false });
   const copyStep = page.getByRole('button', { name: '确定文案', exact: false });
+  const editShots = async () => { if (!await page.locator('.mv-storyboard-edit').evaluate(el => el.open)) await page.getByText('修改分镜', { exact: true }).click(); };
   await confirmStep.click();
-  // Step 3 shows the storyboard as an overview; the editor stays collapsed.
+  // Step 4 shows the storyboard as an overview; the editor stays collapsed.
+  assert.equal(await page.getByRole('button', { name: '下一步', exact: true }).count(), 0, 'the last step has no next button');
   await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
   assert.equal(await page.locator('.mv-shot-overview li').count(), originalShotCount);
   assert.equal(await page.locator('.mv-storyboard-edit').evaluate(el => el.open), false);
@@ -351,16 +364,21 @@ try {
   assert.equal(await page.getByText('文案检查完成', { exact: true }).count(), 0);
   await copyStep.click();
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
+  await confirmStep.click();
+  await editShots();
   await firstCopyShot.getByLabel('画面内容').fill('招牌上写着副业必赚');
   await secondCopyShot.getByLabel('景别与镜头运动').fill('推进副业必赚招牌');
+  // Shot edits write the copy back from the shots; review fixes below must leave it alone.
+  await copyStep.click();
   const narrationBeforeReviewFix = await page.getByLabel('视频口播文案').inputValue();
   await confirmStep.click();
-  await page.getByText('内容已修改，请点击“检查当前文案”重新检查。', { exact: true }).waitFor();
+  await page.getByText('内容已修改，请点击「检查当前文案」重新检查。', { exact: true }).waitFor();
   assert.equal(await page.getByText('文案检查完成，未发现明显风险', { exact: true }).count(), 0);
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   const firstRisk = page.locator('.mv-review-issue').filter({ hasText: '第 1 镜 · 画面内容' });
   const secondRisk = page.locator('.mv-review-issue').filter({ hasText: '第 2 镜 · 景别与镜头运动' });
   await firstRisk.getByRole('button', { name: '一键修改', exact: true }).waitFor();
+  assert.doesNotMatch(await firstRisk.locator('.mv-review-source').innerText(), /risk-table-\d/);
   await firstRisk.scrollIntoViewIfNeeded();
   await snap('marketing-video-risk-zh-light.png');
   // The shared still is made on request, before any clip, and shown for the saved look.
@@ -380,7 +398,7 @@ try {
   const reviewsBeforeFix = writes.filter(r => r.path.endsWith('/review')).length;
   await firstRisk.getByRole('button', { name: '一键修改', exact: true }).click();
   await firstRisk.waitFor({ state: 'hidden' });
-  await page.getByText('内容已修改，请点击“检查当前文案”重新检查。', { exact: true }).waitFor();
+  await page.getByText('内容已修改，请点击「检查当前文案」重新检查。', { exact: true }).waitFor();
   await secondRisk.getByRole('button', { name: '自己修改', exact: true }).waitFor();
   assert.equal(await firstCopyShot.getByLabel('画面内容').inputValue(), '招牌上写着了解副业的投入与风险');
   assert.equal(await secondCopyShot.getByLabel('景别与镜头运动').inputValue(), '推进副业必赚招牌');
@@ -397,11 +415,12 @@ try {
   assert.equal(await secondCopyShot.getByLabel('景别与镜头运动').inputValue(), '镜头缓慢推近咖啡杯');
   await copyStep.click();
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), narrationBeforeReviewFix);
-  await firstCopyShot.getByLabel('分镜口播').fill('这个副业必赚。');
   await confirmStep.click();
+  await editShots();
+  await firstCopyShot.getByLabel('分镜口播').fill('这个副业必赚。');
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   await page.locator('.mv-review-issue').getByRole('button', { name: '一键修改', exact: true }).click();
-  await page.getByText('内容已修改，请点击“检查当前文案”重新检查。', { exact: true }).waitFor();
+  await page.getByText('内容已修改，请点击「检查当前文案」重新检查。', { exact: true }).waitFor();
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   await page.getByText('文案检查完成，未发现明显风险', { exact: true }).waitFor();
   assert.equal(await firstCopyShot.getByLabel('分镜口播').inputValue(), '这个了解副业的投入与风险。');
@@ -415,9 +434,9 @@ try {
   ]) {
     await page.getByLabel('视频口播文案').fill(invalidScript);
     await page.getByRole('alert').filter({ hasText: reason }).waitFor();
-    await page.getByRole('button', { name: '确认与制作', exact: false }).click();
+    await confirmStep.click();
     await page.getByRole('alert').filter({ hasText: reason }).waitFor();
-    assert.equal(await page.getByRole('button', { name: '生成分镜并预览' }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '生成分镜' }).isDisabled(), true);
     assert.equal(await page.getByText('查看自动分段（0 段）').count(), 0);
     await snap('marketing-video-plan-error.png');
     await page.getByRole('button', { name: '修改文案或时长' }).click();
@@ -426,8 +445,8 @@ try {
   await page.getByLabel('视频口播文案').fill('长'.repeat(180));
   await page.getByRole('slider', { name: '整片时长（秒）', exact: true }).focus();
   await page.getByRole('slider', { name: '整片时长（秒）', exact: true }).press('End');
-  await page.getByRole('button', { name: '确认与制作', exact: false }).click();
-  assert.equal(await page.getByRole('button', { name: '生成分镜并预览' }).isDisabled(), false);
+  await confirmStep.click();
+  assert.equal(await page.getByRole('button', { name: '生成分镜' }).isDisabled(), false);
   await page.getByRole('button', { name: '确定文案', exact: false }).click();
   await page.getByLabel('视频口播文案').fill(script);
   await page.getByRole('button', { name: '下一步', exact: true }).click();
@@ -437,7 +456,7 @@ try {
   await twin.locator('.twin-asset').filter({ hasText: '我的肖像' }).getByRole('button', { name: '用于视频制作' }).click();
   await twin.getByRole('status').filter({ hasText: '我的肖像' }).waitFor();
   await twin.getByRole('button', { name: '完成', exact: true }).click();
-  await page.getByLabel('背景/场景补充描述').fill('木质吧台和明亮落地窗');
+  assert.equal(await page.getByLabel('背景/场景补充描述').count(), 0, 'the setting is described in the shared look only');
   await page.getByLabel('上传背景图片（选填）').setInputFiles({ name: 'store.png', mimeType: 'image/png', buffer: png });
   await page.locator('.mv-asset-preview img').nth(1).waitFor();
   const portraitInput = page.getByLabel('上传肖像图片（选填）');
@@ -455,16 +474,17 @@ try {
   assert.equal(await sceneInput.isDisabled(), false);
   assert.equal(await page.getByLabel('上传背景图片（选填）').isDisabled(), false);
   if (process.env.MARKETING_REFERENCE_VIDEO) {
-    const videoInput = page.getByLabel('上传参考视频（选填）');
+    const videoInput = page.getByLabel('上传动作参考视频（选填）');
     await videoInput.setInputFiles({ name: 'reference.mp4', mimeType: 'video/mp4', buffer: await readFile(process.env.MARKETING_REFERENCE_VIDEO) });
     await page.getByRole('alert').filter({ hasText: '图片合计不能超过 3 张' }).waitFor();
     assert.equal(await videoInput.isDisabled(), true);
     await page.getByRole('button', { name: '下一步', exact: true }).click();
-    assert.equal(await page.getByRole('button', { name: '生成分镜并预览', exact: true }).isDisabled(), true);
     assert.equal(await page.getByRole('button', { name: '从数字分身语音库选择', exact: true }).count(), 0);
-    await page.getByRole('button', { name: '上一步', exact: true }).click();
+    await confirmStep.click();
+    assert.equal(await page.getByRole('button', { name: '生成分镜', exact: true }).isDisabled(), true);
+    await page.getByRole('button', { name: '确定素材', exact: false }).click();
     await snap('marketing-video-reference-limit.png');
-    await page.getByRole('region', { name: '参考视频', exact: true }).getByRole('button', { name: '移除', exact: true }).click();
+    await page.getByRole('region', { name: '动作参考视频', exact: true }).getByRole('button', { name: '移除', exact: true }).click();
     assert.equal(await videoInput.isDisabled(), false);
     assert.equal(await page.getByRole('alert').filter({ hasText: '图片合计不能超过 3 张' }).count(), 0);
   }
@@ -477,6 +497,8 @@ try {
   assert.equal(await voiceModes.getByRole('button', { name: /^AI 配音/ }).getAttribute('aria-pressed'), 'true');
   assert.equal(await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).isDisabled(), false);
   assert.equal(await voiceModes.getByRole('button').count(), 2);
+  assert.equal(await page.getByRole('group', { name: '旁白风格' }).count(), 0);
+  await page.getByLabel('语气要求（可选）').fill('语气热情');
   await page.getByRole('button', { name: '从数字分身语音库选择', exact: true }).click();
   const voicePicker = page.getByRole('dialog', { name: '选择数字分身音色' });
   assert.equal(await voicePicker.getByRole('heading', { name: '个人肖像库' }).count(), 0);
@@ -486,12 +508,13 @@ try {
   await page.locator('.mv-asset-preview audio').waitFor();
   holdNextSave = true;
   const savingRequest = page.waitForRequest(request => request.method() === 'PUT' && request.url().includes('/api/marketing-videos/'));
-  await page.getByRole('group', { name: '视频质量', exact: true }).getByRole('button', { name: '高清', exact: true }).click();
+  await page.getByRole('group', { name: '画质', exact: true }).getByRole('button', { name: '1080p', exact: true }).click();
   await savingRequest;
-  assert.equal(await page.getByRole('button', { name: '生成分镜并预览' }).isDisabled(), false);
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '生成分镜' }).isDisabled(), false);
   await page.getByText(`查看自动分段（${planMarketingSegments(script, 60).length} 段）`).click();
   await snap('marketing-video-review.png');
-  await page.getByRole('button', { name: '生成分镜并预览' }).evaluate(button => { button.click(); button.click(); });
+  await page.getByRole('button', { name: '生成分镜' }).evaluate(button => { button.click(); button.click(); });
   await page.getByRole('button', { name: '正在保存…', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
   releaseSave();
@@ -522,10 +545,13 @@ try {
   await page.getByRole('heading', { name: '确认分镜', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-storyboard.png');
   // Twin narration: only a cloned voice can be picked; takes are generated and fitted before any clip.
+  await voiceStep.click();
   await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).click();
   assert.equal(await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).getAttribute('aria-pressed'), 'true');
   assert.equal(await page.getByLabel('上传声音样例（2–15 秒）').count(), 0);
+  await confirmStep.click();
   await page.getByRole('alert').filter({ hasText: '请先选择数字分身旁白音色。' }).waitFor();
+  await voiceStep.click();
   await page.locator('.mv-narration-voice').getByRole('button', { name: '从数字分身语音库选择', exact: true }).click();
   const narrationPicker = page.getByRole('dialog', { name: '选择旁白音色' });
   const narrationSaved = savedDraft('已复刻的声音');
@@ -540,7 +566,9 @@ try {
   await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
   await page.getByRole('alert').filter({ hasText: '当前环境不支持字幕，可关闭字幕后生成。' }).waitFor();
   assert.equal(await page.getByRole('button', { name: '确认分镜并生成视频' }).isDisabled(), true);
+  await voiceStep.click();
   await page.getByLabel('添加字幕', { exact: true }).uncheck();
+  await confirmStep.click();
   await page.getByRole('alert').filter({ hasText: '请先生成全部分镜的数字分身配音并试听。' }).waitFor();
   await narrationPanel.getByRole('button', { name: '生成配音', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: '有分镜的配音长于镜头时长' }).waitFor();
@@ -554,23 +582,31 @@ try {
   await narrationPanel.locator('audio').waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/narration')).length, 1);
   await snap('marketing-video-narration.png');
+  await voiceStep.click();
   await voiceModes.getByRole('button', { name: /^AI 配音/ }).click();
   assert.equal(await page.getByLabel('上传声音样例（2–15 秒）').isVisible(), true);
   // AI-voice captions are burned in locally as well, so they need the same support.
   const captionsSaved = savedDraft('"subtitles":true');
   await page.getByLabel('添加字幕', { exact: true }).check();
+  await confirmStep.click();
   await page.getByRole('alert').filter({ hasText: '当前环境不支持字幕，可关闭字幕后生成。' }).waitFor();
   await captionsSaved;
   subtitleSupport = true;
   await page.reload(); await chooseAgent('营销影像');
   await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
+  await page.locator('.mv-generate:not([disabled])').waitFor();
+  // U02: what generating does is listed above the button.
+  assert.deepEqual(await page.getByRole('list', { name: '生成前检查' }).getByRole('listitem').allInnerTexts(), ['已生成定妆图，各镜头共用这张参考图。', '生成前会自动检查文案。']);
+  await voiceStep.click();
   assert.equal(await page.getByLabel('添加字幕', { exact: true }).isChecked(), true);
+  assert.equal(await page.getByLabel('语气要求（可选）').inputValue(), '语气热情');
+  await confirmStep.click();
   await page.locator('.mv-generate:not([disabled])').waitFor();
   await page.getByRole('button', { name: '确认分镜并生成视频' }).evaluate(button => { button.click(); button.click(); });
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);
   const p = [...projects.values()][0];
-  assert.equal(p.draft.durationSec, 60); assert.equal(p.draft.quality, '1080p');
+  assert.equal(p.draft.durationSec, 60); assert.equal(p.draft.quality, '1080p'); assert.equal(p.draft.voice, '语气热情');
   assert(p.draft.assets.voice); assert(p.draft.assets.background); assert(p.draft.assets.portrait);
   assert.equal(writes.filter(r => r.path.endsWith('/generations')).length, 0);
   // Recover by account-scoped project ID, even after the whole page reloads.
@@ -579,8 +615,11 @@ try {
   taskState = 'pending'; p.stage = '等待队列处理';
   await page.locator('.mv-progress strong').filter({ hasText: '排队中' }).waitFor();
   await page.getByText('35% · 等待队列处理', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '重新排队' }).count(), 0);
+  await page.getByText('排队超过 3 分钟时，系统会自动重新投递，不会重复创建任务。', { exact: true }).waitFor();
   await snap('marketing-video-queued-zh-light.png');
   await page.locator('.mv-progress').getByRole('button', { name: '取消生成', exact: true }).click();
+  assert.equal(await page.getByRole('dialog', { name: '取消视频生成？' }).getByRole('button', { name: '取消生成', exact: true }).getAttribute('class'), 'danger');
   await snap('marketing-video-cancel-confirm-zh-light.png');
   await confirmDialog('取消视频生成？', '取消生成');
   await page.locator('.mv-progress strong').filter({ hasText: '已取消' }).waitFor();
@@ -600,12 +639,12 @@ try {
   const srt = await page.getByRole('link', { name: '下载字幕（SRT）', exact: true }).getAttribute('href');
   assert.equal(decodeURIComponent(srt.split(',').slice(1).join(',')), '1\n00:00:00,200 --> 00:00:02,400\n欢迎光临\n\n2\n00:00:02,400 --> 00:00:04,800\n一起喝杯咖啡\n');
   await page.getByLabel('视频发布标题').fill('欢迎到转角咖啡坐坐');
-  await page.getByRole('button', { name: '存草稿到知识库', exact: true }).click();
+  await page.getByRole('button', { name: '保存视频到知识库', exact: true }).click();
   await page.getByRole('button', { name: '已存入知识库', exact: true }).waitFor();
   assert.equal(p.draft.publishTitle, '来发现你的下一杯咖啡'); // PUT replaces the fixture, not mutation.
   assert.equal(projects.get(p.id).draft.publishTitle, '欢迎到转角咖啡坐坐');
   await page.getByLabel('短视频检索标签').fill('#转角咖啡 #探店');
-  await page.getByRole('button', { name: '更新知识库草稿', exact: true }).click();
+  await page.getByRole('button', { name: '更新知识库中的视频', exact: true }).click();
   await page.getByRole('button', { name: '已存入知识库', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/archive')).length, 2);
   // G04: redo a single shot in place; the other shots keep their clips.
@@ -742,19 +781,20 @@ try {
   await page.getByLabel('视频发布标题').fill('');
   await page.getByLabel('短视频检索标签').fill('');
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
-  await page.getByRole('button', { name: '确认与制作', exact: false }).click();
+  await voiceStep.click();
   await page.getByRole('button', { name: '从数字分身语音库选择', exact: true }).click();
   await voicePicker.locator('.twin-asset').filter({ hasText: '我的声音' }).getByRole('button', { name: '用于视频制作' }).click();
   await voicePicker.getByRole('status').filter({ hasText: '我的声音' }).waitFor();
   await voicePicker.getByRole('button', { name: '完成', exact: true }).click();
   await page.locator('.mv-asset-preview').filter({ has: page.locator('audio') }).getByRole('button', { name: '移除', exact: true }).click();
   assert.equal(await page.locator('.mv-asset-preview audio').count(), 0);
+  await confirmStep.click();
   await page.getByRole('heading', { name: '确认分镜', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-dark.png');
   await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
-  // The copied draft has no still yet: generating without it needs a confirmation.
-  await page.getByRole('dialog', { name: '未使用定妆图', exact: true }).getByText('各镜头只靠文字描述保持人物、服装和场景一致', { exact: false }).waitFor();
-  await confirmDialog('未使用定妆图', '仍然生成');
+  // The copied draft has no still yet: the one confirmation names it.
+  await page.getByRole('dialog', { name: '确认生成视频？', exact: true }).getByText('未生成定妆图，各镜头只靠文字保持人物和场景一致。', { exact: false }).waitFor();
+  await confirmDialog('确认生成视频？', '仍然生成');
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 2);
   await page.waitForFunction(() => [...document.querySelectorAll('input, textarea')].some(field => field.value === '手冲咖啡与惬意时光'));
@@ -772,14 +812,29 @@ try {
   await page.setViewportSize({ width: 760, height: 1000 });
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  // U15: at phone width the sidebar starts collapsed, covers the studio while open and closes once an agent is chosen.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await page.getByRole('button', { name: 'Expand sidebar' }).waitFor();
+  await chooseAgent('Marketing video');
+  await page.getByRole('heading', { name: 'Write copy', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Expand sidebar' }).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  assert(await page.locator('.mv-studio').evaluate(element => element.getBoundingClientRect().width) > 350, 'the studio keeps the full width');
+  await snap('marketing-video-en-390.png');
+  await page.setViewportSize({ width: 760, height: 1000 });
   await page.getByLabel('Spoken script').fill(script);
-  await page.getByRole('button', { name: 'Confirm & produce', exact: false }).click();
+  await page.getByRole('button', { name: 'Voice and picture', exact: false }).click();
   assert.equal(await page.getByLabel('Upload voice sample (2–15 seconds)').isVisible(), true);
+  // R05, U10: the tone field is empty in every language; picture quality has a heading.
+  assert.equal(await page.getByLabel('Delivery style (optional)').inputValue(), '');
+  await page.getByRole('group', { name: 'Picture quality', exact: true }).waitFor();
   await snap('marketing-video-en-compact.png');
   await page.getByRole('button', { name: 'Choose from digital twin voices', exact: true }).click();
   await page.getByRole('dialog', { name: 'Choose digital twin voice' }).getByRole('heading', { name: 'Personal voice library' }).waitFor();
   await snap('marketing-video-voice-picker-en-dark.png');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm and generate', exact: false }).click();
   await page.getByRole('button', { name: 'Create storyboard manually', exact: true }).click();
   await page.getByRole('heading', { name: 'Review storyboard', exact: true }).waitFor();
   assert.equal(await page.locator('.mv-shot').count(), planMarketingSegments(script, 30).length);
@@ -794,20 +849,20 @@ try {
   // No still and no reference image at all: the warning names the paid shot redo, and cancelling submits nothing.
   const generatesBefore = writes.filter(r => r.path.endsWith('/generate')).length;
   await page.getByRole('button', { name: 'Confirm storyboard and generate video' }).click();
-  const bareDialog = page.getByRole('dialog', { name: 'No key-art still', exact: true });
-  await bareDialog.getByText('no portrait, product or setting reference image', { exact: false }).waitFor();
-  await bareDialog.getByText('still billed by the video model', { exact: false }).waitFor();
+  const bareDialog = page.getByRole('dialog', { name: 'Generate the video?', exact: true });
+  await bareDialog.getByText('No key-art still and no reference images', { exact: false }).waitFor();
+  await bareDialog.getByText('Generate the video anyway?', { exact: false }).waitFor();
   await bareDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await bareDialog.waitFor({ state: 'hidden' });
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, generatesBefore);
 
-  await page.getByRole('button', { name: 'Write copy', exact: false }).click();
   {
     const visualField = page.locator('.mv-shot').first().getByLabel('Scene details');
     await visualField.fill('副业必赚');
-    await page.getByRole('button', { name: 'Confirm & produce', exact: false }).click();
     await page.getByRole('button', { name: 'Check current copy', exact: true }).click();
     const risk = page.locator('.mv-review-issue');
+    // U07: the rule is named; its ID stays in the details.
+    assert.doesNotMatch(await risk.locator('.mv-review-source').innerText(), /platform-|risk-table-/);
     await risk.getByRole('button', { name: 'Edit manually', exact: true }).click();
     await risk.getByRole('textbox').fill('A close-up of freshly brewed coffee');
     await risk.scrollIntoViewIfNeeded();
@@ -820,7 +875,7 @@ try {
     await page.getByRole('button', { name: 'Write copy', exact: false }).click();
   }
   await page.getByLabel('Spoken script').fill('word '.repeat(100));
-  await page.getByRole('button', { name: 'Confirm & produce', exact: false }).click();
+  await page.getByRole('button', { name: 'Confirm and generate', exact: false }).click();
   await page.getByRole('alert').filter({ hasText: 'Shorten the script or increase the video duration.' }).waitFor();
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-plan-error-en-dark.png');
@@ -837,7 +892,7 @@ try {
   assert.equal(await page.getByLabel('Spoken script').inputValue(), legacyDraft.script);
   await page.waitForTimeout(1100);
   assert.equal(writes.filter(r => r.path === `/api/marketing-videos/${legacyId}`).length, 0, 'defaulting a missing storyboard must not autosave');
-  await page.getByRole('button', { name: 'Confirm & produce', exact: false }).click();
+  await page.getByRole('button', { name: 'Confirm and generate', exact: false }).click();
   await page.getByRole('button', { name: 'Create storyboard manually', exact: true }).click();
   await page.getByRole('heading', { name: 'Review storyboard', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Save draft', exact: true }).waitFor();
@@ -888,6 +943,7 @@ try {
   await page.locator('.mv-draft-item').filter({ hasText: 'Other editable draft' }).getByRole('button', { name: 'Delete draft', exact: true }).click();
   const deleteDialog = page.getByRole('dialog', { name: 'Delete video draft', exact: true });
   assert.match(await deleteDialog.innerText(), /generated video and clips, and its reference video analysis will be permanently deleted[\s\S]*Uploaded materials remain in Personal Assets/);
+  assert.equal(await deleteDialog.getByRole('button', { name: 'Delete', exact: true }).getAttribute('class'), 'danger');
   await snap('marketing-video-delete-en-dark.png');
   await confirmDialog('Delete video draft', 'Delete');
   await page.getByText('Draft deleted. 3.0 MB freed. Uploaded materials remain in Personal Assets. 1 reference analyses have model requests awaiting verification and were not deleted yet.', { exact: true }).waitFor();
@@ -924,21 +980,21 @@ try {
   await page.getByRole('button', { name: '确定素材', exact: false }).click();
   await page.getByText('此历史素材不支持新生成，请移除或替换。', { exact: true }).waitFor();
   const audioNotice = page.locator('.mv-audio-notice');
-  await audioNotice.getByText('已添加参考视频，成片不生成口播，但当前分镜按有声口播编写。建议按无声展示重新生成分镜。', { exact: true }).waitFor();
+  await audioNotice.getByText('已添加动作参考视频，成片不生成口播，但当前分镜按有声口播编写。建议按无声展示重新生成分镜。', { exact: true }).waitFor();
   await audioNotice.getByRole('button', { name: '保留当前分镜', exact: true }).click();
   await audioNotice.waitFor({ state: 'hidden' });
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
-  await page.getByRole('region', { name: '参考视频', exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole('region', { name: '动作参考视频', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-legacy-webm-zh-dark.png');
-  await page.getByRole('region', { name: '参考视频', exact: true }).getByRole('button', { name: '移除', exact: true }).click();
+  await page.getByRole('region', { name: '动作参考视频', exact: true }).getByRole('button', { name: '移除', exact: true }).click();
   await page.getByText('此历史素材不支持新生成，请移除或替换。', { exact: true }).waitFor({ state: 'hidden' });
   // Removing the video turns speech back on; the kept silent board is flagged and rebuilt on request.
-  await audioNotice.getByText('已移除参考视频，成片会生成口播，但当前分镜按无声展示编写。建议按口播重新生成分镜。', { exact: true }).waitFor();
+  await audioNotice.getByText('已移除动作参考视频，成片会生成口播，但当前分镜按无声展示编写。建议按口播重新生成分镜。', { exact: true }).waitFor();
   await snap('marketing-video-audio-notice-zh-dark.png');
   await audioNotice.getByRole('button', { name: '按口播重新生成分镜', exact: true }).click();
   await audioNotice.waitFor({ state: 'hidden' });
   const rebuild = writes.filter(r => r.path === `/api/marketing-videos/${blockedId}/storyboard`).at(-1);
-  assert.match(rebuild.body.instruction, /已移除参考视频/); assert.equal(rebuild.body.index, undefined);
+  assert.match(rebuild.body.instruction, /已移除动作参考视频/); assert.equal(rebuild.body.index, undefined);
   await page.evaluate(() => localStorage.setItem('lot:language', 'en'));
   taskState = 'pending';
   const queued = projects.get(p.id); queued.output = undefined; queued.stage = '队列状态待核实';
@@ -975,7 +1031,7 @@ try {
   assert(materialRefreshes.length > 0, 'Expired or failed previews reauthorize through the owned asset API');
   assert(statusPolls > 0, 'progress is polled from the task state endpoint');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []); assert.deepEqual(nativeDialogs, []);
-  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, AI-voice and narrated captions blocked until subtitles are off when local subtitles are unsupported, SRT download, adjusting caption size, offsets and line breaks (never words) and recomposing, recomposing captions and reworded narrated lines without a redone shot, following narration takes after reopening, retrying only failed narration takes after confirmation, titles filled and checked after submission, duplicated/new drafts, dark and English responsive layouts.');
+  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, four-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, AI-voice and narrated captions blocked until subtitles are off when local subtitles are unsupported, SRT download, adjusting caption size, offsets and line breaks (never words) and recomposing, recomposing captions and reworded narrated lines without a redone shot, following narration takes after reopening, retrying only failed narration takes after confirmation, titles filled and checked after submission, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {
   console.error({ errors, unexpectedRequests, body: await page?.locator('body').innerText() });
   throw error;

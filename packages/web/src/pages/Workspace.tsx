@@ -16,8 +16,6 @@ import type { ModelCatalog } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
-// Display default only; the server substitutes its configured marketing model.
-import { DEFAULT_MARKETING_VIDEO_MODEL } from "@lot-agent/core/marketing-video";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveImageSelection, resolveLlmSelection } from "../lib/model-defaults.js";
 import { digitalEmployeeConversations as filterDigitalEmployeeConversations, withoutDigitalEmployee } from "../lib/product-agent-scope.js";
 import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
@@ -29,6 +27,9 @@ import {
   DigitalEmployeeSidebar,
   type DigitalEmployeeFeature,
 } from "../modules/digital-employee/DigitalEmployeeSidebar.js";
+
+/** Below this width the sidebar overlays the main area instead of sitting beside it. */
+const NARROW_SCREEN = "(max-width: 760px)";
 
 interface WorkspaceProps {
   user: User;
@@ -111,7 +112,12 @@ export function Workspace({
 
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // On a narrow screen the sidebar starts collapsed and, when opened, covers the main area;
+  // opening an agent or a conversation from it closes it again.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia?.(NARROW_SCREEN).matches ?? false);
+  useEffect(() => {
+    if (window.matchMedia?.(NARROW_SCREEN).matches) setSidebarCollapsed(true);
+  }, [openAgentId, activeId]);
   const [knowledgeOpen, setKnowledgeOpen] = useState(() => new URLSearchParams(window.location.search).get("knowledge") === "1");
   const [knowledgeSection, setKnowledgeSection] = useState<"libraries" | "digital-twin">("libraries");
   const openKnowledge = useCallback((section: "libraries" | "digital-twin" = "libraries") => {
@@ -301,15 +307,12 @@ export function Workspace({
       content: string,
       files: PickedFile[] = [],
       settings?: unknown,
-      knowledgeBases: KnowledgeBaseRef[] = [],
-      videoPublication?: { copy: string; tags: string }
+      knowledgeBases: KnowledgeBaseRef[] = []
     ) => {
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
-        if (kind === "image" || kind === "video" || kind === "marketing_video") {
-          const modelId = kind === "image"
-            ? resolveImageSelection(selectedModels.image, modelCatalog.image)
-            : kind === "marketing_video" ? DEFAULT_MARKETING_VIDEO_MODEL : selectedModels.video;
+        if (kind === "image" || kind === "video") {
+          const modelId = kind === "image" ? resolveImageSelection(selectedModels.image, modelCatalog.image) : selectedModels.video;
           generateMedia(content, kind === "image" ? "image" : "video", settings, files, modelId ?? undefined);
         } else {
           send(content, files, undefined, selectedModels.llm ?? undefined, knowledgeBases);
@@ -328,7 +331,7 @@ export function Workspace({
         setIsCreatingConversation(true);
         let conv;
         try {
-          conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined, videoPublication);
+          conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined);
           if (newAgentId === "general") await window.lotDesktop?.bindLocalPermission(conv.id);
         } finally {
           creatingConversation.current = false;
@@ -466,6 +469,8 @@ export function Workspace({
         )}
       </div>
 
+      {/* Pointer-only: the sidebar's own collapse button serves the keyboard. */}
+      {!sidebarCollapsed && <div className="workspace-sidebar-backdrop" aria-hidden="true" onClick={() => setSidebarCollapsed(true)} />}
       <div className="workspace-main">
         {sidebarCollapsed && (
           <button

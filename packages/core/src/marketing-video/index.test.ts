@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL,
-  MARKETING_DEFAULT_BACKGROUND, marketingBackground,
+  MARKETING_DEFAULT_BACKGROUND, MARKETING_DEFAULT_VOICE, marketingBackground, marketingHdUnavailable, marketingVoiceStyle,
   marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema,
   planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard,
   mergeMarketingShots, speechUnits, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText,
@@ -186,7 +186,33 @@ it("leaves the setting empty instead of storing a Chinese default, and prompts w
   expect(legacy.background).toBe("");
   expect(MarketingDraftSchema.parse(legacy)).toEqual(legacy);
   expect(marketingBackground(legacy)).toBe(MARKETING_DEFAULT_BACKGROUND);
-  expect(marketingBackground(MarketingDraftSchema.parse({ background: " 窗边吧台 " }))).toBe("窗边吧台");
+});
+
+it("reads an older setting description as part of the shared look", () => {
+  const legacy = MarketingDraftSchema.parse({ background: " 窗边吧台 ", continuity: "店员穿白色围裙" });
+  expect(legacy.background).toBe("");
+  expect(legacy.continuity).toBe("店员穿白色围裙\n窗边吧台");
+  expect(MarketingDraftSchema.parse(legacy)).toEqual(legacy);
+  expect(MarketingDraftSchema.parse({ background: "窗边吧台" }).continuity).toBe("窗边吧台");
+  // Both fields at their old limits still load.
+  const full = MarketingDraftSchema.parse({ background: "景".repeat(600), continuity: "人".repeat(400) });
+  expect(full.continuity.length).toBe(1000);
+  expect(marketingBackground(full)).toBe(MARKETING_DEFAULT_BACKGROUND);
+});
+
+it("leaves the tone empty instead of storing a Chinese default, and asks the model for that default", () => {
+  expect(MarketingDraftSchema.parse({}).voice).toBe("");
+  expect(MarketingDraftSchema.parse({ voice: MARKETING_DEFAULT_VOICE }).voice).toBe("");
+  expect(marketingVoiceStyle(MarketingDraftSchema.parse({}))).toBe(MARKETING_DEFAULT_VOICE);
+  expect(marketingVoiceStyle(MarketingDraftSchema.parse({ voice: "温柔女声" }))).toBe("温柔女声");
+});
+
+it("offers 1080p only when the model can render it", () => {
+  const image = "11111111-1111-4111-8111-111111111111";
+  expect(marketingHdUnavailable(MarketingDraftSchema.parse({}), grok)).toBe(false);
+  expect(marketingHdUnavailable(MarketingDraftSchema.parse({}), grok, true)).toBe(true);
+  expect(marketingHdUnavailable(MarketingDraftSchema.parse({ assets: { portrait: [image] } }), grok)).toBe(true);
+  expect(marketingHdUnavailable(MarketingDraftSchema.parse({ assets: { voice: image } }), grok)).toBe(false);
 });
 
 it("keeps loading drafts saved with the removed cover slot and recorded mode", () => {

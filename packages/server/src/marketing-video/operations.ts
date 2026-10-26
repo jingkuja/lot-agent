@@ -124,7 +124,7 @@ export class PgMarketingTextOperations {
       // A received result is recovered, never released, unless its parser or
       // review rules changed so it can no longer be applied.
       const recoverable = row.parser_version === textResultVersion(row.kind);
-      if (recoverable && (row.status === "needs_apply" || row.receipt?.outcome === "completed")) throw new MarketingError("创作结果已收到，正在填入草稿，不会再次扣费。", 409);
+      if (recoverable && (row.status === "needs_apply" || row.receipt?.outcome === "completed")) throw new MarketingError("结果已收到，正在填入草稿，不收费。", 409);
       const status = view(row).status === "needs_apply" ? "unknown" : view(row).status;
       if (status === "running") throw new MarketingError("创作请求仍在处理，请稍候。", 409);
       if (status !== "unknown") throw new MarketingError("该创作记录没有待核实的结果。", 409);

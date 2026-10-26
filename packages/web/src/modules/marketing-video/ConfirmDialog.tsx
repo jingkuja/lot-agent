@@ -1,11 +1,11 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../../i18n/index.js";
 
-/** Interface copy keys; values fill `{0}` placeholders in the message. */
-export interface ConfirmRequest { title: string; message: string; values?: (string | number)[]; confirm: string; cancel?: string }
+/** Interface copy keys; values fill `{0}` placeholders in the message. `danger`: the action deletes, stops or discards something. */
+export interface ConfirmRequest { title: string; message: string; values?: (string | number)[]; confirm: string; cancel?: string; danger?: boolean }
 
 /** A modal confirmation in the app's dialog style (see AgentSwitchDialog). */
-function ConfirmDialog({ title, message, values, confirm, cancel = "取消", onClose }: ConfirmRequest & { onClose(ok: boolean): void }) {
+function ConfirmDialog({ title, message, values, confirm, cancel = "取消", danger = false, onClose }: ConfirmRequest & { onClose(ok: boolean): void }) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId(); const descriptionId = useId();
@@ -20,7 +20,7 @@ function ConfirmDialog({ title, message, values, confirm, cancel = "取消", onC
     <p id={descriptionId}>{t(message, values)}</p>
     <div className="agent-switch-dialog-actions">
       <button type="button" autoFocus onClick={() => onClose(false)}>{t(cancel)}</button>
-      <button type="button" className="primary" onClick={() => onClose(true)}>{t(confirm)}</button>
+      <button type="button" className={danger ? "danger" : "primary"} onClick={() => onClose(true)}>{t(confirm)}</button>
     </div>
   </dialog>;
 }

@@ -52,11 +52,11 @@ export function ShotRevision({ project, revision, draft, busy, saving, reviewPan
   const retryTakes = async () => {
     const slots = failedTakes.map(clip => clip.slot);
     if (await confirm({ title: "重新合成配音", confirm: "重新合成", values: [shotList(slots)],
-      message: "将重新合成第 {0} 镜配音，按语音合成计费；已成功的配音不会重新合成。完成后会继续提交本次修改。" })) onRevise(shots, slots);
+      message: "将重新合成第 {0} 镜配音，会产生费用；已成功的配音不会重新合成。完成后会继续提交本次修改。" })) onRevise(shots, slots);
   };
   const submit = async () => {
-    const message = [shots.length ? "将重新生成第 {0} 镜，共 {1} 秒，按视频模型计费；其余 {2} 个镜头沿用已生成的片段，不再计费。" : "将沿用全部已生成的片段重新合成成片，不调用视频模型。",
-      takes ? "{3} 个镜头的配音需要重新合成，按语音合成计费。" : "", made ? "新成片完成前不再显示当前成片，如需保留请先下载。" : ""].filter(Boolean).map(part => t(part)).join(locale === "zh" ? "" : " ");
+    const message = [shots.length ? "将重新生成第 {0} 镜，共 {1} 秒，会产生费用；其余 {2} 个镜头沿用已生成的片段，不收费。" : "将沿用全部已生成的片段重新合成成片，不调用视频模型。",
+      takes ? "{3} 个镜头的配音需要重新合成，会产生费用。" : "", made ? "新成片完成前不再显示当前成片，如需保留请先下载。" : ""].filter(Boolean).map(part => t(part)).join(locale === "zh" ? "" : " ");
     if (await confirm({ title: shots.length ? "重新生成镜头？" : "重新合成成片？", confirm: shots.length ? "重新生成" : "重新合成", message,
       values: [shotList(shots), seconds, rendered.length - shots.length, takes] })) onRevise(shots);
   };

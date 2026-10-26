@@ -201,7 +201,7 @@ describe("marketing project HTTP boundaries", () => {
     expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "review", { version: 1, locale: "en" });
     const input = JSON.parse(f.service.marketingText.mock.calls[0][1] as unknown as string);
     expect(input.fields).toEqual(expect.arrayContaining([
-      { field: "background", text: "项目稳赚招牌" },
+      { field: "continuity", text: "项目稳赚招牌" },
       { field: "storyboard.script", shotIndex: 0, text: "产品100%见效。" },
       { field: "storyboard.visual", shotIndex: 0, text: "产品海报" },
       { field: "storyboard.action", shotIndex: 0, text: "展示产品" },
@@ -284,7 +284,7 @@ describe("marketing project HTTP boundaries", () => {
     f.project.draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots), background: "背景".repeat(300) });
     const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
     expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ error: "生成提示词过长，请精简分镜画面、动作、镜头、背景描述或统一人物、产品与场景设定。" });
+    expect(await response.json()).toMatchObject({ error: "生成提示词过长，请精简分镜画面、动作、镜头或统一人物、产品与场景设定。" });
     expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
     expect(f.store.reserve).not.toHaveBeenCalled();
     expect(f.service.marketingText).not.toHaveBeenCalled();

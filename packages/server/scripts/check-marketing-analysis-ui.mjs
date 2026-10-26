@@ -167,15 +167,19 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some(t => t.value.includes('在明亮空间')));
   assert.equal(copyCalls, 1, "refresh after a lost copy response must reuse the paid result");
   await page.getByRole("button", { name: /1\s*确定文案/ }).click();
-  await page.getByText("0–13s · 13 秒", { exact: true }).waitFor();
-  await page.getByText("52–65s · 13 秒", { exact: true }).waitFor();
-  await page.getByText("数字分身将在每个镜头出镜，保持人物形象一致。", { exact: true }).waitFor();
-  assert.equal(await page.getByText("中景缓缓推进", { exact: true }).count(), 3);
+  // Step 1 lists the shots; they are edited in the confirmation step.
+  await page.getByText("第 1 镜 · 0–13s", { exact: true }).waitFor();
+  await page.getByText("第 5 镜 · 52–65s", { exact: true }).waitFor();
+  assert.equal(await page.getByText("明亮咖啡店与咖啡杯", { exact: true }).count(), 3);
   assert.equal(await duration.inputValue(), "60");
   await page.getByText("5 个分镜 · 共 65 秒", { exact: true }).waitFor();
-  await page.getByRole("button", { name: "下一步", exact: true }).click();
-  await page.getByRole("button", { name: "下一步", exact: true }).click();
+  for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "下一步", exact: true }).click();
   await page.getByText("目标 60 秒，分镜共 65 秒，分 5 段生成。", { exact: true }).waitFor();
+  await page.getByText("修改分镜", { exact: true }).click();
+  await page.getByText("0–13s · 13 秒", { exact: true }).waitFor();
+  await page.getByText("52–65s · 13 秒", { exact: true }).waitFor();
+  await page.getByText("出镜人物将在每个镜头出镜，保持形象一致。", { exact: true }).waitFor();
+  assert.equal(await page.getByText("中景缓缓推进", { exact: true }).count(), 3);
   assert.equal(await page.getByRole("button", { name: "确认分镜并生成视频", exact: true }).isEnabled(), true);
   await page.getByRole("button", { name: "开始新视频", exact: true }).click();
   await page.getByRole("button", { name: "拆解爆款文案", exact: true }).click();
@@ -253,7 +257,7 @@ try {
   await page.getByText("参考画面", { exact: true }).click(); await page.getByRole("button", { name: "0.0s", exact: true }).click();
   await page.locator("img.ma-frame").waitFor();
   await page.reload();
-  await page.getByText("中景缓缓推进", { exact: true }).waitFor();
+  await page.getByText("明亮咖啡店与咖啡杯", { exact: true }).first().waitFor();
   assert.equal(starts, 1); assert.equal(copyCalls, 1);
   // Upstream exhaustion is actionable, while unknown submissions are not replayed.
   Object.assign(value, { status: "partial", applied: false, errorCode: "MODEL_QUOTA" });
@@ -282,7 +286,7 @@ try {
   assert(!(await page.locator("body").innerText()).includes("可见文字和语音转写生成"));
   value.snapshot.speech = liveSpeech ?? { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "测试录音设备，进入网站。" };
   Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
-  await page.getByText("中景缓缓推进", { exact: true }).waitFor();
+  await page.getByText("明亮咖啡店与咖啡杯", { exact: true }).first().waitFor();
   await page.getByText("已完成，但参考证据存在缺口", { exact: true }).waitFor();
   await page.getByText("查看参考资料", { exact: true }).click();
   await page.getByText("视频语音转写", { exact: true }).click();

@@ -8,6 +8,18 @@ const fieldLabels = {
 };
 const fieldLimits = { script: 2000, publishTitle: 100, tags: 160, background: 600, continuity: 400, "storyboard.script": 600, "storyboard.visual": 600, "storyboard.action": 400, "storyboard.camera": 400 };
 const sourceLabels = { "risk-table": "风险词规则表", douyin: "抖音社区规则", xiaohongshu: "小红书社区规则" };
+/** Names of the server's screening rules; the rule ID stays in the details for support. */
+const ruleNames: Record<string, string> = {
+  "risk-table-blacklist": "黑名单风险词",
+  "platform-misleading-claims": "虚假或夸大宣传", "platform-illegal-trade": "违法交易与引流", "platform-diversion": "站外导流",
+  "platform-fraud": "欺骗性营销", "platform-sexual": "色情低俗", "platform-violence-danger": "暴力与危险行为", "platform-minors": "未成年人保护",
+  "platform-privacy-abuse": "隐私与人身攻击", "platform-copyright": "版权与授权", "platform-professional-claims": "需资质的专业宣传",
+  "platform-synthetic-media": "合成内容误导",
+};
+function ruleName(t: (source: string, values?: readonly unknown[]) => string, id: string) {
+  const row = /^risk-table-(\d+)$/.exec(id);
+  return row ? t("第 {0} 条", [row[1]]) : ruleNames[id] ? t(ruleNames[id]) : "";
+}
 
 function ReviewIssue({ issue, draft, busy, onApply }: {
   issue: MarketingReviewIssue; draft: MarketingDraft; busy: boolean; onApply: (draft: MarketingDraft) => void;
@@ -22,7 +34,7 @@ function ReviewIssue({ issue, draft, busy, onApply }: {
   const location = issue.shotIndex === undefined ? label : `${t("第 {0} 镜", [issue.shotIndex + 1])} · ${label}`;
   return <article className="mv-review-issue" aria-label={location}>
     <header><strong>{location}</strong><span>{t(issue.severity === "reject" ? "请修改风险内容" : "有内容需要核实")}</span></header>
-    {issue.source && <p className="mv-review-source">{t(sourceLabels[issue.source])}{issue.ruleId ? ` · ${issue.ruleId}` : ""}</p>}
+    {issue.source && <p className="mv-review-source">{[t(sourceLabels[issue.source]), issue.ruleId && ruleName(t, issue.ruleId)].filter(Boolean).join(" · ")}</p>}
     <blockquote>{issue.text}</blockquote>
     <p>{t("风险原因")}：{issue.reason}</p>
     <p>{t("修改建议")}：{issue.suggestion || t("删除这段风险内容")}</p>
@@ -36,6 +48,7 @@ function ReviewIssue({ issue, draft, busy, onApply }: {
     </div>}
     {original === null && <p className="mv-hint">{t("无法准确定位此条内容，请在正文或分镜中修改后重新检查。")}</p>}
     {original !== null && !suggested && !editing && <p className="mv-hint">{t("此条建议需要结合上下文修改，请选择自己修改。")}</p>}
+    {issue.ruleId && <details className="mv-more"><summary>{t("详情")}</summary><p>{t("规则编号")}：{issue.ruleId}</p></details>}
   </article>;
 }
 
@@ -48,7 +61,7 @@ export function ReviewPanel({ review, draft, busy, onApply, stale = false }: {
   const issues = stale ? review.issues.filter(issue => marketingReviewFieldText(draft, issue)?.includes(issue.text)) : review.issues;
   const verdict = !stale ? review.verdict : issues.some(issue => issue.severity === "reject") ? "reject" : issues.length ? "suspect" : "";
   return <div className={`mv-review${verdict ? ` mv-review-${verdict}` : ""}`}>
-    <strong role="status">{t(stale ? "内容已修改，请点击“检查当前文案”重新检查。" : ({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
+    <strong role="status">{t(stale ? "内容已修改，请点击「检查当前文案」重新检查。" : ({ pass: "文案检查完成，未发现明显风险", suspect: "有内容需要核实", reject: "请修改风险内容" })[review.verdict])}</strong>
     {issues.map((issue, index) => <ReviewIssue key={`${issue.field}:${issue.shotIndex}:${index}:${issue.text}`} issue={issue} draft={draft} busy={busy} onApply={onApply} />)}
     {!stale && !!review.dropped && <p className="mv-hint">{t("另有 {0} 条检查结果无法在文案中定位，已忽略；请人工复核全文。", [review.dropped])}</p>}
     {!stale && draft.topic.trim() && <p className="mv-hint">{t("主题中商家提供的价格、用料、做法等事实按商家自述检查，不因无法核实而判为风险；请保留相关依据，以备平台核查。")}</p>}

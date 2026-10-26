@@ -148,16 +148,15 @@ try {
   assert.equal(starts.has(cancelledId), false);
   assert.equal(starts.get(bridgeId), 1);
 
-  // Delayed entries are healthy, missing delivery is recoverable by original ID.
+  // Delayed entries are healthy; a missing delivery is delivered again by its original ID.
   const delayedId = await publisher.enqueue("marketing.video", {}, owner, { delayMs: 60_000 });
   const missingId = randomUUID(); await db.createTask(missingId, "marketing.video", {}, owner, MARKETING_VIDEO_QUEUE);
   await db.pool.query("UPDATE tasks SET created_at=now()-interval '4 minutes' WHERE id=ANY($1::uuid[])", [[delayedId, missingId]]);
   await publisher.diagnosePending(180_000);
   assert.equal((await db.getTask(delayedId))?.stage, "等待队列处理");
-  assert.equal((await db.getTask(missingId))?.stage, "投递未完成，可恢复排队");
-  assert.equal(await db.getTaskStatus(missingId), "pending");
-  await publisher.deliverPersisted(missingId, "marketing.video");
+  assert.equal((await marketingQueue.getJob(missingId))?.id, missingId);
   await until(async () => await db.getTaskStatus(missingId) === "succeeded", "same-ID missing delivery recovery");
+  assert.equal(starts.get(missingId), 1);
   await publisher.cancel(delayedId);
 
   // Failed work is not automatically replayed by a stale legacy queue entry.

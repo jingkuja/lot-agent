@@ -7,33 +7,33 @@ export type VideoFailure = {
   /** resume: continue the same task; copy: the frozen task cannot succeed as is; support: outcome must be verified first;
    * release: the user may accept a possible duplicate charge and resubmit only the unknown clips. */
   actions: ("resume" | "copy" | "support" | "release")[];
-  /** Creation step a copied draft opens at: materials (1) or shots (2). */
-  copyStep?: 1 | 2;
+  /** Creation step a copied draft opens at: its materials, or by default the confirmation of its shots. */
+  copyStep?: "materials";
 };
 
 const segmentFailed: VideoFailure = {
   reason: "视频模型未能完成部分片段。",
-  next: "点击继续生成只会重做未完成的片段（可能产生费用），已完成的片段会保留。如反复失败，可复制为新草稿调整分镜或素材。",
+  next: "点击继续生成只会重做未完成的片段，会产生费用；已完成的片段会保留。如反复失败，可复制为新草稿调整分镜或素材。",
   actions: ["resume", "copy"],
 };
 // Decided from the server's per-clip state, not from error text: the parent error
 // names only the first failure, and released clips must stop showing this.
 const unknownSubmission: VideoFailure = {
-  reason: "有片段已发送给视频模型，但没有收到明确结果。为避免重复扣费，系统不会自动重新提交。",
-  next: "可以点击「核实后重试」只重新提交这些片段（可能重复计费），已完成的片段会保留；如需核实费用，请联系客服并提供任务编号。",
+  reason: "有片段已发送给视频模型，但没有收到明确结果。为避免重复收费，系统不会自动重新提交。",
+  next: "可以点击「核实后重试」只重新提交这些片段，会再次产生费用；已完成的片段会保留。如需核实费用，请联系客服并提供任务编号。",
   actions: ["release", "support"],
 };
 // A full record: adding a code in core fails type checking until it has guidance here.
 const failures: Record<MarketingFailureCode, VideoFailure> = {
   CONNECT_FAILED: {
     reason: "暂时无法连接视频模型服务，片段没有提交。",
-    next: "请稍后点击继续生成，不会重复计费。已完成的片段不会重做。",
+    next: "请稍后点击继续生成，不会重复收费。已完成的片段不会重做。",
     actions: ["resume"],
   },
   REAL_PERSON_REJECTED: {
     reason: "视频模型判定参考图中包含真人，拒绝了生成。",
     next: "完成真人认证后可点击继续生成；或复制为新草稿，替换人物图片后重新制作。",
-    actions: ["resume", "copy"], copyStep: 1,
+    actions: ["resume", "copy"], copyStep: "materials",
   },
   MODEL_AUTH_REQUIRED: {
     reason: "视频模型账号未授权，或尚未配置可用的模型密钥。",
@@ -92,7 +92,7 @@ const failures: Record<MarketingFailureCode, VideoFailure> = {
   NARRATION_INVALID: {
     reason: "这次制作使用的数字分身配音文件已不可用。",
     next: "请复制为新草稿，重新生成配音并试听后再制作。",
-    actions: ["copy"], copyStep: 2,
+    actions: ["copy"],
   },
   // The gateway answered with an error: treated as not charged, so no duplicate-charge confirmation.
   GATEWAY_FAILED: {

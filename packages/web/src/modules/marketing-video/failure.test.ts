@@ -26,7 +26,7 @@ describe("marketing video failure guidance", () => {
       ["COMPOSITION_FAILED", "所有片段都已生成，合成成片时出现问题。", ["resume"]],
     ];
     for (const [code, reason, actions] of cases) expect(videoFailure(code), code).toMatchObject({ reason, actions });
-    expect(videoFailure("REAL_PERSON_REJECTED").copyStep).toBe(1);
+    expect(videoFailure("REAL_PERSON_REJECTED").copyStep).toBe("materials");
   });
   it("falls back to the generic guidance for tasks without a known code", () => {
     expect(videoFailure(undefined)).toMatchObject({ reason: "视频模型未能完成部分片段。", actions: ["resume", "copy"] });
