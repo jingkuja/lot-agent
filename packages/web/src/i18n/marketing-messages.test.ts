@@ -19,6 +19,7 @@ const notShown = new Set([
   "字幕 Subtitle 99", // caption burned into the FFmpeg probe clip
   "MARKETING_VIDEO_MODEL={0} 不受支持，可选：{1}", // server start-up error for operators
   "片段完成 ", // stage prefix the task panel matches
+  "简约演播室", // setting the prompts fall back to when the draft names none
 ]);
 
 /** Chinese string and template literals of a file; `${…}` becomes {0}, {1}… in order. */

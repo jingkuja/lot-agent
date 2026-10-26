@@ -253,11 +253,14 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     const body = await c.req.json().catch(() => null);
     // No shot means composing the kept clips again with changed music, captions or narration.
     const shots: unknown[] = Array.isArray(body?.shots) ? body.shots : [];
-    const unique = new Set(shots).size === shots.length;
-    if (!Number.isInteger(body?.version) || !Array.isArray(body?.shots) || shots.length > 15 || !shots.every(Number.isInteger) || !unique) {
+    // Shots whose failed narration take the user chose to make again.
+    const narrationRedo: unknown[] = body?.narrationRedo ?? [];
+    const slots = (list: unknown[]) => Array.isArray(list) && list.length <= 15 && list.every(Number.isInteger) && new Set(list).size === list.length;
+    if (!Number.isInteger(body?.version) || !Array.isArray(body?.shots) || !slots(shots) || !slots(narrationRedo)) {
       throw new MarketingError("重新生成参数无效");
     }
-    const result = await production.revise(owner, p, { version: body.version, shots: shots as number[] }, c.req.raw.signal, started);
+    const request = { version: body.version, shots: shots as number[], narrationRedo: narrationRedo as number[] };
+    const result = await production.revise(owner, p, request, c.req.raw.signal, started);
     if ("narration" in result) return c.json({ narrationPending: true, clips: result.narration }, 202);
     return "quota" in result ? c.json(result.quota, 402) : c.json(result.project, 202);
   });

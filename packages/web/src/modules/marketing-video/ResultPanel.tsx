@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { marketingCaptionSrt, type MarketingCaption, type MarketingComposition, type MarketingProject, type MarketingQualityReport, type MarketingShot } from "@lot-agent/core/marketing-video";
+import { marketingCaptionSrt, type MarketingCaption, type MarketingComposition, type MarketingNarrationClip, type MarketingProject, type MarketingQualityReport,
+  type MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { ShotRevision } from "./ShotRevision.js";
@@ -62,8 +63,11 @@ function QualityReport({ quality, redo }: { quality: MarketingQualityReport; red
 }
 
 /** A submitted video: progress or result, publication copy, and the storyboard it used. */
-export function ResultPanel({ form, project, saving, dirty, knowledge, notice, reviewPanel, handlers, onPickNarrationVoice, onCopyDraft, onResume, onCancel, onRelease, onPublication, onCopyText, onArchive, onShots, onRevertShots, onRevise }: {
+export function ResultPanel({ form, project, saving, dirty, knowledge, notice, reviewPanel, narration, handlers, onPickNarrationVoice, onCopyDraft, onResume,
+  onCancel, onRelease, onPublication, onCopyText, onArchive, onShots, onRevertShots, onRevise }: {
   form: DraftForm; project: MarketingProject; saving: boolean; dirty: boolean; knowledge: boolean; notice: string;
+  /** Twin narration takes of the saved draft, for redoing shots of a narrated video. */
+  narration: MarketingNarrationClip[] | null;
   /** Background music of a made video, composed again without the video model. */
   handlers: MaterialHandlers; onPickNarrationVoice(): void;
   /** The text check, shown with the shots to redo. */
@@ -71,7 +75,7 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
   /** Copy into a new draft opened at the given step. */
   onCopyDraft(step: number): void;
   onResume(): void; onCancel(): void; onRelease(): void; onPublication(): void; onCopyText(): void; onArchive(): void;
-  onShots(shots: MarketingShot[]): void; onRevertShots(): void; onRevise(shots: number[]): void;
+  onShots(shots: MarketingShot[]): void; onRevertShots(): void; onRevise(shots: number[], narrationRedo?: number[]): void;
 }) {
   const { t } = useI18n();
   const { draft, busy } = form;
@@ -100,7 +104,7 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
     </div>
     <details className="mv-script-review" open><summary>{t(project.revision ? "修改成片" : "查看制作分镜")}</summary>
       {project.revision ? <ShotRevision key={project.taskId} project={project} revision={project.revision} draft={draft} busy={busy} saving={saving} reviewPanel={reviewPanel}
-          settings={recompose => <>
+          narration={narration} settings={recompose => <>
             <CompositionSettings form={form} composition={project.revision!.composition} renderedSubtitles={project.revision!.draft.subtitles} captions={project.output?.captions} recompose={recompose} handlers={handlers} onPickNarrationVoice={onPickNarrationVoice} />
             {continuity}
           </>}

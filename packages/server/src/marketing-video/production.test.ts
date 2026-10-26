@@ -58,6 +58,17 @@ describe("marketing production", () => {
     expect(f.deps.store.reserve).toHaveBeenCalledWith("owner", id, 2, expect.objectContaining({ size: "720x1280", local_subtitles: true }), false);
     expect(f.deps.service.jobQueue.deliverPersisted).toHaveBeenCalledWith("task", "marketing.video");
   });
+  it("counts the key-art still against the 720p limit of references before anything is paid", async () => {
+    const f = fixture({ draft: MarketingDraftSchema.parse({ ...draft, quality: "1080p" }) });
+    f.deps.keyArtist.frozen.mockResolvedValueOnce({ id: "still", url: "/static/uploads/still.png" } as never);
+    await expect(f.production.generate("owner", f.p, { version: 2, retry: false }, signal))
+      .rejects.toMatchObject({ status: 400, message: "使用定妆图时最高支持 720p，请将视频质量改为默认。" });
+    expect(f.deps.materials.check).not.toHaveBeenCalled();
+    expect(f.deps.store.reserve).not.toHaveBeenCalled();
+    // Without a still the same draft may use 1080p.
+    const plain = fixture({ draft: MarketingDraftSchema.parse({ ...draft, quality: "1080p" }) });
+    expect(await plain.production.generate("owner", plain.p, { version: 2, retry: false }, signal)).toEqual({ project: plain.p });
+  });
   it("redelivers a queued job instead of creating another one", async () => {
     const f = fixture({ taskId: "queued", status: "pending" });
     expect(await f.production.generate("owner", f.p, { version: 1, retry: true }, signal)).toEqual({ project: f.p });

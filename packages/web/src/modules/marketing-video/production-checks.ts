@@ -31,11 +31,13 @@ export const unusableMaterial = (draft: MarketingDraft, materials: Record<string
 export function generationBlocker(state: {
   ready: boolean; loadError: string; draft: MarketingDraft; profile: MarketingVideoProfile; capabilities: StudioCapabilities | null;
   materials: Record<string, Material>; planError: string; narration: MarketingNarrationClip[] | null;
+  /** A key-art still of the current look exists; the clips will carry it as a reference image. */
+  keyArt?: boolean;
 }): string {
   const { draft, capabilities } = state;
   if (!state.ready) return state.loadError || "正在加载草稿…";
   if (unusableMaterial(draft, state.materials)) return "素材已不可用或不支持新生成，请移除或替换。";
-  return marketingReferenceError(draft, state.profile) || state.planError
+  return marketingReferenceError(draft, state.profile, state.keyArt) || state.planError
     || (!capabilities?.composition ? "视频合成工具不可用，请配置 FFmpeg 和 FFprobe。" : "")
     || (draft.subtitles && !capabilities?.subtitles ? "当前环境不支持字幕，可关闭字幕后生成。" : "")
     || narrationBlocker(draft, capabilities, state.planError, state.narration);

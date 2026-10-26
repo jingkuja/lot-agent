@@ -876,7 +876,7 @@ describe("digital twin narration", () => {
     // New voice settings or reworded lines without a redone shot: new takes, every clip kept.
     expect((await f.call(`/${id}/revise`, { version: 1, shots: [] })).status).toBe(202);
     expect(synthesize).toHaveBeenCalledTimes(2);
-    expect(synthesize).toHaveBeenLastCalledWith("owner", id, draft, expect.any(Array), [], { background: true });
+    expect(synthesize).toHaveBeenLastCalledWith("owner", id, draft, expect.any(Array), [], { background: true, failedOnly: true });
     expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenLastCalledWith("owner", id, 1, "parent", [], { narration: takes });
     // Takes still being made: no job yet, and the studio sends the same redo again once they stop.
     const revise = (f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise;
@@ -891,5 +891,12 @@ describe("digital twin narration", () => {
     expect(failed.status).toBe(409);
     expect(await failed.json()).toEqual({ error: "模型账号余额不足或未开通语音合成。" });
     expect(revise).toHaveBeenCalledTimes(2);
+    // The user confirms making the failed take again: only that shot is named, and only a failed take is redone.
+    synthesize.mockResolvedValueOnce({ clips: [{ slot: 0, status: "succeeded" }, { slot: 1, status: "running" }] as never, error: "" });
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [1], narrationRedo: [1] })).status).toBe(202);
+    expect(synthesize).toHaveBeenLastCalledWith("owner", id, draft, expect.any(Array), [1], { background: true, failedOnly: true });
+    for (const narrationRedo of [[1, 1], [0.5], "1"]) {
+      expect((await f.call(`/${id}/revise`, { version: 1, shots: [1], narrationRedo })).status).toBe(400);
+    }
   });
 });

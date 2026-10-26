@@ -43,20 +43,29 @@ export function useProduction({ editor, text, session, profile, ready, step, set
     }
   }, failed => setError(old => failed ? POLL_ERROR : old === POLL_ERROR ? "" : old));
 
-  // Takes belong to the saved text and voice settings; reload them for each saved version.
+  // Takes belong to the saved text and voice settings; reload them for each saved version. A made
+  // twin-narrated video shows them too, so a take that failed while redoing shots can be made again.
   const voiceover = marketingVoiceover(draft);
   const hasBoard = !!draft.storyboard.length;
+  const showsTakes = frozen ? !!project?.revision?.composition.narration : step === 2;
   useEffect(() => {
-    if (!ready || frozen || step !== 2 || !voiceover || !hasBoard || !draft.narration?.twinItemId || !project || dirty) return;
+    if (!ready || !showsTakes || !voiceover || !hasBoard || !draft.narration?.twinItemId || !project || dirty) return;
     if (narration?.projectId === project.id && narration.version === project.version) return;
     const token = session.token();
     void request<{ version: number; clips: MarketingNarrationClip[] }>(`/marketing-videos/${project.id}/narration`).then(result => {
       if (session.current(token)) setNarration({ projectId: project.id, version: result.version, clips: result.clips });
     }).catch(e => { if (session.current(token)) setError(errorMessage(e)); });
-  }, [ready, frozen, step, voiceover, hasBoard, draft.narration?.twinItemId, project?.id, project?.version, dirty]);
+  }, [ready, showsTakes, voiceover, hasBoard, draft.narration?.twinItemId, project?.id, project?.version, dirty]);
   const current = <T extends { projectId: string; version: number }>(value: T | null) =>
     value && project && value.projectId === project.id && value.version === project.version && !dirty ? value : null;
   const currentNarration = current(narration)?.clips ?? null;
+  // Takes are made in the background; follow them until none runs, also after reopening the draft.
+  const narrationRunning = !!currentNarration?.some(clip => clip.status === "running");
+  usePolling<{ version: number; clips: MarketingNarrationClip[] }>(narrationRunning ? `/marketing-videos/${project?.id}/narration` : undefined,
+    narrationRunning, result => {
+      const p = projectRef.current;
+      if (p && narration && p.id === narration.projectId) setNarration({ projectId: p.id, version: result.version, clips: result.clips });
+    }, failed => setError(old => failed ? POLL_ERROR : old === POLL_ERROR ? "" : old));
   // The still belongs to the saved look; reload it for each saved version.
   const keyArtIssue = marketingKeyArtIssue(draft, profile);
   useEffect(() => {
@@ -88,6 +97,9 @@ export function useProduction({ editor, text, session, profile, ready, step, set
     if (!retry && !marketingKeyArtIssue(p.draft, profile)) {
       const { keyArt: still } = await request<{ keyArt: MarketingKeyArt }>(`/marketing-videos/${p.id}/key-art`);
       if (still.status === "running") throw new Error("定妆图正在生成，完成后再生成视频。");
+      // The still is one more reference image, with the same quality limit.
+      const keyArtError = still.status === "succeeded" ? marketingReferenceError(p.draft, profile, true) : "";
+      if (keyArtError) throw new Error(keyArtError);
       if (still.status !== "succeeded" && !await confirm(missingKeyArtConfirmation(p.draft))) return;
     }
     if (!retry && (!p.review || p.reviewedScript !== marketingReviewText(p.draft))) { await text.review(); p = projectRef.current!; }
@@ -108,28 +120,35 @@ export function useProduction({ editor, text, session, profile, ready, step, set
   }
   /** Redo chosen shots of the current video; the server keeps every other clip unpaid. Changed shots of a
    * twin-narrated video first get their new takes in the background; once none is being made, the same redo
-   * is sent again and reuses them, so leaving the page never pays for a take twice. */
-  async function revise(shots: number[]) {
+   * is sent again and reuses them, so leaving the page never pays for a take twice. A failed take is made
+   * again only for the shots in `narrationRedo`, which the user confirmed, and only with the first request. */
+  async function revise(shots: number[], narrationRedo: number[] = []) {
     let p = await save();
     if (!p.review || p.reviewedScript !== marketingReviewText(p.draft)) { await text.review(); p = projectRef.current!; }
     if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再重新生成。");
-    for (;;) {
+    for (let redo = narrationRedo; ; redo = []) {
       wait("正在提交生成任务", false);
-      const result = await request<Project | { narrationPending: true }>(`/marketing-videos/${p.id}/revise`, json("POST", { version: p.version, shots }));
+      const body = { version: p.version, shots, ...(redo.length ? { narrationRedo: redo } : {}) };
+      type Pending = { narrationPending: true; clips: MarketingNarrationClip[] };
+      const result = await request<Project | Pending>(`/marketing-videos/${p.id}/revise`, json("POST", body));
       if (!session.alive) return;
       if (!("narrationPending" in result)) { setCurrent(normalizeProject(result)); return; }
+      setNarration({ projectId: p.id, version: p.version, clips: result.clips });
       wait("正在合成改动镜头的配音", false);
-      if (!await narrationSettled(p.id)) return;
+      if (!await narrationSettled(p.id, p.version)) return;
     }
   }
   /** Reads the takes, with the task polling backoff, until none is being made; false once the user left the draft. */
-  async function narrationSettled(projectId: string) {
+  async function narrationSettled(projectId: string, version: number) {
     const token = session.token();
     for (let delay = POLL_MIN_MS; ; delay = Math.min(Math.round(delay * 1.5), POLL_MAX_MS)) {
       await new Promise(done => setTimeout(done, delay));
       if (!session.current(token)) return false;
       const { clips } = await request<{ clips: MarketingNarrationClip[] }>(`/marketing-videos/${projectId}/narration`);
-      if (!clips.some(clip => clip.status === "running")) return session.current(token);
+      if (!session.current(token)) return false;
+      // Failed takes stay visible with their reasons and a button to make them again.
+      setNarration({ projectId, version, clips });
+      if (!clips.some(clip => clip.status === "running")) return true;
     }
   }
   // Back to what the video was made from; publishing fields are not part of it.

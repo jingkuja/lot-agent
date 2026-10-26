@@ -13,6 +13,23 @@ describe("caption lines", () => {
     expect(lines.some(line => line.includes("iPhone"))).toBe(true);
     expect(lines.some(line => line.includes("MagSafe"))).toBe(true);
   });
+  it("wraps a long clause into the fewest even lines, between words", () => {
+    expect(captionLines("今天给大家推荐一款超级好用的保温杯", 14)).toEqual(["今天给大家推荐一款", "超级好用的保温杯"]);
+    expect(captionLines("这款保温杯特别适合上班族每天带着", 14)).toEqual(["这款保温杯特别", "适合上班族每天带着"]);
+    expect(captionLines("限时活动今天下单立减二十元还送精美礼品", 14)).toEqual(["限时活动今天下单立减", "二十元还送精美礼品"]);
+    const sentence = "我们的新品咖啡豆来自云南高海拔庄园经过精心烘焙口感醇厚回甘明显适合每天早上来一杯";
+    for (let length = 15; length <= 28; length++) {
+      const text = sentence.slice(0, length);
+      const lines = captionLines(text, 14);
+      expect(lines.join("")).toBe(text);
+      expect(lines).toHaveLength(Math.ceil(length / 14));
+      for (const line of lines) expect(line.length).toBeGreaterThanOrEqual(4);
+    }
+  });
+  it("gives a Latin word wider than the line a line of its own", () => {
+    expect(captionLines("超长型号Supercalifragilisticexpialidocious正式上市", 14))
+      .toEqual(["超长型号", "Supercalifragilisticexpialidocious", "正式上市"]);
+  });
   it("keeps a closing quote with its clause", () => {
     expect(captionLines("她说：“真好喝。”我们下次再来", 14)).toEqual(["她说：“真好喝。”", "我们下次再来"]);
   });

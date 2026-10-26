@@ -33,21 +33,80 @@ function clauses(script: string) {
   return out.filter(clause => clause.replace(TRAILING, "").trim());
 }
 
-/** Splits an over-long clause into near-equal pieces, never inside a Latin word or number. */
+// Latin words and numbers (with their decimal points, separators and units) stay whole.
+const LATIN = /[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ.,%'’+\-/]*/gu;
+const NO_BREAK_BEFORE = /[\p{Pe}\p{Pf}\p{Po}]/u;
+const NO_BREAK_AFTER = /[\p{Ps}\p{Pi}\p{Sc}]/u;
+const MIN_LINE_CELLS = 4;
+const words = typeof Intl.Segmenter === "function" ? new Intl.Segmenter("zh", { granularity: "word" }) : undefined;
+
+// The segmenter splits measure words, suffixes and verb compounds (一/款, 航空/级, 耐/摔)
+// into one-character words. Breaking next to one costs as much as lines 1 cell less even,
+// between two of them 1.7 cells.
+const SINGLE_HAN = /^\p{Script=Han}$/u;
+const HAN_END = /\p{Script=Han}$/u;
+const HAN_START = /^\p{Script=Han}/u;
+function splitCost(before: string, after: string) {
+  if (!HAN_END.test(before) || !HAN_START.test(after)) return 0;
+  return SINGLE_HAN.test(before) && SINGLE_HAN.test(after) ? 3 : SINGLE_HAN.test(before) || SINGLE_HAN.test(after) ? 1 : 0;
+}
+
+/** Where a wrapped line may end, with the cost of ending there: word boundaries, or any
+ * character boundary when `anyChar`. Never inside a Latin word or number, before closing
+ * punctuation or after an opening one. */
+function breakPoints(clause: string, anyChar: boolean) {
+  const points = new Map<number, number>();
+  if (!anyChar && words) {
+    let previous = "";
+    for (const { index, segment } of words.segment(clause)) {
+      points.set(index, splitCost(previous, segment));
+      previous = segment;
+    }
+  } else for (let at = 0; at < clause.length; at += clause.codePointAt(at)! > 0xffff ? 2 : 1) points.set(at, 0);
+  for (const match of clause.matchAll(LATIN)) for (let at = match.index + 1; at < match.index + match[0].length; at++) points.delete(at);
+  for (const at of points.keys()) if (!at || NO_BREAK_BEFORE.test(clause[at]) || NO_BREAK_AFTER.test(clause[at - 1])) points.delete(at);
+  return points;
+}
+
+/** `count` lines no wider than `maxCells`, ending at `points` and as even as possible.
+ * A line under 4 cells is a last resort. Undefined when the lines cannot fit. */
+function balance(clause: string, points: Map<number, number>, count: number, maxCells: number) {
+  const ends = [0, ...[...points.keys()].sort((a, b) => a - b), clause.length];
+  const target = captionCells(clause) / count;
+  // cost[k][j]: least cost of k lines that end at ends[j]; from[k][j] is where the last one starts.
+  const cost = Array.from({ length: count + 1 }, () => ends.map(() => Infinity));
+  const from = Array.from({ length: count + 1 }, () => ends.map(() => 0));
+  cost[0][0] = 0;
+  for (let k = 1; k <= count; k++) {
+    for (let j = 1; j < ends.length; j++) {
+      for (let i = 0; i < j; i++) {
+        if (cost[k - 1][i] === Infinity) continue;
+        const width = captionCells(clause.slice(ends[i], ends[j]).trim());
+        if (!width || width > maxCells) continue;
+        const next = cost[k - 1][i] + (width - target) ** 2 + (width < MIN_LINE_CELLS ? 1000 : 0) + (points.get(ends[j]) ?? 0);
+        if (next < cost[k][j]) { cost[k][j] = next; from[k][j] = i; }
+      }
+    }
+  }
+  if (cost[count][ends.length - 1] === Infinity) return undefined;
+  const lines: string[] = [];
+  for (let k = count, j = ends.length - 1; k > 0; j = from[k][j], k--) lines.unshift(clause.slice(ends[from[k][j]], ends[j]));
+  return lines;
+}
+
+/** Splits an over-long clause into the fewest near-equal lines, breaking between words when it can. */
 function wrap(clause: string, maxCells: number) {
   const total = captionCells(clause);
   if (total <= maxCells) return [clause];
-  const target = total / Math.ceil(total / maxCells);
-  // Latin words and numbers (with their decimal points, separators and units) stay whole.
-  const tokens = clause.match(/[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ.,%'’+\-/]*|\s+|./gu) ?? [];
-  const pieces: string[] = [];
-  let current = "";
-  for (const token of tokens) {
-    if (current.trim() && captionCells(current + token) > target + 0.3) { pieces.push(current); current = ""; }
-    current += token;
+  const wordPoints = breakPoints(clause, false), charPoints = breakPoints(clause, true);
+  const ends = [0, ...[...charPoints.keys()].sort((a, b) => a - b), clause.length];
+  // A Latin word wider than the line gets a line of its own.
+  const limit = Math.max(maxCells, ...ends.slice(1).map((end, i) => captionCells(clause.slice(ends[i], end).trim())));
+  for (let count = Math.ceil(total / limit); count < ends.length; count++) {
+    const lines = balance(clause, wordPoints, count, limit) ?? balance(clause, charPoints, count, limit);
+    if (lines) return lines;
   }
-  pieces.push(current);
-  return pieces.filter(piece => piece.trim());
+  return [clause];
 }
 
 /** Caption lines of one shot's confirmed copy: split at punctuation, short clauses joined,

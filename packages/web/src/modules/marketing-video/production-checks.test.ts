@@ -19,6 +19,10 @@ describe("generation blockers", () => {
     expect(generationBlocker({ ...state, capabilities: { ...capabilities, subtitles: false } })).toBe("当前环境不支持字幕，可关闭字幕后生成。");
     const off = MarketingDraftSchema.parse({ ...draft, subtitles: false });
     expect(generationBlocker({ ...state, draft: off, capabilities: { ...capabilities, subtitles: false } })).toBe("");
+    // A key-art still is submitted with the clips, so 1080p is refused before anything is paid.
+    const hd = MarketingDraftSchema.parse({ ...draft, quality: "1080p" });
+    expect(generationBlocker({ ...state, draft: hd })).toBe("");
+    expect(generationBlocker({ ...state, draft: hd, keyArt: true })).toBe("使用定妆图时最高支持 720p，请将视频质量改为默认。");
   });
   it("blocks a material that is gone or no longer accepted", () => {
     const withImage = MarketingDraftSchema.parse({ ...draft, assets: { portrait: [image] } });

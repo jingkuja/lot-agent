@@ -65,13 +65,13 @@ export class MarketingProduction {
       : { draft: p.draft, profile: this.deps.activeProfile, inputVersion: MARKETING_INPUT_VERSION, segments: [] };
     const { draft, profile, inputVersion, segments, frozen } = basis;
     const needsSubmission = !frozen || segments.some(s => segmentRecoveryAction(s) === "submit");
-    // Version 1 inputs predate reference checks.
-    const referenceError = needsSubmission && inputVersion >= 2 ? marketingReferenceError(draft, profile) : "";
+    // A new video submits the still made for its current look, if any.
+    const keyArt = frozen ? undefined : await this.deps.keyArtist.frozen(owner, p.id, draft, profile);
+    // Version 1 inputs predate reference checks. The still counts as a reference image, also for its quality limit.
+    const referenceError = needsSubmission && inputVersion >= 2 ? marketingReferenceError(draft, profile, frozen ? frozen.keyArt : !!keyArt) : "";
     if (referenceError) throw new MarketingError(referenceError);
     // New clips carry no text; their captions are burned in at composition.
     await this.checkComposition(frozen ? frozen.localSubtitles : true, draft, !!frozen);
-    // A new video submits the still made for its current look, if any.
-    const keyArt = frozen ? undefined : await this.deps.keyArtist.frozen(owner, p.id, draft, profile);
     const planned = this.checkedPlan(basis, !!keyArt);
     const billableSeconds = frozen ? submittedSeconds(segments) : planned.reduce((sum, s) => sum + s.durationSec, 0);
     const assets = await this.deps.materials.check(owner, draft, profile, inputVersion, needsSubmission, signal);
@@ -91,9 +91,10 @@ export class MarketingProduction {
    * a model call or a charge; only the redone shots' seconds are billed. No shot means composing the
    * kept clips again with changed music, captions or narration. `started` begins the timing log.
    * A twin-narrated video whose changed shots need new takes starts them in the background and returns
-   * `narration`: no paid request is held by the HTTP request, and the next try reuses every take. */
-  async revise(owner: string, p: MarketingProject, request: { version: number; shots: number[] }, signal: AbortSignal,
-    started = Date.now()): Promise<MarketingProductionResult> {
+   * `narration`: no paid request is held by the HTTP request, and the next try reuses every take.
+   * A failed take is made again only when the user confirmed it, by naming its shot in `narrationRedo`. */
+  async revise(owner: string, p: MarketingProject, request: { version: number; shots: number[]; narrationRedo?: number[] },
+    signal: AbortSignal, started = Date.now()): Promise<MarketingProductionResult> {
     // Stage times of this request, logged once at the end (P13: one acceptance run took 48.6 s).
     const stages: Record<string, number> = {};
     let last = started;
@@ -118,7 +119,8 @@ export class MarketingProduction {
       }
       if (localSubtitles && marketingCaptionErrors(p.draft).length) throw new Error(CAPTION_WORDS_CHANGED);
     } catch (error) { throw new MarketingError((error as Error).message); }
-    const referenceError = marketingReferenceError(p.draft, profile);
+    // Redone shots carry the video's key-art still; composing again submits no clip.
+    const referenceError = marketingReferenceError(p.draft, profile, typeof frozen.key_art === "string" && redo.length > 0);
     if (referenceError) throw new MarketingError(referenceError);
     lap("plan");
     const capabilities = await mediaCapabilities();
@@ -141,7 +143,7 @@ export class MarketingProduction {
     // shots' text and voice settings are unchanged, so their takes are found as they are.
     let narration: FrozenNarration[] | undefined;
     if (frozen.narration !== undefined) {
-      const { clips } = await this.deps.narrator.synthesize(owner, p.id, p.draft, plan, [], { background: true });
+      const { clips } = await this.deps.narrator.synthesize(owner, p.id, p.draft, plan, request.narrationRedo ?? [], { background: true, failedOnly: true });
       lap("narration");
       if (clips.some(clip => clip.status === "running")) return { narration: clips };
       const failed = clips.find(clip => clip.status === "failed" && clip.error);

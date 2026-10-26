@@ -223,7 +223,7 @@ it("keeps confirmed content in its fields and applies later material/ratio selec
     assets: { portrait: id, scene: id, music: id, cover: id },
     storyboard: [{ script, visual: "窗边陈列台", action: "人物展示杯子", camera: "缓慢平移" }] });
   const prompt = marketingSegmentPrompt(draft, { index: 0, script, durationSec: 15 }, 1);
-  expect(shotData(prompt)).toEqual({ script, visual: "窗边陈列台", action: "人物展示杯子", camera: "缓慢平移", backgroundDescription: draft.background, voiceStyle: draft.voice });
+  expect(shotData(prompt)).toEqual({ script, visual: "窗边陈列台", action: "人物展示杯子", camera: "缓慢平移", backgroundDescription: "简约演播室", voiceStyle: draft.voice });
   expect(prompt).toContain("aspect ratio 16:9");
   expect(prompt).toContain("change location only if visual names another place");
   expect(prompt).toContain("Supplied setting references take precedence");

@@ -85,7 +85,8 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
     hadBoard.current = hasBoard;
   }, [hasBoard]);
   const ends = draft.storyboard.reduce<number[]>((times, shot) => [...times, (times.at(-1) ?? 0) + (shot.durationSec ?? 15)], []);
-  const tally = <p className="mv-hint">{t("目标 {0} 秒，分镜共 {1} 秒，分 {2} 段生成。", [draft.durationSec, parts.reduce((sum, part) => sum + part.durationSec, 0), parts.length])}</p>;
+  // Without a plan the numbers would read 0 seconds in 0 clips; the error below says why.
+  const tally = !planError && <p className="mv-hint">{t("目标 {0} 秒，分镜共 {1} 秒，分 {2} 段生成。", [draft.durationSec, parts.reduce((sum, part) => sum + part.durationSec, 0), parts.length])}</p>;
   return <>
     {draft.assets.video ? <p className="mv-hint" role="status">{referenceVideoStatus}</p> : <>
       <label className="mv-label">{t("配音方式")}</label>
@@ -105,7 +106,7 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
     <label className="mv-label">{t("画面比例")}</label>
     <Choices form={form} label="画面比例" values={["9:16", "16:9", "1:1"].map(value => ({ value, label: value }))} value={draft.ratio} onChoose={value => field("ratio", value as MarketingDraft["ratio"])} />
     <Choices form={form} label="视频质量" values={[{ value: "720p", label: "默认" }, { value: "1080p", label: "高清" }]} value={draft.quality} onChoose={value => field("quality", value as MarketingDraft["quality"])} />
-    {profile.referenceMaxQuality && <p className="mv-hint">{t("使用参考图片或参考视频时最高支持 720p。")}</p>}
+    {profile.referenceMaxQuality && <p className="mv-hint">{t("使用参考图片、参考视频或定妆图时最高支持 720p。")}</p>}
     {hasBoard ? <div ref={storyboardPanel} className="mv-storyboard-panel">
       <div className="mv-section-head"><h3>{t("确认分镜")}</h3><span>{t("{0} 个分镜 · 共 {1} 秒", [draft.storyboard.length, ends.at(-1) ?? 0])}</span></div>
       {tally}
@@ -124,7 +125,8 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
       {tally}
     </>}
     {reviewPanel}
-    {blocker && <div id={blockerId} role="alert"><p className="mv-error">{t(blocker)}</p>{planError && !hasBoard && <button disabled={busy || !ready} onClick={onEditCopy}>{t("修改文案或时长")}</button>}</div>}
+    {blocker && <div id={blockerId} role="alert"><p className="mv-error">{t(blocker)}</p>
+      {planError && <button disabled={busy || !ready} onClick={onEditCopy}>{t("修改文案或时长")}</button>}</div>}
     <button className="mv-primary mv-generate" disabled={busy || !!blocker} aria-describedby={blocker ? blockerId : undefined} onClick={onGenerate}>{t(buttonLabel)}</button>
     {!hasBoard && <button disabled={busy || !!blocker} onClick={onManualStoryboard}>{t("手动编排分镜")}</button>}
   </>;

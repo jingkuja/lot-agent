@@ -76,6 +76,25 @@ describe("marketing twin narration", () => {
       expect(speakAs).toHaveBeenCalledTimes(2);
     } finally { warn.mockRestore(); await rm(f.root, { recursive: true, force: true }); }
   });
+  it("redoes only failed takes of the named shots with failedOnly", async () => {
+    let calls = 0;
+    const speakAs = vi.fn(async () => {
+      if (calls++ === 1) throw new ProviderError("speech", "create", "TRANSPORT_ERROR", {});
+      return { audio: new Uint8Array([1]), mime: "audio/wav" };
+    });
+    const f = await setup(speakAs as never);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const first = await f.narrator.synthesize("owner", projectId, draft, segments);
+      expect(first.clips.map(clip => clip.status)).toEqual(["succeeded", "failed"]);
+      // A repeated confirmation names both shots; the succeeded take is not paid for again.
+      const again = await f.narrator.synthesize("owner", projectId, draft, segments, [0, 1], { failedOnly: true });
+      expect(again.clips.map(clip => clip.status)).toEqual(["succeeded", "succeeded"]);
+      expect(speakAs).toHaveBeenCalledTimes(3);
+      await f.narrator.synthesize("owner", projectId, draft, segments, [0, 1], { failedOnly: true });
+      expect(speakAs).toHaveBeenCalledTimes(3);
+    } finally { warn.mockRestore(); await rm(f.root, { recursive: true, force: true }); }
+  });
   it("claims every take before answering and makes them after it in the background", async () => {
     let finish!: () => void;
     const speakAs = vi.fn(async () => { await new Promise<void>(done => { finish = done; }); return { audio: new Uint8Array([1]), mime: "audio/wav" }; });

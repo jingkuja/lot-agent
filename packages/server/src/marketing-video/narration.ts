@@ -85,13 +85,16 @@ export class MarketingNarrator {
 
   /** Synthesizes shots without a take for the current text and settings, plus `redo` shots.
    * A failed shot stays failed until the user asks for it again. With `background`, the takes are
-   * claimed before it returns and their speech requests go on after it; callers poll `status`. */
+   * claimed before it returns and their speech requests go on after it; callers poll `status`.
+   * With `failedOnly`, a `redo` shot is made again only if its take failed, so a repeated request
+   * never pays for a take that succeeded meanwhile. */
   async synthesize(owner: string, projectId: string, draft: MarketingDraft, segments: MarketingSegment[], redo: number[] = [],
-    options: { background?: boolean } = {}) {
+    options: { background?: boolean; failedOnly?: boolean } = {}) {
     const { voice, settings, keys } = await this.plan(owner, draft, segments);
     const current = (await this.rows(owner, projectId, keys)).map((row, slot) => this.clip(row, slot));
+    const again = (status: MarketingNarrationClip["status"]) => options.failedOnly ? status === "failed" : status !== "running";
     const targets = segments.filter(segment => current[segment.index].status === "missing"
-      || (redo.includes(segment.index) && current[segment.index].status !== "running"));
+      || (redo.includes(segment.index) && again(current[segment.index].status)));
     const claimed: MarketingSegment[] = [];
     for (const segment of targets) {
       if (await this.claim(owner, projectId, keys[segment.index], segment, current[segment.index].status !== "missing")) claimed.push(segment);

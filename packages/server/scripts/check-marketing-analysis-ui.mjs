@@ -80,6 +80,7 @@ try {
     if (path === "/api/public/product") return json({ globle: 1 });
     if (path === "/api/marketing-videos/capabilities") return json({ composition: true, subtitles: true, knowledge: false });
     if (path === "/api/marketing-videos") return json({ data: account === "owner" ? [...projects.values()] : [] });
+    if (path === "/api/marketing-videos/usage") return json({ videoBytes: 0, materialBytes: 0, narrationBytes: 0, analysisBytes: 0, analysisLimitBytes: 2 * 1024 ** 3 });
     if (path.endsWith("/text-operations")) return json({ data: textOperations.get(path.split("/").at(-2)) ?? [] });
     if (path === "/api/marketing-videos/copy") {
       copyCalls++; const body = req.postDataJSON(); assert(body.clientRequestId);
@@ -186,6 +187,21 @@ try {
   await page.reload();
   await page.getByRole("button", { name: "取消", exact: true }).waitFor();
   assert.equal(starts, 1, "refresh must not start another paid analysis");
+  // A running analysis locks only its own draft: another draft can be started, and opening this
+  // one again shows the same analysis without starting another.
+  assert.equal(await reference.isDisabled(), true);
+  await page.locator(".mv-library > summary").click();
+  const analysisDraft = await page.locator(".mv-draft-item > button[aria-pressed]").evaluateAll(buttons => buttons.findIndex(b => b.getAttribute("aria-pressed") === "true"));
+  assert(analysisDraft >= 0);
+  await page.getByRole("button", { name: "开始新视频", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector(".mv-draft-item > button[aria-pressed=true]"));
+  assert.equal(await page.getByRole("textbox", { name: "产品、卖点和目标顾客", exact: true }).isDisabled(), false);
+  assert.equal(await page.getByRole("button", { name: "取消", exact: true }).count(), 0);
+  await page.locator(".mv-draft-item > button[aria-pressed]").nth(analysisDraft).click();
+  await page.getByRole("button", { name: "取消", exact: true }).waitFor();
+  assert.equal(await reference.isDisabled(), true);
+  assert.equal(starts, 1, "switching drafts must not start another paid analysis");
+  await page.locator(".mv-library > summary").click();
   Object.assign(value, { status: "partial", stage: "frames", errorCode: "ANALYSIS_IMAGE_BUDGET_EXHAUSTED" });
   await page.getByText("画面处理已暂停，点击继续生成将复用已有资料。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "继续生成", exact: true }).click();
@@ -358,5 +374,5 @@ try {
   assert.equal(await page.getByText("View source material", { exact: true }).count(), 0);
   assert.equal(await page.locator("img.ma-frame").count(), 0);
   assert.deepEqual(errors, []);
-  console.log("Marketing automatic creation UI passed: text/link/local upload, actual MP4 bytes, upload retry and refresh, source cleanup, complete shots, private evidence, quota/cancel, explicit source-expiry recovery, account isolation, English and dark theme");
+  console.log("Marketing automatic creation UI passed: text/link/local upload, actual MP4 bytes, upload retry and refresh, switching drafts during an analysis, source cleanup, complete shots, private evidence, quota/cancel, explicit source-expiry recovery, account isolation, English and dark theme");
 } finally { await browser?.close(); await vite?.close(); await rm(temp, { recursive: true, force: true }); }

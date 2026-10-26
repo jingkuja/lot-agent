@@ -81,6 +81,9 @@ export const MarketingCaptionsSchema = z.object({
   }).strict().nullable()).max(15).default([]),
 }).strict();
 export type MarketingCaptions = z.infer<typeof MarketingCaptionsSchema>;
+/** The setting the prompts use when the draft names none. Drafts once stored it as their default,
+ * shown as Chinese text in every language; it reads as empty now. */
+export const MARKETING_DEFAULT_BACKGROUND = "简约演播室";
 export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   topic: z.string().max(800).default(""),
   copyMode: z.enum(["generate", "rewrite"]).default("generate"),
@@ -93,7 +96,7 @@ export const MarketingDraftSchema = z.preprocess(withoutLegacyCover, z.object({
   // "always": presenter in every shot. "mixed": presenter in some shots; others may
   // show the venue, dishes or product close-ups (store tours).
   presenter: z.enum(["always", "mixed"]).default("always"),
-  background: z.string().max(600).default("简约演播室"),
+  background: z.string().max(600).default("").transform(value => value === MARKETING_DEFAULT_BACKGROUND ? "" : value),
   voice: z.string().max(100).default("自然旁白"),
   ratio: z.enum(["9:16", "16:9", "1:1"]).default("9:16"),
   quality: z.enum(["720p", "1080p"]).default("720p"),
@@ -155,8 +158,11 @@ export function marketingImageLimitError(assets: Partial<Record<MarketingImageSl
   const { total } = profile.referenceImages;
   return marketingImageCount(assets) > total ? `当前视频模型的参考图片合计最多 ${total} 张，请移除多余图片。` : "";
 }
-/** Reference combinations the model cannot use. */
-export function marketingReferenceError(draft: MarketingDraft, profile: MarketingVideoProfile): string {
+/** Setting description sent to the models. */
+export const marketingBackground = (draft: Pick<MarketingDraft, "background">) => draft.background.trim() || MARKETING_DEFAULT_BACKGROUND;
+/** Reference combinations the model cannot use. `keyArt`: the clips also carry the key-art still,
+ * which is one more reference image. */
+export function marketingReferenceError(draft: MarketingDraft, profile: MarketingVideoProfile, keyArt = false): string {
   const images = marketingImageCount(draft.assets);
   if (draft.assets.video && images > profile.imagesWithReferenceVideo) {
     return profile.imagesWithReferenceVideo
@@ -165,7 +171,10 @@ export function marketingReferenceError(draft: MarketingDraft, profile: Marketin
   }
   const limitError = marketingImageLimitError(draft.assets, profile);
   if (limitError) return limitError;
-  if (profile.referenceMaxQuality === "720p" && draft.quality === "1080p" && (images || draft.assets.video)) return "使用参考图片或参考视频时最高支持 720p，请将视频质量改为默认。";
+  if (profile.referenceMaxQuality === "720p" && draft.quality === "1080p") {
+    if (images || draft.assets.video) return "使用参考图片或参考视频时最高支持 720p，请将视频质量改为默认。";
+    if (keyArt) return "使用定妆图时最高支持 720p，请将视频质量改为默认。";
+  }
   return "";
 }
 /** Why a key-art still cannot join this draft's clips: a reference video is used instead of

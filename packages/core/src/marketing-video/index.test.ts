@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL,
+  MARKETING_DEFAULT_BACKGROUND, marketingBackground,
   marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema,
   planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard,
   mergeMarketingShots, speechUnits, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText,
@@ -174,6 +175,18 @@ it("uses a Grok reference video alone and caps references at 720p", () => {
   expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { scene: id } }), grok)).toContain("720p");
   expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { video: id } }), grok)).toContain("720p");
   expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { voice: id } }), grok)).toBe("");
+  // The key-art still is submitted as a reference image too.
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p" }), grok, true)).toContain("定妆图");
+  expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "720p" }), grok, true)).toBe("");
+});
+
+it("leaves the setting empty instead of storing a Chinese default, and prompts with that default", () => {
+  expect(MarketingDraftSchema.parse({}).background).toBe("");
+  const legacy = MarketingDraftSchema.parse({ background: MARKETING_DEFAULT_BACKGROUND });
+  expect(legacy.background).toBe("");
+  expect(MarketingDraftSchema.parse(legacy)).toEqual(legacy);
+  expect(marketingBackground(legacy)).toBe(MARKETING_DEFAULT_BACKGROUND);
+  expect(marketingBackground(MarketingDraftSchema.parse({ background: " 窗边吧台 " }))).toBe("窗边吧台");
 });
 
 it("keeps loading drafts saved with the removed cover slot and recorded mode", () => {

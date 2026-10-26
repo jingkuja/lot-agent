@@ -56,8 +56,10 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const text = useTextRequests({ editor, session, profile, ownerId, locale, t, confirm, wait, act, setError, setNotice });
   const materials = useStudioMaterials({ editor, session, profile, act, setError });
   const production = useProduction({ editor, text, session, profile, ready, step, setStep, t, confirm, wait, setError, setNotice });
-  const navigationBusy = exclusive.busy || text.analysisPending;
-  const busy = navigationBusy || text.pending;
+  // A running analysis locks only its own draft: its result is written back to that draft by ID,
+  // so other drafts may be opened or started meanwhile.
+  const navigationBusy = exclusive.busy;
+  const busy = navigationBusy || text.analysisPending || text.pending;
   useDraftAutosave(editor, { session, ready, busy, onError: setError, onDraftChange });
   const { draft, project, saving, dirty } = editor;
   const frozen = production.frozen;
@@ -116,9 +118,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     return () => { stopped = true; session.next(); clearTimeout(timeout); controller.abort(); text.abortUpload(); };
   }, [editor.storageKey, loadAttempt]);
 
-  /** Run one user action at a time. Text actions wait while a text request is pending; navigation does not. */
+  /** Run one user action at a time. Draft actions wait while a text request or analysis is pending; navigation does not. */
   async function act(work: () => Promise<void>, navigation = false) {
-    if (exclusive.locked || text.analysisPending || (!navigation && text.pending) || !ready) return;
+    if (exclusive.locked || (!navigation && (text.pending || text.analysisPending)) || !ready) return;
     await exclusive.run(async () => {
       setError("");
       try { await work(); } catch (e) { if (session.alive) setError(errorMessage(e)); }
@@ -172,7 +174,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     ? t("已选择参考视频：参考图片合计最多 {0} 张；不生成口播配音，音色设置不生效，可添加背景音乐。", [profile.imagesWithReferenceVideo])
     : t("已选择参考视频：参考图片不参与生成；不生成口播配音，音色设置不生效，可添加背景音乐。");
   const blocker = generationBlocker({ ready, loadError, draft, profile, capabilities, materials: materials.materials, planError: plan.error,
-    narration: production.currentNarration });
+    narration: production.currentNarration, keyArt: production.currentKeyArt?.status === "succeeded" });
   const nextStep = (target: number) => { if (target && !draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(target); };
 
   const audioNotice = marketingStoryboardAudioMismatch(draft) && !frozen && <StoryboardAudioNotice video={!!draft.assets.video} busy={busy || !ready}
@@ -220,7 +222,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       onOpen={p => void act(async () => { if (dirty) await editor.save(); await open(p.id); }, true)} />
     {!ready && !loadError && <p role="status">{t("正在加载草稿…")}</p>}
     {project?.taskId ? <ResultPanel form={form} project={project} saving={saving} dirty={dirty} knowledge={!!capabilities?.knowledge} notice={notice}
-      reviewPanel={reviewSection} handlers={materials.handlers} onPickNarrationVoice={() => setTwinOpen("narration")}
+      reviewPanel={reviewSection} narration={production.currentNarration} handlers={materials.handlers} onPickNarrationVoice={() => setTwinOpen("narration")}
       onCopyDraft={target => void act(() => newDraft(true, target))}
       onResume={() => void act(() => production.generate(true))}
       onCancel={() => void act(async () => { await api.cancelTask(project.taskId!); await open(project.id); })}
@@ -228,14 +230,16 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       onPublication={() => void act(() => text.publication())}
       onCopyText={() => void act(copyText)}
       onArchive={() => void act(production.archive)}
-      onShots={editor.setShots} onRevertShots={production.revertShots} onRevise={shots => void act(() => production.revise(shots))} /> : <>
+      onShots={editor.setShots} onRevertShots={production.revertShots}
+      onRevise={(shots, narrationRedo) => void act(() => production.revise(shots, narrationRedo))} /> : <>
       <nav className="mv-steps" aria-label={t("视频创作步骤")}>{STEPS.map((label, i) => <button key={label} disabled={busy || !ready}
         aria-current={i === step ? "step" : undefined} className={i === step ? "active" : ""} onClick={() => nextStep(i)}><span>{i + 1}</span>{t(label)}</button>)}</nav>
       <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / 3</span></div>
         {step === 0 && <CopyStep form={form} inputId={`${generationHintId}-reference`} sourceKind={text.sourceKind} uploading={text.uploadingReference}
           analysis={text.analysis} planError={plan.error}
           analysisPanel={referenceAnalysis
-            ? <ReferenceAnalysisPanel key={`${ownerId}:${referenceAnalysis.id}`} id={referenceAnalysis.id} ownerId={ownerId} onActive={text.setAnalysisPending}
+            ? <ReferenceAnalysisPanel key={`${ownerId}:${referenceAnalysis.id}`} id={referenceAnalysis.id} ownerId={ownerId}
+              onActive={value => { if (project?.id === editor.draftId.current) text.setAnalysisPending(value); }}
               onComplete={text.completedAnalysis} completedAction={copyAction} disabled={exclusive.busy || text.pending || saving || !ready} />
             : copyAction}
           onUploadSource={text.chooseReferenceSource} onReferenceFile={file => void act(() => text.selectReferenceVideo(file))}

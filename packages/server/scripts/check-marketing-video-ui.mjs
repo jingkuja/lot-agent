@@ -71,8 +71,11 @@ try {
   const narrationTakes = new Map();
   // Takes a shot redo started in the background; the next narration read finishes them, like a slow speech request.
   const backgroundTakes = new Set();
+  // Takes whose next background synthesis fails, and the failed ones with the reason the server records.
+  const failingTakes = new Set(), failedTakes = new Map();
   const keyArts = new Map();
   const narrationClips = (p) => p.draft.storyboard.map((shot, slot) => backgroundTakes.has(`${p.id}:${shot.script}`) ? { slot, status: 'running' }
+    : failedTakes.has(`${p.id}:${shot.script}`) ? { slot, status: 'failed', error: failedTakes.get(`${p.id}:${shot.script}`) }
     : narrationTakes.has(`${p.id}:${shot.script}`) ? { slot, status: 'succeeded', durationMs: narrationTakes.get(`${p.id}:${shot.script}`) } : { slot, status: 'missing' });
   const generated = new Map();
   const resultAssets = [{ url: '/static/fixture.mp4', mime: 'video/mp4' }];
@@ -152,7 +155,7 @@ try {
           text: '副业必赚', reason: '承诺一定获得收益，需要修改。', suggestion: '了解副业的投入与风险',
           field: `storyboard.${key}`, shotIndex, severity: 'reject', source: 'risk-table', ruleId: 'risk-2',
         }] : []));
-        p.review = { verdict: issues.length ? 'reject' : 'pass', issues }; p.reviewedScript = marketingReviewText(p.draft); return json(p);
+        p.review = { verdict: issues.length ? 'reject' : 'pass', issues }; p.reviewedScript = marketingReviewText(p.draft); return json(withRevision(p));
       }
       if (action === 'publication') { p.version++; p.draft.publishTitle = '手冲咖啡与惬意时光'; p.draft.tags = '#咖啡'; p.review = null; return json(p); }
       if (action === 'narration') {
@@ -166,7 +169,11 @@ try {
           });
         }
         const clips = narrationClips(p);
-        for (const key of backgroundTakes) if (key.startsWith(`${p.id}:`)) { backgroundTakes.delete(key); narrationTakes.set(key, 2000); }
+        for (const key of backgroundTakes) {
+          if (!key.startsWith(`${p.id}:`)) continue;
+          backgroundTakes.delete(key);
+          if (failingTakes.delete(key)) failedTakes.set(key, '配音合成失败，请稍后重新生成该镜配音。'); else narrationTakes.set(key, 2000);
+        }
         return json({ version: p.version, clips, error: '' });
       }
       if (action === 'key-art') {
@@ -186,10 +193,14 @@ try {
       if (action === 'revise') {
         const body = request.postDataJSON(); assert.equal(body.version, p.version); assert(p.review?.verdict === 'pass');
         // A narrated video's changed lines get their takes in the background first; the studio sends the redo again.
-        const missing = p.composition?.narration ? p.draft.storyboard.filter(shot => !narrationTakes.has(`${p.id}:${shot.script}`)) : [];
-        if (missing.length) {
-          for (const shot of missing) backgroundTakes.add(`${p.id}:${shot.script}`);
-          return json({ narrationPending: true, clips: narrationClips(p) }, 202);
+        // A failed take is made again only for a shot the user named in narrationRedo.
+        if (p.composition?.narration) {
+          const keys = p.draft.storyboard.map(shot => `${p.id}:${shot.script}`);
+          keys.forEach((key, slot) => { if (body.narrationRedo?.includes(slot) && failedTakes.delete(key)) backgroundTakes.add(key); });
+          const failed = keys.find(key => failedTakes.has(key));
+          if (failed) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: failedTakes.get(failed) }) });
+          for (const key of keys) if (!narrationTakes.has(key)) backgroundTakes.add(key);
+          if (keys.some(key => backgroundTakes.has(key))) return json({ narrationPending: true, clips: narrationClips(p) }, 202);
         }
         taskState = 'running'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p);
       }
@@ -690,7 +701,39 @@ try {
   assert.deepEqual(writes.filter(r => r.path.endsWith('/revise')).at(-1).body.shots, []);
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
+  // D09: a take still being made when the draft is opened again is followed until it stops.
+  // The made video is twin-narrated from here on; its takes are loaded on the result page.
+  const twinVoice = { twinItemId: '00000000-0000-4000-8000-0000000000aa', voiceName: '已复刻的声音', speed: 1, instructions: '' };
+  projects.get(p.id).draft.narration = structuredClone(twinVoice); projects.get(p.id).rendered.narration = structuredClone(twinVoice);
+  const takeKey = `${p.id}:${projects.get(p.id).draft.storyboard[0].script}`;
+  narrationTakes.delete(takeKey); backgroundTakes.add(takeKey);
+  await page.reload(); await chooseAgent('营销影像');
+  await page.locator('.mv-results video').waitFor();
+  await page.getByText('正在合成改动镜头的配音', { exact: true }).waitFor();
+  await page.getByText('正在合成改动镜头的配音', { exact: true }).waitFor({ state: 'detached', timeout: 10000 });
+  assert.equal(narrationTakes.has(takeKey), true);
+  // D08: a take that failed in the background shows its reason and a button; only that take is made again.
+  const failingLine = '欢迎来到转角咖啡，今天也来坐一坐。';
+  failingTakes.add(`${p.id}:${failingLine}`);
+  await firstShot.getByLabel('分镜口播').fill(failingLine);
+  await page.getByRole('button', { name: '重新合成成片', exact: true }).click();
+  await confirmDialog('重新合成成片？', '重新合成');
+  const failedNotice = page.getByRole('alert').filter({ hasText: '第 1 镜配音合成失败：配音合成失败，请稍后重新生成该镜配音。' });
+  await failedNotice.waitFor({ timeout: 20000 });
+  const revisesBeforeRetry = writes.filter(r => r.path.endsWith('/revise')).length;
+  await failedNotice.scrollIntoViewIfNeeded(); await snap('marketing-video-narration-failed-zh-light.png');
+  await failedNotice.getByRole('button', { name: '重新合成配音', exact: true }).click();
+  await confirmDialog('重新合成配音', '重新合成');
+  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor({ timeout: 20000 });
+  // The confirmed retry names the failed shot once; the redo sent after the take is made names none.
+  assert.deepEqual(writes.filter(r => r.path.endsWith('/revise')).slice(revisesBeforeRetry).map(r => r.body.narrationRedo), [[0], undefined]);
+  taskState = 'succeeded';
+  await page.locator('.mv-results video').waitFor();
   delete projects.get(p.id).composition;
+  // Back to the AI-voiced video the copied draft below starts from.
+  delete projects.get(p.id).draft.narration; delete projects.get(p.id).rendered.narration;
+  await page.reload(); await chooseAgent('营销影像');
+  await page.locator('.mv-results video').waitFor();
   await page.getByRole('button', { name: '复制为新草稿修改其他设置', exact: true }).click();
   await page.getByRole('button', { name: '确定文案', exact: false }).click();
   await page.getByRole('heading', { name: '确定文案', exact: true }).waitFor();
@@ -932,7 +975,7 @@ try {
   assert(materialRefreshes.length > 0, 'Expired or failed previews reauthorize through the owned asset API');
   assert(statusPolls > 0, 'progress is polled from the task state endpoint');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []); assert.deepEqual(nativeDialogs, []);
-  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, AI-voice and narrated captions blocked until subtitles are off when local subtitles are unsupported, SRT download, adjusting caption size, offsets and line breaks (never words) and recomposing, recomposing captions and reworded narrated lines without a redone shot, titles filled and checked after submission, duplicated/new drafts, dark and English responsive layouts.');
+  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, three-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, AI-voice and narrated captions blocked until subtitles are off when local subtitles are unsupported, SRT download, adjusting caption size, offsets and line breaks (never words) and recomposing, recomposing captions and reworded narrated lines without a redone shot, following narration takes after reopening, retrying only failed narration takes after confirmation, titles filled and checked after submission, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {
   console.error({ errors, unexpectedRequests, body: await page?.locator('body').innerText() });
   throw error;

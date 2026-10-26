@@ -57,6 +57,6 @@ export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, a
       {referenceError && <p className="mv-error" role="alert">{t(referenceError)}</p>}
       {audioNotice}
     </section>
-    <DraftText form={form} name="background" label="背景/场景补充描述" max={600} />
+    <DraftText form={form} name="background" label="背景/场景补充描述" max={600} placeholder="例如：简约演播室，浅色背景，柔和灯光。留空时使用简约演播室。" />
   </>;
 }
