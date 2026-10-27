@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatChunk, LLMProvider, Message } from "@lot-agent/core";
@@ -10,9 +11,9 @@ beforeEach(() => marketingCopyModel.reset());
 const frame = (i: number): FrameEvidence => ({ id: `f${String(i + 1).padStart(4, "0")}`, ptsMs: i * 500, sourceHash: "a".repeat(64), sourcePts: String(i * 500), timeBase: "1/1000", width: 720, height: 1280, objectKey: `${i}.jpg`, reasons: [] });
 function setup(reply: unknown, chunks?: ChatChunk[]) {
   const records = new Map<string, { hash: string; model: string; receipt?: ModelStepReceipt }>();
-  const requests: { model: string; messages: Message[] }[] = [];
-  const provider = vi.fn(async (model: string): Promise<LLMProvider> => ({ async *chat(messages) {
-    requests.push({ model, messages });
+  const requests: { model: string; messages: Message[]; reasoning?: "off" | number }[] = [];
+  const provider = vi.fn(async (model: string): Promise<LLMProvider> => ({ async *chat(messages, _tools, options) {
+    requests.push({ model, messages, reasoning: options?.params?.reasoning });
     if (chunks) { yield* chunks; return; }
     yield { type: "text", content: JSON.stringify(reply) };
     yield { type: "done", finishReason: "stop", responseId: "resp1", usage: { promptTokens: 50, completionTokens: 20 } };
@@ -229,6 +230,20 @@ describe("analysis model calls", () => {
       await expect(models.summarize({ revision: 1, frames: [], texts: [], observations: [], durationMs: 1000, limitations: [] })).rejects.toThrow("REQUEST_UNKNOWN");
       expect(chat).toHaveBeenCalledOnce();
     } finally { timeout.mockRestore(); vi.useRealTimers(); }
+  });
+  it("turns thinking off for the summary only, keeping its hash so an earlier failed summary can resume", async () => {
+    const summary = setup({ summary: [], timeline: [], marketingPoints: [], limitations: [] });
+    await summary.models.summarize({ revision: 1, frames: [], texts: [], observations: [], durationMs: 1000, limitations: [] });
+    expect(summary.requests[0].reasoning).toBe("off");
+    const [stepId, record] = [...summary.records.entries()][0];
+    expect(stepId).toBe("summary:1");
+    const payload = JSON.stringify({ model: summary.requests[0].model, messages: summary.requests[0].messages, maxTokens: 8192 });
+    expect(record.hash).toBe(createHash("sha256").update(payload).digest("hex"));
+    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ durationSec: 15, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
+    const copy = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" });
+    await copy.models.createCopy(MarketingDraftSchema.parse({ copyMode: "rewrite", reference: "参考文案" }), "zh",
+      { source: { platform: "bilibili", canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [], frameTexts: [], texts: [], observations: [] }, 1);
+    expect(copy.requests[0].reasoning).toBeUndefined();
   });
   it("reuses a summary after database key reordering", async () => {
     const f = setup({ summary: [{ statement: "咖啡", evidenceIds: ["t0001"], inference: false }], timeline: [], marketingPoints: [], limitations: [] });

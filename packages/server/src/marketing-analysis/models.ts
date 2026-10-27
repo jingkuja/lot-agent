@@ -63,8 +63,11 @@ function parseModelJson(text: string): unknown {
 export class AnalysisModels {
   constructor(private readonly deps: AnalysisModelDeps) {}
 
-  private async invoke<T>(stepId: string, model: string, messages: Message[], images: number, signal: AbortSignal | undefined, validate: (raw: unknown) => T): Promise<T> {
+  private async invoke<T>(stepId: string, model: string, messages: Message[], images: number, signal: AbortSignal | undefined, validate: (raw: unknown) => T,
+    reasoning?: "off"): Promise<T> {
     signal?.throwIfAborted();
+    // The hash identifies the submitted evidence and output limit. The reasoning setting is left out, so a summary that
+    // failed before thinking was turned off (all 8192 tokens spent on reasoning) can still be resumed on its frozen input.
     const payload = JSON.stringify({ model, messages, maxTokens: 8192 });
     if (Buffer.byteLength(payload) > ANALYSIS_LIMITS.requestBytes) throw new AnalysisError("MODEL_REQUEST_LIMIT");
     const llm = await this.deps.provider(model, signal);
@@ -85,7 +88,8 @@ export class AnalysisModels {
         // caller cancellation and lease loss still abort immediately.
         const synthesis = stepId.startsWith("summary:") || stepId.startsWith("copy:");
         const deadline = AbortSignal.timeout(synthesis ? 300000 : 120000);
-        for await (const chunk of llm.chat(messages, undefined, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline, params: { maxTokens: 8192 },
+        for await (const chunk of llm.chat(messages, undefined, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+          params: { maxTokens: 8192, ...(reasoning ? { reasoning } : {}) },
           onResponseId: id => {
             receipt!.responseId = id;
             savingId = savingId.then(() => this.deps.ledger.responseId?.(stepId, id)).catch(() => {});
@@ -202,7 +206,9 @@ export class AnalysisModels {
         frames: input.frames.map(({ id, ptsMs }) => ({ id, ptsMs })),
         texts: input.texts.map(({ id, text, frameIds, firstSeenMs, lastSeenMs }) => ({ id, text, frameIds, firstSeenMs, lastSeenMs })),
         observations: input.observations.map(({ description, frameIds, uncertainty }) => ({ description, frameIds, uncertainty })) }) },
-    ], 0, signal, raw => alignSummaryTimeline(raw, input.frames, input.texts, input.durationMs, input.speech));
+      // The summary arranges given evidence into JSON. With thinking on, kimi-k3.1-pro spent the whole 8192-token output
+      // on reasoning for a ~11k-token input and returned no text, so this step runs without it.
+    ], 0, signal, raw => alignSummaryTimeline(raw, input.frames, input.texts, input.durationMs, input.speech), "off");
     const result = raw;
     result.limitations = [...new Set([...input.limitations, ...result.limitations])].slice(0, 20);
     return result;
