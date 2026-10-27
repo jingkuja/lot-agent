@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingNarrationSpareSec, marketingReviewText, marketingStoryboardAudioMismatch, resolveMarketingSegments,
-  type MarketingDraft, type MarketingProject, type MarketingReview } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingNarrationSpareSec, marketingReviewText, marketingShotMaxSeconds, marketingStoryboardAudioMismatch,
+  resolveMarketingSegments, type MarketingDraft, type MarketingDraftSnapshot, type MarketingProject, type MarketingReview } from "@lot-agent/core/marketing-video";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
@@ -8,7 +8,8 @@ import { TextOperationPanel } from "./TextOperationPanel.js";
 import { ReviewPanel } from "./ReviewPanel.js";
 import { ReferenceAnalysisPanel } from "./ReferenceAnalysisPanel.js";
 import { DraftLibrary, formatBytes, useDraftLibrary } from "./DraftLibrary.js";
-import { errorMessage, requestProject, unavailableMessage, type Project } from "./api.js";
+import { errorMessage, json, requestProject, unavailableMessage, type Project } from "./api.js";
+import { DraftHistory } from "./DraftHistory.js";
 import { ResultPanel } from "./ResultPanel.js";
 import { CopyStep } from "./CopyStep.js";
 import { MaterialsStep } from "./MaterialsStep.js";
@@ -71,6 +72,13 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   }, [validReview, project?.id, project?.review]);
   const staleReview = !validReview && project && lastReview?.projectId === project.id ? lastReview.review : undefined;
   const form: DraftForm = { draft, busy, frozen, ready, field: editor.field };
+  // Lines of the saved board that have a twin narration take, to tell which shots a structure edit leaves without one.
+  const [takeLines, setTakeLines] = useState<{ projectId: string; lines: Set<string> } | null>(null);
+  useEffect(() => {
+    const clips = production.currentNarration;
+    if (clips && project) setTakeLines({ projectId: project.id,
+      lines: new Set(clips.flatMap(clip => clip.status === "succeeded" && project.draft.storyboard[clip.slot] ? [project.draft.storyboard[clip.slot].script] : [])) });
+  }, [production.currentNarration]);
 
   useEffect(() => {
     if (!frozen && step === CONFIRM_STEP && draft.storyboard.length) storyboardPanel.current?.scrollIntoView({ block: "start" });
@@ -160,6 +168,20 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     });
   }
 
+  /** Put an earlier copy and storyboard back; the server keeps the current ones as another version first. */
+  async function restoreSnapshot(snapshot: MarketingDraftSnapshot, time: string) {
+    const message = "将用 {0} 保存的版本替换当前文案、分镜和标题标签，素材、配音方式和画面设置不变。当前内容会先保存为一份历史版本，可以再恢复。不收费。";
+    if (!await confirm({ title: "恢复历史版本", message, values: [time], confirm: "恢复" })) return;
+    await act(async () => {
+      const p = await editor.save();
+      const token = session.token();
+      const restored = await requestProject(`/marketing-videos/${p.id}/snapshots/${snapshot.id}/restore`, json("POST", { version: p.version }));
+      if (!session.current(token)) return;
+      editor.load(restored);
+      setNotice("已恢复所选版本，恢复前的内容已保存为一份历史版本。");
+    });
+  }
+
   const plan = (() => {
     try { return { parts: resolveMarketingSegments(draft, profile), error: "" }; }
     catch (e) { return { parts: [], error: errorMessage(e) }; }
@@ -212,6 +234,10 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     clips={narrationClips} busy={busy || !ready}
     spareSec={narrationClips ? marketingNarrationSpareSec(draft.storyboard, draft, profile, narrationClips.map(clip => clip.durationMs)) : 0}
     onSynthesize={slots => void act(() => production.synthesizeNarration(slots))} onFit={production.fitNarration} />;
+  const history = project?.snapshots && !frozen ? <DraftHistory projectId={project.id} count={project.snapshots} version={project.version}
+    busy={busy || saving || !ready} onRestore={(snapshot, time) => void restoreSnapshot(snapshot, time)} /> : null;
+  const structure = { durationSec: draft.durationSec, maxShot: marketingShotMaxSeconds(draft, profile),
+    takes: production.voiceover && takeLines?.projectId === project?.id ? takeLines?.lines : undefined };
   const generateLabel = busy && !text.unknown ? saving ? "正在保存…" : "正在处理…" : draft.storyboard.length ? "确认分镜并生成视频" : "生成分镜";
 
   return <div className="mv-scroll"><div className="mv-studio">
@@ -247,7 +273,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
               onActive={value => { if (project?.id === editor.draftId.current) text.setAnalysisPending(value); }}
               onComplete={text.completedAnalysis} completedAction={copyAction} disabled={exclusive.busy || text.pending || saving || !ready} />
             : copyAction}
-          onUploadSource={text.chooseReferenceSource} onReferenceFile={file => void act(() => text.selectReferenceVideo(file))}
+          history={history} onUploadSource={text.chooseReferenceSource} onReferenceFile={file => void act(() => text.selectReferenceVideo(file))}
           onPublication={() => void act(() => text.publication())} />}
         {step === 1 && <MaterialsStep form={form} profile={profile} handlers={materials.handlers} referenceVideoStatus={referenceVideoStatus}
           onPickPortrait={() => setTwinOpen("portrait")} audioNotice={audioNotice} />}
@@ -256,7 +282,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
           onPickVoice={() => setTwinOpen("voice")} onPickNarrationVoice={() => setTwinOpen("narration")} />}
         {step === CONFIRM_STEP && <ConfirmStep form={form} parts={plan.parts} planError={plan.error} blocker={blocker} blockerId={generationHintId}
           buttonLabel={generateLabel} checks={checks} storyboardPanel={storyboardPanel} audioNotice={audioNotice} reviewPanel={reviewSection}
-          keyArtPanel={keyArtPanel} narrationPanel={narrationPanel} onStoryboard={editor.setShots} onStoryboardAi={text.aiStoryboard}
+          keyArtPanel={keyArtPanel} narrationPanel={narrationPanel} history={history} structure={structure}
+          onStoryboard={editor.setShots} onStoryboardAi={text.aiStoryboard}
           onEditCopy={() => setStep(0)}
           onGenerate={() => void act(() => draft.storyboard.length ? production.generate() : text.editStoryboard())}
           onManualStoryboard={() => void act(text.manualStoryboard)} />}

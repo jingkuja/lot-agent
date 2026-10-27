@@ -148,6 +148,19 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     }
     return c.json(await store.save(c.get("userId"), c.req.param("id"), body.version, parsed.data));
   });
+  // Earlier copy and storyboard versions (assessment M04); restoring one is free.
+  app.get("/:id/snapshots", async (c) => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    return c.json({ data: await store.snapshots(owner, p.id) });
+  });
+  app.post("/:id/snapshots/:snapshotId/restore", async (c) => {
+    const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+    const snapshotId = c.req.param("snapshotId");
+    if (!uuid.test(snapshotId)) throw new MarketingError("历史版本不存在，请刷新后重试。", 404);
+    const body = await c.req.json().catch(() => null);
+    if (!Number.isInteger(body?.version) || body.version < 1) throw new MarketingError("草稿参数无效");
+    return c.json(await store.restoreSnapshot(owner, p.id, body.version, snapshotId));
+  });
   app.delete("/:id", async (c) => {
     const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
     // A cancelled job may still be queued or finishing in BullMQ.

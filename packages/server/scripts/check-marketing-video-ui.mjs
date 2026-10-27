@@ -74,6 +74,13 @@ try {
   // Takes whose next background synthesis fails, and the failed ones with the reason the server records.
   const failingTakes = new Set(), failedTakes = new Map();
   const keyArts = new Map();
+  // Earlier copy and storyboard versions per draft, newest first, kept like the server before an AI board revision (M04).
+  const snapshots = new Map();
+  const keepSnapshot = (p, reason) => {
+    const kept = { id: crypto.randomUUID(), reason, createdAt: new Date().toISOString(), draft: structuredClone(p.draft) };
+    const list = [kept, ...(snapshots.get(p.id) ?? [])].slice(0, 10);
+    snapshots.set(p.id, list); p.snapshots = list.length;
+  };
   const narrationClips = (p) => p.draft.storyboard.map((shot, slot) => backgroundTakes.has(`${p.id}:${shot.script}`) ? { slot, status: 'running' }
     : failedTakes.has(`${p.id}:${shot.script}`) ? { slot, status: 'failed', error: failedTakes.get(`${p.id}:${shot.script}`) }
     : narrationTakes.has(`${p.id}:${shot.script}`) ? { slot, status: 'succeeded', durationMs: narrationTakes.get(`${p.id}:${shot.script}`) } : { slot, status: 'missing' });
@@ -141,7 +148,19 @@ try {
         const body = request.postDataJSON(); assert.equal(body.version, p.version);
         const current = p.draft.storyboard.length ? p.draft.storyboard : aiPlan(p.draft.script, p.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '木质吧台和咖啡产品特写', action: '自然讲述并展示咖啡', camera: '缓慢推近' }));
         const shots = current.map((shot, index) => body.instruction && (body.index === undefined || body.index === index) ? { ...shot, camera: 'AI 调整镜头' } : shot);
+        keepSnapshot(p, 'storyboard');
         p.version++; p.draft = { ...p.draft, storyboard: shots, script: storyboardScript(shots), storyboardAudio: body.index === undefined ? !p.draft.assets.video : p.draft.storyboardAudio }; p.review = null;
+        return json(p);
+      }
+      if (action === 'snapshots') {
+        const list = snapshots.get(p.id) ?? [], snapshotId = path.split('/')[5];
+        if (!snapshotId) return json({ data: list.map(({ id, reason, createdAt, draft }) => ({ id, reason, createdAt, shots: draft.storyboard.length,
+          durationSec: draft.storyboard.reduce((sum, shot) => sum + shot.durationSec, 0), excerpt: draft.script.slice(0, 80) })) });
+        const body = request.postDataJSON(); assert.equal(body.version, p.version);
+        const saved = list.find(item => item.id === snapshotId); assert(saved, 'snapshot missing');
+        keepSnapshot(p, 'restore');
+        const { script, storyboard, storyboardAudio, continuity, publishTitle, tags } = saved.draft;
+        p.version++; p.draft = { ...p.draft, script, storyboard, storyboardAudio, continuity, publishTitle, tags }; p.review = null;
         return json(p);
       }
       if (['review', 'publication'].includes(action)) {
@@ -542,6 +561,46 @@ try {
   await page.getByText('修改分镜', { exact: true }).click();
   assert.equal(await firstShot.getByLabel('分镜口播').inputValue(), '欢迎来到转角咖啡店，一起喝杯咖啡。');
   assert.equal(await firstShot.getByLabel('景别与镜头运动').inputValue(), 'AI 调整镜头');
+  // M03: shot times and order change in place; the last structure edit can be undone, and the total shows against the allowed range.
+  const lines = async () => Promise.all((await page.locator('.mv-shot').all()).map(shot => shot.getByLabel('分镜口播').inputValue()));
+  const before = await lines();
+  const shotCount = before.length;
+  await secondShot.getByRole('button', { name: '上移', exact: true }).click();
+  assert.deepEqual(await lines(), [before[1], before[0], ...before.slice(2)]);
+  const structureNotice = page.locator('.mv-audio-notice').filter({ hasText: '已调整分镜结构。' });
+  await structureNotice.getByText('生成前会重新检查文案。', { exact: false }).waitFor();
+  await structureNotice.getByRole('button', { name: '撤销本次调整', exact: true }).click();
+  assert.deepEqual(await lines(), before);
+  await firstShot.getByRole('button', { name: '拆分', exact: true }).click();
+  assert.equal(await page.locator('.mv-shot').count(), shotCount + 1);
+  await structureNotice.scrollIntoViewIfNeeded();
+  await snap('marketing-video-structure.png');
+  assert.deepEqual((await lines()).slice(0, 2), ['欢迎来到转角咖啡店，', '一起喝杯咖啡。']);
+  await structureNotice.getByRole('button', { name: '撤销本次调整', exact: true }).click();
+  assert.equal(await page.locator('.mv-shot').count(), shotCount);
+  const firstLength = firstShot.getByLabel('第 1 镜时长');
+  const seconds = await firstLength.inputValue();
+  await firstLength.selectOption('4');
+  await page.locator('.mv-structure-warning').filter({ hasText: '请加长镜头或增加镜头。' }).waitFor();
+  await firstLength.selectOption(seconds);
+  assert.equal(await page.locator('.mv-structure-warning').count(), 0);
+  assert.equal(await page.getByRole('button', { name: '删除', exact: true }).first().isDisabled(), false);
+  // M04: the board before the AI revision comes back free of charge, and so does the one the restore replaced.
+  await page.waitForFunction(() => document.querySelector('.mv-footer [role=status]')?.textContent === '草稿已保存');
+  // Generating the board and the AI revision each kept the version before them.
+  await page.locator('.mv-history summary').filter({ hasText: '历史版本（2）' }).click();
+  await page.locator('.mv-history li').first().filter({ hasText: 'AI 修改分镜前' }).getByRole('button', { name: '恢复上一版', exact: true }).click();
+  await confirmDialog('恢复历史版本', '恢复');
+  await page.getByRole('status').filter({ hasText: '已恢复所选版本' }).waitFor();
+  assert.equal(await firstShot.getByLabel('景别与镜头运动').inputValue(), '缓慢推近');
+  assert.equal(await firstShot.getByLabel('分镜口播').inputValue(), '欢迎来到转角咖啡店，一起喝杯咖啡。');
+  await page.locator('.mv-history summary').filter({ hasText: '历史版本（3）' }).waitFor();
+  await page.locator('.mv-history li').first().filter({ hasText: '恢复历史版本前' }).getByRole('button', { name: '恢复上一版', exact: true }).click();
+  await confirmDialog('恢复历史版本', '恢复');
+  await page.locator('.mv-history summary').filter({ hasText: '历史版本（4）' }).waitFor();
+  assert.equal(await firstShot.getByLabel('景别与镜头运动').inputValue(), 'AI 调整镜头');
+  assert.equal(writes.filter(r => r.path.includes('/snapshots/')).length, 2);
+  await page.locator('.mv-history summary').click();
   await page.getByRole('heading', { name: '确认分镜', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-storyboard.png');
   // Twin narration: only a cloned voice can be picked; takes are generated and fitted before any clip.
@@ -846,6 +905,11 @@ try {
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.getByRole('heading', { name: 'Review storyboard', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-storyboard-en-compact.png');
+  await page.getByRole('article', { name: 'Shot 1', exact: true }).getByRole('button', { name: 'Split', exact: true }).click();
+  await page.locator('.mv-audio-notice').filter({ hasText: 'The storyboard structure changed.' }).scrollIntoViewIfNeeded();
+  await snap('marketing-video-structure-en-compact-dark.png');
+  await page.getByRole('button', { name: 'Undo this change', exact: true }).click();
+  assert.equal(await page.locator('.mv-shot').count(), planMarketingSegments(script, 30).length);
   // No still and no reference image at all: the warning names the paid shot redo, and cancelling submits nothing.
   const generatesBefore = writes.filter(r => r.path.endsWith('/generate')).length;
   await page.getByRole('button', { name: 'Confirm storyboard and generate video' }).click();
@@ -1031,7 +1095,7 @@ try {
   assert(materialRefreshes.length > 0, 'Expired or failed previews reauthorize through the owned asset API');
   assert(statusPolls > 0, 'progress is polled from the task state endpoint');
   assert.deepEqual(errors, []); assert.deepEqual(unexpectedRequests, []); assert.deepEqual(nativeDialogs, []);
-  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, four-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, 60s plan, editable storyboard, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, AI-voice and narrated captions blocked until subtitles are off when local subtitles are unsupported, SRT download, adjusting caption size, offsets and line breaks (never words) and recomposing, recomposing captions and reworded narrated lines without a redone shot, following narration takes after reopening, retrying only failed narration takes after confirmation, titles filled and checked after submission, duplicated/new drafts, dark and English responsive layouts.');
+  console.log('PASS: legacy drafts/results without storyboard, no spurious autosave, legacy-to-storyboard editing and reload, unavailable-server guard and reconnect, generated copy preserved after review failure, four-step workflow, reference rewrite and review, avatar/background selection, optional voice library selection and removal, generation without a voice sample, visible plan errors and edit recovery, generation during pending autosave, 60s plan, editable storyboard, shot times and order with undo, restoring earlier versions, scoped/all AI edits, failure preservation, manual storyboard, double-click safety, reload recovery, editable publication, archive/update, single shot redo, AI-voice and narrated captions blocked until subtitles are off when local subtitles are unsupported, SRT download, adjusting caption size, offsets and line breaks (never words) and recomposing, recomposing captions and reworded narrated lines without a redone shot, following narration takes after reopening, retrying only failed narration takes after confirmation, titles filled and checked after submission, duplicated/new drafts, dark and English responsive layouts.');
 } catch (error) {
   console.error({ errors, unexpectedRequests, body: await page?.locator('body').innerText() });
   throw error;

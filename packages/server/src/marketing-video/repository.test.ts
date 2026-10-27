@@ -60,7 +60,8 @@ describe("deleting marketing drafts", () => {
     const deletes = f.query.mock.calls.filter(([text]) => text.startsWith("DELETE"));
     expect(deletes.map(([text, params]) => [text.split(/\s+WHERE/)[0], params])).toEqual([
       ["DELETE FROM assets", ["owner", "task", "project"]], ["DELETE FROM assets", ["owner", "project"]],
-      ["DELETE FROM marketing_text_operations", ["owner", "project"]], ["DELETE FROM marketing_video_projects", ["owner", "project"]],
+      ["DELETE FROM marketing_text_operations", ["owner", "project"]], ["DELETE FROM marketing_draft_snapshots", ["owner", "project"]],
+      ["DELETE FROM marketing_video_projects", ["owner", "project"]],
       ["DELETE FROM marketing_analysis_revisions", ["current"]], ["DELETE FROM marketing_analysis_revisions", ["old"]]]);
     expect(f.query.mock.calls.filter(([text]) => text.startsWith("UPDATE marketing_reference_analyses SET deleted_at")).map(([, params]) => params)).toEqual([["current"], ["old"]]);
     expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");

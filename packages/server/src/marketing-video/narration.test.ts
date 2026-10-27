@@ -63,6 +63,21 @@ describe("marketing twin narration", () => {
       expect(f.speakAs).toHaveBeenCalledTimes(2);
     } finally { await rm(f.root, { recursive: true, force: true }); }
   });
+  it("keeps a moved shot's take and gives a redo of it its own row (assessment M03)", async () => {
+    const f = await setup();
+    try {
+      await f.narrator.synthesize("owner", projectId, draft, segments);
+      const swapped = [{ ...segments[1], index: 0 }, { ...segments[0], index: 1 }];
+      expect(await f.narrator.status("owner", projectId, draft, swapped)).toEqual([{ slot: 0, status: "succeeded", durationMs: 2500 },
+        { slot: 1, status: "succeeded", durationMs: 2500 }]);
+      expect((await f.narrator.frozen("owner", projectId, draft, swapped)).map(take => take.slot)).toEqual([0, 1]);
+      expect(f.speakAs).toHaveBeenCalledTimes(2);
+      // Redoing a borrowed take makes a new one for this place; the shot it came from keeps its own.
+      await f.narrator.synthesize("owner", projectId, draft, swapped, [0]);
+      expect(f.speakAs).toHaveBeenCalledTimes(3);
+      expect(f.pool.rows.size).toBe(3);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
   it("leaves a failed take failed until the user asks for that shot again", async () => {
     const speakAs = vi.fn(async () => { throw new ProviderError("speech", "create", "TRANSPORT_ERROR", {}); });
     const f = await setup(speakAs as never);

@@ -176,8 +176,11 @@ try {
   for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "下一步", exact: true }).click();
   await page.getByText("目标 60 秒，分镜共 65 秒，分 5 段生成。", { exact: true }).waitFor();
   await page.getByText("修改分镜", { exact: true }).click();
-  await page.getByText("0–13s · 13 秒", { exact: true }).waitFor();
-  await page.getByText("52–65s · 13 秒", { exact: true }).waitFor();
+  // Each shot shows its time span and a length that can be changed in place.
+  await page.getByText("0–13s", { exact: true }).waitFor();
+  await page.getByText("52–65s", { exact: true }).waitFor();
+  assert.equal(await page.getByLabel("第 1 镜时长", { exact: true }).inputValue(), "13");
+  assert.equal(await page.getByLabel("第 5 镜时长", { exact: true }).inputValue(), "13");
   await page.getByText("出镜人物将在每个镜头出镜，保持形象一致。", { exact: true }).waitFor();
   assert.equal(await page.getByText("中景缓缓推进", { exact: true }).count(), 3);
   assert.equal(await page.getByRole("button", { name: "确认分镜并生成视频", exact: true }).isEnabled(), true);

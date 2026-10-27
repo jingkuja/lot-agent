@@ -15,13 +15,16 @@ const SOURCE_HINTS: Record<SourceKind, string> = {
 
 /** Step 1: write copy from a topic, or rewrite a reference video, link or text. The shots it plans are
  * listed here and edited in the confirmation step. */
-export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, analysis, planError, onUploadSource, onReferenceFile, onPublication }: {
+export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, analysis, planError, history, onUploadSource, onReferenceFile,
+  onPublication }: {
   form: DraftForm; inputId: string; sourceKind: SourceKind; uploading: boolean;
   /** The copy button, or the reference analysis panel that ends with it. */
   analysisPanel: ReactNode;
   /** Structure notes returned with the latest copy. */
   analysis: string;
   planError: string;
+  /** Earlier copy and storyboard versions to restore. */
+  history: ReactNode;
   /** Links and pasted copy are told apart automatically; only uploads are chosen. */
   onUploadSource(upload: boolean): void; onReferenceFile(file: File): void; onPublication(): void;
 }) {
@@ -72,6 +75,7 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
         <p className="mv-hint">{t("分镜和统一设定在「确认与生成」中修改。")}</p>
       </div>}
       {draft.script.trim() && planError && <p className="mv-error" role="alert">{t(planError)}</p>}
+      {history}
       <details className="mv-script-review" open><summary>{t("标题标签")}</summary>
         <DraftText form={form} name="publishTitle" label="视频发布标题" max={100} />
         <DraftText form={form} name="tags" label="短视频检索标签" max={160} />

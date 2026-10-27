@@ -572,6 +572,35 @@ try {
   await assert.rejects(operations.begin(pager, randomUUID(), busy[2].id, busy[2].version, "storyboard", { version: busy[2].version }), { status: 429 });
   await operations.fail(pager, running[0], false);
   assert.equal((await operations.begin(pager, randomUUID(), busy[2].id, busy[2].version, "storyboard", { version: busy[2].version })).fresh, true);
+  // M04: an applied AI result and a save that drops the shots keep the earlier copy and board; restoring is undoable and owner-scoped.
+  let kept = await store.save(owner, randomUUID(), 0, { ...draft, assets: {} });
+  const boardId = randomUUID();
+  await operations.begin(owner, boardId, kept.id, kept.version, "storyboard", { version: kept.version });
+  const revisedShots = kept.draft.storyboard.map(shot => ({ ...shot, visual: "人物在窗边举杯" }));
+  const revisedBoard = MarketingDraftSchema.parse({ ...kept.draft, storyboard: revisedShots });
+  assert.equal((await operations.finish(owner, boardId, { draft: revisedBoard, analysis: "" })).status, "succeeded");
+  kept = (await store.get(owner, kept.id))!;
+  assert.equal(kept.snapshots, 1);
+  kept = await store.save(owner, kept.id, kept.version, { ...kept.draft, script: "新的文案", storyboard: [] });
+  kept = await store.save(owner, kept.id, kept.version, { ...kept.draft, ratio: "16:9" });
+  const history = await store.snapshots(owner, kept.id);
+  assert.deepEqual(history.map(h => [h.reason, h.shots]), [["clear", 2], ["storyboard", 2]], "only AI results and dropped shots are kept");
+  assert.deepEqual(await store.snapshots(other, kept.id), []);
+  await assert.rejects(store.restoreSnapshot(other, kept.id, kept.version, history[1].id), /不存在/);
+  await assert.rejects(store.restoreSnapshot(owner, kept.id, kept.version - 1, history[1].id), /其他页面/);
+  await assert.rejects(store.restoreSnapshot(owner, submitted.id, (await store.get(owner, submitted.id))!.version, history[1].id), /已提交/);
+  const restored = await store.restoreSnapshot(owner, kept.id, kept.version, history[1].id);
+  assert.deepEqual(restored.draft.storyboard, draft.storyboard, "the board before the AI result is back");
+  assert.equal(restored.draft.ratio, "16:9", "settings changed since stay");
+  assert.equal(restored.snapshots, 3);
+  assert.equal((await store.snapshots(owner, kept.id))[0].reason, "restore");
+  kept = restored;
+  // Each board differs; a version the newest snapshot already holds is not kept twice.
+  for (let i = 0; i < 24; i++) kept = await store.save(owner, kept.id, kept.version, i % 2 ? { ...kept.draft, script: `文案 ${i}`, storyboard: [] }
+    : { ...kept.draft, script: storyboardScript(draft.storyboard), storyboard: draft.storyboard.map(shot => ({ ...shot, visual: `镜头 ${i}` })) });
+  assert.equal(kept.snapshots, 10, "the newest ten are kept");
+  await store.remove(owner, kept.id);
+  assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_draft_snapshots WHERE project_id=$1", [kept.id])).rows[0].n, 0);
   // R1: twin narration takes on PG, a version 4 job composed from them, and cleanup with the draft.
   const twin = randomUUID(), silentTake = join(root, "take.wav");
   await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=24000", "-t", "3", silentTake]);
@@ -696,5 +725,37 @@ try {
   assert(metrics.composeSec.n > 0, "composition is timed");
   const reconciliation = await marketingReconciliation(db.pool, 1);
   assert((reconciliation.counts.clip_released ?? 0) > 0, "released unknown clips are listed for the gateway check");
-  console.log(JSON.stringify({ migrations: "upgrade and repeated startup passed", adminViews: { renders: metrics.renders.length, clips: metrics.clips.length, reconciliation: reconciliation.counts }, keyArt: "one paid still per look under concurrency, owner-scoped, redo only on request, removed with the draft", twinNarration: "takes paid once per shot, owner-scoped, v4 job composed from them, removed with the draft", ownerRenderCap: "live entries only, owner-scoped", parentVoice: "single claim per parent and slot", draftPaging: "exact cursor, literal search", recordedReview: "receipt recovery, replay, conflict", publicationAfterJob: "allowed", textInflightCap: "429 at 2", ownership: "passed", reviewVersioning: "passed", atomicReservation: "passed", segmentRetry: "passed", unknownSubmission: "no replay", unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply", shotRedo: "only chosen shots submitted and billed, kept clips reused, composition-only and narrated rewording/voice changes recomposed without clips, earlier jobs removed with the draft", cancellation: "passed", downloadResume: "passed", legacyWebmHttpRecovery: "202, original IDs and input, no new POST", safeErrors: "adapter, task.error, HTTP view and logs passed", billingDedup: "passed", archiveUpdateAndRecreate: "passed", oversizedPlan: "70s rejected with zero provider calls", compositionSeconds: [15, 17, 30, 45, 60, 65], maximumShots: 15, bgm: "passed", modelCaptions: "prompt-controlled; visual quality requires real model verification", creates, polls }, null, 2));
+  console.log(JSON.stringify({
+    migrations: "upgrade and repeated startup passed",
+    adminViews: { renders: metrics.renders.length, clips: metrics.clips.length, reconciliation: reconciliation.counts },
+    keyArt: "one paid still per look under concurrency, owner-scoped, redo only on request, removed with the draft",
+    twinNarration: "takes paid once per shot, owner-scoped, v4 job composed from them, removed with the draft",
+    ownerRenderCap: "live entries only, owner-scoped",
+    parentVoice: "single claim per parent and slot",
+    draftPaging: "exact cursor, literal search",
+    recordedReview: "receipt recovery, replay, conflict",
+    publicationAfterJob: "allowed",
+    textInflightCap: "429 at 2",
+    ownership: "passed",
+    reviewVersioning: "passed",
+    atomicReservation: "passed",
+    segmentRetry: "passed",
+    unknownSubmission: "no replay",
+    unknownRelease: "owner-scoped, audited, unfinished clips only; text intents released without late apply",
+    draftSnapshots: "AI results and dropped shots kept, newest ten, restore undoable and owner-scoped, removed with the draft",
+    shotRedo: "only chosen shots submitted and billed, kept clips reused, composition-only and narrated rewording/voice changes recomposed without clips, earlier jobs removed with the draft",
+    cancellation: "passed",
+    downloadResume: "passed",
+    legacyWebmHttpRecovery: "202, original IDs and input, no new POST",
+    safeErrors: "adapter, task.error, HTTP view and logs passed",
+    billingDedup: "passed",
+    archiveUpdateAndRecreate: "passed",
+    oversizedPlan: "70s rejected with zero provider calls",
+    compositionSeconds: [15, 17, 30, 45, 60, 65],
+    maximumShots: 15,
+    bgm: "passed",
+    modelCaptions: "prompt-controlled; visual quality requires real model verification",
+    creates,
+    polls,
+  }, null, 2));
 } finally { await db.close(); await rm(root, { recursive: true, force: true }); }

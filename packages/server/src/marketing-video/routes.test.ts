@@ -29,6 +29,7 @@ function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
     reserve: vi.fn(async () => "task"),
     remove: vi.fn(async () => ({ files: [] as string[], keyArtFiles: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })),
     usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1),
+    snapshots: vi.fn(async () => [] as unknown[]), restoreSnapshot: vi.fn(async (..._args: unknown[]) => project),
   };
   const getAsset = vi.fn(async (_id: string): Promise<Record<string, unknown>> => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 }));
   const service = {
@@ -583,6 +584,22 @@ it("rejects Grok reference video with images and 1080p references before billing
   expect(f.store.reserve).not.toHaveBeenCalled();
 });
 
+
+describe("earlier draft versions (assessment M04)", () => {
+  const snapshotId = "22222222-2222-4222-8222-222222222222";
+  it("lists and restores them only through the owner-scoped store", async () => {
+    const f = fixture();
+    const list = await f.app.request(`/api/marketing-videos/${id}/snapshots`);
+    expect(list.status).toBe(200);
+    expect(f.store.snapshots).toHaveBeenCalledWith("owner", id);
+    expect((await f.call(`/${id}/snapshots/${snapshotId}/restore`, { version: 1 })).status).toBe(200);
+    expect(f.store.restoreSnapshot).toHaveBeenCalledWith("owner", id, 1, snapshotId);
+    expect((await f.call(`/${id}/snapshots/not-a-uuid/restore`, { version: 1 })).status).toBe(404);
+    expect((await f.call(`/${id}/snapshots/${snapshotId}/restore`, { version: "1" })).status).toBe(400);
+    expect(f.store.restoreSnapshot).toHaveBeenCalledOnce();
+    expect(f.service.marketingText).not.toHaveBeenCalled();
+  });
+});
 
 describe("explicit release of unknown paid outcomes", () => {
   const operationId = "22222222-2222-4222-8222-222222222222";

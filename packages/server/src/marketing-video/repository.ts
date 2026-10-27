@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
-import { isMarketingFailureCode, MarketingDraftSchema, marketingJobProfile, marketingRenderKey, marketingRevisionKey, marketingShotNeedsClip, storyboardScript,
-  type MarketingComposition, type MarketingDraft, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview,
+import { isMarketingFailureCode, MARKETING_SNAPSHOT_LIMIT, marketingDraftContent, MarketingDraftSchema, marketingJobProfile, marketingRenderKey,
+  marketingRevisionKey, marketingShotNeedsClip, restoreMarketingDraft, storyboardScript, type MarketingComposition, type MarketingDraft,
+  type MarketingDraftSnapshot, type MarketingProject, type MarketingProjectStore, type MarketingTaskState, type MarketingReview,
   resolveMarketingSegments, marketingReviewText } from "@lot-agent/core/marketing-video";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION } from "./recovery.js";
 import { analysisDeleteBlocker, deleteAnalysisRecord, ownerLock as analysisOwnerLock } from "../marketing-analysis/repository.js";
@@ -19,7 +20,9 @@ const jobComposition = (input: Record<string, any>): MarketingComposition => ({
 const taskColumns = `t.status, t.progress, t.stage, t.error, t.error_code, t.output,
   (SELECT count(*)::int FROM marketing_video_segments s JOIN tasks st ON st.id=s.task_id
     WHERE s.project_id=p.id AND st.input->>'parentId'=p.task_id::text AND st.vendor_task_id='${UNKNOWN_SUBMISSION}') AS unknown_segments`;
-const select = `SELECT p.*, ${taskColumns} FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
+const select = `SELECT p.*, ${taskColumns},
+  (SELECT count(*)::int FROM marketing_draft_snapshots h WHERE h.user_id=p.user_id AND h.project_id=p.id) AS snapshot_count
+  FROM marketing_video_projects p LEFT JOIN tasks t ON t.id=p.task_id`;
 /** The made video with links its owner's browser can play: private videos are served only by signed links. */
 function signedOutput(owner: string, output: MarketingTaskState["output"] | null): MarketingTaskState["output"] {
   if (!output || !Array.isArray(output.assets)) return output ?? undefined;
@@ -34,7 +37,32 @@ function taskState(row: Record<string, any>): MarketingTaskState {
 function project(row: Record<string, any>): MarketingProject {
   return { ...taskState(row), draft: MarketingDraftSchema.parse(row.draft), updatedAt: new Date(row.updated_at).toISOString(), review: row.review,
     ...(row.reference_analysis_id ? { referenceAnalysis: { id: row.reference_analysis_id, acceptedRevision: row.reference_revision, evidenceIds: row.reference_evidence_ids ?? [] } } : {}),
-    reviewedScript: row.reviewed_script, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version };
+    reviewedScript: row.reviewed_script, knowledgeItemId: row.knowledge_item_id, knowledgeVersion: row.knowledge_version,
+    ...(Number(row.snapshot_count) > 0 ? { snapshots: Number(row.snapshot_count) } : {}) };
+}
+/** Keep the copy and storyboard a draft holds now before they are replaced, unless there is
+ * nothing to restore or the newest snapshot already holds the same. Only the newest ten stay. */
+export async function saveSnapshot(client: pg.PoolClient, owner: string, projectId: string, version: number,
+  reason: MarketingDraftSnapshot["reason"], draft: MarketingDraft) {
+  if (!draft.script.trim() && !draft.storyboard.length) return;
+  const content = JSON.stringify(marketingDraftContent(draft));
+  const newest = (await client.query(`SELECT draft FROM marketing_draft_snapshots WHERE user_id=$1 AND project_id=$2
+    ORDER BY created_at DESC, id DESC LIMIT 1`, [owner, projectId])).rows[0];
+  if (newest && JSON.stringify(marketingDraftContent(MarketingDraftSchema.parse(newest.draft))) === content) return;
+  await client.query(`INSERT INTO marketing_draft_snapshots(id,user_id,project_id,project_version,reason,draft) VALUES($1,$2,$3,$4,$5,$6)`,
+    [randomUUID(), owner, projectId, version, reason, JSON.stringify(draft)]);
+  await client.query(`DELETE FROM marketing_draft_snapshots WHERE user_id=$1 AND project_id=$2 AND id NOT IN (
+    SELECT id FROM marketing_draft_snapshots WHERE user_id=$1 AND project_id=$2 ORDER BY created_at DESC, id DESC LIMIT $3)`, [owner, projectId, MARKETING_SNAPSHOT_LIMIT]);
+}
+/** Store a new draft of a locked project row: a changed source drops its reference analysis, and
+ * a changed review text drops the review. */
+async function writeDraft(client: pg.PoolClient, owner: string, id: string, draft: MarketingDraft) {
+  await client.query(`UPDATE marketing_video_projects SET draft=$3,version=version+1,updated_at=now(),
+    reference_analysis_id=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_analysis_id ELSE NULL END,
+    reference_revision=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_revision ELSE NULL END,
+    reference_evidence_ids=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_evidence_ids ELSE NULL END,
+    review=CASE WHEN reviewed_script=$4 THEN review ELSE NULL END,
+    reviewed_script=CASE WHEN reviewed_script=$4 THEN reviewed_script ELSE NULL END WHERE id=$1 AND user_id=$2`, [id, owner, JSON.stringify(draft), reviewText(draft)]);
 }
 /** The stopped or finished job of a draft whose single shots can be redone, with its clips.
  * A clip whose vendor task is still open or unknown must be settled by the job first. */
@@ -122,18 +150,55 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
             throw new MarketingError("成片只能修改分镜内容、背景音乐、字幕和旁白音色，其他制作配置不可修改，请复制为新草稿。", 409);
           }
         }
-        await client.query(`UPDATE marketing_video_projects SET draft=$3,version=version+1,updated_at=now(),
-          reference_analysis_id=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_analysis_id ELSE NULL END,
-          reference_revision=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_revision ELSE NULL END,
-          reference_evidence_ids=CASE WHEN draft->>'reference'=$3::jsonb->>'reference' AND draft->'referenceUpload' IS NOT DISTINCT FROM $3::jsonb->'referenceUpload' AND draft->>'copyMode'=$3::jsonb->>'copyMode' THEN reference_evidence_ids ELSE NULL END,
-          review=CASE WHEN reviewed_script=$4 THEN review ELSE NULL END,
-          reviewed_script=CASE WHEN reviewed_script=$4 THEN reviewed_script ELSE NULL END WHERE id=$1 AND user_id=$2`, [id, owner, JSON.stringify(draft), reviewText(draft)]);
+        // Rewriting the copy drops the shots; they may have come from a paid request.
+        const previous = MarketingDraftSchema.parse(old.draft);
+        if (!old.task_id && previous.storyboard.length && !draft.storyboard.length) await saveSnapshot(client, owner, id, old.version, "clear", previous);
+        await writeDraft(client, owner, id, draft);
       }
       // Read our own version while holding the row lock. A post-commit read
       // could acknowledge a newer tab's version as if it were this save.
       const saved = await withRevision(client, owner, project((await client.query(`${select} WHERE p.user_id=$1 AND p.id=$2`, [owner, id])).rows[0]));
       await client.query("COMMIT");
       return saved;
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+  /** Earlier versions of a draft's copy and storyboard, newest first. */
+  async snapshots(owner: string, id: string): Promise<MarketingDraftSnapshot[]> {
+    const { rows } = await this.pool.query(`SELECT id, reason, created_at, draft FROM marketing_draft_snapshots WHERE user_id=$1 AND project_id=$2
+      ORDER BY created_at DESC, id DESC`, [owner, id]);
+    return rows.map(row => {
+      const draft = MarketingDraftSchema.parse(row.draft);
+      return { id: row.id, reason: row.reason, createdAt: new Date(row.created_at).toISOString(), shots: draft.storyboard.length,
+        durationSec: draft.storyboard.reduce((sum, shot) => sum + shot.durationSec, 0), excerpt: Array.from(draft.script.trim()).slice(0, 80).join("") };
+    });
+  }
+  /** Put a snapshot's copy and storyboard back, free of charge, keeping the current ones as a
+   * snapshot first so the restore can be undone. A submitted video is frozen; a pending text
+   * request would lose its paid result to the version change. */
+  async restoreSnapshot(owner: string, id: string, version: number, snapshotId: string) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Same lock order as text operations: owner text lock, then the project row.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`marketing-text:${owner}`]);
+      const old = (await client.query("SELECT * FROM marketing_video_projects WHERE id=$1 AND user_id=$2 FOR UPDATE", [id, owner])).rows[0];
+      if (!old) throw new MarketingError("草稿不存在", 404);
+      if (old.version !== version) throw new MarketingError("草稿已在其他页面更新，请重新打开。", 409);
+      if (old.task_id) throw new MarketingError("已提交的视频不能恢复历史版本，请复制为新草稿。", 409);
+      if ((await client.query("SELECT 1 FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2 AND status IN ('running','unknown','needs_apply')", [owner, id])).rowCount) {
+        throw new MarketingError("已有创作请求正在处理或结果待核实，请查看页面底部的处理结果。", 409);
+      }
+      const saved = (await client.query("SELECT draft FROM marketing_draft_snapshots WHERE user_id=$1 AND project_id=$2 AND id=$3", [owner, id, snapshotId])).rows[0];
+      if (!saved) throw new MarketingError("历史版本不存在，请刷新后重试。", 404);
+      const current = MarketingDraftSchema.parse(old.draft);
+      const next = restoreMarketingDraft(current, MarketingDraftSchema.parse(saved.draft));
+      if (JSON.stringify(marketingDraftContent(next)) !== JSON.stringify(marketingDraftContent(current))) {
+        await saveSnapshot(client, owner, id, old.version, "restore", current);
+        await writeDraft(client, owner, id, next);
+      }
+      const restored = await withRevision(client, owner, project((await client.query(`${select} WHERE p.user_id=$1 AND p.id=$2`, [owner, id])).rows[0]));
+      await client.query("COMMIT");
+      return restored;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
   async setReview(owner: string, p: MarketingProject, review: MarketingReview) {
@@ -280,6 +345,7 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       const keyArts = (await client.query(`DELETE FROM assets WHERE user_id=$1 AND type='upload'
         AND id IN (SELECT asset_id FROM marketing_video_key_arts WHERE owner_id=$1 AND project_id=$2) RETURNING storage_key, size_bytes`, [owner, id])).rows;
       await client.query("DELETE FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2", [owner, id]);
+      await client.query("DELETE FROM marketing_draft_snapshots WHERE user_id=$1 AND project_id=$2", [owner, id]);
       await client.query("DELETE FROM marketing_video_projects WHERE user_id=$1 AND id=$2", [owner, id]);
       const removedAnalyses: string[] = []; let keptAnalyses = 0;
       for (const [i, row] of analyses.entries()) {

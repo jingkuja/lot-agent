@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 import { MARKETING_COPY_MODEL, MARKETING_REVIEW_MODEL, MarketingDraftSchema, type MarketingDraft } from "@lot-agent/core/marketing-video";
-import { MarketingError, reviewText } from "./repository.js";
+import { MarketingError, reviewText, saveSnapshot } from "./repository.js";
 import { marketingReviewDelta } from "./compliance.js";
 import type { MarketingTextReceipt } from "./text.js";
 import { parseOperationResult, textResultVersion, type TextOperationKind, type TextOperationResult } from "./text-result.js";
@@ -92,6 +92,10 @@ export class PgMarketingTextOperations {
             WHERE user_id=$1 AND id=$2 AND version=$3 AND ($6::boolean OR task_id IS NULL) RETURNING version`,
           [owner, row.project_id, row.project_version, JSON.stringify(result.draft), reviewText(result.draft!), allowedWithTask(row.kind)]);
       const status = applied.rowCount ? "succeeded" : "conflict";
+      // The AI result replaced the copy and storyboard its input was frozen from; keep them to restore.
+      if (applied.rowCount && (row.kind === "copy" || row.kind === "storyboard")) {
+        await saveSnapshot(client, owner, row.project_id, row.project_version, row.kind, MarketingDraftSchema.parse(row.input_snapshot.draft));
+      }
       const updated = (await client.query(`UPDATE marketing_text_operations SET result=$3,status=$4,applied_version=$5,updated_at=now()
         WHERE user_id=$1 AND id=$2 RETURNING *`, [owner, id, JSON.stringify(result), status, applied.rows[0]?.version ?? null])).rows[0];
       return view(updated);

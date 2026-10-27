@@ -69,7 +69,9 @@ export class MarketingNarrator {
   private async rows(owner: string, projectId: string, keys: string[]): Promise<(Row | undefined)[]> {
     const { rows } = await this.pool.query<Row>(`SELECT slot,narration_key,status,storage_key,duration_ms,updated_at,error FROM marketing_video_narrations
       WHERE owner_id=$1 AND project_id=$2 AND narration_key=ANY($3::text[])`, [owner, projectId, keys]);
-    return keys.map((key, slot) => rows.find(row => row.slot === slot && row.narration_key === key));
+    // A moved shot keeps its take: the key covers its line and the voice settings, not its place.
+    return keys.map((key, slot) => rows.find(row => row.slot === slot && row.narration_key === key)
+      ?? rows.find(row => row.narration_key === key && row.status === "succeeded"));
   }
   private clip(row: Row | undefined, slot: number): MarketingNarrationClip {
     if (!row) return { slot, status: "missing" };
@@ -91,13 +93,15 @@ export class MarketingNarrator {
   async synthesize(owner: string, projectId: string, draft: MarketingDraft, segments: MarketingSegment[], redo: number[] = [],
     options: { background?: boolean; failedOnly?: boolean } = {}) {
     const { voice, settings, keys } = await this.plan(owner, draft, segments);
-    const current = (await this.rows(owner, projectId, keys)).map((row, slot) => this.clip(row, slot));
+    const found = await this.rows(owner, projectId, keys);
+    const current = found.map((row, slot) => this.clip(row, slot));
     const again = (status: MarketingNarrationClip["status"]) => options.failedOnly ? status === "failed" : status !== "running";
     const targets = segments.filter(segment => current[segment.index].status === "missing"
       || (redo.includes(segment.index) && again(current[segment.index].status)));
     const claimed: MarketingSegment[] = [];
     for (const segment of targets) {
-      if (await this.claim(owner, projectId, keys[segment.index], segment, current[segment.index].status !== "missing")) claimed.push(segment);
+      // A take borrowed from another shot's place stays there; this shot gets its own row.
+      if (await this.claim(owner, projectId, keys[segment.index], segment, found[segment.index]?.slot === segment.index)) claimed.push(segment);
     }
     let error = "";
     let next = 0;

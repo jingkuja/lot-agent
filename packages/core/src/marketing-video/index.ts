@@ -275,6 +275,8 @@ export interface MarketingProject {
   output?: { assetIds: string[]; assets: { url: string; mime: string }[]; quality?: MarketingQualityReport; captions?: MarketingCaption[] };
   knowledgeItemId: string | null;
   knowledgeVersion?: number | null;
+  /** Saved earlier versions of the copy and storyboard that can be restored; absent when none. */
+  snapshots?: number;
   /** Clips of the current job whose paid submission outcome is unknown. */
   unknownSegments?: number;
   /** Set when single shots of the current stopped or finished job can be redone: the
@@ -284,6 +286,22 @@ export interface MarketingProject {
     /** Each kept clip's video, to watch a shot before redoing it; null when it has none. */
     clips?: (string | null)[] };
 }
+/** Saved earlier copy and storyboard of a draft (assessment M04), kept before an AI result replaced
+ * them (`copy`, `storyboard`), a save dropped the shots (`clear`) or a restore replaced them (`restore`). */
+export interface MarketingDraftSnapshot {
+  id: string; reason: "copy" | "storyboard" | "clear" | "restore"; createdAt: string;
+  shots: number; durationSec: number;
+  /** The start of its copy, to recognise it. */
+  excerpt: string;
+}
+/** Earlier versions kept per draft. */
+export const MARKETING_SNAPSHOT_LIMIT = 10;
+/** What a snapshot holds and restoring it puts back: the copy, shots and publishing text. Materials,
+ * voice and picture settings stay as they are now. */
+export const marketingDraftContent = ({ script, storyboard, storyboardAudio, continuity, publishTitle, tags }: MarketingDraft) =>
+  ({ script, storyboard, storyboardAudio, continuity, publishTitle, tags });
+export const restoreMarketingDraft = (current: MarketingDraft, saved: MarketingDraft): MarketingDraft =>
+  MarketingDraftSchema.parse({ ...current, ...marketingDraftContent(saved) });
 /** What a page polls while a video is being made: task fields only, no draft or material links. */
 export type MarketingTaskState = Pick<MarketingProject, "id" | "version" | "taskId" | "status" | "progress" | "stage" | "error" | "errorCode" | "output" | "unknownSegments">;
 /** A store is owner-scoped even for worker reads; infrastructure lives in server. */

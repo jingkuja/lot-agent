@@ -4,7 +4,7 @@ import { MarketingNarrationSchema, marketingHdUnavailable, type MarketingDraft, 
 import { useI18n } from "../../i18n/index.js";
 import { voiceUploadLabel } from "./materials.js";
 import type { GenerationCheck } from "./production-checks.js";
-import { ShotOverview, StoryboardEditor } from "./StoryboardEditor.js";
+import { ShotOverview, StoryboardEditor, type StoryboardStructure } from "./StoryboardEditor.js";
 import { Choices, DraftText, Hint, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 
 /** How the narration is voiced: by the video model, or as the twin's own off-screen voice-over
@@ -104,7 +104,7 @@ function GenerationChecklist({ checks }: { checks: GenerationCheck[] }) {
 
 /** Step 4: confirm the storyboard, its key-art still and narration takes, check the text, then generate. */
 export function ConfirmStep({ form, parts, planError, blocker, blockerId, buttonLabel, checks, storyboardPanel, reviewPanel, audioNotice, narrationPanel,
-  keyArtPanel, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
+  keyArtPanel, history, structure, onStoryboard, onStoryboardAi, onEditCopy, onGenerate, onManualStoryboard }: {
   form: DraftForm;
   /** Clips the current draft would be generated as. */
   parts: MarketingSegment[];
@@ -121,6 +121,10 @@ export function ConfirmStep({ form, parts, planError, blocker, blockerId, button
   narrationPanel: ReactNode;
   /** The shared key-art still, shown with the confirmed board. */
   keyArtPanel: ReactNode;
+  /** Earlier copy and storyboard versions to restore. */
+  history: ReactNode;
+  /** Limits for changing shot times and order. */
+  structure: StoryboardStructure;
   onStoryboard(shots: MarketingShot[]): void; onStoryboardAi(instruction: string, index?: number): void;
   onEditCopy(): void; onGenerate(): void; onManualStoryboard(): void;
 }) {
@@ -147,14 +151,17 @@ export function ConfirmStep({ form, parts, planError, blocker, blockerId, button
       <details className="mv-storyboard-edit" open={editing} onToggle={e => { if (e.target === e.currentTarget) setEditing(e.currentTarget.open); }}>
         <summary>{t("修改分镜")}</summary>
         <DraftText form={form} name="continuity" label="统一人物、产品与场景设定" max={400} rows={3} placeholder="每段视频都会带上这段描述，用于保持人物、服装、产品和场景一致。" />
-        <StoryboardEditor compact presenter={draft.presenter} shots={draft.storyboard} busy={busy} onChange={onStoryboard} onAi={onStoryboardAi} />
+        <StoryboardEditor compact presenter={draft.presenter} shots={draft.storyboard} busy={busy} structure={structure}
+          onChange={onStoryboard} onAi={onStoryboardAi} />
       </details>
+      {history}
       {keyArtPanel}
       {narrationPanel}
     </div> : <>
       {!!parts.length && <details className="mv-script-review"><summary>{t("查看自动分段（{0} 段）", [parts.length])}</summary>
         {parts.map(p => <p key={p.index}>{p.index + 1} · {p.durationSec}s<br />{p.script}</p>)}</details>}
       {tally}
+      {history}
     </>}
     {reviewPanel}
     {hasBoard && <GenerationChecklist checks={checks} />}
