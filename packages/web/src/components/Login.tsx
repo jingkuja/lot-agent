@@ -398,7 +398,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
             </button>
           )}
           <div className="login-legal-links">
-            <button type="button" onClick={() => setLegalDialog("terms")}>{t("用户协议")}</button>
+            <button type="button" onClick={() => setLegalDialog("terms")}>{international ? t("服务条款") : t("用户协议")}</button>
             <span aria-hidden="true">·</span>
             <button type="button" onClick={() => setLegalDialog("privacy")}>{t("隐私政策")}</button>
           </div>

@@ -1,13 +1,17 @@
 import { useI18n } from "../i18n/index.js";
 
 export function LegalModal({ kind, onClose }: { kind: "privacy" | "terms"; onClose: () => void }) {
-  const { t } = useI18n();
+  const { t, enabled: international } = useI18n();
   const privacy = kind === "privacy";
   return (
     <div className="account-dialog-overlay" onClick={onClose}>
-      <section className="account-dialog legal-dialog" role="dialog" aria-modal="true" aria-labelledby={`${kind}-title`} onClick={(event) => event.stopPropagation()}>
+      <section className="account-dialog legal-dialog" role="dialog" aria-modal="true"
+        aria-labelledby={`${kind}-title`} onClick={(event) => event.stopPropagation()}>
         <header className="account-dialog-head">
-          <span><h2 id={`${kind}-title`}>{privacy ? t("隐私政策") : t("用户协议")}</h2><p>{t("更新日期：2026年8月18日")}</p></span>
+          <span>
+            <h2 id={`${kind}-title`}>{privacy ? t("隐私政策") : international ? t("服务条款") : t("用户协议")}</h2>
+            <p>{international ? t("更新日期：2026年10月26日") : t("更新日期：2026年8月18日")}</p>
+          </span>
           <button type="button" onClick={onClose} aria-label={t("关闭")}>×</button>
         </header>
         <article className="legal-content">
@@ -20,10 +24,14 @@ export function LegalModal({ kind, onClose }: { kind: "privacy" | "terms"; onClo
 }
 
 function PrivacyPolicy() {
-  const { t } = useI18n();
+  const { t, enabled: international } = useI18n();
   return (
     <>
       <p>{t("灵渠claw重视你的隐私。本政策说明我们在提供AI对话、文件处理、知识库及数字员工服务时，如何处理与你有关的信息。")}</p>
+      {international && <>
+        <HongKongCompany />
+        <p>{t("我们作为个人资料使用者，按照香港特别行政区《个人资料（私隐）条例》（第486章）及适用法律处理个人资料，仅为收集时说明的目的或直接相关目的使用资料；用于新目的时，会按适用法律取得同意。")}</p>
+      </>}
       <h3>{t("一、我们处理的信息")}</h3>
       <h4>{t("1. 文字输入与对话")}</h4>
       <p>{t("你的文字输入仅用于完成当前请求、提供连续对话及展示账户内的历史记录。我们不会将文字输入用于模型训练、广告投放、营销、出售或与服务无关的数据分享。为实现历史会话功能，对话内容会保存在你的账户空间，直至你删除相应会话。")}</p>
@@ -33,21 +41,31 @@ function PrivacyPolicy() {
       <p>{t("为改善交互体验，我们可能在最小必要范围内处理功能偏好、常用能力和交互习惯等信息。此类信息仅用于产品内的体验优化和个性化，不用于广告、营销、用户交易、对外数据共享或任何与服务无关的用途。")}</p>
       <h3>{t("二、AI推理与必要的数据传输")}</h3>
       <p>{t("为生成回复，你提交的必要内容会发送至灵渠AI及你所配置的模型服务进行即时推理。相关服务对数据的处理还受其自身规则约束。我们不会向无关第三方出售或提供你的信息，但法律法规另有要求的除外。")}</p>
+      {international && <p>{t("必要的模型推理、文件处理、语音及影像生成可能由技术服务提供者完成，所需资料可能在香港以外处理。我们仅为提供相关功能而传输必要资料，并按照适用法律采取合理措施，限制处理用途及保障个人资料安全。")}</p>}
       <h3>{t("三、保存、删除与安全")}</h3>
       <p>{t("我们按照实现服务所需的最短期限保存信息，并采取访问控制、传输保护和账号隔离等合理措施。你可以删除上传文件及会话记录；如法律要求保留安全日志或交易记录，我们会在法定期限内保存并限制用途。")}</p>
       <h3>{t("四、你的权利")}</h3>
-      <p>{t("你有权访问、更正或删除与你有关的信息，并可停止使用服务。涉及其他个人信息的文件，应确保已取得合法授权。请勿上传国家秘密、违法内容或超出必要范围的敏感个人信息。")}</p>
+      {international
+        ? <p>{t("你可按照《个人资料（私隐）条例》请求查阅及更正我们持有的个人资料，也可使用产品内功能删除文件及会话，或向我们提出其他删除请求。我们会依法处理请求，并在必要时核实身份。涉及他人资料、肖像或声音时，应确保已取得合法授权；请勿上传违法内容或超出必要范围的敏感资料。")}</p>
+        : <p>{t("你有权访问、更正或删除与你有关的信息，并可停止使用服务。涉及其他个人信息的文件，应确保已取得合法授权。请勿上传国家秘密、违法内容或超出必要范围的敏感个人信息。")}</p>}
       <h3>{t("五、政策更新")}</h3>
       <p>{t("服务或法律要求发生变化时，我们可能更新本政策。重大变化会通过产品内提示等合理方式告知你。")}</p>
+      {international && <>
+        <h3>{t("六、适用法律与争议解决")}</h3>
+        <HongKongGoverningLaw />
+        <h3>{t("七、联系我们")}</h3>
+        <HongKongContact />
+      </>}
     </>
   );
 }
 
 function ServiceTerms() {
-  const { t } = useI18n();
+  const { t, enabled: international } = useI18n();
   return (
     <>
       <p>{t("欢迎使用灵渠claw。登录、访问或使用本服务，即表示你已阅读并同意本协议。")}</p>
+      {international && <HongKongCompany />}
       <h3>{t("一、服务基础与配置")}</h3>
       <p>{t("灵渠claw依托灵渠AI提供AI推理服务，所有模型调用统一使用由平台管理的订阅 Key。用户无需选择或提供个人 API Key；可用模型、订阅额度和推理能力以平台配置为准。因额度不足、模型下线或上游服务异常导致的功能不可用，不视为灵渠claw对服务能力的额外承诺。")}</p>
       <h3>{t("二、账号范围")}</h3>
@@ -64,7 +82,39 @@ function ServiceTerms() {
       <p>{t("我们可能因维护、升级、安全风险、法律要求或上游服务变化调整部分功能。我们会尽合理努力保障服务稳定，但不对不可抗力、网络故障或第三方服务异常造成的中断作绝对可用性保证。")}</p>
       <h3>{t("八、协议更新")}</h3>
       <p>{t("本协议可能随服务变化进行更新。更新后的协议公布后生效；如你不同意更新内容，应停止使用相关服务。")}</p>
+      {international && <>
+        <h3>{t("九、适用法律与争议解决")}</h3>
+        <HongKongGoverningLaw />
+        <h3>{t("十、联系我们")}</h3>
+        <HongKongContact />
+      </>}
     </>
   );
+}
+
+function HongKongCompany() {
+  const { t } = useI18n();
+  return <>
+    <h3>{t("服务提供者")}</h3>
+    <p>CLOUDDATA AI TECH CO., LIMITED（雲數智科有限公司）</p>
+    <p>{t("注册地区：香港特别行政区")}</p>
+    <p>{t("公司地址：")}Flat/RM A, 12/F, ZJ 300 300, 300 Lockhart Road, Wan Chai, Hong Kong</p>
+  </>;
+}
+
+function HongKongGoverningLaw() {
+  const { t } = useI18n();
+  return <>
+    <p>{t("本服务、服务条款及隐私政策的解释与适用，以及由此产生的争议，受香港特别行政区法律管辖并据其解释。争议应先通过友好协商解决；协商不成的，提交香港特别行政区具有管辖权的法院处理。")}</p>
+    <p>{t("上述约定不排除或限制适用法律赋予你且依法不得排除或限制的权利，也不影响你依法向个人资料私隐专员等主管机关提出投诉。")}</p>
+  </>;
+}
+
+function HongKongContact() {
+  const { t } = useI18n();
+  return <>
+    <p>{t("有关本服务、服务条款或隐私政策的查询、投诉，以及个人资料查阅、更正或其他删除请求，请以书面形式寄送至上述公司地址，收件人为 CLOUDDATA AI TECH CO., LIMITED（雲數智科有限公司）个人资料查询负责人 ZHENG YVHUI。")}</p>
+    <p>{t("联系电话：")}+852 5776 7174</p>
+  </>;
 }
 

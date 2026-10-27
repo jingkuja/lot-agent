@@ -1,5 +1,39 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
+  "服务条款": { en: "Terms of Service", id: "Ketentuan Layanan" },
+  "更新日期：2026年10月26日": { en: "Updated: October 26, 2026", id: "Diperbarui: 26 Oktober 2026" },
+  "服务提供者": { en: "Service provider", id: "Penyedia layanan" },
+  "注册地区：香港特别行政区": { en: "Place of registration: Hong Kong Special Administrative Region", id: "Wilayah pendaftaran: Daerah Administratif Khusus Hong Kong" },
+  "公司地址：": { en: "Company address: ", id: "Alamat perusahaan: " },
+  "联系电话：": { en: "Contact phone: ", id: "Telepon kontak: " },
+  "我们作为个人资料使用者，按照香港特别行政区《个人资料（私隐）条例》（第486章）及适用法律处理个人资料，仅为收集时说明的目的或直接相关目的使用资料；用于新目的时，会按适用法律取得同意。": {
+    en: "As the data user, we handle personal data under Hong Kong's Personal Data (Privacy) Ordinance (Cap. 486) and applicable law. We use data only for the purposes stated at collection or directly related purposes, and obtain consent for new purposes as required by applicable law.",
+    id: "Sebagai pengguna data, kami memproses data pribadi berdasarkan Personal Data (Privacy) Ordinance (Cap. 486) Hong Kong dan hukum yang berlaku. Data hanya digunakan untuk tujuan yang dijelaskan saat pengumpulan atau tujuan yang terkait langsung; persetujuan untuk tujuan baru diperoleh sesuai hukum yang berlaku.",
+  },
+  "必要的模型推理、文件处理、语音及影像生成可能由技术服务提供者完成，所需资料可能在香港以外处理。我们仅为提供相关功能而传输必要资料，并按照适用法律采取合理措施，限制处理用途及保障个人资料安全。": {
+    en: "Technical service providers may perform necessary model inference, file processing, and speech, image or video generation. Required data may be processed outside Hong Kong. We transfer only the data needed to provide these functions and take reasonable measures under applicable law to limit its use and protect personal data.",
+    id: "Penyedia layanan teknis dapat menjalankan inferensi model, pemrosesan file, serta pembuatan suara, gambar atau video yang diperlukan. Data yang dibutuhkan dapat diproses di luar Hong Kong. Kami hanya mengirimkan data yang diperlukan untuk fungsi tersebut dan mengambil langkah wajar sesuai hukum yang berlaku untuk membatasi penggunaan dan melindungi data pribadi.",
+  },
+  "你可按照《个人资料（私隐）条例》请求查阅及更正我们持有的个人资料，也可使用产品内功能删除文件及会话，或向我们提出其他删除请求。我们会依法处理请求，并在必要时核实身份。涉及他人资料、肖像或声音时，应确保已取得合法授权；请勿上传违法内容或超出必要范围的敏感资料。": {
+    en: "You may request access to and correction of personal data we hold under the Personal Data (Privacy) Ordinance. You may also delete files and conversations using product features or submit other deletion requests to us. We handle requests in accordance with the law and verify identity where necessary. Obtain lawful authorization for other people's data, likenesses or voices; do not upload unlawful content or unnecessary sensitive data.",
+    id: "Anda dapat meminta akses dan koreksi data pribadi yang kami simpan berdasarkan Personal Data (Privacy) Ordinance. Anda juga dapat menghapus file dan percakapan melalui fitur produk atau mengajukan permintaan penghapusan lainnya. Kami menangani permintaan sesuai hukum dan memverifikasi identitas bila diperlukan. Dapatkan izin yang sah untuk data, rupa atau suara orang lain; jangan unggah konten ilegal atau data sensitif yang tidak diperlukan.",
+  },
+  "六、适用法律与争议解决": { en: "6. Governing law and dispute resolution", id: "6. Hukum yang berlaku dan penyelesaian sengketa" },
+  "七、联系我们": { en: "7. Contact us", id: "7. Hubungi kami" },
+  "九、适用法律与争议解决": { en: "9. Governing law and dispute resolution", id: "9. Hukum yang berlaku dan penyelesaian sengketa" },
+  "十、联系我们": { en: "10. Contact us", id: "10. Hubungi kami" },
+  "本服务、服务条款及隐私政策的解释与适用，以及由此产生的争议，受香港特别行政区法律管辖并据其解释。争议应先通过友好协商解决；协商不成的，提交香港特别行政区具有管辖权的法院处理。": {
+    en: "The service, these Terms of Service and the Privacy Policy, their interpretation and application, and disputes arising from them are governed by and construed in accordance with the laws of the Hong Kong Special Administrative Region. Disputes should first be addressed through amicable negotiation. If unresolved, they shall be submitted to the competent courts of the Hong Kong Special Administrative Region.",
+    id: "Layanan, Ketentuan Layanan dan Kebijakan Privasi ini, penafsiran dan penerapannya, serta sengketa yang timbul darinya diatur dan ditafsirkan berdasarkan hukum Daerah Administratif Khusus Hong Kong. Sengketa terlebih dahulu diupayakan melalui musyawarah. Jika tidak terselesaikan, sengketa diajukan ke pengadilan yang berwenang di Daerah Administratif Khusus Hong Kong.",
+  },
+  "上述约定不排除或限制适用法律赋予你且依法不得排除或限制的权利，也不影响你依法向个人资料私隐专员等主管机关提出投诉。": {
+    en: "These provisions do not exclude or limit rights that cannot lawfully be excluded or limited under applicable law, or affect your right to complain to competent authorities, including the Privacy Commissioner for Personal Data, in accordance with the law.",
+    id: "Ketentuan ini tidak mengecualikan atau membatasi hak yang tidak dapat dikecualikan atau dibatasi secara sah berdasarkan hukum yang berlaku, maupun hak Anda untuk mengajukan pengaduan kepada otoritas yang berwenang, termasuk Privacy Commissioner for Personal Data, sesuai hukum.",
+  },
+  "有关本服务、服务条款或隐私政策的查询、投诉，以及个人资料查阅、更正或其他删除请求，请以书面形式寄送至上述公司地址，收件人为 CLOUDDATA AI TECH CO., LIMITED（雲數智科有限公司）个人资料查询负责人 ZHENG YVHUI。": {
+    en: "For inquiries or complaints about the service, Terms of Service or Privacy Policy, or requests for personal data access, correction or other deletion, please write to the company address above, addressed to ZHENG YVHUI, Personal Data Enquiries Officer, CLOUDDATA AI TECH CO., LIMITED（雲數智科有限公司）.",
+    id: "Untuk pertanyaan atau pengaduan tentang layanan, Ketentuan Layanan atau Kebijakan Privasi, atau permintaan akses, koreksi maupun penghapusan data pribadi lainnya, silakan kirim surat ke alamat perusahaan di atas, ditujukan kepada ZHENG YVHUI, Petugas Pertanyaan Data Pribadi, CLOUDDATA AI TECH CO., LIMITED（雲數智科有限公司）.",
+  },
   "保存声音后将通过千问复刻音色，用于后续配音。建议录制 10–15 秒清晰人声。": { en: "Saving a voice sample starts Qwen voice cloning for future narration. Record 10–15 seconds of clear speech.", id: "Menyimpan sampel suara memulai kloning suara Qwen untuk narasi berikutnya. Rekam ucapan jernih selama 10–15 detik." },
   "尚未复刻声音": { en: "Voice not cloned yet", id: "Suara belum dikloning" },
   "千问音色已就绪": { en: "Qwen voice ready", id: "Suara Qwen siap" },

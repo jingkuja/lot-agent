@@ -171,7 +171,7 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
             <div className="account-popover-legal">
               <button type="button" onClick={() => openDialog("privacy")}>{t("隐私政策")}</button>
               <span aria-hidden>·</span>
-              <button type="button" onClick={() => openDialog("terms")}>{t("用户协议")}</button>
+              <button type="button" onClick={() => openDialog("terms")}>{international ? t("服务条款") : t("用户协议")}</button>
             </div>
           </div>
         )}
