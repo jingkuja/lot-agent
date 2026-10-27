@@ -108,6 +108,18 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
   const canResume = current && !active(current) && !["ready", "needs_review"].includes(current.status) && !["REQUEST_UNKNOWN", "MODEL_USAGE_UNKNOWN"].includes(current.errorCode ?? "");
   const speech = current?.snapshot.speech;
   const hasSpeech = speech?.status === "completed" && !!speech.text.trim();
+  const coverage = current?.snapshot.coverage;
+  const limitationNotes = [...new Set([...(coverage?.limitations ?? []), ...(current?.snapshot.summary?.limitations ?? [])])].flatMap(value => {
+    const known = ({ SAMPLED_IMAGES_ONLY: "按固定间隔抽帧分析，未逐帧分析。", BRIEF_TEXT_MAY_BE_MISSED: "短暂出现的文字可能未被抽到。",
+      OCR_INCOMPLETE: "部分画面文字识别失败，摘要可能遗漏内容。", VISUAL_INCOMPLETE: "部分画面尚未完成视觉分析。", DURATION_ESTIMATED: "末帧时长依据相邻帧间隔估计。" } as Record<string, string>)[value];
+    // Other internal codes are already covered by the frame lists or the evidence note.
+    return known ? [t(known)] : /^[A-Z_]+$/.test(value) ? [] : [value];
+  });
+  const partial = !!coverage?.omittedOcrFrameIds.length || !!coverage?.omittedVisualFrameIds.length
+    || (coverage?.limitations ?? []).some(value => value === "OCR_INCOMPLETE" || value === "VISUAL_INCOMPLETE");
+  const frameList = (ids: string[]) => ids.map(id => {
+    const frame = current?.snapshot.frames.find(f => f.id === id); return `${id}${frame ? ` · ${seconds(frame.ptsMs)}` : ""}`;
+  }).join("；");
   const evidenceNote = hasSpeech
     ? "依据视频画面、可见文字和语音转写生成；转写可能有误，分镜为 AI 创作建议。"
     : "依据视频画面和可见文字生成；原始声音未转录，分镜为 AI 创作建议。";
@@ -131,20 +143,16 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
     {current && !active(current) && !canResume && current.status !== "ready" && <p className="mv-hint">{t("此次分析暂时无法继续。请联系客服并提供分析编号 {0} 核实；也可以点击「开始新视频」重新拆解，或直接粘贴文案继续。", [current.id])}</p>}
     {current && !active(current) && current.snapshot.summary && <div className="mv-hint" role="status">
       <p>{t(!current.snapshot.creation && canResume ? "视频拆解结果已保存，文案和分镜尚未完成。继续生成会复用已有拆解结果。"
-        : !hasSpeech || current.snapshot.coverage?.limitations.length || current.snapshot.summary.limitations.length || current.snapshot.coverage?.omittedOcrFrameIds.length || current.snapshot.coverage?.omittedVisualFrameIds.length ? "已完成，但参考证据存在缺口" : "参考画面分析已完成")}</p>
+        : partial ? "已完成，部分抽帧未能识别，具体情况可在下方「查看参考资料」中查看。" : "参考画面分析已完成")}</p>
       <p>{t(evidenceNote)}</p>
-    </div>}
-    {current && <div className="ma-coverage" role="status">
-      {!!current.snapshot.coverage?.omittedOcrFrameIds.length && <p>{t("未识别画面文字的采样帧")} ({current.snapshot.coverage.omittedOcrFrameIds.length})：{current.snapshot.coverage.omittedOcrFrameIds.map(id => {
-        const frame = current.snapshot.frames.find(f => f.id === id); return `${id}${frame ? ` · ${seconds(frame.ptsMs)}` : ""}`;
-      }).join("；")}</p>}
-      {!!current.snapshot.coverage?.omittedVisualFrameIds.length && <p>{t("未进行视觉分析的采样帧")} ({current.snapshot.coverage.omittedVisualFrameIds.length})：{current.snapshot.coverage.omittedVisualFrameIds.map(id => {
-        const frame = current.snapshot.frames.find(f => f.id === id); return `${id}${frame ? ` · ${seconds(frame.ptsMs)}` : ""}`;
-      }).join("；")}</p>}
-      {[...new Set([...(current.snapshot.coverage?.limitations ?? []), ...(current.snapshot.summary?.limitations ?? [])])].map(value => <p key={value} className="mv-hint">{t(({ OCR_INCOMPLETE: "部分画面文字识别失败，摘要可能遗漏内容。", VISUAL_INCOMPLETE: "部分画面尚未完成视觉分析。", DURATION_ESTIMATED: "末帧时长依据相邻帧间隔估计。" } as Record<string, string>)[value] ?? value)}</p>)}
     </div>}
     {current && <details className="mv-script-review"><summary>{t("查看参考资料")}</summary>
       <p>{current.snapshot.source.title}</p>
+      {(partial || !!limitationNotes.length) && <details><summary>{t("识别情况")}</summary><div className="ma-coverage">
+        {!!coverage?.omittedOcrFrameIds.length && <p>{t("未识别画面文字的采样帧")} ({coverage.omittedOcrFrameIds.length})：{frameList(coverage.omittedOcrFrameIds)}</p>}
+        {!!coverage?.omittedVisualFrameIds.length && <p>{t("未进行视觉分析的采样帧")} ({coverage.omittedVisualFrameIds.length})：{frameList(coverage.omittedVisualFrameIds)}</p>}
+        {limitationNotes.map(note => <p key={note} className="mv-hint">{note}</p>)}
+      </div></details>}
       {speech?.status === "completed" && <details><summary>{t("视频语音转写")}</summary><p>{speech.text || t("未识别到语音内容。")}</p><p className="mv-hint">{t("语音转写未提供逐字时间戳，内容可能存在识别误差。")}</p></details>}
       {current.snapshot.summary?.summary.map((item, i) => <p key={i}>{item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}
       {current.snapshot.summary?.marketingPoints.map((item, i) => <p key={i}>{item.statement} · {t(item.inference ? "营销推断" : item.evidenceIds.includes("a0001") ? "语音内容" : "画面观察")} · {item.evidenceIds.join(", ")}</p>)}

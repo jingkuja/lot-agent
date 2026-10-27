@@ -252,9 +252,13 @@ try {
   assert(!/预算|已记录费用|选用预览|生成当前修订摘要/.test(await page.locator("body").innerText()));
   await page.getByText("当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。", { exact: true }).waitFor();
   assert.equal(await page.locator(".ma-panel > details.mv-script-review").evaluate(el => el.open), false);
+  await page.getByText("已完成，部分抽帧未能识别，具体情况可在下方「查看参考资料」中查看。", { exact: true }).waitFor();
+  assert.equal(await page.getByText("未识别画面文字的采样帧 (1)：f0001 · 0.0s", { exact: true }).isVisible(), false, "frame gaps stay inside source material");
+  assert(!/SAMPLED_IMAGES_ONLY|OCR_BUDGET_EXHAUSTED/.test(await page.locator("body").innerText()));
+  await page.getByText("查看参考资料", { exact: true }).click();
+  await page.getByText("识别情况", { exact: true }).click();
   await page.getByText("部分画面文字识别失败，摘要可能遗漏内容。", { exact: true }).waitFor();
   assert.equal(await page.getByText("未识别画面文字的采样帧 (1)：f0001 · 0.0s", { exact: true }).isVisible(), true);
-  await page.getByText("查看参考资料", { exact: true }).click();
   await page.getByText("画面文字", { exact: true }).click();
   await page.getByText("t0001 · 0.0s–0.5s · 原片画面文字", { exact: true }).waitFor();
   await page.getByText("参考画面", { exact: true }).click(); await page.getByRole("button", { name: "0.0s", exact: true }).click();
@@ -290,11 +294,12 @@ try {
   value.snapshot.speech = liveSpeech ?? { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "测试录音设备，进入网站。" };
   Object.assign(value, { status: "ready", applied: true, errorCode: undefined }); await page.reload();
   await page.getByText("明亮咖啡店与咖啡杯", { exact: true }).first().waitFor();
-  await page.getByText("已完成，但参考证据存在缺口", { exact: true }).waitFor();
+  await page.getByText("已完成，部分抽帧未能识别，具体情况可在下方「查看参考资料」中查看。", { exact: true }).waitFor();
   await page.getByText("查看参考资料", { exact: true }).click();
   await page.getByText("视频语音转写", { exact: true }).click();
   await page.getByText(value.snapshot.speech.text, { exact: true }).waitFor();
   assert(!(await page.locator("body").innerText()).includes("原始声音未转录"));
+  await page.getByText("识别情况", { exact: true }).click();
   await page.getByText("部分画面文字识别失败，摘要可能遗漏内容。", { exact: true }).waitFor();
   await page.getByText("原片证据时间线", { exact: true }).click();
   const screenshots = process.env.MARKETING_ANALYSIS_UI_SCREENSHOTS;
@@ -305,13 +310,13 @@ try {
   }
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
-  await page.getByText("已完成，但参考证据存在缺口", { exact: true }).waitFor();
+  await page.getByText("已完成，部分抽帧未能识别，具体情况可在下方「查看参考资料」中查看。", { exact: true }).waitFor();
   if (screenshots) await page.screenshot({ path: join(screenshots, "creation-dark.png"), fullPage: true });
   await page.getByRole("combobox", { name: "Bahasa / Language / 语言" }).selectOption("en");
   await page.getByRole("textbox", { name: "Video link or reference copy", exact: true }).waitFor();
-  await page.getByText("Completed with gaps in reference evidence", { exact: true }).waitFor();
+  await page.getByText("Completed. Some sampled frames could not be recognized; see \"View source material\" below for details.", { exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByText("Completed with gaps in reference evidence", { exact: true }).scrollIntoViewIfNeeded();
+  await page.getByText("Completed. Some sampled frames could not be recognized; see \"View source material\" below for details.", { exact: true }).scrollIntoViewIfNeeded();
   if (screenshots) await page.screenshot({ path: join(screenshots, "creation-mobile-en.png"), fullPage: false });
   assert.equal(await page.locator(".mv-studio").count(), 1);
   await page.getByText("Video speech transcript", { exact: true }).waitFor();
@@ -321,7 +326,7 @@ try {
   await page.getByText("The downloaded file has no usable audio track. This does not confirm whether the original video has sound; transcription was skipped.", { exact: true }).waitFor();
   value.snapshot.speech = { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "" }; await page.reload();
   await page.getByText("No speech was recognized in the transcription. This does not mean the original video has no sound.", { exact: true }).waitFor();
-  await page.getByText("Some OCR failed; the summary may omit content.", { exact: true }).waitFor();
+  await page.getByText("Some OCR failed; the summary may omit content.", { exact: true }).waitFor({ state: "attached" });
   // A real short MP4 exercises browser duration decoding, multipart bytes,
   // explicit retry after response loss, draft persistence and source cleanup.
   await page.setViewportSize({ width: 1280, height: 1000 });
