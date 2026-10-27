@@ -195,7 +195,7 @@ export async function checkReviewFixes(pool: pg.Pool) {
         } });
         await assert.rejects(runAnalysis(restoredLease, new AbortController().signal, {
           store: recoveringStore, storage, config,
-          db: { getUserApiKey: async () => "fixture" }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3", "qwen3.8-max"] }) },
+          db: { getUserApiKey: async () => "fixture" }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3", "kimi-k3.1-pro"] }) },
           baseUrl: "https://never-call.invalid", bridgePath: "/never-run",
           mediaRuntime: { decoderRunner: () => { throw new Error("must not decode expired source"); } },
         } as unknown as Parameters<typeof runAnalysis>[2]), /fixture stop after speech checkpoint/);

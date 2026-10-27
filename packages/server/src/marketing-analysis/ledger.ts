@@ -22,6 +22,10 @@ export class PgAnalysisLedger implements AnalysisCallLedger {
       WHERE analysis_id=$1 AND user_id=$2 AND step_id=$3 AND attempt=$4 AND receipt IS NULL`,
     [this.lease.id, this.lease.ownerId, stepId, this.attempts.get(stepId), JSON.stringify({ text: "", outcome: "request_unknown", responseId: id })]);
   }
+  async stepModel(stepId: string): Promise<string | undefined> {
+    return (await this.store.pool.query("SELECT model FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2 AND step_id=$3 ORDER BY attempt DESC LIMIT 1",
+      [this.lease.id, this.lease.ownerId, stepId])).rows[0]?.model;
+  }
   async begin(stepId: string, inputHash: string, model: string, images: number) {
     return this.store.transaction(async client => {
       await ownerLock(client, this.lease.ownerId);

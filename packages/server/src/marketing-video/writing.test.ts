@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GROK_MARKETING_PROFILE, MARKETING_REVIEW_MODEL, MarketingDraftSchema, storyboardScript, type MarketingProject } from "@lot-agent/core/marketing-video";
 import { MarketingTextError } from "./text.js";
 import type { TextOperation } from "./operations.js";
 import { MarketingWriting, type MarketingWritingDeps } from "./writing.js";
+import { marketingCopyModel } from "./copy-model.js";
 import { REVIEW_INSTRUCTION } from "./compliance.js";
+
+// A model failure in one test must not switch the copy model of the next.
+beforeEach(() => marketingCopyModel.reset());
 
 const id = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
@@ -39,7 +43,7 @@ describe("marketing text requests", () => {
   it("records the receipt before the result and returns the applied project", async () => {
     const { deps, writing } = fixture({ publishTitle: "转角咖啡", tags: "#咖啡 #探店" });
     const result = await writing.publication("owner", id, { ...request, fillMissing: false });
-    expect(deps.operations.begin).toHaveBeenCalledWith("owner", requestId, id, 2, "publication", { version: 2, locale: "zh", fillMissing: false });
+    expect(deps.operations.begin).toHaveBeenCalledWith("owner", requestId, id, 2, "publication", { version: 2, locale: "zh", fillMissing: false }, undefined, "kimi-k3.1-pro");
     expect(deps.operations.receipt).toHaveBeenCalledWith("owner", requestId, { outcome: "completed" });
     expect(deps.operations.receipt.mock.invocationCallOrder[0]).toBeLessThan(deps.operations.finish.mock.invocationCallOrder[0]);
     expect(deps.operations.finish.mock.calls[0][2]).toMatchObject({ draft: { publishTitle: "转角咖啡", tags: "#咖啡 #探店" } });

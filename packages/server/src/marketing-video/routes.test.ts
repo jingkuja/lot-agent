@@ -6,16 +6,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MarketingError } from "./repository.js";
 import type { PgMarketingTextOperations } from "./operations.js";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { CAPTION_WORDS_CHANGED, MarketingCaptionsSchema, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
 import { createMarketingVideoRoutes } from "./routes.js";
+import { marketingCopyModel } from "./copy-model.js";
 import type { AgentService } from "../services/agent-service.js";
 import type { PgMarketingProjectStore } from "./repository.js";
 import type { MarketingNarrator } from "./narration.js";
 import type { MarketingKeyArtist } from "./key-art.js";
 import { completeMarketingJson } from "./text.js";
 import { marketingSegmentPrompt } from "./prompt.js";
+
+// A model failure in one test must not switch the copy model of the next.
+beforeEach(() => marketingCopyModel.reset());
 
 vi.mock("./media.js", () => ({ mediaCapabilities: vi.fn(async () => ({ composition: true, subtitles: true })), SUBTITLES_UNAVAILABLE: "字幕不可用", inspectMedia: vi.fn(), ownedAssetPath: vi.fn() }));
 vi.mock("./image-size.js", () => ({ readImageInfo: vi.fn(async () => ({ mime: "image/png", width: 800, height: 800 })) }));
@@ -199,7 +203,7 @@ describe("marketing project HTTP boundaries", () => {
     expect((await f.call(`/${id}/review`, { locale: "en" })).status).toBe(200);
     // Recorded like /copy: not aborted by a browser disconnect, receipt saved before applying.
     expect(f.service.marketingText).toHaveBeenCalledWith(expect.stringContaining("Write reasons and suggested replacements in en"), expect.any(String), "owner", undefined, expect.objectContaining({ onReceipt: expect.any(Function), model: "deepseek-v4.1-flash" }));
-    expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "review", { version: 1, locale: "en" });
+    expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "review", { version: 1, locale: "en" }, undefined, "deepseek-v4.1-flash");
     const input = JSON.parse(f.service.marketingText.mock.calls[0][1] as unknown as string);
     expect(input.fields).toEqual(expect.arrayContaining([
       { field: "continuity", text: "项目稳赚招牌" },
@@ -785,7 +789,7 @@ describe("recorded review and publication requests", () => {
     const f = fixture(); f.project.draft = MarketingDraftSchema.parse({ ...f.project.draft, publishTitle: "原标题" });
     f.service.marketingText.mockResolvedValueOnce({ publishTitle: "新标题", tags: "#咖啡" });
     expect((await f.call(`/${id}/publication`, { locale: "zh", fillMissing: true })).status).toBe(200);
-    expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "publication", { version: 1, locale: "zh", fillMissing: true });
+    expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "publication", { version: 1, locale: "zh", fillMissing: true }, undefined, "kimi-k3.1-pro");
     expect(f.operations.finish).toHaveBeenCalledWith("owner", expect.any(String), expect.objectContaining({ draft: expect.objectContaining({ publishTitle: "原标题", tags: "#咖啡" }) }));
     expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", undefined, expect.objectContaining({ onReceipt: expect.any(Function) }));
   });

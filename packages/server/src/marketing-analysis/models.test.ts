@@ -1,12 +1,15 @@
 import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatChunk, LLMProvider, Message } from "@lot-agent/core";
 import type { AnalysisSnapshot, FrameEvidence } from "@lot-agent/core/marketing-analysis";
 import { AnalysisModels, userResponsesProvider, type ModelStepReceipt } from "./models.js";
+import { marketingCopyModel } from "../marketing-video/copy-model.js";
+
+beforeEach(() => marketingCopyModel.reset());
 
 const frame = (i: number): FrameEvidence => ({ id: `f${String(i + 1).padStart(4, "0")}`, ptsMs: i * 500, sourceHash: "a".repeat(64), sourcePts: String(i * 500), timeBase: "1/1000", width: 720, height: 1280, objectKey: `${i}.jpg`, reasons: [] });
 function setup(reply: unknown, chunks?: ChatChunk[]) {
-  const records = new Map<string, { hash: string; receipt?: ModelStepReceipt }>();
+  const records = new Map<string, { hash: string; model: string; receipt?: ModelStepReceipt }>();
   const requests: { model: string; messages: Message[] }[] = [];
   const provider = vi.fn(async (model: string): Promise<LLMProvider> => ({ async *chat(messages) {
     requests.push({ model, messages });
@@ -16,12 +19,12 @@ function setup(reply: unknown, chunks?: ChatChunk[]) {
   } }));
   const finish = vi.fn(async (id: string, receipt: ModelStepReceipt) => { records.get(id)!.receipt = receipt; });
   const models = new AnalysisModels({ provider, readFrame: async () => Uint8Array.from([255, 216, 255, 0]), ledger: {
-    begin: async (id, hash) => {
+    begin: async (id, hash, model) => {
       const record = records.get(id);
       if (record && (record.hash !== hash || !record.receipt)) throw new Error("REQUEST_UNKNOWN");
       if (record) return record.receipt!;
-      records.set(id, { hash }); return null;
-    }, finish,
+      records.set(id, { hash, model }); return null;
+    }, finish, stepModel: async id => records.get(id)?.model,
   } });
   return { models, requests, records, finish };
 }
@@ -111,6 +114,19 @@ describe("analysis model calls", () => {
     await f.models.createCopy(draft, "zh", restored, 1);
     expect(f.requests).toHaveLength(1); expect(f.requests[0].messages[1].content).toContain("完整场景观察");
     expect(f.records.has("copy:1")).toBe(true);
+  });
+  it("writes a new copy step with kimi-k3 after the default copy model failed, but replays a recorded step with its model", async () => {
+    const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ durationSec: 15, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
+    const f = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" });
+    const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [frame(0)], frameTexts: [], texts: [],
+      observations: [{ description: "完整场景观察", frameIds: ["f0001"], uncertainty: "" }] };
+    const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: snapshot.source.canonicalUrl });
+    await f.models.createCopy(draft, "zh", snapshot, 1);
+    marketingCopyModel.failed("kimi-k3.1-pro");
+    await f.models.createCopy(draft, "zh", snapshot, 1);
+    await f.models.createCopy(draft, "zh", snapshot, 2);
+    expect(f.requests.map(r => r.model)).toEqual(["kimi-k3.1-pro", "kimi-k3"]);
+    expect(f.records.get("copy:2")?.model).toBe("kimi-k3");
   });
   it.each([402, 403])("records upstream balance rejection (%s) without fabricating usage or replaying", async status => {
     const finish = vi.fn(async () => {});
@@ -204,7 +220,7 @@ describe("analysis model calls", () => {
     expect(f.requests).toHaveLength(1);
   });
   it("requires credentials and one of the two selected models", () => {
-    expect(() => userResponsesProvider("https://example.test/v1", "", "qwen3.8-max")).toThrow("MODEL_AUTH_REQUIRED");
+    expect(() => userResponsesProvider("https://example.test/v1", "", "kimi-k3.1-pro")).toThrow("MODEL_AUTH_REQUIRED");
     expect(() => userResponsesProvider("https://example.test/v1", "key", "other")).toThrow("MODEL_AUTH_REQUIRED");
   });
 });

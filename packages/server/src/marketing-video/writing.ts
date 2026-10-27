@@ -2,6 +2,7 @@ import { capMarketingStoryboard, MARKETING_REVIEW_MODEL, marketingShotMaxSeconds
   type MarketingSource, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { marketingReviewInput, REVIEW_INSTRUCTION, reviewDeltaInstruction, type MarketingReviewDelta } from "./compliance.js";
+import { marketingCopyModel } from "./copy-model.js";
 import { creationPrompt, publicationPrompt, storyboardPrompt } from "./creation.js";
 import type { PgMarketingTextOperations, TextOperation } from "./operations.js";
 import { MarketingError, type PgMarketingProjectStore } from "./repository.js";
@@ -33,21 +34,23 @@ export class MarketingWriting {
   async copy(owner: string, projectId: string, request: TextRequest & { draft: MarketingDraft; source: MarketingSource }) {
     const { operations } = this.deps;
     const { clientRequestId, version, locale, draft, source } = request;
-    const reserved = await operations.begin(owner, clientRequestId, projectId, version, "copy", { draft, locale, source, version }, draft);
+    const model = marketingCopyModel.current();
+    const reserved = await operations.begin(owner, clientRequestId, projectId, version, "copy", { draft, locale, source, version }, draft, model);
     if (!reserved.fresh) return { ...replay(reserved.operation), operation: reserved.operation, project: await this.project(owner, projectId) };
     try {
       const prompt = creationPrompt(reserved.draft, locale);
-      const result = parseTextResult("copy", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true }, "copy"), reserved.draft);
+      const result = parseTextResult("copy", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true, model }, "copy"), reserved.draft);
       const operation = await operations.finish(owner, clientRequestId, result);
       return { ...result, operation, project: await this.project(owner, projectId) };
-    } catch (error) { await operations.fail(owner, clientRequestId, true, invalidTextResult(error)); throw error; }
+    } catch (error) { await this.fail(owner, clientRequestId, true, error, model); throw error; }
   }
 
   /** Writes the whole storyboard, or rewrites shot `index`, of the saved draft. */
   async storyboard(owner: string, p: MarketingProject, request: TextRequest & { instruction: string; index?: number }) {
     const { operations, activeProfile } = this.deps;
     const { clientRequestId, version, locale, instruction, index } = request;
-    const reserved = await operations.begin(owner, clientRequestId, p.id, version, "storyboard", { version, locale, instruction, index });
+    const model = marketingCopyModel.current();
+    const reserved = await operations.begin(owner, clientRequestId, p.id, version, "storyboard", { version, locale, instruction, index }, undefined, model);
     if (!reserved.fresh) { replay(reserved.operation); return { ...p, operation: reserved.operation }; }
     const draft = reserved.draft;
     let started = false;
@@ -62,10 +65,10 @@ export class MarketingWriting {
       catch (error) { throw new MarketingError((error as Error).message); }
       const prompt = storyboardPrompt(draft, locale, initial, instruction, index);
       started = true;
-      const result = parseTextResult("storyboard", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true }, "storyboard"), draft, index);
+      const result = parseTextResult("storyboard", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true, model }, "storyboard"), draft, index);
       const operation = await operations.finish(owner, clientRequestId, result);
       return { ...await this.project(owner, p.id), operation };
-    } catch (error) { await operations.fail(owner, clientRequestId, started, invalidTextResult(error)); throw error; }
+    } catch (error) { await this.fail(owner, clientRequestId, started, error, model); throw error; }
   }
 
   /** Compliance review of the saved copy; a re-check after edits sends only what changed. */
@@ -88,15 +91,15 @@ export class MarketingWriting {
   private async recorded(owner: string, projectId: string, request: TextRequest, kind: "review" | "publication",
     input: { version: number; locale: MarketingLocale; fillMissing?: boolean }, prompt: (draft: MarketingDraft, delta?: MarketingReviewDelta) => Prompt) {
     const { operations } = this.deps;
-    const reserved = await operations.begin(owner, request.clientRequestId, projectId, request.version, kind, input);
+    const model = kind === "review" ? MARKETING_REVIEW_MODEL : marketingCopyModel.current();
+    const reserved = await operations.begin(owner, request.clientRequestId, projectId, request.version, kind, input, undefined, model);
     let operation = reserved.operation;
     if (reserved.fresh) {
       try {
         const frozen = reserved.input as typeof input & { delta?: MarketingReviewDelta };
-        const raw = await this.call(owner, request.clientRequestId, prompt(reserved.draft, frozen.delta),
-          kind === "review" ? { model: MARKETING_REVIEW_MODEL } : {}, kind);
+        const raw = await this.call(owner, request.clientRequestId, prompt(reserved.draft, frozen.delta), { model }, kind);
         operation = await operations.finish(owner, request.clientRequestId, parseOperationResult(kind, raw, reserved.draft, frozen));
-      } catch (error) { await operations.fail(owner, request.clientRequestId, true, invalidTextResult(error)); throw error; }
+      } catch (error) { await this.fail(owner, request.clientRequestId, true, error, model); throw error; }
     } else replay(operation);
     if (operation.status === "conflict") throw new MarketingError(kind === "review" ? "文案已更新，请重新检查。" : "草稿已更新，请重新生成标题和标签。", 409);
     return { ...await this.project(owner, projectId), operation };
@@ -112,6 +115,13 @@ export class MarketingWriting {
       }
       return this.deps.operations.receipt(owner, clientRequestId, receipt);
     } });
+  }
+
+  /** A result the model returned but that does not parse also switches away from the default copy model. */
+  private fail(owner: string, clientRequestId: string, started: boolean, error: unknown, model: string) {
+    const invalid = invalidTextResult(error);
+    if (invalid) marketingCopyModel.failed(model);
+    return this.deps.operations.fail(owner, clientRequestId, started, invalid);
   }
 
   private async project(owner: string, id: string) {

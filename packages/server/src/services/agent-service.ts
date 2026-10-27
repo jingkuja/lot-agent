@@ -1,5 +1,5 @@
 import { DesktopToolBroker } from "../desktop/broker.js";
-import { MARKETING_COPY_MODEL } from "@lot-agent/core/marketing-video";
+import { copyModelFault, marketingCopyModel } from "../marketing-video/copy-model.js";
 import type { FeishuService } from "../feishu/service.js";
 import { createFeishuTools, FEISHU_MESSAGE_POLICY } from "../feishu/tools.js";
 import { FEISHU_TEXT_POLICY } from "../feishu/policy.js";
@@ -998,13 +998,13 @@ export class AgentService {
 
   async marketingText(system: string, input: string, userId: string, signal?: AbortSignal, options: MarketingTextOptions = {}): Promise<unknown> {
     let invoked = false;
+    const model = options.model ?? marketingCopyModel.current();
     try {
       signal?.throwIfAborted();
       if (!options.upstreamBilling) {
         const quota = await this.usageMeter.checkQuota(userId, 0);
         if (!quota.ok) throw new MarketingTextError("文案处理额度已达上限，请检查每日或每月用量限制。", "MARKETING_USAGE_LIMIT", 402);
       }
-      const model = options.model ?? MARKETING_COPY_MODEL;
       const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, modelId: model });
       if (usedModelId !== model) throw new MarketingTextError("文案模型授权不可用，请检查账号的模型权限和积分后重试。", "MARKETING_MODEL_AUTH", 503);
       const metered = options.upstreamBilling ? llm : meterLLM(llm, usage => this.meterUtilityUsage("marketing text", usedModelId, userId, usage));
@@ -1014,7 +1014,9 @@ export class AgentService {
       // Authorization/quota rejection happened before a model request existed.
       // Record that fact so fixing account setup does not leave the draft locked.
       if (!invoked && options.onReceipt) await options.onReceipt({ text: "", outcome: "rejected" });
-      throw marketingTextError(error, signal);
+      const failure = marketingTextError(error, signal);
+      if (invoked && copyModelFault(failure)) marketingCopyModel.failed(model);
+      throw failure;
     }
   }
 

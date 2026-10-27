@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { selectAnalysisFrames, type AnalysisSnapshot, type FrameEvidence } from "@lot-agent/core/marketing-analysis";
 import type { Message } from "@lot-agent/core";
 import { AnalysisModels, type ModelStepReceipt } from "./models.js";
 import { analyzeSelectedFrames } from "./pipeline.js";
 import { AnalysisError } from "./errors.js";
+import { marketingCopyModel } from "../marketing-video/copy-model.js";
+
+// A model failure in one test must not switch the copy model of the next.
+beforeEach(() => marketingCopyModel.reset());
 
 const frames: FrameEvidence[] = [0, 1].map(i => ({ id: `f000${i + 1}`, sourceHash: "a".repeat(64), sourcePts: String(i * 500), timeBase: "1/1000", ptsMs: i * 500, width: 640, height: 360, objectKey: `frame-000${i + 1}.jpg`, reasons: [] }));
 const selection = { ...selectAnalysisFrames(frames, frames.map((_, i) => new Uint8Array(96 * 54).fill(i * 255))), durationMs: 1000 };
@@ -145,7 +149,8 @@ describe("analysis stage checkpoints", () => {
     snapshot.texts[0].text = "199元";
     const completed = await analyzeSelectedFrames({ snapshot, selection, revision: 2, models: model, checkpoint });
     expect(calls).toHaveLength(previousCalls + 1);
-    expect(calls.at(-1)?.model).toBe("qwen3.8-max");
+    // The truncated summary switched the copy model, so the new revision uses the fallback.
+    expect(calls.at(-2)?.model).toBe("kimi-k3.1-pro"); expect(calls.at(-1)?.model).toBe("kimi-k3");
     expect(calls.at(-1)?.messages[1].content).toContain('"text":"199元"');
     expect(calls.at(-1)?.messages[1].content).not.toContain("rawText");
     expect(completed.summaryRevision).toBe(2); expect(completed.texts[0].rawText).toBe("99元");
@@ -174,7 +179,7 @@ it("automatically synthesizes the remaining evidence after known OCR failures wi
     } }),
   });
   const result = await analyzeSelectedFrames({ snapshot: initial(), selection, revision: 1, models, checkpoint: async () => {} });
-  expect(calls).toEqual(["deepseek-v4.1-flash", "deepseek-v4.1-flash", "kimi-k3", "qwen3.8-max"]);
+  expect(calls).toEqual(["deepseek-v4.1-flash", "deepseek-v4.1-flash", "kimi-k3", "kimi-k3.1-pro"]);
   expect(result.summary?.summary[0].statement).toBe("展示产品");
   expect(result.summary?.limitations).toContain("OCR_INCOMPLETE");
   expect(result.coverage?.omittedOcrFrameIds).toEqual(["f0001", "f0002"]);

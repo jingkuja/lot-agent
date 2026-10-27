@@ -85,6 +85,8 @@ export interface AnalysisCallLedger {
   begin(stepId: string, inputHash: string, model: string, imageCount: number): Promise<ModelStepReceipt | null>;
   finish(stepId: string, receipt: ModelStepReceipt): Promise<void>;
   responseId?(stepId: string, id: string): Promise<void>;
+  /** The model already recorded for the step; a replay or explicit retry must use it again. */
+  stepModel?(stepId: string): Promise<string | undefined>;
 }
 export interface AnalysisLease { id: string; ownerId: string; token: string; revision: number }
 export interface AnalysisJobStore extends AnalysisStore {

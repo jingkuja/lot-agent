@@ -32,7 +32,9 @@ export class PgMarketingTextOperations {
   async list(owner: string, projectId: string): Promise<TextOperation[]> {
     return (await this.pool.query("SELECT * FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2 ORDER BY created_at DESC LIMIT 10", [owner, projectId])).rows.map(view);
   }
-  async begin(owner: string, id: string, projectId: string, version: number, kind: TextOperation["kind"], input: unknown, expectedDraft?: MarketingDraft) {
+  /** `model` is the one the caller will request, recorded before the call. */
+  async begin(owner: string, id: string, projectId: string, version: number, kind: TextOperation["kind"], input: unknown, expectedDraft?: MarketingDraft,
+    model = kind === "review" ? MARKETING_REVIEW_MODEL : MARKETING_COPY_MODEL) {
     const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
     return this.transaction(async client => {
       // Serialize requests for this owner, including concurrent reuse of an ID
@@ -67,7 +69,7 @@ export class PgMarketingTextOperations {
         if (delta) frozen = { ...(input as object), delta };
       }
       const row = (await client.query(`INSERT INTO marketing_text_operations(id,user_id,project_id,project_version,kind,input_hash,model,protocol,status,input_snapshot,parser_version)
-        VALUES($1,$2,$3,$4,$5,$6,$7,'marketing-json-v1','running',$8,$9) RETURNING *`, [id, owner, projectId, version, kind, hash, kind === "review" ? MARKETING_REVIEW_MODEL : MARKETING_COPY_MODEL, JSON.stringify({ draft, input: frozen }), textResultVersion(kind)])).rows[0];
+        VALUES($1,$2,$3,$4,$5,$6,$7,'marketing-json-v1','running',$8,$9) RETURNING *`, [id, owner, projectId, version, kind, hash, model, JSON.stringify({ draft, input: frozen }), textResultVersion(kind)])).rows[0];
       return { fresh: true as const, operation: view(row), draft, input: frozen };
     });
   }
