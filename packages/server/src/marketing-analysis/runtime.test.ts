@@ -31,7 +31,7 @@ it("reads local upload bytes through the private owner path and reuses decoding 
     store: { row: async () => ({ pipeline_version: ANALYSIS_VERSION, mode: "all", snapshot: { source, frames: [], frameTexts: [], observations: [], texts: [] } }),
       pool: { query: async () => ({ rows: [], rowCount: 0 }) }, checkpoint },
     storage: { directory: async () => directory }, db: { getUserApiKey: async () => "owner-key" },
-    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] }) }, config: { decodeThreads: 4 },
+    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3.1-pro"] }) }, config: { decodeThreads: 4 },
   } as unknown as Parameters<typeof runAnalysis>[2];
   vi.mocked(downloadAnalysisSource).mockClear();
   vi.mocked(copyAnalysisUpload).mockResolvedValue(prepared);
@@ -67,7 +67,7 @@ it("uses the Worker-selected sandbox for download and decoding before running mo
     },
     storage: { directory: vi.fn(async () => directory) },
     db: { getUserApiKey: vi.fn(async () => "fixture-key") },
-    hub: { listModels: vi.fn(async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] })) },
+    hub: { listModels: vi.fn(async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3.1-pro"] })) },
     config: { downloaderVersion: "2026.07.04", decodeThreads: 4, ocrConcurrency: 8, visualConcurrency: 3 }, baseUrl: "https://gateway.example.test/v1", bridgePath: "/bridge.py",
   } as unknown as Parameters<typeof runAnalysis>[2];
   vi.mocked(downloadAnalysisSource).mockResolvedValue({ source: downloaded, bytes: 1, transferredBytes: 1 });
@@ -95,7 +95,7 @@ it("checkpoints automatic creation from the saved project and reuses it after in
   const deps = {
     store: { row: async () => row, pool: { query: async () => ({ rows: [], rowCount: 0 }) }, checkpoint },
     storage: { directory: async () => "/tmp" },
-    db: { getUserApiKey: async () => "fixture-key" }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] }) },
+    db: { getUserApiKey: async () => "fixture-key" }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3.1-pro"] }) },
     config: {}, baseUrl: "https://gateway.example.test/v1", bridgePath: "/bridge.py",
   } as unknown as Parameters<typeof runAnalysis>[2];
   const lease = { id: "analysis", ownerId: "owner", token: "lease", revision: 1 }; const signal = new AbortController().signal;
@@ -121,7 +121,7 @@ it("resumes failed copy from the saved summary without repeating video analysis"
   const deps = {
     store: { row: async () => row, pool: { query: async () => ({ rows: [], rowCount: 0 }) }, checkpoint },
     storage: { directory: async () => "/tmp" }, db: { getUserApiKey: async () => "fixture-key" },
-    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"] }) }, config: {},
+    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3.1-pro"] }) }, config: {},
   } as unknown as Parameters<typeof runAnalysis>[2];
   const lease = { id: "analysis", ownerId: "owner", token: "lease", revision: 1 };
   const signal = new AbortController().signal;
@@ -170,7 +170,7 @@ it("transcribes with the current owner key before synthesis and checkpoints the 
   const deps = {
     store: { row: async () => row, pool: { query: async () => ({ rows: [], rowCount: 0 }) }, checkpoint },
     storage: { directory: async () => "/tmp" },
-    db: { getUserApiKey: async (owner: string) => `${owner}-key` }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"], asr: [speech.model] }) },
+    db: { getUserApiKey: async (owner: string) => `${owner}-key` }, hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3.1-pro"], asr: [speech.model] }) },
     mediaRuntime: { decoderRunner: () => runner }, config: {}, baseUrl: "https://gateway.example.test/v1", bridgePath: "/bridge.py",
   } as unknown as Parameters<typeof runAnalysis>[2];
   const signal = new AbortController().signal; const lease = { id: "analysis", ownerId: "owner", token: "lease", revision: 1 };
@@ -203,7 +203,7 @@ it.each([
         ? { rows: [{ model: "qwen-audio-3.1-asr-flash", receipt: test.receipt, retry_requested: test.retry }], rowCount: 1 }
         : { rows: [], rowCount: sql.includes("receipt IS NULL") && test.error === "REQUEST_UNKNOWN" ? 1 : 0 } }, checkpoint },
     storage: { directory: async () => "/tmp" }, db: { getUserApiKey: async () => "fixture" },
-    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3"], asr: test.permission ? ["qwen-audio-3.1-asr-flash"] : [] }) },
+    hub: { listModels: async () => ({ llm: ["deepseek-v4.1-flash", "kimi-k3.1-pro"], asr: test.permission ? ["qwen-audio-3.1-asr-flash"] : [] }) },
     config: {}, baseUrl: "https://fixture.test", bridgePath: "/bridge.py",
   } as unknown as Parameters<typeof runAnalysis>[2];
   vi.mocked(analyzeSelectedFrames).mockImplementation(async input => input.snapshot);

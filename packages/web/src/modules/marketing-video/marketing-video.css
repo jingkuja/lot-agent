@@ -236,6 +236,13 @@
 .mv-review-edit .mv-field { margin: 8px 0 0; }
 
 .mv-result-video { display: block; max-width: 100%; max-height: 500px; margin: auto; border-radius: var(--radius-md); background: var(--bg); }
+.mv-result-frame { position: relative; width: fit-content; max-width: 100%; margin: 0 auto; }
+.mv-result-frame .mv-result-video { margin: 0; }
+.mv-caption-overlay { position: absolute; overflow: hidden; pointer-events: none; border-radius: var(--radius-md); }
+.mv-caption-overlay p { position: absolute; left: 0; right: 0; margin: 0; color: var(--video-caption); font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-weight: 700; line-height: 1.2; text-align: center; overflow-wrap: anywhere; paint-order: stroke fill; -webkit-text-stroke-color: var(--video-caption-outline); }
+.mv-caption-badge { position: absolute; top: 8px; left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--warning); color: var(--text-on-accent); font-size: 11px; font-weight: 600; }
+.mv-preview-modes { display: flex; justify-content: center; gap: 8px; margin: 10px 0 0; }
+.mv-preview-modes button { min-height: 30px; padding: 4px 14px; font-size: 12px; }
 .mv-download { display: flex; width: fit-content; align-items: center; justify-content: center; margin: 14px auto 0; padding: 8px 18px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); color: var(--accent); font-size: 13px; font-weight: 550; text-decoration: none; }
 .mv-downloads { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 14px 0 0; }
 .mv-downloads .mv-download { margin: 0; }

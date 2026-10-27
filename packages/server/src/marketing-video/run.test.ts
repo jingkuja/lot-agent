@@ -76,6 +76,23 @@ describe("marketing prompt submission preflight", () => {
     }
   });
 
+  it("stores the caption-free copy beside the video and drops the draft's earlier copies (M08)", async () => {
+    const f = fixture([short, short]);
+    Object.assign(f.job.input, { local_subtitles: true });
+    const captionTiming = [0, 1].map(() => ({ script: short.script, durationSec: 15, voiceSec: 3, pauses: [] }));
+    f.compose.mockResolvedValueOnce({ ...composed(), captions: [], captionTiming, preview: { file: "/tmp/preview.mp4", sizeBytes: 5 } } as never);
+    const output = await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+    expect(output).toMatchObject({ captionTiming, preview: { url: "/static/result.mp4" } });
+    const assets = f.db.createAsset.mock.calls.map(([asset]) => asset as { id: string; storageKey: string; isPrivate: boolean });
+    expect(assets).toHaveLength(2);
+    expect(assets[0].storageKey).toBe(`${(output as { assetIds: string[] }).assetIds[0]}.mp4`);
+    expect(assets[1]).toMatchObject({ id: (output as { preview: { assetId: string } }).preview.assetId, isPrivate: true });
+    expect(assets[1].storageKey).toMatch(/-preview\.mp4$/);
+    const calls = f.db.pool.query.mock.calls as unknown as unknown[][];
+    const prune = calls.find(([sql]) => String(sql).startsWith("DELETE FROM assets"));
+    expect(prune?.[1]).toEqual(["owner", "project", "parent", "%-preview.mp4"]);
+  });
+
   it("reports a draft this worker cannot read as a server problem before any provider is resolved", async () => {
     vi.mocked(runGenerationJob).mockClear();
     const f = fixture([short]);

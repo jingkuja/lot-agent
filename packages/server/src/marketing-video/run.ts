@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import { ProviderError, type ReferenceInput } from "@lot-agent/core";
 import { marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
@@ -14,6 +16,23 @@ import { frozenNarration, narrationFile } from "./narration.js";
 const UNKNOWN = UNKNOWN_SUBMISSION;
 /** The queue already watches the task status; this slower check only backs it up. Every paid step
  * also checks right before it starts. */
+/** Storage key ending of a made video's caption-free copy, used only to preview caption changes. */
+const PREVIEW_SUFFIX = "-preview.mp4";
+/** Only the newest caption-free copy of a draft is kept: earlier jobs' copies are removed once a new
+ * one is stored. A failure only leaves bytes behind; the made video is not affected. */
+async function removeEarlierPreviews(deps: MarketingRunDeps, owner: string, projectId: string, jobId: string) {
+  try {
+    const { rows } = await deps.db.pool.query(`DELETE FROM assets a USING tasks t WHERE a.task_id=t.id AND a.user_id=$1 AND a.type='video'
+      AND a.storage_key LIKE $4 AND t.type='marketing.video' AND t.user_id=$1 AND t.input->>'projectId'=$2 AND t.id<>$3 RETURNING a.storage_key`,
+      [owner, projectId, jobId, `%${PREVIEW_SUFFIX}`]);
+    const folder = resolve(deps.dataRoot, "assets");
+    await Promise.all(rows.map(async row => {
+      const path = resolve(folder, row.storage_key);
+      if (path.startsWith(folder + sep)) await rm(path, { force: true });
+    }));
+  } catch (error) { console.warn("[marketing-video] earlier caption previews not removed", { projectId, errorType: (error as Error)?.name }); }
+}
+
 export const CANCEL_CHECK_MS = 3000;
 // 4xx answers reject the request itself; 408/409 may still have created a task (5xx: see gatewayFailure).
 // CONNECT_ERROR means the POST was never written, so no vendor task can exist.
@@ -55,7 +74,9 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     };
     timer = setInterval(() => { void assertActive().catch(abort); }, CANCEL_CHECK_MS);
     await assertActive();
-    const existing = (await deps.db.pool.query("SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 ORDER BY created_at LIMIT 1", [job.id, job.userId])).rows[0];
+    // The final video, not the caption-free copy stored after it.
+    const existing = (await deps.db.pool.query(`SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 AND storage_key NOT LIKE $3
+      ORDER BY created_at LIMIT 1`, [job.id, job.userId, `%${PREVIEW_SUFFIX}`])).rows[0];
     if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime }] };
     // The API validated this draft on submission, so a rejection here means this worker runs
     // older code than the API (e.g. a draft field it does not know yet), not a model failure.
@@ -255,16 +276,26 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
       const result = await (deps.compose ?? composeMarketingVideo)({ files, segments: segments.map((s) => ({ index: s.slot, script: s.script, durationSec: s.duration_sec })) as MarketingSegment[], draft, music, narration, subtitles: burnSubtitles,
         speech: generateAudio || !!narration, signal: controller.signal });
       const id = randomUUID(); const key = `${id}.mp4`;
+      const previewId = randomUUID(); const previewKey = `${previewId}${PREVIEW_SUFFIX}`;
       let url: string;
+      let previewUrl: string | undefined;
       try {
         await assertActive();
         const gen = await deps.generation(job, controller.signal);
         ({ url } = await storeComposedVideo(gen.storage, key, result));
+        if (result.preview) ({ url: previewUrl } = await storeComposedVideo(gen.storage, previewKey, result.preview));
       } finally { await result.dispose(); }
       await assertActive();
       await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.sizeBytes,
         durationSec: result.durationSec, width: result.width, height: result.height, isPrivate: true });
-      return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}), ...(result.captions ? { captions: result.captions } : {}) };
+      if (result.preview && previewUrl) {
+        await deps.db.createAsset({ id: previewId, taskId: job.id, userId: job.userId, type: "video", storageKey: previewKey, url: previewUrl, mime: "video/mp4",
+          sizeBytes: result.preview.sizeBytes, durationSec: result.durationSec, width: result.width, height: result.height, isPrivate: true });
+        await removeEarlierPreviews(deps, job.userId, project.id, job.id);
+      }
+      return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}),
+        ...(result.captions ? { captions: result.captions } : {}), ...(result.captionTiming ? { captionTiming: result.captionTiming } : {}),
+        ...(result.preview && previewUrl ? { preview: { assetId: previewId, url: previewUrl } } : {}) };
     } catch (error) {
       if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;
       throw new MarketingRunError("COMPOSITION_FAILED", error instanceof Error ? error.message : "视频合成失败", { cause: error });

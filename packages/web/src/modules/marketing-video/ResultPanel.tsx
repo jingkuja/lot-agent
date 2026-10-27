@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { marketingCaptionSrt, type MarketingCaption, type MarketingComposition, type MarketingNarrationClip, type MarketingProject, type MarketingQualityReport,
   type MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
@@ -8,11 +8,12 @@ import { TaskStatus } from "./TaskStatus.js";
 import { DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 import { NarrationSettings } from "./ProductionStep.js";
 import { CaptionSettings } from "./CaptionSettings.js";
+import { ResultVideo, type ResultPlayer } from "./CaptionPreview.js";
 import { CONFIRM_STEP } from "./production-checks.js";
 
 /** Settings only the local composition of a made video uses. Changing them composes the kept
  * clips again, without the video model. */
-function CompositionSettings({ form, composition, renderedSubtitles, captions, recompose, handlers, onPickNarrationVoice }: {
+function CompositionSettings({ form, composition, renderedSubtitles, captions, recompose, handlers, previewable, onPickNarrationVoice, onPlayShot }: {
   form: DraftForm; composition: MarketingComposition; handlers: MaterialHandlers; onPickNarrationVoice(): void;
   /** Whether the kept clips were made for captions, with the bottom of the frame kept clear. */
   renderedSubtitles: boolean;
@@ -20,6 +21,10 @@ function CompositionSettings({ form, composition, renderedSubtitles, captions, r
   recompose: ReactNode;
   /** Cues burned into the current video, shown beside each shot's captions. */
   captions?: MarketingCaption[];
+  /** False for a made video without a caption-free copy: caption changes cannot be watched before composing again. */
+  previewable: boolean;
+  /** Plays one shot of the made video; absent until it is made. */
+  onPlayShot?: (index: number) => void;
 }) {
   const { t } = useI18n();
   // The video's other settings stay frozen; the server accepts only these and shot text.
@@ -36,7 +41,9 @@ function CompositionSettings({ form, composition, renderedSubtitles, captions, r
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
     {composition.localSubtitles && <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label>}
     {composition.localSubtitles && draft.subtitles && !renderedSubtitles && <p className="mv-hint" role="note">{t("这条视频制作时没有开字幕，片段没有为字幕留出底部区域，字幕可能遮挡人脸或产品。重新合成后请检查；遮挡明显的镜头可在下方勾选「重新生成此镜」，会产生费用。")}</p>}
-    {composition.localSubtitles && draft.subtitles && <CaptionSettings form={open} captions={captions} recompose={recompose} />}
+    {composition.localSubtitles && draft.subtitles && !previewable && <p className="mv-hint" role="note">
+      {t("这条视频合成时没有保留无字幕版本，修改字幕后不能实时预览；重新合成成片后，再修改字幕即可实时预览。")}</p>}
+    {composition.localSubtitles && draft.subtitles && <CaptionSettings form={open} captions={captions} recompose={recompose} onPlayShot={onPlayShot} />}
     {!composition.localSubtitles && draft.subtitles && <p className="mv-hint">{t("这条视频的字幕由视频模型画在画面里，不能单独调整；复制为新草稿重新制作后，字幕改为合成时加入，可以调整。")}</p>}
   </div>;
 }
@@ -81,12 +88,15 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
   const { t } = useI18n();
   const { draft, busy } = form;
   const result = project.status === "succeeded" ? project.output?.assets?.[0] : undefined;
+  const player = useRef<ResultPlayer>(null);
+  const previewable = !!result && !!project.output?.preview && !!project.output.captionTiming?.length;
   const continuity = draft.continuity && <p className="mv-hint">{t("统一人物、产品与场景设定")}：{draft.continuity}</p>;
   const archived = project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库中的视频" : "保存视频到知识库";
   return <section className="mv-card mv-results">
     <div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => onCopyDraft(0)}>{t("复制为新草稿")}</button></div>
     {result
-      ? <><video className="mv-result-video" controls src={result.url} />
+      ? <><ResultVideo key={`${project.taskId}:${result.url}`} url={result.url} output={project.output!} draft={draft} player={player}
+          rendered={project.revision?.composition.localSubtitles ? project.revision.draft : undefined} />
         <div className="mv-downloads"><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
           {!!project.output?.captions?.length && <a className="mv-download" href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(project.output.captions))}`} download="captions.srt">{t("下载字幕（SRT）")}</a>}</div>
         {project.output?.quality && <QualityReport quality={project.output.quality} redo={!!project.revision} />}</>
@@ -106,7 +116,10 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
     <details className="mv-script-review" open><summary>{t(project.revision ? "修改成片" : "查看制作分镜")}</summary>
       {project.revision ? <ShotRevision key={project.taskId} project={project} revision={project.revision} draft={draft} busy={busy} saving={saving} reviewPanel={reviewPanel}
           narration={narration} settings={recompose => <>
-            <CompositionSettings form={form} composition={project.revision!.composition} renderedSubtitles={project.revision!.draft.subtitles} captions={project.output?.captions} recompose={recompose} handlers={handlers} onPickNarrationVoice={onPickNarrationVoice} />
+            <CompositionSettings form={form} composition={project.revision!.composition} renderedSubtitles={project.revision!.draft.subtitles}
+              captions={project.output?.captions} recompose={recompose} handlers={handlers} previewable={!result || previewable}
+              onPickNarrationVoice={onPickNarrationVoice}
+              onPlayShot={result ? index => player.current?.playShot(index) : undefined} />
             {continuity}
           </>}
           onChange={onShots} onRevert={onRevertShots} onRevise={onRevise} />

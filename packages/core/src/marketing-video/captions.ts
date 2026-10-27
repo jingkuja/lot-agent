@@ -1,7 +1,7 @@
-import type { MarketingCaptions, MarketingDraft } from "./index.js";
+import { speechUnits, type MarketingCaptions, type MarketingDraft } from "./index.js";
 
-// Locally burned captions: line splitting, layout and the per-shot changes a made video
-// may compose again with. Timing against the audio stays in the server.
+// Locally burned captions: line splitting, layout, timing against a shot's voice and the per-shot
+// changes a made video may compose again with. Finding the pauses in the audio stays in the server.
 
 const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
 /** Display width in full-width cells; Latin letters and digits are about half a cell. */
@@ -179,6 +179,94 @@ export function marketingCaptionsValue(captions: MarketingCaptions | undefined):
   while (shots.length && !shots.at(-1)) shots.pop();
   const value = { ...captions, offsetSec: Math.round(captions.offsetSec * 100) / 100, shots };
   return value.size === "medium" && value.position === "medium" && !value.offsetSec && !shots.length ? undefined : value;
+}
+
+/** One caption line, in seconds from the start of its shot. */
+export interface MarketingCaptionCue { start: number; end: number; text: string }
+/** A silent stretch of a narration take, in seconds. */
+export interface MarketingCaptionPause { start: number; end: number }
+
+/** Times one shot's lines against its narration take. Speech spans the take minus its
+ * leading and trailing silence; line breaks fall in proportion to the spoken text and
+ * move to a pause in the take when one is close. Each line stays up until the next
+ * one is spoken; the last leaves shortly after the take ends. */
+export function timeCaptions(lines: string[], voiceSec: number, shotSec: number, pauses: MarketingCaptionPause[] = []): MarketingCaptionCue[] {
+  if (!lines.length) return [];
+  const edge = 0.05;
+  const leading = pauses.find(pause => pause.start <= edge);
+  const trailing = pauses.find(pause => pause.end >= voiceSec - edge && pause !== leading);
+  const speechStart = leading && leading.end < voiceSec ? leading.end : 0;
+  const speechEnd = trailing && trailing.start > speechStart ? trailing.start : voiceSec;
+  const inner = pauses.filter(pause => pause !== leading && pause !== trailing && pause.start > speechStart && pause.end < speechEnd);
+  const weights = lines.map(line => Math.max(1, speechUnits(line)));
+  const cumulative = weights.reduce<number[]>((sums, weight) => [...sums, (sums.at(-1) ?? 0) + weight], [0]);
+  const total = cumulative.at(-1)!;
+  const span = speechEnd - speechStart;
+  const tolerance = Math.max(0.6, 0.35 * span / lines.length);
+  // Anchors: speech start, boundaries moved to a pause, speech end.
+  const anchors = [{ index: 0, at: speechStart }];
+  const used = new Set<MarketingCaptionPause>();
+  for (let index = 1; index < lines.length; index++) {
+    const estimate = speechStart + span * cumulative[index] / total;
+    const previous = anchors.at(-1)!.at;
+    const pause = inner.filter(p => !used.has(p) && (p.start + p.end) / 2 > previous && Math.abs((p.start + p.end) / 2 - estimate) <= tolerance)
+      .sort((a, b) => Math.abs((a.start + a.end) / 2 - estimate) - Math.abs((b.start + b.end) / 2 - estimate))[0];
+    if (pause) { used.add(pause); anchors.push({ index, at: pause.end }); }
+  }
+  anchors.push({ index: lines.length, at: speechEnd });
+  const starts = lines.map((_, index) => {
+    const after = anchors.findIndex(anchor => anchor.index >= index);
+    if (anchors[after].index === index) return anchors[after].at;
+    const before = anchors[after - 1];
+    const next = anchors[after];
+    return before.at + (next.at - before.at) * (cumulative[index] - cumulative[before.index]) / (cumulative[next.index] - cumulative[before.index]);
+  });
+  starts[0] = Math.max(0, speechStart - 0.1);
+  const last = Math.min(shotSec - edge, speechEnd + 0.5);
+  return lines.map((text, index) => ({ start: starts[index], end: index + 1 < lines.length ? starts[index + 1] : last, text }));
+}
+
+/** Moves a shot's cues by `offset` seconds, as far as the shot allows: the first line keeps at
+ * least `min` seconds after the start and the last one before the end, so no line is lost. */
+export function offsetCues(cues: MarketingCaptionCue[], offset: number, shotSec: number, min = 0.3): MarketingCaptionCue[] {
+  if (!offset || !cues.length) return cues;
+  const limit = shotSec - 0.05;
+  const shift = Math.min(Math.max(offset, min - cues[0].end), limit - min - cues.at(-1)!.start);
+  if ((offset < 0 && shift > 0) || (offset > 0 && shift < 0)) return cues;
+  const at = (sec: number) => Math.min(limit, Math.max(0, sec + shift));
+  return cues.map(cue => ({ ...cue, start: at(cue.start), end: at(cue.end) }));
+}
+
+/** What timing one shot's captions needs, kept with a made video so caption changes can be
+ * previewed without composing it again: the line it said, its length, and its voice's length and
+ * silent stretches (a shot without a voice is timed against its whole length). */
+export interface MarketingCaptionTiming { script: string; durationSec: number; voiceSec: number; pauses: MarketingCaptionPause[] }
+
+/** One shot's caption cues for the draft's current line breaks and offsets, in seconds of the shot. */
+export function marketingShotCues(draft: Pick<MarketingDraft, "captions">, index: number, timing: MarketingCaptionTiming, maxCells: number) {
+  const lines = marketingCaptionLines(draft, index, timing.script, maxCells);
+  const cues = timeCaptions(lines, timing.voiceSec, timing.durationSec, timing.pauses);
+  return offsetCues(cues, marketingCaptionOffset(draft, index, timing.script), timing.durationSec);
+}
+
+/** The captions a made video would get if composed again with the draft's caption settings, in
+ * seconds of the film. `changed` lists shots whose line differs from the one the video says:
+ * their timing is unknown until it is composed again, so they get no captions here. */
+export function marketingPreviewCaptions(draft: Pick<MarketingDraft, "captions" | "storyboard" | "quality" | "ratio">,
+  timing: MarketingCaptionTiming[]): { captions: MarketingCaption[]; changed: number[] } {
+  const { width, height } = marketingFrameSize(draft);
+  const maxCells = captionLayout(width, height, draft.captions).maxCells;
+  const captions: MarketingCaption[] = [], changed: number[] = [];
+  let shotStart = 0;
+  timing.forEach((shot, index) => {
+    if (draft.storyboard[index]?.script !== shot.script) changed.push(index);
+    else {
+      const at = (sec: number) => Math.round((shotStart + sec) * 100) / 100;
+      captions.push(...marketingShotCues(draft, index, shot, maxCells).map(cue => ({ shot: index, start: at(cue.start), end: at(cue.end), text: cue.text })));
+    }
+    shotStart += shot.durationSec;
+  });
+  return { captions, changed };
 }
 
 /** Cue of the made video, in seconds of the film. */

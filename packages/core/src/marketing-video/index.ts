@@ -1,10 +1,10 @@
 import { z } from "zod";
-import type { MarketingCaption } from "./captions.js";
+import type { MarketingCaption, MarketingCaptionTiming } from "./captions.js";
 import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoProfile, type MarketingVideoProfile } from "./models.js";
 
 export * from "./models.js";
 
-export const MARKETING_COPY_MODEL = "kimi-k3";
+export const MARKETING_COPY_MODEL = "kimi-k3.1-pro";
 /** Risk review only quotes and replaces excerpts; a fast model keeps re-checks after each edit short. */
 export const MARKETING_REVIEW_MODEL = "deepseek-v4.1-flash";
 export const MarketingShotSchema = z.object({
@@ -271,8 +271,11 @@ export interface MarketingProject {
   taskId: string | null; status: string; progress: number; stage?: string;
   error?: string; errorCode?: MarketingFailureCode;
   /** `quality`: local checks of the made video; absent on videos made before them.
-   * `captions`: the cues burned in locally. */
-  output?: { assetIds: string[]; assets: { url: string; mime: string }[]; quality?: MarketingQualityReport; captions?: MarketingCaption[] };
+   * `captions`: the cues burned in locally. `preview`: the same video without them, and
+   * `captionTiming` what timing them needs, so caption changes can be watched before composing
+   * again (M08); absent on videos composed before. */
+  output?: { assetIds: string[]; assets: { url: string; mime: string }[]; quality?: MarketingQualityReport; captions?: MarketingCaption[];
+    preview?: { assetId: string; url: string }; captionTiming?: MarketingCaptionTiming[] };
   knowledgeItemId: string | null;
   knowledgeVersion?: number | null;
   /** Saved earlier versions of the copy and storyboard that can be restored; absent when none. */

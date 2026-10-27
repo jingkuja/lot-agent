@@ -3,8 +3,9 @@ import { createReadStream } from "node:fs";
 import { mkdtemp, open, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep, join } from "node:path";
-import { isMarketingDurationValid, marketingCaptionLines, marketingCaptionOffset, marketingFrameSize, type MarketingCaption, type MarketingDraft, type MarketingQualityIssue, type MarketingQualityReport, type MarketingSegment } from "@lot-agent/core/marketing-video";
-import { captionAss, captionLayout, offsetCues, timeCaptions, type Pause } from "./subtitles.js";
+import { isMarketingDurationValid, marketingFrameSize, marketingShotCues, type MarketingCaption, type MarketingCaptionTiming, type MarketingDraft,
+  type MarketingQualityIssue, type MarketingQualityReport, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { captionAss, captionLayout, type Pause } from "./subtitles.js";
 
 export function mediaProcess(binary: string, args: string[], opts: { signal?: AbortSignal; cwd?: string; timeoutMs?: number } = {}): Promise<string> {
   opts.signal?.throwIfAborted();
@@ -206,6 +207,8 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
   try {
     const { width, height } = marketingFrameSize(input.draft);
     const captions: MarketingCaption[] = [];
+    // With captions, each shot is also encoded without them, for previewing caption changes (M08).
+    const timing: MarketingCaptionTiming[] = [];
     let shotStart = 0;
     for (let i = 0; i < input.files.length; i++) {
       const info = await inspectMedia(input.files[i], input.signal);
@@ -213,7 +216,6 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
       if (!info.video || info.duration < duration - 0.25) throw new Error("生成片段时长不足，请重新生成该片段。");
       const args = ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", info.format, "-i", input.files[i]];
       let audio = info.audio ? "0:a:0" : "1:a:0";
-      let captionFilter = "";
       // What the captions are timed to: the take, the clip's own voice, or nothing (silent).
       let speech: { path: string; format: string; sec: number } | undefined;
       if (input.narration) {
@@ -225,25 +227,33 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
         speech = { path: input.narration[i], format: voice.format, sec: voice.duration };
       } else if (!info.audio) args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
       else if (input.speech) speech = { path: input.files[i], format: info.format, sec: Math.min(info.duration, duration) };
+      const frame = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25`;
+      const encode = (file: string) => ["-af", "aresample=48000,apad", "-t", String(duration), "-c:v", "libx264", "-preset", "fast", "-crf", "21",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", file];
       if (input.subtitles) {
         // Burned while the clip is re-encoded anyway; the file name is fixed, never user text.
         const { script } = input.segments[i];
-        const lines = marketingCaptionLines(input.draft, i, script, captionLayout(width, height, input.draft.captions).maxCells);
-        const timed = speech
-          ? timeCaptions(lines, speech.sec, duration, await narrationPauses(speech.path, speech.format, speech.sec, input.signal))
-          : timeCaptions(lines, duration, duration);
-        const cues = offsetCues(timed, marketingCaptionOffset(input.draft, i, script), duration);
+        const shot: MarketingCaptionTiming = { script, durationSec: duration, voiceSec: speech ? speech.sec : duration,
+          pauses: speech ? await narrationPauses(speech.path, speech.format, speech.sec, input.signal) : [] };
+        timing.push(shot);
+        const cues = marketingShotCues(input.draft, i, shot, captionLayout(width, height, input.draft.captions).maxCells);
         await writeFile(join(folder, `${i}.ass`), captionAss(cues, width, height, input.draft.captions));
         const at = (sec: number) => Math.round((shotStart + sec) * 100) / 100;
         captions.push(...cues.map(cue => ({ shot: i, start: at(cue.start), end: at(cue.end), text: cue.text })));
-        captionFilter = `,subtitles=filename=${i}.ass`;
-      }
+        // One decode, two encodes: with captions, and the same picture without them.
+        args.push("-filter_complex", `[0:v:0]${frame},split=2[shot][clean];[shot]subtitles=filename=${i}.ass[burned]`,
+          "-map", "[burned]", "-map", audio, ...encode(`${i}.mp4`), "-map", "[clean]", "-map", audio, ...encode(`${i}-clean.mp4`));
+      } else args.push("-map", "0:v:0", "-map", audio, "-vf", frame, ...encode(`${i}.mp4`));
       shotStart += duration;
-      args.push("-map", "0:v:0", "-map", audio, "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25${captionFilter}`, "-af", "aresample=48000,apad", "-t", String(duration), "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-threads", "2", `${i}.mp4`);
       await mediaProcess(ffmpeg(), args, { signal: input.signal, cwd: folder });
     }
-    await writeFile(join(folder, "clips.txt"), input.files.map((_, i) => `file '${i}.mp4'`).join("\n"));
-    await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "1", "-i", "clips.txt", "-c", "copy", "joined.mp4"], { cwd: folder, signal: input.signal });
+    const concat = async (list: string, name: (i: number) => string, output: string) => {
+      await writeFile(join(folder, list), input.files.map((_, i) => `file '${name(i)}'`).join("\n"));
+      await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "1", "-i", list,
+        "-c", "copy", output], { cwd: folder, signal: input.signal });
+    };
+    await concat("clips.txt", i => `${i}.mp4`, "joined.mp4");
+    if (input.subtitles) await concat("clean.txt", i => `${i}-clean.mp4`, "joined-clean.mp4");
     // Checked before the music is mixed in, so silence means no voice. A failed check
     // leaves the report unchecked instead of failing a video that is already paid for.
     const durations = input.segments.map(segment => segment.durationSec);
@@ -269,10 +279,17 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
     if (Math.abs(info.duration - durationSec) > 0.3) throw new Error("成片时长校验失败");
     const sizeBytes = (await stat(output)).size;
     if (sizeBytes > 200 * 1024 * 1024) throw new Error("成片超过知识库存储限制，请降低清晰度。");
+    // The picture without captions, with the final soundtrack (music included) copied over.
+    let preview: { file: string; sizeBytes: number } | undefined;
+    if (input.subtitles) {
+      await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", "joined-clean.mp4", "-i", "final.mp4",
+        "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-t", String(durationSec), "-movflags", "+faststart", "preview.mp4"], { cwd: folder, signal: input.signal });
+      preview = { file: join(folder, "preview.mp4"), sizeBytes: (await stat(join(folder, "preview.mp4"))).size };
+    }
     const quality: MarketingQualityReport = { checked: !!issues, durationSec: Math.round(info.duration * 100) / 100, expectedSec: durationSec,
       subtitles: input.subtitles ? "burned" : input.draft.subtitles ? "model" : "off", ...(input.subtitles ? { captions: captions.length } : {}), speech, issues: issues ?? [] };
     const composed: ComposedVideo = { file: output, sizeBytes, dispose };
-    return { ...composed, durationSec: info.duration, width, height, quality, ...(input.subtitles ? { captions } : {}) };
+    return { ...composed, durationSec: info.duration, width, height, quality, ...(input.subtitles ? { captions, captionTiming: timing, preview } : {}) };
   } catch (error) { await dispose(); throw error; }
 }
 
@@ -281,6 +298,6 @@ export async function composeMarketingVideo(input: { files: string[]; segments: 
 export interface ComposedVideo { file: string; sizeBytes: number; dispose(): Promise<void> }
 export type VideoStreamStorage = { putStream(key: string, body: NodeJS.ReadableStream, contentType: string, sizeHint?: number): Promise<{ url: string }> };
 /** Streams a composed video to storage. The caller still disposes of it. */
-export function storeComposedVideo(storage: VideoStreamStorage, key: string, video: ComposedVideo) {
+export function storeComposedVideo(storage: VideoStreamStorage, key: string, video: Pick<ComposedVideo, "file" | "sizeBytes">) {
   return storage.putStream(key, createReadStream(video.file), "video/mp4", video.sizeBytes);
 }

@@ -25,9 +25,11 @@ const SHOT_COPY: CaptionUnitCopy = { title: "第 {0} 镜", aria: "第 {0} 镜字
 
 /** One shot's caption lines as editable text, one caption per line. The text is kept while the
  * user types blank lines; a change made elsewhere (undo, reworded shot) replaces it. */
-export function ShotCaption({ index, start, end, lines, auto, mismatch, offsetSec, busy, burned, onLines, onOffset, copy = SHOT_COPY }: {
+export function ShotCaption({ index, start, end, lines, auto, mismatch, offsetSec, busy, burned, onLines, onOffset, onPlay, copy = SHOT_COPY }: {
   index: number; start?: number; end?: number; lines: string[]; auto: boolean; mismatch: boolean; offsetSec: number; busy: boolean;
   burned: MarketingCaption[]; onLines(lines: string[] | undefined): void; onOffset(value: number): void; copy?: CaptionUnitCopy;
+  /** Plays this unit in the video above, to watch its captions. */
+  onPlay?: () => void;
 }) {
   const { t } = useI18n();
   const [text, setText] = useState(lines.join("\n"));
@@ -48,13 +50,16 @@ export function ShotCaption({ index, start, end, lines, auto, mismatch, offsetSe
     <div className="mv-caption-row">
       <OffsetField label={copy.offset} value={offsetSec} busy={busy} onChange={onOffset} />
       {!auto && <button type="button" disabled={busy} onClick={() => { setError(false); onLines(undefined); }}>{t("恢复自动断行")}</button>}
+      {onPlay && <button type="button" onClick={onPlay}>{t("播放本镜")}</button>}
     </div>
   </li>;
 }
 
 /** Captions burned in when a made video is composed: line breaks, timing, size and position.
  * The words stay the confirmed copy; changes here compose the kept clips again with `recompose`. */
-export function CaptionSettings({ form, captions: burned, recompose }: { form: DraftForm; captions?: MarketingCaption[]; recompose?: ReactNode }) {
+export function CaptionSettings({ form, captions: burned, recompose, onPlayShot }: { form: DraftForm; captions?: MarketingCaption[]; recompose?: ReactNode;
+  /** Plays one shot of the made video, to watch its captions. */
+  onPlayShot?: (index: number) => void }) {
   const { t } = useI18n();
   const { draft, busy, field } = form;
   const captions = draft.captions ?? MarketingCaptionsSchema.parse({});
@@ -93,7 +98,8 @@ export function CaptionSettings({ form, captions: burned, recompose }: { form: D
         return <ShotCaption key={index} index={index} start={index ? ends[index - 1] : 0} end={ends[index]} lines={lines} auto={!entry?.lines}
           mismatch={!!entry?.lines && !marketingCaptionLinesMatch(shot.script, entry.lines)} offsetSec={entry?.offsetSec ?? 0} busy={busy}
           burned={burned?.filter(cue => cue.shot === index) ?? []}
-          onLines={next => updateShot(index, { lines: next && !sameLines(next, auto) ? next : undefined })} onOffset={offsetSec => updateShot(index, { offsetSec })} />;
+          onLines={next => updateShot(index, { lines: next && !sameLines(next, auto) ? next : undefined })}
+          onOffset={offsetSec => updateShot(index, { offsetSec })} onPlay={onPlayShot && (() => onPlayShot(index))} />;
       })}</ol>
     </details>
   </fieldset>;

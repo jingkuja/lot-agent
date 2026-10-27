@@ -30,7 +30,7 @@
     "video": { "model": "kling-video-v3-omni", "modelId": "kling-video-v3-omni", "adapter": "openai-video" }
   },
   "modelCatalog": {
-    "llmProtocols": { "deepseek-v4.1-flash": "responses", "kimi-k3": "responses" },
+    "llmProtocols": { "deepseek-v4.1-flash": "responses", "kimi-k3": "responses", "kimi-k3.1-pro": "responses" },
     "defaultProvider": { "llm": "openai", "image": "openai-images", "video": "openai-video" },
     "providerMap": {
       "gemini-2.5-flash-image": "openai-images",

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { MarketingCaptionsSchema, MarketingDraftSchema, marketingCaptionErrors, marketingCaptionLines, marketingCaptionOffset, marketingCaptionSrt, marketingCaptionsValue, marketingFrameSize, marketingRevisionKey, type MarketingShot } from "./index.js";
+import { captionLines, MarketingCaptionsSchema, MarketingDraftSchema, marketingCaptionErrors, marketingCaptionLines, marketingCaptionOffset,
+  marketingCaptionSrt, marketingCaptionsValue, marketingFrameSize, marketingPreviewCaptions, marketingRevisionKey,
+  type MarketingCaptionTiming, type MarketingShot } from "./index.js";
 
 const shots: MarketingShot[] = [
   { durationSec: 8, script: "欢迎光临！今天推荐招牌拿铁，只要¥19.9。", visual: "店内", action: "端起咖啡", camera: "中景" },
@@ -50,4 +52,36 @@ it("writes the burned captions as SRT", () => {
 it("composes at even frame sizes", () => {
   expect(marketingFrameSize({ quality: "720p", ratio: "9:16" })).toEqual({ width: 720, height: 1280 });
   expect(marketingFrameSize({ quality: "1080p", ratio: "16:9" })).toEqual({ width: 1920, height: 1080 });
+});
+
+describe("caption preview of a made video (M08)", () => {
+  // The first shot's voice speaks from 0.5 s to 6 s with a pause in the middle; the second has no voice.
+  const timing: MarketingCaptionTiming[] = [
+    { script: shots[0].script, durationSec: 8, voiceSec: 6.2, pauses: [{ start: 0, end: 0.5 }, { start: 1.6, end: 2 }, { start: 6, end: 6.2 }] },
+    { script: shots[1].script, durationSec: 7, voiceSec: 7, pauses: [] },
+  ];
+  it("times the draft's lines like the composition, in seconds of the film", () => {
+    const { captions, changed } = marketingPreviewCaptions(draft(), timing);
+    expect(changed).toEqual([]);
+    const first = captions.filter(cue => cue.shot === 0);
+    expect(first.map(cue => cue.text).join("")).toBe(captionLines(shots[0].script, 14).join(""));
+    expect(first[0].start).toBeCloseTo(0.4);
+    // A line break lands on the pause in the voice.
+    expect(first.some(cue => Math.abs(cue.start - 2) < 0.01)).toBe(true);
+    expect(first.at(-1)!.end).toBeLessThanOrEqual(8);
+    expect(captions.filter(cue => cue.shot === 1)[0].start).toBeCloseTo(8);
+    expect(captions.every(cue => cue.end > cue.start)).toBe(true);
+  });
+  it("follows edited line breaks and offsets at once", () => {
+    const base = marketingPreviewCaptions(draft(), timing).captions;
+    const edited = marketingPreviewCaptions(draft({ offsetSec: 0.5, shots: [{ script: shots[0].script, lines: ["欢迎光临！", "今天推荐招牌拿铁，", "只要¥19.9"] }] }), timing).captions;
+    expect(edited.filter(cue => cue.shot === 0).map(cue => cue.text)).toEqual(["欢迎光临！", "今天推荐招牌拿铁，", "只要¥19.9"]);
+    expect(edited.at(-1)!.start).toBeCloseTo(base.at(-1)!.start + 0.5);
+  });
+  it("leaves out shots whose line no longer matches the made video", () => {
+    const reworded = MarketingDraftSchema.parse({ ...draft(), storyboard: [shots[0], { ...shots[1], script: "欢迎再来。" }] });
+    const { captions, changed } = marketingPreviewCaptions(reworded, timing);
+    expect(changed).toEqual([1]);
+    expect(captions.every(cue => cue.shot === 0)).toBe(true);
+  });
 });

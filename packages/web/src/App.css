@@ -299,6 +299,9 @@
   --text-muted: #8a929c;
   --text-user: #1a2430;
   --text-on-accent: #ffffff;
+  /* Captions drawn over a video preview look like the burned ones in every theme. */
+  --video-caption: #ffffff;
+  --video-caption-outline: #000000;
 
   --border: #e3e7ec;
   --border-input: #d5dce3;

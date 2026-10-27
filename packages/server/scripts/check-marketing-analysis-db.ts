@@ -69,7 +69,10 @@ try {
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM usage_logs WHERE task_id=$1", [first.id])).rows[0].n, 0);
   assert.equal("budget" in (await store.get(owner, first.id))!, false);
   assert.equal((await db.pool.query("SELECT actual_cost FROM marketing_analysis_steps WHERE analysis_id=$1", [first.id])).rows[0].actual_cost, null);
-  await assert.rejects(ledger.begin("visual:0", "hash2", "kimi-k3", 49), /ANALYSIS_IMAGE_BUDGET_EXHAUSTED/);
+  await assert.rejects(ledger.begin("visual:0", "hash2", "kimi-k3.1-pro", 49), /ANALYSIS_IMAGE_BUDGET_EXHAUSTED/);
+  // Images of steps recorded under the former default model still count after it changed.
+  assert.equal(await ledger.begin("visual:0", "hash2", "kimi-k3", 40), null); await ledger.finish("visual:0", receipt);
+  await assert.rejects(ledger.begin("visual:1", "hash3", "kimi-k3.1-pro", 9), /ANALYSIS_IMAGE_BUDGET_EXHAUSTED/);
   const snapshot: AnalysisSnapshot = { ...first.snapshot,
     source: { ...first.snapshot.source, durationMs: 1000 },
     frames: [{ id: "f0001", sourceHash: "a".repeat(64), sourcePts: "0", timeBase: "1/1000", ptsMs: 0, width: 100, height: 100, objectKey: "frame-0001.jpg", reasons: ["start"] }],
@@ -86,12 +89,12 @@ try {
   await assert.rejects(store.resume(owner, first.id, 1), /REVISION_CONFLICT/);
   await store.resume(owner, first.id, 2); const lease2 = (await store.claim(first.id))!;
   const ledger2 = new PgAnalysisLedger(store, lease2);
-  assert.equal(await ledger2.begin("summary:2", "summary-hash", "kimi-k3", 0), null);
+  assert.equal(await ledger2.begin("summary:2", "summary-hash", "kimi-k3.1-pro", 0), null);
   const failed = { text: "cut off", outcome: "failed" as const, usage: { promptTokens: 100, completionTokens: 10 } };
   await ledger2.finish("summary:2", failed); await store.finish(lease2, "MODEL_STEP_FAILED");
   assert.equal((await store.get(owner, first.id))?.status, "partial");
   await store.resume(owner, first.id, 2); const lease3 = (await store.claim(first.id))!; const ledger3 = new PgAnalysisLedger(store, lease3);
-  assert.equal(await ledger3.begin("summary:2", "summary-hash", "kimi-k3", 0), null, "explicit resume permits one new known-failed attempt");
+  assert.equal(await ledger3.begin("summary:2", "summary-hash", "kimi-k3.1-pro", 0), null, "explicit resume permits one new known-failed attempt");
   await ledger3.finish("summary:2", { ...receipt, text: "summary" }); await store.finish(lease3);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id='summary:2'", [first.id])).rows[0].n, 2);
   // A full selection with eight skipped OCR responses used to deadlock on
@@ -106,22 +109,22 @@ try {
     }));
   }
   for (let i = 0; i < 8; i++) {
-    await fullLedger.begin(`visual:${i}`, `visual-${i}`, "kimi-k3", 6);
+    await fullLedger.begin(`visual:${i}`, `visual-${i}`, "kimi-k3.1-pro", 6);
     await fullLedger.finish(`visual:${i}`, i === 7 ? failed : receipt);
   }
-  await fullLedger.begin("summary:1", "summary-full", "kimi-k3", 0);
+  await fullLedger.begin("summary:1", "summary-full", "kimi-k3.1-pro", 0);
   await fullLedger.finish("summary:1", failed); await store.finish(fullLease, "MODEL_STEP_FAILED");
   await db.pool.query("UPDATE marketing_analysis_steps SET retry_requested=true WHERE analysis_id=$1 AND receipt->>'outcome'='failed'", [full.id]);
   await store.resume(owner, full.id, 1);
   const resumedLease = (await store.claim(full.id))!; const resumedLedger = new PgAnalysisLedger(store, resumedLease);
   assert.equal((await resumedLedger.begin("ocr:f0001", "ocr-0", "deepseek-v4.1-flash", 1))?.outcome, "failed", "skipped OCR must stay cached on Continue");
-  assert.equal(await resumedLedger.begin("visual:7", "visual-7", "kimi-k3", 6), null, "retrying the same images must remain possible at the image limit");
+  assert.equal(await resumedLedger.begin("visual:7", "visual-7", "kimi-k3.1-pro", 6), null, "retrying the same images must remain possible at the image limit");
   await resumedLedger.finish("visual:7", receipt);
-  await assert.rejects(resumedLedger.begin("visual:7", "visual-7", "kimi-k3", 5), /MODEL_INPUT_CHANGED/);
-  await assert.rejects(resumedLedger.begin("visual:8", "extra-images", "kimi-k3", 1), /ANALYSIS_IMAGE_BUDGET_EXHAUSTED/);
-  assert.equal(await resumedLedger.begin("summary:1", "summary-full", "kimi-k3", 0), null);
+  await assert.rejects(resumedLedger.begin("visual:7", "visual-7", "kimi-k3.1-pro", 5), /MODEL_INPUT_CHANGED/);
+  await assert.rejects(resumedLedger.begin("visual:8", "extra-images", "kimi-k3.1-pro", 1), /ANALYSIS_IMAGE_BUDGET_EXHAUSTED/);
+  assert.equal(await resumedLedger.begin("summary:1", "summary-full", "kimi-k3.1-pro", 0), null);
   await resumedLedger.finish("summary:1", receipt);
-  await resumedLedger.begin("copy:1", "copy-full", "kimi-k3", 0); await resumedLedger.finish("copy:1", receipt);
+  await resumedLedger.begin("copy:1", "copy-full", "kimi-k3.1-pro", 0); await resumedLedger.finish("copy:1", receipt);
   await store.finish(resumedLease);
   assert.equal((await store.get(owner, full.id))?.status, "ready");
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id LIKE 'ocr:%'", [full.id])).rows[0].n, 120);
@@ -224,14 +227,14 @@ try {
   assert.equal((await projects.get(owner, targetProject.id))?.referenceAnalysis?.id, creation.id);
   const creationLease = (await store.claim(creation.id))!;
   const creationLedger = new PgAnalysisLedger(store, creationLease);
-  await creationLedger.begin("copy:1", "creation-hash", "kimi-k3", 0);
+  await creationLedger.begin("copy:1", "creation-hash", "kimi-k3.1-pro", 0);
   await creationLedger.finish("copy:1", { text: "", outcome: "rejected", errorCode: "MODEL_QUOTA" });
   await store.finish(creationLease, "MODEL_QUOTA");
   assert.equal((await store.get(owner, creation.id))?.errorCode, "MODEL_QUOTA");
   await store.resume(owner, creation.id, 1);
   const nextLease = (await store.claim(creation.id))!;
   const nextLedger = new PgAnalysisLedger(store, nextLease);
-  assert.equal(await nextLedger.begin("copy:1", "creation-hash", "kimi-k3", 0), null);
+  assert.equal(await nextLedger.begin("copy:1", "creation-hash", "kimi-k3.1-pro", 0), null);
   await nextLedger.finish("copy:1", receipt);
   const output = { draft: MarketingDraftSchema.parse({ ...targetProject.draft, script: "第一句。\n第二句。", storyboard: ["第一句。", "第二句。"].map(script => ({ script, visual: "产品近景", action: "展示产品", camera: "固定镜头" })) }), analysis: "从产品展示切入。" };
   await store.checkpoint(nextLease, { ...creation.snapshot, creation: output }, "copy");

@@ -4,7 +4,7 @@ import { chmod, mkdtemp, writeFile, rm, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { inspectMedia, composeMarketingVideo, detectedIntervals, mediaCapabilities, narrationPauses, qualityIssues } from "./media.js";
-import { MarketingDraftSchema } from "@lot-agent/core/marketing-video";
+import { MarketingDraftSchema, marketingPreviewCaptions } from "@lot-agent/core/marketing-video";
 
 describe("marketing media safety", () => {
   it.each([59, 66])("rejects a %ds composition for a 60s target before opening media", async total => {
@@ -103,13 +103,22 @@ describe("composition readiness probe", () => {
       spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=24000:duration=2", voice]);
       const segments = [0, 1, 2].map(index => ({ index, script: "欢迎光临 Price ¥19.9", durationSec: 5 }));
       const result = await composeMarketingVideo({ draft: MarketingDraftSchema.parse({ durationSec: 15 }), files: segments.map(() => clip), narration: segments.map(() => voice), subtitles: true, segments });
-      const final = join(root, "final.mp4"); await copyFile(result.file, final); await result.dispose();
+      const final = join(root, "final.mp4"); await copyFile(result.file, final);
+      const clean = join(root, "preview.mp4"); await copyFile(result.preview!.file, clean); await result.dispose();
       // Brightest pixel of the caption band: white text on the black clip while spoken, nothing after.
-      const peak = (at: number) => Number(/YMAX=(\d+)/.exec(spawnSync("ffmpeg", ["-v", "error", "-ss", String(at), "-i", final, "-frames:v", "1",
+      const peak = (at: number, file = final) => Number(/YMAX=(\d+)/.exec(spawnSync("ffmpeg", ["-v", "error", "-ss", String(at), "-i", file, "-frames:v", "1",
         "-vf", "crop=iw:ih*0.2:0:ih*0.65,signalstats,metadata=mode=print:key=lavfi.signalstats.YMAX:file=-", "-f", "null", "-"], { encoding: "utf8" }).stdout)?.[1]);
       expect(peak(6)).toBeGreaterThan(200);
       expect(result.quality).toMatchObject({ subtitles: "burned", captions: 3 });
       expect(peak(9.5)).toBeLessThan(40);
+      // M08: the same film without captions, with the narration track, and the timing that reproduces the burned cues.
+      expect(peak(6, clean)).toBeLessThan(40);
+      const previewInfo = await inspectMedia(clean);
+      expect(previewInfo).toMatchObject({ audio: true, video: true });
+      expect(previewInfo.duration).toBeCloseTo(15, 0);
+      expect(result.captionTiming!.map(shot => [shot.durationSec, shot.voiceSec])).toEqual(segments.map(() => [5, expect.closeTo(2, 1)]));
+      const storyboard = segments.map(s => ({ durationSec: s.durationSec, script: s.script, visual: "", action: "", camera: "" }));
+      expect(marketingPreviewCaptions(MarketingDraftSchema.parse({ durationSec: 15, storyboard }), result.captionTiming!).captions).toEqual(result.captions);
     } finally { await rm(root, { recursive: true, force: true }); }
   }, 120_000);
   it.skipIf(!ffmpegInstalled)("times an AI-voiced clip's captions to its own speech, with the saved offset", async ctx => {

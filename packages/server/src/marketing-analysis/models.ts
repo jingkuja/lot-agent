@@ -5,7 +5,7 @@ import { LLMResponseError, OpenAIResponsesProvider, type ContentPart, type LLMPr
 import { ANALYSIS_LIMITS, AnalysisSummarySchema, OcrOutputSchema, VisualOutputSchema, validateObservation, validateSummary, type AnalysisSpeech, type AnalysisSnapshot, type AnalysisSummary, type FrameEvidence, type ScreenText, type VisualObservation, type AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
 
-export const ANALYSIS_MODELS = { ocr: "deepseek-v4.1-flash", visual: "kimi-k3" } as const;
+export const ANALYSIS_MODELS = { ocr: "deepseek-v4.1-flash", visual: "kimi-k3.1-pro" } as const;
 export type { AnalysisUsage, ModelStepReceipt, AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 export interface AnalysisModelDeps {
   ledger: AnalysisCallLedger;

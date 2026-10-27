@@ -2,6 +2,11 @@ import type { AnalysisCallLedger, AnalysisLease, ModelStepReceipt } from "@lot-a
 import { ANALYSIS_LIMITS } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
 import { PgAnalysisStore, ownerLock } from "./repository.js";
+import { ANALYSIS_MODELS } from "./models.js";
+
+/** Models whose steps count against the visual image limit: the current one, and the one analyses
+ * recorded before the default text model changed, so an analysis that spans the change keeps its limit. */
+const VISUAL_MODELS: string[] = [ANALYSIS_MODELS.visual, "kimi-k3"];
 
 export function validReceiptUsage(receipt: ModelStepReceipt) {
   return receipt.usage && [receipt.usage.promptTokens, receipt.usage.completionTokens].every(n => Number.isSafeInteger(n) && n >= 0);
@@ -32,13 +37,14 @@ export class PgAnalysisLedger implements AnalysisCallLedger {
       }
       const totals = (await client.query(`SELECT
         COALESCE(sum(images) FILTER (WHERE model='deepseek-v4.1-flash'),0) AS ocr,
-        COALESCE(sum(images) FILTER (WHERE model='kimi-k3'),0) AS visual FROM
-        (SELECT DISTINCT ON (step_id) model,images FROM marketing_analysis_steps WHERE analysis_id=$1 ORDER BY step_id,attempt DESC) selected`, [row.id])).rows[0];
+        COALESCE(sum(images) FILTER (WHERE model=ANY($2::text[])),0) AS visual FROM
+        (SELECT DISTINCT ON (step_id) model,images FROM marketing_analysis_steps WHERE analysis_id=$1 ORDER BY step_id,attempt DESC) selected`,
+        [row.id, VISUAL_MODELS])).rows[0];
       // This bounds selected image coverage, not paid attempts. An explicitly
       // resumed batch uses the same images and must not exhaust its own limit.
       const addedImages = previous ? 0 : images;
       if (Number(totals.ocr) + (model === "deepseek-v4.1-flash" ? addedImages : 0) > ANALYSIS_LIMITS.ocrImages
-        || Number(totals.visual) + (model === "kimi-k3" ? addedImages : 0) > ANALYSIS_LIMITS.visualImages) throw new AnalysisError("ANALYSIS_IMAGE_BUDGET_EXHAUSTED", 422);
+        || Number(totals.visual) + (VISUAL_MODELS.includes(model) ? addedImages : 0) > ANALYSIS_LIMITS.visualImages) throw new AnalysisError("ANALYSIS_IMAGE_BUDGET_EXHAUSTED", 422);
       const attempt = (previous?.attempt ?? 0) + 1;
       await client.query(`INSERT INTO marketing_analysis_steps(analysis_id,user_id,step_id,attempt,input_hash,model,images,reserved_cost)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [row.id, this.lease.ownerId, stepId, attempt, inputHash, model, images, 0]);

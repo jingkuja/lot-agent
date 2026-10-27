@@ -3,6 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm, mkdir, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
@@ -88,10 +89,27 @@ try {
   const resultAssets = [{ url: '/static/fixture.mp4', mime: 'video/mp4' }];
   // Local checks of the made video (no model): a black stretch at the start of shot 2.
   const burnedCaptions = [{ shot: 0, start: 0.2, end: 2.4, text: '欢迎光临' }, { shot: 0, start: 2.4, end: 4.8, text: '一起喝杯咖啡' }];
+  // Videos composed since M08 keep a caption-free copy and the timing their captions need.
+  let captionPreview = false;
+  const previewOutput = (p) => captionPreview ? { preview: { assetId: 'preview-asset', url: '/static/fixture-preview.mp4' },
+    captionTiming: ((p.rendered ?? p.draft).storyboard ?? [])
+      .map(shot => ({ script: shot.script, durationSec: shot.durationSec, voiceSec: shot.durationSec, pauses: [] })) } : {};
   const quality = { checked: true, durationSec: 60.02, expectedSec: 60, subtitles: 'model', speech: true, issues: [{ kind: 'black', shot: 1, start: 15, end: 15.8 }] };
   // Like the server, full project reads and saves of a made video offer single shot redo; every fixture clip can be kept.
   const withRevision = (p) => p.rendered && p.status === 'succeeded'
     ? { ...p, revision: { draft: p.rendered, modelId: KLING_MARKETING_PROFILE.modelId, reusable: p.rendered.storyboard.map(() => true), clips: p.rendered.storyboard.map((_, index) => `/static/assets/clip-${index}.mp4`), composition: p.composition ?? { narration: false, localSubtitles: false } } } : p;
+  // A playable made video when FFmpeg is installed, so the caption preview can be checked on a real frame.
+  const playable = join(temp, "fixture.mp4");
+  const hasVideo = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=360x640:r=25:d=20", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+    "-t", "20", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", playable]).status === 0;
+  // Served with byte ranges, like the real static route, so the player can seek.
+  if (hasVideo) await page.route(/\/static\/fixture(-preview)?\.mp4$/, async route => {
+    const body = await readFile(playable), range = /bytes=(\d+)-(\d*)/.exec(route.request().headers().range ?? "");
+    if (!range) return route.fulfill({ contentType: "video/mp4", headers: { "Accept-Ranges": "bytes" }, body });
+    const start = Number(range[1]), end = range[2] ? Math.min(Number(range[2]), body.length - 1) : body.length - 1;
+    return route.fulfill({ status: 206, contentType: "video/mp4", body: body.subarray(start, end + 1),
+      headers: { "Accept-Ranges": "bytes", "Content-Range": `bytes ${start}-${end}/${body.length}` } });
+  });
   await page.route("**/api/**", async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (!path.startsWith("/api/")) return route.continue();
@@ -224,7 +242,10 @@ try {
         taskState = 'running'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p);
       }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
-      if (p.taskId) { p.status = taskState; if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'], quality, captions: burnedCaptions }; }
+      if (p.taskId) {
+        p.status = taskState;
+        if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'], quality, captions: burnedCaptions, ...previewOutput(p) };
+      }
       if (action === 'status') {
         statusPolls++;
         const { id: projectId, version, taskId, status, progress, stage, error, errorCode, output, unknownSegments } = p;
@@ -740,6 +761,9 @@ try {
   const composition = page.getByRole('group', { name: '成片设置', exact: true });
   // Locally burned captions: size, offsets and line breaks change, the words never do.
   const captionPanel = composition.getByRole('group', { name: '调整字幕', exact: true });
+  // M08: a video composed before the caption-free copy existed says how to get a preview, and offers none.
+  await composition.getByText('这条视频合成时没有保留无字幕版本', { exact: false }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '预览字幕修改', exact: true }).count(), 0);
   await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '大', exact: true }).click();
   await captionPanel.getByLabel('全片提前或延后（秒）').fill('0.2');
   await captionPanel.getByText('逐镜调整断行和时间', { exact: true }).click();
@@ -768,8 +792,37 @@ try {
   assert.equal(captions.shots[0].script, projects.get(p.id).draft.storyboard[0].script);
   assert.equal(captions.shots[0].offsetSec, -0.15);
   assert.deepEqual(captions.shots[0].lines, `${autoLines.slice(0, 2)}\n${autoLines.slice(2)}`.split('\n').map(line => line.trim()).filter(Boolean));
+  captionPreview = true;
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
+  // M08: the recomposed video kept a caption-free copy; a caption change switches to it with the new captions drawn over it.
+  const video = page.locator('.mv-results video.mv-result-video');
+  const previewMode = page.getByRole('button', { name: '预览字幕修改', exact: true });
+  await previewMode.waitFor();
+  assert.equal(await composition.getByText('这条视频合成时没有保留无字幕版本', { exact: false }).count(), 0);
+  assert.equal(await video.getAttribute('src'), '/static/fixture.mp4');
+  await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '小', exact: true }).click();
+  await page.locator('.mv-caption-badge').filter({ hasText: '预览：未重新合成' }).waitFor();
+  assert.equal(await previewMode.getAttribute('aria-pressed'), 'true');
+  assert.equal(await video.getAttribute('src'), '/static/fixture-preview.mp4');
+  await page.getByRole('status').filter({ hasText: '预览只在页面上叠加字幕' }).waitFor();
+  if (hasVideo) {
+    // The first line of shot 1 is drawn over the caption-free copy at its time, inside the picture.
+    await video.evaluate(element => new Promise(done => { element.addEventListener('seeked', done, { once: true }); element.currentTime = 0.5; }));
+    const drawn = page.locator('.mv-caption-overlay p');
+    await drawn.waitFor();
+    assert.equal(await drawn.textContent(), autoLines.slice(0, 2));
+    const [picture, caption] = await Promise.all([video.boundingBox(), drawn.boundingBox()]);
+    assert(caption.y > picture.y + picture.height / 2 && caption.y + caption.height < picture.y + picture.height, 'the caption sits in the lower half of the picture');
+  }
+  await video.scrollIntoViewIfNeeded(); await snap('marketing-video-caption-preview-zh-light.png');
+  await page.getByRole('button', { name: '原成片', exact: true }).click();
+  assert.equal(await video.getAttribute('src'), '/static/fixture.mp4');
+  assert.equal(await page.locator('.mv-caption-badge').count(), 0);
+  await previewMode.click();
+  if (!await captionPanel.locator('.mv-caption-shots').evaluate(el => el.open)) await captionPanel.getByText('逐镜调整断行和时间', { exact: true }).click();
+  await captionPanel.getByRole('button', { name: '播放本镜', exact: true }).first().click();
+  await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '大', exact: true }).click();
   await composition.getByRole('checkbox', { name: '添加字幕' }).uncheck();
   await page.getByRole('button', { name: '撤销修改', exact: true }).waitFor();
   await composition.scrollIntoViewIfNeeded(); await snap('marketing-video-composition-zh-light.png');

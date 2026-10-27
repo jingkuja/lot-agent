@@ -26,7 +26,9 @@ const select = `SELECT p.*, ${taskColumns},
 /** The made video with links its owner's browser can play: private videos are served only by signed links. */
 function signedOutput(owner: string, output: MarketingTaskState["output"] | null): MarketingTaskState["output"] {
   if (!output || !Array.isArray(output.assets)) return output ?? undefined;
-  return { ...output, assets: output.assets.map(asset => typeof asset?.url === "string" ? { ...asset, url: signPrivateOutput(owner, asset.url) } : asset) };
+  const preview = typeof output.preview?.url === "string" ? { preview: { ...output.preview, url: signPrivateOutput(owner, output.preview.url) } } : {};
+  const assets = output.assets.map(asset => typeof asset?.url === "string" ? { ...asset, url: signPrivateOutput(owner, asset.url) } : asset);
+  return { ...output, assets, ...preview };
 }
 function taskState(row: Record<string, any>): MarketingTaskState {
   return { id: row.id, version: row.version, taskId: row.task_id, status: row.status ?? "draft", progress: Number(row.progress ?? 0),
