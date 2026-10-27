@@ -134,8 +134,8 @@ export class PgAnalysisStore implements AnalysisJobStore {
     return this.transaction(async client => {
       await ownerLock(client, lease.ownerId);
       const row = await this.leased(client, lease, true);
-      const pending = await client.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2
-        AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR (receipt->'usage' IS NULL AND receipt->>'outcome'<>'rejected'))`, [lease.id, lease.ownerId]);
+      const pending = await client.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2 AND ${UNSETTLED_STEP}`,
+        [lease.id, lease.ownerId]);
       const unknown = !!pending.rowCount;
       const cancelled = row.cancel_requested;
       let code = unknown ? "REQUEST_UNKNOWN" : errorCode;
@@ -173,7 +173,9 @@ export class PgAnalysisStore implements AnalysisJobStore {
       await ownerLock(client, owner); const row = await this.row(owner, id, client, true);
       if (row.revision !== revision) throw new AnalysisError("REVISION_CONFLICT", 409);
       if (row.lease_until && new Date(row.lease_until).getTime() > Date.now()) throw new AnalysisError("ANALYSIS_BUSY", 409);
-      if ((await client.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR (receipt->'usage' IS NULL AND receipt->>'outcome'<>'rejected'))`, [id])).rowCount) throw new AnalysisError("REQUEST_UNKNOWN", 409);
+      if ((await client.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND ${UNSETTLED_STEP}`, [id])).rowCount) {
+        throw new AnalysisError("REQUEST_UNKNOWN", 409);
+      }
       if (row.status === "queued") return;
       if (row.status === "ready") return;
       if (visualOnly) {
@@ -185,10 +187,11 @@ export class PgAnalysisStore implements AnalysisJobStore {
       await this.admit(client, owner);
       // Malformed OCR is already a recorded coverage gap, not unfinished work.
       // Also clear flags left by older resume logic. Rejected OCR is retryable
-      // after replenishing upstream credit; unknown requests stay blocked above.
+      // after replenishing upstream credit, and a call that got no response is
+      // retried like any step; unknown requests stay blocked above.
       await client.query(`UPDATE marketing_analysis_steps SET retry_requested=
-        (receipt->>'outcome'='rejected' OR step_id NOT LIKE 'ocr:%')
-        WHERE analysis_id=$1 AND ((receipt->>'outcome'='failed' AND receipt->'usage' IS NOT NULL) OR receipt->>'outcome'='rejected')`, [id]);
+        (receipt->>'outcome' IN ('rejected','cancelled') OR step_id NOT LIKE 'ocr:%')
+        WHERE analysis_id=$1 AND ((receipt->>'outcome'='failed' AND receipt->'usage' IS NOT NULL) OR receipt->>'outcome' IN ('rejected','cancelled'))`, [id]);
       // Rows revised by the former text editor (revision > 1) resume from the summary.
       await client.query(`UPDATE marketing_reference_analyses SET status='queued',mode=$2,reserved_cost=$3,cancel_requested=false,
         lease_token=NULL,lease_until=NULL,error_code=NULL,scratch_cleaned_at=NULL,version=version+1,updated_at=now() WHERE id=$1`, [id, row.revision > 1 ? "summary" : "all", 0]);
@@ -207,11 +210,18 @@ export class PgAnalysisStore implements AnalysisJobStore {
   }
 }
 
+/** A model call that may have been charged without a usable receipt. It blocks resume and deletion
+ * until reconciled. A rejected call or one that got no response (`cancelled`) is settled. */
+export const UNSETTLED_STEP = `(receipt IS NULL OR receipt->>'outcome'='request_unknown'
+  OR (receipt->'usage' IS NULL AND receipt->>'outcome' NOT IN ('rejected','cancelled')))`;
+
 /** Call under `ownerLock` with the row locked. Unknown model requests keep their
  * private record for reconciliation. */
 export async function analysisDeleteBlocker(client: Pick<pg.PoolClient, "query">, row: Record<string, any>) {
   if (["queued", "running"].includes(row.status) || (row.lease_until && new Date(row.lease_until).getTime() > Date.now())) return "ANALYSIS_BUSY" as const;
-  if ((await client.query("SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR (receipt->'usage' IS NULL AND receipt->>'outcome'<>'rejected'))", [row.id])).rowCount) return "REQUEST_UNKNOWN" as const;
+  if ((await client.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND ${UNSETTLED_STEP}`, [row.id])).rowCount) {
+    return "REQUEST_UNKNOWN" as const;
+  }
   return null;
 }
 /** Erase private analysis content; receipts keep only usage. Files are removed by the

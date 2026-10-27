@@ -7,7 +7,7 @@ import { ANALYSIS_VERSION, type AnalysisLease, type AnalysisSnapshot } from "@lo
 import type { DB } from "../db/database.js";
 import type { TokenhubClient } from "../tokenhub/client.js";
 import type { AnalysisConfig } from "./config.js";
-import type { PgAnalysisStore } from "./repository.js";
+import { UNSETTLED_STEP, type PgAnalysisStore } from "./repository.js";
 import type { AnalysisStorage } from "./storage.js";
 import { AnalysisError } from "./errors.js";
 import { AnalysisModels, ANALYSIS_MODELS, userResponsesProvider } from "./models.js";
@@ -41,8 +41,8 @@ export async function runAnalysis(lease: AnalysisLease, signal: AbortSignal, dep
   const mediaRuntime = deps.mediaRuntime ?? analysisMediaRuntime({});
   let row = await deps.store.row(lease.ownerId, lease.id);
   if (row.pipeline_version !== ANALYSIS_VERSION) throw new AnalysisError("ANALYSIS_VERSION_UNSUPPORTED", 409);
-  if ((await deps.store.pool.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2
-    AND (receipt IS NULL OR receipt->>'outcome'='request_unknown' OR (receipt->'usage' IS NULL AND receipt->>'outcome'<>'rejected')) LIMIT 1`, [lease.id, lease.ownerId])).rowCount) throw new AnalysisError("REQUEST_UNKNOWN", 409);
+  if ((await deps.store.pool.query(`SELECT 1 FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2 AND ${UNSETTLED_STEP} LIMIT 1`,
+    [lease.id, lease.ownerId])).rowCount) throw new AnalysisError("REQUEST_UNKNOWN", 409);
   let snapshot = row.snapshot as AnalysisSnapshot;
   signal.throwIfAborted();
   if (snapshot.creation && row.creation_context) return;

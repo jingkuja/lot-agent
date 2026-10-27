@@ -71,6 +71,21 @@ describe("analysis model calls", () => {
     expect(requests).toHaveLength(1); expect(records.get("ocr:f0001")?.receipt).toMatchObject({ outcome: "request_unknown" });
     expect(records.get("ocr:f0001")?.receipt).not.toHaveProperty("usage");
   });
+  it("records a gateway error with nothing received as not charged, with its gateway request ID, and does not resend it", async () => {
+    let receipt: ModelStepReceipt | undefined;
+    const chat = vi.fn(async function* (_messages, _tools, options) {
+      options?.onRequestId?.("req-ocr-502");
+      throw Object.assign(new Error("Bad gateway"), { status: 502 });
+    } satisfies LLMProvider["chat"]);
+    const models = new AnalysisModels({ readFrame: async () => Uint8Array.from([255, 216, 255, 0]), provider: async () => ({ chat }), ledger: {
+      begin: async () => receipt ?? null, finish: async (_id, value) => { receipt = value; },
+    } });
+    await expect(models.ocr(frame(0))).rejects.toThrow("MODEL_NO_RESPONSE");
+    expect(receipt).toEqual({ text: "", outcome: "cancelled", errorCode: "MODEL_NO_RESPONSE", gatewayRequestId: "req-ocr-502" });
+    // Only an explicit resume clears the step for another call.
+    await expect(models.ocr(frame(0))).rejects.toThrow("MODEL_NO_RESPONSE");
+    expect(chat).toHaveBeenCalledOnce();
+  });
   it.each(["length", "content_filter"])("preserves usage but rejects %s", async finishReason => {
     const { models, records } = setup(null, [{ type: "done", finishReason, usage: { promptTokens: 5, completionTokens: 2 } }]);
     await expect(models.ocr(frame(0))).rejects.toThrow("MODEL_STEP_FAILED");

@@ -32,6 +32,11 @@ const CATEGORIES: { category: string; expectedCharge: ExpectedCharge; open: bool
   { category: "text_no_response", expectedCharge: "none", open: false, sql: `SELECT user_id AS owner_id, project_id::text, NULL AS task_id, NULL::int AS slot, id::text AS record_id,
       kind AS request_kind, model, receipt->>'gatewayRequestId' AS gateway_request_id, NULL::int AS http_status, status, created_at AS at
     FROM marketing_text_operations WHERE status='cancelled' AND updated_at >= :since` },
+  { category: "analysis_no_response", expectedCharge: "none", open: false, sql: `SELECT s.user_id AS owner_id, a.creation_context->>'projectId' AS project_id,
+      s.analysis_id::text AS task_id, NULL::int AS slot, s.step_id || '#' || s.attempt AS record_id, split_part(s.step_id, ':', 1) AS request_kind, s.model,
+      s.receipt->>'gatewayRequestId' AS gateway_request_id, NULL::int AS http_status, 'cancelled' AS status, s.created_at AS at
+    FROM marketing_analysis_steps s LEFT JOIN marketing_reference_analyses a ON a.id=s.analysis_id
+    WHERE s.receipt->>'outcome'='cancelled' AND s.updated_at >= :since` },
   // Open items stay listed until their status changes, whatever the window.
   { category: "text_unknown", expectedCharge: "unknown", open: true, sql: `SELECT user_id AS owner_id, project_id::text, NULL AS task_id, NULL::int AS slot, id::text AS record_id,
       kind AS request_kind, model, receipt->>'gatewayRequestId' AS gateway_request_id, NULL::int AS http_status, status, created_at AS at

@@ -71,8 +71,10 @@ export class AnalysisModels {
     signal?.throwIfAborted();
     const previous = await this.deps.ledger.begin(stepId, createHash("sha256").update(payload).digest("hex"), model, images);
     let receipt = previous;
-    if (previous && !previous.usage && previous.outcome !== "rejected" && previous.outcome !== "completed") throw new AnalysisError("REQUEST_UNKNOWN", 409);
-    if (previous && previous.outcome !== "completed") throw new AnalysisError(previous.errorCode ?? (previous.outcome === "request_unknown" ? "REQUEST_UNKNOWN" : "MODEL_STEP_FAILED"), 409);
+    if (previous && !previous.usage && !["rejected", "cancelled", "completed"].includes(previous.outcome)) throw new AnalysisError("REQUEST_UNKNOWN", 409);
+    if (previous && previous.outcome !== "completed") {
+      throw new AnalysisError(previous.errorCode ?? (previous.outcome === "request_unknown" ? "REQUEST_UNKNOWN" : "MODEL_STEP_FAILED"), 409);
+    }
     if (!receipt) {
       receipt = { text: "", outcome: "request_unknown" };
       let terminal = false;
@@ -83,10 +85,15 @@ export class AnalysisModels {
         // caller cancellation and lease loss still abort immediately.
         const synthesis = stepId.startsWith("summary:") || stepId.startsWith("copy:");
         const deadline = AbortSignal.timeout(synthesis ? 300000 : 120000);
-        for await (const chunk of llm.chat(messages, undefined, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline, params: { maxTokens: 8192 }, onResponseId: id => {
-          receipt!.responseId = id;
-          savingId = savingId.then(() => this.deps.ledger.responseId?.(stepId, id)).catch(() => {});
-        } })) {
+        for await (const chunk of llm.chat(messages, undefined, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline, params: { maxTokens: 8192 },
+          onResponseId: id => {
+            receipt!.responseId = id;
+            savingId = savingId.then(() => this.deps.ledger.responseId?.(stepId, id)).catch(() => {});
+          },
+          onRequestId: id => {
+            receipt!.gatewayRequestId = id;
+            savingId = savingId.then(() => this.deps.ledger.requestId?.(stepId, id)).catch(() => {});
+          } })) {
           if (terminal) throw new AnalysisError("MODEL_INVALID_RESPONSE");
           if (chunk.type === "text") {
             receipt.text += chunk.content ?? "";
@@ -107,9 +114,13 @@ export class AnalysisModels {
         const rejected = error as { status?: number; code?: string; error?: { code?: string } };
         const status = rejected?.status;
         const quota = ["insufficient_quota", "insufficient_user_quota", "insufficient_balance"].includes(rejected?.code ?? rejected?.error?.code ?? "");
-        if (!receipt.text && !receipt.usage && !receipt.responseId && [401, 402, 403, 429].includes(status ?? 0)) {
+        if (!terminal && !receipt.text && !receipt.usage && !receipt.responseId && [401, 402, 403, 429].includes(status ?? 0)) {
           receipt.outcome = "rejected";
           receipt.errorCode = status === 402 || quota ? "MODEL_QUOTA" : status === 429 ? "MODEL_RATE_LIMIT" : "MODEL_AUTH_REQUIRED";
+        } else if (!terminal && !receipt.text && !receipt.usage && !receipt.responseId) {
+          // Nothing came back (other error status, timeout, lost connection): not charged, may be resumed.
+          // Anything received means the model ran and stays unknown.
+          receipt.outcome = "cancelled"; receipt.errorCode = "MODEL_NO_RESPONSE";
         }
         await savingId;
         await this.deps.ledger.finish(stepId, receipt);

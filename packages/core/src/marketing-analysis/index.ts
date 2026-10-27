@@ -74,9 +74,11 @@ export interface AnalysisQueue {
   cancel(id: string): Promise<void>;
 }
 export interface AnalysisUsage { promptTokens: number; completionTokens: number; cachedPromptTokens?: number }
+/** `cancelled`: the gateway returned nothing (error status, timeout, lost connection), so the call is
+ * treated as not charged and may be retried; `gatewayRequestId` matches a rare charge in the gateway logs. */
 export interface ModelStepReceipt {
-  text: string; usage?: AnalysisUsage; responseId?: string;
-  outcome: "completed" | "failed" | "request_unknown" | "rejected";
+  text: string; usage?: AnalysisUsage; responseId?: string; gatewayRequestId?: string;
+  outcome: "completed" | "failed" | "request_unknown" | "rejected" | "cancelled";
   errorCode?: string;
 }
 /** begin() must atomically claim the durable request intent.
@@ -85,6 +87,8 @@ export interface AnalysisCallLedger {
   begin(stepId: string, inputHash: string, model: string, imageCount: number): Promise<ModelStepReceipt | null>;
   finish(stepId: string, receipt: ModelStepReceipt): Promise<void>;
   responseId?(stepId: string, id: string): Promise<void>;
+  /** The gateway's log ID (`x-oneapi-request-id`), saved as soon as the response headers arrive. */
+  requestId?(stepId: string, id: string): Promise<void>;
   /** The model already recorded for the step; a replay or explicit retry must use it again. */
   stepModel?(stepId: string): Promise<string | undefined>;
 }

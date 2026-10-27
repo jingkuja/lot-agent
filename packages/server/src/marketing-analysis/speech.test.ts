@@ -32,15 +32,20 @@ it.each([404, 403])("skips an explicitly unavailable model (%s) without using a 
   expect(await transcribeAnalysisAudio(f.input)).toEqual({ status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" });
   await transcribeAnalysisAudio(f.input); expect(f.fetchImpl).toHaveBeenCalledOnce();
 });
-it.each(["network", "usage", "truncated"])("blocks replay of %s results and never fabricates token usage", async kind => {
+it.each(["network", "usage", "truncated"])("does not replay %s results without a resume and never fabricates token usage", async kind => {
   const f = setup(vi.fn(async () => {
     if (kind === "network") throw new Error("connection lost with secret details");
     return Response.json(kind === "usage" ? { ...reply, usage: undefined } : { ...reply, choices: [{ ...reply.choices[0], finish_reason: "length" }] });
   }));
-  const error = kind === "network" ? "REQUEST_UNKNOWN" : kind === "usage" ? "MODEL_USAGE_UNKNOWN" : "MODEL_STEP_FAILED";
+  const error = kind === "network" ? "MODEL_NO_RESPONSE" : kind === "usage" ? "MODEL_USAGE_UNKNOWN" : "MODEL_STEP_FAILED";
   await expect(transcribeAnalysisAudio(f.input)).rejects.toThrow(error);
   await expect(transcribeAnalysisAudio(f.input)).rejects.toThrow(error);
   expect(f.fetchImpl).toHaveBeenCalledOnce();
+});
+it("records a gateway error with no result as not charged, with its gateway request ID", async () => {
+  const f = setup(vi.fn(async () => Response.json({ error: { message: "upstream" } }, { status: 503, headers: { "x-oneapi-request-id": "req-asr-503" } })));
+  await expect(transcribeAnalysisAudio(f.input)).rejects.toThrow("MODEL_NO_RESPONSE");
+  expect(f.finish).toHaveBeenCalledWith("asr:source", { text: "", outcome: "cancelled", errorCode: "MODEL_NO_RESPONSE", gatewayRequestId: "req-asr-503" });
 });
 it("keeps quota rejection actionable instead of treating it as a missing model", async () => {
   const f = setup(vi.fn(async () => Response.json({ error: { code: "insufficient_user_quota" } }, { status: 403 })));
@@ -54,7 +59,7 @@ it("cancels before intent creation and passes cancellation to in-flight fetch", 
   const fetchImpl = vi.fn(async (_url, options) => {
     inFlight.abort(); options.signal.throwIfAborted(); return Response.json(reply);
   }) as unknown as typeof fetch;
-  await expect(transcribeAnalysisAudio({ ...f.input, signal: inFlight.signal, fetchImpl })).rejects.toThrow("REQUEST_UNKNOWN");
+  await expect(transcribeAnalysisAudio({ ...f.input, signal: inFlight.signal, fetchImpl })).rejects.toThrow("MODEL_NO_RESPONSE");
 });
 it("requires only the visual models, treats ASR as optional, and isolates catalog/key lookup by owner", async () => {
   const db = { getUserApiKey: vi.fn(async (owner: string) => `${owner}-key`) };
@@ -104,7 +109,7 @@ it("reuses the same audio receipt when a temporary URL rotates", async () => {
   expect(f.input.ledger.begin.mock.calls[0]).toEqual(f.input.ledger.begin.mock.calls[1]);
 });
 
-it.each(["fetch", "body"])("bounds an uncooperative ASR %s by the deadline and blocks replay", async phase => {
+it.each(["fetch", "body"])("bounds an uncooperative ASR %s by the deadline and does not replay it", async phase => {
   vi.useFakeTimers();
   const cancel = vi.fn(() => new Promise<void>(() => {}));
   const fetchImpl = vi.fn(async () => phase === "fetch" ? await new Promise<Response>(() => {})
@@ -113,9 +118,12 @@ it.each(["fetch", "body"])("bounds an uncooperative ASR %s by the deadline and b
   try {
     const result = transcribeAnalysisAudio(f.input).catch(error => error);
     await vi.advanceTimersByTimeAsync(180001);
-    expect(await result).toMatchObject({ message: "REQUEST_UNKNOWN" });
-    expect(f.finish).toHaveBeenCalledWith("asr:source", { text: "", outcome: "request_unknown" });
-    await expect(transcribeAnalysisAudio(f.input)).rejects.toThrow("REQUEST_UNKNOWN");
+    // No response before the deadline is not charged; a body that broke off stays unknown.
+    const [code, receipt] = phase === "fetch" ? ["MODEL_NO_RESPONSE", { text: "", outcome: "cancelled", errorCode: "MODEL_NO_RESPONSE" }]
+      : ["REQUEST_UNKNOWN", { text: "", outcome: "request_unknown" }];
+    expect(await result).toMatchObject({ message: code });
+    expect(f.finish).toHaveBeenCalledWith("asr:source", receipt);
+    await expect(transcribeAnalysisAudio(f.input)).rejects.toThrow(code as string);
     expect(fetchImpl).toHaveBeenCalledOnce();
     if (phase === "body") expect(cancel).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);

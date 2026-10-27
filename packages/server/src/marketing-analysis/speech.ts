@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createDeadline, withAbort } from "@lot-agent/core";
+import { createDeadline, gatewayRequestId, withAbort } from "@lot-agent/core";
 import { ANALYSIS_LIMITS, type AnalysisCallLedger, type AnalysisSource, type AnalysisSpeech, type ModelStepReceipt } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
 import { readAnalysisFile } from "./private-files.js";
@@ -72,12 +72,15 @@ export async function transcribeAnalysisAudio(input: {
   if (!receipt) {
     receipt = { text: "", outcome: "request_unknown" };
     const deadline = createDeadline(180000, input.signal);
+    let responded = false;
     try {
       deadline.signal.throwIfAborted();
       const response = await withAbort((input.fetchImpl ?? fetch)(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST", redirect: "error", headers: { Authorization: `Bearer ${input.apiKey}`, "Content-Type": "application/json" }, body: payload,
         signal: deadline.signal,
       }), deadline.signal);
+      const requestId = gatewayRequestId(response.headers);
+      if (requestId) receipt.gatewayRequestId = requestId;
       if (!response.ok) {
         const error = await boundedJson(response, deadline.signal).catch(() => null);
         const code = error?.error?.code;
@@ -85,8 +88,9 @@ export async function transcribeAnalysisAudio(input: {
         if (missing || [401, 402, 403, 429].includes(response.status)) {
           receipt.outcome = "rejected";
           receipt.errorCode = missing ? "ASR_MODEL_UNAVAILABLE" : response.status === 402 || ["insufficient_quota", "insufficient_user_quota", "insufficient_balance"].includes(code) ? "MODEL_QUOTA" : response.status === 429 ? "MODEL_RATE_LIMIT" : "MODEL_AUTH_REQUIRED";
-        }
+        } else { receipt.outcome = "cancelled"; receipt.errorCode = "MODEL_NO_RESPONSE"; }
       } else {
+        responded = true;
         const result = await boundedJson(response, deadline.signal);
         if (typeof result.id === "string" && result.id.length <= 500) receipt.responseId = result.id;
         const usage = result.usage;
@@ -97,7 +101,11 @@ export async function transcribeAnalysisAudio(input: {
           receipt.outcome = choice.finish_reason === "stop" ? "completed" : "failed";
         } else if (receipt.usage) receipt.outcome = "failed";
       }
-    } catch { /* An interrupted or ambiguous paid request must never be retried automatically. */ }
+    } catch {
+      // No response at all (timeout, lost connection) is not charged and may be resumed. A response
+      // that broke off while reading stays unknown: an ambiguous paid request is never retried automatically.
+      if (!responded && receipt.outcome === "request_unknown") { receipt.outcome = "cancelled"; receipt.errorCode = "MODEL_NO_RESPONSE"; }
+    }
     finally { deadline.dispose(); }
     await input.ledger.finish(step, receipt);
   }
@@ -109,6 +117,7 @@ export function speechFromReceipt(receipt: ModelStepReceipt): AnalysisSpeech {
   if (receipt.errorCode === "ASR_MODEL_UNAVAILABLE" && receipt.outcome === "rejected") return { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" };
   if (receipt.outcome === "rejected") throw new AnalysisError(receipt.errorCode ?? "MODEL_AUTH_REQUIRED", 409);
   if (receipt.outcome === "request_unknown") throw new AnalysisError("REQUEST_UNKNOWN", 409);
+  if (receipt.outcome === "cancelled") throw new AnalysisError(receipt.errorCode ?? "MODEL_NO_RESPONSE", 409);
   if (!receipt.usage || ![receipt.usage.promptTokens, receipt.usage.completionTokens].every(n => Number.isSafeInteger(n) && n >= 0)) throw new AnalysisError("MODEL_USAGE_UNKNOWN", 409);
   if (receipt.outcome !== "completed") throw new AnalysisError("MODEL_STEP_FAILED", 409);
   if (typeof receipt.text !== "string" || receipt.text.length > 30000) throw new AnalysisError("MODEL_INVALID_RESPONSE");

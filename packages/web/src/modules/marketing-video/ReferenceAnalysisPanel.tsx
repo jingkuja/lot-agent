@@ -17,6 +17,7 @@ export function analysisError(value: unknown) {
     PROJECT_CONFLICT: "草稿已在其他页面更新，生成结果保留在参考资料中。",
     REQUEST_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
     MODEL_USAGE_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
+    MODEL_NO_RESPONSE: "模型服务未返回结果，本次不扣费。点击继续生成将复用已有资料。",
     MODEL_QUOTA: "上游余额不足，请充值后继续。",
     MODEL_RATE_LIMIT: "上游服务繁忙，请稍后继续。",
     ASR_PUBLIC_URL_REQUIRED: "视频语音转写需要配置可公开访问的 PUBLIC_BASE_URL。",

@@ -18,9 +18,19 @@ export class PgAnalysisLedger implements AnalysisCallLedger {
   constructor(private readonly store: PgAnalysisStore, private readonly lease: AnalysisLease) {}
   async responseId(stepId: string, id: string) {
     if (!id || id.length > 500) throw new AnalysisError("MODEL_INVALID_RESPONSE");
-    await this.store.pool.query(`UPDATE marketing_analysis_steps SET receipt=$5,updated_at=now()
-      WHERE analysis_id=$1 AND user_id=$2 AND step_id=$3 AND attempt=$4 AND receipt IS NULL`,
-    [this.lease.id, this.lease.ownerId, stepId, this.attempts.get(stepId), JSON.stringify({ text: "", outcome: "request_unknown", responseId: id })]);
+    await this.checkpoint(stepId, { responseId: id });
+  }
+  async requestId(stepId: string, id: string) {
+    if (!id || id.length > 200) throw new AnalysisError("MODEL_INVALID_RESPONSE");
+    await this.checkpoint(stepId, { gatewayRequestId: id });
+  }
+  /** Adds an identifier to an unfinished call; a finished receipt is left to `finish`. */
+  private async checkpoint(stepId: string, ids: Pick<ModelStepReceipt, "responseId" | "gatewayRequestId">) {
+    await this.store.pool.query(`UPDATE marketing_analysis_steps
+      SET receipt=COALESCE(receipt,'{"text":"","outcome":"request_unknown"}'::jsonb) || $5::jsonb,updated_at=now()
+      WHERE analysis_id=$1 AND user_id=$2 AND step_id=$3 AND attempt=$4
+        AND (receipt IS NULL OR (receipt->>'outcome'='request_unknown' AND receipt->'usage' IS NULL AND COALESCE(receipt->>'text','')=''))`,
+    [this.lease.id, this.lease.ownerId, stepId, this.attempts.get(stepId), JSON.stringify(ids)]);
   }
   async stepModel(stepId: string): Promise<string | undefined> {
     return (await this.store.pool.query("SELECT model FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2 AND step_id=$3 ORDER BY attempt DESC LIMIT 1",
@@ -37,7 +47,10 @@ export class PgAnalysisLedger implements AnalysisCallLedger {
           this.attempts.set(stepId, previous.attempt);
           return (previous.receipt ?? { text: "", outcome: "request_unknown" }) as ModelStepReceipt;
         }
-        if (previous.receipt?.outcome !== "rejected" && (previous.receipt?.outcome !== "failed" || !validReceiptUsage(previous.receipt))) throw new AnalysisError("REQUEST_UNKNOWN", 409);
+        const outcome = previous.receipt?.outcome;
+        if (outcome !== "rejected" && outcome !== "cancelled" && (outcome !== "failed" || !validReceiptUsage(previous.receipt))) {
+          throw new AnalysisError("REQUEST_UNKNOWN", 409);
+        }
       }
       const totals = (await client.query(`SELECT
         COALESCE(sum(images) FILTER (WHERE model='deepseek-v4.1-flash'),0) AS ocr,

@@ -24,6 +24,7 @@ import { knowledgeRedisOptions } from "../src/knowledge/ingestion/config.js";
 import { AnalysisError } from "../src/marketing-analysis/errors.js";
 import { reconcileAnalysisStep } from "../src/marketing-analysis/reconcile.js";
 import { collectAnalysisFiles } from "../src/marketing-analysis/cleanup.js";
+import { marketingAnalysisNoResponse } from "../src/db/migrations/0064-marketing-analysis-no-response.js";
 
 const raw = process.env.MARKETING_ANALYSIS_CHECK_DATABASE_URL;
 if (!raw) throw new Error("Set MARKETING_ANALYSIS_CHECK_DATABASE_URL to a NEW local media_analysis_check_* database");
@@ -164,6 +165,40 @@ try {
   assert.equal(scrubbed.reconciliation.previousReceipt.text, undefined);
   assert.equal(scrubbed.reconciliation.previousReceipt.responseId, "fixture-response", "billing identifiers survive content deletion");
   const cancelled = await create(other); await store.cancel(other, cancelled.id); assert.equal(await store.claim(cancelled.id), null);
+  // A call that got nothing back is not charged: the analysis resumes and only that step runs again.
+  const silentOwner = randomUUID(); const silent = await create(silentOwner); const silentLease = (await store.claim(silent.id))!;
+  const silentLedger = new PgAnalysisLedger(store, silentLease);
+  const stepReceipt = async (id: string, step: string) => (await db.pool.query(
+    "SELECT receipt FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id=$2 ORDER BY attempt DESC LIMIT 1", [id, step])).rows[0].receipt;
+  assert.equal(await silentLedger.begin("ocr:f0002", "hash2", "deepseek-v4.1-flash", 1), null);
+  await silentLedger.requestId("ocr:f0002", "req-merged"); await silentLedger.responseId("ocr:f0002", "resp-merged");
+  assert.deepEqual(await stepReceipt(silent.id, "ocr:f0002"), { text: "", outcome: "request_unknown", gatewayRequestId: "req-merged", responseId: "resp-merged" });
+  await silentLedger.finish("ocr:f0002", { ...receipt, responseId: "resp-merged", gatewayRequestId: "req-merged" });
+  assert.equal(await silentLedger.begin("ocr:f0001", "hash", "deepseek-v4.1-flash", 1), null);
+  await silentLedger.requestId("ocr:f0001", "req-silent");
+  await silentLedger.finish("ocr:f0001", { text: "", outcome: "cancelled", errorCode: "MODEL_NO_RESPONSE", gatewayRequestId: "req-silent" });
+  await store.finish(silentLease, "MODEL_NO_RESPONSE");
+  assert.deepEqual([(await store.get(silentOwner, silent.id))?.status, (await store.get(silentOwner, silent.id))?.errorCode], ["failed", "MODEL_NO_RESPONSE"]);
+  await store.resume(silentOwner, silent.id, 1);
+  const silentRetry = new PgAnalysisLedger(store, (await store.claim(silent.id))!);
+  assert.equal(await silentRetry.begin("ocr:f0001", "hash", "deepseek-v4.1-flash", 1), null, "the silent step is sent again");
+  assert.equal((await silentRetry.begin("ocr:f0002", "hash2", "deepseek-v4.1-flash", 1))?.outcome, "completed", "completed steps are reused");
+  // Migration 64 settles such calls recorded before as unknown; a call that received text stays blocked.
+  const stuck = async (text: string) => {
+    const user = randomUUID(); const value = await create(user); const lease = (await store.claim(value.id))!;
+    const ledger = new PgAnalysisLedger(store, lease); await ledger.begin("visual:0", "hash", "kimi-k3", 1);
+    await ledger.finish("visual:0", { text, outcome: "request_unknown" }); await store.finish(lease, "REQUEST_UNKNOWN");
+    assert.equal((await store.get(user, value.id))?.errorCode, "REQUEST_UNKNOWN"); return { user, value };
+  };
+  const silentOld = await stuck(""); const partialOld = await stuck('{"observations":[');
+  await marketingAnalysisNoResponse.up(db.pool);
+  assert.deepEqual(await stepReceipt(silentOld.value.id, "visual:0"), { text: "", outcome: "cancelled", errorCode: "MODEL_NO_RESPONSE" });
+  assert.equal((await store.get(silentOld.user, silentOld.value.id))?.errorCode, "MODEL_NO_RESPONSE");
+  assert.equal((await db.pool.query("SELECT error FROM tasks WHERE id=$1", [silentOld.value.id])).rows[0].error, "MODEL_NO_RESPONSE");
+  await store.resume(silentOld.user, silentOld.value.id, 1);
+  assert.equal((await store.get(partialOld.user, partialOld.value.id))?.errorCode, "REQUEST_UNKNOWN");
+  await assert.rejects(store.resume(partialOld.user, partialOld.value.id, 1), /REQUEST_UNKNOWN/);
+  await store.cancel(silentOwner, silent.id); await store.cancel(silentOld.user, silentOld.value.id);
   // HTTP authorization is independent of guessed object IDs and filesystem paths.
   const app = new Hono<{ Variables: { userId: string } }>();
   app.use("*", async (c, next) => { c.set("userId", c.req.header("x-test-user") ?? other); await next(); });
