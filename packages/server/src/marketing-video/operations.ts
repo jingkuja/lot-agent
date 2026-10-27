@@ -3,6 +3,7 @@ import type pg from "pg";
 import { MARKETING_COPY_MODEL, MARKETING_REVIEW_MODEL, MarketingDraftSchema, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { MarketingError, reviewText, saveSnapshot } from "./repository.js";
 import { marketingReviewDelta } from "./compliance.js";
+import { MARKETING_TEXT_DEADLINE_MS } from "./text.js";
 import type { MarketingTextReceipt } from "./text.js";
 import { parseOperationResult, textResultVersion, type TextOperationKind, type TextOperationResult } from "./text-result.js";
 
@@ -14,8 +15,8 @@ export interface TextOperation {
 }
 // Review and publication metadata stay editable after a video job exists.
 const allowedWithTask = (kind: TextOperationKind) => kind === "review" || kind === "publication";
-// Longer than the 300 s text request deadline: a running row this old has no live request.
-const STALE_RUNNING_MS = 360_000;
+// Longer than the text request deadline: a running row this old has no live request.
+const STALE_RUNNING_MS = MARKETING_TEXT_DEADLINE_MS + 60_000;
 // Paid text requests one user may run at once across all drafts.
 export const MAX_RUNNING_TEXT_OPERATIONS = 2;
 const view = (row: Record<string, any>): TextOperation => ({ id: row.id, kind: row.kind,

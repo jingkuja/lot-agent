@@ -236,7 +236,7 @@ describe("analysis model calls", () => {
       expect(chat).toHaveBeenCalledOnce();
     } finally { timeout.mockRestore(); vi.useRealTimers(); }
   });
-  it("gives the summary only 16384 tokens, keeping its hash so an earlier failed summary can resume", async () => {
+  it("gives every step 16384 tokens, keeping the hash taken with 8192 so an earlier failed step can resume", async () => {
     const summary = setup({ summary: [], timeline: [], marketingPoints: [], limitations: [] });
     await summary.models.summarize({ revision: 1, frames: [], texts: [], observations: [], durationMs: 1000, limitations: [] });
     expect(summary.requests[0]).toMatchObject({ reasoning: undefined, maxTokens: 16384 });
@@ -248,7 +248,7 @@ describe("analysis model calls", () => {
     const copy = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" });
     await copy.models.createCopy(MarketingDraftSchema.parse({ copyMode: "rewrite", reference: "参考文案" }), "zh",
       { source: { platform: "bilibili", canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [], frameTexts: [], texts: [], observations: [] }, 1);
-    expect(copy.requests[0]).toMatchObject({ reasoning: undefined, maxTokens: 8192 });
+    expect(copy.requests[0]).toMatchObject({ reasoning: undefined, maxTokens: 16384 });
   });
   it("reuses a summary after database key reordering", async () => {
     const f = setup({ summary: [{ statement: "咖啡", evidenceIds: ["t0001"], inference: false }], timeline: [], marketingPoints: [], limitations: [] });

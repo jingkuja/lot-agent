@@ -8,6 +8,10 @@ export interface MarketingTextReceipt {
   /** `cancelled`: sent, but nothing came back; not charged, and a charge in the gateway logs is refunded. */
   outcome: "completed" | "failed" | "unknown" | "rejected" | "cancelled";
 }
+/** kimi-k3 copy for long drafts passed 8192 output tokens (reasoning included); at about 40 tokens/s the full
+ * 16384 take ~7 minutes, so the request deadline is 8 minutes. */
+export const MARKETING_TEXT_MAX_TOKENS = 16384;
+export const MARKETING_TEXT_DEADLINE_MS = 480_000;
 export interface MarketingTextOptions { upstreamBilling?: boolean; onReceipt?: (receipt: MarketingTextReceipt) => Promise<void>; model?: string; }
 
 export class MarketingTextError extends Error {
@@ -37,7 +41,7 @@ export function marketingTextError(error: unknown, signal?: AbortSignal): Market
 }
 
 export async function completeMarketingJson(llm: LLMProvider, system: string, input: string, signal?: AbortSignal, onReceipt?: MarketingTextOptions["onReceipt"]): Promise<unknown> {
-  const timeout = AbortSignal.timeout(300_000);
+  const timeout = AbortSignal.timeout(MARKETING_TEXT_DEADLINE_MS);
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let text = "";
   let completed = false;
@@ -65,7 +69,7 @@ export async function completeMarketingJson(llm: LLMProvider, system: string, in
         if (onReceipt && attempts++ > 0) throw lastAttemptError ?? new Error("MARKETING_REQUEST_UNKNOWN");
       },
       onAttemptEnd: error => { lastAttemptError = error; },
-      params: { maxTokens: 8192, responseFormat: "json_object" },
+      params: { maxTokens: MARKETING_TEXT_MAX_TOKENS, responseFormat: "json_object" },
       onResponseId: id => { receipt.responseId = id; checkpoint(); },
       onRequestId: id => { receipt.gatewayRequestId = id; checkpoint(); } })) {
       if (chunk.type === "text") text += chunk.content ?? "";

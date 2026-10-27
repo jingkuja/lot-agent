@@ -28,7 +28,8 @@ describe("marketing text completion", () => {
     ]);
     expect(await f.call()).toEqual({ verdict: "pass", issues: [] });
     expect(f.service.resolveUtilityLLM).toHaveBeenCalledWith({ userId: "owner", modelId: "kimi-k3" });
-    expect(f.chat).toHaveBeenCalledWith(expect.any(Array), undefined, expect.objectContaining({ signal: expect.any(AbortSignal), params: { maxTokens: 8192, responseFormat: "json_object" } }));
+    expect(f.chat).toHaveBeenCalledWith(expect.any(Array), undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal), params: { maxTokens: 16384, responseFormat: "json_object" } }));
     expect(f.service.meterUtilityUsage.mock.calls).toEqual([["marketing text", "kimi-k3", "owner", usage]]);
   });
 
@@ -50,7 +51,7 @@ describe("marketing text completion", () => {
     f.service.resolveUtilityLLM.mockResolvedValueOnce({ llm, usedModelId: "kimi-k3" } as any);
     expect(await f.call()).toEqual(result);
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ model: "kimi-k3", max_output_tokens: 8192, text: { format: { type: "json_object" } } });
+    expect(requests[0]).toMatchObject({ model: "kimi-k3", max_output_tokens: 16384, text: { format: { type: "json_object" } } });
     expect(requests[0]).not.toHaveProperty("reasoning");
     expect(f.service.meterUtilityUsage).toHaveBeenCalledWith("marketing text", "kimi-k3", "owner", { promptTokens: 20, completionTokens: 8 });
   });

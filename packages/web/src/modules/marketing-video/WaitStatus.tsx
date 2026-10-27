@@ -4,7 +4,7 @@ import { useI18n } from "../../i18n/index.js";
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
 /** A long request in progress: what is running and for how long. Text requests
- * (copy, storyboard, check, titles) end within the server's 300 s deadline.
+ * (copy, storyboard, check, titles) end within the server's 480 s deadline.
  * With `expectedSec` the bar fills over that time from `started` (a server time,
  * so a refresh resumes it) and stops short of full until the result arrives. */
 export function WaitStatus({ label, started, textRequest = true, expectedSec, note }: {
@@ -26,6 +26,6 @@ export function WaitStatus({ label, started, textRequest = true, expectedSec, no
       ? t(slow ? "已用时 {0}，个别任务需要更多时间，请耐心等候" : "已用时 {0} / 预计 {1}", [clock(seconds), clock(expectedSec)])
       : t("已用时 {0}", [clock(seconds)])}</span></p>
     {note ? <p className="mv-wait-note">{t(note)}</p>
-      : textRequest && <p className="mv-wait-note">{t("AI 创作最长需要 5 分钟；可以离开此页面，结果会自动保存，无需重复提交。")}</p>}
+      : textRequest && <p className="mv-wait-note">{t("AI 创作最长需要 8 分钟；可以离开此页面，结果会自动保存，无需重复提交。")}</p>}
   </div>;
 }

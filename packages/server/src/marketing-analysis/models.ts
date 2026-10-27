@@ -63,11 +63,11 @@ function parseModelJson(text: string): unknown {
 export class AnalysisModels {
   constructor(private readonly deps: AnalysisModelDeps) {}
 
-  private async invoke<T>(stepId: string, model: string, messages: Message[], images: number, signal: AbortSignal | undefined, validate: (raw: unknown) => T,
-    output: { maxTokens?: number; deadlineMs?: number } = {}): Promise<T> {
+  private async invoke<T>(stepId: string, model: string, messages: Message[], images: number, signal: AbortSignal | undefined,
+    validate: (raw: unknown) => T): Promise<T> {
     signal?.throwIfAborted();
-    // The hash identifies the submitted evidence. It has always been taken with maxTokens 8192; the summary's larger
-    // output limit leaves it unchanged, so a summary that failed before it resumes on its frozen input.
+    // The hash identifies the submitted evidence. It has always been taken with maxTokens 8192; the larger output
+    // limit leaves it unchanged, so a step that failed before it resumes on its frozen input.
     const payload = JSON.stringify({ model, messages, maxTokens: 8192 });
     if (Buffer.byteLength(payload) > ANALYSIS_LIMITS.requestBytes) throw new AnalysisError("MODEL_REQUEST_LIMIT");
     const llm = await this.deps.provider(model, signal);
@@ -83,13 +83,13 @@ export class AnalysisModels {
       let terminal = false;
       let savingId = Promise.resolve();
       try {
-        // Both summary and copy/storyboard synthesis reason over all evidence.
-        // Keep the same longer deadline for these text-only stages, while
-        // caller cancellation and lease loss still abort immediately.
+        // Both summary and copy/storyboard synthesis reason over all evidence. kimi-k3 passed 8192 output tokens on
+        // both (reasoning included), so every step may use 16384; at about 40 tokens/s that takes ~7 minutes, hence the
+        // 8-minute deadline for synthesis (4 minutes for OCR and visual batches). Cancellation and lease loss abort at once.
         const synthesis = stepId.startsWith("summary:") || stepId.startsWith("copy:");
-        const deadline = AbortSignal.timeout(output.deadlineMs ?? (synthesis ? 300000 : 120000));
+        const deadline = AbortSignal.timeout(synthesis ? 480000 : 240000);
         for await (const chunk of llm.chat(messages, undefined, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-          params: { maxTokens: output.maxTokens ?? 8192 },
+          params: { maxTokens: 16384 },
           onResponseId: id => {
             receipt!.responseId = id;
             savingId = savingId.then(() => this.deps.ledger.responseId?.(stepId, id)).catch(() => {});
@@ -205,10 +205,7 @@ export class AnalysisModels {
         frames: input.frames.map(({ id, ptsMs }) => ({ id, ptsMs })),
         texts: input.texts.map(({ id, text, frameIds, firstSeenMs, lastSeenMs }) => ({ id, text, frameIds, firstSeenMs, lastSeenMs })),
         observations: input.observations.map(({ description, frameIds, uncertainty }) => ({ description, frameIds, uncertainty })) }) },
-      // A long source yields a large timeline; kimi-k3 summaries took 2–3k tokens, so twice the usual limit leaves room.
-      // At about 40 tokens/s the full 16384 take ~7 minutes, hence the longer deadline (inside the 10-minute run limit).
-    ], 0, signal, raw => alignSummaryTimeline(raw, input.frames, input.texts, input.durationMs, input.speech),
-    { maxTokens: 16384, deadlineMs: 480000 });
+    ], 0, signal, raw => alignSummaryTimeline(raw, input.frames, input.texts, input.durationMs, input.speech));
     const result = raw;
     result.limitations = [...new Set([...input.limitations, ...result.limitations])].slice(0, 20);
     return result;
