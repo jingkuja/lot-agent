@@ -11,6 +11,7 @@ import { DIGITAL_PRESENTER_TASK } from "../jobs/task-queues.js";
 import { KnowledgeError } from "../knowledge/errors.js";
 import { signPrivateMaterial } from "../generation/private-materials.js";
 import { inspectMedia, mediaCapabilities, ownedAssetPath, SUBTITLES_UNAVAILABLE } from "../marketing-video/media.js";
+import { HDR_UNAVAILABLE, hdrConversionAvailable, isHdr } from "./media.js";
 import { readImageInfo } from "../marketing-video/image-size.js";
 import { MarketingTextError } from "../marketing-video/text.js";
 import { normalizeMarketingReview, REVIEW_INSTRUCTION } from "../marketing-video/compliance.js";
@@ -209,6 +210,7 @@ export function createDigitalPresenterRoutes(service: AgentService, dataRoot: st
       const trackSec = presenterTrackMs(takes.map(take => take.durationMs)) / 1000;
       if (info.duration + 0.05 < trackSec) throw new PresenterError(`口播底片 ${info.duration.toFixed(1)} 秒，短于配音 ${trackSec.toFixed(1)} 秒，请补拍或精简文案。`);
       if (Math.min(info.width, info.height) < 360) throw new PresenterError("口播底片清晰度过低，短边需不小于 360 像素。");
+      if (isHdr(info) && !await hdrConversionAvailable()) throw new PresenterError(HDR_UNAVAILABLE);
     }
     const model = presenterModel(p.draft.mode);
     const input: Omit<PresenterJobInput, "projectId"> = {

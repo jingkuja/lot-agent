@@ -6,7 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { inspectMedia, mediaCapabilities } from "../marketing-video/media.js";
 import { readImageInfo } from "../marketing-video/image-size.js";
 import { MarketingCaptionsSchema } from "@lot-agent/core/marketing-video";
-import { buildTrack, composeImageMode, composeVideoMode, footageScale, portraitFrame, prepareFootage, preparePortrait, takeCues } from "./media.js";
+import { buildTrack, composeImageMode, composeVideoMode, footageScale, hdrConversionAvailable, portraitFrame, prepareFootage, preparePortrait, shownSize,
+  takeCues } from "./media.js";
 
 const ffmpegAvailable = spawnSync("ffmpeg", ["-version"]).status === 0;
 let dir: string;
@@ -23,6 +24,10 @@ describe("presenter frame and footage limits", () => {
     expect(footageScale(480, 854)).toEqual({ width: 640, height: 1138 });
     expect(footageScale(2160, 3840)).toEqual({ width: 1152, height: 2048 });
     expect(footageScale(300, 1200)).toBeNull();
+  });
+  it("uses the upright size of a rotated phone video", () => {
+    expect(shownSize({ width: 1920, height: 1080, rotation: -90 })).toEqual({ width: 1080, height: 1920 });
+    expect(shownSize({ width: 1920, height: 1080, rotation: 180 })).toEqual({ width: 1920, height: 1080 });
   });
 });
 
@@ -65,6 +70,27 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     await Promise.all([image.dispose(), video.dispose()]);
     const { access } = await import("node:fs/promises");
     await expect(access(video.file)).rejects.toThrow();
+  });
+
+  it("turns upright, HDR iPhone footage into BT.709 SDR with reference white at SDR white", async ctx => {
+    const encoders = String(spawnSync("ffmpeg", ["-hide_banner", "-encoders"]).stdout);
+    if (!/\blibx265\b/.test(encoders) || !await hdrConversionAvailable()) ctx.skip();
+    // Coded sideways with a rotation like an upright iPhone clip; HLG reference white is 75% signal (BT.2408).
+    const white = Math.round(64 + 0.75 * 876);
+    run("-f", "lavfi", "-i", `color=c=black:s=1280x720:r=30:d=3,format=yuv420p10le,geq=lum=${white}:cb=512:cr=512`, "-c:v", "libx265",
+      "-x265-params", "log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc", "-color_primaries", "bt2020",
+      "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "hlg-coded.mov");
+    run("-display_rotation", "90", "-i", "hlg-coded.mov", "-c", "copy", "hlg.mov");
+    expect(await inspectMedia(join(dir, "hlg.mov"))).toMatchObject({ width: 1280, height: 720, transfer: "arib-std-b67" });
+    const footage = await prepareFootage(join(dir, "hlg.mov"), join(dir, "hlg-prepared.mp4"), 2);
+    expect(footage).toMatchObject({ width: 720, height: 1280, rotation: 0, transfer: "bt709" });
+    const level = (file: string) => Number(/YAVG=([\d.]+)/.exec(String(spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-i", file, "-vf",
+      "signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-", "-frames:v", "1", "-f", "null", "-"], { cwd: dir }).stdout))?.[1]);
+    // Read without its HDR tags, the old footage held reference white near 180 (grey); converted it is close to 235.
+    expect(level("hlg-prepared.mp4")).toBeGreaterThan(215);
+    const video = await composeVideoMode({ clip: join(dir, "hlg-prepared.mp4"), track: join(dir, "track.wav"), trackSec: 2 });
+    expect(video).toMatchObject({ width: 720, height: 1280 });
+    await video.dispose();
   });
 
   it("times a take's captions within its span, with the user's line breaks and offsets", async () => {

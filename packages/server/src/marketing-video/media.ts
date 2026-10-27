@@ -124,8 +124,11 @@ export async function inspectMedia(path: string, signal?: AbortSignal) {
   const video = value.streams?.find((s: { codec_type: string }) => s.codec_type === "video");
   const [fpsNumerator, fpsDenominator = "1"] = String(video?.avg_frame_rate ?? "0/1").split("/");
   const has = (type: string) => value.streams?.some((s: { codec_type: string }) => s.codec_type === type);
+  // `width` and `height` are as coded; a phone video shot upright is coded sideways with a `rotation`
+  // that FFmpeg applies before any filter. `transfer` is the transfer characteristic, e.g. HLG for HDR.
+  const rotation = Number(video?.side_data_list?.find((d: { rotation?: number }) => d.rotation !== undefined)?.rotation ?? 0);
   return { width: Number(video?.width ?? 0), height: Number(video?.height ?? 0), fps: Number(fpsNumerator) / Number(fpsDenominator), format, duration,
-    audio: has("audio"), video: has("video") };
+    audio: has("audio"), video: has("video"), rotation: Number.isFinite(rotation) ? rotation : 0, transfer: video?.color_transfer as string | undefined };
 }
 /** Silent stretches of a narration take or a clip's own voice, from FFmpeg's silencedetect.
  * Only the first `durationSec` seconds are read. */

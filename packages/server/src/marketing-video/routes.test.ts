@@ -534,7 +534,7 @@ it("validates reference video metadata and sends it with audio disabled", async 
   f.project.draft.assets = { video: videoId, voice: randomUUID() };
   f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : "audio/wav", size_bytes: 100, url: `/static/${args[0]}` }));
   // Kling's 3–15.5 s / 700 px limits no longer apply to Grok submissions.
-  const info = { format: "mov", video: true, audio: false, duration: 20, width: 640, height: 360, fps: 30 };
+  const info = { format: "mov", video: true, audio: false, duration: 20, width: 640, height: 360, fps: 30, rotation: 0, transfer: undefined };
   vi.mocked(inspectMedia).mockResolvedValueOnce({ ...info, video: false });
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
   expect(f.store.reserve).not.toHaveBeenCalled();
@@ -567,9 +567,11 @@ it("submits new clips with the configured model profile", async () => {
     f.project.draft.assets = { video: videoId, portrait: id };
     f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : "image/png", size_bytes: 100, url: `/static/${args[0]}` }));
     // Kling keeps its documented reference video limits.
-    vi.mocked(inspectMedia).mockResolvedValueOnce({ format: "mov", video: true, audio: false, duration: 20, width: 1280, height: 720, fps: 30 });
+    vi.mocked(inspectMedia).mockResolvedValueOnce({ format: "mov", video: true, audio: false, duration: 20, width: 1280, height: 720, fps: 30,
+      rotation: 0, transfer: undefined });
     expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
-    vi.mocked(inspectMedia).mockResolvedValueOnce({ format: "mov", video: true, audio: false, duration: 5, width: 1280, height: 720, fps: 30 });
+    vi.mocked(inspectMedia).mockResolvedValueOnce({ format: "mov", video: true, audio: false, duration: 5, width: 1280, height: 720, fps: 30,
+      rotation: 0, transfer: undefined });
     expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
     expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ modelId: "kling-video-v3-omni", input_reference: [`/static/${id}`] }), false);
   } finally { delete process.env.MARKETING_VIDEO_MODEL; }
