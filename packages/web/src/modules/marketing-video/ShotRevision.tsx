@@ -33,9 +33,11 @@ export function ShotRevision({ project, revision, draft, busy, saving, reviewPan
   const seconds = shots.reduce((sum, index) => sum + rendered[index].durationSec, 0);
   const edited = reasons.includes("已修改");
   const changed = marketingRenderKey(draft) !== marketingRenderKey(revision.draft);
-  // New voice settings need every take again; otherwise only reworded or redone shots do.
+  // Only takes missing for the current lines and voice are made; a redone shot whose line is unchanged
+  // keeps its take. Before the saved takes are loaded, count the shots a change of line or voice needs.
   const voiceChanged = composition.narration && JSON.stringify(draft.narration) !== JSON.stringify(revision.draft.narration);
-  const takes = composition.narration ? rendered.filter((_, index) => voiceChanged || reworded[index] || selected[index]).length : 0;
+  const takes = !composition.narration ? 0 : narration ? narration.filter(clip => clip.status === "missing").length
+    : rendered.filter((_, index) => voiceChanged || reworded[index]).length;
   const made = project.status === "succeeded";
   const reviewIssue = !!project.review && project.reviewedScript === marketingReviewText(draft) && project.review.verdict !== "pass";
   // Redone shots use the model that made the kept clips.
@@ -56,7 +58,7 @@ export function ShotRevision({ project, revision, draft, busy, saving, reviewPan
   };
   const submit = async () => {
     const message = [shots.length ? "将重新生成第 {0} 镜，共 {1} 秒，会产生费用；其余 {2} 个镜头沿用已生成的片段，不收费。" : "将沿用全部已生成的片段重新合成成片，不调用视频模型。",
-      takes ? "{3} 个镜头的配音需要重新合成，会产生费用。" : "", made ? "新成片完成前不再显示当前成片，如需保留请先下载。" : ""].filter(Boolean).map(part => t(part)).join(locale === "zh" ? "" : " ");
+      takes ? "{3} 个镜头的配音需要重新合成，会产生费用。" : "", made ? "新成片完成后会替换当前成片；在此之前，当前成片仍可在「上一版成片」中查看和下载。" : ""].filter(Boolean).map(part => t(part)).join(locale === "zh" ? "" : " ");
     if (await confirm({ title: shots.length ? "重新生成镜头？" : "重新合成成片？", confirm: shots.length ? "重新生成" : "重新合成", message,
       values: [shotList(shots), seconds, rendered.length - shots.length, takes] })) onRevise(shots);
   };

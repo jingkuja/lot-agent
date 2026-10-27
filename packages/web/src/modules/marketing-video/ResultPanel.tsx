@@ -100,7 +100,13 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
         <div className="mv-downloads"><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
           {!!project.output?.captions?.length && <a className="mv-download" href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(project.output.captions))}`} download="captions.srt">{t("下载字幕（SRT）")}</a>}</div>
         {project.output?.quality && <QualityReport quality={project.output.quality} redo={!!project.revision} />}</>
-      : <TaskStatus project={project} busy={busy} onResume={onResume} onCancel={onCancel} onCopy={onCopyDraft} onRelease={onRelease} />}
+      : <><TaskStatus project={project} busy={busy} onResume={onResume} onCancel={onCancel} onCopy={onCopyDraft} onRelease={onRelease} />
+        {project.previousResult && <section className="mv-previous-result" aria-label={t("上一版成片")}>
+          <h3>{t("上一版成片")}</h3>
+          <p className="mv-hint">{t("新成片完成后会替换上一版；如需保留上一版，请先下载。")}</p>
+          <video key={project.previousResult.taskId} className="mv-result-video" controls preload="metadata" src={project.previousResult.url} />
+          <div className="mv-downloads"><a className="mv-download" href={project.previousResult.url} download>{t("下载上一版成片")}</a></div>
+        </section>}</>}
     <div className="mv-publication">
       <DraftText form={form} name="publishTitle" label="视频发布标题" max={100} />
       <DraftText form={form} name="tags" label="短视频检索标签" max={160} />

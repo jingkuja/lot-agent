@@ -30,6 +30,29 @@ describe("persisting confirmed marketing shots", () => {
   });
 });
 
+describe("the last made video of a redone draft", () => {
+  const draft = MarketingDraftSchema.parse({ script: "欢迎到店" });
+  const read = (status: string) => {
+    const row = { id: "project", user_id: "owner", version: 3, draft, task_id: "redo", status, progress: 40, review: null, reviewed_script: null,
+      updated_at: "2026-10-27T00:00:00Z" };
+    const query = vi.fn(async (sql: string, _params?: unknown[]) => ({ rows: sql.startsWith("SELECT p.*") ? [row]
+      : sql.startsWith("SELECT id, output FROM tasks") ? [{ id: "made", output: { assetIds: ["a"], assets: [{ url: "https://cdn.example/made.mp4" }] } }] : [] }));
+    return { query, store: new PgMarketingProjectStore({ query } as unknown as pg.Pool) };
+  };
+  it("stays reachable while a redo runs or after it fails", async () => {
+    for (const status of ["running", "failed"]) {
+      const { query, store } = read(status);
+      expect((await store.get("owner", "project"))?.previousResult).toEqual({ taskId: "made", url: "https://cdn.example/made.mp4" });
+      expect(query.mock.calls.find(([sql]) => sql.startsWith("SELECT id, output FROM tasks"))?.[1]).toEqual(["owner", "project", "redo"]);
+    }
+  });
+  it("is replaced once the redo made its own video", async () => {
+    const { query, store } = read("succeeded");
+    expect((await store.get("owner", "project"))?.previousResult).toBeUndefined();
+    expect(query.mock.calls.some(([sql]) => sql.startsWith("SELECT id, output FROM tasks"))).toBe(false);
+  });
+});
+
 describe("deleting marketing drafts", () => {
   type Busy = { lock: boolean; text: number; analyses: Record<string, unknown>[]; unknown: string[]; inUse: string[] };
   const store = (row: Record<string, unknown> | undefined, options: Partial<Busy> = {}) => {

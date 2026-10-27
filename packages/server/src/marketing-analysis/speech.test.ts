@@ -58,16 +58,16 @@ it("cancels before intent creation and passes cancellation to in-flight fetch", 
 });
 it("requires only the visual models, treats ASR as optional, and isolates catalog/key lookup by owner", async () => {
   const db = { getUserApiKey: vi.fn(async (owner: string) => `${owner}-key`) };
-  const hub = { listModels: vi.fn(async () => ({ llm: ["qwen3.8-max", "deepseek-v4.1-flash"], image: [], video: [] })) };
+  const hub = { listModels: vi.fn(async () => ({ llm: ["kimi-k3", "qwen3.8-max", "deepseek-v4.1-flash"], image: [], video: [] })) };
   expect(await analysisUserAccess(db, hub, "alice")).toEqual({ key: "alice-key", asrAvailable: false });
-  hub.listModels.mockResolvedValue({ llm: ["qwen3.8-max", "deepseek-v4.1-flash", ASR_MODEL], image: [], video: [] });
+  hub.listModels.mockResolvedValue({ llm: ["kimi-k3", "qwen3.8-max", "deepseek-v4.1-flash", ASR_MODEL], image: [], video: [] });
   expect(await analysisUserAccess(db, hub, "bob")).toEqual({ key: "bob-key", asrAvailable: true });
   expect(hub.listModels).toHaveBeenLastCalledWith("bob-key", expect.any(AbortSignal));
 });
 
 it("recognizes the real gateway audio group without granting ASR to another owner", async () => {
   const db = { getUserApiKey: async (owner: string) => `${owner}-key` };
-  const hub = { listModels: async (key: string) => ({ llm: ["qwen3.8-max", "deepseek-v4.1-flash"], image: [], video: [],
+  const hub = { listModels: async (key: string) => ({ llm: ["kimi-k3", "qwen3.8-max", "deepseek-v4.1-flash"], image: [], video: [],
     audio: key === "alice-key" ? [ASR_MODEL] : [] }) };
   expect(await analysisUserAccess(db, hub, "alice")).toEqual({ key: "alice-key", asrAvailable: true });
   expect(await analysisUserAccess(db, hub, "bob")).toEqual({ key: "bob-key", asrAvailable: false });

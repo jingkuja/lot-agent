@@ -256,6 +256,9 @@
 .mv-failure { display: grid; gap: 6px; width: 100%; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--error) 30%, var(--border)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--error) 5%, var(--bg-card)); font-size: 13px; line-height: 1.7; color: var(--text); }
 .mv-failure p { margin: 0; }
 .mv-progress .mv-failure strong { margin-right: 8px; font-size: 13px; color: var(--error); }
+.mv-previous-result { display: grid; gap: 8px; margin: 14px 0 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.mv-previous-result h3 { margin: 0; font-size: 14px; color: var(--text); }
+.mv-previous-result .mv-downloads { margin: 0; }
 .mv-progress .mv-task-details { width: 100%; margin: 0; padding: 8px 12px; background: var(--bg-card); }
 .mv-task-details p { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; user-select: text; }
 

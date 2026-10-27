@@ -31,8 +31,10 @@ function fixture(shots: MarketingShot[], submitted = false) {
   store.segments.mockResolvedValue(shots.map((shot, slot) => ({ slot, task_id: `child-${slot}`, script: shot.script,
     duration_sec: shot.durationSec, status: "running", vendor_task_id: submitted ? `vendor-${slot}` : null, output: null })));
   const connection = { query: vi.fn(async () => ({ rows: [{ locked: true }] })), release: vi.fn() };
+  // The job lock holds the first connection; the made video's transaction takes another.
+  const storing = { query: vi.fn(async () => ({ rows: [] })), release: vi.fn() };
   const db = {
-    pool: { connect: vi.fn(async () => connection), query: vi.fn(async () => ({ rows: [] })) },
+    pool: { connect: vi.fn().mockResolvedValueOnce(connection).mockResolvedValue(storing), query: vi.fn(async () => ({ rows: [] })) },
     getTaskStatus: vi.fn(async () => "running"), updateTaskProgress: vi.fn(), raiseTaskProgress: vi.fn(),
     getTaskVendorId: vi.fn(async (id: string) => `vendor-${id}`),
     getAsset: vi.fn(async () => ({ user_id: "owner" })),
@@ -44,7 +46,7 @@ function fixture(shots: MarketingShot[], submitted = false) {
   const compose = vi.fn(async () => composed());
   const deps = { db, dataRoot: "/tmp", generation, compose } as unknown as MarketingRunDeps;
   const job = { id: "parent", userId: "owner", input: { projectId: "project", draft, generate_audio: true } };
-  return { deps, job, generation, connection, db, compose };
+  return { deps, job, generation, connection, storing, db, compose };
 }
 
 describe("marketing prompt submission preflight", () => {
@@ -83,14 +85,32 @@ describe("marketing prompt submission preflight", () => {
     f.compose.mockResolvedValueOnce({ ...composed(), captions: [], captionTiming, preview: { file: "/tmp/preview.mp4", sizeBytes: 5 } } as never);
     const output = await runMarketingVideo(f.deps, f.job, new AbortController().signal);
     expect(output).toMatchObject({ captionTiming, preview: { url: "/static/result.mp4" } });
-    const assets = f.db.createAsset.mock.calls.map(([asset]) => asset as { id: string; storageKey: string; isPrivate: boolean });
+    // Both videos and the full output commit in one transaction.
+    const sent = f.storing.query.mock.calls as unknown as [string, unknown[]?][];
+    const assets = sent.filter(([sql]) => sql.startsWith("INSERT INTO assets")).map(([sql, params]) => ({ sql, id: params![0], storageKey: params![3] }));
     expect(assets).toHaveLength(2);
     expect(assets[0].storageKey).toBe(`${(output as { assetIds: string[] }).assetIds[0]}.mp4`);
-    expect(assets[1]).toMatchObject({ id: (output as { preview: { assetId: string } }).preview.assetId, isPrivate: true });
+    expect(assets[1].id).toBe((output as { preview: { assetId: string } }).preview.assetId);
     expect(assets[1].storageKey).toMatch(/-preview\.mp4$/);
+    expect(assets[1].sql).toContain("true)");
+    const stored = sent.find(([sql]) => sql.startsWith("UPDATE tasks SET output"))!;
+    expect(JSON.parse(stored[1]![1] as string)).toEqual(output);
+    expect(sent.map(([sql]) => sql.split(/[ (]/)[0])).toEqual(["BEGIN", "INSERT", "INSERT", "UPDATE", "COMMIT"]);
+    expect(f.storing.release).toHaveBeenCalledOnce();
+    expect(f.db.createAsset).not.toHaveBeenCalled();
     const calls = f.db.pool.query.mock.calls as unknown as unknown[][];
     const prune = calls.find(([sql]) => String(sql).startsWith("DELETE FROM assets"));
     expect(prune?.[1]).toEqual(["owner", "project", "parent", "%-preview.mp4"]);
+  });
+
+  it("recovers the full output of a video stored before the queue recorded it", async () => {
+    const f = fixture([short]);
+    const stored = { assetIds: ["final"], assets: [{ url: "/static/final.mp4", mime: "video/mp4" }], quality: { checked: true }, captions: [],
+      captionTiming: [], preview: { assetId: "copy", url: "/static/copy.mp4" } };
+    f.db.pool.query.mockImplementation((async (sql: string) => ({ rows: sql.startsWith("SELECT * FROM assets") ? [{ id: "final", url: "/static/final.mp4", mime: "video/mp4" }]
+      : sql.startsWith("SELECT output FROM tasks") ? [{ output: stored }] : [] })) as never);
+    await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).resolves.toEqual(stored);
+    expect(f.compose).not.toHaveBeenCalled();
   });
 
   it("reports a draft this worker cannot read as a server problem before any provider is resolved", async () => {

@@ -174,7 +174,7 @@ it("automatically synthesizes the remaining evidence after known OCR failures wi
     } }),
   });
   const result = await analyzeSelectedFrames({ snapshot: initial(), selection, revision: 1, models, checkpoint: async () => {} });
-  expect(calls).toEqual(["deepseek-v4.1-flash", "deepseek-v4.1-flash", "qwen3.8-max", "qwen3.8-max"]);
+  expect(calls).toEqual(["deepseek-v4.1-flash", "deepseek-v4.1-flash", "kimi-k3", "qwen3.8-max"]);
   expect(result.summary?.summary[0].statement).toBe("展示产品");
   expect(result.summary?.limitations).toContain("OCR_INCOMPLETE");
   expect(result.coverage?.omittedOcrFrameIds).toEqual(["f0001", "f0002"]);

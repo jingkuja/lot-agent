@@ -58,13 +58,21 @@ try {
     if (!Object.values(ANALYSIS_MODELS).every(model => allowed.llm.includes(model))) throw new Error("PROBE_MODEL_NOT_ALLOWED");
     // Don't invent a Kimi price or report unknown prices as zero.
     const prices = JSON.parse(process.env.MARKETING_ANALYSIS_PROBE_PRICING ?? "{}");
-    const configs = Object.values(ANALYSIS_MODELS).map((id): ModelConfig => {
+    // Paid calls of this probe per model: two OCR frames, two image batches and one summary.
+    const calls = new Map<string, number>();
+    for (const [id, count] of [[ANALYSIS_MODELS.ocr, 2], [ANALYSIS_MODELS.visual, 2], [ANALYSIS_MODELS.synthesis, 1]] as const) {
+      calls.set(id, (calls.get(id) ?? 0) + count);
+    }
+    const configs = [...calls.keys()].map((id): ModelConfig => {
       const p = prices[id];
       if (!p || ![p.inputPrice, p.outputPrice].every(n => typeof n === "number" && Number.isFinite(n) && n > 0)) throw new Error("PROBE_PRICING_REQUIRED");
       return { id, type: "llm", billingUnit: "token", provider: "openai", enabled: true, inputPrice: p.inputPrice, outputPrice: p.outputPrice, unitPrice: 0 };
     });
     const meter = new UsageMeter(db, id => configs.find(c => c.id === id));
-    const allowance = configs.reduce((sum, config) => sum + calcCost(config, { inputCount: 16384 * (config.id === ANALYSIS_MODELS.ocr ? 2 : 3), outputCount: 8192 * (config.id === ANALYSIS_MODELS.ocr ? 2 : 3) }), 0);
+    const allowance = configs.reduce((sum, config) => {
+      const count = calls.get(config.id)!;
+      return sum + calcCost(config, { inputCount: 16384 * count, outputCount: 8192 * count });
+    }, 0);
     if (!(await meter.checkQuota(owner, allowance)).ok) throw new Error("PROBE_QUOTA_EXCEEDED");
     const ledger = new ProbeCallLedger(join(directory, "receipts"), async (step, modelId, receipt) => {
       if (receipt.usage) await meter.record({ userId: owner, modelId, usage: { inputCount: receipt.usage.promptTokens, outputCount: receipt.usage.completionTokens }, idempotencyKey: `analysis-probe:${runId}:${step}` });

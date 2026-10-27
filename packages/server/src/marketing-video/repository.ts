@@ -89,9 +89,18 @@ async function revisionBase(db: pg.Pool | pg.PoolClient, owner: string, id: stri
   });
   return { input: job.job_input as Record<string, unknown>, draft, modelId, segments: rows, reusable, clips, composition: jobComposition(job.job_input) };
 }
+/** The newest made video of another job of this draft; earlier finals are kept when a draft is redone. */
+async function previousResult(db: pg.Pool | pg.PoolClient, owner: string, p: MarketingProject): Promise<MarketingProject["previousResult"]> {
+  const { rows } = await db.query(`SELECT id, output FROM tasks WHERE user_id=$1 AND type='marketing.video' AND input->>'projectId'=$2
+    AND status='succeeded' AND id<>$3 ORDER BY updated_at DESC LIMIT 1`, [owner, p.id, p.taskId]);
+  const url = rows[0]?.output?.assets?.[0]?.url;
+  return typeof url === "string" ? { taskId: rows[0].id, url: signPrivateOutput(owner, url) } : undefined;
+}
 async function withRevision(db: pg.Pool | pg.PoolClient, owner: string, p: MarketingProject): Promise<MarketingProject> {
   const base = p.taskId ? await revisionBase(db, owner, p.id) : undefined;
-  return base ? { ...p, revision: { draft: base.draft, modelId: base.modelId, reusable: base.reusable, composition: base.composition, clips: base.clips } } : p;
+  const previous = p.taskId && p.status !== "succeeded" ? await previousResult(db, owner, p) : undefined;
+  const revision = base && { draft: base.draft, modelId: base.modelId, reusable: base.reusable, composition: base.composition, clips: base.clips };
+  return { ...p, ...(revision ? { revision } : {}), ...(previous ? { previousResult: previous } : {}) };
 }
 export class PgMarketingProjectStore implements MarketingProjectStore {
   constructor(readonly pool: pg.Pool) {}

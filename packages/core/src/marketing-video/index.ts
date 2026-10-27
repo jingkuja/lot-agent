@@ -288,6 +288,9 @@ export interface MarketingProject {
   revision?: { draft: MarketingDraft; modelId: string; reusable: boolean[]; composition: MarketingComposition;
     /** Each kept clip's video, to watch a shot before redoing it; null when it has none. */
     clips?: (string | null)[] };
+  /** The newest made video of an earlier job of this draft, while the current job has not made one:
+   * a redo or recomposition that is running or stopped never hides the last usable video. */
+  previousResult?: { taskId: string; url: string };
 }
 /** Saved earlier copy and storyboard of a draft (assessment M04), kept before an AI result replaced
  * them (`copy`, `storyboard`), a save dropped the shots (`clear`) or a restore replaced them (`restore`). */

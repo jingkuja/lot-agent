@@ -74,10 +74,15 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
     };
     timer = setInterval(() => { void assertActive().catch(abort); }, CANCEL_CHECK_MS);
     await assertActive();
-    // The final video, not the caption-free copy stored after it.
+    // The final video, not the caption-free copy stored after it. Its full output (checks, cues,
+    // preview) commits with it; videos stored before that keep only the video itself.
     const existing = (await deps.db.pool.query(`SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 AND storage_key NOT LIKE $3
       ORDER BY created_at LIMIT 1`, [job.id, job.userId, `%${PREVIEW_SUFFIX}`])).rows[0];
-    if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime }] };
+    if (existing) {
+      const stored = (await deps.db.pool.query("SELECT output FROM tasks WHERE id=$1 AND user_id=$2", [job.id, job.userId])).rows[0]?.output;
+      if (stored?.assetIds?.[0] === existing.id) return stored;
+      return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime }] };
+    }
     // The API validated this draft on submission, so a rejection here means this worker runs
     // older code than the API (e.g. a draft field it does not know yet), not a model failure.
     const parsedDraft = MarketingDraftSchema.safeParse(job.input.draft);
@@ -286,16 +291,26 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
         if (result.preview) ({ url: previewUrl } = await storeComposedVideo(gen.storage, previewKey, result.preview));
       } finally { await result.dispose(); }
       await assertActive();
-      await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.sizeBytes,
-        durationSec: result.durationSec, width: result.width, height: result.height, isPrivate: true });
-      if (result.preview && previewUrl) {
-        await deps.db.createAsset({ id: previewId, taskId: job.id, userId: job.userId, type: "video", storageKey: previewKey, url: previewUrl, mime: "video/mp4",
-          sizeBytes: result.preview.sizeBytes, durationSec: result.durationSec, width: result.width, height: result.height, isPrivate: true });
-        await removeEarlierPreviews(deps, job.userId, project.id, job.id);
-      }
-      return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}),
+      const preview = result.preview && previewUrl ? { assetId: previewId, url: previewUrl, sizeBytes: result.preview.sizeBytes } : undefined;
+      const output = { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], ...(result.quality ? { quality: result.quality } : {}),
         ...(result.captions ? { captions: result.captions } : {}), ...(result.captionTiming ? { captionTiming: result.captionTiming } : {}),
-        ...(result.preview && previewUrl ? { preview: { assetId: previewId, url: previewUrl } } : {}) };
+        ...(preview ? { preview: { assetId: preview.assetId, url: preview.url } } : {}) };
+      // Both videos and the output commit together, so a crash before the queue stores the result
+      // recovers the checks, cues and preview above instead of the bare video.
+      const assetConnection = await deps.db.pool.connect();
+      try {
+        await assetConnection.query("BEGIN");
+        const insert = `INSERT INTO assets(id,task_id,user_id,type,storage_key,url,mime,size_bytes,duration_sec,width,height,is_private)
+          VALUES($1,$2,$3,'video',$4,$5,'video/mp4',$6,$7,$8,$9,true)`;
+        const size = [result.durationSec, result.width, result.height];
+        await assetConnection.query(insert, [id, job.id, job.userId, key, url, result.sizeBytes, ...size]);
+        if (preview) await assetConnection.query(insert, [preview.assetId, job.id, job.userId, previewKey, preview.url, preview.sizeBytes, ...size]);
+        await assetConnection.query("UPDATE tasks SET output=$2 WHERE id=$1 AND user_id=$3", [job.id, JSON.stringify(output), job.userId]);
+        await assetConnection.query("COMMIT");
+      } catch (error) { await assetConnection.query("ROLLBACK"); throw error; }
+      finally { assetConnection.release(); }
+      if (preview) await removeEarlierPreviews(deps, job.userId, project.id, job.id);
+      return output;
     } catch (error) {
       if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;
       throw new MarketingRunError("COMPOSITION_FAILED", error instanceof Error ? error.message : "视频合成失败", { cause: error });

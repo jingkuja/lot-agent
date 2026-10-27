@@ -4,9 +4,9 @@ import { AnalysisError } from "./errors.js";
 import { PgAnalysisStore, ownerLock } from "./repository.js";
 import { ANALYSIS_MODELS } from "./models.js";
 
-/** Models whose steps count against the visual image limit: the current one, and historical defaults
- * recorded before the text model changed, so an analysis that spans the change keeps its limit. */
-const VISUAL_MODELS: string[] = [ANALYSIS_MODELS.visual, "kimi-k3.1-pro", "kimi-k3"];
+/** Models whose steps count against the visual image limit: the current one, and earlier visual models
+ * (the copy model read the frames until 2026-10-27), so an analysis that spans a change keeps its limit. */
+const VISUAL_MODELS: string[] = [...new Set([ANALYSIS_MODELS.visual, "qwen3.8-max", "kimi-k3.1-pro", "kimi-k3"])];
 
 export function validReceiptUsage(receipt: ModelStepReceipt) {
   return receipt.usage && [receipt.usage.promptTokens, receipt.usage.completionTokens].every(n => Number.isSafeInteger(n) && n >= 0);
