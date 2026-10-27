@@ -106,6 +106,7 @@ export const migrations: Migration[] = [
   marketingPrivateOutputs,
   marketingDraftSnapshots,
   marketingAnalysisNoResponse,
+  marketingAnalysisSubmitted,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -132,3 +133,4 @@ import { marketingBackgroundRequests } from "./0061-marketing-background-request
 import { marketingPrivateOutputs } from "./0062-marketing-private-outputs.js";
 import { marketingDraftSnapshots } from "./0063-marketing-draft-snapshots.js";
 import { marketingAnalysisNoResponse } from "./0064-marketing-analysis-no-response.js";
+import { marketingAnalysisSubmitted } from "./0065-marketing-analysis-submitted.js";

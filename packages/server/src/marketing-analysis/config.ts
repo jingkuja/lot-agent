@@ -2,6 +2,9 @@ import { AnalysisError } from "./errors.js";
 
 export const ANALYSIS_QUEUE = "lot-media-analysis";
 export const ANALYSIS_JOB = "marketing.analysis";
+/** Hard limit for one run (from claim to finish). The page expects about 5 minutes; a run cut off here keeps its
+ * completed steps and ends resumable with ANALYSIS_TIMEOUT. */
+export const ANALYSIS_RUN_LIMIT_MS = 10 * 60_000;
 export interface AnalysisParallelism {
   ocrConcurrency: number; visualConcurrency: number; decodeThreads: number;
 }

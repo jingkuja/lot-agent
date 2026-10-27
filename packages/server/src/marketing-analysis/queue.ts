@@ -1,6 +1,6 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import type { AnalysisLease } from "@lot-agent/core/marketing-analysis";
-import { ANALYSIS_JOB, ANALYSIS_QUEUE } from "./config.js";
+import { ANALYSIS_JOB, ANALYSIS_QUEUE, ANALYSIS_RUN_LIMIT_MS } from "./config.js";
 import type { PgAnalysisStore } from "./repository.js";
 import { AnalysisError } from "./errors.js";
 
@@ -44,11 +44,16 @@ export function createAnalysisConsumer(connection: ConnectionOptions, concurrenc
       if (beating) return; beating = true;
       void store.heartbeat(lease).then(ok => { if (!ok) controller.abort(); }).catch(() => controller.abort()).finally(() => { beating = false; });
     }, 2000);
+    // A call cut off mid-response stays unknown in the ledger (finish reports REQUEST_UNKNOWN), never replayed.
+    let timedOut = false;
+    const limit = setTimeout(() => { timedOut = true; controller.abort(); }, ANALYSIS_RUN_LIMIT_MS);
     let code: string | undefined;
     try { await run(lease, controller.signal); }
-    catch (error) { code = error instanceof AnalysisError ? error.code : controller.signal.aborted ? "PROCESS_CANCELLED" : "ANALYSIS_FAILED"; }
+    catch (error) {
+      code = timedOut ? "ANALYSIS_TIMEOUT" : error instanceof AnalysisError ? error.code : controller.signal.aborted ? "PROCESS_CANCELLED" : "ANALYSIS_FAILED";
+    }
     finally {
-      clearInterval(timer); running.delete(lease.id);
+      clearInterval(timer); clearTimeout(limit); running.delete(lease.id);
       // Losing DB access leaves the lease/intent for recovery, never replays a call.
       await store.finish(lease, code);
     }

@@ -62,6 +62,8 @@ export interface ReferenceAnalysis {
   id: string; ownerId: string; taskId: string; revision: number; version: number; status: AnalysisStatus;
   stage: string; errorCode?: string; snapshot: AnalysisSnapshot; createdAt: string; updatedAt: string;
   projectId?: string; applied?: boolean; pendingCalls?: number;
+  /** When the current run was created or resumed; the page's 5-minute progress bar starts here. */
+  submittedAt?: string;
 }
 export const CreateAnalysisSchema = z.object({ shareText: z.string().trim().min(1).max(4000).optional(), uploadId: z.string().uuid().optional(), clientRequestId: z.string().uuid(),
   target: z.object({ projectId: z.string().uuid(), projectVersion: z.number().int().positive(), locale: z.enum(["zh", "en", "id"]) }).strict().optional(),

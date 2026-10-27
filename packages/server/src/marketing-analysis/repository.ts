@@ -13,7 +13,8 @@ export function analysisRecord(row: Record<string, any>): ReferenceAnalysis {
   return { id: row.id, ownerId: row.user_id, taskId: row.id, revision: row.revision, version: row.version,
     status: row.status, stage: row.stage, errorCode: row.error_code ?? undefined, snapshot: row.snapshot,
     projectId: row.creation_context?.projectId, applied: row.creation_context?.applied === true,
-    createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString() };
+    createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+    submittedAt: new Date(row.submitted_at ?? row.created_at).toISOString() };
 }
 export async function ownerLock(client: pg.PoolClient, owner: string) {
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`media-analysis-budget:${owner}`]);
@@ -194,7 +195,8 @@ export class PgAnalysisStore implements AnalysisJobStore {
         WHERE analysis_id=$1 AND ((receipt->>'outcome'='failed' AND receipt->'usage' IS NOT NULL) OR receipt->>'outcome' IN ('rejected','cancelled'))`, [id]);
       // Rows revised by the former text editor (revision > 1) resume from the summary.
       await client.query(`UPDATE marketing_reference_analyses SET status='queued',mode=$2,reserved_cost=$3,cancel_requested=false,
-        lease_token=NULL,lease_until=NULL,error_code=NULL,scratch_cleaned_at=NULL,version=version+1,updated_at=now() WHERE id=$1`, [id, row.revision > 1 ? "summary" : "all", 0]);
+        lease_token=NULL,lease_until=NULL,error_code=NULL,scratch_cleaned_at=NULL,version=version+1,submitted_at=now(),updated_at=now()
+        WHERE id=$1`, [id, row.revision > 1 ? "summary" : "all", 0]);
       await client.query("UPDATE tasks SET status='pending',error=NULL,updated_at=now() WHERE id=$1", [id]);
     });
     return this.get(owner, id);

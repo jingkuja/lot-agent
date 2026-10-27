@@ -3,11 +3,14 @@ import { ANALYSIS_LIMITS, type ReferenceAnalysis } from "@lot-agent/core/marketi
 import { marketingMegabytes } from "@lot-agent/core/marketing-video";
 import { ApiClientError, getToken, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
+import { WaitStatus } from "./WaitStatus.js";
 
 const base = "/marketing-video-analyses";
 const json = (body: unknown) => ({ method: "POST", body: JSON.stringify(body) });
 const active = (value: ReferenceAnalysis) => ["queued", "running"].includes(value.status);
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+/** Typical time for one analysis run, shown as the progress bar's length. */
+const EXPECTED_SEC = 300;
 export function analysisError(value: unknown) {
   const code = value instanceof ApiClientError ? value.code : value instanceof Error ? value.message : "";
   return ({
@@ -18,6 +21,7 @@ export function analysisError(value: unknown) {
     REQUEST_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
     MODEL_USAGE_UNKNOWN: "模型响应中断，已有分析已保存。为避免重复收费，需核实本次请求后继续。",
     MODEL_NO_RESPONSE: "模型服务未返回结果，本次不扣费。点击继续生成将复用已有资料。",
+    ANALYSIS_TIMEOUT: "本次处理超过 10 分钟已自动停止，已完成的部分已保存。点击继续生成将复用已有资料。",
     MODEL_QUOTA: "上游余额不足，请充值后继续。",
     MODEL_RATE_LIMIT: "上游服务繁忙，请稍后继续。",
     ASR_PUBLIC_URL_REQUIRED: "视频语音转写需要配置可公开访问的 PUBLIC_BASE_URL。",
@@ -126,12 +130,15 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
     : "依据视频画面和可见文字生成；原始声音未转录，分镜为 AI 创作建议。";
   return <div className="ma-panel" aria-live="polite">
     {current?.status === "ready" ? completedAction : <>
-      {(!current || active(current)) && <button className="mv-soft" disabled>{t("正在处理…")}</button>}
+      {!current && <button className="mv-soft" disabled>{t("正在处理…")}</button>}
       {canResume && <button className="mv-soft" disabled={busy || disabled} onClick={() => void act(async () => {
         await request(`${base}/${id}/resume`, json({ expectedRevision: current.revision, ...(current.errorCode === "SOURCE_EXPIRED" ? { visualOnly: true } : {}) })); callbacks.current.onActive(true);
       })}>{t(current.errorCode === "SOURCE_EXPIRED" ? "仅使用保留的画面继续" : "继续生成")}</button>}
     </>}
-    {(!current || active(current)) && <p role="status">{t(stage)}…</p>}
+    {!current && <p role="status">{t(stage)}…</p>}
+    {current && active(current) && <WaitStatus key={current.submittedAt ?? current.createdAt} label={stage}
+      started={Date.parse(current.submittedAt ?? current.createdAt)} expectedSec={EXPECTED_SEC}
+      note="视频拆解和文案生成在后台进行，一般约 5 分钟，最长 10 分钟。可以离开或刷新此页面，完成后会自动显示结果，无需重复提交。" />}
     {current && active(current) && <button disabled={busy} onClick={() => void act(() => request(`${base}/${id}/cancel`, json({})))}>{t("取消")}</button>}
     {speech?.status === "skipped" && <p className="mv-hint" role="status">{t(speech.reason === "ASR_MODEL_UNAVAILABLE"
       ? "当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。"
