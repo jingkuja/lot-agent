@@ -115,7 +115,7 @@ describe("analysis model calls", () => {
     expect(f.requests).toHaveLength(1); expect(f.requests[0].messages[1].content).toContain("完整场景观察");
     expect(f.records.has("copy:1")).toBe(true);
   });
-  it("writes a new copy step with kimi-k3 after the default copy model failed, but replays a recorded step with its model", async () => {
+  it("writes new copy steps with kimi-k3, then deepseek-v4.1-flash, after failures, but replays a recorded step with its model", async () => {
     const shots = ["欢迎品尝咖啡。", "发现喜欢的味道。"].map(script => ({ durationSec: 15, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
     const f = setup({ shots, publishTitle: "咖啡", tags: "#咖啡", analysis: "场景切入。" });
     const snapshot = { source: { platform: "bilibili" as const, canonicalUrl: "https://www.bilibili.com/video/BV1234567890" }, frames: [frame(0)], frameTexts: [], texts: [],
@@ -125,8 +125,12 @@ describe("analysis model calls", () => {
     marketingCopyModel.failed("kimi-k3.1-pro");
     await f.models.createCopy(draft, "zh", snapshot, 1);
     await f.models.createCopy(draft, "zh", snapshot, 2);
-    expect(f.requests.map(r => r.model)).toEqual(["kimi-k3.1-pro", "kimi-k3"]);
+    marketingCopyModel.failed("kimi-k3");
+    await f.models.createCopy(draft, "zh", snapshot, 2);
+    await f.models.createCopy(draft, "zh", snapshot, 3);
+    expect(f.requests.map(r => r.model)).toEqual(["kimi-k3.1-pro", "kimi-k3", "deepseek-v4.1-flash"]);
     expect(f.records.get("copy:2")?.model).toBe("kimi-k3");
+    expect(f.records.get("copy:3")?.model).toBe("deepseek-v4.1-flash");
   });
   it.each([402, 403])("records upstream balance rejection (%s) without fabricating usage or replaying", async status => {
     const finish = vi.fn(async () => {});

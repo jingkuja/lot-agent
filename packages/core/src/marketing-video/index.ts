@@ -7,6 +7,8 @@ export * from "./models.js";
 export const MARKETING_COPY_MODEL = "kimi-k3.1-pro";
 /** Copy and storyboard requests use this model for 30 minutes after the default one fails. */
 export const MARKETING_COPY_FALLBACK_MODEL = "kimi-k3";
+/** ...and this one for 30 minutes after the fallback also fails. */
+export const MARKETING_COPY_LAST_RESORT_MODEL = "deepseek-v4.1-flash";
 /** Risk review only quotes and replaces excerpts; a fast model keeps re-checks after each edit short. */
 export const MARKETING_REVIEW_MODEL = "deepseek-v4.1-flash";
 export const MarketingShotSchema = z.object({

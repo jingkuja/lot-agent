@@ -1,4 +1,5 @@
-import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_MODEL, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_LAST_RESORT_MODEL, MARKETING_COPY_MODEL, type MarketingDraft }
+  from "@lot-agent/core/marketing-video";
 import { marketingCopyModel } from "../marketing-video/copy-model.js";
 import { creationPrompt, parseCreation } from "../marketing-video/creation.js";
 import { createHash } from "node:crypto";
@@ -8,9 +9,10 @@ import { AnalysisError } from "./errors.js";
 
 /** `visual` reads the frames and must take images, so it never follows a change of the copy model;
  * `synthesis` writes the summary and the copy from text alone, with the copy model of the studio,
- * and like the studio switches to `synthesisFallback` for a while after it fails. */
+ * and like the studio switches to `synthesisFallback`, then `synthesisLastResort`, for a while after failures. */
 export const ANALYSIS_MODELS = { ocr: "deepseek-v4.1-flash", visual: "kimi-k3", synthesis: MARKETING_COPY_MODEL,
-  synthesisFallback: MARKETING_COPY_FALLBACK_MODEL } as const;
+  synthesisFallback: MARKETING_COPY_FALLBACK_MODEL, synthesisLastResort: MARKETING_COPY_LAST_RESORT_MODEL } as const;
+const SYNTHESIS_MODELS: string[] = [ANALYSIS_MODELS.synthesis, ANALYSIS_MODELS.synthesisFallback, ANALYSIS_MODELS.synthesisLastResort];
 export type { AnalysisUsage, ModelStepReceipt, AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 export interface AnalysisModelDeps {
   ledger: AnalysisCallLedger;
@@ -137,11 +139,11 @@ export class AnalysisModels {
     }
   }
 
-  /** A new summary or copy step follows the copy model switch. A step already recorded with either copy model
+  /** A new summary or copy step follows the copy model switch. A step already recorded with one of the copy models
    * keeps it: the ledger replays or retries a step only with the same input. */
   private async synthesisModel(stepId: string): Promise<string> {
     const recorded = await this.deps.ledger.stepModel?.(stepId);
-    return recorded === ANALYSIS_MODELS.synthesis || recorded === ANALYSIS_MODELS.synthesisFallback ? recorded : marketingCopyModel.current();
+    return recorded && SYNTHESIS_MODELS.includes(recorded) ? recorded : marketingCopyModel.current();
   }
 
   private async image(frame: FrameEvidence): Promise<ContentPart> {
