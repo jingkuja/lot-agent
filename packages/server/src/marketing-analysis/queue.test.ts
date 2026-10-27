@@ -34,7 +34,7 @@ it.each(["lease lost", "shutdown"])("releases a worker stalled in model authoriz
   } finally { await consumer.close(); vi.useRealTimers(); }
 });
 
-it("stops a run at the 10-minute limit and ends it resumable as ANALYSIS_TIMEOUT", async () => {
+it("stops a run at the 15-minute limit and ends it resumable as ANALYSIS_TIMEOUT", async () => {
   vi.useFakeTimers();
   const lease = { id: "analysis", ownerId: "owner", token: "lease", revision: 1 };
   const finish = vi.fn(async () => {});
