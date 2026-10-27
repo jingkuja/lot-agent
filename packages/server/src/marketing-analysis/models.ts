@@ -1,11 +1,11 @@
-import type { MarketingDraft } from "@lot-agent/core/marketing-video";
+import { MARKETING_COPY_MODEL, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { creationPrompt, parseCreation } from "../marketing-video/creation.js";
 import { createHash } from "node:crypto";
 import { LLMResponseError, OpenAIResponsesProvider, type ContentPart, type LLMProvider, type Message } from "@lot-agent/core";
 import { ANALYSIS_LIMITS, AnalysisSummarySchema, OcrOutputSchema, VisualOutputSchema, validateObservation, validateSummary, type AnalysisSpeech, type AnalysisSnapshot, type AnalysisSummary, type FrameEvidence, type ScreenText, type VisualObservation, type AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
 
-export const ANALYSIS_MODELS = { ocr: "deepseek-v4.1-flash", visual: "kimi-k3.1-pro" } as const;
+export const ANALYSIS_MODELS = { ocr: "deepseek-v4.1-flash", visual: MARKETING_COPY_MODEL } as const;
 export type { AnalysisUsage, ModelStepReceipt, AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 export interface AnalysisModelDeps {
   ledger: AnalysisCallLedger;
@@ -52,7 +52,7 @@ function parseModelJson(text: string): unknown {
   return JSON.parse(repaired);
 }
 
-/** No implicit retries, optional JSON mode or vendor-specific Kimi params. */
+/** No implicit retries, optional JSON mode or vendor-specific params. */
 export class AnalysisModels {
   constructor(private readonly deps: AnalysisModelDeps) {}
 

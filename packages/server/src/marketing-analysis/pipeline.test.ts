@@ -145,7 +145,7 @@ describe("analysis stage checkpoints", () => {
     snapshot.texts[0].text = "199元";
     const completed = await analyzeSelectedFrames({ snapshot, selection, revision: 2, models: model, checkpoint });
     expect(calls).toHaveLength(previousCalls + 1);
-    expect(calls.at(-1)?.model).toBe("kimi-k3.1-pro");
+    expect(calls.at(-1)?.model).toBe("qwen3.8-max");
     expect(calls.at(-1)?.messages[1].content).toContain('"text":"199元"');
     expect(calls.at(-1)?.messages[1].content).not.toContain("rawText");
     expect(completed.summaryRevision).toBe(2); expect(completed.texts[0].rawText).toBe("99元");
@@ -174,7 +174,7 @@ it("automatically synthesizes the remaining evidence after known OCR failures wi
     } }),
   });
   const result = await analyzeSelectedFrames({ snapshot: initial(), selection, revision: 1, models, checkpoint: async () => {} });
-  expect(calls).toEqual(["deepseek-v4.1-flash", "deepseek-v4.1-flash", "kimi-k3.1-pro", "kimi-k3.1-pro"]);
+  expect(calls).toEqual(["deepseek-v4.1-flash", "deepseek-v4.1-flash", "qwen3.8-max", "qwen3.8-max"]);
   expect(result.summary?.summary[0].statement).toBe("展示产品");
   expect(result.summary?.limitations).toContain("OCR_INCOMPLETE");
   expect(result.coverage?.omittedOcrFrameIds).toEqual(["f0001", "f0002"]);

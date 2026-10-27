@@ -4,7 +4,7 @@ import { marketingCaptionLinesMatch, MarketingCaptionsSchema, marketingShotCapti
 /** Vendor models behind the gateway's OpenAI-compatible `/videos` endpoint. */
 export const PRESENTER_IMAGE_MODEL = "wan2.2-s2v";
 export const PRESENTER_VIDEO_MODEL = "videoretalk";
-export const PRESENTER_COPY_MODEL = "kimi-k3.1-pro";
+export const PRESENTER_COPY_MODEL = "qwen3.8-max";
 export const PRESENTER_INPUT_VERSION = 1;
 
 /** wan2.2-s2v fails audio of 20 seconds or more; keep a margin for speech pace. */

@@ -35,10 +35,10 @@ describe("analysis model calls", () => {
     expect(requests[0].messages[1].content).toMatchObject([{ type: "text" }, { type: "image", image: { url: expect.stringMatching(/^data:image\/jpeg;base64,/) } }]);
     expect(records.get("ocr:f0001")?.receipt?.usage?.promptTokens).toBe(50);
   });
-  it("sends ordered Kimi images with interleaved time labels", async () => {
+  it("sends ordered Qwen images with interleaved time labels", async () => {
     const { models, requests } = setup({ observations: [{ description: "红盒在前，蓝盒在后", frameIds: ["f0001", "f0002"], uncertainty: "" }] });
     const result = await models.observe(0, [frame(0), frame(1)]);
-    expect(result[0].frameIds).toEqual(["f0001", "f0002"]); expect(requests[0].model).toBe("kimi-k3.1-pro");
+    expect(result[0].frameIds).toEqual(["f0001", "f0002"]); expect(requests[0].model).toBe("qwen3.8-max");
     expect(requests[0].messages[1].content).toMatchObject([{ type: "text", text: "frameId=f0001; time=0ms" }, { type: "image" }, { type: "text", text: "frameId=f0002; time=500ms" }, { type: "image" }]);
     await expect(models.observe(1, [frame(1), frame(0)])).rejects.toThrow("INVALID_IMAGE_BATCH");
   });
@@ -204,7 +204,7 @@ describe("analysis model calls", () => {
     expect(f.requests).toHaveLength(1);
   });
   it("requires credentials and one of the two selected models", () => {
-    expect(() => userResponsesProvider("https://example.test/v1", "", "kimi-k3.1-pro")).toThrow("MODEL_AUTH_REQUIRED");
+    expect(() => userResponsesProvider("https://example.test/v1", "", "qwen3.8-max")).toThrow("MODEL_AUTH_REQUIRED");
     expect(() => userResponsesProvider("https://example.test/v1", "key", "other")).toThrow("MODEL_AUTH_REQUIRED");
   });
 });

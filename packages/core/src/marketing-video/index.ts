@@ -4,7 +4,7 @@ import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoPr
 
 export * from "./models.js";
 
-export const MARKETING_COPY_MODEL = "kimi-k3.1-pro";
+export const MARKETING_COPY_MODEL = "qwen3.8-max";
 /** Risk review only quotes and replaces excerpts; a fast model keeps re-checks after each edit short. */
 export const MARKETING_REVIEW_MODEL = "deepseek-v4.1-flash";
 export const MarketingShotSchema = z.object({
