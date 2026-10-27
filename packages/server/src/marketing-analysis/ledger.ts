@@ -11,6 +11,12 @@ const VISUAL_MODELS: string[] = [...new Set([ANALYSIS_MODELS.visual, "qwen3.8-ma
 export function validReceiptUsage(receipt: ModelStepReceipt) {
   return receipt.usage && [receipt.usage.promptTokens, receipt.usage.completionTokens].every(n => Number.isSafeInteger(n) && n >= 0);
 }
+/** An attempt that ended (failed with known usage, rejected, or got nothing back) and that the user resumed:
+ * nothing of it can be replayed or double charged, so the next attempt may use another model or input. */
+function settledRetry(row: { retry_requested: boolean; receipt: ModelStepReceipt | null }) {
+  const outcome = row.receipt?.outcome;
+  return row.retry_requested && (outcome === "rejected" || outcome === "cancelled" || (outcome === "failed" && !!validReceiptUsage(row.receipt!)));
+}
 /** Request intent and gateway receipts are committed in PG. Billing stays upstream.
  * Queue retries can only read the existing intent, never resubmit it. */
 export class PgAnalysisLedger implements AnalysisCallLedger {
@@ -32,9 +38,11 @@ export class PgAnalysisLedger implements AnalysisCallLedger {
         AND (receipt IS NULL OR (receipt->>'outcome'='request_unknown' AND receipt->'usage' IS NULL AND COALESCE(receipt->>'text','')=''))`,
     [this.lease.id, this.lease.ownerId, stepId, this.attempts.get(stepId), JSON.stringify(ids)]);
   }
+  /** The model a recorded step must keep; none for a new step or a settled, resumed one. */
   async stepModel(stepId: string): Promise<string | undefined> {
-    return (await this.store.pool.query("SELECT model FROM marketing_analysis_steps WHERE analysis_id=$1 AND user_id=$2 AND step_id=$3 ORDER BY attempt DESC LIMIT 1",
-      [this.lease.id, this.lease.ownerId, stepId])).rows[0]?.model;
+    const row = (await this.store.pool.query(`SELECT model,retry_requested,receipt FROM marketing_analysis_steps
+      WHERE analysis_id=$1 AND user_id=$2 AND step_id=$3 ORDER BY attempt DESC LIMIT 1`, [this.lease.id, this.lease.ownerId, stepId])).rows[0];
+    return row && !settledRetry(row) ? row.model : undefined;
   }
   async begin(stepId: string, inputHash: string, model: string, images: number) {
     return this.store.transaction(async client => {
@@ -42,7 +50,9 @@ export class PgAnalysisLedger implements AnalysisCallLedger {
       const row = await this.store.leased(client, this.lease);
       const previous = (await client.query("SELECT * FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id=$2 ORDER BY attempt DESC LIMIT 1", [this.lease.id, stepId])).rows[0];
       if (previous) {
-        if (previous.input_hash !== inputHash || previous.model !== model || previous.images !== images) throw new AnalysisError("MODEL_INPUT_CHANGED", 409);
+        if (previous.images !== images || ((previous.input_hash !== inputHash || previous.model !== model) && !settledRetry(previous))) {
+          throw new AnalysisError("MODEL_INPUT_CHANGED", 409);
+        }
         if (!previous.retry_requested) {
           this.attempts.set(stepId, previous.attempt);
           return (previous.receipt ?? { text: "", outcome: "request_unknown" }) as ModelStepReceipt;

@@ -92,12 +92,19 @@ try {
   const ledger2 = new PgAnalysisLedger(store, lease2);
   assert.equal(await ledger2.begin("summary:2", "summary-hash", "kimi-k3.1-pro", 0), null);
   const failed = { text: "cut off", outcome: "failed" as const, usage: { promptTokens: 100, completionTokens: 10 } };
-  await ledger2.finish("summary:2", failed); await store.finish(lease2, "MODEL_STEP_FAILED");
+  await ledger2.finish("summary:2", failed);
+  // Until the user resumes, the ended step keeps its model and input.
+  assert.equal(await ledger2.stepModel("summary:2"), "kimi-k3.1-pro");
+  await assert.rejects(ledger2.begin("summary:2", "summary-hash-k3", "kimi-k3", 0), /MODEL_INPUT_CHANGED/);
+  await store.finish(lease2, "MODEL_STEP_FAILED");
   assert.equal((await store.get(owner, first.id))?.status, "partial");
   await store.resume(owner, first.id, 2); const lease3 = (await store.claim(first.id))!; const ledger3 = new PgAnalysisLedger(store, lease3);
-  assert.equal(await ledger3.begin("summary:2", "summary-hash", "kimi-k3.1-pro", 0), null, "explicit resume permits one new known-failed attempt");
+  // A resumed step whose attempt ended follows the current copy model (kimi-k3.1-pro was retired).
+  assert.equal(await ledger3.stepModel("summary:2"), undefined);
+  assert.equal(await ledger3.begin("summary:2", "summary-hash-k3", "kimi-k3", 0), null, "explicit resume permits one new known-failed attempt");
   await ledger3.finish("summary:2", { ...receipt, text: "summary" }); await store.finish(lease3);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_analysis_steps WHERE analysis_id=$1 AND step_id='summary:2'", [first.id])).rows[0].n, 2);
+  assert.equal(await ledger3.stepModel("summary:2"), "kimi-k3", "the completed retry is replayed with its own model");
   // A full selection with eight skipped OCR responses used to deadlock on
   // Continue: resume retried skipped OCR and counted all attempts as images.
   const full = await create(); const fullLease = (await store.claim(full.id))!;

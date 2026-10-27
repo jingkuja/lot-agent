@@ -138,14 +138,15 @@ describe("analysis model calls", () => {
       observations: [{ description: "完整场景观察", frameIds: ["f0001"], uncertainty: "" }] };
     const draft = MarketingDraftSchema.parse({ copyMode: "rewrite", reference: snapshot.source.canonicalUrl });
     await f.models.createCopy(draft, "zh", snapshot, 1);
-    marketingCopyModel.failed("kimi-k3.1-pro");
+    marketingCopyModel.failed("kimi-k3");
     await f.models.createCopy(draft, "zh", snapshot, 1);
     await f.models.createCopy(draft, "zh", snapshot, 2);
-    marketingCopyModel.failed("kimi-k3");
+    // The last model is kept for the hold even when it fails too.
+    marketingCopyModel.failed("deepseek-v4.1-flash");
     await f.models.createCopy(draft, "zh", snapshot, 2);
     await f.models.createCopy(draft, "zh", snapshot, 3);
-    expect(f.requests.map(r => r.model)).toEqual(["kimi-k3.1-pro", "kimi-k3", "deepseek-v4.1-flash"]);
-    expect(f.records.get("copy:2")?.model).toBe("kimi-k3");
+    expect(f.requests.map(r => r.model)).toEqual(["kimi-k3", "deepseek-v4.1-flash", "deepseek-v4.1-flash"]);
+    expect(f.records.get("copy:1")?.model).toBe("kimi-k3");
     expect(f.records.get("copy:3")?.model).toBe("deepseek-v4.1-flash");
   });
   it.each([402, 403])("records upstream balance rejection (%s) without fabricating usage or replaying", async status => {
@@ -235,10 +236,10 @@ describe("analysis model calls", () => {
       expect(chat).toHaveBeenCalledOnce();
     } finally { timeout.mockRestore(); vi.useRealTimers(); }
   });
-  it("runs the summary only without thinking and with 16384 tokens, keeping its hash so an earlier failed summary can resume", async () => {
+  it("gives the summary only 16384 tokens, keeping its hash so an earlier failed summary can resume", async () => {
     const summary = setup({ summary: [], timeline: [], marketingPoints: [], limitations: [] });
     await summary.models.summarize({ revision: 1, frames: [], texts: [], observations: [], durationMs: 1000, limitations: [] });
-    expect(summary.requests[0]).toMatchObject({ reasoning: "off", maxTokens: 16384 });
+    expect(summary.requests[0]).toMatchObject({ reasoning: undefined, maxTokens: 16384 });
     const [stepId, record] = [...summary.records.entries()][0];
     expect(stepId).toBe("summary:1");
     const payload = JSON.stringify({ model: summary.requests[0].model, messages: summary.requests[0].messages, maxTokens: 8192 });

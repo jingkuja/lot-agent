@@ -1,4 +1,4 @@
-import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_LAST_RESORT_MODEL, MARKETING_COPY_MODEL } from "@lot-agent/core/marketing-video";
+import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_MODEL } from "@lot-agent/core/marketing-video";
 import { MarketingTextError } from "./text.js";
 
 /** Errors that mean the copy model itself failed. Cancellation, authorization and quota say nothing about the model. */
@@ -31,4 +31,4 @@ export class CopyModelSwitch {
   reset() { this.level = 0; this.until = 0; }
 }
 
-export const marketingCopyModel = new CopyModelSwitch([MARKETING_COPY_MODEL, MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_LAST_RESORT_MODEL], 30 * 60_000);
+export const marketingCopyModel = new CopyModelSwitch([MARKETING_COPY_MODEL, MARKETING_COPY_FALLBACK_MODEL], 30 * 60_000);

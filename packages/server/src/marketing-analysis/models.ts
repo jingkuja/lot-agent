@@ -1,5 +1,4 @@
-import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_LAST_RESORT_MODEL, MARKETING_COPY_MODEL, type MarketingDraft }
-  from "@lot-agent/core/marketing-video";
+import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_MODEL, type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { marketingCopyModel } from "../marketing-video/copy-model.js";
 import { creationPrompt, parseCreation } from "../marketing-video/creation.js";
 import { createHash } from "node:crypto";
@@ -9,10 +8,11 @@ import { AnalysisError } from "./errors.js";
 
 /** `visual` reads the frames and must take images, so it never follows a change of the copy model;
  * `synthesis` writes the summary and the copy from text alone, with the copy model of the studio,
- * and like the studio switches to `synthesisFallback`, then `synthesisLastResort`, for a while after failures. */
+ * and like the studio switches to `synthesisFallback` for a while after failures. */
 export const ANALYSIS_MODELS = { ocr: "deepseek-v4.1-flash", visual: "kimi-k3", synthesis: MARKETING_COPY_MODEL,
-  synthesisFallback: MARKETING_COPY_FALLBACK_MODEL, synthesisLastResort: MARKETING_COPY_LAST_RESORT_MODEL } as const;
-const SYNTHESIS_MODELS: string[] = [ANALYSIS_MODELS.synthesis, ANALYSIS_MODELS.synthesisFallback, ANALYSIS_MODELS.synthesisLastResort];
+  synthesisFallback: MARKETING_COPY_FALLBACK_MODEL } as const;
+/** Earlier copy models. A step recorded with one is only replayed from its receipt (or stays unknown), never sent again. */
+const RETIRED_SYNTHESIS_MODELS = ["kimi-k3.1-pro", "qwen3.8-max"];
 export type { AnalysisUsage, ModelStepReceipt, AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 export interface AnalysisModelDeps {
   ledger: AnalysisCallLedger;
@@ -64,10 +64,10 @@ export class AnalysisModels {
   constructor(private readonly deps: AnalysisModelDeps) {}
 
   private async invoke<T>(stepId: string, model: string, messages: Message[], images: number, signal: AbortSignal | undefined, validate: (raw: unknown) => T,
-    output: { reasoning?: "off"; maxTokens?: number; deadlineMs?: number } = {}): Promise<T> {
+    output: { maxTokens?: number; deadlineMs?: number } = {}): Promise<T> {
     signal?.throwIfAborted();
-    // The hash identifies the submitted evidence. It has always been taken with maxTokens 8192; the summary's later output
-    // settings (no thinking, a larger limit) leave it unchanged, so a summary that failed before them resumes on its frozen input.
+    // The hash identifies the submitted evidence. It has always been taken with maxTokens 8192; the summary's larger
+    // output limit leaves it unchanged, so a summary that failed before it resumes on its frozen input.
     const payload = JSON.stringify({ model, messages, maxTokens: 8192 });
     if (Buffer.byteLength(payload) > ANALYSIS_LIMITS.requestBytes) throw new AnalysisError("MODEL_REQUEST_LIMIT");
     const llm = await this.deps.provider(model, signal);
@@ -89,7 +89,7 @@ export class AnalysisModels {
         const synthesis = stepId.startsWith("summary:") || stepId.startsWith("copy:");
         const deadline = AbortSignal.timeout(output.deadlineMs ?? (synthesis ? 300000 : 120000));
         for await (const chunk of llm.chat(messages, undefined, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-          params: { maxTokens: output.maxTokens ?? 8192, ...(output.reasoning ? { reasoning: output.reasoning } : {}) },
+          params: { maxTokens: output.maxTokens ?? 8192 },
           onResponseId: id => {
             receipt!.responseId = id;
             savingId = savingId.then(() => this.deps.ledger.responseId?.(stepId, id)).catch(() => {});
@@ -154,11 +154,10 @@ export class AnalysisModels {
     }
   }
 
-  /** A new summary or copy step follows the copy model switch. A step already recorded with one of the copy models
-   * keeps it: the ledger replays or retries a step only with the same input. */
+  /** A new summary or copy step, or one whose last attempt ended and was resumed, follows the copy model switch.
+   * Any other recorded step keeps its model, so its receipt is replayed or it stays unknown. */
   private async synthesisModel(stepId: string): Promise<string> {
-    const recorded = await this.deps.ledger.stepModel?.(stepId);
-    return recorded && SYNTHESIS_MODELS.includes(recorded) ? recorded : marketingCopyModel.current();
+    return await this.deps.ledger.stepModel?.(stepId) ?? marketingCopyModel.current();
   }
 
   private async image(frame: FrameEvidence): Promise<ContentPart> {
@@ -206,11 +205,10 @@ export class AnalysisModels {
         frames: input.frames.map(({ id, ptsMs }) => ({ id, ptsMs })),
         texts: input.texts.map(({ id, text, frameIds, firstSeenMs, lastSeenMs }) => ({ id, text, frameIds, firstSeenMs, lastSeenMs })),
         observations: input.observations.map(({ description, frameIds, uncertainty }) => ({ description, frameIds, uncertainty })) }) },
-      // The summary arranges given evidence into JSON. kimi-k3.1-pro spent the whole 8192-token output on reasoning for a
-      // ~11k-token input and returned no text, so this step runs without thinking and with twice the limit. At about
-      // 40 tokens/s the full 16384 take ~7 minutes, hence the longer deadline (still inside the 10-minute run limit).
+      // A long source yields a large timeline; kimi-k3 summaries took 2–3k tokens, so twice the usual limit leaves room.
+      // At about 40 tokens/s the full 16384 take ~7 minutes, hence the longer deadline (inside the 10-minute run limit).
     ], 0, signal, raw => alignSummaryTimeline(raw, input.frames, input.texts, input.durationMs, input.speech),
-    { reasoning: "off", maxTokens: 16384, deadlineMs: 480000 });
+    { maxTokens: 16384, deadlineMs: 480000 });
     const result = raw;
     result.limitations = [...new Set([...input.limitations, ...result.limitations])].slice(0, 20);
     return result;
@@ -218,6 +216,6 @@ export class AnalysisModels {
 }
 
 export function userResponsesProvider(baseUrl: string, apiKey: string, model: string): LLMProvider {
-  if (!apiKey || !(Object.values(ANALYSIS_MODELS) as string[]).includes(model)) throw new AnalysisError("MODEL_AUTH_REQUIRED", 503);
+  if (!apiKey || ![...Object.values(ANALYSIS_MODELS), ...RETIRED_SYNTHESIS_MODELS].includes(model)) throw new AnalysisError("MODEL_AUTH_REQUIRED", 503);
   return new OpenAIResponsesProvider({ baseUrl, apiKey, model });
 }

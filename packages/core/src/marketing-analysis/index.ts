@@ -91,7 +91,8 @@ export interface AnalysisCallLedger {
   responseId?(stepId: string, id: string): Promise<void>;
   /** The gateway's log ID (`x-oneapi-request-id`), saved as soon as the response headers arrive. */
   requestId?(stepId: string, id: string): Promise<void>;
-  /** The model already recorded for the step; a replay or explicit retry must use it again. */
+  /** The model a recorded step must use again (replay, or a retry of a call whose result is unknown);
+   * none for a new step or one whose last attempt ended and was resumed. */
   stepModel?(stepId: string): Promise<string | undefined>;
 }
 export interface AnalysisLease { id: string; ownerId: string; token: string; revision: number }

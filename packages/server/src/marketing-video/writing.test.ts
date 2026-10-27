@@ -43,7 +43,7 @@ describe("marketing text requests", () => {
   it("records the receipt before the result and returns the applied project", async () => {
     const { deps, writing } = fixture({ publishTitle: "转角咖啡", tags: "#咖啡 #探店" });
     const result = await writing.publication("owner", id, { ...request, fillMissing: false });
-    expect(deps.operations.begin).toHaveBeenCalledWith("owner", requestId, id, 2, "publication", { version: 2, locale: "zh", fillMissing: false }, undefined, "kimi-k3.1-pro");
+    expect(deps.operations.begin).toHaveBeenCalledWith("owner", requestId, id, 2, "publication", { version: 2, locale: "zh", fillMissing: false }, undefined, "kimi-k3");
     expect(deps.operations.receipt).toHaveBeenCalledWith("owner", requestId, { outcome: "completed" });
     expect(deps.operations.receipt.mock.invocationCallOrder[0]).toBeLessThan(deps.operations.finish.mock.invocationCallOrder[0]);
     expect(deps.operations.finish.mock.calls[0][2]).toMatchObject({ draft: { publishTitle: "转角咖啡", tags: "#咖啡 #探店" } });
