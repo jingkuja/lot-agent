@@ -158,7 +158,7 @@ Generate an encryption key with `openssl rand -hex 32`. Keep real credentials ou
 
 Use the client login flow: password login fetches `/api/auth/public-key`, encrypts the password, and exchanges it with `/api/auth/login` for a Bearer session token. Email-only passwordless login is not supported. Model calls use the authenticated user's credentials; recharge and payment records are managed by the external New API service.
 
-See [deployment](docs/deployment.md) and [recharge integration](docs/recharge.md) for operational details.
+See [deployment](docs/deployment.md) and [gateway and recharge integration](docs/gateway-integration.md) for operational details.
 
 ### 5. Enable knowledge features
 
@@ -173,7 +173,7 @@ KNOWLEDGE_EXTERNAL_ENABLED=1
 
 Knowledge indexing requires pgvector, Redis, the knowledge worker, and user access to the configured embedding/OCR models. Enabling these flags alone does not provision gateway credentials. The external API uses separate knowledge keys and collection grants rather than login session tokens.
 
-See [ingestion and retrieval](docs/knowledge-ingestion.md), [external API access](docs/knowledge-external-api.md), and the [OpenAPI contract](docs/knowledge-openapi.json). Knowledge originals and database contents both need backup; see [backup and restore](docs/knowledge-backup-restore.md).
+See [ingestion and retrieval](docs/knowledge-ingestion.md), [external API access](docs/knowledge-external-api.md), and the [OpenAPI contract](docs/knowledge-openapi.json). Knowledge originals and database contents both need backup; see [backup and restore](docs/deployment.md#7-备份恢复与回退).
 
 PPT thumbnails are also optional: install LibreOffice and `pdftoppm`, with executable paths configured through `PPT_SOFFICE_PATH` and `PPT_PDFTOPPM_PATH` if needed. PPTX export remains available without them. See the [PPT workflow](docs/ppt-workflow.md).
 

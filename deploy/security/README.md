@@ -1,6 +1,6 @@
 # 媒体 Worker 的 Linux 安全策略
 
-新机器从零安装请先读[新服务器首次部署指南](../../docs/marketing-video-new-server-deployment.md)；
+新机器从零安装请先读[部署手册](../../docs/deployment.md#4-新服务器首次部署)；
 下面也包含已有镜像的离线修复流程。
 
 适用目标：Ubuntu 22.04、Docker Engine、非 root 媒体 Worker。本目录策略限制
@@ -123,7 +123,7 @@ docker-compose logs --tail=50 media-analysis-worker
 2026-10-16 目标服务器已通过 AppArmor 解析/加载、上述完整预检，以及在
 实际媒体 Worker 中运行同一组 Python 沙箱测试。API 健康检查为 200，
 Nginx 配置检查通过，其他服务容器未重建。未调用付费模型、未重放失败任务。
-详见 [本次部署记录](../../docs/marketing-video-server-deployment-20261016.md)。
+排障步骤见[部署手册](../../docs/deployment.md#8-运维与排障)。
 
 回退时先检查在途任务，停止媒体 Worker，仅恢复其原 image 和 security_opt，
 校验 Compose 后重建该服务。不要覆盖其他服务后续修改；不要删除业务卷，
