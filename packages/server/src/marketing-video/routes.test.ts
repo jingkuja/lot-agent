@@ -284,16 +284,20 @@ describe("marketing project HTTP boundaries", () => {
     expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ error: expect.stringContaining("过长") });
   });
   it("rejects an oversized shot prompt before any quota, task or provider call", async () => {
-    const f = fixture();
-    const shots = [1, 2].map(() => ({ durationSec: 15, script: "欢迎来喝咖啡。", visual: "画面".repeat(300), action: "动作".repeat(200), camera: "镜头".repeat(200) }));
-    f.project.draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots), background: "背景".repeat(300) });
-    const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ error: "生成提示词过长，请精简分镜画面、动作、镜头或统一人物、产品与场景设定。" });
-    expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
-    expect(f.store.reserve).not.toHaveBeenCalled();
-    expect(f.service.marketingText).not.toHaveBeenCalled();
-    expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
+    // Kling's 3072-character cap; Grok's 5000 fits every field at its limit without many images.
+    process.env.MARKETING_VIDEO_MODEL = "kling-video-v3-omni";
+    try {
+      const f = fixture();
+      const shots = [1, 2].map(() => ({ durationSec: 15, script: "欢迎来喝咖啡。", visual: "画面".repeat(300), action: "动作".repeat(200), camera: "镜头".repeat(200) }));
+      f.project.draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots), background: "背景".repeat(300) });
+      const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "生成提示词过长，请精简分镜画面、动作、镜头或统一人物、产品与场景设定。" });
+      expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
+      expect(f.store.reserve).not.toHaveBeenCalled();
+      expect(f.service.marketingText).not.toHaveBeenCalled();
+      expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
+    } finally { delete process.env.MARKETING_VIDEO_MODEL; }
   });
   it("bounds JSON request bodies", async () => {
     const f = fixture();
@@ -483,14 +487,9 @@ it("restores all image metadata and submits references in category order", async
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
   expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ input_reference: ids.map(assetId => `/static/${assetId}.png`) }), false);
   const prompt = marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2);
-  const roles = [...prompt.matchAll(/Use ((?:<IMAGE_\d+>(?:, )?)+) for ([^.]+)\./g)]
-    .flatMap(match => [...match[1].matchAll(/<IMAGE_(\d+)>/g)].map(tag => ({ image: Number(tag[1]), role: match[2] })));
-  expect(roles).toEqual([
-    ...[0, 1, 2].map(image => ({ image, role: "the presenter's identity only" })),
-    ...[3, 4].map(image => ({ image, role: "the product's exact appearance" })),
-    ...[5, 6].map(image => ({ image, role: "the setting and spatial layout" })),
-    { image: 7, role: "relevant scene composition, objects and details" },
-  ]);
+  expect(prompt).toContain("Use <IMAGE_0>, <IMAGE_1>, <IMAGE_2> for the presenter's identity only;");
+  expect(prompt).toContain("Use <IMAGE_3>, <IMAGE_4> for one product's exact look");
+  expect(prompt).toContain("Use <IMAGE_5>, <IMAGE_6> for the setting and spatial layout; <IMAGE_7> for relevant scene composition, objects and details;");
 });
 
 it("submits the key-art still after the chosen images and freezes it for shot redos", async () => {
@@ -504,7 +503,7 @@ it("submits the key-art still after the chosen images and freezes it for shot re
   const prompt = marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2, undefined, undefined, undefined, true);
   expect(prompt).toContain("Use <IMAGE_0> for the presenter's identity only.");
   expect(prompt).toContain("<IMAGE_1> is the key-art still shared by every shot");
-  expect(prompt).toContain("portraits still decide the face");
+  expect(prompt).toContain("portraits decide the face");
   expect(marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2)).not.toContain("key-art");
 });
 

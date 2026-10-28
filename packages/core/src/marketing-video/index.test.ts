@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL,
-  MARKETING_DEFAULT_BACKGROUND, MARKETING_DEFAULT_VOICE, marketingBackground, marketingHdUnavailable, marketingVoiceStyle,
+  MARKETING_DEFAULT_BACKGROUND, MARKETING_DEFAULT_VOICE, MARKETING_PROMPT_BACKGROUND, MARKETING_PROMPT_VOICE, marketingBackground, marketingHdUnavailable,
+  marketingVoiceStyle,
   marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema,
   planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard,
   mergeMarketingShots, speechUnits, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText,
@@ -180,12 +181,12 @@ it("uses a Grok reference video alone and caps references at 720p", () => {
   expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "720p" }), grok, true)).toBe("");
 });
 
-it("leaves the setting empty instead of storing a Chinese default, and prompts with that default", () => {
+it("leaves the setting empty instead of storing a Chinese default, and prompts with an English one", () => {
   expect(MarketingDraftSchema.parse({}).background).toBe("");
   const legacy = MarketingDraftSchema.parse({ background: MARKETING_DEFAULT_BACKGROUND });
   expect(legacy.background).toBe("");
   expect(MarketingDraftSchema.parse(legacy)).toEqual(legacy);
-  expect(marketingBackground(legacy)).toBe(MARKETING_DEFAULT_BACKGROUND);
+  expect(marketingBackground(legacy)).toBe(MARKETING_PROMPT_BACKGROUND);
 });
 
 it("reads an older setting description as part of the shared look", () => {
@@ -197,13 +198,13 @@ it("reads an older setting description as part of the shared look", () => {
   // Both fields at their old limits still load.
   const full = MarketingDraftSchema.parse({ background: "景".repeat(600), continuity: "人".repeat(400) });
   expect(full.continuity.length).toBe(1000);
-  expect(marketingBackground(full)).toBe(MARKETING_DEFAULT_BACKGROUND);
+  expect(marketingBackground(full)).toBe(MARKETING_PROMPT_BACKGROUND);
 });
 
-it("leaves the tone empty instead of storing a Chinese default, and asks the model for that default", () => {
+it("leaves the tone empty instead of storing a Chinese default, and asks the model for an English one", () => {
   expect(MarketingDraftSchema.parse({}).voice).toBe("");
   expect(MarketingDraftSchema.parse({ voice: MARKETING_DEFAULT_VOICE }).voice).toBe("");
-  expect(marketingVoiceStyle(MarketingDraftSchema.parse({}))).toBe(MARKETING_DEFAULT_VOICE);
+  expect(marketingVoiceStyle(MarketingDraftSchema.parse({}))).toBe(MARKETING_PROMPT_VOICE);
   expect(marketingVoiceStyle(MarketingDraftSchema.parse({ voice: "温柔女声" }))).toBe("温柔女声");
 });
 

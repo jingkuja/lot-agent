@@ -57,7 +57,8 @@ export const KLING_MARKETING_PROFILE: MarketingVideoProfile = {
 
 // https://docs.x.ai/developers/model-capabilities/video/generation
 // A reference video replaces image and voice references and fails over 8
-// seconds upstream. No prompt limit is documented, so Kling's cap is kept.
+// seconds upstream. No prompt limit is documented; a 5000-character prompt through the
+// gateway was accepted on 2026-10-28 and its last line was still followed in the clip.
 // https://docs.x.ai/developers/model-capabilities/video/reference-to-video
 // Up to 14 reference images, named in the prompt by position from <IMAGE_0>. Only
 // the count is documented, so the contract is a decodable JPG/PNG/WebP within the
@@ -70,7 +71,7 @@ export const GROK_MARKETING_PROFILE: MarketingVideoProfile = {
   imagesWithReferenceVideo: 0,
   imagePromptTag: { prefix: "<IMAGE_", suffix: ">", firstNumber: 0 },
   referenceMaxQuality: "720p",
-  promptMaxChars: 3072,
+  promptMaxChars: 5000,
   referenceImage: { formats: ["image/jpeg", "image/png", "image/webp"], maxBytes: 20 * 1024 * 1024 },
 };
 

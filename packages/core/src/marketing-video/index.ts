@@ -93,12 +93,14 @@ export const MarketingCaptionsSchema = z.object({
   }).strict().nullable()).max(15).default([]),
 }).strict();
 export type MarketingCaptions = z.infer<typeof MarketingCaptionsSchema>;
-/** The setting the prompts use when the draft names none. Drafts once stored it as their default,
- * shown as Chinese text in every language; it reads as empty now. */
+/** The setting drafts once stored as their default, shown as Chinese text in every language; it
+ * reads as empty now. The key-art prompt still names it (see `marketingKeyArtPrompt`). */
 export const MARKETING_DEFAULT_BACKGROUND = "简约演播室";
-/** Tone the video model is asked for when the draft names none. Drafts once stored it as their
- * default, shown as Chinese text in every language; it reads as empty now. */
+/** The tone drafts once stored as their default; it reads as empty now. */
 export const MARKETING_DEFAULT_VOICE = "自然旁白";
+/** Model prompts are English whatever the interface language, defaults included. */
+export const MARKETING_PROMPT_BACKGROUND = "minimal studio";
+export const MARKETING_PROMPT_VOICE = "natural narration";
 /** Room for a shared look of 400 characters joined with an older setting description of up to 600. */
 const MARKETING_CONTINUITY_MAX_LENGTH = 1000;
 export const MarketingDraftSchema = z.preprocess(value => withoutLegacyBackground(withoutLegacyCover(value)), z.object({
@@ -178,9 +180,9 @@ export function marketingImageLimitError(assets: Partial<Record<MarketingImageSl
   return marketingImageCount(assets) > total ? `当前视频模型的参考图片合计最多 ${total} 张，请移除多余图片。` : "";
 }
 /** Setting description sent to the models. */
-export const marketingBackground = (draft: Pick<MarketingDraft, "background">) => draft.background.trim() || MARKETING_DEFAULT_BACKGROUND;
+export const marketingBackground = (draft: Pick<MarketingDraft, "background">) => draft.background.trim() || MARKETING_PROMPT_BACKGROUND;
 /** Tone sent to the video model when it voices the script. */
-export const marketingVoiceStyle = (draft: Pick<MarketingDraft, "voice">) => draft.voice.trim() || MARKETING_DEFAULT_VOICE;
+export const marketingVoiceStyle = (draft: Pick<MarketingDraft, "voice">) => draft.voice.trim() || MARKETING_PROMPT_VOICE;
 /** Reference combinations the model cannot use. `keyArt`: the clips also carry the key-art still,
  * which is one more reference image. */
 export function marketingReferenceError(draft: MarketingDraft, profile: MarketingVideoProfile, keyArt = false): string {
