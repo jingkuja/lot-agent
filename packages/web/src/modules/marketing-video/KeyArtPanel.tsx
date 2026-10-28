@@ -48,8 +48,8 @@ export function KeyArtPanel({ keyArt, full, total, busy, onGenerate }: {
         {t(label)}
       </button>}
     </div>
-    <Hint text="定妆图是各镜头共用的参考图，减少镜头间人物、服装、产品和场景的差异。" more={[t("按统一人物、产品与场景设定和已选参考图生成。"),
-      t("没有产品图时，产品外观以这张图为准。"), t("修改设定、主题、比例或参考图后需重新生成。"), t("每次生成会产生费用。")]} />
+    <Hint text="定妆图是各镜头共用的参考图，减少镜头间人物、服装、产品和场景的差异（每次约消耗 50 积分）。" more={[t("按统一人物、产品与场景设定和已选参考图生成。"),
+      t("没有产品图时，产品外观以这张图为准。"), t("修改设定、主题、比例或参考图后需重新生成。")]} />
     {full ? <p className="mv-hint" role="status">{t("定妆图占用 1 张参考图，当前视频模型合计最多 {0} 张，请先移除一张参考图。", [total])}</p> : <>
       {keyArt?.url && <img className="mv-key-art-image" src={keyArt.url} alt={t("定妆图")} />}
       {running && since !== null ? <WaitStatus label="正在生成定妆图" started={since} textRequest={false} expectedSec={MARKETING_KEY_ART_PATIENCE_MS / 1000}

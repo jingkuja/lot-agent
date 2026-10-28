@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GROK_MARKETING_PROFILE, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
-import { CREDITS_PER_SECOND, generationBlocker, generationChecks, generationConfirmation, narrationBlocker, reviewQuestion, unusableMaterial } from "./production-checks.js";
+import { generationBlocker, generationChecks, generationConfirmation, narrationBlocker, reviewQuestion, unusableMaterial } from "./production-checks.js";
 
 const image = "11111111-1111-4111-8111-111111111111";
 const shots = [1, 2].map(() => ({ durationSec: 15, script: "欢迎来到转角咖啡店，现磨咖啡等你来。", visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
@@ -51,8 +51,8 @@ describe("checks before generating", () => {
     const ready = generationChecks(titled, { keyArt: true, review: "pass" });
     expect(ready.map(check => check.state)).toEqual(["ok", "ok", "info"]);
     expect(generationConfirmation(ready, text => text)).toBeUndefined();
-    // The last line estimates the credits of the 30-second board.
-    expect(ready.at(-1)).toMatchObject({ text: "预计消耗约 {0} 积分（成片每秒约 {1} 积分）。", values: [30 * CREDITS_PER_SECOND, CREDITS_PER_SECOND] });
+    // The last line gives the rate per second, not a total.
+    expect(ready.at(-1)).toEqual({ state: "info", text: "成片每秒约消耗 120–150 积分，重新生成分镜也会消耗积分。" });
     // Not checked yet, no titles: neither blocks; the copy check is offered when generating.
     expect(generationChecks(draft, { keyArt: true }).map(check => check.state)).toEqual(["ok", "info", "auto", "info"]);
     // Rejected copy may be generated anyway.

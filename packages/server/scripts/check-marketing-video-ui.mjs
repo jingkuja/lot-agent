@@ -681,9 +681,8 @@ try {
   await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
   await page.locator('.mv-generate:not([disabled])').waitFor();
   // U02: what generating does is listed above the button.
-  const boardSec = [...projects.values()][0].draft.storyboard.reduce((sum, shot) => sum + (shot.durationSec ?? 15), 0);
   assert.deepEqual(await page.getByRole('list', { name: '生成前检查' }).getByRole('listitem').allInnerTexts(),
-    ['已生成定妆图，各镜头共用这张参考图。', '尚未检查文案，生成前会询问是否先检查。', `预计消耗约 ${boardSec * 120} 积分（成片每秒约 120 积分）。`]);
+    ['已生成定妆图，各镜头共用这张参考图。', '尚未检查文案，生成前会询问是否先检查。', '成片每秒约消耗 120–150 积分，重新生成分镜也会消耗积分。']);
   await voiceStep.click();
   assert.equal(await page.getByLabel('添加字幕', { exact: true }).isChecked(), true);
   assert.equal(await page.getByLabel('语气要求（可选）').inputValue(), '语气热情');

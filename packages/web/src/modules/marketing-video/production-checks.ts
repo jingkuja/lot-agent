@@ -46,9 +46,6 @@ export function generationBlocker(state: {
 /** The creation step where the board is confirmed and the video generated. */
 export const CONFIRM_STEP = 3;
 
-/** About what one second of the finished video costs, in credits. */
-export const CREDITS_PER_SECOND = 120;
-
 /** One line of the list above the generate button; `values` fill its `{0}` placeholders. ok: done; auto: done while generating;
  * info: worth knowing; warn: worth a look, and with `confirm` the user accepts it once before generating; block: to be fixed first. */
 export type GenerationCheck = { text: string; values?: number[]; state: "ok" | "auto" | "info" | "warn" | "block"; confirm?: boolean };
@@ -73,8 +70,8 @@ export function generationChecks(draft: MarketingDraft, { keyArt, keyArtRunning,
     : review === "reject" ? { state: "warn", text: "文案检查未通过，建议修改后再生成。" }
     : { state: "info", text: "尚未检查文案，生成前会询问是否先检查。" });
   if (!draft.publishTitle.trim() || !draft.tags.trim()) checks.push({ state: "auto", text: "提交后自动补全标题和标签，并再次检查。" });
-  const seconds = draft.storyboard.reduce((sum, shot) => sum + (shot.durationSec ?? 15), 0);
-  if (seconds) checks.push({ state: "info", text: "预计消耗约 {0} 积分（成片每秒约 {1} 积分）。", values: [seconds * CREDITS_PER_SECOND, CREDITS_PER_SECOND] });
+  // The rate only: the total varies by model and shot, and storyboard reruns cost too.
+  checks.push({ state: "info", text: "成片每秒约消耗 120–150 积分，重新生成分镜也会消耗积分。" });
   return checks;
 }
 
