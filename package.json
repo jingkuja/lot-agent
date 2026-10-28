@@ -48,6 +48,7 @@
     "check:marketing-analysis:local": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-local.ts",
     "check:marketing-analysis:local-sandbox": "pnpm --filter @lot-agent/core build && MARKETING_ANALYSIS_LOCAL_SANDBOX_TEST=1 vitest run packages/server/src/marketing-analysis/local-probe.test.ts",
     "dev:media-analysis": "pnpm --filter @lot-agent/server run dev:media-analysis",
+    "setup:marketing-analysis:local": "python3 -B deploy/yt-dlp/setup-local.py",
     "check:marketing-analysis:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-db.ts",
     "check:marketing-analysis:ui": "node packages/server/scripts/check-marketing-analysis-ui.mjs",
     "check:marketing-analysis:audio-url": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-analysis-audio-url.ts",

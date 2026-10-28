@@ -10,11 +10,12 @@ import { startAnalysisEgress } from "./egress.js";
 import type { AnalysisDownloadRuntime } from "./download.js";
 import type { MediaRunner } from "./sandbox.js";
 import { analysisBrowserArgs, resolveDouyinBrowser, type BrowserLaunch } from "./douyin-browser.js";
+import { localDouyinDownloader, usesDouyinDownloader } from "./local-downloader.js";
 
 /** macOS isolation for operator probes and explicitly opted-in development Workers.
  * Never selected by production configuration or HTTP input.
  * Child processes cannot read app credentials/home or make direct requests. */
-export function localProbePolicy(directory: string, proxyPort?: number, browserRoot?: string) {
+export function localProbePolicy(directory: string, proxyPort?: number, browserRoot?: string, downloader?: string) {
   if (proxyPort !== undefined && (!Number.isInteger(proxyPort) || proxyPort < 1 || proxyPort > 65535)) throw new AnalysisError("SANDBOX_REQUIRED", 503);
   return `(version 1)
 (deny default)
@@ -23,6 +24,7 @@ export function localProbePolicy(directory: string, proxyPort?: number, browserR
 (allow file-read* (literal "/"))
 (allow file-read* (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/opt/homebrew") (subpath "/Library/Apple") (subpath "/Library/Developer/CommandLineTools") (subpath "/private/etc/ssl") (subpath "/private/var/db/timezone") (literal "/private/etc/localtime") (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (subpath ${JSON.stringify(directory)}))
 (allow file-write* (subpath ${JSON.stringify(directory)}) (literal "/dev/null"))
+${downloader ? `(allow file-read* (literal ${JSON.stringify(downloader)}))` : ""}
 ${browserRoot ? `(allow file-read* (subpath ${JSON.stringify(browserRoot)}))
 (allow iokit-open (iokit-user-client-class "RootDomainUserClient"))
 (allow mach-register (global-name-regex #"^com[.]google[.]Chrome[.]MachPortRendezvousServer[.][0-9]+$"))
@@ -46,12 +48,20 @@ export function localProbeRunner(directory: string, proxyPort?: number): MediaRu
     if (process.platform !== "darwin" || (command === "yt-dlp" && !proxyPort)) throw new AnalysisError("SANDBOX_REQUIRED", 503);
     signal?.throwIfAborted();
     const work = await realpath(directory);
-    const binary = await realpath(`/opt/homebrew/bin/${command}`);
+    const patched = command === "yt-dlp" && usesDouyinDownloader(args);
+    let binary: string;
+    try { binary = await realpath(patched ? localDouyinDownloader() : `/opt/homebrew/bin/${command}`); }
+    catch (error) {
+      if (patched) throw new AnalysisError("ANALYSIS_CONFIG_REQUIRED", 503);
+      throw error;
+    }
     const python = await realpath("/opt/homebrew/bin/python3");
     const argv = args.map(arg => arg.replaceAll("/work/", `${work}/`).replace("http://127.0.0.1:3189", `http://127.0.0.1:${proxyPort}`));
     const limits = "import os,resource,sys;resource.setrlimit(resource.RLIMIT_CPU,(240,240));resource.setrlimit(resource.RLIMIT_FSIZE,(104857600,104857600));resource.setrlimit(resource.RLIMIT_NOFILE,(128,128));os.execv(sys.argv[1],sys.argv[1:])";
     return new Promise((resolve, reject) => {
-      const child = spawn("/usr/bin/sandbox-exec", ["-p", localProbePolicy(work, command === "yt-dlp" ? proxyPort : undefined), python, "-I", "-c", limits, binary, ...argv],
+      const policy = localProbePolicy(work, command === "yt-dlp" ? proxyPort : undefined, undefined, patched ? binary : undefined);
+      const executable = patched ? [python, "-I", binary] : [binary];
+      const child = spawn("/usr/bin/sandbox-exec", ["-p", policy, python, "-I", "-c", limits, ...executable, ...argv],
         { cwd: work, shell: false, detached: true, env: { PATH: "/opt/homebrew/bin:/usr/bin:/bin", LC_ALL: "C", PYTHONDONTWRITEBYTECODE: "1", TMPDIR: work }, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "", stderr = "", failure: string | undefined, checking = false;
       const stop = (code: string) => { failure ??= code; try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); } };

@@ -31,6 +31,7 @@ data/knowledge/
 # Reference video originals, model receipts and signed share links are private.
 data/marketing-analysis/
 data/marketing-analysis-probes/
+data/media-tools/
 # Per-draft twin narration takes (private user audio).
 data/marketing-narration/
 # Digital presenter voice takes, prepared inputs and downloaded clips.

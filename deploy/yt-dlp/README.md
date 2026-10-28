@@ -25,6 +25,15 @@ browser fallback remains available. All other platforms and `--load-info-json`
 continue using the original binary.
 
 Build prerequisites are Python 3.10+, `patch` and the pinned official zipapp.
+For macOS development, run `pnpm setup:marketing-analysis:local` once, then
+restart the media worker. This verifies the same release and patch and atomically
+installs the zipapp in the Git-ignored `data/media-tools/` directory. The macOS
+runner selects it for normalized Douyin URLs and grants read access only to that
+file inside the existing sandbox. Missing installation fails closed. Keep
+`YTDLP_VERSION` matched to Homebrew yt-dlp; version checks, other platforms and
+browser metadata still use Homebrew. No global installation or automatic task-time
+download is performed.
+
 The Dockerfile downloads it at build time, never while executing a user task.
 To reproduce locally, pass the downloaded archive, patch, destination and version:
 

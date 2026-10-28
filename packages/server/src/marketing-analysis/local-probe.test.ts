@@ -33,6 +33,9 @@ describe("macOS probe and development Worker isolation", () => {
       try {
         const version = await download.runner.run("yt-dlp", ["--ignore-config", "--no-plugin-dirs", "--version"], signal);
         expect(version.stdout.trim()).toMatch(/^\d{4}\.\d{2}\.\d{2}$/);
+        const patched = await download.runner.run("yt-dlp",
+          ["--ignore-config", "--no-plugin-dirs", "--version", "--", "https://v.douyin.com/Hl0DliV9tPg"], signal);
+        expect(patched.stdout.trim()).toBe("2026.08.19");
         expect(download.egress.bytes).toBe(0);
       } finally { await download.egress.close(); }
       const runner = media.decoderRunner(directory);

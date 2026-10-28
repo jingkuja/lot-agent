@@ -31,7 +31,18 @@ export function analysisBrowserArgs(profile: string, proxyPort = 3189, platform:
 
 /** Only accept the requested video's public, muxed player URL. Never copy
  * arbitrary page JSON into yt-dlp's executable/configuration options. */
-export function douyinBrowserMetadata(raw: unknown, source: AnalysisSource): Record<string, unknown> | undefined {
+export interface DouyinDetailMedia { id: string; urls: string[]; }
+
+/** Only the public detail response for the requested video can bind URLs without __vid. */
+export function douyinDetailMedia(raw: unknown): DouyinDetailMedia | undefined {
+  const detail = (raw as { aweme_detail?: { aweme_id?: unknown; video?: { play_addr?: { url_list?: unknown } } } })?.aweme_detail;
+  if (typeof detail?.aweme_id !== "string" || !/^\d{5,30}$/.test(detail.aweme_id)) return undefined;
+  const urls = detail.video?.play_addr?.url_list;
+  if (!Array.isArray(urls)) return undefined;
+  return { id: detail.aweme_id, urls: urls.slice(0, 16).filter((url): url is string => typeof url === "string" && url.length <= 8192) };
+}
+
+export function douyinBrowserMetadata(raw: unknown, source: AnalysisSource, detail?: DouyinDetailMedia): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== "object" || source.platform !== "douyin") throw new AnalysisError("UNSUPPORTED_SOURCE");
   const value = raw as Record<string, any>;
   if (typeof value.pageUrl !== "string" || !Array.isArray(value.videos)) return undefined;
@@ -39,12 +50,28 @@ export function douyinBrowserMetadata(raw: unknown, source: AnalysisSource): Rec
   try { resolved = parseAnalysisSource(value.pageUrl); } catch { return undefined; }
   if (resolved.platform !== "douyin" || !resolved.canonicalId) return undefined;
   if (source.canonicalId && source.canonicalId !== resolved.canonicalId) throw new AnalysisError("UNSUPPORTED_SOURCE");
-  for (const video of value.videos.slice(0, 5)) {
+  const videos = value.videos.slice(0, 5).flatMap(video => {
+    // Bind blob playback to the same video's public detail response, never to
+    // unrelated page traffic or suggested videos.
+    if (typeof video?.url === "string" && video.url.startsWith("blob:")) {
+      try {
+        if (detail && new URL(video.url).origin === new URL(resolved.canonicalUrl).origin && detail.id === resolved.canonicalId) {
+          return detail.urls.slice(0, 16).map(url => ({ ...video, url }));
+        }
+      } catch { /* Invalid blob URLs are not usable player evidence. */ }
+      return [];
+    }
+    return [video];
+  });
+  for (const video of videos) {
     if (!video || typeof video.url !== "string" || video.url.length > 8192) continue;
     let url: URL;
     try { url = new URL(video.url); } catch { continue; }
+    const videoId = url.searchParams.get("__vid");
+    const boundDetail = detail?.id === resolved.canonicalId && detail.urls.includes(url.href);
     if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash
-      || !url.hostname.endsWith(".douyinvod.com") || url.searchParams.get("__vid") !== resolved.canonicalId) continue;
+      || !url.hostname.endsWith(".douyinvod.com")
+      || (videoId !== resolved.canonicalId && (videoId !== null || !boundDetail))) continue;
     if (typeof video.duration !== "number" || !Number.isFinite(video.duration) || video.duration <= 0) continue;
     if (![video.width, video.height].every(n => Number.isInteger(n) && n > 0 && n <= 1920)) throw new AnalysisError("UNSUPPORTED_SOURCE");
     if (typeof value.userAgent !== "string" || value.userAgent.length > 1024 || /[\r\n]/.test(value.userAgent)) throw new AnalysisError("UNSUPPORTED_SOURCE");
@@ -112,13 +139,46 @@ export async function resolveDouyinBrowser(source: AnalysisSource, signal: Abort
       const { browserContextId } = await pipe.send("Target.createBrowserContext", { disposeOnDetach: true });
       const { targetId } = await pipe.send("Target.createTarget", { url: "about:blank", browserContextId });
       const { sessionId } = await pipe.send("Target.attachToTarget", { targetId, flatten: true });
+      let detail: DouyinDetailMedia | undefined;
+      let detailReads = 0;
+      const detailRequests = new Map<string, string>();
       pipe.onEvent = message => {
+        if (message.sessionId !== sessionId) return;
+        if (message.method === "Network.responseReceived") {
+          const response = message.params.response;
+          if (response?.status === 200 && typeof response.url === "string" && detailRequests.size < 4) {
+            try {
+              const url = new URL(response.url);
+              const id = url.searchParams.get("aweme_id");
+              if (url.origin === "https://www.douyin.com" && url.pathname === "/aweme/v1/web/aweme/detail/"
+                && id && /^\d{5,30}$/.test(id)) {
+                detailRequests.set(message.params.requestId, id);
+              }
+            } catch { /* The final metadata validator rejects malformed URLs. */ }
+          }
+          return;
+        }
+        if (message.method === "Network.loadingFinished" || message.method === "Network.loadingFailed") {
+          const requestId = message.params.requestId; const id = detailRequests.get(requestId);
+          detailRequests.delete(requestId);
+          if (id && detailReads < 4 && message.method === "Network.loadingFinished" && message.params.encodedDataLength <= 1024 * 1024) {
+            detailReads++;
+            void pipe.send("Network.getResponseBody", { requestId }, sessionId).then(result => {
+              if (typeof result.body !== "string" || result.body.length > 1024 * 1024) return;
+              const body = result.base64Encoded ? Buffer.from(result.body, "base64").toString("utf8") : result.body;
+              const parsed = douyinDetailMedia(JSON.parse(body));
+              if (parsed?.id === id) detail = parsed;
+            }).catch(() => {});
+          }
+          return;
+        }
         if (message.method !== "Fetch.requestPaused" || message.sessionId !== sessionId) return;
         const { requestId, request, resourceType } = message.params;
         const allowed = typeof request?.url === "string" && request.url.startsWith("https://") && !["Image", "Font", "Ping"].includes(resourceType);
         void pipe.send(allowed ? "Fetch.continueRequest" : "Fetch.failRequest", allowed ? { requestId } : { requestId, errorReason: "BlockedByClient" }, sessionId).catch(() => {});
       };
       await pipe.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] }, sessionId);
+      await pipe.send("Network.enable", { maxTotalBufferSize: 2 * 1024 * 1024, maxResourceBufferSize: 1024 * 1024 }, sessionId);
       await pipe.send("Emulation.setUserAgentOverride", { userAgent: String(version.userAgent).replace("HeadlessChrome", "Chrome") }, sessionId);
       await pipe.send("Page.navigate", { url: source.canonicalUrl }, sessionId);
       for (;;) {
@@ -129,7 +189,7 @@ export async function resolveDouyinBrowser(source: AnalysisSource, signal: Abort
         pipe.throwIfClosed();
         const value = result?.result?.value;
         if (value) {
-          const metadata = douyinBrowserMetadata(value, source);
+          const metadata = douyinBrowserMetadata(value, source, detail);
           if (metadata) return metadata;
           if (value.challenge) throw new AnalysisError("CHALLENGE_REQUIRED");
         }

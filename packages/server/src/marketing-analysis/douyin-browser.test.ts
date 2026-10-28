@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { analysisBrowserArgs, douyinBrowserMetadata, resolveDouyinBrowser } from "./douyin-browser.js";
+import { analysisBrowserArgs, douyinBrowserMetadata, douyinDetailMedia, resolveDouyinBrowser } from "./douyin-browser.js";
 import { parseAnalysisSource } from "./source.js";
 import { sandboxBrowserArgs } from "./sandbox.js";
 
@@ -37,6 +37,25 @@ describe("anonymous Douyin player", () => {
     raw.videos[0].duration = 58.2; raw.videos[0].width = 4096;
     expect(() => douyinBrowserMetadata(raw, source)).toThrow("UNSUPPORTED_SOURCE");
     expect(() => douyinBrowserMetadata({ ...sample(), userAgent: "Chrome\r\nCookie: x" }, source)).toThrow("UNSUPPORTED_SOURCE");
+  });
+  it("binds a blob player to the matching public detail response without relaxing URL safety", () => {
+    const raw = sample(); const mediaUrl = raw.videos[0].url.split("?")[0];
+    const detail = douyinDetailMedia({ aweme_detail: { aweme_id: source.canonicalId, video: { play_addr: { url_list: [mediaUrl] } } } })!;
+    raw.videos[0].url = "blob:https://www.douyin.com/player";
+    expect(douyinBrowserMetadata(raw, source, detail)).toMatchObject({ url: mediaUrl, duration: 58.2 });
+    expect(douyinBrowserMetadata(raw, source)).toBeUndefined();
+    expect(douyinBrowserMetadata(raw, source, { ...detail, id: "123456789" })).toBeUndefined();
+    for (const url of [mediaUrl + "?__vid=123456789",
+      mediaUrl.replace("https:", "http:"), mediaUrl.replace("v26-web.douyinvod.com", "127.0.0.1"),
+      mediaUrl.replace("https://", "https://user:pass@")]) {
+      expect(douyinBrowserMetadata(raw, source, { ...detail, urls: [url] })).toBeUndefined();
+    }
+    raw.videos[0].url = "blob:https://other.example/player";
+    expect(douyinBrowserMetadata(raw, source, detail)).toBeUndefined();
+    expect(douyinDetailMedia({ aweme_detail: { aweme_id: source.canonicalId, video: { play_addr: { url_list: [123, null] } } } }))
+      .toEqual({ id: source.canonicalId, urls: [] });
+    expect(douyinDetailMedia({ aweme_detail: { aweme_id: 123456 } })).toBeUndefined();
+    expect(douyinDetailMedia(null)).toBeUndefined();
   });
   it("keeps the browser inside an empty, bounded namespace with only private protocol pipes and HTTPS egress", () => {
     const args = sandboxBrowserArgs({ path: "/bridge.py", socket: "/task.sock" }, analysisBrowserArgs("/tmp/profile"));
