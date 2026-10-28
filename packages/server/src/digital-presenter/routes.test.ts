@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PresenterDraftSchema } from "@lot-agent/core/digital-presenter";
 import type { AgentService } from "../services/agent-service.js";
 import { mediaCapabilities } from "../marketing-video/media.js";
+import { marketingCopyModel } from "../marketing-video/copy-model.js";
 import { createDigitalPresenterRoutes } from "./routes.js";
 import type { PgPresenterStore } from "./repository.js";
 import type { PresenterVoicer } from "./takes.js";
@@ -55,5 +56,30 @@ describe("POST /:id/captions", () => {
     const f = setup();
     expect((await f.post({ size: "large" })).status).toBe(503);
     expect(f.store.recompose).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /script", () => {
+  const write = (reply: unknown) => {
+    const marketingText = vi.fn(async (..._args: unknown[]) => reply);
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", "owner"); await next(); });
+    const service = { db: { pool: {} }, jobQueue: {}, marketingText };
+    app.route("/api/digital-presenters", createDigitalPresenterRoutes(service as unknown as AgentService, "/tmp", {} as PresenterVoicer, {} as PgPresenterStore));
+    const response = app.request("/api/digital-presenters/script",
+      { method: "POST", body: JSON.stringify({ topic: "咖啡店开业", durationSec: 30, locale: "zh" }), headers: { "Content-Type": "application/json" } });
+    return { marketingText, response };
+  };
+  beforeEach(() => marketingCopyModel.reset());
+
+  it("writes with the current marketing copy model", async () => {
+    const f = write({ script: "欢迎光临。" });
+    expect(await (await f.response).json()).toEqual({ script: "欢迎光临。" });
+    expect(f.marketingText.mock.calls[0][4]).toEqual({ upstreamBilling: true, model: marketingCopyModel.models[0] });
+    expect(marketingCopyModel.current()).toBe(marketingCopyModel.models[0]);
+  });
+  it("switches the copy model like marketing copy when the reply has no script", async () => {
+    expect((await write({ text: "欢迎光临。" }).response).status).toBe(409);
+    expect(marketingCopyModel.current()).toBe(marketingCopyModel.models[1]);
   });
 });

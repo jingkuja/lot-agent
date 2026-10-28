@@ -14,6 +14,7 @@ import { inspectMedia, mediaCapabilities, ownedAssetPath, SUBTITLES_UNAVAILABLE 
 import { HDR_UNAVAILABLE, hdrConversionAvailable, isHdr } from "./media.js";
 import { readImageInfo } from "../marketing-video/image-size.js";
 import { MarketingTextError } from "../marketing-video/text.js";
+import { marketingCopyModel } from "../marketing-video/copy-model.js";
 import { normalizeMarketingReview, REVIEW_INSTRUCTION } from "../marketing-video/compliance.js";
 import { PresenterError } from "./errors.js";
 import { removePresenterFiles } from "./files.js";
@@ -89,9 +90,15 @@ export function createDigitalPresenterRoutes(service: AgentService, dataRoot: st
     const topic = typeof body?.topic === "string" ? body.topic.trim() : "";
     const durationSec = Number(body?.durationSec);
     if (!topic || topic.length > 800 || !Number.isInteger(durationSec) || durationSec < 10 || durationSec > 90 || !LOCALES.includes(body?.locale)) throw new PresenterError("请填写主题。");
-    const raw = await service.marketingText(SCRIPT_INSTRUCTION, JSON.stringify({ topic, targetSeconds: durationSec, outputLanguage: body.locale }), c.get("userId"), undefined, { upstreamBilling: true });
+    // Same model, effort and switching as marketing copy; a reply without a script also counts as a model failure.
+    const model = marketingCopyModel.current();
+    const input = JSON.stringify({ topic, targetSeconds: durationSec, outputLanguage: body.locale });
+    const raw = await service.marketingText(SCRIPT_INSTRUCTION, input, c.get("userId"), undefined, { upstreamBilling: true, model });
     const script = typeof (raw as { script?: unknown })?.script === "string" ? (raw as { script: string }).script.trim() : "";
-    if (!script) throw new PresenterError("模型未返回口播文案，请重试。", 409);
+    if (!script) {
+      marketingCopyModel.failed(model);
+      throw new PresenterError("模型未返回口播文案，请重试。", 409);
+    }
     return c.json({ script: script.slice(0, 2000) });
   });
 
