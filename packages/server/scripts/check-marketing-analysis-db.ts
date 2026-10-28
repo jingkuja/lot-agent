@@ -99,7 +99,7 @@ try {
   await store.finish(lease2, "MODEL_STEP_FAILED");
   assert.equal((await store.get(owner, first.id))?.status, "partial");
   await store.resume(owner, first.id, 2); const lease3 = (await store.claim(first.id))!; const ledger3 = new PgAnalysisLedger(store, lease3);
-  // A resumed step whose attempt ended follows the current copy model (kimi-k3.1-pro was retired).
+  // A resumed step whose attempt ended follows the current copy model (here the fallback kimi-k3).
   assert.equal(await ledger3.stepModel("summary:2"), undefined);
   assert.equal(await ledger3.begin("summary:2", "summary-hash-k3", "kimi-k3", 0), null, "explicit resume permits one new known-failed attempt");
   await ledger3.finish("summary:2", { ...receipt, text: "summary" }); await store.finish(lease3);

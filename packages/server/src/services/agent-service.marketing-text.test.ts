@@ -12,7 +12,7 @@ function setup(chunks: ChatChunk[], error?: unknown) {
   const service = {
     usageMeter: { checkQuota: vi.fn().mockResolvedValue({ ok: true }) },
     miniprogram: { llm: "deepseek-v4.1-flash" },
-    resolveUtilityLLM: vi.fn().mockResolvedValue({ llm: { chat }, usedModelId: "kimi-k3" }),
+    resolveUtilityLLM: vi.fn().mockResolvedValue({ llm: { chat }, usedModelId: "kimi-k3.1-pro" }),
     meterUtilityUsage: vi.fn(),
   };
   const call = (signal?: AbortSignal) => AgentService.prototype.marketingText.call(service as unknown as AgentService, "Return review JSON", "现磨咖啡", "owner", signal);
@@ -27,16 +27,17 @@ describe("marketing text completion", () => {
       { type: "done", finishReason: "stop", usage },
     ]);
     expect(await f.call()).toEqual({ verdict: "pass", issues: [] });
-    expect(f.service.resolveUtilityLLM).toHaveBeenCalledWith({ userId: "owner", modelId: "kimi-k3" });
+    expect(f.service.resolveUtilityLLM).toHaveBeenCalledWith({ userId: "owner", modelId: "kimi-k3.1-pro" });
     expect(f.chat).toHaveBeenCalledWith(expect.any(Array), undefined,
-      expect.objectContaining({ signal: expect.any(AbortSignal), params: { maxTokens: 16384, responseFormat: "json_object" } }));
-    expect(f.service.meterUtilityUsage.mock.calls).toEqual([["marketing text", "kimi-k3", "owner", usage]]);
+      expect.objectContaining({ signal: expect.any(AbortSignal), params: { maxTokens: 16384, responseFormat: "json_object", reasoningEffort: "medium" } }));
+    expect(f.service.meterUtilityUsage.mock.calls).toEqual([["marketing text", "kimi-k3.1-pro", "owner", usage]]);
   });
 
-  it("sends JSON through Responses without forcing reasoning effort", async () => {
+  it.each([["kimi-k3.1-pro", { effort: "medium" }], ["kimi-k3", undefined]] as const)("sends JSON through Responses with %s at its fixed effort, never none",
+    async (model, reasoning) => {
     const requests: Record<string, any>[] = [];
     const result = { verdict: "pass", issues: [] };
-    const llm = new OpenAIResponsesProvider({ baseUrl: "https://gateway.test/v1", apiKey: "owner-key", model: "kimi-k3" }, {
+    const llm = new OpenAIResponsesProvider({ baseUrl: "https://gateway.test/v1", apiKey: "owner-key", model }, {
       fetch: async (url, init) => {
         expect(new URL(String(url)).pathname).toBe("/v1/responses");
         const body = JSON.parse(String(init?.body)); requests.push(body);
@@ -48,12 +49,13 @@ describe("marketing text completion", () => {
       },
     });
     const f = setup([]);
-    f.service.resolveUtilityLLM.mockResolvedValueOnce({ llm, usedModelId: "kimi-k3" } as any);
-    expect(await f.call()).toEqual(result);
+    f.service.resolveUtilityLLM.mockResolvedValueOnce({ llm, usedModelId: model } as any);
+    expect(await AgentService.prototype.marketingText.call(f.service as unknown as AgentService, "Return review JSON", "现磨咖啡", "owner", undefined, { model }))
+      .toEqual(result);
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ model: "kimi-k3", max_output_tokens: 16384, text: { format: { type: "json_object" } } });
-    expect(requests[0]).not.toHaveProperty("reasoning");
-    expect(f.service.meterUtilityUsage).toHaveBeenCalledWith("marketing text", "kimi-k3", "owner", { promptTokens: 20, completionTokens: 8 });
+    expect(requests[0]).toMatchObject({ model, max_output_tokens: 16384, text: { format: { type: "json_object" } } });
+    expect(requests[0].reasoning).toEqual(reasoning);
+    expect(f.service.meterUtilityUsage).toHaveBeenCalledWith("marketing text", model, "owner", { promptTokens: 20, completionTokens: 8 });
   });
 
   it("rejects a fallback model before sending copy or storyboard requests", async () => {
@@ -71,7 +73,7 @@ describe("marketing text completion", () => {
     ]);
     await expect(f.call()).rejects.toMatchObject({ code: "MARKETING_TEXT_TRUNCATED", status: 502 });
     expect(f.chat).toHaveBeenCalledOnce();
-    expect(f.service.meterUtilityUsage.mock.calls).toEqual([["marketing text", "kimi-k3", "owner", usage]]);
+    expect(f.service.meterUtilityUsage.mock.calls).toEqual([["marketing text", "kimi-k3.1-pro", "owner", usage]]);
   });
 
   it.each([
@@ -90,22 +92,24 @@ describe("marketing text completion", () => {
   it("preserves known usage when the stream fails and keeps upstream details private", async () => {
     const f = setup([], new LLMResponseError("secret upstream body", usage));
     await expect(f.call()).rejects.toMatchObject({ code: "MARKETING_MODEL_UNAVAILABLE", message: "文案模型暂时无法完成请求，请稍后重试。" });
-    expect(f.service.meterUtilityUsage.mock.calls).toEqual([["marketing text", "kimi-k3", "owner", usage]]);
+    expect(f.service.meterUtilityUsage.mock.calls).toEqual([["marketing text", "kimi-k3.1-pro", "owner", usage]]);
   });
 
-  it("switches later requests to deepseek-v4.1-flash after a model failure, but not after a credential or cancellation error", async () => {
+  it("switches later requests to kimi-k3 after a model failure, but not after a credential or cancellation error", async () => {
     const denied = setup([], Object.assign(new Error("denied"), { status: 401 }));
     await expect(denied.call()).rejects.toMatchObject({ code: "MARKETING_MODEL_AUTH" });
     await expect(setup([]).call(AbortSignal.abort())).rejects.toMatchObject({ code: "MARKETING_TEXT_CANCELLED" });
-    expect(marketingCopyModel.current()).toBe("kimi-k3");
+    expect(marketingCopyModel.current()).toBe("kimi-k3.1-pro");
     const failed = setup([], Object.assign(new Error("bad gateway"), { status: 502 }));
     await expect(failed.call()).rejects.toMatchObject({ code: "MARKETING_MODEL_UNAVAILABLE" });
     // The failed request is not resent; the next one uses the fallback.
     expect(failed.chat).toHaveBeenCalledOnce();
     const next = setup([{ type: "text", content: "{}" }, { type: "done", finishReason: "stop", usage }]);
-    next.service.resolveUtilityLLM.mockResolvedValueOnce({ llm: { chat: next.chat }, usedModelId: "deepseek-v4.1-flash" });
+    next.service.resolveUtilityLLM.mockResolvedValueOnce({ llm: { chat: next.chat }, usedModelId: "kimi-k3" });
     await next.call();
-    expect(next.service.resolveUtilityLLM).toHaveBeenCalledWith({ userId: "owner", modelId: "deepseek-v4.1-flash" });
+    expect(next.service.resolveUtilityLLM).toHaveBeenCalledWith({ userId: "owner", modelId: "kimi-k3" });
+    // The fallback keeps its default reasoning.
+    expect(next.chat).toHaveBeenCalledWith(expect.any(Array), undefined, expect.objectContaining({ params: { maxTokens: 16384, responseFormat: "json_object" } }));
   });
 
   it("does not turn upstream credential errors into an expired app session", async () => {
@@ -119,7 +123,7 @@ describe("marketing text completion", () => {
     await AgentService.prototype.marketingText.call(f.service as unknown as AgentService, "Create shots", "Reference", "owner", undefined, { upstreamBilling: true });
     expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
     expect(f.service.meterUtilityUsage).not.toHaveBeenCalled();
-    expect(f.service.resolveUtilityLLM).toHaveBeenCalledWith({ userId: "owner", modelId: "kimi-k3" });
+    expect(f.service.resolveUtilityLLM).toHaveBeenCalledWith({ userId: "owner", modelId: "kimi-k3.1-pro" });
     const rejected = setup([], Object.assign(new Error("private upstream message"), { status: 402 }));
     await expect(AgentService.prototype.marketingText.call(rejected.service as unknown as AgentService, "Create", "Reference", "owner", undefined, { upstreamBilling: true })).rejects.toMatchObject({ status: 402 });
     expect(rejected.chat).toHaveBeenCalledOnce();

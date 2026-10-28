@@ -132,7 +132,7 @@ describe("analysis stage checkpoints", () => {
         calls.push({ model: modelId, messages });
         const system = String(messages[0].content);
         let value: unknown; let finishReason = "stop";
-        if (system.startsWith("Transcribe")) value = { text: "99元" };
+        if (modelId === "deepseek-v4.1-flash") value = { text: "99元" };
         else if (system.startsWith("Analyze")) value = { observations: [{ description: "product", frameIds: ["f0001", "f0002"], uncertainty: "" }] };
         else {
           value = { summary: [{ statement: "Product", evidenceIds: ["t0001"], inference: false }], timeline: [], marketingPoints: [], limitations: [] };
@@ -150,7 +150,7 @@ describe("analysis stage checkpoints", () => {
     const completed = await analyzeSelectedFrames({ snapshot, selection, revision: 2, models: model, checkpoint });
     expect(calls).toHaveLength(previousCalls + 1);
     // The truncated summary switched the copy model, so the new revision uses the fallback.
-    expect(calls.at(-2)?.model).toBe("kimi-k3"); expect(calls.at(-1)?.model).toBe("deepseek-v4.1-flash");
+    expect(calls.at(-2)?.model).toBe("kimi-k3.1-pro"); expect(calls.at(-1)?.model).toBe("kimi-k3");
     expect(calls.at(-1)?.messages[1].content).toContain('"text":"199元"');
     expect(calls.at(-1)?.messages[1].content).not.toContain("rawText");
     expect(completed.summaryRevision).toBe(2); expect(completed.texts[0].rawText).toBe("99元");
@@ -172,14 +172,14 @@ it("automatically synthesizes the remaining evidence after known OCR failures wi
     ledger: { begin: async id => receipts.get(id) ?? null, finish: async (id, value) => { receipts.set(id, structuredClone(value)); } },
     provider: async model => ({ async *chat(messages) {
       const system = String(messages[0].content); calls.push(model);
-      const output = system.startsWith("Transcribe") ? "broken JSON"
+      const output = model === "deepseek-v4.1-flash" ? "broken JSON"
         : JSON.stringify(system.startsWith("Analyze") ? { observations: [{ description: "产品", frameIds: ["f0001", "f0002"], uncertainty: "" }] }
           : { summary: [{ statement: "展示产品", evidenceIds: ["f0001"], inference: false }], timeline: [], marketingPoints: [], limitations: [] });
       yield { type: "text", content: output }; yield { type: "done", finishReason: "stop", usage: { promptTokens: 2, completionTokens: 2 } };
     } }),
   });
   const result = await analyzeSelectedFrames({ snapshot: initial(), selection, revision: 1, models, checkpoint: async () => {} });
-  expect(calls).toEqual(["deepseek-v4.1-flash", "deepseek-v4.1-flash", "kimi-k3", "kimi-k3"]);
+  expect(calls).toEqual(["deepseek-v4.1-flash", "deepseek-v4.1-flash", "kimi-k3", "kimi-k3.1-pro"]);
   expect(result.summary?.summary[0].statement).toBe("展示产品");
   expect(result.summary?.limitations).toContain("OCR_INCOMPLETE");
   expect(result.coverage?.omittedOcrFrameIds).toEqual(["f0001", "f0002"]);

@@ -4,10 +4,15 @@ import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoPr
 
 export * from "./models.js";
 
-/** kimi-k3.1-pro was removed on 2026-10-27: it spent the whole output limit on reasoning and returned no text. */
-export const MARKETING_COPY_MODEL = "kimi-k3";
+export const MARKETING_COPY_MODEL = "kimi-k3.1-pro";
 /** Copy and storyboard requests use this model for 30 minutes after the default one fails. */
-export const MARKETING_COPY_FALLBACK_MODEL = "deepseek-v4.1-flash";
+export const MARKETING_COPY_FALLBACK_MODEL = "kimi-k3";
+/** ...and this one for 30 minutes after the fallback also fails. */
+export const MARKETING_COPY_LAST_RESORT_MODEL = "deepseek-v4.1-flash";
+/** Fixed reasoning effort per copy model; others keep their default. Unset, kimi-k3.1-pro thinks until the output limit
+ * runs out (13k of 16384 tokens for a 60-second storyboard, ~400 s); Kimi treats `none` as max. At medium it used under
+ * 1.4k reasoning tokens and kept to the supplied facts (gateway runs on 2026-10-28). */
+export const MARKETING_COPY_REASONING_EFFORT: Readonly<Record<string, "medium">> = { [MARKETING_COPY_MODEL]: "medium" };
 /** Risk review only quotes and replaces excerpts; a fast model keeps re-checks after each edit short. */
 export const MARKETING_REVIEW_MODEL = "deepseek-v4.1-flash";
 export const MarketingShotSchema = z.object({

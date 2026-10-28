@@ -787,7 +787,7 @@ describe("recorded review and publication requests", () => {
     const f = fixture(); f.project.draft = MarketingDraftSchema.parse({ ...f.project.draft, publishTitle: "原标题" });
     f.service.marketingText.mockResolvedValueOnce({ publishTitle: "新标题", tags: "#咖啡" });
     expect((await f.call(`/${id}/publication`, { locale: "zh", fillMissing: true })).status).toBe(200);
-    expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "publication", { version: 1, locale: "zh", fillMissing: true }, undefined, "kimi-k3");
+    expect(f.operations.begin).toHaveBeenCalledWith("owner", expect.any(String), id, 1, "publication", { version: 1, locale: "zh", fillMissing: true }, undefined, "kimi-k3.1-pro");
     expect(f.operations.finish).toHaveBeenCalledWith("owner", expect.any(String), expect.objectContaining({ draft: expect.objectContaining({ publishTitle: "原标题", tags: "#咖啡" }) }));
     expect(f.service.marketingText).toHaveBeenCalledWith(expect.any(String), expect.any(String), "owner", undefined, expect.objectContaining({ onReceipt: expect.any(Function) }));
   });

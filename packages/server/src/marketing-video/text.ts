@@ -1,4 +1,4 @@
-import { LLMResponseError, type LLMProvider } from "@lot-agent/core";
+import { LLMResponseError, type ChatParams, type LLMProvider } from "@lot-agent/core";
 
 export interface MarketingTextReceipt {
   /** `cachedPromptTokens`: prompt tokens the gateway served from its prefix cache, when it reports them. */
@@ -9,7 +9,7 @@ export interface MarketingTextReceipt {
   outcome: "completed" | "failed" | "unknown" | "rejected" | "cancelled";
 }
 /** kimi-k3 copy for long drafts passed 8192 output tokens (reasoning included); at about 40 tokens/s the full
- * 16384 take ~7 minutes, so the request deadline is 8 minutes. */
+ * 16384 take ~7 minutes, so the request deadline is 8 minutes. kimi-k3.1-pro at medium effort used ~2.5k. */
 export const MARKETING_TEXT_MAX_TOKENS = 16384;
 export const MARKETING_TEXT_DEADLINE_MS = 480_000;
 export interface MarketingTextOptions { upstreamBilling?: boolean; onReceipt?: (receipt: MarketingTextReceipt) => Promise<void>; model?: string; }
@@ -40,7 +40,8 @@ export function marketingTextError(error: unknown, signal?: AbortSignal): Market
   return new MarketingTextError("文案模型暂时无法完成请求，请稍后重试。", "MARKETING_MODEL_UNAVAILABLE", 503);
 }
 
-export async function completeMarketingJson(llm: LLMProvider, system: string, input: string, signal?: AbortSignal, onReceipt?: MarketingTextOptions["onReceipt"]): Promise<unknown> {
+export async function completeMarketingJson(llm: LLMProvider, system: string, input: string, signal?: AbortSignal, onReceipt?: MarketingTextOptions["onReceipt"],
+  reasoningEffort?: ChatParams["reasoningEffort"]): Promise<unknown> {
   const timeout = AbortSignal.timeout(MARKETING_TEXT_DEADLINE_MS);
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let text = "";
@@ -60,8 +61,8 @@ export async function completeMarketingJson(llm: LLMProvider, system: string, in
   };
   try {
     requestSignal.throwIfAborted();
-    // Kimi rejects reasoning.effort=none. Keep its default reasoning policy
-    // instead of sending the generic "off" switch through the gateway.
+    // Kimi treats reasoning.effort=none as max, so the generic "off" switch is never sent; a model that
+    // thinks too long at its default gets a fixed effort from MARKETING_COPY_REASONING_EFFORT instead.
     for await (const chunk of llm.chat([
       { role: "system", content: system }, { role: "user", content: input },
     ], undefined, { signal: requestSignal,
@@ -69,7 +70,7 @@ export async function completeMarketingJson(llm: LLMProvider, system: string, in
         if (onReceipt && attempts++ > 0) throw lastAttemptError ?? new Error("MARKETING_REQUEST_UNKNOWN");
       },
       onAttemptEnd: error => { lastAttemptError = error; },
-      params: { maxTokens: MARKETING_TEXT_MAX_TOKENS, responseFormat: "json_object" },
+      params: { maxTokens: MARKETING_TEXT_MAX_TOKENS, responseFormat: "json_object", ...(reasoningEffort ? { reasoningEffort } : {}) },
       onResponseId: id => { receipt.responseId = id; checkpoint(); },
       onRequestId: id => { receipt.gatewayRequestId = id; checkpoint(); } })) {
       if (chunk.type === "text") text += chunk.content ?? "";

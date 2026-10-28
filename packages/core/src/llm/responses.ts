@@ -28,7 +28,8 @@ export class OpenAIResponsesProvider implements LLMProvider {
       top_p: params?.topP,
       // SDK 4.x predates the documented `none` effort; keep this wire-only
       // extension local instead of leaking vendor `thinking` into Responses.
-      ...(params?.reasoning === "off" ? { reasoning: { effort: "none" } as unknown as ResponseCreateParamsStreaming["reasoning"] } : {}),
+      ...(params?.reasoning === "off" ? { reasoning: { effort: "none" } as unknown as ResponseCreateParamsStreaming["reasoning"] }
+        : params?.reasoningEffort ? { reasoning: { effort: params.reasoningEffort } } : {}),
       ...(tools?.length ? { tools: tools.map(t => ({ type: "function" as const, name: t.name, description: t.description, parameters: t.parameters, strict: false })), tool_choice: "auto" as const } : {}),
       ...(params?.responseSchema ? { text: { format: { type: "json_schema" as const, name: "response", schema: params.responseSchema, strict: false } } }
         : params?.responseFormat ? { text: { format: { type: "json_object" as const } } } : {}),

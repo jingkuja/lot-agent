@@ -5,6 +5,7 @@ import { createFeishuTools, FEISHU_MESSAGE_POLICY } from "../feishu/tools.js";
 import { FEISHU_TEXT_POLICY } from "../feishu/policy.js";
 import { completeMarketingJson, marketingTextError, MarketingTextError, type MarketingTextOptions } from "../marketing-video/text.js";
 import { LOCAL_TOOL_NAMES } from "@lot-agent/core/desktop";
+import { MARKETING_COPY_REASONING_EFFORT } from "@lot-agent/core/marketing-video";
 import { RunRepository } from "./run-repository.js";
 import type { RunStatus } from "@lot-agent/core";
 import { RESPONSE_LANGUAGE_POLICY } from "./response-language-policy.js";
@@ -1009,7 +1010,7 @@ export class AgentService {
       if (usedModelId !== model) throw new MarketingTextError("文案模型授权不可用，请检查账号的模型权限和积分后重试。", "MARKETING_MODEL_AUTH", 503);
       const metered = options.upstreamBilling ? llm : meterLLM(llm, usage => this.meterUtilityUsage("marketing text", usedModelId, userId, usage));
       invoked = true;
-      return await completeMarketingJson(metered, system, input, signal, options.onReceipt);
+      return await completeMarketingJson(metered, system, input, signal, options.onReceipt, MARKETING_COPY_REASONING_EFFORT[model]);
     } catch (error) {
       // Authorization/quota rejection happened before a model request existed.
       // Record that fact so fixing account setup does not leave the draft locked.

@@ -192,12 +192,14 @@ describe("Responses transport", () => {
       const provider = new OpenAIResponsesProvider({ model: "kimi-k3", apiKey: "user-a", baseUrl }, transport);
       const onAttempt = vi.fn(); const onAttemptEnd = vi.fn();
       await collect(provider.chat([{ role: "user", content: "Return JSON" }], [{ name: "save", description: "save", parameters: { type: "object" } }], { params: { maxTokens: 1000, responseSchema: { type: "object" }, reasoning: "off" } }));
-      await expect(collect(new OpenAIResponsesProvider({ model: "deepseek-v4.1-flash", apiKey: "user-b", baseUrl }, transport).chat([], undefined, { onAttempt, onAttemptEnd }))).rejects.toThrow();
+      await expect(collect(new OpenAIResponsesProvider({ model: "deepseek-v4.1-flash", apiKey: "user-b", baseUrl }, transport)
+        .chat([], undefined, { onAttempt, onAttemptEnd, params: { reasoningEffort: "medium" } }))).rejects.toThrow();
       expect(requests).toHaveLength(2);
       expect(requests[0]).toMatchObject({ path: "/v1/responses", authorization: "Bearer user-a", body: { model: "kimi-k3", store: false, stream: true, max_output_tokens: 1000, text: { format: { type: "json_schema" } }, reasoning: { effort: "none" }, tools: [{ type: "function", name: "save", strict: false }] } });
       expect(requests[0].body).not.toHaveProperty("messages");
       expect(requests[0].body).not.toHaveProperty("thinking");
       expect(requests[1].authorization).toBe("Bearer user-b");
+      expect(requests[1].body.reasoning).toEqual({ effort: "medium" });
       expect(onAttempt).toHaveBeenCalledOnce(); expect(onAttemptEnd).toHaveBeenCalledOnce();
       const abort = new AbortController(); abort.abort();
       await expect(collect(provider.chat([], undefined, { signal: abort.signal }))).rejects.toThrow();

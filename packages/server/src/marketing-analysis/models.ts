@@ -1,4 +1,5 @@
-import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_MODEL, type MarketingDraft } from "@lot-agent/core/marketing-video";
+import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_LAST_RESORT_MODEL, MARKETING_COPY_MODEL, MARKETING_COPY_REASONING_EFFORT,
+  type MarketingDraft } from "@lot-agent/core/marketing-video";
 import { marketingCopyModel } from "../marketing-video/copy-model.js";
 import { creationPrompt, parseCreation } from "../marketing-video/creation.js";
 import { createHash } from "node:crypto";
@@ -8,11 +9,11 @@ import { AnalysisError } from "./errors.js";
 
 /** `visual` reads the frames and must take images, so it never follows a change of the copy model;
  * `synthesis` writes the summary and the copy from text alone, with the copy model of the studio,
- * and like the studio switches to `synthesisFallback` for a while after failures. */
+ * and like the studio switches to `synthesisFallback`, then `synthesisLastResort`, for a while after failures. */
 export const ANALYSIS_MODELS = { ocr: "deepseek-v4.1-flash", visual: "kimi-k3", synthesis: MARKETING_COPY_MODEL,
-  synthesisFallback: MARKETING_COPY_FALLBACK_MODEL } as const;
+  synthesisFallback: MARKETING_COPY_FALLBACK_MODEL, synthesisLastResort: MARKETING_COPY_LAST_RESORT_MODEL } as const;
 /** Earlier copy models. A step recorded with one is only replayed from its receipt (or stays unknown), never sent again. */
-const RETIRED_SYNTHESIS_MODELS = ["kimi-k3.1-pro", "qwen3.8-max"];
+const RETIRED_SYNTHESIS_MODELS = ["qwen3.8-max"];
 export type { AnalysisUsage, ModelStepReceipt, AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 export interface AnalysisModelDeps {
   ledger: AnalysisCallLedger;
@@ -86,10 +87,11 @@ export class AnalysisModels {
         // Both summary and copy/storyboard synthesis reason over all evidence. kimi-k3 passed 8192 output tokens on
         // both (reasoning included), so every step may use 16384; at about 40 tokens/s that takes ~7 minutes, hence the
         // 8-minute deadline for synthesis (4 minutes for OCR and visual batches). Cancellation and lease loss abort at once.
+        // kimi-k3.1-pro runs at the copy model's fixed effort; the input hash leaves the effort out.
         const synthesis = stepId.startsWith("summary:") || stepId.startsWith("copy:");
         const deadline = AbortSignal.timeout(synthesis ? 480000 : 240000);
         for await (const chunk of llm.chat(messages, undefined, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-          params: { maxTokens: 16384 },
+          params: { maxTokens: 16384, ...(MARKETING_COPY_REASONING_EFFORT[model] ? { reasoningEffort: MARKETING_COPY_REASONING_EFFORT[model] } : {}) },
           onResponseId: id => {
             receipt!.responseId = id;
             savingId = savingId.then(() => this.deps.ledger.responseId?.(stepId, id)).catch(() => {});

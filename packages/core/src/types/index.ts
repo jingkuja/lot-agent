@@ -49,6 +49,8 @@ export interface ChatParams {
   /** Schema output takes precedence over responseFormat when both are set. */
   responseSchema?: JSONSchema;
   reasoning?: "off" | number;
+  /** Responses `reasoning.effort` for models that need a fixed thinking depth; ignored by other transports. */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 /** Streamed chunk from LLM */
