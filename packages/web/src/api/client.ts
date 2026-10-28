@@ -292,7 +292,7 @@ export const api = {
     request<{ ok: boolean }>(`/conversations/${encodeURIComponent(conversationId)}/operations/${encodeURIComponent(operationId)}/verify`, {
       method: "POST", body: JSON.stringify({ outcome }),
     }),
-  getProductLinks: (signal?: AbortSignal) => request<{ webUrl: string; tokenhubUrl: string; globle?: number }>("/public/product", { signal }),
+  getProductLinks: (signal?: AbortSignal) => request<{ webUrl: string; tokenhubUrl: string; globle?: number; showCompliance?: boolean }>("/public/product", { signal }),
   // ── Auth ────────────────────────────────────────────────────────────────────
   getPublicKey: () => request<{ publicKey: string }>("/auth/public-key"),
 

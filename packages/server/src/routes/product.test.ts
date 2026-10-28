@@ -10,7 +10,7 @@ describe("public product links", () => {
     vi.stubEnv("TOKENHUB_PUBLIC_URL", "https://hub.example.com/console");
     vi.stubEnv("NEW_API_INTERNAL_CLIENT_SECRET", "must-not-leak");
     const res = await createProductRoutes().request("/");
-    expect(await res.json()).toEqual({ globle: 0, webUrl: "https://claw.example.com/", tokenhubUrl: "https://hub.example.com/console" });
+    expect(await res.json()).toEqual({ globle: 0, showCompliance: true, webUrl: "https://claw.example.com/", tokenhubUrl: "https://hub.example.com/console" });
   });
 
   it.each(["javascript:alert(1)", "https://secret:password@example.com", "broken", "https://example.com/?token=secret"])("rejects unsafe public configuration %s", async (value) => {
@@ -32,4 +32,11 @@ describe("international interface environment flag", () => {
     const res = await createProductRoutes().request("/");
     expect((await res.json() as { globle: number }).globle).toBe(1);
   });
+  it.each([[undefined, true], ["", true], ["0", true], ["1", false], ["2", false], ["-1", false], ["invalid", false]])(
+    "sets compliance visibility for globle=%s", async (value, showCompliance) => {
+      vi.stubEnv("globle", value);
+      const res = await createProductRoutes().request("/");
+      expect((await res.json() as { showCompliance: boolean }).showCompliance).toBe(showCompliance);
+    },
+  );
 });

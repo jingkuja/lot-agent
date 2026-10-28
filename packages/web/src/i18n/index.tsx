@@ -5,11 +5,13 @@ import { LOCALE_STORAGE_KEY, isInternational, resolveLocale, translate, type Loc
 const LanguageContext = createContext({
   locale: "zh" as Locale,
   enabled: false,
+  showCompliance: true,
   setLocale: (_locale: Locale) => {},
 });
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabled] = useState(false);
+  const [showCompliance, setShowCompliance] = useState(true);
   const [locale, updateLocale] = useState<Locale>("zh");
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -21,6 +23,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       let saved: string | null = null;
       try { saved = localStorage.getItem(LOCALE_STORAGE_KEY); } catch { /* Storage may be disabled. */ }
       setEnabled(isInternational(config.globle));
+      setShowCompliance(config.showCompliance !== false);
       updateLocale(resolveLocale(config.globle, saved));
     }).catch(() => { /* Older/offline servers keep the Chinese interface. */ })
       .finally(() => { window.clearTimeout(timeout); if (active) setReady(true); });
@@ -37,7 +40,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : locale;
     document.title = translate("借势智算", locale);
   }, [locale]);
-  const value = useMemo(() => ({ locale, enabled, setLocale }), [locale, enabled, setLocale]);
+  const value = useMemo(() => ({ locale, enabled, showCompliance, setLocale }), [locale, enabled, showCompliance, setLocale]);
   return <LanguageContext.Provider value={value}>{ready ? children : null}</LanguageContext.Provider>;
 }
 

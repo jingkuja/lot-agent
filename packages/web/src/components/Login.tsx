@@ -23,7 +23,7 @@ function initialLoginScreen(): LoginScreen {
 }
 
 export function Login({ onLogin, initialError = null }: LoginProps) {
-  const { t, enabled: international } = useI18n();
+  const { t, enabled: international, showCompliance } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
@@ -403,7 +403,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
             <button type="button" onClick={() => setLegalDialog("privacy")}>{t("隐私政策")}</button>
           </div>
         </div>
-        <footer className="login-compliance" aria-label={t("网站备案与许可信息")}>
+        {showCompliance && <footer className="login-compliance" aria-label={t("网站备案与许可信息")}>
           <a
             href="https://beian.miit.gov.cn/"
             target="_blank"
@@ -411,7 +411,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
           >
             {t("蜀ICP备2025156360号-2")}</a>
           <span>{t("增值电信业务经营许可证：川B2-20260779")}</span>
-        </footer>
+        </footer>}
       </section>
       {legalDialog && <LegalModal kind={legalDialog} onClose={() => setLegalDialog(null)} />}
     </div>
