@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { KLING_MARKETING_PROFILE, MarketingDraftSchema } from "@lot-agent/core/marketing-video";
+import { KLING_MARKETING_PROFILE, MarketingDraftSchema, newMarketingDraft } from "@lot-agent/core/marketing-video";
 import { marketingImageReferences, marketingPlanningContext, marketingSegmentPrompt, marketingShotDirectionBudget, marketingStoryboardRules,
-  marketingTimingRequirement, mergeMarketingStoryboard } from "./prompt.js";
+  marketingTimingRequirement } from "./prompt.js";
 import { activeMarketingVideoProfile } from "./model.js";
 import { creationPrompt, parseCreation, publicationPrompt, storyboardPrompt } from "./creation.js";
 import { parseTextResult } from "./text-result.js";
@@ -71,17 +71,21 @@ describe("marketing model subtitle instructions", () => {
     // A single-shot edit leaves the rest of the board as planned.
     expect(parseTextResult("storyboard", { shots: [shots[1]] }, silent, 1).draft.storyboardAudio).toBe(true);
   });
-  it("lets mixed-presenter drafts plan venue and product shots without the presenter", () => {
-    const draft = MarketingDraftSchema.parse({ presenter: "mixed", assets: { portrait: id }, durationSec: 17,
-      storyboard: [{ durationSec: 6, script: "欢迎光临。", visual: "招牌菜特写", action: "热气升起", camera: "特写" }] });
+  it("lets the storyboard decide by default where the presenter appears and how each shot is framed", () => {
+    const draft = { ...newMarketingDraft(), assets: { portrait: id }, durationSec: 17,
+      storyboard: [{ durationSec: 6, script: "欢迎光临。", visual: "招牌菜特写", action: "热气升起", camera: "特写" }] };
+    expect(draft.presenter).toBe("mixed");
+    expect(MarketingDraftSchema.parse({}).presenter).toBe("always");
     const creation = creationPrompt(draft, "zh");
-    expect(creation.system).toContain("Presenter mode is mixed");
-    expect(creation.system).toContain("in at least one shot");
+    expect(creation.system).toContain("Presenter mode follows the storyboard");
+    expect(creation.system).toContain("close-up of the face or of hands with the product");
     expect(creation.system).not.toContain("in EVERY shot");
+    expect(creation.system).not.toContain("upper body");
     expect(JSON.parse(creation.input).presenter).toBe("mixed");
-    expect(storyboardPrompt(draft, "zh", draft.storyboard, "").system).toContain("Presenter mode is mixed");
+    expect(storyboardPrompt(draft, "zh", draft.storyboard, "").system).toContain("Presenter mode follows the storyboard");
     const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2);
-    expect(prompt).toContain("Presenter only where visual calls for one");
+    expect(prompt).toContain("Presenter only where visual calls for one, framed as visual and camera say");
+    expect(prompt).not.toContain("upper body");
     expect(prompt).toContain("off-screen voice-over");
     expect(prompt).not.toContain("Presenter in EVERY shot");
     expect(marketingSegmentPrompt({ ...draft, assets: { video: id } }, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2)).toContain("Silent demonstration, no lip-sync");
@@ -310,18 +314,19 @@ describe("copy and storyboard source boundaries", () => {
   });
 });
 
-describe("fewest clips", () => {
+describe("shot rhythm", () => {
   const draft = MarketingDraftSchema.parse({ durationSec: 30 });
-  it("asks the planner for the fewest shots and to join neighbours that fit one clip", () => {
+  it("asks the planner for one shot per copy beat instead of the fewest clips", () => {
     const timing = marketingTimingRequirement(draft, KLING_MARKETING_PROFILE);
-    expect(timing).toContain("ideally 2");
-    expect(timing).toContain("never leave two adjacent shots that together last 15 seconds or less");
+    expect(timing).toContain("give each beat its own shot");
+    expect(timing).toContain("Use at most 8 shots");
+    expect(timing).not.toContain("fewest");
   });
-  it("joins short neighbours unless the joined clip prompt would be too long", () => {
+  it("keeps an AI-planned board's shots apart", () => {
     const shot = (visual: string) => ({ durationSec: 6, script: "欢迎来喝咖啡。", visual, action: "端起杯子", camera: "中景" });
-    expect(mergeMarketingStoryboard([shot("吧台"), shot("窗边")], draft, KLING_MARKETING_PROFILE)).toHaveLength(1);
-    const long = [shot("画".repeat(590)), shot("面".repeat(590))];
-    expect(mergeMarketingStoryboard(long, draft, KLING_MARKETING_PROFILE)).toEqual(long);
+    const shots = [shot("吧台"), shot("窗边"), shot("座位"), shot("门口"), shot("招牌")];
+    const withCopy = { ...draft, script: shots.map(item => item.script).join("\n") };
+    expect(parseTextResult("storyboard", { shots }, withCopy, undefined, KLING_MARKETING_PROFILE).draft.storyboard).toEqual(shots);
   });
 });
 

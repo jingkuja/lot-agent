@@ -4,7 +4,7 @@ import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_
   marketingVoiceStyle,
   marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema,
   planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard,
-  mergeMarketingShots, speechUnits, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText,
+  speechUnits, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText,
   marketingStoryboardAudioMismatch, marketingRevisionKey, marketingShotNeedsClip, marketingShotChanged, fitMarketingNarration,
   marketingNarrationFits, marketingNarrationSpareSec, marketingVoiceover, marketingNativeSpeech, DEFAULT_MARKETING_VIDEO_PROFILE } from "./index.js";
 
@@ -19,10 +19,18 @@ describe("marketing segment plan", () => {
     expect(parts.reduce((n, p) => n + p.durationSec, 0)).toBe(duration);
     expect(parts.every((p) => p.durationSec >= 4 && p.durationSec <= 15)).toBe(true);
   });
-  it("plans as few clips as the length and narration allow", () => {
+  it("plans about one shot per sentence, 5–8 seconds a shot on average", () => {
     const script = "欢迎来到我们的咖啡店。这里有现磨咖啡，也有舒适的座位。无论工作还是休息，都可以来坐一坐。期待与你见面。";
-    expect(planMarketingSegments(script, 30)).toHaveLength(2);
-    expect(planMarketingSegments(script, 60).map(part => part.durationSec)).toEqual([15, 15, 15, 15]);
+    expect(planMarketingSegments(script, 30).map(part => part.script)).toEqual(["欢迎来到我们的咖啡店。", "这里有现磨咖啡，也有舒适的座位。",
+      "无论工作还是休息，都可以来坐一坐。", "期待与你见面。"]);
+    const long = "第一句介绍门店环境。第二句讲招牌咖啡。第三句说甜点搭配。第四句介绍座位区。第五句讲营业时间。第六句欢迎到店品尝。";
+    const parts = planMarketingSegments(long, 30);
+    expect(parts).toHaveLength(6);
+    expect(parts.every(part => /[。]$/u.test(part.script))).toBe(true);
+    // Few long sentences still cut about every 8 seconds, at commas.
+    expect(planMarketingSegments("我们店里的咖啡豆每天现烘，口感醇厚，香气浓郁，回味悠长，深受附近上班族喜爱。", 60).length).toBeGreaterThanOrEqual(5);
+    // A short script never gets more shots than its narration can fill.
+    expect(planMarketingSegments("欢迎光临。".repeat(4), 30).length).toBeLessThanOrEqual(5);
     // Dense narration still gets enough clips to be spoken in time.
     const dense = "欢迎来到我们的咖啡店，".repeat(14);
     expect(planMarketingSegments(dense, 30).every(part => speechUnits(part.script) <= part.durationSec * 4.5)).toBe(true);
@@ -38,22 +46,6 @@ describe("marketing segment plan", () => {
     expect(() => planMarketingSegments("短片", 90)).toThrow();
     expect(MarketingDraftSchema.safeParse({ assets: { video: "https://evil.test/video" } }).success).toBe(false);
     expect(MarketingDraftSchema.safeParse({ userId: "other" }).success).toBe(false);
-  });
-});
-
-describe("joining short shots into one clip", () => {
-  const shot = (durationSec: number, script: string) => ({ durationSec, script, visual: `${script}画面`, action: "展示", camera: "中景" });
-  it("joins neighbours while they fit in one clip, keeping order and every word", () => {
-    const shots = [shot(4, "一。"), shot(5, "二。"), shot(5, "三。"), shot(8, "四。"), shot(8, "五。")];
-    const merged = mergeMarketingShots(shots);
-    expect(merged.map(s => s.durationSec)).toEqual([14, 8, 8]);
-    expect(merged[0]).toEqual({ durationSec: 14, script: "一。\n二。\n三。", visual: "一。画面\n二。画面\n三。画面", action: "展示\n展示\n展示", camera: "中景\n中景\n中景" });
-    expect(storyboardScript(merged)).toBe(storyboardScript(shots));
-    expect(mergeMarketingShots(shots, 8).map(s => s.durationSec)).toEqual([4, 5, 5, 8, 8]);
-  });
-  it("keeps shots apart when the joined narration or the caller's check does not fit", () => {
-    expect(mergeMarketingShots([shot(6, "长".repeat(40)), shot(6, "长".repeat(40))])).toHaveLength(2);
-    expect(mergeMarketingShots([shot(4, "一。"), shot(4, "二。")], 15, () => false)).toHaveLength(2);
   });
 });
 

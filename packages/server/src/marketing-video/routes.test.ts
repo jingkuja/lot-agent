@@ -339,17 +339,14 @@ describe("marketing storyboard editing", () => {
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "镜头推进", index: 1 })).status).toBe(200);
     expect(f.store.save.mock.calls.at(-1)?.[3].storyboard.map(s => s.durationSec)).toEqual([8, 9]);
   });
-  it("joins adjacent AI shots that fit one clip, but never on a single-shot edit", async () => {
+  it("keeps every AI shot as planned, and a single-shot edit keeps every shot's place", async () => {
     const f = fixture(); f.project.draft.durationSec = 17;
     const shot = (durationSec: number, script: string) => ({ durationSec, script, visual: `${script}画面`, action: "端起杯子", camera: "中景" });
-    f.service.marketingText.mockResolvedValueOnce({ shots: [shot(4, "欢迎。"), shot(6, "来喝咖啡。"), shot(7, "现磨咖啡等你来。")] });
+    const planned = [shot(4, "欢迎。"), shot(6, "来喝咖啡。"), shot(7, "现磨咖啡等你来。")];
+    f.service.marketingText.mockResolvedValueOnce({ shots: planned });
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "" })).status).toBe(200);
     const saved = f.store.save.mock.calls.at(-1)![3];
-    expect(saved.storyboard).toEqual([
-      { durationSec: 10, script: "欢迎。\n来喝咖啡。", visual: "欢迎。画面\n来喝咖啡。画面", action: "端起杯子\n端起杯子", camera: "中景\n中景" },
-      shot(7, "现磨咖啡等你来。"),
-    ]);
-    // The copy reads the same as before the shots were joined.
+    expect(saved.storyboard).toEqual(planned);
     expect(saved.script).toBe("欢迎。\n来喝咖啡。\n现磨咖啡等你来。");
     const board = [shot(5, "欢迎。"), shot(5, "来喝咖啡。"), shot(7, "现磨咖啡等你来。")];
     Object.assign(f.project.draft, { storyboard: board, script: storyboardScript(board) });

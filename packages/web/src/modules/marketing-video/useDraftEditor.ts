@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MarketingDraftSchema, storyboardScript, type MarketingDraft, type MarketingShot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { newMarketingDraft, storyboardScript, type MarketingDraft, type MarketingShot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { errorMessage, json, requestProject, type Project } from "./api.js";
 import { withDraftField } from "./draft-editor.js";
 import type { DraftSession } from "./session.js";
@@ -13,7 +13,7 @@ export function useDraftEditor({ ownerId, session, profile, onEdit, onProject }:
   /** Called with every project the editor accepts, e.g. to keep the draft list current. */
   onProject(project: Project): void;
 }) {
-  const [draft, setDraft] = useState<MarketingDraft>(() => MarketingDraftSchema.parse({}));
+  const [draft, setDraft] = useState<MarketingDraft>(() => newMarketingDraft());
   const [project, setProject] = useState<Project | null>(null);
   const [saving, setSaving] = useState(false);
   const draftRef = useRef(draft);
@@ -70,7 +70,7 @@ export function useDraftEditor({ ownerId, session, profile, onEdit, onProject }:
   function reset(copy = false): MarketingDraft {
     draftId.current = crypto.randomUUID(); version.current = 0; projectRef.current = null;
     setProject(null);
-    const next = copy ? { ...draftRef.current } : MarketingDraftSchema.parse({});
+    const next = copy ? { ...draftRef.current } : newMarketingDraft();
     saved.current = copy ? "" : JSON.stringify(next);
     update(next); remember(null);
     return next;

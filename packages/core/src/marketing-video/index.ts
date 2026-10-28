@@ -112,8 +112,9 @@ export const MarketingDraftSchema = z.preprocess(value => withoutLegacyBackgroun
   durationSec: z.number().int().min(15).max(60).default(30),
   // Only digital-presenter videos exist; drafts may still hold the never-offered "recorded".
   mode: z.literal("avatar").catch("avatar"),
-  // "always": presenter in every shot. "mixed": presenter in some shots; others may
-  // show the venue, dishes or product close-ups (store tours).
+  // "always": presenter in every shot. "mixed": the storyboard decides per shot whether the presenter
+  // is on camera and how they are framed; others may show the venue, dishes or products.
+  // New drafts start "mixed" (`newMarketingDraft`); drafts and jobs saved without the field stay "always".
   presenter: z.enum(["always", "mixed"]).default("always"),
   /** Always empty once parsed: the setting is part of `continuity`. Kept so stored drafts, checks and jobs keep loading. */
   background: z.string().max(600).default("").transform(value => value === MARKETING_DEFAULT_BACKGROUND ? "" : value),
@@ -144,6 +145,8 @@ export const MarketingDraftSchema = z.preprocess(value => withoutLegacyBackgroun
   tags: z.string().max(160).default(""),
 }).strict());
 export type MarketingDraft = z.infer<typeof MarketingDraftSchema>;
+/** A blank draft as the studio starts one. */
+export const newMarketingDraft = (): MarketingDraft => MarketingDraftSchema.parse({ presenter: "mixed" });
 /** True when the board was planned for the other audio setting: speech written for a
  * silent reference-video render, or silent demonstration for a narrated one. */
 export function marketingStoryboardAudioMismatch(draft: MarketingDraft): boolean {
@@ -390,24 +393,6 @@ export function timeMarketingStoryboard(shots: MarketingShot[], total: number, m
   return shots.map((shot, index) => ({ ...shot, durationSec: durations[index] }));
 }
 
-/** Joins adjacent shots that together fit in one clip, in order. Every clip is generated on its
- * own, so fewer clips leave less room for the person, product or setting to drift between them.
- * A joined shot keeps both parts of each field, one per line, so the copy reads the same.
- * `fits` may still refuse one, e.g. when its clip prompt would be too long. */
-export function mergeMarketingShots(shots: MarketingShot[], maxShot = MARKETING_SHOT_MAX_SECONDS, fits: (shot: MarketingShot) => boolean = () => true): MarketingShot[] {
-  const join = (a: string, b: string) => [a.trim(), b.trim()].filter(Boolean).join("\n");
-  const merged: MarketingShot[] = [];
-  for (const shot of shots) {
-    const last = merged.at(-1);
-    const joined = last && MarketingShotSchema.safeParse({ durationSec: last.durationSec + shot.durationSec, script: join(last.script, shot.script),
-      visual: join(last.visual, shot.visual), action: join(last.action, shot.action), camera: join(last.camera, shot.camera) });
-    const fitsClip = joined?.success && joined.data.durationSec <= maxShot && marketingSpeechMinimumSeconds(joined.data.script) <= maxShot;
-    if (fitsClip && fits(joined.data)) merged[merged.length - 1] = joined.data;
-    else merged.push(shot);
-  }
-  return merged;
-}
-
 /** Silence kept after a shot's narration; the clip must outlast its voice-over. */
 export const MARKETING_NARRATION_TAIL_MS = 200;
 export const marketingNarrationFits = (durationMs: number, durationSec: number) => durationMs + MARKETING_NARRATION_TAIL_MS <= durationSec * 1000;
@@ -452,18 +437,59 @@ export function capMarketingStoryboard(shots: MarketingShot[], draft: Pick<Marke
   catch { throw new Error(`当前视频模型每镜最长 ${maxShot} 秒，请重新生成全部分镜。`); }
 }
 
-/** Split at phrase boundaries. Segment times are integers accepted by the video model. */
+/** Most shots a storyboard holds (migration 41). */
+const MARKETING_STORYBOARD_MAX_SHOTS = 15;
+/** Split at sentence ends, else phrase boundaries, about one copy beat per shot. Segment times are integers accepted by the video model. */
 export function planMarketingSegments(script: string, durationSec: number, maxShot = MARKETING_SHOT_MAX_SECONDS): MarketingSegment[] {
   if (!Number.isInteger(durationSec) || durationSec < 15 || durationSec > 60 || !script.trim()) throw new Error("请填写文案并选择 15–60 秒的整片时长。");
   const units = speechUnits(script);
   if (units > marketingMaxDuration(durationSec) * MARKETING_MAX_SPEECH_PACE) throw new Error("文案过长，请精简文案或增加视频时长。");
-  // Preserve every character, including whitespace and punctuation. Long
-  // sentences may be split at a comma, space, or ultimately a character edge.
-  // As few clips as the length and narration allow: each clip is generated on its own.
-  const count = Math.max(Math.ceil(durationSec / maxShot), Math.ceil(units / (maxShot * MARKETING_SPLIT_SPEECH_PACE)));
-  if (units < count * 4) throw new Error("文案过短，请补充内容。");
-  const chars = Array.from(script.trim());
-  if (chars.length < count) throw new Error("文案过短，请补充内容。");
+  // One shot per sentence, kept to 5–8 seconds a shot on average, never fewer than the length and narration
+  // need, and each with at least 4 seconds and 4 speech units. A split that does not fit tries one shot fewer.
+  const needed = Math.max(Math.ceil(durationSec / maxShot), Math.ceil(units / (maxShot * MARKETING_SPLIT_SPEECH_PACE)));
+  if (units < needed * 4) throw new Error("文案过短，请补充内容。");
+  if (Array.from(script.trim()).length < needed) throw new Error("文案过短，请补充内容。");
+  const beats = Math.min(Math.max(marketingSentences(script.trim()).length, Math.round(durationSec / 8)), Math.round(durationSec / 5));
+  const preferred = Math.max(needed, Math.min(beats, Math.floor(units / 4), Math.floor(marketingMaxDuration(durationSec) / 4), MARKETING_STORYBOARD_MAX_SHOTS));
+  for (let count = preferred; ; count--) {
+    try { return splitMarketingScript(script.trim(), count, durationSec, maxShot); }
+    catch (error) { if (count <= needed) throw error; }
+  }
+}
+
+/** The copy's sentences, joining back to it exactly; a piece without speech joins its neighbour. */
+function marketingSentences(script: string): string[] {
+  const sentences: string[] = [];
+  for (const piece of script.split(/(?<=[。！？.!?；;\n])/u)) {
+    if (sentences.length && (!speechUnits(piece) || !speechUnits(sentences[sentences.length - 1]))) sentences[sentences.length - 1] += piece;
+    else sentences.push(piece);
+  }
+  return sentences;
+}
+
+/** Whole sentences in `count` shots of as even speech length as possible. */
+function groupMarketingSentences(sentences: string[], count: number): string[] {
+  const sums = sentences.reduce((list, text) => [...list, list.at(-1)! + speechUnits(text)], [0]);
+  const mean = sums.at(-1)! / count;
+  const cost = (from: number, to: number) => (sums[to] - sums[from] - mean) ** 2;
+  // best[k][j]: the cheapest way to put the first j sentences in k shots; from[k][j] where its last shot starts.
+  const best = [sums.map((_, j) => j ? Infinity : 0)];
+  const from: number[][] = [[]];
+  for (let k = 1; k <= count; k++) {
+    best.push(sums.map(() => Infinity)); from.push([]);
+    for (let j = k; j < sums.length; j++) for (let i = k - 1; i < j; i++) {
+      const total = best[k - 1][i] + cost(i, j);
+      if (total < best[k][j]) { best[k][j] = total; from[k][j] = i; }
+    }
+  }
+  const parts: string[] = [];
+  for (let k = count, j = sentences.length; k > 0; j = from[k][j], k--) parts.unshift(sentences.slice(from[k][j], j).join(""));
+  return parts;
+}
+
+// Preserve every character, including whitespace and punctuation. Long
+// sentences may be split at a comma, space, or ultimately a character edge.
+function splitMarketingEvenly(chars: string[], count: number): string[] {
   const parts: string[] = [];
   let start = 0;
   for (let i = 0; i < count - 1; i++) {
@@ -471,17 +497,31 @@ export function planMarketingSegments(script: string, durationSec: number, maxSh
     const target = start + Math.round(remaining / (count - i));
     const lower = start + Math.max(1, Math.floor(remaining / (count - i) * 0.65));
     const upper = Math.min(chars.length - (count - i - 1), start + Math.ceil(remaining / (count - i) * 1.2));
-    let end = target;
-    const candidates = Array.from({ length: upper - lower + 1 }, (_, n) => lower + n)
-      .filter((n) => /[。！？.!?；;，,\s]/u.test(chars[n - 1]));
-    if (candidates.length) end = candidates.sort((a, b) => Math.abs(a - target) - Math.abs(b - target))[0];
+    const window = Array.from({ length: Math.max(0, upper - lower + 1) }, (_, n) => lower + n);
+    const nearest = (ends: number[]) => ends.sort((a, b) => Math.abs(a - target) - Math.abs(b - target))[0];
+    // A sentence end is a copy beat; a comma or space only when the window holds none.
+    const end = nearest(window.filter(n => /[。！？.!?；;\n]/u.test(chars[n - 1])))
+      ?? nearest(window.filter(n => /[，,\s]/u.test(chars[n - 1]))) ?? target;
     parts.push(chars.slice(start, end).join("")); start = end;
   }
   parts.push(chars.slice(start).join(""));
-  if (parts.some((text) => speechUnits(text) === 0)) throw new Error("文案过短，请补充内容。");
-  if (parts.some((text) => speechUnits(text) > maxShot * MARKETING_MAX_SPEECH_PACE)) throw new Error("部分段落过长，请缩短句子后重试。");
-  const durations = allocateShotDurations(parts.map(script => ({ script })), durationSec, maxShot);
-  return parts.map((text, index) => ({ index, script: text, durationSec: durations[index] }));
+  return parts;
+}
+
+/** Whole sentences per shot when they fit, else the even split. */
+function splitMarketingScript(script: string, count: number, durationSec: number, maxShot: number): MarketingSegment[] {
+  const sentences = marketingSentences(script);
+  const splits = [...sentences.length >= count ? [groupMarketingSentences(sentences, count)] : [], splitMarketingEvenly(Array.from(script), count)];
+  let failure: unknown;
+  for (const parts of splits) {
+    try {
+      if (parts.some((text) => speechUnits(text) === 0)) throw new Error("文案过短，请补充内容。");
+      if (parts.some((text) => speechUnits(text) > maxShot * MARKETING_MAX_SPEECH_PACE)) throw new Error("部分段落过长，请缩短句子后重试。");
+      const durations = allocateShotDurations(parts.map(script => ({ script })), durationSec, maxShot);
+      return parts.map((text, index) => ({ index, script: text, durationSec: durations[index] }));
+    } catch (error) { failure = error; }
+  }
+  throw failure;
 }
 
 /** Narration edits in the storyboard are also the project's editable copy. */

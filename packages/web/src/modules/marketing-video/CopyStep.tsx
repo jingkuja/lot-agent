@@ -59,9 +59,11 @@ export function CopyStep({ form, inputId, sourceKind, uploading, analysisPanel, 
     </> : <DraftText form={form} name="topic" label="产品、卖点和目标顾客" max={800} />}
     <label className="mv-field"><span>{t("整片时长（秒）")} · {draft.durationSec}s</span><input type="range" min="15" max="60" step="1" aria-label={t("整片时长（秒）")} value={draft.durationSec} disabled={busy} onChange={e => field("durationSec", Number(e.target.value))} /></label>
     <label className="mv-label">{t("出镜人物")}</label>
-    <Choices form={form} label="出镜人物" values={[{ value: "always", label: "全程出镜" }, { value: "mixed", label: "部分镜头出镜" }]} value={draft.presenter}
+    <Choices form={form} label="出镜人物" values={[{ value: "mixed", label: "按分镜安排" }, { value: "always", label: "全程出镜" }]} value={draft.presenter}
       onChoose={value => field("presenter", value as MarketingDraft["presenter"])} />
-    <p className="mv-hint">{t(draft.presenter === "mixed" ? "出镜人物只出现在部分镜头，其余镜头可拍环境、菜品和产品特写，适合探店。" : "每个镜头都有出镜人物正面出镜，适合口播宣传。")}</p>
+    <p className="mv-hint">{t(draft.presenter === "mixed"
+      ? "人物是否出镜、景别和构图按文案分镜安排，可穿插环境、菜品、产品和手部特写。"
+      : "每个镜头都有出镜人物正面出镜，适合口播宣传。")}</p>
     {analysisPanel}
     {analysis && <details className="mv-script-review"><summary>{t("文案结构")}</summary><p>{analysis}</p></details>}
     {(draft.copyMode !== "rewrite" || !!draft.script.trim()) && <>

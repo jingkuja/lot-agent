@@ -23,7 +23,7 @@ export interface StoryboardStructure {
   takes?: ReadonlySet<string>;
 }
 
-export function StoryboardEditor({ shots, presenter = "always", busy, readOnly = false, compact = false, redo, structure, onChange, onAi }: {
+export function StoryboardEditor({ shots, presenter = "mixed", busy, readOnly = false, compact = false, redo, structure, onChange, onAi }: {
   shots: MarketingShot[];
   presenter?: MarketingDraft["presenter"];
   busy: boolean;
@@ -58,7 +58,7 @@ export function StoryboardEditor({ shots, presenter = "always", busy, readOnly =
     {!compact && <div className="mv-section-head"><h3>{t(readOnly || redo ? "制作分镜" : "确认分镜")}</h3><span>{t("{0} 个分镜 · 共 {1} 秒", [shots.length, ends.at(-1) ?? 0])}</span></div>}
     <p className="mv-hint">{t(redo ? "修改镜头内容或勾选「重新生成此镜」，只重新生成这些镜头并重新合成；其余镜头沿用已生成的片段，不收费。镜数和每镜时长不可修改。"
       : readOnly ? "以下是本次制作使用的分镜。修改后需作为新视频重新生成。"
-      : presenter === "mixed" ? "出镜人物只出现在部分镜头，请在画面内容中写明该镜是否有人物出镜。" : "出镜人物将在每个镜头出镜，保持形象一致。")}</p>
+      : presenter === "mixed" ? "人物出镜与否按分镜安排，请在画面内容中写明该镜是否有人物出镜。" : "出镜人物将在每个镜头出镜，保持形象一致。")}</p>
     {structure && !readOnly && <StructureStatus structure={structure} shots={shots} total={total} busy={busy} lastEdit={lastEdit}
       onUndo={() => { if (lastEdit) { setUndo(null); onChange?.(lastEdit.before); } }} />}
     <div className="mv-shot-list">{shots.map((shot, index) => <article className={redo?.selected[index] ? "mv-shot mv-shot-redo" : "mv-shot"} key={index} aria-label={t("第 {0} 镜", [index + 1])}>
