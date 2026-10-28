@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import type pg from "pg";
 import { MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
-import { PgMarketingProjectStore, renderKey, reviewText } from "./repository.js";
+import { PgMarketingProjectStore, renderKey } from "./repository.js";
 
 describe("persisting confirmed marketing shots", () => {
-  it("snapshots all directions and reserves the edited narration boundaries", async () => {
+  it("snapshots all directions and reserves the edited narration boundaries, also for unchecked copy", async () => {
     const storyboard = [
       { durationSec: 6, script: "欢迎来店里。", visual: "吧台特写", action: "端起杯子", camera: "缓慢推进" },
       { durationSec: 11, script: "享受咖啡时光，看看明亮的空间。", visual: "明亮座位区", action: "轻轻招手", camera: "平稳横移" },
     ];
     const draft = MarketingDraftSchema.parse({ durationSec: 17, storyboard, script: storyboardScript(storyboard) });
-    const row = { id: "project", user_id: "owner", version: 2, draft, task_id: null, review: { verdict: "pass", issues: [] }, reviewed_script: reviewText(draft) };
+    const row = { id: "project", user_id: "owner", version: 2, draft, task_id: null, review: null, reviewed_script: null };
     const query = vi.fn(async (sql: string, _params?: unknown[]) => ({ rows: sql.startsWith("SELECT * FROM marketing_video_projects") ? [row] : [], rowCount: 1 }));
     const client = { query, release: vi.fn() };
     const store = new PgMarketingProjectStore({ connect: async () => client } as unknown as pg.Pool);

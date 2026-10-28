@@ -234,7 +234,7 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         }
         await client.query("COMMIT"); return p.task_id as string;
       }
-      if (!p.review || p.reviewed_script !== reviewText(p.draft) || p.review.verdict === "reject") throw new MarketingError("请先完成当前文案检查。");
+      // The copy check is optional: the user may generate unchecked or rejected copy.
       // Validate the complete duration plan before creating any video task.
       const plan = resolveMarketingSegments(MarketingDraftSchema.parse(p.draft), marketingJobProfile(input));
       const taskId = randomUUID();
@@ -264,7 +264,6 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       // Same key as the worker's job lock: never race a worker that is still finishing.
       const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [`marketing:${baseTaskId}`]);
       if (!lock.rows[0].locked) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
-      if (!p.review || p.reviewed_script !== reviewText(p.draft) || p.review.verdict === "reject") throw new MarketingError("请先完成当前文案检查。");
       const base = await revisionBase(client, owner, id);
       const draft = MarketingDraftSchema.parse(p.draft);
       if (!base || marketingRevisionKey(base.draft, base.composition) !== marketingRevisionKey(draft, base.composition)) throw new MarketingError("当前视频不能单镜重做，请复制为新草稿。", 409);
