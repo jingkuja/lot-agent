@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type pg from "pg";
 import { spawnSync } from "node:child_process";
 import type { PollResult } from "@lot-agent/core";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MarketingDraftSchema } from "@lot-agent/core/marketing-video";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_KEY_ART_PATIENCE_MS, MarketingDraftSchema } from "@lot-agent/core/marketing-video";
 import { KEY_ART_STALE_MS, keyArtBasis, keyArtReference, MarketingKeyArtist, type KeyArtDeps } from "./key-art.js";
 import { imageInfo, jpegOrientation } from "./image-size.js";
 import { marketingKeyArtPrompt, marketingKeyArtReferences } from "./prompt.js";
@@ -23,7 +23,7 @@ const projectId = "33333333-3333-4333-8333-333333333333";
 
 type Row = {
   id: string; owner_id: string; project_id: string; basis: string; status: string; asset_id: string | null; updated_at: Date;
-  vendor_task_id?: string | null; result_url?: string | null; resumable?: boolean; error?: string | null;
+  vendor_task_id?: string | null; result_url?: string | null; resumable?: boolean; error?: string | null; started_at?: Date;
 };
 /** Just enough of the key-art table: the running-row claim is unique per look. */
 function pool(rows: Row[] = []) {
@@ -39,12 +39,13 @@ function pool(rows: Row[] = []) {
     if (sql.startsWith("SELECT")) {
       const found = rows.filter(row => row.owner_id === params[0] && row.project_id === params[1] && row.basis === params[2])
         .sort((a, b) => b.updated_at.getTime() - a.updated_at.getTime())
-        .map(row => ({ vendor_task_id: null, result_url: null, resumable: false, error: null, ...row }));
+        .map(row => ({ vendor_task_id: null, result_url: null, resumable: false, error: null, ...row,
+          elapsed_ms: String(Date.now() - (row.started_at ?? row.updated_at).getTime()) }));
       return { rows: found, rowCount: found.length };
     }
     if (sql.startsWith("INSERT")) {
       const [id, owner_id, project_id, basis] = params as string[];
-      const row = { id, owner_id, project_id, basis, status: "running", asset_id: null, updated_at: now() };
+      const row = { id, owner_id, project_id, basis, status: "running", asset_id: null, updated_at: now(), started_at: new Date() };
       if (running(row)) return done();
       rows.push(row);
       return { rows: [{ id: row.id }], rowCount: 1 };
@@ -62,7 +63,13 @@ function pool(rows: Row[] = []) {
     if (sql.includes("SET status='running'")) {
       if (!row || row.status !== "failed" || !row.resumable) return done();
       if (running(row)) throw Object.assign(new Error("duplicate"), { code: "23505" });
-      Object.assign(row, { status: "running", error: null, updated_at: now() });
+      Object.assign(row, { status: "running", error: null, updated_at: now(), started_at: new Date() });
+      return done(row);
+    }
+    if (sql.includes("COALESCE(started_at, created_at) <=")) {
+      // A running still is given up only past the patience time.
+      if (!row || row.status !== "running" || Date.now() - (row.started_at ?? row.updated_at).getTime() < (params[2] as number)) return done();
+      Object.assign(row, { status: "failed", resumable: false, error: params[1], updated_at: now() });
       return done(row);
     }
     if (!row || row.status !== "running") return done();
@@ -167,14 +174,41 @@ describe("key-art stills", () => {
       expect(await f.artist.frozen("owner", projectId, { ...f.draft, continuity: "长发" }, GROK_MARKETING_PROFILE)).toBeUndefined();
     } finally { await f.cleanup(); }
   });
-  it("does not start another still while one is being made", async () => {
+  it("does not start another still while one is being made, until it has run past the patience time", async () => {
     const f = await fixture();
     try {
       const basis = keyArtBasis(f.draft, "gpt-image-2.5-flare");
-      f.db.rows.push({ id: "running", owner_id: "owner", project_id: projectId, basis, status: "running", asset_id: null, updated_at: new Date() });
-      expect((await f.make(true)).keyArt.status).toBe("running");
+      const started = new Date(Date.now() - 60_000);
+      f.db.rows.push({ id: "running", owner_id: "owner", project_id: projectId, basis, status: "running", asset_id: null, updated_at: new Date(), started_at: started });
+      const young = (await f.make(true)).keyArt;
+      expect(young.status).toBe("running");
+      expect(young.elapsedMs).toBeGreaterThanOrEqual(60_000);
       expect(f.provider.create).not.toHaveBeenCalled();
+      // Past it, a redo gives the running still up for a new paid one; a plain request still waits.
+      f.db.rows[0].started_at = new Date(Date.now() - MARKETING_KEY_ART_PATIENCE_MS - 1000);
+      expect((await f.make()).keyArt.status).toBe("running");
+      expect(f.provider.create).not.toHaveBeenCalled();
+      expect((await f.make(true)).keyArt.status).toBe("succeeded");
+      expect(f.provider.create).toHaveBeenCalledOnce();
+      expect(f.db.rows.map(row => [row.id === "running", row.status, row.resumable])).toEqual([[true, "failed", false], [false, "succeeded", false]]);
     } finally { await f.cleanup(); }
+  });
+  it("stops following a still that was given up, and stops waiting after the longest wait", async () => {
+    const f = await fixture();
+    f.provider.create.mockResolvedValue({ taskId: "task-5", status: "pending", progress: 0 });
+    f.provider.poll.mockResolvedValue({ status: "pending", progress: 10 });
+    // Another request gives the still up while its task is asked about.
+    f.deps.sleep.mockImplementationOnce(async () => { Object.assign(f.db.rows[0], { status: "failed", error: "given up" }); });
+    try {
+      await f.make();
+      expect(f.provider.poll).toHaveBeenCalledTimes(2);
+      expect(f.db.rows[0]).toMatchObject({ status: "failed", error: "given up" });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      f.deps.sleep.mockImplementation(async () => { vi.setSystemTime(Date.now() + 60_000); });
+      const { keyArt } = await f.make(true);
+      expect(keyArt).toMatchObject({ status: "failed", resumable: true, error: expect.stringContaining("超过 5 分钟") });
+      expect(f.provider.poll.mock.calls.length).toBeLessThan(10);
+    } finally { vi.useRealTimers(); await f.cleanup(); }
   });
   it("records a failure without resending, keeps an earlier still and hides the vendor text", async () => {
     const f = await fixture();

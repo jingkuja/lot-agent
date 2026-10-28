@@ -226,7 +226,13 @@ export interface MarketingKeyArt {
   /** The newest attempt was paid for and only its download or wait was cut short: trying again
    * fetches that result without a new image request. */
   resumable?: boolean;
+  /** How long the running still has been made, measured on the server so a refresh keeps the time. */
+  elapsedMs?: number;
 }
+/** A still usually takes up to this long; past it the studio asks for patience and a running still may be made again. */
+export const MARKETING_KEY_ART_PATIENCE_MS = 120_000;
+/** The longest wait for a still; a task still running then stops and can be fetched again without a new charge. */
+export const MARKETING_KEY_ART_LONGEST_MS = 300_000;
 /** Local checks of a composed video; no model is called. Times are seconds in the film. */
 export interface MarketingQualityIssue {
   kind: "silence" | "black" | "freeze";

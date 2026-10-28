@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type pg from "pg";
 import { fetchPublicBinary, isRealPersonRejection, type ImageGenerationProvider } from "@lot-agent/core";
-import { marketingKeyArtIssue, marketingReferenceImageIssue, type MarketingDraft, type MarketingKeyArt, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { MARKETING_KEY_ART_LONGEST_MS, MARKETING_KEY_ART_PATIENCE_MS, marketingKeyArtIssue, marketingReferenceImageIssue, type MarketingDraft,
+  type MarketingKeyArt, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { imageInfo, jpegOrientation, type ImageInfo } from "./image-size.js";
 import { ffmpeg, mediaProcess, ownedAssetPath } from "./media.js";
 import { marketingKeyArtPrompt, marketingKeyArtReferences } from "./prompt.js";
@@ -14,7 +15,7 @@ import { MarketingError } from "./repository.js";
  * touches its row, so only a lost one goes stale. */
 export const KEY_ART_STALE_MS = 300_000;
 /** The longest wait for one image task; its ID stays, so a later try asks again without paying. */
-export const KEY_ART_WAIT_MS = 600_000;
+export const KEY_ART_WAIT_MS = MARKETING_KEY_ART_LONGEST_MS;
 const POLL_MS = 3000;
 /** Long edge of a reference image sent with the request: a larger photo only adds bytes, and base64 adds a third. */
 export const KEY_ART_REFERENCE_EDGE = 1536;
@@ -47,16 +48,24 @@ export interface KeyArtDeps {
 type Row = {
   id: string; status: "running" | "succeeded" | "failed"; asset_id: string | null; updated_at: Date;
   vendor_task_id: string | null; result_url: string | null; resumable: boolean; error: string | null;
+  /** Milliseconds since the current try started; PG may return it as a string. */
+  elapsed_ms?: number | string | null;
 };
 /** Where a still stopped: before the paid request was answered, waiting for its task, or saving its image. */
 type Stage = "create" | "wait" | "save";
 /** A failure the image model confirmed; asking again would not change it. */
 class ConfirmedFailure extends Error {}
+/** The task did not finish within KEY_ART_WAIT_MS. */
+class TimedOut extends Error {}
+/** The user started another still instead; this one is no longer followed. */
+class Superseded extends Error {}
 
 const INTERRUPTED_PAID = "定妆图生成被中断，已保存原任务；点击「继续获取」查询原结果，不收费。";
 const INTERRUPTED_UNKNOWN = "定妆图生成被中断，结果未知；重新生成会再次产生费用。";
 const SAVE_RESUMABLE = "定妆图已生成，保存未完成；点击「继续获取」重新下载，不收费。";
 const WAIT_RESUMABLE = "定妆图暂时无法查询结果；点击「继续获取」查询原任务，不收费。";
+const WAIT_TIMEOUT = "定妆图超过 5 分钟仍未完成；可点击「继续获取」继续等待原任务，不收费，也可以重新生成或直接生成视频。";
+const SUPERSEDED = "已放弃这张定妆图，改为重新生成。";
 
 /** Key-art stills of a draft. Each still is one paid image request through the owner's key, written as an
  * intent row first and never resent automatically. The request runs in the background so a closed tab or a
@@ -67,7 +76,8 @@ export class MarketingKeyArtist {
   constructor(private readonly pool: pg.Pool, private readonly dataRoot: string, private readonly deps: KeyArtDeps) {}
 
   private async rows(owner: string, projectId: string, basis: string): Promise<Row[]> {
-    return (await this.pool.query<Row>(`SELECT id,status,asset_id,updated_at,vendor_task_id,result_url,resumable,error FROM marketing_video_key_arts
+    return (await this.pool.query<Row>(`SELECT id,status,asset_id,updated_at,vendor_task_id,result_url,resumable,error,
+        EXTRACT(EPOCH FROM now() - COALESCE(started_at, created_at)) * 1000 AS elapsed_ms FROM marketing_video_key_arts
       WHERE owner_id=$1 AND project_id=$2 AND basis=$3 ORDER BY updated_at DESC LIMIT 20`, [owner, projectId, basis])).rows;
   }
   /** The newest still made for this look, and whether another is being made. */
@@ -80,8 +90,10 @@ export class MarketingKeyArtist {
     const asset = succeeded?.asset_id ? await this.deps.getAsset(succeeded.asset_id) : undefined;
     const url = asset && asset.user_id === owner ? this.deps.sign(asset) : undefined;
     const failed = !running && newest?.status === "failed" ? newest : undefined;
+    const elapsed = running ? Number(rows.find(row => row.status === "running")?.elapsed_ms) : NaN;
     return { status: running ? "running" : url ? "succeeded" : tried ? "failed" : "missing", ...(url ? { url } : {}),
-      ...(failed?.error ? { error: failed.error } : {}), ...(failed?.resumable ? { resumable: true } : {}) };
+      ...(failed?.error ? { error: failed.error } : {}), ...(failed?.resumable ? { resumable: true } : {}),
+      ...(Number.isFinite(elapsed) ? { elapsedMs: Math.max(0, Math.round(elapsed)) } : {}) };
   }
   /** A still whose row was not touched for KEY_ART_STALE_MS was cut short. With a saved task ID or result it
    * is fetched again for free; without one it may have been charged, so it is only made again when asked. */
@@ -101,27 +113,39 @@ export class MarketingKeyArtist {
 
   /** Starts a still for the current look when there is none, or another one on `redo`, and returns at once
    * with `running`. A newest attempt that was paid for and cut short is fetched again instead, whatever
-   * `redo` says, so it is never paid for twice. A failure keeps an earlier still of the same look. */
+   * `redo` says, so it is never paid for twice. A failure keeps an earlier still of the same look.
+   * `redo` gives up a still running longer than MARKETING_KEY_ART_PATIENCE_MS for a new paid one. */
   async generate(owner: string, projectId: string, draft: MarketingDraft, profile: MarketingVideoProfile, redo: boolean): Promise<{ keyArt: MarketingKeyArt }> {
     const issue = marketingKeyArtIssue(draft, profile);
     if (issue) throw new MarketingError(issue === "video" ? "已选择动作参考视频，定妆图不参与生成。" : `定妆图占用 1 张参考图，当前视频模型合计最多 ${profile.referenceImages.total} 张，请先移除一张参考图。`, 409);
     const model = marketingKeyArtModel();
     const basis = keyArtBasis(draft, model);
     await this.expire(owner, projectId, basis);
-    const { running, tried, newest } = this.current(await this.rows(owner, projectId, basis));
-    if (running) return { keyArt: await this.status(owner, projectId, draft) };
-    if (newest?.status === "failed" && newest.resumable) {
+    const rows = await this.rows(owner, projectId, basis);
+    const { running, tried, newest } = this.current(rows);
+    const replaced = running && redo && await this.supersede(rows.find(row => row.status === "running")!.id);
+    if (running && !replaced) return { keyArt: await this.status(owner, projectId, draft) };
+    if (!replaced && newest?.status === "failed" && newest.resumable) {
       // Another request may claim the same look first; the unique running index refuses the second.
-      const claim = await this.pool.query(`UPDATE marketing_video_key_arts SET status='running',error=NULL,updated_at=now()
+      const claim = await this.pool.query(`UPDATE marketing_video_key_arts SET status='running',error=NULL,started_at=now(),updated_at=now()
         WHERE id=$1 AND status='failed' AND resumable RETURNING id`, [newest.id]).catch(uniqueViolation);
       if (claim?.rowCount) this.start(owner, projectId, draft, model, newest.id, newest);
-    } else if (redo || !tried) {
+    } else if (replaced || redo || !tried) {
       const id = randomUUID();
       const claim = await this.pool.query(`INSERT INTO marketing_video_key_arts(id,owner_id,project_id,basis,status) VALUES($1,$2,$3,$4,'running')
         ON CONFLICT (owner_id,project_id,basis) WHERE status='running' DO NOTHING RETURNING id`, [id, owner, projectId, basis]);
       if (claim.rowCount) this.start(owner, projectId, draft, model, id);
     }
     return { keyArt: await this.status(owner, projectId, draft) };
+  }
+
+  /** Gives up a still that has run past the patience time; false when it finished, failed or is younger meanwhile.
+   * Its task may still be charged; the work making it stops at its next status query. */
+  private async supersede(id: string) {
+    const result = await this.pool.query(`UPDATE marketing_video_key_arts SET status='failed',resumable=false,error=$2,updated_at=now()
+      WHERE id=$1 AND status='running' AND COALESCE(started_at, created_at) <= now() - $3::double precision * interval '1 millisecond' RETURNING id`,
+    [id, SUPERSEDED, MARKETING_KEY_ART_PATIENCE_MS]);
+    return !!result.rowCount;
   }
 
   /** Waits for the stills this process is making; for tests and shutdown. */
@@ -135,6 +159,7 @@ export class MarketingKeyArtist {
   /** Never rejects: every outcome is written to the row. */
   private async run(owner: string, projectId: string, draft: MarketingDraft, model: string, id: string, resume?: Row) {
     let stage: Stage = resume?.result_url ? "save" : resume?.vendor_task_id ? "wait" : "create";
+    const deadline = Date.now() + KEY_ART_WAIT_MS;
     try {
       let source = resume?.result_url ?? undefined;
       if (!source) {
@@ -147,7 +172,7 @@ export class MarketingKeyArtist {
           stage = "wait";
           await this.touch(id, ",vendor_task_id=$2", [taskId]);
         }
-        source = await this.wait(id, provider, taskId);
+        source = await this.wait(id, provider, taskId, deadline);
         // An image returned inline cannot fail to download, and is too large to keep in the row.
         if (!source.startsWith("data:")) await this.touch(id, ",result_url=$2", [source]);
       }
@@ -156,24 +181,25 @@ export class MarketingKeyArtist {
       await this.pool.query(`UPDATE marketing_video_key_arts SET status='succeeded',asset_id=$2,resumable=false,error=NULL,updated_at=now()
         WHERE id=$1 AND status='running'`, [id, assetId]);
     } catch (failure) {
+      if (failure instanceof Superseded) return;
       // One free retry: a second cut-short attempt of the same result may be an expired link or a lost task.
       const row = await this.pool.query<{ result_url: string | null }>("SELECT result_url FROM marketing_video_key_arts WHERE id=$1", [id]).catch(() => null);
       const resumable = !resume && !(failure instanceof ConfirmedFailure) && !(failure instanceof MarketingError)
         && (stage === "wait" || (stage === "save" && !!row?.rows[0]?.result_url));
-      const error = resumable ? (stage === "save" ? SAVE_RESUMABLE : WAIT_RESUMABLE) : this.message(projectId, failure);
+      const error = !resumable ? this.message(projectId, failure)
+        : stage === "save" ? SAVE_RESUMABLE : failure instanceof TimedOut ? WAIT_TIMEOUT : WAIT_RESUMABLE;
       await this.pool.query("UPDATE marketing_video_key_arts SET status='failed',resumable=$2,error=$3,updated_at=now() WHERE id=$1 AND status='running'",
         [id, resumable, error]).catch(() => console.warn("[marketing-video] key art state not saved", { projectId }));
     }
   }
 
-  /** Writes `set` on a still being made, which also keeps it from going stale. */
+  /** Writes `set` on a still being made, which also keeps it from going stale; false once it is no longer running. */
   private async touch(id: string, set = "", values: unknown[] = []) {
-    await this.pool.query(`UPDATE marketing_video_key_arts SET updated_at=now()${set} WHERE id=$1 AND status='running'`, [id, ...values]);
+    return !!(await this.pool.query(`UPDATE marketing_video_key_arts SET updated_at=now()${set} WHERE id=$1 AND status='running'`, [id, ...values])).rowCount;
   }
 
-  /** The image of a task, asked for until it is done; a slow task touches its row between queries. */
-  private async wait(id: string, provider: ImageGenerationProvider, taskId: string): Promise<string> {
-    const deadline = Date.now() + KEY_ART_WAIT_MS;
+  /** The image of a task, asked for until it is done or `deadline`; a slow task touches its row between queries. */
+  private async wait(id: string, provider: ImageGenerationProvider, taskId: string, deadline: number): Promise<string> {
     const sleep = this.deps.sleep ?? (ms => new Promise<void>(done => setTimeout(done, ms)));
     for (;;) {
       const result = await provider.poll(taskId);
@@ -186,8 +212,8 @@ export class MarketingKeyArtist {
         if (result.failureUnconfirmed) throw new Error("image task status unconfirmed");
         throw new ConfirmedFailure(result.error ?? "image generation failed");
       }
-      if (Date.now() > deadline) throw new Error("image task still running");
-      await this.touch(id);
+      if (Date.now() > deadline) throw new TimedOut("image task still running");
+      if (!await this.touch(id)) throw new Superseded();
       await sleep(POLL_MS);
     }
   }

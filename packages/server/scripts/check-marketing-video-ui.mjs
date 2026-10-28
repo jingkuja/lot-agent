@@ -218,8 +218,9 @@ try {
         // The server starts the still and answers at once; the studio polls until it is made.
         if (request.method() === 'POST') {
           const body = request.postDataJSON(); assert.equal(body.version, p.version);
-          keyArts.set(p.id, { status: 'running' });
-          return json({ version: p.version, keyArt: { status: 'running' } });
+          // Past the 2-minute patience time, so the panel asks for patience and offers a redo.
+          keyArts.set(p.id, { status: 'running', elapsedMs: 125_000 });
+          return json({ version: p.version, keyArt: { status: 'running', elapsedMs: 125_000 } });
         }
         const keyArt = keyArts.get(p.id) ?? { status: 'missing' };
         if (keyArt.status === 'running') { keyArtPolls++; keyArts.set(p.id, { status: 'succeeded', url: `data:image/png;base64,${png.toString('base64')}` }); }
@@ -366,7 +367,7 @@ try {
   const waitStatus = page.locator('.mv-dock .mv-wait');
   await waitStatus.getByText('正在生成文案和分镜…', { exact: true }).waitFor();
   assert.match(await waitStatus.innerText(), /已用时 0:0\d/);
-  assert.match(await waitStatus.innerText(), /最长需要 5 分钟/);
+  assert.match(await waitStatus.innerText(), /最长需要 8 分钟/);
   releaseCopy();
   await waitStatus.waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: '分镜总览', exact: true }).waitFor();
@@ -394,13 +395,13 @@ try {
   await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
   assert.equal(await page.locator('.mv-shot-overview li').count(), originalShotCount);
   assert.equal(await page.locator('.mv-storyboard-edit').evaluate(el => el.open), false);
-  await page.getByText('尚未检查，生成视频前会自动检查。', { exact: true }).waitFor();
+  await page.getByText('尚未检查，建议生成视频前先检查文案。', { exact: true }).waitFor();
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: '模型输出未完成，请重试；当前文案已保留。' }).waitFor();
   await page.getByRole('button', { name: '检查当前文案', exact: true }).click();
   await page.getByText('文案检查完成，未发现明显风险', { exact: true }).waitFor();
   assert.equal(await page.getByRole('region', { name: '文案与分镜检查' }).getByRole('status').textContent(), '文案检查完成，未发现明显风险');
-  assert.equal(await page.getByText('尚未检查，生成视频前会自动检查。', { exact: true }).count(), 0);
+  assert.equal(await page.getByText('尚未检查，建议生成视频前先检查文案。', { exact: true }).count(), 0);
   assert.equal(await page.getByText('文案检查完成', { exact: true }).count(), 0);
   await copyStep.click();
   assert.equal(await page.getByLabel('视频口播文案').inputValue(), script);
@@ -425,13 +426,17 @@ try {
   const keyArtPanel = page.getByRole('region', { name: '定妆图', exact: true });
   await keyArtPanel.getByRole('button', { name: '生成定妆图', exact: true }).click();
   // T05: made in the background; the panel follows it without a reload.
-  await keyArtPanel.getByText('正在生成定妆图，可以离开页面，完成后会自动显示。', { exact: true }).waitFor();
+  await keyArtPanel.getByText('复杂构图需要更多时间，最长约 5 分钟。', { exact: false }).waitFor();
+  assert.match(await keyArtPanel.locator('.mv-wait').innerText(), /已用时 2:0\d/);
+  assert.equal(await keyArtPanel.getByRole('button', { name: '重新生成', exact: true }).isDisabled(), false);
   await keyArtPanel.getByRole('img', { name: '定妆图' }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/key-art')).length, 1);
   assert.equal(keyArtPolls, 1, 'the still was polled, not requested again');
   await keyArtPanel.getByRole('button', { name: '换一张', exact: true }).waitFor();
   await page.getByRole('button', { name: '确认分镜并生成视频' }).click();
-  await page.locator('.mv-dock').getByRole('alert').filter({ hasText: '文案检查发现需要修改的内容' }).waitFor();
+  // A rejected check is not required: the user is asked, and keeping on it submits nothing.
+  await confirmDialog('文案检查未通过', '继续检查');
+  await page.locator('.mv-dock').getByRole('status').filter({ hasText: '请按「文案与分镜检查」中的提示修改文案' }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 0);
   // A rejected check keeps the user on the confirm step, next to the issues.
   // A fix only replaces the text; the check stays until the user runs it again.
@@ -676,13 +681,17 @@ try {
   await page.getByRole('heading', { name: '确认分镜', exact: true }).waitFor();
   await page.locator('.mv-generate:not([disabled])').waitFor();
   // U02: what generating does is listed above the button.
-  assert.deepEqual(await page.getByRole('list', { name: '生成前检查' }).getByRole('listitem').allInnerTexts(), ['已生成定妆图，各镜头共用这张参考图。', '生成前会自动检查文案。']);
+  const boardSec = [...projects.values()][0].draft.storyboard.reduce((sum, shot) => sum + (shot.durationSec ?? 15), 0);
+  assert.deepEqual(await page.getByRole('list', { name: '生成前检查' }).getByRole('listitem').allInnerTexts(),
+    ['已生成定妆图，各镜头共用这张参考图。', '尚未检查文案，生成前会询问是否先检查。', `预计消耗约 ${boardSec * 120} 积分（成片每秒约 120 积分）。`]);
   await voiceStep.click();
   assert.equal(await page.getByLabel('添加字幕', { exact: true }).isChecked(), true);
   assert.equal(await page.getByLabel('语气要求（可选）').inputValue(), '语气热情');
   await confirmStep.click();
   await page.locator('.mv-generate:not([disabled])').waitFor();
   await page.getByRole('button', { name: '确认分镜并生成视频' }).evaluate(button => { button.click(); button.click(); });
+  // Unchecked copy: the user chooses to check it first, and the video is generated once it passes.
+  await confirmDialog('尚未检查文案', '检查文案');
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 1);
   const p = [...projects.values()][0];
@@ -907,8 +916,13 @@ try {
   // The copied draft has no still yet: the one confirmation names it.
   await page.getByRole('dialog', { name: '确认生成视频？', exact: true }).getByText('未生成定妆图，各镜头只靠文字保持人物和场景一致。', { exact: false }).waitFor();
   await confirmDialog('确认生成视频？', '仍然生成');
+  // Its copy is not checked: generating directly skips the check before submitting.
+  const beforeDirect = writes.length;
+  await confirmDialog('尚未检查文案', '直接生成');
   await page.getByRole('heading', { name: '生成结果', exact: true }).waitFor();
   assert.equal(writes.filter(r => r.path.endsWith('/generate')).length, 2);
+  const directGenerate = writes.findLastIndex(r => r.path.endsWith('/generate'));
+  assert(!writes.slice(beforeDirect, directGenerate).some(r => r.path.endsWith('/review')), 'generating directly skips the copy check');
   await page.waitForFunction(() => [...document.querySelectorAll('input, textarea')].some(field => field.value === '手冲咖啡与惬意时光'));
   assert.equal(await page.getByLabel('视频发布标题').inputValue(), '手冲咖啡与惬意时光');
   const secondGenerate = writes.findLastIndex(r => r.path.endsWith('/generate'));

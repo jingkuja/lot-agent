@@ -713,8 +713,23 @@ try {
   await linked.generate(owner, looked.id, lostLook, KLING_MARKETING_PROFILE, false); await linked.settled();
   assert.equal((await linked.status(owner, looked.id, lostLook)).status, "succeeded");
   assert.equal(images, 3, "the saved task is asked again, not paid for again");
+  // A running still reports how long it has run; a redo gives it up only past the 2-minute patience time.
+  const slowLook = { ...looked.draft, continuity: "马尾店员，格子衬衫" };
+  const slowId = randomUUID();
+  await db.pool.query(`INSERT INTO marketing_video_key_arts(id,owner_id,project_id,basis,status,vendor_task_id,started_at)
+    VALUES($1,$2,$3,$4,'running','slow-task',now() - interval '30 seconds')`, [slowId, owner, looked.id, keyArtBasis(slowLook, marketingKeyArtModel())]);
+  const young = await artist.status(owner, looked.id, slowLook);
+  assert(young.status === "running" && young.elapsedMs! >= 30_000 && young.elapsedMs! < 60_000, "the running time comes from the server");
+  await artist.generate(owner, looked.id, slowLook, KLING_MARKETING_PROFILE, true); await artist.settled();
+  assert.equal(images, 3, "a young still is not given up");
+  await db.pool.query("UPDATE marketing_video_key_arts SET started_at=now() - interval '3 minutes' WHERE id=$1", [slowId]);
+  await artist.generate(owner, looked.id, slowLook, KLING_MARKETING_PROFILE, true); await artist.settled();
+  assert.equal(images, 4, "a redo past the patience time pays for a new still");
+  assert.equal((await artist.status(owner, looked.id, slowLook)).status, "succeeded");
+  assert.deepEqual((await db.pool.query("SELECT status,resumable FROM marketing_video_key_arts WHERE id=$1", [slowId])).rows[0],
+    { status: "failed", resumable: false });
   const removedStills = await store.remove(owner, looked.id);
-  assert.equal(removedStills.keyArtFiles.length, 4);
+  assert.equal(removedStills.keyArtFiles.length, 5);
   assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM marketing_video_key_arts WHERE project_id=$1", [looked.id])).rows[0].n, 0);
   assert.equal(await db.getAsset(still.id), null);
   // P08 / P07: the timing trigger sees the real run writes, and the admin views read them.
@@ -728,7 +743,7 @@ try {
   console.log(JSON.stringify({
     migrations: "upgrade and repeated startup passed",
     adminViews: { renders: metrics.renders.length, clips: metrics.clips.length, reconciliation: reconciliation.counts },
-    keyArt: "one paid still per look under concurrency, owner-scoped, redo only on request, removed with the draft",
+    keyArt: "one paid still per look under concurrency, owner-scoped, redo only on request or past the patience time, removed with the draft",
     twinNarration: "takes paid once per shot, owner-scoped, v4 job composed from them, removed with the draft",
     ownerRenderCap: "live entries only, owner-scoped",
     parentVoice: "single claim per parent and slot",

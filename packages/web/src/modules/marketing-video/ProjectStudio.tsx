@@ -51,12 +51,12 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [loadError, setLoadError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const library = useDraftLibrary(session, ready, e => setError(errorMessage(e)));
-  const [confirmDialog, confirm] = useConfirm();
+  const [confirmDialog, confirm, choose] = useConfirm();
   const editor = useDraftEditor({ ownerId, session, profile, onEdit: () => { setError(""); setNotice(""); }, onProject: p => library.put(p) });
   const wait = (label: string, textRequest = true) => setWorking({ label, started: Date.now(), textRequest });
   const text = useTextRequests({ editor, session, profile, ownerId, locale, t, confirm, wait, act, setError, setNotice });
   const materials = useStudioMaterials({ editor, session, profile, act, setError });
-  const production = useProduction({ editor, text, session, profile, ready, step, setStep, t, confirm, wait, setError, setNotice });
+  const production = useProduction({ editor, text, session, profile, ready, step, setStep, t, confirm, choose, wait, setError, setNotice });
   // A running analysis locks only its own draft: its result is written back to that draft by ID,
   // so other drafts may be opened or started meanwhile.
   const navigationBusy = exclusive.busy;
@@ -197,11 +197,12 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const referenceVideoStatus = profile.imagesWithReferenceVideo
     ? t("已选择动作参考视频：参考图片合计最多 {0} 张；不生成口播配音，音色设置不生效，可添加背景音乐。", [profile.imagesWithReferenceVideo])
     : t("已选择动作参考视频：参考图片不参与生成；不生成口播配音，音色设置不生效，可添加背景音乐。");
-  const keyArtMade = production.currentKeyArt?.status === "succeeded";
+  // While another still is made, the video would take the earlier one of this look.
+  const keyArtMade = !!production.currentKeyArt?.url;
   const blocker = generationBlocker({ ready, loadError, draft, profile, capabilities, materials: materials.materials, planError: plan.error,
     narration: production.currentNarration, keyArt: keyArtMade });
   const checks = generationChecks(draft, { keyArt: production.keyArtIssue || !production.currentKeyArt ? undefined : keyArtMade,
-    review: validReview ? project?.review?.verdict : undefined });
+    keyArtRunning: production.currentKeyArt?.status === "running", review: validReview ? project?.review?.verdict : undefined });
   const nextStep = (target: number) => { if (target && !draft.script.trim()) setError("请先填写或生成视频文案。"); else setStep(target); };
 
   const audioNotice = marketingStoryboardAudioMismatch(draft) && !frozen && <StoryboardAudioNotice video={!!draft.assets.video} busy={busy || !ready}
@@ -212,7 +213,7 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     {validReview
       ? <ReviewPanel key={project!.reviewedScript} review={project!.review!} draft={draft} busy={busy} onApply={applyReviewEdit} />
       : staleReview ? <ReviewPanel key="stale" stale review={staleReview} draft={draft} busy={busy} onApply={applyReviewEdit} />
-      : <p className="mv-hint" role="status">{t("尚未检查，生成视频前会自动检查。")}</p>}
+      : <p className="mv-hint" role="status">{t("尚未检查，建议生成视频前先检查文案。")}</p>}
   </section>;
   // Errors and progress stay next to the step buttons instead of the end of a long page.
   const status = <>

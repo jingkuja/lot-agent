@@ -150,7 +150,7 @@ describe("runMigrations", () => {
         [57, "marketing-clip-gateway-failures"], [58, "marketing-video-key-arts"], [59, "task-timing"],
         [60, "presenter-clip-gateway-failures"],
         [61, "marketing-background-requests"], [62, "marketing-private-outputs"], [63, "marketing-draft-snapshots"],
-        [64, "marketing-analysis-no-response"], [65, "marketing-analysis-submitted"]]);
+        [64, "marketing-analysis-no-response"], [65, "marketing-analysis-submitted"], [66, "marketing-key-art-started"]]);
     expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 

@@ -145,7 +145,7 @@
 .mv-checklist { display: grid; gap: 6px; margin: 16px 0 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); list-style: none; }
 .mv-checklist li { display: flex; align-items: baseline; gap: 8px; color: var(--text); font-size: 12px; line-height: 1.6; }
 .mv-checklist li::before { content: "✓"; flex: none; width: 14px; color: var(--success); font-weight: 700; }
-.mv-checklist li.auto::before { content: "•"; color: var(--text-secondary); }
+.mv-checklist li.auto::before, .mv-checklist li.info::before { content: "•"; color: var(--text-secondary); }
 .mv-checklist li.warn::before { content: "!"; color: var(--warning); }
 .mv-checklist li.block::before { content: "×"; color: var(--error); }
 

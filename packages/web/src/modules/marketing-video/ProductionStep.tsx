@@ -99,7 +99,7 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
 /** The checks generating will run or warn about, shown above the generate button. */
 function GenerationChecklist({ checks }: { checks: GenerationCheck[] }) {
   const { t } = useI18n();
-  return <ul className="mv-checklist" aria-label={t("生成前检查")}>{checks.map(check => <li key={check.text} className={check.state}>{t(check.text)}</li>)}</ul>;
+  return <ul className="mv-checklist" aria-label={t("生成前检查")}>{checks.map(check => <li key={check.text} className={check.state}>{t(check.text, check.values)}</li>)}</ul>;
 }
 
 /** Step 4: confirm the storyboard, its key-art still and narration takes, check the text, then generate. */

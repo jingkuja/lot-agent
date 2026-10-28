@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GROK_MARKETING_PROFILE, MarketingDraftSchema, storyboardScript } from "@lot-agent/core/marketing-video";
-import { generationBlocker, generationChecks, generationConfirmation, narrationBlocker, unusableMaterial } from "./production-checks.js";
+import { CREDITS_PER_SECOND, generationBlocker, generationChecks, generationConfirmation, narrationBlocker, reviewQuestion, unusableMaterial } from "./production-checks.js";
 
 const image = "11111111-1111-4111-8111-111111111111";
 const shots = [1, 2].map(() => ({ durationSec: 15, script: "欢迎来到转角咖啡店，现磨咖啡等你来。", visual: "咖啡店", action: "展示咖啡", camera: "中景" }));
@@ -49,13 +49,26 @@ describe("checks before generating", () => {
   it("lists what generating does, and asks once for everything that needs accepting", () => {
     const titled = MarketingDraftSchema.parse({ ...draft, publishTitle: "标题", tags: "#咖啡" });
     const ready = generationChecks(titled, { keyArt: true, review: "pass" });
-    expect(ready.map(check => check.state)).toEqual(["ok", "ok"]);
+    expect(ready.map(check => check.state)).toEqual(["ok", "ok", "info"]);
     expect(generationConfirmation(ready, text => text)).toBeUndefined();
-    // Not checked yet, no titles: both happen while generating, without a question.
-    expect(generationChecks(draft, { keyArt: true }).map(check => check.state)).toEqual(["ok", "auto", "auto"]);
-    expect(generationChecks(draft, { review: "reject" }).find(check => check.state === "block")?.text).toContain("请修改后再生成");
+    // The last line estimates the credits of the 30-second board.
+    expect(ready.at(-1)).toMatchObject({ text: "预计消耗约 {0} 积分（成片每秒约 {1} 积分）。", values: [30 * CREDITS_PER_SECOND, CREDITS_PER_SECOND] });
+    // Not checked yet, no titles: neither blocks; the copy check is offered when generating.
+    expect(generationChecks(draft, { keyArt: true }).map(check => check.state)).toEqual(["ok", "info", "auto", "info"]);
+    // Rejected copy may be generated anyway.
+    expect(generationChecks(draft, { review: "reject" }).some(check => check.state === "block")).toBe(false);
     // A check with findings to verify is shown, but does not ask.
     expect(confirmed(generationChecks(draft, { review: "suspect" }))).toEqual([]);
+  });
+  it("offers a copy check before generating unchecked or rejected copy, with generating directly as the other choice", () => {
+    expect(reviewQuestion("pass")).toBeUndefined();
+    expect(reviewQuestion("suspect")).toBeUndefined();
+    expect(reviewQuestion(undefined)).toMatchObject({ confirm: "检查文案", alternative: "直接生成" });
+    expect(reviewQuestion("reject")).toMatchObject({ confirm: "继续检查", alternative: "直接生成" });
+  });
+  it("asks before generating while a key-art still is being made", () => {
+    expect(confirmed(generationChecks(draft, { keyArt: false, keyArtRunning: true }))).toEqual(["定妆图还在生成，现在生成视频将不使用定妆图。"]);
+    expect(confirmed(generationChecks(draft, { keyArt: true, keyArtRunning: true }))).toEqual(["新的定妆图还在生成，现在生成视频将使用上一张定妆图。"]);
   });
   it("asks about a board planned for the other reference video setting and a missing key-art still in one dialog", () => {
     const silent = MarketingDraftSchema.parse({ ...draft, storyboardAudio: false });

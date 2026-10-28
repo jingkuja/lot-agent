@@ -3,8 +3,8 @@ import { fitMarketingNarration, marketingKeyArtIssue, marketingReferenceError, m
   type MarketingKeyArt, type MarketingNarrationClip, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { request } from "../../api/client.js";
 import { errorMessage, json, normalizeProject, requestProject, type Project } from "./api.js";
-import type { ConfirmRequest } from "./ConfirmDialog.js";
-import { CONFIRM_STEP, generationChecks, generationConfirmation } from "./production-checks.js";
+import type { ConfirmChoice, ConfirmRequest } from "./ConfirmDialog.js";
+import { CONFIRM_STEP, generationChecks, generationConfirmation, reviewQuestion } from "./production-checks.js";
 import { POLL_MAX_MS, POLL_MIN_MS, usePolling, useTaskPolling, type DraftSession } from "./session.js";
 import type { DraftEditor } from "./useDraftEditor.js";
 import type { TextRequests } from "./useTextRequests.js";
@@ -18,10 +18,10 @@ export const POLL_ERROR = "暂时无法查询进度，正在自动重试；无�
 
 /** Everything between a confirmed board and a made video: the twin narration takes and key-art
  * still the clips need, submitting the video or single shots again, and following its progress. */
-export function useProduction({ editor, text, session, profile, ready, step, setStep, t, confirm, wait, setError, setNotice }: {
+export function useProduction({ editor, text, session, profile, ready, step, setStep, t, confirm, choose, wait, setError, setNotice }: {
   editor: DraftEditor; text: TextRequests; session: DraftSession; profile: MarketingVideoProfile;
   ready: boolean; step: number; setStep(step: number): void; t: Translate;
-  confirm(request: ConfirmRequest): Promise<boolean>;
+  confirm(request: ConfirmRequest): Promise<boolean>; choose(request: ConfirmRequest): Promise<ConfirmChoice>;
   wait(label: string, textRequest?: boolean): void;
   setError: Dispatch<SetStateAction<string>>; setNotice(message: string): void;
 }) {
@@ -93,20 +93,31 @@ export function useProduction({ editor, text, session, profile, ready, step, set
     let p = await save();
     if (!retry) {
       let keyArtMade: boolean | undefined;
+      let keyArtRunning = false;
       if (!marketingKeyArtIssue(p.draft, profile)) {
         const { keyArt: still } = await request<{ keyArt: MarketingKeyArt }>(`/marketing-videos/${p.id}/key-art`);
-        if (still.status === "running") throw new Error("定妆图正在生成，完成后再生成视频。");
+        // A still being made is not waited for: the video takes an earlier still of this look, or none.
+        keyArtRunning = still.status === "running";
+        keyArtMade = !!still.url;
         // The still is one more reference image, with the same quality limit.
-        const keyArtError = still.status === "succeeded" ? marketingReferenceError(p.draft, profile, true) : "";
+        const keyArtError = keyArtMade ? marketingReferenceError(p.draft, profile, true) : "";
         if (keyArtError) throw new Error(keyArtError);
-        keyArtMade = still.status === "succeeded";
       }
       // Everything the checklist warns about is accepted in one confirmation.
-      const confirmation = generationConfirmation(generationChecks(p.draft, { keyArt: keyArtMade }), t);
+      const confirmation = generationConfirmation(generationChecks(p.draft, { keyArt: keyArtMade, keyArtRunning }), t);
       if (confirmation && !await confirm(confirmation)) return;
+      // Checking the copy is offered, not required: unchecked or rejected copy may be generated directly.
+      const verdict = p.review && p.reviewedScript === marketingReviewText(p.draft) ? p.review.verdict : undefined;
+      const question = reviewQuestion(verdict);
+      const choice = question ? await choose(question) : "alternative";
+      if (!choice) return;
+      if (choice === "confirm") {
+        if (verdict === "reject") { setNotice("请按「文案与分镜检查」中的提示修改文案，或再次生成视频时选择「直接生成」。"); return; }
+        await text.review();
+        p = projectRef.current!;
+        if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。");
+      }
     }
-    if (!retry && (!p.review || p.reviewedScript !== marketingReviewText(p.draft))) { await text.review(); p = projectRef.current!; }
-    if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再生成。");
     wait("正在提交生成任务", false);
     const result = await requestProject(`/marketing-videos/${p.id}/generate`, json("POST", { version: p.version, retry }));
     if (!session.alive) return;
@@ -176,7 +187,9 @@ export function useProduction({ editor, text, session, profile, ready, step, set
    * fetched again for free instead, so it asks for no confirmation. */
   async function makeKeyArt(redo: boolean) {
     const free = currentKeyArt?.resumable === true;
-    if (redo && !free && !await confirm({ title: "重新生成定妆图", message: "将重新生成一张定妆图，会再次产生费用。是否继续？", confirm: "重新生成" })) return;
+    const message = currentKeyArt?.status === "running" ? "将放弃正在生成的定妆图并重新生成一张，会再次产生费用。是否继续？"
+      : "将重新生成一张定妆图，会再次产生费用。是否继续？";
+    if (redo && !free && !await confirm({ title: "重新生成定妆图", message, confirm: "重新生成" })) return;
     const p = await save();
     wait(free ? "正在获取定妆图" : "正在提交定妆图生成", false);
     const result = await request<{ version: number; keyArt: MarketingKeyArt }>(`/marketing-videos/${p.id}/key-art`, json("POST", { version: p.version, redo: redo && !free }));
