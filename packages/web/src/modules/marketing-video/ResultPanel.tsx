@@ -1,6 +1,6 @@
-import { useRef, type ReactNode } from "react";
-import { marketingCaptionSrt, type MarketingCaption, type MarketingComposition, type MarketingNarrationClip, type MarketingProject, type MarketingQualityReport,
-  type MarketingShot } from "@lot-agent/core/marketing-video";
+import { useRef, useState, type ReactNode } from "react";
+import { marketingCaptionSrt, type MarketingCaption, type MarketingComposition, type MarketingNarrationClip, type MarketingProject,
+  type MarketingQualityReport, type MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { StoryboardEditor } from "./StoryboardEditor.js";
 import { ShotRevision } from "./ShotRevision.js";
@@ -8,12 +8,13 @@ import { TaskStatus } from "./TaskStatus.js";
 import { DraftText, MaterialField, type DraftForm, type MaterialHandlers } from "./StudioFields.js";
 import { NarrationSettings } from "./ProductionStep.js";
 import { CaptionSettings } from "./CaptionSettings.js";
-import { ResultVideo, type ResultPlayer } from "./CaptionPreview.js";
+import { CaptionPreviewModes, ResultVideo, type ResultPlayer } from "./CaptionPreview.js";
 import { CONFIRM_STEP } from "./production-checks.js";
 
 /** Settings only the local composition of a made video uses. Changing them composes the kept
  * clips again, without the video model. */
-function CompositionSettings({ form, composition, renderedSubtitles, captions, recompose, handlers, previewable, onPickNarrationVoice, onPlayShot }: {
+function CompositionSettings({ form, composition, renderedSubtitles, captions, recompose, handlers, previewable, previewModes, onPickNarrationVoice,
+  onPlayShot }: {
   form: DraftForm; composition: MarketingComposition; handlers: MaterialHandlers; onPickNarrationVoice(): void;
   /** Whether the kept clips were made for captions, with the bottom of the frame kept clear. */
   renderedSubtitles: boolean;
@@ -23,6 +24,8 @@ function CompositionSettings({ form, composition, renderedSubtitles, captions, r
   captions?: MarketingCaption[];
   /** False for a made video without a caption-free copy: caption changes cannot be watched before composing again. */
   previewable: boolean;
+  /** Switches the made video above between itself and the caption preview; absent when it has no preview. */
+  previewModes?: ReactNode;
   /** Plays one shot of the made video; absent until it is made. */
   onPlayShot?: (index: number) => void;
 }) {
@@ -40,6 +43,7 @@ function CompositionSettings({ form, composition, renderedSubtitles, captions, r
     <MaterialField form={open} slot="music" label="选择背景音乐（选填）" handlers={handlers} />
     {draft.assets.music && <label className="mv-field"><span>{t("背景音乐音量")}</span><input aria-label={t("背景音乐音量")} type="range" min="0" max="0.5" step="0.01" value={draft.musicVolume} disabled={busy} onChange={e => field("musicVolume", Number(e.target.value))} /></label>}
     {composition.localSubtitles && <label className="mv-checkbox"><input type="checkbox" checked={draft.subtitles} disabled={busy} onChange={e => field("subtitles", e.target.checked)} />{t("添加字幕")}</label>}
+    {composition.localSubtitles && previewModes}
     {composition.localSubtitles && draft.subtitles && !renderedSubtitles && <p className="mv-hint" role="note">{t("这条视频制作时没有开字幕，片段没有为字幕留出底部区域，字幕可能遮挡人脸或产品。重新合成后请检查；遮挡明显的镜头可在下方勾选「重新生成此镜」，会产生费用。")}</p>}
     {composition.localSubtitles && draft.subtitles && !previewable && <p className="mv-hint" role="note">
       {t("这条视频合成时没有保留无字幕版本，修改字幕后不能实时预览；重新合成成片后，再修改字幕即可实时预览。")}</p>}
@@ -87,18 +91,34 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
 }) {
   const { t } = useI18n();
   const { draft, busy } = form;
+  const section = useRef<HTMLElement>(null);
   const result = project.status === "succeeded" ? project.output?.assets?.[0] : undefined;
   const player = useRef<ResultPlayer>(null);
   const previewable = !!result && !!project.output?.preview && !!project.output.captionTiming?.length;
+  // The caption preview is chosen per made video; a new one starts on the video itself.
+  const resultKey = result && `${project.taskId}:${result.url}`;
+  const [previewed, setPreviewed] = useState<string>();
+  const previewing = !!resultKey && previewed === resultKey;
+  const onPreview = (next: boolean) => setPreviewed(next ? resultKey : undefined);
+  /** Choosing the caption preview asks to compose the video again, which calls no model and needs no change; once
+   * confirmed, its progress shows at the top of the results. Declined, or when it cannot be composed now, the preview
+   * is shown. */
+  const choosePreview = async (next: boolean, composeAgain?: () => Promise<boolean>) => {
+    if (!next || !composeAgain) { player.current?.showPreview(next); return; }
+    if (!await composeAgain()) { player.current?.showPreview(true, false); return; }
+    section.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    section.current?.focus({ preventScroll: true });
+  };
   const continuity = draft.continuity && <p className="mv-hint">{t("统一人物、产品与场景设定")}：{draft.continuity}</p>;
   const archived = project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库中的视频" : "保存视频到知识库";
-  return <section className="mv-card mv-results">
+  return <section ref={section} className="mv-card mv-results" tabIndex={-1}>
     <div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy || saving} onClick={() => onCopyDraft(0)}>{t("复制为新草稿")}</button></div>
     {result
-      ? <><ResultVideo key={`${project.taskId}:${result.url}`} url={result.url} output={project.output!} draft={draft} player={player}
+      ? <><ResultVideo key={resultKey} url={result.url} output={project.output!} draft={draft} player={player} previewing={previewing} onPreview={onPreview}
           rendered={project.revision?.composition.localSubtitles ? project.revision.draft : undefined} />
         <div className="mv-downloads"><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
-          {!!project.output?.captions?.length && <a className="mv-download" href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(project.output.captions))}`} download="captions.srt">{t("下载字幕（SRT）")}</a>}</div>
+          {!!project.output?.captions?.length && <a className="mv-download" download="captions.srt"
+            href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(project.output.captions))}`}>{t("下载字幕（SRT）")}</a>}</div>
         {project.output?.quality && <QualityReport quality={project.output.quality} redo={!!project.revision} />}</>
       : <><TaskStatus project={project} busy={busy} onResume={onResume} onCancel={onCancel} onCopy={onCopyDraft} onRelease={onRelease} />
         {project.previousResult && <section className="mv-previous-result" aria-label={t("上一版成片")}>
@@ -121,9 +141,11 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
     </div>
     <details className="mv-script-review" open><summary>{t(project.revision ? "修改成片" : "查看制作分镜")}</summary>
       {project.revision ? <ShotRevision key={project.taskId} project={project} revision={project.revision} draft={draft} busy={busy} saving={saving} reviewPanel={reviewPanel}
-          narration={narration} settings={recompose => <>
+          narration={narration} settings={(recompose, composeAgain) => <>
             <CompositionSettings form={form} composition={project.revision!.composition} renderedSubtitles={project.revision!.draft.subtitles}
               captions={project.output?.captions} recompose={recompose} handlers={handlers} previewable={!result || previewable}
+              previewModes={previewable && <CaptionPreviewModes preview={previewing} draft={draft} timing={project.output!.captionTiming!}
+                onChoose={next => void choosePreview(next, composeAgain)} />}
               onPickNarrationVoice={onPickNarrationVoice}
               onPlayShot={result ? index => player.current?.playShot(index) : undefined} />
             {continuity}

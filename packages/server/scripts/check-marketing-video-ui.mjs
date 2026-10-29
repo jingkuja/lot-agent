@@ -767,6 +767,7 @@ try {
   await page.reload(); await chooseAgent('营销影像');
   await page.locator('.mv-results video').waitFor();
   const composition = page.getByRole('group', { name: '成片设置', exact: true });
+  const revisionPanel = page.locator('.mv-script-review');
   // Locally burned captions: size, offsets and line breaks change, the words never do.
   const captionPanel = composition.getByRole('group', { name: '调整字幕', exact: true });
   // M08: a video composed before the caption-free copy existed says how to get a preview, and offers none.
@@ -782,7 +783,7 @@ try {
   // The caption panel has its own compose button next to the whole-video offset.
   const captionRecompose = captionPanel.getByRole('button', { name: '重新合成成片', exact: true });
   assert.equal(await captionRecompose.isDisabled(), true);
-  assert.equal(await page.getByRole('button', { name: '重新合成成片', exact: true }).last().isDisabled(), true);
+  assert.equal(await revisionPanel.getByRole('button', { name: '重新合成成片', exact: true }).last().isDisabled(), true);
   await firstCaption.fill(`${autoLines.slice(0, 2)}\n${autoLines.slice(2)}`);
   await captionPanel.getByLabel('本镜提前或延后（秒）').first().fill('-0.15');
   await captionPanel.getByRole('button', { name: '恢复自动断行', exact: true }).waitFor();
@@ -805,7 +806,8 @@ try {
   await page.locator('.mv-results video').waitFor();
   // M08: the recomposed video kept a caption-free copy; a caption change switches to it with the new captions drawn over it.
   const video = page.locator('.mv-results video.mv-result-video');
-  const previewMode = page.getByRole('button', { name: '预览字幕修改', exact: true });
+  // The preview toggle sits with the caption settings; choosing a mode brings the video into view and focus.
+  const previewMode = composition.getByRole('button', { name: '预览字幕修改', exact: true });
   await previewMode.waitFor();
   assert.equal(await composition.getByText('这条视频合成时没有保留无字幕版本', { exact: false }).count(), 0);
   assert.equal(await video.getAttribute('src'), '/static/fixture.mp4');
@@ -824,10 +826,18 @@ try {
     assert(caption.y > picture.y + picture.height / 2 && caption.y + caption.height < picture.y + picture.height, 'the caption sits in the lower half of the picture');
   }
   await video.scrollIntoViewIfNeeded(); await snap('marketing-video-caption-preview-zh-light.png');
-  await page.getByRole('button', { name: '原成片', exact: true }).click();
+  await composition.getByRole('button', { name: '原成片', exact: true }).click();
   assert.equal(await video.getAttribute('src'), '/static/fixture.mp4');
+  assert.equal(await video.evaluate(element => document.activeElement === element), true);
   assert.equal(await page.locator('.mv-caption-badge').count(), 0);
+  // Choosing the preview asks to compose the video again; declined, the preview is shown in place.
+  const revisesBeforePreview = writes.filter(r => r.path.endsWith('/revise')).length;
   await previewMode.click();
+  await page.getByRole('dialog', { name: '重新合成成片？', exact: true }).getByText('不调用视频模型', { exact: false }).waitFor();
+  await confirmDialog('重新合成成片？', '取消');
+  assert.equal(await previewMode.getAttribute('aria-pressed'), 'true');
+  assert.equal(await video.getAttribute('src'), '/static/fixture-preview.mp4');
+  assert.equal(writes.filter(r => r.path.endsWith('/revise')).length, revisesBeforePreview);
   if (!await captionPanel.locator('.mv-caption-shots').evaluate(el => el.open)) await captionPanel.getByText('逐镜调整断行和时间', { exact: true }).click();
   await captionPanel.getByRole('button', { name: '播放本镜', exact: true }).first().click();
   await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '大', exact: true }).click();
@@ -837,11 +847,22 @@ try {
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await snap('marketing-video-composition-zh-dark.png');
   await page.evaluate(() => document.documentElement.dataset.theme = 'light');
-  await page.getByRole('button', { name: '重新合成成片', exact: true }).click();
+  await revisionPanel.getByRole('button', { name: '重新合成成片', exact: true }).last().click();
   await confirmDialog('重新合成成片？', '重新合成');
   await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
   assert.deepEqual(writes.filter(r => r.path.endsWith('/revise')).at(-1).body.shots, []);
   assert.equal(projects.get(p.id).draft.subtitles, false);
+  taskState = 'succeeded';
+  await page.locator('.mv-results video').waitFor();
+  // With nothing changed, confirming composes the made video again and moves focus to its progress at the top.
+  const unchangedBefore = writes.length;
+  await previewMode.click();
+  await confirmDialog('重新合成成片？', '重新合成');
+  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
+  assert.equal(await page.locator('.mv-results').evaluate(element => document.activeElement === element), true);
+  const unchangedWrites = writes.slice(unchangedBefore);
+  assert.deepEqual(unchangedWrites.filter(r => r.path.endsWith('/revise')).map(r => r.body.shots), [[]]);
+  assert(!unchangedWrites.some(r => r.path.endsWith('/review')), 'composing the made video again as it is skips the copy check');
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
   await firstShot.getByLabel('分镜口播').fill('欢迎来到转角咖啡，坐下慢慢喝一杯。');
@@ -849,7 +870,7 @@ try {
   const keptRedo = firstShot.getByRole('checkbox', { name: /重新生成此镜/ });
   assert.equal(await keptRedo.isChecked(), false); assert.equal(await keptRedo.isDisabled(), false);
   await firstShot.scrollIntoViewIfNeeded(); await snap('marketing-video-recompose-zh-light.png');
-  await page.getByRole('button', { name: '重新合成成片', exact: true }).click();
+  await revisionPanel.getByRole('button', { name: '重新合成成片', exact: true }).last().click();
   await page.getByRole('dialog', { name: '重新合成成片？', exact: true }).getByText('1 个镜头的配音需要重新合成', { exact: false }).waitFor();
   const revisesBefore = writes.filter(r => r.path.endsWith('/revise')).length;
   await confirmDialog('重新合成成片？', '重新合成');
@@ -875,7 +896,7 @@ try {
   const failingLine = '欢迎来到转角咖啡，今天也来坐一坐。';
   failingTakes.add(`${p.id}:${failingLine}`);
   await firstShot.getByLabel('分镜口播').fill(failingLine);
-  await page.getByRole('button', { name: '重新合成成片', exact: true }).click();
+  await revisionPanel.getByRole('button', { name: '重新合成成片', exact: true }).last().click();
   await confirmDialog('重新合成成片？', '重新合成');
   const failedNotice = page.getByRole('alert').filter({ hasText: '第 1 镜配音合成失败：配音合成失败，请稍后重新生成该镜配音。' });
   await failedNotice.waitFor({ timeout: 20000 });

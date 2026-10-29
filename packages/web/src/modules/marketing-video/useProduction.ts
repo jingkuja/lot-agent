@@ -1,6 +1,6 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { fitMarketingNarration, marketingKeyArtIssue, marketingReferenceError, marketingReviewText, marketingVoiceover, resolveMarketingSegments,
-  type MarketingKeyArt, type MarketingNarrationClip, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { fitMarketingNarration, marketingKeyArtIssue, marketingReferenceError, marketingRenderKey, marketingReviewText, marketingVoiceover,
+  resolveMarketingSegments, type MarketingKeyArt, type MarketingNarrationClip, type MarketingTaskState, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { request } from "../../api/client.js";
 import { errorMessage, json, normalizeProject, requestProject, type Project } from "./api.js";
 import type { ConfirmChoice, ConfirmRequest } from "./ConfirmDialog.js";
@@ -138,8 +138,10 @@ export function useProduction({ editor, text, session, profile, ready, step, set
    * again only for the shots in `narrationRedo`, which the user confirmed, and only with the first request. */
   async function revise(shots: number[], narrationRedo: number[] = []) {
     let p = await save();
-    if (!p.review || p.reviewedScript !== marketingReviewText(p.draft)) { await text.review(); p = projectRef.current!; }
-    if (p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再重新生成。");
+    // Composing the made draft again unchanged calls no model, so its text is not checked again.
+    const unchanged = !shots.length && !!p.revision && marketingRenderKey(p.draft) === marketingRenderKey(p.revision.draft);
+    if (!unchanged && (!p.review || p.reviewedScript !== marketingReviewText(p.draft))) { await text.review(); p = projectRef.current!; }
+    if (!unchanged && p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再重新生成。");
     for (let redo = narrationRedo; ; redo = []) {
       wait("正在提交生成任务", false);
       const body = { version: p.version, shots, ...(redo.length ? { narrationRedo: redo } : {}) };

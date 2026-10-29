@@ -13,8 +13,10 @@ export function ShotRevision({ project, revision, draft, busy, saving, reviewPan
   busy: boolean; saving: boolean; reviewPanel: ReactNode;
   /** Twin narration takes of the saved draft, for a narrated video; null until loaded. */
   narration: MarketingNarrationClip[] | null;
-  /** Composition settings shown above the shots, given a button that only composes again. */
-  settings(recompose: ReactNode): ReactNode;
+  /** Composition settings shown above the shots, given a button that composes again once something changed, and,
+   * for a made video that can be composed now, a confirmed composition even with nothing changed; it resolves true
+   * once submitted. */
+  settings(recompose: ReactNode, composeAgain?: () => Promise<boolean>): ReactNode;
   onChange(shots: MarketingShot[]): void; onRevert(): void;
   /** `narrationRedo`: shots whose failed take the user chose to make again. */
   onRevise(shots: number[], narrationRedo?: number[]): void;
@@ -60,15 +62,18 @@ export function ShotRevision({ project, revision, draft, busy, saving, reviewPan
     const message = [shots.length ? "将重新生成第 {0} 镜，共 {1} 秒，会产生费用；其余 {2} 个镜头沿用已生成的片段，不收费。" : "将沿用全部已生成的片段重新合成成片，不调用视频模型。",
       takes ? "{3} 个镜头的配音需要重新合成，会产生费用。" : "", made ? "新成片完成后会替换当前成片；在此之前，当前成片仍可在「上一版成片」中查看和下载。" : ""].filter(Boolean).map(part => t(part)).join(locale === "zh" ? "" : " ");
     if (await confirm({ title: shots.length ? "重新生成镜头？" : "重新合成成片？", confirm: shots.length ? "重新生成" : "重新合成", message,
-      values: [shotList(shots), seconds, rendered.length - shots.length, takes] })) onRevise(shots);
+      values: [shotList(shots), seconds, rendered.length - shots.length, takes] })) { onRevise(shots); return true; }
+    return false;
   };
   // Beside the caption settings, so a caption change needs no scrolling; shot redos stay below.
   const recompose = <>
     <button className="mv-primary" disabled={busy || saving || !changed || !!planError || !!shots.length} onClick={() => void submit()}>{t("重新合成成片")}</button>
     {!!shots.length && <p className="mv-hint">{t("已选择要重新生成的镜头，请在下方分镜处提交。")}</p>}
   </>;
+  // Composing the kept clips calls no video model, so a made video can be composed again without a change.
+  const composeAgain = made && !busy && !saving && !planError && !shots.length ? submit : undefined;
   return <>
-    {settings(recompose)}
+    {settings(recompose, composeAgain)}
     <StoryboardEditor shots={draft.storyboard} busy={busy} onChange={onChange} redo={{ selected, reasons, notes, onToggle: toggle, clips: revision.clips }} />
     {!made && edited && <p className="mv-hint">{t("「继续生成」按原分镜制作；要使用修改后的镜头，请点击下方的重新生成。")}</p>}
     {(edited || reviewIssue) && reviewPanel}
