@@ -269,14 +269,30 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     // Shots whose failed narration take the user chose to make again.
     const narrationRedo: unknown[] = body?.narrationRedo ?? [];
     const slots = (list: unknown[]) => Array.isArray(list) && list.length <= 15 && list.every(Number.isInteger) && new Set(list).size === list.length;
-    if (!Number.isInteger(body?.version) || !Array.isArray(body?.shots) || !slots(shots) || !slots(narrationRedo)) {
+    // A preview composes a new video beside the made one, kept or discarded later.
+    if (!Number.isInteger(body?.version) || !Array.isArray(body?.shots) || !slots(shots) || !slots(narrationRedo)
+      || (body.preview !== undefined && typeof body.preview !== "boolean")) {
       throw new MarketingError("重新生成参数无效");
     }
-    const request = { version: body.version, shots: shots as number[], narrationRedo: narrationRedo as number[] };
+    const request = { version: body.version, shots: shots as number[], narrationRedo: narrationRedo as number[], ...(body.preview ? { preview: true } : {}) };
     const result = await production.revise(owner, p, request, c.req.raw.signal, started);
     if ("narration" in result) return c.json({ narrationPending: true, clips: result.narration }, 202);
     return "quota" in result ? c.json(result.quota, 402) : c.json(result.project, 202);
   });
+  // Keeping a preview removes the made video it replaces; discarding it returns the draft to that video.
+  for (const [action, settle] of [["keep", store.keepPreview], ["discard", store.discardPreview]] as const) {
+    app.post(`/:id/preview/${action}`, async (c) => {
+      const owner = c.get("userId"); const p = await requireProject(owner, c.req.param("id"));
+      const files = await settle.call(store, owner, p.id);
+      const folder = resolve(dataRoot, "assets");
+      const results = await Promise.allSettled(files.map(async key => {
+        const path = resolve(folder, key);
+        if (path.startsWith(folder + sep)) await rm(path, { force: true });
+      }));
+      if (results.some(result => result.status === "rejected")) console.warn("[marketing-video] preview files not removed", { projectId: p.id, action });
+      return c.json(await store.get(owner, p.id));
+    });
+  }
   app.post("/:id/archive", async (c) => {
     if (process.env.KNOWLEDGE_MANAGEMENT_ENABLED !== "1") throw new MarketingError("知识库尚未启用。", 503);
     return c.json(await archiveMarketingVideo(store, c.get("userId"), c.req.param("id"), dataRoot));

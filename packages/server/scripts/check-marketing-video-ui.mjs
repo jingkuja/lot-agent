@@ -151,7 +151,7 @@ try {
       return json({ project: p, analysis: '开场介绍店铺，展示卖点，邀请到店。' });
     }
     if (path.startsWith('/api/marketing-videos/')) {
-      const [, , , id, action] = path.split('/');
+      const [, , , id, action, step] = path.split('/');
       if (request.method() === 'PUT') {
         if (holdNextSave) { holdNextSave = false; await new Promise(resolve => { releaseSave = resolve; }); }
         const body = request.postDataJSON(), old = projects.get(id);
@@ -240,8 +240,11 @@ try {
           for (const key of keys) if (!narrationTakes.has(key)) backgroundTakes.add(key);
           if (keys.some(key => backgroundTakes.has(key))) return json({ narrationPending: true, clips: narrationClips(p) }, 202);
         }
+        // A preview composes beside the made video, which stays until the preview is kept or discarded.
+        if (body.preview) { assert.deepEqual(body.shots, []); p.previewBase = { taskId: 'made-task', url: '/static/fixture.mp4' }; }
         taskState = 'running'; p.status = taskState; p.progress = 35; p.stage = '片段完成 1/2'; p.rendered = structuredClone(p.draft); return json(p);
       }
+      if (action === 'preview') { assert(['keep', 'discard'].includes(step) && p.previewBase); delete p.previewBase; taskState = 'succeeded'; }
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
       if (p.taskId) {
         p.status = taskState;
@@ -830,14 +833,6 @@ try {
   assert.equal(await video.getAttribute('src'), '/static/fixture.mp4');
   assert.equal(await video.evaluate(element => document.activeElement === element), true);
   assert.equal(await page.locator('.mv-caption-badge').count(), 0);
-  // Choosing the preview asks to compose the video again; declined, the preview is shown in place.
-  const revisesBeforePreview = writes.filter(r => r.path.endsWith('/revise')).length;
-  await previewMode.click();
-  await page.getByRole('dialog', { name: '重新合成成片？', exact: true }).getByText('不调用视频模型', { exact: false }).waitFor();
-  await confirmDialog('重新合成成片？', '取消');
-  assert.equal(await previewMode.getAttribute('aria-pressed'), 'true');
-  assert.equal(await video.getAttribute('src'), '/static/fixture-preview.mp4');
-  assert.equal(writes.filter(r => r.path.endsWith('/revise')).length, revisesBeforePreview);
   if (!await captionPanel.locator('.mv-caption-shots').evaluate(el => el.open)) await captionPanel.getByText('逐镜调整断行和时间', { exact: true }).click();
   await captionPanel.getByRole('button', { name: '播放本镜', exact: true }).first().click();
   await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '大', exact: true }).click();
@@ -854,17 +849,34 @@ try {
   assert.equal(projects.get(p.id).draft.subtitles, false);
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
-  // With nothing changed, confirming composes the made video again and moves focus to its progress at the top.
+  // Choosing the preview composes a preview video beside the made one, even with nothing changed and without a
+  // confirmation or a copy check; its progress shows at the top while the made video stays as it is.
   const unchangedBefore = writes.length;
   await previewMode.click();
-  await confirmDialog('重新合成成片？', '重新合成');
   await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
   assert.equal(await page.locator('.mv-results').evaluate(element => document.activeElement === element), true);
   const unchangedWrites = writes.slice(unchangedBefore);
-  assert.deepEqual(unchangedWrites.filter(r => r.path.endsWith('/revise')).map(r => r.body.shots), [[]]);
-  assert(!unchangedWrites.some(r => r.path.endsWith('/review')), 'composing the made video again as it is skips the copy check');
+  assert.deepEqual(unchangedWrites.filter(r => r.path.endsWith('/revise')).map(r => [r.body.shots, r.body.preview]), [[[], true]]);
+  assert(!unchangedWrites.some(r => r.path.endsWith('/review')), 'a preview of the made video as it is skips the copy check');
+  const original = page.getByRole('region', { name: '原成片', exact: true });
+  await original.getByText('预览成片完成前，原成片保持不变。', { exact: true }).waitFor();
+  assert.equal(await original.getByRole('button', { name: '放弃预览', exact: true }).count(), 0, 'a running preview is cancelled, not discarded');
   taskState = 'succeeded';
-  await page.locator('.mv-results video').waitFor();
+  const decision = page.getByRole('group', { name: '预览成片', exact: true });
+  await decision.getByRole('button', { name: '替换原成片', exact: true }).waitFor();
+  await decision.scrollIntoViewIfNeeded(); await snap('marketing-video-preview-decision-zh-light.png');
+  // Discarding returns to the made video and to the settings the preview tried.
+  await decision.getByRole('button', { name: '放弃预览', exact: true }).click();
+  await decision.waitFor({ state: 'detached' });
+  assert.equal(writes.at(-1).path.endsWith('/preview/discard'), true);
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '成片设置');
+  // Kept, the preview replaces the made video.
+  await previewMode.click();
+  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
+  taskState = 'succeeded';
+  await decision.getByRole('button', { name: '替换原成片', exact: true }).click();
+  await decision.waitFor({ state: 'detached' });
+  assert.equal(writes.at(-1).path.endsWith('/preview/keep'), true);
   await firstShot.getByLabel('分镜口播').fill('欢迎来到转角咖啡，坐下慢慢喝一杯。');
   await firstShot.getByText('口播已修改，保留画面，只更新配音和字幕', { exact: true }).waitFor();
   const keptRedo = firstShot.getByRole('checkbox', { name: /重新生成此镜/ });

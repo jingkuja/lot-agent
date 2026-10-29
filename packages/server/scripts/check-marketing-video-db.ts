@@ -119,9 +119,7 @@ try {
   assert.equal(await store.get(other, p.id), null);
   await assert.rejects(store.save(other, p.id, p.version, draft));
   await assert.rejects(store.save(owner, p.id, 0, draft), /其他页面/);
-  await assert.rejects(store.reserve(owner, p.id, p.version, {}, false), /文案检查/);
-  p = await store.setReview(owner, p, { verdict: "reject", issues: [] });
-  await assert.rejects(store.reserve(owner, p.id, p.version, {}, false), /文案检查/);
+  // The copy check is optional since generating unchecked copy became the user's choice.
   p = await store.setReview(owner, p, { verdict: "pass", issues: [] });
   const ids = await Promise.all([store.reserve(owner, p.id, p.version, {}, false), store.reserve(owner, p.id, p.version, {}, false)]);
   assert.equal(ids[0], ids[1]); assert.equal((await store.segments(owner, p.id)).length, 2);
@@ -209,7 +207,6 @@ try {
   await assert.rejects(store.save(owner, made.id, made.version, { ...made.draft, storyboard: made.draft.storyboard.map(shot => ({ ...shot, durationSec: shot.durationSec - 1 })) }), /只能修改分镜/);
   made = await store.save(owner, made.id, made.version, { ...made.draft, storyboard: made.draft.storyboard.map((shot, i) => i === 1 ? { ...shot, visual: "人物在窗边喝咖啡" } : shot) });
   assert.equal(made.review, null, "an edited shot needs a new text check");
-  await assert.rejects(store.revise(owner, made.id, made.version, firstJob, [1]), /文案检查/);
   made = await store.setReview(owner, made, { verdict: "pass", issues: [] });
   await assert.rejects(store.revise(owner, made.id, made.version, firstJob, [0]), /重新选择/, "an edited shot is never kept");
   await assert.rejects(store.revise(other, made.id, made.version, firstJob, [1]), /不存在/);
@@ -251,9 +248,37 @@ try {
   assert.equal(creates, before, "composing again submits no clip");
   assert.deepEqual(await charges(), chargedBeforeRecompose);
   assert((await store.segments(owner, made.id)).every(segment => segment.output.reusedFrom));
+  // A preview composes beside the made video, even unchanged; the made video stays until the preview is kept or discarded.
+  const finalOf = async (taskId: string) => (await db.pool.query("SELECT 1 FROM assets WHERE task_id=$1 AND type='video'", [taskId])).rowCount;
+  made = (await store.get(owner, made.id))!;
+  const discardedJob = await store.revise(owner, made.id, made.version, fourthJob, [], {}, true);
+  assert.equal((await db.getTask(discardedJob))?.input.previewOf, fourthJob);
+  made = (await store.get(owner, made.id))!;
+  assert.equal(made.previewBase?.taskId, fourthJob); assert.equal(made.previousResult, undefined);
+  await assert.rejects(store.discardPreview(owner, made.id), /正在生成/);
+  await assert.rejects(store.keepPreview(owner, made.id), /尚未完成/);
+  await run(discardedJob);
+  assert.equal(creates, before, "a preview submits no clip");
+  // Another job while the preview waits previews the same made video.
+  made = (await store.get(owner, made.id))!;
+  const supersededJob = await store.revise(owner, made.id, made.version, discardedJob, [], {}, true);
+  assert.equal((await db.getTask(supersededJob))?.input.previewOf, fourthJob);
+  await run(supersededJob);
+  assert.equal((await store.discardPreview(owner, made.id)).length, 2, "both previews' final videos are removed");
+  made = (await store.get(owner, made.id))!;
+  assert.equal(made.taskId, fourthJob); assert.equal(made.previewBase, undefined); assert.equal(made.status, "succeeded"); assert(made.revision);
+  assert.equal(await finalOf(fourthJob), 1); assert.equal(await finalOf(discardedJob), 0);
+  await assert.rejects(store.keepPreview(owner, made.id), /没有待确认/);
+  const keptJob = await store.revise(owner, made.id, made.version, fourthJob, [], {}, true);
+  await run(keptJob);
+  assert.equal((await store.keepPreview(owner, made.id)).length, 1, "the replaced video is removed");
+  made = (await store.get(owner, made.id))!;
+  assert.equal(made.taskId, keptJob); assert.equal(made.previewBase, undefined); assert.equal(await finalOf(fourthJob), 0);
+  assert.equal((await store.get(owner, made.id))!.previousResult, undefined);
+  const jobs = [firstJob, secondJob, thirdJob, fourthJob, discardedJob, supersededJob, keptJob];
   const madeFiles = (await db.pool.query(`SELECT size_bytes FROM assets WHERE user_id=$1 AND type='video' AND task_id IN (
-    SELECT id FROM tasks WHERE id=ANY($2::uuid[]) OR input->>'parentId'=ANY($3::text[]))`, [owner, [firstJob, secondJob, thirdJob, fourthJob], [firstJob, secondJob, thirdJob, fourthJob]])).rows;
-  assert.equal(madeFiles.length, 8, "four final videos, two first clips and two redone clips");
+    SELECT id FROM tasks WHERE id=ANY($2::uuid[]) OR input->>'parentId'=ANY($3::text[]))`, [owner, jobs, jobs])).rows;
+  assert.equal(madeFiles.length, 8, "four kept final videos, two first clips and two redone clips");
   const usageBeforeRevisionDelete = await store.usage(owner);
   const removedRevision = await store.remove(owner, made.id);
   assert.equal(removedRevision.files.length, 8);
@@ -289,7 +314,7 @@ try {
   await ops.fail(owner, afterCancelled, false);
   const staleOp = randomUUID();
   assert.equal((await ops.begin(owner, staleOp, textProject.id, textProject.version, "copy", { n: 2 })).fresh, true);
-  await db.pool.query("UPDATE marketing_text_operations SET created_at=now()-interval '7 minutes' WHERE id=$1", [staleOp]);
+  await db.pool.query("UPDATE marketing_text_operations SET created_at=now()-interval '10 minutes' WHERE id=$1", [staleOp]);
   assert.equal((await ops.release(owner, textProject.id, staleOp)).status, "released", "a running row older than the request deadline has no live request");
   const receivedOp = randomUUID();
   await ops.begin(owner, receivedOp, textProject.id, textProject.version, "copy", { n: 3 });

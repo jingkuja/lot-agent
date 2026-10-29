@@ -93,7 +93,7 @@ export class MarketingProduction {
    * A twin-narrated video whose changed shots need new takes starts them in the background and returns
    * `narration`: no paid request is held by the HTTP request, and the next try reuses every take.
    * A failed take is made again only when the user confirmed it, by naming its shot in `narrationRedo`. */
-  async revise(owner: string, p: MarketingProject, request: { version: number; shots: number[]; narrationRedo?: number[] },
+  async revise(owner: string, p: MarketingProject, request: { version: number; shots: number[]; narrationRedo?: number[]; preview?: boolean },
     signal: AbortSignal, started = Date.now()): Promise<MarketingProductionResult> {
     // Stage times of this request, logged once at the end (P13: one acceptance run took 48.6 s).
     const stages: Record<string, number> = {};
@@ -150,7 +150,7 @@ export class MarketingProduction {
       if (failed) throw new MarketingError(failed.error!, 409);
       narration = await this.deps.narrator.frozen(owner, p.id, p.draft, plan);
     }
-    const taskId = await this.deps.store.revise(owner, p.id, request.version, p.taskId, redo, narration ? { narration } : {});
+    const taskId = await this.deps.store.revise(owner, p.id, request.version, p.taskId, redo, narration ? { narration } : {}, request.preview === true);
     lap("save");
     await this.deliver(taskId);
     lap("deliver");

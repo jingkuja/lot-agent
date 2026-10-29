@@ -260,6 +260,12 @@
 .mv-previous-result { display: grid; gap: 8px; margin: 14px 0 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
 .mv-previous-result h3 { margin: 0; font-size: 14px; color: var(--text); }
 .mv-previous-result .mv-downloads { margin: 0; }
+.mv-previous-result .mv-choices { margin: 0; }
+.mv-preview-decision { display: grid; gap: 8px; margin: 14px 0 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 5%, var(--bg-card)); }
+.mv-preview-decision .mv-hint, .mv-preview-decision .mv-choices { margin: 0; }
+.mv-preview-decision summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.mv-preview-decision details .mv-result-video { margin-top: 8px; }
+.mv-composition:focus { outline: none; }
 .mv-progress .mv-task-details { width: 100%; margin: 0; padding: 8px 12px; background: var(--bg-card); }
 .mv-task-details p { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; user-select: text; }
 

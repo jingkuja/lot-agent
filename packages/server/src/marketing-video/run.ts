@@ -19,12 +19,14 @@ const UNKNOWN = UNKNOWN_SUBMISSION;
 /** Storage key ending of a made video's caption-free copy, used only to preview caption changes. */
 const PREVIEW_SUFFIX = "-preview.mp4";
 /** Only the newest caption-free copy of a draft is kept: earlier jobs' copies are removed once a new
- * one is stored. A failure only leaves bytes behind; the made video is not affected. */
-async function removeEarlierPreviews(deps: MarketingRunDeps, owner: string, projectId: string, jobId: string) {
+ * one is stored, except the copy of the made video a preview job may replace (`keep`). A failure only
+ * leaves bytes behind; the made video is not affected. */
+async function removeEarlierPreviews(deps: MarketingRunDeps, owner: string, projectId: string, jobId: string, keep?: string) {
   try {
     const { rows } = await deps.db.pool.query(`DELETE FROM assets a USING tasks t WHERE a.task_id=t.id AND a.user_id=$1 AND a.type='video'
-      AND a.storage_key LIKE $4 AND t.type='marketing.video' AND t.user_id=$1 AND t.input->>'projectId'=$2 AND t.id<>$3 RETURNING a.storage_key`,
-      [owner, projectId, jobId, `%${PREVIEW_SUFFIX}`]);
+      AND a.storage_key LIKE $4 AND t.type='marketing.video' AND t.user_id=$1 AND t.input->>'projectId'=$2 AND t.id<>$3
+      AND t.id::text IS DISTINCT FROM $5 RETURNING a.storage_key`,
+      [owner, projectId, jobId, `%${PREVIEW_SUFFIX}`, keep ?? null]);
     const folder = resolve(deps.dataRoot, "assets");
     await Promise.all(rows.map(async row => {
       const path = resolve(folder, row.storage_key);
@@ -309,7 +311,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
         await assetConnection.query("COMMIT");
       } catch (error) { await assetConnection.query("ROLLBACK"); throw error; }
       finally { assetConnection.release(); }
-      if (preview) await removeEarlierPreviews(deps, job.userId, project.id, job.id);
+      if (preview) await removeEarlierPreviews(deps, job.userId, project.id, job.id, typeof job.input.previewOf === "string" ? job.input.previewOf : undefined);
       return output;
     } catch (error) {
       if (error instanceof JobCancelledError || error instanceof MarketingRunError) throw error;

@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { marketingCaptionSrt, type MarketingCaption, type MarketingComposition, type MarketingNarrationClip, type MarketingProject,
   type MarketingQualityReport, type MarketingShot } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
@@ -13,7 +13,7 @@ import { CONFIRM_STEP } from "./production-checks.js";
 
 /** Settings only the local composition of a made video uses. Changing them composes the kept
  * clips again, without the video model. */
-function CompositionSettings({ form, composition, renderedSubtitles, captions, recompose, handlers, previewable, previewModes, onPickNarrationVoice,
+function CompositionSettings({ form, composition, renderedSubtitles, captions, recompose, handlers, previewable, previewModes, anchor, onPickNarrationVoice,
   onPlayShot }: {
   form: DraftForm; composition: MarketingComposition; handlers: MaterialHandlers; onPickNarrationVoice(): void;
   /** Whether the kept clips were made for captions, with the bottom of the frame kept clear. */
@@ -26,6 +26,8 @@ function CompositionSettings({ form, composition, renderedSubtitles, captions, r
   previewable: boolean;
   /** Switches the made video above between itself and the caption preview; absent when it has no preview. */
   previewModes?: ReactNode;
+  /** Focused when the user comes back to these settings, after discarding a preview. */
+  anchor: RefObject<HTMLDivElement | null>;
   /** Plays one shot of the made video; absent until it is made. */
   onPlayShot?: (index: number) => void;
 }) {
@@ -33,7 +35,7 @@ function CompositionSettings({ form, composition, renderedSubtitles, captions, r
   // The video's other settings stay frozen; the server accepts only these and shot text.
   const open: DraftForm = { ...form, frozen: false };
   const { draft, busy, field } = open;
-  return <div className="mv-composition" role="group" aria-label={t("成片设置")}>
+  return <div ref={anchor} className="mv-composition" role="group" aria-label={t("成片设置")} tabIndex={-1}>
     <h3>{t("成片设置")}</h3>
     <p className="mv-hint">{t(composition.localSubtitles ? "修改背景音乐、音量或字幕后，点击「重新合成成片」：沿用全部已生成的片段，不调用视频模型。" : "修改背景音乐或音量后，点击下方「重新合成成片」：沿用全部已生成的片段，不调用视频模型。")}</p>
     {composition.narration && draft.narration && <>
@@ -76,7 +78,7 @@ function QualityReport({ quality, redo }: { quality: MarketingQualityReport; red
 
 /** A submitted video: progress or result, publication copy, and the storyboard it used. */
 export function ResultPanel({ form, project, saving, dirty, knowledge, notice, reviewPanel, narration, handlers, onPickNarrationVoice, onCopyDraft, onResume,
-  onCancel, onRelease, onPublication, onCopyText, onArchive, onShots, onRevertShots, onRevise }: {
+  onCancel, onRelease, onPublication, onCopyText, onArchive, onShots, onRevertShots, onRevise, onSettlePreview }: {
   form: DraftForm; project: MarketingProject; saving: boolean; dirty: boolean; knowledge: boolean; notice: string;
   /** Twin narration takes of the saved draft, for redoing shots of a narrated video. */
   narration: MarketingNarrationClip[] | null;
@@ -87,7 +89,9 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
   /** Copy into a new draft opened at the given step. */
   onCopyDraft(step: number): void;
   onResume(): void; onCancel(): void; onRelease(): void; onPublication(): void; onCopyText(): void; onArchive(): void;
-  onShots(shots: MarketingShot[]): void; onRevertShots(): void; onRevise(shots: number[], narrationRedo?: number[]): void;
+  onShots(shots: MarketingShot[]): void; onRevertShots(): void; onRevise(shots: number[], narrationRedo?: number[], preview?: boolean): void;
+  /** Keeps a made preview in place of the video it previews, or discards it. */
+  onSettlePreview(action: "keep" | "discard"): Promise<void>;
 }) {
   const { t } = useI18n();
   const { draft, busy } = form;
@@ -100,15 +104,29 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
   const [previewed, setPreviewed] = useState<string>();
   const previewing = !!resultKey && previewed === resultKey;
   const onPreview = (next: boolean) => setPreviewed(next ? resultKey : undefined);
-  /** Choosing the caption preview asks to compose the video again, which calls no model and needs no change; once
-   * confirmed, its progress shows at the top of the results. Declined, or when it cannot be composed now, the preview
-   * is shown. */
-  const choosePreview = async (next: boolean, composeAgain?: () => Promise<boolean>) => {
-    if (!next || !composeAgain) { player.current?.showPreview(next); return; }
-    if (!await composeAgain()) { player.current?.showPreview(true, false); return; }
+  /** Choosing the caption preview composes a preview video beside the made one; its progress shows at the top of the
+   * results. When it cannot be composed now, or paid takes were declined, the captions are drawn over the video instead. */
+  const choosePreview = async (next: boolean, composePreview?: () => Promise<boolean>) => {
+    if (!next || !composePreview) { player.current?.showPreview(next); return; }
+    if (!await composePreview()) { player.current?.showPreview(true, false); return; }
+    // The preview video draws its own captions; it starts without the overlay.
+    setPreviewed(undefined);
     section.current?.scrollIntoView({ block: "start", behavior: "smooth" });
     section.current?.focus({ preventScroll: true });
   };
+  const base = project.previewBase;
+  const settings = useRef<HTMLDivElement>(null);
+  // After a discard the made video is current again; the user goes back to the settings the preview tried.
+  const [refocus, setRefocus] = useState(false);
+  useEffect(() => {
+    if (!refocus) return;
+    setRefocus(false);
+    if (base || !settings.current) return;
+    settings.current.scrollIntoView({ block: "start", behavior: "smooth" });
+    settings.current.focus({ preventScroll: true });
+  }, [refocus, base]);
+  const discard = async () => { await onSettlePreview("discard"); setRefocus(true); };
+  const settleBusy = busy || saving;
   const continuity = draft.continuity && <p className="mv-hint">{t("统一人物、产品与场景设定")}：{draft.continuity}</p>;
   const archived = project.knowledgeItemId ? project.knowledgeVersion === project.version && !dirty ? "已存入知识库" : "更新知识库中的视频" : "保存视频到知识库";
   return <section ref={section} className="mv-card mv-results" tabIndex={-1}>
@@ -116,11 +134,27 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
     {result
       ? <><ResultVideo key={resultKey} url={result.url} output={project.output!} draft={draft} player={player} previewing={previewing} onPreview={onPreview}
           rendered={project.revision?.composition.localSubtitles ? project.revision.draft : undefined} />
+        {base && <div className="mv-preview-decision" role="group" aria-label={t("预览成片")}>
+          <p className="mv-hint">{t("这是预览成片，原成片仍保留。替换后删除原成片；放弃则删除这条预览成片。")}</p>
+          <div className="mv-choices">
+            <button className="mv-primary" disabled={settleBusy} onClick={() => void onSettlePreview("keep")}>{t("替换原成片")}</button>
+            <button disabled={settleBusy} onClick={() => void discard()}>{t("放弃预览")}</button>
+          </div>
+          <details><summary>{t("对比原成片")}</summary>
+            <video key={base.taskId} className="mv-result-video" controls preload="metadata" src={base.url} /></details>
+        </div>}
         <div className="mv-downloads"><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
           {!!project.output?.captions?.length && <a className="mv-download" download="captions.srt"
             href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(project.output.captions))}`}>{t("下载字幕（SRT）")}</a>}</div>
         {project.output?.quality && <QualityReport quality={project.output.quality} redo={!!project.revision} />}</>
       : <><TaskStatus project={project} busy={busy} onResume={onResume} onCancel={onCancel} onCopy={onCopyDraft} onRelease={onRelease} />
+        {base && <section className="mv-previous-result" aria-label={t("原成片")}>
+          <h3>{t("原成片")}</h3>
+          <p className="mv-hint">{t("预览成片完成前，原成片保持不变。")}</p>
+          <video key={base.taskId} className="mv-result-video" controls preload="metadata" src={base.url} />
+          {!["pending", "running"].includes(project.status) && <div className="mv-choices">
+            <button disabled={settleBusy} onClick={() => void discard()}>{t("放弃预览")}</button></div>}
+        </section>}
         {project.previousResult && <section className="mv-previous-result" aria-label={t("上一版成片")}>
           <h3>{t("上一版成片")}</h3>
           <p className="mv-hint">{t("新成片完成后会替换上一版；如需保留上一版，请先下载。")}</p>
@@ -141,11 +175,11 @@ export function ResultPanel({ form, project, saving, dirty, knowledge, notice, r
     </div>
     <details className="mv-script-review" open><summary>{t(project.revision ? "修改成片" : "查看制作分镜")}</summary>
       {project.revision ? <ShotRevision key={project.taskId} project={project} revision={project.revision} draft={draft} busy={busy} saving={saving} reviewPanel={reviewPanel}
-          narration={narration} settings={(recompose, composeAgain) => <>
+          narration={narration} settings={(recompose, composePreview) => <>
             <CompositionSettings form={form} composition={project.revision!.composition} renderedSubtitles={project.revision!.draft.subtitles}
-              captions={project.output?.captions} recompose={recompose} handlers={handlers} previewable={!result || previewable}
+              captions={project.output?.captions} recompose={recompose} handlers={handlers} previewable={!result || previewable} anchor={settings}
               previewModes={previewable && <CaptionPreviewModes preview={previewing} draft={draft} timing={project.output!.captionTiming!}
-                onChoose={next => void choosePreview(next, composeAgain)} />}
+                onChoose={next => void choosePreview(next, composePreview)} />}
               onPickNarrationVoice={onPickNarrationVoice}
               onPlayShot={result ? index => player.current?.playShot(index) : undefined} />
             {continuity}

@@ -263,7 +263,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
       onCopyText={() => void act(copyText)}
       onArchive={() => void act(production.archive)}
       onShots={editor.setShots} onRevertShots={production.revertShots}
-      onRevise={(shots, narrationRedo) => void act(() => production.revise(shots, narrationRedo))} /> : <>
+      onRevise={(shots, narrationRedo, preview) => void act(() => production.revise(shots, narrationRedo, preview))}
+      onSettlePreview={action => act(() => production.settlePreview(action))} /> : <>
       <nav className="mv-steps" aria-label={t("视频创作步骤")}>{STEPS.map((label, i) => <button key={label} disabled={busy || !ready}
         aria-current={i === step ? "step" : undefined} className={i === step ? "active" : ""} onClick={() => nextStep(i)}><span>{i + 1}</span>{t(label)}</button>)}</nav>
       <section className="mv-card"><div className="mv-section-head"><h2>{t(STEPS[step])}</h2><span>{step + 1} / {STEPS.length}</span></div>

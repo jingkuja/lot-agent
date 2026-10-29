@@ -100,7 +100,7 @@ describe("marketing prompt submission preflight", () => {
     expect(f.db.createAsset).not.toHaveBeenCalled();
     const calls = f.db.pool.query.mock.calls as unknown as unknown[][];
     const prune = calls.find(([sql]) => String(sql).startsWith("DELETE FROM assets"));
-    expect(prune?.[1]).toEqual(["owner", "project", "parent", "%-preview.mp4"]);
+    expect(prune?.[1]).toEqual(["owner", "project", "parent", "%-preview.mp4", null]);
   });
 
   it("recovers the full output of a video stored before the queue recorded it", async () => {

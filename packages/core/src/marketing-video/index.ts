@@ -310,6 +310,9 @@ export interface MarketingProject {
   /** The newest made video of an earlier job of this draft, while the current job has not made one:
    * a redo or recomposition that is running or stopped never hides the last usable video. */
   previousResult?: { taskId: string; url: string };
+  /** The made video the current job previews a replacement for. It stays until the preview is kept, which removes
+   * it, or discarded, which makes it current again. */
+  previewBase?: { taskId: string; url: string };
 }
 /** Saved earlier copy and storyboard of a draft (assessment M04), kept before an AI result replaced
  * them (`copy`, `storyboard`), a save dropped the shots (`clear`) or a restore replaced them (`restore`). */

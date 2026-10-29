@@ -34,6 +34,7 @@ function fixture(owner = "owner", narrator?: Partial<MarketingNarrator>) {
     remove: vi.fn(async () => ({ files: [] as string[], keyArtFiles: [] as string[], removedBytes: 2048, removedAnalyses: [] as string[], keptAnalyses: 1 })),
     usage: vi.fn(async () => ({ videoBytes: 4096, materialBytes: 1024 })), releaseUnknownSegments: vi.fn(async () => 1),
     snapshots: vi.fn(async () => [] as unknown[]), restoreSnapshot: vi.fn(async (..._args: unknown[]) => project),
+    keepPreview: vi.fn(async (..._args: unknown[]) => ["old.mp4"]), discardPreview: vi.fn(async (..._args: unknown[]) => [] as string[]),
   };
   const getAsset = vi.fn(async (_id: string): Promise<Record<string, unknown>> => ({ user_id: "someone-else", mime: "image/png", size_bytes: 100 }));
   const service = {
@@ -720,7 +721,7 @@ describe("single shot redo", () => {
     const f = made();
     const response = await f.call(`/${id}/revise`, { version: 1, shots: [1] });
     expect(response.status).toBe(202);
-    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1], {});
+    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1], {}, false);
     expect(f.service.jobQueue.deliverPersisted).toHaveBeenCalledWith("revision", "marketing.video");
     expect(f.service.usageMeter.checkQuota).toHaveBeenCalledOnce();
     expect(f.store.reserve).not.toHaveBeenCalled();
@@ -741,8 +742,20 @@ describe("single shot redo", () => {
   it("composes the kept clips again when no shot is chosen", async () => {
     const f = made();
     expect((await f.call(`/${id}/revise`, { version: 1, shots: [] })).status).toBe(202);
-    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [], {});
+    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [], {}, false);
     expect(f.service.jobQueue.deliverPersisted).toHaveBeenCalledWith("revision", "marketing.video");
+  });
+  it("composes a preview beside the made video, then keeps or discards it", async () => {
+    const f = made();
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [], preview: "yes" })).status).toBe(400);
+    expect((await f.call(`/${id}/revise`, { version: 1, shots: [], preview: true })).status).toBe(202);
+    expect(f.store.revise).toHaveBeenCalledWith("owner", id, 1, "parent", [], {}, true);
+    expect((await f.call(`/${id}/preview/keep`, {})).status).toBe(200);
+    expect(f.store.keepPreview).toHaveBeenCalledWith("owner", id);
+    expect((await f.call(`/${id}/preview/discard`, {})).status).toBe(200);
+    expect(f.store.discardPreview).toHaveBeenCalledWith("owner", id);
+    f.store.discardPreview.mockRejectedValueOnce(new MarketingError("没有待确认的预览成片。", 409));
+    expect((await f.call(`/${id}/preview/discard`, {})).status).toBe(409);
   });
   it("keeps only clips that still belong to this owner and draft", async () => {
     const f = made();
@@ -891,12 +904,12 @@ describe("digital twin narration", () => {
     Object.assign(f.store, { revise: vi.fn(async () => "revision") });
     expect((await f.call(`/${id}/revise`, { version: 1, shots: [1] })).status).toBe(202);
     expect(synthesize).toHaveBeenCalledOnce();
-    expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1], { narration: takes });
+    expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenCalledWith("owner", id, 1, "parent", [1], { narration: takes }, false);
     // New voice settings or reworded lines without a redone shot: new takes, every clip kept.
     expect((await f.call(`/${id}/revise`, { version: 1, shots: [] })).status).toBe(202);
     expect(synthesize).toHaveBeenCalledTimes(2);
     expect(synthesize).toHaveBeenLastCalledWith("owner", id, draft, expect.any(Array), [], { background: true, failedOnly: true });
-    expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenLastCalledWith("owner", id, 1, "parent", [], { narration: takes });
+    expect((f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise).toHaveBeenLastCalledWith("owner", id, 1, "parent", [], { narration: takes }, false);
     // Takes still being made: no job yet, and the studio sends the same redo again once they stop.
     const revise = (f.store as unknown as { revise: ReturnType<typeof vi.fn> }).revise;
     synthesize.mockResolvedValueOnce({ clips: [{ slot: 0, status: "succeeded" }, { slot: 1, status: "running" }] as never, error: "" });

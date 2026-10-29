@@ -136,7 +136,7 @@ export function useProduction({ editor, text, session, profile, ready, step, set
    * twin-narrated video first get their new takes in the background; once none is being made, the same redo
    * is sent again and reuses them, so leaving the page never pays for a take twice. A failed take is made
    * again only for the shots in `narrationRedo`, which the user confirmed, and only with the first request. */
-  async function revise(shots: number[], narrationRedo: number[] = []) {
+  async function revise(shots: number[], narrationRedo: number[] = [], preview = false) {
     let p = await save();
     // Composing the made draft again unchanged calls no model, so its text is not checked again.
     const unchanged = !shots.length && !!p.revision && marketingRenderKey(p.draft) === marketingRenderKey(p.revision.draft);
@@ -144,7 +144,7 @@ export function useProduction({ editor, text, session, profile, ready, step, set
     if (!unchanged && p.review?.verdict === "reject") throw new Error("文案检查发现需要修改的内容，请按「文案与分镜检查」中的提示修改后再重新生成。");
     for (let redo = narrationRedo; ; redo = []) {
       wait("正在提交生成任务", false);
-      const body = { version: p.version, shots, ...(redo.length ? { narrationRedo: redo } : {}) };
+      const body = { version: p.version, shots, ...(redo.length ? { narrationRedo: redo } : {}), ...(preview ? { preview } : {}) };
       type Pending = { narrationPending: true; clips: MarketingNarrationClip[] };
       const result = await request<Project | Pending>(`/marketing-videos/${p.id}/revise`, json("POST", body));
       if (!session.alive) return;
@@ -204,6 +204,13 @@ export function useProduction({ editor, text, session, profile, ready, step, set
     try { editor.setShots(fitMarketingNarration(draftRef.current.storyboard, draftRef.current, profile, clips.map(clip => clip.durationMs))); }
     catch (e) { setError(errorMessage(e)); }
   }
+  /** Keeps the made preview, removing the video it replaces, or discards it and returns to that video. */
+  async function settlePreview(action: "keep" | "discard") {
+    const p = projectRef.current;
+    if (!p) return;
+    const result = await request<Project>(`/marketing-videos/${p.id}/preview/${action}`, json("POST", {}));
+    if (session.alive) setCurrent(normalizeProject(result));
+  }
   /** The user accepts a possible duplicate charge: resubmit only the clips whose outcome is unknown. */
   async function releaseUnknown(id: string) {
     const released = await request<{ project: Project }>(`/marketing-videos/${id}/unknown-segments/release`, json("POST", {}));
@@ -219,5 +226,5 @@ export function useProduction({ editor, text, session, profile, ready, step, set
   }
 
   return { frozen, currentNarration, currentKeyArt, keyArtIssue, voiceover,
-    generate, revise, revertShots, synthesizeNarration, makeKeyArt, fitNarration, releaseUnknown, archive };
+    generate, revise, settlePreview, revertShots, synthesizeNarration, makeKeyArt, fitNarration, releaseUnknown, archive };
 }

@@ -89,18 +89,31 @@ async function revisionBase(db: pg.Pool | pg.PoolClient, owner: string, id: stri
   });
   return { input: job.job_input as Record<string, unknown>, draft, modelId, segments: rows, reusable, clips, composition: jobComposition(job.job_input) };
 }
+/** A made job whose final video is still stored; a kept or discarded preview removes it. */
+const LIVE_FINAL = `t.type='marketing.video' AND t.status='succeeded'
+  AND EXISTS (SELECT 1 FROM assets a WHERE a.user_id=t.user_id AND a.type='video' AND a.id::text=t.output->'assetIds'->>0)`;
+const resultLink = (owner: string, row?: { id: string; output?: { assets?: { url?: unknown }[] } }) => {
+  const url = row?.output?.assets?.[0]?.url;
+  return row && typeof url === "string" ? { taskId: row.id, url: signPrivateOutput(owner, url) } : undefined;
+};
 /** The newest made video of another job of this draft; earlier finals are kept when a draft is redone. */
 async function previousResult(db: pg.Pool | pg.PoolClient, owner: string, p: MarketingProject): Promise<MarketingProject["previousResult"]> {
-  const { rows } = await db.query(`SELECT id, output FROM tasks WHERE user_id=$1 AND type='marketing.video' AND input->>'projectId'=$2
-    AND status='succeeded' AND id<>$3 ORDER BY updated_at DESC LIMIT 1`, [owner, p.id, p.taskId]);
-  const url = rows[0]?.output?.assets?.[0]?.url;
-  return typeof url === "string" ? { taskId: rows[0].id, url: signPrivateOutput(owner, url) } : undefined;
+  const { rows } = await db.query(`SELECT t.id, t.output FROM tasks t WHERE t.user_id=$1 AND t.input->>'projectId'=$2 AND t.id<>$3 AND ${LIVE_FINAL}
+    ORDER BY t.updated_at DESC LIMIT 1`, [owner, p.id, p.taskId]);
+  return resultLink(owner, rows[0]);
+}
+/** The made video a preview job may replace, while the user has neither kept nor discarded the preview. */
+async function previewBase(db: pg.Pool | pg.PoolClient, owner: string, taskId: string) {
+  const { rows } = await db.query(`SELECT t.id, t.output FROM tasks c JOIN tasks t ON t.id::text=c.input->>'previewOf' AND t.user_id=c.user_id
+    WHERE c.id=$2 AND c.user_id=$1 AND ${LIVE_FINAL}`, [owner, taskId]);
+  return rows[0] as { id: string; output: { assets?: { url?: unknown }[] } } | undefined;
 }
 async function withRevision(db: pg.Pool | pg.PoolClient, owner: string, p: MarketingProject): Promise<MarketingProject> {
   const base = p.taskId ? await revisionBase(db, owner, p.id) : undefined;
-  const previous = p.taskId && p.status !== "succeeded" ? await previousResult(db, owner, p) : undefined;
+  const kept = p.taskId ? resultLink(owner, await previewBase(db, owner, p.taskId)) : undefined;
+  const previous = !kept && p.taskId && p.status !== "succeeded" ? await previousResult(db, owner, p) : undefined;
   const revision = base && { draft: base.draft, modelId: base.modelId, reusable: base.reusable, composition: base.composition, clips: base.clips };
-  return { ...p, ...(revision ? { revision } : {}), ...(previous ? { previousResult: previous } : {}) };
+  return { ...p, ...(revision ? { revision } : {}), ...(previous ? { previousResult: previous } : {}), ...(kept ? { previewBase: kept } : {}) };
 }
 export class PgMarketingProjectStore implements MarketingProjectStore {
   constructor(readonly pool: pg.Pool) {}
@@ -254,7 +267,9 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
    * `inputChanges` carries what the redone shots need anew, e.g. their narration takes.
    * Every other shot keeps its clip: its new segment task is already succeeded and points
    * at the existing asset, so it is neither submitted nor billed again. */
-  async revise(owner: string, id: string, version: number, baseTaskId: string, redo: number[], inputChanges: Record<string, unknown> = {}) {
+  /** A `preview` job composes a new video beside the made one, which stays until the preview is kept or discarded.
+   * A job made while a preview waits for that choice is a preview of the same made video. */
+  async revise(owner: string, id: string, version: number, baseTaskId: string, redo: number[], inputChanges: Record<string, unknown> = {}, preview = false) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -273,11 +288,18 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       const required = plan.filter(part => !base.reusable[part.index] || (part.script !== base.segments[part.index].script && !base.composition.narration)
         || marketingShotNeedsClip(base.draft.storyboard[part.index], draft.storyboard[part.index], base.composition)).map(part => part.index);
       if (redo.some(slot => !plan[slot]) || required.some(slot => !redo.includes(slot))) throw new MarketingError("请重新选择需要重新生成的镜头。", 409);
-      // Without a redone shot the job only composes the kept clips again with the changed settings.
-      if (!redo.length && renderKey(base.draft) === renderKey(draft)) throw new MarketingError("成片设置和分镜都没有修改，无需重新合成。", 409);
+      // Without a redone shot the job only composes the kept clips again with the changed settings; a preview may
+      // compose them unchanged.
+      if (!preview && !redo.length && renderKey(base.draft) === renderKey(draft)) throw new MarketingError("成片设置和分镜都没有修改，无需重新合成。", 409);
+      const pending = (await previewBase(client, owner, baseTaskId))?.id;
+      const madeBase = preview && !pending && (await client.query(`SELECT 1 FROM tasks t WHERE t.id=$2 AND t.user_id=$1 AND ${LIVE_FINAL}`,
+        [owner, baseTaskId])).rowCount ? baseTaskId : undefined;
+      const previewOf = pending ?? madeBase;
+      const { previewOf: _previewOf, ...input } = base.input;
       const taskId = randomUUID();
       await client.query(`INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.video',$2,$3,$4)`,
-        [taskId, JSON.stringify({ ...base.input, ...inputChanges, draft: p.draft, revisedFrom: baseTaskId }), owner, MARKETING_VIDEO_QUEUE]);
+        [taskId, JSON.stringify({ ...input, ...inputChanges, draft: p.draft, revisedFrom: baseTaskId, ...(previewOf ? { previewOf } : {}) }),
+          owner, MARKETING_VIDEO_QUEUE]);
       for (const part of plan) {
         const childId = randomUUID(); const old = base.segments[part.index];
         const input = JSON.stringify({ parentId: taskId, ...part });
@@ -293,6 +315,44 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
       }
       await client.query(`UPDATE marketing_video_projects SET task_id=$3,updated_at=now() WHERE id=$1 AND user_id=$2`, [id, owner, taskId]);
       await client.query("COMMIT"); return taskId;
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+  /** Keeps the made preview: the video it replaces and earlier previews of it are removed. Asset rows go in this
+   * transaction; the caller removes their files after commit. */
+  async keepPreview(owner: string, id: string) {
+    return this.settlePreview(owner, id, async (client, current, base) => {
+      if (current.status !== "succeeded") throw new MarketingError("预览成片尚未完成，不能替换原成片。", 409);
+      return (await client.query(`DELETE FROM assets a USING tasks t WHERE a.task_id=t.id AND a.user_id=$1 AND a.type='video'
+        AND t.user_id=$1 AND t.type='marketing.video' AND t.input->>'projectId'=$2 AND t.id<>$3 AND (t.id=$4 OR t.input->>'previewOf'=$4::text)
+        RETURNING a.storage_key`, [owner, id, current.task_id, base])).rows.map(row => row.storage_key as string);
+    });
+  }
+  /** Discards the preview: the draft returns to the made video, and the previews' final videos are removed. */
+  async discardPreview(owner: string, id: string) {
+    return this.settlePreview(owner, id, async (client, current, base) => {
+      if (["pending", "running"].includes(current.status)) throw new MarketingError("预览成片正在生成，请等它完成或取消后再放弃。", 409);
+      await client.query("UPDATE marketing_video_projects SET task_id=$3,updated_at=now() WHERE id=$1 AND user_id=$2", [id, owner, base]);
+      return (await client.query(`DELETE FROM assets a USING tasks t WHERE a.task_id=t.id AND a.user_id=$1 AND a.type='video'
+        AND t.user_id=$1 AND t.type='marketing.video' AND t.input->>'projectId'=$2 AND t.input->>'previewOf'=$3::text
+        RETURNING a.storage_key`, [owner, id, base])).rows.map(row => row.storage_key as string);
+    });
+  }
+  private async settlePreview(owner: string, id: string,
+    settle: (client: pg.PoolClient, current: { task_id: string; status: string }, base: string) => Promise<string[]>) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = (await client.query(`SELECT p.task_id,t.status FROM marketing_video_projects p JOIN tasks t ON t.id=p.task_id AND t.user_id=p.user_id
+        WHERE p.id=$1 AND p.user_id=$2 FOR UPDATE OF p`, [id, owner])).rows[0];
+      if (!current) throw new MarketingError("草稿不存在", 404);
+      // Same key as the worker's job lock: never race a worker that is still finishing.
+      const lock = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [`marketing:${current.task_id}`]);
+      if (!lock.rows[0].locked) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
+      const base = (await previewBase(client, owner, current.task_id))?.id;
+      if (!base) throw new MarketingError("没有待确认的预览成片。", 409);
+      const files = await settle(client, current, base);
+      await client.query("COMMIT");
+      return files;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
   /** The user accepts a possible duplicate charge for clips whose submission outcome is
