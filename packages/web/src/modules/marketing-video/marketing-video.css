@@ -239,7 +239,9 @@
 .mv-result-frame { position: relative; width: fit-content; max-width: 100%; margin: 0 auto; }
 .mv-result-frame .mv-result-video { margin: 0; }
 .mv-caption-overlay { position: absolute; overflow: hidden; pointer-events: none; border-radius: var(--radius-md); }
-.mv-caption-overlay p { position: absolute; left: 0; right: 0; margin: 0; padding-block: 0; border: 0; border-radius: 0; background: none; white-space: normal; color: var(--video-caption); font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-weight: 700; line-height: 1.2; text-align: center; overflow-wrap: anywhere; paint-order: stroke fill; -webkit-text-stroke-color: var(--video-caption-outline); }
+.mv-caption-overlay p { position: absolute; left: 0; right: 0; margin: 0; padding-block: 0; border: 0; border-radius: 0; background: none; white-space: normal; font-family: "Noto Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-weight: 700; line-height: 1.2; text-align: center; overflow-wrap: anywhere; paint-order: stroke fill; }
+.mv-caption-colors button { flex: 0 0 auto; min-width: 64px; }
+.mv-caption-swatch { font-family: "Noto Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-weight: 700; font-size: 15px; paint-order: stroke fill; }
 .mv-caption-badge { position: absolute; top: 8px; left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--warning); color: var(--text-on-accent); font-size: 11px; font-weight: 600; }
 .mv-composition-actions, .mv-preview-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .mv-results:focus { outline: none; }

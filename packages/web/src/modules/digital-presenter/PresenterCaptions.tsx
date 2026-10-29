@@ -2,7 +2,7 @@ import { useState } from "react";
 import { planPresenterSegments, presenterCaptionErrors } from "@lot-agent/core/digital-presenter";
 import { captionLayout, captionLines, marketingCaptionLinesMatch, marketingCaptionsValue, MarketingCaptionsSchema, marketingShotCaption, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
-import { CAPTION_POSITIONS, CAPTION_SIZES, OffsetField, sameLines, ShotCaption, type CaptionUnitCopy } from "../marketing-video/CaptionSettings.js";
+import { CAPTION_POSITIONS, CAPTION_SIZES, CaptionColorChoice, OffsetField, sameLines, ShotCaption, type CaptionUnitCopy } from "../marketing-video/CaptionSettings.js";
 import type { Project } from "./api.js";
 
 const SEGMENT_COPY: CaptionUnitCopy = { title: "第 {0} 段", aria: "第 {0} 段字幕", empty: "每段至少保留一行字幕。",
@@ -41,6 +41,7 @@ export function PresenterCaptions({ project, frame, busy, onApply }: {
       {choices("字号", CAPTION_SIZES, captions.size, value => update({ size: value as MarketingCaptions["size"] }))}
       {choices("位置", CAPTION_POSITIONS, captions.position, value => update({ position: value as MarketingCaptions["position"] }))}
     </div>
+    <CaptionColorChoice value={captions.color} busy={busy} onChoose={color => update({ color })} />
     {captions.position === "low" && frame.height > frame.width && <p className="mv-hint">{t("竖屏字幕靠下时，可能被短视频平台的按钮和标题遮挡。")}</p>}
     <div className="mv-caption-row">
       <OffsetField label="全片提前或延后（秒）" value={captions.offsetSec} busy={busy} onChange={offsetSec => update({ offsetSec })} />

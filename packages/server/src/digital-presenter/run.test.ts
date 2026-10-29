@@ -192,7 +192,7 @@ describe("digital presenter worker", () => {
     await writeFile(join(root.dir, "jobs/old/clip-0.mp4"), "clip");
     await writeFile(join(root.dir, "jobs/old/clip-1.mp4"), "clip");
     const f = fixture([{ status: "succeeded", file: "jobs/old/clip-0.mp4" }, { status: "succeeded", file: "jobs/old/clip-1.mp4" }], provider);
-    const settings = { size: "large", position: "high", offsetSec: -0.2, shots: [] };
+    const settings = { size: "large", position: "high", color: "white", offsetSec: -0.2, shots: [] };
     Object.assign(f.job.input, { captions: settings, recomposedFrom: "old" });
     await runDigitalPresenter(f.deps, f.job, new AbortController().signal);
     expect(provider.create).not.toHaveBeenCalled();

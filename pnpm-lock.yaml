@@ -157,6 +157,9 @@ importers:
 
   packages/web:
     dependencies:
+      '@fontsource/noto-sans-sc':
+        specifier: 5.3.1
+        version: 5.3.1
       '@lot-agent/core':
         specifier: workspace:*
         version: link:../core
@@ -948,6 +951,9 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@fontsource/noto-sans-sc@5.3.1':
+    resolution: {integrity: sha512-YxZ/VWAWo9FWzH08Q6fGTzIW6vYNP2TMhUFCnfhlimbhdXnWrxJLrzX3KWt2FKnV0s8XiM5vjpGHQiyFRlTj0w==}
 
   '@hapi/address@5.1.1':
     resolution: {integrity: sha512-A+po2d/dVoY7cYajycYI43ZbYMXukuopIsqCjh5QzsBCipDtdofHntljDlpccMjIfTy6UOkg+5KPriwYch2bXA==}
@@ -4435,6 +4441,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.0':
     optional: true
+
+  '@fontsource/noto-sans-sc@5.3.1': {}
 
   '@hapi/address@5.1.1':
     dependencies:

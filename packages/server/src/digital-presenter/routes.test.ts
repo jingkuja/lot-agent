@@ -32,7 +32,7 @@ describe("POST /:id/captions", () => {
 
   it("starts a recompose job with the changed captions", async () => {
     const f = setup();
-    const captions = { size: "large", position: "medium", offsetSec: 0.2, shots: [{ script: takes[0].text, lines: ["大家好", "欢迎光临"], offsetSec: 0 }] };
+    const captions = { size: "large", position: "medium", color: "white", offsetSec: 0.2, shots: [{ script: takes[0].text, lines: ["大家好", "欢迎光临"], offsetSec: 0 }] };
     const response = await f.post(captions);
     expect(response.status).toBe(202);
     expect(f.store.recompose).toHaveBeenCalledWith("owner", ID, 3, "task-1", expect.objectContaining({ takes, subtitles: true, captions }), captions);

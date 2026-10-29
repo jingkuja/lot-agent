@@ -871,6 +871,22 @@ try {
   assert.equal(await livePlayer.getAttribute('src'), liveSrc, 'the player is not reloaded');
   assert.equal(await position.getByRole('button', { name: '靠上', exact: true }).evaluate(element => document.activeElement === element), true);
   await position.getByRole('button', { name: '标准', exact: true }).click();
+  // Colour presets: the live preview draws the colours the composition will burn, in the burned font.
+  const colors = captionPanel.getByRole('group', { name: '颜色', exact: true });
+  const colorSaved = savedDraft('"color":"yellow-box"');
+  await colors.getByRole('button', { name: '黄字黑底', exact: true }).click();
+  await colorSaved;
+  assert.equal(await colors.getByRole('button', { name: '黄字黑底', exact: true }).getAttribute('aria-pressed'), 'true');
+  if (hasVideo) {
+    const drawn = page.locator('.mv-caption-overlay p span');
+    await drawn.waitFor();
+    assert.deepEqual(await drawn.evaluate(element => [getComputedStyle(element).color, getComputedStyle(element).backgroundColor]),
+      ['rgb(255, 212, 0)', 'rgba(0, 0, 0, 0.6)']);
+    // Only the font slices for the characters on screen are fetched.
+    await page.waitForFunction(() => document.fonts.check('700 20px "Noto Sans SC"', document.querySelector('.mv-caption-overlay p span')?.textContent ?? ''));
+    await livePlayer.scrollIntoViewIfNeeded(); await snap('marketing-video-caption-colour-zh-light.png');
+  }
+  await colors.getByRole('button', { name: '白字黑边', exact: true }).click();
   if (!await captionPanel.locator('.mv-caption-shots').evaluate(el => el.open)) await captionPanel.getByText('逐镜调整断行和时间', { exact: true }).click();
   await captionPanel.getByRole('button', { name: '播放本镜', exact: true }).first().click();
   await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '大', exact: true }).click();

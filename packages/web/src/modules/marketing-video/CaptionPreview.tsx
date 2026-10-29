@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { captionLayout, marketingCaptionsValue, marketingFrameSize, marketingPreviewCaptions, type MarketingCaption, type MarketingDraft,
+import { captionLayout, captionStroke, marketingCaptionsValue, marketingFrameSize, marketingPreviewCaptions, type MarketingCaption, type MarketingDraft,
   type MarketingProject } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
+import { captionColorStyle } from "./CaptionSettings.js";
+// The font the composition burns (Noto Sans CJK SC, bold), so the live preview draws captions the same way.
+import "@fontsource/noto-sans-sc/700.css";
 
 /** Lets the caption settings play one shot of the video, or switch it between the made video and the caption preview;
  * `reveal` (default true) scrolls the video into view and focuses it. */
@@ -86,6 +89,8 @@ export function ResultVideo({ url, previewUrl, output, draft, rendered, player, 
     showPreview: choose,
   }), [timing, rendered, draft, previewing, onPreview]);
   const layout = box && captionLayout(box.frame.width, box.frame.height, draft.captions);
+  // An outline is centred on the glyph edge, so the preview strokes twice the burned width.
+  const stroke = layout ? captionStroke(layout.fontSize, draft.captions?.color) : 0;
   const frame = <div className="mv-result-player">
     <div className="mv-result-frame">
       <video ref={attach} className="mv-result-video" controls src={preview ? previewUrl : url} onLoadedMetadata={e => {
@@ -97,8 +102,8 @@ export function ResultVideo({ url, previewUrl, output, draft, rendered, player, 
       {preview && box && layout && <div className="mv-caption-overlay" aria-hidden="true"
         style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
         <span className="mv-caption-badge">{t("预览：未重新合成")}</span>
-        {line && <p style={{ bottom: layout.marginV * box.scale, fontSize: layout.fontSize * box.scale, paddingInline: box.frame.width * 0.06 * box.scale,
-          WebkitTextStrokeWidth: Math.max(2, Math.round(layout.fontSize * 0.08)) * 2 * box.scale }}>{line}</p>}
+        {line && <p style={{ bottom: layout.marginV * box.scale, fontSize: layout.fontSize * box.scale, paddingInline: box.frame.width * 0.06 * box.scale }}>
+          <span style={captionColorStyle(draft.captions?.color ?? "white", stroke * 2 * box.scale, stroke * box.scale)}>{line}</span></p>}
       </div>}
     </div>
   </div>;

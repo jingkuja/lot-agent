@@ -10,6 +10,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@fontsource/noto-sans-sc": "5.3.1",
     "@lot-agent/core": "workspace:*",
     "node-forge": "^1.4.0",
     "qrcode": "1.5.4",

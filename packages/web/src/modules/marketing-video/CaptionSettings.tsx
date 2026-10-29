@@ -1,11 +1,33 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { captionLayout, captionLines, marketingCaptionLinesMatch, marketingCaptionsValue, marketingFrameSize, marketingShotCaption, MarketingCaptionsSchema,
-  type MarketingCaption, type MarketingCaptions } from "@lot-agent/core/marketing-video";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { captionLayout, captionLines, MARKETING_CAPTION_BOX_OPACITY, MARKETING_CAPTION_COLORS, marketingCaptionLinesMatch, marketingCaptionsValue,
+  marketingFrameSize, marketingShotCaption, MarketingCaptionsSchema, type MarketingCaption, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { Choices, type DraftForm } from "./StudioFields.js";
 
 export const CAPTION_SIZES = [{ value: "small", label: "小" }, { value: "medium", label: "标准" }, { value: "large", label: "大" }];
 export const CAPTION_POSITIONS = [{ value: "low", label: "靠下" }, { value: "medium", label: "标准" }, { value: "high", label: "靠上" }];
+const CAPTION_COLOR_LABELS: Record<MarketingCaptions["color"], string> = {
+  white: "白字黑边", yellow: "黄字黑边", black: "黑字白边", box: "白字黑底", "yellow-box": "黄字黑底" };
+
+/** How a caption colour preset looks, for the live preview and the colour choices alike. */
+export function captionColorStyle(color: MarketingCaptions["color"], stroke: number, pad: number): CSSProperties {
+  const preset = MARKETING_CAPTION_COLORS[color];
+  if (!preset.box) return { color: preset.text, WebkitTextStroke: `${stroke}px ${preset.outline}` };
+  const alpha = Math.round(MARKETING_CAPTION_BOX_OPACITY * 255).toString(16).padStart(2, "0");
+  return { color: preset.text, background: `${preset.box}${alpha}`, padding: `0 ${pad}px`, boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" };
+}
+
+/** The caption colour presets, each shown as it will look in the video. */
+export function CaptionColorChoice({ value, busy, onChoose }: { value: MarketingCaptions["color"]; busy: boolean; onChoose(color: MarketingCaptions["color"]): void }) {
+  const { t } = useI18n();
+  return <div className="mv-caption-choice"><span>{t("颜色")}</span>
+    <div className="mv-choices mv-caption-colors" role="group" aria-label={t("颜色")}>
+      {(Object.keys(CAPTION_COLOR_LABELS) as MarketingCaptions["color"][]).map(color => <button key={color} type="button" disabled={busy}
+        className={value === color ? "selected" : ""} aria-pressed={value === color} aria-label={t(CAPTION_COLOR_LABELS[color])} title={t(CAPTION_COLOR_LABELS[color])}
+        onClick={() => onChoose(color)}><span className="mv-caption-swatch" style={captionColorStyle(color, 1.4, 6)}>{t("字幕")}</span></button>)}
+    </div>
+  </div>;
+}
 const parseLines = (text: string) => text.split("\n").map(line => line.trim()).filter(Boolean);
 export const sameLines = (a: string[], b: string[]) => a.length === b.length && a.every((line, i) => line === b[i]);
 
@@ -83,6 +105,7 @@ export function CaptionSettings({ form, captions: burned, recompose, onPlayShot 
       <div className="mv-caption-choice"><span>{t("位置")}</span>
         <Choices form={form} label="位置" values={CAPTION_POSITIONS} value={captions.position} onChoose={value => update({ position: value as MarketingCaptions["position"] })} /></div>
     </div>
+    <CaptionColorChoice value={captions.color} busy={busy || form.frozen || !form.ready} onChoose={color => update({ color })} />
     {captions.position === "low" && height > width && <p className="mv-hint">{t("竖屏字幕靠下时，可能被短视频平台的按钮和标题遮挡。")}</p>}
     <div className="mv-caption-row">
       <OffsetField label="全片提前或延后（秒）" value={captions.offsetSec} busy={busy} onChange={offsetSec => update({ offsetSec })} />

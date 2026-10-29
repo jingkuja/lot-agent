@@ -39,7 +39,7 @@ describe.skipIf(!testUrl)("digital presenter store on PostgreSQL", () => {
 
   it("recomposes from copies of the finished clips and keeps the new captions in the draft", async () => {
     const { id, taskId } = await finished();
-    const captions = { size: "large" as const, position: "medium" as const, offsetSec: 0.1, shots: [] };
+    const captions = { size: "large" as const, position: "medium" as const, color: "white" as const, offsetSec: 0.1, shots: [] };
     const next = await store.recompose(owner, id, 4, taskId, { mode: "image", subtitles: true, captions }, captions);
     const clips = await store.clips(next);
     expect(clips.map(clip => [clip.slot, clip.status, clip.file])).toEqual([[0, "succeeded", `jobs/${taskId}/clip-0.mp4`], [1, "succeeded", `jobs/${taskId}/clip-1.mp4`]]);

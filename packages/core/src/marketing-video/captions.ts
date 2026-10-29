@@ -131,6 +131,20 @@ export function marketingFrameSize(draft: Pick<MarketingDraft, "quality" | "rati
 }
 
 const FONT_SCALE = { small: 0.045, medium: 0.055, large: 0.068 } as const;
+/** Caption colours, burned by the composition and drawn by the live preview alike. An outline preset strokes each glyph;
+ * a `box` preset puts a translucent band behind each line instead. */
+export const MARKETING_CAPTION_COLORS: Record<MarketingCaptions["color"], { text: string; outline?: string; box?: string }> = {
+  white: { text: "#FFFFFF", outline: "#000000" },
+  yellow: { text: "#FFD400", outline: "#000000" },
+  black: { text: "#111111", outline: "#FFFFFF" },
+  box: { text: "#FFFFFF", box: "#000000" },
+  "yellow-box": { text: "#FFD400", box: "#000000" },
+};
+/** Opacity of a caption band. */
+export const MARKETING_CAPTION_BOX_OPACITY = 0.6;
+/** Glyph outline width, and the band's padding around a line, in composed pixels. */
+export const captionStroke = (fontSize: number, color: MarketingCaptions["color"] = "white") =>
+  MARKETING_CAPTION_COLORS[color].box ? Math.round(fontSize * 0.2) : Math.max(2, Math.round(fontSize * 0.08));
 // Bottom margin as a share of the height: vertical videos, then landscape and square ones.
 const MARGIN = { low: [0.1, 0.05], medium: [0.16, 0.08], high: [0.24, 0.14] } as const;
 /** Caption box of a frame size: font size, line width and bottom margin. By default vertical
@@ -178,7 +192,8 @@ export function marketingCaptionsValue(captions: MarketingCaptions | undefined):
   const shots = captions.shots.map(entry => entry && (entry.lines || entry.offsetSec) ? entry : null);
   while (shots.length && !shots.at(-1)) shots.pop();
   const value = { ...captions, offsetSec: Math.round(captions.offsetSec * 100) / 100, shots };
-  return value.size === "medium" && value.position === "medium" && !value.offsetSec && !shots.length ? undefined : value;
+  return value.size === "medium" && value.position === "medium" && (value.color ?? "white") === "white" && !value.offsetSec && !shots.length
+    ? undefined : value;
 }
 
 /** One caption line, in seconds from the start of its shot. */

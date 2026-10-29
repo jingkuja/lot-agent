@@ -81,4 +81,13 @@ describe("ASS script", () => {
     expect(ass).toContain("PlayResX: 720\nPlayResY: 1280");
     expect(ass).toContain("Dialogue: 0,0:00:00.00,0:01:01.23,Default,,0,0,0,,｛＼b1｝价格");
   });
+  it("burns the caption colour presets: white on a black outline by default, or a translucent band", () => {
+    const style = (color?: "yellow" | "black" | "box" | "yellow-box") =>
+      captionAss([], 720, 1280, color && { color }).split("\n").find(line => line.startsWith("Style: "));
+    expect(style()).toBe("Style: Default,Noto Sans CJK SC,40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,43,43,205,1");
+    expect(style("yellow")).toContain(",&H0000D4FF,&H0000D4FF,&H00000000,");
+    expect(style("black")).toContain(",&H00111111,&H00111111,&H00FFFFFF,");
+    expect(style("box")).toBe("Style: Default,Noto Sans CJK SC,40,&H00FFFFFF,&H00FFFFFF,&H66000000,&H00000000,-1,0,0,0,100,100,0,0,3,8,0,2,43,43,205,1");
+    expect(style("yellow-box")).toContain(",&H0000D4FF,&H0000D4FF,&H66000000,");
+  });
 });

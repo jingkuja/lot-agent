@@ -87,6 +87,8 @@ const CaptionOffsetSchema = z.number().min(-1).max(1);
 export const MarketingCaptionsSchema = z.object({
   size: z.enum(["small", "medium", "large"]).default("medium"),
   position: z.enum(["low", "medium", "high"]).default("medium"),
+  /** A colour preset of `MARKETING_CAPTION_COLORS`. */
+  color: z.enum(["white", "yellow", "black", "box", "yellow-box"]).default("white"),
   /** Seconds every caption moves; negative shows them earlier. */
   offsetSec: CaptionOffsetSchema.default(0),
   /** Per shot; an entry applies only while its shot still says `script`. `lines` may move
