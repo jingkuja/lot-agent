@@ -34,6 +34,7 @@ export function extractImageUrls(response: unknown): string[] {
 export interface OpenAIImagesImageOpts {
   baseUrl: string;
   apiKey: string;
+  headers?: Record<string, string>;
   model: string;
 }
 
@@ -89,7 +90,7 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
     console.log("[images] request", JSON.stringify({ endpoint, model, size: body.size, quality: body.quality, n: body.n }));
     const res = await fetch(`${this.opts.baseUrl}${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.opts.apiKey}` },
+      headers: { ...this.opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${this.opts.apiKey}` },
       body: payload,
     });
     const text = await res.text();

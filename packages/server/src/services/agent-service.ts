@@ -64,6 +64,7 @@ import { proposeOutlineTool } from "../tools/propose-outline-tool.js";
 import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
+import { internationalModelsEnabled } from "../tokenhub/model-access.js";
 import { enrichCatalog, orderLlmModels, resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import {
@@ -835,7 +836,8 @@ export class AgentService {
     const credentialFingerprint = apiKey
       ? createHash("sha256").update(apiKey).digest("hex").slice(0, 16)
       : "no-key";
-    const cacheKey = `models:${userId}:${credentialFingerprint}`;
+    const mode = internationalModelsEnabled() ? "international" : "domestic";
+    const cacheKey = `models:${userId}:${credentialFingerprint}:${mode}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) {
       const catalog = JSON.parse(cached) as ReturnType<typeof enrichCatalog>;

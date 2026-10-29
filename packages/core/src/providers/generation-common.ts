@@ -69,6 +69,7 @@ export interface VendorAdapter<Req> {
 export interface HttpGenerationOpts<Req> {
   baseUrl: string;
   apiKey: string;
+  headers?: Record<string, string>;
   adapter: VendorAdapter<Req>;
   model: string;
   /** Per-request timeout. Default: 2 minutes. */
@@ -120,7 +121,7 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     console.log("[generation.create] request", { method: "POST" });
     const res = await this.request(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      headers: { ...this.opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     }, 0, "create");
     console.log("[generation.create] response", { status: res.status });
@@ -142,7 +143,7 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     const { adapter, baseUrl, apiKey } = this.opts;
     const res = await this.request(`${baseUrl}${adapter.pollPath(taskId)}`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: { ...this.opts.headers, Authorization: `Bearer ${apiKey}` },
     }, 1, "poll");
     let json: Record<string, unknown>;
     try {

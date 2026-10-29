@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { TokenhubClient, TokenhubClientError, TokenhubMergeRequiredError } from "./client.js";
 import { createHash, createHmac } from "node:crypto";
 
@@ -6,6 +6,8 @@ const ok = (data: unknown) =>
   ({ ok: true, json: async () => ({ data, success: true }) }) as Response;
 const fail = () =>
   ({ ok: true, json: async () => ({ data: null, success: false, message: "bad" }) }) as Response;
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("TokenhubClient", () => {
   it("sends registration bindings and both verification codes through the signed control plane", async () => {
@@ -417,7 +419,8 @@ describe("TokenhubClient", () => {
     await expect(c.tokenLogin("t")).rejects.toThrow("tokenhub_token_login_failed");
   });
 
-  it("listModels returns the three buckets", async () => {
+  it.each(["0", "1"])("lists models with deployment permissions for globle=%s", async globle => {
+    vi.stubEnv("globle", globle);
     const f = vi.fn().mockResolvedValue(ok({ llm: ["gpt-5.4"], image: ["gpt-image-2"], video: ["veo3.1"] }));
     const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
     await expect(c.listModels("sk-X")).resolves.toEqual({
@@ -426,6 +429,7 @@ describe("TokenhubClient", () => {
     const [url, init] = f.mock.calls[0];
     expect(url).toBe("https://h/api/agent-market/models");
     expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-X" });
+    expect(new Headers((init as RequestInit).headers).get("X-Agent-Globle")).toBe(globle === "1" ? "1" : null);
   });
 
   it("authenticates through the signed internal control plane and maps only the managed key", async () => {

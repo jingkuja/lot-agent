@@ -11,7 +11,10 @@ export class OpenAIResponsesProvider implements LLMProvider {
   readonly reportsAttempts = true;
   private readonly client: OpenAI;
   constructor(private readonly config: OpenAIProviderConfig, transport: Pick<ClientOptions, "fetch"> = {}) {
-    this.client = new OpenAI({ ...transport, apiKey: config.apiKey, baseURL: config.baseUrl?.replace(/\/+$/, ""), maxRetries: 0 });
+    this.client = new OpenAI({
+      ...transport, apiKey: config.apiKey, baseURL: config.baseUrl?.replace(/\/+$/, ""), defaultHeaders: config.headers, maxRetries: 0,
+      fetch: transport.fetch ?? config.fetch as ClientOptions["fetch"],
+    });
   }
 
   async *chat(messages: Message[], tools?: LLMTool[], opts?: ChatOptions): AsyncIterable<ChatChunk> {

@@ -1,7 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { createModelRoutes } from "./models.js";
 import { AgentService } from "../services/agent-service.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 function svc(cacheHit: string | null) {
   return {
@@ -29,6 +32,20 @@ function mount(service: import("../services/agent-service.js").AgentService) {
 }
 
 describe("GET /api/models", () => {
+  it.each(["0", "1"])("isolates the catalog cache by deployment mode globle=%s", async globle => {
+    vi.stubEnv("globle", globle);
+    const fingerprint = createHash("sha256").update("sk-user").digest("hex").slice(0, 16);
+    const domestic = `models:u1:${fingerprint}:domestic`;
+    const international = `models:u1:${fingerprint}:international`;
+    const service = svc(null);
+    const cached = JSON.stringify({ llm: [{ id: "international-only" }], image: [], video: [] });
+    vi.mocked(service.redis.get).mockImplementation(async key => key === international ? cached : null);
+    const res = await mount(service).request("/");
+    expect(service.redis.get).toHaveBeenCalledWith(globle === "1" ? international : domestic);
+    const body = await res.json() as { llm: Array<{ id: string }> };
+    expect(body.llm[0].id).toBe(globle === "1" ? "international-only" : "gpt-5.4");
+  });
+
   it("fetches, enriches, and caches on miss", async () => {
     const service = svc(null);
     const res = await mount(service).request("/");

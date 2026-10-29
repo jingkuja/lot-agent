@@ -2,6 +2,7 @@ import { createDeadline, withAbort } from "@lot-agent/core";
 import { logger } from "@lot-agent/core";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { normalizeApiKeyEntries, type RawApiKeyEntry } from "./api-key-entry.js";
+import { gatewayModelHeaders } from "./model-access.js";
 
 export interface TokenhubLoginResult {
   userId: number;
@@ -571,7 +572,8 @@ export class TokenhubClient {
         "/models",
         apiKey,
         "tokenhub_models_failed",
-        deadline.signal
+        deadline.signal,
+        gatewayModelHeaders()
       );
       return { llm: data.llm ?? [], image: data.image ?? [], video: data.video ?? [], ...(data.asr ? { asr: data.asr } : {}), ...(data.audio ? { audio: data.audio } : {}) };
     } finally { deadline.dispose(); }
@@ -594,11 +596,11 @@ export class TokenhubClient {
     );
   }
 
-  private async get<T>(path: string, apiKey: string, errCode: string, signal?: AbortSignal): Promise<T> {
+  private async get<T>(path: string, apiKey: string, errCode: string, signal?: AbortSignal, headers?: Record<string, string>): Promise<T> {
     return this.unwrap<T>(
       () =>
         this.fetchImpl(`${this.baseUrl}${path}`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
+          headers: { ...headers, Authorization: `Bearer ${apiKey}` },
           signal,
         }),
       errCode, signal

@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { LLMResponseError, OpenAIResponsesProvider, type ContentPart, type LLMProvider, type Message } from "@lot-agent/core";
 import { ANALYSIS_LIMITS, AnalysisSummarySchema, OcrOutputSchema, VisualOutputSchema, validateObservation, validateSummary, type AnalysisSpeech, type AnalysisSnapshot, type AnalysisSummary, type FrameEvidence, type ScreenText, type VisualObservation, type AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
+import { gatewayModelHeaders } from "../tokenhub/model-access.js";
 
 /** `visual` reads the frames and must take images, so it never follows a change of the copy model;
  * `synthesis` writes the summary and the copy from text alone, with the copy model of the studio,
@@ -216,5 +217,5 @@ export class AnalysisModels {
 
 export function userResponsesProvider(baseUrl: string, apiKey: string, model: string): LLMProvider {
   if (!apiKey || ![...Object.values(ANALYSIS_MODELS), ...RETIRED_SYNTHESIS_MODELS].includes(model)) throw new AnalysisError("MODEL_AUTH_REQUIRED", 503);
-  return new OpenAIResponsesProvider({ baseUrl, apiKey, model });
+  return new OpenAIResponsesProvider({ baseUrl, apiKey, model, headers: gatewayModelHeaders() });
 }

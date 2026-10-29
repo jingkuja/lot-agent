@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { GenerationError } from "./errors.js";
 import { resolve } from "node:path";
+import { gatewayModelHeaders } from "../tokenhub/model-access.js";
 import {
   OpenAIImagesImageProvider,
   HttpImageGenerationProvider,
@@ -112,12 +113,14 @@ export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationPr
   // image models now use its synchronous OpenAI Images endpoints instead.
   if (cfg.adapter === "openai-images" || cfg.adapter === "chat-completions") {
     return new OpenAIImagesImageProvider({
+      headers: gatewayModelHeaders(),
       baseUrl: cfg.baseUrl,
       apiKey: cfg.apiKey,
       model: cfg.model,
     });
   }
   return new HttpImageGenerationProvider({
+    headers: gatewayModelHeaders(),
     baseUrl: cfg.baseUrl,
     apiKey: cfg.apiKey,
     adapter: pickImageAdapter(cfg.adapter),
@@ -141,6 +144,7 @@ export function mediaSupportsProgress(cfg: MediaGenerationConfig): boolean {
 export function makeVideoProvider(cfg: MediaGenerationConfig): VideoGenerationProvider {
   if (cfg.mock || !cfg.apiKey) return new MockVideoGenerationProvider();
   return new HttpVideoGenerationProvider({
+    headers: gatewayModelHeaders(),
     baseUrl: cfg.baseUrl,
     apiKey: cfg.apiKey,
     adapter: pickVideoAdapter(cfg.adapter),

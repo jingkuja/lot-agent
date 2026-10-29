@@ -7,6 +7,7 @@ import { ANALYSIS_LIMITS, type AnalysisCallLedger, type AnalysisSource, type Ana
 import { AnalysisError } from "./errors.js";
 import { readAnalysisFile } from "./private-files.js";
 import type { MediaRunner } from "./sandbox.js";
+import { gatewayModelHeaders } from "../tokenhub/model-access.js";
 
 export const ASR_MODEL = "qwen-audio-3.1-asr-flash";
 const maxAudioBytes = 180 * 16000 * 2 + 4096;
@@ -76,7 +77,8 @@ export async function transcribeAnalysisAudio(input: {
     try {
       deadline.signal.throwIfAborted();
       const response = await withAbort((input.fetchImpl ?? fetch)(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-        method: "POST", redirect: "error", headers: { Authorization: `Bearer ${input.apiKey}`, "Content-Type": "application/json" }, body: payload,
+        method: "POST", redirect: "error",
+        headers: { ...gatewayModelHeaders(), Authorization: `Bearer ${input.apiKey}`, "Content-Type": "application/json" }, body: payload,
         signal: deadline.signal,
       }), deadline.signal);
       const requestId = gatewayRequestId(response.headers);

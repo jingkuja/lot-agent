@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { internationalModelsEnabled } from "../tokenhub/model-access.js";
 
 function publicUrl(value: string | undefined, fallback: string): string {
   try {
@@ -14,7 +15,7 @@ function publicUrl(value: string | undefined, fallback: string): string {
 export function createProductRoutes() {
   // dotenv values are strings. Only a finite positive number opts in.
   const value = Number(process.env.globle);
-  const globle = Number.isFinite(value) && value > 0 ? 1 : 0;
+  const globle = internationalModelsEnabled() ? 1 : 0;
   const app = new Hono();
   app.get("/", (c) => c.json({
     globle,

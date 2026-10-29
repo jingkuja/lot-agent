@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AppConfigSchema } from "@lot-agent/core";
 import type { LLMConfig } from "@lot-agent/core";
+import { gatewayModelHeaders } from "./tokenhub/model-access.js";
 
 /**
  * Load the LLM config from {rootDir}/config/default.json, applying
@@ -29,5 +30,5 @@ export async function loadLlmConfig(rootDir: string): Promise<LLMConfig> {
   rawConfig.llm = llmRaw;
 
   const config = AppConfigSchema.parse(rawConfig);
-  return config.llm as LLMConfig;
+  return { ...config.llm, openai: { ...config.llm.openai, headers: gatewayModelHeaders() } } as LLMConfig;
 }

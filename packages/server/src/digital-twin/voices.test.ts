@@ -178,7 +178,7 @@ describe("digital twin speech", () => {
     const f = fixture(); await f.enroll(); await f.enroll();
     expect(await f.service.speak("owner", id, { text: "欢迎", speed: 1.1 })).toEqual({ audio: new Uint8Array([9, 8]), mime: "audio/mpeg" });
     expect(f.speech.apiKey).toHaveBeenCalledWith("owner");
-    expect(f.speech.provider).toHaveBeenCalledWith({ baseUrl: "https://gateway.example/v1", apiKey: "user-key" });
+    expect(f.speech.provider).toHaveBeenCalledWith({ baseUrl: "https://gateway.example/v1", apiKey: "user-key", headers: {} });
     expect(f.speechProvider.synthesize).toHaveBeenCalledWith({ model: f.config.targetModel, text: "欢迎", voice: "qwen-voice-1", format: "mp3", speed: 1.1, instructions: undefined }, undefined);
   });
   it("refuses voices that are not ready, foreign owners and missing user keys before any billed call", async () => {

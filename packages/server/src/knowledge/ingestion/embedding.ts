@@ -1,4 +1,5 @@
 import type { EmbeddingProvider } from "@lot-agent/core";
+import { gatewayModelHeaders } from "../../tokenhub/model-access.js";
 export class EmbeddingError extends Error {
   constructor(readonly code: string, readonly retryable = false) { super(code); }
 }
@@ -16,7 +17,7 @@ export class TokenhubEmbeddingProvider implements EmbeddingProvider {
     let response: Response;
     try {
       response = await (this.options.fetcher ?? fetch)(`${this.options.baseUrl.replace(/\/$/, "")}/embeddings`, {
-        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.options.apiKey}` },
+        method: "POST", headers: { ...gatewayModelHeaders(), "Content-Type": "application/json", Authorization: `Bearer ${this.options.apiKey}` },
         body: JSON.stringify({ model: this.options.model, input: texts, dimensions: this.options.dimensions, encoding_format: "float" }),
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000),
       });

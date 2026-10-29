@@ -36,7 +36,9 @@ const SPEECH_MIME: Record<SpeechFormat, string[]> = {
 
 /** OpenAI-compatible `POST {baseUrl}/audio/speech`, e.g. New API in front of Qwen Audio TTS. */
 export class OpenAISpeechProvider implements SpeechProvider {
-  constructor(private readonly options: { baseUrl: string; apiKey: string; timeoutMs?: number; maxBytes?: number }) {}
+  constructor(private readonly options: {
+    baseUrl: string; apiKey: string; timeoutMs?: number; maxBytes?: number; headers?: Record<string, string>;
+  }) {}
 
   async synthesize(req: SpeechRequest, signal?: AbortSignal): Promise<SpeechResult> {
     signal?.throwIfAborted();
@@ -51,7 +53,7 @@ export class OpenAISpeechProvider implements SpeechProvider {
     try {
       response = await fetch(`${this.options.baseUrl.replace(/\/+$/, "")}/audio/speech`, {
         method: "POST", redirect: "error", signal: combined,
-        headers: { Authorization: `Bearer ${this.options.apiKey}`, "Content-Type": "application/json" },
+        headers: { ...this.options.headers, Authorization: `Bearer ${this.options.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model: req.model, input: req.text, voice: req.voice, response_format: format, speed: req.speed, instructions: req.instructions || undefined }),
       });
     } catch { signal?.throwIfAborted(); throw fail("TRANSPORT_ERROR"); }

@@ -1,5 +1,6 @@
 import { LLMResponseError } from "./errors.js";
 import OpenAI, {
+  type ClientOptions,
   RateLimitError,
   InternalServerError,
   APIConnectionError,
@@ -29,6 +30,8 @@ export interface OpenAIProviderConfig {
   baseUrl?: string;
   model: string;
   protocol?: "chat-completions" | "responses";
+  headers?: Record<string, string>;
+  fetch?: typeof fetch;
 }
 
 export class OpenAIProvider implements LLMProvider {
@@ -40,6 +43,8 @@ export class OpenAIProvider implements LLMProvider {
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
+      defaultHeaders: config.headers,
+      fetch: config.fetch as ClientOptions["fetch"],
       maxRetries: 0, // withLLMRetry owns transport retries
     });
     this.model = config.model;

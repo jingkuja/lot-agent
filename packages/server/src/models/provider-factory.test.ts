@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { OpenAIProvider, OpenAIResponsesProvider, OpenAIImagesImageProvider, HttpVideoGenerationProvider } from "@lot-agent/core";
 import { ProviderFactory } from "./provider-factory.js";
 import type { ModelCatalogConfig } from "./catalog.js";
@@ -21,7 +21,38 @@ const f = new ProviderFactory({
   catalog, llmBaseUrl: "https://h/v1", imageBase: media(), videoBase: media(),
 });
 
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
 describe("ProviderFactory", () => {
+  it.each(["0", "1"])("uses the catalog mode for all model transports (globle=%s)", async globle => {
+    vi.stubEnv("globle", globle);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ error: { message: "test rejection" } }), {
+        status: 403, headers: { "Content-Type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const factory = new ProviderFactory({
+      catalog: { ...catalog, defaultProvider: { ...catalog.defaultProvider, image: "happyhorse" } },
+      llmBaseUrl: "https://h/v1", llmFetch: fetcher, imageBase: media(), videoBase: media(),
+    });
+    const messages = [{ role: "user" as const, content: "test" }];
+    await expect(factory.llm("model", "user-key").chat(messages)[Symbol.asyncIterator]().next()).rejects.toThrow();
+    await expect(factory.llm("model", "user-key", "responses").chat(messages)[Symbol.asyncIterator]().next()).rejects.toThrow();
+    await expect(factory.image("gpt-image-2-token", "user-key").create({ prompt: "test" })).rejects.toThrow();
+    await expect(factory.image("async-image", "user-key").create({ prompt: "test" })).rejects.toThrow();
+    await expect(factory.video("veo3.1", "user-key").create({ prompt: "test" })).rejects.toThrow();
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://h/v1/chat/completions", "https://h/v1/responses", "https://h/v1/images/generations",
+      "https://h/v1/image/generations", "https://h/v1/video/generations",
+    ]);
+    for (const [, init] of fetcher.mock.calls) {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer user-key");
+      expect(headers.get("X-Agent-Globle")).toBe(globle === "1" ? "1" : null);
+    }
+  });
+
   it("honors per-model Responses selection and a per-call override", () => {
     const factory = new ProviderFactory({ catalog: { ...catalog, llmProtocols: { "kimi-k3": "responses" } }, llmBaseUrl: "https://h/v1", imageBase: media(), videoBase: media() });
     expect(factory.llm("kimi-k3", "sk-u")).toBeInstanceOf(OpenAIResponsesProvider);

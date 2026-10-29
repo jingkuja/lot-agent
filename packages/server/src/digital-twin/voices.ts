@@ -4,6 +4,7 @@ import type { KnowledgeRepository } from "../knowledge/repository.js";
 import type { LocalKnowledgeStorage } from "../knowledge/private-storage.js";
 import { KnowledgeError } from "../knowledge/errors.js";
 import { inspectMedia } from "../marketing-video/media.js";
+import { gatewayModelHeaders } from "../tokenhub/model-access.js";
 
 export function loadTwinVoiceConfig() {
   return {
@@ -22,7 +23,7 @@ const view = ({ targetModel, voiceId, status }: TwinVoiceRecord): TwinVoiceView 
 export interface TwinSpeechDeps {
   apiKey(ownerId: string): Promise<string | null>;
   baseUrl(): string;
-  provider?: (options: { baseUrl: string; apiKey: string }) => SpeechProvider;
+  provider?: (options: { baseUrl: string; apiKey: string; headers?: Record<string, string> }) => SpeechProvider;
 }
 
 export class TwinVoices {
@@ -125,7 +126,7 @@ export class TwinVoices {
     if (!speech) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "语音合成服务不可用");
     const apiKey = await speech.apiKey(ownerId);
     if (!apiKey) throw new KnowledgeError("KNOWLEDGE_UNAVAILABLE", 503, "模型账号不可用，请重新登录后重试");
-    const options = { baseUrl: speech.baseUrl(), apiKey };
+    const options = { baseUrl: speech.baseUrl(), apiKey, headers: gatewayModelHeaders() };
     const provider = speech.provider?.(options) ?? new OpenAISpeechProvider(options);
     return provider.synthesize({ model: voice.targetModel, text: input.text, voice: voice.voiceId, format, speed: input.speed, instructions: input.instructions }, signal);
   }
