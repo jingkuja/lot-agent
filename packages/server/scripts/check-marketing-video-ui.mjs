@@ -171,7 +171,10 @@ try {
         if (failNextStoryboard) { failNextStoryboard = false; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'AI 分镜生成失败，原分镜已保留，请重试。' }) }); }
         const body = request.postDataJSON(); assert.equal(body.version, p.version);
         const current = p.draft.storyboard.length ? p.draft.storyboard : aiPlan(p.draft.script, p.draft.durationSec).map(part => ({ durationSec: part.durationSec, script: part.script, visual: '木质吧台和咖啡产品特写', action: '自然讲述并展示咖啡', camera: '缓慢推近' }));
-        const shots = current.map((shot, index) => body.instruction && (body.index === undefined || body.index === index) ? { ...shot, camera: 'AI 调整镜头' } : shot);
+        // An empty request on an existing board polishes the chosen shots.
+        const polish = !body.instruction && p.draft.storyboard.length;
+        const shots = current.map((shot, index) => (body.instruction || polish) && (body.index === undefined || body.index === index)
+          ? { ...shot, camera: polish ? 'AI 润色镜头' : 'AI 调整镜头' } : shot);
         keepSnapshot(p, 'storyboard');
         p.version++; p.draft = { ...p.draft, storyboard: shots, script: storyboardScript(shots), storyboardAudio: body.index === undefined ? !p.draft.assets.video : p.draft.storyboardAudio }; p.review = null;
         return json(p);
@@ -639,6 +642,7 @@ try {
   await page.locator('.mv-history summary').click();
   await page.getByRole('heading', { name: '确认分镜', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-storyboard.png');
+  await page.locator('.mv-storyboard-ai').scrollIntoViewIfNeeded(); await snap('marketing-video-storyboard-polish-zh-light.png');
   // Twin narration: only a cloned voice can be picked; takes are generated and fitted before any clip.
   await voiceStep.click();
   await voiceModes.getByRole('button', { name: /^数字分身旁白/ }).click();
@@ -1038,6 +1042,14 @@ try {
   await page.getByRole('button', { name: 'Revise storyboard with AI', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Storyboard saved.' }).waitFor();
   assert.deepEqual(await page.getByLabel('Framing and camera movement').evaluateAll(inputs => inputs.map(input => input.value)), planMarketingSegments(script, 30).map(() => 'AI 调整镜头'));
+  await page.getByLabel('Storyboard revision request').fill('');
+  await page.getByRole('button', { name: 'Polish storyboard with AI', exact: true }).click();
+  // The saved notice is still up from the previous revision; wait for the polished board instead.
+  await page.waitForFunction(() => [...document.querySelectorAll('.mv-shot textarea')].some(input => input.value === 'AI 润色镜头'));
+  await page.locator('.mv-storyboard-ai').scrollIntoViewIfNeeded(); await snap('marketing-video-storyboard-polish-en.png');
+  assert.equal(writes.filter(r => r.path.endsWith('/storyboard')).at(-1).body.instruction, '');
+  assert.deepEqual(await page.getByLabel('Framing and camera movement').evaluateAll(inputs => inputs.map(input => input.value)),
+    planMarketingSegments(script, 30).map(() => 'AI 润色镜头'));
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.getByRole('heading', { name: 'Review storyboard', exact: true }).scrollIntoViewIfNeeded();
   await snap('marketing-video-storyboard-en-compact.png');

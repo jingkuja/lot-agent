@@ -165,7 +165,7 @@ export function useTextRequests({ editor, session, profile, ownerId, locale, t, 
     if (!session.current(token)) return;
     lastText.current = { kind: "storyboard", run: () => editStoryboard(instruction, index) };
     const clientRequestId = stableRequestId(textRequest, JSON.stringify(["storyboard", p.id, p.version, locale, instruction, index]));
-    wait(instruction ? "正在按要求修改分镜" : "正在生成分镜");
+    wait(instruction ? "正在按要求修改分镜" : draftRef.current.storyboard.length ? "正在润色分镜" : "正在生成分镜");
     try {
       const result = await requestProject(`/marketing-videos/${p.id}/storyboard`, json("POST", { version: p.version, locale, instruction, index, clientRequestId }));
       if (!session.current(token)) return;

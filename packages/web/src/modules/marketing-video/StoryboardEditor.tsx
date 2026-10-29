@@ -58,7 +58,7 @@ export function StoryboardEditor({ shots, presenter = "mixed", busy, readOnly = 
     {!compact && <div className="mv-section-head"><h3>{t(readOnly || redo ? "制作分镜" : "确认分镜")}</h3><span>{t("{0} 个分镜 · 共 {1} 秒", [shots.length, ends.at(-1) ?? 0])}</span></div>}
     <p className="mv-hint">{t(redo ? "修改镜头内容或勾选「重新生成此镜」，只重新生成这些镜头并重新合成；其余镜头沿用已生成的片段，不收费。镜数和每镜时长不可修改。"
       : readOnly ? "以下是本次制作使用的分镜。修改后需作为新视频重新生成。"
-      : presenter === "mixed" ? "人物出镜与否按分镜安排，请在画面内容中写明该镜是否有人物出镜。" : "出镜人物将在每个镜头出镜，保持形象一致。")}</p>
+      : presenter === "mixed" ? "人物出镜与否按分镜安排，请在画面内容中写明该镜是否有人物出镜；人物出镜但不说话时写明「画外旁白」。" : "出镜人物将在每个镜头出镜，保持形象一致。")}</p>
     {structure && !readOnly && <StructureStatus structure={structure} shots={shots} total={total} busy={busy} lastEdit={lastEdit}
       onUndo={() => { if (lastEdit) { setUndo(null); onChange?.(lastEdit.before); } }} />}
     <div className="mv-shot-list">{shots.map((shot, index) => <article className={redo?.selected[index] ? "mv-shot mv-shot-redo" : "mv-shot"} key={index} aria-label={t("第 {0} 镜", [index + 1])}>
@@ -88,7 +88,10 @@ export function StoryboardEditor({ shots, presenter = "mixed", busy, readOnly = 
     {!readOnly && onAi && <details className="mv-storyboard-ai" open><summary>{t("调整分镜（选填）")}</summary>
       <label className="mv-field"><span>{t("AI 修改范围")}</span><select value={target} disabled={busy} onChange={e => setTarget(e.target.value)}><option value="all">{t("全部分镜")}</option>{shots.map((_, index) => <option key={index} value={index}>{t("第 {0} 镜", [index + 1])}</option>)}</select></label>
       <label className="mv-field"><span>{t("分镜修改要求")}</span><textarea rows={2} maxLength={1000} value={instruction} disabled={busy} placeholder={t("例如：开场由人物手持产品展示，保留脸部和上半身，镜头缓慢推近，口播保持不变。")} onChange={e => setInstruction(e.target.value)} /></label>
-      <button className="mv-soft" disabled={busy || !instruction.trim()} onClick={() => onAi?.(instruction.trim(), target === "all" ? undefined : Number(target))}>{t(busy ? "正在处理…" : "AI 修改分镜")}</button>
+      {/* Without a request the server polishes the shots' visuals and camera work, keeping the narration. */}
+      <p className="mv-hint">{t("不填要求时，AI 会整体润色所选分镜的画面、动作和运镜，口播保持不变。")}</p>
+      <button className="mv-soft" disabled={busy} onClick={() => onAi?.(instruction.trim(), target === "all" ? undefined : Number(target))}>
+        {t(busy ? "正在处理…" : instruction.trim() ? "AI 修改分镜" : "AI 润色分镜")}</button>
     </details>}
   </div>;
 }

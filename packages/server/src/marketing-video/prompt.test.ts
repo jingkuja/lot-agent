@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { KLING_MARKETING_PROFILE, MarketingDraftSchema, newMarketingDraft } from "@lot-agent/core/marketing-video";
-import { marketingImageReferences, marketingPlanningContext, marketingSegmentPrompt, marketingShotDirectionBudget, marketingStoryboardRules,
-  marketingTimingRequirement } from "./prompt.js";
+import { MARKETING_CINEMATOGRAPHY, MARKETING_PERFORMANCE, marketingImageReferences, marketingPlanningContext, marketingSegmentPrompt,
+  marketingShotDirectionBudget, marketingStoryboardRules, marketingTimingRequirement } from "./prompt.js";
 import { activeMarketingVideoProfile } from "./model.js";
 import { creationPrompt, parseCreation, publicationPrompt, storyboardPrompt } from "./creation.js";
 import { parseTextResult } from "./text-result.js";
@@ -86,9 +86,26 @@ describe("marketing model subtitle instructions", () => {
     const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2);
     expect(prompt).toContain("Presenter only where visual calls for one, framed as visual and camera say");
     expect(prompt).not.toContain("upper body");
-    expect(prompt).toContain("off-screen voice-over");
+    expect(prompt).toContain("marks the script as off-screen narration, narrate off-screen and no one on screen speaks or lip-syncs");
     expect(prompt).not.toContain("Presenter in EVERY shot");
     expect(marketingSegmentPrompt({ ...draft, assets: { video: id } }, { index: 0, script: "欢迎光临。", durationSec: 6 }, 2)).toContain("Silent demonstration, no lip-sync");
+  });
+  it("plans narration over demonstrations and keeps looks into the lens for trust and the call to action", () => {
+    const draft = { ...newMarketingDraft(), durationSec: 17 };
+    const native = creationPrompt(draft, "zh").system;
+    expect(native).toContain("keep sustained talking to the lens rare");
+    expect(native).toContain("the presenter is not speaking");
+    expect(native).toContain("never a lingering frontal close-up of the face");
+    // Twin narration is silent on screen: the presenter may look into the lens but never speaks.
+    const narration = { twinItemId: id };
+    const twin = MarketingDraftSchema.parse({ ...draft, narration });
+    const twinPlan = creationPrompt(twin, "zh").system;
+    expect(twinPlan).toContain("keep sustained talking to the lens rare");
+    expect(twinPlan).toContain("look into the lens, smile or gesture, without speaking");
+    expect(twinPlan).not.toContain("the presenter is not speaking");
+    // A chosen talking-head video and a silent reference-video film keep their own rules.
+    expect(creationPrompt({ ...draft, presenter: "always" }, "zh").system).not.toContain("keep sustained talking to the lens rare");
+    expect(creationPrompt({ ...draft, assets: { video: id } }, "zh").system).not.toContain("keep sustained talking to the lens rare");
   });
   it("asks AI-voiced clips for speech without any text: captions are burned in afterwards", () => {
     const draft = MarketingDraftSchema.parse({ script: "欢迎来到咖啡店。其他片段。", subtitles: true });
@@ -304,6 +321,26 @@ describe("copy and storyboard source boundaries", () => {
     expect(prompt.system).toContain("index 1 (shot 2), lasting exactly 10 seconds");
     expect(prompt.system).toContain("do not authorize rewriting or translating narration");
     expect(prompt.system).not.toContain("The target duration is");
+    expect(prompt.system).toContain("polish the selected shot's visual, action and camera as a whole");
+    expect(prompt.system).not.toContain("Preserve unrequested fields");
+  });
+
+  it("asks every planned board for cinematic directions and people's behavior, and rewrites typed ones on revision", () => {
+    const draft = MarketingDraftSchema.parse({ storyboard: [
+      { durationSec: 8, script: "先看这杯咖啡。", visual: "展示产品与使用场景", action: "展示", camera: "中景平稳拍摄" },
+    ] });
+    const prompts = [creationPrompt(draft, "zh"), storyboardPrompt(draft, "zh", draft.storyboard, ""), storyboardPrompt(draft, "zh", draft.storyboard, "", 0)];
+    for (const prompt of prompts) {
+      expect(prompt.system).toContain(MARKETING_CINEMATOGRAPHY);
+      expect(prompt.system).toContain(MARKETING_PERFORMANCE);
+      expect(prompt.system).toContain("ONE main action and at most one or two small reactions");
+    }
+    // Planning only: the clip prompt carries the shot's action, not the rule, so its length is unchanged.
+    expect(marketingSegmentPrompt(draft, { index: 0, script: "先看这杯咖啡。", durationSec: 8 }, 1)).not.toContain("behave and change");
+    const board = storyboardPrompt(draft, "zh", draft.storyboard, "开场更吸引人").system;
+    expect(board).toContain("including text the user typed, as a rough draft");
+    expect(board).toContain("never undo what it asks for");
+    expect(board).not.toContain("change only what it requests");
   });
 
   it("passes only final narration to publication copy generation", () => {
