@@ -91,7 +91,10 @@ try {
   const burnedCaptions = [{ shot: 0, start: 0.2, end: 2.4, text: '欢迎光临' }, { shot: 0, start: 2.4, end: 4.8, text: '一起喝杯咖啡' }];
   // Videos composed since M08 keep a caption-free copy and the timing their captions need.
   let captionPreview = false;
-  const previewOutput = (p) => captionPreview ? { preview: { assetId: 'preview-asset', url: '/static/fixture-preview.mp4' },
+  // Like the server, every response signs the made videos anew.
+  let signatures = 0;
+  const signed = (url) => `${url}?material_token=${++signatures}`;
+  const previewOutput = (p) => captionPreview ? { preview: { assetId: 'preview-asset', url: signed('/static/fixture-preview.mp4') },
     captionTiming: ((p.rendered ?? p.draft).storyboard ?? [])
       .map(shot => ({ script: shot.script, durationSec: shot.durationSec, voiceSec: shot.durationSec, pauses: [] })) } : {};
   const quality = { checked: true, durationSec: 60.02, expectedSec: 60, subtitles: 'model', speech: true, issues: [{ kind: 'black', shot: 1, start: 15, end: 15.8 }] };
@@ -103,7 +106,7 @@ try {
   const hasVideo = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=360x640:r=25:d=20", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
     "-t", "20", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", playable]).status === 0;
   // Served with byte ranges, like the real static route, so the player can seek.
-  if (hasVideo) await page.route(/\/static\/fixture(-preview)?\.mp4$/, async route => {
+  if (hasVideo) await page.route(/\/static\/fixture(-preview)?\.mp4(\?|$)/, async route => {
     const body = await readFile(playable), range = /bytes=(\d+)-(\d*)/.exec(route.request().headers().range ?? "");
     if (!range) return route.fulfill({ contentType: "video/mp4", headers: { "Accept-Ranges": "bytes" }, body });
     const start = Number(range[1]), end = range[2] ? Math.min(Number(range[2]), body.length - 1) : body.length - 1;
@@ -158,6 +161,9 @@ try {
         assert.equal(body.version, old?.version ?? 0);
         const p = { ...(old ?? { id, status: 'draft', progress: 0, taskId: null, review: null, reviewedScript: null, knowledgeItemId: null }), version: body.version + 1, draft: body.draft, updatedAt: new Date().toISOString() };
         if (p.reviewedScript !== marketingReviewText(p.draft)) p.review = null;
+        // A saved draft comes back with its videos signed anew.
+        if (p.output) p.output = { ...p.output, assets: p.output.assets.map(asset => ({ ...asset, url: signed(asset.url.split('?')[0]) })),
+          ...(p.output.preview ? { preview: { ...p.output.preview, url: signed(p.output.preview.url.split('?')[0]) } } : {}) };
         projects.set(id, p); return json(withRevision(p));
       }
       const p = projects.get(id); assert(p, `project ${id} missing`);
@@ -248,7 +254,8 @@ try {
       if (action === 'archive') { p.knowledgeItemId = 'knowledge-video'; p.knowledgeVersion = p.version; return json({ itemId: p.knowledgeItemId, version: p.version }); }
       if (p.taskId) {
         p.status = taskState;
-        if (taskState === 'succeeded') p.output = { assets: resultAssets, assetIds: ['video-asset'], quality, captions: burnedCaptions, ...previewOutput(p) };
+        const assets = resultAssets.map(asset => ({ ...asset, url: signed(asset.url) }));
+        if (taskState === 'succeeded') p.output = { assets, assetIds: ['video-asset'], quality, captions: burnedCaptions, ...previewOutput(p) };
       }
       if (action === 'status') {
         statusPolls++;
@@ -775,7 +782,7 @@ try {
   const captionPanel = composition.getByRole('group', { name: '调整字幕', exact: true });
   // M08: a video composed before the caption-free copy existed says how to get a preview, and offers none.
   await composition.getByText('这条视频合成时没有保留无字幕版本', { exact: false }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '预览字幕修改', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '实时预览', exact: true }).count(), 0);
   await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '大', exact: true }).click();
   await captionPanel.getByLabel('全片提前或延后（秒）').fill('0.2');
   await captionPanel.getByText('逐镜调整断行和时间', { exact: true }).click();
@@ -810,15 +817,20 @@ try {
   // M08: the recomposed video kept a caption-free copy; a caption change switches to it with the new captions drawn over it.
   const video = page.locator('.mv-results video.mv-result-video');
   // The preview toggle sits with the caption settings; choosing a mode brings the video into view and focus.
-  const previewMode = composition.getByRole('button', { name: '预览字幕修改', exact: true });
+  const previewMode = composition.getByRole('button', { name: '实时预览', exact: true });
+  // Composing a preview video is held back for now.
+  assert.equal(await composition.getByRole('button', { name: '生成预览成片', exact: true }).count(), 0);
   await previewMode.waitFor();
   assert.equal(await composition.getByText('这条视频合成时没有保留无字幕版本', { exact: false }).count(), 0);
-  assert.equal(await video.getAttribute('src'), '/static/fixture.mp4');
+  assert.equal((await video.getAttribute('src')).split('?')[0], '/static/fixture.mp4');
   await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '小', exact: true }).click();
   await page.locator('.mv-caption-badge').filter({ hasText: '预览：未重新合成' }).waitFor();
   assert.equal(await previewMode.getAttribute('aria-pressed'), 'true');
-  assert.equal(await video.getAttribute('src'), '/static/fixture-preview.mp4');
-  await page.getByRole('status').filter({ hasText: '预览只在页面上叠加字幕' }).waitFor();
+  // The live preview plays beside the caption settings; the top of the results says where it went.
+  assert.equal(await composition.locator('.mv-live-slot video').count(), 1);
+  await page.getByRole('note').filter({ hasText: '实时预览显示在下方「成片设置」中' }).waitFor();
+  assert.equal((await video.getAttribute('src')).split('?')[0], '/static/fixture-preview.mp4');
+  await page.getByRole('status').filter({ hasText: '实时预览只在页面上叠加字幕' }).waitFor();
   if (hasVideo) {
     // The first line of shot 1 is drawn over the caption-free copy at its time, inside the picture.
     await video.evaluate(element => new Promise(done => { element.addEventListener('seeked', done, { once: true }); element.currentTime = 0.5; }));
@@ -829,10 +841,36 @@ try {
     assert(caption.y > picture.y + picture.height / 2 && caption.y + caption.height < picture.y + picture.height, 'the caption sits in the lower half of the picture');
   }
   await video.scrollIntoViewIfNeeded(); await snap('marketing-video-caption-preview-zh-light.png');
-  await composition.getByRole('button', { name: '原成片', exact: true }).click();
-  assert.equal(await video.getAttribute('src'), '/static/fixture.mp4');
+  // The note where the video was brings it back with one click.
+  const movedNote = page.getByRole('note').filter({ hasText: '实时预览显示在下方「成片设置」中' });
+  await movedNote.scrollIntoViewIfNeeded(); await snap('marketing-video-live-preview-note-zh-light.png');
+  await page.getByRole('note').filter({ hasText: '实时预览显示在下方「成片设置」中' }).getByRole('button', { name: '原成片', exact: true }).click();
+  assert.equal((await video.getAttribute('src')).split('?')[0], '/static/fixture.mp4');
+  assert.equal(await composition.locator('video').count(), 0, 'the made video plays back at the top');
   assert.equal(await video.evaluate(element => document.activeElement === element), true);
   assert.equal(await page.locator('.mv-caption-badge').count(), 0);
+  // The live preview comes back at once, without composing anything.
+  const revisesBeforeLive = writes.filter(r => r.path.endsWith('/revise')).length;
+  await previewMode.click();
+  assert.equal((await video.getAttribute('src')).split('?')[0], '/static/fixture-preview.mp4');
+  await page.locator('.mv-caption-badge').waitFor();
+  assert.equal(await composition.locator('.mv-live-slot video').count(), 1);
+  await page.waitForFunction(() => document.activeElement?.matches('.mv-live-slot video'));
+  assert.equal(writes.filter(r => r.path.endsWith('/revise')).length, revisesBeforeLive);
+  // A caption change is saved and answered with newly signed links; the playing preview keeps its player, link and
+  // place, and the chosen setting keeps the focus.
+  const livePlayer = composition.locator('.mv-live-slot video');
+  const liveSrc = await livePlayer.getAttribute('src');
+  await livePlayer.evaluate(element => { element.dataset.kept = 'yes'; });
+  const position = captionPanel.getByRole('group', { name: '位置', exact: true });
+  const positionSaved = savedDraft('"position":"high"');
+  await position.getByRole('button', { name: '靠上', exact: true }).click();
+  await positionSaved;
+  await page.waitForTimeout(300);
+  assert.equal(await livePlayer.getAttribute('data-kept'), 'yes', 'the player is not rebuilt');
+  assert.equal(await livePlayer.getAttribute('src'), liveSrc, 'the player is not reloaded');
+  assert.equal(await position.getByRole('button', { name: '靠上', exact: true }).evaluate(element => document.activeElement === element), true);
+  await position.getByRole('button', { name: '标准', exact: true }).click();
   if (!await captionPanel.locator('.mv-caption-shots').evaluate(el => el.open)) await captionPanel.getByText('逐镜调整断行和时间', { exact: true }).click();
   await captionPanel.getByRole('button', { name: '播放本镜', exact: true }).first().click();
   await captionPanel.getByRole('group', { name: '字号', exact: true }).getByRole('button', { name: '大', exact: true }).click();
@@ -849,34 +887,17 @@ try {
   assert.equal(projects.get(p.id).draft.subtitles, false);
   taskState = 'succeeded';
   await page.locator('.mv-results video').waitFor();
-  // Choosing the preview composes a preview video beside the made one, even with nothing changed and without a
-  // confirmation or a copy check; its progress shows at the top while the made video stays as it is.
-  const unchangedBefore = writes.length;
-  await previewMode.click();
-  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
-  assert.equal(await page.locator('.mv-results').evaluate(element => document.activeElement === element), true);
-  const unchangedWrites = writes.slice(unchangedBefore);
-  assert.deepEqual(unchangedWrites.filter(r => r.path.endsWith('/revise')).map(r => [r.body.shots, r.body.preview]), [[[], true]]);
-  assert(!unchangedWrites.some(r => r.path.endsWith('/review')), 'a preview of the made video as it is skips the copy check');
-  const original = page.getByRole('region', { name: '原成片', exact: true });
-  await original.getByText('预览成片完成前，原成片保持不变。', { exact: true }).waitFor();
-  assert.equal(await original.getByRole('button', { name: '放弃预览', exact: true }).count(), 0, 'a running preview is cancelled, not discarded');
-  taskState = 'succeeded';
+  // A preview made before composing previews was held back still offers its choice: discarding returns to the made
+  // video and to the settings the preview tried; kept, the preview replaces the made video.
   const decision = page.getByRole('group', { name: '预览成片', exact: true });
-  await decision.getByRole('button', { name: '替换原成片', exact: true }).waitFor();
-  await decision.scrollIntoViewIfNeeded(); await snap('marketing-video-preview-decision-zh-light.png');
-  // Discarding returns to the made video and to the settings the preview tried.
-  await decision.getByRole('button', { name: '放弃预览', exact: true }).click();
-  await decision.waitFor({ state: 'detached' });
-  assert.equal(writes.at(-1).path.endsWith('/preview/discard'), true);
-  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '成片设置');
-  // Kept, the preview replaces the made video.
-  await previewMode.click();
-  await page.locator('.mv-progress strong').filter({ hasText: '正在制作完整视频' }).waitFor();
-  taskState = 'succeeded';
-  await decision.getByRole('button', { name: '替换原成片', exact: true }).click();
-  await decision.waitFor({ state: 'detached' });
-  assert.equal(writes.at(-1).path.endsWith('/preview/keep'), true);
+  for (const action of ['放弃预览', '替换原成片']) {
+    projects.get(p.id).previewBase = { taskId: 'made-task', url: '/static/fixture.mp4' };
+    await page.reload(); await chooseAgent('营销影像');
+    await decision.getByRole('button', { name: action, exact: true }).click();
+    await decision.waitFor({ state: 'detached' });
+    assert.equal(writes.at(-1).path.endsWith(action === '放弃预览' ? '/preview/discard' : '/preview/keep'), true);
+    if (action === '放弃预览') await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '成片设置');
+  }
   await firstShot.getByLabel('分镜口播').fill('欢迎来到转角咖啡，坐下慢慢喝一杯。');
   await firstShot.getByText('口播已修改，保留画面，只更新配音和字幕', { exact: true }).waitFor();
   const keptRedo = firstShot.getByRole('checkbox', { name: /重新生成此镜/ });
