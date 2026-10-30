@@ -1,6 +1,6 @@
 import { capMarketingStoryboard, MARKETING_REVIEW_RULE_VERSION, MarketingDraftSchema, MarketingStoryboardSchema, marketingShotMaxSeconds, planMarketingSegments,
   resolveMarketingSegments, storyboardScript, timeMarketingStoryboard, type MarketingDraft, type MarketingReview, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
-import { activeMarketingVideoProfile } from "./model.js";
+import { newMarketingVideoProfile } from "./model.js";
 import { parseCreation } from "./creation.js";
 import { MarketingTextError } from "./text.js";
 import { normalizeMarketingReview, type MarketingReviewDelta } from "./compliance.js";
@@ -33,7 +33,8 @@ export function parseOperationResult(kind: TextOperationKind, raw: unknown, draf
   }
   return parseTextResult(kind, raw, draft, input.index);
 }
-export function parseTextResult(kind: "copy" | "storyboard", raw: unknown, draft: MarketingDraft, selectedIndex?: number, profile: MarketingVideoProfile = activeMarketingVideoProfile()) {
+export function parseTextResult(kind: "copy" | "storyboard", raw: unknown, draft: MarketingDraft, selectedIndex?: number,
+  profile: MarketingVideoProfile = newMarketingVideoProfile(draft)) {
   try {
     if (kind === "copy") return parseCreation(raw, draft, profile);
     const maxShot = marketingShotMaxSeconds(draft, profile);

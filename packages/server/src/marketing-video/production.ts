@@ -1,8 +1,8 @@
 import { estimateCost } from "@lot-agent/core";
 import {
-  CAPTION_WORDS_CHANGED, isMarketingDurationValid, marketingCaptionErrors, marketingFrameSize, MARKETING_INPUT_VERSION, marketingJobProfile,
-  marketingNativeSpeech, marketingReferenceError, marketingShotMaxSeconds, marketingVoiceover, MarketingDraftSchema, resolveMarketingSegments,
-  type MarketingDraft, type MarketingNarrationClip, type MarketingProject, type MarketingSegment, type MarketingVideoProfile,
+  CAPTION_WORDS_CHANGED, isMarketingDurationValid, marketingCaptionErrors, marketingDraftProfile, marketingFrameSize, MARKETING_INPUT_VERSION,
+  marketingJobProfile, marketingNativeSpeech, marketingReferenceError, marketingShotMaxSeconds, marketingVoiceover, MarketingDraftSchema,
+  resolveMarketingSegments, type MarketingDraft, type MarketingNarrationClip, type MarketingProject, type MarketingSegment, type MarketingVideoProfile,
 } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import type { BullmqJobQueue } from "../jobs/bullmq-queue.js";
@@ -21,7 +21,8 @@ export interface MarketingProductionDeps {
   narrator: MarketingNarrator;
   keyArtist: Pick<MarketingKeyArtist, "frozen">;
   materials: MarketingMaterials;
-  /** Clip model of new videos; a stopped job keeps the model it recorded. */
+  /** Configured clip model of new videos (`marketingDraftProfile` may pick Seedance instead); a stopped job keeps
+   * the model it recorded. */
   activeProfile: MarketingVideoProfile;
 }
 
@@ -62,7 +63,7 @@ export class MarketingProduction {
     if (p.taskId && !await this.queue.canResumePersisted(p.taskId)) throw new MarketingError("原任务正在收尾，请稍后继续。", 409);
     // Recovery keeps the frozen job's model and reference rules.
     const basis: JobBasis = p.taskId ? await this.stoppedJob(owner, p, p.taskId)
-      : { draft: p.draft, profile: this.deps.activeProfile, inputVersion: MARKETING_INPUT_VERSION, segments: [] };
+      : { draft: p.draft, profile: marketingDraftProfile(p.draft, this.deps.activeProfile), inputVersion: MARKETING_INPUT_VERSION, segments: [] };
     const { draft, profile, inputVersion, segments, frozen } = basis;
     const needsSubmission = !frozen || segments.some(s => segmentRecoveryAction(s) === "submit");
     // A new video submits the still made for its current look, if any.

@@ -327,7 +327,7 @@ async function main() {
   });
   const { segments: segmentConcurrency } = marketingQueueLimits();
   queue.process("marketing.video", async (job, ctl) => runMarketingVideo({
-    db, dataRoot: resolve(ROOT, "data"), segmentConcurrency, generation: (child, signal) => genDeps("video", child, signal),
+    db, dataRoot: resolve(ROOT, "data"), segmentConcurrency, uploads: uploadStorage, generation: (child, signal) => genDeps("video", child, signal),
   }, { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, ctl.signal));
   // Digital presenters always use the owner's own model key: the gateway bills the owner.
   queue.process(DIGITAL_PRESENTER_TASK, async (job, ctl) => runDigitalPresenter({

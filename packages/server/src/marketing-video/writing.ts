@@ -1,5 +1,5 @@
-import { capMarketingStoryboard, MARKETING_REVIEW_MODEL, marketingShotMaxSeconds, planMarketingSegments, type MarketingDraft, type MarketingProject,
-  type MarketingSource, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
+import { capMarketingStoryboard, MARKETING_REVIEW_MODEL, marketingDraftProfile, marketingShotMaxSeconds, planMarketingSegments, type MarketingDraft,
+  type MarketingProject, type MarketingSource, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import { marketingReviewInput, REVIEW_INSTRUCTION, reviewDeltaInstruction, type MarketingReviewDelta } from "./compliance.js";
 import { marketingCopyModel } from "./copy-model.js";
@@ -53,19 +53,20 @@ export class MarketingWriting {
     const reserved = await operations.begin(owner, clientRequestId, p.id, version, "storyboard", { version, locale, instruction, index }, undefined, model);
     if (!reserved.fresh) { replay(reserved.operation); return { ...p, operation: reserved.operation }; }
     const draft = reserved.draft;
+    const profile = marketingDraftProfile(draft, activeProfile);
     let started = false;
     try {
       if (index !== undefined && index >= draft.storyboard.length) throw new MarketingError("分镜修改参数无效。");
       let initial;
       try {
-        initial = draft.storyboard.length ? capMarketingStoryboard(draft.storyboard, draft, activeProfile)
-          : planMarketingSegments(draft.script, draft.durationSec, marketingShotMaxSeconds(draft, activeProfile))
+        initial = draft.storyboard.length ? capMarketingStoryboard(draft.storyboard, draft, profile)
+          : planMarketingSegments(draft.script, draft.durationSec, marketingShotMaxSeconds(draft, profile))
             .map(part => ({ durationSec: part.durationSec, script: part.script, visual: "", action: "", camera: "" }));
       }
       catch (error) { throw new MarketingError((error as Error).message); }
       const prompt = storyboardPrompt(draft, locale, initial, instruction, index);
       started = true;
-      const result = parseTextResult("storyboard", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true, model }, "storyboard"), draft, index);
+      const result = parseTextResult("storyboard", await this.call(owner, clientRequestId, prompt, { upstreamBilling: true, model }, "storyboard"), draft, index, profile);
       const operation = await operations.finish(owner, clientRequestId, result);
       return { ...await this.project(owner, p.id), operation };
     } catch (error) { await this.fail(owner, clientRequestId, started, error, model); throw error; }

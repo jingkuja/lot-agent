@@ -412,8 +412,11 @@ export class PgMarketingProjectStore implements MarketingProjectStore {
         AND task_id IN (SELECT $2::uuid UNION SELECT task_id FROM marketing_video_segments WHERE project_id=$3
           UNION SELECT (st.input->>'parentId')::uuid FROM marketing_video_segments s JOIN tasks st ON st.id=s.task_id WHERE s.project_id=$3)
         RETURNING storage_key, size_bytes`, [owner, p.task_id, id])).rows : [];
+      // Key-art stills, and the reference videos trimmed for this draft's clips (`run.ts → shotReferenceVideo`).
       const keyArts = (await client.query(`DELETE FROM assets WHERE user_id=$1 AND type='upload'
-        AND id IN (SELECT asset_id FROM marketing_video_key_arts WHERE owner_id=$1 AND project_id=$2) RETURNING storage_key, size_bytes`, [owner, id])).rows;
+        AND (id IN (SELECT asset_id FROM marketing_video_key_arts WHERE owner_id=$1 AND project_id=$2)
+          OR (storage_key LIKE 'marketing-reference-%' AND task_id IN (SELECT task_id FROM marketing_video_segments WHERE project_id=$2)))
+        RETURNING storage_key, size_bytes`, [owner, id])).rows;
       await client.query("DELETE FROM marketing_text_operations WHERE user_id=$1 AND project_id=$2", [owner, id]);
       await client.query("DELETE FROM marketing_draft_snapshots WHERE user_id=$1 AND project_id=$2", [owner, id]);
       await client.query("DELETE FROM marketing_video_projects WHERE user_id=$1 AND id=$2", [owner, id]);

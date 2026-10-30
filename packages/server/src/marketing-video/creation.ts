@@ -1,5 +1,5 @@
 import { MarketingDraftSchema, MarketingCreationSchema, marketingShotMaxSeconds, resolveMarketingSegments, storyboardScript, timeMarketingStoryboard, type MarketingDraft, type MarketingShot, type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
-import { activeMarketingVideoProfile } from "./model.js";
+import { newMarketingVideoProfile } from "./model.js";
 import { marketingPlanningContext, marketingPresenterRequirement, marketingPromptInput, marketingShotDirectionBudget, marketingStoryboardRules,
   marketingTimingRequirement } from "./prompt.js";
 
@@ -54,7 +54,7 @@ export function publicationPrompt(script: string, locale: string) {
   };
 }
 
-export function parseCreation(raw: unknown, draft: MarketingDraft, profile: MarketingVideoProfile = activeMarketingVideoProfile()) {
+export function parseCreation(raw: unknown, draft: MarketingDraft, profile: MarketingVideoProfile = newMarketingVideoProfile(draft)) {
   const value = MarketingCreationSchema.parse(raw);
   const storyboard = timeMarketingStoryboard(value.shots, draft.durationSec, marketingShotMaxSeconds(draft, profile));
   const result = MarketingDraftSchema.parse({ ...draft, storyboard, script: storyboardScript(value.shots), publishTitle: value.publishTitle, tags: value.tags,

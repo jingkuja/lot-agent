@@ -37,7 +37,7 @@ const settle = () => act(async () => { await Promise.resolve(); });
 /** The studio's editor with autosave, as ProjectStudio wires them. */
 function editorHook(props: { busy: boolean; ready: boolean; onError(message: string): void }) {
   const session = useDraftSession();
-  const editor = useDraftEditor({ ownerId: "owner", session, profile: GROK_MARKETING_PROFILE, onEdit: () => {}, onProject: () => {} });
+  const editor = useDraftEditor({ ownerId: "owner", session, configured: GROK_MARKETING_PROFILE, onEdit: () => {}, onProject: () => {} });
   useDraftAutosave(editor, { session, ready: props.ready, busy: props.busy, onError: props.onError });
   return { session, editor };
 }
@@ -119,7 +119,7 @@ describe("draft autosave", () => {
     const onProject = vi.fn();
     const { result, unmount } = renderHook(() => {
       const session = useDraftSession();
-      return { session, editor: useDraftEditor({ ownerId: "owner", session, profile: GROK_MARKETING_PROFILE, onEdit: () => {}, onProject }) };
+      return { session, editor: useDraftEditor({ ownerId: "owner", session, configured: GROK_MARKETING_PROFILE, onEdit: () => {}, onProject }) };
     });
     act(() => result.current.editor.field("topic", "关闭前"));
     let pending!: Promise<Project>;

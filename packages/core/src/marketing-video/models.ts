@@ -23,6 +23,8 @@ export interface MarketingVideoProfile {
   /** How a clip prompt names the submitted image at `index` (0-based submission order):
    * `${prefix}${index + firstNumber}${suffix}`. */
   imagePromptTag: { prefix: string; suffix: string; firstNumber: 0 | 1 };
+  /** How a clip prompt names the reference video. */
+  videoPromptTag: string;
   /** Highest quality when any image or video reference is submitted. */
   referenceMaxQuality?: "720p";
   /** Documented reference video limits; omitted when the vendor publishes none. */
@@ -30,6 +32,9 @@ export interface MarketingVideoProfile {
     minSeconds: number; maxSeconds: number; minFps: number; maxFps: number;
     minEdge: number; maxEdge: number; maxPixels: number; minAspect: number; maxAspect: number;
   };
+  /** The clip copies its reference video's length and ratio, so each clip is sent the reference's first
+   * shot-length seconds (`run.ts → shotReferenceVideo`). */
+  trimsReferenceVideo?: true;
   /** Prompt length cap for one clip request. */
   promptMaxChars: number;
   /** Reference image contract, checked on upload and again by the server before submission. */
@@ -50,6 +55,7 @@ export const KLING_MARKETING_PROFILE: MarketingVideoProfile = {
   referenceImages: { total: 7, portrait: 3, product: 3, setting: 3 },
   imagesWithReferenceVideo: 3,
   imagePromptTag: { prefix: "image ", suffix: "", firstNumber: 1 },
+  videoPromptTag: "video 1",
   referenceVideo: { minSeconds: 3, maxSeconds: 15.5, minFps: 24, maxFps: 60, minEdge: 700, maxEdge: 4553, maxPixels: 8_294_400, minAspect: 0.4, maxAspect: 2 },
   promptMaxChars: 3072,
   referenceImage: { formats: ["image/jpeg", "image/png"], maxBytes: 50 * 1024 * 1024, minEdge: 300, minAspect: 1 / 2.5, maxAspect: 2.5 },
@@ -70,12 +76,31 @@ export const GROK_MARKETING_PROFILE: MarketingVideoProfile = {
   referenceImages: { total: 14, portrait: 4, product: 5, setting: 5 },
   imagesWithReferenceVideo: 0,
   imagePromptTag: { prefix: "<IMAGE_", suffix: ">", firstNumber: 0 },
+  videoPromptTag: "video 1",
   referenceMaxQuality: "720p",
   promptMaxChars: 5000,
   referenceImage: { formats: ["image/jpeg", "image/png", "image/webp"], maxBytes: 20 * 1024 * 1024 },
 };
 
-export const MARKETING_VIDEO_PROFILES: readonly MarketingVideoProfile[] = [KLING_MARKETING_PROFILE, GROK_MARKETING_PROFILE];
+// Seedance 2.5 makes 1080p clips and clips with a reference video (`marketingDraftProfile`). Image limits and the
+// image contract are Grok's, so switching quality never invalidates chosen images; a reference video is still used
+// without images. With a reference video Seedance only accepts `duration: -1` / `ratio: "adaptive"` (tested), so
+// the clip is as long as its reference: each clip gets the reference trimmed to its shot. No reference video limits
+// or prompt cap are encoded yet; see "待测试" in docs/marketing-video.md.
+export const SEEDANCE_MARKETING_PROFILE: MarketingVideoProfile = {
+  modelId: "doubao-seedance-2-5",
+  shotMaxSeconds: 15,
+  referenceVideoShotMaxSeconds: 15,
+  referenceImages: GROK_MARKETING_PROFILE.referenceImages,
+  imagesWithReferenceVideo: 0,
+  imagePromptTag: { prefix: "@Image", suffix: "", firstNumber: 1 },
+  videoPromptTag: "@Video1",
+  trimsReferenceVideo: true,
+  promptMaxChars: 5000,
+  referenceImage: GROK_MARKETING_PROFILE.referenceImage,
+};
+
+export const MARKETING_VIDEO_PROFILES: readonly MarketingVideoProfile[] = [KLING_MARKETING_PROFILE, GROK_MARKETING_PROFILE, SEEDANCE_MARKETING_PROFILE];
 export const DEFAULT_MARKETING_VIDEO_MODEL = GROK_MARKETING_PROFILE.modelId;
 /** Largest image section of any profile; drafts store at most this many per slot. */
 export const MARKETING_MAX_SECTION_IMAGES = Math.max(...MARKETING_VIDEO_PROFILES.flatMap(profile => [profile.referenceImages.portrait, profile.referenceImages.product, profile.referenceImages.setting]));

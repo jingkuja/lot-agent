@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { GROK_MARKETING_PROFILE, MarketingDraftSchema, storyboardScript, type MarketingProject } from "@lot-agent/core/marketing-video";
+import { GROK_MARKETING_PROFILE, MarketingDraftSchema, SEEDANCE_MARKETING_PROFILE, storyboardScript, type MarketingProject } from "@lot-agent/core/marketing-video";
 import { MarketingProduction, newJobInput, type MarketingProductionDeps } from "./production.js";
 import type { OwnedMaterial } from "./materials.js";
 
@@ -58,16 +58,23 @@ describe("marketing production", () => {
     expect(f.deps.store.reserve).toHaveBeenCalledWith("owner", id, 2, expect.objectContaining({ size: "720x1280", local_subtitles: true }), false);
     expect(f.deps.service.jobQueue.deliverPersisted).toHaveBeenCalledWith("task", "marketing.video");
   });
-  it("counts the key-art still against the 720p limit of references before anything is paid", async () => {
+  it("makes a 1080p video with its key-art still with Seedance 2.5", async () => {
     const f = fixture({ draft: MarketingDraftSchema.parse({ ...draft, quality: "1080p" }) });
     f.deps.keyArtist.frozen.mockResolvedValueOnce({ id: "still", url: "/static/uploads/still.png" } as never);
-    await expect(f.production.generate("owner", f.p, { version: 2, retry: false }, signal))
+    expect(await f.production.generate("owner", f.p, { version: 2, retry: false }, signal)).toEqual({ project: f.p });
+    expect(f.deps.materials.check).toHaveBeenCalledWith("owner", f.p.draft, SEEDANCE_MARKETING_PROFILE, 4, true, signal);
+    expect(f.deps.store.reserve).toHaveBeenCalledWith("owner", id, 2, expect.objectContaining({ modelId: "doubao-seedance-2-5", key_art: "still",
+      size: "1080x1920" }), false);
+  });
+  it("counts the key-art still against the 720p limit of references when a stopped Grok shot is redone", async () => {
+    const task = { user_id: "owner", type: "marketing.video", status: "succeeded", input: { projectId: id, modelId: GROK_MARKETING_PROFILE.modelId,
+      marketingInputVersion: 4, key_art: "still", local_subtitles: true } };
+    const f = fixture({ taskId: "done", status: "succeeded", revision: { modelId: GROK_MARKETING_PROFILE.modelId } as never,
+      draft: MarketingDraftSchema.parse({ ...draft, quality: "1080p" }) });
+    f.deps.service.db.getTask.mockResolvedValueOnce(task as never);
+    await expect(f.production.revise("owner", f.p, { version: 2, shots: [0] }, signal))
       .rejects.toMatchObject({ status: 400, message: "使用定妆图时最高支持 720p，请将画质改为 720p。" });
-    expect(f.deps.materials.check).not.toHaveBeenCalled();
-    expect(f.deps.store.reserve).not.toHaveBeenCalled();
-    // Without a still the same draft may use 1080p.
-    const plain = fixture({ draft: MarketingDraftSchema.parse({ ...draft, quality: "1080p" }) });
-    expect(await plain.production.generate("owner", plain.p, { version: 2, retry: false }, signal)).toEqual({ project: plain.p });
+    expect(f.deps.store.revise).not.toHaveBeenCalled();
   });
   it("redelivers a queued job instead of creating another one", async () => {
     const f = fixture({ taskId: "queued", status: "pending" });

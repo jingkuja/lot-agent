@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { ProviderError, type ReferenceInput } from "@lot-agent/core";
-import { marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid, type MarketingSegment } from "@lot-agent/core/marketing-video";
+import { marketingJobProfile, marketingReferenceError, marketingShotMaxSeconds, MarketingDraftSchema, resolveMarketingSegments, isMarketingDurationValid,
+  type MarketingDraft, type MarketingSegment } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError, runGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { PgMarketingProjectStore } from "./repository.js";
-import { composeMarketingVideo, inspectMedia, mediaCapabilities, ownedAssetPath, storeComposedVideo, SUBTITLES_UNAVAILABLE } from "./media.js";
+import { composeMarketingVideo, inspectMedia, mediaCapabilities, ownedAssetPath, storeComposedVideo, SUBTITLES_UNAVAILABLE, trimReferenceVideo,
+  type VideoStreamStorage } from "./media.js";
 import { marketingSegmentPrompt } from "./prompt.js";
 import { segmentRecoveryAction, UNKNOWN_SUBMISSION, UNKNOWN_SUBMISSION_MESSAGE } from "./recovery.js";
 import { marketingFailureCode, MarketingRunError } from "./failure.js";
@@ -50,12 +52,36 @@ export function gatewayFailure(error: unknown): error is ProviderError {
   return error instanceof ProviderError && error.phase === "create" && error.code === "HTTP_ERROR" && (error.httpStatus ?? 0) >= 500;
 }
 export const GATEWAY_FAILED_MESSAGE = "视频模型服务暂时出错，该片段没有生成；继续生成会重新提交该片段。";
+/** A clip refused for showing a real person: at 720p without a reference video the clips go to another model. */
+export const REAL_PERSON_MESSAGE = "所传素材有真人，未能通过服务商安全机制，可以尝试720p出片。";
+const realPersonRejected = (cause: unknown) => new MarketingRunError("REAL_PERSON_REJECTED", REAL_PERSON_MESSAGE, { cause });
 export interface MarketingRunDeps {
   db: DB; dataRoot: string;
   generation(job: { userId: string; input: Record<string, unknown> }, signal: AbortSignal): Promise<RunJobDeps>;
   compose?: typeof composeMarketingVideo;
   /** Clips submitted and polled at once within this render (MARKETING_VIDEO_SEGMENT_CONCURRENCY). */
   segmentConcurrency?: number;
+  /** Upload storage for the trimmed reference videos of models that copy their length. */
+  uploads?: VideoStreamStorage;
+}
+/** A model that copies its reference video's length (Seedance) gets only the reference's first `seconds`. It is kept as
+ * the owner's private upload, keyed by clip and length, so a resubmission of the same clip reuses it. */
+async function shotReferenceVideo(deps: MarketingRunDeps, owner: string, draft: MarketingDraft, clipId: string, seconds: number, signal: AbortSignal) {
+  const key = `marketing-reference-${clipId}-${seconds}s.mp4`;
+  const kept = await deps.db.getUploadByStorageKey(key);
+  if (kept?.user_id === owner) return kept.url;
+  if (!deps.uploads) throw new MarketingRunError("CONFIG_MISSING", "参考视频截取未配置，请联系管理员。");
+  const source = draft.assets.video ? await deps.db.getAsset(draft.assets.video) : null;
+  if (!source || source.user_id !== owner) throw new MarketingRunError("NOT_RECOVERABLE", "动作参考视频不可用");
+  const path = await ownedAssetPath(deps.dataRoot, source).catch(() => { throw new MarketingRunError("NOT_RECOVERABLE", "动作参考视频不可用"); });
+  const trimmed = await trimReferenceVideo(path, seconds, signal);
+  try {
+    const { url } = await storeComposedVideo(deps.uploads, key, trimmed);
+    // Linked to the clip task, so deleting the draft removes it with the clip.
+    await deps.db.createAsset({ id: randomUUID(), taskId: clipId, userId: owner, type: "upload", storageKey: key, url, mime: "video/mp4", sizeBytes: trimmed.sizeBytes,
+      durationSec: trimmed.durationSec, originalName: "reference-shot", isPrivate: true });
+    return url;
+  } finally { await trimmed.dispose(); }
 }
 export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: string; userId: string; input: Record<string, unknown> }, signal: AbortSignal) {
   const connection = await deps.db.pool.connect();
@@ -180,6 +206,10 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
             await deps.db.pool.query("UPDATE tasks SET status='running',error=NULL,error_code=NULL WHERE id=$1 AND user_id=$2 AND status<>'succeeded'", [segment.task_id, job.userId]);
             // A known vendor task is polled/downloaded without rebuilding its old prompt.
             Object.assign(child.input, { prompt: prompts[i] ?? "" });
+            if (prompts[i] !== undefined && profile.trimsReferenceVideo && draft.assets.video && job.input.reference_video) {
+              const reference = await shotReferenceVideo(deps, job.userId, draft, child.id, segment.duration_sec, controller.signal);
+              Object.assign(child.input, { reference_video: [reference] });
+            }
             const provider = gen.provider;
             const baseDb = gen.db;
             output = await runGenerationJob({ ...gen,
@@ -207,6 +237,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                     if (definiteRejection(error) || gatewayFailure(error)) {
                       await deps.db.pool.query("UPDATE tasks SET vendor_task_id=NULL WHERE id=$1 AND vendor_task_id=$2", [child.id, UNKNOWN]);
                       if (gatewayFailure(error)) throw new MarketingRunError("GATEWAY_FAILED", GATEWAY_FAILED_MESSAGE, { cause: error });
+                      if (error instanceof ProviderError && error.code === "REAL_PERSON_REJECTED") throw realPersonRejected(error);
                       throw error;
                     }
                     throw new MarketingRunError("SUBMISSION_UNKNOWN", UNKNOWN_SUBMISSION_MESSAGE);
@@ -220,6 +251,7 @@ export async function runMarketingVideo(deps: MarketingRunDeps, job: { id: strin
                   const result = await provider.poll(id);
                   if (result.failureUnconfirmed) throw new MarketingRunError("STATUS_UNCONFIRMED", "片段状态暂时无法确认，继续任务将查询原片段。");
                   if (result.status === "failed") await deps.db.pool.query("UPDATE tasks SET output=$2 WHERE id=$1", [child.id, JSON.stringify({ retrySafe: true })]);
+                  if (result.status === "failed" && result.realPerson) throw realPersonRejected(result.error);
                   return result;
                 },
               },

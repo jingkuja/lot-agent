@@ -36,7 +36,8 @@ export function TaskStatus({ project, busy, onResume, onCancel, onCopy, onReleas
       {((cancelled && !unknown) || failure?.actions.includes("resume")) && <button className="mv-primary" disabled={busy} onClick={onResume}>{t("继续生成")}</button>}
       {failure?.actions.includes("release") && <button className="mv-primary" disabled={busy} onClick={() => void confirm({ title: "核实后重试？", message: UNKNOWN_CLIPS_MESSAGE,
         values: [unknown], confirm: "重试", danger: true }).then(ok => { if (ok) onRelease(); })}>{t("核实后重试")}</button>}
-      {failure?.actions.includes("copy") && <button disabled={busy} onClick={() => onCopy(failure.copyStep === "materials" ? 1 : CONFIRM_STEP)}>{t("复制为新草稿重新制作")}</button>}
+      {failure?.actions.includes("copy") && <button disabled={busy}
+        onClick={() => onCopy(failure.copyStep === "materials" ? 1 : failure.copyStep === "production" ? 2 : CONFIRM_STEP)}>{t("复制为新草稿重新制作")}</button>}
     </div>
     {pending && <p className="mv-hint">{t("排队超过 3 分钟时，系统会自动重新投递，不会重复创建任务。")}</p>}
     {!active && project.taskId && <details className="mv-task-details" open={failure?.actions.includes("support")}>

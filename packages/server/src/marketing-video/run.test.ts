@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MarketingDraftSchema, storyboardScript, type MarketingShot } from "@lot-agent/core/marketing-video";
-import { runMarketingVideo, type MarketingRunDeps } from "./run.js";
-import { mediaCapabilities } from "./media.js";
+import { REAL_PERSON_MESSAGE, runMarketingVideo, type MarketingRunDeps } from "./run.js";
+import { mediaCapabilities, trimReferenceVideo } from "./media.js";
 import { runGenerationJob } from "../generation/run-job.js";
 import { ProviderError } from "@lot-agent/core";
 
@@ -16,6 +16,7 @@ vi.mock("./media.js", () => ({
   SUBTITLES_UNAVAILABLE: "字幕不可用",
   inspectMedia: vi.fn(async () => ({ video: true, audio: true, duration: 15 })),
   ownedAssetPath: vi.fn(async () => "/tmp/fixture.mp4"),
+  trimReferenceVideo: vi.fn(async (_path: string, seconds: number) => ({ file: "/tmp/reference.mp4", sizeBytes: 3, durationSec: seconds, dispose: vi.fn() })),
   storeComposedVideo: vi.fn((storage: { putStream: (...args: unknown[]) => unknown }, key: string, video: { file: string; sizeBytes: number }) => storage.putStream(key, video.file, "video/mp4", video.sizeBytes)),
 }));
 vi.mock("../generation/run-job.js", async importOriginal => ({
@@ -52,6 +53,26 @@ function fixture(shots: MarketingShot[], submitted = false) {
 describe("marketing prompt submission preflight", () => {
   const short: MarketingShot = { durationSec: 15, script: "欢迎来喝咖啡。", visual: "人物展示咖啡", action: "端起杯子", camera: "中景" };
   const long: MarketingShot = { ...short, visual: "画面".repeat(300), action: "动作".repeat(200), camera: "镜头".repeat(200) };
+
+  it("sends each new Seedance clip the reference video trimmed to its shot, made once per clip and length", async () => {
+    vi.mocked(runGenerationJob).mockClear(); vi.mocked(trimReferenceVideo).mockClear();
+    const f = fixture([short, short]);
+    const video = "11111111-1111-4111-8111-111111111111";
+    Object.assign(f.job.input, { modelId: "doubao-seedance-2-5", generate_audio: false, reference_video: ["/static/uploads/ref.mp4"],
+      draft: { ...f.job.input.draft, assets: { video } } });
+    const uploads = { putStream: vi.fn(async (key: string) => ({ url: `/static/uploads/${key}` })) };
+    // The second clip's trim was stored by an earlier attempt.
+    const kept = vi.fn(async (key: string) => key.includes("child-1") ? { user_id: "owner", url: "/static/uploads/kept.mp4" } : null);
+    Object.assign(f.deps, { uploads }); Object.assign(f.db, { getUploadByStorageKey: kept });
+    await runMarketingVideo(f.deps, f.job, new AbortController().signal);
+    expect(f.db.getAsset).toHaveBeenCalledWith(video);
+    expect(trimReferenceVideo).toHaveBeenCalledOnce();
+    expect(trimReferenceVideo).toHaveBeenCalledWith("/tmp/fixture.mp4", 15, expect.anything());
+    const sent = Object.fromEntries(vi.mocked(runGenerationJob).mock.calls.map(([, child]) => [child.id, child.input.reference_video]));
+    expect(sent).toEqual({ "child-0": ["/static/uploads/marketing-reference-child-0-15s.mp4"], "child-1": ["/static/uploads/kept.mp4"] });
+    expect(f.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({ taskId: "child-0", userId: "owner", type: "upload",
+      storageKey: "marketing-reference-child-0-15s.mp4", isPrivate: true }));
+  });
 
   it("checks every new segment before resolving any chargeable provider", async () => {
     vi.mocked(runGenerationJob).mockClear();
@@ -165,9 +186,19 @@ describe("marketing segment submission failures", () => {
     for (const [error, errorCode] of [[new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 429 }), "MODEL_RATE_LIMIT"], [new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: 400 }), "REAL_PERSON_REJECTED"], [new ProviderError("generation", "create", "CONNECT_ERROR"), "CONNECT_FAILED"]] as const) {
       const f = await submitWith(error);
       // The queue stores the code; the original provider error stays as the cause.
-      await expect(f.result).rejects.toMatchObject({ errorCode, cause: error, message: error.message });
+      const message = errorCode === "REAL_PERSON_REJECTED" ? REAL_PERSON_MESSAGE : error.message;
+      await expect(f.result).rejects.toMatchObject({ errorCode, cause: error, message });
       expect(f.released()).toBe(true);
     }
+  });
+  it("reports a clip task the vendor refused for a real person with the same guidance", async () => {
+    const f = fixture([shot, shot]);
+    f.db.pool.query.mockImplementation((async () => ({ rows: [], rowCount: 1 })) as never);
+    const poll = vi.fn(async () => ({ status: "failed", progress: 0, realPerson: true, error: "REAL_PERSON_REJECTED" }));
+    f.generation.mockResolvedValue({ modelId: "doubao-seedance-2-5", db: {}, provider: { create: vi.fn(), poll }, meter: { record: vi.fn() },
+      storage: { putStream: vi.fn() } } as never);
+    vi.mocked(runGenerationJob).mockImplementation(async (deps) => { await deps.provider.poll("vendor"); throw new Error("unreachable"); });
+    await expect(runMarketingVideo(f.deps, f.job, new AbortController().signal)).rejects.toMatchObject({ errorCode: "REAL_PERSON_REJECTED", message: REAL_PERSON_MESSAGE });
   });
   it("counts a gateway 5xx as not charged: records its request ID and releases the clip for the next continue", async () => {
     for (const status of [500, 502]) {

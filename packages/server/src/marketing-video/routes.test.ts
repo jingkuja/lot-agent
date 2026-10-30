@@ -381,13 +381,12 @@ describe("marketing storyboard editing", () => {
     expect(system).toContain("index 1 (shot 2), lasting exactly 15 seconds");
     expect(input).not.toContain(id);
   });
-  it("asks for a full storyboard before a paid edit when a reference video cannot fit 8-second shots", async () => {
+  it("keeps 15-second shots with a reference video, which Seedance 2.5 makes", async () => {
     const f = fixture(); Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
     f.project.draft.assets = { video: id };
     const response = await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "改成平移", index: 1 });
-    expect(response.status).toBe(400);
-    expect((await response.json() as { error: string }).error).toContain("8 秒");
-    expect(f.service.marketingText).not.toHaveBeenCalled();
+    expect(response.status).not.toBe(400);
+    expect(f.service.marketingText).toHaveBeenCalledOnce();
   });
   it("rejects stale versions, submitted projects, invalid target and malformed AI output", async () => {
     const f = fixture();
@@ -530,14 +529,15 @@ it("validates reference video metadata and sends it with audio disabled", async 
   const videoId = randomUUID();
   f.project.draft.assets = { video: videoId, voice: randomUUID() };
   f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : "audio/wav", size_bytes: 100, url: `/static/${args[0]}` }));
-  // Kling's 3–15.5 s / 700 px limits no longer apply to Grok submissions.
+  // Reference videos go to Seedance 2.5; Kling's 3–15.5 s / 700 px limits do not apply.
   const info = { format: "mov", video: true, audio: false, duration: 20, width: 640, height: 360, fps: 30, rotation: 0, transfer: undefined };
   vi.mocked(inspectMedia).mockResolvedValueOnce({ ...info, video: false });
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
   expect(f.store.reserve).not.toHaveBeenCalled();
   vi.mocked(inspectMedia).mockResolvedValueOnce(info);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
-  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, modelId: "grok-imagine-video-1.5", reference_video: [`/static/${videoId}`], generate_audio: false, reference_audio: undefined, local_subtitles: true }), false);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, modelId: "doubao-seedance-2-5", reference_video: [`/static/${videoId}`],
+    generate_audio: false, reference_audio: undefined, local_subtitles: true }), false);
 });
 it("burns the captions of a model-voiced video locally, so it needs a host that can burn them", async () => {
   const f = fixture();
@@ -560,31 +560,27 @@ it("submits new clips with the configured model profile", async () => {
   try {
     const f = fixture();
     expect(await (await f.call("/capabilities", undefined, "GET")).json()).toMatchObject({ model: { modelId: "kling-video-v3-omni", imagesWithReferenceVideo: 3 } });
-    const videoId = randomUUID();
-    f.project.draft.assets = { video: videoId, portrait: id };
-    f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : "image/png", size_bytes: 100, url: `/static/${args[0]}` }));
-    // Kling keeps its documented reference video limits.
-    vi.mocked(inspectMedia).mockResolvedValueOnce({ format: "mov", video: true, audio: false, duration: 20, width: 1280, height: 720, fps: 30,
-      rotation: 0, transfer: undefined });
-    expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
-    vi.mocked(inspectMedia).mockResolvedValueOnce({ format: "mov", video: true, audio: false, duration: 5, width: 1280, height: 720, fps: 30,
-      rotation: 0, transfer: undefined });
+    f.project.draft.assets = { portrait: id };
+    f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: "image/png", size_bytes: 100, url: `/static/${args[0]}` }));
     expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
     expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ modelId: "kling-video-v3-omni", input_reference: [`/static/${id}`] }), false);
   } finally { delete process.env.MARKETING_VIDEO_MODEL; }
 });
 
-it("rejects Grok reference video with images and 1080p references before billing", async () => {
+it("rejects a reference video with images before billing, and makes 1080p references with Seedance 2.5", async () => {
   const f = fixture();
   f.project.draft.assets = { video: randomUUID(), portrait: id };
-  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
-  f.project.draft.assets = { portrait: id };
-  f.project.draft.quality = "1080p";
   const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
   expect(response.status).toBe(400);
-  expect((await response.json() as { error: string }).error).toContain("720p");
+  expect((await response.json() as { error: string }).error).toContain("参考图片不会参与生成");
   expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
   expect(f.store.reserve).not.toHaveBeenCalled();
+  f.project.draft.assets = { portrait: id };
+  f.project.draft.quality = "1080p";
+  f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: "image/png", size_bytes: 100, url: `/static/${args[0]}` }));
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ modelId: "doubao-seedance-2-5", resolution: "1080p",
+    input_reference: [`/static/${id}`] }), false);
 });
 
 

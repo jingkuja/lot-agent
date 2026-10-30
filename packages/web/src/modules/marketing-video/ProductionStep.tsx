@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { MarketingNarrationSchema, marketingHdUnavailable, type MarketingDraft, type MarketingSegment, type MarketingShot,
+import { MarketingNarrationSchema, marketingDraftProfile, marketingHdUnavailable, type MarketingDraft, type MarketingSegment, type MarketingShot,
   type MarketingVideoProfile } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { voiceUploadLabel } from "./materials.js";
@@ -64,7 +64,9 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
 }) {
   const { t } = useI18n();
   const { draft, busy, frozen, ready, field } = form;
-  const hdUnavailable = marketingHdUnavailable(draft, profile, keyArt);
+  // 1080p switches the draft to its own model, so its limits decide whether 1080p can be chosen.
+  const hdProfile = marketingDraftProfile({ ...draft, quality: "1080p" }, profile);
+  const hdUnavailable = marketingHdUnavailable(draft, hdProfile, keyArt);
   return <>
     {draft.assets.video ? <p className="mv-hint" role="status">{referenceVideoStatus}</p> : <>
       <label className="mv-label">{t("配音方式")}</label>
@@ -92,7 +94,8 @@ export function ProductionStep({ form, profile, handlers, referenceVideoStatus, 
     <label className="mv-label">{t("画质")}</label>
     <Choices form={form} label="画质" values={[{ value: "720p", label: "720p" }, { value: "1080p", label: "1080p", disabled: hdUnavailable }]}
       value={draft.quality} onChoose={value => field("quality", value as MarketingDraft["quality"])} />
-    {profile.referenceMaxQuality && <p className="mv-hint" role={hdUnavailable ? "note" : undefined}>{t("使用参考图片、动作参考视频或定妆图时，最高支持 720p。")}</p>}
+    {hdProfile.referenceMaxQuality && <p className="mv-hint" role={hdUnavailable ? "note" : undefined}>{t("使用参考图片、动作参考视频或定妆图时，最高支持 720p。")}</p>}
+    {draft.quality === "1080p" && <p className="mv-hint" role="note">{t("1080p 生成时间会变长，请耐心等待。")}</p>}
   </>;
 }
 

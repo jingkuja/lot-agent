@@ -31,6 +31,8 @@ export interface PollResult {
   error?: string;
   /** A lookup error is not proof that a paid vendor task actually failed. */
   failureUnconfirmed?: boolean;
+  /** The vendor refused the task because a reference shows a real person (`REAL_PERSON_REJECTED`). */
+  realPerson?: boolean;
 }
 
 export function parseSize(size?: string): [number, number] {
@@ -155,7 +157,7 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     const details = { httpStatus: res.status, requestId: json?.request_id, privateValues: [apiKey] };
     // The vendor explicitly rejected the input, so the failure is confirmed.
     const realPersonFailure = (): PollResult =>
-      ({ status: "failed", progress: 0, error: new ProviderError("generation", "poll", "REAL_PERSON_REJECTED", details).message });
+      ({ status: "failed", progress: 0, realPerson: true, error: new ProviderError("generation", "poll", "REAL_PERSON_REJECTED", details).message });
     if (!res.ok) {
       if (isRealPersonRejection(json)) return realPersonFailure();
       throw new ProviderError("generation", "poll", "HTTP_ERROR", details);

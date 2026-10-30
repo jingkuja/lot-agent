@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmod, mkdtemp, writeFile, rm, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { inspectMedia, composeMarketingVideo, detectedIntervals, mediaCapabilities, narrationPauses, qualityIssues } from "./media.js";
+import { inspectMedia, composeMarketingVideo, detectedIntervals, mediaCapabilities, narrationPauses, qualityIssues, trimReferenceVideo } from "./media.js";
 import { MarketingDraftSchema, marketingPreviewCaptions } from "@lot-agent/core/marketing-video";
 
 describe("marketing media safety", () => {
@@ -59,6 +59,20 @@ describe("composition readiness probe", () => {
   });
   it.skipIf(!ffmpegInstalled)("composes a probe clip with the installed FFmpeg", async () => {
     expect(await mediaCapabilities()).toMatchObject({ composition: true });
+  }, 30_000);
+  it.skipIf(!ffmpegInstalled)("trims a reference video to the shot from its start, and keeps a shorter one whole", async () => {
+    const root = await mkdtemp(join(tmpdir(), "marketing-reference-trim-"));
+    try {
+      const source = join(root, "source.mp4");
+      spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=25:d=6", "-c:v", "libx264", "-pix_fmt", "yuv420p", source]);
+      for (const [seconds, expected] of [[4, 4], [10, 6]]) {
+        const trimmed = await trimReferenceVideo(source, seconds);
+        try {
+          expect(trimmed.durationSec).toBe(expected);
+          expect((await inspectMedia(trimmed.file)).duration).toBeCloseTo(expected, 0);
+        } finally { await trimmed.dispose(); }
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
   }, 30_000);
   it.skipIf(!ffmpegInstalled)("replaces each clip's own audio with its narration and pads it to the shot", async () => {
     const root = await mkdtemp(join(tmpdir(), "marketing-narration-compose-"));

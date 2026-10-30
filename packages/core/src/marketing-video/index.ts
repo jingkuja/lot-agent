@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { MarketingCaption, MarketingCaptionTiming } from "./captions.js";
-import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoProfile, type MarketingVideoProfile } from "./models.js";
+import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoProfile, SEEDANCE_MARKETING_PROFILE, type MarketingVideoProfile } from "./models.js";
 
 export * from "./models.js";
 
@@ -167,6 +167,11 @@ export const marketingNativeSpeech = (draft: Pick<MarketingDraft, "narration" | 
  * twin narration. Rules always come from the profile of the recorded `modelId`. */
 export const MARKETING_INPUT_VERSION = 4;
 
+/** Clip model of a new video: 1080p, or a reference video at any quality, goes to Seedance 2.5; the rest to the
+ * `configured` model (`MARKETING_VIDEO_MODEL`). */
+export function marketingDraftProfile(draft: Pick<MarketingDraft, "quality" | "assets">, configured: MarketingVideoProfile): MarketingVideoProfile {
+  return draft.quality === "1080p" || draft.assets.video ? SEEDANCE_MARKETING_PROFILE : configured;
+}
 /** Profile of a frozen job; inputs without a model id were submitted to Kling. */
 export function marketingJobProfile(input: { modelId?: unknown }): MarketingVideoProfile {
   const profile = marketingVideoProfile(typeof input.modelId === "string" ? input.modelId : KLING_MARKETING_PROFILE.modelId);

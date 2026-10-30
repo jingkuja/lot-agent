@@ -247,6 +247,7 @@ describe("HttpVideoGenerationProvider", () => {
     const r = await p.poll("task_1");
     expect(r.status).toBe("failed");
     expect(r.failureUnconfirmed).toBeUndefined();
+    expect(r.realPerson).toBe(true);
     expect(r.error).toContain("REAL_PERSON_REJECTED");
     expect(r.error).not.toContain("content[0]");
   });

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { KLING_MARKETING_PROFILE, MarketingDraftSchema, newMarketingDraft } from "@lot-agent/core/marketing-video";
-import { MARKETING_CINEMATOGRAPHY, MARKETING_PERFORMANCE, marketingImageReferences, marketingPlanningContext, marketingSegmentPrompt,
+import { MARKETING_CINEMATOGRAPHY, MARKETING_PERFORMANCE, marketingImageReferences, marketingImageTag, marketingPlanningContext, marketingSegmentPrompt,
   marketingShotDirectionBudget, marketingStoryboardRules, marketingTimingRequirement } from "./prompt.js";
-import { activeMarketingVideoProfile } from "./model.js";
+import { activeMarketingVideoProfile, newMarketingVideoProfile } from "./model.js";
 import { creationPrompt, parseCreation, publicationPrompt, storyboardPrompt } from "./creation.js";
 import { parseTextResult } from "./text-result.js";
 
@@ -202,7 +202,8 @@ it("submits product images after the portrait and names them with Grok's zero-ba
 it("uses reference video for silent visuals without requesting voice synthesis", () => {
   const draft = MarketingDraftSchema.parse({ assets: { video: id, voice: id } });
   const prompt = marketingSegmentPrompt(draft, { index: 0, script: "Hello", durationSec: 5 }, 1);
-  expect(prompt).toContain("Use video 1 as a reference");
+  // A reference video goes to Seedance 2.5, which names it @Video1.
+  expect(prompt).toContain("Use @Video1 as a reference");
   expect(prompt).toContain("Do not generate speech or audio");
   expect(prompt).toContain("Silent demonstration, no lip-sync");
   expect(prompt).toContain("captions are added after generation");
@@ -222,17 +223,18 @@ it.each([
   const draft = MarketingDraftSchema.parse({ assets });
   expect(marketingImageReferences(draft)).toEqual(roles.map((role, index) => ({ role, imageNumber: index + 1, assetId: id })));
   const prompt = marketingSegmentPrompt(draft, { index: 0, script: "欢迎光临。", durationSec: 8 }, 2);
-  expect([...prompt.matchAll(/<IMAGE_(\d+)>/g)].map(match => Number(match[1]))).toEqual(roles.map((_, index) => index));
+  const profile = newMarketingVideoProfile(draft);
+  expect([...prompt.matchAll(/<IMAGE_\d+>|@Image\d+/g)].map(match => match[0])).toEqual(roles.map((_, index) => marketingImageTag(profile, index + 1)));
 });
 
 it("honors persisted audio mode independently of the presence of a video reference", () => {
   const withVideo = MarketingDraftSchema.parse({ assets: { video: id, voice: id } });
   const legacy = marketingSegmentPrompt(withVideo, { index: 0, script: "Hello", durationSec: 8 }, 2, true);
   expect(legacy).toContain("Narrate ONLY");
-  expect(legacy).toContain("Use video 1");
+  expect(legacy).toContain("Use @Video1");
   expect(legacy).toContain("Use the supplied custom voice");
   const silent = marketingSegmentPrompt(MarketingDraftSchema.parse({ subtitles: false }), { index: 0, script: "Hello", durationSec: 8 }, 2, false);
-  expect(silent).not.toContain("Use video 1");
+  expect(silent).not.toContain("as a reference for motion");
   expect(silent).not.toContain("Narrate ONLY");
   expect(silent).toContain("Do not add on-screen text or subtitles.");
   expect(silent).toContain("communicate the message through visible actions");

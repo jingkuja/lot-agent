@@ -7,8 +7,9 @@ export type VideoFailure = {
   /** resume: continue the same task; copy: the frozen task cannot succeed as is; support: outcome must be verified first;
    * release: the user may accept a possible duplicate charge and resubmit only the unknown clips. */
   actions: ("resume" | "copy" | "support" | "release")[];
-  /** Creation step a copied draft opens at: its materials, or by default the confirmation of its shots. */
-  copyStep?: "materials";
+  /** Creation step a copied draft opens at: its materials, its voice and picture settings, or by default the
+   * confirmation of its shots. */
+  copyStep?: "materials" | "production";
 };
 
 const segmentFailed: VideoFailure = {
@@ -31,9 +32,9 @@ const failures: Record<MarketingFailureCode, VideoFailure> = {
     actions: ["resume"],
   },
   REAL_PERSON_REJECTED: {
-    reason: "视频模型判定参考图中包含真人，拒绝了生成。",
-    next: "完成真人认证后可点击继续生成；或复制为新草稿，替换人物图片后重新制作。",
-    actions: ["resume", "copy"], copyStep: "materials",
+    reason: "所传素材有真人，未能通过服务商安全机制。",
+    next: "可以尝试 720p 出片：复制为新草稿，将画质改为 720p 后重新制作。",
+    actions: ["resume", "copy"], copyStep: "production",
   },
   MODEL_AUTH_REQUIRED: {
     reason: "视频模型账号未授权，或尚未配置可用的模型密钥。",

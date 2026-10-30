@@ -304,3 +304,19 @@ export type VideoStreamStorage = { putStream(key: string, body: NodeJS.ReadableS
 export function storeComposedVideo(storage: VideoStreamStorage, key: string, video: Pick<ComposedVideo, "file" | "sizeBytes">) {
   return storage.putStream(key, createReadStream(video.file), "video/mp4", video.sizeBytes);
 }
+
+/** The first `seconds` of a reference video, re-encoded so the cut is exact (a stream copy would stop at a
+ * keyframe). A shorter reference is kept whole: whether the model accepts it is still to be tested. */
+export async function trimReferenceVideo(path: string, seconds: number, signal?: AbortSignal): Promise<ComposedVideo & { durationSec: number }> {
+  const info = await inspectMedia(path, signal);
+  if (!info.video) throw new Error("动作参考视频无法读取画面，请重新上传。");
+  const folder = await mkdtemp(join(tmpdir(), "lot-marketing-reference-"));
+  const dispose = () => rm(folder, { recursive: true, force: true });
+  try {
+    const file = join(folder, "reference.mp4");
+    await mediaProcess(ffmpeg(), ["-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", info.format, "-i", path,
+      "-t", String(seconds), "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+      "-c:a", "aac", "-movflags", "+faststart", file], { signal });
+    return { file, sizeBytes: (await stat(file)).size, durationSec: Math.min(seconds, info.duration), dispose };
+  } catch (error) { await dispose(); throw error; }
+}

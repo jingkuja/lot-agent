@@ -14,7 +14,7 @@ describe("marketing video failure guidance", () => {
   });
   it("maps each cause code to an actionable next step", () => {
     const cases: [MarketingFailureCode, string, string[]][] = [
-      ["REAL_PERSON_REJECTED", "视频模型判定参考图中包含真人，拒绝了生成。", ["resume", "copy"]],
+      ["REAL_PERSON_REJECTED", "所传素材有真人，未能通过服务商安全机制。", ["resume", "copy"]],
       ["MODEL_RATE_LIMIT", "视频模型当前繁忙或请求过于频繁。", ["resume"]],
       ["MODEL_AUTH_REQUIRED", "视频模型账号未授权，或尚未配置可用的模型密钥。", ["resume"]],
       ["GENERATION_FAILED", "视频模型未能完成部分片段。", ["resume", "copy"]],
@@ -26,7 +26,7 @@ describe("marketing video failure guidance", () => {
       ["COMPOSITION_FAILED", "所有片段都已生成，合成成片时出现问题。", ["resume"]],
     ];
     for (const [code, reason, actions] of cases) expect(videoFailure(code), code).toMatchObject({ reason, actions });
-    expect(videoFailure("REAL_PERSON_REJECTED").copyStep).toBe("materials");
+    expect(videoFailure("REAL_PERSON_REJECTED").copyStep).toBe("production");
   });
   it("falls back to the generic guidance for tasks without a known code", () => {
     expect(videoFailure(undefined)).toMatchObject({ reason: "视频模型未能完成部分片段。", actions: ["resume", "copy"] });

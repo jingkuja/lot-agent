@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MarketingDraftSchema, resolveMarketingSegments, storyboardScript } from "@lot-agent/core/marketing-video";
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MarketingDraftSchema, resolveMarketingSegments, SEEDANCE_MARKETING_PROFILE,
+  storyboardScript } from "@lot-agent/core/marketing-video";
 import { stableRequestId, withDraftField } from "./draft-editor.js";
 
 const shot = (durationSec: number, script = "欢迎来到转角咖啡店，现磨咖啡等你来。") => ({ durationSec, script, visual: "咖啡店", action: "展示咖啡", camera: "中景" });
@@ -30,9 +31,10 @@ describe("draft field edits", () => {
     const withVideo = withDraftField(draft, "assets", { video: "11111111-1111-4111-8111-111111111111" }, KLING_MARKETING_PROFILE);
     expect(withVideo.storyboardAudio).toBe(true);
     expect(withVideo.storyboard).toHaveLength(2);
-    // Grok allows 8-second shots with a reference video; two shots cannot fill 30 seconds, so the board stays for the plan to report.
+    // A reference video goes to Seedance 2.5, which keeps 15-second shots whatever model is configured.
     const grok = withDraftField(draft, "assets", { video: "11111111-1111-4111-8111-111111111111" }, GROK_MARKETING_PROFILE);
     expect(grok.storyboard.map(s => s.durationSec)).toEqual([15, 15]);
+    expect(() => resolveMarketingSegments(grok, SEEDANCE_MARKETING_PROFILE)).not.toThrow();
     expect(withDraftField(withVideo, "assets", {}, KLING_MARKETING_PROFILE).storyboardAudio).toBe(true);
   });
 });

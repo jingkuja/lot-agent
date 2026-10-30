@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingReferenceImageIssue, DEFAULT_MARKETING_VIDEO_MODEL,
   MARKETING_DEFAULT_BACKGROUND, MARKETING_DEFAULT_VOICE, MARKETING_PROMPT_BACKGROUND, MARKETING_PROMPT_VOICE, marketingBackground, marketingHdUnavailable,
-  marketingVoiceStyle,
+  marketingVoiceStyle, marketingDraftProfile, SEEDANCE_MARKETING_PROFILE,
   marketingJobProfile, marketingVideoProfile, capMarketingStoryboard, marketingShotMaxSeconds, marketingReferenceError, MarketingDraftSchema,
   planMarketingSegments, storyboardScript, resolveMarketingSegments, marketingReviewText, allocateShotDurations, timeMarketingStoryboard,
   speechUnits, isMarketingDurationValid, applyMarketingReviewSuggestion, updateMarketingReviewField, marketingReviewFieldText,
@@ -292,6 +292,23 @@ it("resolves model profiles for new and frozen jobs", () => {
   expect(marketingJobProfile({ modelId: "grok-imagine-video-1.5" })).toBe(grok);
   expect(marketingJobProfile({})).toBe(kling);
   expect(() => marketingJobProfile({ modelId: "retired-model" })).toThrow("不受支持");
+  expect(marketingJobProfile({ modelId: "doubao-seedance-2-5" })).toBe(SEEDANCE_MARKETING_PROFILE);
+});
+
+it("makes 1080p and reference-video drafts with Seedance 2.5, which allows 15-second shots and 1080p references", () => {
+  const video = "11111111-1111-4111-8111-111111111111";
+  const draft = (value: object) => MarketingDraftSchema.parse(value);
+  expect(marketingDraftProfile(draft({}), kling)).toBe(kling);
+  expect(marketingDraftProfile(draft({ quality: "1080p" }), grok)).toBe(SEEDANCE_MARKETING_PROFILE);
+  const withVideo = draft({ assets: { video } });
+  expect(marketingDraftProfile(withVideo, grok)).toBe(SEEDANCE_MARKETING_PROFILE);
+  expect(marketingShotMaxSeconds(withVideo, SEEDANCE_MARKETING_PROFILE)).toBe(15);
+  const hd = draft({ quality: "1080p", assets: { portrait: video } });
+  expect(marketingReferenceError(hd, grok)).toContain("720p");
+  expect(marketingReferenceError(hd, SEEDANCE_MARKETING_PROFILE, true)).toBe("");
+  // Image limits stay those of Grok, and a reference video is still used without images.
+  expect(SEEDANCE_MARKETING_PROFILE.referenceImages).toEqual(grok.referenceImages);
+  expect(marketingReferenceError(draft({ assets: { video, portrait: video } }), SEEDANCE_MARKETING_PROFILE)).toContain("参考图片不会参与生成");
 });
 
 describe("reference image contract per model", () => {

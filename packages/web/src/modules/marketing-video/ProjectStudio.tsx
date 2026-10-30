@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingNarrationSpareSec, marketingReviewText, marketingShotMaxSeconds, marketingStoryboardAudioMismatch,
-  resolveMarketingSegments, type MarketingDraft, type MarketingDraftSnapshot, type MarketingProject, type MarketingReview } from "@lot-agent/core/marketing-video";
+import { DEFAULT_MARKETING_VIDEO_PROFILE, marketingDraftProfile, marketingNarrationSpareSec, marketingReviewText, marketingShotMaxSeconds,
+  marketingStoryboardAudioMismatch, resolveMarketingSegments, type MarketingDraft, type MarketingDraftSnapshot, type MarketingProject,
+  type MarketingReview } from "@lot-agent/core/marketing-video";
 import { api, ApiClientError, request } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { DigitalTwinPicker } from "../digital-twin/DigitalTwinPanel.js";
@@ -40,8 +41,9 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const session = useDraftSession();
   const exclusive = useExclusive(session);
   const [capabilities, setCapabilities] = useState<StudioCapabilities | null>(null);
-  // The server picks the clip model; its limits drive validation and hints here.
-  const profile = capabilities?.model ?? DEFAULT_MARKETING_VIDEO_PROFILE;
+  // The server's configured clip model; 1080p and reference videos use Seedance 2.5 instead. Limits of the
+  // open draft's model drive validation and hints here.
+  const configured = capabilities?.model ?? DEFAULT_MARKETING_VIDEO_PROFILE;
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -52,7 +54,8 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
   const [loadAttempt, setLoadAttempt] = useState(0);
   const library = useDraftLibrary(session, ready, e => setError(errorMessage(e)));
   const [confirmDialog, confirm, choose] = useConfirm();
-  const editor = useDraftEditor({ ownerId, session, profile, onEdit: () => { setError(""); setNotice(""); }, onProject: p => library.put(p) });
+  const editor = useDraftEditor({ ownerId, session, configured, onEdit: () => { setError(""); setNotice(""); }, onProject: p => library.put(p) });
+  const profile = marketingDraftProfile(editor.draft, configured);
   const wait = (label: string, textRequest = true) => setWorking({ label, started: Date.now(), textRequest });
   const text = useTextRequests({ editor, session, profile, ownerId, locale, t, confirm, wait, act, setError, setNotice });
   const materials = useStudioMaterials({ editor, session, profile, act, setError });

@@ -6,8 +6,10 @@ import type { DraftSession } from "./session.js";
 
 /** The open draft and the last state the server confirmed for it. Async work reads the refs, so a
  * result that arrives after later edits still sees the current draft. */
-export function useDraftEditor({ ownerId, session, profile, onEdit, onProject }: {
-  ownerId: string; session: DraftSession; profile: MarketingVideoProfile;
+export function useDraftEditor({ ownerId, session, configured, onEdit, onProject }: {
+  ownerId: string; session: DraftSession;
+  /** The server's clip model; each draft may be made with another one (`marketingDraftProfile`). */
+  configured: MarketingVideoProfile;
   /** Called on every edit, e.g. to clear the last error and notice. */
   onEdit(): void;
   /** Called with every project the editor accepts, e.g. to keep the draft list current. */
@@ -44,7 +46,7 @@ export function useDraftEditor({ ownerId, session, profile, onEdit, onProject }:
     update(p.draft); setCurrent(p);
   }
   function field<K extends keyof MarketingDraft>(name: K, value: MarketingDraft[K]) {
-    update(withDraftField(draftRef.current, name, value, profile));
+    update(withDraftField(draftRef.current, name, value, configured));
   }
   /** Shot edits are also edits of the copy. */
   const setShots = (storyboard: MarketingShot[]) => update({ ...draftRef.current, storyboard, script: storyboardScript(storyboard) });

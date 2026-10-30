@@ -1,4 +1,4 @@
-import { activeMarketingVideoProfile } from "./model.js";
+import { newMarketingVideoProfile } from "./model.js";
 import {
   MARKETING_DEFAULT_BACKGROUND, MARKETING_IMAGE_SLOTS, MARKETING_SPEECH_PACE, marketingAssetIds, marketingBackground, marketingMaxDuration,
   marketingNativeSpeech, marketingShotMaxSeconds, marketingVoiceStyle, marketingVoiceover, type MarketingDraft,
@@ -43,7 +43,7 @@ export function marketingPromptInput(value: unknown): string {
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
 }
 
-export function marketingTimingRequirement(draft: MarketingDraft, profile: MarketingVideoProfile = activeMarketingVideoProfile()): string {
+export function marketingTimingRequirement(draft: MarketingDraft, profile: MarketingVideoProfile = newMarketingVideoProfile(draft)): string {
   const maxShot = marketingShotMaxSeconds(draft, profile);
   const maxShots = Math.min(15, Math.floor(marketingMaxDuration(draft.durationSec) / 4));
   return `The target duration is ${draft.durationSec} seconds. The sum must be between ${draft.durationSec} and ${marketingMaxDuration(draft.durationSec)} seconds, never over 65. Hit the target when practical; up to 5 extra seconds are optional for natural pacing, not required. Follow the copy: give each beat its own shot and cut when the subject, shot size, action or setting changes, so the video has a clear visual rhythm. Most shots last 4–8 seconds; use a longer one only for a single continuous action. Use at most ${maxShots} shots. Allocate each shot an integer durationSec of 4–${maxShot} seconds to fit its content.`;
@@ -69,7 +69,7 @@ function plannedScriptChars(draft: MarketingDraft, locale: string, shots: Market
  * planner's limit unless the call keeps it. A board with more images can still exceed the cap; the clip
  * request then asks for shorter directions, as before. */
 export function marketingShotDirectionBudget(draft: MarketingDraft, locale: string, shots: MarketingShot[] = [], keepContinuity = false,
-  profile: MarketingVideoProfile = activeMarketingVideoProfile()): number {
+  profile: MarketingVideoProfile = newMarketingVideoProfile(draft)): number {
   const video = !!draft.assets.video;
   // At least two images of every role, so choosing them later leaves the room unchanged.
   const atLeastTwo = (ids: string[]) => ids.length >= 2 ? ids : [...ids, PROBE_ASSET, PROBE_ASSET].slice(0, 2);
@@ -148,7 +148,7 @@ export function marketingPresenterRequirement(draft: MarketingDraft, generateAud
  * must carry no text. `keyArt`: the job submits a key-art still after the chosen images.
  * Frozen jobs pass the values they were submitted with. */
 export function marketingSegmentPrompt(draft: MarketingDraft, segment: MarketingSegment, count: number, generateAudio = marketingNativeSpeech(draft),
-  profile: MarketingVideoProfile = activeMarketingVideoProfile(), localSubtitles = true, keyArt = false): string {
+  profile: MarketingVideoProfile = newMarketingVideoProfile(draft), localSubtitles = true, keyArt = false): string {
   const prompt = segmentPrompt(draft, segment, count, generateAudio, profile, localSubtitles, keyArt);
   // Never truncate approved copy or shot directions to fit a paid request.
   if (prompt.length > profile.promptMaxChars) throw new Error("生成提示词过长，请精简分镜画面、动作、镜头或统一人物、产品与场景设定。");
@@ -183,7 +183,7 @@ function segmentPrompt(draft: MarketingDraft, segment: MarketingSegment, count: 
       : "backgroundDescription is the default setting unless visual names another; keep its layout, props, lighting and colors identical in every shot.",
     // Without product images the still is the only picture of the product, so it decides its design too.
     keyArtTag ? `${keyArtTag} is the key-art still shared by every shot: match its presenter's hair, makeup, outfit, accessories, ${products.length ? "" : "product design, colors and details, "}setting, props, lighting and color grade, not its framing or action${portraits.length ? "; portraits decide the face" : ""}${products.length ? "; product images decide the product" : ""}.` : "",
-    draft.assets.video ? "Use video 1 as a reference for motion/composition only; preserve portrait identity and script. Do not copy its dialogue, captions, music or unrelated people." : "",
+    draft.assets.video ? `Use ${profile.videoPromptTag} as a reference for motion/composition only; preserve portrait identity and script. Do not copy its dialogue, captions, music or unrelated people.` : "",
     generateAudio && draft.assets.voice ? "Use the supplied custom voice for vocal identity, never the words in the voice sample." : "",
     marketingPresenterRequirement(draft, generateAudio, true),
     localSubtitles

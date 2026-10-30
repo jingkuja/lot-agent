@@ -3,8 +3,8 @@ import { resolve, sep } from "node:path";
 import { PgMarketingTextOperations } from "./operations.js";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { marketingVideoProfile, marketingVoiceover, type MarketingDraft, type MarketingProject, MarketingDraftSchema, MarketingSourceSchema,
-  marketingSourceKind, resolveMarketingSegments } from "@lot-agent/core/marketing-video";
+import { marketingDraftProfile, marketingVideoProfile, marketingVoiceover, type MarketingDraft, type MarketingProject, MarketingDraftSchema,
+  MarketingSourceSchema, marketingSourceKind, resolveMarketingSegments } from "@lot-agent/core/marketing-video";
 import type { AgentService } from "../services/agent-service.js";
 import type { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { KnowledgeError } from "../knowledge/errors.js";
@@ -41,7 +41,8 @@ export function marketingKeyArtist(service: AgentService, dataRoot: string) {
 
 export function createMarketingVideoRoutes(service: AgentService, dataRoot: string, store = new PgMarketingProjectStore(service.db.pool), operations = new PgMarketingTextOperations(service.db.pool),
   narrator = new MarketingNarrator(service.db.pool, dataRoot), keyArtist = marketingKeyArtist(service, dataRoot)) {
-  // New clips use the configured model; recovery uses each job's recorded model.
+  // New clips use the configured model, or Seedance 2.5 for 1080p and reference videos (`marketingDraftProfile`);
+  // recovery uses each job's recorded model.
   const activeProfile = activeMarketingVideoProfile();
   const analysisStorage = new AnalysisStorage(resolve(dataRoot, "marketing-analysis"));
   const app = new Hono<{ Variables: { userId: string } }>();
@@ -211,7 +212,8 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
   // before any clip; /generate freezes them. A stopped video's shots keep its clip model's limits.
   const narrationPlan = (p: MarketingProject) => {
     if (!marketingVoiceover(p.draft)) throw new MarketingError("当前草稿未选择数字分身旁白。");
-    try { return resolveMarketingSegments(p.draft, (p.revision && marketingVideoProfile(p.revision.modelId)) || activeProfile); }
+    const profile = (p.revision && marketingVideoProfile(p.revision.modelId)) || marketingDraftProfile(p.draft, activeProfile);
+    try { return resolveMarketingSegments(p.draft, profile); }
     catch (error) { throw new MarketingError((error as Error).message); }
   };
   app.get("/:id/narration", async (c) => {
@@ -246,7 +248,7 @@ export function createMarketingVideoRoutes(service: AgentService, dataRoot: stri
     if (p.version !== body.version) throw new MarketingError("草稿已更新，请重新确认。", 409);
     if (p.taskId) throw new MarketingError("视频已提交制作，定妆图不会再改变；如需新的定妆图请复制为新草稿。", 409);
     await materials.owned(owner, p.draft);
-    return c.json({ version: p.version, ...await keyArtist.generate(owner, p.id, p.draft, activeProfile, body.redo === true) });
+    return c.json({ version: p.version, ...await keyArtist.generate(owner, p.id, p.draft, marketingDraftProfile(p.draft, activeProfile), body.redo === true) });
   });
   app.post("/:id/generate", async (c) => {
     const owner = c.get("userId");
