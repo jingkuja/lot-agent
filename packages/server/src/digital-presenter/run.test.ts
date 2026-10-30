@@ -200,6 +200,26 @@ describe("digital presenter worker", () => {
       captions: { texts: ["大家好。", "欢迎光临。"], settings } }));
   });
 
+  it("keeps the caption-free copy and timing for the live preview, and removes the draft's earlier copies", async () => {
+    const provider = { create: vi.fn(), poll: vi.fn() };
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(root.dir, "jobs", "old"), { recursive: true });
+    await writeFile(join(root.dir, "jobs/old/clip-0.mp4"), "clip");
+    await writeFile(join(root.dir, "jobs/old/clip-1.mp4"), "clip");
+    const f = fixture([{ status: "succeeded", file: "jobs/old/clip-0.mp4" }, { status: "succeeded", file: "jobs/old/clip-1.mp4" }], provider);
+    const timing = [{ script: "大家好。", durationSec: 4.45, voiceSec: 4.2, pauses: [] }, { script: "欢迎光临。", durationSec: 3.1, voiceSec: 3.1, pauses: [] }];
+    const preview = { file: "/tmp/clean.mp4", sizeBytes: 4 };
+    f.compose.image.mockResolvedValueOnce({ ...f.file, durationSec: 7.55, width: 720, height: 1280, captions: [], captionTiming: timing, preview } as never);
+    const output = await runDigitalPresenter(f.deps, f.job, new AbortController().signal);
+    expect(f.deps.storage.putStream).toHaveBeenCalledWith(expect.stringMatching(/-preview\.mp4$/), "/tmp/clean.mp4", "video/mp4", 4);
+    expect(f.db.createAsset).toHaveBeenCalledTimes(2);
+    expect(f.db.createAsset).toHaveBeenLastCalledWith(expect.objectContaining({ storageKey: expect.stringMatching(/-preview\.mp4$/), sizeBytes: 4 }));
+    expect(output).toMatchObject({ captionTiming: timing, preview: { url: expect.stringMatching(/^\/static\/assets\/.+-preview\.mp4$/) } });
+    // The final video is found again on recovery, never its copy; other jobs' copies of the draft go.
+    expect(f.queries.find(q => q.sql.includes("FROM assets WHERE task_id"))?.values).toEqual(["job", "owner", "%-preview.mp4"]);
+    expect(f.queries.find(q => q.sql.startsWith("DELETE FROM assets"))?.values).toEqual(["owner", PROJECT, "job", "%-preview.mp4", "digital-presenter.video"]);
+  });
+
   it("stops before any clip is paid for when captions cannot be burned", async () => {
     const provider = { create: vi.fn(), poll: vi.fn() };
     const media = await import("../marketing-video/media.js");

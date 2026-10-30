@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { captionLayout, captionStroke, marketingCaptionsValue, marketingFrameSize, marketingPreviewCaptions, type MarketingCaption, type MarketingDraft,
-  type MarketingProject } from "@lot-agent/core/marketing-video";
+import { captionLayout, captionStroke, marketingCaptionsValue, marketingFrameSize, marketingPreviewCaptions, type MarketingCaption, type MarketingCaptions,
+  type MarketingDraft, type MarketingProject } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
 import { captionColorStyle } from "./CaptionSettings.js";
 // The font the composition burns (Noto Sans CJK SC, bold), so the live preview draws captions the same way.
@@ -51,10 +51,7 @@ export function ResultVideo({ url, previewUrl, output, draft, rendered, player, 
   const preview = available && previewing;
   const timing = output.captionTiming ?? NO_TIMING;
   const { captions } = usePreviewCaptions(preview, draft, timing);
-  const line = useCaptionLine(element, captions);
-  const box = useVideoBox(element, marketingFrameSize(rendered ?? draft));
-  // Switching between the two files keeps the position and whether it was playing.
-  const resume = useRef<{ at: number; playing: boolean } | null>(null);
+  const resume = useResumeOnSwitch();
   // Set when the chosen video is to be shown once it is in its place.
   const reveal = useRef(false);
   function choose(next: boolean, show = true) {
@@ -62,7 +59,7 @@ export function ResultVideo({ url, previewUrl, output, draft, rendered, player, 
     if (!current) return;
     reveal.current = show;
     if (next !== previewing) {
-      resume.current = { at: current.currentTime, playing: !current.paused };
+      resume.remember(current);
       onPreview(next);
     } else if (show) {
       reveal.current = false;
@@ -88,23 +85,10 @@ export function ResultVideo({ url, previewUrl, output, draft, rendered, player, 
     },
     showPreview: choose,
   }), [timing, rendered, draft, previewing, onPreview]);
-  const layout = box && captionLayout(box.frame.width, box.frame.height, draft.captions);
-  // An outline is centred on the glyph edge, so the preview strokes twice the burned width.
-  const stroke = layout ? captionStroke(layout.fontSize, draft.captions?.color) : 0;
   const frame = <div className="mv-result-player">
     <div className="mv-result-frame">
-      <video ref={attach} className="mv-result-video" controls src={preview ? previewUrl : url} onLoadedMetadata={e => {
-        const state = resume.current; resume.current = null;
-        if (!state) return;
-        e.currentTarget.currentTime = state.at;
-        if (state.playing) void e.currentTarget.play().catch(() => {});
-      }} />
-      {preview && box && layout && <div className="mv-caption-overlay" aria-hidden="true"
-        style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
-        <span className="mv-caption-badge">{t("预览：未重新合成")}</span>
-        {line && <p style={{ bottom: layout.marginV * box.scale, fontSize: layout.fontSize * box.scale, paddingInline: box.frame.width * 0.06 * box.scale }}>
-          <span style={captionColorStyle(draft.captions?.color ?? "white", stroke * 2 * box.scale, stroke * box.scale)}>{line}</span></p>}
-      </div>}
+      <video ref={attach} className="mv-result-video" controls src={preview ? previewUrl : url} onLoadedMetadata={e => resume.restore(e.currentTarget)} />
+      {preview && <CaptionOverlay video={element} captions={captions} frame={marketingFrameSize(rendered ?? draft)} settings={draft.captions} />}
     </div>
   </div>;
   return preview && slot ? <>
@@ -135,6 +119,40 @@ export function CaptionPreviewModes({ preview, draft, timing, onChoose, onCompos
     {preview && <p className="mv-hint" role="status">{t("实时预览只在页面上叠加字幕，与成片的字体渲染可能略有差别。满意后点击「重新合成成片」。")}
       {!!changed.length && ` ${t("第 {0} 镜口播已修改，重新合成后才能预览该镜字幕。", [shotList])}`}</p>}
   </>;
+}
+
+/** Switching a player between two files keeps the position and whether it was playing: `remember` before the switch,
+ * `restore` once the new file's metadata has loaded. */
+export function useResumeOnSwitch() {
+  const resume = useRef<{ at: number; playing: boolean } | null>(null);
+  return useMemo(() => ({
+    remember(video: HTMLVideoElement) { resume.current = { at: video.currentTime, playing: !video.paused }; },
+    restore(video: HTMLVideoElement) {
+      const state = resume.current; resume.current = null;
+      if (!state) return;
+      video.currentTime = state.at;
+      if (state.playing) void video.play().catch(() => {});
+    },
+  }), []);
+}
+
+/** Captions drawn over a caption-free copy of a made video the way the composition burns them, with `settings`' size,
+ * position and colour; `frame` is the composed size. Place it beside the video inside `mv-result-frame`. */
+export function CaptionOverlay({ video, captions, frame, settings }: {
+  video: HTMLVideoElement | null; captions: MarketingCaption[]; frame: { width: number; height: number }; settings?: MarketingCaptions;
+}) {
+  const { t } = useI18n();
+  const line = useCaptionLine(video, captions);
+  const box = useVideoBox(video, frame);
+  const layout = box && captionLayout(box.frame.width, box.frame.height, settings);
+  if (!box || !layout) return null;
+  // An outline is centred on the glyph edge, so the preview strokes twice the burned width.
+  const stroke = captionStroke(layout.fontSize, settings?.color);
+  return <div className="mv-caption-overlay" aria-hidden="true" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
+    <span className="mv-caption-badge">{t("预览：未重新合成")}</span>
+    {line && <p style={{ bottom: layout.marginV * box.scale, fontSize: layout.fontSize * box.scale, paddingInline: box.frame.width * 0.06 * box.scale }}>
+      <span style={captionColorStyle(settings?.color ?? "white", stroke * 2 * box.scale, stroke * box.scale)}>{line}</span></p>}
+  </div>;
 }
 
 /** The caption on screen. While a captioned video plays it is read each frame, so captions change on time, but the

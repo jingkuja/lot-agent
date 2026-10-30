@@ -1,4 +1,4 @@
-import { useState } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { planPresenterSegments, presenterCaptionErrors } from "@lot-agent/core/digital-presenter";
 import { captionLayout, captionLines, marketingCaptionLinesMatch, marketingCaptionsValue, MarketingCaptionsSchema, marketingShotCaption, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
@@ -6,22 +6,30 @@ import { CAPTION_POSITIONS, CAPTION_SIZES, CaptionColorChoice, OffsetField, same
 import type { Project } from "./api.js";
 
 const SEGMENT_COPY: CaptionUnitCopy = { title: "第 {0} 段", aria: "第 {0} 段字幕", empty: "每段至少保留一行字幕。",
-  mismatch: "字幕只能调整断行和标点。", offset: "本段提前或延后（秒）" };
-const same = (a: MarketingCaptions | undefined, b: MarketingCaptions | undefined) => JSON.stringify(marketingCaptionsValue(a) ?? null) === JSON.stringify(marketingCaptionsValue(b) ?? null);
+  mismatch: "字幕只能调整断行和标点。", offset: "本段提前或延后（秒）", play: "播放本段" };
+/** Whether two caption settings compose the same captions. */
+export const sameCaptions = (a: MarketingCaptions | undefined, b: MarketingCaptions | undefined) =>
+  JSON.stringify(marketingCaptionsValue(a) ?? null) === JSON.stringify(marketingCaptionsValue(b) ?? null);
 
-/** Captions of a made video: size, position, timing and line breaks. The words are the segments'
- * script; applying composes the kept clips again without the model. Remount per task. */
-export function PresenterCaptions({ project, frame, busy, onApply }: {
-  project: Project; frame: { width: number; height: number }; busy: boolean; onApply(captions: MarketingCaptions | undefined): void;
+/** Captions of a made video: size, position, colour, timing and line breaks. The words are the segments'
+ * script; applying composes the kept clips again without the model. `captions` is the changed setting,
+ * watched in the live preview (`modes`) before applying. */
+export function PresenterCaptions({ project, frame, busy, captions, onChange, modes, onPlaySegment, onApply }: {
+  project: Project; frame: { width: number; height: number }; busy: boolean;
+  captions: MarketingCaptions; onChange: Dispatch<SetStateAction<MarketingCaptions>>;
+  /** Switches the video above between the made video and the live preview. */
+  modes?: ReactNode;
+  /** Plays one segment of the video above. */
+  onPlaySegment?: (index: number) => void;
+  onApply(captions: MarketingCaptions | undefined): void;
 }) {
   const { t } = useI18n();
   const saved = project.draft.captions;
-  const [captions, setCaptions] = useState<MarketingCaptions>(() => saved ?? MarketingCaptionsSchema.parse({}));
   const texts = planPresenterSegments(project.draft.script, project.draft.voice.speed).segments.map(segment => segment.text);
   const maxCells = captionLayout(frame.width, frame.height, captions).maxCells;
   const burned = project.output?.captions ?? [];
-  const update = (next: Partial<MarketingCaptions>) => setCaptions(old => ({ ...old, ...next }));
-  const updateSegment = (index: number, change: { lines?: string[]; offsetSec?: number }) => setCaptions(old => {
+  const update = (next: Partial<MarketingCaptions>) => onChange(old => ({ ...old, ...next }));
+  const updateSegment = (index: number, change: { lines?: string[]; offsetSec?: number }) => onChange(old => {
     const script = texts[index];
     const current = marketingShotCaption({ captions: old }, index, script);
     const entry = { script, offsetSec: current?.offsetSec ?? 0, ...(current?.lines ? { lines: current.lines } : {}), ...change };
@@ -37,6 +45,7 @@ export function PresenterCaptions({ project, frame, busy, onApply }: {
   return <fieldset className="mv-captions" aria-label={t("调整字幕")}>
     <legend>{t("调整字幕")}</legend>
     <p className="mv-hint">{t("字幕文字来自口播文案，这里只能调整断行、标点、出现时间、字号和位置。重新合成沿用已生成的片段，不调用模型、不产生费用。")}</p>
+    {modes}
     <div className="mv-caption-row">
       {choices("字号", CAPTION_SIZES, captions.size, value => update({ size: value as MarketingCaptions["size"] }))}
       {choices("位置", CAPTION_POSITIONS, captions.position, value => update({ position: value as MarketingCaptions["position"] }))}
@@ -45,8 +54,9 @@ export function PresenterCaptions({ project, frame, busy, onApply }: {
     {captions.position === "low" && frame.height > frame.width && <p className="mv-hint">{t("竖屏字幕靠下时，可能被短视频平台的按钮和标题遮挡。")}</p>}
     <div className="mv-caption-row">
       <OffsetField label="全片提前或延后（秒）" value={captions.offsetSec} busy={busy} onChange={offsetSec => update({ offsetSec })} />
-      <button type="button" className="mv-primary" disabled={busy || invalid || same(captions, saved)} onClick={() => onApply(marketingCaptionsValue(captions))}>{t("重新合成成片")}</button>
-      {!same(captions, saved) && <button type="button" disabled={busy} onClick={() => setCaptions(saved ?? MarketingCaptionsSchema.parse({}))}>{t("撤销修改")}</button>}
+      <button type="button" className="mv-primary" disabled={busy || invalid || sameCaptions(captions, saved)}
+        onClick={() => onApply(marketingCaptionsValue(captions))}>{t("重新合成成片")}</button>
+      {!sameCaptions(captions, saved) && <button type="button" disabled={busy} onClick={() => onChange(saved ?? MarketingCaptionsSchema.parse({}))}>{t("撤销修改")}</button>}
     </div>
     <p className="mv-hint">{t("负数提前、正数延后，每次 0.05 秒；字幕不会移出所在段落。看成片时觉得字幕比声音早或晚，就在这里调整。")}</p>
     <details className="mv-caption-shots"><summary>{t("逐段调整断行和时间")}</summary>
@@ -56,7 +66,7 @@ export function PresenterCaptions({ project, frame, busy, onApply }: {
         const auto = captionLines(text, maxCells);
         return <ShotCaption key={index} index={index} lines={entry?.lines ?? auto} auto={!entry?.lines} copy={SEGMENT_COPY}
           mismatch={!!entry?.lines && !marketingCaptionLinesMatch(text, entry.lines)} offsetSec={entry?.offsetSec ?? 0} busy={busy}
-          burned={burned.filter(cue => cue.shot === index)}
+          burned={burned.filter(cue => cue.shot === index)} onPlay={onPlaySegment && (() => onPlaySegment(index))}
           onLines={next => updateSegment(index, { lines: next && !sameLines(next, auto) ? next : undefined })} onOffset={offsetSec => updateSegment(index, { offsetSec })} />;
       })}</ol>
     </details>

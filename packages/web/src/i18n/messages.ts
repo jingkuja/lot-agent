@@ -3053,5 +3053,6 @@ export const messages: Record<string, { en: string; id: string }> = {
   "实时预览只在页面上叠加字幕，与成片的字体渲染可能略有差别。满意后点击「重新合成成片」。": {"en": "The live preview only draws captions over the page, so font rendering may differ slightly from the video. When you are happy, click \"Compose video again\".", "id": "Pratinjau langsung hanya menampilkan subtitle di atas halaman, sehingga tampilan huruf bisa sedikit berbeda dari video. Jika sudah sesuai, klik \"Susun ulang video\"."},
   "第 {0} 镜口播已修改，重新合成后才能预览该镜字幕。": {"en": "The narration of shot {0} changed; its captions can be previewed after composing again.", "id": "Narasi adegan {0} diubah; subtitlenya dapat dipratinjau setelah disusun ulang."},
   "播放本镜": {"en": "Play this shot", "id": "Putar adegan ini"},
+  "播放本段": {"en": "Play this segment", "id": "Putar segmen ini"},
   "这条视频合成时没有保留无字幕版本，修改字幕后不能实时预览；重新合成成片后，再修改字幕即可实时预览。": {"en": "This video was composed without a caption-free copy, so caption changes cannot be previewed. After composing it again, caption changes can be previewed right away.", "id": "Video ini disusun tanpa salinan tanpa subtitle, sehingga perubahan subtitle tidak dapat dipratinjau. Setelah disusun ulang, perubahan subtitle dapat langsung dipratinjau."},
 };

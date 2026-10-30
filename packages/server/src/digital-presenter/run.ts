@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import type { ProviderError, VideoGenerationProvider, VideoGenerationRequest } from "@lot-agent/core";
 import { presenterTrackMs, PRESENTER_INPUT_VERSION, type PresenterDraft } from "@lot-agent/core/digital-presenter";
 import { MarketingCaptionsSchema, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import type { DB } from "../db/database.js";
 import { JobCancelledError } from "../generation/run-job.js";
+import { DIGITAL_PRESENTER_TASK } from "../jobs/task-queues.js";
 import { inspectMedia, mediaCapabilities, ownedAssetPath, storeComposedVideo, SUBTITLES_UNAVAILABLE, type VideoStreamStorage } from "../marketing-video/media.js";
 import { CANCEL_CHECK_MS, definiteRejection, gatewayFailure } from "../marketing-video/run.js";
 import { PresenterRunError, UNKNOWN_CLIP_MESSAGE } from "./errors.js";
@@ -38,6 +39,22 @@ export interface PresenterRunDeps {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   compose?: { image: typeof composeImageMode; video: typeof composeVideoMode };
   sign?: typeof signPresenterFile;
+}
+
+/** Storage key ending of a made video's caption-free copy, used only to preview caption changes. */
+const PREVIEW_SUFFIX = "-preview.mp4";
+/** Only the newest caption-free copy of a draft is kept; a failure only leaves bytes behind. */
+async function removeEarlierPreviews(deps: PresenterRunDeps, owner: string, projectId: string, jobId: string) {
+  try {
+    const { rows } = await deps.db.pool.query(`DELETE FROM assets a USING tasks t WHERE a.task_id=t.id AND a.user_id=$1 AND a.type='video'
+      AND a.storage_key LIKE $4 AND t.type=$5 AND t.user_id=$1 AND t.input->>'projectId'=$2 AND t.id<>$3 RETURNING a.storage_key`,
+    [owner, projectId, jobId, `%${PREVIEW_SUFFIX}`, DIGITAL_PRESENTER_TASK]);
+    const folder = resolve(deps.dataRoot, "assets");
+    await Promise.all(rows.map(async row => {
+      const path = resolve(folder, row.storage_key);
+      if (path.startsWith(folder + sep)) await rm(path, { force: true });
+    }));
+  } catch (error) { console.warn("[digital-presenter] earlier caption previews not removed", { projectId, errorType: (error as Error)?.name }); }
 }
 
 const sleeper = (ms: number, signal: AbortSignal) => new Promise<void>(done => {
@@ -76,8 +93,10 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
     };
     timer = setInterval(() => { void assertActive().catch(abort); }, CANCEL_CHECK_MS);
     await assertActive();
-    const existing = (await deps.db.pool.query("SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 AND type='video' ORDER BY created_at LIMIT 1", [job.id, job.userId])).rows[0];
-    // Finished before the task was marked done; the burned cues are not kept with the asset.
+    // The final video, not its caption-free copy stored after it.
+    const existing = (await deps.db.pool.query(`SELECT * FROM assets WHERE task_id=$1 AND user_id=$2 AND type='video' AND storage_key NOT LIKE $3
+      ORDER BY created_at LIMIT 1`, [job.id, job.userId, `%${PREVIEW_SUFFIX}`])).rows[0];
+    // Finished before the task was marked done; the burned cues and the caption preview are not kept with the asset.
     if (existing) return { assetIds: [existing.id], assets: [{ url: existing.url, mime: existing.mime, durationSec: Number(existing.duration_sec) || undefined }],
       ...(existing.width && existing.height ? { frame: { width: Number(existing.width), height: Number(existing.height) } } : {}) };
 
@@ -255,14 +274,24 @@ export async function runDigitalPresenter(deps: PresenterRunDeps, job: { id: str
       throw new PresenterRunError("COMPOSITION_FAILED", error instanceof Error ? error.message : "视频合成失败", { cause: error });
     }
     const id = randomUUID(); const key = `${id}.mp4`;
+    const previewId = randomUUID(); const previewKey = `${previewId}${PREVIEW_SUFFIX}`;
     let url: string;
+    let previewUrl: string | undefined;
     try {
       await assertActive();
       ({ url } = await storeComposedVideo(deps.storage, key, result));
+      if (result.preview) ({ url: previewUrl } = await storeComposedVideo(deps.storage, previewKey, result.preview));
     } finally { await result.dispose(); }
-    await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.sizeBytes, durationSec: result.durationSec, width: result.width, height: result.height });
+    const size = { durationSec: result.durationSec, width: result.width, height: result.height };
+    await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type: "video", storageKey: key, url, mime: "video/mp4", sizeBytes: result.sizeBytes, ...size });
+    if (result.preview && previewUrl) {
+      await deps.db.createAsset({ id: previewId, taskId: job.id, userId: job.userId, type: "video", storageKey: previewKey, url: previewUrl, mime: "video/mp4",
+        sizeBytes: result.preview.sizeBytes, ...size });
+      await removeEarlierPreviews(deps, job.userId, input.projectId, job.id);
+    }
     return { assetIds: [id], assets: [{ url, mime: "video/mp4", durationSec: result.durationSec }], frame: { width: result.width, height: result.height },
-      ...(result.captions ? { captions: result.captions } : {}) };
+      ...(result.captions ? { captions: result.captions } : {}), ...(result.captionTiming ? { captionTiming: result.captionTiming } : {}),
+      ...(result.preview && previewUrl ? { preview: { assetId: previewId, url: previewUrl } } : {}) };
   } catch (error) {
     if (error instanceof JobCancelledError || error instanceof PresenterRunError) throw error;
     throw new PresenterRunError("UNKNOWN", error instanceof Error ? error.message : String(error), { cause: error });

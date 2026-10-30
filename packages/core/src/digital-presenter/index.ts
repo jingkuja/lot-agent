@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { marketingCaptionLinesMatch, MarketingCaptionsSchema, marketingShotCaption, type MarketingCaption, type MarketingCaptions } from "../marketing-video/index.js";
+import { captionLayout, marketingCaptionLinesMatch, MarketingCaptionsSchema, marketingShotCaption, marketingShotCues, type MarketingCaption,
+  type MarketingCaptions, type MarketingCaptionTiming } from "../marketing-video/index.js";
 
 /** Vendor models behind the gateway's OpenAI-compatible `/videos` endpoint. */
 export const PRESENTER_IMAGE_MODEL = "wan2.2-s2v";
@@ -70,8 +71,11 @@ export interface PresenterReview { verdict: "pass" | "suspect" | "reject"; issue
 export interface PresenterTaskState {
   id: string; version: number; taskId?: string; status: PresenterTaskStatus; progress: number;
   stage?: string; error?: string; errorCode?: string;
-  /** `captions`: cues burned in, in seconds of the film (`shot` is the segment); `frame`: the film's size. */
-  output?: { assetIds?: string[]; assets?: { url: string; mime: string; durationSec?: number }[]; captions?: MarketingCaption[]; frame?: { width: number; height: number } };
+  /** `captions`: cues burned in, in seconds of the film (`shot` is the segment); `frame`: the film's size.
+   * `preview`: the same video without captions, and `captionTiming` each segment's timing, so caption
+   * changes can be watched before composing again. */
+  output?: { assetIds?: string[]; assets?: { url: string; mime: string; durationSec?: number }[]; captions?: MarketingCaption[];
+    frame?: { width: number; height: number }; preview?: { assetId: string; url: string }; captionTiming?: MarketingCaptionTiming[] };
   /** Clips sent to the model without a known outcome; resending may charge again. */
   unknownClips?: number;
 }
@@ -181,5 +185,20 @@ export function presenterCaptionErrors(captions: MarketingCaptions | undefined, 
   return texts.flatMap((text, index) => {
     const lines = marketingShotCaption({ captions }, index, text)?.lines;
     return lines && !marketingCaptionLinesMatch(text, lines) ? [index] : [];
+  });
+}
+
+/** The captions a made video would get if composed again with `captions`, in seconds of the film:
+ * each segment timed as the composition timed it, the segments one after another. */
+export function presenterPreviewCaptions(captions: MarketingCaptions | undefined, timing: MarketingCaptionTiming[],
+  frame: { width: number; height: number }): MarketingCaption[] {
+  const maxCells = captionLayout(frame.width, frame.height, captions).maxCells;
+  let start = 0;
+  return timing.flatMap((segment, index) => {
+    const at = (sec: number) => Math.round((start + sec) * 100) / 100;
+    const cues = marketingShotCues({ captions }, index, segment, maxCells)
+      .map(cue => ({ shot: index, start: at(cue.start), end: at(cue.end), text: cue.text }));
+    start += segment.durationSec;
+    return cues;
   });
 }

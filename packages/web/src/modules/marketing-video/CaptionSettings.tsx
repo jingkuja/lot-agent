@@ -41,9 +41,9 @@ export function OffsetField({ label, value, busy, onChange }: { label: string; v
 }
 
 /** Message keys of one caption unit; marketing videos edit shots, digital presenters segments. */
-export interface CaptionUnitCopy { title: string; aria: string; empty: string; mismatch: string; offset: string }
+export interface CaptionUnitCopy { title: string; aria: string; empty: string; mismatch: string; offset: string; play: string }
 const SHOT_COPY: CaptionUnitCopy = { title: "第 {0} 镜", aria: "第 {0} 镜字幕", empty: "每镜至少保留一行字幕。",
-  mismatch: "字幕只能调整断行和标点；要改文字，请修改该镜口播。", offset: "本镜提前或延后（秒）" };
+  mismatch: "字幕只能调整断行和标点；要改文字，请修改该镜口播。", offset: "本镜提前或延后（秒）", play: "播放本镜" };
 
 /** One shot's caption lines as editable text, one caption per line. The text is kept while the
  * user types blank lines; a change made elsewhere (undo, reworded shot) replaces it. */
@@ -72,7 +72,7 @@ export function ShotCaption({ index, start, end, lines, auto, mismatch, offsetSe
     <div className="mv-caption-row">
       <OffsetField label={copy.offset} value={offsetSec} busy={busy} onChange={onOffset} />
       {!auto && <button type="button" disabled={busy} onClick={() => { setError(false); onLines(undefined); }}>{t("恢复自动断行")}</button>}
-      {onPlay && <button type="button" onClick={onPlay}>{t("播放本镜")}</button>}
+      {onPlay && <button type="button" onClick={onPlay}>{t(copy.play)}</button>}
     </div>
   </li>;
 }

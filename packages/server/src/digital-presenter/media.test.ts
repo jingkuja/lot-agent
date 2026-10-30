@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { inspectMedia, mediaCapabilities } from "../marketing-video/media.js";
 import { readImageInfo } from "../marketing-video/image-size.js";
 import { MarketingCaptionsSchema } from "@lot-agent/core/marketing-video";
+import { presenterPreviewCaptions } from "@lot-agent/core/digital-presenter";
 import { buildTrack, composeImageMode, composeVideoMode, footageScale, hdrConversionAvailable, portraitFrame, prepareFootage, preparePortrait, shownSize,
   takeCues } from "./media.js";
 
@@ -96,14 +97,15 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
   it("times a take's captions within its span, with the user's line breaks and offsets", async () => {
     const take = { path: join(dir, "take0.wav"), format: "wav", speechSec: 1.2 };
     const text = "大家好，欢迎来到我们的门店，今天给大家介绍招牌套餐和到店优惠。";
-    const auto = await takeCues(take, 0, { texts: [text] }, 1.45, { width: 720, height: 1280 });
+    const { cues: auto, timing } = await takeCues(take, 0, { texts: [text] }, 1.45, { width: 720, height: 1280 });
+    expect(timing).toMatchObject({ script: text, durationSec: 1.45, voiceSec: 1.2 });
     expect(auto.length).toBeGreaterThan(1);
     expect(auto[0].start).toBeGreaterThanOrEqual(0);
     expect(auto.at(-1)!.end).toBeLessThanOrEqual(1.45);
     expect(auto.map(cue => cue.text).join("")).toContain("招牌套餐");
     const lines = ["大家好，欢迎来到我们的门店", "今天给大家介绍招牌套餐和到店优惠"];
     const settings = MarketingCaptionsSchema.parse({ offsetSec: 0.1, shots: [{ script: text, lines, offsetSec: 0.05 }] });
-    const edited = await takeCues(take, 0, { texts: [text], settings }, 1.45, { width: 720, height: 1280 });
+    const { cues: edited } = await takeCues(take, 0, { texts: [text], settings }, 1.45, { width: 720, height: 1280 });
     expect(edited.map(cue => cue.text)).toEqual(lines);
     expect(edited[0].start).toBeCloseTo(auto[0].start + 0.15, 2);
   });
@@ -117,9 +119,15 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     expect(image.durationSec).toBeCloseTo(2.25, 0);
     expect(image.captions?.map(cue => cue.shot)).toContain(1);
     expect(image.captions?.find(cue => cue.shot === 1)!.start).toBeGreaterThanOrEqual(1.2);
+    // The live preview times the same captions from the kept timing, over the caption-free copy.
+    expect(presenterPreviewCaptions(captions.settings, image.captionTiming!, { width: 720, height: 1280 })).toEqual(image.captions);
+    expect(image.preview?.sizeBytes).toBeGreaterThan(0);
+    expect((await inspectMedia(image.preview!.file)).duration).toBeCloseTo(image.durationSec, 1);
     const video = await composeVideoMode({ clip: join(dir, "prepared.mp4"), track: join(dir, "track.wav"), trackSec: 2.25, captions: { ...captions, takes, takeMs: [1200, 800] } });
     expect(video.durationSec).toBeCloseTo(2.25, 0);
     expect(video.captions?.at(-1)!.end).toBeLessThanOrEqual(2.25);
+    expect(presenterPreviewCaptions(captions.settings, video.captionTiming!, { width: video.width, height: video.height })).toEqual(video.captions);
+    expect(video.preview?.sizeBytes).toBeGreaterThan(0);
     await Promise.all([image.dispose(), video.dispose()]);
   });
 });

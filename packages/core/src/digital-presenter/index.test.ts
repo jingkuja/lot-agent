@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { estimateSpeechSec, planPresenterSegments, presenterMaterialBlocker, presenterTakesIssue, presenterTrackMs, PresenterDraftSchema, splitSentences } from "./index.js";
+import { MarketingCaptionsSchema } from "../marketing-video/index.js";
+import { estimateSpeechSec, planPresenterSegments, presenterMaterialBlocker, presenterPreviewCaptions, presenterTakesIssue, presenterTrackMs,
+  PresenterDraftSchema, splitSentences } from "./index.js";
 
 describe("digital presenter script", () => {
   it("splits Chinese and Latin sentences and keeps closing marks", () => {
@@ -45,5 +47,26 @@ describe("digital presenter limits", () => {
     expect(presenterMaterialBlocker({ ...draft, portrait: "00000000-0000-4000-8000-000000000000" })).toMatch(/授权/);
     expect(presenterMaterialBlocker({ ...draft, portrait: "00000000-0000-4000-8000-000000000000", consent: true })).toBe("");
     expect(() => PresenterDraftSchema.parse({ unknown: 1 })).toThrow();
+  });
+});
+
+describe("digital presenter caption preview", () => {
+  const frame = { width: 720, height: 1280 };
+  const timing = [{ script: "大家好，欢迎光临。", durationSec: 2.45, voiceSec: 2.2, pauses: [] }, { script: "今天有优惠。", durationSec: 1.5, voiceSec: 1.5, pauses: [] }];
+
+  it("times each segment after the ones before it, as the composition does", () => {
+    const cues = presenterPreviewCaptions(undefined, timing, frame);
+    expect(cues.map(cue => cue.shot)).toEqual([0, 1]);
+    expect(cues[0].start).toBe(0);
+    expect(cues[1].start).toBeGreaterThanOrEqual(2.45 - 0.1);
+    expect(cues.at(-1)!.end).toBeLessThanOrEqual(2.45 + 1.5);
+  });
+
+  it("follows changed line breaks and offsets", () => {
+    const captions = MarketingCaptionsSchema.parse({ offsetSec: 0.2, shots: [{ script: timing[0].script, lines: ["大家好，", "欢迎光临。"] }] });
+    const before = presenterPreviewCaptions(undefined, timing, frame);
+    const after = presenterPreviewCaptions(captions, timing, frame);
+    expect(after.filter(cue => cue.shot === 0).map(cue => cue.text)).toEqual(["大家好，", "欢迎光临。"]);
+    expect(after.find(cue => cue.shot === 1)!.start).toBeCloseTo(before.find(cue => cue.shot === 1)!.start + 0.2, 2);
   });
 });

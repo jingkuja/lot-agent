@@ -1,9 +1,12 @@
-import { marketingCaptionSrt, type MarketingCaptions } from "@lot-agent/core/marketing-video";
+import { useEffect, useMemo, useState } from "react";
+import { presenterPreviewCaptions } from "@lot-agent/core/digital-presenter";
+import { marketingCaptionSrt, MarketingCaptionsSchema, type MarketingCaptions } from "@lot-agent/core/marketing-video";
 import { useI18n } from "../../i18n/index.js";
+import { CaptionOverlay, useResumeOnSwitch } from "../marketing-video/CaptionPreview.js";
 import { useConfirm } from "../marketing-video/ConfirmDialog.js";
 import { UNKNOWN_CLIPS_MESSAGE } from "../marketing-video/TaskStatus.js";
 import type { Project } from "./api.js";
-import { PresenterCaptions } from "./PresenterCaptions.js";
+import { PresenterCaptions, sameCaptions } from "./PresenterCaptions.js";
 
 /** Guidance per stop reason; rewording a server message never changes the offered actions. */
 const FAILURES: Record<string, { reason: string; next: string; resume?: boolean }> = {
@@ -22,6 +25,58 @@ const FAILURES: Record<string, { reason: string; next: string; resume?: boolean 
   JOB_BUSY: { reason: "该视频正在其他进程中处理。", next: "稍后刷新查看进度。", resume: true },
 };
 
+/** The made video and its captions. With a caption-free copy, changed captions are drawn over that copy, timed like
+ * the composition would time them, so they can be watched before composing again. Remount per task. */
+function MadeVideo({ project, url, busy, onCaptions }: {
+  project: Project; url: string; busy: boolean; onCaptions(captions: MarketingCaptions | undefined): void;
+}) {
+  const { t } = useI18n();
+  const output = project.output!;
+  const frame = output.frame;
+  const timing = output.captionTiming;
+  const saved = project.draft.captions;
+  const [captions, setCaptions] = useState<MarketingCaptions>(() => saved ?? MarketingCaptionsSchema.parse({}));
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const resume = useResumeOnSwitch();
+  const adjustable = project.draft.subtitles && !!frame;
+  const previewable = adjustable && !!output.preview && !!timing?.length;
+  const preview = previewable && previewing;
+  const changed = !sameCaptions(captions, saved);
+  const choose = (next: boolean) => {
+    if (next === previewing) return;
+    if (video) resume.remember(video);
+    setPreviewing(next);
+  };
+  // A caption change shows its preview at once; the made video stays one click away.
+  useEffect(() => { if (changed && previewable) choose(true); }, [changed]);
+  const cues = useMemo(() => preview ? presenterPreviewCaptions(captions, timing!, frame!) : [], [preview, captions, timing, frame]);
+  const playSegment = (index: number) => {
+    if (!video) return;
+    video.currentTime = timing?.length ? timing.slice(0, index).reduce((sum, segment) => sum + segment.durationSec, 0)
+      : output.captions?.find(cue => cue.shot === index)?.start ?? 0;
+    video.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    void video.play().catch(() => {});
+  };
+  return <>
+    <div className="mv-result-player"><div className="mv-result-frame">
+      <video ref={setVideo} className="mv-result-video" controls src={preview ? output.preview!.url : url} onLoadedMetadata={e => resume.restore(e.currentTarget)} />
+      {preview && <CaptionOverlay video={video} captions={cues} frame={frame!} settings={captions} />}
+    </div></div>
+    <div className="mv-downloads"><a className="mv-download" href={url} download>{t("下载视频")}</a>
+      {!!output.captions?.length && <a className="mv-download" href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(output.captions))}`} download="captions.srt">{t("下载字幕（SRT）")}</a>}</div>
+    <p className="mv-hint">{t("口型、表情和身份一致性以实际成片为准，发布前请完整观看。")}</p>
+    {adjustable && <PresenterCaptions project={project} frame={frame} busy={busy} captions={captions} onChange={setCaptions} onApply={onCaptions}
+      onPlaySegment={playSegment} modes={previewable ? <>
+        <div className="mv-preview-modes" role="group" aria-label={t("字幕预览")}>
+          <button type="button" className={preview ? "" : "selected"} aria-pressed={!preview} onClick={() => choose(false)}>{t("原成片")}</button>
+          <button type="button" className={preview ? "selected" : ""} aria-pressed={preview} onClick={() => choose(true)}>{t("实时预览")}</button>
+        </div>
+        {preview && <p className="mv-hint" role="status">{t("实时预览只在页面上叠加字幕，与成片的字体渲染可能略有差别。满意后点击「重新合成成片」。")}</p>}
+      </> : <p className="mv-hint" role="note">{t("这条视频合成时没有保留无字幕版本，修改字幕后不能实时预览；重新合成成片后，再修改字幕即可实时预览。")}</p>} />}
+  </>;
+}
+
 /** A submitted video: progress, or why it stopped and what can move it forward, or the result. */
 export function PresenterResult({ project, busy, onCancel, onResume, onRelease, onCopy, onCaptions }: {
   project: Project; busy: boolean; onCancel(): void; onResume(): void; onRelease(): void; onCopy(): void;
@@ -39,13 +94,7 @@ export function PresenterResult({ project, busy, onCancel, onResume, onRelease, 
   const stage = project.stage?.startsWith("片段完成 ") ? t("片段完成 {0}", [project.stage.slice(5)]) : t(project.stage || "等待生成");
   return <section className="mv-card mv-results">
     <div className="mv-section-head"><h2>{t("生成结果")}</h2><button disabled={busy} onClick={onCopy}>{t("复制为新草稿")}</button></div>
-    {result ? <>
-      <video className="mv-result-video" controls src={result.url} />
-      <div className="mv-downloads"><a className="mv-download" href={result.url} download>{t("下载视频")}</a>
-        {!!project.output?.captions?.length && <a className="mv-download" href={`data:application/x-subrip;charset=utf-8,${encodeURIComponent(marketingCaptionSrt(project.output.captions))}`} download="captions.srt">{t("下载字幕（SRT）")}</a>}</div>
-      <p className="mv-hint">{t("口型、表情和身份一致性以实际成片为准，发布前请完整观看。")}</p>
-      {project.draft.subtitles && project.output?.frame && <PresenterCaptions key={project.taskId} project={project} frame={project.output.frame} busy={busy} onApply={onCaptions} />}
-    </> : <div className="mv-progress">
+    {result ? <MadeVideo key={project.taskId} project={project} url={result.url} busy={busy} onCaptions={onCaptions} /> : <div className="mv-progress">
       <strong>{t(pending ? "排队中" : active ? "正在生成主播视频" : cancelled ? "已取消" : "生成未完成")}</strong>
       <progress aria-label={t("视频制作进度")} max="100" value={project.progress} />
       <span>{project.progress}% · {stage}</span>
