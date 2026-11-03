@@ -45,3 +45,17 @@ it("does not claim no charge when the result is unknown, downloading, cancelled 
   ]) expect(visibleText(patch)).not.toContain("不会扣除积分");
   expect(visibleText({ error: "生成状态获取失败" })).toContain("暂时无法确认视频生成结果，请刷新会话查看，或联系客服。");
 });
+
+it("offers editing on generated images only when an edit handler is given", () => {
+  const html = (patch: Partial<GenerationView>, onEditImage?: () => void) => {
+    vi.stubGlobal("React", React);
+    return renderToStaticMarkup(React.createElement(GenerationCard, {
+      generation: { mediaType: "image", status: "completed", ...patch },
+      onEditImage,
+    }));
+  };
+  const image = { assets: [{ url: "/static/a.png", mime: "image/png" }] };
+  expect(html(image, () => {})).toContain("gen-asset-edit");
+  expect(html(image)).not.toContain("gen-asset-edit");
+  expect(html({ mediaType: "video", assets: [{ url: "/static/a.mp4", mime: "video/mp4" }] }, () => {})).not.toContain("gen-asset-edit");
+});

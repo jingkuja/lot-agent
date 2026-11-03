@@ -6,10 +6,11 @@ import { MarketingVideoStudio } from "../modules/marketing-video/MarketingVideoS
 import { DigitalPresenterStudio } from "../modules/digital-presenter/DigitalPresenterStudio.js";
 import { GenerationCard } from "./GenerationCard.js";
 import { MessageBubble } from "./MessageBubble.js";
-import { InputBox, type InputMode } from "./InputBox.js";
+import { InputBox, type InputBoxHandle, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
+import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile } from "../api/client.js";
 import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
 
@@ -45,6 +46,8 @@ interface ChatPanelProps {
   onModelChange?: (id: string) => void;
   /** Retry the download of a generation left in "下载失败". */
   onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
+  /** Image-to-image from a generated image with its own settings (the composer's for older messages). */
+  onEditImage?: (prompt: string, imageUrl: string, settings?: ImageSettings) => void;
   knowledgeBases?: KnowledgeBaseRef[];
   onKnowledgeBasesChange?: (items: KnowledgeBaseRef[]) => void;
   /** Product-specific content replacing the generic empty-state hero. */
@@ -171,6 +174,7 @@ export function ChatPanel({
   selectedModel,
   onModelChange,
   onRedownloadGeneration,
+  onEditImage,
   knowledgeBases,
   onKnowledgeBasesChange,
   emptyDashboard,
@@ -179,6 +183,7 @@ export function ChatPanel({
   const desktopControl = useDesktopWorkspace(activeConversationId, !readOnly && agent?.id === "general");
   const pendingApprovalId = desktopControl.state?.approvals[0]?.id;
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<InputBoxHandle>(null);
 
   // While streaming, the assistant bubble only enters the list once its first
   // text/tool_call arrives. Until then (and in the gap after a tool result,
@@ -213,6 +218,17 @@ export function ChatPanel({
             ? "contract"
             : "default";
 
+  // Editing a generated image sends from its own dialog with that image's settings,
+  // checked against the selected model the way the composer checks a send.
+  const editImage = mode === "image" && !readOnly && onEditImage
+    ? (imageUrl: string, prompt: string, original?: GenerationSettings): string | void => {
+      if (isStreaming) return "当前有任务正在进行，请完成后再修改";
+      const prepared = inputRef.current?.prepareImageSend(original) ?? {};
+      if (prepared.error) return prepared.error;
+      onEditImage(prompt, imageUrl, prepared.settings);
+    }
+    : undefined;
+
   const modelList =
     mode === "image"
       ? modelCatalog?.image
@@ -226,6 +242,7 @@ export function ChatPanel({
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
       <DesktopWorkspaceBar disabled={isStreaming} control={desktopControl} />
       <InputBox
+        ref={inputRef}
         toolbarStart={<DesktopWorkspace key={activeConversationId ?? "new"} disabled={isStreaming} control={desktopControl} />}
         onDraftChange={onDraftChange}
         attachment={attachment}
@@ -318,6 +335,7 @@ export function ChatPanel({
               askInteractive={hasInteractive && askAnswer === undefined && !isStreaming}
               failedToolNames={failedTools}
               onRedownloadGeneration={onRedownloadGeneration}
+              onEditImage={editImage}
             />
           );
         })}

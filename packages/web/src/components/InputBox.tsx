@@ -15,6 +15,7 @@ import {
   type CatalogModel,
 } from "../lib/model-filter.js";
 import type { PickedFile } from "../api/client.js";
+import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
 import { MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, MAX_KLING_REFERENCE_VIDEOS, MAX_GROK_REFERENCE_VIDEOS, GROK_REFERENCE_VIDEO_MAX_SECONDS, durationsUpTo, grokReferencesIssue, checkKlingReferenceImage, klingReferenceImagesIssue, klingReferenceVideosIssue, validateReferenceMedia, readMediaDuration } from "../lib/video-references.js";
@@ -30,6 +31,10 @@ export interface InputBoxHandle {
   getSettings: () => ImageSettings | VideoSettings | undefined;
   getImageSettingsError: () => string | null;
   getMissingMentions: () => string[];
+  /** Image settings for a send that bypasses the composer (editing a generated
+   * image): `original` (the image's own settings) when known, else the composer's,
+   * checked against the selected model like the send button; or the error to show. */
+  prepareImageSend: (original?: GenerationSettings) => { settings?: ImageSettings; error?: string };
 }
 
 interface InputBoxProps {
@@ -441,7 +446,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     getSettings: () => mediaMode ? settingsRef.current : undefined,
     getImageSettingsError: () => imageSettingsError,
     getMissingMentions: () => missingMentions,
-  }), [collectPickedFiles, mediaMode, imageSettingsError, missingMentions]);
+    prepareImageSend: (original) => {
+      if (noModels) return { error: "模型目录暂时不可用，请稍后重试或联系管理员" };
+      if (original?.size) {
+        const settings = { size: original.size, n: original.n ?? 1, quality: original.quality ?? DEFAULT_IMAGE_QUALITY };
+        const error = imageSizeError(settings.size, effectiveImageModel);
+        return error ? { error } : { settings };
+      }
+      const current = settingsRef.current as ImageSettings | undefined;
+      const error = imageSettingsError ?? imageSizeError(current?.size ?? "", effectiveImageModel);
+      return error ? { error } : { settings: current };
+    },
+  }), [collectPickedFiles, mediaMode, imageSettingsError, missingMentions, noModels, effectiveImageModel]);
 
   const handleSend = useCallback(() => {
     if (checkingMediaRef.current) return;

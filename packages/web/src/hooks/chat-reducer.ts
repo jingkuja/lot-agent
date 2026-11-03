@@ -11,6 +11,26 @@ export interface GenerationView {
   assets?: { url: string; mime: string; durationSec?: number }[];
   error?: string;
   taskId?: string;
+  /** Image settings the server recorded for this generation; editing the image keeps them. */
+  settings?: GenerationSettings;
+}
+
+export interface GenerationSettings {
+  size?: string;
+  n?: number;
+  quality?: string;
+}
+
+/** Keeps only well-typed image settings from stored message metadata. */
+export function generationSettings(raw: unknown): GenerationSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { size, n, quality } = raw as Record<string, unknown>;
+  const settings: GenerationSettings = {
+    ...(typeof size === "string" && size ? { size } : {}),
+    ...(typeof n === "number" && Number.isInteger(n) && n > 0 ? { n } : {}),
+    ...(typeof quality === "string" && quality ? { quality } : {}),
+  };
+  return Object.keys(settings).length ? settings : undefined;
 }
 
 export interface DisplayMessage {
@@ -201,7 +221,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
               ...m,
               id: action.assistantMessageId,
               dbId: action.assistantMessageId,
-              generation: action.generation,
+              generation: { ...action.generation, settings: action.generation.settings ?? m.generation?.settings },
             };
           return m;
         }),
@@ -225,7 +245,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         isStreaming: false,
         messages: state.messages.map((m) =>
-          m.id === action.messageId ? { ...m, generation: action.generation } : m
+          m.id === action.messageId
+            ? { ...m, generation: { ...action.generation, settings: action.generation.settings ?? m.generation?.settings } }
+            : m
         ),
       };
   }

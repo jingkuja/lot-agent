@@ -2,6 +2,8 @@ import { useI18n } from "../i18n/index.js";
 import { useState } from "react";
 import { api } from "../api/client.js";
 import type { GenerationView } from "../hooks/useChat.js";
+import type { GenerationSettings } from "../hooks/chat-reducer.js";
+import { ImageEditDialog } from "./ImageEditDialog.js";
 
 const LABELS = {
   image: { loading: "图片生成中……", fail: "图片生成失败", cancelled: "图片生成已取消", downloadFail: "图片下载失败" },
@@ -25,9 +27,16 @@ function DownloadLink({ href, name }: { href: string; name: string }) {
 
 /** One generated asset: preview (img/video) + download link, with a graceful
     fallback so a load error never looks like a bare broken-image icon. */
-function AssetView({ asset, mediaType, index }: { asset: Asset; mediaType: "image" | "video"; index: number }) {
+function AssetView({ asset, mediaType, index, settings, onEdit }: {
+  asset: Asset;
+  mediaType: "image" | "video";
+  index: number;
+  settings?: GenerationSettings;
+  onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
+}) {
   const { t } = useI18n();
   const [errored, setErrored] = useState(false);
+  const [editing, setEditing] = useState(false);
   const ext = (asset.url.split("?")[0].split(".").pop() || "bin").toLowerCase();
   const name = `生成结果${index + 1}.${ext}`;
   const isVideo = mediaType === "video" && asset.mime.startsWith("video/");
@@ -46,9 +55,18 @@ function AssetView({ asset, mediaType, index }: { asset: Asset; mediaType: "imag
           <span>{t("结果文件（无法预览）")}</span>
         </div>
       ) : (
-        <img className="gen-asset" src={asset.url} alt={name} onError={() => setErrored(true)} />
+        <div className="gen-asset-frame">
+          <img className="gen-asset" src={asset.url} alt={name} onError={() => setErrored(true)} />
+          {onEdit && (
+            <button type="button" className="gen-asset-edit" onClick={() => setEditing(true)}>{t("编辑")}</button>
+          )}
+        </div>
       )}
       <DownloadLink href={asset.url} name={name} />
+      {editing && onEdit && (
+        <ImageEditDialog imageUrl={asset.url} size={settings?.size}
+          onSubmit={(prompt) => onEdit(asset.url, prompt, settings)} onClose={() => setEditing(false)} />
+      )}
     </div>
   );
 }
@@ -75,9 +93,13 @@ export function GenerationCard({
   generation,
   messageId,
   onRedownload,
+  onEditImage,
 }: {
   generation: GenerationView;
   messageId?: string;
+  /** Edit a generated image: image-to-image with it as the reference and this
+   * generation's settings. Returns an error to show in the editor; undefined hides the button. */
+  onEditImage?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
   /** Retry only the download of a "下载失败" generation (vendor media already
    * succeeded). Undefined disables the re-download button. */
   onRedownload?: (messageId: string, mediaType: "image" | "video") => void;
@@ -90,7 +112,8 @@ export function GenerationCard({
     return (
       <div className="gen-card-assets">
         {assets.map((a, i) => (
-          <AssetView key={i} asset={a} mediaType={mediaType} index={i} />
+          <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
+            onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined} />
         ))}
       </div>
     );

@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import { api } from "../api/client.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
+import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { GenerationCard } from "./GenerationCard.js";
 import { AskUserCard } from "./AskUserCard.js";
 import { OutlineCard } from "./OutlineCard.js";
@@ -36,6 +37,8 @@ interface MessageBubbleProps {
   failedToolNames?: string[];
   /** 生成媒体「下载失败」时重新下载(仅重拉下载,不重新计费生成)。 */
   onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
+  /** 编辑生成的图片：以该图为参考图、沿用其生成设置发起图生图，返回错误时留在编辑框。 */
+  onEditImage?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
 }
 
 export function MessageBubble({
@@ -47,6 +50,7 @@ export function MessageBubble({
   askInteractive,
   failedToolNames,
   onRedownloadGeneration,
+  onEditImage,
 }: MessageBubbleProps) {
   const { t } = useI18n();
   if (message.generation) {
@@ -57,6 +61,7 @@ export function MessageBubble({
             generation={message.generation}
             messageId={message.id}
             onRedownload={onRedownloadGeneration}
+            onEditImage={onEditImage}
           />
         </div>
       </div>

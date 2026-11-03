@@ -604,7 +604,14 @@ export const api = {
         id: string;
         role: "assistant";
         status: string;
-        metadata: { mediaType: "image" | "video"; status: string; supportsProgress?: boolean; assets?: { url: string; mime: string; durationSec?: number }[]; error?: string };
+        metadata: {
+          mediaType: "image" | "video";
+          status: string;
+          supportsProgress?: boolean;
+          assets?: { url: string; mime: string; durationSec?: number }[];
+          error?: string;
+          settings?: unknown;
+        };
       };
       taskId: string;
       title?: string;

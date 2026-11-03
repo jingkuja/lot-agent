@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   chatReducer,
+  generationSettings,
   initialChatState,
   type ChatAction,
   type ChatState,
@@ -291,4 +292,32 @@ it("retains terminal run status while waiting for persistence and lease release"
   const finished = chatReducer(pending, { type: "turn_finalized", message });
   expect(finished.isStreaming).toBe(false);
   expect(finished.messages[0].runStatus).toBe("unknown_outcome");
+});
+
+describe("generation settings", () => {
+  it("keeps only well-typed image settings from stored metadata", () => {
+    expect(generationSettings({ size: "1024x1536", n: 2, quality: "high", durationSec: null })).toEqual({ size: "1024x1536", n: 2, quality: "high" });
+    expect(generationSettings({ size: 1, n: 1.5, quality: "" })).toBeUndefined();
+    expect(generationSettings(undefined)).toBeUndefined();
+  });
+
+  it("keeps the sent settings through reconcile and the terminal poll result", () => {
+    const settings = { size: "1536x1024", n: 1, quality: "auto" };
+    const state = run([
+      {
+        type: "generation_pair_appended",
+        userMessage: user("u-temp"),
+        genMessage: assistant("g-temp", "", { generation: { mediaType: "image", status: "generating", settings } }),
+      },
+      {
+        type: "generation_ids_reconciled", tempUserId: "u-temp", userMessageId: "u1", tempGenId: "g-temp", assistantMessageId: "g1",
+        generation: { mediaType: "image", status: "generating", taskId: "t1" },
+      },
+      {
+        type: "generation_finished", messageId: "g1",
+        generation: { mediaType: "image", status: "completed", assets: [{ url: "/static/a.png", mime: "image/png" }] },
+      },
+    ]);
+    expect(state.messages[1].generation?.settings).toEqual(settings);
+  });
 });

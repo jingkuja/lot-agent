@@ -6,6 +6,7 @@ import { showAlert, notifyDesktop } from "../lib/notify.js";
 import {
   chatReducer,
   initialChatState,
+  generationSettings,
   type DisplayMessage,
   type GenerationView,
 } from "./chat-reducer.js";
@@ -162,6 +163,7 @@ export function useChat(
               assets: parsedMeta.assets,
               error: parsedMeta.error,
               taskId: parsedMeta.taskId as string | undefined,
+              settings: parsedMeta.mediaType === "image" ? generationSettings(parsedMeta.settings) : undefined,
             }
           : undefined;
       return {
@@ -472,7 +474,9 @@ export function useChat(
   }, [state.messages, state.isStreaming, conversationId, streamMessage]);
 
   const generateMedia = useCallback(
-    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [], modelId?: string) => {
+    // `references` are image URLs the server already stores (e.g. a generated
+    // image being edited), sent as reference images without a re-upload.
+    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [], modelId?: string, references: string[] = []) => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || state.isStreaming) return;
       dispatch({ type: "stream_started" });
@@ -495,7 +499,7 @@ export function useChat(
           id: tempGenId,
           role: "assistant",
           content: "",
-          generation: { mediaType, status: "generating", progress: 0 },
+          generation: { mediaType, status: "generating", progress: 0, settings: mediaType === "image" ? generationSettings(settings) : undefined },
         },
       });
 
@@ -504,9 +508,10 @@ export function useChat(
           const uploaded = files.length
             ? await Promise.all(files.map(async (f) => ({ slot: f.slot, uploaded: await api.uploadFile(f.file) })))
             : [];
-          const media = uploaded
-            .filter((f) => mediaType === "image" && f.uploaded.mime.startsWith("image/"))
-            .map((f) => ({ type: "reference_image" as const, url: f.uploaded.url }));
+          const media = [
+            ...(mediaType === "image" ? references : []),
+            ...uploaded.filter((f) => mediaType === "image" && f.uploaded.mime.startsWith("image/")).map((f) => f.uploaded.url),
+          ].map((url) => ({ type: "reference_image" as const, url }));
           const urlsFor = (slot: PickedFile["slot"]) =>
             uploaded.filter((f) => f.slot === slot).map((f) => f.uploaded.url);
           const inputReference = urlsFor("video_reference_image");
@@ -542,6 +547,8 @@ export function useChat(
               progress: 0,
               supportsProgress: res.assistantMessage.metadata?.supportsProgress,
               taskId: res.taskId,
+              // The server's finalized settings; the reducer keeps the sent ones if absent.
+              settings: mediaType === "image" ? generationSettings(res.assistantMessage.metadata?.settings) : undefined,
             },
           });
           if (res.title) onTitleRef.current?.(cid, res.title);

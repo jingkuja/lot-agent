@@ -3059,4 +3059,12 @@ export const messages: Record<string, { en: string; id: string }> = {
   "播放本镜": {"en": "Play this shot", "id": "Putar adegan ini"},
   "播放本段": {"en": "Play this segment", "id": "Putar segmen ini"},
   "这条视频合成时没有保留无字幕版本，修改字幕后不能实时预览；重新合成成片后，再修改字幕即可实时预览。": {"en": "This video was composed without a caption-free copy, so caption changes cannot be previewed. After composing it again, caption changes can be previewed right away.", "id": "Video ini disusun tanpa salinan tanpa subtitle, sehingga perubahan subtitle tidak dapat dipratinjau. Setelah disusun ulang, perubahan subtitle dapat langsung dipratinjau."},
+  "编辑图片": {"en": "Edit image", "id": "Edit gambar"},
+  "当前生成图": {"en": "Current generated image", "id": "Gambar hasil saat ini"},
+  "请输入修改要求，例如：把背景换成海边": {"en": "Describe the change, e.g. replace the background with a beach", "id": "Jelaskan perubahan, mis. ganti latar belakang dengan pantai"},
+  "修改要求": {"en": "Change request", "id": "Permintaan perubahan"},
+  "发起修改": {"en": "Apply change", "id": "Terapkan perubahan"},
+  "将以这张图为参考图生成新图片，沿用输入框当前的模型与尺寸设置。": {"en": "A new image is generated from this one, using the model and size currently selected in the input box.", "id": "Gambar baru dibuat dari gambar ini, memakai model dan ukuran yang sedang dipilih di kotak input."},
+  "将以这张图为参考图生成新图片，保持原图比例与设置（{0}），模型为输入框当前所选。": {"en": "A new image is generated from this one, keeping its aspect ratio and settings ({0}) with the model currently selected in the input box.", "id": "Gambar baru dibuat dari gambar ini dengan rasio dan pengaturan aslinya ({0}), memakai model yang sedang dipilih di kotak input."},
+  "当前有任务正在进行，请完成后再修改": {"en": "A task is still running. Edit after it finishes.", "id": "Masih ada tugas yang berjalan. Edit setelah selesai."},
 };

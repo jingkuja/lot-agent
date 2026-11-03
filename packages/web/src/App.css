@@ -5013,6 +5013,63 @@ html, body, #root {
 }
 .gen-asset-download svg { width: 15px; height: 15px; }
 
+/* 生成图片上的「编辑」：在图上直接发起图生图 */
+.gen-asset-frame { position: relative; display: inline-flex; max-width: min(520px, 100%); }
+.gen-asset-frame .gen-asset { max-width: 100%; }
+.gen-asset-edit {
+  position: absolute; left: 14px; bottom: 14px;
+  padding: 8px 18px; border: none; border-radius: 999px;
+  background: color-mix(in srgb, var(--login-hero) 78%, transparent);
+  color: var(--login-hero-text); font: inherit; font-size: 14px; font-weight: 500;
+  backdrop-filter: blur(6px); cursor: pointer;
+  transition: background 0.12s, transform 0.12s;
+}
+.gen-asset-edit:hover { background: color-mix(in srgb, var(--login-hero) 92%, transparent); }
+.gen-asset-edit:active { transform: scale(0.97); }
+.gen-asset-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.image-edit-dialog {
+  width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 18px 20px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-xl);
+  background: var(--bg-card); color: var(--text); box-shadow: var(--shadow-lg);
+}
+.image-edit-dialog[open] { display: flex; flex-direction: column; gap: 14px; }
+.image-edit-dialog::backdrop { background: color-mix(in srgb, var(--login-hero) 55%, transparent); backdrop-filter: blur(4px); }
+.image-edit-head { display: flex; align-items: center; justify-content: space-between; }
+.image-edit-head h2 { margin: 0; font-size: 16px; }
+.image-edit-close {
+  display: inline-flex; padding: 6px; border: none; border-radius: var(--radius-md);
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+}
+.image-edit-close:hover { background: var(--bg-hover); color: var(--text); }
+.image-edit-close svg { width: 18px; height: 18px; }
+.image-edit-preview {
+  display: flex; justify-content: center; min-height: 0;
+  border-radius: var(--radius-lg); background: var(--bg-tool); overflow: hidden;
+}
+.image-edit-preview img { display: block; max-width: 100%; max-height: min(56vh, 520px); object-fit: contain; }
+.image-edit-composer {
+  display: flex; align-items: flex-end; gap: 10px; padding: 10px 10px 10px 14px;
+  border: 1.5px solid var(--border-input); border-radius: var(--radius-lg); background: var(--bg-input);
+}
+.image-edit-composer:focus-within { border-color: var(--accent); }
+.image-edit-composer textarea {
+  flex: 1; min-height: 44px; max-height: 140px; padding: 0; border: none; outline: none; resize: none;
+  background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.6;
+}
+.image-edit-composer textarea::placeholder { color: var(--text-muted); }
+.image-edit-send {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 34px; height: 34px; border: none; border-radius: 50%;
+  background: var(--accent-grad); color: var(--icon-on-grad); cursor: pointer;
+}
+.image-edit-send:hover { filter: brightness(1.05); }
+.image-edit-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.image-edit-send svg { width: 18px; height: 18px; }
+.image-edit-hint, .image-edit-error { margin: -4px 2px 0; font-size: 12px; line-height: 1.6; }
+.image-edit-hint { color: var(--text-muted); }
+.image-edit-error { color: var(--error); }
+
 /* Download card for document/PPT tool results (generate_ppt / generate_document) */
 .doc-download-card {
   display: inline-flex;

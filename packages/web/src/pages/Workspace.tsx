@@ -352,6 +352,12 @@ export function Workspace({
     [newAgentId, newProjectId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, digitalEmployeeFeature, modelCatalog]
   );
 
+  // Edits happen inside an existing image conversation, so no conversation is created here.
+  const handleEditImage = useCallback((prompt: string, imageUrl: string, settings?: unknown) => {
+    const modelId = resolveImageSelection(selectedModels.image, modelCatalog.image);
+    generateMedia(prompt, "image", settings, [], modelId ?? undefined, [imageUrl]);
+  }, [generateMedia, selectedModels.image, modelCatalog.image]);
+
   const handleDelete = useCallback(
     (id: string) => {
       remove(id);
@@ -511,6 +517,7 @@ export function Workspace({
             readOnly={channel === "feishu"}
             onRegenerate={channel === "feishu" ? undefined : regenerate}
             onRedownloadGeneration={redownloadGeneration}
+            onEditImage={handleEditImage}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
             onSelectForPreview={
               openAgent?.type === "copywriting" || openAgent?.id === "copywriting"
