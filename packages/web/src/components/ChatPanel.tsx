@@ -63,9 +63,11 @@ function timeGreeting(): string {
 }
 
 function InputBranding() {
-  const { t } = useI18n();
+  const { t, enabled: international } = useI18n();
   const miniProgramDialog = useRef<HTMLDialogElement>(null);
   const miniProgramTitleId = useId();
+
+  if (international) return null;
 
   return (
     <>

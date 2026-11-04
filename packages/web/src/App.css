@@ -3099,6 +3099,13 @@ html, body, #root {
   color: var(--text-on-accent);
 }
 
+/* The floating buttons keep their 16px page offset below the titlebar. Above it
+   they would cover the Windows window controls and the drag region. */
+.titlebar ~ .desktop-update-trigger,
+.titlebar ~ .theme-toggle {
+  top: 54px;
+}
+
 /* ── Desktop download toasts ── */
 .download-toasts {
   position: fixed;
