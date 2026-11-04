@@ -6,18 +6,6 @@ export interface CatalogModel {
   description?: string;
 }
 
-/** Prefer deepseek-v4.1-flash; keep other models stable and Claude last. */
-export function orderLlmModels(models: CatalogModel[]): CatalogModel[] {
-  const preferred: CatalogModel[] = [];
-  const nonClaude: CatalogModel[] = [];
-  const claude: CatalogModel[] = [];
-  for (const model of models) {
-    if (model.id === "deepseek-v4.1-flash") preferred.push(model);
-    else (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
-  }
-  return [...preferred, ...nonClaude, ...claude];
-}
-
 /** gpt-image 1.5 only accepts the three standard sizes; custom WxH is rejected. */
 export function isGptImage15(id: string | null | undefined): boolean {
   return /gpt[-_ ]?image[-_ ]?1[\.\-_]?5(?!\d)/i.test(id ?? "");

@@ -66,6 +66,18 @@ describe("generateTitle model resolution", () => {
     expect(svc.providerFactory.llm).toHaveBeenCalledWith("m-cat-1", "key-1");
   });
 
+  it("skips a premium catalog default for the cheap background model", async () => {
+    const svc = fakeService({ apiKey: "key-1", catalogLlm: ["claude-sonnet-5-5", "kimi-k3.1-pro", "deepseek-v4.1-flash"] });
+    await svc.generateTitle("c1", "你好", [], { userId: "u1" });
+    expect(svc.providerFactory.llm).toHaveBeenCalledWith("deepseek-v4.1-flash", "key-1");
+  });
+
+  it("never titles on Claude, even when the account has nothing else", async () => {
+    const svc = fakeService({ apiKey: "key-1", catalogLlm: ["claude-sonnet-5-5", "fable-5.1"] });
+    await svc.generateTitle("c1", "你好", [], { userId: "u1" });
+    expect(svc.providerFactory.llm).toHaveBeenCalledWith("m-env", "key-1");
+  });
+
   it("empty catalog → env default LLM model", async () => {
     const svc = fakeService({ conversationModel: null, apiKey: "key-1", catalogLlm: [] });
     await svc.generateTitle("c1", "你好", [], { userId: "u1" });

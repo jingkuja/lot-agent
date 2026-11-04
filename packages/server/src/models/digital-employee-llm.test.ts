@@ -21,6 +21,11 @@ describe("pickDigitalEmployeeLlmModel", () => {
     expect(pickDigitalEmployeeLlmModel(["model-b", "model-a"])).toBe("model-b");
     expect(pickDigitalEmployeeLlmModel([])).toBeNull();
   });
+
+  it("never falls back to Claude for digital-employee work", () => {
+    expect(pickDigitalEmployeeLlmModel(["claude-sonnet-5-5", "model-a"])).toBe("model-a");
+    expect(pickDigitalEmployeeLlmModel(["claude-sonnet-5-5"])).toBeNull();
+  });
 });
 
 describe("resolveDigitalEmployeeLlm", () => {

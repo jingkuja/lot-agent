@@ -35,8 +35,8 @@ export interface Message {
   content: string | ContentPart[];
   toolCallId?: string;
   toolCalls?: ToolCall[];
-  /** Provider-produced, request-local stateless Responses context. */
-  responseState?: { model: string; items: unknown[] };
+  /** Provider-produced, request-local context replayed to the same model (Responses items or Messages blocks). */
+  responseState?: { model: string; items: unknown[]; prefix?: string };
 }
 
 /** Per-call model parameters. */
@@ -49,7 +49,7 @@ export interface ChatParams {
   /** Schema output takes precedence over responseFormat when both are set. */
   responseSchema?: JSONSchema;
   reasoning?: "off" | number;
-  /** Responses `reasoning.effort` for models that need a fixed thinking depth; ignored by other transports. */
+  /** Fixed thinking depth: Responses `reasoning.effort` or Messages `output_config.effort`. */
   reasoningEffort?: "low" | "medium" | "high";
 }
 

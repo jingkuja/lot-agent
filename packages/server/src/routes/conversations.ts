@@ -512,7 +512,6 @@ export function createConversationRoutes(service: AgentService) {
               attachments,
               {
                 userId,
-                modelId: body.modelId,
                 digitalEmployee: conversation.agent_id === "digital_employee",
               }
             );

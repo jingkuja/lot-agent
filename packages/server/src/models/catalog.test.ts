@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { resolveProvider, resolvePricing, enrichCatalog, orderLlmModels, type ModelCatalogConfig } from "./catalog.js";
+import { describe, it, expect, vi } from "vitest";
+import { resolveProvider, resolvePricing, enrichCatalog, orderLlmModels, pickUtilityLlmModel, type ModelCatalogConfig } from "./catalog.js";
 
 const cfg: ModelCatalogConfig = {
   defaultProvider: { llm: "openai", image: "chat-completions", video: "openai-video" },
@@ -60,6 +60,40 @@ describe("catalog resolvers", () => {
     ]);
     expect(out.image.map((model) => model.id)).toEqual(["gpt-image-2-token"]);
     expect(out.video.map((model) => model.id)).toEqual(["veo3.1"]);
+  });
+  it.each<[string, boolean, string[], string[]]>([
+    ["domestic default first", false,
+      ["claude-sonnet-5-5", "gpt-5.4", "deepseek-v4.1-flash", "kimi-k3.1-pro"],
+      ["kimi-k3.1-pro", "deepseek-v4.1-flash", "gpt-5.4", "claude-sonnet-5-5"]],
+    ["domestic without Kimi", false,
+      ["claude-sonnet-5-5", "gpt-5.4", "deepseek-v4.1-flash"],
+      ["deepseek-v4.1-flash", "gpt-5.4", "claude-sonnet-5-5"]],
+    ["international Claude default first", true,
+      ["claude-opus-5-5", "kimi-k3.1-pro", "deepseek-v4.1-flash", "claude-sonnet-5-5", "fable-5.1"],
+      ["claude-sonnet-5-5", "deepseek-v4.1-flash", "kimi-k3.1-pro", "claude-opus-5-5", "fable-5.1"]],
+    ["international with only Opus", true,
+      ["kimi-k3.1-pro", "claude-opus-5-5", "deepseek-v4.1-flash"],
+      ["claude-opus-5-5", "deepseek-v4.1-flash", "kimi-k3.1-pro"]],
+    ["international without either default", true,
+      ["kimi-k3.1-pro", "claude-haiku-5-5", "deepseek-v4.1-flash"],
+      ["deepseek-v4.1-flash", "kimi-k3.1-pro", "claude-haiku-5-5"]],
+    ["only Claude models keep a usable default", false, ["claude-opus-5-5"], ["claude-opus-5-5"]],
+  ])("orders %s", (_name, international, ids, expected) => {
+    expect(orderLlmModels(ids.map((id) => ({ id })), international).map((model) => model.id)).toEqual(expected);
+  });
+  it("follows the deployment mode by default", () => {
+    vi.stubEnv("globle", "1");
+    const ids = ["kimi-k3.1-pro", "claude-sonnet-5-5"];
+    expect(orderLlmModels(ids.map((id) => ({ id }))).map((model) => model.id)).toEqual(["claude-sonnet-5-5", "kimi-k3.1-pro"]);
+    vi.unstubAllEnvs();
+  });
+  it.each<[string[], string | null]>([
+    [["claude-sonnet-5-5", "kimi-k3.1-pro", "deepseek-v4.1-flash"], "deepseek-v4.1-flash"],
+    [["claude-sonnet-5-5", "fable-5.1", "kimi-k3.1-pro"], "kimi-k3.1-pro"],
+    [["claude-sonnet-5-5", "opus-4.8"], null],
+    [[], null],
+  ])("picks a background model from %j without Claude", (ids, expected) => {
+    expect(pickUtilityLlmModel(ids)).toBe(expected);
   });
   it("does not mutate cached model arrays while normalizing their order", () => {
     const input = [{ id: "claude-4" }, { id: "gpt-5.4" }];

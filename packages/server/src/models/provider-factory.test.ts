@@ -24,6 +24,25 @@ const f = new ProviderFactory({
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("ProviderFactory", () => {
+  it.each(["claude-opus-5-5", "fable-5.1", "opus-4.8", "sonnet-5-5"])("sends %s to the gateway Messages route", async modelId => {
+    vi.stubEnv("globle", "1");
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "test rejection" } }), {
+        status: 400, headers: { "Content-Type": "application/json" },
+      })
+    );
+    const factory = new ProviderFactory({
+      catalog: { ...catalog, llmProtocols: { [modelId]: "responses" } },
+      llmBaseUrl: "https://h/v1", llmFetch: fetcher, imageBase: media(), videoBase: media(),
+    });
+    await expect(factory.llm(modelId, "user-key").chat([{ role: "user", content: "test" }])[Symbol.asyncIterator]().next()).rejects.toThrow();
+    expect(String(fetcher.mock.calls[0][0])).toBe("https://h/v1/messages");
+    const headers = new Headers(fetcher.mock.calls[0][1]?.headers);
+    expect(headers.get("x-api-key")).toBe("user-key");
+    expect(headers.get("x-agent-globle")).toBe("1");
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).model).toBe(modelId);
+  });
+
   it.each(["0", "1"])("uses the catalog mode for all model transports (globle=%s)", async globle => {
     vi.stubEnv("globle", globle);
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>

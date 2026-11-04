@@ -1,6 +1,6 @@
 export { OpenAIProvider, type OpenAIProviderConfig } from "./openai.js";
 export { OpenAIResponsesProvider } from "./responses.js";
-export { AnthropicProvider, type AnthropicProviderConfig } from "./anthropic.js";
+export { AnthropicProvider, isAnthropicModel, type AnthropicProviderConfig } from "./anthropic.js";
 export { createLLMProvider, type LLMConfig, type ProviderType } from "./factory.js";
 export { withLLMRetry, isMalformedToolCallError, type LLMRetryConfig } from "./retry.js";
 export { complete } from "./complete.js";

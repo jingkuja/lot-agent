@@ -12,7 +12,7 @@ import { RESPONSE_LANGUAGE_POLICY } from "./response-language-policy.js";
 import { parsePptApproval, PPT_APPROVAL_PREFIX } from "@lot-agent/core/presentation";
 import { exportConfirmedPpt } from "./ppt-confirmation.js";
 import { renderPptPreview } from "../ppt/preview.js";
-import { parseChatSourceTypes } from "@lot-agent/core";
+import { isAnthropicModel, parseChatSourceTypes } from "@lot-agent/core";
 import { createLocalKnowledgeService } from "../knowledge/local-service.js";
 import { FactAwareMemory } from "../knowledge/profile/memory.js";
 import { KnowledgeFacts } from "../knowledge/profile/repository.js";
@@ -65,7 +65,7 @@ import { staticPrefix } from "../util/public-base.js";
 import { loadGenerationConfig, mediaSupportsProgress, type GenerationConfig } from "../generation/config.js";
 import { TokenhubClient } from "../tokenhub/client.js";
 import { internationalModelsEnabled } from "../tokenhub/model-access.js";
-import { enrichCatalog, orderLlmModels, resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
+import { enrichCatalog, orderLlmModels, pickUtilityLlmModel, resolvePricing, type ModelCatalogConfig } from "../models/catalog.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import {
   DIGITAL_EMPLOYEE_LLM_UNAVAILABLE,
@@ -970,7 +970,7 @@ export class AgentService {
     let modelId = opts?.modelId ?? null;
     if (!modelId && opts?.userId && activeApiKey) {
       modelId = await this.getUserModelCatalog(opts.userId, activeApiKey)
-        .then((catalog) => catalog?.llm[0]?.id ?? null)
+        .then((catalog) => pickUtilityLlmModel(catalog?.llm.map((model) => model.id) ?? []))
         .catch(() => null);
     }
     const usedModelId = activeApiKey
@@ -980,6 +980,17 @@ export class AgentService {
       usedModelId,
       llm: activeApiKey ? this.providerFactory.llm(usedModelId, activeApiKey) : this.getLLMProvider(),
     };
+  }
+
+  /** Summarizing a long history is background work, so a Claude turn must not pay Claude rates for it.
+   * Without a usable model the context manager falls back to truncation. */
+  private async resolveUtilityCompressor(userId: string | undefined, digitalEmployee: boolean): Promise<LLMProvider | undefined> {
+    try {
+      const { llm, usedModelId } = await this.resolveUtilityLLM({ userId, digitalEmployee });
+      return meterLLM(llm, (usage) => this.meterUtilityUsage("context compression", usedModelId, userId, usage));
+    } catch {
+      return undefined;
+    }
   }
 
   private meterUtilityUsage(
@@ -1129,12 +1140,13 @@ export class AgentService {
         : "";
       const titleInput = (userMessage || "(Attachments only; no message text)") + attachmentNote;
 
-      // 通用助手标题模型:显式回合模型 > 用户模型目录第一个 LLM > env 默认 LLM。
+      // 标题模型:调用方配置的模型 > 目录里的后台任务模型(绝不用 Claude) > env 默认 LLM。
+      // 这里不跟随回合模型:默认对话模型可能很贵,标题不该用它。
       // 数字员工传入 digitalEmployee=true，严格限定为用户 TokenHub key；
       // 无用户 LLM 时直接失败，不允许使用 env 模型或 key。
       // 故意不回落到 conversation.model:会话创建时它被种成 env 默认模型,
       // 若在这里采用,图片/视频会话和目录未加载就发出的首条消息(进页面竞态)
-      // 的标题都会跑到 env 模型上,而不是和对话一致的目录第一名。
+      // 的标题都会跑到 env 模型上,而不是用户目录里可用的后台任务模型。
       // Some focused unit tests invoke this method with a minimal structural
       // fake rather than a constructed AgentService. Calling via the prototype
       // preserves that test seam while keeping title and query-rewrite model
@@ -1364,7 +1376,10 @@ export class AgentService {
         systemPrompt: `${def.systemPrompt}\n\n${RESPONSE_LANGUAGE_POLICY}${opts?.channel === "feishu" ? `\n\n${FEISHU_TEXT_POLICY}` : ""}`,
         allowedToolNames,
         dynamicPromptParts: dynamicParts,
-        modelParams: def.modelParams,
+        // Same fixed depth as copy: unset, this model thinks until the output limit runs out.
+        modelParams: MARKETING_COPY_REASONING_EFFORT[modelId]
+          ? { reasoningEffort: MARKETING_COPY_REASONING_EFFORT[modelId], ...def.modelParams }
+          : def.modelParams,
         outputSchema: def.outputSchema,
         contextConfig: contextConfig
           ? {
@@ -1372,7 +1387,9 @@ export class AgentService {
               budget: derivedTotal
                 ? { ...contextConfig.budget, total: derivedTotal }
                 : contextConfig.budget,
-              compressor: llm,
+              compressor: isAnthropicModel(modelId)
+                ? await withAbort(this.resolveUtilityCompressor(userId, def.id === "digital_employee"), signal)
+                : llm,
               initialSummary: persistedSummary,
             }
           : undefined,
@@ -1410,10 +1427,7 @@ export class AgentService {
 
       let knowledgeSources: import("@lot-agent/core").KnowledgeEvidence[] = [];
       if (opts?.knowledgeBases?.length && userId) {
-        const rewrittenQuery = await withAbort(this.rewriteKnowledgeQuery(userMessage, {
-          userId,
-          modelId: opts.modelId,
-        }), signal);
+        const rewrittenQuery = await withAbort(this.rewriteKnowledgeQuery(userMessage, { userId }), signal);
         const records = await withAbort(this.retrieveKnowledge(userId, opts.knowledgeBases, rewrittenQuery), signal);
         knowledgeSources = records.flatMap((record) => record.evidence ? [record.evidence] : []);
         if (knowledgeSources.length) yield { type: "knowledge_sources", sources: knowledgeSources };
@@ -1560,12 +1574,11 @@ export class AgentService {
         // background worker — never blocks the stream, never shows in the chat.
         // Only extract memory from turns that produced a real assistant reply —
         // empty/tool-only/errored turns would otherwise re-extract a stale turn
-        // and create a junk task row. Pass this turn's resolved modelId so the
-        // worker can extract with the same model + user tokenhub key that
-        // generated the turn, instead of a fixed env-configured model.
+        // and create a junk task row. Extraction is background work, so it uses
+        // the user's utility model rather than following this turn's model.
         if (def.id !== "digital_employee" && runStatus === "completed" && producedAssistantText.trim() && !lastErrorMessage && !signal.aborted) {
-          this.jobQueue
-            .enqueue("memory.extract", { conversationId, modelId }, userId ?? "default")
+          void this.resolveUtilityLLM({ userId })
+            .then(({ usedModelId }) => this.jobQueue.enqueue("memory.extract", { conversationId, modelId: usedModelId }, userId ?? "default"))
             .catch((err) => console.warn("[memory.extract] enqueue failed:", err));
         }
 

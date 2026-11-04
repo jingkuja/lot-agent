@@ -115,6 +115,8 @@ function fakeService(opts: {
     },
     sessionBackend: undefined,
     jobQueue: { enqueue: vi.fn(async () => "job1") },
+    resolveUtilityLLM: vi.fn(async () => ({ usedModelId: "deepseek-v4.1-flash", llm: scriptedLLM(opts.script, calls) })),
+    resolveUtilityCompressor: vi.fn(async () => ({ chat: vi.fn() })),
     usageMeter,
     traceRecorderFactory: () => recorder,
     streamAgentResponse: AgentService.prototype.streamAgentResponse,
@@ -204,6 +206,44 @@ describe("streamAgentResponse tool-result persistence", () => {
 });
 
 describe("streamAgentResponse usage metering", () => {
+  it("extracts memory on the background model, not a Claude turn's", async () => {
+    const { fake } = fakeService({
+      script: [[{ type: "text", content: "done" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }]],
+    });
+    await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", undefined, undefined, { modelId: "claude-sonnet-5-5" }));
+    await vi.waitFor(() => expect((fake as any).jobQueue.enqueue).toHaveBeenCalled());
+    expect((fake as any).jobQueue.enqueue).toHaveBeenCalledWith(
+      "memory.extract", { conversationId: "c1", modelId: "deepseek-v4.1-flash" }, "u1"
+    );
+  });
+
+  it("compresses a Claude turn's history on the background model", async () => {
+    const { fake } = fakeService({
+      script: [[{ type: "text", content: "done" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }]],
+    });
+    (fake as any).agentConfig = { context: { budget: { total: 100_000 } } };
+    await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", undefined, undefined, { modelId: "claude-sonnet-5-5" }));
+    expect((fake as any).resolveUtilityCompressor).toHaveBeenCalledWith("u1", false);
+    await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", undefined, undefined, { modelId: "kimi-k3.1-pro" }));
+    expect((fake as any).resolveUtilityCompressor).toHaveBeenCalledTimes(1);
+  });
+
+  it("fixes kimi-k3.1-pro at medium effort and leaves other models alone", async () => {
+    const text: ChatChunk[] = [{ type: "text", content: "done" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }];
+    const params: unknown[] = [];
+    const { fake } = fakeService({ script: [text, text], apiKey: "user-key" });
+    (fake as any).providerFactory.llm = () => ({
+      async *chat(_messages: unknown, _tools: unknown, options: { params?: unknown }) {
+        params.push(options.params);
+        yield* text;
+      },
+    });
+    await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", undefined, undefined, { modelId: "kimi-k3.1-pro" }));
+    await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", undefined, undefined, { modelId: "kimi-k3" }));
+    expect(params[0]).toEqual({ reasoningEffort: "medium" });
+    expect(params[1]).toBeUndefined();
+  });
+
   it("records usage under the turn's resolved model, not the agent default", async () => {
     const { fake, usageMeter } = fakeService({
       script: parallelSameNameScript(),

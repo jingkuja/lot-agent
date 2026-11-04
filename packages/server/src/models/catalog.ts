@@ -1,3 +1,6 @@
+import { isAnthropicModel } from "@lot-agent/core";
+import { internationalModelsEnabled } from "../tokenhub/model-access.js";
+
 export interface Pricing {
   inputPrice: number;
   outputPrice: number;
@@ -17,20 +20,26 @@ export interface ModelCatalogConfig {
   defaultPricing: Record<string, Pricing>;
 }
 
-/** Prefer deepseek-v4.1-flash, then other non-Claude models, then Claude.
- * Preserve relative order within each group and only use available models.
- * This lives on the server because background/utility LLM calls also choose
- * the catalog's first model; sorting only in the web picker makes the two
- * selections disagree. */
-export function orderLlmModels<T extends { id: string }>(models: T[]): T[] {
-  const preferred: T[] = [];
-  const nonClaude: T[] = [];
-  const claude: T[] = [];
-  for (const model of models) {
-    if (model.id === "deepseek-v4.1-flash") preferred.push(model);
-    else (model.id.toLowerCase().includes("claude") ? claude : nonClaude).push(model);
-  }
-  return [...preferred, ...nonClaude, ...claude];
+/** Cheap model for background work; the configured default when nothing else is chosen. */
+export const UTILITY_LLM_MODEL = "deepseek-v4.1-flash";
+const DOMESTIC_DEFAULT_LLMS = ["kimi-k3.1-pro"];
+const INTERNATIONAL_DEFAULT_LLMS = ["claude-sonnet-5-5", "claude-opus-5-5"];
+
+/** The deployment's default model first, then deepseek-v4.1-flash, other models, and Claude
+ * last because it is expensive. This server order is the only one: the first entry is
+ * what the web picker shows and selects. */
+export function orderLlmModels<T extends { id: string }>(models: T[], international = internationalModelsEnabled()): T[] {
+  const available = new Set(models.map((model) => model.id));
+  const defaultId = (international ? INTERNATIONAL_DEFAULT_LLMS : DOMESTIC_DEFAULT_LLMS).find((id) => available.has(id));
+  const rank = ({ id }: T) => id === defaultId ? 0 : id === UTILITY_LLM_MODEL ? 1 : isAnthropicModel(id) ? 3 : 2;
+  return [...models].sort((a, b) => rank(a) - rank(b));
+}
+
+/** Titles, query rewrites, memory extraction and other background work never run on
+ * Claude, and never follow the catalog's first entry, which may be a premium default. */
+export function pickUtilityLlmModel(modelIds: string[]): string | null {
+  if (modelIds.includes(UTILITY_LLM_MODEL)) return UTILITY_LLM_MODEL;
+  return modelIds.find((id) => !isAnthropicModel(id)) ?? null;
 }
 
 /** LLM and video always use their per-type default provider (all video models

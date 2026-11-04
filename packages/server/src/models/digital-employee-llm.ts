@@ -1,3 +1,5 @@
+import { pickUtilityLlmModel } from "./catalog.js";
+
 /** Preferred LLMs for every digital-employee model call, in selection order. */
 export const DIGITAL_EMPLOYEE_LLM_PRIORITY = [
   "deepseek-v4.1-flash",
@@ -10,9 +12,8 @@ export const DIGITAL_EMPLOYEE_LLM_UNAVAILABLE =
   "当前账号没有可用的 LLM 模型，请先为 TokenHub key 配置 LLM 模型权限";
 
 export function pickDigitalEmployeeLlmModel(modelIds: string[]): string | null {
-  if (modelIds.length === 0) return null;
   const available = new Set(modelIds);
-  return DIGITAL_EMPLOYEE_LLM_PRIORITY.find((id) => available.has(id)) ?? modelIds[0]!;
+  return DIGITAL_EMPLOYEE_LLM_PRIORITY.find((id) => available.has(id)) ?? pickUtilityLlmModel(modelIds);
 }
 
 export interface DigitalEmployeeLlmSelection {
