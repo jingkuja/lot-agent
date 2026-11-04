@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n/index.js";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { EDGE_MARGIN, useDraggablePosition } from "../hooks/useDraggablePosition.js";
 import { useTheme } from "../hooks/useTheme.js";
 import type { Theme } from "../lib/theme.js";
 
@@ -8,10 +9,6 @@ const OPTIONS: { value: Theme; label: string }[] = [
   { value: "dark", label: "深色" },
 ];
 
-/** Pointer travel (px) before a press becomes a drag rather than a click. */
-const DRAG_THRESHOLD = 4;
-/** Keep the button at least this far from the viewport edges. */
-const EDGE_MARGIN = 8;
 /** Approx. menu box used to decide which way it should open. */
 const MENU_W = 144;
 const MENU_H = 96;
@@ -19,56 +16,15 @@ const POS_KEY = "lot:theme-toggle-pos";
 
 type Placement = { h: "left" | "right"; v: "up" | "down" };
 
-type Pos = { left: number; top: number };
-
-function loadPos(): Pos | null {
-  try {
-    const raw = localStorage.getItem(POS_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw);
-    if (Number.isFinite(p?.left) && Number.isFinite(p?.top)) return p;
-  } catch {
-    /* ignore malformed value */
-  }
-  return null;
-}
-
-function clampToViewport(left: number, top: number, w: number, h: number): Pos {
-  return {
-    left: Math.min(Math.max(left, EDGE_MARGIN), window.innerWidth - w - EDGE_MARGIN),
-    top: Math.min(Math.max(top, EDGE_MARGIN), window.innerHeight - h - EDGE_MARGIN),
-  };
-}
-
 export function ThemeToggle() {
   const { t } = useI18n();
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
-  // null = default (CSS top/right anchor); once dragged, an explicit left/top.
-  const [pos, setPos] = useState<Pos | null>(() => loadPos());
   // Which way the menu opens; recomputed each time it's opened so it never
   // spills off-screen after the button is dragged to an edge.
   const [placement, setPlacement] = useState<Placement>({ h: "right", v: "down" });
-  const ref = useRef<HTMLDivElement>(null);
-
-  // Per-drag scratch: pointer start, grab offset within the button, whether it
-  // has crossed the threshold yet.
-  const drag = useRef<{ startX: number; startY: number; offX: number; offY: number; moved: boolean } | null>(null);
-  // Set true on pointer-up of a real drag so the synthetic click that follows
-  // doesn't open the menu.
-  const draggedRef = useRef(false);
-
-  // Saved coordinates can belong to a larger window or another display.
-  // Recover the default top-right anchor before painting an off-screen button.
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const rect = element.getBoundingClientRect();
-    if (rect.left < EDGE_MARGIN || rect.top < EDGE_MARGIN ||
-      rect.right > window.innerWidth - EDGE_MARGIN || rect.bottom > window.innerHeight - EDGE_MARGIN) {
-      setPos(null);
-    }
-  }, []);
+  // Don't keep the menu open while dragging.
+  const { ref, style, pointerHandlers, consumeDrag } = useDraggablePosition<HTMLDivElement>(POS_KEY, () => setOpen(false));
 
   // Close the menu on outside click or Escape.
   useEffect(() => {
@@ -85,74 +41,10 @@ export function ThemeToggle() {
       document.removeEventListener("mousedown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, ref]);
 
-  // Persist the dragged position.
-  useEffect(() => {
-    try {
-      if (pos) localStorage.setItem(POS_KEY, JSON.stringify(pos));
-      else localStorage.removeItem(POS_KEY);
-    } catch {
-      /* ignore quota / disabled storage */
-    }
-  }, [pos]);
-
-  // Keep the button on-screen if the window shrinks.
-  useEffect(() => {
-    const onResize = () => {
-      const el = ref.current;
-      if (!el) return;
-      setPos((prev) => {
-        if (!prev) return prev;
-        const r = el.getBoundingClientRect();
-        return clampToViewport(prev.left, prev.top, r.width, r.height);
-      });
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-    const el = ref.current;
-    if (!el || e.button !== 0) return;
-    const rect = el.getBoundingClientRect();
-    drag.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      offX: e.clientX - rect.left,
-      offY: e.clientY - rect.top,
-      moved: false,
-    };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }, []);
-
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    const d = drag.current;
-    const el = ref.current;
-    if (!d || !el) return;
-    if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) {
-      return;
-    }
-    d.moved = true;
-    setOpen(false); // don't keep the menu open while dragging
-    const r = el.getBoundingClientRect();
-    setPos(clampToViewport(e.clientX - d.offX, e.clientY - d.offY, r.width, r.height));
-  }, []);
-
-  const onPointerUp = useCallback((e: React.PointerEvent) => {
-    const d = drag.current;
-    drag.current = null;
-    if (d?.moved) draggedRef.current = true; // swallow the trailing click
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-  }, []);
-
-  const handleClick = useCallback(() => {
-    if (draggedRef.current) {
-      draggedRef.current = false; // this click ended a drag — ignore it
-      return;
-    }
+  const handleClick = () => {
+    if (consumeDrag()) return;
     setOpen((v) => {
       // About to open: pick the open direction with the most room so the menu
       // never runs off the left/bottom edge.
@@ -167,7 +59,7 @@ export function ThemeToggle() {
       }
       return !v;
     });
-  }, []);
+  };
 
   const choose = (value: Theme) => {
     setTheme(value);
@@ -178,15 +70,13 @@ export function ThemeToggle() {
     <div
       className="theme-toggle"
       ref={ref}
-      style={pos ? { left: pos.left, top: pos.top, right: "auto" } : undefined}
+      style={style}
     >
       <button
         type="button"
         className="theme-toggle-btn"
         onClick={handleClick}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
+        {...pointerHandlers}
         aria-label={t("切换主题")}
         aria-haspopup="menu"
         aria-expanded={open}

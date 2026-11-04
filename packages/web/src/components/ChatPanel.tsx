@@ -1,7 +1,7 @@
 import { DesktopWorkspace, DesktopWorkspaceBar, DesktopApprovalCards } from "./DesktopWorkspace.js";
 import { useDesktopWorkspace } from "../hooks/useDesktopWorkspace.js";
 import { useI18n } from "../i18n/index.js";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 import { MarketingVideoStudio } from "../modules/marketing-video/MarketingVideoStudio.js";
 import { DigitalPresenterStudio } from "../modules/digital-presenter/DigitalPresenterStudio.js";
 import { GenerationCard } from "./GenerationCard.js";
@@ -64,32 +64,12 @@ function timeGreeting(): string {
 
 function InputBranding() {
   const { t } = useI18n();
-  const [copyStatus, setCopyStatus] = useState("");
   const miniProgramDialog = useRef<HTMLDialogElement>(null);
   const miniProgramTitleId = useId();
-
-  useEffect(() => {
-    if (!copyStatus) return;
-    const timer = window.setTimeout(() => setCopyStatus(""), 2500);
-    return () => window.clearTimeout(timer);
-  }, [copyStatus]);
-
-  async function copyAddress() {
-    try {
-      await navigator.clipboard.writeText("https://wetok.ai");
-      setCopyStatus("已复制");
-    } catch {
-      setCopyStatus("复制失败，请选中地址手动复制");
-    }
-  }
 
   return (
     <>
       <div className="input-branding">
-        <a href="https://wetok.ai" target="_blank" rel="noopener noreferrer">{t("灵渠AI")}</a>
-        <button type="button" onClick={copyAddress} title={t("复制网址")} aria-label={t("复制网址 https://wetok.ai")}>
-          https://wetok.ai
-        </button>
         <button
           type="button"
           className="input-mini-program"
@@ -106,7 +86,6 @@ function InputBranding() {
             <path d="m9 5 7 7-7 7" />
           </svg>
         </button>
-        <span className="input-branding-status" role="status">{t(copyStatus)}</span>
       </div>
       <dialog
         ref={miniProgramDialog}

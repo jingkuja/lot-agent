@@ -1,6 +1,8 @@
 import { useId, useRef } from "react";
+import { useDraggablePosition } from "../hooks/useDraggablePosition.js";
 import { useI18n } from "../i18n/index.js";
 
+const POS_KEY = "lot:desktop-download-pos";
 const VERSIONS = [
   { name: "Mac", chip: "Apple Silicon", file: "linquclaw-arm64.dmg" },
   { name: "Mac", chip: "Intel", file: "linquclaw.dmg" },
@@ -11,11 +13,15 @@ export function DesktopDownload() {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const { ref, style, pointerHandlers, consumeDrag } = useDraggablePosition<HTMLButtonElement>(POS_KEY);
 
   return (
     <>
-      <button type="button" className="desktop-download-trigger" aria-haspopup="dialog"
-        onClick={() => dialog.current?.showModal()}>
+      <button type="button" className="desktop-download-trigger" aria-haspopup="dialog" title={t("桌面版下载（可拖动）")}
+        ref={ref} style={style} {...pointerHandlers}
+        onClick={() => {
+          if (!consumeDrag()) dialog.current?.showModal();
+        }}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5" />
         </svg>
