@@ -39,6 +39,17 @@ function fixtures() {
   return {
     settings: { employeeName: "小灵", feishuReminder: false, desktopReminder: false, version: 0 },
     focusWrites: [], writes: [],
+    work: {
+      id: "c1", title: "李静的跟进", runs: [{
+        id: "w1", goal: "记一下李静嫌门槛高", status: "completed", startedAt: NOW, finishedAt: NOW, outcome: "已记录。",
+        steps: [
+          { id: "st1", tool: "search_customer_profiles", status: "succeeded", startedAt: NOW, finishedAt: NOW, artifact: null },
+          { id: "st2", tool: "prepare_follow_up_action", status: "failed", startedAt: NOW, finishedAt: NOW, artifact: null },
+          { id: "st3", tool: "commit_customer_capture", status: "succeeded", startedAt: NOW, finishedAt: NOW,
+            artifact: { label: "查看画像", url: `/digital-employee/customers/${PROFILE}` } },
+        ],
+      }],
+    },
     proposals: new Map([
       ["d1", {
         id: "d1", kind: "follow_up_action", confirmable: true, conversationId: "c1",
@@ -129,6 +140,7 @@ function api(state, unexpected, dailyScan = false) {
     const de = path.replace("/api/digital-employee", "");
     if (method !== "GET") state.writes.push({ path, body: request.postData() });
     if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeDailyScan: dailyScan });
+    if (de.startsWith("/work-log/conversations/")) return json({ ...state.work, id: de.split("/").at(-1) });
     if (path === "/api/agents") return json([
       { id: "general", name: "通用助手", description: "通用", type: "general", installed: true, sortOrder: 0 },
       { id: "digital_employee", name: "数字员工", description: "独立模块", type: "digital_employee", installed: true, sortOrder: 1 },
@@ -468,6 +480,8 @@ try {
     const { page, close } = await open("/digital-employee/work-log");
     await page.getByRole("button", { name: /李静的跟进/ }).waitFor();
     await page.getByRole("button", { name: /获客宝旧对话/ }).click();
+    await page.waitForURL("**/digital-employee/work-log/c2");
+    await page.getByRole("button", { name: "回到对话" }).click();
     await page.waitForURL("**/digital-employee/chat/c2");
     await page.getByText("获客宝旧对话 的内容").waitFor();
     await page.locator(".de-employee-nav").getByRole("button", { name: "工作记录" }).click();
@@ -546,6 +560,21 @@ try {
     await page.getByText("每日自动发现").waitFor();
     assert.equal(await page.getByText("飞书提醒").count(), 0);
     assert.equal(await page.getByText("用模型提前写好建议").count(), 0);
+    await close();
+  }
+
+  // A conversation in the work log opens as a record of the work, and leads back to the chat.
+  {
+    const { page, close } = await open("/digital-employee/work-log/c1");
+    await page.getByRole("heading", { name: "李静的跟进" }).waitFor();
+    await page.getByText("记一下李静嫌门槛高").waitFor();
+    await page.getByText("查找客户").waitFor();
+    await page.getByText("没有成功").waitFor();
+    await page.getByRole("button", { name: "查看画像" }).click();
+    await page.waitForURL(`**/digital-employee/customers/${PROFILE}`);
+    await page.goBack();
+    await page.getByRole("button", { name: "回到对话" }).click();
+    await page.waitForURL("**/digital-employee/chat/c1");
     await close();
   }
 

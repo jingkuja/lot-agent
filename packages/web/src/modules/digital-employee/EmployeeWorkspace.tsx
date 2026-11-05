@@ -17,6 +17,7 @@ import { CHAT_PATH, employeePath, parseEmployeePath, type EmployeeView } from ".
 import { SchedulePage } from "./SchedulePage.js";
 import { TodayPage } from "./today/TodayPage.js";
 import type { CampaignRecommendation, OpportunityItem, TodayResponse } from "./types.js";
+import { WorkDetailPage } from "./work-log/WorkDetailPage.js";
 import { WorkLogPage } from "./WorkLogPage.js";
 import "./employee.css";
 
@@ -179,6 +180,14 @@ export function EmployeeWorkspace({
       return <MarketingMaterialsPage onSelect={(product) => setPageFocus({ type: "product", id: product.id, label: product.name })} />;
     }
     if (view === "work-log") {
+      if (location.workConversationId) {
+        return <WorkDetailPage
+          conversationId={location.workConversationId}
+          onBack={() => openView("work-log")}
+          onOpenConversation={openConversation}
+          onOpenLink={navigate}
+        />;
+      }
       return <WorkLogPage
         key={tab}
         initialTab={tab}
@@ -187,7 +196,7 @@ export function EmployeeWorkspace({
         hasMore={context.hasMore}
         loadingMore={context.loadingMore}
         onLoadMore={context.loadMore}
-        onOpenConversation={openConversation}
+        onOpenWork={(id) => openView("work-log", id)}
         onDeleteConversation={context.deleteConversation}
         onOpenProfile={openProfile}
         onDraftOutreach={(item) => draftOutreach(context, item)}

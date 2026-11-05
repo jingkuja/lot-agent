@@ -52,6 +52,7 @@ import { resolveFocus, type FocusType } from "./focus.js";
 import { ProposalService } from "./proposal-service.js";
 import { EmployeeSettingsService } from "./settings-service.js";
 import { TodayService } from "./today-service.js";
+import { WorkLogService } from "./work-log-service.js";
 import type { CampaignContentGenerator, CampaignModelResolver } from "./acquisition-types.js";
 
 const CAPTURE_PROMPT_VERSION = "customer-capture/v1";
@@ -115,6 +116,7 @@ export class DigitalEmployeeService {
   readonly settings: EmployeeSettingsService;
   readonly proposals: ProposalService;
   readonly briefs: BriefService;
+  readonly workLog: WorkLogService;
   readonly today: TodayService;
   private readonly secretBox: SecretBox;
 
@@ -141,6 +143,7 @@ export class DigitalEmployeeService {
     this.settings = new EmployeeSettingsService(db.pool);
     this.proposals = new ProposalService(db.pool, this.opportunities, this.customerAcquisition);
     this.briefs = new BriefService(db.pool);
+    this.workLog = new WorkLogService(db.pool);
     this.today = new TodayService(db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals, this.briefs);
     this.secretBox = secretBox;
   }

@@ -11,24 +11,32 @@ export interface EmployeeLocation {
   tab: string | null;
   conversationId: string | null;
   profileId: string | null;
+  /** The conversation whose work record is open. */
+  workConversationId: string | null;
+  /** The scheduled run whose report is open. */
+  scheduledRunId: string | null;
 }
 
 const CUSTOMER_TABS = new Set(["segments"]);
+const WORK_TABS = new Set(["conversations", "in_progress", "completed", "snoozed", "scheduled"]);
 
 export function employeePath(view: EmployeeView, tail?: string): string {
   return `${EMPLOYEE_ROOT}/${view}${tail ? `/${encodeURIComponent(tail)}` : ""}`;
 }
 
 export function parseEmployeePath(pathname: string): EmployeeLocation {
-  const [view = "today", tail = null] = pathname.slice(EMPLOYEE_ROOT.length + 1).split("/").filter(Boolean);
+  const [view = "today", tail = null, item = null] = pathname.slice(EMPLOYEE_ROOT.length + 1).split("/").filter(Boolean);
   const decoded = tail === null ? null : decodeURIComponent(tail);
-  const base = { tab: null, conversationId: null, profileId: null };
+  const base = { tab: null, conversationId: null, profileId: null, workConversationId: null, scheduledRunId: null };
   if (view === "chat") return { ...base, view, conversationId: decoded };
   if (view === "customers") {
     return CUSTOMER_TABS.has(decoded ?? "") ? { ...base, view, tab: decoded } : { ...base, view, profileId: decoded };
   }
   if (view === "marketing") return { ...base, view, tab: decoded };
-  if (view === "work-log") return { ...base, view, tab: decoded };
+  if (view === "work-log") {
+    if (decoded && !WORK_TABS.has(decoded)) return { ...base, view, workConversationId: decoded };
+    return { ...base, view, tab: decoded, scheduledRunId: item === null ? null : decodeURIComponent(item) };
+  }
   if (view === "materials" || view === "schedule") return { ...base, view };
   return { ...base, view: "today" };
 }

@@ -619,6 +619,31 @@ export const OBSERVATION_LABELS: Record<ObservationType, string> = {
   note: "其他备注",
 };
 
+export interface WorkStep {
+  id: string;
+  tool: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  artifact: { label: string | null; url: string | null } | null;
+}
+
+export interface WorkRun {
+  id: string;
+  goal: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  outcome: string | null;
+  steps: WorkStep[];
+}
+
+export interface ConversationWork {
+  id: string;
+  title: string;
+  runs: WorkRun[];
+}
+
 export interface EmployeeSettings {
   employeeName: string;
   feishuReminder: boolean;

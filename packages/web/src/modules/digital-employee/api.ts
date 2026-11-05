@@ -1,6 +1,8 @@
 import { request, type UploadedAttachment } from "../../api/client.js";
 import type { EmployeeFocus } from "./focus.js";
-import type { CustomerWork, EmployeeSettings, ProposalResult, TodayResponse, TodaySummary } from "./types.js";
+import type {
+  ConversationWork, CustomerWork, EmployeeSettings, ProposalResult, TodayResponse, TodaySummary,
+} from "./types.js";
 import type {
   CustomerObservation,
   CustomerProductState,
@@ -45,6 +47,8 @@ export const employeeApi = {
     request<EmployeeSettings>("/digital-employee/settings", { method: "PUT", body: JSON.stringify(input) }),
 
   getToday: () => request<TodayResponse>("/digital-employee/today"),
+
+  getConversationWork: (id: string) => request<ConversationWork>(`/digital-employee/work-log/conversations/${encodeURIComponent(id)}`),
 
   getTodaySummary: () => request<TodaySummary>("/digital-employee/today/summary"),
 

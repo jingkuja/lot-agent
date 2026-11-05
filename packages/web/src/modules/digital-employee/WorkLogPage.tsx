@@ -26,7 +26,8 @@ interface WorkLogPageProps {
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
-  onOpenConversation: (id: string) => void;
+  /** Rows open the record of the work; the record leads back to the conversation. */
+  onOpenWork: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onOpenProfile: (id: string) => void;
   onDraftOutreach: (item: OpportunityItem) => void;
@@ -48,13 +49,13 @@ export function WorkLogPage(props: WorkLogPageProps) {
 }
 
 function ConversationList({
-  conversations, activeConversationId, hasMore, loadingMore, onLoadMore, onOpenConversation, onDeleteConversation,
+  conversations, activeConversationId, hasMore, loadingMore, onLoadMore, onOpenWork, onDeleteConversation,
 }: WorkLogPageProps) {
   const { t, locale } = useI18n();
   if (conversations.length === 0) return <div className="de-state de-empty-state"><strong>{t("还没有工作记录")}</strong></div>;
   return <section className="de-work-log-list">
     {conversations.map((conversation) => <article key={conversation.id} className={conversation.id === activeConversationId ? "active" : ""}>
-      <button type="button" onClick={() => onOpenConversation(conversation.id)}>
+      <button type="button" onClick={() => onOpenWork(conversation.id)}>
         <strong>{conversation.title || t("新对话")}</strong>
         <small>{conversation.updated_at ? formatTime(conversation.updated_at, locale) : ""}</small>
       </button>

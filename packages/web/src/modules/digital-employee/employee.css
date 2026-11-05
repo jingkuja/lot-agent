@@ -691,6 +691,24 @@
 .de-work-log-delete:hover { color: var(--error); }
 .de-work-log-list > .de-secondary-button { justify-self: center; margin-top: 6px; }
 
+.de-text-button { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+.de-work-detail .de-employee-page-head { display: grid; gap: 6px; }
+.de-work-detail .de-employee-page-head nav { display: flex; gap: 16px; font-size: 13px; }
+.de-work-detail .de-employee-page-head h1 { min-width: 0; overflow-wrap: anywhere; }
+.de-work-run { display: grid; gap: 10px; margin-bottom: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); }
+.de-work-run > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.de-work-run > header strong { min-width: 0; color: var(--text); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.de-work-run > header small { color: var(--text-muted); font-size: 12px; }
+.de-work-run-failed > header small, .de-work-run-unknown_outcome > header small { color: var(--error); }
+.de-work-run ol { display: grid; gap: 4px; margin: 0; padding: 0 0 0 18px; color: var(--text-muted); font-size: 13px; }
+.de-work-run li > span { color: var(--text); }
+.de-work-run li > small { margin-left: 8px; color: var(--text-muted); font-size: 12px; }
+.de-work-run li.de-work-step-failed > span { color: var(--text-muted); }
+.de-work-run li.de-work-step-unknown_outcome > small { color: var(--error); }
+.de-work-run li > em, .de-work-run li > a, .de-work-run li > .de-text-button { margin-left: 8px; font-size: 12px; font-style: normal; overflow-wrap: anywhere; }
+.de-work-run li > a { color: var(--accent); }
+.de-work-outcome { padding-top: 10px; border-top: 1px solid var(--border); color: var(--text); font-size: 13px; }
+
 /* Schedule */
 .de-schedule-page { width: min(760px, 100%); margin: 0 auto; }
 .de-schedule-section { display: grid; gap: 10px; margin-bottom: 16px; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); }

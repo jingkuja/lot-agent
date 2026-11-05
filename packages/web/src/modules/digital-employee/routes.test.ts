@@ -8,7 +8,9 @@ describe("employee routes", () => {
     expect(parseEmployeePath("/digital-employee/customers/segments")).toMatchObject({ view: "customers", tab: "segments", profileId: null });
     expect(parseEmployeePath("/digital-employee/customers/p1")).toMatchObject({ view: "customers", tab: null, profileId: "p1" });
     expect(parseEmployeePath("/digital-employee/marketing/assets")).toMatchObject({ view: "marketing", tab: "assets" });
-    expect(parseEmployeePath("/digital-employee/work-log/snoozed")).toMatchObject({ view: "work-log", tab: "snoozed" });
+    expect(parseEmployeePath("/digital-employee/work-log/snoozed")).toMatchObject({ view: "work-log", tab: "snoozed", workConversationId: null });
+    expect(parseEmployeePath("/digital-employee/work-log/c1")).toMatchObject({ view: "work-log", tab: null, workConversationId: "c1" });
+    expect(parseEmployeePath("/digital-employee/work-log/scheduled/r1")).toMatchObject({ tab: "scheduled", scheduledRunId: "r1", workConversationId: null });
   });
 
   it("treats an unknown page as today", () => {

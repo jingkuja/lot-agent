@@ -81,6 +81,12 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     } catch (error) { return respondError(c, error); }
   });
 
+  app.get("/work-log/conversations/:id", async (c) => {
+    try {
+      return c.json(await service.workLog.conversation(c.get("userId"), parseEntityId(c.req.param("id"), "conversationId")));
+    } catch (error) { return respondError(c, error); }
+  });
+
   app.post("/proposals/:id/confirm", async (c) => {
     try { return c.json(await service.proposals.confirm(c.get("userId"), parseEntityId(c.req.param("id"), "proposalId"))); }
     catch (error) { return respondError(c, error); }
