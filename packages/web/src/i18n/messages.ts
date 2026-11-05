@@ -3,6 +3,7 @@ export const messages: Record<string, { en: string; id: string }> = {
   "文案生成失败，可以重试": { en: "Couldn't write the copy. You can try again.", id: "Teks gagal dibuat. Anda bisa mencoba lagi." },
   "活动提议生成失败，可以重试": { en: "Couldn't generate campaign ideas. You can try again.", id: "Ide kampanye gagal dibuat. Anda bisa mencoba lagi." },
   "客群和产品匹配度评估失败，可以重试": { en: "Couldn't check segment and product fit. You can try again.", id: "Kecocokan segmen dan produk gagal diperiksa. Anda bisa mencoba lagi." },
+  "所选知识库暂时无法读取，文案没有生成，可以重试": { en: "The selected knowledge base can't be read right now, so no copy was written. You can try again.", id: "Basis pengetahuan yang dipilih belum bisa dibaca, jadi teks tidak dibuat. Anda bisa mencoba lagi." },
   "查看画像": { en: "View profile", id: "Lihat profil" },
   "定时工作": { en: "Scheduled work", id: "Pekerjaan terjadwal" },
   "跟进准备": { en: "Follow-up prep", id: "Persiapan tindak lanjut" },

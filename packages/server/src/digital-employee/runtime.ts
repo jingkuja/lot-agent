@@ -21,6 +21,7 @@ import { DIGITAL_EMPLOYEE_LLM_UNAVAILABLE, resolveDigitalEmployeeLlm } from "./l
 import type { OpportunityAdvicePatch, OpportunityService } from "./opportunity-service.js";
 import { cohortLlmMetrics } from "./profile/cohort-summary.js";
 import { DigitalEmployeeService } from "./service.js";
+import { GenerationFailedError } from "./errors.js";
 import { createCustomerAcquisitionTools } from "./tools/customer-acquisition-tools.js";
 import { createCustomerCaptureTools } from "./tools/customer-capture-tools.js";
 import { createCustomerProfileTools } from "./tools/customer-profile-tools.js";
@@ -313,7 +314,7 @@ export function createDigitalEmployeeRuntime(ports: DigitalEmployeeRuntimePorts)
             input.userId,
             input.knowledgeBaseIds.map((id) => ({ id, name: id })),
             input.prompt,
-          ).catch(() => [])
+          ).catch(() => { throw new GenerationFailedError("所选知识库暂时无法读取，文案没有生成，可以重试"); })
           : [];
         const attachmentNotes = input.attachments?.length
           ? (await Promise.all(input.attachments.map((item) => ports.extractAttachment(item))))
