@@ -85,7 +85,9 @@ describe("beginTurn", () => {
   const metadata = (extra: Record<string, unknown> = {}) => ({ digitalEmployeeFeatureScope: "employee", ...extra });
   const turn = (extension: ReturnType<typeof createDigitalEmployeeExtension>, value: unknown) =>
     extension.beginTurn!({ agentId: "digital_employee", userId: "u1", conversationId: "c1", metadata: value, toolNames: tools });
-  const settings = (employeeName: string) => ({ get: async () => ({ employeeName, feishuReminder: false, desktopReminder: false, version: 1 }) });
+  const settings = (employeeName: string) => ({
+    get: async () => ({ employeeName, feishuReminder: false, desktopReminder: false, workTone: null, preferredChannels: [], version: 1 }),
+  });
 
   it("uses the name the owner chose, as data", async () => {
     const { dynamicParts } = await turn(createDigitalEmployeeExtension({ settings: settings("阿\"灵") }), metadata());
@@ -96,6 +98,12 @@ describe("beginTurn", () => {
     const failing = { get: async () => { throw new Error("db down"); } };
     const { dynamicParts } = await turn(createDigitalEmployeeExtension({ settings: failing }), metadata());
     expect(dynamicParts[0]).toContain(JSON.stringify("小灵"));
+  });
+
+  it("adds work preferences once the owner sets them", async () => {
+    const withTone = { get: async () => ({ ...await settings("阿灵").get(), workTone: "concise" as const, preferredChannels: ["wechat" as const] }) };
+    expect((await turn(createDigitalEmployeeExtension({ settings: withTone }), metadata())).dynamicParts.at(-1)).toContain("short and direct");
+    expect((await turn(createDigitalEmployeeExtension({ settings: settings("阿灵") }), metadata())).dynamicParts.join("\n")).not.toContain("Work preferences");
   });
 
   it("adds the current object to employee conversations", async () => {

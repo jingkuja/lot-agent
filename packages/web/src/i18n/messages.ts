@@ -1,6 +1,15 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
   "查看画像": { en: "View profile", id: "Lihat profil" },
+  "工作偏好": { en: "Work preferences", id: "Preferensi kerja" },
+  "不指定": { en: "No preference", id: "Tidak ditentukan" },
+  "亲切": { en: "Warm", id: "Hangat" },
+  "专业": { en: "Professional", id: "Profesional" },
+  "简短直接": { en: "Short and direct", id: "Singkat dan langsung" },
+  "活泼": { en: "Lively", id: "Ceria" },
+  "常用渠道": { en: "Usual channels", id: "Saluran yang biasa dipakai" },
+  "企微": { en: "WeCom", id: "WeCom" },
+  "抖音和快手": { en: "Douyin and Kuaishou", id: "Douyin dan Kuaishou" },
   "超时": { en: "Timed out", id: "Waktu habis" },
   "没有完成": { en: "Not finished", id: "Belum selesai" },
   "查找客户": { en: "Find customers", id: "Cari pelanggan" },

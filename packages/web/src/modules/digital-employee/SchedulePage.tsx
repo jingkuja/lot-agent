@@ -1,9 +1,28 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../../i18n/index.js";
 import { employeeApi } from "./api.js";
-import type { DigitalEmployeeOverview, EmployeeSettings, OpportunitySettings } from "./types.js";
+import type { DigitalEmployeeOverview, EmployeeSettings, OpportunitySettings, WorkChannel, WorkTone } from "./types.js";
 
 const MAX_NAME = 20;
+const TONES: Array<{ value: WorkTone | ""; label: string }> = [
+  { value: "", label: "不指定" },
+  { value: "warm", label: "亲切" },
+  { value: "professional", label: "专业" },
+  { value: "concise", label: "简短直接" },
+  { value: "lively", label: "活泼" },
+];
+const CHANNELS: Array<{ value: WorkChannel; label: string }> = [
+  { value: "wechat", label: "微信" },
+  { value: "wecom", label: "企微" },
+  { value: "phone", label: "电话" },
+  { value: "email", label: "邮件" },
+  { value: "visit", label: "线下拜访" },
+  { value: "moments", label: "朋友圈" },
+  { value: "wechat_official", label: "公众号" },
+  { value: "channels", label: "视频号" },
+  { value: "douyin_kuaishou", label: "抖音和快手" },
+  { value: "xiaohongshu", label: "小红书" },
+];
 
 /** The employee's name and everything it does on its own. Only the rule scan is free of model costs. */
 export function SchedulePage({ dailyScan, onNameChange }: { dailyScan: boolean; onNameChange: (name: string) => void }) {
@@ -64,6 +83,40 @@ export function SchedulePage({ dailyScan, onNameChange }: { dailyScan: boolean; 
           {saved && <span role="status">{t("已保存")}</span>}
         </form>
         <p>{t("1–20 个字。新回合和界面都会用这个名字。")}</p>
+      </section>
+      <section className="de-schedule-section">
+        <h2>{t("工作偏好")}</h2>
+        <p>{t("写话术和文案时默认这样做。客户的情况不用写在这里，告诉员工就会记到客户资料里。")}</p>
+        <div className="de-schedule-row">
+          <label className="de-schedule-time">
+            <span>{t("语气")}</span>
+            <select
+              aria-label={t("语气")}
+              value={settings.workTone ?? ""}
+              disabled={saving}
+              onChange={(event) => void saveReminders({ workTone: (event.target.value || null) as WorkTone | null })}
+            >
+              {TONES.map((tone) => <option key={tone.value} value={tone.value}>{t(tone.label)}</option>)}
+            </select>
+          </label>
+        </div>
+        <fieldset className="de-schedule-channels" disabled={saving}>
+          <legend>{t("常用渠道")}</legend>
+          <div className="de-check-row">
+            {CHANNELS.map((channel) => <label key={channel.value}>
+              <input
+                type="checkbox"
+                checked={settings.preferredChannels.includes(channel.value)}
+                onChange={(event) => void saveReminders({
+                  preferredChannels: event.target.checked
+                    ? [...settings.preferredChannels, channel.value]
+                    : settings.preferredChannels.filter((item) => item !== channel.value),
+                })}
+              />
+              {t(channel.label)}
+            </label>)}
+          </div>
+        </fieldset>
       </section>
       <section className="de-schedule-section">
         <h2>{t("自动准备")}</h2>

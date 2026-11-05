@@ -116,7 +116,9 @@ describe.skipIf(!testUrl)("digital employee proposals on PostgreSQL", () => {
   });
 
   it("stores the employee's settings per account with a version check", async () => {
-    const saved = await service.settings.save(owner, { employeeName: "阿灵", feishuReminder: false, desktopReminder: false, version: 0 });
+    const saved = await service.settings.save(owner, {
+      employeeName: "阿灵", feishuReminder: false, desktopReminder: false, workTone: "warm", preferredChannels: ["wechat", "phone"], version: 0,
+    });
     expect(saved).toMatchObject({ employeeName: "阿灵", version: 1 });
     await expect(service.settings.save(owner, { ...saved, employeeName: "别的", version: 0 })).rejects.toThrow("刷新");
     await expect(service.settings.save(owner, { ...saved, employeeName: "二灵" })).resolves.toMatchObject({ version: 2 });

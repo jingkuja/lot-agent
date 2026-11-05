@@ -644,10 +644,15 @@ export interface ConversationWork {
   runs: WorkRun[];
 }
 
+export type WorkTone = "warm" | "professional" | "concise" | "lively";
+export type WorkChannel = "wechat" | "wecom" | "phone" | "email" | "visit" | "moments" | "wechat_official" | "channels" | "douyin_kuaishou" | "xiaohongshu";
+
 export interface EmployeeSettings {
   employeeName: string;
   feishuReminder: boolean;
   desktopReminder: boolean;
+  workTone: WorkTone | null;
+  preferredChannels: WorkChannel[];
   version: number;
 }
 

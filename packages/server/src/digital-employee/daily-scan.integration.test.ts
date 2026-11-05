@@ -147,7 +147,7 @@ describe.skipIf(!testUrl)("digital employee daily scan on PostgreSQL", () => {
     await deliverBriefs(service, { sendToOwner, english: false });
     expect(sendToOwner).not.toHaveBeenCalled();
 
-    await service.settings.save(owner, { employeeName: "小灵", feishuReminder: true, desktopReminder: false, version: 0 });
+    await service.settings.save(owner, { employeeName: "小灵", feishuReminder: true, desktopReminder: false, workTone: null, preferredChannels: [], version: 0 });
     await Promise.all([deliverBriefs(service, { sendToOwner, english: false }), deliverBriefs(service, { sendToOwner, english: false })]);
     await deliverBriefs(service, { sendToOwner, english: false });
     expect(sendToOwner).toHaveBeenCalledOnce();

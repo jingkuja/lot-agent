@@ -13,6 +13,7 @@ import {
   parseArchiveProfile,
   parseEntityId,
 } from "./validators.js";
+import { parsePreferredChannels, parseWorkTone } from "./work-preferences.js";
 import {
   parseMarketingBrandAssets,
   parseMarketingProduct,
@@ -59,6 +60,8 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
         employeeName: parseEmployeeName(payload.employeeName),
         feishuReminder: payload.feishuReminder === true,
         desktopReminder: payload.desktopReminder === true,
+        workTone: parseWorkTone(payload.workTone),
+        preferredChannels: parsePreferredChannels(payload.preferredChannels),
         version: settingsVersion(payload.version),
       }));
     } catch (error) { return respondError(c, error); }

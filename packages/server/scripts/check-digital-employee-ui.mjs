@@ -37,7 +37,7 @@ function fixtures() {
   const followUp = opportunity({ id: "a1", opportunityId: "o2", actionId: "a1", status: "pending", view: "today", title: "回访王总", scheduledAt: NOW, overdue: true });
   const awaiting = opportunity({ id: "a2", opportunityId: "o3", actionId: "a2", status: "awaiting_result", view: "today", title: "等张姐回复", scheduledAt: NOW });
   return {
-    settings: { employeeName: "小灵", feishuReminder: false, desktopReminder: false, version: 0 },
+    settings: { employeeName: "小灵", feishuReminder: false, desktopReminder: false, workTone: null, preferredChannels: [], version: 0 },
     focusWrites: [], writes: [],
     work: {
       id: "c1", title: "李静的跟进", runs: [{
@@ -575,6 +575,19 @@ try {
     await page.goBack();
     await page.getByRole("button", { name: "回到对话" }).click();
     await page.waitForURL("**/digital-employee/chat/c1");
+    await close();
+  }
+
+  // Work preferences save with the settings row; closed lists only.
+  {
+    const { page, state, close } = await open("/digital-employee/schedule");
+    await page.getByLabel("语气").selectOption("concise");
+    await page.waitForFunction(() => !document.querySelector(".de-schedule-channels").disabled);
+    await page.waitForTimeout(100);
+    await page.getByLabel("微信", { exact: true }).click();
+    await page.waitForTimeout(300);
+    assert.deepEqual(JSON.parse(state.writes.findLast((write) => write.path.endsWith("/settings")).body).preferredChannels, ["wechat"]);
+    assert.equal(state.settings.workTone, "concise");
     await close();
   }
 

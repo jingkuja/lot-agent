@@ -16,7 +16,9 @@ function build(views: Record<string, unknown[]> = {}, extra: {
     listDeploymentsAwaitingFeedback: vi.fn(async () => extra.deployments ?? []),
   };
   const proposals = { listPending: vi.fn(async () => extra.proposals ?? []) };
-  const settings = { get: vi.fn(async () => ({ employeeName: "阿灵", feishuReminder: false, desktopReminder: true, version: 1 })) };
+  const settings = {
+    get: vi.fn(async () => ({ employeeName: "阿灵", feishuReminder: false, desktopReminder: true, workTone: null, preferredChannels: [], version: 1 })),
+  };
   const briefs = { latest: vi.fn(async () => extra.brief ?? null) };
   const query = vi.fn(async () => ({ rows: extra.tasks ?? [] }));
   return {

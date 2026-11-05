@@ -13,6 +13,7 @@ import {
 } from "./feature-scope.js";
 import { focusTurnPart, readConversationFocus } from "./focus.js";
 import type { EmployeeSettingsService } from "./settings-service.js";
+import { workPreferenceText } from "./work-preferences.js";
 
 export const DIGITAL_EMPLOYEE_AGENT_ID = "digital_employee";
 
@@ -107,11 +108,13 @@ export function createDigitalEmployeeExtension(deps: {
       const featureScope = readConversationFeatureScope(metadata);
       const focus = featureScope === DIGITAL_EMPLOYEE_UNIFIED_SCOPE ? readConversationFocus(metadata) : null;
       const settings = userId ? await deps.settings?.get(userId).catch(() => undefined) : undefined;
+      const preferences = workPreferenceText(settings);
       return {
         allowedToolNames: digitalEmployeeAllowedToolNames(featureScope, toolNames),
         dynamicParts: [
           ...digitalEmployeeTurnParts(featureScope, settings?.employeeName),
           ...(focus ? [focusTurnPart(focus)] : []),
+          ...(preferences ? [`[Work preferences]\n${preferences}`] : []),
         ],
         featureScope,
       };

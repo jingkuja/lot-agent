@@ -113,6 +113,7 @@ export const migrations: Migration[] = [
   draftDismissed,
   discoveryMode,
   employeeBriefs,
+  employeeWorkPreferences,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -146,3 +147,4 @@ import { employeeSettings } from "./0068-employee-settings.js";
 import { draftDismissed } from "./0069-draft-dismissed.js";
 import { discoveryMode } from "./0070-discovery-mode.js";
 import { employeeBriefs } from "./0071-employee-briefs.js";
+import { employeeWorkPreferences } from "./0072-employee-work-preferences.js";
