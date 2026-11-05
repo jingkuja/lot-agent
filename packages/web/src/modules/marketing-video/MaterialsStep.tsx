@@ -57,8 +57,9 @@ export function MaterialsStep({ form, profile, handlers, referenceVideoStatus, a
       </div>
       <Hint text="背景图参考环境与空间布局，场景图参考构图与物品细节。" more={[t("图片中的其他人物不会作为主角；每镜按分镜选用相关内容。")]} />
     </section>
-    {/* With this model a reference video replaces every image, so it is an advanced choice. */}
-    {profile.imagesWithReferenceVideo || draft.assets.video ? video
+    {/* With this model a reference video replaces every image, so it is an advanced choice.
+        Removing the video can raise an audio notice, which must not end up folded away. */}
+    {profile.imagesWithReferenceVideo || draft.assets.video || audioNotice ? video
       : <details className="mv-advanced"><summary>{t("高级设置：动作参考视频")}</summary>{video}</details>}
   </>;
 }
