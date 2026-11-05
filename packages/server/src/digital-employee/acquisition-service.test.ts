@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { GenerationFailedError } from "./errors.js";
 import { CustomerAcquisitionService, campaignMediaPrompt, campaignVideoModels, fallbackCopy, fallbackRecommendations } from "./acquisition-service.js";
 import type { CampaignModelAvailability } from "./acquisition-types.js";
 
@@ -25,6 +26,78 @@ function availability(overrides: Partial<CampaignModelAvailability> = {}): Campa
 }
 
 describe("CustomerAcquisitionService", () => {
+  describe("a failed model call", () => {
+    const groupQuery = () => vi.fn(async (sql: string, _params?: any[]) => {
+      if (sql.includes("FROM marketing_products WHERE user_id")) {
+        return { rows: [{ id: "p1", name: "产品A", positioning: "定位", core_values: [], verifiable_facts: [], common_objections: [] }] };
+      }
+      return { rows: [] };
+    });
+
+    it.each([
+      ["throws", async () => { throw new Error("upstream"); }],
+      ["returns nothing usable", async () => ({ recommendations: [], modelId: "m" })],
+    ])("fails the campaign ideas when the model %s", async (_label, recommend) => {
+      const query = groupQuery();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, { recommend, createCopy: vi.fn() });
+      await expect(service.refreshRecommendations("u1")).rejects.toBeInstanceOf(GenerationFailedError);
+      expect(query.mock.calls.some(([sql]) => sql.includes("INSERT INTO de_daily_recommendations"))).toBe(false);
+      warn.mockRestore();
+    });
+
+    it("leaves the free rule scan alone", async () => {
+      const query = groupQuery();
+      const recommend = vi.fn();
+      const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, { recommend, createCopy: vi.fn() });
+      await service.refreshRecommendations("u1", undefined, { rulesOnly: true });
+      expect(recommend).not.toHaveBeenCalled();
+      expect(query.mock.calls.some(([sql]) => sql.includes("INSERT INTO de_daily_recommendations"))).toBe(true);
+    });
+
+    const productQuery = () => vi.fn(async (sql: string, _params?: any[]) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{ id: "p1", name: "Product", version: 1 }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) return { rows: [{
+        id: "s1", audience_description: "Public", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date(),
+      }] };
+      return { rows: [] };
+    });
+    const input = {
+      assetType: "copy" as const, prompt: "write", publicAudience: "Public", productId: "p1", objective: "Inform", channels: ["web"], callToAction: "Read",
+    };
+    const wrote = (query: ReturnType<typeof productQuery>, table: string) => query.mock.calls.some(([sql]) => sql.includes(`INSERT INTO ${table}`));
+
+    it("fails the copy and saves nothing, not even an empty campaign", async () => {
+      const query = productQuery();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const createCopy = vi.fn(async () => { throw new Error("upstream timeout"); });
+      const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, { recommend: vi.fn(), createCopy });
+      const failure = await service.createAsset("u1", input).catch((error) => error);
+      expect(failure).toBeInstanceOf(GenerationFailedError);
+      expect(failure.message).toBe("文案生成失败，可以重试");
+      expect(createCopy).toHaveBeenCalledOnce();
+      for (const table of ["de_marketing_asset_library", "de_campaign_generation_runs", "de_marketing_campaigns"]) expect(wrote(query, table)).toBe(false);
+      warn.mockRestore();
+    });
+
+    it("keeps the knowledge base's own message", async () => {
+      const query = productQuery();
+      const createCopy = vi.fn(async () => { throw new GenerationFailedError("所选知识库暂时无法读取，文案没有生成，可以重试"); });
+      const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, { recommend: vi.fn(), createCopy });
+      await expect(service.createAsset("u1", input)).rejects.toThrow("所选知识库");
+    });
+
+    it("still swaps the copy when a good reply carries contact details", async () => {
+      const query = productQuery();
+      const createCopy = vi.fn(async () => ({ title: "t", content: "打 13812345678", modelId: "m" }));
+      const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, { recommend: vi.fn(), createCopy });
+      await service.createAsset("u1", input).catch(() => undefined);
+      const insert = query.mock.calls.find(([sql]) => sql.includes("INSERT INTO de_marketing_asset_library"));
+      expect(JSON.stringify(insert)).not.toContain("13812345678");
+      expect(JSON.stringify(insert)).toContain("contact_replaced");
+    });
+  });
+
   it("propagates cancellation through copy generation and never saves its late result or a fallback", async () => {
     const controller = new AbortController();
     const query = vi.fn(async (sql: string, _params?: any[]) => {
@@ -109,7 +182,10 @@ describe("CustomerAcquisitionService", () => {
     const recommend = vi.fn(async (input) => {
       expect(JSON.stringify(input)).not.toContain("李静");
       expect(input.segments[0]).toEqual(expect.objectContaining({ name: "制造业潜客", metrics: { totalProfiles: 5 } }));
-      return { recommendations: [], modelId: "m1" };
+      return {
+        recommendations: [{ type: "copy" as const, theme: "主题", targetSegmentDescription: "制造业潜客", corePoints: [], suggestedChannels: [], reasoning: [] }],
+        modelId: "m1",
+      };
     });
     const service = new CustomerAcquisitionService({ pool: { query } } as any, undefined, { recommend, createCopy: vi.fn() });
     await service.refreshRecommendations("u1");

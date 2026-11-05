@@ -50,6 +50,13 @@ export class QuotaError extends DigitalEmployeeError {
   }
 }
 
+/** A model call failed and nothing was saved. The owner decides whether to try again. */
+export class GenerationFailedError extends DigitalEmployeeError {
+  constructor(message: string) {
+    super(message, 503, "generation_failed");
+  }
+}
+
 export function apiError(error: unknown): { status: number; body: { error: string; code?: string; openTaskCount?: number } } {
   if (error instanceof OpenTasksError) {
     return { status: error.status, body: { error: error.message, code: error.code, openTaskCount: error.openTaskCount } };

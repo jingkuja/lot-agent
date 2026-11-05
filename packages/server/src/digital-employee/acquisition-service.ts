@@ -3,7 +3,7 @@ import type { DB } from "../db/database.js";
 import { isGrokVideoModel, type JobQueue } from "@lot-agent/core";
 import { billedVideoSeconds, resolveVideoGenerateAudio, validateImageGenerationSettings } from "../generation/input.js";
 import { ConversationActionDrafts } from "./conversation-drafts.js";
-import { ConflictError, InputError, NotFoundError, QuotaError } from "./errors.js";
+import { ConflictError, DigitalEmployeeError, GenerationFailedError, InputError, NotFoundError, QuotaError } from "./errors.js";
 import {
   assertGroupContentInput,
   buildIdentityTerms,
@@ -43,6 +43,9 @@ export interface DeploymentAwaitingFeedback {
 }
 
 const MARKETING_URL = "/digital-employee/marketing";
+const COPY_FAILED = "文案生成失败，可以重试";
+const RECOMMENDATIONS_FAILED = "活动提议生成失败，可以重试";
+const FIT_FAILED = "客群和产品匹配度评估失败，可以重试";
 const SEGMENTS_URL = "/digital-employee/customers/segments";
 const CREATION_PROMPT_VERSION = "customer-acquisition-creative/v1";
 
@@ -192,7 +195,8 @@ export class CustomerAcquisitionService {
     }));
     const safeProducts = productsResult.rows.map(marketingProductSnapshot);
     let drafts: CampaignRecommendationDraft[];
-    if (this.contentGenerator && !rulesOnly) {
+    const useModel = Boolean(this.contentGenerator) && !rulesOnly;
+    if (this.contentGenerator && useModel) {
       try {
         const generated = await this.contentGenerator.recommend({
           signal,
@@ -204,14 +208,13 @@ export class CustomerAcquisitionService {
         });
         drafts = generated.recommendations;
       } catch (error) {
-        if (signal?.aborted) throw error;
-        drafts = fallbackRecommendations(safeSegments, safeProducts);
+        throw modelFailure(error, signal, RECOMMENDATIONS_FAILED);
       }
     } else {
       drafts = fallbackRecommendations(safeSegments, safeProducts);
     }
     drafts = normalizeRecommendationMix(drafts).slice(0, 7);
-    if (!drafts.length) drafts = fallbackRecommendations(safeSegments, safeProducts);
+    if (useModel && !drafts.length) throw new GenerationFailedError(RECOMMENDATIONS_FAILED);
     const recommendationDate = shanghaiDate(new Date());
     for (const draft of drafts) {
       signal?.throwIfAborted();
@@ -384,37 +387,34 @@ export class CustomerAcquisitionService {
       : await this.resolveSnapshot(userId, resolvedInput);
     const brand = (await this.db.pool.query(`SELECT * FROM marketing_brand_assets WHERE user_id=$1`, [userId])).rows[0] ?? null;
     signal?.throwIfAborted();
+    const brief = buildBrief(resolvedInput, snapshot, product, brand);
+    // Written before anything is saved, so a failed call leaves no empty campaign behind.
+    let generated: { title: string; content: string; modelId: string } | null = null;
+    if (resolvedInput.assetType === "copy") {
+      if (!this.contentGenerator) throw new GenerationFailedError(COPY_FAILED);
+      try {
+        generated = await this.contentGenerator.createCopy({
+          signal,
+          userId,
+          prompt: resolvedInput.prompt,
+          brief,
+          modelId: copyModelId ?? resolvedInput.modelId,
+          knowledgeBaseIds: resolvedInput.knowledgeBaseIds,
+          attachments: resolvedInput.attachments,
+        });
+      } catch (error) {
+        throw modelFailure(error, signal, COPY_FAILED);
+      }
+      signal?.throwIfAborted();
+    }
     const campaignId = existing
       ? existing.id
       : await this.createCampaign(userId, resolvedInput, snapshot.id, product.id);
-    const brief = buildBrief(resolvedInput, snapshot, product, brand);
     if (!existing) await this.upsertBrief(userId, campaignId, brief, Number(product.version));
 
     const source = resolvedInput.parentAssetId ? "reuse" : resolvedInput.recommendationId ? "recommendation" : "workspace";
     const title = resolvedInput.title || `${product.name} · ${resolvedInput.assetType === "copy" ? "营销文案" : resolvedInput.assetType === "poster" ? "营销海报" : "营销视频"}`;
-    if (resolvedInput.assetType === "copy") {
-      let generated = {
-        title,
-        content: fallbackCopy(resolvedInput, snapshot, product),
-        modelId: "logic-fallback",
-      };
-      if (this.contentGenerator) {
-        try {
-          generated = await this.contentGenerator.createCopy({
-            signal,
-            userId,
-            prompt: resolvedInput.prompt,
-            brief,
-            modelId: copyModelId ?? resolvedInput.modelId,
-            knowledgeBaseIds: resolvedInput.knowledgeBaseIds,
-            attachments: resolvedInput.attachments,
-          });
-        } catch (error) {
-          if (signal?.aborted) throw error;
-          // A usable, fact-bound draft is preferable to losing the whole brief.
-        }
-      }
-      signal?.throwIfAborted();
+    if (generated) {
       const reviewFlags: AssetReviewFlag[] = [];
       if (containsContactDetails(policy, `${generated.title}\n${generated.content}`)) {
         generated = { title, content: fallbackCopy(resolvedInput, snapshot, product), modelId: "logic-fallback" };
@@ -662,8 +662,7 @@ export class CustomerAcquisitionService {
           brand: brand ? { tone: brand.tone ?? [], version: Number(brand.version) } : null,
         });
       } catch (error) {
-        if (signal?.aborted) throw error;
-        // Keep the deterministic fallback when the model is unavailable.
+        throw modelFailure(error, signal, FIT_FAILED);
       }
     }
     signal?.throwIfAborted();
@@ -1499,6 +1498,13 @@ function buildBrief(input: CreateCampaignAssetInput, snapshot: any, product: any
     request: input.prompt,
     privacyRule: "Address aggregate audiences only; never include individual customer identities or contact details",
   };
+}
+
+/** Rule-written content is never passed off as a model's answer: a failed call stays a failed call. */
+function modelFailure(error: unknown, signal: AbortSignal | undefined, message: string): unknown {
+  if (signal?.aborted || error instanceof DigitalEmployeeError) return error;
+  console.warn(`[customer-acquisition] ${message}:`, error instanceof Error ? `${error.name} ${error.message}` : "unknown error");
+  return new GenerationFailedError(message);
 }
 
 function fallbackFit(audience: { description?: string; metrics?: SegmentMetrics }, product: ReturnType<typeof marketingProductSnapshot>): CampaignFitDraft {

@@ -1,6 +1,6 @@
 import type { ToolContext, ToolResult } from "@lot-agent/core";
 import { classifyToolFailure } from "@lot-agent/core";
-import { DigitalEmployeeError, InputError } from "../errors.js";
+import { DigitalEmployeeError, GenerationFailedError, InputError } from "../errors.js";
 import type { ConversationActionDraft } from "../conversation-drafts.js";
 import { DIGITAL_EMPLOYEE_UNIFIED_SCOPE } from "../feature-scope.js";
 
@@ -41,6 +41,14 @@ export function confirmationContent(draft: ConversationActionDraft, commitTool: 
 }
 
 export function toolError(prefix: string, error: unknown): ToolResult {
+  if (error instanceof GenerationFailedError) {
+    return {
+      content: `${prefix}：${error.message}\nNothing was saved. Do not call this tool again in this turn and do not write the content yourself. ` +
+        "Tell the owner it failed and that they can ask you to try again.",
+      isError: true,
+      errorKind: "unknown",
+    };
+  }
   if (error instanceof DigitalEmployeeError) {
     return { content: `${prefix}：${error.message}`, isError: true,
       errorKind: error.status === 404 ? "not_found" : error.status === 403 ? "permission" : "validation" };

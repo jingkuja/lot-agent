@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { GenerationFailedError } from "../errors.js";
 import { createCustomerAcquisitionTools } from "./customer-acquisition-tools.js";
 
 function find(name: string, service: Record<string, unknown>) {
@@ -10,6 +11,23 @@ const context = {
   workingDirectory: "/tmp",
   featureScope: "customer-acquisition",
 };
+
+describe("a failed generation", () => {
+  it("tells the model not to retry or write the content itself", async () => {
+    const service = { createAsset: vi.fn(async () => { throw new GenerationFailedError("文案生成失败，可以重试"); }) };
+    const result = await find("generate_campaign_copy", service).execute({
+      prompt: "为公开课写一条克制的朋友圈文案",
+      publicAudience: "关注边缘算力的华东制造业潜客",
+      productId: "00000000-0000-4000-8000-000000000001",
+      objective: "活动报名",
+      channels: ["朋友圈"],
+      callToAction: "预约报名",
+    }, context);
+    expect(result).toMatchObject({ isError: true, errorKind: "unknown" });
+    expect(result.content).toContain("Do not call this tool again in this turn");
+    expect(service.createAsset).toHaveBeenCalledOnce();
+  });
+});
 
 describe("customer acquisition agent tools", () => {
   it("returns only the service aggregate cohort view", async () => {
