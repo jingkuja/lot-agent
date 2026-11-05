@@ -12,6 +12,8 @@ export function CustomerSegmentsPage({ onCreateContent, onSelect }: {
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       setInsights(await employeeApi.getAcquisitionInsights());
@@ -21,16 +23,30 @@ export function CustomerSegmentsPage({ onCreateContent, onSelect }: {
   }, []);
   useEffect(() => { void load(); }, [load]);
   const create = async (input: { name: string; description?: string; criteria: CustomerSegmentCriteria }) => {
-    setSaving(true);
+    if (saving) return;
+    setSaving(true); setEditorError(null);
     try {
       await employeeApi.createCustomerSegment(input);
       setEditorOpen(false);
       await load();
+    } catch (reason) {
+      setEditorError(reason instanceof Error ? reason.message : "保存失败");
     } finally {
       setSaving(false);
     }
   };
-  const snapshot = async (segment: CustomerSegment) => { await employeeApi.snapshotCustomerSegment(segment.id); await load(); };
+  const snapshot = async (segment: CustomerSegment) => {
+    if (saving) return;
+    setSaving(true); setActionError(null);
+    try {
+      await employeeApi.snapshotCustomerSegment(segment.id);
+      await load();
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : "操作失败");
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <section className="de-acquisition-workspace">
       <header className="de-acquisition-section-head">
@@ -47,6 +63,12 @@ export function CustomerSegmentsPage({ onCreateContent, onSelect }: {
         <div className="de-inline-error">
           <span>{t(error)}</span>
           <button onClick={() => void load()}>{t("重试")}</button>
+        </div>
+      )}
+      {actionError && (
+        <div className="de-inline-error" role="alert">
+          <span>{t(actionError)}</span>
+          <button onClick={() => setActionError(null)}>{t("关闭")}</button>
         </div>
       )}
       {!insights ? (
@@ -81,6 +103,7 @@ export function CustomerSegmentsPage({ onCreateContent, onSelect }: {
                   onFocus={onSelect ? () => onSelect(segment) : undefined}
                   key={segment.id}
                   segment={segment}
+                  snapshotting={saving}
                   onSnapshot={() => void snapshot(segment)}
                   onCreate={() => onCreateContent(segment)}
                 />
@@ -89,13 +112,13 @@ export function CustomerSegmentsPage({ onCreateContent, onSelect }: {
           )}
         </>
       )}
-      {editorOpen && <SegmentEditor saving={saving} onClose={() => !saving && setEditorOpen(false)} onSave={create} />}
+      {editorOpen && <SegmentEditor saving={saving} error={editorError} onClose={() => !saving && setEditorOpen(false)} onSave={create} />}
     </section>
   );
 }
 
-function SegmentCard({ segment, onSnapshot, onCreate, onFocus }: {
-  segment: CustomerSegment; onSnapshot: () => void; onCreate: () => void; onFocus?: () => void;
+function SegmentCard({ segment, snapshotting, onSnapshot, onCreate, onFocus }: {
+  segment: CustomerSegment; snapshotting: boolean; onSnapshot: () => void; onCreate: () => void; onFocus?: () => void;
 }) {
   const { t } = useI18n();
   const metrics = segment.latestSnapshot?.metrics;
@@ -141,7 +164,7 @@ function SegmentCard({ segment, onSnapshot, onCreate, onFocus }: {
         </p>
       ))}
       <footer>
-        <button className="de-secondary-button" onClick={onSnapshot}>
+        <button className="de-secondary-button" disabled={snapshotting} onClick={onSnapshot}>
           {t("重新固定快照")}
         </button>
         <button className="de-primary-button" onClick={onCreate}>
@@ -152,12 +175,99 @@ function SegmentCard({ segment, onSnapshot, onCreate, onFocus }: {
   );
 }
 
-function SegmentEditor({ saving, onClose, onSave }: { saving: boolean; onClose: () => void; onSave: (input: { name: string; description?: string; criteria: CustomerSegmentCriteria }) => Promise<void> }) {
+function SegmentEditor({ saving, error, onClose, onSave }: {
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSave: (input: { name: string; description?: string; criteria: CustomerSegmentCriteria }) => Promise<void>;
+}) {
   const { t } = useI18n();
   const [name, setName] = useState(""); const [description, setDescription] = useState(""); const [relationshipStages, setRelationshipStages] = useState<RelationshipStage[]>(["lead", "prospect"]); const [health, setHealth] = useState<Health[]>([]); const [regions, setRegions] = useState(""); const [tags, setTags] = useState(""); const [productName, setProductName] = useState(""); const [activeWithinDays, setActiveWithinDays] = useState("30"); const [excludeAtRisk, setExcludeAtRisk] = useState(true); const [excludeRecently, setExcludeRecently] = useState("7");
   const toggle = <T extends string>(value: T, current: T[], update: (value: T[]) => void) => update(current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
   const submit = () => onSave({ name, description, criteria: { relationshipStages, health, regions: csv(regions), tags: csv(tags), productName: productName || undefined, activeWithinDays: number(activeWithinDays), excludeAtRisk, excludeRecentlyContactedDays: number(excludeRecently) } });
-  return <div className="de-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="de-modal de-segment-editor"><header className="de-modal-head"><div><p className="de-eyebrow">{t("动态客群")}</p><h2>{t("定义可重复计算的筛选条件")}</h2></div><button className="de-icon-button" onClick={onClose}>×</button></header><div className="de-segment-editor-grid"><label><span>{t("客群名称")}</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("例如：华东制造业评估客户")} /></label><label><span>{t("客群说明")}</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t("这类客户为什么值得持续观察")} /></label><fieldset><legend>{t("关系阶段")}</legend>{(Object.entries(RELATIONSHIP_LABELS) as Array<[RelationshipStage, string]>).map(([value, label]) => <button type="button" key={value} className={relationshipStages.includes(value) ? "active" : ""} onClick={() => toggle(value, relationshipStages, setRelationshipStages)}>{t(label)}</button>)}</fieldset><fieldset><legend>{t("健康度")}</legend>{(Object.entries(HEALTH_LABELS) as Array<[Health, string]>).map(([value, label]) => <button type="button" key={value} className={health.includes(value) ? "active" : ""} onClick={() => toggle(value, health, setHealth)}>{t(label)}</button>)}</fieldset><label><span>{t("区域（逗号分隔）")}</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder={t("华东, 上海")} /></label><label><span>{t("标签（需同时满足）")}</span><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder={t("制造业, 重点潜客")} /></label><label><span>{t("关联产品")}</span><input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder={t("可选")} /></label><label><span>{t("近期活跃")}</span><select value={activeWithinDays} onChange={(event) => setActiveWithinDays(event.target.value)}><option value="7">{t("7 天内")}</option><option value="30">{t("30 天内")}</option><option value="90">{t("90 天内")}</option><option value="">{t("不限")}</option></select></label></div><div className="de-segment-safety"><label><input type="checkbox" checked={excludeAtRisk} onChange={(event) => setExcludeAtRisk(event.target.checked)} /> {t("排除有投诉或高风险客户")}</label><label><input type="checkbox" checked={Boolean(excludeRecently)} onChange={(event) => setExcludeRecently(event.target.checked ? "7" : "")} /> {t("排除近")}<input type="number" min="1" max="90" disabled={!excludeRecently} value={excludeRecently} onChange={(event) => setExcludeRecently(event.target.value)} /> {t("天刚联系过的客户")}</label></div><footer className="de-modal-actions"><button className="de-secondary-button" onClick={onClose}>{t("取消")}</button><button className="de-primary-button" disabled={saving || !name.trim()} onClick={() => void submit()}>{saving ? t("正在计算快照…") : t("保存并生成首个快照")}</button></footer></section></div>;
+  return <div className="de-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="de-modal de-segment-editor">
+      <header className="de-modal-head">
+        <div>
+          <p className="de-eyebrow">{t("动态客群")}</p>
+          <h2>{t("定义可重复计算的筛选条件")}</h2>
+        </div>
+        <button className="de-icon-button" onClick={onClose}>×</button>
+      </header>
+      {error && <div className="de-inline-error" role="alert"><span>{t(error)}</span></div>}
+      <div className="de-segment-editor-grid">
+        <label>
+          <span>{t("客群名称")}</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("例如：华东制造业评估客户")} />
+        </label>
+        <label>
+          <span>{t("客群说明")}</span>
+          <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t("这类客户为什么值得持续观察")} />
+        </label>
+        <fieldset>
+          <legend>{t("关系阶段")}</legend>
+          {(Object.entries(RELATIONSHIP_LABELS) as Array<[RelationshipStage, string]>).map(([value, label]) => <button
+            type="button"
+            key={value}
+            className={relationshipStages.includes(value) ? "active" : ""}
+            onClick={() => toggle(value, relationshipStages, setRelationshipStages)}
+          >{t(label)}</button>)}
+        </fieldset>
+        <fieldset>
+          <legend>{t("健康度")}</legend>
+          {(Object.entries(HEALTH_LABELS) as Array<[Health, string]>).map(([value, label]) => <button
+            type="button"
+            key={value}
+            className={health.includes(value) ? "active" : ""}
+            onClick={() => toggle(value, health, setHealth)}
+          >{t(label)}</button>)}
+        </fieldset>
+        <label>
+          <span>{t("区域（逗号分隔）")}</span>
+          <input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder={t("华东, 上海")} />
+        </label>
+        <label>
+          <span>{t("标签（需同时满足）")}</span>
+          <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder={t("制造业, 重点潜客")} />
+        </label>
+        <label>
+          <span>{t("关联产品")}</span>
+          <input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder={t("可选")} />
+        </label>
+        <label>
+          <span>{t("近期活跃")}</span>
+          <select value={activeWithinDays} onChange={(event) => setActiveWithinDays(event.target.value)}>
+            <option value="7">{t("7 天内")}</option>
+            <option value="30">{t("30 天内")}</option>
+            <option value="90">{t("90 天内")}</option>
+            <option value="">{t("不限")}</option>
+          </select>
+        </label>
+      </div>
+      <div className="de-segment-safety">
+        <label>
+          <input type="checkbox" checked={excludeAtRisk} onChange={(event) => setExcludeAtRisk(event.target.checked)} /> {t("排除有投诉或高风险客户")}
+        </label>
+        <label>
+          <input type="checkbox" checked={Boolean(excludeRecently)} onChange={(event) => setExcludeRecently(event.target.checked ? "7" : "")} /> {t("排除近")}
+          <input
+            type="number"
+            min="1"
+            max="90"
+            disabled={!excludeRecently}
+            value={excludeRecently}
+            onChange={(event) => setExcludeRecently(event.target.value)}
+          /> {t("天刚联系过的客户")}
+        </label>
+      </div>
+      <footer className="de-modal-actions">
+        <button className="de-secondary-button" onClick={onClose}>{t("取消")}</button>
+        <button className="de-primary-button" disabled={saving || !name.trim()} onClick={() => void submit()}>
+          {saving ? t("正在计算快照…") : t("保存并生成首个快照")}
+        </button>
+      </footer>
+    </section>
+  </div>;
 }
 
 function Metric({ label, value }: { label: string; value: number }) {

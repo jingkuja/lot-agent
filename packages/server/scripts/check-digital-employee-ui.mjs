@@ -284,6 +284,12 @@ function api(state, unexpected, dailyScan = false, schedules = false) {
     if (de === "/acquisition/insights") return json({ overall: null, segments: [], commonNeeds: [], commonObjections: [] });
     if (de === "/acquisition/assets") return json({ items: [], total: 0 });
     if (de === "/acquisition/campaigns") return json({ items: [campaign], total: 1 });
+    if (de === `/acquisition/campaigns/${CAMPAIGN}` && method === "PATCH") {
+      state.campaignWrites = (state.campaignWrites ?? 0) + 1;
+      await new Promise((done) => setTimeout(done, 150));
+      if (state.failCampaignWrite) return json({ error: "保存失败" }, 500);
+      return json({ ...campaign, name: JSON.parse(request.postData()).name ?? campaign.name });
+    }
     if (de === `/acquisition/campaigns/${CAMPAIGN}`) return json(campaign);
     if (de === "/acquisition/campaign-opportunities") return json({ items: [], total: 0 });
     if (de === "/acquisition/recommendations") return json({ items: state.recommendations, generatedAt: NOW });
@@ -612,6 +618,25 @@ try {
     await page.waitForTimeout(300);
     assert.deepEqual(JSON.parse(state.writes.findLast((write) => write.path.endsWith("/settings")).body).preferredChannels, ["wechat"]);
     assert.equal(state.settings.workTone, "concise");
+    await close();
+  }
+
+  // A failed campaign write says so, keeps what was typed, and a double click sends once.
+  {
+    const state = fixtures();
+    state.failCampaignWrite = true;
+    const { page, close } = await open("/digital-employee/marketing", { state });
+    await page.getByRole("button", { name: /双十一/ }).click();
+    const name = page.locator(".de-campaign-name-row input");
+    await name.fill("双十二");
+    await page.getByRole("button", { name: "保存名称" }).dblclick();
+    await page.getByRole("alert").getByText("保存失败").waitFor();
+    assert.equal(state.campaignWrites, 1);
+    assert.equal(await name.inputValue(), "双十二");
+    state.failCampaignWrite = false;
+    await page.getByRole("button", { name: "保存名称" }).click();
+    await page.getByRole("alert").waitFor({ state: "detached" });
+    assert.equal(state.campaignWrites, 2);
     await close();
   }
 
