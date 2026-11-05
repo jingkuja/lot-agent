@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Tool, ToolResult, ObjectStorage } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
+import { privateFilesEnabled } from "../generation/private-materials.js";
 import { DOWNLOAD_RESULT_HINT } from "./artifact-result.js";
 import {
   extractTheme,
@@ -251,7 +252,7 @@ export function createPptTool(deps: PptToolDeps): Tool {
         }
         context.signal?.throwIfAborted();
         await db.createAsset({
-          id, userId, type: "document", storageKey: key, url, mime: PPTX_MIME, sizeBytes: buffer.byteLength,
+          id, userId, type: "document", storageKey: key, url, mime: PPTX_MIME, sizeBytes: buffer.byteLength, isPrivate: privateFilesEnabled(),
         });
       } catch (error) {
         await Promise.allSettled(storedKeys.map(k => storage.delete(k)));

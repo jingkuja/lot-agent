@@ -255,6 +255,9 @@ export const api = {
     request<{ ok: boolean }>(`/conversations/${encodeURIComponent(conversationId)}/operations/${encodeURIComponent(operationId)}/verify`, {
       method: "POST", body: JSON.stringify({ outcome }),
     }),
+  getFileLinks: (urls: string[]) => request<{ links: Record<string, string> }>("/assets/links", {
+    method: "POST", body: JSON.stringify({ urls }),
+  }),
   getProductLinks: (signal?: AbortSignal) => request<{
     webUrl: string; tokenhubUrl: string; globle?: number; showCompliance?: boolean; [flag: string]: unknown;
   }>("/public/product", { signal }),

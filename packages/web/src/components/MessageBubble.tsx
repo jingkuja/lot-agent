@@ -11,6 +11,7 @@ import type { DisplayMessage } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { GenerationCard } from "./GenerationCard.js";
 import { AskUserCard } from "./AskUserCard.js";
+import { FileLink } from "./FileLink.js";
 import { OutlineCard } from "./OutlineCard.js";
 import { PptArtifactCard } from "./PptArtifactCard.js";
 import { parsePptArtifact, parsePptApproval } from "@lot-agent/core/presentation";
@@ -80,21 +81,16 @@ export function MessageBubble({
           {userContent && <div className="message-content">{userContent}</div>}
           {message.attachments && message.attachments.length > 0 && (
             <div className="message-attachments">
-              {message.attachments.map((a, i) => (
-                <a
-                  className="attachment-chip"
-                  key={i}
-                  href={a.url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {a.kind === "image" ? (
-                    <img className="attachment-thumb" src={a.url} alt={a.filename} />
-                  ) : (
-                    <span className="attachment-doc-icon" aria-hidden>📄</span>
-                  )}
+              {message.attachments.map((a, i) => a.kind === "image" ? (
+                <a className="attachment-chip" key={i} href={a.url} target="_blank" rel="noreferrer">
+                  <img className="attachment-thumb" src={a.url} alt={a.filename} />
                   <span className="attachment-name" title={a.filename}>{a.filename}</span>
                 </a>
+              ) : (
+                <FileLink className="attachment-chip" key={i} url={a.url} target="_blank" rel="noreferrer">
+                  <span className="attachment-doc-icon" aria-hidden>📄</span>
+                  <span className="attachment-name" title={a.filename}>{a.filename}</span>
+                </FileLink>
               ))}
             </div>
           )}
@@ -141,14 +137,8 @@ export function MessageBubble({
               <span className="doc-download-name" title={artifact.filename}>
                 {artifact.filename}
               </span>
-              <a
-                className="gen-asset-download"
-                href={artifact.url}
-                download={artifact.filename}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t("下载")}</a>
+              <FileLink className="gen-asset-download" url={artifact.url} download={artifact.filename} target="_blank" rel="noreferrer">
+                {t("下载")}</FileLink>
             </div>
           </div>
         </div>

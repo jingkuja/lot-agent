@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import type { AgentService } from "../services/agent-service.js";
 import { attachmentKind } from "../services/attachment-extractor.js";
-import { signPrivateMaterial } from "../generation/private-materials.js";
+import { privateFilesEnabled, signPrivateMaterial } from "../generation/private-materials.js";
 import { meteredUpload, uploadFileName, UploadTooLargeError } from "../util/metered-upload.js";
 
 type Variables = { userId: string };
@@ -75,7 +75,9 @@ export function createUploadRoutes(service: AgentService) {
     const ext = extname(name) || "";
     const id = randomUUID();
     const key = `${id}${ext}`;
-    const isPrivate = purpose === "marketing-video";
+    const marketingMaterial = purpose === "marketing-video";
+    // Images and media stay reachable by URL: model vendors and the miniprogram fetch them that way.
+    const isPrivate = marketingMaterial || (kind === "doc" && !isMedia && privateFilesEnabled());
     // Fail before writing material when the temporary-link key is unavailable.
     const privateAsset = { id, user_id: userId, type: "upload", storage_key: key, url: service.uploadStorage.getUrl(key), is_private: isPrivate };
     let accessUrl: string;
@@ -104,7 +106,7 @@ export function createUploadRoutes(service: AgentService) {
     });
 
     c.header("Cache-Control", "no-store");
-    return c.json({ assetId: id, filename: name, mime, size, url: isPrivate ? accessUrl : url, kind });
+    return c.json({ assetId: id, filename: name, mime, size, url: marketingMaterial ? accessUrl : url, kind });
   });
 
   return app;

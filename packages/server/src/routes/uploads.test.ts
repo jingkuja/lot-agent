@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { createUploadRoutes } from "./uploads.js";
 
@@ -82,6 +82,32 @@ describe("POST /uploads", () => {
     expect(json.assetId).toBeTruthy();
     expect(service.created.length).toBe(1);
     expect(service.created[0].originalName).toBe("note.txt");
+  });
+
+  describe("private documents", () => {
+    afterEach(() => { vi.unstubAllEnvs(); });
+    const send = async (mime: string) => {
+      const service = makeService();
+      const res = await appFor(service).request("/", { method: "POST", headers: { "content-type": mime, "x-file-name": "a" }, body: "x" });
+      return { service, body: await res.json() as { url: string } };
+    };
+
+    it("makes a new document private but keeps its stable URL", async () => {
+      vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+      const { service, body } = await send("application/pdf");
+      expect(service.created[0].isPrivate).toBe(true);
+      expect(body.url).toMatch(/^\/static\/uploads\/[^?]+$/);
+    });
+
+    it.each(["image/png", "video/mp4", "audio/mpeg"])("leaves %s reachable by URL", async (mime) => {
+      vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+      expect((await send(mime)).service.created[0].isPrivate).toBe(false);
+    });
+
+    it("behaves as before where links cannot be signed", async () => {
+      vi.stubEnv("SECRET_MASTER_KEY", "");
+      expect((await send("application/pdf")).service.created[0].isPrivate).toBe(false);
+    });
   });
 
   it("stops a multipart body with no Content-Length as soon as it passes the limit", async () => {

@@ -34,6 +34,70 @@ function makeApp(overrides: Record<string, unknown> = {}) {
   return { app, service };
 }
 
+describe("file links", () => {
+  const document = { user_id: "u1", storage_key: "d.docx", is_private: true };
+  const post = (app: Hono<any>, urls: unknown) => app.request("/links", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ urls }),
+  });
+
+  function linkApp(row: unknown, uploadRow: unknown = null) {
+    const { app, service } = makeApp();
+    service.db.getGeneratedByStorageKey = vi.fn(async () => row);
+    service.db.getUploadByStorageKey = vi.fn(async () => uploadRow);
+    return { app, service };
+  }
+
+  it("signs the owner's private document and leaves its stored URL out of it", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      const { app } = linkApp(document);
+      const { links } = await (await post(app, ["/static/documents/d.docx"])).json() as { links: Record<string, string> };
+      expect(links["/static/documents/d.docx"]).toMatch(/^\/static\/documents\/d\.docx\?material_token=/);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("signs a slide preview by its deck", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      const { app, service } = linkApp(document);
+      await post(app, ["/static/documents/d-slide-3.png"]);
+      expect(service.db.getGeneratedByStorageKey).toHaveBeenCalledWith("d.pptx");
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("signs a private upload the same way", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      const { app } = linkApp(null, { ...upload, is_private: true });
+      const { links } = await (await post(app, [upload.url])).json() as { links: Record<string, string> };
+      expect(links[upload.url]).toContain("material_token=");
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("returns public files and other accounts' files unchanged", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      for (const row of [{ ...document, is_private: false }, { ...document, user_id: "u2" }, null]) {
+        const { app } = linkApp(row);
+        const { links } = await (await post(app, ["/static/documents/d.docx"])).json() as { links: Record<string, string> };
+        expect(links["/static/documents/d.docx"]).toBe("/static/documents/d.docx");
+      }
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("ignores anything that is not a local file path", async () => {
+    const { app, service } = linkApp(document);
+    const { links } = await (await post(app, ["https://evil.example/x"])).json() as { links: Record<string, string> };
+    expect(links["https://evil.example/x"]).toBe("https://evil.example/x");
+    expect(service.db.getGeneratedByStorageKey).not.toHaveBeenCalled();
+  });
+
+  it.each([[null], ["/static/documents/d.docx"], [[1]], [Array(101).fill("/x")]])("rejects %j", async (urls) => {
+    const { app } = linkApp(document);
+    expect((await post(app, urls)).status).toBe(400);
+  });
+});
+
 describe("asset file management", () => {
   it("renews a private preview only for its owner and does not modify its stored URL", async () => {
     vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));

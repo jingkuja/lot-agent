@@ -40,7 +40,7 @@ import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { staticFileHandler } from "./static-files.js";
-import { createOutputAccessGuard, createUploadAccessGuard } from "./generation/private-materials.js";
+import { createDocumentAccessGuard, createOutputAccessGuard, createUploadAccessGuard } from "./generation/private-materials.js";
 import { AgentService, type ServiceConfig } from "./services/agent-service.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
@@ -235,7 +235,9 @@ async function main() {
   });
 
   const requestLogger = logger();
-  app.use("*", (c, next) => c.req.path.startsWith("/static/uploads/") || c.req.path.startsWith("/api/rag/preview/") || c.req.path.startsWith("/api/public/feishu/") || c.req.path.startsWith("/api/public/marketing-analysis-audio/") || c.req.path.startsWith("/api/public/digital-presenter-media/") ? next() : requestLogger(c, next));
+  // These paths can carry capabilities in the query string.
+  const UNLOGGED_PATHS = ["/static/", "/api/rag/preview/", "/api/public/feishu/", "/api/public/marketing-analysis-audio/", "/api/public/digital-presenter-media/"];
+  app.use("*", (c, next) => UNLOGGED_PATHS.some((path) => c.req.path.startsWith(path)) ? next() : requestLogger(c, next));
   app.use("*", cors({
     origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
     credentials: true,
@@ -449,7 +451,7 @@ async function main() {
   app.route("/api/public/digital-presenter-media", createPresenterMediaRoutes(resolve(ROOT, "data")));
   // Marketing clips and made videos are private; other generated files stay public.
   app.get("/static/assets/:filename", staticFileHandler(ASSETS_DIR, { authorize: createOutputAccessGuard(service.db, service.sessions) }));
-  app.get("/static/documents/:filename", staticFileHandler(DOCS_DIR));
+  app.get("/static/documents/:filename", staticFileHandler(DOCS_DIR, { authorize: createDocumentAccessGuard(service.db, service.sessions) }));
   app.get("/static/uploads/:filename", staticFileHandler(UPLOADS_DIR, { authorize: createUploadAccessGuard(service.db, service.sessions) }));
 
   const port = Number(process.env.PORT) || 3000;

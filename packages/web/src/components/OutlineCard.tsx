@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { encodePptApproval, inspectDeck, validateDeck, type PptDeck, type PptSlide } from "@lot-agent/core/presentation";
 import { useI18n } from "../i18n/index.js";
 import { layoutMeta } from "../lib/layout-icons.js";
+import { useFileLinks } from "../hooks/useFileLinks.js";
 
 interface OutlineCardProps {
   input: unknown;
@@ -31,6 +32,7 @@ export function OutlineCard({ input, interactive, answer, onReply, exportAgain, 
   const [changed, setChanged] = useState(false);
   const [sending, setSending] = useState(false);
   const lock = useRef(false);
+  const previews = useFileLinks(previewUrls ?? []);
   useEffect(() => { if (!interactive) { lock.current = false; setSending(false); } }, [interactive]);
   if (!deck) return <div className="outline-card" role="status">{t("大纲数据不完整，请让助手重新整理。")}</div>;
   const error = validateDeck(deck);
@@ -88,7 +90,11 @@ export function OutlineCard({ input, interactive, answer, onReply, exportAgain, 
             <span className="outline-body"><span className="outline-slide-title">{slide.title || t(layoutMeta(slide.layout).label)}</span><span className="outline-slide-sum">{summary(slide)}</span></span>
             <span className="ppt-expand">{t(editable ? "编辑" : "查看")}</span>
           </summary>
-          {!!previewUrls?.[i] && !changed && <a href={previewUrls[i]} target="_blank" rel="noreferrer"><img className="ppt-slide-preview" loading="lazy" src={previewUrls[i]} alt={`${i + 1}. ${slide.title}`} /></a>}
+          {!!previewUrls?.[i] && !changed && previews.ready && <a
+            href={previews.link(previewUrls[i])}
+            target="_blank"
+            rel="noreferrer"
+          ><img className="ppt-slide-preview" loading="lazy" src={previews.link(previewUrls[i])} alt={`${i + 1}. ${slide.title}`} /></a>}
           <fieldset className="ppt-slide-fields" disabled={!editable}>
             <SlideFields slide={slide} onChange={patch => patchSlide(i, patch)} />
           </fieldset>

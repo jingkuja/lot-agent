@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SecretBox } from "../auth/secret-box.js";
 import { staticFileHandler } from "../static-files.js";
-import { createOutputAccessGuard, createUploadAccessGuard, resolveMaterialReference, signPrivateMaterial, signPrivateOutput,
+import { createDocumentAccessGuard, createOutputAccessGuard, createUploadAccessGuard, documentAssetKey, parseFileUrl, resolveMaterialReference,
+  signPrivateFile, signPrivateMaterial, signPrivateOutput,
   type PrivateMaterialAsset } from "./private-materials.js";
 
 const key = "11".repeat(32);
@@ -228,5 +229,110 @@ describe("private generated outputs", () => {
     expect(response.headers.get("Cache-Control")).toBe("private, max-age=3600");
     db.getGeneratedByStorageKey.mockRejectedValue(new Error("database unavailable"));
     expect((await app.request("/static/assets/chat.png")).status).toBe(404);
+  });
+});
+
+describe("private documents", () => {
+  const owner = "owner";
+  const key = "11111111-1111-4111-8111-111111111111.docx";
+  const url = `/static/documents/${key}`;
+  const privateRow = { user_id: owner, storage_key: key, is_private: true };
+  let dir: string;
+  let now = start;
+
+  const appFor = (row: unknown, sessions = { resolve: vi.fn(async () => null) }) => {
+    const lookup = { getGeneratedByStorageKey: vi.fn(async () => row as never) };
+    const app = new Hono();
+    app.get("/static/documents/:filename", staticFileHandler(dir, {
+      authorize: createDocumentAccessGuard(lookup, sessions, { ...options, now: () => now }),
+    }));
+    return { app, lookup };
+  };
+
+  beforeEach(async () => {
+    now = start;
+    dir = await mkdtemp(join(tmpdir(), "lot-documents-"));
+    await writeFile(join(dir, key), "contract");
+    await writeFile(join(dir, "11111111-1111-4111-8111-111111111111-slide-2.png"), "slide");
+  });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it("keeps older documents exactly as they were, with or without a row", async () => {
+    for (const row of [null, { ...privateRow, is_private: false }]) {
+      const response = await appFor(row).app.request(url);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
+    }
+  });
+
+  it("refuses a private document without a link or session", async () => {
+    expect((await appFor(privateRow).app.request(url)).status).toBe(404);
+  });
+
+  it("opens with the owner's link until it expires", async () => {
+    const { app } = appFor(privateRow);
+    const signed = signPrivateFile(owner, url, options);
+    expect(signed).toMatch(/^\/static\/documents\/.+\?material_token=/);
+    const response = await app.request(signed);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    now = start + 6 * 60 * 60_000 + 1;
+    expect((await app.request(signed)).status).toBe(404);
+  });
+
+  it("does not open with another account's or another file's link", async () => {
+    const { app } = appFor(privateRow);
+    expect((await app.request(signPrivateFile("someone-else", url, options))).status).toBe(404);
+    const other = signPrivateFile(owner, "/static/documents/other.docx", options);
+    expect((await app.request(`${url}?${other.split("?")[1]}`)).status).toBe(404);
+    const upload = signPrivateFile(owner, `/static/uploads/${key}`, options);
+    expect((await app.request(`${url}?${upload.split("?")[1]}`)).status).toBe(404);
+  });
+
+  it("refuses a link that claims to last longer than any link may", async () => {
+    const signed = signPrivateFile(owner, url, { ...options, ttlMs: 30 * 24 * 60 * 60_000 });
+    expect((await appFor(privateRow).app.request(signed)).status).toBe(404);
+  });
+
+  it("opens for the owner's session and no one else's", async () => {
+    const sessions = { resolve: vi.fn(async (token: string) => ({ userId: token })) };
+    const { app } = appFor(privateRow, sessions as never);
+    expect((await app.request(url, { headers: { Authorization: "Bearer owner" } })).status).toBe(200);
+    expect((await app.request(url, { headers: { Authorization: "Bearer stranger" } })).status).toBe(404);
+  });
+
+  it("guards a slide preview by its deck", async () => {
+    const preview = "11111111-1111-4111-8111-111111111111-slide-2.png";
+    expect(documentAssetKey(preview)).toBe("11111111-1111-4111-8111-111111111111.pptx");
+    const { app, lookup } = appFor({ ...privateRow, storage_key: documentAssetKey(preview) });
+    expect((await app.request(`/static/documents/${preview}`)).status).toBe(404);
+    expect(lookup.getGeneratedByStorageKey).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111.pptx");
+    expect((await app.request(signPrivateFile(owner, `/static/documents/${preview}`, options))).status).toBe(200);
+  });
+
+  it("lets the owner open a private upload with the same kind of link", async () => {
+    const upload = { ...asset, storage_key: key, url: `/static/uploads/${key}`, is_private: true };
+    const app = new Hono();
+    app.get("/static/uploads/:filename", staticFileHandler(dir, {
+      authorize: createUploadAccessGuard({ getUploadByStorageKey: vi.fn(async () => upload) }, { resolve: vi.fn(async () => null) }, options),
+    }));
+    expect((await app.request(upload.url)).status).toBe(404);
+    expect((await app.request(signPrivateFile(owner, upload.url, options))).status).toBe(200);
+    expect((await app.request(signPrivateFile("someone-else", upload.url, options))).status).toBe(404);
+  });
+
+  it("fails closed when the lookup fails", async () => {
+    const app = new Hono();
+    app.get("/static/documents/:filename", staticFileHandler(dir, {
+      authorize: createDocumentAccessGuard({ getGeneratedByStorageKey: vi.fn(async () => { throw new Error("db"); }) }, { resolve: vi.fn() }, options),
+    }));
+    expect((await app.request(url)).status).toBe(404);
+  });
+
+  it("reads only local file paths", () => {
+    expect(parseFileUrl("/static/documents/a.docx?material_token=x")).toMatchObject({ folder: "documents", key: "a.docx" });
+    expect(parseFileUrl("https://box.example/static/uploads/a.pdf")).toMatchObject({ folder: "uploads", prefix: "https://box.example/static/uploads/" });
+    for (const url of ["/static/assets/a.png", "/static/documents/..%2Fsecret", "https://evil.example/x", 7]) expect(parseFileUrl(url)).toBeNull();
+    expect(signPrivateFile(owner, "/static/assets/a.png", options)).toBe("/static/assets/a.png");
   });
 });

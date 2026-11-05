@@ -5,6 +5,7 @@ import type { AgentService } from "../services/agent-service.js";
 import { FeishuService, hash } from "./service.js";
 import { FeishuError } from "./client.js";
 import { parseSendCommand } from "./policy.js";
+import { SENT_FILE_LINK_TTL_MS, signPrivateFile } from "../generation/private-materials.js";
 
 export const FEISHU_HELP = "发送：/send 联系人姓名或ou_用户ID 消息原文\n回复：/reply om_消息ID 回复原文\n取消：/cancel\n可以直接说：查好后发给我自己，或发消息给联系人。按姓名自动查询飞书官方通讯录，同名时会请你选择。\n支持与 Web 通用助手相同的工具，包括文档、PPT、联网查询等。";
 
@@ -242,7 +243,9 @@ export class FeishuChannel {
             if (link) {
               try {
                 const url = new URL(link, process.env.PUBLIC_BASE_URL || undefined);
-                if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) artifacts.add(`下载文件：${url.href}`);
+                if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) {
+                  artifacts.add(`下载文件：${signPrivateFile(job.user_id, url.href, { ttlMs: SENT_FILE_LINK_TTL_MS })}`);
+                }
               } catch { artifacts.add("文件已保存，请在 Lot Agent 的飞书会话中下载。"); }
             }
           }

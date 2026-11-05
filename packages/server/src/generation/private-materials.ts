@@ -34,6 +34,14 @@ const OUTPUT_PURPOSE = "private-output:v1";
 /** A made video is watched and scrubbed for a while; each Range request checks the same link. */
 const OUTPUT_TTL_MS = 6 * 60 * 60_000;
 
+const FILE_PURPOSE = "private-file:v1";
+const FILE_URL = /^(.*\/static\/(documents|uploads)\/)([^/?#]+)(?:[?#].*)?$/;
+/** Long enough for a page left open; each link is checked again on every read. */
+export const FILE_LINK_TTL_MS = 6 * 60 * 60_000;
+/** A message in another app cannot ask for a fresh link, so it has to last. */
+export const SENT_FILE_LINK_TTL_MS = 7 * 24 * 60 * 60_000;
+const SLIDE_PREVIEW = /^(.+)-slide-\d+\.png$/;
+
 function safeKey(key: string): boolean {
   return !!key && key.length <= 500 && !/[\\/\u0000-\u001f\u007f]/.test(key) && !key.includes("..");
 }
@@ -81,6 +89,41 @@ export function signPrivateOutput(owner: string, url: string, options: PrivateMa
   } catch { return url; }
 }
 
+/**
+ * Files written from now on are private when links can be signed. Rows from before stay public,
+ * so links people already hold keep working, and a deployment without the key behaves as it did.
+ */
+export function privateFilesEnabled(options: PrivateMaterialOptions = {}): boolean {
+  return !!(options.masterKey ?? process.env.SECRET_MASTER_KEY);
+}
+
+/** A slide preview belongs to its deck, which is the row that says who owns it. */
+export function documentAssetKey(filename: string): string {
+  const preview = SLIDE_PREVIEW.exec(filename);
+  return preview ? `${preview[1]}.pptx` : filename;
+}
+
+export function parseFileUrl(url: unknown): { folder: "documents" | "uploads"; key: string; prefix: string } | null {
+  const match = typeof url === "string" && url.length <= 2048 ? FILE_URL.exec(url) : null;
+  if (!match) return null;
+  try {
+    const key = decodeURIComponent(match[3]);
+    return safeKey(key) ? { folder: match[2] as "documents" | "uploads", key, prefix: match[1] } : null;
+  } catch { return null; }
+}
+
+/** A link the owner's browser, or a message to the owner, can open without a session. Any other URL is returned as it is. */
+export function signPrivateFile(owner: string, url: string, options: PrivateMaterialOptions & { ttlMs?: number } = {}): string {
+  const file = parseFileUrl(url);
+  if (!file || !owner) return url;
+  try {
+    const expires = (options.now ?? Date.now)() + (options.ttlMs ?? FILE_LINK_TTL_MS);
+    const claim = { purpose: FILE_PURPOSE, owner, folder: file.folder, key: file.key, expires };
+    const token = Buffer.from(secretBox(options).seal(JSON.stringify(claim))).toString("base64url");
+    return `${file.prefix}${encodeURIComponent(file.key)}?${TOKEN_PARAMETER}=${token}`;
+  } catch { return url; }
+}
+
 /** The decrypted claim of a well-formed token, or null. */
 function openCapability(token: string | undefined, options: PrivateMaterialOptions): Record<string, unknown> | null {
   if (!token || token.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(token)) return null;
@@ -99,6 +142,35 @@ function validCapability(token: string | undefined, asset: PrivateMaterialAsset,
   const now = (options.now ?? Date.now)();
   return claim?.purpose === PURPOSE && claim.id === asset.id && claim.owner === asset.user_id && claim.key === asset.storage_key
     && Number.isSafeInteger(claim.expires) && (claim.expires as number) > now && (claim.expires as number) <= now + TOKEN_TTL_MS;
+}
+
+function validFileCapability(
+  token: string | undefined, owner: string, folder: "documents" | "uploads", key: string, options: PrivateMaterialOptions,
+): boolean {
+  const claim = openCapability(token, options);
+  const now = (options.now ?? Date.now)();
+  return claim?.purpose === FILE_PURPOSE && claim.owner === owner && claim.folder === folder && claim.key === key
+    && Number.isSafeInteger(claim.expires) && (claim.expires as number) > now && (claim.expires as number) <= now + SENT_FILE_LINK_TTL_MS;
+}
+
+/** Called before reading a generated document or slide preview. Lookup failures fail closed; a row that is not private stays public. */
+export function createDocumentAccessGuard(
+  db: GeneratedLookup,
+  sessions: { resolve(token: string): Promise<{ userId: string } | null | undefined> },
+  options: PrivateMaterialOptions = {}
+) {
+  return async (c: Context, filename: string): Promise<boolean | "public"> => {
+    if (!safeKey(filename)) return false;
+    try {
+      const asset = await db.getGeneratedByStorageKey(documentAssetKey(filename));
+      if (!asset?.is_private) return "public";
+      if (validFileCapability(c.req.query(TOKEN_PARAMETER), asset.user_id, "documents", filename, options)) return true;
+      const header = c.req.header("Authorization");
+      const token = header?.startsWith("Bearer ") ? header.slice(7).trim() : "";
+      if (!token) return false;
+      return (await sessions.resolve(token))?.userId === asset.user_id;
+    } catch { return false; }
+  };
 }
 
 /** Called before reading a generated file. A private one (marketing clips and made videos) needs its owner's
@@ -138,7 +210,8 @@ export function createUploadAccessGuard(
       const asset = await db.getUploadByStorageKey(filename);
       if (!asset || asset.type !== "upload" || asset.storage_key !== filename) return false;
       if (!asset.is_private) return true;
-      if (validCapability(c.req.query(TOKEN_PARAMETER), asset, options)) return true;
+      const capability = c.req.query(TOKEN_PARAMETER);
+      if (validCapability(capability, asset, options) || validFileCapability(capability, asset.user_id, "uploads", filename, options)) return true;
       const header = c.req.header("Authorization");
       const token = header?.startsWith("Bearer ") ? header.slice(7).trim() : "";
       if (!token) return false;

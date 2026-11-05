@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Tool, ToolResult, ObjectStorage } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 import { generateDocument, type DocFormat } from "./doc-generator.js";
+import { privateFilesEnabled } from "../generation/private-materials.js";
 import { DOWNLOAD_RESULT_HINT } from "./artifact-result.js";
 
 const MIME: Record<string, string> = {
@@ -119,6 +120,7 @@ export function createDocTool(deps: DocToolDeps): Tool {
         url,
         mime,
         sizeBytes: buffer.byteLength,
+        isPrivate: privateFilesEnabled(),
       });
 
       const degradeNote =
