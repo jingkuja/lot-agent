@@ -6,8 +6,10 @@ import { employeeApi } from "../api.js";
 import { formatTime, type OpportunityDialog } from "../opportunities/OpportunityCard.js";
 import { CreateActionDialog, OpportunityDialogs } from "../opportunities/OpportunityDialogs.js";
 import { TODAY_PATH } from "../routes.js";
+import { TEMPLATE_LABELS } from "../schedule/labels.js";
 import type { CampaignRecommendation, MarketingAsset, OpportunityItem, TodayItem, TodayResponse } from "../types.js";
 import { proposalCopy, runningLabel } from "./copy.js";
+import { ReportCard } from "./ReportCard.js";
 
 const QUICK_RESULTS = [
   { outcome: "replied", label: "已回复" },
@@ -28,6 +30,7 @@ interface TodayPageProps {
   onDraftOutreach: (item: OpportunityItem) => void;
   onAssign: (prompt: string) => void;
   onRefineRecommendation: (item: CampaignRecommendation) => void;
+  onOpenScheduledRun: (id: string) => void;
 }
 
 interface Notice {
@@ -38,7 +41,7 @@ interface Notice {
 /** The landing page: what the employee prepared, in the order the owner has to act on it. */
 export function TodayPage({
   data, error, busy, onReload, onOpenConversation, onOpenProfile, onOpenCustomers, onOpenSnoozed, onOpenLink,
-  onDraftOutreach, onAssign, onRefineRecommendation,
+  onDraftOutreach, onAssign, onRefineRecommendation, onOpenScheduledRun,
 }: TodayPageProps) {
   const { t, locale } = useI18n();
   const [pending, setPending] = useState<string | null>(null);
@@ -99,6 +102,7 @@ export function TodayPage({
   const recommendations = data.items.filter((item) => item.kind === "recommendation");
   const followUps = data.items.filter((item) => item.kind === "follow_up");
   const results = data.items.filter((item) => item.kind === "result");
+  const reports = data.items.filter((item) => item.kind === "report");
   const toConfirm = proposals.length + opportunities.length + recommendations.length;
 
   return (
@@ -313,6 +317,26 @@ export function TodayPage({
               </WorkCard>
             );
           })}
+        </section>
+      )}
+
+      {reports.length > 0 && (
+        <section className="de-today-section" aria-label={t("定时工作")}>
+          <h2>
+            {t("定时工作")}
+            <b>{reports.length}</b>
+          </h2>
+          {reports.map((item) => <ReportCard
+            key={item.id}
+            item={item}
+            disabled={pending !== null || busy}
+            onOpen={() => onOpenScheduledRun(item.source.id)}
+            onAcknowledge={() => void act(item.id, async () => { await employeeApi.acknowledgeScheduleRun(item.source.id); })}
+            onAnswer={(answer) => void act(item.id, async () => {
+              await employeeApi.acknowledgeScheduleRun(item.source.id);
+              onAssign(t("你在{0}里问我：{1}\n我的回答：{2}", [t(TEMPLATE_LABELS[item.scheduleRun!.template]), item.scheduleRun!.report!.question, answer]));
+            })}
+          />)}
         </section>
       )}
 

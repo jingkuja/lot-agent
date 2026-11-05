@@ -152,7 +152,7 @@ describe("runMigrations", () => {
         [61, "marketing-background-requests"], [62, "marketing-private-outputs"], [63, "marketing-draft-snapshots"],
         [64, "marketing-analysis-no-response"], [65, "marketing-analysis-submitted"], [66, "marketing-key-art-started"], [67, "asset-review-flags"],
         [68, "employee-settings"], [69, "draft-dismissed"], [70, "discovery-mode"], [71, "employee-briefs"],
-        [72, "employee-work-preferences"]]);
+        [72, "employee-work-preferences"], [73, "employee-schedules"]]);
     expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 

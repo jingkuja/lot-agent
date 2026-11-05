@@ -22,7 +22,9 @@ function build(views: Record<string, unknown[]> = {}, extra: {
   const briefs = { latest: vi.fn(async () => extra.brief ?? null) };
   const query = vi.fn(async () => ({ rows: extra.tasks ?? [] }));
   return {
-    service: new TodayService({ query } as any, settings, opportunities as any, acquisition as any, proposals as any, briefs as any),
+    service: new TodayService(
+      { query } as any, settings, opportunities as any, acquisition as any, proposals as any, briefs as any, { pendingReports: vi.fn(async () => []) },
+    ),
     opportunities, acquisition, proposals, query,
   };
 }

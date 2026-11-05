@@ -50,6 +50,7 @@ import { BriefService } from "./brief-service.js";
 import { DIGITAL_EMPLOYEE_UNIFIED_SCOPE, readConversationFeatureScope } from "./feature-scope.js";
 import { resolveFocus, type FocusType } from "./focus.js";
 import { ProposalService } from "./proposal-service.js";
+import { ScheduleService } from "./schedule-service.js";
 import { EmployeeSettingsService } from "./settings-service.js";
 import { TodayService } from "./today-service.js";
 import { WorkLogService } from "./work-log-service.js";
@@ -117,6 +118,7 @@ export class DigitalEmployeeService {
   readonly proposals: ProposalService;
   readonly briefs: BriefService;
   readonly workLog: WorkLogService;
+  readonly schedules: ScheduleService;
   readonly today: TodayService;
   private readonly secretBox: SecretBox;
 
@@ -144,7 +146,8 @@ export class DigitalEmployeeService {
     this.proposals = new ProposalService(db.pool, this.opportunities, this.customerAcquisition);
     this.briefs = new BriefService(db.pool);
     this.workLog = new WorkLogService(db.pool);
-    this.today = new TodayService(db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals, this.briefs);
+    this.schedules = new ScheduleService(db.pool, opportunityQueue);
+    this.today = new TodayService(db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals, this.briefs, this.schedules);
     this.secretBox = secretBox;
   }
 

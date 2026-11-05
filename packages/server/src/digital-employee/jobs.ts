@@ -2,16 +2,18 @@ import type { JobQueue } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 import { CustomerAcquisitionService } from "./acquisition-service.js";
 import { BriefService, briefMessage } from "./brief-service.js";
-import { digitalEmployeeDailyScanEnabled } from "./feature-scope.js";
+import { digitalEmployeeDailyScanEnabled, digitalEmployeeSchedulesEnabled } from "./feature-scope.js";
 import { OpportunityService } from "./opportunity-service.js";
 import { ProposalService } from "./proposal-service.js";
-import { createOpportunityAdviceGenerator } from "./runtime.js";
+import { createOpportunityAdviceGenerator, createScheduleReportGenerator } from "./runtime.js";
+import { SCHEDULE_JOB, ScheduleService } from "./schedule-service.js";
 import type { DigitalEmployeeService } from "./service.js";
 import { EmployeeSettingsService } from "./settings-service.js";
 import { TodayService, countToday } from "./today-service.js";
 
 const COHORT_SUMMARY_CHECK_MS = 5 * 60 * 1000;
 const DISCOVERY_CHECK_MS = 60 * 1000;
+const SCHEDULE_CHECK_MS = 60 * 1000;
 const DELIVERY_BATCH = 20;
 
 export interface OwnerMessage {
@@ -66,6 +68,12 @@ export function registerDigitalEmployeeJobs(service: DigitalEmployeeService, opt
     if (queued > 0) console.log(`Queued ${queued} daily opportunity discovery task(s)`);
     await deliverBriefs(service, options);
   });
+  if (digitalEmployeeSchedulesEnabled()) {
+    every(SCHEDULE_CHECK_MS, "Employee schedule dispatcher", async () => {
+      const queued = await service.schedules.dispatchDue();
+      if (queued > 0) console.log(`Queued ${queued} scheduled employee run(s)`);
+    });
+  }
 }
 
 interface WorkerQueue {
@@ -77,6 +85,7 @@ interface WorkerPorts {
   queue: WorkerQueue;
   db: DB;
   adviceLlm: Parameters<typeof createOpportunityAdviceGenerator>[0];
+  checkQuota(userId: string, estimatedCost: number): Promise<{ ok: boolean }>;
 }
 
 /** What follows a daily scan. Nothing here can reach a model: the acquisition service has no generator. */
@@ -85,7 +94,7 @@ export function createDailyScanFollowUp(db: Pick<DB, "pool">, opportunities: Opp
   const settings = new EmployeeSettingsService(db.pool);
   const briefs = new BriefService(db.pool);
   const proposals = new ProposalService(db.pool, opportunities, acquisition);
-  const today = new TodayService(db.pool, settings, opportunities, acquisition, proposals, briefs);
+  const today = new TodayService(db.pool, settings, opportunities, acquisition, proposals, briefs, new ScheduleService(db.pool));
   return async (userId: string, scan: { scanned: number; created: number }) => {
     await acquisition.seedRuleRecommendations(userId);
     const { items } = await today.get(userId);
@@ -93,7 +102,7 @@ export function createDailyScanFollowUp(db: Pick<DB, "pool">, opportunities: Opp
   };
 }
 
-export function registerDigitalEmployeeWorkerJobs({ queue, db, adviceLlm }: WorkerPorts) {
+export function registerDigitalEmployeeWorkerJobs({ queue, db, adviceLlm, checkQuota }: WorkerPorts) {
   const opportunities = new OpportunityService(db, undefined, createOpportunityAdviceGenerator(adviceLlm));
   const followUp = createDailyScanFollowUp(db, opportunities);
   queue.process("opportunity.discover", async (job) => {
@@ -107,5 +116,11 @@ export function registerDigitalEmployeeWorkerJobs({ queue, db, adviceLlm }: Work
         .catch((error) => console.warn(`[employee-brief] follow-up failed for user ${job.userId}:`, error));
     }
     return result;
+  });
+  const schedules = new ScheduleService(db.pool);
+  const execution = { opportunities, checkQuota, generate: createScheduleReportGenerator(adviceLlm) };
+  queue.process(SCHEDULE_JOB, async (job, control) => {
+    const { runId } = job.input as { runId: string };
+    return { status: await schedules.execute(job.userId, runId, execution, control.signal) };
   });
 }

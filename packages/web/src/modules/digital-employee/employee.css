@@ -710,6 +710,17 @@
 .de-work-outcome { padding-top: 10px; border-top: 1px solid var(--border); color: var(--text); font-size: 13px; }
 
 /* Schedule */
+.de-scheduled-work > small { color: var(--text-muted); font-size: 12px; }
+.de-schedule-add { padding-top: 10px; border-top: 1px solid var(--border); }
+.de-schedule-section form.de-schedule-add input { flex: 0 1 180px; }
+.de-schedule-section select, .de-today-report textarea { min-height: 36px; padding: 0 10px; border: 1px solid var(--border-input); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text); font: inherit; font-size: 14px; }
+.de-today-report textarea { width: 100%; padding: 8px 10px; resize: vertical; }
+.de-today-report .de-today-question { color: var(--text); font-weight: 500; }
+.de-work-summary { color: var(--text); font-size: 14px; line-height: 1.6; }
+.de-report-items { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.de-report-items strong { color: var(--text); font-size: 13px; }
+.de-report-items p { color: var(--text-secondary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.de-work-question { padding-top: 10px; border-top: 1px solid var(--border); color: var(--text); font-size: 13px; font-weight: 500; }
 .de-schedule-channels { min-width: 0; margin: 0; padding: 0; border: 0; }
 .de-schedule-channels legend { margin-bottom: 8px; padding: 0; color: var(--text-secondary); font-size: 13px; }
 .de-schedule-page { width: min(760px, 100%); margin: 0 auto; }

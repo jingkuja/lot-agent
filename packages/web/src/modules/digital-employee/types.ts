@@ -644,6 +644,39 @@ export interface ConversationWork {
   runs: WorkRun[];
 }
 
+export type ScheduleTemplate = "follow_up_prep" | "weekly_review";
+
+export type ScheduleTiming =
+  | { kind: "once"; at: string }
+  | { kind: "daily"; hour: number; minute: number }
+  | { kind: "weekly"; weekday: number; hour: number; minute: number };
+
+export interface ScheduleInput {
+  template: ScheduleTemplate;
+  timing: ScheduleTiming;
+  timezone: string;
+  enabled: boolean;
+}
+
+export interface EmployeeSchedule extends ScheduleInput {
+  id: string;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  version: number;
+}
+
+export interface ScheduleRun {
+  id: string;
+  scheduleId: string | null;
+  template: ScheduleTemplate;
+  scheduledFor: string;
+  status: string;
+  reason: string | null;
+  report: { summary: string; items: Array<{ title: string; body: string }>; question: string | null } | null;
+  acknowledgedAt: string | null;
+  finishedAt: string | null;
+}
+
 export type WorkTone = "warm" | "professional" | "concise" | "lively";
 export type WorkChannel = "wechat" | "wecom" | "phone" | "email" | "visit" | "moments" | "wechat_official" | "channels" | "douyin_kuaishou" | "xiaohongshu";
 
@@ -681,7 +714,7 @@ export interface ProposalResult {
 
 export interface TodayItem {
   id: string;
-  kind: "proposal" | "opportunity" | "recommendation" | "follow_up" | "result";
+  kind: "proposal" | "opportunity" | "recommendation" | "follow_up" | "result" | "report";
   subject: { type: "customer" | "segment" | "campaign" | "asset"; id: string; label: string } | null;
   title: string;
   reason: string;
@@ -693,6 +726,7 @@ export interface TodayItem {
   opportunity?: OpportunityItem;
   recommendation?: CampaignRecommendation;
   deployment?: { id: string; assetId: string; title: string; platform: string; customPlatform: string | null; deployedAt: string | null };
+  scheduleRun?: ScheduleRun;
 }
 
 export interface EmployeeBrief {

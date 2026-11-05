@@ -1,7 +1,7 @@
 import { request, type UploadedAttachment } from "../../api/client.js";
 import type { EmployeeFocus } from "./focus.js";
 import type {
-  ConversationWork, CustomerWork, EmployeeSettings, ProposalResult, TodayResponse, TodaySummary,
+  ConversationWork, CustomerWork, EmployeeSchedule, EmployeeSettings, ProposalResult, ScheduleInput, ScheduleRun, TodayResponse, TodaySummary,
 } from "./types.js";
 import type {
   CustomerObservation,
@@ -47,6 +47,21 @@ export const employeeApi = {
     request<EmployeeSettings>("/digital-employee/settings", { method: "PUT", body: JSON.stringify(input) }),
 
   getToday: () => request<TodayResponse>("/digital-employee/today"),
+
+  listSchedules: () => request<{ schedules: EmployeeSchedule[]; runs: ScheduleRun[] }>("/digital-employee/schedules"),
+
+  createSchedule: (input: ScheduleInput) =>
+    request<EmployeeSchedule>("/digital-employee/schedules", { method: "POST", body: JSON.stringify(input) }),
+
+  updateSchedule: (id: string, input: ScheduleInput & { version: number }) =>
+    request<EmployeeSchedule>(`/digital-employee/schedules/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) }),
+
+  deleteSchedule: (id: string) => request<{ ok: boolean }>(`/digital-employee/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  getScheduleRun: (id: string) => request<ScheduleRun>(`/digital-employee/schedule-runs/${encodeURIComponent(id)}`),
+
+  acknowledgeScheduleRun: (id: string) =>
+    request<{ ok: boolean }>(`/digital-employee/schedule-runs/${encodeURIComponent(id)}/acknowledge`, { method: "POST" }),
 
   getConversationWork: (id: string) => request<ConversationWork>(`/digital-employee/work-log/conversations/${encodeURIComponent(id)}`),
 

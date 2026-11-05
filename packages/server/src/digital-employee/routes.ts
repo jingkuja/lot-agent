@@ -13,6 +13,7 @@ import {
   parseArchiveProfile,
   parseEntityId,
 } from "./validators.js";
+import { parseScheduleInput, parseScheduleVersion } from "./schedule-validators.js";
 import { parsePreferredChannels, parseWorkTone } from "./work-preferences.js";
 import {
   parseMarketingBrandAssets,
@@ -87,6 +88,44 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.get("/work-log/conversations/:id", async (c) => {
     try {
       return c.json(await service.workLog.conversation(c.get("userId"), parseEntityId(c.req.param("id"), "conversationId")));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/schedules", async (c) => {
+    try { return c.json(await service.schedules.list(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/schedules", async (c) => {
+    try { return c.json(await service.schedules.create(c.get("userId"), parseScheduleInput(await body(c))), 201); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.put("/schedules/:id", async (c) => {
+    try {
+      const payload = await body(c);
+      return c.json(await service.schedules.update(c.get("userId"), parseEntityId(c.req.param("id"), "scheduleId"), {
+        ...parseScheduleInput(payload), version: parseScheduleVersion(payload.version),
+      }));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.delete("/schedules/:id", async (c) => {
+    try {
+      await service.schedules.remove(c.get("userId"), parseEntityId(c.req.param("id"), "scheduleId"));
+      return c.json({ ok: true });
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/schedule-runs/:id", async (c) => {
+    try { return c.json(await service.schedules.getRun(c.get("userId"), parseEntityId(c.req.param("id"), "runId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/schedule-runs/:id/acknowledge", async (c) => {
+    try {
+      await service.schedules.acknowledge(c.get("userId"), parseEntityId(c.req.param("id"), "runId"));
+      return c.json({ ok: true });
     } catch (error) { return respondError(c, error); }
   });
 

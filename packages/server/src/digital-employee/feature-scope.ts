@@ -32,7 +32,12 @@ export function digitalEmployeeDailyScanEnabled(): boolean {
   return process.env.DIGITAL_EMPLOYEE_DAILY_SCAN === "1";
 }
 
+/** Separate from the daily scan: scheduled work spends the owner's model budget and the scan does not. */
+export function digitalEmployeeSchedulesEnabled(): boolean {
+  return process.env.DIGITAL_EMPLOYEE_SCHEDULES === "1";
+}
+
 /** What the signed-out product config tells the web shell. */
 export function digitalEmployeeProductFlags() {
-  return { digitalEmployeeDailyScan: digitalEmployeeDailyScanEnabled() };
+  return { digitalEmployeeDailyScan: digitalEmployeeDailyScanEnabled(), digitalEmployeeSchedules: digitalEmployeeSchedulesEnabled() };
 }

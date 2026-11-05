@@ -50,6 +50,14 @@ function fixtures() {
         ],
       }],
     },
+    schedules: [{ id: "s1", template: "weekly_review", timing: { kind: "weekly", weekday: 1, hour: 9, minute: 0 }, timezone: "Asia/Shanghai", enabled: true,
+      nextRunAt: NOW, lastRunAt: null, version: 1 }],
+    reports: [],
+    runs: [
+      { id: "r1", scheduleId: "s1", template: "follow_up_prep", scheduledFor: NOW, status: "succeeded", reason: null, acknowledgedAt: null, finishedAt: NOW,
+        report: { summary: "今天 1 位客户要跟进", items: [{ title: "李静", body: "先问门槛" }], question: "李静这周还在考虑吗？" } },
+      { id: "r2", scheduleId: "s1", template: "weekly_review", scheduledFor: NOW, status: "skipped", reason: "quota", acknowledgedAt: null, finishedAt: NOW, report: null },
+    ],
     proposals: new Map([
       ["d1", {
         id: "d1", kind: "follow_up_action", confirmable: true, conversationId: "c1",
@@ -132,15 +140,30 @@ const overview = {
   recentProfiles: [profile],
 };
 
-function api(state, unexpected, dailyScan = false) {
+function api(state, unexpected, dailyScan = false, schedules = false) {
   return async (route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
     if (!path.startsWith("/api/")) return route.continue();
     const json = (data, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(data) });
     const de = path.replace("/api/digital-employee", "");
     if (method !== "GET") state.writes.push({ path, body: request.postData() });
-    if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeDailyScan: dailyScan });
+    if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeDailyScan: dailyScan, digitalEmployeeSchedules: schedules });
     if (de.startsWith("/work-log/conversations/")) return json({ ...state.work, id: de.split("/").at(-1) });
+    if (de === "/schedules" && method === "GET") return json({ schedules: state.schedules, runs: state.runs });
+    if (de === "/schedules" && method === "POST") {
+      const created = { id: `s${state.schedules.length + 1}`, ...JSON.parse(request.postData()), nextRunAt: NOW, lastRunAt: null, version: 1 };
+      state.schedules.push(created);
+      return json(created, 201);
+    }
+    if (de.startsWith("/schedules/") && method === "DELETE") {
+      state.schedules = state.schedules.filter((item) => item.id !== de.slice("/schedules/".length));
+      return json({ ok: true });
+    }
+    if (de === "/schedule-runs/r1") return json(state.runs[0]);
+    if (de === "/schedule-runs/r1/acknowledge") {
+      state.reports = [];
+      return json({ ok: true });
+    }
     if (path === "/api/agents") return json([
       { id: "general", name: "通用助手", description: "通用", type: "general", installed: true, sortOrder: 0 },
       { id: "digital_employee", name: "数字员工", description: "独立模块", type: "digital_employee", installed: true, sortOrder: 1 },
@@ -203,6 +226,7 @@ function api(state, unexpected, dailyScan = false) {
         })),
         ...state.followUps.map((item) => work("follow_up", item)),
         ...state.results.map((item) => work("result", item)),
+        ...state.reports,
         ...state.feedback.map((item) => ({
           id: `result:${item.id}`, kind: "result", subject: { type: "asset", id: item.assetId, label: item.title }, title: item.title, reason: "", evidence: [],
           priority: "normal", dueAt: item.deployedAt, source: { type: "deployment", id: item.id }, deployment: item,
@@ -314,7 +338,7 @@ try {
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true, channel: "chrome" });
 
-  async function open(path, { dailyScan = false, language = "zh", width = 1440, state = fixtures(), desktop = false } = {}) {
+  async function open(path, { dailyScan = false, schedules = false, language = "zh", width = 1440, state = fixtures(), desktop = false } = {}) {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     await context.addInitScript((value) => { try { localStorage.setItem("lot:language", value); } catch { /* opaque origin */ } }, language);
     if (desktop) await context.addInitScript(() => {
@@ -325,7 +349,7 @@ try {
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     page.on("pageerror", (error) => errors.push(`${path}: ${error.message}`));
-    await page.route("**/api/**", api(state, unexpected, dailyScan));
+    await page.route("**/api/**", api(state, unexpected, dailyScan, schedules));
     await page.goto(`${origin}${path}`);
     return { page, state, close: () => context.close() };
   }
@@ -591,15 +615,63 @@ try {
     await close();
   }
 
+  // Scheduled work stays hidden until its own switch is on, whatever the daily scan does.
+  {
+    const { page, close } = await open("/digital-employee/schedule", { dailyScan: true });
+    await page.getByText("工作偏好").waitFor();
+    assert.equal(await page.getByRole("region", { name: "定时工作" }).count(), 0);
+    await close();
+    const log = await open("/digital-employee/work-log");
+    await log.page.getByRole("heading", { name: "工作记录" }).waitFor();
+    assert.equal(await log.page.getByRole("button", { name: "定时工作" }).count(), 0);
+    await log.close();
+  }
+
+  // An owner adds and removes a schedule; a report waits on the today page; every run stays explained.
+  {
+    const { page, state, close } = await open("/digital-employee/schedule", { schedules: true });
+    const section = page.getByRole("region", { name: "定时工作" });
+    await section.getByText("每周一 09:00").waitFor();
+    await section.getByLabel("工作内容").selectOption("follow_up_prep");
+    await section.getByLabel("重复").selectOption("daily");
+    await section.getByRole("button", { name: "添加" }).click();
+    await section.getByText("每天 08:30").waitFor();
+    await section.getByRole("button", { name: "删除" }).first().click();
+    await section.getByText("每周一 09:00").waitFor({ state: "detached" });
+    assert.equal(state.schedules.length, 1);
+    assert.deepEqual(state.schedules[0].timing, { kind: "daily", hour: 8, minute: 30 });
+    await close();
+
+    const reportState = fixtures();
+    const run = reportState.runs[0];
+    reportState.reports = [{
+      id: "report:r1", kind: "report", subject: null, title: run.template, reason: run.report.summary, evidence: [], priority: "high", dueAt: NOW,
+      source: { type: "schedule_run", id: "r1" }, scheduleRun: run,
+    }];
+    const today = await open("/digital-employee/today", { schedules: true, state: reportState });
+    const reports = today.page.getByRole("region", { name: "定时工作" });
+    await reports.getByText("李静这周还在考虑吗？").waitFor();
+    await reports.getByRole("button", { name: "查看" }).click();
+    await today.page.waitForURL("**/digital-employee/work-log/scheduled/r1");
+    await today.page.getByText("先问门槛").waitFor();
+    await today.page.getByRole("button", { name: "返回" }).click();
+    await today.page.getByText("已跳过 · 额度不足").waitFor();
+    await today.page.goto(`${origin}/digital-employee/today`);
+    await reports.getByRole("button", { name: "知道了" }).click();
+    await reports.waitFor({ state: "detached" });
+    await today.close();
+  }
+
   // Two languages, two themes, phone width.
   for (const [view, name] of [["today", "today"], ["customers", "customers"], [`customers/${PROFILE}`, "detail"], ["marketing", "marketing"],
-    ["materials", "materials"], ["work-log", "work-log"], ["schedule", "schedule"], ["chat", "chat"]]) {
+    ["materials", "materials"], ["work-log", "work-log"], ["work-log/c1", "work-detail"], ["work-log/scheduled", "work-scheduled"],
+    ["work-log/scheduled/r1", "scheduled-run"], ["schedule", "schedule"], ["chat", "chat"]]) {
     const path = `/digital-employee/${view}`;
-    const desktop = await open(path);
+    const desktop = await open(path, { schedules: true });
     await desktop.page.locator(".de-employee-card").waitFor();
     await desktop.close();
 
-    const { page, close } = await open(path, { language: "en", width: 390 });
+    const { page, close } = await open(path, { language: "en", width: 390, schedules: true });
     await page.locator(".de-employee-card").waitFor({ state: "attached" });
     await page.waitForLoadState("networkidle");
     assert(await noHorizontalScroll(page), `${name} scrolls sideways at 390`);
@@ -612,7 +684,7 @@ try {
       }
       return found;
     });
-    const fixtureText = /李静|王总|张姐|明天跟进|确认门槛|新客户|想了解价格|代销|云启|华东|集中问价|嫌门槛高|了解顾虑|问了代销|回访|双十一|边缘算力|咨询|获客|上海|潜客|共 1 位|朋友圈|小灵|的内容|好的/;
+    const fixtureText = /已记录。|先问门槛|今天 1 位客户|李静|王总|张姐|明天跟进|确认门槛|新客户|想了解价格|代销|云启|华东|集中问价|嫌门槛高|了解顾虑|问了代销|回访|双十一|边缘算力|咨询|获客|上海|潜客|共 1 位|朋友圈|小灵|的内容|好的/;
     assert.deepEqual(leftovers.filter((text) => !fixtureText.test(text)), [], `${name}: untranslated copy`);
     await snap(page, `${name}-en-390-light.png`);
     await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });

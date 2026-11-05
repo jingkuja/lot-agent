@@ -4,9 +4,10 @@ import type { BriefService } from "./brief-service.js";
 import type { OpportunityListItem } from "./opportunity-types.js";
 import type { OpportunityService } from "./opportunity-service.js";
 import type { PendingProposal, ProposalService } from "./proposal-service.js";
+import type { ScheduleRun, ScheduleService } from "./schedule-service.js";
 import type { EmployeeSettingsService } from "./settings-service.js";
 
-export type TodayItemKind = "proposal" | "opportunity" | "recommendation" | "follow_up" | "result";
+export type TodayItemKind = "proposal" | "opportunity" | "recommendation" | "follow_up" | "result" | "report";
 type Recommendation = Awaited<ReturnType<CustomerAcquisitionService["listRecommendations"]>>["items"][number];
 
 /** One unit of work, whichever table it comes from. Interface copy is built from these fields. */
@@ -24,6 +25,7 @@ export interface TodayItem {
   opportunity?: OpportunityListItem;
   recommendation?: Recommendation;
   deployment?: DeploymentAwaitingFeedback;
+  scheduleRun?: ScheduleRun;
 }
 
 export interface RunningWork {
@@ -48,6 +50,7 @@ export class TodayService {
     private readonly acquisition: Pick<CustomerAcquisitionService, "listRecommendations" | "listDeploymentsAwaitingFeedback">,
     private readonly proposals: Pick<ProposalService, "listPending">,
     private readonly briefs: Pick<BriefService, "latest">,
+    private readonly schedules: Pick<ScheduleService, "pendingReports">,
   ) {}
 
   async get(userId: string) {
@@ -55,13 +58,14 @@ export class TodayService {
     const today = await this.opportunities.list(userId, { view: "today" });
     const pending = await this.opportunities.list(userId, { view: "pending" });
     const snoozed = await this.opportunities.list(userId, { view: "snoozed" });
-    const [settings, recommendations, deployments, proposals, running, brief] = await Promise.all([
+    const [settings, recommendations, deployments, proposals, running, brief, reports] = await Promise.all([
       this.settings.get(userId),
       this.acquisition.listRecommendations(userId, "pending"),
       this.acquisition.listDeploymentsAwaitingFeedback(userId),
       this.proposals.listPending(userId),
       this.runningWork(userId),
       this.briefs.latest(userId),
+      this.schedules.pendingReports(userId),
     ]);
     const items = [
       ...proposals.map(proposalItem),
@@ -69,6 +73,7 @@ export class TodayService {
       ...recommendations.items.slice(0, RECOMMENDATION_LIMIT).map(recommendationItem),
       ...today.items.map((item) => workItem(item.status === "awaiting_result" ? "result" : "follow_up", item)),
       ...deployments.map(deploymentItem),
+      ...reports.map(reportItem),
     ].sort(byPriority);
     return {
       employee: { name: settings.employeeName },
@@ -91,7 +96,7 @@ export class TodayService {
     const { rows } = await this.pool.query(
       `SELECT id, type, status, progress, stage, created_at FROM tasks
        WHERE user_id=$1 AND status IN ('pending','running')
-         AND (type='opportunity.discover' OR input->>'featureScope'='customer-acquisition')
+         AND (type IN ('opportunity.discover','employee.schedule.run') OR input->>'featureScope'='customer-acquisition')
        ORDER BY created_at DESC LIMIT $2`,
       [userId, RUNNING_LIMIT]
     );
@@ -174,6 +179,23 @@ function recommendationItem(item: Recommendation): TodayItem {
     dueAt: null,
     source: { type: "recommendation", id: item.id },
     recommendation: item,
+  };
+}
+
+/** A question outranks a finished report: nothing can continue until the owner answers it. */
+function reportItem(run: ScheduleRun): TodayItem {
+  const report = run.report!;
+  return {
+    id: `report:${run.id}`,
+    kind: "report",
+    subject: null,
+    title: run.template,
+    reason: report.summary,
+    evidence: [],
+    priority: report.question ? "high" : "normal",
+    dueAt: run.finishedAt,
+    source: { type: "schedule_run", id: run.id },
+    scheduleRun: run,
   };
 }
 

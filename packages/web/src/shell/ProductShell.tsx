@@ -4,7 +4,7 @@ import { Workspace } from "../pages/Workspace.js";
 import { DIGITAL_EMPLOYEE_AGENT_ID } from "../modules/digital-employee/conversation-scope.js";
 import { EmployeeWorkspace } from "../modules/digital-employee/EmployeeWorkspace.js";
 import { TODAY_PATH, normalizeEmployeePath } from "../modules/digital-employee/routes.js";
-import { useEmployeeDailyScan } from "../modules/digital-employee/useEmployeeDailyScan.js";
+import { useEmployeeFlags } from "../modules/digital-employee/useEmployeeFlags.js";
 import { useEmployeeSummary } from "../modules/digital-employee/useEmployeeSummary.js";
 import { useModels } from "../hooks/useModels.js";
 import { LlmModelRequiredModal } from "../components/LlmModelRequiredModal.js";
@@ -31,7 +31,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
   const [pathname, setPathname] = useState(currentPath);
   const { models: modelCatalog, loading: modelsLoading, reload: reloadModels } = useModels();
   const [llmNoticeTitle, setLlmNoticeTitle] = useState<string | null>(null);
-  const dailyScan = useEmployeeDailyScan();
+  const employeeFlags = useEmployeeFlags();
   const employeeSummary = useEmployeeSummary();
   const isDigitalEmployee = pathname.startsWith("/digital-employee");
 
@@ -81,7 +81,8 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           modelCatalog={modelCatalog}
           pathname={pathname}
           active={isDigitalEmployee}
-          dailyScan={dailyScan}
+          dailyScan={employeeFlags.dailyScan}
+          schedules={employeeFlags.schedules}
           pendingCount={employeeSummary.pending}
           onPendingChange={employeeSummary.setPending}
           onLogout={onLogout}

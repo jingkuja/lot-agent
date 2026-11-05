@@ -275,6 +275,7 @@ async function main() {
   registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: resolveOwnerLlm }));
   registerDigitalEmployeeWorkerJobs({
     queue, db, adviceLlm: { resolveLlm: resolveOwnerLlm, recordUsage: (input) => meter.record(input), english: internationalModelsEnabled() },
+    checkQuota: (userId, estimatedCost) => meter.checkQuota(userId, estimatedCost),
   });
 
   queue.process("image.generate", async (job, ctl) => {

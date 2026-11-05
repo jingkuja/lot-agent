@@ -17,6 +17,7 @@ import { CHAT_PATH, employeePath, parseEmployeePath, type EmployeeView } from ".
 import { SchedulePage } from "./SchedulePage.js";
 import { TodayPage } from "./today/TodayPage.js";
 import type { CampaignRecommendation, OpportunityItem, TodayResponse } from "./types.js";
+import { ScheduledRunPage } from "./schedule/ScheduledRunPage.js";
 import { WorkDetailPage } from "./work-log/WorkDetailPage.js";
 import { WorkLogPage } from "./WorkLogPage.js";
 import "./employee.css";
@@ -31,6 +32,7 @@ interface EmployeeWorkspaceProps {
   /** False while another product area is on screen; the chat stays mounted behind it. */
   active: boolean;
   dailyScan: boolean;
+  schedules: boolean;
   pendingCount: number;
   onPendingChange: (count: number) => void;
   onLogout: () => void;
@@ -45,7 +47,7 @@ const keepConversation = (conversation: Conversation | undefined) =>
 
 /** One employee: its card, five entries and a conversation that stays mounted under every page. */
 export function EmployeeWorkspace({
-  user, modelCatalog, pathname, active, dailyScan, pendingCount, onPendingChange, onLogout, navigate, replacePath, onNavigateAssistant,
+  user, modelCatalog, pathname, active, dailyScan, schedules, pendingCount, onPendingChange, onLogout, navigate, replacePath, onNavigateAssistant,
 }: EmployeeWorkspaceProps) {
   const { t } = useI18n();
   const location = useMemo(() => parseEmployeePath(pathname), [pathname]);
@@ -188,9 +190,12 @@ export function EmployeeWorkspace({
           onOpenLink={navigate}
         />;
       }
+      if (location.scheduledRunId) return <ScheduledRunPage runId={location.scheduledRunId} onBack={() => openView("work-log", "scheduled")} />;
       return <WorkLogPage
         key={tab}
         initialTab={tab}
+        schedules={schedules}
+        onOpenScheduledRun={(id) => navigate(`${employeePath("work-log", "scheduled")}/${encodeURIComponent(id)}`)}
         conversations={digitalEmployeeConversations(context.conversations)}
         activeConversationId={context.activeConversationId}
         hasMore={context.hasMore}
@@ -202,7 +207,7 @@ export function EmployeeWorkspace({
         onDraftOutreach={(item) => draftOutreach(context, item)}
       />;
     }
-    if (view === "schedule") return <SchedulePage dailyScan={dailyScan} onNameChange={setName} />;
+    if (view === "schedule") return <SchedulePage dailyScan={dailyScan} schedules={schedules} onNameChange={setName} />;
     return <TodayPage
       data={today}
       error={todayError}
@@ -215,6 +220,7 @@ export function EmployeeWorkspace({
       onOpenLink={navigate}
       onDraftOutreach={(item) => draftOutreach(context, item)}
       onAssign={(prompt) => assign(context, prompt)}
+      onOpenScheduledRun={(id) => navigate(`${employeePath("work-log", "scheduled")}/${encodeURIComponent(id)}`)}
       onRefineRecommendation={(item: CampaignRecommendation) => openCreation(seedFromRecommendation(item))}
     />;
   };

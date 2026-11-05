@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../../i18n/index.js";
 import { employeeApi } from "./api.js";
+import { ScheduledWorkSection } from "./schedule/ScheduledWorkSection.js";
 import type { DigitalEmployeeOverview, EmployeeSettings, OpportunitySettings, WorkChannel, WorkTone } from "./types.js";
 
 const MAX_NAME = 20;
@@ -25,7 +26,7 @@ const CHANNELS: Array<{ value: WorkChannel; label: string }> = [
 ];
 
 /** The employee's name and everything it does on its own. Only the rule scan is free of model costs. */
-export function SchedulePage({ dailyScan, onNameChange }: { dailyScan: boolean; onNameChange: (name: string) => void }) {
+export function SchedulePage({ dailyScan, schedules, onNameChange }: { dailyScan: boolean; schedules: boolean; onNameChange: (name: string) => void }) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<EmployeeSettings | null>(null);
   const [name, setName] = useState("");
@@ -176,6 +177,7 @@ export function SchedulePage({ dailyScan, onNameChange }: { dailyScan: boolean; 
           <small>{cohort.enabled ? t("每晚 23:00 自动更新，产生模型费用") : t("自动更新已关闭")}</small>
         </div>}
       </section>
+      {schedules && <ScheduledWorkSection />}
       {dailyScan && <section className="de-schedule-section">
         <h2>{t("提醒")}</h2>
         <p>{t("简报准备好时告诉你。站内一直有提醒。")}</p>

@@ -44,5 +44,6 @@ export function runningLabel(type: string): string {
   if (type === "image.generate") return "生成海报";
   if (type === "video.generate") return "生成视频";
   if (type === "opportunity.discover") return "看一遍客户";
+  if (type === "employee.schedule.run") return "准备定时工作";
   return "处理任务";
 }

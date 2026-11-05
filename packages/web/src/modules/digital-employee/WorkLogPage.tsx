@@ -7,20 +7,25 @@ import {
   type FilterValues, type OpportunityDialog,
 } from "./opportunities/OpportunityCard.js";
 import { OpportunityDialogs } from "./opportunities/OpportunityDialogs.js";
-import type { OpportunityItem, OpportunityListResponse, OpportunityView } from "./types.js";
+import { TEMPLATE_LABELS } from "./schedule/labels.js";
+import { runSummary } from "./schedule/ScheduledRunPage.js";
+import type { OpportunityItem, OpportunityListResponse, OpportunityView, ScheduleRun } from "./types.js";
 
-type WorkTab = "conversations" | Extract<OpportunityView, "in_progress" | "completed" | "snoozed">;
+type WorkTab = "conversations" | "scheduled" | Extract<OpportunityView, "in_progress" | "completed" | "snoozed">;
 
 const TABS: Array<{ id: WorkTab; label: string }> = [
   { id: "conversations", label: "对话" },
   { id: "in_progress", label: "跟进中" },
   { id: "completed", label: "已完成" },
   { id: "snoozed", label: "稍后处理" },
+  { id: "scheduled", label: "定时工作" },
 ];
 
 interface WorkLogPageProps {
   /** The tab a link asked for. */
   initialTab: string | null;
+  schedules: boolean;
+  onOpenScheduledRun: (id: string) => void;
   conversations: Conversation[];
   activeConversationId: string | null;
   hasMore: boolean;
@@ -36,16 +41,42 @@ interface WorkLogPageProps {
 /** Everything the employee and the owner did together, not split by module. */
 export function WorkLogPage(props: WorkLogPageProps) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<WorkTab>(TABS.find((item) => item.id === props.initialTab)?.id ?? "conversations");
+  const tabs = TABS.filter((item) => item.id !== "scheduled" || props.schedules);
+  const [tab, setTab] = useState<WorkTab>(tabs.find((item) => item.id === props.initialTab)?.id ?? "conversations");
   return <div className="de-page de-work-log">
     <header className="de-employee-page-head"><h1>{t("工作记录")}</h1></header>
     <nav className="de-employee-tabs" aria-label={t("工作记录")}>
-      {TABS.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{t(item.label)}</button>)}
+      {tabs.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{t(item.label)}</button>)}
     </nav>
-    {tab === "conversations"
-      ? <ConversationList {...props} />
-      : <FollowUpList view={tab} onOpenProfile={props.onOpenProfile} onDraftOutreach={props.onDraftOutreach} />}
+    {tab === "conversations" && <ConversationList {...props} />}
+    {tab === "scheduled" && <ScheduledRuns onOpen={props.onOpenScheduledRun} />}
+    {tab !== "conversations" && tab !== "scheduled" && <FollowUpList view={tab} onOpenProfile={props.onOpenProfile} onDraftOutreach={props.onDraftOutreach} />}
   </div>;
+}
+
+/** Skipped and missed runs stay listed: they answer why a report did not appear. */
+function ScheduledRuns({ onOpen }: { onOpen: (id: string) => void }) {
+  const { t, locale } = useI18n();
+  const [runs, setRuns] = useState<ScheduleRun[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void employeeApi.listSchedules()
+      .then((result) => { if (live) setRuns(result.runs); })
+      .catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : "读取失败"); });
+    return () => { live = false; };
+  }, []);
+  if (error) return <div className="de-inline-error" role="alert"><span>{t(error)}</span></div>;
+  if (!runs) return <div className="de-state">{t("加载中…")}</div>;
+  if (runs.length === 0) return <div className="de-state de-empty-state"><strong>{t("还没有定时工作记录")}</strong></div>;
+  return <section className="de-work-log-list">
+    {runs.map((run) => <article key={run.id}>
+      <button type="button" onClick={() => onOpen(run.id)}>
+        <strong>{t(TEMPLATE_LABELS[run.template])} · {runSummary(run, t)}</strong>
+        <small>{formatTime(run.scheduledFor, locale)}</small>
+      </button>
+    </article>)}
+  </section>;
 }
 
 function ConversationList({
