@@ -53,7 +53,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
           total: result.total,
           hasProfiles: result.hasProfiles,
           items: result.items.slice(0, 20).map(queueItem),
-          managementUrl: "/digital-employee/acquisition",
+          managementUrl: "/digital-employee/today",
         };
       });
     },
@@ -82,7 +82,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
         return {
           total: result.total,
           items: result.items.slice(0, 20).map(queueItem),
-          managementUrl: "/digital-employee/acquisition",
+          managementUrl: "/digital-employee/today",
         };
       });
     },
@@ -244,7 +244,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
         return {
           outreach: draft,
           message: "Personalized script generated. Call mark_individual_outreach_used only after the user explicitly says it was used, not merely copied or rewritten.",
-          managementUrl: "/digital-employee/acquisition",
+          managementUrl: "/digital-employee/today",
         };
       });
     },
@@ -269,7 +269,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
           parseEntityId(value.outreachId, "outreachId"),
           optionalString(value.instruction, 2_000, "instruction") ?? ""
         );
-        return { outreach: draft, managementUrl: "/digital-employee/acquisition" };
+        return { outreach: draft, managementUrl: "/digital-employee/today" };
       });
     },
   };
@@ -286,7 +286,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
       return run(context, "标记话术使用失败", async (userId) => ({
         outreach: await opportunities.markOutreachUsed(userId, parseEntityId(object(input).outreachId, "outreachId")),
         message: "Marked as actually used. Generating a script alone does not mean the customer was contacted.",
-        managementUrl: "/digital-employee/acquisition",
+        managementUrl: "/digital-employee/today",
       }));
     },
   };
@@ -329,7 +329,7 @@ function queueItem(item: {
     title: item.title, objective: item.objective, followUpMethod: item.followUpMethod,
     scheduledAt: item.scheduledAt, priority: item.priority, reason: item.reason, readiness: item.readiness,
     status: item.status, overdue: item.overdue, productName: item.productName,
-    detailUrl: "/digital-employee/acquisition",
+    detailUrl: "/digital-employee/today",
   };
 }
 

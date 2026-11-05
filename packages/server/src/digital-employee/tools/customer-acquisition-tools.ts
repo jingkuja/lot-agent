@@ -21,7 +21,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     async execute(_input, context) {
       return run(context, "读取客群洞察失败", async (userId) => ({
         ...await service.getCohortInsights(userId),
-        managementUrl: "/digital-employee/copy",
+        managementUrl: "/digital-employee/marketing",
       }));
     },
   };
@@ -40,7 +40,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
         const items = (await service.listSegments(userId)).filter((item) =>
           !query || `${item.name} ${item.description}`.toLocaleLowerCase("zh-CN").includes(query)
         );
-        return { items: items.slice(0, 20), total: items.length, managementUrl: "/digital-employee/copy" };
+        return { items: items.slice(0, 20), total: items.length, managementUrl: "/digital-employee/marketing" };
       });
     },
   };
@@ -72,7 +72,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
         return {
           asset,
           message: `已生成并保存群体文案「${asset.title}」${reviewNotice(asset.reviewFlags)}`,
-          managementUrl: "/digital-employee/copy",
+          managementUrl: "/digital-employee/marketing",
         };
       });
     },
@@ -99,7 +99,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
           page: typeof value.page === "number" ? String(value.page) : "1",
           limit: "12",
         }));
-        return { ...result, managementUrl: "/digital-employee/copy" };
+        return { ...result, managementUrl: "/digital-employee/marketing" };
       });
     },
   };
@@ -112,7 +112,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     async execute(input, context) {
       return run(context, "读取资产投放状态失败", async (userId) => {
         const asset = await service.getAsset(userId, parseEntityId(object(input).assetId, "assetId"));
-        return { asset, managementUrl: "/digital-employee/copy" };
+        return { asset, managementUrl: "/digital-employee/marketing" };
       });
     },
   };
@@ -124,7 +124,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     async execute(_input, context) {
       return run(context, "生成每日推荐失败", async (userId) => ({
         ...await service.refreshRecommendations(userId, context.signal),
-        managementUrl: "/digital-employee/copy",
+        managementUrl: "/digital-employee/marketing",
       }));
     },
   };
@@ -137,7 +137,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     async execute(input, context) {
       return run(context, "查询每日推荐失败", async (userId) => ({
         ...await service.listRecommendations(userId, parseRecommendationFilter(object(input).status)),
-        managementUrl: "/digital-employee/copy",
+        managementUrl: "/digital-employee/marketing",
       }));
     },
   };
@@ -153,7 +153,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
           parseEntityId(object(input).recommendationId, "recommendationId"),
           status
         ),
-        managementUrl: "/digital-employee/copy",
+        managementUrl: "/digital-employee/marketing",
       }));
     },
   });
@@ -169,7 +169,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     async execute(input, context) {
       return run(context, "查询营销活动失败", async (userId) => ({
         ...await service.listCampaigns(userId, { status: object(input ?? {}).status as "draft" | undefined, page: 1, limit: 20 }),
-        managementUrl: "/digital-employee/copy",
+        managementUrl: "/digital-employee/marketing",
       }));
     },
   };
@@ -182,7 +182,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     async execute(input, context) {
       return run(context, "读取营销活动失败", async (userId) => ({
         campaign: await service.getCampaign(userId, parseEntityId(object(input).campaignId, "campaignId")),
-        managementUrl: "/digital-employee/copy",
+        managementUrl: "/digital-employee/marketing",
       }));
     },
   };
@@ -355,7 +355,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
         return {
           asset,
           message: assetType === "poster" ? "已提交海报生成任务，完成后会进入营销资产库。" : "已提交视频生成任务，完成后会进入营销资产库。",
-          managementUrl: "/digital-employee/copy",
+          managementUrl: "/digital-employee/marketing",
         };
       });
     },
@@ -382,7 +382,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
           asObjectString(value.instruction, "改写要求"),
           context.signal
         );
-        return { asset, message: reviewNotice(asset.reviewFlags) || undefined, managementUrl: "/digital-employee/copy" };
+        return { asset, message: reviewNotice(asset.reviewFlags) || undefined, managementUrl: "/digital-employee/marketing" };
       });
     },
   };
@@ -409,7 +409,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
           parseEntityId(value.assetId, "assetId"),
           parseDeployment(value)
         );
-        return { deployment, managementUrl: "/digital-employee/copy" };
+        return { deployment, managementUrl: "/digital-employee/marketing" };
       });
     },
   };

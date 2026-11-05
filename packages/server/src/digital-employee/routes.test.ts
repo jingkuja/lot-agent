@@ -20,29 +20,6 @@ describe("digital employee profile routes", () => {
     await expect(response.json()).resolves.toEqual(overview);
   });
 
-  it("refreshes the cohort with the LLM model selected by the user", async () => {
-    const cohort = { summary: "已更新", modelId: "deepseek-v4.1-flash" };
-    const service = { refreshCohortSummary: vi.fn(async () => cohort) };
-    const response = await app(service).request("/digital-employee/overview/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ modelId: "deepseek-v4.1-flash" }),
-    });
-    expect(response.status).toBe(200);
-    expect(service.refreshCohortSummary).toHaveBeenCalledWith("u1", "deepseek-v4.1-flash");
-    await expect(response.json()).resolves.toEqual(cohort);
-  });
-
-  it("requires a model when refreshing the cohort", async () => {
-    const service = { refreshCohortSummary: vi.fn() };
-    const response = await app(service).request("/digital-employee/overview/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    expect(response.status).toBe(400);
-    expect(service.refreshCohortSummary).not.toHaveBeenCalled();
-  });
 
   it("saves the default-off cohort automation switch for the authenticated user", async () => {
     const schedule = { enabled: true, version: 1, nextRunAt: "2026-08-18T15:00:00.000Z" };
@@ -184,17 +161,18 @@ describe("digital employee profile routes", () => {
     expect(decide).not.toHaveBeenCalled();
   });
 
-  it("generates a personal talk track for one customer item", async () => {
-    const generateTalkTrack = vi.fn(async () => ({ reply: "您好，想跟您确认一下合同反馈。", modelId: "m1" }));
-    const service = { opportunities: { generateTalkTrack } };
+  it("saves a talk track through the outreach path, so it reaches the library", async () => {
+    const generateOutreach = vi.fn(async () => ({ id: "d1", content: "您好，想跟您确认一下合同反馈。", modelId: "m1" }));
+    const service = { opportunities: { generateOutreach } };
     const response = await app(service).request("/digital-employee/opportunities/00000000-0000-0000-0000-000000000011/talk-track", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ intent: "follow_up", message: "生成微信跟进话术", history: [], modelId: "m1" }),
+      body: JSON.stringify({ intent: "follow_up", message: "生成微信跟进话术", history: [], modelId: "ignored" }),
     });
     expect(response.status).toBe(200);
-    expect(generateTalkTrack).toHaveBeenCalledWith("u1", "00000000-0000-0000-0000-000000000011", {
-      intent: "follow_up", message: "生成微信跟进话术", history: [], modelId: "m1",
+    expect(generateOutreach).toHaveBeenCalledWith("u1", {
+      itemId: "00000000-0000-0000-0000-000000000011", intent: "follow_up", message: "生成微信跟进话术", history: [],
     });
+    await expect(response.json()).resolves.toEqual({ reply: "您好，想跟您确认一下合同反馈。", modelId: "m1", outreachId: "d1" });
   });
 
   it("validates and saves daily opportunity discovery settings", async () => {

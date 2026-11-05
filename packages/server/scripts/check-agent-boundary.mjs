@@ -4,9 +4,8 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 /**
- * Keeps the digital employee a self-contained agent. Two rules, each with a shrinking
- * list: the platform names the agent only in listed files, and the module reaches the
- * platform only through listed files. Delete entries as later phases move code out.
+ * Keeps the digital employee a self-contained agent. The platform names the agent only in
+ * listed files, and the module reaches the platform only through listed files.
  */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const server = path.join(root, "packages/server/src");
@@ -25,15 +24,6 @@ const PLATFORM_FINAL = new Set([
   "server:knowledge/materials.ts",
   "web:components/BrandHeader.tsx",
   "web:shell/ProductShell.tsx",
-]);
-
-/** Removed by phase 2: 2.4 Workspace slots, 2.5 product route, 2.10 client move, 2.13 old shell. */
-const PLATFORM_LEGACY = new Set([
-  "server:routes/product.ts",
-  "web:api/client.ts",
-  "web:pages/Workspace.tsx",
-  "web:lib/product-agent-scope.ts",
-  "web:lib/agent-icons.tsx",
 ]);
 
 /** The module's view of the platform; anything else needs a port. */
@@ -84,7 +74,7 @@ function checkPlatformFile(label, text, specifiers) {
   const reaches = specifiers.some((specifier) => MODULE_SOURCE.test(specifier));
   if (!names && !reaches) return;
   used.add(label);
-  if (PLATFORM_FINAL.has(label) || PLATFORM_LEGACY.has(label)) return;
+  if (PLATFORM_FINAL.has(label)) return;
   errors.push(`${label}: platform code must not name digital_employee or import its module. Add an AgentExtension hook instead`);
 }
 
@@ -112,7 +102,7 @@ for (const [name, dir] of [["server", server], ["web", web]]) {
   }
 }
 
-for (const label of [...PLATFORM_LEGACY, ...MODULE_IMPORTS]) {
+for (const label of MODULE_IMPORTS) {
   if (!used.has(label)) errors.push(`${label}: no longer needed, remove it from the list`);
 }
 
@@ -120,5 +110,5 @@ if (errors.length) {
   console.error(errors.join("\n"));
   process.exitCode = 1;
 } else {
-  console.log(`Agent boundary passed; ${PLATFORM_LEGACY.size} legacy exceptions remain`);
+  console.log("Agent boundary passed");
 }

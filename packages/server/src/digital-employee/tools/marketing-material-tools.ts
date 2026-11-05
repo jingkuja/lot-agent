@@ -73,7 +73,7 @@ export function createMarketingMaterialTools(service: MarketingMaterialsService)
           }),
           value.includeBrand === false ? Promise.resolve(null) : service.getBrandAssets(userId),
         ]);
-        return { content: JSON.stringify({ ...products, brandAssets, managementUrl: "/digital-employee/marketing-materials/manage" }) };
+        return { content: JSON.stringify({ ...products, brandAssets, managementUrl: "/digital-employee/materials" }) };
       } catch (error) {
         return toolError("查询营销资料失败", error);
       }
@@ -87,7 +87,7 @@ export function createMarketingMaterialTools(service: MarketingMaterialsService)
     async execute(input, context) {
       try {
         const product = await service.createProduct(context.userId ?? "default", parseMarketingProduct(input));
-        return { content: `已新建产品资料「${product.name}」。\n[打开营销资料管理](/digital-employee/marketing-materials/manage)` };
+        return { content: `已新建产品资料「${product.name}」。\n[打开营销资料管理](/digital-employee/materials)` };
       } catch (error) {
         return toolError("新建产品资料失败", error);
       }
@@ -109,7 +109,7 @@ export function createMarketingMaterialTools(service: MarketingMaterialsService)
         const productId = parseEntityId(value.productId, "productId");
         const existing = await service.getProduct(userId, productId);
         const updated = await service.updateProduct(userId, productId, parseMarketingProductUpdate({ ...value, version: existing.version }));
-        return { content: `已更新产品资料「${updated.name}」。\n[打开营销资料管理](/digital-employee/marketing-materials/manage)` };
+        return { content: `已更新产品资料「${updated.name}」。\n[打开营销资料管理](/digital-employee/materials)` };
       } catch (error) {
         return toolError("更新产品资料失败", error);
       }
@@ -135,7 +135,7 @@ export function createMarketingMaterialTools(service: MarketingMaterialsService)
         const userId = context.userId ?? "default";
         const current = await service.getBrandAssets(userId);
         const saved = await service.saveBrandAssets(userId, parseMarketingBrandAssets({ ...object(input), ...(current ? { version: current.version } : {}) }));
-        return { content: `已更新品牌资料（版本 ${saved.version}）。\n[打开营销资料管理](/digital-employee/marketing-materials/manage)` };
+        return { content: `已更新品牌资料（版本 ${saved.version}）。\n[打开营销资料管理](/digital-employee/materials)` };
       } catch (error) {
         return toolError("更新品牌资料失败", error);
       }

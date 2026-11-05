@@ -33,6 +33,8 @@ import {
   type SegmentMetrics,
 } from "./acquisition-types.js";
 
+const MARKETING_URL = "/digital-employee/marketing";
+const SEGMENTS_URL = "/digital-employee/customers/segments";
 const CREATION_PROMPT_VERSION = "customer-acquisition-creative/v1";
 
 interface SegmentMemberRow {
@@ -589,17 +591,19 @@ export class CustomerAcquisitionService {
   }
 
   async commitCustomerSegment(userId: string, draftId: string) {
-    const draft = await this.drafts.get(userId, draftId, "customer_segment");
-    if (draft.status === "applied") {
-      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/copy" };
-    }
-    const segment = await this.createSegment(userId, draft.payload as unknown as SegmentInput);
-    await this.drafts.markApplied(userId, draftId, segment.id);
-    return {
-      alreadyApplied: false,
-      segment: { ...segment, latestSnapshot: segment.latestSnapshot ? { ...segment.latestSnapshot, memberPreview: undefined } : undefined },
-      managementUrl: "/digital-employee/copy",
-    };
+    return this.drafts.commit(userId, draftId, "customer_segment", {
+      applied: (draft) => ({ alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: MARKETING_URL }),
+      apply: async (draft) => {
+        const segment = await this.createSegment(userId, draft.payload as unknown as SegmentInput);
+        await this.drafts.markApplied(userId, draftId, segment.id);
+        return {
+          alreadyApplied: false,
+          entityId: segment.id,
+          segment: { ...segment, latestSnapshot: segment.latestSnapshot ? { ...segment.latestSnapshot, memberPreview: undefined } : undefined },
+          managementUrl: SEGMENTS_URL,
+        };
+      },
+    });
   }
 
   async evaluateSegmentProductFit(userId: string, input: { segmentId?: string; segmentSnapshotId?: string; productId: string }, signal?: AbortSignal) {
@@ -650,7 +654,7 @@ export class CustomerAcquisitionService {
       audience: safeAudience,
       product: { id: product.id, name: product.name, version: Number(product.version) },
       fit: { ...fit, reasoning: fit.reasoning ?? [], corePoints: fit.corePoints ?? [], suggestedChannels: fit.suggestedChannels ?? [], risks: fit.risks ?? [] },
-      managementUrl: "/digital-employee/copy",
+      managementUrl: MARKETING_URL,
     };
   }
 
@@ -685,16 +689,17 @@ export class CustomerAcquisitionService {
   }
 
   async commitMarketingCampaign(userId: string, draftId: string) {
-    const draft = await this.drafts.get(userId, draftId, "marketing_campaign");
-    if (draft.status === "applied") {
-      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/copy" };
-    }
-    const payload = draft.payload as unknown as CreateCampaignInput;
-    const campaign = payload.opportunityId
-      ? await this.acceptCampaignOpportunity(userId, payload.opportunityId)
-      : await this.createMarketingCampaign(userId, payload);
-    await this.drafts.markApplied(userId, draftId, campaign.id);
-    return { alreadyApplied: false, campaign, managementUrl: "/digital-employee/copy" };
+    return this.drafts.commit(userId, draftId, "marketing_campaign", {
+      applied: (draft) => ({ alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: MARKETING_URL }),
+      apply: async (draft) => {
+        const payload = draft.payload as unknown as CreateCampaignInput;
+        const campaign = payload.opportunityId
+          ? await this.acceptCampaignOpportunity(userId, payload.opportunityId)
+          : await this.createMarketingCampaign(userId, payload);
+        await this.drafts.markApplied(userId, draftId, campaign.id);
+        return { alreadyApplied: false, entityId: campaign.id, campaign, managementUrl: MARKETING_URL };
+      },
+    });
   }
 
   async createMarketingCampaign(userId: string, input: CreateCampaignInput) {
@@ -918,14 +923,15 @@ export class CustomerAcquisitionService {
   }
 
   async commitAssetDeployment(userId: string, draftId: string) {
-    const draft = await this.drafts.get(userId, draftId, "asset_deployment");
-    if (draft.status === "applied") {
-      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/copy" };
-    }
-    const payload = draft.payload as unknown as DeploymentInput & { assetId: string };
-    const deployment = await this.saveDeployment(userId, payload.assetId, payload);
-    await this.drafts.markApplied(userId, draftId, deployment.id);
-    return { alreadyApplied: false, deployment, managementUrl: "/digital-employee/copy" };
+    return this.drafts.commit(userId, draftId, "asset_deployment", {
+      applied: (draft) => ({ alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: MARKETING_URL }),
+      apply: async (draft) => {
+        const payload = draft.payload as unknown as DeploymentInput & { assetId: string };
+        const deployment = await this.saveDeployment(userId, payload.assetId, payload);
+        await this.drafts.markApplied(userId, draftId, deployment.id);
+        return { alreadyApplied: false, entityId: deployment.id, deployment, managementUrl: MARKETING_URL };
+      },
+    });
   }
 
   async prepareDeploymentFeedback(
@@ -955,14 +961,15 @@ export class CustomerAcquisitionService {
   }
 
   async commitDeploymentFeedback(userId: string, draftId: string) {
-    const draft = await this.drafts.get(userId, draftId, "deployment_feedback");
-    if (draft.status === "applied") {
-      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/copy" };
-    }
-    const payload = draft.payload as unknown as FeedbackInput & { deploymentId: string };
-    const feedback = await this.addFeedback(userId, payload.deploymentId, { ...payload, requestId: draftId });
-    await this.drafts.markApplied(userId, draftId, feedback.id);
-    return { alreadyApplied: false, feedback, managementUrl: "/digital-employee/copy" };
+    return this.drafts.commit(userId, draftId, "deployment_feedback", {
+      applied: (draft) => ({ alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: MARKETING_URL }),
+      apply: async (draft) => {
+        const payload = draft.payload as unknown as FeedbackInput & { deploymentId: string };
+        const feedback = await this.addFeedback(userId, payload.deploymentId, { ...payload, requestId: draftId });
+        await this.drafts.markApplied(userId, draftId, feedback.id);
+        return { alreadyApplied: false, entityId: feedback.id, feedback, managementUrl: MARKETING_URL };
+      },
+    });
   }
 
   async prepareCampaignResult(
@@ -990,29 +997,30 @@ export class CustomerAcquisitionService {
   }
 
   async commitCampaignResult(userId: string, draftId: string) {
-    const draft = await this.drafts.get(userId, draftId, "campaign_result");
-    if (draft.status === "applied") {
-      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/copy" };
-    }
-    const input = draft.payload as unknown as CampaignResultInput;
-    const id = randomUUID();
-    await this.db.pool.query(
-      `INSERT INTO de_campaign_results
-        (id,user_id,campaign_id,impressions,interactions,conversions,leads,note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [id, userId, input.campaignId, input.impressions ?? null, input.interactions ?? null,
-        input.conversions ?? null, input.leads ?? null, input.note ?? ""]
-    );
-    await this.drafts.markApplied(userId, draftId, id);
-    await this.db.pool.query(
-      `UPDATE de_marketing_campaigns SET status='completed' WHERE id=$1 AND user_id=$2 AND status IN ('draft','active')`,
-      [input.campaignId, userId]
-    );
-    return {
-      alreadyApplied: false, resultId: id, campaignId: input.campaignId,
-      message: "已记录群体结果。具体咨询者请到客户画像建档，并由商机雷达继续单客跟进。",
-      managementUrl: "/digital-employee/copy",
-    };
+    return this.drafts.commit(userId, draftId, "campaign_result", {
+      applied: (draft) => ({ alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: MARKETING_URL }),
+      apply: async (draft) => {
+        const input = draft.payload as unknown as CampaignResultInput;
+        const id = randomUUID();
+        await this.db.pool.query(
+          `INSERT INTO de_campaign_results
+            (id,user_id,campaign_id,impressions,interactions,conversions,leads,note)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [id, userId, input.campaignId, input.impressions ?? null, input.interactions ?? null,
+            input.conversions ?? null, input.leads ?? null, input.note ?? ""]
+        );
+        await this.drafts.markApplied(userId, draftId, id);
+        await this.db.pool.query(
+          `UPDATE de_marketing_campaigns SET status='completed' WHERE id=$1 AND user_id=$2 AND status IN ('draft','active')`,
+          [input.campaignId, userId]
+        );
+        return {
+          alreadyApplied: false, entityId: id, resultId: id, campaignId: input.campaignId,
+          message: "已记录群体结果。具体咨询者请到客户档案建档，并在今天的工作里继续单客跟进。",
+          managementUrl: MARKETING_URL,
+        };
+      },
+    });
   }
 
   async analytics(userId: string) {

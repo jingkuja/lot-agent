@@ -11,6 +11,13 @@ import { runMigrations } from "./migration-runner.js";
 import { migrations } from "./migrations/index.js";
 import { maskPhone } from "./phone.js";
 
+/** The object a digital employee conversation is about. Validated and labelled by the module. */
+export interface ConversationFocus {
+  type: string;
+  id: string;
+  label: string;
+}
+
 export interface Conversation {
   channel?: "feishu" | null;
   id: string;
@@ -449,10 +456,16 @@ export class DB {
     userId: string
   ): Promise<{ id: string; displayName: string } | null> {
     const { rows } = await this.pool.query(
-      `SELECT metadata->'digitalEmployeeCurrentProfile' AS context
+      `SELECT metadata->'digitalEmployeeFocus' AS focus, metadata->'digitalEmployeeCurrentProfile' AS context
        FROM conversations WHERE id = $1 AND user_id = $2 AND status = 'active'`,
       [id, userId]
     );
+    const focus = rows[0]?.focus as Partial<ConversationFocus> | null | undefined;
+    if (focus) {
+      return focus.type === "customer" && typeof focus.id === "string" && typeof focus.label === "string"
+        ? { id: focus.id, displayName: focus.label }
+        : null;
+    }
     const value = rows[0]?.context;
     if (!value || typeof value !== "object") return null;
     const profileId = (value as Record<string, unknown>).id;
@@ -467,15 +480,20 @@ export class DB {
     userId: string,
     profile: { id: string; displayName: string } | null
   ): Promise<boolean> {
-    const { rowCount } = profile
+    return this.setConversationFocus(id, userId, profile && { type: "customer", id: profile.id, label: profile.displayName });
+  }
+
+  /** Replaces the older customer-only field, so a conversation holds one object at a time. */
+  async setConversationFocus(id: string, userId: string, focus: ConversationFocus | null): Promise<boolean> {
+    const { rowCount } = focus
       ? await this.pool.query(
           `UPDATE conversations
-           SET metadata = metadata || jsonb_build_object('digitalEmployeeCurrentProfile', $1::jsonb)
+           SET metadata = (metadata - 'digitalEmployeeCurrentProfile') || jsonb_build_object('digitalEmployeeFocus', $1::jsonb)
            WHERE id = $2 AND user_id = $3 AND status = 'active'`,
-          [JSON.stringify(profile), id, userId]
+          [JSON.stringify(focus), id, userId]
         )
       : await this.pool.query(
-          `UPDATE conversations SET metadata = metadata - 'digitalEmployeeCurrentProfile'
+          `UPDATE conversations SET metadata = metadata - 'digitalEmployeeCurrentProfile' - 'digitalEmployeeFocus'
            WHERE id = $1 AND user_id = $2 AND status = 'active'`,
           [id, userId]
         );

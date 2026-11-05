@@ -601,7 +601,7 @@ describe("CustomerAcquisitionService", () => {
       if (sql.includes("SELECT id,name FROM marketing_products")) return { rows: [{ id: "p1", name: "边缘算力" }] };
       if (sql.includes("INSERT INTO de_conversation_action_drafts")) return { rows: [{
         id: params![0], user_id: "u1", feature_scope: params![4], kind: params![5], payload: JSON.parse(params![6]), preview: {},
-        options: [], status: "awaiting_confirmation", expires_at: params![11],
+        options: [], status: "awaiting_confirmation", created_at: new Date(), expires_at: params![11],
       }] };
       return { rows: [] };
     });
@@ -620,7 +620,7 @@ describe("CustomerAcquisitionService", () => {
   });
 
   it("commits an opportunity draft through acceptance, so its status moves too", async () => {
-    const service = new CustomerAcquisitionService({ pool: { query: vi.fn() } } as any);
+    const service = new CustomerAcquisitionService({ pool: { query: vi.fn(async () => ({ rows: [{ id: "d1" }] })) } } as any);
     vi.spyOn((service as any).drafts, "get").mockResolvedValue({ status: "awaiting_confirmation", payload: { opportunityId: "o1", name: "主题" } });
     const markApplied = vi.spyOn((service as any).drafts, "markApplied").mockResolvedValue(undefined);
     const accept = vi.spyOn(service, "acceptCampaignOpportunity").mockResolvedValue({ id: "c1" } as never);
@@ -717,8 +717,8 @@ describe("deployment feedback idempotency", () => {
     });
     const service = new CustomerAcquisitionService({ pool: { query } } as any);
     const drafts = {
-      get: vi.fn(async () => ({ status: "pending", payload: { deploymentId, impressions: 20 } })),
       markApplied: vi.fn(async () => undefined),
+      commit: vi.fn(async (_userId, _id, _kind, handlers) => handlers.apply({ payload: { deploymentId, impressions: 20 } })),
     };
     (service as any).drafts = drafts;
     await service.commitDeploymentFeedback("u1", draftId);

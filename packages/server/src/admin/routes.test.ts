@@ -5,7 +5,11 @@ const KEY = "k".repeat(40);
 function app() {
   const marketingMetrics = vi.fn(async (hours: number) => ({ window: { hours } }));
   const marketingReconciliation = vi.fn(async (hours: number) => ({ items: [], window: { hours } }));
-  return { marketingMetrics, marketingReconciliation, routes: createAdminRoutes({ marketingMetrics, marketingReconciliation }, KEY) };
+  const digitalEmployeeMetrics = vi.fn(async (hours: number) => ({ windowHours: hours }));
+  return {
+    marketingMetrics, marketingReconciliation, digitalEmployeeMetrics,
+    routes: createAdminRoutes({ marketingMetrics, marketingReconciliation, digitalEmployeeMetrics }, KEY),
+  };
 }
 
 describe("admin API key", () => {

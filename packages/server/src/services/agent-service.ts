@@ -424,7 +424,7 @@ export class AgentService {
     );
     this.toolRegistry.register(proposeOutlineTool);
     for (const tool of digitalEmployee.tools) this.toolRegistry.register(tool);
-    registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: digitalEmployee.resolveLlm }));
+    registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: digitalEmployee.resolveLlm, settings: digitalEmployee.service.settings }));
 
     // Load skills
     await this.skillLoader.loadFromDirectory(this.skillsDir);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { digitalEmployeeConversations, digitalEmployeeConversationsForScope, withoutDigitalEmployee } from "./product-agent-scope.js";
+import { digitalEmployeeConversations, digitalEmployeeConversationsForScope, withoutDigitalEmployee } from "./conversation-scope.js";
 
 describe("product Agent scope", () => {
   it("keeps the digital employee out of normal Agent surfaces", () => {

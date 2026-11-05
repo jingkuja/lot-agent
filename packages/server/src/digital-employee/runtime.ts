@@ -67,6 +67,15 @@ export interface DigitalEmployeeRuntime {
 }
 
 /**
+ * kimi-k3.1-pro thinks until the output budget runs out unless the depth is fixed, and these
+ * budgets count that thinking. Replies people read get medium, background summaries get low.
+ */
+const REPLY_EFFORT = "medium";
+const BACKGROUND_EFFORT = "low";
+/** The longest structured answer here: on kimi-k3.1-pro it took more than the usual 45 seconds. */
+const RECOMMENDATION_TIMEOUT_MS = 120_000;
+
+/**
  * Reasoning models can spend a small output budget entirely on thinking and
  * finish without a user-visible text chunk. Talk tracks must never expose that
  * private reasoning as the reply, so retry an empty first result with a direct
@@ -80,7 +89,7 @@ export async function completeTalkTrackReply(
   try {
     first = await complete(llm, messages, {
       signal: AbortSignal.timeout(45_000),
-      params: { temperature: 0.45, maxTokens: 1_600 },
+      params: { temperature: 0.45, maxTokens: 2_400, reasoningEffort: REPLY_EFFORT },
     });
   } catch (error) {
     // Only the known reasoning-only exhaustion is safe to resample here.
@@ -100,7 +109,7 @@ export async function completeTalkTrackReply(
   ];
   const retried = await complete(llm, retryMessages, {
     signal: AbortSignal.timeout(45_000),
-    params: { temperature: 0.3, maxTokens: 3_200 },
+    params: { temperature: 0.3, maxTokens: 3_200, reasoningEffort: REPLY_EFFORT },
   });
   return retried.trim();
 }
@@ -162,7 +171,7 @@ export function createOpportunityAdviceGenerator(ports: {
             'Output only JSON: {"suggestions":[{"dedupKey":"...","title":"...","objective":"...","method":"...","reason":"..."}]}',
         },
         { role: "user", content: JSON.stringify({ opportunities }) },
-      ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.2, maxTokens: 2_400 } });
+      ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.2, maxTokens: 3_200, reasoningEffort: BACKGROUND_EFFORT } });
       await Promise.allSettled(meters);
       return { modelId, patches: parseOpportunityAdvice(raw) };
     },
@@ -200,14 +209,14 @@ export function createDigitalEmployeeRuntime(ports: DigitalEmployeeRuntimePorts)
         ],
         {
           signal: AbortSignal.timeout(30_000),
-          params: { temperature: 0.2, maxTokens: 320 },
+          params: { temperature: 0.2, maxTokens: 1_600, reasoningEffort: BACKGROUND_EFFORT },
         }
       );
       return { summary, modelId: usedModelId };
     },
   }, ports.jobQueue, {
     generate: async ({ userId, context, request }) => {
-      const { llm, usedModelId } = await resolveLlm(userId, request.modelId);
+      const { llm, usedModelId } = await resolveLlm(userId);
       const metered = meterLLM(llm, (usage) =>
         ports.meterUsage("opportunity talk-track", usedModelId, userId, usage)
       );
@@ -252,7 +261,10 @@ export function createDigitalEmployeeRuntime(ports: DigitalEmployeeRuntimePorts)
               "\"reasoning\":[\"...\"],\"creativeDirection\":\"...\",\"durationSeconds\":15}]}.",
           },
           { role: "user", content: JSON.stringify(input).slice(0, 30_000) },
-        ], { signal: generationSignal(input.signal), params: { temperature: 0.3, maxTokens: 2_400 } });
+        ], {
+          signal: generationSignal(input.signal, RECOMMENDATION_TIMEOUT_MS),
+          params: { temperature: 0.3, maxTokens: 3_200, reasoningEffort: BACKGROUND_EFFORT },
+        });
         return { recommendations: parseAcquisitionRecommendations(raw), modelId: usedModelId };
       },
       createCopy: async (input) => {
@@ -301,7 +313,7 @@ export function createDigitalEmployeeRuntime(ports: DigitalEmployeeRuntimePorts)
               attachments: attachmentNotes || undefined,
             }).slice(0, 30_000),
           },
-        ], { signal: generationSignal(input.signal), params: { temperature: 0.55, maxTokens: 1_600 } });
+        ], { signal: generationSignal(input.signal), params: { temperature: 0.55, maxTokens: 3_200, reasoningEffort: REPLY_EFFORT } });
         const parsed = parseAcquisitionCopy(raw);
         return { ...parsed, modelId: usedModelId };
       },
@@ -322,7 +334,7 @@ export function createDigitalEmployeeRuntime(ports: DigitalEmployeeRuntimePorts)
               "\"corePoints\":[\"...\"],\"suggestedChannels\":[\"...\"],\"risks\":[\"...\"],\"priority\":\"low|normal|high\"}.",
           },
           { role: "user", content: JSON.stringify(input).slice(0, 30_000) },
-        ], { signal: generationSignal(input.signal), params: { temperature: 0.3, maxTokens: 1_200 } });
+        ], { signal: generationSignal(input.signal), params: { temperature: 0.3, maxTokens: 2_400, reasoningEffort: BACKGROUND_EFFORT } });
         return { ...parseAcquisitionFit(raw), modelId: usedModelId };
       },
     },
@@ -366,8 +378,8 @@ export function createDigitalEmployeeRuntime(ports: DigitalEmployeeRuntimePorts)
   };
 }
 
-function generationSignal(signal?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(45_000);
+function generationSignal(signal?: AbortSignal, timeoutMs = 45_000): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 

@@ -1,6 +1,7 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type KnowledgeBaseRef, type PickedFile } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import { InputBox, type InputBoxHandle } from "../../../components/InputBox.js";
 import type { ImageSettings, VideoSettings } from "../../../components/MediaSettings.js";
 import type { MarketingProduct } from "../types.js";
@@ -38,7 +39,6 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
   const [campaigns, setCampaigns] = useState<MarketingCampaignSummary[]>([]);
   const [campaign, setCampaign] = useState<MarketingCampaignDetail | null>(null);
   const [configuration, setConfiguration] = useState<AcquisitionModelConfiguration | null>(null);
-  const [llmModelId, setLlmModelId] = useState("");
   const [imageModelId, setImageModelId] = useState("");
   const [videoModelId, setVideoModelId] = useState("");
   const [contextLoading, setContextLoading] = useState(true);
@@ -62,7 +62,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
   const [result, setResult] = useState<MarketingAsset | null>(null);
 
   const loadCampaign = async (id: string) => {
-    const next = await api.getMarketingCampaign(id);
+    const next = await employeeApi.getMarketingCampaign(id);
     setCampaign(next);
     setCampaignId(next.id);
     setTitle(next.name);
@@ -77,23 +77,21 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
     let active = true;
     setContextLoading(true);
     void Promise.all([
-      api.listCustomerSegments(),
-      api.listMarketingProducts({ status: "active", page: 1, limit: 100 }),
-      api.getAcquisitionModelConfiguration(),
-      api.listMarketingCampaigns({ limit: 50 }),
+      employeeApi.listCustomerSegments(),
+      employeeApi.listMarketingProducts({ status: "active", page: 1, limit: 100 }),
+      employeeApi.getAcquisitionModelConfiguration(),
+      employeeApi.listMarketingCampaigns({ limit: 50 }),
     ]).then(([segmentResult, productResult, modelResult, campaignResult]) => {
       if (!active) return;
       setSegments(segmentResult.items);
       setProducts(productResult.items);
       setConfiguration(modelResult);
       const stored = readStoredAcquisitionModels();
-      const nextLlm = pickAcquisitionModel(listedAcquisitionModels(modelResult, "llm"), stored.llm, modelResult.llmModelId);
       const nextImage = pickAcquisitionModel(listedAcquisitionModels(modelResult, "image"), stored.image, modelResult.imageModelId);
       const nextVideo = pickAcquisitionModel(listedAcquisitionModels(modelResult, "video"), stored.video, modelResult.videoModelId);
-      setLlmModelId(nextLlm);
       setImageModelId(nextImage);
       setVideoModelId(nextVideo);
-      writeStoredAcquisitionModels({ llm: nextLlm || undefined, image: nextImage || undefined, video: nextVideo || undefined });
+      writeStoredAcquisitionModels({ image: nextImage || undefined, video: nextVideo || undefined });
       setCampaigns(campaignResult.items);
       setSegmentId((current) => current || segmentResult.items[0]?.id || "");
       setProductId((current) => current || productResult.items[0]?.id || "");
@@ -135,7 +133,6 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
   const selectedProduct = products.find((item) => item.id === productId);
   const llmModels = listedAcquisitionModels(configuration, "llm");
   const imageModels = listedAcquisitionModels(configuration, "image");
-  const llmPickerModels = llmModels.map((model) => ({ ...model, type: "llm" as const, provider: "tokenhub" }));
   const copyBlocked = !contextLoading && llmModels.length === 0;
   const mediaBlocked = assetType === "poster" ? !imageModelId : assetType === "video" ? !videoModelId : false;
   const imageModelLabel = imageModels.find((model) => model.id === imageModelId)?.label;
@@ -158,14 +155,14 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
       const uploaded = files.length
         ? await Promise.all(files.map(async (item) => ({ slot: item.slot, uploaded: await api.uploadFile(item.file) })))
         : [];
-      const created = await api.createMarketingAsset({
+      const created = await employeeApi.createMarketingAsset({
         assetType, prompt: prompt.trim(),
         campaignId: campaignId || undefined,
         segmentId: campaignId ? undefined : (segmentId || undefined),
         publicAudience: campaignId || segmentId ? undefined : publicAudience.trim(),
         productId, recommendationId, parentAssetId, objective, channels, callToAction,
         title: title.trim() || undefined,
-        modelId: assetType === "copy" ? llmModelId || undefined : assetType === "poster" ? imageModelId || undefined : videoModelId || undefined,
+        modelId: assetType === "poster" ? imageModelId || undefined : assetType === "video" ? videoModelId || undefined : undefined,
         knowledgeBaseIds: assetType === "copy" ? knowledgeBases.map((item) => item.id) : undefined,
         ...composerPayload(assetType, uploaded, settings),
       });
@@ -177,7 +174,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
       });
       if (created.campaignId) {
         setCampaignId(created.campaignId);
-        const next = await api.getMarketingCampaign(created.campaignId);
+        const next = await employeeApi.getMarketingCampaign(created.campaignId);
         setCampaign(next);
         setCampaigns((current) => current.some((item) => item.id === next.id) ? current.map((item) => item.id === next.id ? next : item) : [next, ...current]);
       }
@@ -193,7 +190,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
 
   const selectVersion = async (kind: "copy" | "poster" | "video", assetId: string) => {
     if (!campaignId) return;
-    const next = await api.updateMarketingCampaign(campaignId, { selectedAssets: { [kind]: assetId } });
+    const next = await employeeApi.updateMarketingCampaign(campaignId, { selectedAssets: { [kind]: assetId } });
     setCampaign(next);
   };
 
@@ -230,9 +227,8 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
                 value={prompt}
                 onChange={setPrompt}
                 disabled={creating || (assetType === "copy" && copyBlocked)}
-                models={assetType === "copy" ? llmPickerModels : []}
-                selectedModel={assetType === "copy" ? llmModelId || null : assetType === "poster" ? imageModelId || null : videoModelId || null}
-                onModelChange={assetType === "copy" ? (id) => { setLlmModelId(id); writeStoredAcquisitionModels({ llm: id }); } : undefined}
+                models={[]}
+                selectedModel={assetType === "poster" ? imageModelId || null : assetType === "video" ? videoModelId || null : null}
                 allowKnowledgeBase={assetType === "copy"}
                 knowledgeBases={assetType === "copy" ? knowledgeBases : []}
                 onKnowledgeBasesChange={setKnowledgeBases}

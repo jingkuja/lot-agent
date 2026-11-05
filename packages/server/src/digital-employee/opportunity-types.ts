@@ -142,7 +142,6 @@ export interface TalkTrackRequest {
   intent: TalkTrackIntent;
   message: string;
   history: TalkTrackMessage[];
-  modelId?: string;
 }
 
 export interface TalkTrackContext {

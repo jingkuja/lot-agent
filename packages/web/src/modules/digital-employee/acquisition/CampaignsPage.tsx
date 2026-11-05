@@ -1,11 +1,12 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useEffect, useState } from "react";
-import { api } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import type { CampaignOpportunity, MarketingCampaignDetail, MarketingCampaignSummary } from "../types.js";
 
-export function CampaignsPage({ onCreate, onContinue }: {
+export function CampaignsPage({ onCreate, onContinue, onSelect }: {
   onCreate: () => void;
   onContinue: (campaign: MarketingCampaignSummary) => void;
+  onSelect?: (campaign: MarketingCampaignSummary) => void;
 }) {
   const { t } = useI18n();
   const [items, setItems] = useState<MarketingCampaignSummary[]>([]);
@@ -19,12 +20,12 @@ export function CampaignsPage({ onCreate, onContinue }: {
     setLoading(true); setError(null);
     try {
       const [campaigns, opportunityResult] = await Promise.all([
-        api.listMarketingCampaigns({ limit: 50 }),
-        api.listCampaignOpportunities(),
+        employeeApi.listMarketingCampaigns({ limit: 50 }),
+        employeeApi.listCampaignOpportunities(),
       ]);
       setItems(campaigns.items);
       setOpportunities(opportunityResult.items);
-      if (detail) setDetail(await api.getMarketingCampaign(detail.id));
+      if (detail) setDetail(await employeeApi.getMarketingCampaign(detail.id));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "活动加载失败"); }
     finally { setLoading(false); }
   };
@@ -32,32 +33,33 @@ export function CampaignsPage({ onCreate, onContinue }: {
   useEffect(() => { void load(); }, []);
 
   const open = async (id: string) => {
-    const next = await api.getMarketingCampaign(id);
+    const next = await employeeApi.getMarketingCampaign(id);
     setDetail(next); setName(next.name);
+    onSelect?.(next);
   };
 
   const saveName = async () => {
     if (!detail || !name.trim()) return;
-    const next = await api.updateMarketingCampaign(detail.id, { name: name.trim() });
+    const next = await employeeApi.updateMarketingCampaign(detail.id, { name: name.trim() });
     setDetail(next);
     setItems((current) => current.map((item) => item.id === next.id ? next : item));
   };
 
   const selectVersion = async (kind: "copy" | "poster" | "video", assetId: string) => {
     if (!detail) return;
-    const next = await api.updateMarketingCampaign(detail.id, { selectedAssets: { [kind]: assetId } });
+    const next = await employeeApi.updateMarketingCampaign(detail.id, { selectedAssets: { [kind]: assetId } });
     setDetail(next);
   };
 
   const accept = async (item: CampaignOpportunity) => {
-    const campaign = await api.acceptCampaignOpportunity(item.id);
+    const campaign = await employeeApi.acceptCampaignOpportunity(item.id);
     setItems((current) => [campaign, ...current.filter((entry) => entry.id !== campaign.id)]);
     setOpportunities((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "accepted", campaignId: campaign.id } : entry));
     setDetail(campaign); setName(campaign.name);
   };
 
   const dismiss = async (item: CampaignOpportunity) => {
-    await api.dismissCampaignOpportunity(item.id);
+    await employeeApi.dismissCampaignOpportunity(item.id);
     setOpportunities((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "dismissed" } : entry));
   };
 

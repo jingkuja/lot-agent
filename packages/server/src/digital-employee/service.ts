@@ -41,16 +41,20 @@ import type {
   UpdateProductStateInput,
 } from "./types.js";
 import { parseCaptureInput } from "./validators.js";
+import { DRAFT_TTL_MS } from "./conversation-drafts.js";
 import { MarketingMaterialsService } from "./marketing-service.js";
 import { OpportunityService, type OpportunityTalkTrackGenerator } from "./opportunity-service.js";
 import type { JobQueue } from "@lot-agent/core";
 import { CustomerAcquisitionService } from "./acquisition-service.js";
+import { DIGITAL_EMPLOYEE_UNIFIED_SCOPE, readConversationFeatureScope } from "./feature-scope.js";
+import { resolveFocus, type FocusType } from "./focus.js";
+import { ProposalService } from "./proposal-service.js";
+import { EmployeeSettingsService } from "./settings-service.js";
+import { TodayService } from "./today-service.js";
 import type { CampaignContentGenerator, CampaignModelResolver } from "./acquisition-types.js";
 
-const CAPTURE_DRAFT_TTL_MS = 24 * 60 * 60 * 1_000;
 const CAPTURE_PROMPT_VERSION = "customer-capture/v1";
 const CAPTURE_SCHEMA_VERSION = "customer-observation/v1";
-const PROFILE_CHANGE_DRAFT_TTL_MS = 24 * 60 * 60 * 1_000;
 
 export interface CaptureSourceContext {
   conversationId?: string;
@@ -107,6 +111,9 @@ export class DigitalEmployeeService {
   readonly marketingMaterials: MarketingMaterialsService;
   readonly opportunities: OpportunityService;
   readonly customerAcquisition: CustomerAcquisitionService;
+  readonly settings: EmployeeSettingsService;
+  readonly proposals: ProposalService;
+  readonly today: TodayService;
   private readonly secretBox: SecretBox;
 
   constructor(
@@ -129,6 +136,9 @@ export class DigitalEmployeeService {
       acquisitionDeps?.contentGenerator,
       acquisitionDeps?.modelResolver,
     );
+    this.settings = new EmployeeSettingsService(db.pool);
+    this.proposals = new ProposalService(db.pool, this.opportunities, this.customerAcquisition);
+    this.today = new TodayService(db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals);
     this.secretBox = secretBox;
   }
 
@@ -173,33 +183,6 @@ export class DigitalEmployeeService {
     };
   }
 
-  /** User-triggered refresh using the model explicitly selected in the UI. */
-  async refreshCohortSummary(userId: string, modelId: string, now: Date = new Date()) {
-    if (!this.cohortSummaryGenerator) throw new InputError("当前无法使用 LLM 更新群像总结");
-    const logicSnapshot = buildCohortSnapshot(
-      await this.repository.listActiveProfilesForCohort(userId),
-      now
-    );
-    const generated = await this.cohortSummaryGenerator.generate({
-      userId,
-      snapshotDate: logicSnapshot.snapshotDate,
-      metrics: logicSnapshot.metrics,
-      modelId,
-    });
-    const snapshot = {
-      ...logicSnapshot,
-      summary: parseLlmCohortSummary(generated.summary),
-      generationMethod: "llm" as const,
-      modelId: generated.modelId,
-    };
-    await this.repository.upsertCohortSnapshot(userId, snapshot);
-    return { ...snapshot, source: "nightly" as const };
-  }
-
-  /**
-   * Idempotent account-level scheduler target. The repository returns only
-   * opted-in users; a user/date primary key limits each account to one run per day.
-   */
   async runNightlyCohortSummaries(now: Date = new Date()): Promise<number> {
     if (!isCohortNightlyWindow(now)) return 0;
     const snapshotDate = cohortDateKey(now);
@@ -302,6 +285,18 @@ export class DigitalEmployeeService {
     });
   }
 
+  /** Only `employee` conversations can follow an object; module chats keep their boundary. */
+  async setConversationFocus(userId: string, conversationId: string, input: { type: FocusType; id: string }) {
+    const conversation = await this.db.getConversation(conversationId);
+    if (!conversation || conversation.user_id !== userId) throw new NotFoundError();
+    if (readConversationFeatureScope(conversation.metadata) !== DIGITAL_EMPLOYEE_UNIFIED_SCOPE) {
+      throw new InputError("这个对话不能切换当前对象");
+    }
+    const focus = await resolveFocus(this.db.pool, userId, input);
+    if (!await this.db.setConversationFocus(conversationId, userId, focus)) throw new NotFoundError();
+    return focus;
+  }
+
   async clearCurrentProfile(userId: string, conversationId: string): Promise<void> {
     const cleared = await this.db.setConversationCustomerContext(conversationId, userId, null);
     if (!cleared) throw new NotFoundError();
@@ -352,7 +347,7 @@ export class DigitalEmployeeService {
       targetVersion: target?.version ?? null,
       risks,
       status: risks.length ? "awaiting_confirmation" : "prepared",
-      expiresAt: new Date(Date.now() + PROFILE_CHANGE_DRAFT_TTL_MS).toISOString(),
+      expiresAt: new Date(Date.now() + DRAFT_TTL_MS).toISOString(),
     });
     const maxCandidateOptions = risks.includes("possible_duplicate") ? 4 : 5;
     const views = candidates.slice(0, maxCandidateOptions).map((item) => ({
@@ -397,6 +392,7 @@ export class DigitalEmployeeService {
         if (!applied) throw new NotFoundError();
         return this.publicProfile(applied, false);
       }
+      if (draft.status === "dismissed") throw new InputError("该草稿已失效，请重新准备");
       if (draft.status === "expired" || new Date(draft.expiresAt).getTime() < Date.now()) {
         throw new InputError("画像变更草稿已过期，请重新操作");
       }
@@ -847,7 +843,7 @@ export class DigitalEmployeeService {
       }),
       ambiguities: [...new Set(ambiguities)],
       status: clarification ? "awaiting_confirmation" : "prepared",
-      expiresAt: new Date(Date.now() + CAPTURE_DRAFT_TTL_MS).toISOString(),
+      expiresAt: new Date(Date.now() + DRAFT_TTL_MS).toISOString(),
     });
 
     return {

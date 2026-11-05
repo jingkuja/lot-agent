@@ -1,6 +1,6 @@
 import { useI18n } from "../../i18n/index.js";
 import { useEffect, useState } from "react";
-import { api } from "../../api/client.js";
+import { employeeApi } from "./api.js";
 import {
   HEALTH_LABELS,
   RELATIONSHIP_LABELS,
@@ -14,7 +14,6 @@ interface DigitalEmployeeHomeProps {
   onOpenOpportunities?: () => void;
   onOpenAcquisition?: () => void;
   onPrompt: (prompt: string) => void;
-  llmModelId?: string | null;
 }
 
 const QUICK_PROMPTS = [
@@ -22,18 +21,16 @@ const QUICK_PROMPTS = [
   { label: "记录客户动态", prompt: "我要记录一条新的客户动态，请引导我补全客户、事件和产品信息。" },
 ];
 
-export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOpportunities, onOpenAcquisition, onPrompt, llmModelId }: DigitalEmployeeHomeProps) {
+export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOpportunities, onOpenAcquisition, onPrompt }: DigitalEmployeeHomeProps) {
   const { t, locale } = useI18n();
   const [overview, setOverview] = useState<DigitalEmployeeOverview | null>(null);
   const [error, setError] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    void api.getDigitalEmployeeOverview()
+    void employeeApi.getDigitalEmployeeOverview()
       .then((result) => {
         if (active) setOverview(result);
       })
@@ -43,26 +40,12 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
     return () => { active = false; };
   }, []);
 
-  const refreshCohort = async () => {
-    if (!llmModelId || refreshing) return;
-    setRefreshing(true);
-    setRefreshError(null);
-    try {
-      const cohort = await api.refreshDigitalEmployeeCohort(llmModelId);
-      setOverview((current) => current ? { ...current, cohort } : current);
-    } catch (requestError) {
-      setRefreshError(requestError instanceof Error ? requestError.message : "群像总结更新失败，请稍后重试");
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   const toggleCohortSchedule = async (enabled: boolean) => {
     if (!overview || savingSchedule) return;
     setSavingSchedule(true);
     setScheduleError(null);
     try {
-      const schedule = await api.saveDigitalEmployeeCohortSchedule({
+      const schedule = await employeeApi.saveDigitalEmployeeCohortSchedule({
         enabled,
         version: overview.schedule.version,
       });
@@ -115,19 +98,8 @@ export function DigitalEmployeeHome({ onOpenProfiles, onOpenProfile, onOpenOppor
                   {overview.cohort.source === "live" ? t("实时规则预览") : overview.cohort.generationMethod === "llm" ? t("AI 智能总结 · {0}", [dateTime(overview.cohort.generatedAt, locale)]) : t("规则兜底 · {0}", [dateTime(overview.cohort.generatedAt, locale)])}
                 </span>
               )}
-              <button
-                className="de-cohort-refresh"
-                type="button"
-                onClick={() => void refreshCohort()}
-                disabled={refreshing || !llmModelId || !overview}
-                title={llmModelId ? t("使用当前模型 {0} 更新", [llmModelId]) : t("当前没有可用的 LLM 模型")}
-              >
-                {refreshing ? t("更新中…") : t("即刻更新")}
-              </button>
             </div>
           </div>
-
-          {refreshError && <p className="de-cohort-refresh-error" role="alert">{t(refreshError)}</p>}
 
           {!overview && !error && <CohortSkeleton />}
           {error && (

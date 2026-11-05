@@ -12,7 +12,7 @@ import { createMarketingVideoRoutes } from "./marketing-video/routes.js";
 import { MarketingNarrator } from "./marketing-video/narration.js";
 import { createDigitalPresenterRoutes } from "./digital-presenter/routes.js";
 import { adminApiKey, createAdminRoutes } from "./admin/routes.js";
-import { marketingMetrics } from "./admin/metrics.js";
+import { digitalEmployeeMetrics, marketingMetrics } from "./admin/metrics.js";
 import { marketingReconciliation } from "./admin/reconciliation.js";
 import { PresenterVoicer } from "./digital-presenter/takes.js";
 import { createPresenterMediaRoutes } from "./digital-presenter/files.js";
@@ -57,6 +57,7 @@ import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes, summarizeBalance } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
+import { digitalEmployeeProductFlags } from "./digital-employee/feature-scope.js";
 import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { VirtualPaymentService } from "./payments/service.js";
 import { PgVirtualPaymentRepository } from "./payments/repository.js";
@@ -283,7 +284,7 @@ async function main() {
   app.on("POST", "/api/auth/wechat-phone-bind/confirm", loginRateLimit);
   app.on("PATCH", "/api/auth/profile", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
-  app.route("/api/public/product", createProductRoutes());
+  app.route("/api/public/product", createProductRoutes(digitalEmployeeProductFlags));
   app.route("/api/public/shares", createPublicImageShareRoutes(service));
   app.use("/api/public/feishu/*", loginRateLimit);
   app.route("/api/public/feishu", createFeishuPublicRoutes(feishu));
@@ -295,6 +296,7 @@ async function main() {
     app.route("/api/admin", createAdminRoutes({
       marketingMetrics: (hours) => marketingMetrics(service.db.pool, hours),
       marketingReconciliation: (hours) => marketingReconciliation(service.db.pool, hours),
+      digitalEmployeeMetrics: (hours) => digitalEmployeeMetrics(service.db.pool, hours),
     }, adminKey));
   }
 

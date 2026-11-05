@@ -50,7 +50,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
               overallHealth: profile.overallHealth,
               tags: profile.tags,
               summary: profile.summary,
-              detailUrl: `/digital-employee/profiles/${profile.id}`,
+              detailUrl: `/digital-employee/customers/${profile.id}`,
             })),
           }),
         };
@@ -171,7 +171,7 @@ export function createCustomerProfileTools(service: DigitalEmployeeService): Too
         return {
           content:
             `已${profile.version === 1 ? "新建" : "更新"}「${profile.displayName}」的客户画像。\n` +
-            `[查看画像](/digital-employee/profiles/${profile.id})`,
+            `[查看画像](/digital-employee/customers/${profile.id})`,
         };
       } catch (error) {
         return toolError("提交画像变更失败", error);

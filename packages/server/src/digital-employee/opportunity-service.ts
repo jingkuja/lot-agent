@@ -39,6 +39,8 @@ export interface OpportunityTalkTrackGenerator {
   }): Promise<{ modelId: string; reply: string }>;
 }
 
+const TODAY_URL = "/digital-employee/today";
+
 export class OpportunityService {
   private readonly pool: Pool;
   private readonly drafts: ConversationActionDrafts;
@@ -468,7 +470,7 @@ export class OpportunityService {
         id: row.id, channel: row.channel, objective: row.objective, version: Number(row.version),
         usedAt: iso(row.used_at), createdAt: iso(row.created_at), excerpt: String(row.content ?? "").slice(0, 180),
       })),
-      managementUrl: "/digital-employee/acquisition",
+      managementUrl: TODAY_URL,
     };
   }
 
@@ -492,18 +494,19 @@ export class OpportunityService {
   }
 
   async commitFollowUpAction(userId: string, draftId: string, profileId?: string) {
-    const draft = await this.drafts.get(userId, draftId, "follow_up_action");
-    if (draft.status === "applied") {
-      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/acquisition" };
-    }
-    const input = {
-      ...(draft.payload as unknown as FollowUpActionPrepareInput),
-      ...(profileId ? { profileId } : {}),
-    };
-    const result = await this.applyFollowUpAction(userId, input);
-    const entityId = ("actionId" in result && result.actionId) || result.opportunityId || null;
-    await this.drafts.markApplied(userId, draftId, entityId);
-    return { ...result, alreadyApplied: false, managementUrl: "/digital-employee/acquisition" };
+    return this.drafts.commit(userId, draftId, "follow_up_action", {
+      applied: (draft) => ({ alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: TODAY_URL }),
+      apply: async (draft) => {
+        const input = {
+          ...(draft.payload as unknown as FollowUpActionPrepareInput),
+          ...(profileId ? { profileId } : {}),
+        };
+        const result = await this.applyFollowUpAction(userId, input);
+        const entityId = ("actionId" in result && result.actionId) || result.opportunityId || null;
+        await this.drafts.markApplied(userId, draftId, entityId);
+        return { ...result, alreadyApplied: false, entityId, managementUrl: TODAY_URL };
+      },
+    });
   }
 
   async prepareFollowUpResult(
@@ -540,14 +543,15 @@ export class OpportunityService {
   }
 
   async commitFollowUpResult(userId: string, draftId: string) {
-    const draft = await this.drafts.get(userId, draftId, "follow_up_result");
-    if (draft.status === "applied") {
-      return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/acquisition" };
-    }
-    const payload = draft.payload as unknown as ActionResultInput & { actionId: string };
-    const result = await this.addResult(userId, payload.actionId, payload);
-    await this.drafts.markApplied(userId, draftId, result.recordId);
-    return { ...result, alreadyApplied: false, managementUrl: "/digital-employee/acquisition" };
+    return this.drafts.commit(userId, draftId, "follow_up_result", {
+      applied: (draft) => ({ alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: TODAY_URL }),
+      apply: async (draft) => {
+        const payload = draft.payload as unknown as ActionResultInput & { actionId: string };
+        const result = await this.addResult(userId, payload.actionId, payload);
+        await this.drafts.markApplied(userId, draftId, result.recordId);
+        return { ...result, alreadyApplied: false, entityId: result.recordId, managementUrl: TODAY_URL };
+      },
+    });
   }
 
   async generateOutreach(userId: string, input: OutreachGenerateInput): Promise<OutreachDraft> {

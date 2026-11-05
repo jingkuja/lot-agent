@@ -198,7 +198,7 @@ function formatCommit(result: Awaited<ReturnType<DigitalEmployeeService["commitC
   return (
     `${result.alreadyApplied ? "该客户记录此前已提交" : "已记录"}到「${result.profile.displayName}」的客户画像。` +
     `更新：${changed}${skipped}。\n` +
-    `[查看画像](/digital-employee/profiles/${result.profile.id})`
+    `[查看画像](/digital-employee/customers/${result.profile.id})`
   );
 }
 

@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { digitalEmployeeUnifiedEnabled } from "../digital-employee/feature-scope.js";
 import { internationalModelsEnabled } from "../tokenhub/model-access.js";
 
 function publicUrl(value: string | undefined, fallback: string): string {
@@ -13,7 +12,7 @@ function publicUrl(value: string | undefined, fallback: string): string {
 }
 
 /** Public destinations only; never derive these from internal gateway credentials. */
-export function createProductRoutes() {
+export function createProductRoutes(flags: () => Record<string, boolean> = () => ({})) {
   // dotenv values are strings. Only a finite positive number opts in.
   const value = Number(process.env.globle);
   const globle = internationalModelsEnabled() ? 1 : 0;
@@ -23,7 +22,7 @@ export function createProductRoutes() {
     showCompliance: !process.env.globle?.trim() || value === 0,
     webUrl: publicUrl(process.env.LOT_AGENT_PUBLIC_URL, "https://todoucloud.com/"),
     tokenhubUrl: publicUrl(process.env.TOKENHUB_PUBLIC_URL, "https://tokenhub.todoucloud.com/"),
-    digitalEmployeeUnified: digitalEmployeeUnifiedEnabled(),
+    ...flags(),
   }));
   return app;
 }

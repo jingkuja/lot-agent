@@ -1,7 +1,7 @@
 import { useI18n } from "../i18n/index.js";
 import { KnowledgePanel } from "../modules/knowledge/KnowledgePanel.js";
 import { knowledgeApi } from "../modules/knowledge/api.js";
-import { useEffect, useCallback, useRef, useState, useMemo } from "react";
+import { useEffect, useCallback, useRef, useState, useMemo, type ReactNode } from "react";
 import { Sidebar } from "../components/Sidebar.js";
 import { ChatPanel } from "../components/ChatPanel.js";
 import { BrandHeader } from "../components/BrandHeader.js";
@@ -14,39 +14,57 @@ import { useChat } from "../hooks/useChat.js";
 import { useAgents } from "../hooks/useAgents.js";
 import type { ModelCatalog } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
-import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
+import { api, type Conversation, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveImageSelection, resolveLlmSelection } from "../lib/model-defaults.js";
-import {
-  DIGITAL_EMPLOYEE_UNIFIED_SCOPE,
-  digitalEmployeeConversations as filterDigitalEmployeeConversations,
-  digitalEmployeeConversationsForScope,
-  withoutDigitalEmployee,
-} from "../lib/product-agent-scope.js";
-import { useDigitalEmployeeUnified } from "../modules/digital-employee/useDigitalEmployeeUnified.js";
-import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
-import { DigitalEmployeeHome } from "../modules/digital-employee/DigitalEmployeeHome.js";
-import { MarketingMaterialsHome } from "../modules/digital-employee/marketing/MarketingMaterialsHome.js";
-import { CustomerAcquisitionChatHome } from "../modules/digital-employee/acquisition/CustomerAcquisitionChatHome.js";
-import { OpportunityAdvisorChatHome } from "../modules/digital-employee/opportunities/OpportunityAdvisorChatHome.js";
-import {
-  DigitalEmployeeSidebar,
-  type DigitalEmployeeFeature,
-} from "../modules/digital-employee/DigitalEmployeeSidebar.js";
 
 /** Below this width the sidebar overlays the main area instead of sitting beside it. */
 const NARROW_SCREEN = "(max-width: 760px)";
+
+/** What a product built on the Workspace can see and do from its slots. */
+export interface WorkspaceContext {
+  conversations: Conversation[];
+  activeConversation?: Conversation;
+  activeConversationId: string | null;
+  isStreaming: boolean;
+  hasMore: boolean;
+  loadingMore: boolean;
+  loadMore: () => void;
+  newConversation: () => void;
+  openConversation: (id: string) => void;
+  deleteConversation: (id: string) => void;
+  refreshConversations: () => void;
+  send: (prompt: string) => void;
+  llmModelId: string | null;
+}
+
+type WorkspaceSlot = (context: WorkspaceContext) => ReactNode;
 
 interface WorkspaceProps {
   user: User;
   modelCatalog: ModelCatalog;
   onLogout: () => void;
   onNavigateDigitalEmployee?: () => void;
-  onNavigateDigitalProfile?: (profileId: string) => void;
-  onNavigateDigitalFeature?: (feature: DigitalEmployeeFeature) => void;
   onNavigateAssistant?: () => void;
-  mode?: "assistant" | "digitalEmployee";
-  digitalEmployeeFeature?: DigitalEmployeeFeature;
+  /** Agents with their own product entry, kept out of the launcher. */
+  hiddenAgentIds?: string[];
+  /** Serves this one Agent: no launcher, and the sidebar slot replaces the conversation list. */
+  lockedAgentId?: string;
+  /** Sent when a conversation is created; the server decides what it means. */
+  newConversationScope?: string;
+  /** A change starts a new chat unless keepConversation holds for the open one. */
+  resetKey?: string;
+  keepConversation?: (conversation: Conversation | undefined) => boolean;
+  sidebar?: WorkspaceSlot;
+  inputAbove?: WorkspaceSlot;
+  emptyDashboard?: WorkspaceSlot;
+  /** A page over the chat. The chat stays mounted beneath it, so its draft and stream survive. */
+  overlay?: WorkspaceSlot;
+  /** Runs as soon as the user sends, before anything is created. */
+  onSendStart?: () => void;
+  /** Runs once the conversation exists, before the message goes out. */
+  beforeDispatch?: (conversationId: string) => Promise<void>;
+  onActiveConversationChange?: (id: string | null) => void;
   requestedConversationId?: string | null;
   onRequestedConversationHandled?: () => void;
 }
@@ -56,32 +74,40 @@ export function Workspace({
   modelCatalog,
   onLogout,
   onNavigateDigitalEmployee,
-  onNavigateDigitalProfile,
-  onNavigateDigitalFeature,
   onNavigateAssistant,
-  mode = "assistant",
-  digitalEmployeeFeature = "customer-profile",
+  hiddenAgentIds,
+  lockedAgentId,
+  newConversationScope,
+  resetKey,
+  keepConversation,
+  sidebar,
+  inputAbove,
+  emptyDashboard,
+  overlay,
+  onSendStart,
+  beforeDispatch,
+  onActiveConversationChange,
   requestedConversationId,
   onRequestedConversationHandled,
 }: WorkspaceProps) {
   const { t } = useI18n();
   const { agents } = useAgents(true);
-  const isDigitalEmployeeMode = mode === "digitalEmployee";
+  const isLocked = Boolean(lockedAgentId);
   const assistantAgents = useMemo(
-    () => withoutDigitalEmployee(agents),
-    [agents]
+    () => agents.filter((agent) => !hiddenAgentIds?.includes(agent.id)),
+    [agents, hiddenAgentIds]
   );
-  const digitalEmployee = agents.find((agent) => agent.id === "digital_employee") ?? null;
+  const lockedAgent = agents.find((agent) => agent.id === lockedAgentId) ?? null;
 
   // 所有可见 Agent 均可直接使用；通用助手作为默认入口。
   const orderedAgents = useMemo(() => {
-    if (isDigitalEmployeeMode) return digitalEmployee ? [digitalEmployee] : [];
+    if (isLocked) return lockedAgent ? [lockedAgent] : [];
     const general = assistantAgents.find((a) => a.type === "general" || a.id === GENERAL_ID);
     if (!general) return assistantAgents;
     return [general, ...assistantAgents.filter((a) => a !== general)];
-  }, [assistantAgents, digitalEmployee, isDigitalEmployeeMode]);
+  }, [assistantAgents, lockedAgent, isLocked]);
 
-  const defaultAgentId = isDigitalEmployeeMode ? "digital_employee" : orderedAgents[0]?.id ?? GENERAL_ID;
+  const defaultAgentId = lockedAgentId ?? orderedAgents[0]?.id ?? GENERAL_ID;
   const [activeAgentId, setActiveAgentId] = useState(defaultAgentId);
 
   // newAgentId: page-only "new chat" state. No server conversation exists yet.
@@ -107,18 +133,7 @@ export function Workspace({
     newAgentId ??
     openConversation?.agent_id ??
     activeAgentId;
-  const openAgent = agents.find((a) => a.id === openAgentId) ?? (isDigitalEmployeeMode ? digitalEmployee : null);
-  const unifiedEnabled = useDigitalEmployeeUnified(isDigitalEmployeeMode);
-  const openConversationUnified = openConversation?.metadata?.digitalEmployeeFeatureScope === DIGITAL_EMPLOYEE_UNIFIED_SCOPE;
-  // An open conversation keeps its own scope, so older chats still read as module chats.
-  const digitalEmployeeUnified = openConversation ? openConversationUnified : unifiedEnabled;
-  const currentProfileValue = openConversation?.metadata?.digitalEmployeeCurrentProfile;
-  const currentProfile = currentProfileValue && typeof currentProfileValue === "object"
-    ? currentProfileValue as { id?: unknown; displayName?: unknown }
-    : null;
-  const currentCustomerName = typeof currentProfile?.displayName === "string"
-    ? currentProfile.displayName
-    : null;
+  const openAgent = agents.find((a) => a.id === openAgentId) ?? lockedAgent;
 
   const [artifacts] = useState<Artifact[]>([]);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
@@ -252,16 +267,15 @@ export function Workspace({
     [setActiveId, clear]
   );
 
-  // A module-scoped conversation is a hard business boundary. Switching from
-  // 客户画像/商机雷达 to 获客宝 must never keep its implicit object or tool
-  // scope, even though this Workspace stays mounted. `employee` has no boundary.
-  const previousDigitalFeature = useRef(digitalEmployeeFeature);
+  // Some products bind a conversation to the page it started on, so leaving that
+  // page must not carry its objects or tools along, even though this Workspace stays mounted.
+  const previousResetKey = useRef(resetKey);
   useEffect(() => {
-    const previous = previousDigitalFeature.current;
-    previousDigitalFeature.current = digitalEmployeeFeature;
-    if (!isDigitalEmployeeMode || previous === digitalEmployeeFeature || openConversationUnified) return;
-    handleStartNewChat("digital_employee");
-  }, [digitalEmployeeFeature, handleStartNewChat, isDigitalEmployeeMode, openConversationUnified]);
+    const previous = previousResetKey.current;
+    previousResetKey.current = resetKey;
+    if (!lockedAgentId || previous === resetKey || keepConversation?.(openConversation)) return;
+    handleStartNewChat(lockedAgentId);
+  }, [resetKey, handleStartNewChat, lockedAgentId, keepConversation, openConversation]);
 
   // Desktop shortcut: Cmd/Ctrl+N opens a fresh chat for the agent currently
   // on screen. The Agent has no user-selectable API key settings.
@@ -299,12 +313,17 @@ export function Workspace({
 
   const handledConversationRequest = useRef<string | null>(null);
   useEffect(() => {
-    if (!isDigitalEmployeeMode || !requestedConversationId) return;
-    if (handledConversationRequest.current === requestedConversationId) return;
+    if (!requestedConversationId) {
+      handledConversationRequest.current = null;
+      return;
+    }
+    if (!isLocked || handledConversationRequest.current === requestedConversationId) return;
     handledConversationRequest.current = requestedConversationId;
     handleSelect(requestedConversationId);
     onRequestedConversationHandled?.();
-  }, [handleSelect, isDigitalEmployeeMode, onRequestedConversationHandled, requestedConversationId]);
+  }, [handleSelect, isLocked, onRequestedConversationHandled, requestedConversationId]);
+
+  useEffect(() => { onActiveConversationChange?.(activeId); }, [activeId, onActiveConversationChange]);
 
   // New chats stay with the currently selected Agent.
   const handleCreate = useCallback(() => {
@@ -329,14 +348,9 @@ export function Workspace({
         }
       };
       if (newAgentId) {
-        const featureScope = newAgentId === "digital_employee"
-          ? digitalEmployeeFeature === "copy"
-            ? "customer-acquisition"
-            : digitalEmployeeFeature === "acquisition"
-              ? "opportunity-advisor"
-              : digitalEmployeeFeature
-          : undefined;
+        const featureScope = newAgentId === lockedAgentId ? newConversationScope : undefined;
         if (creatingConversation.current) return;
+        onSendStart?.();
         creatingConversation.current = true;
         setIsCreatingConversation(true);
         let conv;
@@ -354,12 +368,18 @@ export function Workspace({
         // surface this one in the sidebar instead of refreshing (which wouldn't
         // return it yet). stream_end triggers a real refresh once it has content.
         addLocal(conv);
+        await beforeDispatch?.(conv.id);
         dispatch();
         return;
       }
+      onSendStart?.();
+      if (activeIdRef.current) await beforeDispatch?.(activeIdRef.current);
       dispatch();
     },
-    [newAgentId, newProjectId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, digitalEmployeeFeature, modelCatalog]
+    [
+      newAgentId, newProjectId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, modelCatalog,
+      lockedAgentId, newConversationScope, onSendStart, beforeDispatch,
+    ]
   );
 
   // Edits happen inside an existing image conversation, so no conversation is created here.
@@ -393,25 +413,28 @@ export function Workspace({
       ...filtered,
     ];
   }, [newAgentId, newProjectId, conversations, activeAgentId]);
-  const digitalEmployeeConversations = useMemo(
-    () => filterDigitalEmployeeConversations(conversations),
-    [conversations]
-  );
-  const featureScopedDigitalEmployeeConversations = useMemo(() => {
-    const scope = digitalEmployeeFeature === "copy"
-      ? "customer-acquisition"
-      : digitalEmployeeFeature === "acquisition"
-        ? "opportunity-advisor"
-        : digitalEmployeeFeature;
-    return digitalEmployeeConversationsForScope(digitalEmployeeConversations, scope);
-  }, [digitalEmployeeConversations, digitalEmployeeFeature]);
-
   // 当前 hero Agent 对应的模型分组;切组时各组各自记住上次的选择。
   const modelGroup = groupForKind(openAgent?.type || openAgent?.id);
   const handleModelChange = useCallback(
     (id: string) => setSelectedModels((prev) => ({ ...prev, [modelGroup]: id })),
     [modelGroup]
   );
+
+  const context: WorkspaceContext = {
+    conversations,
+    activeConversation: openConversation,
+    activeConversationId: activeId,
+    isStreaming,
+    hasMore,
+    loadingMore,
+    loadMore,
+    newConversation: () => handleStartNewChat(openAgentId),
+    openConversation: handleSelect,
+    deleteConversation: handleDelete,
+    refreshConversations: () => void refresh(),
+    send: (prompt) => void doSend(prompt),
+    llmModelId: selectedModels.llm ?? null,
+  };
 
   return (
     <div className="workspace">
@@ -422,9 +445,9 @@ export function Workspace({
           onLogout={onLogout}
           onCollapse={() => setSidebarCollapsed(true)}
           onOpenDigitalTwin={() => openKnowledge("digital-twin")}
-          onOpenAssistant={isDigitalEmployeeMode ? onNavigateAssistant : () => {}}
-          onOpenDigitalEmployee={isDigitalEmployeeMode ? () => {} : onNavigateDigitalEmployee}
-          activeModule={isDigitalEmployeeMode ? "digitalEmployee" : "assistant"}
+          onOpenAssistant={isLocked ? onNavigateAssistant : () => {}}
+          onOpenDigitalEmployee={onNavigateDigitalEmployee}
+          activeModule={isLocked ? "digitalEmployee" : "assistant"}
           balanceRefreshKey={balanceRefreshKey}
           onOpenKnowledgeBase={() => {
             const popup = window.open("about:blank", "_blank");
@@ -440,23 +463,7 @@ export function Workspace({
               .catch(() => popup?.close());
           }}
         />
-        {isDigitalEmployeeMode ? (
-          <DigitalEmployeeSidebar
-            activeFeature={digitalEmployeeFeature}
-            conversations={featureScopedDigitalEmployeeConversations}
-            activeConversationId={activeId}
-            onOpenFeature={(feature) => {
-              if (feature === digitalEmployeeFeature) handleStartNewChat("digital_employee");
-              else onNavigateDigitalFeature?.(feature);
-            }}
-            onOpenConversation={handleSelect}
-            onNewConversation={() => handleStartNewChat("digital_employee")}
-            onDeleteConversation={handleDelete}
-            onLoadMore={loadMore}
-            hasMore={hasMore}
-            loadingMore={loadingMore}
-          />
-        ) : (
+        {sidebar ? sidebar(context) : (
           <Sidebar
             conversations={sidebarConversations}
             agents={assistantAgents}
@@ -495,8 +502,9 @@ export function Workspace({
             ›
           </button>
         )}
-        <div className="workspace-chat">
-          {!isDigitalEmployeeMode && openAgent && (
+        <div className={`workspace-chat ${overlay ? "has-overlay" : ""}`}>
+          {overlay && <div className="workspace-overlay">{overlay(context)}</div>}
+          {!isLocked && openAgent && (
             <header className={`workspace-agent-header ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
               <span className={`agent-pill-icon agent-pill-icon--${agentIconKind(openAgent)}`} aria-hidden>
                 {AGENT_ICONS[agentIconKind(openAgent)]}
@@ -532,21 +540,7 @@ export function Workspace({
                 : undefined
             }
             agent={openAgent}
-            inputAbove={isDigitalEmployeeMode ? (
-              <>
-                {isDigitalEmployeeMode && onNavigateDigitalEmployee && (
-                  <DigitalEmployeeActions
-                    feature={digitalEmployeeFeature}
-                    unified={digitalEmployeeUnified}
-                    onOpenProfiles={onNavigateDigitalEmployee}
-                    currentCustomerName={currentCustomerName}
-                    onClearCurrentCustomer={activeId ? () => {
-                      void api.clearDigitalEmployeeContext(activeId).then(() => refresh()).catch(() => {});
-                    } : undefined}
-                  />
-                )}
-              </>
-            ) : undefined}
+            inputAbove={inputAbove?.(context)}
             userName={user.name}
             userId={user.id}
             modelCatalog={modelCatalog}
@@ -554,27 +548,7 @@ export function Workspace({
             onModelChange={handleModelChange}
             knowledgeBases={conversationKnowledgeBases}
             onKnowledgeBasesChange={handleKnowledgeBasesChange}
-            emptyDashboard={isDigitalEmployeeMode && onNavigateDigitalEmployee ? (
-              digitalEmployeeFeature === "marketing-materials" ? <MarketingMaterialsHome
-                onOpenManagement={onNavigateDigitalEmployee}
-                onPrompt={(prompt) => void doSend(prompt)}
-              /> : digitalEmployeeFeature === "copy" ? <CustomerAcquisitionChatHome
-                unified={digitalEmployeeUnified}
-                onOpenWorkspace={onNavigateDigitalEmployee}
-                onPrompt={(prompt) => void doSend(prompt)}
-              /> : digitalEmployeeFeature === "acquisition" ? <OpportunityAdvisorChatHome
-                unified={digitalEmployeeUnified}
-                onOpenWorkspace={onNavigateDigitalEmployee}
-                onPrompt={(prompt) => void doSend(prompt)}
-              /> : <DigitalEmployeeHome
-                onOpenProfiles={onNavigateDigitalEmployee}
-                onOpenProfile={onNavigateDigitalProfile ?? onNavigateDigitalEmployee}
-                onOpenOpportunities={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("acquisition") : undefined}
-                onOpenAcquisition={onNavigateDigitalFeature ? () => onNavigateDigitalFeature("copy") : undefined}
-                onPrompt={(prompt) => void doSend(prompt)}
-                llmModelId={selectedModels.llm}
-              />
-            ) : undefined}
+            emptyDashboard={emptyDashboard?.(context)}
           />
         </div>
 

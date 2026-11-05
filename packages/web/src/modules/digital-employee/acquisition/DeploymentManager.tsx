@@ -1,6 +1,6 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useRef, useState } from "react";
-import { api } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import { randomId } from "../../../lib/uuid.js";
 import { feedbackCount } from "./asset-delivery.js";
 import type { AssetDeployment, DeploymentPlatform, MarketingAsset } from "../types.js";
@@ -22,7 +22,12 @@ export function DeploymentManager({ asset, onClose, onChanged }: { asset: Market
   const save = async () => {
     setSaving(true); setError(null);
     try {
-      await api.saveAssetDeployment(asset.id, { platform, customPlatform: platform === "other" ? customPlatform : undefined, status: "deployed", deployedAt: new Date(deployedAt).toISOString() });
+      await employeeApi.saveAssetDeployment(asset.id, {
+        platform,
+        customPlatform: platform === "other" ? customPlatform : undefined,
+        status: "deployed",
+        deployedAt: new Date(deployedAt).toISOString(),
+      });
       onChanged();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "投放状态保存失败"); }
     finally { setSaving(false); }
@@ -31,7 +36,7 @@ export function DeploymentManager({ asset, onClose, onChanged }: { asset: Market
     if (saving) return;
     setSaving(true); setError(null);
     try {
-      await api.saveAssetDeployment(asset.id, {
+      await employeeApi.saveAssetDeployment(asset.id, {
         platform: entry.platform,
         customPlatform: entry.customPlatform ?? undefined,
         status: "ended",
@@ -66,7 +71,13 @@ function FeedbackDialog({ deployment, onClose, onSaved }: { deployment: AssetDep
     if (saving) return;
     setSaving(true); setError(null);
     try {
-      await api.addDeploymentFeedback(deployment.id, { requestId: requestId.current, impressions: feedbackCount(impressions), interactions: feedbackCount(interactions), conversions: feedbackCount(conversions), feedbackText });
+      await employeeApi.addDeploymentFeedback(deployment.id, {
+        requestId: requestId.current,
+        impressions: feedbackCount(impressions),
+        interactions: feedbackCount(interactions),
+        conversions: feedbackCount(conversions),
+        feedbackText,
+      });
       onSaved();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "反馈保存失败，请重试"); }
     finally { setSaving(false); }

@@ -109,6 +109,8 @@ export const migrations: Migration[] = [
   marketingAnalysisSubmitted,
   marketingKeyArtStarted,
   assetReviewFlags,
+  employeeSettings,
+  draftDismissed,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -138,3 +140,5 @@ import { marketingAnalysisNoResponse } from "./0064-marketing-analysis-no-respon
 import { marketingAnalysisSubmitted } from "./0065-marketing-analysis-submitted.js";
 import { marketingKeyArtStarted } from "./0066-marketing-key-art-started.js";
 import { assetReviewFlags } from "./0067-asset-review-flags.js";
+import { employeeSettings } from "./0068-employee-settings.js";
+import { draftDismissed } from "./0069-draft-dismissed.js";

@@ -1,6 +1,6 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import type {
   MarketingBrandAssets,
   MarketingProduct,
@@ -9,10 +9,11 @@ import type {
 } from "../types.js";
 
 interface Props {
-  onBackToConversation: () => void;
+  onBackToConversation?: () => void;
+  onSelect?: (product: MarketingProduct) => void;
 }
 
-export function MarketingMaterialsPage({ onBackToConversation }: Props) {
+export function MarketingMaterialsPage({ onBackToConversation, onSelect }: Props) {
   const { t } = useI18n();
   const [products, setProducts] = useState<MarketingProduct[]>([]);
   const [brand, setBrand] = useState<MarketingBrandAssets | null>(null);
@@ -33,8 +34,8 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
     setError(null);
     try {
       const [productResult, brandResult] = await Promise.all([
-        api.listMarketingProducts({ q: debouncedQuery || undefined, limit: 100 }),
-        api.getMarketingBrandAssets(),
+        employeeApi.listMarketingProducts({ q: debouncedQuery || undefined, limit: 100 }),
+        employeeApi.getMarketingBrandAssets(),
       ]);
       setProducts(productResult.items);
       setBrand(brandResult);
@@ -48,8 +49,8 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
   useEffect(() => { void load(); }, [load]);
 
   const saveProduct = async (input: MarketingProductInput) => {
-    if (editingProduct === "new") await api.createMarketingProduct(input);
-    else if (editingProduct) await api.updateMarketingProduct(editingProduct.id, { ...input, version: editingProduct.version });
+    if (editingProduct === "new") await employeeApi.createMarketingProduct(input);
+    else if (editingProduct) await employeeApi.updateMarketingProduct(editingProduct.id, { ...input, version: editingProduct.version });
     setEditingProduct(null);
     await load();
   };
@@ -57,7 +58,7 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
   const archiveProduct = async (product: MarketingProduct) => {
     if (!window.confirm(t(`确认归档“${product.name}”？归档后不会再作为有效营销事实被查询。`))) return;
     try {
-      await api.archiveMarketingProduct(product.id, product.version);
+      await employeeApi.archiveMarketingProduct(product.id, product.version);
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "归档失败");
@@ -66,57 +67,117 @@ export function MarketingMaterialsPage({ onBackToConversation }: Props) {
 
   return (
     <div className="de-page marketing-materials-page">
-      <button className="de-back-button" onClick={onBackToConversation}>{t("‹ 返回对话管理")}</button>
+      {onBackToConversation && (
+        <button className="de-back-button" onClick={onBackToConversation}>
+          {t("‹ 返回对话管理")}
+        </button>
+      )}
       <header className="de-page-header">
         <div>
           <p className="de-eyebrow">{t("数字员工 / 营销资料")}</p>
           <h1>{t("产品与品牌事实库")}</h1>
           <p>{t("统一维护产品能说什么、品牌怎么说；商机雷达的单客跟进与获客宝的客群营销共同引用这份事实。")}</p>
         </div>
-        <button className="de-primary-button" onClick={() => setEditingProduct("new")}>{t("＋ 新建产品")}</button>
+        <button className="de-primary-button" onClick={() => setEditingProduct("new")}>
+          {t("＋ 新建产品")}
+        </button>
       </header>
 
-      {error && <div className="de-inline-error">{t(error)}<button onClick={() => void load()}>{t("重试")}</button></div>}
+      {error && (
+        <div className="de-inline-error">
+          {t(error)}
+          <button onClick={() => void load()}>{t("重试")}</button>
+        </div>
+      )}
 
       <section className="marketing-brand-card">
         <div className="de-card-heading">
-          <div><p className="de-eyebrow">{t("品牌资料")}</p><h2>{t("品牌口径与视觉资产")}</h2></div>
-          <button className="de-secondary-button" onClick={() => setEditingBrand(true)}>{brand ? t("编辑品牌资料") : t("建立品牌资料")}</button>
+          <div>
+            <p className="de-eyebrow">{t("品牌资料")}</p>
+            <h2>{t("品牌口径与视觉资产")}</h2>
+          </div>
+          <button className="de-secondary-button" onClick={() => setEditingBrand(true)}>
+            {brand ? t("编辑品牌资料") : t("建立品牌资料")}
+          </button>
         </div>
         <div className="marketing-brand-grid">
           <FactBlock title={t("品牌语气")} items={brand?.tone ?? []} empty="尚未设置品牌语气" />
           <FactBlock title={t("标准行动号召")} items={brand?.standardCallsToAction ?? []} empty="尚未设置行动号召" />
           <div className="marketing-fact-block">
             <h3>{t("视觉资产")}</h3>
-            {brand?.visualAssets.length ? <div className="marketing-asset-list">{brand.visualAssets.map((asset, index) => (
-              <a key={`${asset.url}-${index}`} href={asset.url} target="_blank" rel="noreferrer">
-                <span aria-hidden>▧</span><span><strong>{asset.name}</strong><small>{asset.type || t("品牌素材")}</small></span>
-              </a>
-            ))}</div> : <p>{t("尚未添加视觉资产")}</p>}
+            {brand?.visualAssets.length ? (
+              <div className="marketing-asset-list">
+                {brand.visualAssets.map((asset, index) => (
+                  <a key={`${asset.url}-${index}`} href={asset.url} target="_blank" rel="noreferrer">
+                    <span aria-hidden>▧</span>
+                    <span>
+                      <strong>{asset.name}</strong>
+                      <small>{asset.type || t("品牌素材")}</small>
+                    </span>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p>{t("尚未添加视觉资产")}</p>
+            )}
           </div>
         </div>
       </section>
 
       <section className="marketing-products-section">
         <div className="de-section-heading">
-          <div><h2>{t("产品目录")}</h2><p>{t("卖点、事实、FAQ、补充说明、异议、权益、禁用表达与案例素材集中管理。")}</p></div>
-          <div className="marketing-product-search"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索产品名称或定位")} /></div>
+          <div>
+            <h2>{t("产品目录")}</h2>
+            <p>{t("卖点、事实、FAQ、补充说明、异议、权益、禁用表达与案例素材集中管理。")}</p>
+          </div>
+          <div className="marketing-product-search">
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索产品名称或定位")} />
+          </div>
         </div>
         {loading && products.length === 0 && <div className="de-state">{t("正在读取营销资料…")}</div>}
         {!loading && products.length === 0 && (
-          <div className="de-state de-empty-state"><span className="de-empty-icon">◇</span><strong>{debouncedQuery ? t("没有匹配的产品") : t("还没有产品资料")}</strong><p>{t("可以在此结构化维护，也可以回到对话直接告诉数字员工。")}</p>{!debouncedQuery && <button className="de-primary-button" onClick={() => setEditingProduct("new")}>{t("新建第一条产品资料")}</button>}</div>
+          <div className="de-state de-empty-state">
+            <span className="de-empty-icon">◇</span>
+            <strong>{debouncedQuery ? t("没有匹配的产品") : t("还没有产品资料")}</strong>
+            <p>{t("可以在此结构化维护，也可以回到对话直接告诉数字员工。")}</p>
+            {!debouncedQuery && (
+              <button className="de-primary-button" onClick={() => setEditingProduct("new")}>
+                {t("新建第一条产品资料")}
+              </button>
+            )}
+          </div>
         )}
-        {products.length > 0 && <div className="marketing-product-grid">{products.map((product) => (
-          <ProductCard key={product.id} product={product} onEdit={() => setEditingProduct(product)} onArchive={() => void archiveProduct(product)} />
-        ))}</div>}
+        {products.length > 0 && (
+          <div className="marketing-product-grid">
+            {products.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                onEdit={() => {
+                  setEditingProduct(product);
+                  onSelect?.(product);
+                }}
+                onArchive={() => void archiveProduct(product)}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
-      {editingProduct && <ProductEditor product={editingProduct === "new" ? undefined : editingProduct} onClose={() => setEditingProduct(null)} onSave={saveProduct} />}
-      {editingBrand && <BrandEditor brand={brand} onClose={() => setEditingBrand(false)} onSave={async (input) => {
-        await api.saveMarketingBrandAssets({ ...input, ...(brand ? { version: brand.version } : {}) });
-        setEditingBrand(false);
-        await load();
-      }} />}
+      {editingProduct && (
+        <ProductEditor product={editingProduct === "new" ? undefined : editingProduct} onClose={() => setEditingProduct(null)} onSave={saveProduct} />
+      )}
+      {editingBrand && (
+        <BrandEditor
+          brand={brand}
+          onClose={() => setEditingBrand(false)}
+          onSave={async (input) => {
+            await employeeApi.saveMarketingBrandAssets({ ...input, ...(brand ? { version: brand.version } : {}) });
+            setEditingBrand(false);
+            await load();
+          }}
+        />
+      )}
     </div>
   );
 }

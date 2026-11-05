@@ -619,3 +619,72 @@ export const OBSERVATION_LABELS: Record<ObservationType, string> = {
   churn: "流失/放弃",
   note: "其他备注",
 };
+
+export interface EmployeeSettings {
+  employeeName: string;
+  feishuReminder: boolean;
+  desktopReminder: boolean;
+  version: number;
+}
+
+export type ProposalKind =
+  | "follow_up_action" | "follow_up_result" | "customer_segment" | "marketing_campaign"
+  | "asset_deployment" | "deployment_feedback" | "campaign_result" | "customer_capture" | "profile_change";
+
+export interface PendingProposal {
+  id: string;
+  kind: ProposalKind;
+  /** False for customer records and profile changes, which need a choice in the conversation. */
+  confirmable: boolean;
+  conversationId: string | null;
+  preview: Record<string, unknown>;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ProposalResult {
+  id: string;
+  kind: ProposalKind;
+  alreadyApplied: boolean;
+  entityId: string | null;
+  managementUrl: string | null;
+}
+
+export interface TodayItem {
+  id: string;
+  kind: "proposal" | "opportunity" | "recommendation" | "follow_up" | "result";
+  subject: { type: "customer" | "segment" | "campaign" | "asset"; id: string; label: string } | null;
+  title: string;
+  reason: string;
+  evidence: Array<{ fact: string }>;
+  priority: "high" | "normal" | "low";
+  dueAt: string | null;
+  source: { type: string; id: string; version?: number };
+  proposal?: PendingProposal;
+  opportunity?: OpportunityItem;
+  recommendation?: CampaignRecommendation;
+}
+
+export interface RunningWork {
+  id: string;
+  type: string;
+  status: string;
+  progress: number;
+  stage: string | null;
+  createdAt: string;
+}
+
+export interface TodayResponse {
+  employee: { name: string };
+  items: TodayItem[];
+  running: RunningWork[];
+  snoozedCount: number;
+  hasProfiles: boolean;
+  lastDiscoveredAt: string | null;
+}
+
+export interface CustomerWork {
+  opportunities: OpportunityItem[];
+  actions: OpportunityItem[];
+  outreach: Array<{ id: string; channel: string; objective: string; version: number; usedAt: string | null; createdAt: string; excerpt: string }>;
+}

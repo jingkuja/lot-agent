@@ -87,3 +87,33 @@ describe("digital employee extension", () => {
     expect(digitalEmployeeTurnParts(undefined)[0]).toContain("business tools are disabled");
   });
 });
+
+describe("beginTurn", () => {
+  const metadata = (extra: Record<string, unknown> = {}) => ({ digitalEmployeeFeatureScope: "employee", ...extra });
+  const turn = (extension: ReturnType<typeof createDigitalEmployeeExtension>, value: unknown) =>
+    extension.beginTurn!({ agentId: "digital_employee", userId: "u1", conversationId: "c1", metadata: value, toolNames: tools });
+  const settings = (employeeName: string) => ({ get: async () => ({ employeeName, feishuReminder: false, desktopReminder: false, version: 1 }) });
+
+  it("uses the name the owner chose, as data", async () => {
+    const { dynamicParts } = await turn(createDigitalEmployeeExtension({ settings: settings("阿\"灵") }), metadata());
+    expect(dynamicParts[0]).toContain(JSON.stringify("阿\"灵"));
+  });
+
+  it("falls back to the default name when settings cannot be read", async () => {
+    const failing = { get: async () => { throw new Error("db down"); } };
+    const { dynamicParts } = await turn(createDigitalEmployeeExtension({ settings: failing }), metadata());
+    expect(dynamicParts[0]).toContain(JSON.stringify("小灵"));
+  });
+
+  it("adds the current object to employee conversations", async () => {
+    const focus = { type: "customer", id: "p1", label: "李静" };
+    const { dynamicParts } = await turn(createDigitalEmployeeExtension(), metadata({ digitalEmployeeFocus: focus }));
+    expect(dynamicParts.at(-1)).toContain(JSON.stringify(focus));
+  });
+
+  it("keeps module conversations free of it", async () => {
+    const focus = { type: "customer", id: "p1", label: "李静" };
+    const { dynamicParts } = await turn(createDigitalEmployeeExtension(), { digitalEmployeeFeatureScope: "customer-acquisition", digitalEmployeeFocus: focus });
+    expect(dynamicParts.join("\n")).not.toContain("李静");
+  });
+});

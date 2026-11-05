@@ -1,4 +1,4 @@
-import type { Agent, Conversation } from "../api/client.js";
+import type { Agent, Conversation } from "../../api/client.js";
 
 export const DIGITAL_EMPLOYEE_AGENT_ID = "digital_employee";
 export const DIGITAL_EMPLOYEE_UNIFIED_SCOPE = "employee";

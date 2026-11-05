@@ -185,7 +185,8 @@ export type CaptureDraftStatus =
   | "awaiting_confirmation"
   | "applied"
   | "rejected"
-  | "expired";
+  | "expired"
+  | "dismissed";
 
 export interface CustomerCaptureDraft {
   id: string;
@@ -395,7 +396,7 @@ export interface AddManualObservationInput {
 }
 
 export type ProfileChangeOperation = "create" | "update";
-export type ProfileChangeDraftStatus = "prepared" | "awaiting_confirmation" | "applied" | "expired";
+export type ProfileChangeDraftStatus = "prepared" | "awaiting_confirmation" | "applied" | "expired" | "dismissed";
 
 export interface CustomerProfileChangeDraft {
   id: string;

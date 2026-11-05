@@ -31,6 +31,7 @@ export function adminAuth(key: string): MiddlewareHandler {
 export interface AdminDeps {
   marketingMetrics(hours: number): Promise<unknown>;
   marketingReconciliation(hours: number): Promise<unknown>;
+  digitalEmployeeMetrics(hours: number): Promise<unknown>;
 }
 
 /** Read-only operations endpoints for scripts and dashboards; there is no admin UI. */
@@ -46,6 +47,7 @@ export function createAdminRoutes(deps: AdminDeps, key: string) {
     return c.json(await read(hours));
   };
   app.get("/metrics/marketing", window(hours => deps.marketingMetrics(hours), 24));
+  app.get("/metrics/digital-employee", window(hours => deps.digitalEmployeeMetrics(hours), 168));
   app.get("/reconciliation/marketing", window(hours => deps.marketingReconciliation(hours), 168));
   return app;
 }

@@ -1,5 +1,7 @@
 import { Hono } from "hono";
+import { parseEmployeeName } from "./employee-name.js";
 import { apiError, InputError } from "./errors.js";
+import { parseFocusInput } from "./focus.js";
 import type { DigitalEmployeeService } from "./service.js";
 import {
   parseManualObservation,
@@ -45,6 +47,38 @@ type Variables = { userId: string };
 /** Browser-facing, authenticated customer-profile API. */
 export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Hono<{ Variables: Variables }> {
   const app = new Hono<{ Variables: Variables }>();
+
+  app.get("/settings", async (c) => {
+    try { return c.json(await service.settings.get(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.put("/settings", async (c) => {
+    try {
+      const payload = await body(c);
+      return c.json(await service.settings.save(c.get("userId"), {
+        employeeName: parseEmployeeName(payload.employeeName),
+        feishuReminder: payload.feishuReminder === true,
+        desktopReminder: payload.desktopReminder === true,
+        version: settingsVersion(payload.version),
+      }));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/today", async (c) => {
+    try { return c.json(await service.today.get(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/proposals/:id/confirm", async (c) => {
+    try { return c.json(await service.proposals.confirm(c.get("userId"), parseEntityId(c.req.param("id"), "proposalId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/proposals/:id/dismiss", async (c) => {
+    try { return c.json(await service.proposals.dismiss(c.get("userId"), parseEntityId(c.req.param("id"), "proposalId"))); }
+    catch (error) { return respondError(c, error); }
+  });
 
   app.get("/acquisition/segments", async (c) => {
     try { return c.json({ items: await service.customerAcquisition.listSegments(c.get("userId")) }); }
@@ -198,11 +232,11 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
 
   app.post("/opportunities/:id/talk-track", async (c) => {
     try {
-      return c.json(await service.opportunities.generateTalkTrack(
-        c.get("userId"),
-        parseEntityId(c.req.param("id"), "itemId"),
-        parseTalkTrackRequest(await body(c))
-      ));
+      const { intent, message, history } = parseTalkTrackRequest(await body(c));
+      const draft = await service.opportunities.generateOutreach(c.get("userId"), {
+        itemId: parseEntityId(c.req.param("id"), "itemId"), intent, message, history,
+      });
+      return c.json({ reply: draft.content, modelId: draft.modelId, outreachId: draft.id });
     } catch (error) { return respondError(c, error); }
   });
 
@@ -311,6 +345,18 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     }
   });
 
+  app.put("/conversation-context/:conversationId", async (c) => {
+    try {
+      return c.json(await service.setConversationFocus(
+        c.get("userId"),
+        parseEntityId(c.req.param("conversationId"), "conversationId"),
+        parseFocusInput(await body(c))
+      ));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
   app.delete("/conversation-context/:conversationId", async (c) => {
     try {
       await service.clearCurrentProfile(
@@ -326,17 +372,6 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.get("/overview", async (c) => {
     try {
       return c.json(await service.getOverview(c.get("userId")));
-    } catch (error) {
-      return respondError(c, error);
-    }
-  });
-
-  app.post("/overview/refresh", async (c) => {
-    try {
-      const payload = await body(c);
-      const modelId = typeof payload.modelId === "string" ? payload.modelId.trim() : "";
-      if (!modelId || modelId.length > 200) throw new InputError("请选择有效的 LLM 模型");
-      return c.json(await service.refreshCohortSummary(c.get("userId"), modelId));
     } catch (error) {
       return respondError(c, error);
     }
@@ -369,6 +404,14 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.post("/profiles", async (c) => {
     try {
       return c.json(await service.createProfile(c.get("userId"), parseCreateProfile(await body(c))), 201);
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.get("/profiles/:id/work", async (c) => {
+    try {
+      return c.json(await service.opportunities.getCustomerBusinessContext(c.get("userId"), parseEntityId(c.req.param("id"), "profileId")));
     } catch (error) {
       return respondError(c, error);
     }
@@ -486,6 +529,11 @@ async function body(c: { req: { json: () => Promise<unknown> } }): Promise<Recor
   });
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new InputError("请求体必须是JSON对象");
   return value as Record<string, unknown>;
+}
+
+/** 0 is the version of settings that were never saved. */
+function settingsVersion(value: unknown): number {
+  return value === 0 ? 0 : parseVersion(value);
 }
 
 function pagination(value: string | undefined, label: string, min: number, max: number, fallback: number): number {

@@ -145,3 +145,40 @@ export async function marketingMetrics(pool: pg.Pool, hours: number, env: NodeJS
     throw error;
   } finally { client.release(); }
 }
+
+const share = (part: number, whole: number) => (whole ? Math.round(part / whole * 1000) / 1000 : null);
+
+/**
+ * The three numbers that show whether the employee is doing the work, for rows created in
+ * the last `hours`. A proposal counts as handled once the owner confirmed or refused it; one
+ * that expired unanswered stays in the total. Follow-ups count once marked as executed.
+ */
+export async function digitalEmployeeMetrics(pool: pg.Pool, hours: number) {
+  const since = `now() - make_interval(hours => $1)`;
+  const { rows: [row] } = await pool.query(
+    `WITH work AS (
+       SELECT source = 'ai_accepted' AS employee FROM de_follow_up_tasks WHERE created_at >= ${since}
+       UNION ALL SELECT opportunity_id IS NOT NULL FROM de_marketing_campaigns WHERE created_at >= ${since}
+       UNION ALL SELECT source = 'recommendation' FROM de_marketing_asset_library WHERE created_at >= ${since}
+     ), proposals AS (
+       SELECT status FROM de_conversation_action_drafts WHERE created_at >= ${since}
+       UNION ALL SELECT status FROM de_customer_capture_drafts WHERE created_at >= ${since}
+       UNION ALL SELECT status FROM de_customer_profile_change_drafts WHERE created_at >= ${since}
+     )
+     SELECT
+       (SELECT count(*)::int FROM work) AS work_total,
+       (SELECT count(*) FILTER (WHERE employee)::int FROM work) AS work_employee,
+       (SELECT count(*) FILTER (WHERE status <> 'prepared')::int FROM proposals) AS proposal_total,
+       (SELECT count(*) FILTER (WHERE status IN ('applied','dismissed','rejected'))::int FROM proposals) AS proposal_handled,
+       (SELECT count(*)::int FROM de_follow_up_tasks WHERE executed_at >= ${since}) AS executed,
+       (SELECT count(*)::int FROM de_follow_up_tasks
+         WHERE executed_at >= ${since} AND status = 'completed' AND close_reason IS DISTINCT FROM 'overdue_closed') AS filled`,
+    [hours]
+  );
+  return {
+    windowHours: hours,
+    employeeInitiated: { employee: row.work_employee, total: row.work_total, share: share(row.work_employee, row.work_total) },
+    proposalsHandled: { handled: row.proposal_handled, total: row.proposal_total, rate: share(row.proposal_handled, row.proposal_total) },
+    resultsFilled: { filled: row.filled, executed: row.executed, rate: share(row.filled, row.executed) },
+  };
+}

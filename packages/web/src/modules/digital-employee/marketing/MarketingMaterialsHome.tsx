@@ -1,6 +1,6 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useEffect, useState } from "react";
-import { api } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import type { MarketingBrandAssets, MarketingProduct } from "../types.js";
 
 export function MarketingMaterialsHome({ onOpenManagement, onPrompt }: { onOpenManagement: () => void; onPrompt: (prompt: string) => void }) {
@@ -12,7 +12,7 @@ export function MarketingMaterialsHome({ onOpenManagement, onPrompt }: { onOpenM
   useEffect(() => {
     let active = true;
     setError(false);
-    void Promise.all([api.listMarketingProducts({ limit: 5 }), api.getMarketingBrandAssets()]).then(([result, brandResult]) => {
+    void Promise.all([employeeApi.listMarketingProducts({ limit: 5 }), employeeApi.getMarketingBrandAssets()]).then(([result, brandResult]) => {
       if (active) { setProducts(result.items); setBrand(brandResult); }
     }).catch(() => { if (active) setError(true); });
     return () => { active = false; };

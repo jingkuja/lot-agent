@@ -302,7 +302,7 @@ describe("OpportunityService personal work queue", () => {
     const service = new OpportunityService({ pool: { query } } as any, undefined, undefined, { generate });
 
     const result = await service.generateTalkTrack("u1", "a1", {
-      intent: "follow_up", message: "生成微信跟进话术", history: [], modelId: "test-model",
+      intent: "follow_up", message: "生成微信跟进话术", history: [],
     });
 
     expect(result).toEqual({ modelId: "test-model", reply: "李姐，合同模板您看得怎么样？" });
@@ -312,7 +312,6 @@ describe("OpportunityService personal work queue", () => {
         customerName: "李姐", productName: "机房运维服务",
         recentFacts: [{ text: "客户要求先发合同模板", occurredAt: "2026-08-18T02:00:00.000Z" }],
       }),
-      request: expect.objectContaining({ modelId: "test-model" }),
     }));
   });
 

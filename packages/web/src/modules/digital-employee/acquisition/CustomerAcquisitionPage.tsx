@@ -7,6 +7,7 @@ import { CreationWorkspacePage, type CreationSeed } from "./CreationWorkspacePag
 import { CustomerSegmentsPage } from "./CustomerSegmentsPage.js";
 import { AcquisitionAnalyticsPage } from "./AcquisitionAnalyticsPage.js";
 import { CampaignsPage } from "./CampaignsPage.js";
+import { seedFromAsset, seedFromCampaign, seedFromRecommendation, seedFromSegment } from "./creation-seeds.js";
 
 type Workspace = "assets" | "recommendations" | "creation" | "campaigns" | "segments" | "analytics";
 
@@ -29,34 +30,10 @@ export function CustomerAcquisitionPage({ onOpenChat, onOpenMarketingMaterials }
     setWorkspace("creation");
   };
 
-  const fromRecommendation = (item: CampaignRecommendation) => startCreation({
-    recommendationId: item.id,
-    segmentId: item.segmentId ?? undefined,
-    productId: item.productId ?? undefined,
-    publicAudience: item.segmentId ? undefined : item.targetSegmentDescription,
-    title: item.theme,
-    prompt: [item.theme, item.creativeDirection, ...item.corePoints].filter(Boolean).join("；"),
-    channels: item.suggestedChannels,
-    assetType: item.type === "copy" ? "copy" : item.type === "poster" ? "poster" : "video",
-    durationSeconds: item.durationSeconds === 10 ? 10 : 15,
-  });
-
-  const reuseAsset = (item: MarketingAsset) => startCreation({
-    parentAssetId: item.id,
-    campaignId: item.campaignId ?? undefined,
-    title: `${item.title} · 新版本`,
-    prompt: item.assetType === "text" ? `参考以下历史文案的主题和结构生成新版本，但不要直接照抄：\n${item.content}` : `基于“${item.title}”延续主题，生成一个差异化新版本。`,
-    assetType: item.assetType === "video" ? "video" : item.assetType === "text" ? "copy" : "poster",
-  });
-
-  const continueCampaign = (item: MarketingCampaignSummary) => startCreation({
-    campaignId: item.id,
-    title: item.name,
-    productId: item.productId ?? undefined,
-    channels: item.channels,
-  });
-
-  const fromSegment = (item: CustomerSegment) => startCreation({ segmentId: item.id, title: `${item.name}营销内容` });
+  const fromRecommendation = (item: CampaignRecommendation) => startCreation(seedFromRecommendation(item));
+  const reuseAsset = (item: MarketingAsset) => startCreation(seedFromAsset(item));
+  const continueCampaign = (item: MarketingCampaignSummary) => startCreation(seedFromCampaign(item));
+  const fromSegment = (item: CustomerSegment) => startCreation(seedFromSegment(item));
 
   return <div className="de-page de-acquisition-page">
     <header className="de-acquisition-header">

@@ -3,8 +3,7 @@ import { useState } from "react";
 import type { User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
 import { useConversations } from "../../hooks/useConversations.js";
-import type { CatalogModel } from "../../lib/model-filter.js";
-import { digitalEmployeeConversations as filterDigitalEmployeeConversations, digitalEmployeeConversationsForScope } from "../../lib/product-agent-scope.js";
+import { digitalEmployeeConversations as filterDigitalEmployeeConversations, digitalEmployeeConversationsForScope } from "./conversation-scope.js";
 import { DigitalEmployeeSidebar, type DigitalEmployeeFeature } from "./DigitalEmployeeSidebar.js";
 import { ProfileDetailPage } from "./profiles/ProfileDetailPage.js";
 import { ProfileListPage } from "./profiles/ProfileListPage.js";
@@ -15,7 +14,6 @@ import { CustomerAcquisitionPage } from "./acquisition/CustomerAcquisitionPage.j
 interface DigitalEmployeeLayoutProps {
   pathname: string;
   user: User;
-  llmModels: CatalogModel[];
   onLogout: () => void;
   onNavigate: (path: string) => void;
   onOpenDigitalEmployee: () => void;
@@ -37,7 +35,15 @@ function profileIdFor(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-export function DigitalEmployeeLayout({ pathname, user, llmModels, onLogout, onNavigate, onOpenDigitalEmployee, onNavigateAssistant, onOpenConversation }: DigitalEmployeeLayoutProps) {
+export function DigitalEmployeeLayout({
+  pathname,
+  user,
+  onLogout,
+  onNavigate,
+  onOpenDigitalEmployee,
+  onNavigateAssistant,
+  onOpenConversation,
+}: DigitalEmployeeLayoutProps) {
   const { t } = useI18n();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { conversations, loadingMore, hasMore, loadMore } = useConversations();
@@ -49,11 +55,10 @@ export function DigitalEmployeeLayout({ pathname, user, llmModels, onLogout, onN
   const activeScope = activeFeature === "copy" ? "customer-acquisition" : activeFeature === "acquisition" ? "opportunity-advisor" : activeFeature;
   const featureConversations = digitalEmployeeConversationsForScope(digitalEmployeeConversations, activeScope);
   const openFeature = (feature: DigitalEmployeeFeature) => onNavigate(`/digital-employee/${feature}`);
-  const openFeatureChat = () => onNavigate(
-    activeFeature === "copy" || activeFeature === "acquisition"
-      ? `/digital-employee/${activeFeature}/chat`
-      : `/digital-employee/${activeFeature}`
-  );
+  const openFeatureChat = () =>
+    onNavigate(
+      activeFeature === "copy" || activeFeature === "acquisition" ? `/digital-employee/${activeFeature}/chat` : `/digital-employee/${activeFeature}`
+    );
 
   return (
     <div className="workspace de-workspace">
@@ -79,25 +84,37 @@ export function DigitalEmployeeLayout({ pathname, user, llmModels, onLogout, onN
       </aside>
 
       <main className="workspace-main de-workspace-main">
-        {sidebarCollapsed && <button className="sidebar-expand" onClick={() => setSidebarCollapsed(false)} title={t("展开侧栏")} aria-label={t("展开侧栏")}>›</button>}
+        {sidebarCollapsed && (
+          <button className="sidebar-expand" onClick={() => setSidebarCollapsed(false)} title={t("展开侧栏")} aria-label={t("展开侧栏")}>
+            ›
+          </button>
+        )}
         <div className="de-main-surface">
-          {view === "profiles" && (profileId
-            ? <ProfileDetailPage profileId={profileId} onBack={goProfiles} />
-            : <ProfileListPage
+          {view === "profiles" &&
+            (profileId ? (
+              <ProfileDetailPage profileId={profileId} onBack={goProfiles} />
+            ) : (
+              <ProfileListPage
+                onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
+                onBackToConversation={() => onNavigate("/digital-employee/customer-profile")}
+              />
+            ))}
+          {view === "marketing-materials" && (
+            <MarketingMaterialsPage onBackToConversation={() => onNavigate("/digital-employee/marketing-materials")} />
+          )}
+          {view === "acquisition" && (
+            <OpportunityAdvisorPage
               onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
-              onBackToConversation={() => onNavigate("/digital-employee/customer-profile")}
-            />)}
-          {view === "marketing-materials" && <MarketingMaterialsPage onBackToConversation={() => onNavigate("/digital-employee/marketing-materials")} />}
-          {view === "acquisition" && <OpportunityAdvisorPage
-            llmModels={llmModels}
-            onOpenProfile={(id) => onNavigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
-            onCreateProfile={goProfiles}
-            onOpenChat={openFeatureChat}
-          />}
-          {view === "copy" && <CustomerAcquisitionPage
-            onOpenChat={openFeatureChat}
-            onOpenMarketingMaterials={() => onNavigate("/digital-employee/marketing-materials/manage")}
-          />}
+              onCreateProfile={goProfiles}
+              onOpenChat={openFeatureChat}
+            />
+          )}
+          {view === "copy" && (
+            <CustomerAcquisitionPage
+              onOpenChat={openFeatureChat}
+              onOpenMarketingMaterials={() => onNavigate("/digital-employee/marketing-materials/manage")}
+            />
+          )}
         </div>
       </main>
     </div>

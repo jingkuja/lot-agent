@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { digitalEmployeeProductFlags } from "../digital-employee/feature-scope.js";
 import { createProductRoutes } from "./product.js";
 
 beforeEach(() => vi.stubEnv("globle", undefined));
@@ -11,14 +12,20 @@ describe("public product links", () => {
     vi.stubEnv("NEW_API_INTERNAL_CLIENT_SECRET", "must-not-leak");
     const res = await createProductRoutes().request("/");
     expect(await res.json()).toEqual({
-      globle: 0, showCompliance: true, webUrl: "https://claw.example.com/", tokenhubUrl: "https://hub.example.com/console", digitalEmployeeUnified: false,
+      globle: 0, showCompliance: true, webUrl: "https://claw.example.com/", tokenhubUrl: "https://hub.example.com/console",
     });
   });
 
-  it("reports the unified digital employee switch", async () => {
+  it("adds the switches it is given", async () => {
     vi.stubEnv("DIGITAL_EMPLOYEE_UNIFIED", "1");
-    const res = await createProductRoutes().request("/");
-    expect((await res.json() as { digitalEmployeeUnified: boolean }).digitalEmployeeUnified).toBe(true);
+    const res = await createProductRoutes(digitalEmployeeProductFlags).request("/");
+    expect(await res.json()).toMatchObject({ digitalEmployeeUnified: true, digitalEmployeeWorkspace: false });
+  });
+
+  it("treats the workspace as unified", async () => {
+    vi.stubEnv("DIGITAL_EMPLOYEE_WORKSPACE", "1");
+    const res = await createProductRoutes(digitalEmployeeProductFlags).request("/");
+    expect(await res.json()).toMatchObject({ digitalEmployeeUnified: true, digitalEmployeeWorkspace: true });
   });
 
   it.each(["javascript:alert(1)", "https://secret:password@example.com", "broken", "https://example.com/?token=secret"])("rejects unsafe public configuration %s", async (value) => {

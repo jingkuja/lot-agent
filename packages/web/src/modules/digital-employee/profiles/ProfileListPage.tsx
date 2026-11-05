@@ -1,6 +1,6 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import { ProfileEditor } from "../components/ProfileEditor.js";
 import {
   HEALTH_LABELS,
@@ -13,7 +13,7 @@ import {
 
 interface ProfileListPageProps {
   onOpenProfile: (profileId: string) => void;
-  onBackToConversation: () => void;
+  onBackToConversation?: () => void;
 }
 
 const RELATIONSHIP_OPTIONS = Object.entries(RELATIONSHIP_LABELS) as Array<[RelationshipStage, string]>;
@@ -45,7 +45,7 @@ export function ProfileListPage({ onOpenProfile, onBackToConversation }: Profile
     setLoading(true);
     setError(null);
     try {
-      const result = await api.listCustomerProfiles({ page, limit, q: query, relationshipStage, health });
+      const result = await employeeApi.listCustomerProfiles({ page, limit, q: query, relationshipStage, health });
       setItems(result.items);
       setTotal(result.total);
     } catch (reason) {
@@ -81,7 +81,7 @@ export function ProfileListPage({ onOpenProfile, onBackToConversation }: Profile
   const create = async (input: ProfileInput) => {
     setSaving(true);
     try {
-      const created = await api.createCustomerProfile(input);
+      const created = await employeeApi.createCustomerProfile(input);
       clearCreateFlag();
       setNewOpen(false);
       onOpenProfile(created.profile.id);
@@ -94,7 +94,7 @@ export function ProfileListPage({ onOpenProfile, onBackToConversation }: Profile
     <div className="de-page de-profile-list-page">
       <header className="de-page-header">
         <div>
-          <button className="de-back-button" type="button" onClick={onBackToConversation}>{t("← 返回对话")}</button>
+          {onBackToConversation && <button className="de-back-button" type="button" onClick={onBackToConversation}>{t("← 返回对话")}</button>}
           <p className="de-eyebrow">{t("数字员工 / 客户画像")}</p>
           <h1>{t("客户画像管理")}</h1>
           <p>{t("把身份主档、原始观察和当前产品状态分开保存，方便持续跟进且可追溯。")}</p>

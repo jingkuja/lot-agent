@@ -28,8 +28,21 @@ export function readConversationFeatureScope(metadata: unknown): DigitalEmployee
   );
 }
 
+/** The workspace has only `employee` conversations, so its switch implies this one. */
 export function digitalEmployeeUnifiedEnabled(): boolean {
-  return process.env.DIGITAL_EMPLOYEE_UNIFIED === "1";
+  return process.env.DIGITAL_EMPLOYEE_UNIFIED === "1" || digitalEmployeeWorkspaceEnabled();
+}
+
+export function digitalEmployeeWorkspaceEnabled(): boolean {
+  return process.env.DIGITAL_EMPLOYEE_WORKSPACE === "1";
+}
+
+/** What the signed-out product config tells the web shell. */
+export function digitalEmployeeProductFlags() {
+  return {
+    digitalEmployeeUnified: digitalEmployeeUnifiedEnabled(),
+    digitalEmployeeWorkspace: digitalEmployeeWorkspaceEnabled(),
+  };
 }
 
 /** The scope a new conversation is stored with. The server decides `employee`:

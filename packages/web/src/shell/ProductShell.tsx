@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "../api/client.js";
 import { Workspace } from "../pages/Workspace.js";
+import { DIGITAL_EMPLOYEE_AGENT_ID } from "../modules/digital-employee/conversation-scope.js";
 import { DigitalEmployeeLayout } from "../modules/digital-employee/DigitalEmployeeLayout.js";
+import { EmployeeWorkspace } from "../modules/digital-employee/EmployeeWorkspace.js";
+import { LegacyDigitalEmployeeWorkspace } from "../modules/digital-employee/LegacyDigitalEmployeeWorkspace.js";
+import { TODAY_PATH, normalizeEmployeePath } from "../modules/digital-employee/routes.js";
+import { useEmployeeFlags } from "../modules/digital-employee/useEmployeeFlags.js";
 import { useModels } from "../hooks/useModels.js";
 import { LlmModelRequiredModal } from "../components/LlmModelRequiredModal.js";
 
@@ -9,6 +14,9 @@ interface ProductShellProps {
   user: User;
   onLogout: () => void;
 }
+
+/** The digital employee has its own entry, so the assistant's launcher leaves it out. */
+const HIDDEN_AGENT_IDS = [DIGITAL_EMPLOYEE_AGENT_ID];
 
 function currentPath(): string {
   return window.location.pathname || "/assistant";
@@ -44,6 +52,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
   const [requestedDigitalConversationId, setRequestedDigitalConversationId] = useState<string | null>(null);
   const { models: modelCatalog, loading: modelsLoading, reload: reloadModels } = useModels();
   const [llmNoticeTitle, setLlmNoticeTitle] = useState<string | null>(null);
+  const flags = useEmployeeFlags();
   const isDigitalEmployee = pathname.startsWith("/digital-employee");
   const isDigitalEmployeeChat = pathname === "/digital-employee" || pathname === "/digital-employee/customer-profile" ||
     pathname === "/digital-employee/marketing-materials" || pathname === "/digital-employee/copy/chat" ||
@@ -60,6 +69,16 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
     if (window.location.pathname !== path) window.history.pushState({}, "", path);
     setPathname(path);
   }, []);
+
+  const replacePath = useCallback((path: string) => {
+    if (window.location.pathname !== path) window.history.replaceState({}, "", path);
+    setPathname(path);
+  }, []);
+
+  // Old links reach their new place, and new links still work on the older interface.
+  useEffect(() => {
+    if (flags.ready) replacePath(normalizeEmployeePath(pathname, flags.workspace));
+  }, [flags.ready, flags.workspace, pathname, replacePath]);
 
   const requireLlm = useCallback((next: () => void, title: string) => {
     const openNoticeIfMissing = (catalog: { llm: unknown[] }) => {
@@ -82,13 +101,16 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
     requireLlm(() => navigate(path), "无法打开商机雷达");
   }, [navigate, requireLlm]);
 
-  const handleOpenDigitalEmployee = useCallback((targetPath = "/digital-employee/marketing-materials") => {
-    requireLlm(() => navigate(targetPath), "无法打开数字员工");
-  }, [navigate, requireLlm]);
+  const handleOpenDigitalEmployee = useCallback((targetPath?: string) => {
+    const path = targetPath ?? (flags.workspace ? TODAY_PATH : "/digital-employee/marketing-materials");
+    requireLlm(() => navigate(path), "无法打开数字员工");
+  }, [flags.workspace, navigate, requireLlm]);
 
   const handleOpenDigitalFeature = useCallback((feature: string) => {
     navigateWithModelGuard(`/digital-employee/${feature}`);
   }, [navigateWithModelGuard]);
+
+  const clearRequestedConversation = useCallback(() => setRequestedDigitalConversationId(null), []);
 
   return (
     <>
@@ -98,28 +120,44 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           onLogout={onLogout}
           modelCatalog={modelCatalog}
           onNavigateDigitalEmployee={() => handleOpenDigitalEmployee()}
+          hiddenAgentIds={HIDDEN_AGENT_IDS}
         />
       </div>
-      <div className={isDigitalEmployeeChat ? "product-shell-view" : "product-shell-view is-hidden"} aria-hidden={!isDigitalEmployeeChat || undefined}>
-        <Workspace
-          mode="digitalEmployee"
-          digitalEmployeeFeature={digitalEmployeeFeature}
-          user={user}
-          onLogout={onLogout}
-          modelCatalog={modelCatalog}
-          onNavigateAssistant={() => navigate("/assistant")}
-          onNavigateDigitalEmployee={() => handleOpenDigitalEmployee(digitalEmployeeManagementPath(digitalEmployeeFeature))}
-          onNavigateDigitalProfile={(id) => navigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
-          onNavigateDigitalFeature={handleOpenDigitalFeature}
-          requestedConversationId={requestedDigitalConversationId}
-          onRequestedConversationHandled={() => setRequestedDigitalConversationId(null)}
-        />
-      </div>
-      {isDigitalEmployee && !isDigitalEmployeeChat && (
+      {flags.ready && flags.workspace && (
+        <div className={isDigitalEmployee ? "product-shell-view" : "product-shell-view is-hidden"} aria-hidden={!isDigitalEmployee || undefined}>
+          <EmployeeWorkspace
+            user={user}
+            modelCatalog={modelCatalog}
+            pathname={pathname}
+            active={isDigitalEmployee}
+            onLogout={onLogout}
+            navigate={navigate}
+            replacePath={replacePath}
+            onNavigateAssistant={() => navigate("/assistant")}
+          />
+        </div>
+      )}
+      {flags.ready && !flags.workspace && (
+        <div className={isDigitalEmployeeChat ? "product-shell-view" : "product-shell-view is-hidden"} aria-hidden={!isDigitalEmployeeChat || undefined}>
+          <LegacyDigitalEmployeeWorkspace
+            user={user}
+            modelCatalog={modelCatalog}
+            onLogout={onLogout}
+            feature={digitalEmployeeFeature}
+            unifiedEnabled={flags.unified}
+            onNavigateAssistant={() => navigate("/assistant")}
+            onOpenManagement={() => handleOpenDigitalEmployee(digitalEmployeeManagementPath(digitalEmployeeFeature))}
+            onOpenProfile={(id) => navigate(`/digital-employee/profiles/${encodeURIComponent(id)}`)}
+            onOpenFeature={handleOpenDigitalFeature}
+            requestedConversationId={requestedDigitalConversationId}
+            onRequestedConversationHandled={clearRequestedConversation}
+          />
+        </div>
+      )}
+      {flags.ready && !flags.workspace && isDigitalEmployee && !isDigitalEmployeeChat && (
         <DigitalEmployeeLayout
           pathname={pathname}
           user={user}
-          llmModels={modelCatalog.llm}
           onLogout={onLogout}
           onNavigate={navigateWithModelGuard}
           onOpenDigitalEmployee={() => handleOpenDigitalEmployee(digitalEmployeeManagementPath(digitalEmployeeFeature))}

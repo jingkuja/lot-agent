@@ -1,6 +1,7 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import type { MarketingAsset, MarketingAssetType } from "../types.js";
 import { AssetReviewNotice, MarketingAssetCard } from "./MarketingAssetCard.js";
 import { DeploymentManager } from "./DeploymentManager.js";
@@ -8,7 +9,11 @@ import { assetTextFileName, generationStateLabel } from "./asset-delivery.js";
 
 const TYPE_LABEL = { text: "营销文案", poster: "营销海报", image: "营销图片", video: "营销视频" } as const;
 
-export function MarketingAssetLibraryPage({ onReuse, onCreate }: { onReuse: (asset: MarketingAsset) => void; onCreate: () => void }) {
+export function MarketingAssetLibraryPage({ onReuse, onCreate, onSelect }: {
+  onReuse: (asset: MarketingAsset) => void;
+  onCreate: () => void;
+  onSelect?: (asset: MarketingAsset) => void;
+}) {
   const { t } = useI18n();
   const [items, setItems] = useState<MarketingAsset[]>([]);
   const [total, setTotal] = useState(0);
@@ -25,7 +30,7 @@ export function MarketingAssetLibraryPage({ onReuse, onCreate }: { onReuse: (ass
     if (!quiet) setLoading(true);
     setError(null);
     try {
-      const result = await api.listMarketingAssets({ range, assetType, page, limit });
+      const result = await employeeApi.listMarketingAssets({ range, assetType, page, limit });
       setItems(result.items); setTotal(result.total);
       setManaging((current) => current ? result.items.find((item) => item.id === current.id) ?? current : null);
       setViewing((current) => current ? result.items.find((item) => item.id === current.id) ?? current : null);
@@ -45,24 +50,123 @@ export function MarketingAssetLibraryPage({ onReuse, onCreate }: { onReuse: (ass
     if (item.taskId && (item.generationStatus === "pending" || item.generationStatus === "running")) {
       await api.cancelTask(item.taskId).catch(() => ({ ok: false }));
     }
-    await api.archiveMarketingAsset(item.id); void load();
+    await employeeApi.archiveMarketingAsset(item.id); void load();
   };
   const pages = Math.max(1, Math.ceil(total / limit));
 
-  return <section className="de-acquisition-workspace" aria-label={t("营销资产库")}>
-    <header className="de-acquisition-section-head"><div><p>{t("营销资产库")}</p><h2>{t("已生成内容与投放状态")}</h2><span>{t("生成、投放和产生效果是三个独立状态。")}</span></div><button className="de-primary-button" onClick={onCreate}>{t("＋ 创作新内容")}</button></header>
-    <div className="de-acquisition-toolbar">
-      <label><span>{t("时间")}</span><select value={range} onChange={(event) => { setRange(event.target.value); setPage(1); }}><option value="3d">{t("最近 3 天")}</option><option value="7d">{t("最近一周")}</option><option value="30d">{t("最近一月")}</option><option value="all">{t("所有")}</option></select></label>
-      <label><span>{t("类型")}</span><select value={assetType} onChange={(event) => { setAssetType(event.target.value as MarketingAssetType | ""); setPage(1); }}><option value="">{t("全部内容")}</option><option value="text">{t("文案")}</option><option value="poster">{t("海报")}</option><option value="video">{t("视频")}</option></select></label>
-      <span className="de-acquisition-total">{t("共")}{total} {t("项")}</span>
-    </div>
-    {error && <div className="de-inline-error"><span>{t(error)}</span><button onClick={() => void load()}>{t("重试")}</button></div>}
-    {loading ? <div className="de-state">{t("正在读取营销资产…")}</div> : items.length === 0 ? <div className="de-state de-empty-state"><span className="de-empty-icon">▧</span><strong>{t("这个范围内还没有营销资产")}</strong><p>{t("从每日推荐或创作工作台生成的内容会自动出现在这里。")}</p><button className="de-primary-button" onClick={onCreate}>{t("开始创作")}</button></div> :
-      <div className="de-asset-grid">{items.map((item) => <MarketingAssetCard key={item.id} item={item} onView={() => setViewing(item)} onManage={() => setManaging(item)} onReuse={() => onReuse(item)} onArchive={() => void archive(item)} />)}</div>}
-    {total > limit && <footer className="de-pagination"><button className="de-secondary-button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{t("上一页")}</button><span>{t("第")}{page} / {pages} {t("页")}</span><button className="de-secondary-button" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>{t("下一页")}</button></footer>}
-    {viewing && <AssetContentDetail asset={viewing} onClose={() => setViewing(null)} onManage={() => { setManaging(viewing); setViewing(null); }} onReuse={() => { onReuse(viewing); setViewing(null); }} />}
-    {managing && <DeploymentManager asset={managing} onClose={() => setManaging(null)} onChanged={() => void load(true)} />}
-  </section>;
+  return (
+    <section className="de-acquisition-workspace" aria-label={t("营销资产库")}>
+      <header className="de-acquisition-section-head">
+        <div>
+          <p>{t("营销资产库")}</p>
+          <h2>{t("已生成内容与投放状态")}</h2>
+          <span>{t("生成、投放和产生效果是三个独立状态。")}</span>
+        </div>
+        <button className="de-primary-button" onClick={onCreate}>
+          {t("＋ 创作新内容")}
+        </button>
+      </header>
+      <div className="de-acquisition-toolbar">
+        <label>
+          <span>{t("时间")}</span>
+          <select
+            value={range}
+            onChange={(event) => {
+              setRange(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="3d">{t("最近 3 天")}</option>
+            <option value="7d">{t("最近一周")}</option>
+            <option value="30d">{t("最近一月")}</option>
+            <option value="all">{t("所有")}</option>
+          </select>
+        </label>
+        <label>
+          <span>{t("类型")}</span>
+          <select
+            value={assetType}
+            onChange={(event) => {
+              setAssetType(event.target.value as MarketingAssetType | "");
+              setPage(1);
+            }}
+          >
+            <option value="">{t("全部内容")}</option>
+            <option value="text">{t("文案")}</option>
+            <option value="poster">{t("海报")}</option>
+            <option value="video">{t("视频")}</option>
+          </select>
+        </label>
+        <span className="de-acquisition-total">
+          {t("共")}
+          {total} {t("项")}
+        </span>
+      </div>
+      {error && (
+        <div className="de-inline-error">
+          <span>{t(error)}</span>
+          <button onClick={() => void load()}>{t("重试")}</button>
+        </div>
+      )}
+      {loading ? (
+        <div className="de-state">{t("正在读取营销资产…")}</div>
+      ) : items.length === 0 ? (
+        <div className="de-state de-empty-state">
+          <span className="de-empty-icon">▧</span>
+          <strong>{t("这个范围内还没有营销资产")}</strong>
+          <p>{t("从每日推荐或创作工作台生成的内容会自动出现在这里。")}</p>
+          <button className="de-primary-button" onClick={onCreate}>
+            {t("开始创作")}
+          </button>
+        </div>
+      ) : (
+        <div className="de-asset-grid">
+          {items.map((item) => (
+            <MarketingAssetCard
+              key={item.id}
+              item={item}
+              onView={() => {
+                setViewing(item);
+                onSelect?.(item);
+              }}
+              onManage={() => setManaging(item)}
+              onReuse={() => onReuse(item)}
+              onArchive={() => void archive(item)}
+            />
+          ))}
+        </div>
+      )}
+      {total > limit && (
+        <footer className="de-pagination">
+          <button className="de-secondary-button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
+            {t("上一页")}
+          </button>
+          <span>
+            {t("第")}
+            {page} / {pages} {t("页")}
+          </span>
+          <button className="de-secondary-button" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>
+            {t("下一页")}
+          </button>
+        </footer>
+      )}
+      {viewing && (
+        <AssetContentDetail
+          asset={viewing}
+          onClose={() => setViewing(null)}
+          onManage={() => {
+            setManaging(viewing);
+            setViewing(null);
+          }}
+          onReuse={() => {
+            onReuse(viewing);
+            setViewing(null);
+          }}
+        />
+      )}
+      {managing && <DeploymentManager asset={managing} onClose={() => setManaging(null)} onChanged={() => void load(true)} />}
+    </section>
+  );
 }
 
 function AssetContentDetail({ asset, onClose, onManage, onReuse }: {

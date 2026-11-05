@@ -1,6 +1,6 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import type { CampaignRecommendation } from "../types.js";
 import { RecommendationCard } from "./RecommendationCard.js";
 
@@ -11,10 +11,42 @@ export function DailyRecommendationsPage({ onCreate }: { onCreate: (item: Campai
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => { setLoading(true); try { let result = await api.listAcquisitionRecommendations("pending"); if (!result.generatedAt) { setRefreshing(true); result = await api.refreshAcquisitionRecommendations(); setRefreshing(false); } setItems(result.items); setGeneratedAt(result.generatedAt); } catch (reason) { setError(reason instanceof Error ? reason.message : "推荐加载失败"); } finally { setRefreshing(false); setLoading(false); } }, []);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      let result = await employeeApi.listAcquisitionRecommendations("pending");
+      if (!result.generatedAt) {
+        setRefreshing(true);
+        result = await employeeApi.refreshAcquisitionRecommendations();
+        setRefreshing(false);
+      }
+      setItems(result.items);
+      setGeneratedAt(result.generatedAt);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "推荐加载失败");
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+    }
+  }, []);
   useEffect(() => { void load(); }, [load]);
-  const refresh = async () => { setRefreshing(true); setError(null); try { const result = await api.refreshAcquisitionRecommendations(); setItems(result.items); setGeneratedAt(result.generatedAt); } catch (reason) { setError(reason instanceof Error ? reason.message : "今日推荐生成失败"); } finally { setRefreshing(false); } };
-  const ignore = async (item: CampaignRecommendation) => { await api.updateAcquisitionRecommendation(item.id, "ignored"); setItems((current) => current.filter((entry) => entry.id !== item.id)); };
+  const refresh = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      const result = await employeeApi.refreshAcquisitionRecommendations();
+      setItems(result.items);
+      setGeneratedAt(result.generatedAt);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "今日推荐生成失败");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  const ignore = async (item: CampaignRecommendation) => {
+    await employeeApi.updateAcquisitionRecommendation(item.id, "ignored");
+    setItems((current) => current.filter((entry) => entry.id !== item.id));
+  };
   return <section className="de-acquisition-workspace">
     <header className="de-acquisition-section-head"><div><p>{t("每日推荐")}</p><h2>{t("今天值得尝试的客群营销方向")}</h2><span>{generatedAt ? t("上次生成 {0} · 推荐 7 天后过期", [time(generatedAt, locale)]) : t("基于客群聚合画像与已确认营销资料生成")}</span></div><button className="de-primary-button" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? t("AI 正在分析…") : t("↻ 重新生成今日推荐")}</button></header>
     {error && <div className="de-inline-error"><span>{t(error)}</span><button onClick={() => void refresh()}>{t("重试")}</button></div>}

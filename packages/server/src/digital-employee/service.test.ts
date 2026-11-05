@@ -517,35 +517,6 @@ describe("DigitalEmployeeService cohort overview", () => {
     }));
   });
 
-  it("immediately refreshes the cohort with the explicitly selected model", async () => {
-    const upsertCohortSnapshot = vi.fn(async () => {});
-    const generate = vi.fn(async () => ({
-      summary: "当前客户整体活跃度稳定，潜客仍是主体。建议优先处理到期跟进，并持续观察风险变化。",
-      modelId: "model-from-input",
-    }));
-    const service = serviceWith({
-      listActiveProfilesForCohort: vi.fn(async () => []),
-      upsertCohortSnapshot,
-    }, {}, { generate });
-
-    const cohort = await service.refreshCohortSummary(
-      "u1",
-      "model-from-input",
-      new Date("2026-08-18T08:00:00.000Z")
-    );
-
-    expect(generate).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "u1",
-      snapshotDate: "2026-08-18",
-      modelId: "model-from-input",
-    }));
-    expect(upsertCohortSnapshot).toHaveBeenCalledWith("u1", expect.objectContaining({
-      generationMethod: "llm",
-      modelId: "model-from-input",
-    }));
-    expect(cohort).toMatchObject({ source: "nightly", modelId: "model-from-input" });
-  });
-
   it("persists the deterministic summary when the LLM fails", async () => {
     const upsertCohortSnapshot = vi.fn(async () => {});
     const service = serviceWith({

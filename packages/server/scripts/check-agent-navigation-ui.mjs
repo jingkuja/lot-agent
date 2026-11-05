@@ -24,7 +24,7 @@ try {
     import ${JSON.stringify(resolve(root, "packages/web/src/App.css"))};
     setToken('agent-navigation-test');
     const modelCatalog = {llm:[{id:'test-llm',type:'llm',provider:'test'}],image:[{id:'gpt-image-2',type:'image',provider:'test'}],video:[{id:'doubao-seedance-2.5',type:'video',provider:'test'}]};
-    createRoot(document.getElementById('root')).render(<LanguageProvider><Workspace user={{id:'fixture',name:'测试用户'}} modelCatalog={modelCatalog} onLogout={()=>{}} /></LanguageProvider>);`);
+    createRoot(document.getElementById('root')).render(<LanguageProvider><Workspace user={{id:'fixture',name:'测试用户'}} modelCatalog={modelCatalog} onLogout={()=>{}} hiddenAgentIds={['digital_employee']} /></LanguageProvider>);`);
   vite = await createServer({ configFile: false, root: temp, esbuild: { jsx: "automatic" }, optimizeDeps: { include: ["react", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "react-dom", "react-markdown", "remark-gfm"] }, resolve: { alias: { react: resolve(root, "packages/web/node_modules/react"), "react-dom": resolve(root, "packages/web/node_modules/react-dom"), "react-markdown": resolve(root, "packages/web/node_modules/react-markdown"), "remark-gfm": resolve(root, "packages/web/node_modules/remark-gfm") } }, server: { host: "127.0.0.1", port: 0, fs: { allow: [root, temp] } } });
   await vite.listen();
   browser = await chromium.launch({ headless: true, channel: "chrome" });

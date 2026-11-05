@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import { InputError, NotFoundError } from "./errors.js";
+import { ConflictError, InputError, NotFoundError } from "./errors.js";
 
-const TTL_MS = 24 * 60 * 60 * 1_000;
+/** Proposals now wait on the today page, so they outlive the conversation that made them. */
+export const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+/** A claim older than this lost its process; the commit it guarded may run again. */
+const CLAIM_LEASE = "5 minutes";
+const OPEN = "status IN ('prepared','awaiting_confirmation')";
 
 export interface ConversationActionDraft {
   id: string;
@@ -15,8 +19,9 @@ export interface ConversationActionDraft {
   preview: Record<string, unknown>;
   question: string | null;
   options: string[];
-  status: "prepared" | "awaiting_confirmation" | "applied" | "expired";
+  status: "prepared" | "awaiting_confirmation" | "applied" | "expired" | "dismissed";
   appliedEntityId: string | null;
+  createdAt: string;
   expiresAt: string;
 }
 
@@ -33,7 +38,13 @@ export interface NewConversationDraft {
   status?: "prepared" | "awaiting_confirmation";
 }
 
-/** Short-lived prepare/commit payloads for conversation write tools. */
+export interface DraftCommit<Done, Fresh> {
+  /** The draft was already applied, here or by a request that won the race. */
+  applied(draft: ConversationActionDraft): Done;
+  apply(draft: ConversationActionDraft): Promise<Fresh>;
+}
+
+/** Prepare/commit payloads for conversation write tools; the today page reads the same rows. */
 export class ConversationActionDrafts {
   constructor(private readonly pool: Pool) {}
 
@@ -47,7 +58,7 @@ export class ConversationActionDrafts {
         randomUUID(), row.userId, row.conversationId ?? null, row.sourceMessageId ?? null,
         row.featureScope, row.kind, JSON.stringify(row.payload), JSON.stringify(row.preview),
         row.question, JSON.stringify(row.options), row.status ?? "awaiting_confirmation",
-        new Date(Date.now() + TTL_MS).toISOString(),
+        new Date(Date.now() + DRAFT_TTL_MS).toISOString(),
       ]
     );
     return toDraft(rows[0]);
@@ -68,11 +79,72 @@ export class ConversationActionDrafts {
     return draft;
   }
 
+  /**
+   * Applies a draft at most once. The chat card and the today page can confirm the same
+   * draft, so the writer claims the row first and a loser reports the outcome instead of
+   * writing again. A failed commit gives the claim back so the user can retry.
+   */
+  async commit<Done, Fresh>(userId: string, draftId: string, kind: string, handlers: DraftCommit<Done, Fresh>): Promise<Done | Fresh> {
+    const draft = await this.get(userId, draftId, kind);
+    if (draft.status === "applied") return handlers.applied(draft);
+    const { rows } = await this.pool.query(
+      `UPDATE de_conversation_action_drafts SET claimed_at = now()
+       WHERE id=$1 AND user_id=$2 AND ${OPEN}
+         AND (claimed_at IS NULL OR claimed_at < now() - interval '${CLAIM_LEASE}')
+       RETURNING id`,
+      [draftId, userId]
+    );
+    if (!rows[0]) {
+      const current = await this.get(userId, draftId, kind);
+      if (current.status === "applied") return handlers.applied(current);
+      throw new ConflictError("这项确认正在处理，请稍后刷新");
+    }
+    try {
+      return await handlers.apply(draft);
+    } catch (error) {
+      await this.pool.query(
+        `UPDATE de_conversation_action_drafts SET claimed_at = NULL WHERE id=$1 AND user_id=$2 AND ${OPEN}`,
+        [draftId, userId]
+      ).catch(() => {});
+      throw error;
+    }
+  }
+
+  async find(userId: string, draftId: string): Promise<ConversationActionDraft | null> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM de_conversation_action_drafts WHERE id=$1 AND user_id=$2`,
+      [draftId, userId]
+    );
+    return rows[0] ? toDraft(rows[0]) : null;
+  }
+
+  async listOpen(userId: string, limit: number): Promise<ConversationActionDraft[]> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM de_conversation_action_drafts
+       WHERE user_id=$1 AND ${OPEN} AND expires_at > now()
+       ORDER BY created_at DESC LIMIT $2`,
+      [userId, limit]
+    );
+    return rows.map(toDraft);
+  }
+
+  /** False when a commit holds the draft or it has already left the open states. */
+  async dismiss(userId: string, draftId: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `UPDATE de_conversation_action_drafts SET status='dismissed', updated_at=now()
+       WHERE id=$1 AND user_id=$2 AND ${OPEN}
+         AND (claimed_at IS NULL OR claimed_at < now() - interval '${CLAIM_LEASE}')
+       RETURNING id`,
+      [draftId, userId]
+    );
+    return rows.length > 0;
+  }
+
   async markApplied(userId: string, draftId: string, entityId: string | null): Promise<void> {
     await this.pool.query(
       `UPDATE de_conversation_action_drafts
        SET status='applied', applied_entity_id=$3, updated_at=now()
-       WHERE id=$1 AND user_id=$2 AND status IN ('prepared','awaiting_confirmation')`,
+       WHERE id=$1 AND user_id=$2 AND ${OPEN}`,
       [draftId, userId, entityId]
     );
   }
@@ -92,6 +164,7 @@ function toDraft(row: Record<string, unknown>): ConversationActionDraft {
     options: Array.isArray(row.options) ? row.options.filter((item): item is string => typeof item === "string") : [],
     status: String(row.status) as ConversationActionDraft["status"],
     appliedEntityId: row.applied_entity_id == null ? null : String(row.applied_entity_id),
+    createdAt: new Date(row.created_at as string | Date).toISOString(),
     expiresAt: new Date(row.expires_at as string | Date).toISOString(),
   };
 }

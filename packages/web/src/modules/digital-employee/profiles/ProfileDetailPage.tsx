@@ -1,6 +1,7 @@
 import { useI18n } from "../../../i18n/index.js";
 import { useCallback, useEffect, useState } from "react";
-import { ApiClientError, api } from "../../../api/client.js";
+import { ApiClientError } from "../../../api/client.js";
+import { employeeApi } from "../api.js";
 import { ProfileEditor } from "../components/ProfileEditor.js";
 import {
   HEALTH_LABELS,
@@ -27,6 +28,10 @@ import {
 interface ProfileDetailPageProps {
   profileId: string;
   onBack: () => void;
+  /** Reports the customer once loaded, so the page around it can follow them. */
+  onLoaded?: (profile: CustomerProfile) => void;
+  /** Shown under the header. */
+  children?: React.ReactNode;
 }
 
 const JOURNEY_OPTIONS = Object.entries(JOURNEY_LABELS) as Array<[JourneyStage, string]>;
@@ -52,7 +57,7 @@ function shortValues(values: unknown[]): string {
   }).filter(Boolean).join("；");
 }
 
-export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps) {
+export function ProfileDetailPage({ profileId, onBack, onLoaded, children }: ProfileDetailPageProps) {
   const { t, locale } = useI18n();
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [products, setProducts] = useState<CustomerProductState[]>([]);
@@ -76,9 +81,9 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
     setError(null);
     try {
       const [detail, nextTimeline, productCatalog] = await Promise.all([
-        api.getCustomerProfile(profileId),
-        api.getCustomerTimeline(profileId),
-        api.listMarketingProducts({ status: "active", limit: 100 }),
+        employeeApi.getCustomerProfile(profileId),
+        employeeApi.getCustomerTimeline(profileId),
+        employeeApi.listMarketingProducts({ status: "active", limit: 100 }),
       ]);
       setProfile(detail.profile);
       setProducts(detail.productStates);
@@ -92,12 +97,14 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
   }, [profileId]);
 
   useEffect(() => { void reload(); }, [reload]);
+  const loadedProfile = profile?.id === profileId ? profile : null;
+  useEffect(() => { if (loadedProfile) onLoaded?.(loadedProfile); }, [loadedProfile?.id, loadedProfile?.displayName]);
 
   const saveProfile = async (input: ProfileInput) => {
     if (!profile) return;
     setSavingProfile(true);
     try {
-      const updated = await api.updateCustomerProfile(profile.id, { ...input, version: profile.version } as ProfileUpdateInput);
+      const updated = await employeeApi.updateCustomerProfile(profile.id, { ...input, version: profile.version } as ProfileUpdateInput);
       setProfile(updated);
       setEditProfile(false);
       await reload();
@@ -112,7 +119,7 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
     try {
       if (stateEditor === "new" && !input.marketingProductId) throw new Error("请选择营销资料中的有效产品");
       const key = stateEditor === "new" ? `marketing:${input.marketingProductId}` : stateEditor!.productKey;
-      const result = await api.updateCustomerProductState(profile.id, key, stateEditor === "new" ? input : { ...input, version: stateEditor!.version });
+      const result = await employeeApi.updateCustomerProductState(profile.id, key, stateEditor === "new" ? input : { ...input, version: stateEditor!.version });
       setProfile(result.profile);
       setStateEditor(null);
       await reload();
@@ -134,7 +141,7 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
           productName: marketingProducts.find((product) => product.id === noteProduct)?.name,
         } : {}),
       };
-      await api.addCustomerObservation(profile.id, input);
+      await employeeApi.addCustomerObservation(profile.id, input);
       setNote("");
       setNoteProduct("");
       await reload();
@@ -153,7 +160,7 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
     setSavingArchive(true);
     setError(null);
     try {
-      await api.archiveCustomerProfile(profile.id, profile.version, onOpenTasks);
+      await employeeApi.archiveCustomerProfile(profile.id, profile.version, onOpenTasks);
       onBack();
     } catch (reason) {
       if (reason instanceof ApiClientError && reason.code === "open_tasks") {
@@ -181,7 +188,9 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
   return (
     <div className="de-page de-profile-detail-page">
       <header className="de-detail-header">
-        <button className="de-back-button" onClick={onBack}>{t("‹ 返回客户画像")}</button>
+        <button className="de-back-button" onClick={onBack}>
+          {t("‹ 返回客户画像")}
+        </button>
         <div className="de-detail-title-row">
           <div>
             <p className="de-eyebrow">{t("客户画像 / 详情")}</p>
@@ -189,26 +198,61 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
             <p>{profile.customerRegion || t("尚未补充客户区域")}</p>
           </div>
           <div className="de-header-actions">
-            {profile.status === "active" && <><button className="de-secondary-button" onClick={() => setEditProfile(true)}>{t("编辑画像")}</button><button className="de-danger-button" onClick={() => void archive()}>{t("归档")}</button></>}
+            {profile.status === "active" && (
+              <>
+                <button className="de-secondary-button" onClick={() => setEditProfile(true)}>
+                  {t("编辑画像")}
+                </button>
+                <button className="de-danger-button" onClick={() => void archive()}>
+                  {t("归档")}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
+      {children}
 
-      {error && <div className="de-inline-error" role="alert"><span>{t(error)}</span><button onClick={() => void reload()}>{t("重试")}</button></div>}
+      {error && (
+        <div className="de-inline-error" role="alert">
+          <span>{t(error)}</span>
+          <button onClick={() => void reload()}>{t("重试")}</button>
+        </div>
+      )}
       {archiveOpenCount !== null && profile && (
         <div className="de-modal-backdrop" onMouseDown={() => !savingArchive && setArchiveOpenCount(null)}>
-          <section className="de-modal" role="dialog" aria-modal="true" aria-label={t("处理未完成跟进")} onMouseDown={(event) => event.stopPropagation()}>
+          <section
+            className="de-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("处理未完成跟进")}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
             <div className="de-modal-head">
               <div>
-                <h2>{t("归档「")}{profile.displayName}」</h2>
-                <p>{t("该客户还有")}{archiveOpenCount} {t("项未完成跟进。请选择取消或保留这些任务后再归档；归档后不会出现在商机待办中。")}</p>
+                <h2>
+                  {t("归档「")}
+                  {profile.displayName}」
+                </h2>
+                <p>
+                  {t("该客户还有")}
+                  {archiveOpenCount} {t("项未完成跟进。请选择取消或保留这些任务后再归档；归档后不会出现在商机待办中。")}
+                </p>
               </div>
-              <button className="de-icon-button" type="button" onClick={() => setArchiveOpenCount(null)} disabled={savingArchive}>×</button>
+              <button className="de-icon-button" type="button" onClick={() => setArchiveOpenCount(null)} disabled={savingArchive}>
+                ×
+              </button>
             </div>
             <footer className="de-modal-actions">
-              <button type="button" className="de-secondary-button" onClick={() => setArchiveOpenCount(null)} disabled={savingArchive}>{t("返回")}</button>
-              <button type="button" className="de-secondary-button" onClick={() => void archive("keep")} disabled={savingArchive}>{t("保留任务并归档")}</button>
-              <button type="button" className="de-danger-button" onClick={() => void archive("cancel")} disabled={savingArchive}>{t("取消任务并归档")}</button>
+              <button type="button" className="de-secondary-button" onClick={() => setArchiveOpenCount(null)} disabled={savingArchive}>
+                {t("返回")}
+              </button>
+              <button type="button" className="de-secondary-button" onClick={() => void archive("keep")} disabled={savingArchive}>
+                {t("保留任务并归档")}
+              </button>
+              <button type="button" className="de-danger-button" onClick={() => void archive("cancel")} disabled={savingArchive}>
+                {t("取消任务并归档")}
+              </button>
             </footer>
           </section>
         </div>
@@ -216,57 +260,193 @@ export function ProfileDetailPage({ profileId, onBack }: ProfileDetailPageProps)
 
       <div className="de-detail-grid">
         <section className="de-detail-card de-profile-overview">
-          <div className="de-card-heading"><h2>{t("基本资料")}</h2><span className={`de-status-chip stage-${profile.relationshipStage}`}>{t(RELATIONSHIP_LABELS[profile.relationshipStage])}</span></div>
+          <div className="de-card-heading">
+            <h2>{t("基本资料")}</h2>
+            <span className={`de-status-chip stage-${profile.relationshipStage}`}>{t(RELATIONSHIP_LABELS[profile.relationshipStage])}</span>
+          </div>
           <dl className="de-info-list">
-            <div><dt>{t("别名")}</dt><dd>{profile.aliases.length ? profile.aliases.join("、") : "—"}</dd></div>
-            <div><dt>{t("客户区域")}</dt><dd>{profile.customerRegion || "—"}</dd></div>
-            <div><dt>{t("来源")}</dt><dd>{profile.source || "—"}</dd></div>
-            <div><dt>{t("整体健康度")}</dt><dd><span className={`de-status-chip health-${profile.overallHealth}`}>{t(HEALTH_LABELS[profile.overallHealth])}</span></dd></div>
-            <div><dt>{t("最近观察")}</dt><dd>{dateTime(profile.lastObservedAt, locale)}</dd></div>
-            <div><dt>{t("最近联系")}</dt><dd>{dateTime(profile.lastContactAt, locale)}</dd></div>
-            <div><dt>{t("人工锁定")}</dt><dd>{profile.manualLockFields.length ? profile.manualLockFields.join("、") : t("未锁定")}</dd></div>
+            <div>
+              <dt>{t("别名")}</dt>
+              <dd>{profile.aliases.length ? profile.aliases.join("、") : "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("客户区域")}</dt>
+              <dd>{profile.customerRegion || "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("来源")}</dt>
+              <dd>{profile.source || "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("整体健康度")}</dt>
+              <dd>
+                <span className={`de-status-chip health-${profile.overallHealth}`}>{t(HEALTH_LABELS[profile.overallHealth])}</span>
+              </dd>
+            </div>
+            <div>
+              <dt>{t("最近观察")}</dt>
+              <dd>{t(dateTime(profile.lastObservedAt, locale))}</dd>
+            </div>
+            <div>
+              <dt>{t("最近联系")}</dt>
+              <dd>{t(dateTime(profile.lastContactAt, locale))}</dd>
+            </div>
+            <div>
+              <dt>{t("人工锁定")}</dt>
+              <dd>{profile.manualLockFields.length ? profile.manualLockFields.join("、") : t("未锁定")}</dd>
+            </div>
           </dl>
-          {contactEntries.length > 0 && <div className="de-contact-strip">{contactEntries.map(([label, value]) => <span key={label}><small>{t(label)}</small>{value}</span>)}</div>}
-          <div className="de-tag-list de-detail-tags">{profile.tags.length ? profile.tags.map((tag) => <span key={tag}>{tag}</span>) : <em>{t("暂无标签")}</em>}</div>
+          {contactEntries.length > 0 && (
+            <div className="de-contact-strip">
+              {contactEntries.map(([label, value]) => (
+                <span key={label}>
+                  <small>{t(label)}</small>
+                  {value}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="de-tag-list de-detail-tags">
+            {profile.tags.length ? profile.tags.map((tag) => <span key={tag}>{tag}</span>) : <em>{t("暂无标签")}</em>}
+          </div>
         </section>
 
         <section className="de-detail-card de-summary-card">
-          <div className="de-card-heading"><h2>{t("动态摘要")}</h2><span>{t("版本")}{profile.summaryVersion}</span></div>
+          <div className="de-card-heading">
+            <h2>{t("动态摘要")}</h2>
+            <span>
+              {t("版本")}
+              {profile.summaryVersion}
+            </span>
+          </div>
           <p>{profile.summary || t("当前还没有足够的观察记录。")}</p>
           <small>{t("摘要只基于当前投影生成，不会把完整历史原文发送给模型。")}</small>
         </section>
       </div>
 
       <section className="de-section">
-        <div className="de-section-heading"><div><h2>{t("产品关系")}</h2><p>{t("关联营销资料中的产品，并独立维护购买阶段、满意度、问题和风险。")}</p></div>{profile.status === "active" && <button className="de-secondary-button" disabled={marketingProducts.length === 0 || allActiveProductsLinked} onClick={() => setStateEditor("new")}>{t("＋ 关联产品")}</button>}</div>
-        {marketingProducts.length === 0 && <div className="de-product-catalog-hint">{t("营销资料中还没有有效产品，请先建立产品资料后再关联客户。")}</div>}
-        {products.length === 0 ? <div className="de-empty-inline">{t("尚未关联产品。添加产品后可独立记录试用、使用和反馈状态。")}</div> : <div className="de-product-grid">{products.map((state) => <ProductStateCard key={state.id} state={state} disabled={profile.status !== "active"} onEdit={() => setStateEditor(state)} />)}</div>}
+        <div className="de-section-heading">
+          <div>
+            <h2>{t("产品关系")}</h2>
+            <p>{t("关联营销资料中的产品，并独立维护购买阶段、满意度、问题和风险。")}</p>
+          </div>
+          {profile.status === "active" && (
+            <button
+              className="de-secondary-button"
+              disabled={marketingProducts.length === 0 || allActiveProductsLinked}
+              onClick={() => setStateEditor("new")}
+            >
+              {t("＋ 关联产品")}
+            </button>
+          )}
+        </div>
+        {marketingProducts.length === 0 && (
+          <div className="de-product-catalog-hint">{t("营销资料中还没有有效产品，请先建立产品资料后再关联客户。")}</div>
+        )}
+        {products.length === 0 ? (
+          <div className="de-empty-inline">{t("尚未关联产品。添加产品后可独立记录试用、使用和反馈状态。")}</div>
+        ) : (
+          <div className="de-product-grid">
+            {products.map((state) => (
+              <ProductStateCard key={state.id} state={state} disabled={profile.status !== "active"} onEdit={() => setStateEditor(state)} />
+            ))}
+          </div>
+        )}
       </section>
 
-      {profile.status === "active" && <section className="de-section de-observation-section">
-        <div className="de-section-heading"><div><h2>{t("补充观察记录")}</h2><p>{t("原文将作为可追溯事实保存；没有填写结构化字段时不会臆测客户状态。")}</p></div></div>
-        <form className="de-observation-form" onSubmit={addObservation}>
-          <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder={t("例如：李姐反馈边缘算力性能在高峰期不稳定，希望本周安排技术支持。")} maxLength={12_000} />
-          <div className="de-observation-controls">
-            <label><span>{t("记录类型")}</span><select value={noteType} onChange={(event) => setNoteType(event.target.value as ObservationType)}>{OBSERVATION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
-            <label><span>{t("关联产品（可选）")}</span><select value={noteProduct} onChange={(event) => setNoteProduct(event.target.value)}><option value="">{t("不关联产品")}</option>{marketingProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>
-            <button className="de-primary-button" disabled={savingNote || !note.trim()}>{savingNote ? t("保存中…") : t("保存记录")}</button>
+      {profile.status === "active" && (
+        <section className="de-section de-observation-section">
+          <div className="de-section-heading">
+            <div>
+              <h2>{t("补充观察记录")}</h2>
+              <p>{t("原文将作为可追溯事实保存；没有填写结构化字段时不会臆测客户状态。")}</p>
+            </div>
           </div>
-        </form>
-      </section>}
+          <form className="de-observation-form" onSubmit={addObservation}>
+            <textarea
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder={t("例如：李姐反馈边缘算力性能在高峰期不稳定，希望本周安排技术支持。")}
+              maxLength={12_000}
+            />
+            <div className="de-observation-controls">
+              <label>
+                <span>{t("记录类型")}</span>
+                <select value={noteType} onChange={(event) => setNoteType(event.target.value as ObservationType)}>
+                  {OBSERVATION_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {t(label)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{t("关联产品（可选）")}</span>
+                <select value={noteProduct} onChange={(event) => setNoteProduct(event.target.value)}>
+                  <option value="">{t("不关联产品")}</option>
+                  {marketingProducts.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="de-primary-button" disabled={savingNote || !note.trim()}>
+                {savingNote ? t("保存中…") : t("保存记录")}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       <section className="de-section">
-        <div className="de-section-heading"><div><h2>{t("观察与变更时间线")}</h2><p>{t("原始记录与状态投影分别保留，便于解释变化来源。")}</p></div></div>
+        <div className="de-section-heading">
+          <div>
+            <h2>{t("观察与变更时间线")}</h2>
+            <p>{t("原始记录与状态投影分别保留，便于解释变化来源。")}</p>
+          </div>
+        </div>
         <div className="de-timeline">
-          {timeline.observations.length === 0 && timeline.changes.length === 0 ? <div className="de-empty-inline">{t("暂无观察或状态变更。")}</div> : <>
-            {timeline.observations.map((observation) => <article className="de-timeline-item observation" key={`o-${observation.id}`}><span className="de-timeline-dot" /><div><header><strong>{t(OBSERVATION_LABELS[(observation.eventType as ObservationType) ?? "note"]) ?? t("观察记录")}</strong><time>{dateTime(observation.occurredAt ?? observation.createdAt, locale)}</time></header><p>{observation.rawText}</p></div></article>)}
-            {timeline.changes.map((change) => <StateChangeItem key={`c-${change.id}`} change={change} />)}
-          </>}
+          {timeline.observations.length === 0 && timeline.changes.length === 0 ? (
+            <div className="de-empty-inline">{t("暂无观察或状态变更。")}</div>
+          ) : (
+            <>
+              {timeline.observations.map((observation) => (
+                <article className="de-timeline-item observation" key={`o-${observation.id}`}>
+                  <span className="de-timeline-dot" />
+                  <div>
+                    <header>
+                      <strong>{t(OBSERVATION_LABELS[(observation.eventType as ObservationType) ?? "note"]) ?? t("观察记录")}</strong>
+                      <time>{t(dateTime(observation.occurredAt ?? observation.createdAt, locale))}</time>
+                    </header>
+                    <p>{observation.rawText}</p>
+                  </div>
+                </article>
+              ))}
+              {timeline.changes.map((change) => (
+                <StateChangeItem key={`c-${change.id}`} change={change} />
+              ))}
+            </>
+          )}
         </div>
       </section>
 
-      {editProfile && <ProfileEditor profile={profile} saving={savingProfile} onClose={() => !savingProfile && setEditProfile(false)} onSave={saveProfile} />}
-      {stateEditor && <ProductStateEditor state={stateEditor === "new" ? undefined : stateEditor} products={stateEditor === "new" ? marketingProducts.filter((product) => !products.some((state) => state.marketingProductId === product.id)) : marketingProducts} saving={savingState} onClose={() => !savingState && setStateEditor(null)} onSave={saveProduct} />}
+      {editProfile && (
+        <ProfileEditor profile={profile} saving={savingProfile} onClose={() => !savingProfile && setEditProfile(false)} onSave={saveProfile} />
+      )}
+      {stateEditor && (
+        <ProductStateEditor
+          state={stateEditor === "new" ? undefined : stateEditor}
+          products={
+            stateEditor === "new"
+              ? marketingProducts.filter((product) => !products.some((state) => state.marketingProductId === product.id))
+              : marketingProducts
+          }
+          saving={savingState}
+          onClose={() => !savingState && setStateEditor(null)}
+          onSave={saveProduct}
+        />
+      )}
     </div>
   );
 }
@@ -285,7 +465,21 @@ function ProductStateCard({ state, disabled, onEdit }: { state: CustomerProductS
 function StateChangeItem({ change }: { change: CustomerStateChange }) {
   const { t, locale } = useI18n();
   const fields = Object.entries(change.patch).map(([key, value]) => `${key} → ${formatValue(value)}`).join("；");
-  return <article className="de-timeline-item change"><span className="de-timeline-dot" /><div><header><strong>{change.actorType === "user" ? t("人工状态修正") : t("已确认的画像更新")}</strong><time>{dateTime(change.createdAt, locale)}</time></header><p>{change.reason || t("状态更新")}{fields ? `：${fields}` : ""}</p></div></article>;
+  return (
+    <article className="de-timeline-item change">
+      <span className="de-timeline-dot" />
+      <div>
+        <header>
+          <strong>{change.actorType === "user" ? t("人工状态修正") : t("已确认的画像更新")}</strong>
+          <time>{t(dateTime(change.createdAt, locale))}</time>
+        </header>
+        <p>
+          {change.reason || t("状态更新")}
+          {fields ? `：${fields}` : ""}
+        </p>
+      </div>
+    </article>
+  );
 }
 
 function formatValue(value: unknown): string {
