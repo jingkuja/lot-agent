@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import type { AgentService } from "../services/agent-service.js";
@@ -22,12 +23,14 @@ const ALLOWED = new Set([
 const MAX_IMAGE = 150 * 1024 * 1024;
 const MAX_DOC = 150 * 1024 * 1024;
 const MAX_MEDIA = 150 * 1024 * 1024;
-// `parseBody` buffers the whole multipart body into memory before we ever
-// see a per-file size — a Content-Length precheck rejects oversized requests
-// before that read happens. 151MB leaves ~1MB of multipart boundary/header
-// overhead above the largest allowed file (MAX_DOC/MAX_MEDIA, 150MB).
+// `parseBody` buffers the whole multipart body into memory before we ever see a
+// per-file size, so the limit runs as the body arrives, chunked requests included.
+// 151MB leaves ~1MB of multipart boundary/header overhead above the largest allowed
+// file (MAX_DOC/MAX_MEDIA, 150MB).
 // A raw upload (the file bytes as the body) is streamed to storage instead.
 const MAX_UPLOAD_BODY_BYTES = 151 * 1024 * 1024;
+const MULTIPART = /^multipart\/form-data/i;
+const multipartLimit = bodyLimit({ maxSize: MAX_UPLOAD_BODY_BYTES, onError: (c) => c.json({ error: "请求体过大 (payload too large)" }, 413) });
 
 export function createUploadRoutes(service: AgentService) {
   const app = new Hono<{ Variables: Variables }>();
@@ -37,16 +40,14 @@ export function createUploadRoutes(service: AgentService) {
    * The web client sends the file bytes as the body, with its type as Content-Type, its
    * URI-encoded name in `X-File-Name` and `?purpose=`; that body is streamed to disk.
    */
-  app.post("/", async (c) => {
+  app.post("/", (c, next) => MULTIPART.test(c.req.header("content-type") ?? "") ? multipartLimit(c, next) : next(), async (c) => {
     const userId = c.get("userId");
-    // Header-only precheck — missing/unparseable Content-Length falls through
-    // to the per-file size checks below, which still apply after parseBody.
     const contentLength = Number(c.req.header("content-length"));
     if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BODY_BYTES) {
       return c.json({ error: "请求体过大 (payload too large)" }, 413);
     }
     const contentType = c.req.header("content-type") ?? "";
-    const multipart = /^multipart\/form-data/i.test(contentType);
+    const multipart = MULTIPART.test(contentType);
     let file: File | undefined;
     let name: string; let mime: string; let purpose: unknown; let declared: number | undefined;
     if (multipart) {

@@ -84,6 +84,27 @@ describe("POST /uploads", () => {
     expect(service.created[0].originalName).toBe("note.txt");
   });
 
+  it("stops a multipart body with no Content-Length as soon as it passes the limit", async () => {
+    const service = makeService();
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        sent += 1;
+        if (sent > 200) controller.close(); else controller.enqueue(chunk);
+      },
+    });
+    const res = await appFor(service).request("/", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=x" },
+      body,
+      duplex: "half",
+    } as RequestInit);
+    expect(res.status).toBe(413);
+    expect(sent).toBeLessThan(160);
+    expect(service.created.length).toBe(0);
+  });
+
   it("rejects with 413 before reading the body when Content-Length exceeds the precheck cap", async () => {
     const service = makeService();
     const app = appFor(service);
