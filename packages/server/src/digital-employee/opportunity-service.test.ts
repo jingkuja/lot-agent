@@ -26,7 +26,7 @@ describe("OpportunityService settings", () => {
     expect(sql).toContain("$2::boolean");
     expect(sql).toContain("$3::text");
     expect(sql).toContain("$4::time");
-    expect(query).toHaveBeenCalledWith(expect.any(String), ["u1", true, "Asia/Shanghai", "09:30", 0]);
+    expect(query).toHaveBeenCalledWith(expect.any(String), ["u1", true, "Asia/Shanghai", "09:30", 0, "hybrid"]);
   });
 
   it("casts the next-run timestamp so Postgres does not treat Date+$interval as interval", async () => {
@@ -70,7 +70,7 @@ describe("OpportunityService settings", () => {
     const result = await service.requestDiscovery("u1");
 
     expect(result).toEqual({ runId: "run-1", taskId: "task-retry", reused: false });
-    expect(enqueue).toHaveBeenCalledWith("opportunity.discover", { runId: "run-1" }, "u1", { maxAttempts: 2 });
+    expect(enqueue).toHaveBeenCalledWith("opportunity.discover", expect.objectContaining({ runId: "run-1" }), "u1", { maxAttempts: 2 });
     const relinkSql = query.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("SET task_id")) ?? "";
     expect(relinkSql).toContain("status = 'pending'");
     expect(relinkSql).toContain("error_code = NULL");
@@ -140,7 +140,7 @@ describe("OpportunityService settings", () => {
     const service = new OpportunityService({ pool: { query } } as any, { enqueue } as any);
 
     await expect(service.enqueueDueDiscoveries(now)).resolves.toBe(1);
-    expect(enqueue).toHaveBeenCalledWith("opportunity.discover", { runId: "run-1" }, "u1", { maxAttempts: 2 });
+    expect(enqueue).toHaveBeenCalledWith("opportunity.discover", expect.objectContaining({ runId: "run-1" }), "u1", { maxAttempts: 2 });
     expect(query.mock.calls.some((call) => String(call[0]).includes("next_daily_run"))).toBe(true);
   });
 
@@ -410,5 +410,76 @@ describe("OpportunityService personal work queue", () => {
     expect(cadenceSql).toContain("next_follow_up_at");
     const cadenceArgs = query.mock.calls.find((call) => String(call[0]).includes("last_contact_at"))?.[1];
     expect(cadenceArgs).toEqual(["u1", "p1", "2026-08-20T05:00:00.000Z"]);
+  });
+});
+
+describe("OpportunityService daily scan", () => {
+  const rule = {
+    profile: {
+      id: "p1", display_name: "李静", relationship_stage: "customer", overall_health: "healthy", summary: "",
+      last_contact_at: new Date(Date.now() - 45 * 86_400_000).toISOString(), next_follow_up_at: null,
+      updated_at: "2026-01-01T00:00:00.000Z", observation_id: null, products: [],
+    },
+  };
+  const pool = () => vi.fn(async (sql: string) => {
+    if (sql.includes("status = 'running'")) return { rows: [{ id: "r1", task_id: "t1" }] };
+    if (sql.includes("FROM de_customer_profiles profile")) return { rows: [rule.profile] };
+    return { rows: [], rowCount: 0 };
+  });
+
+  it("calls no model in rules mode", async () => {
+    const enhance = vi.fn(async () => ({ modelId: "m", patches: [] }));
+    const service = new OpportunityService({ pool: { query: pool() } } as any, undefined, { enhance });
+    const result = await service.runDiscovery("u1", "r1", undefined, { useModel: false });
+    expect(enhance).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "succeeded", discoveryMethod: "rules" });
+  });
+
+  it("keeps the model step for a run that asked for it", async () => {
+    const enhance = vi.fn(async () => ({ modelId: "m", patches: [] }));
+    const service = new OpportunityService({ pool: { query: pool() } } as any, undefined, { enhance });
+    await service.runDiscovery("u1", "r1");
+    expect(enhance).toHaveBeenCalledOnce();
+  });
+
+  function schedule(rows: unknown[]) {
+    const enqueue = vi.fn(async () => "task");
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("FROM de_follow_up_automation_settings")) return { rows };
+      if (sql.includes("INSERT INTO de_follow_up_suggestion_runs")) return { rows: [{ id: "run" }] };
+      return { rows: [], params };
+    });
+    return { enqueue, query, service: new OpportunityService({ pool: { query } } as any, { enqueue } as any) };
+  }
+
+  it("tells the worker what each account chose", async () => {
+    const { service, enqueue } = schedule([{ user_id: "u1", discovery_mode: "rules" }, { user_id: "u2", discovery_mode: "hybrid" }]);
+    await service.enqueueDueDiscoveries(new Date("2026-11-05T01:00:00Z"), true);
+    expect(enqueue.mock.calls.map((call: any[]) => call.slice(1, 3))).toEqual([
+      [{ runId: "run", useModel: false, daily: true }, "u1"],
+      [{ runId: "run", useModel: true, daily: true }, "u2"],
+    ]);
+  });
+
+  it("runs only accounts that opted into the model while the scan is off", async () => {
+    const { service, query } = schedule([]);
+    await service.enqueueDueDiscoveries(new Date("2026-11-05T01:00:00Z"), false);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain("enabled = true");
+    expect(sql).toContain("$2::boolean OR discovery_mode = 'hybrid'");
+    expect(params?.[1]).toBe(false);
+  });
+
+  it("does not turn on an account whose row already exists", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    await new OpportunityService({ pool: { query } } as any).ensureScanSettings();
+    const sql = String((query.mock.calls[0] as unknown[])[0]);
+    expect(sql).toContain("settings.user_id IS NULL");
+    expect(sql).toContain("ON CONFLICT (user_id) DO NOTHING");
+  });
+
+  it("reads a rules row as off while the scan is off, so the older page does not mislead", async () => {
+    const query = vi.fn(async () => ({ rows: [{ enabled: true, discovery_mode: "rules", timezone: "Asia/Shanghai", daily_run_time: "09:00:00", version: 1 }] }));
+    await expect(new OpportunityService({ pool: { query } } as any).getSettings("u1")).resolves.toMatchObject({ enabled: false, discoveryMode: "rules" });
   });
 });

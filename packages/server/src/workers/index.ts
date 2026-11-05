@@ -37,8 +37,8 @@ import { staticPrefix } from "../util/public-base.js";
 import { createOptionalFallbackLLM } from "./fallback-llm.js";
 import { agentExtension, registerAgentExtension } from "../services/agent-extensions.js";
 import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
-import { OpportunityService } from "../digital-employee/opportunity-service.js";
-import { createOpportunityAdviceGenerator, createOwnerLlmResolver } from "../digital-employee/runtime.js";
+import { registerDigitalEmployeeWorkerJobs } from "../digital-employee/jobs.js";
+import { createOwnerLlmResolver } from "../digital-employee/runtime.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
@@ -272,10 +272,9 @@ async function main() {
     llm: (modelId, apiKey) => providerFactory.llm(modelId, apiKey),
   });
   registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: resolveOwnerLlm }));
-  const opportunityService = new OpportunityService(db, undefined, createOpportunityAdviceGenerator({
-    resolveLlm: resolveOwnerLlm,
-    recordUsage: (input) => meter.record(input),
-  }));
+  registerDigitalEmployeeWorkerJobs({
+    queue, db, adviceLlm: { resolveLlm: resolveOwnerLlm, recordUsage: (input) => meter.record(input) },
+  });
 
   queue.process("image.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
@@ -299,10 +298,6 @@ async function main() {
     },
     download: (url, signal) => urlToBytes(url, VIDEO_MAX_BYTES, { signal, timeoutMs: VIDEO_DOWNLOAD_TIMEOUT_MS }),
   }, { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, ctl.signal));
-  queue.process("opportunity.discover", async (job) => {
-    const { runId } = job.input as { runId: string };
-    return opportunityService.runDiscovery(job.userId, runId, (value, stage) => queue.updateProgress(job.id, value, stage));
-  });
 
   // Download-only retry: the vendor generation already succeeded but pulling
   // the media into our storage failed (e.g. slow CDN → download timed out).

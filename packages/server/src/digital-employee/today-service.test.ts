@@ -8,15 +8,19 @@ const work = (over: Record<string, unknown>) => ({
 const list = (items: unknown[] = []) => ({ items, hasProfiles: true, lastDiscoveredAt: "2026-11-05T00:00:00.000Z" });
 
 function build(views: Record<string, unknown[]> = {}, extra: {
-  recommendations?: unknown[]; proposals?: unknown[]; tasks?: unknown[];
+  recommendations?: unknown[]; proposals?: unknown[]; tasks?: unknown[]; deployments?: unknown[]; brief?: unknown;
 } = {}) {
   const opportunities = { list: vi.fn(async (_userId: string, filters: { view: string }) => list(views[filters.view])) };
-  const acquisition = { listRecommendations: vi.fn(async () => ({ items: extra.recommendations ?? [], generatedAt: null })) };
+  const acquisition = {
+    listRecommendations: vi.fn(async () => ({ items: extra.recommendations ?? [], generatedAt: null })),
+    listDeploymentsAwaitingFeedback: vi.fn(async () => extra.deployments ?? []),
+  };
   const proposals = { listPending: vi.fn(async () => extra.proposals ?? []) };
-  const settings = { get: vi.fn(async () => ({ employeeName: "阿灵", feishuReminder: false, desktopReminder: false, version: 1 })) };
+  const settings = { get: vi.fn(async () => ({ employeeName: "阿灵", feishuReminder: false, desktopReminder: true, version: 1 })) };
+  const briefs = { latest: vi.fn(async () => extra.brief ?? null) };
   const query = vi.fn(async () => ({ rows: extra.tasks ?? [] }));
   return {
-    service: new TodayService({ query } as any, settings, opportunities as any, acquisition as any, proposals as any),
+    service: new TodayService({ query } as any, settings, opportunities as any, acquisition as any, proposals as any, briefs as any),
     opportunities, acquisition, proposals, query,
   };
 }
@@ -84,5 +88,21 @@ describe("TodayService", () => {
     }));
     const { service } = build({}, { recommendations });
     expect((await service.get("u1")).items).toHaveLength(6);
+  });
+
+  it("asks about a publication that has had no feedback", async () => {
+    const { service } = build({}, { deployments: [{ id: "dp1", assetId: "as1", title: "双十一海报", platform: "moments", customPlatform: null, deployedAt: "2026-11-01T00:00:00.000Z" }] });
+    const { items } = await service.get("u1");
+    expect(items).toEqual([expect.objectContaining({
+      id: "result:dp1", kind: "result", subject: { type: "asset", id: "as1", label: "双十一海报" }, source: { type: "deployment", id: "dp1" },
+    })]);
+  });
+
+  it("counts everything waiting on the owner for the brand area", async () => {
+    const { service } = build({ today: [work({ id: "t1" })] }, {
+      proposals: [{ id: "d1", kind: "campaign_result", preview: {}, confirmable: true, conversationId: null, createdAt: "", expiresAt: "" }],
+      brief: { id: "b1", date: "2026-11-05", counts: {}, readAt: null },
+    });
+    await expect(service.summary("u1")).resolves.toMatchObject({ pending: 2, desktopReminder: true, brief: { id: "b1" } });
   });
 });

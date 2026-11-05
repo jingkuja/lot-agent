@@ -182,5 +182,6 @@ export function parseOpportunitySettings(value: unknown) {
   try { new Intl.DateTimeFormat("zh-CN", { timeZone: timezone }).format(); } catch { throw new InputError("timezone无效"); }
   const dailyRunTime = text(source.dailyRunTime, "dailyRunTime", 5, true)!;
   if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dailyRunTime)) throw new InputError("dailyRunTime无效");
-  return { enabled: source.enabled, timezone, dailyRunTime, version: version(source.version) };
+  const discoveryMode = choice(source.discoveryMode, ["rules", "hybrid"] as const, "discoveryMode");
+  return { enabled: source.enabled, discoveryMode, timezone, dailyRunTime, version: version(source.version) };
 }

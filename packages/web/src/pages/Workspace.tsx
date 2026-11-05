@@ -65,6 +65,7 @@ interface WorkspaceProps {
   /** Runs once the conversation exists, before the message goes out. */
   beforeDispatch?: (conversationId: string) => Promise<void>;
   onActiveConversationChange?: (id: string | null) => void;
+  digitalEmployeeBadge?: number;
   requestedConversationId?: string | null;
   onRequestedConversationHandled?: () => void;
 }
@@ -87,6 +88,7 @@ export function Workspace({
   onSendStart,
   beforeDispatch,
   onActiveConversationChange,
+  digitalEmployeeBadge,
   requestedConversationId,
   onRequestedConversationHandled,
 }: WorkspaceProps) {
@@ -449,6 +451,7 @@ export function Workspace({
           onOpenDigitalEmployee={onNavigateDigitalEmployee}
           activeModule={isLocked ? "digitalEmployee" : "assistant"}
           balanceRefreshKey={balanceRefreshKey}
+          digitalEmployeeBadge={digitalEmployeeBadge}
           onOpenKnowledgeBase={() => {
             const popup = window.open("about:blank", "_blank");
             void api.getKnowledgeBaseLink()

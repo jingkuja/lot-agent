@@ -6,8 +6,9 @@ import { ConflictError, InputError, NotFoundError } from "./errors.js";
 import { discoverByRules, type DiscoveryCandidate } from "./opportunity-rules.js";
 import type { RuleOpportunity } from "./opportunity-rules.js";
 import { ConversationActionDrafts } from "./conversation-drafts.js";
+import { digitalEmployeeDailyScanEnabled } from "./feature-scope.js";
 import type {
-  ActionResultInput, ActionUpdateInput, FollowUpActionPrepareInput, ManualActionInput, OpportunityDecisionInput, OpportunityListFilters,
+  ActionResultInput, ActionUpdateInput, DiscoveryMode, FollowUpActionPrepareInput, ManualActionInput, OpportunityDecisionInput, OpportunityListFilters,
   OpportunityListItem, OpportunitySettings, OpportunitySummary, OutreachChannel, OutreachDraft, OutreachGenerateInput,
   TalkTrackContext, TalkTrackRequest,
 } from "./opportunity-types.js";
@@ -40,6 +41,12 @@ export interface OpportunityTalkTrackGenerator {
 }
 
 const TODAY_URL = "/digital-employee/today";
+
+/** A click always gets the model step; a daily run says what the account chose. */
+interface DiscoveryRun {
+  useModel?: boolean;
+  daily?: boolean;
+}
 
 export class OpportunityService {
   private readonly pool: Pool;
@@ -86,7 +93,12 @@ export class OpportunityService {
   }
 
   /** Worker entry point; discovery stays useful without a model. */
-  async runDiscovery(userId: string, runId: string, progress?: (value: number, stage?: string) => Promise<void>) {
+  async runDiscovery(
+    userId: string,
+    runId: string,
+    progress?: (value: number, stage?: string) => Promise<void>,
+    { useModel = true }: { useModel?: boolean } = {},
+  ) {
     const claimed = await this.pool.query(
       `UPDATE de_follow_up_suggestion_runs SET status = 'running', started_at = now(), error_code = NULL
        WHERE id = $1 AND user_id = $2 AND status IN ('pending','failed') RETURNING id, task_id`,
@@ -105,7 +117,7 @@ export class OpportunityService {
       let opportunities = rules;
       let modelId: string | null = null;
       let discoveryMethod: "rules" | "hybrid" = "rules";
-      if (this.adviceGenerator && rules.length > 0) {
+      if (useModel && this.adviceGenerator && rules.length > 0) {
         try {
           await progress?.(45, "正在完善行动建议");
           // Bound model context and cost. Remaining deterministic suggestions
@@ -361,7 +373,8 @@ export class OpportunityService {
   async getSettings(userId: string): Promise<OpportunitySettings> {
     const result = await this.pool.query("SELECT * FROM de_follow_up_automation_settings WHERE user_id = $1", [userId]);
     const row = result.rows[0];
-    return row ? toSettings(row) : { enabled: false, timezone: "Asia/Shanghai", dailyRunTime: "09:00", nextRunAt: null, lastRunAt: null, version: 0 };
+    if (row) return toSettings(row);
+    return { enabled: false, discoveryMode: "rules", timezone: "Asia/Shanghai", dailyRunTime: "09:00", nextRunAt: null, lastRunAt: null, version: 0 };
   }
 
   async generateTalkTrack(userId: string, itemId: string, request: TalkTrackRequest) {
@@ -619,34 +632,56 @@ export class OpportunityService {
     return toOutreach(rows[0]);
   }
 
-  async saveSettings(userId: string, input: { enabled: boolean; timezone: string; dailyRunTime: string; version: number }) {
+  async saveSettings(
+    userId: string,
+    input: { enabled: boolean; discoveryMode?: DiscoveryMode; timezone: string; dailyRunTime: string; version: number },
+  ) {
     const result = await this.pool.query(
-      `INSERT INTO de_follow_up_automation_settings (user_id,enabled,timezone,daily_run_time,next_run_at,version)
+      `INSERT INTO de_follow_up_automation_settings (user_id,enabled,timezone,daily_run_time,next_run_at,version,discovery_mode)
        VALUES ($1,$2::boolean,$3::text,$4::time,
-         CASE WHEN $2::boolean THEN next_daily_run($3::text,$4::time) ELSE NULL END,1)
+         CASE WHEN $2::boolean THEN next_daily_run($3::text,$4::time) ELSE NULL END,1,$6::text)
        ON CONFLICT (user_id) DO UPDATE SET
          enabled = EXCLUDED.enabled, timezone = EXCLUDED.timezone, daily_run_time = EXCLUDED.daily_run_time,
+         discovery_mode = EXCLUDED.discovery_mode,
          next_run_at = CASE WHEN EXCLUDED.enabled THEN next_daily_run(EXCLUDED.timezone,EXCLUDED.daily_run_time) ELSE NULL END,
          version = de_follow_up_automation_settings.version + 1
        WHERE de_follow_up_automation_settings.version = $5
        RETURNING *`,
-      [userId, input.enabled, input.timezone, input.dailyRunTime, input.version]
+      // Only the older interface sends no mode, and there this switch has always meant the model step.
+      [userId, input.enabled, input.timezone, input.dailyRunTime, input.version, input.discoveryMode ?? (digitalEmployeeDailyScanEnabled() ? "rules" : "hybrid")]
     );
     if (!result.rows[0]) throw new ConflictError();
     return toSettings(result.rows[0]);
   }
 
-  async enqueueDueDiscoveries(now = new Date()): Promise<number> {
+  /** Default on for anyone with a customer. A row the owner turned off stays off. */
+  async ensureScanSettings(): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO de_follow_up_automation_settings (user_id, enabled, discovery_mode, next_run_at)
+       SELECT DISTINCT profile.user_id, true, 'rules', next_daily_run('Asia/Shanghai', '09:00'::time)
+       FROM de_customer_profiles profile
+       LEFT JOIN de_follow_up_automation_settings settings ON settings.user_id = profile.user_id
+       WHERE profile.status = 'active' AND settings.user_id IS NULL
+       ON CONFLICT (user_id) DO NOTHING`
+    );
+  }
+
+  /** With the daily scan off, only accounts that opted into the model step run, as they always did. */
+  async enqueueDueDiscoveries(now = new Date(), dailyScan = digitalEmployeeDailyScanEnabled()): Promise<number> {
     if (!this.queue) return 0;
     const due = await this.pool.query(
-      `SELECT user_id, timezone FROM de_follow_up_automation_settings
-       WHERE enabled = true AND next_run_at IS NOT NULL AND next_run_at <= $1 ORDER BY next_run_at LIMIT 100`, [now]
+      `SELECT user_id, timezone, discovery_mode FROM de_follow_up_automation_settings
+       WHERE enabled = true AND next_run_at IS NOT NULL AND next_run_at <= $1
+         AND ($2::boolean OR discovery_mode = 'hybrid')
+       ORDER BY next_run_at LIMIT 100`, [now, dailyScan]
     );
     let count = 0;
     for (const row of due.rows) {
       const scanDate = dateKey(now);
       try {
-        const result = await this.startOrReuseDiscovery(row.user_id, `daily:${scanDate}`, scanDate);
+        const result = await this.startOrReuseDiscovery(row.user_id, `daily:${scanDate}`, scanDate, {
+          useModel: row.discovery_mode === "hybrid", daily: dailyScan,
+        });
         await this.advanceDiscoverySchedule(row.user_id, now);
         if (!result.reused) count += 1;
       } catch {
@@ -656,7 +691,12 @@ export class OpportunityService {
     return count;
   }
 
-  private async startOrReuseDiscovery(userId: string, idempotencyKey: string, scanDate: string): Promise<{ runId: string; taskId: string; reused: boolean }> {
+  private async startOrReuseDiscovery(
+    userId: string,
+    idempotencyKey: string,
+    scanDate: string,
+    run: DiscoveryRun = {},
+  ): Promise<{ runId: string; taskId: string; reused: boolean }> {
     if (!this.queue) throw new InputError("商机发现任务队列暂不可用");
     const runId = randomUUID();
     const inserted = await this.pool.query(
@@ -668,7 +708,7 @@ export class OpportunityService {
     );
     if (inserted.rows[0]) {
       try {
-        const taskId = await this.enqueueDiscovery(userId, inserted.rows[0].id);
+        const taskId = await this.enqueueDiscovery(userId, inserted.rows[0].id, run);
         return { runId: inserted.rows[0].id, taskId, reused: false };
       } catch (error) {
         await this.markDiscoveryEnqueueFailed(inserted.rows[0].id);
@@ -687,7 +727,7 @@ export class OpportunityService {
     }
     if (row && (row.status === "failed" || !row.task_id)) {
       try {
-        const taskId = await this.enqueueDiscovery(userId, row.id);
+        const taskId = await this.enqueueDiscovery(userId, row.id, run);
         return { runId: row.id, taskId, reused: false };
       } catch (error) {
         await this.markDiscoveryEnqueueFailed(row.id);
@@ -697,8 +737,8 @@ export class OpportunityService {
     throw new ConflictError("今天的商机发现任务正在创建，请稍后重试");
   }
 
-  private async enqueueDiscovery(userId: string, runId: string): Promise<string> {
-    const taskId = await this.queue!.enqueue("opportunity.discover", { runId }, userId, { maxAttempts: 2 });
+  private async enqueueDiscovery(userId: string, runId: string, run: DiscoveryRun): Promise<string> {
+    const taskId = await this.queue!.enqueue("opportunity.discover", { runId, ...run }, userId, { maxAttempts: 2 });
     await this.pool.query(
       `UPDATE de_follow_up_suggestion_runs
           SET task_id = $2, status = 'pending', error_code = NULL, finished_at = NULL
@@ -1295,8 +1335,13 @@ function matches(item: OpportunityListItem, filters: OpportunityListFilters) {
 }
 
 function toSettings(row: any): OpportunitySettings {
-  return { enabled: Boolean(row.enabled), timezone: row.timezone, dailyRunTime: String(row.daily_run_time).slice(0, 5),
-    nextRunAt: iso(row.next_run_at), lastRunAt: iso(row.last_run_at), version: Number(row.version) };
+  const discoveryMode: DiscoveryMode = row.discovery_mode === "hybrid" ? "hybrid" : "rules";
+  return {
+    // With the daily scan off a rules row does nothing, so it must not read as switched on.
+    enabled: Boolean(row.enabled) && (digitalEmployeeDailyScanEnabled() || discoveryMode === "hybrid"),
+    discoveryMode, timezone: row.timezone, dailyRunTime: String(row.daily_run_time).slice(0, 5),
+    nextRunAt: iso(row.next_run_at), lastRunAt: iso(row.last_run_at), version: Number(row.version),
+  };
 }
 
 function iso(value: unknown): string | null {

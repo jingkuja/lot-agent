@@ -273,12 +273,36 @@ function Summary({ summary }: { summary: OpportunityListResponse["summary"] }) {
 
 function Automation({ settings, lastDiscoveredAt, saving, onSave }: { settings: OpportunitySettings; lastDiscoveredAt: string | null; saving: boolean; onSave: (value: OpportunitySettings) => void }) {
   const { t, locale } = useI18n();
-  return <section className="de-opportunity-automation">
-    <span>{t("最近发现：")}<strong>{lastDiscoveredAt ? formatTime(lastDiscoveredAt, locale) : t("尚未运行")}</strong></span>
-    <label className="de-switch"><input type="checkbox" checked={settings.enabled} disabled={saving} onChange={(event) => onSave({ ...settings, enabled: event.target.checked })} /><i /><span>{t("每日自动发现")}</span></label>
-    <label><span>{t("执行时间")}</span><input type="time" value={settings.dailyRunTime} disabled={!settings.enabled || saving} onChange={(event) => onSave({ ...settings, dailyRunTime: event.target.value })} /></label>
-    <small>{settings.enabled && settings.nextRunAt ? t("下次 {0}", [formatTime(settings.nextRunAt, locale)]) : t("默认关闭，不会产生模型费用")}</small>
-  </section>;
+  return (
+    <section className="de-opportunity-automation">
+      <span>
+        {t("最近发现：")}
+        <strong>{lastDiscoveredAt ? formatTime(lastDiscoveredAt, locale) : t("尚未运行")}</strong>
+      </span>
+      <label className="de-switch">
+        <input
+          type="checkbox"
+          checked={settings.enabled}
+          disabled={saving}
+          onChange={(event) => onSave({ ...settings, enabled: event.target.checked, discoveryMode: "hybrid" })}
+        />
+        <i />
+        <span>{t("每日自动发现")}</span>
+      </label>
+      <label>
+        <span>{t("执行时间")}</span>
+        <input
+          type="time"
+          value={settings.dailyRunTime}
+          disabled={!settings.enabled || saving}
+          onChange={(event) => onSave({ ...settings, dailyRunTime: event.target.value })}
+        />
+      </label>
+      <small>
+        {settings.enabled && settings.nextRunAt ? t("下次 {0}", [formatTime(settings.nextRunAt, locale)]) : t("默认关闭，不会产生模型费用")}
+      </small>
+    </section>
+  );
 }
 
 function Empty({ view, hasProfiles, hasFilters, onCreateProfile, onDiscover }: { view: OpportunityView; hasProfiles: boolean; hasFilters: boolean; onCreateProfile: () => void; onDiscover: () => void }) {

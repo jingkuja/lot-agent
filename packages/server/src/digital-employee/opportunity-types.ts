@@ -86,8 +86,12 @@ export interface OpportunitySummary {
   viewCounts: Record<OpportunityView, number>;
 }
 
+export type DiscoveryMode = "rules" | "hybrid";
+
 export interface OpportunitySettings {
   enabled: boolean;
+  /** `rules` never calls a model; `hybrid` lets one improve the wording. */
+  discoveryMode: DiscoveryMode;
   timezone: string;
   dailyRunTime: string;
   nextRunAt: string | null;

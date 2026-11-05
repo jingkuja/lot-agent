@@ -29,6 +29,9 @@ interface EmployeeWorkspaceProps {
   pathname: string;
   /** False while another product area is on screen; the chat stays mounted behind it. */
   active: boolean;
+  dailyScan: boolean;
+  pendingCount: number;
+  onPendingChange: (count: number) => void;
   onLogout: () => void;
   navigate: (path: string) => void;
   replacePath: (path: string) => void;
@@ -41,7 +44,7 @@ const keepConversation = (conversation: Conversation | undefined) =>
 
 /** One employee: its card, five entries and a conversation that stays mounted under every page. */
 export function EmployeeWorkspace({
-  user, modelCatalog, pathname, active, onLogout, navigate, replacePath, onNavigateAssistant,
+  user, modelCatalog, pathname, active, dailyScan, pendingCount, onPendingChange, onLogout, navigate, replacePath, onNavigateAssistant,
 }: EmployeeWorkspaceProps) {
   const { t } = useI18n();
   const location = useMemo(() => parseEmployeePath(pathname), [pathname]);
@@ -57,11 +60,12 @@ export function EmployeeWorkspace({
       const next = await employeeApi.getToday();
       setToday(next);
       setName(next.employee.name);
+      onPendingChange(next.items.length);
       setTodayError(null);
     } catch (reason) {
       setTodayError(reason instanceof Error ? reason.message : "读取失败");
     }
-  }, []);
+  }, [onPendingChange]);
 
   useEffect(() => { if (active) void reloadToday(); }, [active, view, reloadToday]);
   const hasRunning = (today?.running.length ?? 0) > 0;
@@ -189,7 +193,7 @@ export function EmployeeWorkspace({
         onDraftOutreach={(item) => draftOutreach(context, item)}
       />;
     }
-    if (view === "schedule") return <SchedulePage onNameChange={setName} />;
+    if (view === "schedule") return <SchedulePage dailyScan={dailyScan} onNameChange={setName} />;
     return <TodayPage
       data={today}
       error={todayError}
@@ -206,8 +210,6 @@ export function EmployeeWorkspace({
     />;
   };
 
-  const waiting = today?.items.filter((item) => item.kind === "proposal" || item.kind === "opportunity" || item.kind === "recommendation").length ?? 0;
-
   return <Workspace
     user={user}
     modelCatalog={modelCatalog}
@@ -220,11 +222,12 @@ export function EmployeeWorkspace({
     onSendStart={handleSendStart}
     beforeDispatch={beforeDispatch}
     onActiveConversationChange={handleActiveConversation}
+    digitalEmployeeBadge={pendingCount}
     requestedConversationId={location.conversationId}
     sidebar={(context) => <EmployeeSidebar
       name={name}
       running={today?.running ?? []}
-      waiting={waiting}
+      waiting={pendingCount}
       view={view}
       isStreaming={context.isStreaming}
       onNavigate={openView}

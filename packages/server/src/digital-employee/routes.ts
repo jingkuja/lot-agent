@@ -70,6 +70,18 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     catch (error) { return respondError(c, error); }
   });
 
+  app.get("/today/summary", async (c) => {
+    try { return c.json(await service.today.summary(c.get("userId"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/today/brief/:id/read", async (c) => {
+    try {
+      await service.briefs.markRead(c.get("userId"), parseEntityId(c.req.param("id"), "briefId"));
+      return c.json({ ok: true });
+    } catch (error) { return respondError(c, error); }
+  });
+
   app.post("/proposals/:id/confirm", async (c) => {
     try { return c.json(await service.proposals.confirm(c.get("userId"), parseEntityId(c.req.param("id"), "proposalId"))); }
     catch (error) { return respondError(c, error); }

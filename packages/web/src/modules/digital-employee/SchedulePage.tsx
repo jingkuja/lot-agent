@@ -5,8 +5,8 @@ import type { DigitalEmployeeOverview, EmployeeSettings, OpportunitySettings } f
 
 const MAX_NAME = 20;
 
-/** The employee's name and everything it does on its own. Both automatic jobs call a model. */
-export function SchedulePage({ onNameChange }: { onNameChange: (name: string) => void }) {
+/** The employee's name and everything it does on its own. Only the rule scan is free of model costs. */
+export function SchedulePage({ dailyScan, onNameChange }: { dailyScan: boolean; onNameChange: (name: string) => void }) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<EmployeeSettings | null>(null);
   const [name, setName] = useState("");
@@ -37,6 +37,10 @@ export function SchedulePage({ onNameChange }: { onNameChange: (name: string) =>
     finally { setSaving(false); }
   };
 
+  const saveReminders = (patch: Partial<EmployeeSettings>) => guarded(async () => {
+    setSettings(await employeeApi.saveEmployeeSettings({ ...settings!, ...patch }));
+  });
+
   const saveName = () => guarded(async () => {
     const next = await employeeApi.saveEmployeeSettings({ ...settings!, employeeName: name.trim() });
     setSettings(next);
@@ -63,7 +67,7 @@ export function SchedulePage({ onNameChange }: { onNameChange: (name: string) =>
       </section>
       <section className="de-schedule-section">
         <h2>{t("自动准备")}</h2>
-        <p>{t("开启后每天自动运行，会产生模型费用。")}</p>
+        <p>{dailyScan ? t("每天按规则看一遍客户，不产生模型费用。") : t("开启后每天自动运行，会产生模型费用。")}</p>
         {discovery && <div className="de-schedule-row">
           <label className="de-switch">
             <input
@@ -71,10 +75,12 @@ export function SchedulePage({ onNameChange }: { onNameChange: (name: string) =>
               checked={discovery.enabled}
               disabled={saving}
               onChange={(event) => void guarded(async () => {
-                setDiscovery(await employeeApi.saveOpportunitySettings({ ...discovery, enabled: event.target.checked }));
+                setDiscovery(await employeeApi.saveOpportunitySettings({
+                  ...discovery, enabled: event.target.checked, discoveryMode: dailyScan ? discovery.discoveryMode : "hybrid",
+                }));
               })}
             />
-            <i /><span>{t("每日自动发现")}</span>
+            <i /><span>{dailyScan ? t("每天看一遍客户") : t("每日自动发现")}</span>
           </label>
           <label className="de-schedule-time">
             <span>{t("执行时间")}</span>
@@ -88,6 +94,20 @@ export function SchedulePage({ onNameChange }: { onNameChange: (name: string) =>
             />
           </label>
         </div>}
+        {discovery && dailyScan && <div className="de-schedule-row">
+          <label className="de-switch">
+            <input
+              type="checkbox"
+              checked={discovery.discoveryMode === "hybrid"}
+              disabled={!discovery.enabled || saving}
+              onChange={(event) => void guarded(async () => {
+                setDiscovery(await employeeApi.saveOpportunitySettings({ ...discovery, discoveryMode: event.target.checked ? "hybrid" : "rules" }));
+              })}
+            />
+            <i /><span>{t("用模型提前写好建议")}</span>
+          </label>
+          <small>{t("每天产生模型费用")}</small>
+        </div>}
         {cohort && <div className="de-schedule-row">
           <label className="de-switch">
             <input
@@ -100,9 +120,37 @@ export function SchedulePage({ onNameChange }: { onNameChange: (name: string) =>
             />
             <i /><span>{t("群像总结")}</span>
           </label>
-          <small>{cohort.enabled ? t("每晚 23:00 自动更新") : t("自动更新已关闭")}</small>
+          <small>{cohort.enabled ? t("每晚 23:00 自动更新，产生模型费用") : t("自动更新已关闭")}</small>
         </div>}
       </section>
+      {dailyScan && <section className="de-schedule-section">
+        <h2>{t("提醒")}</h2>
+        <p>{t("简报准备好时告诉你。站内一直有提醒。")}</p>
+        <div className="de-schedule-row">
+          <label className="de-switch">
+            <input
+              type="checkbox"
+              checked={settings.desktopReminder}
+              disabled={saving}
+              onChange={(event) => void saveReminders({ desktopReminder: event.target.checked })}
+            />
+            <i /><span>{t("桌面提醒")}</span>
+          </label>
+          <small>{t("只在桌面应用运行时生效")}</small>
+        </div>
+        <div className="de-schedule-row">
+          <label className="de-switch">
+            <input
+              type="checkbox"
+              checked={settings.feishuReminder}
+              disabled={saving}
+              onChange={(event) => void saveReminders({ feishuReminder: event.target.checked })}
+            />
+            <i /><span>{t("飞书提醒")}</span>
+          </label>
+          <small>{t("只发给你本人，需要先接入飞书")}</small>
+        </div>
+      </section>}
     </>}
   </div>;
 }

@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../../api/client.js";
 import { useI18n } from "../../../i18n/index.js";
+import { DeploymentManager } from "../acquisition/DeploymentManager.js";
 import { employeeApi } from "../api.js";
 import { formatTime, type OpportunityDialog } from "../opportunities/OpportunityCard.js";
 import { CreateActionDialog, OpportunityDialogs } from "../opportunities/OpportunityDialogs.js";
 import { TODAY_PATH } from "../routes.js";
-import type { CampaignRecommendation, OpportunityItem, TodayItem, TodayResponse } from "../types.js";
+import type { CampaignRecommendation, MarketingAsset, OpportunityItem, TodayItem, TodayResponse } from "../types.js";
 import { proposalCopy, runningLabel } from "./copy.js";
 
 const QUICK_RESULTS = [
@@ -47,6 +48,12 @@ export function TodayPage({
   const [dialog, setDialog] = useState<OpportunityDialog | null>(null);
   const [creating, setCreating] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [reporting, setReporting] = useState<MarketingAsset | null>(null);
+
+  const unreadBrief = data?.brief && !data.brief.readAt ? data.brief.id : null;
+  useEffect(() => {
+    if (unreadBrief) void employeeApi.markBriefRead(unreadBrief).catch(() => {});
+  }, [unreadBrief]);
 
   const closeDialog = () => { setActive(null); setDialog(null); setCreating(false); };
   const openDialog = (item: OpportunityItem, next: OpportunityDialog) => { setActive(item); setDialog(next); };
@@ -104,6 +111,7 @@ export function TodayPage({
               ? t("待确认 {0} 件，要跟进 {1} 位客户，等结果 {2} 个。", [toConfirm, followUps.length, results.length])
               : t("我还不认识你的客户。告诉我第一位客户，我就开始准备工作。")}
           </p>
+          {data.brief && <p>{t("今天早上看了 {0} 位客户，新发现 {1} 条商机。", [data.brief.counts.scanned, data.brief.counts.created])}</p>}
           {data.lastDiscoveredAt && <small>{t("最近看过客户：{0}", [formatTime(data.lastDiscoveredAt, locale)])}</small>}
         </div>
         {data.hasProfiles ? (
@@ -315,6 +323,25 @@ export function TodayPage({
             <b>{results.length}</b>
           </h2>
           {results.map((item) => {
+            if (item.deployment) {
+              const { deployment } = item;
+              return (
+                <article key={item.id} className="de-today-card">
+                  <div>
+                    <h3>{t("{0} 投放满 3 天了，效果怎么样？", [deployment.title])}</h3>
+                    {deployment.deployedAt && <small>{formatTime(deployment.deployedAt, locale)}</small>}
+                  </div>
+                  <div className="de-today-actions">
+                    <button
+                      type="button"
+                      className="de-primary-button"
+                      disabled={pending !== null}
+                      onClick={() => void act(item.id, async () => { setReporting(await employeeApi.getMarketingAsset(deployment.assetId)); })}
+                    >{t("回填效果")}</button>
+                  </div>
+                </article>
+              );
+            }
             const opportunity = item.opportunity!;
             return (
               <WorkCard key={item.id} item={item} locale={locale}>
@@ -371,6 +398,14 @@ export function TodayPage({
       {data.hasProfiles && data.items.length === 0 && data.running.length === 0 && <p className="de-today-empty">{t("今天的工作都处理完了。")}</p>}
 
       <OpportunityDialogs active={active} dialog={dialog} onClose={closeDialog} mutate={mutate} onOpenProfile={onOpenProfile} />
+      {reporting && <DeploymentManager
+        asset={reporting}
+        onClose={() => setReporting(null)}
+        onChanged={() => {
+          setReporting(null);
+          void onReload();
+        }}
+      />}
       {creating && <CreateActionDialog onClose={closeDialog} onSave={(input) => void mutate(() => employeeApi.createOpportunityAction(input))} />}
     </div>
   );

@@ -1,6 +1,6 @@
 import { request, type UploadedAttachment } from "../../api/client.js";
 import type { EmployeeFocus } from "./focus.js";
-import type { CustomerWork, EmployeeSettings, ProposalResult, TodayResponse } from "./types.js";
+import type { CustomerWork, EmployeeSettings, ProposalResult, TodayResponse, TodaySummary } from "./types.js";
 import type {
   CustomerObservation,
   CustomerProductState,
@@ -47,6 +47,11 @@ export const employeeApi = {
     request<EmployeeSettings>("/digital-employee/settings", { method: "PUT", body: JSON.stringify(input) }),
 
   getToday: () => request<TodayResponse>("/digital-employee/today"),
+
+  getTodaySummary: () => request<TodaySummary>("/digital-employee/today/summary"),
+
+  markBriefRead: (id: string) =>
+    request<{ ok: boolean }>(`/digital-employee/today/brief/${encodeURIComponent(id)}/read`, { method: "POST" }),
 
   confirmProposal: (id: string) => request<ProposalResult>(`/digital-employee/proposals/${encodeURIComponent(id)}/confirm`, { method: "POST" }),
 
@@ -189,7 +194,10 @@ export const employeeApi = {
   saveOpportunitySettings: (input: OpportunitySettings) =>
     request<OpportunitySettings>("/digital-employee/opportunity-settings", {
       method: "PUT",
-      body: JSON.stringify({ enabled: input.enabled, timezone: input.timezone, dailyRunTime: input.dailyRunTime, version: input.version }),
+      body: JSON.stringify({
+        enabled: input.enabled, discoveryMode: input.discoveryMode, timezone: input.timezone,
+        dailyRunTime: input.dailyRunTime, version: input.version,
+      }),
     }),
 
   listMarketingProducts: (filters: { q?: string; status?: string; page?: number; limit?: number } = {}) => {

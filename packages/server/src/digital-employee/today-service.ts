@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
-import type { CustomerAcquisitionService } from "./acquisition-service.js";
+import type { CustomerAcquisitionService, DeploymentAwaitingFeedback } from "./acquisition-service.js";
+import type { BriefService } from "./brief-service.js";
 import type { OpportunityListItem } from "./opportunity-types.js";
 import type { OpportunityService } from "./opportunity-service.js";
 import type { PendingProposal, ProposalService } from "./proposal-service.js";
@@ -22,6 +23,7 @@ export interface TodayItem {
   proposal?: PendingProposal;
   opportunity?: OpportunityListItem;
   recommendation?: Recommendation;
+  deployment?: DeploymentAwaitingFeedback;
 }
 
 export interface RunningWork {
@@ -43,8 +45,9 @@ export class TodayService {
     private readonly pool: Pool,
     private readonly settings: Pick<EmployeeSettingsService, "get">,
     private readonly opportunities: Pick<OpportunityService, "list">,
-    private readonly acquisition: Pick<CustomerAcquisitionService, "listRecommendations">,
+    private readonly acquisition: Pick<CustomerAcquisitionService, "listRecommendations" | "listDeploymentsAwaitingFeedback">,
     private readonly proposals: Pick<ProposalService, "listPending">,
+    private readonly briefs: Pick<BriefService, "latest">,
   ) {}
 
   async get(userId: string) {
@@ -52,26 +55,36 @@ export class TodayService {
     const today = await this.opportunities.list(userId, { view: "today" });
     const pending = await this.opportunities.list(userId, { view: "pending" });
     const snoozed = await this.opportunities.list(userId, { view: "snoozed" });
-    const [settings, recommendations, proposals, running] = await Promise.all([
+    const [settings, recommendations, deployments, proposals, running, brief] = await Promise.all([
       this.settings.get(userId),
       this.acquisition.listRecommendations(userId, "pending"),
+      this.acquisition.listDeploymentsAwaitingFeedback(userId),
       this.proposals.listPending(userId),
       this.runningWork(userId),
+      this.briefs.latest(userId),
     ]);
     const items = [
       ...proposals.map(proposalItem),
       ...pending.items.map((item) => workItem("opportunity", item)),
       ...recommendations.items.slice(0, RECOMMENDATION_LIMIT).map(recommendationItem),
       ...today.items.map((item) => workItem(item.status === "awaiting_result" ? "result" : "follow_up", item)),
+      ...deployments.map(deploymentItem),
     ].sort(byPriority);
     return {
       employee: { name: settings.employeeName },
+      brief,
       items,
       running,
       snoozedCount: snoozed.items.length,
       hasProfiles: today.hasProfiles,
       lastDiscoveredAt: today.lastDiscoveredAt,
     };
+  }
+
+  /** What the brand area and the desktop notification need. */
+  async summary(userId: string) {
+    const [{ items, brief }, settings] = await Promise.all([this.get(userId), this.settings.get(userId)]);
+    return { pending: items.length, brief, desktopReminder: settings.desktopReminder };
   }
 
   private async runningWork(userId: string): Promise<RunningWork[]> {
@@ -87,6 +100,14 @@ export class TodayService {
       stage: row.stage ? String(row.stage) : null, createdAt: new Date(row.created_at).toISOString(),
     }));
   }
+}
+
+export function countToday(items: TodayItem[]) {
+  return {
+    confirm: items.filter((item) => ["proposal", "opportunity", "recommendation"].includes(item.kind)).length,
+    followUps: items.filter((item) => item.kind === "follow_up").length,
+    results: items.filter((item) => item.kind === "result").length,
+  };
 }
 
 function byPriority(left: TodayItem, right: TodayItem): number {
@@ -153,5 +174,20 @@ function recommendationItem(item: Recommendation): TodayItem {
     dueAt: null,
     source: { type: "recommendation", id: item.id },
     recommendation: item,
+  };
+}
+
+function deploymentItem(item: DeploymentAwaitingFeedback): TodayItem {
+  return {
+    id: `result:${item.id}`,
+    kind: "result",
+    subject: { type: "asset", id: item.assetId, label: item.title },
+    title: item.title,
+    reason: "",
+    evidence: [],
+    priority: "normal",
+    dueAt: item.deployedAt,
+    source: { type: "deployment", id: item.id },
+    deployment: item,
   };
 }

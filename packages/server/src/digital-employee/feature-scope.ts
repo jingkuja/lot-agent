@@ -37,11 +37,17 @@ export function digitalEmployeeWorkspaceEnabled(): boolean {
   return process.env.DIGITAL_EMPLOYEE_WORKSPACE === "1";
 }
 
+/** Scans feed the today page, so they stay off until the workspace is on. */
+export function digitalEmployeeDailyScanEnabled(): boolean {
+  return process.env.DIGITAL_EMPLOYEE_DAILY_SCAN === "1" && digitalEmployeeWorkspaceEnabled();
+}
+
 /** What the signed-out product config tells the web shell. */
 export function digitalEmployeeProductFlags() {
   return {
     digitalEmployeeUnified: digitalEmployeeUnifiedEnabled(),
     digitalEmployeeWorkspace: digitalEmployeeWorkspaceEnabled(),
+    digitalEmployeeDailyScan: digitalEmployeeDailyScanEnabled(),
   };
 }
 

@@ -55,6 +55,7 @@ function fixtures() {
     }],
     running: [{ id: "t1", type: "image.generate", status: "running", progress: 40, stage: null, createdAt: NOW }],
     hasProfiles: true,
+    brief: null, feedback: [], discovery: { ...opportunitySettings, enabled: true, version: 1 }, briefReads: [],
     conversations: [
       { id: "c1", title: "李静的跟进", agent_id: "digital_employee", created_at: NOW, updated_at: NOW, metadata: { digitalEmployeeFeatureScope: "employee" } },
       { id: "c2", title: "获客宝旧对话", agent_id: "digital_employee", created_at: NOW, updated_at: NOW, metadata: { digitalEmployeeFeatureScope: "customer-acquisition" } },
@@ -109,7 +110,7 @@ const summary = {
   awaitingResult: 1,
   viewCounts: { today: 2, pending: 1, snoozed: 0, in_progress: 1, awaiting_result: 1, completed: 0 },
 };
-const opportunitySettings = { enabled: false, timezone: "Asia/Shanghai", dailyRunTime: "09:00", nextRunAt: null, lastRunAt: null, version: 0 };
+const opportunitySettings = { enabled: false, discoveryMode: "rules", timezone: "Asia/Shanghai", dailyRunTime: "09:00", nextRunAt: null, lastRunAt: null, version: 0 };
 const overview = {
   cohort: {
     source: "live",
@@ -122,14 +123,14 @@ const overview = {
   recentProfiles: [profile],
 };
 
-function api(state, workspace, unexpected) {
+function api(state, workspace, unexpected, dailyScan = false) {
   return async (route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
     if (!path.startsWith("/api/")) return route.continue();
     const json = (data, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(data) });
     const de = path.replace("/api/digital-employee", "");
     if (method !== "GET") state.writes.push({ path, body: request.postData() });
-    if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeUnified: workspace, digitalEmployeeWorkspace: workspace });
+    if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeUnified: workspace, digitalEmployeeWorkspace: workspace, digitalEmployeeDailyScan: dailyScan });
     if (path === "/api/agents") return json([
       { id: "general", name: "通用助手", description: "通用", type: "general", installed: true, sortOrder: 0 },
       { id: "digital_employee", name: "数字员工", description: "独立模块", type: "digital_employee", installed: true, sortOrder: 1 },
@@ -165,6 +166,20 @@ function api(state, workspace, unexpected) {
       }
       return json(state.settings);
     }
+    if (de === "/today/summary") {
+      return json({
+        pending:
+          state.proposals.size +
+          state.pending.length +
+          state.recommendations.length +
+          state.followUps.length +
+          state.results.length +
+          state.feedback.length,
+        brief: state.brief,
+        desktopReminder: state.settings.desktopReminder,
+      });
+    }
+    if (de.match(/^\/today\/brief\/[^/]+\/read$/)) { state.briefReads.push(de); return json({ ok: true }); }
     if (de === "/today") {
       const items = [
         ...[...state.proposals.values()].map((proposal) => ({
@@ -178,9 +193,14 @@ function api(state, workspace, unexpected) {
         })),
         ...state.followUps.map((item) => work("follow_up", item)),
         ...state.results.map((item) => work("result", item)),
+        ...state.feedback.map((item) => ({
+          id: `result:${item.id}`, kind: "result", subject: { type: "asset", id: item.assetId, label: item.title }, title: item.title, reason: "", evidence: [],
+          priority: "normal", dueAt: item.deployedAt, source: { type: "deployment", id: item.id }, deployment: item,
+        })),
       ];
       return json({
         employee: { name: state.settings.employeeName },
+        brief: state.brief,
         items,
         running: state.running,
         snoozedCount: 1,
@@ -201,7 +221,21 @@ function api(state, workspace, unexpected) {
     }
     if (de.match(/^\/actions\/[^/]+\/results$/)) { state.results = []; return json({ recordId: "x", actionId: "a2", status: "completed", nextActionId: null }, 201); }
     if (de.match(/^\/actions\/[^/]+$/)) { state.followUps = []; return json(opportunity({})); }
-    if (de === "/opportunity-settings") return json(method === "PUT" ? request.postDataJSON() : opportunitySettings);
+    if (de === "/opportunity-settings") {
+      if (method === "PUT") state.discovery = { ...request.postDataJSON(), version: request.postDataJSON().version + 1 };
+      return json(state.discovery);
+    }
+    if (de.match(/^\/acquisition\/assets\/[^/]+$/)) {
+      return json({
+        id: "as1", title: "双十一海报", assetType: "poster", generationStatus: "ready", status: "ready", version: 1, deployments: state.feedback.map((item) => ({
+          id: item.id, assetId: "as1", platform: "moments", customPlatform: null, status: "deployed", deployedAt: NOW, feedback: [],
+        })),
+      });
+    }
+    if (de.match(/^\/acquisition\/deployments\/[^/]+\/feedback$/)) {
+      state.feedback = [];
+      return json({ id: "f1", deploymentId: "dp1", impressions: 10, interactions: null, conversions: null, feedbackText: "", recordedAt: NOW }, 201);
+    }
     if (de === "/overview") return json(overview);
     if (de === "/overview/schedule") return json({ ...overview.schedule, ...request.postDataJSON(), version: 1 });
     if (de === "/profiles") return json({ items: [profile], total: 1, page: 1, limit: 20 });
@@ -270,13 +304,18 @@ try {
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true, channel: "chrome" });
 
-  async function open(path, { workspace = true, language = "zh", width = 1440, state = fixtures() } = {}) {
+  async function open(path, { workspace = true, dailyScan = false, language = "zh", width = 1440, state = fixtures(), desktop = false } = {}) {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     await context.addInitScript((value) => { try { localStorage.setItem("lot:language", value); } catch { /* opaque origin */ } }, language);
+    if (desktop) await context.addInitScript(() => {
+      window.notified = [];
+      const notify = (title, body) => window.notified.push([title, body]);
+      window.lotDesktop = new Proxy({ notify }, { get: (bridge, key) => bridge[key] ?? (async () => undefined) });
+    });
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     page.on("pageerror", (error) => errors.push(`${path}: ${error.message}`));
-    await page.route("**/api/**", api(state, workspace, unexpected));
+    await page.route("**/api/**", api(state, workspace, unexpected, dailyScan));
     await page.goto(`${origin}${path}`);
     return { page, state, close: () => context.close() };
   }
@@ -467,6 +506,79 @@ try {
     await page.locator(".de-employee-nav").getByRole("button", { name: "工作记录" }).click();
     await page.getByRole("button", { name: "跟进中" }).click();
     await page.getByText("这个视图目前为空").waitFor();
+    await close();
+  }
+
+  // The morning brief, the number in the brand area, and asking how a publication went.
+  {
+    const state = fixtures();
+    state.brief = { id: "b1", date: "2026-11-05", counts: { scanned: 12, created: 3, confirm: 4, followUps: 1, results: 2, pending: 7 }, readAt: null };
+    state.feedback = [{ id: "dp1", assetId: "as1", title: "双十一海报", platform: "moments", customPlatform: null, deployedAt: NOW }];
+    const { page, close } = await open("/digital-employee/today", { state, dailyScan: true });
+    await page.getByText("今天早上看了 12 位客户，新发现 3 条商机。").waitFor();
+    await page.waitForFunction(() => document.querySelector(".product-shell-view:not(.is-hidden) .brand-module-badge")?.textContent === "7");
+    const badge = page.locator(".product-shell-view:not(.is-hidden) .brand-module-badge");
+    await page.waitForResponse("**/today/brief/b1/read").catch(() => {});
+    assert.deepEqual(state.briefReads, ["/today/brief/b1/read"]);
+    await snap(page, "today-brief-zh-light.png");
+    const card = page.getByText("双十一海报 投放满 3 天了，效果怎么样？");
+    await card.locator("xpath=ancestor::article").getByRole("button", { name: "回填效果" }).click();
+    await page.getByRole("button", { name: "＋ 添加反馈" }).click();
+    await page.locator(".de-subdialog input").first().fill("10");
+    await page.getByRole("button", { name: "保存反馈" }).click();
+    await card.waitFor({ state: "detached" });
+    await page.waitForFunction(() => document.querySelector(".product-shell-view:not(.is-hidden) .brand-module-badge")?.textContent === "6");
+    assert.equal(await badge.innerText(), "6");
+    await close();
+  }
+
+  // A desktop notification fires once per brief, even after the app restarts.
+  {
+    const state = fixtures();
+    state.settings.desktopReminder = true;
+    state.brief = { id: "b1", date: "2026-11-05", counts: { scanned: 1, created: 1, confirm: 2, followUps: 3, results: 4, pending: 9 }, readAt: null };
+    const { page, close } = await open("/assistant", { state, dailyScan: true, desktop: true });
+    await page.waitForFunction(() => window.notified?.length === 1);
+    assert.deepEqual(await page.evaluate(() => window.notified), [["今日简报", "待确认 2 件，要跟进 3 位客户，等结果 4 个。"]]);
+    await page.reload();
+    await page.locator(".brand-module-badge").first().waitFor({ state: "attached" });
+    assert.deepEqual(await page.evaluate(() => window.notified), []);
+    await close();
+  }
+
+  // The owner can switch everything off, and the model step and the reminders are separate choices.
+  {
+    const { page, state, close } = await open("/digital-employee/schedule", { dailyScan: true });
+    const toggled = () => page.waitForResponse((response) => response.url().endsWith("/opportunity-settings") && response.request().method() === "PUT");
+    await page.getByText("每天看一遍客户").waitFor();
+    const clickSwitch = async (name) => {
+      const saved = toggled();
+      await page.locator("label.de-switch").filter({ hasText: name }).click();
+      await saved;
+    };
+    assert.equal(state.discovery.discoveryMode, "rules");
+    await clickSwitch("用模型提前写好建议");
+    assert.equal(state.discovery.discoveryMode, "hybrid");
+    await page.waitForFunction(() => !document.querySelector(".de-schedule-time input")?.disabled);
+    await clickSwitch("用模型提前写好建议");
+    assert.equal(state.discovery.discoveryMode, "rules");
+    await page.waitForFunction(() => !document.querySelector(".de-schedule-time input")?.disabled);
+    await clickSwitch("每天看一遍客户");
+    assert.equal(state.discovery.enabled, false);
+    await page.waitForFunction(() => document.querySelector(".de-schedule-time input")?.disabled === true);
+    const reminder = page.waitForResponse((response) => response.url().endsWith("/settings") && response.request().method() === "PUT");
+    await page.locator("label.de-switch").filter({ hasText: "飞书提醒" }).click();
+    await reminder;
+    assert.equal(state.settings.feishuReminder, true);
+    await close();
+  }
+
+  // Without the daily scan the page keeps its old promise: that switch costs model money.
+  {
+    const { page, close } = await open("/digital-employee/schedule");
+    await page.getByText("每日自动发现").waitFor();
+    assert.equal(await page.getByText("飞书提醒").count(), 0);
+    assert.equal(await page.getByText("用模型提前写好建议").count(), 0);
     await close();
   }
 

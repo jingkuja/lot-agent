@@ -46,6 +46,7 @@ import { MarketingMaterialsService } from "./marketing-service.js";
 import { OpportunityService, type OpportunityTalkTrackGenerator } from "./opportunity-service.js";
 import type { JobQueue } from "@lot-agent/core";
 import { CustomerAcquisitionService } from "./acquisition-service.js";
+import { BriefService } from "./brief-service.js";
 import { DIGITAL_EMPLOYEE_UNIFIED_SCOPE, readConversationFeatureScope } from "./feature-scope.js";
 import { resolveFocus, type FocusType } from "./focus.js";
 import { ProposalService } from "./proposal-service.js";
@@ -113,6 +114,7 @@ export class DigitalEmployeeService {
   readonly customerAcquisition: CustomerAcquisitionService;
   readonly settings: EmployeeSettingsService;
   readonly proposals: ProposalService;
+  readonly briefs: BriefService;
   readonly today: TodayService;
   private readonly secretBox: SecretBox;
 
@@ -138,7 +140,8 @@ export class DigitalEmployeeService {
     );
     this.settings = new EmployeeSettingsService(db.pool);
     this.proposals = new ProposalService(db.pool, this.opportunities, this.customerAcquisition);
-    this.today = new TodayService(db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals);
+    this.briefs = new BriefService(db.pool);
+    this.today = new TodayService(db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals, this.briefs);
     this.secretBox = secretBox;
   }
 

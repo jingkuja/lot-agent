@@ -7,6 +7,7 @@ import { EmployeeWorkspace } from "../modules/digital-employee/EmployeeWorkspace
 import { LegacyDigitalEmployeeWorkspace } from "../modules/digital-employee/LegacyDigitalEmployeeWorkspace.js";
 import { TODAY_PATH, normalizeEmployeePath } from "../modules/digital-employee/routes.js";
 import { useEmployeeFlags } from "../modules/digital-employee/useEmployeeFlags.js";
+import { useEmployeeSummary } from "../modules/digital-employee/useEmployeeSummary.js";
 import { useModels } from "../hooks/useModels.js";
 import { LlmModelRequiredModal } from "../components/LlmModelRequiredModal.js";
 
@@ -53,6 +54,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
   const { models: modelCatalog, loading: modelsLoading, reload: reloadModels } = useModels();
   const [llmNoticeTitle, setLlmNoticeTitle] = useState<string | null>(null);
   const flags = useEmployeeFlags();
+  const employeeSummary = useEmployeeSummary(flags.workspace);
   const isDigitalEmployee = pathname.startsWith("/digital-employee");
   const isDigitalEmployeeChat = pathname === "/digital-employee" || pathname === "/digital-employee/customer-profile" ||
     pathname === "/digital-employee/marketing-materials" || pathname === "/digital-employee/copy/chat" ||
@@ -121,6 +123,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           modelCatalog={modelCatalog}
           onNavigateDigitalEmployee={() => handleOpenDigitalEmployee()}
           hiddenAgentIds={HIDDEN_AGENT_IDS}
+          digitalEmployeeBadge={employeeSummary.pending}
         />
       </div>
       {flags.ready && flags.workspace && (
@@ -130,6 +133,9 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
             modelCatalog={modelCatalog}
             pathname={pathname}
             active={isDigitalEmployee}
+            dailyScan={flags.dailyScan}
+            pendingCount={employeeSummary.pending}
+            onPendingChange={employeeSummary.setPending}
             onLogout={onLogout}
             navigate={navigate}
             replacePath={replacePath}

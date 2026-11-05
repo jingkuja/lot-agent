@@ -326,6 +326,7 @@ export interface OpportunityItem {
 
 export interface OpportunitySettings {
   enabled: boolean;
+  discoveryMode: "rules" | "hybrid";
   timezone: string;
   dailyRunTime: string;
   nextRunAt: string | null;
@@ -663,6 +664,20 @@ export interface TodayItem {
   proposal?: PendingProposal;
   opportunity?: OpportunityItem;
   recommendation?: CampaignRecommendation;
+  deployment?: { id: string; assetId: string; title: string; platform: string; customPlatform: string | null; deployedAt: string | null };
+}
+
+export interface EmployeeBrief {
+  id: string;
+  date: string;
+  counts: { scanned: number; created: number; confirm: number; followUps: number; results: number; pending: number };
+  readAt: string | null;
+}
+
+export interface TodaySummary {
+  pending: number;
+  brief: EmployeeBrief | null;
+  desktopReminder: boolean;
 }
 
 export interface RunningWork {
@@ -676,6 +691,7 @@ export interface RunningWork {
 
 export interface TodayResponse {
   employee: { name: string };
+  brief: EmployeeBrief | null;
   items: TodayItem[];
   running: RunningWork[];
   snoozedCount: number;

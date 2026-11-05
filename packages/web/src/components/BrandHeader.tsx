@@ -15,6 +15,8 @@ interface BrandHeaderProps {
   onOpenKnowledgeBase?: () => void;
   activeModule?: "assistant" | "digitalEmployee";
   balanceRefreshKey?: number;
+  /** Work waiting on the owner in the digital employee. */
+  digitalEmployeeBadge?: number;
 }
 
 /** Top-left identity strip: logo, product name, account avatar, and workspace nav.
@@ -30,6 +32,7 @@ export function BrandHeader({
   onOpenKnowledgeBase,
   activeModule = "assistant",
   balanceRefreshKey,
+  digitalEmployeeBadge = 0,
 }: BrandHeaderProps) {
   const { t } = useI18n();
   return (
@@ -118,7 +121,9 @@ export function BrandHeader({
                   <path d="M5.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6" />
                   <path d="M18.5 5.5h2M19.5 4.5v2" />
                 </svg>
-                {t("数字员工")}</button>
+                {t("数字员工")}
+                {digitalEmployeeBadge > 0 && <b className="brand-module-badge">{digitalEmployeeBadge > 99 ? "99+" : digitalEmployeeBadge}</b>}
+              </button>
             </div>
           )}
         </div>

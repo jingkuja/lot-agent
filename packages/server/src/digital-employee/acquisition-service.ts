@@ -33,6 +33,15 @@ import {
   type SegmentMetrics,
 } from "./acquisition-types.js";
 
+export interface DeploymentAwaitingFeedback {
+  id: string;
+  assetId: string;
+  title: string;
+  platform: string;
+  customPlatform: string | null;
+  deployedAt: string | null;
+}
+
 const MARKETING_URL = "/digital-employee/marketing";
 const SEGMENTS_URL = "/digital-employee/customers/segments";
 const CREATION_PROMPT_VERSION = "customer-acquisition-creative/v1";
@@ -166,7 +175,7 @@ export class CustomerAcquisitionService {
     return { items: rows.map(toRecommendation), generatedAt: latest.rows[0]?.generated_at ? iso(latest.rows[0].generated_at) : null };
   }
 
-  async refreshRecommendations(userId: string, signal?: AbortSignal) {
+  async refreshRecommendations(userId: string, signal?: AbortSignal, { rulesOnly = false }: { rulesOnly?: boolean } = {}) {
     signal?.throwIfAborted();
     const [insights, productsResult, brandResult] = await Promise.all([
       this.getCohortInsights(userId),
@@ -183,7 +192,7 @@ export class CustomerAcquisitionService {
     }));
     const safeProducts = productsResult.rows.map(marketingProductSnapshot);
     let drafts: CampaignRecommendationDraft[];
-    if (this.contentGenerator) {
+    if (this.contentGenerator && !rulesOnly) {
       try {
         const generated = await this.contentGenerator.recommend({
           signal,
@@ -242,6 +251,22 @@ export class CustomerAcquisitionService {
       );
     }
     return this.listRecommendations(userId, "pending");
+  }
+
+  /**
+   * The morning scan's proposals. They wait a week between batches, so ones the owner
+   * ignored do not return tomorrow and ones written by a model are not replaced.
+   */
+  async seedRuleRecommendations(userId: string) {
+    const { rows } = await this.db.pool.query(
+      `SELECT
+         EXISTS (SELECT 1 FROM de_daily_recommendations WHERE user_id=$1 AND generated_at > now() - interval '7 days') AS recent,
+         EXISTS (SELECT 1 FROM marketing_products WHERE user_id=$1 AND status='active') AS has_product`,
+      [userId]
+    );
+    if (rows[0]?.recent || !rows[0]?.has_product) return false;
+    await this.refreshRecommendations(userId, undefined, { rulesOnly: true });
+    return true;
   }
 
   async updateRecommendation(userId: string, id: string, status: "adopted" | "ignored") {
@@ -1021,6 +1046,24 @@ export class CustomerAcquisitionService {
         };
       },
     });
+  }
+
+  /** Published for three days with nothing reported back: the employee asks how it went. */
+  async listDeploymentsAwaitingFeedback(userId: string) {
+    const { rows } = await this.db.pool.query(
+      `SELECT deployment.id, deployment.asset_id, deployment.platform, deployment.custom_platform, deployment.deployed_at, asset.title
+       FROM de_asset_deployments deployment
+       JOIN de_marketing_asset_library asset ON asset.id=deployment.asset_id AND asset.user_id=deployment.user_id
+       WHERE deployment.user_id=$1 AND deployment.status IN ('deployed','ended') AND asset.status<>'archived'
+         AND COALESCE(deployment.deployed_at, deployment.created_at) <= now() - interval '3 days'
+         AND NOT EXISTS (SELECT 1 FROM de_deployment_feedback feedback WHERE feedback.deployment_id=deployment.id)
+       ORDER BY COALESCE(deployment.deployed_at, deployment.created_at) LIMIT 20`,
+      [userId]
+    );
+    return rows.map((row): DeploymentAwaitingFeedback => ({
+      id: row.id, assetId: row.asset_id, title: row.title, platform: row.platform,
+      customPlatform: row.custom_platform || null, deployedAt: row.deployed_at ? iso(row.deployed_at) : null,
+    }));
   }
 
   async analytics(userId: string) {

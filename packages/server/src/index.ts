@@ -58,6 +58,8 @@ import { createUsageRoutes, summarizeBalance } from "./routes/usage.js";
 import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
 import { digitalEmployeeProductFlags } from "./digital-employee/feature-scope.js";
+import { registerDigitalEmployeeJobs } from "./digital-employee/jobs.js";
+import { internationalModelsEnabled } from "./tokenhub/model-access.js";
 import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { VirtualPaymentService } from "./payments/service.js";
 import { PgVirtualPaymentRepository } from "./payments/repository.js";
@@ -144,35 +146,10 @@ async function main() {
   void sweepExpiredSessions();
   setInterval(sweepExpiredSessions, SESSION_CLEANUP_INTERVAL_MS).unref();
 
-  // Customer group portraits are account-scoped aggregates. Only explicitly
-  // opted-in accounts are selected after 23:00 Asia/Shanghai; the snapshot's
-  // (user, date) key also prevents duplicate model billing across restarts.
-  const COHORT_SUMMARY_CHECK_INTERVAL_MS = 5 * 60 * 1000;
-  const runCustomerCohortSummaries = async () => {
-    try {
-      const completed = await service.digitalEmployee.runNightlyCohortSummaries();
-      if (completed > 0) console.log(`Generated ${completed} nightly customer cohort portrait(s)`);
-    } catch (err) {
-      console.warn("Customer cohort summary scheduler failed:", err);
-    }
-  };
-  void runCustomerCohortSummaries();
-  setInterval(runCustomerCohortSummaries, COHORT_SUMMARY_CHECK_INTERVAL_MS).unref();
-
-  // Each account owns its local time-zone setting. The database selects only
-  // due rows and advances next_run_at, while the same daily idempotency key
-  // prevents restarts or overlapping ticks from creating duplicate runs.
-  const OPPORTUNITY_DISCOVERY_CHECK_INTERVAL_MS = 60 * 1000;
-  const enqueueDailyOpportunityDiscoveries = async () => {
-    try {
-      const queued = await service.digitalEmployee.opportunities.enqueueDueDiscoveries();
-      if (queued > 0) console.log(`Queued ${queued} daily opportunity discovery task(s)`);
-    } catch (err) {
-      console.warn("Opportunity discovery scheduler failed:", err);
-    }
-  };
-  void enqueueDailyOpportunityDiscoveries();
-  setInterval(enqueueDailyOpportunityDiscoveries, OPPORTUNITY_DISCOVERY_CHECK_INTERVAL_MS).unref();
+  registerDigitalEmployeeJobs(service.digitalEmployee, {
+    sendToOwner: feishu ? (userId, message) => feishu.send(userId, { recipient: "self", ...message }) : undefined,
+    english: internationalModelsEnabled(),
+  });
 
   // Long waits trigger diagnostics, never terminal failures. A queue entry may
   // legitimately wait behind long renders; Redis outages are not missing jobs.

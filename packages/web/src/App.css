@@ -3680,6 +3680,8 @@ html, body, #root {
   box-shadow: none;
 }
 
+.brand-module-badge { min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--text-on-accent); font-size: 10px; line-height: 16px; text-align: center; }
+
 /* A product page over the chat: the page scrolls, the composer stays below it. */
 .workspace-overlay { flex: 1; min-height: 0; overflow: auto; }
 .workspace-chat.has-overlay .chat-panel { flex: 0 0 auto; height: auto; min-height: 0; }
