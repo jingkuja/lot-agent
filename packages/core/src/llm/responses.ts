@@ -5,6 +5,7 @@ import { mediaPartPlaceholder } from "../types/index.js";
 import { LLMResponseError } from "./errors.js";
 import type { OpenAIProviderConfig } from "./openai.js";
 import { withGatewayRequestId } from "./gateway-request-id.js";
+import { requestTemperature } from "./model-params.js";
 
 /** Stateless Responses transport. Never replay an uncertain, potentially paid POST. */
 export class OpenAIResponsesProvider implements LLMProvider {
@@ -27,7 +28,7 @@ export class OpenAIResponsesProvider implements LLMProvider {
       include: ["reasoning.encrypted_content"],
       stream: true,
       max_output_tokens: params?.maxTokens,
-      temperature: params?.temperature,
+      temperature: requestTemperature(this.config.model, params?.temperature),
       top_p: params?.topP,
       // SDK 4.x predates the documented `none` effort; keep this wire-only
       // extension local instead of leaking vendor `thinking` into Responses.

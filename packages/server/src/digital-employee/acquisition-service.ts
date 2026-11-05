@@ -5,6 +5,14 @@ import { billedVideoSeconds, resolveVideoGenerateAudio, validateImageGenerationS
 import { ConversationActionDrafts } from "./conversation-drafts.js";
 import { ConflictError, InputError, NotFoundError, QuotaError } from "./errors.js";
 import {
+  assertGroupContentInput,
+  buildIdentityTerms,
+  containsContactDetails,
+  customerNameFlags,
+  type AssetReviewFlag,
+  type GroupContentPolicy,
+} from "./group-content-guard.js";
+import {
   DEFAULT_TOKENHUB_CONFIGURATION_URL,
   type AssetListFilters,
   type CampaignContentGenerator,
@@ -79,6 +87,7 @@ export class CustomerAcquisitionService {
   }
 
   async createSegment(userId: string, input: SegmentInput) {
+    assertGroupContentInput(await this.groupContentPolicy(userId), segmentGuardFields(input));
     const id = randomUUID();
     try {
       const { rows } = await this.db.pool.query(
@@ -247,7 +256,25 @@ export class CustomerAcquisitionService {
     return this.modelResolver?.get(userId) ?? emptyModelAvailability();
   }
 
-  async createAsset(userId: string, input: CreateCampaignAssetInput, signal?: AbortSignal) {
+  /** Everything needed to keep individual identities out of group content. */
+  private async groupContentPolicy(userId: string): Promise<GroupContentPolicy> {
+    const [customers, products, brand] = await Promise.all([
+      this.db.pool.query(`SELECT display_name, aliases FROM de_customer_profiles WHERE user_id=$1`, [userId]),
+      this.db.pool.query(`SELECT * FROM marketing_products WHERE user_id=$1 AND status='active'`, [userId]),
+      this.db.pool.query(`SELECT * FROM marketing_brand_assets WHERE user_id=$1`, [userId]),
+    ]);
+    return {
+      identityTerms: buildIdentityTerms(customers.rows, products.rows.map((row) => row.name)),
+      approvedFacts: JSON.stringify([products.rows, brand.rows]),
+    };
+  }
+
+  async createAsset(
+    userId: string,
+    input: CreateCampaignAssetInput,
+    signal?: AbortSignal,
+    options: { inheritedTitle?: boolean } = {}
+  ) {
     signal?.throwIfAborted();
     const existing = input.campaignId ? await this.loadCampaignRow(userId, input.campaignId) : null;
     const productId = input.productId || existing?.product_id;
@@ -282,6 +309,15 @@ export class CustomerAcquisitionService {
     if (!resolvedInput.objective || !resolvedInput.channels.length || !resolvedInput.callToAction) {
       throw new InputError("活动目标、渠道和行动号召不能为空");
     }
+    const policy = await this.groupContentPolicy(userId);
+    assertGroupContentInput(policy, {
+      创作要求: resolvedInput.prompt,
+      活动目标: resolvedInput.objective,
+      行动号召: resolvedInput.callToAction,
+      公开受众: resolvedInput.publicAudience,
+      // A rewrite must stay possible on the very asset that was flagged for its title.
+      标题: options.inheritedTitle ? undefined : resolvedInput.title,
+    });
     const isPoster = resolvedInput.assetType === "poster";
     let copyModelId: string | null = null;
     let mediaModelId: string | null = null;
@@ -347,12 +383,21 @@ export class CustomerAcquisitionService {
         }
       }
       signal?.throwIfAborted();
+      const reviewFlags: AssetReviewFlag[] = [];
+      if (containsContactDetails(policy, `${generated.title}\n${generated.content}`)) {
+        generated = { title, content: fallbackCopy(resolvedInput, snapshot, product), modelId: "logic-fallback" };
+        reviewFlags.push({ type: "contact_replaced" });
+      }
+      reviewFlags.push(...customerNameFlags(policy, `${generated.title}\n${generated.content}`));
       const assetId = randomUUID();
       await this.db.pool.query(
         `INSERT INTO de_marketing_asset_library
-           (id,user_id,campaign_id,segment_snapshot_id,parent_asset_id,asset_type,title,content,source,model_id,generation_status,status,version)
-         VALUES ($1,$2,$3,$4,$5,'text',$6,$7,$8,$9,'ready','ready',$10)`,
-        [assetId, userId, campaignId, snapshot.id, resolvedInput.parentAssetId ?? null, generated.title || title, generated.content, source, generated.modelId, parentVersion]
+           (id,user_id,campaign_id,segment_snapshot_id,parent_asset_id,asset_type,title,content,source,model_id,generation_status,status,version,review_flags)
+         VALUES ($1,$2,$3,$4,$5,'text',$6,$7,$8,$9,'ready','ready',$10,$11::jsonb)`,
+        [
+          assetId, userId, campaignId, snapshot.id, resolvedInput.parentAssetId ?? null, generated.title || title, generated.content, source,
+          generated.modelId, parentVersion, JSON.stringify(reviewFlags),
+        ]
       );
       await this.db.pool.query(
         `INSERT INTO de_campaign_generation_runs
@@ -528,6 +573,7 @@ export class CustomerAcquisitionService {
     input: SegmentInput,
     source: { conversationId?: string; sourceMessageId?: string }
   ) {
+    assertGroupContentInput(await this.groupContentPolicy(userId), segmentGuardFields(input));
     const preview = await this.previewSegment(userId, input.criteria);
     return this.drafts.create({
       userId,
@@ -613,6 +659,7 @@ export class CustomerAcquisitionService {
     input: CreateCampaignInput,
     source: { conversationId?: string; sourceMessageId?: string }
   ) {
+    assertGroupContentInput(await this.groupContentPolicy(userId), campaignGuardFields(input));
     const snapshot = await this.resolveSnapshot(userId, input);
     const product = (await this.db.pool.query(
       `SELECT id,name FROM marketing_products WHERE id=$1 AND user_id=$2 AND status='active'`,
@@ -642,12 +689,16 @@ export class CustomerAcquisitionService {
     if (draft.status === "applied") {
       return { alreadyApplied: true, entityId: draft.appliedEntityId, preview: draft.preview, managementUrl: "/digital-employee/copy" };
     }
-    const campaign = await this.createMarketingCampaign(userId, draft.payload as unknown as CreateCampaignInput);
+    const payload = draft.payload as unknown as CreateCampaignInput;
+    const campaign = payload.opportunityId
+      ? await this.acceptCampaignOpportunity(userId, payload.opportunityId)
+      : await this.createMarketingCampaign(userId, payload);
     await this.drafts.markApplied(userId, draftId, campaign.id);
     return { alreadyApplied: false, campaign, managementUrl: "/digital-employee/copy" };
   }
 
   async createMarketingCampaign(userId: string, input: CreateCampaignInput) {
+    assertGroupContentInput(await this.groupContentPolicy(userId), campaignGuardFields(input));
     const product = (await this.db.pool.query(
       `SELECT * FROM marketing_products WHERE id=$1 AND user_id=$2 AND status='active'`,
       [input.productId, userId]
@@ -777,6 +828,15 @@ export class CustomerAcquisitionService {
     return { items: rows.map(toCampaignOpportunity), total: rows.length };
   }
 
+  /** The chat path: a campaign is a proposal until the user confirms the draft. */
+  async prepareCampaignOpportunity(userId: string, opportunityId: string, source: { conversationId?: string; sourceMessageId?: string }) {
+    const { rows } = await this.db.pool.query(
+      `SELECT * FROM de_campaign_opportunities WHERE id=$1 AND user_id=$2`, [opportunityId, userId]
+    );
+    if (!rows[0]) throw new NotFoundError("未找到客群营销机会");
+    return this.prepareMarketingCampaign(userId, opportunityCampaignInput(rows[0]), source);
+  }
+
   async acceptCampaignOpportunity(userId: string, opportunityId: string) {
     const { rows } = await this.db.pool.query(
       `SELECT * FROM de_campaign_opportunities WHERE id=$1 AND user_id=$2`, [opportunityId, userId]
@@ -790,18 +850,7 @@ export class CustomerAcquisitionService {
       );
       if (existing.rows[0]) return this.getCampaign(userId, existing.rows[0].id);
     }
-    if (opportunity.status !== "suggested") throw new ConflictError("该客群机会已经处理");
-    if (!opportunity.product_id) throw new InputError("该机会没有关联产品，无法创建活动");
-    const channels = Array.isArray(opportunity.suggested_channels) ? opportunity.suggested_channels : [];
-    const campaign = await this.createMarketingCampaign(userId, {
-      name: opportunity.title,
-      objective: opportunity.objective,
-      channels: channels.length ? channels.map(String) : ["朋友圈"],
-      callToAction: "了解详情或预约咨询",
-      productId: opportunity.product_id,
-      segmentSnapshotId: opportunity.segment_snapshot_id,
-      opportunityId,
-    });
+    const campaign = await this.createMarketingCampaign(userId, opportunityCampaignInput(opportunity));
     await this.db.pool.query(
       `UPDATE de_campaign_opportunities SET status='accepted' WHERE id=$1 AND user_id=$2`,
       [opportunityId, userId]
@@ -841,7 +890,7 @@ export class CustomerAcquisitionService {
       channels: campaign.channels ?? [],
       callToAction: campaign.call_to_action ?? "",
       title: asset.title,
-    }, signal);
+    }, signal, { inheritedTitle: true });
   }
 
   async recordCampaignUsage(userId: string, assetId: string, input: DeploymentInput) {
@@ -1328,6 +1377,7 @@ function toAsset(row: any) {
     assetType: row.asset_type, title: row.title, content: row.content ?? "", fileUrl: row.file_url ?? null,
     source: row.source, modelId: row.model_id ?? null, taskId: row.task_id ?? null,
     generationStatus: row.generation_status, status: row.status, version: Number(row.version),
+    reviewFlags: Array.isArray(row.review_flags) ? row.review_flags as AssetReviewFlag[] : [],
     deployments: Array.isArray(row.deployments) ? row.deployments.map((item: any) => ({
       ...item,
       deployedAt: item.deployedAt ? iso(item.deployedAt) : null,
@@ -1356,6 +1406,31 @@ function marketingProductSnapshot(row: any) {
     commonObjections: row.common_objections ?? [], prohibitedExpressions: row.prohibited_expressions ?? [],
     faqs: row.faqs ?? [], productNotes: row.product_notes ?? "",
     version: Number(row.version),
+  };
+}
+
+function opportunityCampaignInput(opportunity: any): CreateCampaignInput {
+  if (opportunity.status !== "suggested") throw new ConflictError("该客群机会已经处理");
+  if (!opportunity.product_id) throw new InputError("该机会没有关联产品，无法创建活动");
+  const channels = Array.isArray(opportunity.suggested_channels) ? opportunity.suggested_channels : [];
+  return {
+    name: opportunity.title,
+    objective: opportunity.objective,
+    channels: channels.length ? channels.map(String) : ["朋友圈"],
+    callToAction: "了解详情或预约咨询",
+    productId: opportunity.product_id,
+    segmentSnapshotId: opportunity.segment_snapshot_id,
+    opportunityId: opportunity.id,
+  };
+}
+
+function segmentGuardFields(input: SegmentInput) {
+  return { 客群名称: input.name, 客群描述: input.description };
+}
+
+function campaignGuardFields(input: CreateCampaignInput) {
+  return {
+    活动名称: input.name, 活动目标: input.objective, 行动号召: input.callToAction, 公开受众: input.publicAudience,
   };
 }
 

@@ -3,6 +3,8 @@ import type { DigitalEmployeeFeature } from "./DigitalEmployeeSidebar.js";
 
 interface DigitalEmployeeActionsProps {
   feature?: DigitalEmployeeFeature;
+  /** The conversation is not tied to this module, so module-limit copy would be false. */
+  unified?: boolean;
   onOpenProfiles: () => void;
   currentCustomerName?: string | null;
   onClearCurrentCustomer?: () => void;
@@ -11,6 +13,7 @@ interface DigitalEmployeeActionsProps {
 /** Lightweight precision-management entry shown only above digital-employee chat. */
 export function DigitalEmployeeActions({
   feature = "customer-profile",
+  unified = false,
   onOpenProfiles,
   currentCustomerName,
   onClearCurrentCustomer,
@@ -19,7 +22,9 @@ export function DigitalEmployeeActions({
   const isMarketing = feature === "marketing-materials";
   const isOpportunity = feature === "acquisition";
   const isAcquisition = feature === "copy";
-  const hint = isMarketing
+  const hint = unified
+    ? null
+    : isMarketing
     ? "直接在下方对话中快速维护产品卖点、权益、案例和品牌口径"
     : isOpportunity
       ? "商机雷达对话只处理单个客户：查询今日队列、采纳商机、创建或改期行动、生成话术并回填结果"
@@ -29,17 +34,17 @@ export function DigitalEmployeeActions({
   const management = isMarketing ? ["◆", "营销资料管理"] : isOpportunity ? ["◇", "商机雷达工作台"] : isAcquisition ? ["✎", "获客宝工作台"] : ["◎", "新建 / 管理画像"];
   return (
     <div className="de-chat-actions" aria-label={t("数字员工快捷操作")}>
-      <p className="de-chat-actions-hint">
+      {hint && <p className="de-chat-actions-hint">
         <span className="de-chat-actions-hint-icon" aria-hidden>✦</span>
         <span>{t(hint)}</span>
-      </p>
+      </p>}
       <div className="de-chat-actions-row">
         <button type="button" className="de-chat-management-button" onClick={onOpenProfiles}>
           <span aria-hidden>{t(management[0])}</span>
           {t(management[1])}
         </button>
-        {isAcquisition && <span className="de-chat-current-customer">{t("当前作用域：")}<strong>{t("获客宝 · 客群 / 公开受众")}</strong></span>}
-        {!isMarketing && !isAcquisition && currentCustomerName && (
+        {isAcquisition && !unified && <span className="de-chat-current-customer">{t("当前作用域：")}<strong>{t("获客宝 · 客群 / 公开受众")}</strong></span>}
+        {(unified || (!isMarketing && !isAcquisition)) && currentCustomerName && (
           <span className="de-chat-current-customer">
             {t("当前客户：")}<strong>{currentCustomerName}</strong>
             {onClearCurrentCustomer && (

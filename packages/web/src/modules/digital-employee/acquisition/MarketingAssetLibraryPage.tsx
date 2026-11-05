@@ -2,7 +2,7 @@ import { useI18n } from "../../../i18n/index.js";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../../api/client.js";
 import type { MarketingAsset, MarketingAssetType } from "../types.js";
-import { MarketingAssetCard } from "./MarketingAssetCard.js";
+import { AssetReviewNotice, MarketingAssetCard } from "./MarketingAssetCard.js";
 import { DeploymentManager } from "./DeploymentManager.js";
 import { assetTextFileName, generationStateLabel } from "./asset-delivery.js";
 
@@ -95,6 +95,7 @@ function AssetContentDetail({ asset, onClose, onManage, onReuse }: {
         <button className="de-icon-button" onClick={onClose} aria-label={t("关闭")}>×</button>
       </header>
       <div className="de-asset-content-body">
+        <AssetReviewNotice flags={asset.reviewFlags} />
         {asset.assetType === "text" ? (
           <pre className="de-asset-content-copy">{asset.content || t("（暂无文案内容）")}</pre>
         ) : asset.assetType === "video" && asset.fileUrl ? (

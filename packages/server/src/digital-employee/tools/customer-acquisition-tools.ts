@@ -7,7 +7,7 @@ import {
   parseRecommendationFilter, parseSegmentInput,
 } from "../acquisition-validators.js";
 import { parseDraftId, parseEntityId } from "../validators.js";
-import { confirmationContent, sourceContext } from "./agent-tool-helpers.js";
+import { assertScope, confirmationContent, sourceContext } from "./agent-tool-helpers.js";
 
 const RECOMMENDATION_STATUS = ["pending", "adopted", "ignored", "expired"];
 
@@ -16,7 +16,7 @@ const RECOMMENDATION_STATUS = ["pending", "adopted", "ignored", "expired"];
 export function createCustomerAcquisitionTools(service: CustomerAcquisitionService): Tool[] {
   const analyze: Tool = {
     name: "analyze_customer_cohort",
-    description: "Read Acquisition Hub's aggregate customer portrait, dynamic segments and latest snapshot metrics. Only group statistics; no individual names or contact details.",
+    description: "Read the aggregate customer portrait, dynamic segments and latest snapshot metrics. Only group statistics; no individual names or contact details.",
     parameters: { type: "object", properties: {} },
     async execute(_input, context) {
       return run(context, "读取客群洞察失败", async (userId) => ({
@@ -71,7 +71,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
         const asset = await service.createAsset(userId, parseCreateCampaignAsset({ ...object(input), assetType: "copy" }), context.signal);
         return {
           asset,
-          message: `已生成并保存群体文案「${asset.title}」`,
+          message: `已生成并保存群体文案「${asset.title}」${reviewNotice(asset.reviewFlags)}`,
           managementUrl: "/digital-employee/copy",
         };
       });
@@ -81,7 +81,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
   const searchAssets: Tool = {
     name: "search_marketing_assets",
     effect: "read",
-    description: "Search Acquisition Hub's copy, poster and video assets and their generation/deployment status.",
+    description: "Search marketing copy, poster and video assets and their generation/deployment status.",
     parameters: {
       type: "object",
       properties: {
@@ -119,7 +119,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const refreshRecommendations: Tool = {
     name: "generate_daily_recommendations",
-    description: "Refresh daily Acquisition Hub recommendations from anonymized aggregate portraits and confirmed marketing facts. Does not generate paid images or videos.",
+    description: "Refresh daily campaign recommendations from anonymized aggregate portraits and confirmed marketing facts. Does not generate paid images or videos.",
     parameters: { type: "object", properties: {} },
     async execute(_input, context) {
       return run(context, "生成每日推荐失败", async (userId) => ({
@@ -190,7 +190,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
   const searchOpportunities: Tool = {
     name: "search_campaign_opportunities",
     effect: "read",
-    description: "Search cohort marketing opportunities. Acceptance creates a campaign before content generation.",
+    description: "Search campaign ideas already evaluated for a customer group by evaluate_segment_product_fit. Acceptance creates a campaign before content generation. For sales opportunities (商机) with individual customers use search_customer_opportunities.",
     parameters: { type: "object", properties: { status: { type: "string", enum: ["suggested", "accepted", "dismissed", "expired"] } } },
     async execute(input, context) {
       return run(context, "查询客群机会失败", async (userId) =>
@@ -200,13 +200,14 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const acceptOpportunity: Tool = {
     name: "accept_campaign_opportunity",
-    description: "Convert the user-selected cohort opportunity into a campaign only after explicit confirmation.",
+    description: "Prepare turning a cohort opportunity the user chose into a campaign, without creating it. After confirmation call commit_marketing_campaign.",
     parameters: { type: "object", properties: { opportunityId: { type: "string" } }, required: ["opportunityId"] },
     async execute(input, context) {
-      return run(context, "采纳客群机会失败", async (userId) => ({
-        campaign: await service.acceptCampaignOpportunity(userId, parseEntityId(object(input).opportunityId, "opportunityId")),
-        managementUrl: "/digital-employee/copy",
-      }));
+      return run(context, "采纳客群机会失败", async (userId) => {
+        const opportunityId = parseEntityId(object(input).opportunityId, "opportunityId");
+        const draft = await service.prepareCampaignOpportunity(userId, opportunityId, sourceContext(context));
+        return confirmationContent(draft, "commit_marketing_campaign");
+      });
     },
   };
 
@@ -381,7 +382,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
           asObjectString(value.instruction, "改写要求"),
           context.signal
         );
-        return { asset, managementUrl: "/digital-employee/copy" };
+        return { asset, message: reviewNotice(asset.reviewFlags) || undefined, managementUrl: "/digital-employee/copy" };
       });
     },
   };
@@ -491,7 +492,7 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
 
   const prepareResult: Tool = {
     name: "prepare_campaign_result",
-    description: "Prepare aggregate campaign outcomes. Generation is not business completion. Handle identifiable inquirers through Customer Profiles and Opportunity Radar.",
+    description: "Prepare aggregate campaign outcomes. Generation is not business completion. Handle identifiable inquirers as individual customers with the customer and follow-up tools.",
     parameters: {
       type: "object",
       properties: {
@@ -578,15 +579,22 @@ async function run(
   operation: (userId: string) => Promise<unknown>
 ): Promise<ToolResult> {
   try {
-    if (context.featureScope && context.featureScope !== "customer-acquisition") {
-      throw new InputError("当前对话不在获客宝作用域，请先进入获客宝对话");
-    }
+    assertScope(context, "customer-acquisition", "获客宝");
     context.signal?.throwIfAborted();
     const value = await operation(context.userId ?? "default");
     return { content: typeof value === "string" ? value : JSON.stringify(value) };
   } catch (error) {
     return failureResult(prefix, error);
   }
+}
+
+/** Tells the user what the server found, because the model never sees why copy was swapped. */
+function reviewNotice(flags: Array<{ type: string; term?: string }> = []): string {
+  const names = flags.filter((flag) => flag.type === "customer_name").map((flag) => flag.term);
+  return [
+    flags.some((flag) => flag.type === "contact_replaced") ? "。模型文案含联系方式，已改用模板文案" : "",
+    names.length ? `。文案可能含客户姓名（${names.join("、")}），请告知用户发布前核对` : "",
+  ].join("");
 }
 
 function object(value: unknown): Record<string, unknown> {

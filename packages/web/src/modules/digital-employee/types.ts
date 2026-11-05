@@ -477,6 +477,8 @@ export interface MarketingAsset {
   generationStatus: "pending" | "running" | "ready" | "failed" | "cancelled";
   status: "draft" | "ready" | "archived";
   version: number;
+  /** Server findings on generated group copy; older rows have none. */
+  reviewFlags?: Array<{ type: "customer_name" | "contact_replaced"; term?: string }>;
   deployments: AssetDeployment[];
   createdAt: string;
   updatedAt: string;

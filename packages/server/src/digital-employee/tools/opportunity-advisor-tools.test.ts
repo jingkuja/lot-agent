@@ -51,7 +51,10 @@ describe("opportunity advisor agent tools", () => {
   });
 
   it("rejects advisor tools outside the opportunity feature scope", async () => {
-    const list = vi.fn();
+    const list = vi.fn(async () => ({ items: [], total: 0 }));
+    const allowed = await find("search_customer_work_queue", { opportunities: { list } }).execute({}, { ...context, featureScope: "employee" });
+    expect(allowed.isError).toBeUndefined();
+    list.mockClear();
     const result = await find("search_customer_work_queue", { opportunities: { list } }).execute(
       {},
       { ...context, featureScope: "customer-acquisition" }

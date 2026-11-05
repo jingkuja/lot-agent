@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { createConversationRoutes } from "./conversations.js";
+import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
+import { registerAgentExtension } from "../services/agent-extensions.js";
+
+registerAgentExtension(createDigitalEmployeeExtension());
 
 /** Parse an SSE body into the ordered list of event objects. */
 function parseSse(body: string): Record<string, unknown>[] {
@@ -107,7 +111,7 @@ describe("POST /conversations/:id/messages (SSE)", () => {
       "c1",
       "查询客户",
       [],
-      expect.objectContaining({ userId: "u1", digitalEmployee: true })
+      expect.objectContaining({ userId: "u1", agentId: "digital_employee" })
     );
   });
 });

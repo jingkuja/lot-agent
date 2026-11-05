@@ -587,6 +587,49 @@ describe("CustomerAcquisitionService", () => {
     expect(query.mock.calls.some((call) => String(call[0]).includes("INSERT INTO de_marketing_campaigns"))).toBe(true);
     expect(query.mock.calls.some((call) => String(call[0]).includes("status='accepted'"))).toBe(true);
   });
+
+  it("creates nothing from an opportunity until its draft is committed", async () => {
+    const opportunity = {
+      id: "o1", status: "suggested", title: "部署简单主题", objective: "获得咨询", product_id: "p1",
+      suggested_channels: ["朋友圈"], segment_snapshot_id: "ss1",
+    };
+    const query = vi.fn(async (sql: string, params?: any[]) => {
+      if (sql.includes("FROM de_campaign_opportunities")) return { rows: [opportunity] };
+      if (sql.includes("FROM de_customer_segment_snapshots")) return { rows: [{
+        id: "ss1", audience_description: "制造业潜客", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date(),
+      }] };
+      if (sql.includes("SELECT id,name FROM marketing_products")) return { rows: [{ id: "p1", name: "边缘算力" }] };
+      if (sql.includes("INSERT INTO de_conversation_action_drafts")) return { rows: [{
+        id: params![0], user_id: "u1", feature_scope: params![4], kind: params![5], payload: JSON.parse(params![6]), preview: {},
+        options: [], status: "awaiting_confirmation", expires_at: params![11],
+      }] };
+      return { rows: [] };
+    });
+    const service = new CustomerAcquisitionService({ pool: { query } } as any);
+    const draft = await service.prepareCampaignOpportunity("u1", "o1", {});
+    expect(draft.kind).toBe("marketing_campaign");
+    expect(draft.payload).toMatchObject({ opportunityId: "o1", segmentSnapshotId: "ss1" });
+    expect(query.mock.calls.some((call) => String(call[0]).includes("INSERT INTO de_marketing_campaigns"))).toBe(false);
+    expect(query.mock.calls.some((call) => String(call[0]).includes("status='accepted'"))).toBe(false);
+  });
+
+  it("refuses to prepare an opportunity that was already handled", async () => {
+    const query = vi.fn(async () => ({ rows: [{ id: "o1", status: "dismissed", product_id: "p1" }] }));
+    const service = new CustomerAcquisitionService({ pool: { query } } as any);
+    await expect(service.prepareCampaignOpportunity("u1", "o1", {})).rejects.toThrow("已经处理");
+  });
+
+  it("commits an opportunity draft through acceptance, so its status moves too", async () => {
+    const service = new CustomerAcquisitionService({ pool: { query: vi.fn() } } as any);
+    vi.spyOn((service as any).drafts, "get").mockResolvedValue({ status: "awaiting_confirmation", payload: { opportunityId: "o1", name: "主题" } });
+    const markApplied = vi.spyOn((service as any).drafts, "markApplied").mockResolvedValue(undefined);
+    const accept = vi.spyOn(service, "acceptCampaignOpportunity").mockResolvedValue({ id: "c1" } as never);
+    const create = vi.spyOn(service, "createMarketingCampaign");
+    await service.commitMarketingCampaign("u1", "d1");
+    expect(accept).toHaveBeenCalledWith("u1", "o1");
+    expect(create).not.toHaveBeenCalled();
+    expect(markApplied).toHaveBeenCalledWith("u1", "d1", "c1");
+  });
 });
 
 

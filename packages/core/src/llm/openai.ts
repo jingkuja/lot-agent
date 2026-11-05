@@ -22,6 +22,7 @@ import { mediaPartPlaceholder } from "../types/index.js";
 import { withLLMRetry } from "./retry.js";
 import { withGatewayRequestId } from "./gateway-request-id.js";
 import { logger } from "../logger/log.js";
+import { requestTemperature } from "./model-params.js";
 
 const log = logger.child({ mod: "llm.openai" });
 
@@ -84,7 +85,7 @@ export class OpenAIProvider implements LLMProvider {
               tool_choice: oaiTools?.length ? "auto" : undefined,
               stream: true,
               stream_options: { include_usage: true },
-              temperature: params?.temperature,
+              temperature: requestTemperature(model, params?.temperature),
               max_tokens: params?.maxTokens,
               top_p: params?.topP,
               // DeepSeek hybrid models default to thinking. Small structured

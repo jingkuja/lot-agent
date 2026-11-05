@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import { SkillLoader, ToolRegistry } from "@lot-agent/core";
 import type { ChatChunk, Message } from "@lot-agent/core";
 import type { FeishuService } from "../feishu/service.js";
+import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
 import { AgentService } from "./agent-service.js";
+import { registerAgentExtension } from "./agent-extensions.js";
 
 /** LLM that replays a script of chunk-lists; one list per chat() call. */
 function scriptedLLM(script: ChatChunk[][], calls: Message[][] = []) {
@@ -223,7 +225,7 @@ describe("streamAgentResponse usage metering", () => {
     });
     (fake as any).agentConfig = { context: { budget: { total: 100_000 } } };
     await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", undefined, undefined, { modelId: "claude-sonnet-5-5" }));
-    expect((fake as any).resolveUtilityCompressor).toHaveBeenCalledWith("u1", false);
+    expect((fake as any).resolveUtilityCompressor).toHaveBeenCalledWith("u1", "general");
     await drain(fake.streamAgentResponse("c1", "hi", "general", "u1", undefined, undefined, { modelId: "kimi-k3.1-pro" }));
     expect((fake as any).resolveUtilityCompressor).toHaveBeenCalledTimes(1);
   });
@@ -295,18 +297,18 @@ describe("streamAgentResponse digital employee scope", () => {
     const userLlm = scriptedLLM([
       [{ type: "text", content: "ok" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
     ]);
-    const resolveDigitalEmployeeLLM = vi.fn(async () => ({
-      llm: userLlm,
+    const resolveModel = vi.fn(async () => ({
+      llm: userLlm as never,
       usedModelId: "m-user-tokenhub",
       modelIds: ["m-user-tokenhub"],
     }));
-    (fake as any).resolveDigitalEmployeeLLM = resolveDigitalEmployeeLLM;
+    registerAgentExtension(createDigitalEmployeeExtension({ resolveModel }));
     const toLLMTools = vi.spyOn((fake as any).toolRegistry, "toLLMTools");
 
     await drain(fake.streamAgentResponse("c1", "hi", "digital_employee", "u1"));
 
     expect(toLLMTools).toHaveBeenCalledWith([]);
-    expect(resolveDigitalEmployeeLLM).toHaveBeenCalledWith("u1", null);
+    expect(resolveModel).toHaveBeenCalledWith("u1", null);
     expect((fake as any).jobQueue.enqueue).not.toHaveBeenCalled();
   });
 });

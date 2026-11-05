@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatOptions, LLMProvider, Message } from "@lot-agent/core";
-import { completeTalkTrackReply } from "./agent-service.js";
+import { completeTalkTrackReply } from "./runtime.js";
 
 describe("completeTalkTrackReply", () => {
   it("returns the first visible reply without retrying", async () => {

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { createGenerationRoutes } from "./conversations.js";
+import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
+import { registerAgentExtension } from "../services/agent-extensions.js";
+
+registerAgentExtension(createDigitalEmployeeExtension());
 
 function fakeService() {
   const messages: any[] = [];
@@ -106,7 +110,6 @@ describe("POST /conversations/:id/generations", () => {
     const body: any = await res.json();
     expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], {
       userId: "u1",
-      digitalEmployee: false,
     });
     expect(body.title).toBeUndefined(); // Title is persisted asynchronously, not awaited by submission.
   });
@@ -123,7 +126,7 @@ describe("POST /conversations/:id/generations", () => {
     });
     expect(service.generateTitle).toHaveBeenCalledWith("c1", "营销海报", [], {
       userId: "u1",
-      digitalEmployee: true,
+      agentId: "digital_employee",
     });
     expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
       "image.generate",
@@ -405,7 +408,6 @@ describe("POST /conversations/:id/generations", () => {
     expect(service.jobQueue.enqueue.mock.calls[2][1].modelId).toBe("gpt-image-2.5-flare");
     expect(service.generateTitle).toHaveBeenCalledWith("c1", "菊花", [], {
       userId: "u1",
-      digitalEmployee: false,
       modelId: "deepseek-v4.1-flash",
     });
   });

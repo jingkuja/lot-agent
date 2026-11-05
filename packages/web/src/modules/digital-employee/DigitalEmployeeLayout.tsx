@@ -4,7 +4,7 @@ import type { User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
 import { useConversations } from "../../hooks/useConversations.js";
 import type { CatalogModel } from "../../lib/model-filter.js";
-import { digitalEmployeeConversations as filterDigitalEmployeeConversations } from "../../lib/product-agent-scope.js";
+import { digitalEmployeeConversations as filterDigitalEmployeeConversations, digitalEmployeeConversationsForScope } from "../../lib/product-agent-scope.js";
 import { DigitalEmployeeSidebar, type DigitalEmployeeFeature } from "./DigitalEmployeeSidebar.js";
 import { ProfileDetailPage } from "./profiles/ProfileDetailPage.js";
 import { ProfileListPage } from "./profiles/ProfileListPage.js";
@@ -47,10 +47,7 @@ export function DigitalEmployeeLayout({ pathname, user, llmModels, onLogout, onN
   const digitalEmployeeConversations = filterDigitalEmployeeConversations(conversations);
   const activeFeature: DigitalEmployeeFeature = view === "profiles" ? "customer-profile" : view;
   const activeScope = activeFeature === "copy" ? "customer-acquisition" : activeFeature === "acquisition" ? "opportunity-advisor" : activeFeature;
-  const featureConversations = digitalEmployeeConversations.filter((conversation) => {
-    const stored = conversation.metadata?.digitalEmployeeFeatureScope;
-    return stored === activeScope || (stored === undefined && activeScope === "customer-profile");
-  });
+  const featureConversations = digitalEmployeeConversationsForScope(digitalEmployeeConversations, activeScope);
   const openFeature = (feature: DigitalEmployeeFeature) => onNavigate(`/digital-employee/${feature}`);
   const openFeatureChat = () => onNavigate(
     activeFeature === "copy" || activeFeature === "acquisition"

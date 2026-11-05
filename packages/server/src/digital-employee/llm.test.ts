@@ -3,7 +3,7 @@ import {
   DIGITAL_EMPLOYEE_LLM_PRIORITY,
   pickDigitalEmployeeLlmModel,
   resolveDigitalEmployeeLlm,
-} from "./digital-employee-llm.js";
+} from "./llm.js";
 
 describe("pickDigitalEmployeeLlmModel", () => {
   it.each([

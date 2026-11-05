@@ -23,6 +23,7 @@ export function MarketingAssetCard({ item, onView, onManage, onReuse, onArchive 
     </div>
     <div className="de-asset-card-body">
       <div className="de-asset-card-title"><div><h3>{item.title}</h3><p>{item.segmentName || t("公开受众")} · {date(item.createdAt, locale)}</p></div><span className={`deployment-${deployed.length ? "deployed" : "pending"}`}>{deployed.length ? t("已投放") : t("待投放")}</span></div>
+      <AssetReviewNotice flags={item.reviewFlags} />
       <div className="de-asset-feedback-summary"><span>{t("投放平台")}<strong>{deployed.length}</strong></span><span>{t("曝光")}<strong>{compact(impressions)}</strong></span><span>{t("转化")}<strong>{compact(conversions)}</strong></span></div>
       <div className="de-asset-card-actions">
         <button className="de-secondary-button" onClick={onView}>{t("查看内容")}</button>
@@ -33,6 +34,17 @@ export function MarketingAssetCard({ item, onView, onManage, onReuse, onArchive 
       </div>
     </div>
   </article>;
+}
+
+/** Identity findings must stay visible until the owner has read them, wherever the copy is shown. */
+export function AssetReviewNotice({ flags = [] }: { flags?: MarketingAsset["reviewFlags"] }) {
+  const { t } = useI18n();
+  const names = flags.flatMap((flag) => flag.type === "customer_name" && flag.term ? [flag.term] : []);
+  if (!flags.length) return null;
+  return <>
+    {names.length > 0 && <p className="de-segment-warning">{t("可能含客户姓名：{0}。发布前请核对", [names.join(" / ")])}</p>}
+    {flags.some((flag) => flag.type === "contact_replaced") && <p className="de-segment-warning">{t("模型文案含联系方式，已换成模板文案")}</p>}
+  </>;
 }
 
 function date(value: string, locale = "zh-CN") { return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }

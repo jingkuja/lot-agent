@@ -21,10 +21,27 @@ describe("customer acquisition agent tools", () => {
 
   it("rejects acquisition tools outside the acquisition feature scope", async () => {
     const service = { getCohortInsights: vi.fn() };
+    const allowed = await find("analyze_customer_cohort", service).execute({}, { ...context, featureScope: "employee" });
+    expect(allowed.isError).toBeUndefined();
+    service.getCohortInsights.mockClear();
     const result = await find("analyze_customer_cohort", service).execute({}, { ...context, featureScope: "customer-profile" });
     expect(result.isError).toBe(true);
     expect(result.content).toContain("不在获客宝作用域");
     expect(service.getCohortInsights).not.toHaveBeenCalled();
+  });
+
+  it("only prepares a campaign from an opportunity; the user must confirm before it exists", async () => {
+    const service = {
+      prepareCampaignOpportunity: vi.fn(async () => ({
+        id: "00000000-0000-4000-8000-000000000222", question: "确认创建营销活动？", options: ["确认创建", "取消"], preview: {},
+      })),
+      acceptCampaignOpportunity: vi.fn(),
+    };
+    const opportunityId = "00000000-0000-4000-8000-000000000111";
+    const result = await find("accept_campaign_opportunity", service).execute({ opportunityId }, context);
+    expect(result.content).toContain("User confirmation required");
+    expect(result.content).toContain("commit_marketing_campaign");
+    expect(service.acceptCampaignOpportunity).not.toHaveBeenCalled();
   });
 
   it("exposes segment, campaign, rewrite and result tools", () => {

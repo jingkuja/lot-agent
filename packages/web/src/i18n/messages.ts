@@ -1,6 +1,12 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
   "服务条款": { en: "Terms of Service", id: "Ketentuan Layanan" },
+  "一句话交代就行，客户、跟进、客群和活动可以放在同一个对话里": {
+    en: "Just say what you need. Customers, follow-ups, groups and campaigns can all go in one conversation",
+    id: "Cukup sampaikan kebutuhan Anda. Pelanggan, tindak lanjut, kelompok, dan kampanye bisa dalam satu percakapan",
+  },
+  "可能含客户姓名：{0}。发布前请核对": { en: "May contain customer names: {0}. Check before publishing", id: "Mungkin memuat nama pelanggan: {0}. Periksa sebelum dipublikasikan" },
+  "模型文案含联系方式，已换成模板文案": { en: "The generated copy contained contact details and was replaced with template copy", id: "Salinan yang dihasilkan memuat detail kontak dan diganti dengan salinan templat" },
   "更新日期：2026年10月26日": { en: "Updated: October 26, 2026", id: "Diperbarui: 26 Oktober 2026" },
   "服务提供者": { en: "Service provider", id: "Penyedia layanan" },
   "注册地区：香港特别行政区": { en: "Place of registration: Hong Kong Special Administrative Region", id: "Wilayah pendaftaran: Daerah Administratif Khusus Hong Kong" },

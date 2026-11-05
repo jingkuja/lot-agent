@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { createConversationRoutes } from "./conversations.js";
+import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
+import { registerAgentExtension } from "../services/agent-extensions.js";
+
+registerAgentExtension(createDigitalEmployeeExtension());
 
 function app() {
   const createConversation = vi.fn(async (_id, title, model, provider, agentId, userId, metadata) => ({
@@ -47,6 +51,24 @@ describe("conversation feature scope", () => {
       expect.any(String), "新对话", undefined, undefined, "digital_employee", "u1",
       { digitalEmployeeFeatureScope: "customer-acquisition" }, undefined
     );
+  });
+
+  it("writes employee on the server when the unified switch is on, and returns to module scopes when off", async () => {
+    const create = (featureScope?: string) => app().instance.request("/conversations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId: "digital_employee", featureScope }),
+    });
+    process.env.DIGITAL_EMPLOYEE_UNIFIED = "1";
+    try {
+      const unified = await create("customer-profile");
+      expect((await unified.json() as { metadata: unknown }).metadata).toEqual({ digitalEmployeeFeatureScope: "employee" });
+    } finally {
+      delete process.env.DIGITAL_EMPLOYEE_UNIFIED;
+    }
+    const legacy = await create("customer-profile");
+    expect((await legacy.json() as { metadata: unknown }).metadata).toEqual({ digitalEmployeeFeatureScope: "customer-profile" });
+    expect((await create("employee")).status).toBe(400);
   });
 
   it("rejects digital employee conversations without a legal featureScope", async () => {

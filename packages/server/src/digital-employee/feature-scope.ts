@@ -1,15 +1,20 @@
-export const DIGITAL_EMPLOYEE_FEATURE_SCOPES = [
+export const DIGITAL_EMPLOYEE_MODULE_SCOPES = [
   "marketing-materials",
   "customer-profile",
   "opportunity-advisor",
   "customer-acquisition",
 ] as const;
 
+/** One employee across customers, follow-ups, groups, campaigns and materials. */
+export const DIGITAL_EMPLOYEE_UNIFIED_SCOPE = "employee";
+
+export const DIGITAL_EMPLOYEE_FEATURE_SCOPES = [...DIGITAL_EMPLOYEE_MODULE_SCOPES, DIGITAL_EMPLOYEE_UNIFIED_SCOPE] as const;
+
 export type DigitalEmployeeFeatureScope = typeof DIGITAL_EMPLOYEE_FEATURE_SCOPES[number];
 
 const ALLOWED = new Set<string>(DIGITAL_EMPLOYEE_FEATURE_SCOPES);
 
-/** Only the four in-app workspaces are legal conversation scopes. */
+/** Legal scopes on a stored conversation; `employee` stays readable with the switch off. */
 export function parseDigitalEmployeeFeatureScope(value: unknown): DigitalEmployeeFeatureScope | undefined {
   return typeof value === "string" && ALLOWED.has(value)
     ? value as DigitalEmployeeFeatureScope
@@ -21,4 +26,19 @@ export function readConversationFeatureScope(metadata: unknown): DigitalEmployee
   return parseDigitalEmployeeFeatureScope(
     (metadata as Record<string, unknown>).digitalEmployeeFeatureScope
   );
+}
+
+export function digitalEmployeeUnifiedEnabled(): boolean {
+  return process.env.DIGITAL_EMPLOYEE_UNIFIED === "1";
+}
+
+/** The scope a new conversation is stored with. The server decides `employee`:
+ * clients keep sending their module scope until the old entries are removed. */
+export function newConversationFeatureScope(
+  requested: unknown,
+  unified = digitalEmployeeUnifiedEnabled()
+): DigitalEmployeeFeatureScope | undefined {
+  if (unified) return DIGITAL_EMPLOYEE_UNIFIED_SCOPE;
+  const scope = parseDigitalEmployeeFeatureScope(requested);
+  return scope === DIGITAL_EMPLOYEE_UNIFIED_SCOPE ? undefined : scope;
 }

@@ -8,6 +8,7 @@ import type {
   AcquisitionModelConfiguration, CustomerSegment, MarketingAsset, MarketingCampaignDetail, MarketingCampaignSummary,
 } from "../types.js";
 import { listedAcquisitionModels, pickAcquisitionModel, readStoredAcquisitionModels, writeStoredAcquisitionModels } from "./acquisition-models.js";
+import { AssetReviewNotice } from "./MarketingAssetCard.js";
 import { ModelConfigurationGuard } from "./ModelConfigurationGuard.js";
 
 export interface CreationSeed {
@@ -321,6 +322,7 @@ function CreationResult({ asset, onOpenAssets, compact }: { asset: MarketingAsse
   if (["failed", "cancelled"].includes(asset.generationStatus)) return <div className="de-canvas-generating failed"><span>!</span><strong>{t("生成未完成")}</strong><p>{t("请检查模型配置后重新生成。")}</p></div>;
   return <div className={`de-canvas-result${compact ? " compact" : " emphasized"}`}>
     {!compact && <div className="de-canvas-result-banner"><strong>{asset.assetType === "text" ? t("文案已生成") : asset.assetType === "video" ? t("视频已生成") : t("海报已生成")}</strong><span>{asset.title}</span></div>}
+    <AssetReviewNotice flags={asset.reviewFlags} />
     {asset.assetType === "text" ? <pre>{asset.content}</pre> : asset.assetType === "video" && asset.fileUrl ? <video src={asset.fileUrl} controls /> : asset.fileUrl ? <img src={asset.fileUrl} alt={asset.title} /> : null}
     <div><span>{t("模型")}{asset.modelId} · v{asset.version}</span><span>{t("客群内容 · 不含单客身份")}</span></div>
     {!compact && <footer>{asset.fileUrl && <a className="de-secondary-button" href={asset.fileUrl} download>{t("下载文件")}</a>}<button className="de-primary-button" onClick={onOpenAssets}>{t("前往资产库管理投放")}</button></footer>}

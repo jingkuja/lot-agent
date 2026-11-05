@@ -2,6 +2,7 @@ import type { ToolContext, ToolResult } from "@lot-agent/core";
 import { classifyToolFailure } from "@lot-agent/core";
 import { DigitalEmployeeError, InputError } from "../errors.js";
 import type { ConversationActionDraft } from "../conversation-drafts.js";
+import { DIGITAL_EMPLOYEE_UNIFIED_SCOPE } from "../feature-scope.js";
 
 export function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new InputError("参数必须是对象");
@@ -24,7 +25,7 @@ export function sourceContext(context: ToolContext) {
 }
 
 export function assertScope(context: ToolContext, expected: string, label: string) {
-  if (context.featureScope && context.featureScope !== expected) {
+  if (context.featureScope && context.featureScope !== expected && context.featureScope !== DIGITAL_EMPLOYEE_UNIFIED_SCOPE) {
     throw new InputError(`当前对话不在${label}作用域，请先进入${label}对话`);
   }
 }

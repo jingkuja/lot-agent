@@ -1,4 +1,4 @@
-import { pickUtilityLlmModel } from "./catalog.js";
+import { pickUtilityLlmModel } from "../models/catalog.js";
 
 /** Preferred LLMs for every digital-employee model call, in selection order. */
 export const DIGITAL_EMPLOYEE_LLM_PRIORITY = [

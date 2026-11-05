@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
-import { LocalStorage, complete, fetchPublicBinary } from "@lot-agent/core";
+import { LocalStorage, fetchPublicBinary } from "@lot-agent/core";
 import type { ModelConfig } from "@lot-agent/core";
 import {
   PgMemoryAdapter,
@@ -26,10 +26,6 @@ import { KlingVoicePreparation } from "../generation/kling-voices.js";
 import { resolveMaterialReference } from "../generation/private-materials.js";
 import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
 import { ProviderFactory } from "../models/provider-factory.js";
-import {
-  DIGITAL_EMPLOYEE_LLM_UNAVAILABLE,
-  resolveDigitalEmployeeLlm,
-} from "../models/digital-employee-llm.js";
 import type { ModelCatalogConfig } from "../models/catalog.js";
 import { TokenhubClient } from "../tokenhub/client.js";
 import { pickGenModel } from "./gen-provider.js";
@@ -39,8 +35,10 @@ import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { GenCache } from "../billing/gen-cache.js";
 import { staticPrefix } from "../util/public-base.js";
 import { createOptionalFallbackLLM } from "./fallback-llm.js";
-import { OpportunityService, type OpportunityAdvicePatch } from "../digital-employee/opportunity-service.js";
-import { meterLLM } from "../billing/metered-llm.js";
+import { agentExtension, registerAgentExtension } from "../services/agent-extensions.js";
+import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
+import { OpportunityService } from "../digital-employee/opportunity-service.js";
+import { createOpportunityAdviceGenerator, createOwnerLlmResolver } from "../digital-employee/runtime.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
@@ -155,24 +153,6 @@ async function main() {
   );
   const managedKeysEnabled = process.env.DEBUG !== "1" || process.env.NEW_API_MANAGED_KEYS === "1";
 
-  const resolveDigitalEmployeeTaskLlm = async (userId: string) => {
-    const activeApiKey = await db.getUserApiKey(userId, managedKeysEnabled);
-    if (managedKeysEnabled && !activeApiKey) {
-      throw new Error("managed New API credential unavailable");
-    }
-    let apiKeys: string[] = [];
-    try {
-      apiKeys = (await db.getUserRuntimeApiKeys(userId, managedKeysEnabled)).map((entry) => entry.apiKey);
-    } catch {
-      // The active key can still be tried when the stored key list is unavailable.
-    }
-    return resolveDigitalEmployeeLlm(
-      activeApiKey,
-      apiKeys,
-      async (apiKey) => (await tokenhub.listModels(apiKey)).llm
-    );
-  };
-
   /**
    * Resolve a provider url (http(s) or data:) to bytes + mime, enforcing
    * `maxBytes` either way: `data:` URLs are decoded then length-checked (the
@@ -285,37 +265,17 @@ async function main() {
   const memAdapter = new PgMemoryAdapter(db.pool);
   await memAdapter.init();
 
-  const opportunityService = new OpportunityService(db, undefined, {
-    enhance: async ({ userId, taskId, opportunities }) => {
-      const selection = await resolveDigitalEmployeeTaskLlm(userId);
-      if (!selection) throw new Error(DIGITAL_EMPLOYEE_LLM_UNAVAILABLE);
-      const modelId = selection.modelId;
-      const llm = providerFactory.llm(selection.modelId, selection.apiKey);
-      const meters: Promise<unknown>[] = [];
-      const metered = meterLLM(llm, (usage) => {
-        meters.push(meter.record({
-          userId, taskId: taskId ?? undefined, modelId,
-          usage: { inputCount: usage.promptTokens, outputCount: usage.completionTokens },
-        }));
-      });
-      const raw = await complete(metered, [
-        {
-          role: "system",
-          content:
-            "You enhance Opportunity Radar candidates already filtered and validated by the server. Make wording customer-specific and actionable. " +
-            "title names the product or customer scenario; objective is one executable step (channel, point to confirm, expected result). " +
-            "reason explains why to follow up now and which signal matters. method must use one of these exact schema values: 电话, 企微, 微信, 邮件, 线下拜访. " +
-            "Use relationshipStage, productName, summaryHint and evidence. Avoid generic advice such as maintaining contact. " +
-            "Never change dedupKey, opportunity type, priority, evidence or risk. Never add contact details or invent facts. " +
-            "Write free-text fields in English unless the input explicitly specifies a different output language. Preserve schema values and proper names. " +
-            'Output only JSON: {"suggestions":[{"dedupKey":"...","title":"...","objective":"...","method":"...","reason":"..."}]}',
-        },
-        { role: "user", content: JSON.stringify({ opportunities }) },
-      ], { signal: AbortSignal.timeout(45_000), params: { temperature: 0.2, maxTokens: 2_400 } });
-      await Promise.allSettled(meters);
-      return { modelId, patches: parseOpportunityAdvice(raw) };
-    },
+  const resolveOwnerLlm = createOwnerLlmResolver({
+    db,
+    managedKeysEnabled,
+    listLlmModels: async (_userId, apiKey) => (await tokenhub.listModels(apiKey)).llm,
+    llm: (modelId, apiKey) => providerFactory.llm(modelId, apiKey),
   });
+  registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: resolveOwnerLlm }));
+  const opportunityService = new OpportunityService(db, undefined, createOpportunityAdviceGenerator({
+    resolveLlm: resolveOwnerLlm,
+    recordUsage: (input) => meter.record(input),
+  }));
 
   queue.process("image.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
@@ -361,10 +321,10 @@ async function main() {
     const { conversationId, modelId } = job.input as { conversationId: string; modelId?: string };
     const userId = job.userId;
 
-    // Digital-employee facts belong in its controlled profile/marketing tables,
-    // not user memory. This also guarantees old queued tasks cannot fall back
-    // to an environment LLM after a user's TokenHub key disappears.
-    if (await db.getConversationAgentId(conversationId) === "digital_employee") {
+    // Some agents keep facts in their own controlled tables, not user memory.
+    // This also guarantees their old queued tasks cannot fall back to an
+    // environment LLM after a user's TokenHub key disappears.
+    if (agentExtension(await db.getConversationAgentId(conversationId))?.disableUserMemory) {
       await queue.updateProgress(job.id, 100);
       return { upserts: 0, deletes: 0 };
     }
@@ -442,12 +402,3 @@ main().catch((error) => {
   console.error("Worker failed to start:", error);
   process.exit(1);
 });
-
-function parseOpportunityAdvice(raw: string): OpportunityAdvicePatch[] {
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const parsed = JSON.parse(cleaned) as { suggestions?: unknown };
-  if (!Array.isArray(parsed.suggestions)) throw new Error("invalid opportunity advice response");
-  return parsed.suggestions.filter((item): item is OpportunityAdvicePatch =>
-    Boolean(item && typeof item === "object" && typeof (item as { dedupKey?: unknown }).dedupKey === "string")
-  );
-}

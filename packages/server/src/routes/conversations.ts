@@ -10,7 +10,7 @@ import { attachmentKind, type AttachmentRef } from "../services/attachment-extra
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
 import type { StoredMessage } from "../db/database.js";
 import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
-import { parseDigitalEmployeeFeatureScope, readConversationFeatureScope } from "../digital-employee/feature-scope.js";
+import { agentExtension, AgentConversationError } from "../services/agent-extensions.js";
 import {
   DEFAULT_MINIPROGRAM_CONFIG,
   downshiftMiniprogramImageSize,
@@ -165,16 +165,16 @@ export function createConversationRoutes(service: AgentService) {
     const id = randomUUID();
     const title = body.title ?? "新对话";
     const agentId = body.agentId ?? "general";
-    const isDigitalEmployee = agentId === "digital_employee";
+    const extension = agentExtension(agentId);
     const isMiniprogram = isMiniprogramClient(c.req.header("x-lot-client"));
-    const model = isDigitalEmployee
+    const model = extension?.ownerKeyOnly
       ? undefined
       : isMiniprogram
         ? miniprogramCfg(service).llm
         : service["llmConfig"].default === "openai"
           ? service["llmConfig"].openai.model
           : service["llmConfig"].anthropic.model;
-    const provider = isDigitalEmployee ? undefined : service["llmConfig"].default;
+    const provider = extension?.ownerKeyOnly ? undefined : service["llmConfig"].default;
     let metadata: Record<string, unknown> | undefined;
     if (body.videoPublication !== undefined) {
       if (!["video", "marketing_video"].includes(agentId) || !validVideoPublication(body.videoPublication)) {
@@ -182,12 +182,11 @@ export function createConversationRoutes(service: AgentService) {
       }
       metadata = { videoPublication: { copy: body.videoPublication.copy, tags: body.videoPublication.tags } };
     }
-    if (isDigitalEmployee) {
-      const featureScope = parseDigitalEmployeeFeatureScope(body.featureScope);
-      if (!featureScope) {
-        return c.json({ error: "digital_employee conversations require a valid featureScope" }, 400);
-      }
-      metadata = { digitalEmployeeFeatureScope: featureScope };
+    try {
+      metadata = extension?.conversationMetadata?.({ featureScope: body.featureScope }) ?? metadata;
+    } catch (error) {
+      if (error instanceof AgentConversationError) return c.json({ error: error.message }, 400);
+      throw error;
     }
     const conversation = await service.db.createConversation(
       id, title, model, provider, agentId, userId, metadata, body.projectId
@@ -354,8 +353,11 @@ export function createConversationRoutes(service: AgentService) {
       return c.json({ error: "Not found" }, 404);
     }
     if (conversation.channel === "feishu") return c.json({ error: "请在飞书中发送或取消任务，此处保留完整记录" },409);
-    if (conversation.agent_id === "digital_employee" && !readConversationFeatureScope(conversation.metadata)) {
-      return c.json({ error: "digital_employee conversations require a valid featureScope" }, 400);
+    try {
+      agentExtension(conversation.agent_id)?.assertConversation?.(conversation.metadata);
+    } catch (error) {
+      if (error instanceof AgentConversationError) return c.json({ error: error.message }, 400);
+      throw error;
     }
 
     const body = await c.req.json<{
@@ -512,7 +514,7 @@ export function createConversationRoutes(service: AgentService) {
               attachments,
               {
                 userId,
-                digitalEmployee: conversation.agent_id === "digital_employee",
+                agentId: conversation.agent_id,
               }
             );
             if (title) send({ type: "title", title });
@@ -713,7 +715,7 @@ export function createGenerationRoutes(service: AgentService) {
           prompt,
           conversationId,
           assistantMessageId,
-          requireUserModelKey: conv.agent_id === "digital_employee",
+          requireUserModelKey: agentExtension(conv.agent_id)?.ownerKeyOnly === true,
         },
         userId
       );
@@ -728,13 +730,13 @@ export function createGenerationRoutes(service: AgentService) {
       // inside generateTitle). The chat SSE path does this too; without it,
       // image/video conversations stay stuck on the "新对话" placeholder.
       try {
-        // 本回合的模型是图片/视频模型，标题改用 LLM。数字员工会话仍严格
+        // 本回合的模型是图片/视频模型，标题改用 LLM。ownerKeyOnly 的 Agent 仍严格
         // 限定为用户 TokenHub key，不允许标题请求回退环境模型。
         // The task is already running. Never hold its 202 response behind a
         // separate LLM request: a proxy timeout would look like submission failed.
         void service.generateTitle(conversationId, prompt, [], {
           userId,
-          digitalEmployee: conv.agent_id === "digital_employee",
+          agentId: conv.agent_id,
           ...(isMiniprogramClient(c.req.header("x-lot-client"))
             ? { modelId: miniprogramCfg(service).llm }
             : {}),

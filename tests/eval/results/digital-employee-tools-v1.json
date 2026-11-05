@@ -1,0 +1,307 @@
+{
+  "version": "digital-employee-tools/v1",
+  "modelId": "deepseek-v4.1-flash",
+  "ranAt": "2026-11-05T06:48:13.086Z",
+  "toolDefinitionChars": 30421,
+  "passed": 29,
+  "total": 30,
+  "rate": 0.9666666666666667,
+  "threshold": 0.9,
+  "results": [
+    {
+      "id": "asset-copy",
+      "object": "asset",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_campaigns",
+        "search_marketing_assets"
+      ],
+      "pass": false
+    },
+    {
+      "id": "asset-deployed",
+      "object": "asset",
+      "actual": "search_marketing_assets",
+      "expected": [
+        "search_marketing_assets"
+      ],
+      "pass": true
+    },
+    {
+      "id": "asset-list",
+      "object": "asset",
+      "actual": "search_marketing_assets",
+      "expected": [
+        "search_marketing_assets"
+      ],
+      "pass": true
+    },
+    {
+      "id": "boundary-mass-send",
+      "object": "boundary",
+      "actual": "NO_TOOL",
+      "expected": [
+        "NO_TOOL",
+        "ask_user"
+      ],
+      "pass": true
+    },
+    {
+      "id": "campaign-create",
+      "object": "campaign",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_customer_segments",
+        "search_marketing_materials",
+        "analyze_customer_cohort"
+      ],
+      "pass": true
+    },
+    {
+      "id": "campaign-ideas",
+      "object": "campaign",
+      "actual": "get_daily_recommendations",
+      "expected": [
+        "get_daily_recommendations",
+        "search_campaign_opportunities"
+      ],
+      "pass": true
+    },
+    {
+      "id": "campaign-list",
+      "object": "campaign",
+      "actual": "search_marketing_campaigns",
+      "expected": [
+        "search_marketing_campaigns"
+      ],
+      "pass": true
+    },
+    {
+      "id": "campaign-refresh",
+      "object": "campaign",
+      "actual": "generate_daily_recommendations",
+      "expected": [
+        "generate_daily_recommendations"
+      ],
+      "pass": true
+    },
+    {
+      "id": "campaign-result",
+      "object": "campaign",
+      "actual": "search_marketing_campaigns",
+      "expected": [
+        "search_marketing_campaigns"
+      ],
+      "pass": true
+    },
+    {
+      "id": "customer-capture-purchase",
+      "object": "customer",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_materials",
+        "prepare_customer_capture",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "customer-capture-trial",
+      "object": "customer",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "search_marketing_materials",
+        "prepare_customer_capture",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "customer-count",
+      "object": "customer",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "search_customer_profiles",
+        "analyze_customer_cohort"
+      ],
+      "pass": true
+    },
+    {
+      "id": "customer-create",
+      "object": "customer",
+      "actual": "prepare_customer_profile_change",
+      "expected": [
+        "prepare_customer_profile_change",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "customer-read",
+      "object": "customer",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "customer-update",
+      "object": "customer",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "prepare_customer_profile_change",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "followup-context",
+      "object": "follow-up",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "get_customer_business_context",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "followup-create",
+      "object": "follow-up",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "prepare_follow_up_action",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "followup-opportunities",
+      "object": "follow-up",
+      "actual": "search_customer_opportunities",
+      "expected": [
+        "search_customer_opportunities"
+      ],
+      "pass": true
+    },
+    {
+      "id": "followup-overdue",
+      "object": "follow-up",
+      "actual": "search_customer_work_queue",
+      "expected": [
+        "search_customer_work_queue"
+      ],
+      "pass": true
+    },
+    {
+      "id": "followup-result",
+      "object": "follow-up",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "search_customer_work_queue",
+        "search_customer_profiles",
+        "prepare_customer_capture",
+        "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "followup-today",
+      "object": "follow-up",
+      "actual": "search_customer_work_queue",
+      "expected": [
+        "search_customer_work_queue"
+      ],
+      "pass": true
+    },
+    {
+      "id": "group-fit",
+      "object": "group",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_customer_segments",
+        "search_marketing_materials",
+        "analyze_customer_cohort"
+      ],
+      "pass": true
+    },
+    {
+      "id": "group-portrait",
+      "object": "group",
+      "actual": "analyze_customer_cohort",
+      "expected": [
+        "analyze_customer_cohort"
+      ],
+      "pass": true
+    },
+    {
+      "id": "group-save",
+      "object": "group",
+      "actual": "analyze_customer_cohort",
+      "expected": [
+        "prepare_customer_segment",
+        "analyze_customer_cohort",
+        "search_customer_segments"
+      ],
+      "pass": true
+    },
+    {
+      "id": "group-size",
+      "object": "group",
+      "actual": "analyze_customer_cohort",
+      "expected": [
+        "analyze_customer_cohort",
+        "search_customer_segments"
+      ],
+      "pass": true
+    },
+    {
+      "id": "mixed-owner-sentence",
+      "object": "mixed",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "search_marketing_materials",
+        "prepare_customer_capture",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "outreach-create",
+      "object": "follow-up",
+      "actual": "search_customer_profiles",
+      "expected": [
+        "generate_individual_outreach",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
+      "id": "outreach-rewrite",
+      "object": "follow-up",
+      "actual": "rewrite_individual_outreach",
+      "expected": [
+        "rewrite_individual_outreach"
+      ],
+      "pass": true
+    },
+    {
+      "id": "outreach-used",
+      "object": "follow-up",
+      "actual": "mark_individual_outreach_used",
+      "expected": [
+        "mark_individual_outreach_used"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-question",
+      "object": "product",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_materials"
+      ],
+      "pass": true
+    }
+  ]
+}

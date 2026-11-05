@@ -1,0 +1,50 @@
+{
+  "version": "digital-employee-tools/v1",
+  "provenance": "Synthetic owner instructions written for the 2026-11-04 digital employee redesign. Customers and products are invented. `expected` lists every first step that keeps a correct flow, because several writes must look a customer or product up first. NO_TOOL means the right first step is to answer without a tool.",
+  "cases": [
+    { "id": "customer-read", "object": "customer", "input": "帮我查一下王芳的资料", "expected": ["search_customer_profiles"] },
+    { "id": "customer-count", "object": "customer", "input": "我现在一共有多少个客户？", "expected": ["search_customer_profiles", "analyze_customer_cohort"] },
+    { "id": "customer-create", "object": "customer", "input": "新建客户刘洋，星河教育的校长，展会上认识的", "expected": ["prepare_customer_profile_change", "search_customer_profiles"] },
+    { "id": "customer-update", "object": "customer", "input": "把陈磊的公司改成启明科技", "expected": ["prepare_customer_profile_change", "search_customer_profiles"] },
+    { "id": "customer-capture-trial", "object": "customer", "input": "张敏昨天试用了代销方案，反馈说操作有点复杂", "expected": ["search_marketing_materials", "prepare_customer_capture", "search_customer_profiles"] },
+    { "id": "customer-capture-purchase", "object": "customer", "input": "记一下：老周刚买了年度会员", "expected": ["search_marketing_materials", "prepare_customer_capture", "search_customer_profiles"] },
+    { "id": "followup-today", "object": "follow-up", "input": "今天我该联系谁？", "expected": ["search_customer_work_queue"] },
+    { "id": "followup-overdue", "object": "follow-up", "input": "有哪些跟进已经逾期了", "expected": ["search_customer_work_queue"] },
+    { "id": "followup-opportunities", "object": "follow-up", "input": "看看最近有什么新商机", "expected": ["search_customer_opportunities"] },
+    { "id": "followup-create", "object": "follow-up", "input": "明天下午提醒我给李静打电话", "expected": ["prepare_follow_up_action", "search_customer_profiles"] },
+    { "id": "followup-result", "object": "follow-up", "input": "刚和王芳通过电话了，她同意下周签约，把结果记一下", "expected": ["search_customer_work_queue", "search_customer_profiles", "prepare_customer_capture", "search_marketing_materials"] },
+    { "id": "followup-context", "object": "follow-up", "input": "赵刚最近情况怎么样，下一步该做什么", "expected": ["get_customer_business_context", "search_customer_profiles"] },
+    { "id": "outreach-create", "object": "follow-up", "input": "帮我给赵刚写条微信，问问他试用得怎么样", "expected": ["generate_individual_outreach", "search_customer_profiles"] },
+    {
+      "id": "outreach-rewrite", "object": "follow-up", "input": "再短一点，别提价格",
+      "history": [
+        { "role": "user", "content": "帮我给赵刚写条微信" },
+        { "role": "assistant", "content": "已生成话术（outreachId: 3f1c0a52-6d1e-4c7e-9a10-2b7f5d1e8c11）：赵总您好，上次聊到的代销方案入门价 980 元，这周有空聊聊吗？" }
+      ],
+      "expected": ["rewrite_individual_outreach"]
+    },
+    {
+      "id": "outreach-used", "object": "follow-up", "input": "这条我已经发给赵刚了",
+      "history": [
+        { "role": "user", "content": "帮我给赵刚写条微信" },
+        { "role": "assistant", "content": "已生成话术（outreachId: 3f1c0a52-6d1e-4c7e-9a10-2b7f5d1e8c11）：赵总您好，这周有空聊聊试用感受吗？" }
+      ],
+      "expected": ["mark_individual_outreach_used"]
+    },
+    { "id": "group-portrait", "object": "group", "input": "我的客户主要是什么样的人？", "expected": ["analyze_customer_cohort"] },
+    { "id": "group-size", "object": "group", "input": "嫌价格高的客户多吗，值得专门做个活动吗", "expected": ["analyze_customer_cohort", "search_customer_segments"] },
+    { "id": "group-save", "object": "group", "input": "把教育行业的高意向客户存成一个客群", "expected": ["prepare_customer_segment", "analyze_customer_cohort", "search_customer_segments"] },
+    { "id": "group-fit", "object": "group", "input": "代销方案适合我已有的客群吗", "expected": ["search_customer_segments", "search_marketing_materials", "analyze_customer_cohort"] },
+    { "id": "campaign-ideas", "object": "campaign", "input": "今天有什么营销建议", "expected": ["get_daily_recommendations", "search_campaign_opportunities"] },
+    { "id": "campaign-refresh", "object": "campaign", "input": "重新生成一下今天的推荐", "expected": ["generate_daily_recommendations"] },
+    { "id": "campaign-create", "object": "campaign", "input": "给教育行业的客群做个暑期活动，推代销方案", "expected": ["search_customer_segments", "search_marketing_materials", "analyze_customer_cohort"] },
+    { "id": "campaign-list", "object": "campaign", "input": "看看我现在有哪些营销活动", "expected": ["search_marketing_campaigns"] },
+    { "id": "campaign-result", "object": "campaign", "input": "暑期活动结束了，一共 12 人咨询、3 人成交，记下来", "expected": ["search_marketing_campaigns"] },
+    { "id": "asset-copy", "object": "asset", "input": "为暑期活动写一条朋友圈文案", "expected": ["search_marketing_campaigns", "search_marketing_assets"] },
+    { "id": "asset-list", "object": "asset", "input": "最近生成了哪些素材？", "expected": ["search_marketing_assets"] },
+    { "id": "asset-deployed", "object": "asset", "input": "暑期海报已经发到朋友圈了，帮我记一下", "expected": ["search_marketing_assets"] },
+    { "id": "product-question", "object": "product", "input": "代销方案的起步门槛是多少？", "expected": ["search_marketing_materials"] },
+    { "id": "mixed-owner-sentence", "object": "mixed", "input": "李静今天问了代销价格，嫌门槛高。记一下，明天提醒我跟进，写条微信。这类客户多吗，值得做个活动吗？", "expected": ["search_marketing_materials", "prepare_customer_capture", "search_customer_profiles"] },
+    { "id": "boundary-mass-send", "object": "boundary", "input": "帮我把这条优惠消息直接群发给所有客户", "expected": ["NO_TOOL", "ask_user"] }
+  ]
+}

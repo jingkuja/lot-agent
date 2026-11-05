@@ -17,7 +17,13 @@ import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveImageSelection, resolveLlmSelection } from "../lib/model-defaults.js";
-import { digitalEmployeeConversations as filterDigitalEmployeeConversations, withoutDigitalEmployee } from "../lib/product-agent-scope.js";
+import {
+  DIGITAL_EMPLOYEE_UNIFIED_SCOPE,
+  digitalEmployeeConversations as filterDigitalEmployeeConversations,
+  digitalEmployeeConversationsForScope,
+  withoutDigitalEmployee,
+} from "../lib/product-agent-scope.js";
+import { useDigitalEmployeeUnified } from "../modules/digital-employee/useDigitalEmployeeUnified.js";
 import { DigitalEmployeeActions } from "../modules/digital-employee/DigitalEmployeeActions.js";
 import { DigitalEmployeeHome } from "../modules/digital-employee/DigitalEmployeeHome.js";
 import { MarketingMaterialsHome } from "../modules/digital-employee/marketing/MarketingMaterialsHome.js";
@@ -102,6 +108,10 @@ export function Workspace({
     openConversation?.agent_id ??
     activeAgentId;
   const openAgent = agents.find((a) => a.id === openAgentId) ?? (isDigitalEmployeeMode ? digitalEmployee : null);
+  const unifiedEnabled = useDigitalEmployeeUnified(isDigitalEmployeeMode);
+  const openConversationUnified = openConversation?.metadata?.digitalEmployeeFeatureScope === DIGITAL_EMPLOYEE_UNIFIED_SCOPE;
+  // An open conversation keeps its own scope, so older chats still read as module chats.
+  const digitalEmployeeUnified = openConversation ? openConversationUnified : unifiedEnabled;
   const currentProfileValue = openConversation?.metadata?.digitalEmployeeCurrentProfile;
   const currentProfile = currentProfileValue && typeof currentProfileValue === "object"
     ? currentProfileValue as { id?: unknown; displayName?: unknown }
@@ -242,16 +252,16 @@ export function Workspace({
     [setActiveId, clear]
   );
 
-  // A digital-employee feature is a hard business boundary. Switching from
-  // 客户画像/商机雷达 to 获客宝 must never keep the previous conversation's
-  // implicit object or tool scope, even though this Workspace stays mounted.
+  // A module-scoped conversation is a hard business boundary. Switching from
+  // 客户画像/商机雷达 to 获客宝 must never keep its implicit object or tool
+  // scope, even though this Workspace stays mounted. `employee` has no boundary.
   const previousDigitalFeature = useRef(digitalEmployeeFeature);
   useEffect(() => {
     const previous = previousDigitalFeature.current;
     previousDigitalFeature.current = digitalEmployeeFeature;
-    if (!isDigitalEmployeeMode || previous === digitalEmployeeFeature) return;
+    if (!isDigitalEmployeeMode || previous === digitalEmployeeFeature || openConversationUnified) return;
     handleStartNewChat("digital_employee");
-  }, [digitalEmployeeFeature, handleStartNewChat, isDigitalEmployeeMode]);
+  }, [digitalEmployeeFeature, handleStartNewChat, isDigitalEmployeeMode, openConversationUnified]);
 
   // Desktop shortcut: Cmd/Ctrl+N opens a fresh chat for the agent currently
   // on screen. The Agent has no user-selectable API key settings.
@@ -393,10 +403,7 @@ export function Workspace({
       : digitalEmployeeFeature === "acquisition"
         ? "opportunity-advisor"
         : digitalEmployeeFeature;
-    return digitalEmployeeConversations.filter((conversation) => {
-      const stored = conversation.metadata?.digitalEmployeeFeatureScope;
-      return stored === scope || (stored === undefined && scope === "customer-profile");
-    });
+    return digitalEmployeeConversationsForScope(digitalEmployeeConversations, scope);
   }, [digitalEmployeeConversations, digitalEmployeeFeature]);
 
   // 当前 hero Agent 对应的模型分组;切组时各组各自记住上次的选择。
@@ -530,6 +537,7 @@ export function Workspace({
                 {isDigitalEmployeeMode && onNavigateDigitalEmployee && (
                   <DigitalEmployeeActions
                     feature={digitalEmployeeFeature}
+                    unified={digitalEmployeeUnified}
                     onOpenProfiles={onNavigateDigitalEmployee}
                     currentCustomerName={currentCustomerName}
                     onClearCurrentCustomer={activeId ? () => {
@@ -551,9 +559,11 @@ export function Workspace({
                 onOpenManagement={onNavigateDigitalEmployee}
                 onPrompt={(prompt) => void doSend(prompt)}
               /> : digitalEmployeeFeature === "copy" ? <CustomerAcquisitionChatHome
+                unified={digitalEmployeeUnified}
                 onOpenWorkspace={onNavigateDigitalEmployee}
                 onPrompt={(prompt) => void doSend(prompt)}
               /> : digitalEmployeeFeature === "acquisition" ? <OpportunityAdvisorChatHome
+                unified={digitalEmployeeUnified}
                 onOpenWorkspace={onNavigateDigitalEmployee}
                 onPrompt={(prompt) => void doSend(prompt)}
               /> : <DigitalEmployeeHome

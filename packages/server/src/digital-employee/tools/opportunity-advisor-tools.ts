@@ -28,7 +28,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
   const searchQueue: Tool = {
     name: "search_customer_work_queue",
     description:
-      "Search Opportunity Radar's daily work queue, overdue actions, ongoing follow-ups or outcomes awaiting entry. Only individual-customer items; no cohort marketing. Use view=today for who to contact today, including unfinished overdue actions.",
+      "Search the daily follow-up work queue, overdue actions, ongoing follow-ups or outcomes awaiting entry. Only individual-customer items; no cohort marketing. Use view=today for who to contact today, including unfinished overdue actions.",
     parameters: {
       type: "object",
       properties: {
@@ -61,7 +61,7 @@ export function createOpportunityAdvisorTools(service: DigitalEmployeeService): 
 
   const searchOpportunities: Tool = {
     name: "search_customer_opportunities",
-    description: "Search undecided individual-customer opportunities. Use prepare_follow_up_action to accept, snooze or dismiss.",
+    description: "Search undecided sales opportunities (商机) with individual customers. This is the default for \"any new opportunities\". Use prepare_follow_up_action to accept, snooze or dismiss.",
     parameters: {
       type: "object",
       properties: {

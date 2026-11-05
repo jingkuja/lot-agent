@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { digitalEmployeeUnifiedEnabled } from "../digital-employee/feature-scope.js";
 import { internationalModelsEnabled } from "../tokenhub/model-access.js";
 
 function publicUrl(value: string | undefined, fallback: string): string {
@@ -22,6 +23,7 @@ export function createProductRoutes() {
     showCompliance: !process.env.globle?.trim() || value === 0,
     webUrl: publicUrl(process.env.LOT_AGENT_PUBLIC_URL, "https://todoucloud.com/"),
     tokenhubUrl: publicUrl(process.env.TOKENHUB_PUBLIC_URL, "https://tokenhub.todoucloud.com/"),
+    digitalEmployeeUnified: digitalEmployeeUnifiedEnabled(),
   }));
   return app;
 }
