@@ -45,6 +45,8 @@
     { "id": "asset-deployed", "object": "asset", "input": "暑期海报已经发到朋友圈了，帮我记一下", "expected": ["search_marketing_assets"] },
     { "id": "product-question", "object": "product", "input": "代销方案的起步门槛是多少？", "expected": ["search_marketing_materials"] },
     { "id": "mixed-owner-sentence", "object": "mixed", "input": "李静今天问了代销价格，嫌门槛高。记一下，明天提醒我跟进，写条微信。这类客户多吗，值得做个活动吗？", "expected": ["search_marketing_materials", "prepare_customer_capture", "search_customer_profiles"] },
+    { "id": "video-start", "object": "marketing-video", "input": "帮我做一条代销方案的营销短视频，竖屏 30 秒", "expected": ["search_marketing_materials", "start_marketing_video"] },
+    { "id": "video-presenter", "object": "marketing-video", "input": "我想让数字人讲讲代销方案，做个口播视频发抖音", "expected": ["search_marketing_materials", "start_marketing_video"] },
     { "id": "boundary-mass-send", "object": "boundary", "input": "帮我把这条优惠消息直接群发给所有客户", "expected": ["NO_TOOL", "ask_user"] }
   ]
 }

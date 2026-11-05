@@ -25,6 +25,7 @@ import { createCustomerAcquisitionTools } from "./tools/customer-acquisition-too
 import { createCustomerCaptureTools } from "./tools/customer-capture-tools.js";
 import { createCustomerProfileTools } from "./tools/customer-profile-tools.js";
 import { createMarketingMaterialTools } from "./tools/marketing-material-tools.js";
+import { createMarketingVideoTools, type MarketingVideoDrafts } from "./tools/marketing-video-tools.js";
 import { createOpportunityAdvisorTools } from "./tools/opportunity-advisor-tools.js";
 
 type LlmUsage = { promptTokens: number; completionTokens: number } | undefined;
@@ -58,6 +59,7 @@ export interface DigitalEmployeeRuntimePorts {
   }>>;
   extractAttachment(item: AttachmentRef): Promise<{ type: string; text?: string }>;
   checkMediaQuota: ModelResolver["checkQuota"];
+  marketingVideoDrafts: MarketingVideoDrafts;
 }
 
 export interface DigitalEmployeeRuntime {
@@ -376,6 +378,7 @@ export function createDigitalEmployeeRuntime(ports: DigitalEmployeeRuntimePorts)
       ...createMarketingMaterialTools(service.marketingMaterials),
       ...createCustomerAcquisitionTools(service.customerAcquisition),
       ...createOpportunityAdvisorTools(service),
+      ...createMarketingVideoTools(ports.marketingVideoDrafts, (userId, fields) => service.customerAcquisition.assertGroupContent(userId, fields)),
     ],
   };
 }

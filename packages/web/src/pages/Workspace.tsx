@@ -251,6 +251,8 @@ export function Workspace({
 
   // Agent selection controls both history and the next conversation.
   const [newProjectId, setNewProjectId] = useState<string | null>(null);
+  // A link can open an Agent directly, for example a draft prepared in another Agent's chat.
+  const linkedAgentId = useRef(isLocked ? null : new URLSearchParams(window.location.search).get("agent"));
 
   const handleStartNewChat = useCallback(
     (agentId: string) => {
@@ -294,6 +296,13 @@ export function Workspace({
     }
     handleStartNewChat(agentId);
   }, [openAgentId, assistantAgents, activeId, messages.length, isStreaming, hasDraft, handleStartNewChat]);
+
+  useEffect(() => {
+    const agentId = linkedAgentId.current;
+    if (!agentId || !assistantAgents.some((agent) => agent.id === agentId)) return;
+    linkedAgentId.current = null;
+    handleStartNewChat(agentId);
+  }, [assistantAgents, handleStartNewChat]);
 
   const handleSelect = useCallback(
     (id: string) => {

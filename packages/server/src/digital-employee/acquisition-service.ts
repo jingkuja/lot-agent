@@ -284,6 +284,11 @@ export class CustomerAcquisitionService {
   }
 
   /** Everything needed to keep individual identities out of group content. */
+  /** For public content made outside this service. */
+  async assertGroupContent(userId: string, fields: Record<string, string | undefined>): Promise<void> {
+    assertGroupContentInput(await this.groupContentPolicy(userId), fields);
+  }
+
   private async groupContentPolicy(userId: string): Promise<GroupContentPolicy> {
     const [customers, products, brand] = await Promise.all([
       this.db.pool.query(`SELECT display_name, aliases FROM de_customer_profiles WHERE user_id=$1`, [userId]),

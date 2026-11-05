@@ -112,8 +112,15 @@ export function ProjectStudio({ ownerId = "", onDraftChange }: { ownerId?: strin
     ]).then(async ([list, caps]) => {
       if (stopped) return;
       library.showFirstPage(list); setCapabilities(caps);
-      let id: string | null = null;
-      try { id = localStorage.getItem(editor.storageKey); } catch { /* Optional preference. */ }
+      // A link names its draft, which then becomes the remembered one.
+      const params = new URLSearchParams(window.location.search);
+      let id = params.get("project");
+      if (id) {
+        params.delete("agent"); params.delete("project");
+        const query = params.toString();
+        window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+      }
+      else try { id = localStorage.getItem(editor.storageKey); } catch { /* Optional preference. */ }
       // The remembered draft may be older than the first page.
       if (id) {
         try { await open(id); }

@@ -90,6 +90,7 @@ import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { meterLLM } from "../billing/metered-llm.js";
 import { agentExtension, registerAgentExtension } from "./agent-extensions.js";
 import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
+import { createEmployeeMarketingDrafts } from "../marketing-video/employee-draft.js";
 import { createDigitalEmployeeRuntime, createOwnerLlmResolver, type DigitalEmployeeRuntime } from "../digital-employee/runtime.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
@@ -399,6 +400,7 @@ export class AgentService {
         const result = await this.usageMeter.checkQuota(userId, estimatedCost);
         return { ok: result.ok, reason: result.reason };
       },
+      marketingVideoDrafts: createEmployeeMarketingDrafts(this.db.pool),
     });
     this.digitalEmployee = digitalEmployee.service;
 

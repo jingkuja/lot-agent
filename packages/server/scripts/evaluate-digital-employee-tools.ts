@@ -13,6 +13,7 @@ import { createCustomerAcquisitionTools } from "../src/digital-employee/tools/cu
 import { createCustomerCaptureTools } from "../src/digital-employee/tools/customer-capture-tools.js";
 import { createCustomerProfileTools } from "../src/digital-employee/tools/customer-profile-tools.js";
 import { createMarketingMaterialTools } from "../src/digital-employee/tools/marketing-material-tools.js";
+import { createMarketingVideoTools } from "../src/digital-employee/tools/marketing-video-tools.js";
 import { createOpportunityAdvisorTools } from "../src/digital-employee/tools/opportunity-advisor-tools.js";
 import { loadLlmConfig } from "../src/config.js";
 import { ProviderFactory } from "../src/models/provider-factory.js";
@@ -59,6 +60,7 @@ await skills.loadFromDirectory(resolve(root, "skills"));
 const registry = new ToolRegistry();
 const tools: Tool[] = [
   ...createCustomerCaptureTools(stub), ...createCustomerProfileTools(stub), ...createMarketingMaterialTools(stub),
+  ...createMarketingVideoTools(stub, stub),
   ...createCustomerAcquisitionTools(stub), ...createOpportunityAdvisorTools(stub), createLoadSkillTool(skills),
   { name: "ask_user", description: "Ask the user a question and end the turn.", parameters: {
     type: "object", properties: { question: { type: "string" }, options: { type: "array", items: { type: "string" } } }, required: ["question"],
