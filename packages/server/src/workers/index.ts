@@ -39,6 +39,7 @@ import { agentExtension, registerAgentExtension } from "../services/agent-extens
 import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
 import { registerDigitalEmployeeWorkerJobs } from "../digital-employee/jobs.js";
 import { createOwnerLlmResolver } from "../digital-employee/runtime.js";
+import { internationalModelsEnabled } from "../tokenhub/model-access.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
@@ -273,7 +274,7 @@ async function main() {
   });
   registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: resolveOwnerLlm }));
   registerDigitalEmployeeWorkerJobs({
-    queue, db, adviceLlm: { resolveLlm: resolveOwnerLlm, recordUsage: (input) => meter.record(input) },
+    queue, db, adviceLlm: { resolveLlm: resolveOwnerLlm, recordUsage: (input) => meter.record(input), english: internationalModelsEnabled() },
   });
 
   queue.process("image.generate", async (job, ctl) => {

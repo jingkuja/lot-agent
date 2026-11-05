@@ -111,7 +111,7 @@ export function TodayPage({
               ? t("待确认 {0} 件，要跟进 {1} 位客户，等结果 {2} 个。", [toConfirm, followUps.length, results.length])
               : t("我还不认识你的客户。告诉我第一位客户，我就开始准备工作。")}
           </p>
-          {data.brief && <p>{t("今天早上看了 {0} 位客户，新发现 {1} 条商机。", [data.brief.counts.scanned, data.brief.counts.created])}</p>}
+          {data.brief && <p>{t("今天看了 {0} 位客户，新发现 {1} 条商机。", [data.brief.counts.scanned, data.brief.counts.created])}</p>}
           {data.lastDiscoveredAt && <small>{t("最近看过客户：{0}", [formatTime(data.lastDiscoveredAt, locale)])}</small>}
         </div>
         {data.hasProfiles ? (

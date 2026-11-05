@@ -1,6 +1,6 @@
 /** Interface copy only. Chinese source text is the stable key and fallback. */
 export const messages: Record<string, { en: string; id: string }> = {
-  "今天早上看了 {0} 位客户，新发现 {1} 条商机。": { en: "This morning I checked {0} customers and found {1} new opportunities.", id: "Pagi ini saya memeriksa {0} pelanggan dan menemukan {1} peluang baru." },
+  "今天看了 {0} 位客户，新发现 {1} 条商机。": { en: "Today I checked {0} customers and found {1} new opportunities.", id: "Hari ini saya memeriksa {0} pelanggan dan menemukan {1} peluang baru." },
   "{0} 投放满 3 天了，效果怎么样？": { en: "{0} has been out for 3 days. How did it go?", id: "{0} sudah tayang 3 hari. Bagaimana hasilnya?" },
   "回填效果": { en: "Report results", id: "Laporkan hasil" },
   "每天按规则看一遍客户，不产生模型费用。": { en: "I check your customers by rules every day, at no model cost.", id: "Saya memeriksa pelanggan setiap hari berdasarkan aturan, tanpa biaya model." },

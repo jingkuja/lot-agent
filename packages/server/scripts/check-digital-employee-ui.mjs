@@ -482,7 +482,7 @@ try {
     state.brief = { id: "b1", date: "2026-11-05", counts: { scanned: 12, created: 3, confirm: 4, followUps: 1, results: 2, pending: 7 }, readAt: null };
     state.feedback = [{ id: "dp1", assetId: "as1", title: "双十一海报", platform: "moments", customPlatform: null, deployedAt: NOW }];
     const { page, close } = await open("/digital-employee/today", { state, dailyScan: true });
-    await page.getByText("今天早上看了 12 位客户，新发现 3 条商机。").waitFor();
+    await page.getByText("今天看了 12 位客户，新发现 3 条商机。").waitFor();
     await page.waitForFunction(() => document.querySelector(".product-shell-view:not(.is-hidden) .brand-module-badge")?.textContent === "7");
     const badge = page.locator(".product-shell-view:not(.is-hidden) .brand-module-badge");
     await page.waitForResponse("**/today/brief/b1/read").catch(() => {});

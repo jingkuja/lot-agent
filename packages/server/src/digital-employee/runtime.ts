@@ -147,6 +147,8 @@ export function createOwnerLlmResolver(ports: OwnerLlmPorts): OwnerLlmResolver {
 export function createOpportunityAdviceGenerator(ports: {
   resolveLlm: OwnerLlmResolver;
   recordUsage(input: { userId: string; taskId?: string; modelId: string; usage: { inputCount: number; outputCount: number } }): Promise<unknown>;
+  /** A scan has no conversation to match, so the deployment decides what owners read. */
+  english: boolean;
 }): OpportunityAdviceGenerator {
   return {
     enhance: async ({ userId, taskId, opportunities }) => {
@@ -167,7 +169,7 @@ export function createOpportunityAdviceGenerator(ports: {
             "reason explains why to follow up now and which signal matters. method must use one of these exact schema values: 电话, 企微, 微信, 邮件, 线下拜访. " +
             "Use relationshipStage, productName, summaryHint and evidence. Avoid generic advice such as maintaining contact. " +
             "Never change dedupKey, opportunity type, priority, evidence or risk. Never add contact details or invent facts. " +
-            "Write free-text fields in English unless the input explicitly specifies a different output language. Preserve schema values and proper names. " +
+            `Write free-text fields in ${ports.english ? "English" : "Simplified Chinese"}. Preserve schema values and proper names. ` +
             'Output only JSON: {"suggestions":[{"dedupKey":"...","title":"...","objective":"...","method":"...","reason":"..."}]}',
         },
         { role: "user", content: JSON.stringify({ opportunities }) },
