@@ -1,17 +1,17 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "kimi-k3.1-pro",
-  "ranAt": "2026-11-05T07:00:50.948Z",
-  "toolDefinitionChars": 30421,
-  "passed": 28,
-  "total": 30,
-  "rate": 0.9333333333333333,
+  "ranAt": "2026-11-05T12:58:00.310Z",
+  "toolDefinitionChars": 31239,
+  "passed": 30,
+  "total": 32,
+  "rate": 0.9375,
   "threshold": 0.9,
   "results": [
     {
       "id": "asset-copy",
       "object": "asset",
-      "actual": "NO_TOOL",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_marketing_campaigns",
         "search_marketing_assets"
@@ -139,11 +139,11 @@
     {
       "id": "customer-read",
       "object": "customer",
-      "actual": "load_skill",
+      "actual": "search_customer_profiles",
       "expected": [
         "search_customer_profiles"
       ],
-      "pass": false
+      "pass": true
     },
     {
       "id": "customer-update",
@@ -248,17 +248,17 @@
     {
       "id": "group-size",
       "object": "group",
-      "actual": "analyze_customer_cohort",
+      "actual": "load_skill",
       "expected": [
         "analyze_customer_cohort",
         "search_customer_segments"
       ],
-      "pass": true
+      "pass": false
     },
     {
       "id": "mixed-owner-sentence",
       "object": "mixed",
-      "actual": "search_customer_profiles",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -269,7 +269,7 @@
     {
       "id": "outreach-create",
       "object": "follow-up",
-      "actual": "generate_individual_outreach",
+      "actual": "search_customer_profiles",
       "expected": [
         "generate_individual_outreach",
         "search_customer_profiles"
@@ -300,6 +300,26 @@
       "actual": "search_marketing_materials",
       "expected": [
         "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "video-presenter",
+      "object": "marketing-video",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_materials",
+        "start_marketing_video"
+      ],
+      "pass": true
+    },
+    {
+      "id": "video-start",
+      "object": "marketing-video",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_materials",
+        "start_marketing_video"
       ],
       "pass": true
     }

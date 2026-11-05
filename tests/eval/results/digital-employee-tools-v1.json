@@ -1,11 +1,11 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "deepseek-v4.1-flash",
-  "ranAt": "2026-11-05T06:48:13.086Z",
-  "toolDefinitionChars": 30421,
-  "passed": 29,
-  "total": 30,
-  "rate": 0.9666666666666667,
+  "ranAt": "2026-11-05T12:57:04.424Z",
+  "toolDefinitionChars": 31239,
+  "passed": 30,
+  "total": 32,
+  "rate": 0.9375,
   "threshold": 0.9,
   "results": [
     {
@@ -49,7 +49,7 @@
     {
       "id": "campaign-create",
       "object": "campaign",
-      "actual": "search_marketing_materials",
+      "actual": "search_customer_segments",
       "expected": [
         "search_customer_segments",
         "search_marketing_materials",
@@ -97,7 +97,7 @@
     {
       "id": "customer-capture-purchase",
       "object": "customer",
-      "actual": "search_marketing_materials",
+      "actual": "search_customer_profiles",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -108,7 +108,7 @@
     {
       "id": "customer-capture-trial",
       "object": "customer",
-      "actual": "search_customer_profiles",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -129,7 +129,7 @@
     {
       "id": "customer-create",
       "object": "customer",
-      "actual": "prepare_customer_profile_change",
+      "actual": "search_customer_profiles",
       "expected": [
         "prepare_customer_profile_change",
         "search_customer_profiles"
@@ -258,7 +258,7 @@
     {
       "id": "mixed-owner-sentence",
       "object": "mixed",
-      "actual": "search_customer_profiles",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -279,11 +279,11 @@
     {
       "id": "outreach-rewrite",
       "object": "follow-up",
-      "actual": "rewrite_individual_outreach",
+      "actual": "search_customer_profiles",
       "expected": [
         "rewrite_individual_outreach"
       ],
-      "pass": true
+      "pass": false
     },
     {
       "id": "outreach-used",
@@ -300,6 +300,26 @@
       "actual": "search_marketing_materials",
       "expected": [
         "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "video-presenter",
+      "object": "marketing-video",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_materials",
+        "start_marketing_video"
+      ],
+      "pass": true
+    },
+    {
+      "id": "video-start",
+      "object": "marketing-video",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_materials",
+        "start_marketing_video"
       ],
       "pass": true
     }
