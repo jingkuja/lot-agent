@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+import { isPrivateAddress } from "@lot-agent/core";
 import type { Context, MiddlewareHandler } from "hono";
 
 /**
@@ -27,21 +29,19 @@ export interface RateLimitOptions {
 }
 
 /**
- * Best-effort IP extraction: `x-forwarded-for`'s first (client-nearest) hop,
- * falling back to the raw socket address @hono/node-server exposes on
- * `c.env`, falling back to "unknown". Never throws — rate limiting must not
- * become a new failure mode for requests without a resolvable IP.
+ * The address a rate limit counts. `x-forwarded-for` is believed only when the connection
+ * comes from a private address, meaning nginx on this host or Docker network, and only its
+ * last entry, the one that proxy wrote. Anything earlier is whatever the client sent.
+ * A CDN or load balancer in front of nginx would need nginx's real_ip module.
  */
 export function clientIp(c: Context): string {
-  const forwarded = c.req.header("x-forwarded-for");
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  const remoteAddress = (
-    c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined
-  )?.incoming?.socket?.remoteAddress;
-  return remoteAddress ?? "unknown";
+  const socket = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress;
+  if (!socket) return "unknown";
+  const peer = socket.replace(/^::ffff:/i, "");
+  const family = isIP(peer);
+  if (!family || !isPrivateAddress(peer, family)) return peer;
+  const hop = c.req.header("x-forwarded-for")?.split(",").at(-1)?.trim().replace(/^::ffff:/i, "");
+  return hop && isIP(hop) ? hop : peer;
 }
 
 /**

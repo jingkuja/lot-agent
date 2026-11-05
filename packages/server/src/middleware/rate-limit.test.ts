@@ -211,23 +211,40 @@ describe("rateLimit", () => {
 });
 
 describe("clientIp", () => {
-  function buildIpApp() {
+  async function ipFor(remoteAddress: string | undefined, forwarded?: string) {
     const app = new Hono();
     app.get("/ip", (c) => c.json({ ip: clientIp(c) }));
-    return app;
+    const headers: Record<string, string> = forwarded === undefined ? {} : { "x-forwarded-for": forwarded };
+    const res = await app.request("/ip", { headers }, { incoming: { socket: { remoteAddress } } });
+    return (await res.json() as any).ip;
   }
 
-  it("takes the first entry of x-forwarded-for, trimmed", async () => {
-    const app = buildIpApp();
-    const res = await app.request("/ip", {
-      headers: { "x-forwarded-for": " 1.2.3.4 , 5.6.7.8" },
-    });
-    expect((await res.json() as any).ip).toBe("1.2.3.4");
+  it("uses the address nginx wrote", async () => {
+    expect(await ipFor("172.18.0.5", "203.0.113.9")).toBe("203.0.113.9");
+    expect(await ipFor("::ffff:172.18.0.5", "203.0.113.9")).toBe("203.0.113.9");
+    expect(await ipFor("127.0.0.1", "2001:db8::1")).toBe("2001:db8::1");
+  });
+
+  it("ignores what the client put in front of it", async () => {
+    expect(await ipFor("172.18.0.5", "1.1.1.1, 2.2.2.2 , 203.0.113.9")).toBe("203.0.113.9");
+  });
+
+  it("keeps one bucket however the client rotates the header", async () => {
+    const seen = await Promise.all(["1.1.1.1", "8.8.8.8", "9.9.9.9"].map((forged) => ipFor("172.18.0.5", `${forged}, 203.0.113.9`)));
+    expect(new Set(seen)).toEqual(new Set(["203.0.113.9"]));
+  });
+
+  it("never believes the header on a direct public connection", async () => {
+    expect(await ipFor("198.51.100.7", "1.2.3.4")).toBe("198.51.100.7");
+    expect(await ipFor("::ffff:198.51.100.7", "1.2.3.4")).toBe("198.51.100.7");
+  });
+
+  it("falls back to the proxy when its header is missing or malformed", async () => {
+    expect(await ipFor("172.18.0.5")).toBe("172.18.0.5");
+    expect(await ipFor("172.18.0.5", "not-an-ip")).toBe("172.18.0.5");
   });
 
   it("falls back to 'unknown' when no header and no socket info", async () => {
-    const app = buildIpApp();
-    const res = await app.request("/ip");
-    expect((await res.json() as any).ip).toBe("unknown");
+    expect(await ipFor(undefined)).toBe("unknown");
   });
 });
