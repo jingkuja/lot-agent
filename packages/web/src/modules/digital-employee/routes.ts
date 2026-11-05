@@ -43,36 +43,19 @@ const OLD_PATHS: Array<[old: string, next: string]> = [
   ["/digital-employee/copy", "/digital-employee/marketing"],
 ];
 
-/** Tool links always use the new paths, so the older interface maps them back while it exists. */
-const NEW_PATHS: Array<[next: string, old: string]> = [
-  ["/digital-employee/today", "/digital-employee/acquisition"],
-  ["/digital-employee/customers/segments", "/digital-employee/copy"],
-  ["/digital-employee/customers", "/digital-employee/profiles"],
-  ["/digital-employee/marketing", "/digital-employee/copy"],
-  ["/digital-employee/materials", "/digital-employee/marketing-materials/manage"],
-  ["/digital-employee/work-log", "/digital-employee/customer-profile"],
-  ["/digital-employee/schedule", "/digital-employee/customer-profile"],
-  ["/digital-employee/chat", "/digital-employee/customer-profile"],
-];
-
 const matches = (pathname: string, prefix: string) => pathname === prefix || pathname.startsWith(`${prefix}/`);
 
 function isChatTail(pathname: string, old: string): boolean {
   return pathname === `${old}/chat`;
 }
 
-/** The current path under the interface in use; returns the path unchanged when it already fits. */
-export function normalizeEmployeePath(pathname: string, workspace: boolean): string {
+/** Where an address lives now; returns it unchanged when it is already current. */
+export function normalizeEmployeePath(pathname: string): string {
   if (!matches(pathname, EMPLOYEE_ROOT)) return pathname;
-  if (workspace) {
-    if (pathname === EMPLOYEE_ROOT) return TODAY_PATH;
-    const hit = OLD_PATHS.find(([old]) => matches(pathname, old));
-    if (!hit) return pathname;
-    if (isChatTail(pathname, hit[0])) return hit[0] === "/digital-employee/copy" ? CHAT_PATH : TODAY_PATH;
-    // Only customer pages keep what follows: `/profiles/:id` is still that customer.
-    return hit[0] === "/digital-employee/profiles" ? pathname.replace(hit[0], hit[1]) : hit[1];
-  }
-  const hit = NEW_PATHS.find(([next]) => matches(pathname, next));
+  if (pathname === EMPLOYEE_ROOT) return TODAY_PATH;
+  const hit = OLD_PATHS.find(([old]) => matches(pathname, old));
   if (!hit) return pathname;
-  return hit[0] === "/digital-employee/customers" ? pathname.replace(hit[0], hit[1]) : hit[1];
+  if (isChatTail(pathname, hit[0])) return hit[0] === "/digital-employee/copy" ? CHAT_PATH : TODAY_PATH;
+  // Only customer pages keep what follows: `/profiles/:id` is still that customer.
+  return hit[0] === "/digital-employee/profiles" ? pathname.replace(hit[0], hit[1]) : hit[1];
 }

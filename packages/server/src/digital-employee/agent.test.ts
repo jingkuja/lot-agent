@@ -42,30 +42,23 @@ describe("digitalEmployeeAllowedToolNames", () => {
 
 describe("digital employee extension", () => {
   const extension = createDigitalEmployeeExtension();
-  const enable = (value?: string) => {
-    if (value === undefined) delete process.env.DIGITAL_EMPLOYEE_UNIFIED;
-    else process.env.DIGITAL_EMPLOYEE_UNIFIED = value;
-  };
 
-  it("keeps the module scope with the switch off and refuses a client-chosen employee scope", () => {
-    enable();
-    expect(extension.conversationMetadata!({ featureScope: "customer-profile" })).toEqual({ digitalEmployeeFeatureScope: "customer-profile" });
-    expect(() => extension.conversationMetadata!({ featureScope: "employee" })).toThrow(AgentConversationError);
-    expect(() => extension.conversationMetadata!({})).toThrow(AgentConversationError);
-  });
-
-  it("writes every new conversation as employee with the switch on", () => {
-    enable("1");
-    try {
-      expect(extension.conversationMetadata!({ featureScope: "customer-profile" })).toEqual({ digitalEmployeeFeatureScope: "employee" });
-      expect(extension.conversationMetadata!({})).toEqual({ digitalEmployeeFeatureScope: "employee" });
-    } finally {
-      enable();
+  it("writes every new conversation as employee, whatever the client sends", () => {
+    for (const featureScope of [undefined, "customer-profile", "all"]) {
+      expect(extension.conversationMetadata!({ featureScope })).toEqual({ digitalEmployeeFeatureScope: "employee" });
     }
   });
 
-  it("keeps existing employee conversations running with the switch off", async () => {
-    enable();
+  it("keeps an older module conversation under its own scope", async () => {
+    const older = { digitalEmployeeFeatureScope: "customer-acquisition" };
+    expect(() => extension.assertConversation!(older)).not.toThrow();
+    const turn = await extension.beginTurn!({ agentId: "digital_employee", conversationId: "c1", metadata: older, toolNames: tools });
+    expect(turn.featureScope).toBe("customer-acquisition");
+    expect(turn.allowedToolNames).toContain("generate_campaign_copy");
+    expect(turn.allowedToolNames).not.toContain("generate_individual_outreach");
+  });
+
+  it("runs employee conversations with every tool", async () => {
     const metadata = { digitalEmployeeFeatureScope: "employee" };
     expect(() => extension.assertConversation!(metadata)).not.toThrow();
     const turn = await extension.beginTurn!({ agentId: "digital_employee", conversationId: "c1", metadata, toolNames: tools });

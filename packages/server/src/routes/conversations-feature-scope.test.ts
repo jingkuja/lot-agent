@@ -39,53 +39,20 @@ describe("conversation list filters", () => {
 });
 
 describe("conversation feature scope", () => {
-  it("persists a valid digital employee scope on creation", async () => {
-    const { instance, createConversation } = app();
-    const response = await instance.request("/conversations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId: "digital_employee", featureScope: "customer-acquisition" }),
-    });
-    expect(response.status).toBe(201);
-    expect(createConversation).toHaveBeenCalledWith(
-      expect.any(String), "新对话", undefined, undefined, "digital_employee", "u1",
-      { digitalEmployeeFeatureScope: "customer-acquisition" }, undefined
-    );
-  });
-
-  it("writes employee on the server when the unified switch is on, and returns to module scopes when off", async () => {
-    const create = (featureScope?: string) => app().instance.request("/conversations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId: "digital_employee", featureScope }),
-    });
-    process.env.DIGITAL_EMPLOYEE_UNIFIED = "1";
-    try {
-      const unified = await create("customer-profile");
-      expect((await unified.json() as { metadata: unknown }).metadata).toEqual({ digitalEmployeeFeatureScope: "employee" });
-    } finally {
-      delete process.env.DIGITAL_EMPLOYEE_UNIFIED;
+  it("stores every new digital employee conversation as employee, whatever the client sends", async () => {
+    for (const featureScope of [undefined, "customer-acquisition", "all"]) {
+      const { instance, createConversation } = app();
+      const response = await instance.request("/conversations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agentId: "digital_employee", featureScope }),
+      });
+      expect(response.status).toBe(201);
+      expect(createConversation).toHaveBeenCalledWith(
+        expect.any(String), "新对话", undefined, undefined, "digital_employee", "u1",
+        { digitalEmployeeFeatureScope: "employee" }, undefined
+      );
     }
-    const legacy = await create("customer-profile");
-    expect((await legacy.json() as { metadata: unknown }).metadata).toEqual({ digitalEmployeeFeatureScope: "customer-profile" });
-    expect((await create("employee")).status).toBe(400);
-  });
-
-  it("rejects digital employee conversations without a legal featureScope", async () => {
-    const { instance, createConversation } = app();
-    const missing = await instance.request("/conversations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId: "digital_employee" }),
-    });
-    const invalid = await instance.request("/conversations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId: "digital_employee", featureScope: "all" }),
-    });
-    expect(missing.status).toBe(400);
-    expect(invalid.status).toBe(400);
-    expect(createConversation).not.toHaveBeenCalled();
   });
 
   it("uses the configured mini program LLM when X-Lot-Client is miniprogram", async () => {

@@ -31,28 +31,17 @@ describe("employee routes", () => {
     ["/digital-employee/copy", "/digital-employee/marketing"],
     ["/digital-employee/copy/chat", "/digital-employee/chat"],
   ])("sends %s to its new place", (old, next) => {
-    expect(normalizeEmployeePath(old, true)).toBe(next);
-  });
-
-  it.each([
-    ["/digital-employee/today", "/digital-employee/acquisition"],
-    ["/digital-employee/customers/p1", "/digital-employee/profiles/p1"],
-    ["/digital-employee/customers/segments", "/digital-employee/copy"],
-    ["/digital-employee/materials", "/digital-employee/marketing-materials/manage"],
-    ["/digital-employee/marketing", "/digital-employee/copy"],
-  ])("maps the tool link %s back for the older interface", (link, old) => {
-    expect(normalizeEmployeePath(link, false)).toBe(old);
+    expect(normalizeEmployeePath(old)).toBe(next);
   });
 
   it("leaves paths that already fit alone", () => {
-    expect(normalizeEmployeePath("/digital-employee/today", true)).toBe("/digital-employee/today");
-    expect(normalizeEmployeePath("/digital-employee/customers/p1", true)).toBe("/digital-employee/customers/p1");
-    expect(normalizeEmployeePath("/digital-employee/copy", false)).toBe("/digital-employee/copy");
-    expect(normalizeEmployeePath("/assistant", true)).toBe("/assistant");
+    expect(normalizeEmployeePath("/digital-employee/today")).toBe("/digital-employee/today");
+    expect(normalizeEmployeePath("/digital-employee/customers/p1")).toBe("/digital-employee/customers/p1");
+    expect(normalizeEmployeePath("/assistant")).toBe("/assistant");
   });
 
   it("does not confuse paths that only share a prefix", () => {
-    expect(normalizeEmployeePath("/digital-employee-other", true)).toBe("/digital-employee-other");
-    expect(normalizeEmployeePath("/digital-employee/copyright", true)).toBe("/digital-employee/copyright");
+    expect(normalizeEmployeePath("/digital-employee-other")).toBe("/digital-employee-other");
+    expect(normalizeEmployeePath("/digital-employee/copyright")).toBe("/digital-employee/copyright");
   });
 });

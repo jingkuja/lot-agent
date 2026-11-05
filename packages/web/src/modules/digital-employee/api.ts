@@ -19,8 +19,6 @@ import type {
   ProfileUpdateInput,
   OpportunityListResponse,
   OpportunitySettings,
-  TalkTrackIntent,
-  TalkTrackMessage,
   OpportunityView,
   CustomerSegment,
   CustomerSegmentCriteria,
@@ -168,12 +166,6 @@ export const employeeApi = {
       body: JSON.stringify(input),
     }),
 
-  generateOpportunityTalkTrack: (id: string, input: { intent: TalkTrackIntent; message: string; history: TalkTrackMessage[]; modelId?: string }) =>
-    request<{ reply: string; modelId: string | null; outreachId: string }>(`/digital-employee/opportunities/${encodeURIComponent(id)}/talk-track`, {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-
   updateOpportunityAction: (id: string, input: Record<string, unknown>) =>
     request<import("./types.js").OpportunityItem>(`/digital-employee/actions/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -247,16 +239,6 @@ export const employeeApi = {
     request<CustomerSegmentSnapshot>(`/digital-employee/acquisition/segments/${encodeURIComponent(id)}/snapshots`, { method: "POST" }),
 
   getAcquisitionInsights: () => request<AcquisitionInsights>("/digital-employee/acquisition/insights"),
-
-  listAcquisitionRecommendations: (status?: string) =>
-    request<{ items: CampaignRecommendation[]; generatedAt: string | null }>(
-      `/digital-employee/acquisition/recommendations${status ? `?status=${encodeURIComponent(status)}` : ""}`
-    ),
-
-  refreshAcquisitionRecommendations: () =>
-    request<{ items: CampaignRecommendation[]; generatedAt: string | null }>("/digital-employee/acquisition/recommendations/refresh", {
-      method: "POST",
-    }),
 
   updateAcquisitionRecommendation: (id: string, status: "adopted" | "ignored") =>
     request<CampaignRecommendation>(`/digital-employee/acquisition/recommendations/${encodeURIComponent(id)}`, {

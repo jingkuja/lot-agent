@@ -9,11 +9,10 @@ import type {
 } from "../types.js";
 
 interface Props {
-  onBackToConversation?: () => void;
   onSelect?: (product: MarketingProduct) => void;
 }
 
-export function MarketingMaterialsPage({ onBackToConversation, onSelect }: Props) {
+export function MarketingMaterialsPage({ onSelect }: Props) {
   const { t } = useI18n();
   const [products, setProducts] = useState<MarketingProduct[]>([]);
   const [brand, setBrand] = useState<MarketingBrandAssets | null>(null);
@@ -67,11 +66,6 @@ export function MarketingMaterialsPage({ onBackToConversation, onSelect }: Props
 
   return (
     <div className="de-page marketing-materials-page">
-      {onBackToConversation && (
-        <button className="de-back-button" onClick={onBackToConversation}>
-          {t("‹ 返回对话管理")}
-        </button>
-      )}
       <header className="de-page-header">
         <div>
           <p className="de-eyebrow">{t("数字员工 / 营销资料")}</p>

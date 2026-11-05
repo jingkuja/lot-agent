@@ -13,7 +13,7 @@ function delivery(claimed: unknown[]) {
 
 describe("brief delivery", () => {
   afterEach(() => vi.unstubAllEnvs());
-  const on = () => { vi.stubEnv("DIGITAL_EMPLOYEE_WORKSPACE", "1"); vi.stubEnv("DIGITAL_EMPLOYEE_DAILY_SCAN", "1"); };
+  const on = () => { vi.stubEnv("DIGITAL_EMPLOYEE_DAILY_SCAN", "1"); };
 
   it("sends once per account and day, keyed so a restart cannot send again", async () => {
     on();

@@ -83,7 +83,6 @@ describe.skipIf(!testUrl)("digital employee daily scan on PostgreSQL", () => {
 
   it("stops queueing once the owner turns the scan off", async () => {
     const current = await service.opportunities.getSettings(owner);
-    vi.stubEnv("DIGITAL_EMPLOYEE_WORKSPACE", "1");
     vi.stubEnv("DIGITAL_EMPLOYEE_DAILY_SCAN", "1");
     await service.opportunities.saveSettings(owner, { ...current, enabled: false, discoveryMode: "rules" });
     await makeDue();
@@ -143,7 +142,6 @@ describe.skipIf(!testUrl)("digital employee daily scan on PostgreSQL", () => {
   });
 
   it("sends Feishu once, to the account that asked for it", async () => {
-    vi.stubEnv("DIGITAL_EMPLOYEE_WORKSPACE", "1");
     vi.stubEnv("DIGITAL_EMPLOYEE_DAILY_SCAN", "1");
     const sendToOwner = vi.fn(async () => undefined);
     await deliverBriefs(service, { sendToOwner, english: false });

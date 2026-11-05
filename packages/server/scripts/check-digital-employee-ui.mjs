@@ -1,9 +1,8 @@
 /** Real digital employee UI with in-memory API fixtures; no user data or model calls.
  * PLAYWRIGHT_MODULE=/path/to/playwright node packages/server/scripts/check-digital-employee-ui.mjs
- * AGENT_SCREENSHOTS_DIR saves screenshots; DE_STYLE_DUMP writes computed styles, to compare two versions.
+ * AGENT_SCREENSHOTS_DIR saves screenshots.
  */
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,7 +15,6 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const { createServer } = createRequire(resolve(root, "packages/web/package.json"))("vite");
 const temp = await realpath(await mkdtemp(join(tmpdir(), "lot-digital-employee-")));
 const screenshotDir = process.env.AGENT_SCREENSHOTS_DIR;
-const styleDump = process.env.DE_STYLE_DUMP;
 const PROFILE = "00000000-0000-4000-8000-000000000101";
 const CAMPAIGN = "00000000-0000-4000-8000-000000000201";
 const NOW = "2026-11-05T02:00:00.000Z";
@@ -123,14 +121,14 @@ const overview = {
   recentProfiles: [profile],
 };
 
-function api(state, workspace, unexpected, dailyScan = false) {
+function api(state, unexpected, dailyScan = false) {
   return async (route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
     if (!path.startsWith("/api/")) return route.continue();
     const json = (data, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(data) });
     const de = path.replace("/api/digital-employee", "");
     if (method !== "GET") state.writes.push({ path, body: request.postData() });
-    if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeUnified: workspace, digitalEmployeeWorkspace: workspace, digitalEmployeeDailyScan: dailyScan });
+    if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeDailyScan: dailyScan });
     if (path === "/api/agents") return json([
       { id: "general", name: "通用助手", description: "通用", type: "general", installed: true, sortOrder: 0 },
       { id: "digital_employee", name: "数字员工", description: "独立模块", type: "digital_employee", installed: true, sortOrder: 1 },
@@ -281,7 +279,7 @@ function api(state, workspace, unexpected, dailyScan = false) {
 }
 
 let vite, browser;
-const errors = [], unexpected = [], styles = {};
+const errors = [], unexpected = [];
 try {
   await writeFile(join(temp, "index.html"), '<div id="root"></div><script type="module" src="/main.tsx"></script>');
   await writeFile(join(temp, "main.tsx"), `import React from 'react'; import {createRoot} from 'react-dom/client';
@@ -304,7 +302,7 @@ try {
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true, channel: "chrome" });
 
-  async function open(path, { workspace = true, dailyScan = false, language = "zh", width = 1440, state = fixtures(), desktop = false } = {}) {
+  async function open(path, { dailyScan = false, language = "zh", width = 1440, state = fixtures(), desktop = false } = {}) {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     await context.addInitScript((value) => { try { localStorage.setItem("lot:language", value); } catch { /* opaque origin */ } }, language);
     if (desktop) await context.addInitScript(() => {
@@ -315,7 +313,7 @@ try {
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     page.on("pageerror", (error) => errors.push(`${path}: ${error.message}`));
-    await page.route("**/api/**", api(state, workspace, unexpected, dailyScan));
+    await page.route("**/api/**", api(state, unexpected, dailyScan));
     await page.goto(`${origin}${path}`);
     return { page, state, close: () => context.close() };
   }
@@ -323,27 +321,6 @@ try {
     if (!screenshotDir) return;
     await mkdir(screenshotDir, { recursive: true });
     await page.screenshot({ path: join(screenshotDir, name), animations: "disabled" });
-  };
-  const dumpStyles = async (page, name) => {
-    if (!styleDump) return;
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(200);
-    const entries = await page.evaluate(() => [...document.querySelectorAll("#root *")].map((element) => {
-      const computed = getComputedStyle(element);
-      return [
-        `${element.tagName}.${element.getAttribute("class") ?? ""}`,
-        [...computed]
-          .filter((key) => !key.startsWith("--"))
-          .sort()
-          .map((key) => `${key}:${computed.getPropertyValue(key)}`),
-      ];
-    }));
-    // Two runs compare property by property; the hash keeps one file small enough to keep.
-    styles[name] = entries.map(([key, values]) => ({
-      key,
-      values: values.map((value) => createHash("sha1").update(value).digest("hex").slice(0, 8)),
-      names: values.map((value) => value.split(":")[0]),
-    }));
   };
   const noHorizontalScroll = (page) => page.evaluate(() => {
     const scroller = document.querySelector(".workspace-overlay") ?? document.documentElement;
@@ -420,21 +397,11 @@ try {
     await close();
   }
 
-  // The switch off keeps the four-module interface, and new links still land there.
-  for (const [path, expected, marker] of [
-    ["/digital-employee/customer-profile", "/digital-employee/customer-profile", "客户洞察工作台"],
-    ["/digital-employee/marketing-materials/manage", "/digital-employee/marketing-materials/manage", "营销资料"],
-    ["/digital-employee/acquisition", "/digital-employee/acquisition", "商机雷达"],
-    ["/digital-employee/copy", "/digital-employee/copy", "获客宝"],
-    ["/digital-employee/today", "/digital-employee/acquisition", "商机雷达"],
-    ["/digital-employee/materials", "/digital-employee/marketing-materials/manage", "营销资料"],
-    [`/digital-employee/customers/${PROFILE}`, `/digital-employee/profiles/${PROFILE}`, "客户"],
-  ]) {
-    const { page, close } = await open(path, { workspace: false });
-    await page.waitForURL(`**${expected}`);
-    await page.getByText(marker).filter({ visible: true }).first().waitFor();
-    assert.equal(await page.locator(".de-employee-card").count(), 0);
-    await dumpStyles(page, `legacy ${path}`);
+  // A conversation from before the workspace still opens, under its old scope.
+  {
+    const { page, close } = await open("/digital-employee/chat/c2");
+    await page.getByText("获客宝旧对话 的内容").waitFor();
+    assert.equal(await page.locator(".de-employee-card").count(), 1);
     await close();
   }
 
@@ -588,7 +555,6 @@ try {
     const path = `/digital-employee/${view}`;
     const desktop = await open(path);
     await desktop.page.locator(".de-employee-card").waitFor();
-    await dumpStyles(desktop.page, `employee ${path}`);
     await desktop.close();
 
     const { page, close } = await open(path, { language: "en", width: 390 });
@@ -616,7 +582,6 @@ try {
 
   assert.deepEqual(errors, []);
   assert.deepEqual([...new Set(unexpected)], []);
-  if (styleDump) await writeFile(styleDump, JSON.stringify(styles, null, 1));
   console.log("Digital employee UI passed");
 } catch (error) {
   // The first failure usually follows from an earlier unexpected request or page error.

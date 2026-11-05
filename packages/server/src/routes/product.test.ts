@@ -17,15 +17,9 @@ describe("public product links", () => {
   });
 
   it("adds the switches it is given", async () => {
-    vi.stubEnv("DIGITAL_EMPLOYEE_UNIFIED", "1");
+    vi.stubEnv("DIGITAL_EMPLOYEE_DAILY_SCAN", "1");
     const res = await createProductRoutes(digitalEmployeeProductFlags).request("/");
-    expect(await res.json()).toMatchObject({ digitalEmployeeUnified: true, digitalEmployeeWorkspace: false });
-  });
-
-  it("treats the workspace as unified", async () => {
-    vi.stubEnv("DIGITAL_EMPLOYEE_WORKSPACE", "1");
-    const res = await createProductRoutes(digitalEmployeeProductFlags).request("/");
-    expect(await res.json()).toMatchObject({ digitalEmployeeUnified: true, digitalEmployeeWorkspace: true });
+    expect(await res.json()).toMatchObject({ digitalEmployeeDailyScan: true });
   });
 
   it.each(["javascript:alert(1)", "https://secret:password@example.com", "broken", "https://example.com/?token=secret"])("rejects unsafe public configuration %s", async (value) => {

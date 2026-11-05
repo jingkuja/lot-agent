@@ -281,8 +281,6 @@ export type StoredOpportunityType = OpportunityType | "cohort_marketing";
 export type OpportunityView = "today" | "pending" | "snoozed" | "in_progress" | "awaiting_result" | "completed";
 export type OpportunityReadiness = "actionable" | "tryable" | "needs_info" | "paused";
 export type OpportunityPriority = "low" | "normal" | "high";
-export type TalkTrackIntent = "maintenance" | "follow_up" | "sales";
-export interface TalkTrackMessage { role: "user" | "assistant"; content: string }
 
 export interface OpportunityEvidence { fact: string; occurredAt: string; sourceType: string; sourceId?: string }
 export interface OpportunityRisk { code: string; message: string; blocking: boolean }

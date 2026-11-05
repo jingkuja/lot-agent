@@ -26,7 +26,7 @@ describe("OpportunityService settings", () => {
     expect(sql).toContain("$2::boolean");
     expect(sql).toContain("$3::text");
     expect(sql).toContain("$4::time");
-    expect(query).toHaveBeenCalledWith(expect.any(String), ["u1", true, "Asia/Shanghai", "09:30", 0, "hybrid"]);
+    expect(query).toHaveBeenCalledWith(expect.any(String), ["u1", true, "Asia/Shanghai", "09:30", 0, "rules"]);
   });
 
   it("casts the next-run timestamp so Postgres does not treat Date+$interval as interval", async () => {

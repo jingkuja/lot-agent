@@ -16,7 +16,7 @@ function rememberNotified(id: string) {
 }
 
 /** The number on the brand area, and the one desktop notification a brief gets per device. */
-export function useEmployeeSummary(enabled: boolean) {
+export function useEmployeeSummary() {
   const { t } = useI18n();
   const [pending, setPending] = useState(0);
 
@@ -29,7 +29,6 @@ export function useEmployeeSummary(enabled: boolean) {
   }, [t]);
 
   useEffect(() => {
-    if (!enabled) return;
     let live = true;
     const load = () => {
       if (document.visibilityState === "hidden" && !window.lotDesktop) return;
@@ -47,7 +46,7 @@ export function useEmployeeSummary(enabled: boolean) {
       window.clearInterval(timer);
       window.removeEventListener("focus", load);
     };
-  }, [enabled, announce]);
+  }, [announce]);
 
   return { pending, setPending };
 }

@@ -647,8 +647,7 @@ export class OpportunityService {
          version = de_follow_up_automation_settings.version + 1
        WHERE de_follow_up_automation_settings.version = $5
        RETURNING *`,
-      // Only the older interface sends no mode, and there this switch has always meant the model step.
-      [userId, input.enabled, input.timezone, input.dailyRunTime, input.version, input.discoveryMode ?? (digitalEmployeeDailyScanEnabled() ? "rules" : "hybrid")]
+      [userId, input.enabled, input.timezone, input.dailyRunTime, input.version, input.discoveryMode ?? "rules"]
     );
     if (!result.rows[0]) throw new ConflictError();
     return toSettings(result.rows[0]);

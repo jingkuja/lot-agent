@@ -15,7 +15,7 @@ import { AgentService, type ServiceConfig } from "../src/services/agent-service.
 
 /**
  * Gate one, real model and real tools against a throwaway database. Refuses anything else:
- * PG_DATABASE must be digital_employee_check_*, and DIGITAL_EMPLOYEE_UNIFIED must be on.
+ * PG_DATABASE must be digital_employee_check_*.
  * Nothing leaves the gateway call: no message is sent, and no paid media is generated.
  */
 const FAKE_PHONE = "13812345678";
@@ -26,7 +26,6 @@ const modelOption = process.argv.find((arg) => arg.startsWith("--model="))?.slic
 
 if (!process.argv.includes("--live")) throw new Error("Requires --live (real metered calls)");
 if (!/^digital_employee_check_/.test(process.env.PG_DATABASE ?? "")) throw new Error("PG_DATABASE must be digital_employee_check_*");
-if (process.env.DIGITAL_EMPLOYEE_UNIFIED !== "1") throw new Error("Requires DIGITAL_EMPLOYEE_UNIFIED=1");
 const apiKey = process.env.DIGITAL_EMPLOYEE_EVAL_API_KEY || process.env.OPENAI_API_KEY;
 if (!apiKey) throw new Error("Set DIGITAL_EMPLOYEE_EVAL_API_KEY to a test account's gateway key");
 

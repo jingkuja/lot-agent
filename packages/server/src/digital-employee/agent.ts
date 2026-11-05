@@ -9,7 +9,6 @@ import {
 import { DEFAULT_EMPLOYEE_NAME } from "./employee-name.js";
 import {
   DIGITAL_EMPLOYEE_UNIFIED_SCOPE,
-  newConversationFeatureScope,
   readConversationFeatureScope,
 } from "./feature-scope.js";
 import { focusTurnPart, readConversationFocus } from "./focus.js";
@@ -96,10 +95,9 @@ export function createDigitalEmployeeExtension(deps: {
     ownerKeyOnly: true,
     disableUserMemory: true,
     privateToolNames: DIGITAL_EMPLOYEE_PRIVATE_TOOL_NAMES,
-    conversationMetadata({ featureScope }) {
-      const scope = newConversationFeatureScope(featureScope);
-      if (!scope) throw new AgentConversationError(INVALID_SCOPE);
-      return { digitalEmployeeFeatureScope: scope };
+    /** Always `employee`, whatever the client sends: a stale page cannot start a module chat. */
+    conversationMetadata() {
+      return { digitalEmployeeFeatureScope: DIGITAL_EMPLOYEE_UNIFIED_SCOPE };
     },
     assertConversation(metadata) {
       if (!readConversationFeatureScope(metadata)) throw new AgentConversationError(INVALID_SCOPE);

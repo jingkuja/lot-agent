@@ -1,10 +1,7 @@
 import { useI18n } from "../../../i18n/index.js";
-import { useRef, useState } from "react";
-import { shouldSubmitComposer } from "../../../lib/composer-keyboard.js";
-import { employeeApi } from "../api.js";
 import {
   OPPORTUNITY_TYPE_LABELS, OUTCOME_LABELS, READINESS_LABELS, RELATIONSHIP_LABELS,
-  type OpportunityItem, type OpportunityType, type TalkTrackIntent, type TalkTrackMessage,
+  type OpportunityItem, type OpportunityType,
 } from "../types.js";
 
 export const PRIORITY_LABELS = { high: "高优先", normal: "中优先", low: "低优先" } as const;
@@ -90,15 +87,14 @@ export function OpportunityCard({ item, onOpenProfile, onAction, onResume, onExe
   item: OpportunityItem; onOpenProfile: (id: string) => void;
   onAction: (item: OpportunityItem, action: OpportunityDialog) => void;
   onResume: () => void; onExecute: () => void; onCancel: () => void;
-  /** Hands the writing to the conversation; without it the card keeps its own assistant. */
-  onDraftOutreach?: (item: OpportunityItem) => void;
+  /** Writing happens in the conversation, so the message reaches the library. */
+  onDraftOutreach: (item: OpportunityItem) => void;
 }) {
   const { t, locale } = useI18n();
-  const [talkOpen, setTalkOpen] = useState(false);
   const blocked = item.riskFlags.some((risk) => risk.blocking);
   return (
     <article
-      className={`de-opportunity-card priority-${item.priority} ${item.overdue ? "is-overdue" : ""} ${blocked ? "is-blocked" : ""} ${talkOpen ? "has-talk-track" : ""}`}
+      className={`de-opportunity-card priority-${item.priority} ${item.overdue ? "is-overdue" : ""} ${blocked ? "is-blocked" : ""}`}
     >
       <header>
         <div className="de-opportunity-identity">
@@ -109,12 +105,7 @@ export function OpportunityCard({ item, onOpenProfile, onAction, onResume, onExe
               <small>{item.organization || t(RELATIONSHIP_LABELS[item.relationshipStage])}</small>
             </strong>
           </button>
-          <button
-            type="button"
-            className={`de-talk-track-toggle${talkOpen ? " is-open" : ""}`}
-            aria-expanded={onDraftOutreach ? undefined : talkOpen}
-            onClick={() => (onDraftOutreach ? onDraftOutreach(item) : setTalkOpen((value) => !value))}
-          >
+          <button type="button" className="de-talk-track-toggle" onClick={() => onDraftOutreach(item)}>
             <span aria-hidden="true">✦</span>
             {t("联系话术")}
           </button>
@@ -126,8 +117,7 @@ export function OpportunityCard({ item, onOpenProfile, onAction, onResume, onExe
           <em>{t(READINESS_LABELS[item.readiness])}</em>
         </div>
       </header>
-      {!onDraftOutreach && <TalkTrackAssistant item={item} open={talkOpen} onClose={() => setTalkOpen(false)} />}
-      <div className="de-opportunity-body">
+            <div className="de-opportunity-body">
         <div className="de-opportunity-main">
           <h2>{item.title}</h2>
           <section className="de-opportunity-section">
@@ -276,139 +266,6 @@ export function OpportunityCard({ item, onOpenProfile, onAction, onResume, onExe
         </button>
       </footer>
     </article>
-  );
-}
-
-const TALK_TRACK_PRESETS: Array<{ intent: TalkTrackIntent; label: string; prompt: string }> = [
-  { intent: "maintenance", label: "维护问候", prompt: "请生成一段自然、不带强推销感的客户维护问候话术。" },
-  { intent: "follow_up", label: "跟进联络", prompt: "请根据当前事项生成一段可直接发送的跟进联络话术，明确但不要给客户压力。" },
-  { intent: "sales", label: "产品推介", prompt: "请结合客户需求和已核实的产品资料，生成一段有针对性的产品推介话术。" },
-];
-
-function TalkTrackAssistant({ item, open, onClose }: { item: OpportunityItem; open: boolean; onClose: () => void }) {
-  const { t } = useI18n();
-  const compositionActiveRef = useRef(false);
-  const [intent, setIntent] = useState<TalkTrackIntent>("follow_up");
-  const [messages, setMessages] = useState<TalkTrackMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const send = async (content: string, nextIntent: TalkTrackIntent = intent) => {
-    const message = content.trim();
-    if (!message || loading) return;
-    const history = messages.slice(-12);
-    setIntent(nextIntent);
-    setMessages((current) => [...current, { role: "user", content: message }]);
-    setInput(""); setLoading(true); setError(null);
-    try {
-      const result = await employeeApi.generateOpportunityTalkTrack(item.id, { intent: nextIntent, message, history });
-      setMessages((current) => [...current, { role: "assistant", content: result.reply }]);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "话术生成失败，请重试");
-    } finally { setLoading(false); }
-  };
-
-  if (!open) return null;
-  return (
-    <section className="de-talk-track-panel" aria-label={t("{0}联系话术助手", [item.customerName])}>
-      <header>
-        <div>
-          <strong>{t("单客户话术助手")}</strong>
-          <span>
-            {t("已带入")}
-            {item.customerName} {t("的画像、当前事项")}
-            {item.productName ? t("和{0}资料", [item.productName]) : ""}
-          </span>
-        </div>
-        <button type="button" onClick={onClose} aria-label={t("收起话术助手")}>
-          ×
-        </button>
-      </header>
-      <div className="de-talk-track-presets">
-        {TALK_TRACK_PRESETS.map((preset) => (
-          <button
-            type="button"
-            key={preset.intent}
-            disabled={loading}
-            className={intent === preset.intent ? "active" : ""}
-            onClick={() => void send(preset.prompt, preset.intent)}
-          >
-            {t(preset.label)}
-          </button>
-        ))}
-      </div>
-      {messages.length === 0 && (
-        <div className="de-talk-track-empty">
-          <span>✦</span>
-          <p>{t("选择一种场景直接生成，或在下方说明渠道、语气和想达到的目的。")}</p>
-        </div>
-      )}
-      {messages.length > 0 && (
-        <div className="de-talk-track-messages">
-          {messages.map((message, index) => (
-            <div key={`${message.role}-${index}`} className={`de-talk-track-message ${message.role}`}>
-              <span>{message.role === "assistant" ? t("参谋") : t("你")}</span>
-              <p>{message.content}</p>
-              {message.role === "assistant" && (
-                <button type="button" onClick={() => void navigator.clipboard.writeText(message.content)}>
-                  {t("复制")}
-                </button>
-              )}
-            </div>
-          ))}
-          {loading && (
-            <div className="de-talk-track-thinking">
-              <i />
-              <span>{t("正在结合客户信息生成…")}</span>
-            </div>
-          )}
-        </div>
-      )}
-      {error && (
-        <p className="de-talk-track-error" role="alert">
-          {t(error)}
-        </p>
-      )}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void send(input);
-        }}
-      >
-        <div className="de-talk-track-composer">
-          <textarea
-            value={input}
-            maxLength={2_000}
-            rows={2}
-            disabled={loading}
-            placeholder={t("例如：语气更熟悉一点，适合微信，先询问对方是否方便……")}
-            onChange={(event) => setInput(event.target.value)}
-            onCompositionStart={() => {
-              compositionActiveRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              compositionActiveRef.current = false;
-            }}
-            onKeyDown={(event) => {
-              if (
-                shouldSubmitComposer(
-                  { key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode },
-                  compositionActiveRef.current
-                )
-              ) {
-                event.preventDefault();
-                void send(input);
-              }
-            }}
-          />
-        </div>
-        <button type="submit" className="de-primary-button" disabled={loading || !input.trim()}>
-          {loading ? t("生成中") : t("发送")}
-        </button>
-      </form>
-      <small>{t("AI 话术仅供参考，发送前请核对客户事实、产品承诺和价格权益。")}</small>
-    </section>
   );
 }
 

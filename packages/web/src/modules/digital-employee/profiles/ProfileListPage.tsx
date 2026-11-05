@@ -13,7 +13,6 @@ import {
 
 interface ProfileListPageProps {
   onOpenProfile: (profileId: string) => void;
-  onBackToConversation?: () => void;
 }
 
 const RELATIONSHIP_OPTIONS = Object.entries(RELATIONSHIP_LABELS) as Array<[RelationshipStage, string]>;
@@ -26,7 +25,7 @@ function time(value: string | null, locale = "zh-CN"): string {
   return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-export function ProfileListPage({ onOpenProfile, onBackToConversation }: ProfileListPageProps) {
+export function ProfileListPage({ onOpenProfile }: ProfileListPageProps) {
   const { t, locale } = useI18n();
   const [items, setItems] = useState<CustomerProfile[]>([]);
   const [total, setTotal] = useState(0);
@@ -94,7 +93,6 @@ export function ProfileListPage({ onOpenProfile, onBackToConversation }: Profile
     <div className="de-page de-profile-list-page">
       <header className="de-page-header">
         <div>
-          {onBackToConversation && <button className="de-back-button" type="button" onClick={onBackToConversation}>{t("← 返回对话")}</button>}
           <p className="de-eyebrow">{t("数字员工 / 客户画像")}</p>
           <h1>{t("客户画像管理")}</h1>
           <p>{t("把身份主档、原始观察和当前产品状态分开保存，方便持续跟进且可追溯。")}</p>

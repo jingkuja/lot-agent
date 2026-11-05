@@ -26,7 +26,6 @@ import {
   parseOpportunityDecision,
   parseOpportunityList,
   parseOpportunitySettings,
-  parseTalkTrackRequest,
 } from "./opportunity-validators.js";
 import {
   parseAssetList,
@@ -117,11 +116,6 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
 
   app.get("/acquisition/recommendations", async (c) => {
     try { return c.json(await service.customerAcquisition.listRecommendations(c.get("userId"), parseRecommendationFilter(c.req.query("status")))); }
-    catch (error) { return respondError(c, error); }
-  });
-
-  app.post("/acquisition/recommendations/refresh", async (c) => {
-    try { return c.json(await service.customerAcquisition.refreshRecommendations(c.get("userId"))); }
     catch (error) { return respondError(c, error); }
   });
 
@@ -239,16 +233,6 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.post("/opportunities/discover", async (c) => {
     try {
       return c.json(await service.opportunities.requestDiscovery(c.get("userId")), 202);
-    } catch (error) { return respondError(c, error); }
-  });
-
-  app.post("/opportunities/:id/talk-track", async (c) => {
-    try {
-      const { intent, message, history } = parseTalkTrackRequest(await body(c));
-      const draft = await service.opportunities.generateOutreach(c.get("userId"), {
-        itemId: parseEntityId(c.req.param("id"), "itemId"), intent, message, history,
-      });
-      return c.json({ reply: draft.content, modelId: draft.modelId, outreachId: draft.id });
     } catch (error) { return respondError(c, error); }
   });
 
