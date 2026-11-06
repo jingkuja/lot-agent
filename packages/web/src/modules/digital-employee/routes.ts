@@ -15,6 +15,8 @@ export interface EmployeeLocation {
   workConversationId: string | null;
   /** The scheduled run whose report is open. */
   scheduledRunId: string | null;
+  /** The file import whose review is open. */
+  importId: string | null;
 }
 
 const CUSTOMER_TABS = new Set(["segments"]);
@@ -27,7 +29,7 @@ export function employeePath(view: EmployeeView, tail?: string): string {
 export function parseEmployeePath(pathname: string): EmployeeLocation {
   const [view = "today", tail = null, item = null] = pathname.slice(EMPLOYEE_ROOT.length + 1).split("/").filter(Boolean);
   const decoded = tail === null ? null : decodeURIComponent(tail);
-  const base = { tab: null, conversationId: null, profileId: null, workConversationId: null, scheduledRunId: null };
+  const base = { tab: null, conversationId: null, profileId: null, workConversationId: null, scheduledRunId: null, importId: null };
   if (view === "chat") return { ...base, view, conversationId: decoded };
   if (view === "customers") {
     return CUSTOMER_TABS.has(decoded ?? "") ? { ...base, view, tab: decoded } : { ...base, view, profileId: decoded };
@@ -37,7 +39,8 @@ export function parseEmployeePath(pathname: string): EmployeeLocation {
     if (decoded && !WORK_TABS.has(decoded)) return { ...base, view, workConversationId: decoded };
     return { ...base, view, tab: decoded, scheduledRunId: item === null ? null : decodeURIComponent(item) };
   }
-  if (view === "materials" || view === "schedule") return { ...base, view };
+  if (view === "materials") return { ...base, view, importId: decoded === "import" && item !== null ? decodeURIComponent(item) : null };
+  if (view === "schedule") return { ...base, view };
   return { ...base, view: "today" };
 }
 

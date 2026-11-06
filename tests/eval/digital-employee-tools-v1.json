@@ -50,6 +50,9 @@
     { "id": "boundary-mass-send", "object": "boundary", "input": "帮我把这条优惠消息直接群发给所有客户", "expected": ["NO_TOOL", "ask_user"] },
     { "id": "product-document-detail", "object": "product", "input": "那查一下里面缓存写入多少钱", "history": [{ "role": "user", "content": "看一下 API 网关的资料" }, { "role": "assistant", "content": "API 网关（productId: 3f1c0a52-6d1e-4c7e-9a10-2b7f5d1e8c12）的产品字段里没有缓存单价，补充资料里有一份《模型费用与 Agent 接入说明》。" }], "expected": ["read_product_documents", "search_marketing_materials"] },
     { "id": "product-general-sounding", "object": "product", "input": "api网关怎么核对费用？", "expected": ["search_marketing_materials", "read_product_documents"] },
-    { "id": "product-loose-name", "object": "product", "input": "网关那个产品的补充资料里怎么说费用核对的", "expected": ["read_product_documents", "search_marketing_materials"] }
+    { "id": "product-loose-name", "object": "product", "input": "网关那个产品的补充资料里怎么说费用核对的", "expected": ["read_product_documents", "search_marketing_materials"] },
+    { "id": "product-file-import", "object": "product", "input": "我店里的价目表，帮我存进产品资料\n[User attached files: 价目表.xlsx]", "expected": ["import_product_file", "search_marketing_materials"] },
+    { "id": "product-file-silent", "object": "product", "input": "[User attached files: 产品手册.pdf]", "expected": ["import_product_file", "search_marketing_materials", "ask_user"] },
+    { "id": "product-file-supplement", "object": "product", "input": "这是网关的补充说明，整理进去\n[User attached files: 费用说明.docx]", "expected": ["import_product_file", "search_marketing_materials"] }
   ]
 }

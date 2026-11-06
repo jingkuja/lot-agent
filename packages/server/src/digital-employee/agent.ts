@@ -25,8 +25,8 @@ export const DIGITAL_EMPLOYEE_PRIVATE_TOOL_NAMES = digitalEmployeeDefinition.too
 
 const SCOPE_TOOLS: Record<string, Set<string>> = {
   "marketing-materials": new Set([
-    "search_marketing_materials", "read_product_documents", "create_marketing_product", "update_marketing_product",
-    "update_marketing_brand_assets", "ask_user", "load_skill",
+    "search_marketing_materials", "read_product_documents", "import_product_file", "commit_product_import",
+    "create_marketing_product", "update_marketing_product", "update_marketing_brand_assets", "ask_user", "load_skill",
   ]),
   "customer-profile": new Set([
     "search_customer_profiles", "get_customer_profiles", "prepare_customer_profile_change",

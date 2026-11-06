@@ -273,6 +273,72 @@ export interface ProductDocumentList {
   usage: { usedChars: number; limitChars: number };
 }
 
+export interface ImportItem {
+  id: string;
+  field: "coreValues" | "verifiableFacts" | "commonObjections" | "currentBenefits" | "prohibitedExpressions" | "caseMaterials" | "faqs" | "productNotes";
+  text: string;
+  detail?: string;
+  source?: string;
+  validFrom?: string | null;
+  validUntil?: string | null;
+  selected: boolean;
+  flag?: "number" | "contact" | "benefit" | "expired";
+}
+
+export interface ImportProduct {
+  key: string;
+  name: string;
+  suggestedName: string;
+  targetProductId: string | null;
+  targetName: string | null;
+  positioning: string;
+  items: ImportItem[];
+  questions: Array<{ id: string; field: "name" | "positioning" | "notes"; question: string }>;
+}
+
+export interface ImportDraft {
+  documentId: string;
+  title: string;
+  truncated: boolean;
+  skippedPages: number;
+  products: ImportProduct[];
+}
+
+export interface ProductImportStatus {
+  id: string;
+  title: string;
+  status: "working" | "ready" | "failed";
+  errorCode: string | null;
+  draftId: string | null;
+  preview: {
+    products: Array<{ name: string; target: string | null; items: number }>;
+    needsReview: number;
+    questions: number;
+    reviewUrl: string;
+  } | null;
+  createdAt: string;
+}
+
+export interface ProductImportCommit {
+  products: Array<{
+    key: string;
+    skip?: boolean;
+    name: string;
+    targetProductId: string | null;
+    positioning: string;
+    items: Array<{ id: string; selected: boolean; text: string; detail?: string; validUntil?: string | null }>;
+  }>;
+  answers: Array<{ id: string; answer: string }>;
+}
+
+export interface ProductImportResult {
+  alreadyApplied: boolean;
+  entityId: string | null;
+  managementUrl: string;
+  saved: Array<{ id: string; name: string; created: boolean; items: number }>;
+  dropped: number;
+}
+
 export interface MarketingBrandAssets {
   id: string;
   userId: string;
@@ -711,7 +777,8 @@ export interface EmployeeSettings {
 
 export type ProposalKind =
   | "follow_up_action" | "follow_up_result" | "customer_segment" | "marketing_campaign"
-  | "asset_deployment" | "deployment_feedback" | "campaign_result" | "customer_capture" | "profile_change";
+  | "asset_deployment" | "deployment_feedback" | "campaign_result" | "customer_capture" | "profile_change"
+  | "product_import";
 
 export interface PendingProposal {
   id: string;

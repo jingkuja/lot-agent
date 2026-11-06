@@ -27,7 +27,7 @@ export type ProductDocumentStatus = "pending" | "processing" | "ready" | "failed
 
 export interface ProductDocument {
   id: string;
-  productId: string;
+  productId: string | null;
   title: string;
   mime: string;
   status: ProductDocumentStatus;
@@ -144,21 +144,37 @@ export class ProductDocumentService {
 
   async add(userId: string, productId: string, input: { assetId: string; title?: string }): Promise<ProductDocument> {
     await this.requireActiveProduct(userId, productId);
+    const { mime, title, assetId } = await this.readableAsset(userId, input.assetId, input.title);
+    const { rows } = await this.pool.query(
+      `INSERT INTO marketing_product_documents (user_id, product_id, asset_id, title, mime)
+       VALUES ($1, $2, $3, $4, $5) RETURNING ${LIST_COLUMNS}`,
+      [userId, productId, assetId, title, mime]
+    );
+    return this.enqueue(userId, rows[0]);
+  }
+
+  /** A file dropped before anyone knows which product it is about; saving the review places it. */
+  async addForImport(userId: string, input: { assetId: string; productId?: string; conversationId?: string }): Promise<ProductDocument> {
+    if (input.productId) await this.requireActiveProduct(userId, input.productId);
+    const { mime, title, assetId } = await this.readableAsset(userId, input.assetId);
+    const { rows } = await this.pool.query(
+      `INSERT INTO marketing_product_documents (user_id, product_id, asset_id, title, mime, import_status, import_conversation_id)
+       VALUES ($1, $2, $3, $4, $5, 'queued', $6) RETURNING ${LIST_COLUMNS}`,
+      [userId, input.productId ?? null, assetId, title, mime, input.conversationId ?? null]
+    );
+    return this.enqueue(userId, rows[0]);
+  }
+
+  private async readableAsset(userId: string, assetId: string, title?: string) {
     const asset = (await this.pool.query(
       `SELECT id, mime, original_name, storage_key FROM assets WHERE id = $1 AND user_id = $2 AND type = 'upload'`,
-      [input.assetId, userId]
+      [assetId, userId]
     )).rows[0];
     if (!asset) throw new NotFoundError("未找到上传的文件");
     const mime = String(asset.mime ?? "");
     if (!READABLE_MIMES.has(mime) && !mime.startsWith("text/")) throw new InputError("这种文件暂时读不了，可以上传 PDF、Word、PPT、Excel 或文本文件");
     if (!isSafeUploadKey(String(asset.storage_key))) throw new InputError("文件无法读取");
-    const title = (input.title?.trim() || String(asset.original_name ?? "").trim() || "补充资料").slice(0, 300);
-    const { rows } = await this.pool.query(
-      `INSERT INTO marketing_product_documents (user_id, product_id, asset_id, title, mime)
-       VALUES ($1, $2, $3, $4, $5) RETURNING ${LIST_COLUMNS}`,
-      [userId, productId, asset.id, title, mime]
-    );
-    return this.enqueue(userId, rows[0]);
+    return { mime, assetId: String(asset.id), title: (title?.trim() || String(asset.original_name ?? "").trim() || "补充资料").slice(0, 300) };
   }
 
   async retry(userId: string, productId: string, documentId: string): Promise<ProductDocument> {
@@ -173,19 +189,25 @@ export class ProductDocumentService {
     return this.enqueue(userId, rows[0]);
   }
 
-  private async enqueue(userId: string, row: Record<string, any>): Promise<ProductDocument> {
+  /** False when nothing was queued; the caller records why on its own status. */
+  async dispatch(userId: string, documentId: string): Promise<boolean> {
     try {
       if (!this.queue) throw new Error("queue unavailable");
-      await this.queue.enqueue(PRODUCT_DOCUMENT_JOB, { documentId: row.id }, userId, { maxAttempts: 1 });
-      return toDocument(row, new Set(), Date.now());
+      await this.queue.enqueue(PRODUCT_DOCUMENT_JOB, { documentId }, userId, { maxAttempts: 1 });
+      return true;
     } catch (error) {
       console.warn("[product-document] enqueue failed:", error instanceof Error ? error.name : "unknown");
-      await this.pool.query(
-        `UPDATE marketing_product_documents SET status = 'failed', error_code = 'QUEUE_UNAVAILABLE', updated_at = now() WHERE id = $1 AND user_id = $2`,
-        [row.id, userId]
-      );
-      return toDocument({ ...row, status: "failed", error_code: "QUEUE_UNAVAILABLE" }, new Set(), Date.now());
+      return false;
     }
+  }
+
+  private async enqueue(userId: string, row: Record<string, any>): Promise<ProductDocument> {
+    if (await this.dispatch(userId, row.id)) return toDocument(row, new Set(), Date.now());
+    await this.pool.query(
+      `UPDATE marketing_product_documents SET status = 'failed', error_code = 'QUEUE_UNAVAILABLE', updated_at = now() WHERE id = $1 AND user_id = $2`,
+      [row.id, userId]
+    );
+    return toDocument({ ...row, status: "failed", error_code: "QUEUE_UNAVAILABLE" }, new Set(), Date.now());
   }
 
   async remove(userId: string, productId: string, documentId: string): Promise<void> {

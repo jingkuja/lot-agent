@@ -1,4 +1,6 @@
 import { InputError } from "./errors.js";
+import type { ImportCommitInput } from "./product-import.js";
+import { parseEntityId } from "./validators.js";
 import type {
   MarketingBrandAssetsInput,
   MarketingCaseMaterial,
@@ -204,5 +206,58 @@ export function parseMarketingProductList(query: Record<string, string>): Market
     limit,
     ...(query.q?.trim() ? { query: query.q.trim().slice(0, 200) } : {}),
     ...(query.status ? { status: query.status as "active" | "archived" } : {}),
+  };
+}
+
+const IMPORT_ID = /^[a-z0-9-]{1,40}$/i;
+
+function importId(value: unknown, label: string): string {
+  if (typeof value !== "string" || !IMPORT_ID.test(value)) throw new InputError(`${label}无效`);
+  return value;
+}
+
+function importIds(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 200) throw new InputError(`${label}无效`);
+  return value.map((item) => importId(item, label));
+}
+
+export function parseProductImportStart(value: unknown): { assetId: string; productId?: string } {
+  const source = object(value);
+  const assetId = text(source.assetId, "assetId", 40, true)!;
+  const productId = text(source.productId, "productId", 40);
+  return { assetId: parseEntityId(assetId, "assetId"), ...(productId ? { productId: parseEntityId(productId, "productId") } : {}) };
+}
+
+function importItemEdit(item: Record<string, unknown>) {
+  const validUntil = date(item.validUntil, "权益结束", "until");
+  return {
+    id: importId(item.id, "条目"),
+    ...(typeof item.selected === "boolean" ? { selected: item.selected } : {}),
+    ...(text(item.text, "内容", 1_000) !== undefined ? { text: text(item.text, "内容", 1_000) } : {}),
+    ...(text(item.detail, "内容", 2_000) !== undefined ? { detail: text(item.detail, "内容", 2_000) } : {}),
+    ...(validUntil !== undefined ? { validUntil } : {}),
+  };
+}
+
+export function parseProductImportCommit(value: unknown): ImportCommitInput {
+  const source = object(value);
+  const products = structured(source.products, "产品", 20, (item) => {
+    const target = item.targetProductId;
+    return {
+      key: importId(item.key, "产品"),
+      ...(item.skip === true ? { skip: true } : {}),
+      ...(text(item.name, "产品名称", 200) !== undefined ? { name: text(item.name, "产品名称", 200) } : {}),
+      ...(target === null ? { targetProductId: null } : target !== undefined ? { targetProductId: parseEntityId(target, "targetProductId") } : {}),
+      ...(text(item.positioning, "产品定位", 4_000) !== undefined ? { positioning: text(item.positioning, "产品定位", 4_000) } : {}),
+      ...(item.items !== undefined ? { items: structured(item.items, "条目", 300, importItemEdit) } : {}),
+    };
+  });
+  const answers = structured(source.answers, "回答", 20, (item) => ({ id: importId(item.id, "问题"), answer: text(item.answer, "回答", 2_000, true)! }));
+  const confirmItemIds = importIds(source.confirmItemIds, "条目");
+  const skipItemIds = importIds(source.skipItemIds, "条目");
+  return {
+    ...(products ? { products } : {}), ...(answers ? { answers } : {}),
+    ...(confirmItemIds ? { confirmItemIds } : {}), ...(skipItemIds ? { skipItemIds } : {}),
   };
 }

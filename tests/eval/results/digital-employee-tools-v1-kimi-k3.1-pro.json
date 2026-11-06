@@ -1,11 +1,11 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "kimi-k3.1-pro",
-  "ranAt": "2026-11-06T03:39:14.981Z",
-  "toolDefinitionChars": 32092,
-  "passed": 34,
-  "total": 35,
-  "rate": 0.9714285714285714,
+  "ranAt": "2026-11-06T06:22:13.644Z",
+  "toolDefinitionChars": 33395,
+  "passed": 36,
+  "total": 38,
+  "rate": 0.9473684210526315,
   "threshold": 0.9,
   "results": [
     {
@@ -49,7 +49,7 @@
     {
       "id": "campaign-create",
       "object": "campaign",
-      "actual": "search_marketing_materials",
+      "actual": "search_customer_segments",
       "expected": [
         "search_customer_segments",
         "search_marketing_materials",
@@ -129,7 +129,7 @@
     {
       "id": "customer-create",
       "object": "customer",
-      "actual": "search_customer_profiles",
+      "actual": "prepare_customer_profile_change",
       "expected": [
         "prepare_customer_profile_change",
         "search_customer_profiles"
@@ -217,7 +217,7 @@
     {
       "id": "group-fit",
       "object": "group",
-      "actual": "analyze_customer_cohort",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_customer_segments",
         "search_marketing_materials",
@@ -288,11 +288,11 @@
     {
       "id": "outreach-used",
       "object": "follow-up",
-      "actual": "mark_individual_outreach_used",
+      "actual": "NO_TOOL",
       "expected": [
         "mark_individual_outreach_used"
       ],
-      "pass": true
+      "pass": false
     },
     {
       "id": "product-document-detail",
@@ -300,6 +300,37 @@
       "actual": "read_product_documents",
       "expected": [
         "read_product_documents",
+        "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-file-import",
+      "object": "product",
+      "actual": "import_product_file",
+      "expected": [
+        "import_product_file",
+        "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-file-silent",
+      "object": "product",
+      "actual": "import_product_file",
+      "expected": [
+        "import_product_file",
+        "search_marketing_materials",
+        "ask_user"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-file-supplement",
+      "object": "product",
+      "actual": "import_product_file",
+      "expected": [
+        "import_product_file",
         "search_marketing_materials"
       ],
       "pass": true

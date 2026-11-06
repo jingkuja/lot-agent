@@ -10,6 +10,7 @@ export const DIGITAL_EMPLOYEE_LLM_PRIORITY = [
 
 export const DIGITAL_EMPLOYEE_LLM_UNAVAILABLE =
   "当前账号没有可用的 LLM 模型，请先为 TokenHub key 配置 LLM 模型权限";
+export const MANAGED_CREDENTIAL_UNAVAILABLE = "managed New API credential unavailable";
 
 export function pickDigitalEmployeeLlmModel(modelIds: string[]): string | null {
   const available = new Set(modelIds);

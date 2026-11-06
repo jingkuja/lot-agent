@@ -36,7 +36,7 @@ describe("digitalEmployeeAllowedToolNames", () => {
   it("opens every business tool to the employee scope, and no host tool", () => {
     const employee = digitalEmployeeAllowedToolNames("employee", [...tools, "execute_command"]);
     expect(employee).toEqual(tools);
-    expect(employee.filter((name) => name !== "ask_user" && name !== "load_skill")).toHaveLength(52);
+    expect(employee.filter((name) => name !== "ask_user" && name !== "load_skill")).toHaveLength(54);
   });
 });
 

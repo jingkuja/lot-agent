@@ -45,6 +45,7 @@ import { DRAFT_TTL_MS } from "./conversation-drafts.js";
 import { MarketingMaterialsService } from "./marketing-service.js";
 import { OpportunityService, type OpportunityTalkTrackGenerator } from "./opportunity-service.js";
 import { ProductDocumentService } from "./product-document-service.js";
+import { ProductImportService } from "./product-import-service.js";
 import { confidentProductMatch, rankProductCandidates } from "./product-match.js";
 import type { JobQueue } from "@lot-agent/core";
 import { CustomerAcquisitionService } from "./acquisition-service.js";
@@ -115,6 +116,7 @@ export class DigitalEmployeeService {
   readonly repository: DigitalEmployeeRepository;
   readonly marketingMaterials: MarketingMaterialsService;
   readonly productDocuments: ProductDocumentService;
+  readonly productImports: ProductImportService;
   readonly opportunities: OpportunityService;
   readonly customerAcquisition: CustomerAcquisitionService;
   readonly settings: EmployeeSettingsService;
@@ -139,6 +141,7 @@ export class DigitalEmployeeService {
     this.repository = new DigitalEmployeeRepository(db.pool);
     this.marketingMaterials = new MarketingMaterialsService(db);
     this.productDocuments = new ProductDocumentService(db.pool, opportunityQueue);
+    this.productImports = new ProductImportService(db.pool, this.marketingMaterials, this.productDocuments);
     this.opportunities = new OpportunityService(db, opportunityQueue, undefined, opportunityTalkTrackGenerator);
     this.customerAcquisition = new CustomerAcquisitionService(
       db,

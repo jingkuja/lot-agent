@@ -13,6 +13,10 @@ import type {
   MarketingProductListResponse,
   ProductDocument,
   ProductDocumentList,
+  ProductImportCommit,
+  ProductImportResult,
+  ProductImportStatus,
+  ImportDraft,
   CustomerStateChange,
   DigitalEmployeeOverview,
   ManualObservationInput,
@@ -260,6 +264,32 @@ export const employeeApi = {
       `/digital-employee/marketing/products/${encodeURIComponent(productId)}/documents/${encodeURIComponent(documentId)}`,
       { method: "DELETE", body: "{}" },
     ),
+
+  importProductDocument: (productId: string, documentId: string) =>
+    request<ProductImportStatus>(
+      `/digital-employee/marketing/products/${encodeURIComponent(productId)}/documents/${encodeURIComponent(documentId)}/import`,
+      { method: "POST", body: "{}" },
+    ),
+
+  listProductImports: () => request<{ items: ProductImportStatus[] }>("/digital-employee/marketing/imports"),
+
+  startProductImport: (assetId: string) =>
+    request<ProductImportStatus>("/digital-employee/marketing/imports", { method: "POST", body: JSON.stringify({ assetId }) }),
+
+  getProductImport: (id: string) =>
+    request<{ status: ProductImportStatus; draft: ImportDraft | null }>(`/digital-employee/marketing/imports/${encodeURIComponent(id)}`),
+
+  retryProductImport: (id: string) =>
+    request<ProductImportStatus>(`/digital-employee/marketing/imports/${encodeURIComponent(id)}/retry`, { method: "POST", body: "{}" }),
+
+  discardProductImport: (id: string) =>
+    request<{ ok: boolean }>(`/digital-employee/marketing/imports/${encodeURIComponent(id)}`, { method: "DELETE", body: "{}" }),
+
+  commitProductImport: (draftId: string, input: ProductImportCommit) =>
+    request<ProductImportResult>(`/digital-employee/marketing/imports/drafts/${encodeURIComponent(draftId)}/commit`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 
   getMarketingBrandAssets: () => request<MarketingBrandAssets | null>("/digital-employee/marketing/brand-assets"),
 

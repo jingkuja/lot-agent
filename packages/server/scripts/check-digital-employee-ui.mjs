@@ -21,6 +21,24 @@ const NOW = "2026-11-05T02:00:00.000Z";
 const CHAT_INPUT = ".product-shell-view:not(.is-hidden) .chat-panel textarea";
 
 const PRODUCT = "00000000-0000-4000-8000-000000000301";
+const importStatusFixture = {
+  id: "22222222-2222-4222-8222-222222222222", title: "焕颜手册.md", status: "ready", errorCode: null, draftId: "33333333-3333-4333-8333-333333333333",
+  createdAt: "2026-11-06T00:00:00.000Z",
+  preview: { products: [{ name: "", target: null, items: 4 }], needsReview: 2, questions: 2, reviewUrl: "/digital-employee/materials/import/22222222-2222-4222-8222-222222222222" },
+};
+const importDraftFixture = {
+  documentId: importStatusFixture.id, title: "焕颜手册.md", truncated: true, skippedPages: 0,
+  products: [{
+    key: "p1", name: "", suggestedName: "皮肤管理中心", targetProductId: null, targetName: null, positioning: "",
+    items: [
+      { id: "p1-1", field: "verifiableFacts", text: "小气泡单次 198 元", source: "明星项目", selected: true },
+      { id: "p1-2", field: "faqs", text: "孕妇能做吗？", detail: "孕期不建议做", selected: true },
+      { id: "p1-3", field: "currentBenefits", text: "新客体验价 99 元", selected: false, flag: "benefit" },
+      { id: "p1-4", field: "verifiableFacts", text: "年卡 3999 元", selected: false, flag: "number" },
+    ],
+    questions: [{ id: "p1-name", field: "name", question: "这家店叫什么？" }, { id: "p1-q2", field: "notes", question: "优惠到什么时候？" }],
+  }],
+};
 const documentFixture = (over) => ({
   id: "d1", productId: PRODUCT, title: "费用说明.docx", mime: "application/pdf", status: "ready", errorCode: null, chars: 3200,
   skippedPages: 0, usedInTalkTrack: true, createdAt: NOW, updatedAt: NOW, ...over,
@@ -346,6 +364,29 @@ function api(state, unexpected, dailyScan = false, schedules = false) {
       state.documents = state.documents.filter((item) => !de.endsWith(item.id));
       return json({ ok: true });
     }
+    if (de === "/marketing/imports") {
+      if (method === "POST") {
+        state.imports = [{ ...importStatusFixture, status: "working", draftId: null, preview: null }];
+        state.importReads = 0;
+        return json(state.imports[0], 202);
+      }
+      state.importReads = (state.importReads ?? 0) + 1;
+      if (state.importReads > 1) state.imports = (state.imports ?? []).map((item) => item.status === "working" ? importStatusFixture : item);
+      return json({ items: state.imports ?? [] });
+    }
+    if (de === `/marketing/products/${PRODUCT}/documents/d1/import`) {
+      state.imports = [{ ...importStatusFixture, status: "working", draftId: null, preview: null }];
+      state.importReads = 0;
+      return json(state.imports[0], 202);
+    }
+    if (de.endsWith("/commit") && de.startsWith("/marketing/imports/drafts/")) {
+      state.commits = (state.commits ?? 0) + 1;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      if (state.failCommit) return json({ error: "保存失败，可以重试" }, 500);
+      state.imports = [];
+      return json({ alreadyApplied: false, entityId: PRODUCT, managementUrl: "/digital-employee/materials", saved: [{ id: PRODUCT, name: "焕颜美学", created: true, items: 3 }], dropped: 0 });
+    }
+    if (de.startsWith("/marketing/imports/")) return json({ status: importStatusFixture, draft: importDraftFixture });
     if (de === "/marketing/brand-assets") return json(null);
     unexpected.push(`${method} ${path}`);
     return json({}, 404);
@@ -721,6 +762,94 @@ try {
     await phone.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
     await snap(phone.page, "materials-documents-en-390-dark.png");
     await phone.close();
+  }
+
+  // A file becomes a one-screen review: blanks are fine, a name is the only thing it insists on.
+  {
+    const state = { ...fixtures(), products: [productFixture], documents: [documentFixture()] };
+    const { page, close } = await open("/digital-employee/materials", { state });
+    await page.getByRole("button", { name: "从文件导入" }).waitFor();
+    await page.locator(".de-header-actions input[type=file]").setInputFiles({ name: "手册.md", mimeType: "text/markdown", buffer: Buffer.from("# 手册") });
+    const row = page.locator(".product-import-strip li", { hasText: "焕颜手册.md" });
+    await row.getByText("整理好了：1 个产品，4 条内容").waitFor({ timeout: 8000 });
+    await row.getByRole("button", { name: "看一下" }).click();
+    const review = page.getByRole("dialog", { name: "确认产品资料" });
+    await review.getByText("这几条要你确认").waitFor();
+    await review.getByText("文件里没找到这个数字，核对后再勾选").waitFor();
+    await review.getByText("将保存 2 条，空着的以后再补").waitFor();
+
+    assert.equal(await review.getByPlaceholder("这家店叫什么？").inputValue(), "皮肤管理中心");
+    await review.getByPlaceholder("这家店叫什么？").fill("焕颜美学");
+
+    await review.getByRole("checkbox", { name: "新客体验价 99 元" }).check();
+    await review.locator(".product-import-date input").fill("2026-12-31");
+    await review.getByText("将保存 3 条，空着的以后再补").waitFor();
+    await review.getByText("已整理 2 条").click();
+    const fact = review.locator(".product-import-item", { hasText: "小气泡单次 198 元" });
+    await fact.getByRole("button", { name: "修改" }).click();
+    await fact.locator("textarea").first().fill("小气泡单次 198 元，60 分钟");
+    await fact.getByRole("button", { name: "完成" }).click();
+
+    state.failCommit = true;
+    await review.getByRole("button", { name: "保存", exact: true }).click();
+    await review.getByText("保存失败，可以重试").waitFor();
+    await review.getByRole("checkbox", { name: "新客体验价 99 元" }).isChecked().then((checked) => assert(checked, "a failed save keeps the choices"));
+    state.failCommit = false;
+    state.commits = 0;
+    await review.getByRole("button", { name: "保存", exact: true }).dblclick();
+    await page.getByText("已保存到：焕颜美学").waitFor();
+    await review.waitFor({ state: "detached" });
+    assert.equal(state.commits, 1, "a double click saves once");
+    const committed = JSON.parse(state.writes.filter((write) => write.path.endsWith("/commit")).at(-1).body);
+    assert.deepEqual(committed.answers, [{ id: "p1-name", answer: "焕颜美学" }]);
+    const [sent] = committed.products;
+    assert.equal(sent.items.find((item) => item.id === "p1-1").text, "小气泡单次 198 元，60 分钟");
+    assert.equal(sent.items.find((item) => item.id === "p1-3").validUntil, "2026-12-31");
+    assert.equal(sent.items.find((item) => item.id === "p1-4").selected, false);
+    assert.equal(await page.locator(".product-import-strip").count(), 0);
+    await close();
+
+    // The today page opens the same review, and a ready file on a product can be sorted later.
+    const today = { ...fixtures(), products: [productFixture], documents: [documentFixture()], imports: [importStatusFixture] };
+    today.proposals = new Map([["dr1", {
+      id: "dr1", kind: "product_import", confirmable: false, conversationId: null, createdAt: "2026-11-06T00:00:00.000Z", expiresAt: "2026-11-13T00:00:00.000Z",
+      preview: { title: "焕颜手册.md", products: [{ name: "", target: null, items: 4 }], reviewUrl: importStatusFixture.preview.reviewUrl },
+    }]]);
+    const home = await open("/digital-employee/today", { state: today });
+    const card = home.page.locator(".de-today-card", { hasText: "整理好了：焕颜手册.md" });
+    await card.getByText("1 个产品，4 条内容").waitFor();
+    assert.equal(await card.getByRole("button", { name: "去对话里选择" }).count(), 0);
+    await card.getByRole("button", { name: "看一下" }).click();
+    await home.page.getByRole("dialog", { name: "确认产品资料" }).waitFor();
+    await home.page.getByRole("button", { name: "关闭" }).first().click();
+    await home.page.waitForFunction(() => !window.location.pathname.includes("import"));
+
+    today.imports = [];
+    await home.page.getByRole("button", { name: "补充资料 3" }).click();
+    await home.page.getByRole("dialog", { name: "补充资料" }).getByRole("button", { name: "整理进资料" }).click();
+    await home.page.locator(".product-import-strip").getByText("整理好了：1 个产品，4 条内容").waitFor({ timeout: 8000 });
+    await home.close();
+
+    const phone = await open(importStatusFixture.preview.reviewUrl, {
+      state: { ...fixtures(), products: [productFixture], documents: [], imports: [importStatusFixture] }, language: "en", width: 390,
+    });
+    const english = phone.page.getByRole("dialog", { name: "Confirm product info" });
+    await english.getByText("Please confirm these").waitFor();
+    assert(await noHorizontalScroll(phone.page), "import review scrolls sideways at 390");
+    await snap(phone.page, "materials-import-en-390-light.png");
+    await phone.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    await snap(phone.page, "materials-import-en-390-dark.png");
+    const chrome = (await english.locator(".de-modal-head, .product-import-footer, .product-import-identity, .product-import-group h3").allInnerTexts()).join(" ");
+    assert(!/[一-鿿]/.test(chrome.replace(/焕颜手册\.md|API 网关/g, "")), `import review: untranslated copy: ${chrome}`);
+    await phone.close();
+    await (async () => {
+      const wide = await open(importStatusFixture.preview.reviewUrl, {
+        state: { ...fixtures(), products: [productFixture], documents: [], imports: [importStatusFixture] },
+      });
+      await wide.page.getByRole("dialog", { name: "确认产品资料" }).getByText("这几条要你确认").waitFor();
+      await snap(wide.page, "materials-import-zh-1440.png");
+      await wide.close();
+    })();
   }
 
   // Scheduled work stays hidden until its own switch is on, whatever the daily scan does.

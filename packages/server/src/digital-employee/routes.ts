@@ -20,6 +20,8 @@ import {
   parseMarketingProduct,
   parseMarketingProductList,
   parseMarketingProductUpdate,
+  parseProductImportCommit,
+  parseProductImportStart,
 } from "./marketing-validators.js";
 import {
   parseActionResult,
@@ -409,6 +411,67 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
         c.get("userId"), parseEntityId(c.req.param("id"), "productId"), parseEntityId(c.req.param("documentId"), "documentId")
       );
       return c.json({ ok: true });
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.post("/marketing/products/:id/documents/:documentId/import", async (c) => {
+    try {
+      return c.json(await service.productImports.startFromDocument(
+        c.get("userId"), parseEntityId(c.req.param("id"), "productId"), parseEntityId(c.req.param("documentId"), "documentId")
+      ), 202);
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.get("/marketing/imports", async (c) => {
+    try {
+      return c.json({ items: await service.productImports.list(c.get("userId")) });
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.post("/marketing/imports", async (c) => {
+    try {
+      return c.json(await service.productImports.start(c.get("userId"), parseProductImportStart(await body(c))), 202);
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.get("/marketing/imports/:id", async (c) => {
+    try {
+      return c.json(await service.productImports.review(c.get("userId"), parseEntityId(c.req.param("id"), "importId")));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.post("/marketing/imports/:id/retry", async (c) => {
+    try {
+      return c.json(await service.productImports.retry(c.get("userId"), parseEntityId(c.req.param("id"), "importId")), 202);
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.delete("/marketing/imports/:id", async (c) => {
+    try {
+      await service.productImports.discard(c.get("userId"), parseEntityId(c.req.param("id"), "importId"));
+      return c.json({ ok: true });
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.post("/marketing/imports/drafts/:draftId/commit", async (c) => {
+    try {
+      return c.json(await service.productImports.commit(
+        c.get("userId"), parseEntityId(c.req.param("draftId"), "draftId"), parseProductImportCommit(await body(c))
+      ));
     } catch (error) {
       return respondError(c, error);
     }

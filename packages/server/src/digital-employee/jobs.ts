@@ -3,10 +3,12 @@ import type { DB } from "../db/database.js";
 import { CustomerAcquisitionService } from "./acquisition-service.js";
 import { BriefService, briefMessage } from "./brief-service.js";
 import { digitalEmployeeDailyScanEnabled, digitalEmployeeSchedulesEnabled } from "./feature-scope.js";
+import { MarketingMaterialsService } from "./marketing-service.js";
 import { OpportunityService } from "./opportunity-service.js";
 import { PRODUCT_DOCUMENT_JOB, ProductDocumentService, type ProductDocumentParser } from "./product-document-service.js";
 import { ProposalService } from "./proposal-service.js";
-import { createOpportunityAdviceGenerator, createScheduleReportGenerator } from "./runtime.js";
+import { ProductImportService } from "./product-import-service.js";
+import { createOpportunityAdviceGenerator, createProductImportGenerator, createScheduleReportGenerator } from "./runtime.js";
 import { SCHEDULE_JOB, ScheduleService } from "./schedule-service.js";
 import type { DigitalEmployeeService } from "./service.js";
 import { EmployeeSettingsService } from "./settings-service.js";
@@ -126,9 +128,12 @@ export function registerDigitalEmployeeWorkerJobs({ queue, db, adviceLlm, checkQ
     return { status: await schedules.execute(job.userId, runId, execution, control.signal) };
   });
   const productDocuments = new ProductDocumentService(db.pool);
+  const productImports = new ProductImportService(db.pool, new MarketingMaterialsService(db), productDocuments);
+  const generateImport = createProductImportGenerator(adviceLlm);
   queue.process(PRODUCT_DOCUMENT_JOB, async (job, control) => {
     const { documentId } = job.input as { documentId: string };
     await productDocuments.parse(job.userId, documentId, parseProductDocument, control.signal);
+    await productImports.run(job.userId, documentId, generateImport, control.signal);
     return { documentId };
   });
 }

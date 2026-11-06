@@ -17,9 +17,11 @@ import {
   type CampaignFitDraft,
   type CampaignRecommendationDraft,
 } from "./acquisition-types.js";
-import { DIGITAL_EMPLOYEE_LLM_UNAVAILABLE, resolveDigitalEmployeeLlm } from "./llm.js";
+import { DIGITAL_EMPLOYEE_LLM_UNAVAILABLE, MANAGED_CREDENTIAL_UNAVAILABLE, resolveDigitalEmployeeLlm } from "./llm.js";
 import type { OpportunityAdvicePatch, OpportunityService } from "./opportunity-service.js";
 import { TALK_TRACK_CONTEXT_CHARS } from "./opportunity-types.js";
+import { IMPORT_SYSTEM_PROMPT, importUserPrompt, parseImportOutput } from "./product-import.js";
+import type { ProductImportGenerator } from "./product-import-service.js";
 import { cohortLlmMetrics } from "./profile/cohort-summary.js";
 import { DigitalEmployeeService } from "./service.js";
 import { GenerationFailedError } from "./errors.js";
@@ -127,7 +129,7 @@ export function createOwnerLlmResolver(ports: OwnerLlmPorts): OwnerLlmResolver {
   return async (userId, requested) => {
     if (!userId) throw new Error(DIGITAL_EMPLOYEE_LLM_UNAVAILABLE);
     const activeApiKey = await ports.db.getUserApiKey(userId, ports.managedKeysEnabled);
-    if (ports.managedKeysEnabled && !activeApiKey) throw new Error("managed New API credential unavailable");
+    if (ports.managedKeysEnabled && !activeApiKey) throw new Error(MANAGED_CREDENTIAL_UNAVAILABLE);
     let apiKeys: string[] = [];
     try {
       apiKeys = ports.db.getUserRuntimeApiKeys
@@ -207,6 +209,22 @@ export function createScheduleReportGenerator(ports: { resolveLlm: OwnerLlmResol
       { role: "user", content: JSON.stringify(template.data).slice(0, 30_000) },
     ], { signal: generationSignal(signal, SCHEDULE_REPORT_TIMEOUT_MS), params: { temperature: 0.3, maxTokens: 3_200, reasoningEffort: BACKGROUND_EFFORT } });
     return { report: parseScheduleReport(raw), modelId: usedModelId };
+  };
+}
+
+/** The longest input here: a whole file, read once in the background. */
+const IMPORT_TIMEOUT_MS = 240_000;
+const IMPORT_MAX_TOKENS = 8_000;
+
+/** A failed read stays failed until the owner retries it, so one file is never billed twice unasked. */
+export function createProductImportGenerator(ports: { resolveLlm: OwnerLlmResolver }): ProductImportGenerator {
+  return async ({ userId, signal, ...input }) => {
+    const { llm } = await ports.resolveLlm(userId);
+    const raw = await complete(llm, [
+      { role: "system", content: IMPORT_SYSTEM_PROMPT },
+      { role: "user", content: importUserPrompt(input) },
+    ], { signal: generationSignal(signal, IMPORT_TIMEOUT_MS), params: { temperature: 0.1, maxTokens: IMPORT_MAX_TOKENS, reasoningEffort: BACKGROUND_EFFORT } });
+    return parseImportOutput(raw);
   };
 }
 
@@ -412,7 +430,7 @@ export function createDigitalEmployeeRuntime(ports: DigitalEmployeeRuntimePorts)
     tools: [
       ...createCustomerCaptureTools(service),
       ...createCustomerProfileTools(service),
-      ...createMarketingMaterialTools(service.marketingMaterials, service.productDocuments),
+      ...createMarketingMaterialTools(service.marketingMaterials, service.productDocuments, service.productImports),
       ...createCustomerAcquisitionTools(service.customerAcquisition),
       ...createOpportunityAdvisorTools(service),
       ...createMarketingVideoTools(ports.marketingVideoDrafts, (userId, fields) => service.customerAcquisition.assertGroupContent(userId, fields)),

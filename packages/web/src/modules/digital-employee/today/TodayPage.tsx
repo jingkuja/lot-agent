@@ -188,7 +188,12 @@ export function TodayPage({
                       {pending === item.id ? t("处理中…") : t("确认")}
                     </button>
                   )}
-                  {conversationId && (
+                  {proposal.kind === "product_import" && (
+                    <button type="button" className="de-primary-button" onClick={() => onOpenLink(String(proposal.preview.reviewUrl))}>
+                      {t("看一下")}
+                    </button>
+                  )}
+                  {conversationId && proposal.kind !== "product_import" && (
                     <button type="button" className="de-secondary-button" onClick={() => onOpenConversation(conversationId)}>
                       {proposal.confirmable ? t("修改") : t("去对话里选择")}
                     </button>

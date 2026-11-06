@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDailyScanFollowUp, deliverBriefs, registerDigitalEmployeeWorkerJobs } from "./jobs.js";
 import { OpportunityService } from "./opportunity-service.js";
+import { PRODUCT_DOCUMENT_JOB, ProductDocumentService } from "./product-document-service.js";
+import { ProductImportService } from "./product-import-service.js";
 
 const counts = { scanned: 1, created: 0, confirm: 1, followUps: 0, results: 0, pending: 1 };
 
@@ -44,9 +46,9 @@ describe("brief delivery", () => {
 
 describe("worker job", () => {
   function worker() {
-    const handlers = new Map<string, (job: any) => Promise<unknown>>();
+    const handlers = new Map<string, (job: any, control?: any) => Promise<unknown>>();
     const queue = { process: vi.fn((name: string, handler: any) => handlers.set(name, handler)), updateProgress: vi.fn(async () => undefined) };
-    return { queue, run: (input: unknown) => handlers.get("opportunity.discover")!({ id: "t1", userId: "u1", input }) };
+    return { queue, handlers, run: (input: unknown) => handlers.get("opportunity.discover")!({ id: "t1", userId: "u1", input }) };
   }
 
   it("skips the brief for a manual run", async () => {
@@ -60,6 +62,25 @@ describe("worker job", () => {
     expect(runDiscovery).toHaveBeenCalledWith("u1", "r1", expect.any(Function), { useModel: undefined });
     expect(query).not.toHaveBeenCalled();
     runDiscovery.mockRestore();
+  });
+
+  it("reads a document, then sorts it when an import is waiting", async () => {
+    const parse = vi.spyOn(ProductDocumentService.prototype, "parse").mockResolvedValue(undefined);
+    const importing = vi.spyOn(ProductImportService.prototype, "run").mockResolvedValue(undefined);
+    const { queue, handlers } = worker();
+    const parseProductDocument = vi.fn() as any;
+    registerDigitalEmployeeWorkerJobs({
+      queue: queue as any, db: { pool: {} } as any, adviceLlm: { resolveLlm: vi.fn(), recordUsage: vi.fn(), english: false } as any,
+      parseProductDocument, checkQuota: vi.fn(),
+    });
+    const job = { id: "t1", userId: "u1", input: { documentId: "d1" } };
+    const signal = new AbortController().signal;
+    await handlers.get(PRODUCT_DOCUMENT_JOB)!(job, { signal });
+    expect(parse).toHaveBeenCalledWith("u1", "d1", parseProductDocument, signal);
+    expect(importing).toHaveBeenCalledWith("u1", "d1", expect.any(Function), signal);
+    expect(parse.mock.invocationCallOrder[0]).toBeLessThan(importing.mock.invocationCallOrder[0]);
+    parse.mockRestore();
+    importing.mockRestore();
   });
 
   it("still reports the scan when the brief fails", async () => {

@@ -3,38 +3,25 @@ import { api } from "../../../api/client.js";
 import { useI18n } from "../../../i18n/index.js";
 import { employeeApi } from "../api.js";
 import type { MarketingProduct, ProductDocument, ProductDocumentList } from "../types.js";
+import { DOCUMENT_ACCEPT, DOCUMENT_ERROR_TEXT, DOCUMENT_NO_RETRY, uploadable } from "./product-files.js";
 
-const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv";
 const POLL_MS = 3000;
-/** Browsers leave `type` empty for some extensions; the upload needs one. */
-const MIME_BY_EXTENSION: Record<string, string> = { md: "text/markdown", txt: "text/plain", csv: "text/csv" };
-
-const ERROR_TEXT: Record<string, string> = {
-  OCR_REQUIRED: "这份文件是扫描件或图片，暂时读不了文字",
-  EMPTY_TEXT: "文件里没有读到文字",
-  PASSWORD_REQUIRED: "文件设置了密码，去掉密码后再上传",
-  TEXT_LIMIT_EXCEEDED: "文件太大，暂时读不完",
-  DOCUMENT_TOO_LARGE: "文件太大，暂时读不完",
-  TOO_MANY_PAGES: "文件太大，暂时读不完",
-  SOURCE_MISSING: "原文件已不在，请重新上传",
-  QUEUE_UNAVAILABLE: "暂时排不上队，可以重试",
-  PARSE_STALLED: "处理超时，可以重试",
-};
-const NO_RETRY = new Set(["OCR_REQUIRED", "EMPTY_TEXT", "PASSWORD_REQUIRED", "TEXT_LIMIT_EXCEEDED", "DOCUMENT_TOO_LARGE", "TOO_MANY_PAGES", "SOURCE_MISSING"]);
 
 interface Upload { key: string; file: File; error?: string }
-
-function uploadable(file: File): File {
-  if (file.type) return file;
-  const type = MIME_BY_EXTENSION[file.name.split(".").pop()?.toLowerCase() ?? ""];
-  return type ? new File([file], file.name, { type }) : file;
-}
 
 function working(document: ProductDocument): boolean {
   return document.status === "pending" || document.status === "processing";
 }
 
-export function ProductDocumentsDialog({ product, onClose, onChanged }: { product: MarketingProduct; onClose: () => void; onChanged: () => void }) {
+interface Props {
+  product: MarketingProduct;
+  onClose: () => void;
+  onChanged: () => void;
+  /** The import shows its progress on the page, behind this dialog. */
+  onImporting: () => void;
+}
+
+export function ProductDocumentsDialog({ product, onClose, onChanged, onImporting }: Props) {
   const { t } = useI18n();
   const [list, setList] = useState<ProductDocumentList | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -125,7 +112,7 @@ export function ProductDocumentsDialog({ product, onClose, onChanged }: { produc
           <strong>{t("把手册或说明文件拖到这里，或点击选择")}</strong>
           <span>{t("支持 PDF、Word、PPT、Excel 和文本文件；写话术时会自动参考")}</span>
         </button>
-        <input ref={input} type="file" hidden multiple accept={ACCEPT} onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
+        <input ref={input} type="file" hidden multiple accept={DOCUMENT_ACCEPT} onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
 
         {error && <div className="de-inline-error">{t(error)}<button onClick={() => void load()}>{t("重试")}</button></div>}
 
@@ -149,6 +136,10 @@ export function ProductDocumentsDialog({ product, onClose, onChanged }: { produc
             document={document}
             busy={busyId === document.id}
             onRetry={() => void act(document, () => employeeApi.retryProductDocument(product.id, document.id))}
+            onImport={() => void act(document, async () => {
+              await employeeApi.importProductDocument(product.id, document.id);
+              onImporting();
+            })}
             onRemove={() => remove(document)}
           />)}
         </ul>
@@ -158,10 +149,12 @@ export function ProductDocumentsDialog({ product, onClose, onChanged }: { produc
   </div>;
 }
 
-function DocumentRow({ document, busy, onRetry, onRemove }: { document: ProductDocument; busy: boolean; onRetry: () => void; onRemove: () => void }) {
+interface RowProps { document: ProductDocument; busy: boolean; onRetry: () => void; onImport: () => void; onRemove: () => void }
+
+function DocumentRow({ document, busy, onRetry, onImport, onRemove }: RowProps) {
   const { t } = useI18n();
   const failed = document.status === "failed";
-  const status = failed ? t(ERROR_TEXT[document.errorCode ?? ""] ?? "这份文件没读出来，可以重试")
+  const status = failed ? t(DOCUMENT_ERROR_TEXT[document.errorCode ?? ""] ?? "这份文件没读出来，可以重试")
     : working(document) ? t("正在读取…")
       : document.usedInTalkTrack ? t("已用于话术")
         : t("内容太长，话术暂不使用，聊天中仍可查阅");
@@ -172,7 +165,8 @@ function DocumentRow({ document, busy, onRetry, onRemove }: { document: ProductD
       {document.skippedPages > 0 && <small>{t(`有 ${document.skippedPages} 页是图片，暂未读取`)}</small>}
     </div>
     <div className="product-documents-actions">
-      {failed && !NO_RETRY.has(document.errorCode ?? "") && <button className="de-row-action" disabled={busy} onClick={onRetry}>{t("重试")}</button>}
+      {failed && !DOCUMENT_NO_RETRY.has(document.errorCode ?? "") && <button className="de-row-action" disabled={busy} onClick={onRetry}>{t("重试")}</button>}
+      {document.status === "ready" && <button className="de-row-action" disabled={busy} onClick={onImport}>{t("整理进资料")}</button>}
       <button className="de-row-action" disabled={busy} onClick={onRemove}>{t("删除")}</button>
     </div>
   </li>;

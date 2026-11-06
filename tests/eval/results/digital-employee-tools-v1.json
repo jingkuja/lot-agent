@@ -1,11 +1,11 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "deepseek-v4.1-flash",
-  "ranAt": "2026-11-06T03:37:56.673Z",
-  "toolDefinitionChars": 32092,
-  "passed": 34,
-  "total": 35,
-  "rate": 0.9714285714285714,
+  "ranAt": "2026-11-06T06:16:25.232Z",
+  "toolDefinitionChars": 33395,
+  "passed": 37,
+  "total": 38,
+  "rate": 0.9736842105263158,
   "threshold": 0.9,
   "results": [
     {
@@ -97,7 +97,7 @@
     {
       "id": "customer-capture-purchase",
       "object": "customer",
-      "actual": "search_marketing_materials",
+      "actual": "search_customer_profiles",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -108,7 +108,7 @@
     {
       "id": "customer-capture-trial",
       "object": "customer",
-      "actual": "search_marketing_materials",
+      "actual": "search_customer_profiles",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -196,7 +196,7 @@
     {
       "id": "followup-result",
       "object": "follow-up",
-      "actual": "search_customer_work_queue",
+      "actual": "search_customer_profiles",
       "expected": [
         "search_customer_work_queue",
         "search_customer_profiles",
@@ -300,6 +300,37 @@
       "actual": "search_marketing_materials",
       "expected": [
         "read_product_documents",
+        "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-file-import",
+      "object": "product",
+      "actual": "import_product_file",
+      "expected": [
+        "import_product_file",
+        "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-file-silent",
+      "object": "product",
+      "actual": "import_product_file",
+      "expected": [
+        "import_product_file",
+        "search_marketing_materials",
+        "ask_user"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-file-supplement",
+      "object": "product",
+      "actual": "import_product_file",
+      "expected": [
+        "import_product_file",
         "search_marketing_materials"
       ],
       "pass": true

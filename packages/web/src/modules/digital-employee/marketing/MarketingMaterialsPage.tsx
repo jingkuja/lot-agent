@@ -1,19 +1,29 @@
 import { useI18n } from "../../../i18n/index.js";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "../../../api/client.js";
 import { employeeApi } from "../api.js";
 import type {
   MarketingBrandAssets,
   MarketingProduct,
   MarketingProductInput,
   MarketingVisualAsset,
+  ProductImportResult,
+  ProductImportStatus,
 } from "../types.js";
+import { DOCUMENT_ACCEPT, DOCUMENT_ERROR_TEXT, DOCUMENT_NO_RETRY, uploadable } from "./product-files.js";
 import { ProductDocumentsDialog } from "./ProductDocumentsDialog.js";
+import { ProductImportDialog } from "./ProductImportDialog.js";
+
+const IMPORT_POLL_MS = 3000;
 
 interface Props {
   onSelect?: (product: MarketingProduct) => void;
+  /** The review named by the address, from the today page or a chat link. */
+  importId?: string | null;
+  onImportClosed?: () => void;
 }
 
-export function MarketingMaterialsPage({ onSelect }: Props) {
+export function MarketingMaterialsPage({ onSelect, importId = null, onImportClosed }: Props) {
   const { t } = useI18n();
   const [products, setProducts] = useState<MarketingProduct[]>([]);
   const [brand, setBrand] = useState<MarketingBrandAssets | null>(null);
@@ -24,6 +34,12 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
   const [editingProduct, setEditingProduct] = useState<MarketingProduct | "new" | null>(null);
   const [editingBrand, setEditingBrand] = useState(false);
   const [documentsOf, setDocumentsOf] = useState<MarketingProduct | null>(null);
+  const [imports, setImports] = useState<ProductImportStatus[]>([]);
+  const [reviewing, setReviewing] = useState<string | null>(importId);
+  const [uploading, setUploading] = useState<string[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
@@ -49,6 +65,70 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
 
   useEffect(() => { void load(); }, [load]);
 
+  const loadImports = useCallback(async () => {
+    try {
+      setImports((await employeeApi.listProductImports()).items);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "导入进度加载失败");
+    }
+  }, []);
+
+  useEffect(() => { void loadImports(); }, [loadImports]);
+  useEffect(() => { setReviewing(importId); }, [importId]);
+  const importing = imports.some((item) => item.status === "working");
+  useEffect(() => {
+    if (!importing) return;
+    const timer = window.setTimeout(() => void loadImports(), IMPORT_POLL_MS);
+    return () => window.clearTimeout(timer);
+  }, [importing, imports, loadImports]);
+
+  const importFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setNotice(null);
+    for (const file of Array.from(files)) {
+      setUploading((current) => [...current, file.name]);
+      try {
+        const asset = await api.uploadFile(uploadable(file));
+        await employeeApi.startProductImport(asset.assetId);
+        await loadImports();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "上传失败");
+      } finally {
+        setUploading((current) => current.filter((name) => name !== file.name));
+      }
+    }
+  };
+
+  const closeReview = () => {
+    setReviewing(null);
+    if (importId) onImportClosed?.();
+  };
+
+  const importSaved = (result: ProductImportResult) => {
+    closeReview();
+    setNotice(result.alreadyApplied ? "这份文件之前已经保存过了" : t("已保存到：{0}", [result.saved.map((item) => item.name).join("、")]));
+    void load();
+    void loadImports();
+  };
+
+  const retryImport = async (id: string) => {
+    try {
+      await employeeApi.retryProductImport(id);
+      await loadImports();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "重试失败");
+    }
+  };
+
+  const removeImport = async (id: string) => {
+    try {
+      await employeeApi.discardProductImport(id);
+      await loadImports();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "操作失败");
+    }
+  };
+
   const saveProduct = async (input: MarketingProductInput) => {
     if (editingProduct === "new") await employeeApi.createMarketingProduct(input);
     else if (editingProduct) await employeeApi.updateMarketingProduct(editingProduct.id, { ...input, version: editingProduct.version });
@@ -67,16 +147,31 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
   };
 
   return (
-    <div className="de-page marketing-materials-page">
+    <div
+      className={`de-page marketing-materials-page${dropping ? " is-dropping" : ""}`}
+      onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDropping(true); } }}
+      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false); }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        setDropping(false);
+        void importFiles(event.dataTransfer.files);
+      }}
+    >
       <header className="de-page-header">
         <div>
           <p className="de-eyebrow">{t("数字员工 / 营销资料")}</p>
           <h1>{t("产品与品牌事实库")}</h1>
           <p>{t("统一维护产品能说什么、品牌怎么说；商机雷达的单客跟进与获客宝的客群营销共同引用这份事实。")}</p>
         </div>
-        <button className="de-primary-button" onClick={() => setEditingProduct("new")}>
-          {t("＋ 新建产品")}
-        </button>
+        <div className="de-header-actions">
+          <button className="de-secondary-button" onClick={() => setEditingProduct("new")}>{t("＋ 新建产品")}</button>
+          <button className="de-primary-button" onClick={() => fileInput.current?.click()}>{t("从文件导入")}</button>
+          <input
+            ref={fileInput} type="file" hidden multiple accept={DOCUMENT_ACCEPT}
+            onChange={(event) => { void importFiles(event.target.files); event.target.value = ""; }}
+          />
+        </div>
       </header>
 
       {error && (
@@ -84,6 +179,26 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
           {t(error)}
           <button onClick={() => void load()}>{t("重试")}</button>
         </div>
+      )}
+
+      {notice && (
+        <div className="de-inline-notice" role="status">
+          <span>{t(notice)}</span>
+          <button onClick={() => setNotice(null)}>{t("关闭")}</button>
+        </div>
+      )}
+
+      {(uploading.length > 0 || imports.length > 0) && (
+        <ul className="product-import-strip" aria-label={t("正在导入的文件")}>
+          {uploading.map((name) => <li key={name}><div><strong>{name}</strong><small>{t("上传中…")}</small></div></li>)}
+          {imports.map((item) => <ImportRow
+            key={item.id}
+            item={item}
+            onReview={() => setReviewing(item.id)}
+            onRetry={() => void retryImport(item.id)}
+            onRemove={() => void removeImport(item.id)}
+          />)}
+        </ul>
       )}
 
       <section className="marketing-brand-card">
@@ -135,7 +250,7 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
           <div className="de-state de-empty-state">
             <span className="de-empty-icon">◇</span>
             <strong>{debouncedQuery ? t("没有匹配的产品") : t("还没有产品资料")}</strong>
-            <p>{t("可以在此结构化维护，也可以回到对话直接告诉数字员工。")}</p>
+            <p>{t("把手册、价目表或想法文件拖进来，也可以直接告诉数字员工。")}</p>
             {!debouncedQuery && (
               <button className="de-primary-button" onClick={() => setEditingProduct("new")}>
                 {t("新建第一条产品资料")}
@@ -164,7 +279,23 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
       {editingProduct && (
         <ProductEditor product={editingProduct === "new" ? undefined : editingProduct} onClose={() => setEditingProduct(null)} onSave={saveProduct} />
       )}
-      {documentsOf && <ProductDocumentsDialog product={documentsOf} onClose={() => setDocumentsOf(null)} onChanged={() => void load()} />}
+      {documentsOf && (
+        <ProductDocumentsDialog
+          product={documentsOf}
+          onClose={() => setDocumentsOf(null)}
+          onChanged={() => void load()}
+          onImporting={() => { setDocumentsOf(null); void loadImports(); }}
+        />
+      )}
+      {reviewing && (
+        <ProductImportDialog
+          importId={reviewing}
+          products={products}
+          onClose={closeReview}
+          onSaved={importSaved}
+          onDiscarded={() => { closeReview(); void loadImports(); }}
+        />
+      )}
       {editingBrand && (
         <BrandEditor
           brand={brand}
@@ -178,6 +309,28 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
       )}
     </div>
   );
+}
+
+function ImportRow({ item, onReview, onRetry, onRemove }: {
+  item: ProductImportStatus; onReview: () => void; onRetry: () => void; onRemove: () => void;
+}) {
+  const { t } = useI18n();
+  const found = item.preview?.products.reduce((sum, product) => sum + product.items, 0) ?? 0;
+  const count = item.preview?.products.length ?? 0;
+  const status = item.status === "ready" ? t("整理好了：{0} 个产品，{1} 条内容", [count, found])
+    : item.status === "failed" ? t(DOCUMENT_ERROR_TEXT[item.errorCode ?? ""] ?? "这份文件没读出来，可以重试")
+      : t("正在读取和整理…");
+  return <li>
+    <div>
+      <strong>{item.title}</strong>
+      <small className={item.status === "failed" ? "is-error" : undefined}>{status}</small>
+    </div>
+    <div className="product-documents-actions">
+      {item.status === "ready" && <button className="de-primary-button" onClick={onReview}>{t("看一下")}</button>}
+      {item.status === "failed" && !DOCUMENT_NO_RETRY.has(item.errorCode ?? "") && <button className="de-row-action" onClick={onRetry}>{t("重试")}</button>}
+      {item.status === "failed" && <button className="de-row-action" onClick={onRemove}>{t("移除")}</button>}
+    </div>
+  </li>;
 }
 
 function ProductCard({ product, onEdit, onDocuments, onArchive }: {

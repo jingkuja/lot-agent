@@ -3,6 +3,7 @@ import type { CustomerAcquisitionService } from "./acquisition-service.js";
 import { ConversationActionDrafts } from "./conversation-drafts.js";
 import { ConflictError, InputError, NotFoundError } from "./errors.js";
 import type { OpportunityService } from "./opportunity-service.js";
+import { PRODUCT_IMPORT_KIND } from "./product-import.js";
 
 export interface PendingProposal {
   id: string;
@@ -71,8 +72,8 @@ export class ProposalService {
         [userId, LIST_LIMIT]
       ),
     ]);
-    const known = drafts.filter((draft) => this.commits[draft.kind]).map((draft): PendingProposal => ({
-      id: draft.id, kind: draft.kind, confirmable: true, conversationId: draft.conversationId,
+    const known = drafts.filter((draft) => this.commits[draft.kind] || draft.kind === PRODUCT_IMPORT_KIND).map((draft): PendingProposal => ({
+      id: draft.id, kind: draft.kind, confirmable: Boolean(this.commits[draft.kind]), conversationId: draft.conversationId,
       preview: draft.preview, createdAt: draft.createdAt, expiresAt: draft.expiresAt,
     }));
     const captured = captures.rows.map((row): PendingProposal => ({
@@ -116,7 +117,10 @@ export class ProposalService {
   async dismiss(userId: string, id: string): Promise<{ id: string; status: "dismissed" }> {
     const draft = await this.drafts.find(userId, id);
     if (draft) {
-      if (draft.status === "dismissed" || await this.drafts.dismiss(userId, id)) return { id, status: "dismissed" };
+      if (draft.status === "dismissed" || await this.drafts.dismiss(userId, id)) {
+        if (draft.kind === PRODUCT_IMPORT_KIND) await this.discardImportFile(userId, id);
+        return { id, status: "dismissed" };
+      }
       throw new ConflictError(draft.status === "applied" ? "这项已经确认过了" : "这项确认正在处理，请稍后刷新");
     }
     for (const table of CUSTOMER_DRAFT_TABLES) {
@@ -131,6 +135,18 @@ export class ProposalService {
       if (current.rows[0]) throw new ConflictError("这项已经处理过了");
     }
     throw new NotFoundError("未找到待确认事项");
+  }
+
+  /** A file dropped for an import that was turned down belongs to no product, so nothing keeps it. */
+  private async discardImportFile(userId: string, draftId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE marketing_product_documents
+       SET import_status = 'none', updated_at = now(),
+           deleted_at = CASE WHEN product_id IS NULL THEN now() ELSE deleted_at END,
+           parsed_text = CASE WHEN product_id IS NULL THEN NULL ELSE parsed_text END
+       WHERE import_draft_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+      [draftId, userId]
+    );
   }
 
   private async ownsCustomerDraft(userId: string, id: string): Promise<boolean> {

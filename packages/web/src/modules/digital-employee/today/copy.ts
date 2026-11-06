@@ -31,6 +31,11 @@ export function proposalCopy(item: TodayItem, t: Translate): { title: string; de
       return { title: t("回填投放反馈：{0}", [value("title")]), detail: null };
     case "campaign_result":
       return { title: t("写入活动结果：{0}", [value("name")]), detail: t("生成完成不算投放结果，这里记录的是真实反馈。") };
+    case "product_import": {
+      const products = (preview.products ?? []) as Array<{ items: number }>;
+      const items = products.reduce((sum, product) => sum + product.items, 0);
+      return { title: t("整理好了：{0}", [value("title")]), detail: t("{0} 个产品，{1} 条内容", [products.length, items]) };
+    }
     case "customer_capture":
       return { title: t("记录{0}的动态", [value("customerMention")]), detail: value("excerpt") || null };
     case "profile_change":

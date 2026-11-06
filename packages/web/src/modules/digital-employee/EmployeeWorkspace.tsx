@@ -179,7 +179,11 @@ export function EmployeeWorkspace({
       />;
     }
     if (view === "materials") {
-      return <MarketingMaterialsPage onSelect={(product) => setPageFocus({ type: "product", id: product.id, label: product.name })} />;
+      return <MarketingMaterialsPage
+        importId={location.importId}
+        onImportClosed={() => replacePath(employeePath("materials"))}
+        onSelect={(product) => setPageFocus({ type: "product", id: product.id, label: product.name })}
+      />;
     }
     if (view === "work-log") {
       if (location.workConversationId) {

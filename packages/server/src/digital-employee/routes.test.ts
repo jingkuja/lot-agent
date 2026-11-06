@@ -110,6 +110,30 @@ describe("digital employee profile routes", () => {
     expect(service.clearCurrentProfile).toHaveBeenCalledWith("u1", conversationId);
   });
 
+  it("checks ids and review edits before an import runs", async () => {
+    const start = vi.fn(async () => ({ id: "d1" }));
+    const commit = vi.fn(async () => ({ saved: [] }));
+    const server = app({ productImports: { start, commit } });
+    const assetId = "00000000-0000-4000-8000-000000000002";
+    const draftId = "00000000-0000-4000-8000-000000000003";
+    const post = (path: string, payload: unknown) => server.request(`/digital-employee/marketing/imports${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+
+    expect((await post("", { assetId: "../secret" })).status).toBe(400);
+    expect(start).not.toHaveBeenCalled();
+    expect((await post("", { assetId })).status).toBe(202);
+    expect(start).toHaveBeenCalledWith(expect.any(String), { assetId });
+
+    expect((await post(`/drafts/${draftId}/commit`, { products: [{ key: "../p" }] })).status).toBe(400);
+    expect(commit).not.toHaveBeenCalled();
+    const edits = { products: [{ key: "p1", targetProductId: null, items: [{ id: "p1-1", selected: true, validUntil: "2026-12-31" }] }] };
+    expect((await post(`/drafts/${draftId}/commit`, edits)).status).toBe(200);
+    expect(commit).toHaveBeenCalledWith(expect.any(String), draftId, {
+      products: [{ key: "p1", targetProductId: null, items: [{ id: "p1-1", selected: true, validUntil: "2026-12-31T00:00:00.000Z" }] }],
+    });
+  });
+
   it("checks product and asset ids before touching documents", async () => {
     const add = vi.fn(async () => ({ id: "d1" }));
     const server = app({ productDocuments: { add } });
