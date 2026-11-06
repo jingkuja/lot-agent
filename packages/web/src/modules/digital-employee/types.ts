@@ -282,7 +282,7 @@ export interface ImportItem {
   validFrom?: string | null;
   validUntil?: string | null;
   selected: boolean;
-  flag?: "number" | "contact" | "benefit" | "expired";
+  flag?: "number" | "contact" | "benefit" | "expired" | "image";
 }
 
 export interface ImportProduct {
@@ -316,6 +316,7 @@ export interface ProductImportStatus {
     questions: number;
     reviewUrl: string;
   } | null;
+  pagesRead: number;
   createdAt: string;
 }
 

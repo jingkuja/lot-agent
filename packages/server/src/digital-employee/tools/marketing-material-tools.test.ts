@@ -46,7 +46,7 @@ describe("marketing material agent tools", () => {
       truncated: false, skippedPages: 0,
       products: [{
         name: "", suggestedName: "小店", targetName: null, positioning: "",
-        items: [{ id: "p1-1", text: "198 元", selected: true }, { id: "p1-2", text: "新客 99 元", selected: false, flag: "benefit" }],
+        items: [{ id: "p1-1", text: "198 元", selected: true }, { id: "p1-2", text: "新客 99 元", selected: false, flag: "benefit" }, { id: "p1-3", text: "A3 1299 元", selected: true, flag: "image" }],
         questions: [{ id: "p1-name", field: "name", question: "" }],
       }],
     };
@@ -55,19 +55,22 @@ describe("marketing material agent tools", () => {
       const start = vi.fn(async () => ready);
       const result = await importTool("import_product_file", {
         latestAttachments: vi.fn(async () => [{ assetId: "a1", kind: "doc" }, { assetId: "a2", kind: "image" }]),
-        start, settled: vi.fn(async () => [ready]), review: vi.fn(async () => ({ draft })),
+        start, settled: vi.fn(async () => [ready, ready]), review: vi.fn(async () => ({ draft })),
       }).execute({}, context);
-      expect(start).toHaveBeenCalledOnce();
-      expect(start).toHaveBeenCalledWith("u1", { assetId: "a1", conversationId: "c1" });
+      expect(start).toHaveBeenCalledTimes(2);
+      expect(start).toHaveBeenCalledWith("u1", { assetId: "a2", conversationId: "c1" });
       expect(JSON.parse(result.content).imports[0]).toMatchObject({
         draftId: "dr1",
-        products: [{ savedAsIfUnnamed: "小店", fromFile: ["198 元"], needsOwner: [{ id: "p1-2", reason: "benefit" }], questions: [{ id: "p1-name", question: "What is this product called?" }] }],
+        products: [{
+          savedAsIfUnnamed: "小店", fromFile: ["198 元", "A3 1299 元"], readFromPictures: 1,
+          needsOwner: [{ id: "p1-2", reason: "benefit" }], questions: [{ id: "p1-name", question: "What is this product called?" }],
+        }],
       });
     });
 
-    it("says so when only pictures were sent, and starts nothing", async () => {
+    it("starts nothing when no file was sent", async () => {
       const start = vi.fn();
-      const result = await importTool("import_product_file", { latestAttachments: vi.fn(async () => [{ assetId: "a2", kind: "image" }]), start }).execute({}, context);
+      const result = await importTool("import_product_file", { latestAttachments: vi.fn(async () => []), start }).execute({}, context);
       expect(JSON.parse(result.content).imports).toEqual([]);
       expect(start).not.toHaveBeenCalled();
     });
@@ -81,10 +84,20 @@ describe("marketing material agent tools", () => {
       expect(start).toHaveBeenCalledWith("u1", expect.objectContaining({ productId: "11111111-1111-4111-8111-111111111111" }));
     });
 
+    it("refuses to save until the owner has replied", async () => {
+      const commit = vi.fn();
+      const draftId = "22222222-2222-4222-8222-222222222222";
+      const replied = vi.fn(async () => false);
+      const result = await importTool("commit_product_import", { commit, ownerRepliedSince: replied }).execute({ draftId }, context);
+      expect(result).toMatchObject({ isError: true });
+      expect(replied).toHaveBeenCalledWith("u1", draftId, "c1");
+      expect(commit).not.toHaveBeenCalled();
+    });
+
     it("commits answers and approvals by id", async () => {
       const commit = vi.fn(async () => ({ alreadyApplied: false, saved: [{ name: "小店" }] }));
       const draftId = "22222222-2222-4222-8222-222222222222";
-      await importTool("commit_product_import", { commit }).execute({
+      await importTool("commit_product_import", { commit, ownerRepliedSince: vi.fn(async () => true) }).execute({
         draftId, answers: [{ id: "p1-name", answer: "小店" }], confirmItemIds: ["p1-2"],
       }, context);
       expect(commit).toHaveBeenCalledWith("u1", draftId, { answers: [{ id: "p1-name", answer: "小店" }], confirmItemIds: ["p1-2"] });

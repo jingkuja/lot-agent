@@ -1,4 +1,4 @@
-export const DOCUMENT_ACCEPT = ".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv";
+export const DOCUMENT_ACCEPT = ".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv,.png,.jpg,.jpeg,.webp,.gif";
 
 /** Browsers leave `type` empty for some extensions; the upload needs one. */
 const MIME_BY_EXTENSION: Record<string, string> = { md: "text/markdown", txt: "text/plain", csv: "text/csv" };
@@ -6,6 +6,10 @@ const MIME_BY_EXTENSION: Record<string, string> = { md: "text/markdown", txt: "t
 export const DOCUMENT_ERROR_TEXT: Record<string, string> = {
   OCR_REQUIRED: "这份文件是扫描件或图片，暂时读不了文字",
   EMPTY_TEXT: "文件里没有读到文字",
+  OCR_EMPTY_TEXT: "文件里没有读到文字",
+  OCR_CREDENTIAL_REQUIRED: "读图片要先配好 Key，配好后可以重试",
+  OCR_QUOTA_EXCEEDED: "额度不足，充值后可以重试，已读完的页不会重复计费",
+  OCR_OUTPUT_TRUNCATED: "这张图片内容太多，没读完，可以重试",
   PASSWORD_REQUIRED: "文件设置了密码，去掉密码后再上传",
   TEXT_LIMIT_EXCEEDED: "文件太大，暂时读不完",
   DOCUMENT_TOO_LARGE: "文件太大，暂时读不完",
@@ -19,7 +23,7 @@ export const DOCUMENT_ERROR_TEXT: Record<string, string> = {
 };
 
 export const DOCUMENT_NO_RETRY = new Set([
-  "OCR_REQUIRED", "EMPTY_TEXT", "PASSWORD_REQUIRED", "TEXT_LIMIT_EXCEEDED", "DOCUMENT_TOO_LARGE", "TOO_MANY_PAGES", "SOURCE_MISSING",
+  "OCR_REQUIRED", "EMPTY_TEXT", "OCR_EMPTY_TEXT", "PASSWORD_REQUIRED", "TEXT_LIMIT_EXCEEDED", "DOCUMENT_TOO_LARGE", "TOO_MANY_PAGES", "SOURCE_MISSING",
 ]);
 
 export function uploadable(file: File): File {

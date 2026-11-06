@@ -23,6 +23,7 @@ const CHAT_INPUT = ".product-shell-view:not(.is-hidden) .chat-panel textarea";
 const PRODUCT = "00000000-0000-4000-8000-000000000301";
 const importStatusFixture = {
   id: "22222222-2222-4222-8222-222222222222", title: "焕颜手册.md", status: "ready", errorCode: null, draftId: "33333333-3333-4333-8333-333333333333",
+  pagesRead: 0,
   createdAt: "2026-11-06T00:00:00.000Z",
   preview: { products: [{ name: "", target: null, items: 4 }], needsReview: 2, questions: 2, reviewUrl: "/digital-employee/materials/import/22222222-2222-4222-8222-222222222222" },
 };
@@ -35,6 +36,7 @@ const importDraftFixture = {
       { id: "p1-2", field: "faqs", text: "孕妇能做吗？", detail: "孕期不建议做", selected: true },
       { id: "p1-3", field: "currentBenefits", text: "新客体验价 99 元", selected: false, flag: "benefit" },
       { id: "p1-4", field: "verifiableFacts", text: "年卡 3999 元", selected: false, flag: "number" },
+      { id: "p1-5", field: "verifiableFacts", text: "水光 680 元", selected: true, flag: "image" },
     ],
     questions: [{ id: "p1-name", field: "name", question: "这家店叫什么？" }, { id: "p1-q2", field: "notes", question: "优惠到什么时候？" }],
   }],
@@ -366,7 +368,7 @@ function api(state, unexpected, dailyScan = false, schedules = false) {
     }
     if (de === "/marketing/imports") {
       if (method === "POST") {
-        state.imports = [{ ...importStatusFixture, status: "working", draftId: null, preview: null }];
+        state.imports = [{ ...importStatusFixture, status: "working", draftId: null, preview: null, pagesRead: 3 }];
         state.importReads = 0;
         return json(state.imports[0], 202);
       }
@@ -771,19 +773,21 @@ try {
     await page.getByRole("button", { name: "从文件导入" }).waitFor();
     await page.locator(".de-header-actions input[type=file]").setInputFiles({ name: "手册.md", mimeType: "text/markdown", buffer: Buffer.from("# 手册") });
     const row = page.locator(".product-import-strip li", { hasText: "焕颜手册.md" });
+    await row.getByText("已读完 3 张图片，继续整理…").waitFor();
     await row.getByText("整理好了：1 个产品，4 条内容").waitFor({ timeout: 8000 });
     await row.getByRole("button", { name: "看一下" }).click();
     const review = page.getByRole("dialog", { name: "确认产品资料" });
     await review.getByText("这几条要你确认").waitFor();
     await review.getByText("文件里没找到这个数字，核对后再勾选").waitFor();
-    await review.getByText("将保存 2 条，空着的以后再补").waitFor();
+    await review.getByText("这个数字是从图片里读的，核对一下").waitFor();
+    await review.getByText("将保存 3 条，空着的以后再补").waitFor();
 
     assert.equal(await review.getByPlaceholder("这家店叫什么？").inputValue(), "皮肤管理中心");
     await review.getByPlaceholder("这家店叫什么？").fill("焕颜美学");
 
     await review.getByRole("checkbox", { name: "新客体验价 99 元" }).check();
     await review.locator(".product-import-date input").fill("2026-12-31");
-    await review.getByText("将保存 3 条，空着的以后再补").waitFor();
+    await review.getByText("将保存 4 条，空着的以后再补").waitFor();
     await review.getByText("已整理 2 条").click();
     const fact = review.locator(".product-import-item", { hasText: "小气泡单次 198 元" });
     await fact.getByRole("button", { name: "修改" }).click();

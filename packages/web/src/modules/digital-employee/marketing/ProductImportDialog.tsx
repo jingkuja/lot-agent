@@ -13,6 +13,7 @@ const FLAG_TEXT: Record<NonNullable<ImportItem["flag"]>, string> = {
   contact: "含联系方式，勾选后对外内容可以使用",
   benefit: "优惠要你确认，到期日不填就是长期有效",
   expired: "看起来已经过期",
+  image: "这个数字是从图片里读的，核对一下",
 };
 
 interface Props {

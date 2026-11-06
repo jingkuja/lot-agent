@@ -319,7 +319,7 @@ function ImportRow({ item, onReview, onRetry, onRemove }: {
   const count = item.preview?.products.length ?? 0;
   const status = item.status === "ready" ? t("整理好了：{0} 个产品，{1} 条内容", [count, found])
     : item.status === "failed" ? t(DOCUMENT_ERROR_TEXT[item.errorCode ?? ""] ?? "这份文件没读出来，可以重试")
-      : t("正在读取和整理…");
+      : item.pagesRead > 0 ? t("已读完 {0} 张图片，继续整理…", [item.pagesRead]) : t("正在读取和整理…");
   return <li>
     <div>
       <strong>{item.title}</strong>

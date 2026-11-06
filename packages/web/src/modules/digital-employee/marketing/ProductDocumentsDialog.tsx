@@ -110,7 +110,7 @@ export function ProductDocumentsDialog({ product, onClose, onChanged, onImportin
           onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }}
         >
           <strong>{t("把手册或说明文件拖到这里，或点击选择")}</strong>
-          <span>{t("支持 PDF、Word、PPT、Excel 和文本文件；写话术时会自动参考")}</span>
+          <span>{t("支持 PDF、Word、PPT、Excel、图片和文本文件；写话术时会自动参考")}</span>
         </button>
         <input ref={input} type="file" hidden multiple accept={DOCUMENT_ACCEPT} onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
 

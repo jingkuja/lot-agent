@@ -8,13 +8,15 @@ import { resolveProductMention, type NamedProduct } from "./product-match.js";
 export const PRODUCT_DOCUMENT_JOB = "employee.product_document.parse";
 /** A talk track leaves room for customer context; one product's documents may fill the rest. */
 export const PRODUCT_DOCUMENT_CHAR_LIMIT = 15_000;
+/** Pictures read per file. Past this the file still works and the rest are reported as unread. */
+export const PRODUCT_DOCUMENT_IMAGE_LIMIT = 50;
 const READ_PAGE_CHARS = 12_000;
 const STALLED_MS = 15 * 60 * 1000;
 const CATALOG_LIMIT = 200;
 const ENTITY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const READABLE_MIMES = new Set([
-  "application/pdf", "application/json",
+  "application/pdf", "application/json", "image/png", "image/jpeg", "image/webp", "image/gif",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel",
@@ -52,17 +54,26 @@ export interface PromptDocument {
 }
 
 interface ParsedDocument {
-  blocks: Array<{ text: string; citation?: { kind?: string; page?: number } }>;
+  blocks: Array<{ text: string; origin?: string; citation?: { kind?: string; page?: number } }>;
   diagnostics: string[];
   parserVersion: string;
 }
 
+/** Keeps what a picture said, so a retry only pays for the pictures not read yet. */
+export type RememberImage = (image: { bytes: Uint8Array; page?: number }, read: () => Promise<string>) => Promise<string>;
+
 /** Bound in the worker, so the module never reaches the parser or the upload folder itself. */
-export type ProductDocumentParser = (file: { storageKey: string; mime: string }, signal?: AbortSignal) => Promise<ParsedDocument>;
+export type ProductDocumentParser = (
+  file: { storageKey: string; mime: string; userId: string; taskId?: string }, signal?: AbortSignal, remember?: RememberImage,
+) => Promise<ParsedDocument>;
 
 function promptChars(text: string): number {
   return JSON.stringify(text).length;
 }
+
+/** Marks text read from a picture: an import checks its figures harder than typed ones. */
+export const IMAGE_TEXT_START = "[Image text]";
+export const IMAGE_TEXT_END = "[/Image text]";
 
 /** Page markers stay in the text so answers and later imports can say where a fact came from. */
 export function documentText(parsed: ParsedDocument): { text: string; skippedPages: number } {
@@ -73,7 +84,7 @@ export function documentText(parsed: ParsedDocument): { text: string; skippedPag
       page = block.citation.page;
       lines.push(`[Page ${page}]`);
     }
-    lines.push(block.text);
+    lines.push(block.origin === "ocr" ? `${IMAGE_TEXT_START}\n${block.text}\n${IMAGE_TEXT_END}` : block.text);
   }
   return {
     text: lines.join("\n").trim(),
@@ -172,7 +183,7 @@ export class ProductDocumentService {
     )).rows[0];
     if (!asset) throw new NotFoundError("未找到上传的文件");
     const mime = String(asset.mime ?? "");
-    if (!READABLE_MIMES.has(mime) && !mime.startsWith("text/")) throw new InputError("这种文件暂时读不了，可以上传 PDF、Word、PPT、Excel 或文本文件");
+    if (!READABLE_MIMES.has(mime) && !mime.startsWith("text/")) throw new InputError("这种文件暂时读不了，可以上传 PDF、Word、PPT、Excel、图片或文本文件");
     if (!isSafeUploadKey(String(asset.storage_key))) throw new InputError("文件无法读取");
     return { mime, assetId: String(asset.id), title: (title?.trim() || String(asset.original_name ?? "").trim() || "补充资料").slice(0, 300) };
   }
@@ -212,14 +223,32 @@ export class ProductDocumentService {
 
   async remove(userId: string, productId: string, documentId: string): Promise<void> {
     const { rowCount } = await this.pool.query(
-      `UPDATE marketing_product_documents SET deleted_at = now(), parsed_text = NULL, updated_at = now()
+      `UPDATE marketing_product_documents SET deleted_at = now(), parsed_text = NULL, ocr_pages = '{}'::jsonb, updated_at = now()
        WHERE id = $1 AND user_id = $2 AND product_id = $3 AND deleted_at IS NULL`,
       [documentId, userId, productId]
     );
     if (!rowCount) throw new NotFoundError("未找到这份资料");
   }
 
-  async parse(userId: string, documentId: string, parser: ProductDocumentParser, signal?: AbortSignal): Promise<void> {
+  private rememberImage(userId: string, documentId: string): RememberImage {
+    return async (image, read) => {
+      const key = `${image.page ?? "image"}-${createHash("sha256").update(image.bytes).digest("hex")}`;
+      const { rows } = await this.pool.query(
+        `SELECT ocr_pages->$3 AS text FROM marketing_product_documents WHERE id = $1 AND user_id = $2`, [documentId, userId, key]
+      );
+      if (typeof rows[0]?.text === "string") return rows[0].text;
+      const text = await read();
+      // Writing here also moves updated_at, so a long scan is not mistaken for a stalled one.
+      await this.pool.query(
+        `UPDATE marketing_product_documents SET ocr_pages = ocr_pages || jsonb_build_object($3::text, $4::text), updated_at = now()
+         WHERE id = $1 AND user_id = $2`,
+        [documentId, userId, key, text]
+      );
+      return text;
+    };
+  }
+
+  async parse(userId: string, documentId: string, parser: ProductDocumentParser, signal?: AbortSignal, taskId?: string): Promise<void> {
     const claimed = (await this.pool.query(
       `UPDATE marketing_product_documents document SET status = 'processing', updated_at = now()
        FROM (SELECT id, storage_key FROM assets) asset
@@ -233,13 +262,14 @@ export class ProductDocumentService {
       return;
     }
     try {
-      const parsed = await parser({ storageKey: claimed.storage_key, mime: claimed.mime }, signal);
+      const file = { storageKey: claimed.storage_key, mime: claimed.mime, userId, ...(taskId ? { taskId } : {}) };
+      const parsed = await parser(file, signal, this.rememberImage(userId, documentId));
       const { text, skippedPages } = documentText(parsed);
       if (!text) throw new Error("EMPTY_TEXT");
       await this.pool.query(
         `UPDATE marketing_product_documents
          SET status = 'ready', error_code = NULL, parsed_text = $3, prompt_chars = $4, content_hash = $5,
-             skipped_pages = $6, parser_version = $7, updated_at = now()
+             skipped_pages = $6, parser_version = $7, ocr_pages = '{}'::jsonb, updated_at = now()
          WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
         [documentId, userId, text, promptChars(text), createHash("sha256").update(text).digest("hex"), skippedPages, parsed.parserVersion]
       );

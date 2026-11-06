@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
+import { calcCost } from "@lot-agent/core";
 import { LocalStorage, fetchPublicBinary } from "@lot-agent/core";
 import type { ModelConfig } from "@lot-agent/core";
 import {
@@ -39,6 +40,8 @@ import { agentExtension, registerAgentExtension } from "../services/agent-extens
 import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
 import { registerDigitalEmployeeWorkerJobs } from "../digital-employee/jobs.js";
 import { parseIsolated } from "../knowledge/ingestion/parser-process.js";
+import { createUserOcr, OCR_MAX_TOKENS, OCR_MODEL } from "../knowledge/ingestion/ocr.js";
+import { PRODUCT_DOCUMENT_IMAGE_LIMIT } from "../digital-employee/product-document-service.js";
 import { createOwnerLlmResolver } from "../digital-employee/runtime.js";
 import { internationalModelsEnabled } from "../tokenhub/model-access.js";
 
@@ -91,6 +94,9 @@ function workerPoolMax() {
   return max;
 }
 
+/** Rendering and filtering pictures takes longer than reading text. Each picture read has its own limit. */
+const PRODUCT_PARSE_TIMEOUT_MS = 60_000;
+
 async function main() {
   const pgPassword = process.env.PG_PASSWORD;
   if (!pgPassword) throw new Error("PG_PASSWORD is required");
@@ -132,7 +138,9 @@ async function main() {
   // chat path (agent-service.ts) — otherwise a dynamic tokenhub model id
   // (e.g. memory.extract running on the triggering turn's model) is unknown
   // to `modelMap` and its usage silently goes unmetered (#18).
-  const meter = new UsageMeter(db, makePricingLookup((id) => modelMap.get(id), modelCatalog));
+  const pricing = makePricingLookup((id) => modelMap.get(id), modelCatalog);
+  const ocrPricing = pricing(OCR_MODEL);
+  const meter = new UsageMeter(db, pricing);
   const cache = new GenCache(conn);
 
   const genConfig = await loadGenerationConfig(ROOT);
@@ -277,11 +285,22 @@ async function main() {
   registerDigitalEmployeeWorkerJobs({
     queue, db, adviceLlm: { resolveLlm: resolveOwnerLlm, recordUsage: (input) => meter.record(input), english: internationalModelsEnabled() },
     checkQuota: (userId, estimatedCost) => meter.checkQuota(userId, estimatedCost),
-    parseProductDocument: ({ storageKey, mime }, signal) => parseIsolated(
-      resolve(dirname(process.argv[1]), `knowledge-parser.${process.argv[1].endsWith(".ts") ? "ts" : "js"}`),
-      { mime: mime.startsWith("text/") || mime === "application/json" ? "text/plain" : mime, path: resolve(UPLOADS_DIR, storageKey) },
-      signal,
-    ),
+    parseProductDocument: ({ storageKey, mime, userId, taskId }, signal, remember) => {
+      const recognize = createUserOcr({
+        db, meter, ownerId: userId, taskId: taskId ?? "", baseUrl: llmConfig.openai.baseUrl ?? genConfig.image.baseUrl,
+        estimatedCost: ocrPricing ? calcCost(ocrPricing, { inputCount: 4096, outputCount: OCR_MAX_TOKENS }) : 0,
+      });
+      return parseIsolated(
+        resolve(dirname(process.argv[1]), `knowledge-parser.${process.argv[1].endsWith(".ts") ? "ts" : "js"}`),
+        {
+          mime: mime.startsWith("text/") || mime === "application/json" ? "text/plain" : mime,
+          path: resolve(UPLOADS_DIR, storageKey),
+          readImages: { maxImages: PRODUCT_DOCUMENT_IMAGE_LIMIT },
+        },
+        signal, PRODUCT_PARSE_TIMEOUT_MS,
+        (image, ocrSignal) => remember ? remember(image, () => recognize(image, ocrSignal)) : recognize(image, ocrSignal),
+      );
+    },
   });
 
   queue.process("image.generate", async (job, ctl) => {

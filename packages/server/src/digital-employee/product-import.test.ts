@@ -70,6 +70,14 @@ describe("buildImportDraft", () => {
     ]);
   });
 
+  it("asks the owner to check a figure only a picture supplied, but keeps it in", () => {
+    const sourceText = "安装费 80 元\n[Image text]\n净饮 A3 售价 1299 元\n[/Image text]\n";
+    const { products } = build([entry({ facts: [{ statement: "安装费 80 元" }, { statement: "净饮 A3 售价 1299 元" }, { statement: "滤芯 268 元" }] })], { sourceText });
+    expect(products[0].items.map(({ selected, flag }) => [selected, flag])).toEqual([
+      [true, undefined], [true, "image"], [false, "number"],
+    ]);
+  });
+
   it("matches a loosely written existing product and leaves its positioning alone", () => {
     const current = product({ positioning: "已有定位", coreValues: ["已有"], verifiableFacts: [{ statement: "已有事实" }] });
     const { products } = build([entry({

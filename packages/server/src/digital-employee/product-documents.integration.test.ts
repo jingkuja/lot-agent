@@ -5,7 +5,7 @@ import { DB } from "../db/database.js";
 import { runMigrations } from "../db/migration-runner.js";
 import { migrations } from "../db/migrations/index.js";
 import { DIGITAL_EMPLOYEE_LLM_UNAVAILABLE } from "./llm.js";
-import { PRODUCT_DOCUMENT_CHAR_LIMIT, PRODUCT_DOCUMENT_JOB } from "./product-document-service.js";
+import { PRODUCT_DOCUMENT_CHAR_LIMIT, PRODUCT_DOCUMENT_JOB, type ProductDocumentParser } from "./product-document-service.js";
 import type { ImportModelProduct } from "./product-import.js";
 import { ProposalService } from "./proposal-service.js";
 import { DigitalEmployeeService } from "./service.js";
@@ -179,6 +179,22 @@ describe.skipIf(!testUrl)("product documents on PostgreSQL", () => {
       expect(rows[0].deleted_at).not.toBeNull();
     });
 
+    it("knows whether the owner has spoken since a draft appeared", async () => {
+      const { id } = await started("等回复.txt", "内容");
+      const conversationId = randomUUID();
+      await db.pool.query("INSERT INTO conversations (id, user_id, title) VALUES ($1, $2, 't')", [conversationId, importer]);
+      await db.addMessage(randomUUID(), conversationId, "user", "发文件");
+      await service.productImports.run(importer, id, async () => [entry({ facts: [], benefits: [], coreValues: [], questions: [] })]);
+      const { status } = await service.productImports.review(importer, id);
+      expect(await service.productImports.ownerRepliedSince(importer, status.draftId!, conversationId)).toBe(false);
+
+      await db.addMessage(randomUUID(), conversationId, "assistant", "存吗");
+      expect(await service.productImports.ownerRepliedSince(importer, status.draftId!, conversationId)).toBe(false);
+      await db.addMessage(randomUUID(), conversationId, "user", "存吧");
+      expect(await service.productImports.ownerRepliedSince(importer, status.draftId!, conversationId)).toBe(true);
+      expect(await service.productImports.ownerRepliedSince(stranger, status.draftId!, conversationId)).toBe(false);
+    });
+
     it("carries a parsing failure through to the import", async () => {
       const status = await service.productImports.start(importer, { assetId: await asset(importer, "扫描.pdf") });
       await service.productDocuments.parse(importer, status.id, async () => { throw new Error("OCR_REQUIRED"); });
@@ -246,6 +262,34 @@ describe.skipIf(!testUrl)("product documents on PostgreSQL", () => {
     expect(rows[0].deleted_at).not.toBeNull();
     await service.productDocuments.parse(owner, document.id, parsed("迟到的解析"));
     expect((await db.pool.query("SELECT parsed_text FROM marketing_product_documents WHERE id = $1", [document.id])).rows[0].parsed_text).toBeNull();
+  });
+
+  it("pays for each picture once, even when a read fails partway through", async () => {
+    const document = await service.productDocuments.add(owner, gateway, { assetId: await asset(owner, "扫描.png", "image/png") });
+    const reads: string[] = [];
+    const parser = (failOn?: string): ProductDocumentParser => async (_file, _signal, remember) => {
+      const blocks = [];
+      for (const page of [1, 2]) {
+        const text = await remember!({ bytes: new Uint8Array([page]), page }, async () => {
+          reads.push(`第 ${page} 页`);
+          if (failOn === `第 ${page} 页`) throw new Error("OCR_RATE_LIMITED");
+          return `第 ${page} 页文字`;
+        });
+        blocks.push({ text, origin: "ocr", citation: { kind: "pdf", page } });
+      }
+      return { parserVersion: "v1", diagnostics: [], blocks };
+    };
+    await service.productDocuments.parse(owner, document.id, parser("第 2 页"));
+    const saved = await db.pool.query("SELECT ocr_pages FROM marketing_product_documents WHERE id = $1", [document.id]);
+    expect(Object.keys(saved.rows[0].ocr_pages)).toHaveLength(1);
+
+    await service.productDocuments.retry(owner, gateway, document.id);
+    await service.productDocuments.parse(owner, document.id, parser());
+    expect(reads).toEqual(["第 1 页", "第 2 页", "第 2 页"]);
+    const { rows } = await db.pool.query("SELECT status, parsed_text, ocr_pages FROM marketing_product_documents WHERE id = $1", [document.id]);
+    expect(rows[0]).toMatchObject({ status: "ready", ocr_pages: {} });
+    expect(rows[0].parsed_text).toContain("[Page 1]\n[Image text]\n第 1 页文字\n[/Image text]");
+    await service.productDocuments.remove(owner, gateway, document.id);
   });
 
   it("reports a file that has gone missing and stops using an archived product", async () => {

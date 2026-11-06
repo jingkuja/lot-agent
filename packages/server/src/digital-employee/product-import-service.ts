@@ -24,6 +24,8 @@ export interface ProductImportStatus {
   errorCode: string | null;
   draftId: string | null;
   preview: ImportPreview | null;
+  /** Pictures read so far on a file still being worked on. */
+  pagesRead: number;
   createdAt: string;
 }
 
@@ -40,7 +42,8 @@ const STALLED_MINUTES = 15;
 const CATALOG_LIMIT = 100;
 const MANAGEMENT_URL = "/digital-employee/materials";
 const COLUMNS = `document.id, document.title, document.status, document.error_code, document.import_status, document.import_error,
-  document.import_draft_id, document.product_id, document.created_at, document.updated_at, draft.preview, draft.status AS draft_status, draft.expires_at`;
+  document.import_draft_id, document.product_id, document.created_at, document.updated_at, draft.preview, draft.status AS draft_status, draft.expires_at,
+  (SELECT count(*) FROM jsonb_object_keys(document.ocr_pages)) AS pages_read`;
 const JOINED = `marketing_product_documents document LEFT JOIN de_conversation_action_drafts draft
   ON draft.id = document.import_draft_id AND draft.user_id = document.user_id`;
 const OPEN_DRAFT = `(document.import_status <> 'ready' OR (draft.status IN ('prepared', 'awaiting_confirmation') AND draft.expires_at > now()))`;
@@ -64,6 +67,7 @@ function toStatus(row: Record<string, any>): ProductImportStatus {
     errorCode: !failed ? null : stalled ? "PARSE_STALLED" : (row.error_code ?? row.import_error ?? "PARSE_FAILED"),
     draftId: !failed ? row.import_draft_id ?? null : null,
     preview: !failed && row.import_status === "ready" ? row.preview ?? null : null,
+    pagesRead: Number(row.pages_read ?? 0),
     createdAt: new Date(row.created_at).toISOString(),
   };
 }
@@ -162,7 +166,7 @@ export class ProductImportService {
       `UPDATE marketing_product_documents
        SET import_status = 'none', import_error = NULL, updated_at = now(),
            deleted_at = CASE WHEN product_id IS NULL THEN now() ELSE deleted_at END,
-           parsed_text = CASE WHEN product_id IS NULL THEN NULL ELSE parsed_text END
+           parsed_text = CASE WHEN product_id IS NULL THEN NULL ELSE parsed_text END, ocr_pages = '{}'::jsonb
        WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
       [documentId, userId]
     );
@@ -271,6 +275,18 @@ export class ProductImportService {
         [documentId, userId, productId]
       );
     }
+  }
+
+  /** Saving from chat needs an owner's reply after the draft appeared: a model must not confirm for them. */
+  async ownerRepliedSince(userId: string, draftId: string, conversationId: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM de_conversation_action_drafts draft
+       JOIN conversations conversation ON conversation.id = $3 AND conversation.user_id = draft.user_id
+       JOIN messages message ON message.conversation_id = conversation.id AND message.role = 'user' AND message.created_at > draft.created_at
+       WHERE draft.id = $2 AND draft.user_id = $1 LIMIT 1`,
+      [userId, draftId, conversationId]
+    );
+    return rows.length > 0;
   }
 
   /** Attachments come from the stored message, never from model arguments. Newest message first. */

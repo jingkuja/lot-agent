@@ -143,7 +143,7 @@ export class ProposalService {
       `UPDATE marketing_product_documents
        SET import_status = 'none', updated_at = now(),
            deleted_at = CASE WHEN product_id IS NULL THEN now() ELSE deleted_at END,
-           parsed_text = CASE WHEN product_id IS NULL THEN NULL ELSE parsed_text END
+           parsed_text = CASE WHEN product_id IS NULL THEN NULL ELSE parsed_text END, ocr_pages = '{}'::jsonb
        WHERE import_draft_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
       [draftId, userId]
     );

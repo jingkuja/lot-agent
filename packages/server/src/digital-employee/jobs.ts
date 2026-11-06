@@ -132,7 +132,7 @@ export function registerDigitalEmployeeWorkerJobs({ queue, db, adviceLlm, checkQ
   const generateImport = createProductImportGenerator(adviceLlm);
   queue.process(PRODUCT_DOCUMENT_JOB, async (job, control) => {
     const { documentId } = job.input as { documentId: string };
-    await productDocuments.parse(job.userId, documentId, parseProductDocument, control.signal);
+    await productDocuments.parse(job.userId, documentId, parseProductDocument, control.signal, job.id);
     await productImports.run(job.userId, documentId, generateImport, control.signal);
     return { documentId };
   });

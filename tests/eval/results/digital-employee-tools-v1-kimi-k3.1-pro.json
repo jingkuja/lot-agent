@@ -1,11 +1,11 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "kimi-k3.1-pro",
-  "ranAt": "2026-11-06T06:22:13.644Z",
-  "toolDefinitionChars": 33395,
-  "passed": 36,
-  "total": 38,
-  "rate": 0.9473684210526315,
+  "ranAt": "2026-11-06T06:49:16.173Z",
+  "toolDefinitionChars": 33470,
+  "passed": 37,
+  "total": 39,
+  "rate": 0.9487179487179487,
   "threshold": 0.9,
   "results": [
     {
@@ -49,7 +49,7 @@
     {
       "id": "campaign-create",
       "object": "campaign",
-      "actual": "search_customer_segments",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_customer_segments",
         "search_marketing_materials",
@@ -269,12 +269,12 @@
     {
       "id": "outreach-create",
       "object": "follow-up",
-      "actual": "search_customer_profiles",
+      "actual": "get_customer_business_context",
       "expected": [
         "generate_individual_outreach",
         "search_customer_profiles"
       ],
-      "pass": true
+      "pass": false
     },
     {
       "id": "outreach-rewrite",
@@ -288,11 +288,11 @@
     {
       "id": "outreach-used",
       "object": "follow-up",
-      "actual": "NO_TOOL",
+      "actual": "mark_individual_outreach_used",
       "expected": [
         "mark_individual_outreach_used"
       ],
-      "pass": false
+      "pass": true
     },
     {
       "id": "product-document-detail",
@@ -351,6 +351,16 @@
       "actual": "search_marketing_materials",
       "expected": [
         "read_product_documents",
+        "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-photo-import",
+      "object": "product",
+      "actual": "import_product_file",
+      "expected": [
+        "import_product_file",
         "search_marketing_materials"
       ],
       "pass": true

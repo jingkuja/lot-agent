@@ -76,7 +76,7 @@ describe("worker job", () => {
     const job = { id: "t1", userId: "u1", input: { documentId: "d1" } };
     const signal = new AbortController().signal;
     await handlers.get(PRODUCT_DOCUMENT_JOB)!(job, { signal });
-    expect(parse).toHaveBeenCalledWith("u1", "d1", parseProductDocument, signal);
+    expect(parse).toHaveBeenCalledWith("u1", "d1", parseProductDocument, signal, "t1");
     expect(importing).toHaveBeenCalledWith("u1", "d1", expect.any(Function), signal);
     expect(parse.mock.invocationCallOrder[0]).toBeLessThan(importing.mock.invocationCallOrder[0]);
     parse.mockRestore();

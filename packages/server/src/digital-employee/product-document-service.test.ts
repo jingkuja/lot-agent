@@ -51,9 +51,9 @@ describe("ProductDocumentService", () => {
     expect(noAsset.query.mock.calls.some(([sql, params]) => sql.includes("FROM assets") && params![1] === "u1")).toBe(true);
   });
 
-  it("refuses images and media with a plain reason", async () => {
+  it("refuses audio and video with a plain reason", async () => {
     const { service } = setup((sql) => product(sql) ?? (sql.includes("FROM assets")
-      ? { rows: [{ id: ASSET, mime: "image/png", original_name: "a.png", storage_key: "a.png" }] } : undefined));
+      ? { rows: [{ id: ASSET, mime: "video/mp4", original_name: "a.png", storage_key: "a.png" }] } : undefined));
     await expect(service.add("u1", PRODUCT, { assetId: ASSET })).rejects.toThrow("暂时读不了");
   });
 
