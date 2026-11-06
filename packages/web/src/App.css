@@ -4670,13 +4670,18 @@ html, body, #root {
 }
 
 /* ── Model picker (bottom-right of the input box) ── */
-.model-popup { min-width: 260px; max-width: 320px; }
+/* Placed by ModelPicker in viewport coordinates; the list takes whatever height is left. */
+.model-popup {
+  position: fixed; top: 0; right: auto; bottom: auto; left: 0;
+  display: flex; flex-direction: column;
+  min-width: 260px; max-width: 320px;
+}
 .model-search {
   width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px 10px;
   border: 1px solid var(--border); border-radius: 8px;
   background: var(--overlay-sink); color: var(--text); font-size: 13px;
 }
-.model-list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.model-list { flex: 1 1 auto; min-height: 0; max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .model-row {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   padding: 8px 10px; border-radius: 8px; background: transparent; border: none;

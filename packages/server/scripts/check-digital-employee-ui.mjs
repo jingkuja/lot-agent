@@ -202,7 +202,10 @@ function api(state, unexpected, dailyScan = false, schedules = false) {
       { id: "general", name: "通用助手", description: "通用", type: "general", installed: true, sortOrder: 0 },
       { id: "digital_employee", name: "数字员工", description: "独立模块", type: "digital_employee", installed: true, sortOrder: 1 },
     ]);
-    if (path === "/api/models") return json({ llm: [{ id: "test-llm", type: "llm", provider: "test" }], image: [], video: [] });
+    if (path === "/api/models") {
+      const llm = ["test-llm", ...Array.from({ length: 11 }, (_, i) => `test-llm-${i + 2}`)].map((id) => ({ id, type: "llm", provider: "test" }));
+      return json({ llm, image: [], video: [] });
+    }
     if (path === "/api/usage/balance") return json({ balance: 100, totalUsed: 0, totalRecharged: 100, usedRatio: 0, allowBalanceFallback: true });
     if (path === "/api/conversations/projects") return json([]);
     if (path === "/api/conversations") {
@@ -419,8 +422,8 @@ try {
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true, channel: "chrome" });
 
-  async function open(path, { dailyScan = false, schedules = false, language = "zh", width = 1440, state = fixtures(), desktop = false } = {}) {
-    const context = await browser.newContext({ viewport: { width, height: 1000 } });
+  async function open(path, { dailyScan = false, schedules = false, language = "zh", width = 1440, height = 1000, state = fixtures(), desktop = false } = {}) {
+    const context = await browser.newContext({ viewport: { width, height } });
     await context.addInitScript((value) => { try { localStorage.setItem("lot:language", value); } catch { /* opaque origin */ } }, language);
     if (desktop) await context.addInitScript(() => {
       window.notified = [];
@@ -901,6 +904,27 @@ try {
     await reports.getByRole("button", { name: "知道了" }).click();
     await reports.waitFor({ state: "detached" });
     await today.close();
+  }
+
+  // The model list opens upward from the composer and must not be cut off by what surrounds it.
+  for (const [view, width, height] of [["today", 1440, 1000], ["today", 1440, 620], ["customers", 1280, 800], ["chat", 1440, 1000], ["chat", 1440, 620],
+    ["chat", 390, 700]]) {
+    const { page, close } = await open(`/digital-employee/${view}`, { width, height });
+    await page.locator(".de-employee-card").waitFor({ state: "attached" });
+    await page.locator(".product-shell-view:not(.is-hidden) .model-picker .media-trigger").click();
+    const search = page.locator(".model-popup .model-search");
+    await search.waitFor();
+    await snap(page, `model-popup-${view}-${width}x${height}.png`);
+    const cutOff = await page.locator(".model-popup").evaluate((popup) => {
+      const { left, right, top, bottom } = popup.getBoundingClientRect();
+      const x = (left + right) / 2;
+      return [top + 6, (top + bottom) / 2, bottom - 6].filter((y) => !popup.contains(document.elementFromPoint(x, y)));
+    });
+    assert.deepEqual(cutOff, [], `${view} ${width}x${height}: model list is cut off`);
+    await search.fill("llm-12");
+    await page.locator(".model-popup .model-row").filter({ hasText: "test-llm-12" }).click();
+    await page.locator(".model-popup").waitFor({ state: "detached" });
+    await close();
   }
 
   // Two languages, two themes, phone width.
