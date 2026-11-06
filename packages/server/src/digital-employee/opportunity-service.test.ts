@@ -315,6 +315,53 @@ describe("OpportunityService personal work queue", () => {
     }));
   });
 
+  it("gives both talk-track paths the product FAQs and notes", async () => {
+    const stored: Record<string, unknown> = {
+      name: "API 网关", positioning: "统一接入", core_values: [], verifiable_facts: [], common_objections: [],
+      current_benefits: [], prohibited_expressions: ["保证最低价"], case_materials: [],
+      faqs: [{ question: "保存正文吗", answer: "不保存" }], product_notes: "价格以使用时为准",
+    };
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
+      if (sql.includes("FROM de_follow_up_tasks task")) return { rows: [{
+        id: "o1", action_id: "a1", profile_id: "p1", action_status: "pending", action_source: "manual",
+        display_name: "周工", organization: null, relationship_stage: "prospect",
+        opportunity_type: "prospect_progress", title: "回访", objective: "确认接入",
+        follow_up_method: "微信", suggested_at: "2026-08-18T01:00:00.000Z",
+        scheduled_at: "2026-08-20T01:00:00.000Z", priority: "normal", reason: "约定回访",
+        evidence: [], readiness: "actionable", risk_flags: [], product_name: "API 网关",
+        result_criteria: null, action_version: 1,
+      }] };
+      if (sql.includes("AS product_states")) return { rows: [{
+        summary: "", tags: [], product_states: [{ productName: "API 网关" }], recent_facts: [],
+      }] };
+      if (sql.includes("FROM de_customer_profiles WHERE id=$1")) return { rows: [{
+        id: "p1", display_name: "周工", organization: null, relationship_stage: "prospect",
+      }] };
+      if (sql.includes("FROM marketing_products")) {
+        const columns = /SELECT([\s\S]+?)FROM/.exec(sql)![1].split(",").map((column) => column.trim());
+        return { rows: [Object.fromEntries(columns.map((column) => [column, stored[column]]))] };
+      }
+      if (sql.includes("INSERT INTO de_outreach_drafts")) return { rows: [{
+        id: "d1", profile_id: "p1", task_id: null, opportunity_id: null, channel: "wechat",
+        objective: "确认接入", content: "周工好", version: 1, used_at: null, model_id: "m1",
+      }] };
+      return { rows: [] };
+    });
+    const generate = vi.fn(async (_input: { context: { productMaterial: Record<string, unknown> | null } }) => (
+      { modelId: "m1", reply: "周工好" }
+    ));
+    const service = new OpportunityService({ pool: { query } } as any, undefined, undefined, { generate } as any);
+
+    await service.generateTalkTrack("u1", "a1", { intent: "follow_up", message: "写跟进", history: [] });
+    await service.generateOutreach("u1", { profileId: "p1", intent: "follow_up", channel: "wechat", message: "写跟进" });
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    for (const [input] of generate.mock.calls) {
+      expect(input.context.productMaterial).toEqual(stored);
+      expect(Object.keys(input.context.productMaterial!).slice(-2)).toEqual(["faqs", "product_notes"]);
+    }
+  });
+
   it("persists generated outreach against the selected customer", async () => {
     const query = vi.fn(async (sql: string, _params?: any[]) => {
       if (sql.includes("FROM de_follow_up_tasks task")) return { rows: [{

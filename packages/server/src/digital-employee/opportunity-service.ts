@@ -415,14 +415,6 @@ export class OpportunityService {
       [item.profileId, userId]
     );
     if (!detail.rows[0]) throw new NotFoundError("未找到该客户画像");
-    const product = item.productName ? await this.pool.query(
-      `SELECT name, positioning, core_values, verifiable_facts, common_objections,
-        current_benefits, prohibited_expressions, case_materials
-       FROM marketing_products
-       WHERE user_id = $1 AND status = 'active' AND lower(name) = lower($2)
-       ORDER BY updated_at DESC LIMIT 1`,
-      [userId, item.productName]
-    ) : { rows: [] };
     const context: TalkTrackContext = {
       customerName: item.customerName,
       organization: item.organization,
@@ -441,7 +433,7 @@ export class OpportunityService {
         text: String(fact.text ?? ""),
         occurredAt: iso(fact.occurredAt ?? fact.occurred_at),
       })).filter((fact: { text: string }) => fact.text),
-      productMaterial: product.rows[0] ?? null,
+      productMaterial: await this.talkTrackProduct(userId, item.productName),
     };
     const generated = await this.talkTrackGenerator.generate({ userId, context, request });
     const reply = generated.reply.trim();
@@ -900,19 +892,25 @@ export class OpportunityService {
     return toItem(pending.rows[0]);
   }
 
+  /** The prompt cuts its context at 30,000 characters, so the long free-text columns stay last. */
+  private async talkTrackProduct(userId: string, productName: string | null): Promise<Record<string, unknown> | null> {
+    if (!productName) return null;
+    const { rows } = await this.pool.query(
+      `SELECT name, positioning, core_values, verifiable_facts, common_objections,
+        current_benefits, prohibited_expressions, case_materials, faqs, product_notes
+       FROM marketing_products
+       WHERE user_id = $1 AND status = 'active' AND lower(name) = lower($2)
+       ORDER BY updated_at DESC LIMIT 1`,
+      [userId, productName]
+    );
+    return rows[0] ?? null;
+  }
+
   private async generateProfileTalkTrack(userId: string, profileId: string, request: TalkTrackRequest) {
     if (!this.talkTrackGenerator) throw new InputError("话术生成服务暂不可用");
     const profile = await this.requireProfile(userId, profileId);
     const facts = await this.talkTrackFacts(userId, profileId);
     const productName = facts.productStates[0]?.productName ?? null;
-    const product = productName ? await this.pool.query(
-      `SELECT name, positioning, core_values, verifiable_facts, common_objections,
-        current_benefits, prohibited_expressions, case_materials
-       FROM marketing_products
-       WHERE user_id = $1 AND status = 'active' AND lower(name) = lower($2)
-       ORDER BY updated_at DESC LIMIT 1`,
-      [userId, productName]
-    ) : { rows: [] };
     const context: TalkTrackContext = {
       customerName: profile.display_name,
       organization: profile.organization ?? null,
@@ -928,7 +926,7 @@ export class OpportunityService {
       resultCriteria: null,
       customerProductStates: facts.productStates,
       recentFacts: facts.recentFacts,
-      productMaterial: product.rows[0] ?? null,
+      productMaterial: await this.talkTrackProduct(userId, productName),
     };
     const generated = await this.talkTrackGenerator.generate({ userId, context, request });
     const reply = generated.reply.trim();
