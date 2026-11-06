@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { JobQueue } from "@lot-agent/core";
 import type { Pool, PoolClient } from "pg";
 import type { DB } from "../db/database.js";
+import { ProductDocumentService } from "./product-document-service.js";
+import { resolveTalkTrackProducts, type NamedProduct } from "./product-match.js";
 import { ConflictError, InputError, NotFoundError } from "./errors.js";
 import { discoverByRules, type DiscoveryCandidate } from "./opportunity-rules.js";
 import type { RuleOpportunity } from "./opportunity-rules.js";
@@ -12,6 +14,7 @@ import type {
   OpportunityListItem, OpportunitySettings, OpportunitySummary, OutreachChannel, OutreachDraft, OutreachGenerateInput,
   TalkTrackContext, TalkTrackRequest,
 } from "./opportunity-types.js";
+import { TALK_TRACK_CONTEXT_CHARS } from "./opportunity-types.js";
 
 export interface OpportunityAdvicePatch {
   dedupKey: string;
@@ -51,6 +54,7 @@ interface DiscoveryRun {
 export class OpportunityService {
   private readonly pool: Pool;
   private readonly drafts: ConversationActionDrafts;
+  private readonly productDocuments: ProductDocumentService;
 
   constructor(
     db: DB,
@@ -58,6 +62,7 @@ export class OpportunityService {
     private readonly adviceGenerator?: OpportunityAdviceGenerator,
     private readonly talkTrackGenerator?: OpportunityTalkTrackGenerator
   ) {
+    this.productDocuments = new ProductDocumentService(db.pool);
     this.pool = db.pool;
     this.drafts = new ConversationActionDrafts(db.pool);
   }
@@ -415,6 +420,7 @@ export class OpportunityService {
       [item.profileId, userId]
     );
     if (!detail.rows[0]) throw new NotFoundError("未找到该客户画像");
+    const states = array(detail.rows[0].product_states);
     const context: TalkTrackContext = {
       customerName: item.customerName,
       organization: item.organization,
@@ -428,14 +434,16 @@ export class OpportunityService {
       followUpMethod: item.followUpMethod,
       productName: item.productName,
       resultCriteria: item.resultCriteria,
-      customerProductStates: array(detail.rows[0].product_states),
+      customerProductStates: states,
       recentFacts: array(detail.rows[0].recent_facts).map((fact: any) => ({
         text: String(fact.text ?? ""),
         occurredAt: iso(fact.occurredAt ?? fact.occurred_at),
       })).filter((fact: { text: string }) => fact.text),
-      productMaterial: await this.talkTrackProduct(userId, item.productName),
+      productMaterial: null,
     };
-    const generated = await this.talkTrackGenerator.generate({ userId, context, request });
+    const generated = await this.talkTrackGenerator.generate({
+      userId, request, context: await this.withProducts(userId, context, request, [item.productName, ...productNames(states)]),
+    });
     const reply = generated.reply.trim();
     if (!reply) throw new InputError("话术生成结果为空，请重试");
     return { reply, modelId: generated.modelId };
@@ -892,25 +900,50 @@ export class OpportunityService {
     return toItem(pending.rows[0]);
   }
 
-  /** The prompt cuts its context at 30,000 characters, so the long free-text columns stay last. */
-  private async talkTrackProduct(userId: string, productName: string | null): Promise<Record<string, unknown> | null> {
-    if (!productName) return null;
-    const { rows } = await this.pool.query(
-      `SELECT name, positioning, core_values, verifiable_facts, common_objections,
-        current_benefits, prohibited_expressions, case_materials, faqs, product_notes
-       FROM marketing_products
-       WHERE user_id = $1 AND status = 'active' AND lower(name) = lower($2)
-       ORDER BY updated_at DESC LIMIT 1`,
-      [userId, productName]
+  /** The prompt cuts its context at its limit, so the long free-text columns stay last. */
+  private async withProducts(
+    userId: string, context: TalkTrackContext, request: TalkTrackRequest, named: Array<string | null | undefined>
+  ): Promise<TalkTrackContext> {
+    const { rows: catalog } = await this.pool.query(
+      `SELECT id, name FROM marketing_products WHERE user_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 200`,
+      [userId]
     );
-    return rows[0] ?? null;
+    const earlier = request.history.filter((turn) => turn.role === "user").map((turn) => turn.content).reverse().slice(0, 3);
+    const { products, uncertain } = resolveTalkTrackProducts(
+      { texts: [request.message, ...earlier], named: named.filter((name): name is string => Boolean(name)) }, catalog as NamedProduct[]
+    );
+    if (!products.length) {
+      return catalog.length ? { ...context, availableProducts: catalog.slice(0, 30).map((row) => String(row.name)) } : context;
+    }
+    const { rows } = await this.pool.query(
+      `SELECT id, name, positioning, core_values, verifiable_facts, common_objections,
+        current_benefits, prohibited_expressions, case_materials, faqs, product_notes
+       FROM marketing_products WHERE user_id = $1 AND status = 'active' AND id = ANY($2::uuid[])`,
+      [userId, products.map((product) => product.id)]
+    );
+    const materials = products.flatMap((product) => {
+      const row = rows.find((candidate) => candidate.id === product.id);
+      if (!row) return [];
+      const { id: _id, ...material } = row;
+      return [material as Record<string, unknown>];
+    });
+    const resolved: TalkTrackContext = {
+      ...context,
+      productName: String(materials[0]?.name ?? context.productName ?? "") || null,
+      productMaterial: materials[0] ?? null,
+      ...(materials.length > 1 ? { otherProductMaterials: materials.slice(1) } : {}),
+      ...(uncertain ? { productMatchUncertain: true } : {}),
+    };
+    const room = TALK_TRACK_CONTEXT_CHARS - JSON.stringify(resolved).length - JSON.stringify({ productDocuments: [] }).length;
+    const productDocuments = await this.productDocuments.forPrompt(userId, products, room);
+    return productDocuments.length ? { ...resolved, productDocuments } : resolved;
   }
 
   private async generateProfileTalkTrack(userId: string, profileId: string, request: TalkTrackRequest) {
     if (!this.talkTrackGenerator) throw new InputError("话术生成服务暂不可用");
     const profile = await this.requireProfile(userId, profileId);
     const facts = await this.talkTrackFacts(userId, profileId);
-    const productName = facts.productStates[0]?.productName ?? null;
+    const productName = productNames(facts.productStates)[0] ?? null;
     const context: TalkTrackContext = {
       customerName: profile.display_name,
       organization: profile.organization ?? null,
@@ -926,9 +959,10 @@ export class OpportunityService {
       resultCriteria: null,
       customerProductStates: facts.productStates,
       recentFacts: facts.recentFacts,
-      productMaterial: await this.talkTrackProduct(userId, productName),
+      productMaterial: null,
     };
-    const generated = await this.talkTrackGenerator.generate({ userId, context, request });
+    const resolved = await this.withProducts(userId, context, request, productNames(facts.productStates));
+    const generated = await this.talkTrackGenerator.generate({ userId, context: resolved, request });
     const reply = generated.reply.trim();
     if (!reply) throw new InputError("话术生成结果为空，请重试");
     return { reply, modelId: generated.modelId, context };
@@ -1406,6 +1440,13 @@ function resultLabel(outcome: string) {
     won: "已成交", rejected: "已拒绝", service_needed: "需要服务处理",
   };
   return labels[outcome] ?? outcome;
+}
+
+function productNames(states: unknown[]): string[] {
+  return states.flatMap((state) => {
+    const name = (state as { productName?: unknown } | null)?.productName;
+    return typeof name === "string" && name ? [name] : [];
+  });
 }
 
 function channelPrompt(channel: OutreachChannel, message: string) {

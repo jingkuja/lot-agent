@@ -745,3 +745,24 @@
   /* Clears the button that reopens the sidebar. */
   .workspace-overlay > .de-page, .workspace-overlay > .de-employee-page-tabs { padding-top: 56px; }
 }
+
+.product-documents-modal { width: min(620px, 100%); }
+.product-documents-body { display: flex; flex-direction: column; gap: 14px; padding: 18px 22px 22px; }
+.product-documents-drop { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 26px 18px; border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--bg-card); color: var(--text-secondary); font: inherit; text-align: center; cursor: pointer; }
+.product-documents-drop strong { color: var(--text); font-size: 14px; font-weight: 600; }
+.product-documents-drop span { font-size: 12px; }
+.product-documents-drop:hover, .product-documents-drop:focus-visible, .product-documents-drop.is-dragging { border-color: var(--accent); color: var(--accent); }
+.product-documents-usage, .product-documents-empty { margin: 0; color: var(--text-muted); font-size: 12px; }
+.product-documents-empty { padding: 12px 0; text-align: center; }
+.product-documents-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.product-documents-list:empty { display: none; }
+.product-documents-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.product-documents-list li > div:first-child { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.product-documents-list strong { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.product-documents-list small { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.product-documents-list small.is-error { color: var(--error); }
+.product-documents-actions { display: flex; flex-shrink: 0; gap: 6px; }
+@media (max-width: 520px) {
+  .product-documents-body { padding: 16px; }
+  .product-documents-list li { align-items: stretch; flex-direction: column; }
+}

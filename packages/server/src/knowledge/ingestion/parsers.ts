@@ -1,6 +1,7 @@
 import type { RecognizeImage } from "./ocr.js";
 import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
+import { EXCEL_MIMES, PPTX_MIME, excelToText, pptxToText } from "./office-text.js";
 import { MAX_EXTRACTED_CHARACTERS, textBlocks, type ParsedBlock } from "./text.js";
 
 export interface ParseInput { mime: string; bytes?: Uint8Array; content?: string; description?: string }
@@ -58,6 +59,10 @@ export async function parseKnowledge(input: ParseInput, ocr?: RecognizeImage): P
     };
     await mammoth.convertToHtml({ buffer: Buffer.from(input.bytes) }, { transformDocument(document: Element) { visit(document); return document; } });
     if (!blocks.length) throw new Error("EMPTY_TEXT");
+  } else if (input.mime === PPTX_MIME || EXCEL_MIMES.has(input.mime)) {
+    if (!input.bytes) throw new Error("DOCUMENT_MISSING");
+    const bytes = Buffer.from(input.bytes);
+    blocks.push(...textBlocks(input.mime === PPTX_MIME ? await pptxToText(bytes) : excelToText(bytes)));
   } else if (input.mime.startsWith("image/") && ocr) {
     if (!input.bytes) throw new Error("DOCUMENT_MISSING");
     add({ text: await ocr({ mime: input.mime, bytes: input.bytes }), origin: "ocr" });

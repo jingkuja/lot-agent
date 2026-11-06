@@ -46,6 +46,7 @@ export interface MarketingProduct {
   caseMaterials: MarketingCaseMaterial[];
   faqs: MarketingFaq[];
   productNotes: string;
+  documentCount: number;
   status: "active" | "archived";
   version: number;
   archivedAt: string | null;

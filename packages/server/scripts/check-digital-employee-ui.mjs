@@ -20,6 +20,15 @@ const CAMPAIGN = "00000000-0000-4000-8000-000000000201";
 const NOW = "2026-11-05T02:00:00.000Z";
 const CHAT_INPUT = ".product-shell-view:not(.is-hidden) .chat-panel textarea";
 
+const PRODUCT = "00000000-0000-4000-8000-000000000301";
+const documentFixture = (over) => ({
+  id: "d1", productId: PRODUCT, title: "费用说明.docx", mime: "application/pdf", status: "ready", errorCode: null, chars: 3200,
+  skippedPages: 0, usedInTalkTrack: true, createdAt: NOW, updatedAt: NOW, ...over,
+});
+const productFixture = { id: PRODUCT, userId: "u1", name: "API 网关", positioning: "统一接入", coreValues: [], verifiableFacts: [], commonObjections: [],
+  currentBenefits: [], prohibitedExpressions: [], caseMaterials: [], faqs: [], productNotes: "", documentCount: 3, status: "active", version: 1,
+  archivedAt: null, createdAt: NOW, updatedAt: NOW };
+
 const opportunity = (over) => ({
   id: "o1", view: "pending", opportunityId: "o1", actionId: null, actionVersion: 1, profileId: PROFILE, customerName: "李静", organization: "云启",
   relationshipStage: "prospect", opportunityType: "prospect_progress", source: "ai", title: "确认代销门槛", objective: "了解顾虑", followUpMethod: "电话",
@@ -147,6 +156,11 @@ function api(state, unexpected, dailyScan = false, schedules = false) {
     const json = (data, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(data) });
     const de = path.replace("/api/digital-employee", "");
     if (method !== "GET") state.writes.push({ path, body: request.postData() });
+    if (path === "/api/uploads") {
+      state.uploads = (state.uploads ?? 0) + 1;
+      if (state.failUpload) return json({ error: "上传失败" }, 500);
+      return json({ assetId: `asset${state.uploads}`, filename: "手册.pdf", mime: "application/pdf", size: 5, url: "/x", kind: "doc" });
+    }
     if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeDailyScan: dailyScan, digitalEmployeeSchedules: schedules });
     if (de.startsWith("/work-log/conversations/")) return json({ ...state.work, id: de.split("/").at(-1) });
     if (de === "/schedules" && method === "GET") return json({ schedules: state.schedules, runs: state.runs });
@@ -313,7 +327,25 @@ function api(state, unexpected, dailyScan = false, schedules = false) {
       videoModels: [],
       configurationUrl: "https://example.com",
     });
-    if (de === "/marketing/products") return json({ items: [], total: 0, page: 1, limit: 20 });
+    if (de === "/marketing/products") return json({ items: state.products ?? [], total: state.products?.length ?? 0, page: 1, limit: 20 });
+    if (de.startsWith(`/marketing/products/${PRODUCT}/documents`)) {
+      if (method === "GET") {
+        // The document being read finishes on the second look, as the worker would.
+        state.documentReads = (state.documentReads ?? 0) + 1;
+        if (state.documentReads > 1) {
+          state.documents = state.documents.map((item) => item.status === "processing" ? { ...item, status: "ready", usedInTalkTrack: true } : item);
+        }
+        return json({ items: state.documents, usage: { usedChars: 3200, limitChars: 15000 } });
+      }
+      if (method === "POST") {
+        const added = documentFixture({ id: `d${state.documents.length + 10}`, title: "新手册.pdf", status: "processing", usedInTalkTrack: false });
+        state.documents = [added, ...state.documents];
+        state.documentReads = 0;
+        return json(added, 201);
+      }
+      state.documents = state.documents.filter((item) => !de.endsWith(item.id));
+      return json({ ok: true });
+    }
     if (de === "/marketing/brand-assets") return json(null);
     unexpected.push(`${method} ${path}`);
     return json({}, 404);
@@ -638,6 +670,57 @@ try {
     await page.getByRole("alert").waitFor({ state: "detached" });
     assert.equal(state.campaignWrites, 2);
     await close();
+  }
+
+  // A dropped file shows what happened to it, a failed upload can be retried, and the list keeps working.
+  {
+    const documentState = () => ({ ...fixtures(), products: [productFixture], documents: [
+      documentFixture({ skippedPages: 2 }),
+      documentFixture({ id: "d2", title: "超长手册.pdf", usedInTalkTrack: false }),
+      documentFixture({ id: "d3", title: "扫描件.pdf", status: "failed", errorCode: "OCR_REQUIRED", usedInTalkTrack: false }),
+      documentFixture({ id: "d4", title: "超时.pdf", status: "failed", errorCode: "PARSE_STALLED", usedInTalkTrack: false }),
+    ] });
+    const state = documentState();
+    state.failUpload = true;
+    const { page, close } = await open("/digital-employee/materials", { state });
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "补充资料 3" }).click();
+    const dialog = page.getByRole("dialog", { name: "补充资料" });
+    await dialog.getByText("已用于话术").first().waitFor();
+    await dialog.getByText("有 2 页是图片，暂未读取").waitFor();
+    await dialog.getByText("内容太长，话术暂不使用，聊天中仍可查阅").waitFor();
+    await dialog.getByText("这份文件是扫描件或图片，暂时读不了文字").waitFor();
+    await dialog.getByText("话术可用 3,200 / 15,000 字符").waitFor();
+    assert.equal(await dialog.locator("li", { hasText: "扫描件.pdf" }).getByRole("button", { name: "重试" }).count(), 0);
+    await dialog.locator("li", { hasText: "超时.pdf" }).getByRole("button", { name: "重试" }).waitFor();
+
+    const file = { name: "手册.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-") };
+    await dialog.locator("input[type=file]").setInputFiles(file);
+    const failed = dialog.locator("li", { hasText: "手册.pdf" }).filter({ hasText: "上传失败" });
+    await failed.waitFor();
+    state.failUpload = false;
+    await failed.getByRole("button", { name: "重试" }).click();
+    await dialog.locator("li", { hasText: "新手册.pdf" }).getByText("已用于话术").waitFor({ timeout: 8000 });
+    assert.equal(state.uploads, 2);
+
+    await dialog.locator("li", { hasText: "超长手册.pdf" }).getByRole("button", { name: "删除" }).click();
+    await dialog.getByText("超长手册.pdf").waitFor({ state: "detached" });
+    await snap(page, "materials-documents-zh-1440.png");
+    await close();
+
+    const phone = await open("/digital-employee/materials", { state: documentState(), language: "en", width: 390 });
+    await phone.page.getByRole("button", { name: /Supplementary files/ }).click();
+    const english = phone.page.getByRole("dialog");
+    await english.getByText("Used in outreach messages").first().waitFor();
+    await english.getByText("2 pages are images and weren't read").waitFor();
+    await english.getByText("3,200 of 15,000 characters available to outreach messages").waitFor();
+    assert(await noHorizontalScroll(phone.page), "documents dialog scrolls sideways at 390");
+    const copy = (await english.innerText()).replace(/API 网关|费用说明\.docx|超长手册\.pdf|扫描件\.pdf|超时\.pdf/g, "");
+    assert(!/[一-鿿]/.test(copy), `documents dialog: untranslated copy: ${copy}`);
+    await snap(phone.page, "materials-documents-en-390-light.png");
+    await phone.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    await snap(phone.page, "materials-documents-en-390-dark.png");
+    await phone.close();
   }
 
   // Scheduled work stays hidden until its own switch is on, whatever the daily scan does.

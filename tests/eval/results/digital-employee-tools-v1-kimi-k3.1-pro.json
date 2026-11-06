@@ -1,11 +1,11 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "kimi-k3.1-pro",
-  "ranAt": "2026-11-05T12:58:00.310Z",
-  "toolDefinitionChars": 31239,
-  "passed": 30,
-  "total": 32,
-  "rate": 0.9375,
+  "ranAt": "2026-11-06T03:39:14.981Z",
+  "toolDefinitionChars": 32092,
+  "passed": 34,
+  "total": 35,
+  "rate": 0.9714285714285714,
   "threshold": 0.9,
   "results": [
     {
@@ -49,7 +49,7 @@
     {
       "id": "campaign-create",
       "object": "campaign",
-      "actual": "search_customer_segments",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_customer_segments",
         "search_marketing_materials",
@@ -129,7 +129,7 @@
     {
       "id": "customer-create",
       "object": "customer",
-      "actual": "prepare_customer_profile_change",
+      "actual": "search_customer_profiles",
       "expected": [
         "prepare_customer_profile_change",
         "search_customer_profiles"
@@ -248,12 +248,12 @@
     {
       "id": "group-size",
       "object": "group",
-      "actual": "load_skill",
+      "actual": "analyze_customer_cohort",
       "expected": [
         "analyze_customer_cohort",
         "search_customer_segments"
       ],
-      "pass": false
+      "pass": true
     },
     {
       "id": "mixed-owner-sentence",
@@ -291,6 +291,36 @@
       "actual": "mark_individual_outreach_used",
       "expected": [
         "mark_individual_outreach_used"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-document-detail",
+      "object": "product",
+      "actual": "read_product_documents",
+      "expected": [
+        "read_product_documents",
+        "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-general-sounding",
+      "object": "product",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_materials",
+        "read_product_documents"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-loose-name",
+      "object": "product",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "read_product_documents",
+        "search_marketing_materials"
       ],
       "pass": true
     },

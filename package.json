@@ -30,7 +30,7 @@
     "check:agent-boundary": "node packages/server/scripts/check-agent-boundary.mjs",
     "check:digital-employee:eval": "pnpm --filter @lot-agent/core build && pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/evaluate-digital-employee-tools.ts --live",
     "check:digital-employee:live": "pnpm --filter @lot-agent/core build && pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-digital-employee-live.ts --live",
-    "check:digital-employee:db": "pnpm --filter @lot-agent/core build && vitest run packages/server/src/digital-employee/proposals.integration.test.ts packages/server/src/digital-employee/daily-scan.integration.test.ts packages/server/src/digital-employee/schedules.integration.test.ts",
+    "check:digital-employee:db": "pnpm --filter @lot-agent/core build && vitest run packages/server/src/digital-employee/product-documents.integration.test.ts packages/server/src/digital-employee/proposals.integration.test.ts packages/server/src/digital-employee/daily-scan.integration.test.ts packages/server/src/digital-employee/schedules.integration.test.ts",
     "check:digital-employee:ui": "node packages/server/scripts/check-digital-employee-ui.mjs",
     "check:agent-navigation:ui": "node packages/server/scripts/check-agent-navigation-ui.mjs",
     "check:marketing-video:ui": "node packages/server/scripts/check-marketing-video-ui.mjs",

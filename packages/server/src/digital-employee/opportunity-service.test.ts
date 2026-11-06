@@ -294,7 +294,7 @@ describe("OpportunityService personal work queue", () => {
         recent_facts: [{ text: "客户要求先发合同模板", occurredAt: "2026-08-18T02:00:00.000Z" }],
       }] };
       if (sql.includes("FROM marketing_products")) return { rows: [{
-        name: "机房运维服务", positioning: "稳定运维", prohibited_expressions: ["绝对零故障"],
+        id: "m1", name: "机房运维服务", positioning: "稳定运维", prohibited_expressions: ["绝对零故障"],
       }] };
       return { rows: [] };
     });
@@ -339,7 +339,7 @@ describe("OpportunityService personal work queue", () => {
       }] };
       if (sql.includes("FROM marketing_products")) {
         const columns = /SELECT([\s\S]+?)FROM/.exec(sql)![1].split(",").map((column) => column.trim());
-        return { rows: [Object.fromEntries(columns.map((column) => [column, stored[column]]))] };
+        return { rows: [Object.fromEntries(columns.map((column) => [column, column === "id" ? "m1" : stored[column]]))] };
       }
       if (sql.includes("INSERT INTO de_outreach_drafts")) return { rows: [{
         id: "d1", profile_id: "p1", task_id: null, opportunity_id: null, channel: "wechat",
@@ -360,6 +360,68 @@ describe("OpportunityService personal work queue", () => {
       expect(input.context.productMaterial).toEqual(stored);
       expect(Object.keys(input.context.productMaterial!).slice(-2)).toEqual(["faqs", "product_notes"]);
     }
+  });
+
+  describe("talk-track product resolution", () => {
+    function setup(options: { products: Array<Record<string, unknown>>; documents?: Array<Record<string, unknown>>; states?: string[] }) {
+      const query = vi.fn(async (sql: string, params?: any[]) => {
+        if (sql.includes("AS product_states")) return { rows: [{
+          summary: "", tags: [], recent_facts: [], product_states: (options.states ?? []).map((productName) => ({ productName })),
+        }] };
+        if (sql.includes("FROM de_customer_profiles WHERE id=$1")) return { rows: [{
+          id: "p1", display_name: "周工", organization: null, relationship_stage: "prospect",
+        }] };
+        if (sql.includes("FROM marketing_product_documents")) return { rows: options.documents ?? [] };
+        if (sql.includes("id = ANY($2::uuid[])")) return { rows: options.products.filter((row) => params?.[1].includes(row.id)) };
+        if (sql.includes("FROM marketing_products")) return { rows: options.products };
+        if (sql.includes("INSERT INTO de_outreach_drafts")) return { rows: [{
+          id: "d1", profile_id: "p1", task_id: null, opportunity_id: null, channel: "wechat",
+          objective: "x", content: "y", version: 1, used_at: null, model_id: "m1",
+        }] };
+        return { rows: [] };
+      });
+      const generate = vi.fn(async (_input: { context: Record<string, any> }) => ({ modelId: "m1", reply: "y" }));
+      const service = new OpportunityService({ pool: { query } } as any, undefined, undefined, { generate } as any);
+      return { service, generate };
+    }
+    const gateway = { id: "g1", name: "API 网关" };
+    const ops = { id: "o1", name: "机房运维服务" };
+    const outreach = (message: string) => ({ profileId: "p1", intent: "follow_up", channel: "wechat", message } as const);
+
+    it("uses the product the request names, not the one on file", async () => {
+      const { service, generate } = setup({ products: [gateway, ops], states: ["API 网关"] });
+      await service.generateOutreach("u1", outreach("这次跟他聊机房运维"));
+      expect(generate.mock.calls[0][0].context).toMatchObject({ productName: "机房运维服务", productMaterial: { name: "机房运维服务" } });
+    });
+
+    it("matches a name that differs in spacing or a typo", async () => {
+      const { service, generate } = setup({ products: [gateway, ops], states: ["API网管"] });
+      await service.generateOutreach("u1", outreach("写跟进"));
+      const { context } = generate.mock.calls[0][0];
+      expect(context.productMaterial).toMatchObject({ name: "API 网关" });
+      expect(context.productMatchUncertain).toBe(true);
+    });
+
+    it("offers the product names when none can be identified", async () => {
+      const { service, generate } = setup({ products: [gateway, ops], states: ["边缘算力"] });
+      await service.generateOutreach("u1", outreach("写跟进"));
+      const { context } = generate.mock.calls[0][0];
+      expect(context.productMaterial).toBeNull();
+      expect(context.availableProducts).toEqual(["API 网关", "机房运维服务"]);
+    });
+
+    it("adds documents last and leaves out one that no longer fits", async () => {
+      const documents = [
+        { product_id: "g1", title: "短文", parsed_text: "保存策略", content_hash: "a" },
+        { product_id: "g1", title: "长文", parsed_text: "长".repeat(14_990), content_hash: "b" },
+      ];
+      const { service, generate } = setup({ products: [gateway], documents, states: ["API 网关"] });
+      await service.generateOutreach("u1", outreach("写跟进"));
+      const { context } = generate.mock.calls[0][0];
+      expect(Object.keys(context).at(-1)).toBe("productDocuments");
+      expect(context.productDocuments.map((item: { title: string }) => item.title)).toEqual(["短文"]);
+      expect(JSON.stringify(context).length).toBeLessThanOrEqual(30_000);
+    });
   });
 
   it("persists generated outreach against the selected customer", async () => {

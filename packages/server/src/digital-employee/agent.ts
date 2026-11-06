@@ -25,13 +25,13 @@ export const DIGITAL_EMPLOYEE_PRIVATE_TOOL_NAMES = digitalEmployeeDefinition.too
 
 const SCOPE_TOOLS: Record<string, Set<string>> = {
   "marketing-materials": new Set([
-    "search_marketing_materials", "create_marketing_product", "update_marketing_product",
+    "search_marketing_materials", "read_product_documents", "create_marketing_product", "update_marketing_product",
     "update_marketing_brand_assets", "ask_user", "load_skill",
   ]),
   "customer-profile": new Set([
     "search_customer_profiles", "get_customer_profiles", "prepare_customer_profile_change",
     "commit_customer_profile_change", "prepare_customer_capture", "commit_customer_capture",
-    "search_marketing_materials",
+    "search_marketing_materials", "read_product_documents",
     "ask_user", "load_skill",
   ]),
   "opportunity-advisor": new Set([
@@ -39,7 +39,7 @@ const SCOPE_TOOLS: Record<string, Set<string>> = {
     "commit_customer_capture", "search_customer_work_queue", "get_customer_business_context",
     "search_customer_opportunities", "prepare_follow_up_action", "commit_follow_up_action",
     "prepare_follow_up_result", "commit_follow_up_result", "generate_individual_outreach",
-    "rewrite_individual_outreach", "mark_individual_outreach_used", "ask_user", "load_skill",
+    "rewrite_individual_outreach", "mark_individual_outreach_used", "read_product_documents", "ask_user", "load_skill",
   ]),
   "customer-acquisition": new Set([
     "analyze_customer_cohort", "search_customer_segments", "prepare_customer_segment",
@@ -51,7 +51,7 @@ const SCOPE_TOOLS: Record<string, Set<string>> = {
     "commit_asset_deployment", "prepare_deployment_feedback", "commit_deployment_feedback",
     "prepare_campaign_result", "commit_campaign_result", "archive_marketing_asset",
     "generate_daily_recommendations", "get_daily_recommendations", "adopt_recommendation",
-    "ignore_recommendation", "check_user_generation_models", "search_marketing_materials",
+    "ignore_recommendation", "check_user_generation_models", "search_marketing_materials", "read_product_documents",
     "ask_user", "load_skill",
   ]),
   [DIGITAL_EMPLOYEE_UNIFIED_SCOPE]: new Set(digitalEmployeeDefinition.toolNames),

@@ -24,7 +24,11 @@ export class MarketingMaterialsRepository {
     const count = await this.pool.query(`SELECT count(*)::int AS total FROM marketing_products WHERE ${whereSql}`, params);
     params.push(filters.limit, (filters.page - 1) * filters.limit);
     const result = await this.pool.query(
-      `SELECT * FROM marketing_products WHERE ${whereSql}
+      `SELECT *, (
+         SELECT count(*)::int FROM marketing_product_documents document
+         WHERE document.product_id = marketing_products.id AND document.deleted_at IS NULL
+       ) AS document_count
+       FROM marketing_products WHERE ${whereSql}
        ORDER BY updated_at DESC, id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
@@ -157,6 +161,7 @@ function toProduct(row: any): MarketingProduct {
     caseMaterials: row.case_materials ?? [],
     faqs: row.faqs ?? [],
     productNotes: row.product_notes ?? "",
+    documentCount: Number(row.document_count ?? 0),
     status: row.status,
     version: Number(row.version),
     archivedAt: row.archived_at ? new Date(row.archived_at).toISOString() : null,

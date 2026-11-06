@@ -115,6 +115,7 @@ export const migrations: Migration[] = [
   employeeBriefs,
   employeeWorkPreferences,
   employeeSchedules,
+  marketingProductDocuments,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -150,3 +151,4 @@ import { discoveryMode } from "./0070-discovery-mode.js";
 import { employeeBriefs } from "./0071-employee-briefs.js";
 import { employeeWorkPreferences } from "./0072-employee-work-preferences.js";
 import { employeeSchedules } from "./0073-employee-schedules.js";
+import { marketingProductDocuments } from "./0074-marketing-product-documents.js";

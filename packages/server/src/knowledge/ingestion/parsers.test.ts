@@ -1,6 +1,8 @@
 import { expect, it } from "vitest";
 import { Document, Packer, Paragraph, HeadingLevel } from "docx";
+import JSZip from "jszip";
 import PDFDocument from "pdfkit";
+import * as XLSX from "xlsx";
 import { parseKnowledge } from "./parsers.js";
 it("retains >30K text and labels descriptions separately", async () => {
   const artifact = await parseKnowledge({ mime: "text/plain", content: "说明".repeat(20000) + "END", description: "人工说明" });
@@ -78,4 +80,22 @@ it("uses an existing description for a text-free image without overwriting it or
   expect(calls).toBe(1);
   expect(parsed.generatedDescription).toBeUndefined();
   expect(parsed.blocks).toEqual([{ text: "用户填写的产品说明", origin: "manual_description" }]);
+});
+it("reads PowerPoint slides in order and every Excel sheet", async () => {
+  const deck = new JSZip();
+  deck.file("ppt/slides/slide2.xml", "<a:t>第二页</a:t>");
+  deck.file("ppt/slides/slide1.xml", "<a:t>第一页</a:t>");
+  const slides = await parseKnowledge({
+    mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    bytes: await deck.generateAsync({ type: "uint8array" }),
+  });
+  expect(slides.blocks.map((block) => block.text)).toEqual(["### Slide 1", "第一页", "### Slide 2", "第二页"]);
+
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([["型号", "价格"], ["A1", 99]]), "价目表");
+  const sheet = await parseKnowledge({
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    bytes: XLSX.write(book, { type: "array", bookType: "xlsx" }),
+  });
+  expect(sheet.blocks.map((block) => block.text)).toEqual(["### Worksheet: 价目表", "型号,价格", "A1,99"]);
 });

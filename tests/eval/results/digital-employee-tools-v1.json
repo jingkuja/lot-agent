@@ -1,11 +1,11 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "deepseek-v4.1-flash",
-  "ranAt": "2026-11-05T12:57:04.424Z",
-  "toolDefinitionChars": 31239,
-  "passed": 30,
-  "total": 32,
-  "rate": 0.9375,
+  "ranAt": "2026-11-06T03:37:56.673Z",
+  "toolDefinitionChars": 32092,
+  "passed": 34,
+  "total": 35,
+  "rate": 0.9714285714285714,
   "threshold": 0.9,
   "results": [
     {
@@ -49,7 +49,7 @@
     {
       "id": "campaign-create",
       "object": "campaign",
-      "actual": "search_customer_segments",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_customer_segments",
         "search_marketing_materials",
@@ -97,7 +97,7 @@
     {
       "id": "customer-capture-purchase",
       "object": "customer",
-      "actual": "search_customer_profiles",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -129,7 +129,7 @@
     {
       "id": "customer-create",
       "object": "customer",
-      "actual": "search_customer_profiles",
+      "actual": "prepare_customer_profile_change",
       "expected": [
         "prepare_customer_profile_change",
         "search_customer_profiles"
@@ -196,7 +196,7 @@
     {
       "id": "followup-result",
       "object": "follow-up",
-      "actual": "search_customer_profiles",
+      "actual": "search_customer_work_queue",
       "expected": [
         "search_customer_work_queue",
         "search_customer_profiles",
@@ -279,11 +279,11 @@
     {
       "id": "outreach-rewrite",
       "object": "follow-up",
-      "actual": "search_customer_profiles",
+      "actual": "rewrite_individual_outreach",
       "expected": [
         "rewrite_individual_outreach"
       ],
-      "pass": false
+      "pass": true
     },
     {
       "id": "outreach-used",
@@ -291,6 +291,36 @@
       "actual": "mark_individual_outreach_used",
       "expected": [
         "mark_individual_outreach_used"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-document-detail",
+      "object": "product",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "read_product_documents",
+        "search_marketing_materials"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-general-sounding",
+      "object": "product",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "search_marketing_materials",
+        "read_product_documents"
+      ],
+      "pass": true
+    },
+    {
+      "id": "product-loose-name",
+      "object": "product",
+      "actual": "search_marketing_materials",
+      "expected": [
+        "read_product_documents",
+        "search_marketing_materials"
       ],
       "pass": true
     },

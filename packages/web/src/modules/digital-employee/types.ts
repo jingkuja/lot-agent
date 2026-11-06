@@ -246,11 +246,31 @@ export interface MarketingProduct {
   caseMaterials: MarketingCaseMaterial[];
   faqs: MarketingFaq[];
   productNotes: string;
+  documentCount?: number;
   status: "active" | "archived";
   version: number;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProductDocument {
+  id: string;
+  productId: string;
+  title: string;
+  mime: string;
+  status: "pending" | "processing" | "ready" | "failed";
+  errorCode: string | null;
+  chars: number;
+  skippedPages: number;
+  usedInTalkTrack: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductDocumentList {
+  items: ProductDocument[];
+  usage: { usedChars: number; limitChars: number };
 }
 
 export interface MarketingBrandAssets {

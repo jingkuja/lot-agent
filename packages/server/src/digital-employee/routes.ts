@@ -373,6 +373,47 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     }
   });
 
+  app.get("/marketing/products/:id/documents", async (c) => {
+    try {
+      return c.json(await service.productDocuments.list(c.get("userId"), parseEntityId(c.req.param("id"), "productId")));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.post("/marketing/products/:id/documents", async (c) => {
+    try {
+      const payload = await body(c);
+      return c.json(await service.productDocuments.add(c.get("userId"), parseEntityId(c.req.param("id"), "productId"), {
+        assetId: parseEntityId(payload.assetId, "assetId"),
+        title: typeof payload.title === "string" ? payload.title : undefined,
+      }), 201);
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.post("/marketing/products/:id/documents/:documentId/retry", async (c) => {
+    try {
+      return c.json(await service.productDocuments.retry(
+        c.get("userId"), parseEntityId(c.req.param("id"), "productId"), parseEntityId(c.req.param("documentId"), "documentId")
+      ));
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
+  app.delete("/marketing/products/:id/documents/:documentId", async (c) => {
+    try {
+      await service.productDocuments.remove(
+        c.get("userId"), parseEntityId(c.req.param("id"), "productId"), parseEntityId(c.req.param("documentId"), "documentId")
+      );
+      return c.json({ ok: true });
+    } catch (error) {
+      return respondError(c, error);
+    }
+  });
+
   app.get("/marketing/brand-assets", async (c) => {
     try {
       return c.json(await service.marketingMaterials.getBrandAssets(c.get("userId")));

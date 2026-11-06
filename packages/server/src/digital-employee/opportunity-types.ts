@@ -164,7 +164,17 @@ export interface TalkTrackContext {
   customerProductStates: unknown[];
   recentFacts: Array<{ text: string; occurredAt: string | null }>;
   productMaterial: Record<string, unknown> | null;
+  /** Further products the request named or that tied with the first one. */
+  otherProductMaterials?: Array<Record<string, unknown>>;
+  /** The product was inferred loosely and may not be the one meant. */
+  productMatchUncertain?: boolean;
+  /** Names to choose from when no product could be identified. */
+  availableProducts?: string[];
+  productDocuments?: Array<{ product: string; title: string; content: string }>;
 }
+
+/** The prompt cuts its serialized context here; documents are sized to fit inside it. */
+export const TALK_TRACK_CONTEXT_CHARS = 30_000;
 
 export interface ActionResultInput {
   outcome: ActionOutcome;

@@ -11,6 +11,8 @@ import type {
   MarketingProduct,
   MarketingProductInput,
   MarketingProductListResponse,
+  ProductDocument,
+  ProductDocumentList,
   CustomerStateChange,
   DigitalEmployeeOverview,
   ManualObservationInput,
@@ -237,6 +239,27 @@ export const employeeApi = {
       method: "DELETE",
       body: JSON.stringify({ version }),
     }),
+
+  listProductDocuments: (productId: string) =>
+    request<ProductDocumentList>(`/digital-employee/marketing/products/${encodeURIComponent(productId)}/documents`),
+
+  addProductDocument: (productId: string, assetId: string) =>
+    request<ProductDocument>(`/digital-employee/marketing/products/${encodeURIComponent(productId)}/documents`, {
+      method: "POST",
+      body: JSON.stringify({ assetId }),
+    }),
+
+  retryProductDocument: (productId: string, documentId: string) =>
+    request<ProductDocument>(
+      `/digital-employee/marketing/products/${encodeURIComponent(productId)}/documents/${encodeURIComponent(documentId)}/retry`,
+      { method: "POST", body: "{}" },
+    ),
+
+  deleteProductDocument: (productId: string, documentId: string) =>
+    request<{ ok: boolean }>(
+      `/digital-employee/marketing/products/${encodeURIComponent(productId)}/documents/${encodeURIComponent(documentId)}`,
+      { method: "DELETE", body: "{}" },
+    ),
 
   getMarketingBrandAssets: () => request<MarketingBrandAssets | null>("/digital-employee/marketing/brand-assets"),
 

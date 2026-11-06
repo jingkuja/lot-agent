@@ -174,6 +174,27 @@ describe("DigitalEmployeeService product relationships", () => {
       .rejects.toThrow("请选择营销资料中的产品");
   });
 
+  it("links a product the user wrote differently without asking", async () => {
+    const service = serviceWith({
+      findProfilesByExactMention: vi.fn(async () => [profile]),
+      getProductStateByMarketingProduct: vi.fn(async () => null),
+      createDraft: vi.fn(async (row) => row),
+    });
+    (service as any).marketingMaterials = {
+      findActiveProductByName: vi.fn(async () => null),
+      getProduct: vi.fn(async () => ({ id: marketingProductId, name: "API 网关", status: "active" })),
+      listProducts: vi.fn(async () => ({
+        items: [{ id: marketingProductId, name: "API 网关", status: "active" }], page: 1, limit: 100, total: 1,
+      })),
+    };
+
+    const result = await service.prepareCustomerCapture(
+      "u1", { customerMention: "李静", eventType: "note", productName: "api网关" }, { sourceText: "李静在问 api网关" }
+    );
+
+    expect(result.clarification?.kind).not.toBe("marketing_product");
+  });
+
   it("asks for confirmation when the conversation product cannot be matched exactly", async () => {
     const createDraft = vi.fn(async (row) => row);
     const service = serviceWith({

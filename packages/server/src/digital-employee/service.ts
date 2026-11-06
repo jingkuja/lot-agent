@@ -44,6 +44,8 @@ import { parseCaptureInput } from "./validators.js";
 import { DRAFT_TTL_MS } from "./conversation-drafts.js";
 import { MarketingMaterialsService } from "./marketing-service.js";
 import { OpportunityService, type OpportunityTalkTrackGenerator } from "./opportunity-service.js";
+import { ProductDocumentService } from "./product-document-service.js";
+import { confidentProductMatch, rankProductCandidates } from "./product-match.js";
 import type { JobQueue } from "@lot-agent/core";
 import { CustomerAcquisitionService } from "./acquisition-service.js";
 import { BriefService } from "./brief-service.js";
@@ -112,6 +114,7 @@ export interface CohortSummaryGenerator {
 export class DigitalEmployeeService {
   readonly repository: DigitalEmployeeRepository;
   readonly marketingMaterials: MarketingMaterialsService;
+  readonly productDocuments: ProductDocumentService;
   readonly opportunities: OpportunityService;
   readonly customerAcquisition: CustomerAcquisitionService;
   readonly settings: EmployeeSettingsService;
@@ -135,6 +138,7 @@ export class DigitalEmployeeService {
   ) {
     this.repository = new DigitalEmployeeRepository(db.pool);
     this.marketingMaterials = new MarketingMaterialsService(db);
+    this.productDocuments = new ProductDocumentService(db.pool, opportunityQueue);
     this.opportunities = new OpportunityService(db, opportunityQueue, undefined, opportunityTalkTrackGenerator);
     this.customerAcquisition = new CustomerAcquisitionService(
       db,
@@ -768,8 +772,12 @@ export class DigitalEmployeeService {
         input = { ...input, productName: exact.name, marketingProductId: exact.id };
       } else {
         const catalog = await this.marketingMaterials.listProducts(userId, { page: 1, limit: 100, status: "active" });
-        productCandidates = rankProductCandidates(input.productName, catalog.items).slice(0, 4)
-          .map((product) => ({ id: product.id, name: product.name }));
+        const match = confidentProductMatch(input.productName, catalog.items);
+        if (match) input = { ...input, productName: match.name, marketingProductId: match.id };
+        else {
+          productCandidates = rankProductCandidates(input.productName, catalog.items).slice(0, 4)
+            .map((product) => ({ id: product.id, name: product.name }));
+        }
       }
     }
     const rawText = source.sourceText.trim().slice(0, 12_000);
@@ -1347,10 +1355,6 @@ function marketingProductKey(marketingProductId: string): string {
   return `marketing:${marketingProductId}`;
 }
 
-function normalizedProductName(value: string): string {
-  return value.trim().toLocaleLowerCase("zh-CN").replace(/\s+/g, "");
-}
-
 function inferProductNameFromSource(text: string): string | undefined {
   const patterns = [
     /(?:咨询|了解|关注|试用|购买|采购|订购|续费)(?:了|一下)?\s*[“"'「]?([^，。；;,.!?！？]{2,80}?)[”"'」]?(?=\s*(?:表示|但|不过|然而|，|。|；|,|;|$))/iu,
@@ -1363,20 +1367,6 @@ function inferProductNameFromSource(text: string): string | undefined {
     if (candidate && candidate.length <= 200 && !generic.has(candidate)) return candidate;
   }
   return undefined;
-}
-
-function rankProductCandidates<T extends { name: string }>(requestedName: string, products: T[]): T[] {
-  const requested = normalizedProductName(requestedName);
-  return products
-    .map((product, index) => {
-      const candidate = normalizedProductName(product.name);
-      const score = candidate === requested ? 100
-        : candidate.includes(requested) || requested.includes(candidate) ? 50
-          : 0;
-      return { product, index, score };
-    })
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .map(({ product }) => product);
 }
 
 function productStatePatch(before: CustomerProductState, after: CustomerProductState): JsonObject {

@@ -38,6 +38,7 @@ import { createOptionalFallbackLLM } from "./fallback-llm.js";
 import { agentExtension, registerAgentExtension } from "../services/agent-extensions.js";
 import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
 import { registerDigitalEmployeeWorkerJobs } from "../digital-employee/jobs.js";
+import { parseIsolated } from "../knowledge/ingestion/parser-process.js";
 import { createOwnerLlmResolver } from "../digital-employee/runtime.js";
 import { internationalModelsEnabled } from "../tokenhub/model-access.js";
 
@@ -276,6 +277,11 @@ async function main() {
   registerDigitalEmployeeWorkerJobs({
     queue, db, adviceLlm: { resolveLlm: resolveOwnerLlm, recordUsage: (input) => meter.record(input), english: internationalModelsEnabled() },
     checkQuota: (userId, estimatedCost) => meter.checkQuota(userId, estimatedCost),
+    parseProductDocument: ({ storageKey, mime }, signal) => parseIsolated(
+      resolve(dirname(process.argv[1]), `knowledge-parser.${process.argv[1].endsWith(".ts") ? "ts" : "js"}`),
+      { mime: mime.startsWith("text/") || mime === "application/json" ? "text/plain" : mime, path: resolve(UPLOADS_DIR, storageKey) },
+      signal,
+    ),
   });
 
   queue.process("image.generate", async (job, ctl) => {

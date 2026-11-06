@@ -4,6 +4,7 @@ import { CustomerAcquisitionService } from "./acquisition-service.js";
 import { BriefService, briefMessage } from "./brief-service.js";
 import { digitalEmployeeDailyScanEnabled, digitalEmployeeSchedulesEnabled } from "./feature-scope.js";
 import { OpportunityService } from "./opportunity-service.js";
+import { PRODUCT_DOCUMENT_JOB, ProductDocumentService, type ProductDocumentParser } from "./product-document-service.js";
 import { ProposalService } from "./proposal-service.js";
 import { createOpportunityAdviceGenerator, createScheduleReportGenerator } from "./runtime.js";
 import { SCHEDULE_JOB, ScheduleService } from "./schedule-service.js";
@@ -86,6 +87,7 @@ interface WorkerPorts {
   db: DB;
   adviceLlm: Parameters<typeof createOpportunityAdviceGenerator>[0];
   checkQuota(userId: string, estimatedCost: number): Promise<{ ok: boolean }>;
+  parseProductDocument: ProductDocumentParser;
 }
 
 /** What follows a daily scan. Nothing here can reach a model: the acquisition service has no generator. */
@@ -102,7 +104,7 @@ export function createDailyScanFollowUp(db: Pick<DB, "pool">, opportunities: Opp
   };
 }
 
-export function registerDigitalEmployeeWorkerJobs({ queue, db, adviceLlm, checkQuota }: WorkerPorts) {
+export function registerDigitalEmployeeWorkerJobs({ queue, db, adviceLlm, checkQuota, parseProductDocument }: WorkerPorts) {
   const opportunities = new OpportunityService(db, undefined, createOpportunityAdviceGenerator(adviceLlm));
   const followUp = createDailyScanFollowUp(db, opportunities);
   queue.process("opportunity.discover", async (job) => {
@@ -122,5 +124,11 @@ export function registerDigitalEmployeeWorkerJobs({ queue, db, adviceLlm, checkQ
   queue.process(SCHEDULE_JOB, async (job, control) => {
     const { runId } = job.input as { runId: string };
     return { status: await schedules.execute(job.userId, runId, execution, control.signal) };
+  });
+  const productDocuments = new ProductDocumentService(db.pool);
+  queue.process(PRODUCT_DOCUMENT_JOB, async (job, control) => {
+    const { documentId } = job.input as { documentId: string };
+    await productDocuments.parse(job.userId, documentId, parseProductDocument, control.signal);
+    return { documentId };
   });
 }

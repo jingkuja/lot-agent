@@ -53,7 +53,9 @@ describe("worker job", () => {
     const runDiscovery = vi.spyOn(OpportunityService.prototype, "runDiscovery").mockResolvedValue({ runId: "r1", status: "succeeded", created: 0 });
     const query = vi.fn(async () => ({ rows: [] }));
     const { queue, run } = worker();
-    registerDigitalEmployeeWorkerJobs({ queue: queue as any, db: { pool: { query } } as any, adviceLlm: {} as any, checkQuota: vi.fn() });
+    registerDigitalEmployeeWorkerJobs({
+      queue: queue as any, db: { pool: { query } } as any, adviceLlm: {} as any,
+      parseProductDocument: vi.fn() as any, checkQuota: vi.fn() });
     await run({ runId: "r1" });
     expect(runDiscovery).toHaveBeenCalledWith("u1", "r1", expect.any(Function), { useModel: undefined });
     expect(query).not.toHaveBeenCalled();
@@ -65,7 +67,8 @@ describe("worker job", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { queue, run } = worker();
     registerDigitalEmployeeWorkerJobs({
-      queue: queue as any, db: { pool: { query: vi.fn(async () => { throw new Error("db"); }) } } as any, adviceLlm: {} as any, checkQuota: vi.fn(),
+      queue: queue as any, db: { pool: { query: vi.fn(async () => { throw new Error("db"); }) } } as any, adviceLlm: {} as any,
+      parseProductDocument: vi.fn() as any, checkQuota: vi.fn(),
     });
     await expect(run({ runId: "r1", daily: true, useModel: false })).resolves.toMatchObject({ created: 2 });
     expect(runDiscovery).toHaveBeenCalledWith("u1", "r1", expect.any(Function), { useModel: false });

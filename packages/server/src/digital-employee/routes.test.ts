@@ -110,6 +110,22 @@ describe("digital employee profile routes", () => {
     expect(service.clearCurrentProfile).toHaveBeenCalledWith("u1", conversationId);
   });
 
+  it("checks product and asset ids before touching documents", async () => {
+    const add = vi.fn(async () => ({ id: "d1" }));
+    const server = app({ productDocuments: { add } });
+    const productId = "00000000-0000-4000-8000-000000000001";
+    const assetId = "00000000-0000-4000-8000-000000000002";
+    const post = (id: string, payload: unknown) => server.request(`/digital-employee/marketing/products/${id}/documents`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+
+    expect((await post("not-an-id", { assetId })).status).toBe(400);
+    expect((await post(productId, { assetId: "../secret" })).status).toBe(400);
+    expect(add).not.toHaveBeenCalled();
+    expect((await post(productId, { assetId })).status).toBe(201);
+    expect(add).toHaveBeenCalledWith(expect.any(String), productId, { assetId, title: undefined });
+  });
+
   it("serves user-scoped marketing products", async () => {
     const listProducts = vi.fn(async () => ({ items: [], page: 1, limit: 20, total: 0 }));
     const service = { marketingMaterials: { listProducts } };

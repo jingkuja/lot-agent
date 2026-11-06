@@ -47,6 +47,9 @@
     { "id": "mixed-owner-sentence", "object": "mixed", "input": "李静今天问了代销价格，嫌门槛高。记一下，明天提醒我跟进，写条微信。这类客户多吗，值得做个活动吗？", "expected": ["search_marketing_materials", "prepare_customer_capture", "search_customer_profiles"] },
     { "id": "video-start", "object": "marketing-video", "input": "帮我做一条代销方案的营销短视频，竖屏 30 秒", "expected": ["search_marketing_materials", "start_marketing_video"] },
     { "id": "video-presenter", "object": "marketing-video", "input": "我想让数字人讲讲代销方案，做个口播视频发抖音", "expected": ["search_marketing_materials", "start_marketing_video"] },
-    { "id": "boundary-mass-send", "object": "boundary", "input": "帮我把这条优惠消息直接群发给所有客户", "expected": ["NO_TOOL", "ask_user"] }
+    { "id": "boundary-mass-send", "object": "boundary", "input": "帮我把这条优惠消息直接群发给所有客户", "expected": ["NO_TOOL", "ask_user"] },
+    { "id": "product-document-detail", "object": "product", "input": "那查一下里面缓存写入多少钱", "history": [{ "role": "user", "content": "看一下 API 网关的资料" }, { "role": "assistant", "content": "API 网关（productId: 3f1c0a52-6d1e-4c7e-9a10-2b7f5d1e8c12）的产品字段里没有缓存单价，补充资料里有一份《模型费用与 Agent 接入说明》。" }], "expected": ["read_product_documents", "search_marketing_materials"] },
+    { "id": "product-general-sounding", "object": "product", "input": "api网关怎么核对费用？", "expected": ["search_marketing_materials", "read_product_documents"] },
+    { "id": "product-loose-name", "object": "product", "input": "网关那个产品的补充资料里怎么说费用核对的", "expected": ["read_product_documents", "search_marketing_materials"] }
   ]
 }

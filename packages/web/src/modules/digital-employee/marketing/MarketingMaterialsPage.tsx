@@ -7,6 +7,7 @@ import type {
   MarketingProductInput,
   MarketingVisualAsset,
 } from "../types.js";
+import { ProductDocumentsDialog } from "./ProductDocumentsDialog.js";
 
 interface Props {
   onSelect?: (product: MarketingProduct) => void;
@@ -22,6 +23,7 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<MarketingProduct | "new" | null>(null);
   const [editingBrand, setEditingBrand] = useState(false);
+  const [documentsOf, setDocumentsOf] = useState<MarketingProduct | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
@@ -151,6 +153,7 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
                   setEditingProduct(product);
                   onSelect?.(product);
                 }}
+                onDocuments={() => setDocumentsOf(product)}
                 onArchive={() => void archiveProduct(product)}
               />
             ))}
@@ -161,6 +164,7 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
       {editingProduct && (
         <ProductEditor product={editingProduct === "new" ? undefined : editingProduct} onClose={() => setEditingProduct(null)} onSave={saveProduct} />
       )}
+      {documentsOf && <ProductDocumentsDialog product={documentsOf} onClose={() => setDocumentsOf(null)} onChanged={() => void load()} />}
       {editingBrand && (
         <BrandEditor
           brand={brand}
@@ -176,7 +180,9 @@ export function MarketingMaterialsPage({ onSelect }: Props) {
   );
 }
 
-function ProductCard({ product, onEdit, onArchive }: { product: MarketingProduct; onEdit: () => void; onArchive: () => void }) {
+function ProductCard({ product, onEdit, onDocuments, onArchive }: {
+  product: MarketingProduct; onEdit: () => void; onDocuments: () => void; onArchive: () => void;
+}) {
   const { t, locale } = useI18n();
   const activeBenefits = product.currentBenefits.filter((benefit) => {
     const now = Date.now();
@@ -184,7 +190,16 @@ function ProductCard({ product, onEdit, onArchive }: { product: MarketingProduct
       && (!benefit.validUntil || new Date(benefit.validUntil).getTime() >= now);
   });
   return <article className="marketing-product-card">
-    <header><div><h3>{product.name}</h3><p>{product.positioning || t("待补充产品定位")}</p></div><div><button className="de-row-action" onClick={onEdit}>{t("编辑")}</button><button className="de-quiet-button" onClick={onArchive}>{t("归档")}</button></div></header>
+    <header>
+      <div><h3>{product.name}</h3><p>{product.positioning || t("待补充产品定位")}</p></div>
+      <div>
+        <button className="de-row-action" onClick={onDocuments}>
+          {t("补充资料")}{product.documentCount ? ` ${product.documentCount}` : ""}
+        </button>
+        <button className="de-row-action" onClick={onEdit}>{t("编辑")}</button>
+        <button className="de-quiet-button" onClick={onArchive}>{t("归档")}</button>
+      </div>
+    </header>
     <div className="marketing-product-stats">
       <span><strong>{product.coreValues.length}</strong>{t("客户最在意")}</span>
       <span><strong>{product.verifiableFacts.length}</strong>{t("能说出口的证据")}</span>
