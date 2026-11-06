@@ -10,6 +10,52 @@ function app(service: Record<string, unknown>) {
   return server;
 }
 
+describe("task routes", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const post = (body?: unknown) => ({
+    method: "POST", headers: { "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const assignments = () => ({
+    list: vi.fn(async () => ({ items: [], pinned: [], nextCursor: null })),
+    create: vi.fn(async () => ({ id })), cancel: vi.fn(async () => ({ id })), retry: vi.fn(async () => ({ id })),
+    resume: vi.fn(async () => ({ id })), setCreditLimit: vi.fn(async () => ({ id })), get: vi.fn(async () => ({ id })),
+  });
+
+  it("creates for the logged-in owner, ignoring any owner in the body", async () => {
+    const service = assignments();
+    const response = await app({ assignments: service }).request("/digital-employee/assignments", post({ goal: "写方案", userId: "someone-else" }));
+    expect(response.status).toBe(201);
+    expect(service.create).toHaveBeenCalledWith("u1", expect.objectContaining({ goal: "写方案" }));
+  });
+
+  it("passes filters through to the list", async () => {
+    const service = assignments();
+    await app({ assignments: service }).request("/digital-employee/assignments?q=%E7%8E%8B&status=failed");
+    expect(service.list).toHaveBeenCalledWith("u1", expect.objectContaining({ q: "王", status: "failed", limit: 30 }));
+  });
+
+  it("tells a resume with a new limit from one without", async () => {
+    const service = assignments();
+    const server = app({ assignments: service });
+    await server.request(`/digital-employee/assignments/${id}/resume`, post({}));
+    await server.request(`/digital-employee/assignments/${id}/resume`, post({ creditLimit: 800 }));
+    await server.request(`/digital-employee/assignments/${id}/resume`, post({ creditLimit: null }));
+    expect(service.resume.mock.calls).toEqual([["u1", id, undefined], ["u1", id, 800], ["u1", id, null]]);
+  });
+
+  it("rejects a malformed id before reaching the service", async () => {
+    const service = assignments();
+    expect((await app({ assignments: service }).request("/digital-employee/assignments/not-an-id/cancel", post())).status).toBe(400);
+    expect(service.cancel).not.toHaveBeenCalled();
+  });
+
+  it("answers a missing feature with 404", async () => {
+    const service = assignments();
+    service.list.mockRejectedValue(new NotFoundError("任务分派未开启"));
+    expect((await app({ assignments: service }).request("/digital-employee/assignments")).status).toBe(404);
+  });
+});
+
 describe("digital employee profile routes", () => {
   it("returns the user-scoped digital employee overview", async () => {
     const overview = { recentProfiles: [], totalProfiles: 0 };

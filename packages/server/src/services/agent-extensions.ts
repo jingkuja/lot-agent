@@ -1,4 +1,4 @@
-import type { LLMProvider } from "@lot-agent/core";
+import type { LLMProvider, Tool } from "@lot-agent/core";
 
 export interface ResolvedLlm {
   llm: LLMProvider;
@@ -18,6 +18,10 @@ export interface AgentTurnContext {
   allowedToolNames: string[];
   dynamicParts: string[];
   featureScope?: string;
+  /** Removed after every other tool is added, so a channel's own tools cannot come back. */
+  blockedToolNames?: string[];
+  /** Tools for this turn only. `original` looks up the shared tool of the same name, which they may wrap. */
+  toolOverrides?(original: (name: string) => Tool | undefined): Tool[];
 }
 
 /** A conversation an extension refuses; routes report it as a 400. */

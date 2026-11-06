@@ -8,7 +8,7 @@ import type { MarketingProduct } from "./marketing-types.js";
 import { parseMarketingProduct, parseMarketingProductUpdate } from "./marketing-validators.js";
 import type { ProductDocumentService } from "./product-document-service.js";
 import {
-  IMPORT_INPUT_CHARS, PRODUCT_IMPORT_KIND, applyImportEdits, buildImportDraft, importPreview, importedFields,
+  IMPORT_INPUT_CHARS, PRODUCT_IMPORT_KIND, applyImportEdits, buildImportDraft, importPreview, importedFields, splitUnattended,
   type ImportCommitInput, type ImportDraft, type ImportModelProduct, type ImportPreview, type ImportProduct, type ImportPromptInput,
 } from "./product-import.js";
 import { confidentProductMatch, normalizedProductName } from "./product-match.js";
@@ -36,6 +36,12 @@ export interface ProductImportResult {
   saved: Array<{ id: string; name: string; created: boolean; items: number }>;
   /** Selected items that did not fit the product's field limits. */
   dropped: number;
+}
+
+export interface UnattendedImportResult extends ProductImportResult {
+  /** Items that wait for the owner in a new draft. */
+  held: number;
+  reviewUrl: string | null;
 }
 
 const STALLED_MINUTES = 15;
@@ -235,9 +241,78 @@ export class ProductImportService {
       saved.push(result.saved);
       dropped += result.dropped;
     }
-    await this.placeDocument(userId, draft.documentId, [...new Set(saved.map((item) => item.id))]);
+    if (draft.heldFromDocument) await this.discard(userId, draft.documentId);
+    else await this.placeDocument(userId, draft.documentId, [...new Set(saved.map((item) => item.id))]);
     await this.drafts.markApplied(userId, row.id, saved[0].id);
     return { alreadyApplied: false, entityId: saved[0].id, managementUrl: MANAGEMENT_URL, saved, dropped };
+  }
+
+  /**
+   * The save a background task may do. Model-supplied confirmations do not exist on this path, and what
+   * would have waited for the owner moves to a new draft instead of being dropped with this one.
+   */
+  async commitUnattended(userId: string, draftId: string): Promise<UnattendedImportResult> {
+    const current = await this.drafts.get(userId, draftId, PRODUCT_IMPORT_KIND);
+    const draft = current.payload as unknown as ImportDraft;
+    const { save, held } = splitUnattended(draft);
+    const heldItems = held.reduce((sum, product) => sum + product.items.length, 0);
+    if (current.status !== "applied" && !save.length) {
+      const reviewUrl = importPreview(draft).reviewUrl;
+      return { alreadyApplied: false, entityId: null, managementUrl: MANAGEMENT_URL, saved: [], dropped: 0, held: heldItems, reviewUrl };
+    }
+    return this.drafts.commit<UnattendedImportResult, UnattendedImportResult>(userId, draftId, PRODUCT_IMPORT_KIND, {
+      applied: (row) => ({
+        alreadyApplied: true, entityId: row.appliedEntityId, managementUrl: MANAGEMENT_URL, saved: [], dropped: 0, held: 0, reviewUrl: null,
+      }),
+      apply: async (row) => {
+        const { items: catalog } = await this.materials.listProducts(userId, { page: 1, limit: CATALOG_LIMIT, status: "active" });
+        const saved: ProductImportResult["saved"] = [];
+        let dropped = 0;
+        for (const product of save) {
+          const result = await this.saveProduct(userId, product, draft.title, catalog);
+          saved.push(result.saved);
+          dropped += result.dropped;
+        }
+        await this.placeDocument(userId, draft.documentId, [...new Set(saved.map((item) => item.id))]);
+        // Before closing the draft: a second held draft is harmless, losing these items is not.
+        const reviewUrl = held.length ? await this.holdForOwner(userId, draft, held, save, saved, row.conversationId) : null;
+        await this.drafts.markApplied(userId, row.id, saved[0]!.id);
+        return { alreadyApplied: false, entityId: saved[0]!.id, managementUrl: MANAGEMENT_URL, saved, dropped, held: heldItems, reviewUrl };
+      },
+    });
+  }
+
+  /** Reviews are opened by document, so the new draft gets its own row for the same file, with no product of its own. */
+  private async holdForOwner(
+    userId: string, draft: ImportDraft, held: ImportProduct[], saved: ImportProduct[], results: ProductImportResult["saved"], conversationId: string | null,
+  ): Promise<string> {
+    const savedAs = new Map(saved.map((product, index) => [product.key, results[index]!]));
+    const { rows } = await this.pool.query(
+      `INSERT INTO marketing_product_documents
+         (user_id, product_id, asset_id, title, mime, status, parsed_text, prompt_chars, content_hash, skipped_pages, parser_version, import_status)
+       SELECT user_id, NULL, asset_id, title, mime, status, parsed_text, prompt_chars, content_hash, skipped_pages, parser_version, 'running'
+       FROM marketing_product_documents WHERE id = $1 AND user_id = $2
+       RETURNING id`,
+      [draft.documentId, userId]
+    );
+    const documentId = String(rows[0].id);
+    const next: ImportDraft = {
+      ...draft, documentId, heldFromDocument: draft.documentId, heldInConversation: conversationId ?? undefined,
+      products: held.map((product) => {
+        const target = savedAs.get(product.key);
+        return target ? { ...product, name: target.name, targetProductId: target.id, targetName: target.name } : product;
+      }),
+    };
+    const row = await this.drafts.create({
+      userId, featureScope: DIGITAL_EMPLOYEE_UNIFIED_SCOPE, kind: PRODUCT_IMPORT_KIND,
+      payload: next as unknown as Record<string, unknown>, preview: importPreview(next) as unknown as Record<string, unknown>,
+      question: `Save what was held back from ${draft.title}?`, options: ["Save", "Not now"],
+    });
+    await this.pool.query(
+      `UPDATE marketing_product_documents SET import_status = 'ready', import_draft_id = $3, updated_at = now() WHERE id = $1 AND user_id = $2`,
+      [documentId, userId, row.id]
+    );
+    return importPreview(next).reviewUrl;
   }
 
   private async saveProduct(userId: string, product: ImportProduct, title: string, catalog: readonly MarketingProduct[]) {
@@ -275,6 +350,22 @@ export class ProductImportService {
         [documentId, userId, productId]
       );
     }
+  }
+
+  /**
+   * Whether a task still has a file's items waiting for the owner, on this product or, with no product, at all.
+   * A prompt is not enough here: a model that thinks an item looks fine would write it with the ordinary product tools.
+   */
+  async itemsHeldFor(userId: string, conversationId: string, productId?: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM de_conversation_action_drafts
+       WHERE user_id = $1 AND kind = $2 AND status IN ('prepared', 'awaiting_confirmation') AND expires_at > now()
+         AND (conversation_id::text = $3 OR payload->>'heldInConversation' = $3)
+         AND ($4::jsonb IS NULL OR payload->'products' @> $4::jsonb)
+       LIMIT 1`,
+      [userId, PRODUCT_IMPORT_KIND, conversationId, productId ? JSON.stringify([{ targetProductId: productId }]) : null]
+    );
+    return rows.length > 0;
   }
 
   /** Saving from chat needs an owner's reply after the draft appeared: a model must not confirm for them. */

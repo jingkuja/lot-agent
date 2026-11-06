@@ -112,6 +112,7 @@ export type ToolErrorKind =
   | "validation"  // Invalid input (non-retryable)
   | "cancelled"
   | "unknown_outcome" // A write may have committed; never automatically replay.
+  | "quota"       // The account cannot pay for this; retrying will not help.
   | "unknown";    // Unclassified
 
 /** Tool execution result */

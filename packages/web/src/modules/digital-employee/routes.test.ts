@@ -11,6 +11,8 @@ describe("employee routes", () => {
     expect(parseEmployeePath("/digital-employee/work-log/snoozed")).toMatchObject({ view: "work-log", tab: "snoozed", workConversationId: null });
     expect(parseEmployeePath("/digital-employee/work-log/c1")).toMatchObject({ view: "work-log", tab: null, workConversationId: "c1" });
     expect(parseEmployeePath("/digital-employee/work-log/scheduled/r1")).toMatchObject({ tab: "scheduled", scheduledRunId: "r1", workConversationId: null });
+    expect(parseEmployeePath("/digital-employee/assignments")).toMatchObject({ view: "assignments", assignmentId: null });
+    expect(parseEmployeePath("/digital-employee/assignments/t1")).toMatchObject({ view: "assignments", assignmentId: "t1" });
   });
 
   it("treats an unknown page as today", () => {

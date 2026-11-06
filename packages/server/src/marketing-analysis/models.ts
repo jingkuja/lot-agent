@@ -3,7 +3,7 @@ import { MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_LAST_RESORT_MODEL, MARKET
 import { marketingCopyModel } from "../marketing-video/copy-model.js";
 import { creationPrompt, parseCreation } from "../marketing-video/creation.js";
 import { createHash } from "node:crypto";
-import { LLMResponseError, OpenAIResponsesProvider, type ContentPart, type LLMProvider, type Message } from "@lot-agent/core";
+import { LLMResponseError, OpenAIResponsesProvider, isQuotaError, type ContentPart, type LLMProvider, type Message } from "@lot-agent/core";
 import { ANALYSIS_LIMITS, AnalysisSummarySchema, OcrOutputSchema, VisualOutputSchema, validateObservation, validateSummary, type AnalysisSpeech, type AnalysisSnapshot, type AnalysisSummary, type FrameEvidence, type ScreenText, type VisualObservation, type AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
 import { gatewayModelHeaders } from "../tokenhub/model-access.js";
@@ -118,12 +118,10 @@ export class AnalysisModels {
         if (error instanceof LLMResponseError && error.usage) { receipt.usage = error.usage; receipt.outcome = "failed"; }
         // Partial text is evidence of a call, never a usable model result.
         if (!terminal && !receipt.usage) receipt.outcome = "request_unknown";
-        const rejected = error as { status?: number; code?: string; error?: { code?: string } };
-        const status = rejected?.status;
-        const quota = ["insufficient_quota", "insufficient_user_quota", "insufficient_balance"].includes(rejected?.code ?? rejected?.error?.code ?? "");
+        const status = (error as { status?: number })?.status;
         if (!terminal && !receipt.text && !receipt.usage && !receipt.responseId && [401, 402, 403, 429].includes(status ?? 0)) {
           receipt.outcome = "rejected";
-          receipt.errorCode = status === 402 || quota ? "MODEL_QUOTA" : status === 429 ? "MODEL_RATE_LIMIT" : "MODEL_AUTH_REQUIRED";
+          receipt.errorCode = isQuotaError(error) ? "MODEL_QUOTA" : status === 429 ? "MODEL_RATE_LIMIT" : "MODEL_AUTH_REQUIRED";
         } else if (!terminal && !receipt.text && !receipt.usage && !receipt.responseId) {
           // Nothing came back (other error status, timeout, lost connection): not charged, may be resumed.
           // Anything received means the model ran and stays unknown.

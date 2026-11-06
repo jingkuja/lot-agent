@@ -67,7 +67,14 @@ function fixtures() {
   const awaiting = opportunity({ id: "a2", opportunityId: "o3", actionId: "a2", status: "awaiting_result", view: "today", title: "等张姐回复", scheduledAt: NOW });
   return {
     settings: { employeeName: "小灵", feishuReminder: false, desktopReminder: false, workTone: null, preferredChannels: [], version: 0 },
-    focusWrites: [], writes: [],
+    focusWrites: [], writes: [], assignmentQueries: [],
+    assignments: [
+      task({}),
+      task({ id: "t2", title: "整理客户清单", goal: "整理本周客户", status: "succeeded", createdAt: TODAY, currentTool: null,
+        result: { summary: "整理好了 12 位客户", assumptions: ["按最近联系排序"], skipped: ["两位王总没有更新"] } }),
+      task({ id: "t3", title: "写活动海报", goal: "做一张海报", status: "queued", pausedReason: "quota", createdAt: TWO_DAYS_AGO, currentTool: null }),
+      task({ id: "t4", title: "同步产品资料", goal: "把手册存进产品资料", status: "failed", failureReason: "unknown_outcome", createdAt: TWO_DAYS_AGO, currentTool: null }),
+    ],
     work: {
       id: "c1", title: "李静的跟进", runs: [{
         id: "w1", goal: "记一下李静嫌门槛高", status: "completed", startedAt: NOW, finishedAt: NOW, outcome: "已记录。",
@@ -169,7 +176,15 @@ const overview = {
   recentProfiles: [profile],
 };
 
-function api(state, unexpected, dailyScan = false, schedules = false) {
+const TODAY = new Date(new Date().setHours(10, 0, 0, 0)).toISOString();
+const TWO_DAYS_AGO = new Date(new Date().setHours(10, 0, 0, 0) - 2 * 86_400_000).toISOString();
+const task = (over) => ({
+  id: "t1", title: "写开业优惠方案", goal: "查同行开业活动，写优惠方案", mode: "autonomous", status: "running", pausedReason: null, modelId: "kimi-k3.1-pro",
+  result: null, failureReason: null, createdAt: TODAY, finishedAt: null, creditsUsed: 120, creditLimit: null, subtasks: { done: 0, total: 0 },
+  currentTool: "web_search", attachments: [], ...over,
+});
+
+function api(state, unexpected, dailyScan = false, schedules = false, assignments = false) {
   return async (route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
     if (!path.startsWith("/api/")) return route.continue();
@@ -181,7 +196,43 @@ function api(state, unexpected, dailyScan = false, schedules = false) {
       if (state.failUpload) return json({ error: "上传失败" }, 500);
       return json({ assetId: `asset${state.uploads}`, filename: "手册.pdf", mime: "application/pdf", size: 5, url: "/x", kind: "doc" });
     }
-    if (path === "/api/public/product") return json({ globle: 1, digitalEmployeeDailyScan: dailyScan, digitalEmployeeSchedules: schedules });
+    if (path === "/api/public/product") {
+      return json({ globle: 1, digitalEmployeeDailyScan: dailyScan, digitalEmployeeSchedules: schedules, digitalEmployeeAssignments: assignments });
+    }
+    if (path === "/api/feishu/status") return json({ configured: true, connected: false });
+    if (path === "/api/assets/links") return json({ links: {} });
+    if (de === "/assignments" && method === "GET") {
+      state.assignmentQueries.push(Object.fromEntries(url.searchParams));
+      const searching = !url.searchParams.has("openBefore");
+      const q = url.searchParams.get("q");
+      const items = state.assignments.filter((item) => !q || item.title.includes(q) || item.goal.includes(q));
+      if (searching) return json({ items, pinned: [], nextCursor: null });
+      const open = (item) => !["succeeded", "failed", "cancelled"].includes(item.status);
+      const older = (item) => open(item) && item.createdAt < url.searchParams.get("openBefore");
+      return json({ items: items.filter((item) => !older(item)), pinned: items.filter(older), nextCursor: null });
+    }
+    if (de === "/assignments" && method === "POST") {
+      const body = request.postDataJSON();
+      const created = task({ id: `t${state.assignments.length + 1}`, title: body.goal, goal: body.goal, status: "queued", currentTool: null, creditsUsed: 0 });
+      state.assignments.unshift(created);
+      return json(created, 201);
+    }
+    const assignment = de.match(/^\/assignments\/([^/]+)(?:\/(\w+))?$/);
+    if (assignment) {
+      const item = state.assignments.find((entry) => entry.id === assignment[1]);
+      if (!item) return json({ error: "任务不存在" }, 404);
+      if (assignment[2] === "cancel") Object.assign(item, { status: "cancelled", pausedReason: null });
+      if (assignment[2] === "retry") Object.assign(item, { status: "queued", failureReason: null });
+      if (assignment[2] === "resume") Object.assign(item, { pausedReason: null });
+      if (assignment[2] === "limit") Object.assign(item, { creditLimit: request.postDataJSON().creditLimit });
+      return json(assignment[2] ? item : { ...item, runs: [{ id: "run1", status: "completed", startedAt: NOW, finishedAt: NOW, steps: [
+        { id: "as1", tool: "web_search", status: "succeeded", startedAt: NOW, finishedAt: NOW, artifact: null },
+        { id: "as2", tool: "generate_document", status: "succeeded", startedAt: NOW, finishedAt: NOW,
+          artifact: { label: "方案.docx", url: "/static/documents/abc.docx", download: true } },
+        { id: "as3", tool: "commit_product_import", status: "succeeded", startedAt: NOW, finishedAt: NOW,
+          artifact: { label: "焕颜美学", url: "/digital-employee/materials/import/d1", needsReview: true } },
+      ] }] });
+    }
     if (de.startsWith("/work-log/conversations/")) return json({ ...state.work, id: de.split("/").at(-1) });
     if (de === "/schedules" && method === "GET") return json({ schedules: state.schedules, runs: state.runs });
     if (de === "/schedules" && method === "POST") {
@@ -422,7 +473,9 @@ try {
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true, channel: "chrome" });
 
-  async function open(path, { dailyScan = false, schedules = false, language = "zh", width = 1440, height = 1000, state = fixtures(), desktop = false } = {}) {
+  async function open(path, {
+    dailyScan = false, schedules = false, assignments = false, language = "zh", width = 1440, height = 1000, state = fixtures(), desktop = false,
+  } = {}) {
     const context = await browser.newContext({ viewport: { width, height } });
     await context.addInitScript((value) => { try { localStorage.setItem("lot:language", value); } catch { /* opaque origin */ } }, language);
     if (desktop) await context.addInitScript(() => {
@@ -433,7 +486,7 @@ try {
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     page.on("pageerror", (error) => errors.push(`${path}: ${error.message}`));
-    await page.route("**/api/**", api(state, unexpected, dailyScan, schedules));
+    await page.route("**/api/**", api(state, unexpected, dailyScan, schedules, assignments));
     await page.goto(`${origin}${path}`);
     return { page, state, close: () => context.close() };
   }
@@ -927,16 +980,92 @@ try {
     await close();
   }
 
+  // Off by default: nothing about tasks shows until a deployment opts in.
+  {
+    const { page, close } = await open("/digital-employee/today");
+    await page.locator(".de-employee-card").waitFor();
+    assert.equal(await page.locator(".de-employee-nav").getByRole("button", { name: "任务分派" }).count(), 0);
+    await close();
+  }
+
+  // Tasks: cards by day, open ones carried up, search, and everything an owner can do to one.
+  {
+    const { page, state, close } = await open("/digital-employee/today", { assignments: true });
+    await page.locator(".de-employee-nav").getByRole("button", { name: "任务分派" }).click();
+    await page.waitForURL("**/digital-employee/assignments");
+    await page.getByRole("heading", { name: "任务分派" }).waitFor();
+
+    const days = page.locator(".de-assignment-day");
+    await days.first().getByRole("heading", { name: "还没结束" }).waitFor();
+    assert.deepEqual(await days.first().locator("strong").allTextContents(), ["写活动海报"]);
+    assert.match(await days.first().locator(".de-assignment-card-main small").innerText(), /\d+\/\d+/);
+    await days.nth(1).getByRole("heading", { name: /^今天/ }).waitFor();
+    assert.deepEqual(await days.nth(1).locator("strong").allTextContents(), ["写开业优惠方案", "整理客户清单"]);
+    await days.nth(1).getByText("正在：联网搜索").waitFor();
+    await days.nth(2).getByText("有操作的结果没有确认").waitFor();
+
+    await page.getByText("还没接入飞书").waitFor();
+    await page.getByRole("button", { name: "附文件" }).waitFor();
+    await page.locator('.de-assignment-composer input[type="file"]').setInputFiles({ name: "手册.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-") });
+    await page.locator(".de-assignment-files").getByText("手册.pdf").waitFor();
+    await page.getByText("更多设置").click();
+    await page.getByLabel("费用上限（积分）").fill("500");
+    await page.getByRole("textbox", { name: "交代一件事" }).fill("查查附近的开业活动");
+    await page.getByRole("button", { name: "开始", exact: true }).click();
+    await days.nth(1).getByText("查查附近的开业活动", { exact: true }).first().waitFor();
+    const created = JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/assignments")).body);
+    assert.deepEqual(created, { goal: "查查附近的开业活动", attachments: [{ assetId: "asset1", filename: "手册.pdf" }], creditLimit: 500 });
+
+    await days.first().getByRole("button", { name: "继续", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector(".de-assignment-card em")?.textContent !== "已暂停");
+    assert.equal(state.assignments.find((item) => item.id === "t3").pausedReason, null);
+
+    await page.getByRole("button", { name: "最近 7 天" }).click();
+    await page.getByLabel("关键词").fill("客户");
+    await page.getByRole("button", { name: "搜索", exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll(".de-assignment-card").length === 1);
+    const query = state.assignmentQueries.at(-1);
+    assert.equal(query.q, "客户");
+    assert.equal(query.openBefore, undefined);
+    assert.ok(new Date(query.to) - new Date(query.from) > 6 * 86_400_000 && !Number.isNaN(Date.parse(query.from)));
+    await page.getByRole("button", { name: "清除" }).click();
+    await page.waitForFunction(() => document.querySelectorAll(".de-assignment-card").length > 1);
+
+    await page.locator(".de-assignment-card-main").filter({ hasText: "整理客户清单" }).click();
+    await page.waitForURL("**/digital-employee/assignments/t2");
+    await page.getByRole("heading", { name: "整理客户清单" }).waitFor();
+    await page.getByText("整理好了 12 位客户").waitFor();
+    await page.getByText("按最近联系排序").waitFor();
+    await page.getByText("两位王总没有更新").waitFor();
+    assert.equal(await page.getByRole("link", { name: "下载" }).getAttribute("download"), "方案.docx");
+    await page.getByRole("button", { name: "有内容等你审阅" }).click();
+    await page.waitForURL("**/digital-employee/materials/import/d1");
+
+    await page.goto(`${origin}/digital-employee/assignments/t1`);
+    await page.getByRole("button", { name: "取消任务" }).click();
+    await page.locator(".de-assignment-status").getByText("已取消").waitFor();
+    assert.equal(await page.getByRole("button", { name: "取消任务" }).count(), 0);
+    await close();
+
+    const phone = await open("/digital-employee/assignments", { assignments: true, width: 390 });
+    await phone.page.locator(".de-assignment-card").first().waitFor();
+    assert.equal(await phone.page.locator(".de-assignment-filters").isVisible(), false);
+    await phone.page.locator(".de-assignment-filter-toggle").click();
+    await phone.page.locator(".de-assignment-filters").waitFor();
+    assert.equal(await phone.page.evaluate(() => getComputedStyle(document.querySelector(".de-assignment-list")).gridTemplateColumns.split(" ").length), 1);
+    await phone.close();
+  }
+
   // Two languages, two themes, phone width.
-  for (const [view, name] of [["today", "today"], ["customers", "customers"], [`customers/${PROFILE}`, "detail"], ["marketing", "marketing"],
+  for (const [view, name] of [["assignments", "assignments"], ["assignments/t3", "assignment-detail"], ["assignments/t2", "assignment-result"], ["today", "today"], ["customers", "customers"], [`customers/${PROFILE}`, "detail"], ["marketing", "marketing"],
     ["materials", "materials"], ["work-log", "work-log"], ["work-log/c1", "work-detail"], ["work-log/scheduled", "work-scheduled"],
     ["work-log/scheduled/r1", "scheduled-run"], ["schedule", "schedule"], ["chat", "chat"]]) {
     const path = `/digital-employee/${view}`;
-    const desktop = await open(path, { schedules: true });
+    const desktop = await open(path, { schedules: true, assignments: true });
     await desktop.page.locator(".de-employee-card").waitFor();
     await desktop.close();
 
-    const { page, close } = await open(path, { language: "en", width: 390, schedules: true });
+    const { page, close } = await open(path, { language: "en", width: 390, schedules: true, assignments: true });
     await page.locator(".de-employee-card").waitFor({ state: "attached" });
     await page.waitForLoadState("networkidle");
     assert(await noHorizontalScroll(page), `${name} scrolls sideways at 390`);
@@ -949,8 +1078,9 @@ try {
       }
       return found;
     });
+    const taskFixtures = /整理本周客户|方案\.docx|焕颜美学|写开业优惠方案|查同行开业|整理客户清单|整理好了|按最近联系|两位王总|写活动海报|做一张海报|同步产品资料/;
     const fixtureText = /已记录。|先问门槛|今天 1 位客户|李静|王总|张姐|明天跟进|确认门槛|新客户|想了解价格|代销|云启|华东|集中问价|嫌门槛高|了解顾虑|问了代销|回访|双十一|边缘算力|咨询|获客|上海|潜客|共 1 位|朋友圈|小灵|的内容|好的/;
-    assert.deepEqual(leftovers.filter((text) => !fixtureText.test(text)), [], `${name}: untranslated copy`);
+    assert.deepEqual(leftovers.filter((text) => !fixtureText.test(text) && !taskFixtures.test(text)), [], `${name}: untranslated copy`);
     await snap(page, `${name}-en-390-light.png`);
     await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
     await snap(page, `${name}-en-390-dark.png`);

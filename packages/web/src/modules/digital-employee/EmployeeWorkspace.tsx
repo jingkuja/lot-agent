@@ -4,6 +4,8 @@ import type { ModelCatalog } from "../../hooks/useModels.js";
 import { useI18n } from "../../i18n/index.js";
 import { Workspace, type WorkspaceContext } from "../../pages/Workspace.js";
 import { seedFromRecommendation, seedFromSegment } from "./acquisition/creation-seeds.js";
+import { AssignmentDetailPage } from "./assignments/AssignmentDetailPage.js";
+import { AssignmentsPage } from "./assignments/AssignmentsPage.js";
 import type { CreationSeed } from "./acquisition/CreationWorkspacePage.js";
 import { employeeApi } from "./api.js";
 import { DIGITAL_EMPLOYEE_AGENT_ID, DIGITAL_EMPLOYEE_UNIFIED_SCOPE, digitalEmployeeConversations } from "./conversation-scope.js";
@@ -33,6 +35,7 @@ interface EmployeeWorkspaceProps {
   active: boolean;
   dailyScan: boolean;
   schedules: boolean;
+  assignments: boolean;
   pendingCount: number;
   onPendingChange: (count: number) => void;
   onLogout: () => void;
@@ -47,7 +50,7 @@ const keepConversation = (conversation: Conversation | undefined) =>
 
 /** One employee: its card, five entries and a conversation that stays mounted under every page. */
 export function EmployeeWorkspace({
-  user, modelCatalog, pathname, active, dailyScan, schedules, pendingCount, onPendingChange, onLogout, navigate, replacePath, onNavigateAssistant,
+  user, modelCatalog, pathname, active, dailyScan, schedules, assignments, pendingCount, onPendingChange, onLogout, navigate, replacePath, onNavigateAssistant,
 }: EmployeeWorkspaceProps) {
   const { t } = useI18n();
   const location = useMemo(() => parseEmployeePath(pathname), [pathname]);
@@ -212,6 +215,11 @@ export function EmployeeWorkspace({
       />;
     }
     if (view === "schedule") return <SchedulePage dailyScan={dailyScan} schedules={schedules} onNameChange={setName} />;
+    if (view === "assignments") {
+      return location.assignmentId
+        ? <AssignmentDetailPage id={location.assignmentId} onBack={() => openView("assignments")} onOpenLink={navigate} />
+        : <AssignmentsPage modelCatalog={modelCatalog} onOpen={(id) => openView("assignments", id)} />;
+    }
     return <TodayPage
       data={today}
       error={todayError}
@@ -248,6 +256,7 @@ export function EmployeeWorkspace({
       running={today?.running ?? []}
       waiting={pendingCount}
       view={view}
+      assignments={assignments}
       isStreaming={context.isStreaming}
       onNavigate={openView}
       onNewConversation={() => {

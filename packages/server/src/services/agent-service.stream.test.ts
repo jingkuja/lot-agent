@@ -5,6 +5,7 @@ import type { FeishuService } from "../feishu/service.js";
 import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
 import { AgentService } from "./agent-service.js";
 import { registerAgentExtension } from "./agent-extensions.js";
+import type { Tool } from "@lot-agent/core";
 
 /** LLM that replays a script of chunk-lists; one list per chat() call. */
 function scriptedLLM(script: ChatChunk[][], calls: Message[][] = []) {
@@ -386,4 +387,72 @@ it.each(["feishu", "web", "contract"])("researches then sends through Feishu in 
   expect(repo.saveToolResult).toHaveBeenCalledTimes(2);
   expect(JSON.stringify(calls)).toContain("om_delivered");
   expect(fake.toolRegistry.get("feishu_send_message")).toBeUndefined();
+});
+
+describe("streamAgentResponse with a turn that adapts its tools", () => {
+  const AGENT = "turn_test_agent";
+
+  function turnService(script: ChatChunk[][]) {
+    const { fake, calls } = fakeService({ script, apiKey: "sk-1" });
+    const search = vi.fn(async () => ({ content: "shared search" }));
+    fake.toolRegistry.register({ name: "web_search", description: "search", parameters: { type: "object" }, effect: "read", execute: search });
+    const definition = fake.agentRegistry.get("general")!;
+    vi.spyOn(fake.agentRegistry, "get").mockReturnValue({ ...definition, id: AGENT, toolNames: [] });
+    fake.feishuService = {} as FeishuService;
+    return { fake, calls, search };
+  }
+
+  it("replaces a shared tool for this turn only, and adds its own", async () => {
+    const { fake, search } = turnService([
+      [{ type: "tool_call", toolCall: { id: "a", name: "web_search", arguments: {} } }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
+      [{ type: "tool_call", toolCall: { id: "b", name: "wrap_up", arguments: {} } }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
+      [{ type: "text", content: "done" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
+    ]);
+    const wrapUp: Tool = { name: "wrap_up", description: "", parameters: { type: "object" }, execute: async () => ({ content: "wrapped" }) };
+    registerAgentExtension({
+      agentId: AGENT, ownerKeyOnly: false,
+      beginTurn: async () => ({
+        allowedToolNames: ["web_search", "wrap_up"], dynamicParts: [],
+        toolOverrides: (original) => [wrapUp, {
+          ...original("web_search")!,
+          execute: async (input, context) => ({ content: `counted ${(await original("web_search")!.execute(input, context)).content}` }),
+        }],
+      }),
+    });
+    const events = await drain(fake.streamAgentResponse("c1", "hi", AGENT, "u1"));
+    const results = (events as Array<{ type: string; output?: string }>).filter((event) => event.type === "tool_result");
+    expect(results.map((event) => event.output)).toEqual(["counted shared search", "wrapped"]);
+    expect(search).toHaveBeenCalledOnce();
+    expect(fake.toolRegistry.get("wrap_up")).toBeUndefined();
+    expect(fake.toolRegistry.get("web_search")!.execute).toBe(search);
+  });
+
+  it("keeps blocked tools and their prompt out, even with a channel connected", async () => {
+    const { fake, calls } = turnService([[
+      { type: "tool_call", toolCall: { id: "a", name: "feishu_send_message", arguments: { recipient: "self", text: "x" } } },
+      { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
+    ], [{ type: "text", content: "done" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }]]);
+    registerAgentExtension({
+      agentId: AGENT, ownerKeyOnly: false,
+      beginTurn: async () => ({ allowedToolNames: ["web_search"], dynamicParts: [], blockedToolNames: ["feishu_contacts", "feishu_send_message"] }),
+    });
+    const events = await drain(fake.streamAgentResponse("c1", "hi", AGENT, "u1"));
+    expect((events as Array<{ type: string }>).find((event) => event.type === "tool_result"))
+      .toMatchObject({ output: "Tool not permitted: feishu_send_message", isError: true });
+    expect(JSON.stringify(calls[0])).not.toContain("Feishu");
+  });
+
+  it("gives the hook what the run has spent, and stops when told to", async () => {
+    const { fake } = turnService([
+      [{ type: "tool_call", toolCall: { id: "a", name: "web_search", arguments: {} } }, { type: "done", usage: { promptTokens: 7, completionTokens: 3 } }],
+      [{ type: "text", content: "never" }, { type: "done", usage: { promptTokens: 1, completionTokens: 1 } }],
+    ]);
+    registerAgentExtension({ agentId: AGENT, ownerKeyOnly: false, beginTurn: async () => ({ allowedToolNames: ["web_search"], dynamicParts: [] }) });
+    const seen: Array<{ tokens: number; cost: number }> = [];
+    const events = await drain(fake.streamAgentResponse("c1", "hi", AGENT, "u1", [], undefined, {
+      beforeIteration: async (usage) => { seen.push(usage); return { stop: seen.length === 2 }; },
+    }));
+    expect(seen).toEqual([{ tokens: 0, cost: 0 }, { tokens: 10, cost: 0.01 }]);
+    expect(events.at(-1)).toMatchObject({ type: "done", status: "budget_exhausted" });
+  });
 });

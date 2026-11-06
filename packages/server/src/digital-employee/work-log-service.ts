@@ -7,12 +7,19 @@ const OUTCOME_MAX = 4_000;
 /** Bookkeeping, not work the owner asked for. */
 const HIDDEN_TOOLS = ["load_skill"];
 const PRODUCING_TOOL = /^(commit|generate|rewrite|adopt|record|mark|start)_/;
+const DOCUMENT_LINK = /下载链接：\s*(\S+)/;
+const DOCUMENT_TOOLS = new Set(["generate_document", "generate_ppt"]);
+const DOCUMENT_PATH = /(?:^|\/)static\/documents\/([\w.-]+)$/;
 const CHAT_LINK = /\[([^\]\n]{1,80})\]\((\/digital-employee\/[^)\s]+)\)/;
 const SAFE_PATH = /^\/(digital-employee\/[\w\-/%]+|assistant\?agent=marketing_video&project=[\w-]+)$/;
 
 export interface WorkArtifact {
   label: string | null;
   url: string | null;
+  /** Something here waits for the owner's review rather than being finished. */
+  needsReview?: boolean;
+  /** A file to download, not a page in the app. */
+  download?: boolean;
 }
 
 export interface WorkStep {
@@ -56,6 +63,7 @@ export function stepArtifact(tool: string, status: string, result: unknown): Wor
   if (status !== "succeeded" || !PRODUCING_TOOL.test(tool)) return null;
   const content = field(result, "content");
   if (typeof content !== "string") return null;
+  if (DOCUMENT_TOOLS.has(tool)) return documentArtifact(content);
   const value = parsed(content);
   if (!value) {
     const link = content.match(CHAT_LINK);
@@ -63,8 +71,17 @@ export function stepArtifact(tool: string, status: string, result: unknown): Wor
   }
   const label = text(field(value.asset, "title")) ?? text(field(value.campaign, "name")) ?? text(field(value.preview, "title"))
     ?? text(field(value.action, "title")) ?? text(value.title) ?? text(value.name);
+  const review = safePath(value.reviewUrl);
+  if (review) return { label, url: review, needsReview: true };
   const url = safePath(value.managementUrl);
   return label || url ? { label, url } : null;
+}
+
+/** The server wrote this link into its own result; it is checked anyway because it reaches the browser. */
+function documentArtifact(content: string): WorkArtifact | null {
+  const url = content.match(DOCUMENT_LINK)?.[1];
+  const file = url?.split(/[?#]/)[0]?.match(DOCUMENT_PATH)?.[1];
+  return url && file ? { label: file, url, download: true } : null;
 }
 
 function iso(value: unknown): string {

@@ -54,6 +54,10 @@ export interface ImportDraft {
   truncated: boolean;
   skippedPages: number;
   products: ImportProduct[];
+  /** What an unattended save left for the owner. The file already belongs to a product, so saving this does not place it again. */
+  heldFromDocument?: string;
+  /** The task that held these back. It may not write them another way. */
+  heldInConversation?: string;
 }
 
 export interface ImportModelProduct {
@@ -396,6 +400,22 @@ export function applyImportEdits(draft: ImportDraft, input: ImportCommitInput): 
     next.name = next.name.trim() || product.suggestedName;
     return next;
   });
+}
+
+/**
+ * What a task may save with nobody to ask: only what the owner would get by accepting the defaults.
+ * A product with nothing safe to save stays out entirely, rather than appearing as an empty record.
+ */
+export function splitUnattended(draft: ImportDraft): { save: ImportProduct[]; held: ImportProduct[] } {
+  const save: ImportProduct[] = [];
+  const held: ImportProduct[] = [];
+  for (const product of draft.products) {
+    const items = product.items.filter((item) => item.selected);
+    const doubtful = product.items.filter((item) => !item.selected);
+    if (items.length || !doubtful.length) save.push({ ...product, name: product.name.trim() || product.suggestedName, items, questions: [] });
+    if (doubtful.length) held.push({ ...product, items: doubtful, questions: items.length ? [] : product.questions });
+  }
+  return { save, held };
 }
 
 const FIELD_LIMITS = {

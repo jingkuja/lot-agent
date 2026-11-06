@@ -42,6 +42,8 @@ x-app-env: &app-env
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
   BIGMODEL_API_KEY: ${BIGMODEL_API_KEY:-}
+  # Background tasks for the digital employee (employee-task-worker).
+  DIGITAL_EMPLOYEE_ASSIGNMENTS: ${DIGITAL_EMPLOYEE_ASSIGNMENTS:-0}
   DEBUG_LLM: ${DEBUG_LLM:-}
   # Hosts web_fetch may reach on private addresses (comma-separated); empty keeps them blocked.
   WEB_FETCH_ALLOW_HOSTS: ${WEB_FETCH_ALLOW_HOSTS:-}
@@ -194,6 +196,26 @@ services:
       - app_data:/app/data
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Runs digital employee tasks with the same tools as the API. Idle unless DIGITAL_EMPLOYEE_ASSIGNMENTS=1.
+  employee-task-worker:
+    image: lot-agent-app:1.0
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      FEISHU_ENABLED: ${FEISHU_ENABLED:-1}
+      ROLE: employee-task-worker
+    # A task in progress gets this long to reach a safe point before a deploy aborts it.
+    stop_grace_period: 60s
+    healthcheck:
+      disable: true
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      server:
         condition: service_healthy
       redis:
         condition: service_healthy

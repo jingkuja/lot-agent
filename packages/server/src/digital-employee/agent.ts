@@ -6,6 +6,7 @@ import {
   type AgentTurnInput,
   type ResolvedLlm,
 } from "../services/agent-extensions.js";
+import { isAssignmentConversation, type AssignmentService } from "./assignment-service.js";
 import { DEFAULT_EMPLOYEE_NAME } from "./employee-name.js";
 import {
   DIGITAL_EMPLOYEE_UNIFIED_SCOPE,
@@ -18,6 +19,7 @@ import { workPreferenceText } from "./work-preferences.js";
 export const DIGITAL_EMPLOYEE_AGENT_ID = "digital_employee";
 
 const INVALID_SCOPE = "digital_employee conversations require a valid featureScope";
+const TASK_CONVERSATION = "This conversation belongs to a background task and only the task can write to it";
 
 /** Business tools only this agent may use; ask_user and load_skill are shared. */
 export const DIGITAL_EMPLOYEE_PRIVATE_TOOL_NAMES = digitalEmployeeDefinition.toolNames
@@ -90,6 +92,7 @@ export function digitalEmployeeTurnParts(featureScope: string | undefined, emplo
 export function createDigitalEmployeeExtension(deps: {
   resolveModel?: (userId: string | undefined, requested?: string | null) => Promise<ResolvedLlm>;
   settings?: Pick<EmployeeSettingsService, "get">;
+  assignments?: Pick<AssignmentService, "beginTurn">;
 } = {}): AgentExtension {
   return {
     agentId: DIGITAL_EMPLOYEE_AGENT_ID,
@@ -102,15 +105,15 @@ export function createDigitalEmployeeExtension(deps: {
     },
     assertConversation(metadata) {
       if (!readConversationFeatureScope(metadata)) throw new AgentConversationError(INVALID_SCOPE);
+      if (isAssignmentConversation(metadata)) throw new AgentConversationError(TASK_CONVERSATION);
     },
     resolveModel: deps.resolveModel,
-    async beginTurn({ userId, metadata, toolNames }: AgentTurnInput): Promise<AgentTurnContext> {
+    async beginTurn({ userId, conversationId, metadata, toolNames }: AgentTurnInput): Promise<AgentTurnContext> {
       const featureScope = readConversationFeatureScope(metadata);
       const focus = featureScope === DIGITAL_EMPLOYEE_UNIFIED_SCOPE ? readConversationFocus(metadata) : null;
       const settings = userId ? await deps.settings?.get(userId).catch(() => undefined) : undefined;
       const preferences = workPreferenceText(settings);
-      return {
-        allowedToolNames: digitalEmployeeAllowedToolNames(featureScope, toolNames),
+      const base = {
         dynamicParts: [
           ...digitalEmployeeTurnParts(featureScope, settings?.employeeName),
           ...(focus ? [focusTurnPart(focus)] : []),
@@ -118,6 +121,11 @@ export function createDigitalEmployeeExtension(deps: {
         ],
         featureScope,
       };
+      if (isAssignmentConversation(metadata)) {
+        if (!deps.assignments) throw new Error("Background tasks are not available in this process");
+        return deps.assignments.beginTurn({ userId, conversationId, toolNames, base });
+      }
+      return { ...base, allowedToolNames: digitalEmployeeAllowedToolNames(featureScope, toolNames) };
     },
   };
 }

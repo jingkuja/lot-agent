@@ -3,6 +3,7 @@ import type { MarketingProduct } from "./marketing-types.js";
 import {
   applyImportEdits, buildImportDraft, importUserPrompt, importedFields, parseImportOutput, unsourcedNumbers,
   type ImportDraft, type ImportModelProduct,
+  splitUnattended,
 } from "./product-import.js";
 
 const entry = (over: Partial<ImportModelProduct> = {}): ImportModelProduct => ({
@@ -207,5 +208,32 @@ describe("importUserPrompt", () => {
     expect(value.file).toHaveLength(60_000);
     expect(value.catalog).toBeUndefined();
     expect(value.target.name).toBe("API 网关");
+  });
+});
+
+describe("saving with nobody to ask", () => {
+  const item = (id: string, selected: boolean) => ({ id, field: "verifiableFacts" as const, text: id, selected });
+  const product = (key: string, items: ReturnType<typeof item>[], over: Record<string, unknown> = {}) => ({
+    key, name: "", suggestedName: `${key}店`, targetProductId: null, targetName: null, positioning: "",
+    items, questions: [{ id: `${key}-q`, field: "name" as const, question: "叫什么？" }], ...over,
+  });
+  const draft = (...products: ReturnType<typeof product>[]) => ({ documentId: "d1", title: "手册", truncated: false, skippedPages: 0, products });
+
+  it("saves the selected items under the suggested name and holds the rest", () => {
+    const { save, held } = splitUnattended(draft(product("a", [item("sure", true), item("doubtful", false)])));
+    expect(save).toMatchObject([{ key: "a", name: "a店", items: [{ id: "sure" }], questions: [] }]);
+    expect(held).toMatchObject([{ key: "a", items: [{ id: "doubtful" }], questions: [] }]);
+  });
+
+  it("creates nothing for a product with only doubtful items, and keeps its questions", () => {
+    const { save, held } = splitUnattended(draft(product("a", [item("doubtful", false)])));
+    expect(save).toEqual([]);
+    expect(held).toMatchObject([{ key: "a", questions: [{ id: "a-q" }] }]);
+  });
+
+  it("still saves a product that had nothing doubtful, such as one that only named a positioning", () => {
+    const { save, held } = splitUnattended(draft(product("a", [], { positioning: "社区面馆" })));
+    expect(save).toMatchObject([{ positioning: "社区面馆" }]);
+    expect(held).toEqual([]);
   });
 });

@@ -209,6 +209,7 @@ export interface ServiceConfig {
     user?: string;
     password?: string;
     database?: string;
+    max?: number;
   };
 }
 
@@ -330,10 +331,10 @@ export class AgentService {
     );
   }
 
-  async init(): Promise<void> {
+  async init(options: { background?: boolean } = {}): Promise<void> {
     // Server owns schema migration; the worker process does not migrate
     // (see workers/index.ts) so DDL runs exactly once, from here.
-    await this.db.migrate();
+    if (!options.background) await this.db.migrate();
 
     // Initialize job queue (server enqueues; separate Worker process consumes)
     const conn = createRedisConnection(process.env.REDIS_URL);
@@ -426,7 +427,11 @@ export class AgentService {
     );
     this.toolRegistry.register(proposeOutlineTool);
     for (const tool of digitalEmployee.tools) this.toolRegistry.register(tool);
-    registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: digitalEmployee.resolveLlm, settings: digitalEmployee.service.settings }));
+    registerAgentExtension(createDigitalEmployeeExtension({
+      resolveModel: digitalEmployee.resolveLlm,
+      settings: digitalEmployee.service.settings,
+      assignments: digitalEmployee.service.assignments,
+    }));
 
     // Load skills
     await this.skillLoader.loadFromDirectory(this.skillsDir);
@@ -437,8 +442,8 @@ export class AgentService {
     // general 的白名单取自「全部已注册工具 − DISABLED_HOST_TOOLS」。
     this.toolRegistry.register(createLoadSkillTool(this.skillLoader));
 
-    // Connect MCP servers (non-fatal if fails)
-    try {
+    // Connect MCP servers (non-fatal if fails). No background agent uses them.
+    if (!options.background) try {
       const mcpConfigs = await loadMCPConfig(this.mcpConfigPath);
       for (const cfg of mcpConfigs) {
         try {
@@ -862,7 +867,12 @@ export class AgentService {
     userId?: string,
     attachments?: AttachmentRef[],
     signal?: AbortSignal,
-    opts?: { modelId?: string; knowledgeBases?: KnowledgeBaseRef[]; runId?: string; desktopTools?: import("@lot-agent/core").Tool[]; channel?: "feishu"; feishuTurn?: { userMessageId: string; resultMessageId: string; revision?: string } }
+    opts?: {
+      modelId?: string; knowledgeBases?: KnowledgeBaseRef[]; runId?: string; desktopTools?: import("@lot-agent/core").Tool[]; channel?: "feishu";
+      feishuTurn?: { userMessageId: string; resultMessageId: string; revision?: string };
+      /** Runs before each model call with what this run has used so far. */
+      beforeIteration?: (usage: { tokens: number; cost: number }) => ReturnType<NonNullable<AgentContext["beforeIteration"]>>;
+    }
   ): AsyncIterable<AgentEvent> {
     const deadline = createDeadline(this.agentConfig.maxRunTimeMs ?? 1_800_000, signal);
     signal = deadline.signal;
@@ -1002,11 +1012,15 @@ export class AgentService {
       const persistedSummary = readPersistedSummary(conversation?.metadata);
       // Request-scoped proxies: never mutate the shared registry with local tools.
       const desktopTools = def.id === "general" && opts?.channel !== "feishu" ? opts?.desktopTools ?? [] : [];
-      const feishuTools = this.feishuService && userId ? createFeishuTools(this.feishuService, userId, opts?.feishuTurn?.revision) : [];
-      const requestTools = desktopTools.length || feishuTools.length ? new ToolRegistry() : this.toolRegistry;
+      const blockedTools = new Set(turn?.blockedToolNames);
+      const feishuTools = (this.feishuService && userId ? createFeishuTools(this.feishuService, userId, opts?.feishuTurn?.revision) : [])
+        .filter(tool => !blockedTools.has(tool.name));
+      const overrides = turn?.toolOverrides?.(name => this.toolRegistry.get(name)) ?? [];
+      const requestTools = desktopTools.length || feishuTools.length || overrides.length ? new ToolRegistry() : this.toolRegistry;
       if (requestTools !== this.toolRegistry) for (const tool of this.toolRegistry.getAll()) {
         if (!DISABLED_HOST_TOOLS.has(tool.name)) requestTools.register(tool);
       }
+      for (const tool of overrides) requestTools.register(tool);
       for (const tool of desktopTools) {
         if (LOCAL_TOOL_NAMES.includes(tool.name)) requestTools.register(tool);
       }
@@ -1028,7 +1042,7 @@ export class AgentService {
           return price ? { input: price.inputPrice, output: price.outputPrice } : undefined;
         })(),
         systemPrompt: `${def.systemPrompt}\n\n${RESPONSE_LANGUAGE_POLICY}${opts?.channel === "feishu" ? `\n\n${FEISHU_TEXT_POLICY}` : ""}`,
-        allowedToolNames,
+        allowedToolNames: allowedToolNames.filter(name => !blockedTools.has(name)),
         dynamicPromptParts: dynamicParts,
         // Same fixed depth as copy: unset, this model thinks until the output limit runs out.
         modelParams: MARKETING_COPY_REASONING_EFFORT[modelId]
@@ -1061,8 +1075,15 @@ export class AgentService {
       // Load this conversation's persisted session memory before the run
       await withAbort(memory.hydrate(), signal);
 
+      const beforeIteration = opts?.beforeIteration;
       const context: AgentContext = {
         llm,
+        ...(beforeIteration ? {
+          beforeIteration: async () => {
+            await Promise.allSettled(usageWrites);
+            return beforeIteration({ tokens: recordedTokens, cost: totalCost });
+          },
+        } : {}),
         journal: this.runRepository?.journal(runId, conversationId, userId ?? "default"),
         toolRegistry: requestTools,
         toolContext: {

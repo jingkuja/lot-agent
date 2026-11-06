@@ -5,6 +5,21 @@ import { WorkLogService, stepArtifact } from "./work-log-service.js";
 const NOW = "2026-11-05T02:00:00.000Z";
 
 describe("stepArtifact", () => {
+  it("offers a generated file as a download, reading the tool's own link", () => {
+    const content = "已生成文档。\n下载链接：/static/documents/abc-1.docx\nasset_id: abc";
+    expect(stepArtifact("generate_document", "succeeded", { content })).toEqual({ label: "abc-1.docx", url: "/static/documents/abc-1.docx", download: true });
+  });
+
+  it("does not pass on a link outside the document store", () => {
+    expect(stepArtifact("generate_document", "succeeded", { content: "下载链接：https://evil.example/x.docx" })).toBeNull();
+  });
+
+  it("points at the review when a task left items for the owner", () => {
+    expect(stepArtifact("commit_product_import", "succeeded", {
+      content: JSON.stringify({ managementUrl: "/digital-employee/materials", reviewUrl: "/digital-employee/materials/import/d1" }),
+    })).toEqual({ label: null, url: "/digital-employee/materials/import/d1", needsReview: true });
+  });
+
   it("names what a tool produced", () => {
     expect(stepArtifact("generate_campaign_copy", "succeeded", {
       content: JSON.stringify({ asset: { title: "门槛文案", content: "secret body" }, managementUrl: "/digital-employee/marketing" }),

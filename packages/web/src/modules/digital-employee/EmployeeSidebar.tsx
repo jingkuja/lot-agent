@@ -17,6 +17,8 @@ interface EmployeeSidebarProps {
   running: RunningWork[];
   waiting: number;
   view: EmployeeView;
+  /** The deployment has task dispatch on. */
+  assignments: boolean;
   isStreaming: boolean;
   onNavigate: (view: EmployeeView) => void;
   onNewConversation: () => void;
@@ -24,7 +26,7 @@ interface EmployeeSidebarProps {
 }
 
 /** The employee card and the only navigation of the workspace. */
-export function EmployeeSidebar({ name, running, waiting, view, isStreaming, onNavigate, onNewConversation, onStreamEnd }: EmployeeSidebarProps) {
+export function EmployeeSidebar({ name, running, waiting, view, assignments, isStreaming, onNavigate, onNewConversation, onStreamEnd }: EmployeeSidebarProps) {
   const { t } = useI18n();
   const wasStreaming = useRef(false);
   useEffect(() => {
@@ -57,6 +59,12 @@ export function EmployeeSidebar({ name, running, waiting, view, isStreaming, onN
         aria-current={view === "schedule" ? "page" : undefined}
         onClick={() => onNavigate("schedule")}
       >{t("工作安排")}</button>
+      {assignments && <button
+        type="button"
+        className={view === "assignments" ? "active" : ""}
+        aria-current={view === "assignments" ? "page" : undefined}
+        onClick={() => onNavigate("assignments")}
+      >{t("任务分派")}</button>}
     </nav>
     <button type="button" className="de-new-chat-button" onClick={onNewConversation}>
       <span aria-hidden>＋</span>{t("新对话")}

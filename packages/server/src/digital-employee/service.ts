@@ -56,6 +56,7 @@ import { ProposalService } from "./proposal-service.js";
 import { ScheduleService } from "./schedule-service.js";
 import { EmployeeSettingsService } from "./settings-service.js";
 import { TodayService } from "./today-service.js";
+import { AssignmentService } from "./assignment-service.js";
 import { WorkLogService } from "./work-log-service.js";
 import type { CampaignContentGenerator, CampaignModelResolver } from "./acquisition-types.js";
 
@@ -125,6 +126,7 @@ export class DigitalEmployeeService {
   readonly workLog: WorkLogService;
   readonly schedules: ScheduleService;
   readonly today: TodayService;
+  readonly assignments: AssignmentService;
   private readonly secretBox: SecretBox;
 
   constructor(
@@ -155,6 +157,11 @@ export class DigitalEmployeeService {
     this.workLog = new WorkLogService(db.pool);
     this.schedules = new ScheduleService(db.pool, opportunityQueue);
     this.today = new TodayService(db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals, this.briefs, this.schedules);
+    this.assignments = new AssignmentService(db.pool, {
+      llmModels: async (userId) => (await acquisitionDeps?.modelResolver?.get(userId))?.llmModels.map((model) => model.id) ?? [],
+      imports: this.productImports,
+      workLog: this.workLog,
+    });
     this.secretBox = secretBox;
   }
 

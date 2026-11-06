@@ -30,18 +30,17 @@ import { LocalKnowledgeStorage } from "./knowledge/private-storage.js";
 import { createKnowledgeManageRoutes, createKnowledgePreviewRoutes } from "./knowledge/routes.js";
 import { TwinVoices } from "./digital-twin/voices.js";
 import { PgTwinVoiceStore } from "./digital-twin/voice-store.js";
-import { KnowledgeConfigSchema } from "./knowledge/module.js";
 import "./load-env.js";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { staticFileHandler } from "./static-files.js";
 import { createDocumentAccessGuard, createOutputAccessGuard, createUploadAccessGuard } from "./generation/private-materials.js";
-import { AgentService, type ServiceConfig } from "./services/agent-service.js";
+import { AgentService } from "./services/agent-service.js";
+import { loadServiceConfig } from "./services/service-config.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
 import { createConversationRoutes, createGenerationRoutes } from "./routes/conversations.js";
@@ -66,9 +65,6 @@ import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
-import { AppConfigSchema } from "@lot-agent/core";
-import { loadLlmConfig } from "./config.js";
-import { parseMiniprogramConfig } from "./miniprogram/models.js";
 import { rateLimit, clientIp } from "./middleware/rate-limit.js";
 import { RedisRateLimitStore } from "./middleware/redis-rate-limit-store.js";
 
@@ -82,42 +78,8 @@ const DOCS_DIR = resolve(ROOT, "data/documents");
 const UPLOADS_DIR = resolve(ROOT, "data/uploads");
 const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "https://aigc.todoucloud.com"];
 
-async function loadConfig(): Promise<ServiceConfig> {
-  const llm = await loadLlmConfig(ROOT);
-
-  const configPath = resolve(ROOT, "config/default.json");
-  const raw = JSON.parse(await readFile(configPath, "utf-8"));
-  const config = AppConfigSchema.parse(raw);
-  // `modelCatalog` is read directly from the raw JSON (like `generation`) since
-  // AppConfigSchema strips unknown keys.
-  const modelCatalog = (raw as { modelCatalog: ServiceConfig["modelCatalog"] }).modelCatalog;
-  const miniprogram = parseMiniprogramConfig((raw as { miniprogram?: unknown }).miniprogram);
-
-  const pgPassword = process.env.PG_PASSWORD;
-  if (!pgPassword) throw new Error("PG_PASSWORD is required");
-
-  return {
-    llm,
-    knowledge: KnowledgeConfigSchema.parse(raw.knowledge),
-    models: config.models ?? [],
-    modelCatalog,
-    miniprogram,
-    debug: process.env.DEBUG === "1",
-    agent: config.agent as ServiceConfig["agent"],
-    mcpConfigPath: resolve(ROOT, "config/mcp-servers.json"),
-    skillsDir: resolve(ROOT, "skills"),
-    db: {
-      host: process.env.PG_HOST ?? "localhost",
-      port: Number(process.env.PG_PORT) || 5432,
-      user: process.env.PG_USER ?? "postgres",
-      password: pgPassword,
-      database: process.env.PG_DATABASE ?? "lot",
-    },
-  };
-}
-
 async function main() {
-  const serviceConfig = await loadConfig();
+  const serviceConfig = await loadServiceConfig(ROOT);
 
   if (!serviceConfig.llm.openai.apiKey && !serviceConfig.llm.anthropic.apiKey) {
     console.warn("WARNING: No LLM API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY");

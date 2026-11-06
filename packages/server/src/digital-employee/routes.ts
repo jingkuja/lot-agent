@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { parseAssignmentList, parseCreateAssignment, parseCreditLimit } from "./assignment-validators.js";
 import { parseEmployeeName } from "./employee-name.js";
 import { apiError, InputError } from "./errors.js";
 import { parseFocusInput } from "./focus.js";
@@ -67,6 +68,46 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
         preferredChannels: parsePreferredChannels(payload.preferredChannels),
         version: settingsVersion(payload.version),
       }));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/assignments", async (c) => {
+    try { return c.json(await service.assignments.list(c.get("userId"), parseAssignmentList(c.req.query()))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignments", async (c) => {
+    try { return c.json(await service.assignments.create(c.get("userId"), parseCreateAssignment(await body(c))), 201); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/assignments/:id", async (c) => {
+    try { return c.json(await service.assignments.get(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignments/:id/cancel", async (c) => {
+    try { return c.json(await service.assignments.cancel(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignments/:id/retry", async (c) => {
+    try { return c.json(await service.assignments.retry(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"))); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignments/:id/resume", async (c) => {
+    try {
+      const payload = await body(c);
+      const limit = "creditLimit" in payload ? parseCreditLimit(payload) : undefined;
+      return c.json(await service.assignments.resume(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"), limit));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.put("/assignments/:id/limit", async (c) => {
+    try {
+      const limit = parseCreditLimit(await body(c));
+      return c.json(await service.assignments.setCreditLimit(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"), limit));
     } catch (error) { return respondError(c, error); }
   });
 

@@ -1,5 +1,5 @@
 /** Every location of the employee workspace. `view` decides which page covers the chat. */
-export type EmployeeView = "today" | "customers" | "marketing" | "materials" | "work-log" | "schedule" | "chat";
+export type EmployeeView = "today" | "customers" | "marketing" | "materials" | "work-log" | "schedule" | "assignments" | "chat";
 
 export const EMPLOYEE_ROOT = "/digital-employee";
 export const TODAY_PATH = `${EMPLOYEE_ROOT}/today`;
@@ -17,6 +17,8 @@ export interface EmployeeLocation {
   scheduledRunId: string | null;
   /** The file import whose review is open. */
   importId: string | null;
+  /** The task whose detail is open. */
+  assignmentId: string | null;
 }
 
 const CUSTOMER_TABS = new Set(["segments"]);
@@ -29,7 +31,7 @@ export function employeePath(view: EmployeeView, tail?: string): string {
 export function parseEmployeePath(pathname: string): EmployeeLocation {
   const [view = "today", tail = null, item = null] = pathname.slice(EMPLOYEE_ROOT.length + 1).split("/").filter(Boolean);
   const decoded = tail === null ? null : decodeURIComponent(tail);
-  const base = { tab: null, conversationId: null, profileId: null, workConversationId: null, scheduledRunId: null, importId: null };
+  const base = { tab: null, conversationId: null, profileId: null, workConversationId: null, scheduledRunId: null, importId: null, assignmentId: null };
   if (view === "chat") return { ...base, view, conversationId: decoded };
   if (view === "customers") {
     return CUSTOMER_TABS.has(decoded ?? "") ? { ...base, view, tab: decoded } : { ...base, view, profileId: decoded };
@@ -41,6 +43,7 @@ export function parseEmployeePath(pathname: string): EmployeeLocation {
   }
   if (view === "materials") return { ...base, view, importId: decoded === "import" && item !== null ? decodeURIComponent(item) : null };
   if (view === "schedule") return { ...base, view };
+  if (view === "assignments") return { ...base, view, assignmentId: decoded };
   return { ...base, view: "today" };
 }
 

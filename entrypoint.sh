@@ -4,6 +4,7 @@
 # Picks the process to run from $ROLE:
 #   ROLE=server  (default) → HTTP API   (packages/server/dist/index.js)
 #   ROLE=worker            → job worker  (packages/server/dist/workers/index.js)
+#   ROLE=employee-task-worker → digital employee tasks (packages/server/dist/workers/employee-task.js)
 # Before starting, waits for PostgreSQL (and Redis, if configured) to accept
 # TCP connections so we don't crash-loop while infra is still booting.
 # ─────────────────────────────────────────────────────────────
@@ -47,6 +48,10 @@ case "${ROLE}" in
     echo "[entrypoint] starting job worker"
     exec node packages/server/dist/workers/index.js
     ;;
+  employee-task-worker)
+    echo "[entrypoint] starting employee task worker"
+    exec node packages/server/dist/workers/employee-task.js
+    ;;
   knowledge-worker)
     echo "[entrypoint] starting knowledge worker"
     exec node packages/server/dist/workers/knowledge.js
@@ -56,7 +61,7 @@ case "${ROLE}" in
     exec node packages/server/dist/workers/media-analysis.js
     ;;
   *)
-    echo "[entrypoint] ERROR: unknown ROLE='${ROLE}' (expected 'server', 'worker', 'knowledge-worker' or 'media-analysis-worker')" >&2
+    echo "[entrypoint] ERROR: unknown ROLE='${ROLE}' (expected 'server', 'worker', 'employee-task-worker', 'knowledge-worker' or 'media-analysis-worker')" >&2
     exit 1
     ;;
 esac

@@ -83,6 +83,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           active={isDigitalEmployee}
           dailyScan={employeeFlags.dailyScan}
           schedules={employeeFlags.schedules}
+          assignments={employeeFlags.assignments}
           pendingCount={employeeSummary.pending}
           onPendingChange={employeeSummary.setPending}
           onLogout={onLogout}

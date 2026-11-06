@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { resolveProvider, resolvePricing, enrichCatalog, orderLlmModels, pickUtilityLlmModel, type ModelCatalogConfig } from "./catalog.js";
+import { resolveProvider, resolvePricing, enrichCatalog, orderLlmModels, pickBackgroundTaskLlmModel, pickUtilityLlmModel, type ModelCatalogConfig } from "./catalog.js";
 
 const cfg: ModelCatalogConfig = {
   defaultProvider: { llm: "openai", image: "chat-completions", video: "openai-video" },
@@ -94,6 +94,15 @@ describe("catalog resolvers", () => {
     [[], null],
   ])("picks a background model from %j without Claude", (ids, expected) => {
     expect(pickUtilityLlmModel(ids)).toBe(expected);
+  });
+  it.each<[string[], boolean, string | null]>([
+    [["deepseek-v4.1-flash", "kimi-k3.1-pro"], false, "kimi-k3.1-pro"],
+    [["deepseek-v4.1-flash", "gpt-6.1-terra"], true, "gpt-6.1-terra"],
+    [["deepseek-v4.1-flash", "claude-opus-5-5"], true, "deepseek-v4.1-flash"],
+    [["kimi-k3.1-pro"], true, "kimi-k3.1-pro"],
+    [["claude-opus-5-5"], false, null],
+  ])("picks a task's default from %j", (ids, international, expected) => {
+    expect(pickBackgroundTaskLlmModel(ids, international)).toBe(expected);
   });
   it("does not mutate cached model arrays while normalizing their order", () => {
     const input = [{ id: "claude-4" }, { id: "gpt-5.4" }];

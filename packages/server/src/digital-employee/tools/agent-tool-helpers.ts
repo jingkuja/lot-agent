@@ -1,6 +1,6 @@
 import type { ToolContext, ToolResult } from "@lot-agent/core";
 import { classifyToolFailure } from "@lot-agent/core";
-import { DigitalEmployeeError, GenerationFailedError, InputError } from "../errors.js";
+import { DigitalEmployeeError, GenerationFailedError, InputError, QuotaError } from "../errors.js";
 import type { ConversationActionDraft } from "../conversation-drafts.js";
 import { DIGITAL_EMPLOYEE_UNIFIED_SCOPE } from "../feature-scope.js";
 
@@ -49,6 +49,7 @@ export function toolError(prefix: string, error: unknown): ToolResult {
       errorKind: "unknown",
     };
   }
+  if (error instanceof QuotaError) return { content: `${prefix}：${error.message}`, isError: true, errorKind: "quota" };
   if (error instanceof DigitalEmployeeError) {
     return { content: `${prefix}：${error.message}`, isError: true,
       errorKind: error.status === 404 ? "not_found" : error.status === 403 ? "permission" : "validation" };

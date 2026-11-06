@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { digitalEmployeeDefinition } from "@lot-agent/core";
 import { createDigitalEmployeeExtension, digitalEmployeeAllowedToolNames, digitalEmployeeTurnParts } from "./agent.js";
 import { AgentConversationError } from "../services/agent-extensions.js";
@@ -42,6 +42,25 @@ describe("digitalEmployeeAllowedToolNames", () => {
 
 describe("digital employee extension", () => {
   const extension = createDigitalEmployeeExtension();
+  const taskMetadata = { digitalEmployeeFeatureScope: "employee", digitalEmployeeAssignment: "node-1" };
+
+  it("refuses chat messages to a task's conversation", () => {
+    expect(() => extension.assertConversation!(taskMetadata)).toThrow(AgentConversationError);
+    expect(() => extension.assertConversation!({ digitalEmployeeFeatureScope: "employee" })).not.toThrow();
+  });
+
+  it("does not run a task turn on the chat rules when the task service is missing", async () => {
+    await expect(extension.beginTurn!({ agentId: "digital_employee", userId: "u1", conversationId: "c1", metadata: taskMetadata, toolNames: tools }))
+      .rejects.toThrow("Background tasks are not available");
+  });
+
+  it("hands a task conversation to the task service", async () => {
+    const beginTurn = vi.fn(async () => ({ allowedToolNames: ["finish_task"], dynamicParts: [] }));
+    const tasks = createDigitalEmployeeExtension({ assignments: { beginTurn } });
+    await expect(tasks.beginTurn!({ agentId: "digital_employee", userId: "u1", conversationId: "c1", metadata: taskMetadata, toolNames: tools }))
+      .resolves.toMatchObject({ allowedToolNames: ["finish_task"] });
+    expect(beginTurn).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1", conversationId: "c1", toolNames: tools }));
+  });
 
   it("writes every new conversation as employee, whatever the client sends", () => {
     for (const featureScope of [undefined, "customer-profile", "all"]) {

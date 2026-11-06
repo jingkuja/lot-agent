@@ -351,7 +351,9 @@ export function createCustomerAcquisitionTools(service: CustomerAcquisitionServi
     },
     async execute(input, context) {
       return run(context, assetType === "poster" ? "生成海报失败" : "生成视频失败", async (userId) => {
-        const asset = await service.createAsset(userId, parseCreateCampaignAsset({ ...object(input), assetType }), context.signal);
+        const asset = await service.createAsset(userId, parseCreateCampaignAsset({ ...object(input), assetType }), context.signal, {
+          sourceConversationId: context.conversationId,
+        });
         return {
           asset,
           message: assetType === "poster" ? "已提交海报生成任务，完成后会进入营销资产库。" : "已提交视频生成任务，完成后会进入营销资产库。",

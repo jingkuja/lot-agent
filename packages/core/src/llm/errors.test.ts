@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatLLMError, isUnauthorizedLLMError, LLM_QUOTA_HINT } from "./errors.js";
+import { formatLLMError, isUnauthorizedLLMError, LLM_QUOTA_HINT, isQuotaError, llmErrorCode } from "./errors.js";
 
 describe("isUnauthorizedLLMError", () => {
   it("matches status 401 on the error object", () => {
@@ -15,6 +15,34 @@ describe("isUnauthorizedLLMError", () => {
     expect(isUnauthorizedLLMError(new Error("upstream 500"))).toBe(false);
     expect(isUnauthorizedLLMError({ status: 403 })).toBe(false);
     expect(isUnauthorizedLLMError(new Error("rate limited"))).toBe(false);
+  });
+});
+
+describe("isQuotaError", () => {
+  it("recognises a 402 under any of the status fields", () => {
+    expect(isQuotaError({ status: 402 })).toBe(true);
+    expect(isQuotaError({ statusCode: 402 })).toBe(true);
+    expect(isQuotaError({ httpStatus: 402 })).toBe(true);
+  });
+
+  it("recognises the gateway's codes, nested or not", () => {
+    expect(isQuotaError({ status: 403, code: "insufficient_balance" })).toBe(true);
+    expect(isQuotaError({ status: 401, error: { code: "insufficient_quota" } })).toBe(true);
+  });
+
+  it("does not call a plain 401 or 500 a quota error", () => {
+    expect(isQuotaError({ status: 401 })).toBe(false);
+    expect(isQuotaError({ status: 500, code: "server_error" })).toBe(false);
+    expect(isQuotaError(new Error("x"))).toBe(false);
+    expect(isQuotaError(null)).toBe(false);
+  });
+});
+
+describe("llmErrorCode", () => {
+  it("counts a plain 401, because that is how an exhausted key answers", () => {
+    expect(llmErrorCode({ status: 401 })).toBe("quota");
+    expect(llmErrorCode({ status: 402 })).toBe("quota");
+    expect(llmErrorCode({ status: 500 })).toBeUndefined();
   });
 });
 

@@ -42,6 +42,14 @@ export function pickUtilityLlmModel(modelIds: string[]): string | null {
   return modelIds.find((id) => !isAnthropicModel(id)) ?? null;
 }
 
+const BACKGROUND_TASK_LLM = { domestic: "kimi-k3.1-pro", international: "gpt-6.1-terra" };
+
+/** Default for long tasks the owner leaves running, and for them alone. Without it, the same pick as background work. */
+export function pickBackgroundTaskLlmModel(modelIds: string[], international = internationalModelsEnabled()): string | null {
+  const preferred = international ? BACKGROUND_TASK_LLM.international : BACKGROUND_TASK_LLM.domestic;
+  return modelIds.includes(preferred) ? preferred : pickUtilityLlmModel(modelIds);
+}
+
 /** LLM and video always use their per-type default provider (all video models
  * route through the same tokenhub `/videos` endpoint, so per-model matching is
  * meaningless and would break for dynamic agent-market models not in the map).

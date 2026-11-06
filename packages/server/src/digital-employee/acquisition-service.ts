@@ -308,7 +308,7 @@ export class CustomerAcquisitionService {
     userId: string,
     input: CreateCampaignAssetInput,
     signal?: AbortSignal,
-    options: { inheritedTitle?: boolean } = {}
+    options: { inheritedTitle?: boolean; sourceConversationId?: string } = {}
   ) {
     signal?.throwIfAborted();
     const existing = input.campaignId ? await this.loadCampaignRow(userId, input.campaignId) : null;
@@ -470,6 +470,8 @@ export class CustomerAcquisitionService {
           .map((item) => ({ type: "reference_image" as const, url: item.url }))
         : undefined;
       const videoSettings = resolvedInput.mediaSettings;
+      // Lets a background task count this media against the owner's cost limit.
+      const sourceInput = options.sourceConversationId ? { sourceConversationId: options.sourceConversationId } : {};
       taskId = await queue!.enqueue(
         isPoster ? "image.generate" : "video.generate",
         isPoster
@@ -484,6 +486,7 @@ export class CustomerAcquisitionService {
               requireUserModelKey: true,
               campaignId,
               assetId,
+              ...sourceInput,
             }
           : {
               prompt: mediaPrompt,
@@ -501,6 +504,7 @@ export class CustomerAcquisitionService {
               requireUserModelKey: true,
               campaignId,
               assetId,
+              ...sourceInput,
             },
         userId
       );

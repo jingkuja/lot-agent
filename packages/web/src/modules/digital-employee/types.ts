@@ -712,7 +712,7 @@ export interface WorkStep {
   status: string;
   startedAt: string;
   finishedAt: string | null;
-  artifact: { label: string | null; url: string | null } | null;
+  artifact: { label: string | null; url: string | null; needsReview?: boolean; download?: boolean } | null;
 }
 
 export interface WorkRun {
@@ -853,4 +853,54 @@ export interface CustomerWork {
   opportunities: OpportunityItem[];
   actions: OpportunityItem[];
   outreach: Array<{ id: string; channel: string; objective: string; version: number; usedAt: string | null; createdAt: string; excerpt: string }>;
+}
+
+export type AssignmentStatus = "queued" | "running" | "succeeded" | "failed" | "waiting_user" | "waiting_team" | "waiting_children" | "cancelled" | "skipped";
+export type AssignmentStatusFilter = "active" | "paused" | "succeeded" | "failed" | "cancelled";
+export type AssignmentFailure =
+  | "blocked" | "model_failed" | "empty_response" | "stalled" | "timed_out" | "unknown_outcome" | "interrupted";
+
+export interface Assignment {
+  id: string;
+  title: string;
+  goal: string;
+  mode: "autonomous" | "responsive";
+  status: AssignmentStatus;
+  pausedReason: "quota" | "cost_limit" | null;
+  modelId: string;
+  result: { summary: string; assumptions: string[]; skipped: string[] } | null;
+  failureReason: AssignmentFailure | null;
+  createdAt: string;
+  finishedAt: string | null;
+  creditsUsed: number;
+  creditLimit: number | null;
+  subtasks: { done: number; total: number };
+  currentTool: string | null;
+  attachments: string[];
+}
+
+export interface AssignmentDetail extends Assignment {
+  runs: Array<Pick<WorkRun, "id" | "status" | "startedAt" | "finishedAt" | "steps">>;
+}
+
+export interface AssignmentPage {
+  items: Assignment[];
+  pinned: Assignment[];
+  nextCursor: string | null;
+}
+
+export interface AssignmentFilter {
+  from?: string;
+  to?: string;
+  q?: string;
+  status?: AssignmentStatusFilter;
+  cursor?: string;
+  openBefore?: string;
+}
+
+export interface AssignmentInput {
+  goal: string;
+  modelId?: string;
+  attachments: Array<{ assetId: string; filename: string }>;
+  creditLimit: number | null;
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { JobQueue } from "@lot-agent/core";
+import { isQuotaError, type JobQueue } from "@lot-agent/core";
 import type { Pool } from "pg";
 import { ConflictError, InputError, NotFoundError } from "./errors.js";
 import { digitalEmployeeSchedulesEnabled } from "./feature-scope.js";
@@ -80,10 +80,6 @@ function toRun(row: Row): ScheduleRun {
     scheduledFor: toIso(row.scheduled_for)!, status: row.status as RunStatus, reason: (row.reason ?? null) as RunReason | null,
     report: (row.report ?? null) as ScheduleReport | null, acknowledgedAt: toIso(row.acknowledged_at), finishedAt: toIso(row.finished_at),
   };
-}
-
-function gatewayQuotaError(error: unknown): boolean {
-  return (error as { httpStatus?: number } | null)?.httpStatus === 402;
 }
 
 /**
@@ -291,7 +287,7 @@ export class ScheduleService {
       return "succeeded";
     } catch (error) {
       if (signal?.aborted) { await this.finish(runId, "cancelled", null); return "cancelled"; }
-      if (gatewayQuotaError(error)) return skip("quota");
+      if (isQuotaError(error)) return skip("quota");
       console.warn(`[employee-schedule] run ${runId} failed:`, error);
       await this.finish(runId, "failed", "model_failed");
       return "failed";

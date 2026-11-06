@@ -37,7 +37,15 @@ export function digitalEmployeeSchedulesEnabled(): boolean {
   return process.env.DIGITAL_EMPLOYEE_SCHEDULES === "1";
 }
 
+/** Background tasks run in their own process and can write business data, so they stay off until a deployment opts in. */
+export function digitalEmployeeAssignmentsEnabled(): boolean {
+  return process.env.DIGITAL_EMPLOYEE_ASSIGNMENTS === "1";
+}
+
 /** What the signed-out product config tells the web shell. */
 export function digitalEmployeeProductFlags() {
-  return { digitalEmployeeDailyScan: digitalEmployeeDailyScanEnabled(), digitalEmployeeSchedules: digitalEmployeeSchedulesEnabled() };
+  return {
+    digitalEmployeeDailyScan: digitalEmployeeDailyScanEnabled(), digitalEmployeeSchedules: digitalEmployeeSchedulesEnabled(),
+    digitalEmployeeAssignments: digitalEmployeeAssignmentsEnabled(),
+  };
 }

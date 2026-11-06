@@ -63,6 +63,58 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
   return out;
 }
 
+describe("Agent.run beforeIteration", () => {
+  it("runs before every model call and appends notices without storing them as history", async () => {
+    const registry = new ToolRegistry();
+    registry.register({ name: "noop", description: "noop", parameters: { type: "object" }, async execute() { return { content: "ok" }; } });
+    const llm = scriptedLLM([toolCallChunks("c1", "noop", {}), textChunks("done")]);
+    let calls = 0;
+    const beforeIteration = async () => { calls += 1; return calls === 2 ? { notices: ["subtask 1 published a result"] } : undefined; };
+    await collect(new Agent({ systemPrompt: "sys" }).run("hello", { ...makeContext(llm, registry), beforeIteration }));
+    expect(calls).toBe(2);
+    expect(llm.calls[0].some((message) => String(message.content).includes("[Runtime notice]"))).toBe(false);
+    expect(llm.calls[1].at(-1)).toEqual({ role: "user", content: "[Runtime notice] subtask 1 published a result" });
+  });
+
+  it("stops between iterations as budget_exhausted, after the tool finished", async () => {
+    const registry = new ToolRegistry();
+    const execute = async () => ({ content: "written" });
+    registry.register({ name: "write", description: "write", parameters: { type: "object" }, execute });
+    const llm = scriptedLLM([toolCallChunks("c1", "write", {}), textChunks("never")]);
+    let calls = 0;
+    const events = await collect(new Agent({ systemPrompt: "sys" }).run("hello", {
+      ...makeContext(llm, registry), beforeIteration: async () => ({ stop: ++calls === 2 }),
+    }));
+    expect(llm.calls).toHaveLength(1);
+    expect(events.find((event) => event.type === "tool_result")).toMatchObject({ output: "written" });
+    expect(events.at(-1)).toMatchObject({ type: "done", status: "budget_exhausted" });
+  });
+});
+
+describe("Agent.run error codes", () => {
+  const rejecting = (error: unknown): LLMProvider => ({
+    // eslint-disable-next-line require-yield
+    async *chat() { throw error; },
+  });
+
+  it.each([
+    ["a 402", Object.assign(new Error("Payment required"), { status: 402 })],
+    ["a quota code", Object.assign(new Error("no balance"), { status: 429, code: "insufficient_user_quota" })],
+    ["the gateway's 401", Object.assign(new Error("无效的令牌"), { status: 401 })],
+  ])("marks %s as quota", async (_label, error) => {
+    const events = await collect(new Agent({ systemPrompt: "sys" }).run("hello", makeContext(rejecting(error))));
+    expect(events.find((event) => event.type === "error")).toMatchObject({ code: "quota" });
+    expect(events.at(-1)).toMatchObject({ type: "done", status: "failed" });
+  });
+
+  it("leaves other failures unmarked", async () => {
+    const events = await collect(new Agent({ systemPrompt: "sys" }).run("hello", makeContext(rejecting(Object.assign(new Error("boom"), { status: 500 })))));
+    const error = events.find((event) => event.type === "error");
+    expect(error).toBeDefined();
+    expect(error).not.toHaveProperty("code");
+  });
+});
+
 describe("Agent.run", () => {
   it("carries stateless Responses reasoning into the next tool turn", async () => {
     const registry = new ToolRegistry();

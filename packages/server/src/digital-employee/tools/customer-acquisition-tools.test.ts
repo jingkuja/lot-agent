@@ -129,10 +129,10 @@ describe("customer acquisition agent tools", () => {
       channels: ["朋友圈"],
       callToAction: "预约",
       modelId: "flux-pro",
-    }, context);
+    }, { ...context, conversationId: "conv-media" });
     expect(service.createAsset).toHaveBeenCalledWith("u1", expect.objectContaining({
       assetType: "poster",
       modelId: "flux-pro",
-    }), undefined);
+    }), undefined, { sourceConversationId: "conv-media" });
   });
 });

@@ -321,6 +321,12 @@ export function createConversationRoutes(service: AgentService) {
       return c.json({ error: "Not found" }, 404);
     }
     if (conversation.channel === "feishu") return c.json({ error: "请在飞书中发送或取消任务，此处保留完整记录" },409);
+    try {
+      agentExtension(conversation.agent_id)?.assertConversation?.(conversation.metadata);
+    } catch (error) {
+      if (error instanceof AgentConversationError) return c.json({ error: error.message }, 400);
+      throw error;
+    }
 
     const body = await c.req.json<{ afterMessageId: string }>();
     if (!body.afterMessageId) {

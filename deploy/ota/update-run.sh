@@ -6,7 +6,7 @@
 #       → 改 .env 切 tag → compose up app → 健康检查 → 成败/回滚 → 上报。
 #
 # 关键不变量：
-#   - data 容器(postgres/redis)全程不动；只重建 server/worker/web。
+#   - data 容器(postgres/redis)全程不动；只重建 server/worker/employee-task-worker/web。
 #   - 旧镜像保留(供回滚)；更新成功后才按 KEEP_VERSIONS 清理。
 #   - 任何失败都不让盒子停在坏状态：要么旧版继续跑，要么回滚回旧版。
 #
@@ -34,7 +34,7 @@ KEEP_VERSIONS="${KEEP_VERSIONS:-2}"
 WEB_PORT="${WEB_PORT:-80}"
 MIN_FREE_MB="${MIN_FREE_MB:-2048}"   # 下载前要求的额外磁盘余量
 
-APP_SVCS="server worker web"          # 只重建这三个 app 服务
+APP_SVCS="server worker employee-task-worker web"          # 只重建这些 app 服务
 
 log()  { echo "[$(date -u +%FT%TZ)] $*" >&2; }
 die()  { log "ERROR: $*"; }

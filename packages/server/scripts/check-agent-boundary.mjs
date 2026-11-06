@@ -18,6 +18,7 @@ const MODULE_SOURCE = /(^|\/)digital-employee\//;
 const PLATFORM_FINAL = new Set([
   "server:index.ts",
   "server:workers/index.ts",
+  "server:workers/employee-task.ts",
   "server:services/agent-service.ts",
   "server:agents/install-order.ts",
   "server:routes/agents.ts",

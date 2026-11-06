@@ -1,7 +1,8 @@
 import { request, type UploadedAttachment } from "../../api/client.js";
 import type { EmployeeFocus } from "./focus.js";
 import type {
-  ConversationWork, CustomerWork, EmployeeSchedule, EmployeeSettings, ProposalResult, ScheduleInput, ScheduleRun, TodayResponse, TodaySummary,
+  Assignment, AssignmentDetail, AssignmentFilter, AssignmentInput, AssignmentPage, ConversationWork, CustomerWork, EmployeeSchedule,
+  EmployeeSettings, ProposalResult, ScheduleInput, ScheduleRun, TodayResponse, TodaySummary,
 } from "./types.js";
 import type {
   CustomerObservation,
@@ -70,6 +71,30 @@ export const employeeApi = {
     request<{ ok: boolean }>(`/digital-employee/schedule-runs/${encodeURIComponent(id)}/acknowledge`, { method: "POST" }),
 
   getConversationWork: (id: string) => request<ConversationWork>(`/digital-employee/work-log/conversations/${encodeURIComponent(id)}`),
+
+  listAssignments: (filter: AssignmentFilter = {}) => {
+    const query = new URLSearchParams(Object.entries(filter).filter((entry): entry is [string, string] => Boolean(entry[1])));
+    const suffix = query.toString();
+    return request<AssignmentPage>(`/digital-employee/assignments${suffix ? `?${suffix}` : ""}`);
+  },
+
+  createAssignment: (input: AssignmentInput) =>
+    request<Assignment>("/digital-employee/assignments", { method: "POST", body: JSON.stringify(input) }),
+
+  getAssignment: (id: string) => request<AssignmentDetail>(`/digital-employee/assignments/${encodeURIComponent(id)}`),
+
+  cancelAssignment: (id: string) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+
+  retryAssignment: (id: string) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+
+  /** Leave the limit out to keep it; pass null to remove it. */
+  resumeAssignment: (id: string, creditLimit?: number | null) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/resume`, {
+    method: "POST", body: JSON.stringify(creditLimit === undefined ? {} : { creditLimit }),
+  }),
+
+  setAssignmentLimit: (id: string, creditLimit: number | null) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/limit`, {
+    method: "PUT", body: JSON.stringify({ creditLimit }),
+  }),
 
   getTodaySummary: () => request<TodaySummary>("/digital-employee/today/summary"),
 

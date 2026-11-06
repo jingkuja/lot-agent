@@ -26,7 +26,7 @@ import type { Retriever } from "../retrieval/index.js";
 import { hasMemoryTools, MEMORY_POLICY_PROMPT } from "../memory/policy.js";
 import { hasAskUserTool, ASK_USER_POLICY_PROMPT } from "../tools/ask-user.js";
 import { isMalformedToolCallError } from "../llm/retry.js";
-import { formatLLMError } from "../llm/errors.js";
+import { formatLLMError, llmErrorCode } from "../llm/errors.js";
 import { createDeadline, withAbort, abortableStream, abortableDelay } from "../runtime/abort.js";
 import { estimateTokens } from "../context/tokenizer.js";
 
@@ -47,7 +47,7 @@ export type AgentEvent =
       outputTokens: number;
       cachedPromptTokens: number;
     }
-  | { type: "error"; message: string }
+  | { type: "error"; message: string; code?: "quota" }
   | { type: "artifact"; assetId: string; url: string; mediaType: string };
 
 export interface AgentConfig {
@@ -92,6 +92,8 @@ export interface AgentContext {
   retriever?: Retriever;
   /** Namespace to retrieve from (e.g. `user:{id}:notes`). */
   retrievalNamespace?: string;
+  /** Runs before each model call. Notices are appended as runtime notices; stop ends the run as budget_exhausted. */
+  beforeIteration?: () => Promise<{ notices?: string[]; stop?: boolean } | void>;
 }
 
 export interface AgentRunOptions {
@@ -326,6 +328,17 @@ export class Agent {
           return;
         }
 
+        // Between iterations, so stopping can never leave a write half finished.
+        const checkpoint = context.beforeIteration ? await withAbort(context.beforeIteration(), signal) : undefined;
+        if (checkpoint?.stop) {
+          yield { type: "error", message: "Stopped before the next model call" };
+          yield done("budget_exhausted");
+          return;
+        }
+        for (const notice of checkpoint?.notices ?? []) {
+          workingHistory.push({ role: "user", content: `[Runtime notice] ${notice}` });
+        }
+
         iterations++;
         let hasToolCalls = false;
         let assistantContent = "";
@@ -427,6 +440,7 @@ export class Agent {
             message: isMalformedToolCallError(streamError)
               ? MALFORMED_FALLBACK_MESSAGE
               : formatLLMError(streamError),
+            ...(llmErrorCode(streamError) ? { code: llmErrorCode(streamError) } : {}),
           };
           yield done(streamError instanceof RunBudgetError ? "budget_exhausted" : "failed");
           return;
@@ -614,7 +628,10 @@ export class Agent {
       yield done("budget_exhausted");
     } catch (error) {
       const reason = abortReason();
-      yield reason ? abortError(reason) : { type: "error", message: formatLLMError(error) };
+      yield reason ? abortError(reason) : {
+        type: "error", message: formatLLMError(error),
+        ...(llmErrorCode(error) && !uncertainOutcome ? { code: llmErrorCode(error) } : {}),
+      };
       yield done(error instanceof RunBudgetError ? "budget_exhausted" : "failed");
     } finally {
       deadline.dispose();

@@ -52,6 +52,14 @@ export const TOOL_LABELS: Record<string, string> = {
   check_user_generation_models: "检查可用模型",
   start_marketing_video: "创建营销影像草稿",
   ask_user: "向你确认",
+  web_search: "联网搜索",
+  web_fetch: "打开网页",
+  generate_document: "生成文档",
+  generate_ppt: "生成 PPT",
+  import_product_file: "整理产品文件",
+  commit_product_import: "保存产品资料",
+  read_product_documents: "读取产品补充资料",
+  finish_task: "收尾任务",
 };
 
 export const RUN_STATUS_LABELS: Record<string, string> = {
