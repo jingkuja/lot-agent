@@ -241,6 +241,13 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
     if (path === "/api/uploads") {
       state.uploads = (state.uploads ?? 0) + 1;
       if (state.failUpload) return json({ error: "上传失败" }, 500);
+      const mime = request.headers()["content-type"] ?? "";
+      if (mime.startsWith("image/")) {
+        const filename = decodeURIComponent(request.headers()["x-file-name"] ?? "image.png");
+        const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        const url = `data:image/png;base64,${pixel}#${state.uploads}`;
+        return json({ assetId: `asset${state.uploads}`, filename, mime, size: 5, url, kind: "image" });
+      }
       return json({ assetId: `asset${state.uploads}`, filename: "手册.pdf", mime: "application/pdf", size: 5, url: "/x", kind: "doc" });
     }
     if (path === "/api/public/product") {
@@ -371,6 +378,12 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
     if (path.startsWith("/api/tasks/") && path.endsWith("/cancel")) { state.running = []; return json({ ok: true, status: "cancelled" }); }
     if (!path.startsWith("/api/digital-employee")) { unexpected.push(path); return json({}, 404); }
 
+    if (method === "GET" && state.limitedReads > 0 && path.startsWith("/api/digital-employee/settings")) {
+      state.limitedReads -= 1;
+      return route.fulfill({
+        status: 429, contentType: "application/json", headers: { "Retry-After": "1" }, body: JSON.stringify({ error: "操作太频繁，请稍后再试。" }),
+      });
+    }
     if (de === "/settings") {
       if (method === "PUT") {
         const body = request.postDataJSON();
@@ -502,6 +515,10 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
       videoModels: [],
       configurationUrl: "https://example.com",
     });
+    if (de === `/marketing/products/${PRODUCT}` && method === "PATCH") {
+      state.products = state.products.map((item) => ({ ...item, ...request.postDataJSON(), version: item.version + 1 }));
+      return json(state.products[0]);
+    }
     if (de === "/marketing/products") return json({ items: state.products ?? [], total: state.products?.length ?? 0, page: 1, limit: 20 });
     if (de.startsWith(`/marketing/products/${PRODUCT}/documents`)) {
       if (method === "GET") {
@@ -544,7 +561,12 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
       return json({ alreadyApplied: false, entityId: PRODUCT, managementUrl: "/digital-employee/materials", saved: [{ id: PRODUCT, name: "焕颜美学", created: true, items: 3 }], dropped: 0 });
     }
     if (de.startsWith("/marketing/imports/")) return json({ status: importStatusFixture, draft: importDraftFixture });
-    if (de === "/marketing/brand-assets") return json(null);
+    if (de === "/marketing/brand-assets") {
+      if (method === "PUT") {
+        state.brand = { id: "b1", userId: "u1", tone: [], standardCallsToAction: [], version: 1, createdAt: NOW, updatedAt: NOW, ...request.postDataJSON() };
+      }
+      return json(state.brand ?? null);
+    }
     unexpected.push(`${method} ${path}`);
     return json({}, 404);
   };
@@ -923,6 +945,56 @@ try {
     await phone.close();
   }
 
+  {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+    const image = (name) => ({ name, mimeType: "image/png", buffer: png });
+    const state = { ...fixtures(), products: [] };
+    const { page, close } = await open("/digital-employee/materials", { state });
+    await page.getByRole("heading", { name: "公司 / 店铺资料" }).waitFor();
+    await page.getByText("还没有填写。").waitFor();
+    assert.equal(await page.getByText("品牌语气").count(), 0);
+    await page.getByRole("button", { name: "填写资料" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("公司或店铺名称").fill("小王面馆");
+    await dialog.getByLabel("基础介绍").fill("开了十年的牛肉面馆，每天早上六点开门。");
+    const inputs = dialog.locator("input[type=file]");
+    await inputs.nth(0).setInputFiles(image("logo.png"));
+    await dialog.getByRole("img", { name: "Logo 图片" }).waitFor();
+    await dialog.locator("input[type=file]").first().setInputFiles([image("门头.png"), image("店内.png")]);
+    await dialog.getByRole("img", { name: "店内.png" }).waitFor();
+    await dialog.locator("input[type=file]").first().setInputFiles({ name: "价目表.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-") });
+    await dialog.getByText("只支持 JPG、PNG、WebP 图片").waitFor();
+    await snap(page, "materials-business-editor-zh-1440.png");
+    await dialog.getByRole("button", { name: "保存", exact: true }).click();
+    await dialog.waitFor({ state: "detached" });
+    assert.equal(state.brand.businessName, "小王面馆");
+    assert.deepEqual(state.brand.visualAssets.map((item) => item.type), ["logo", "store", "store"]);
+    await page.getByText("开了十年的牛肉面馆").waitFor();
+    await page.getByRole("img", { name: "门头.png" }).waitFor();
+    await snap(page, "materials-business-zh-1440.png");
+    await close();
+
+    const legacy = { ...fixtures(), products: [], brand: { id: "b1", userId: "u1", businessName: "", businessIntro: "", version: 2, tone: ["专业克制"],
+      standardCallsToAction: ["预约咨询"], visualAssets: [{ name: "品牌手册", url: "https://example.com/guide.pdf", type: "手册" }],
+      createdAt: NOW, updatedAt: NOW } };
+    const phone = await open("/digital-employee/materials", { state: legacy, language: "en", width: 390 });
+    await phone.page.getByRole("button", { name: "Edit", exact: true }).click();
+    const english = phone.page.getByRole("dialog");
+    await english.getByLabel("Writing style").waitFor();
+    assert.equal(await english.getByLabel("Writing style").inputValue(), "专业克制");
+    assert(await noHorizontalScroll(phone.page), "company dialog scrolls sideways at 390");
+    const copy = (await english.innerText()).replace(/品牌手册/g, "");
+    assert(!/[一-鿿]/.test(copy), `company dialog: untranslated copy: ${copy}`);
+    await snap(phone.page, "materials-business-editor-en-390-light.png");
+    await phone.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    await snap(phone.page, "materials-business-editor-en-390-dark.png");
+    await english.getByRole("button", { name: "Save", exact: true }).click();
+    await english.waitFor({ state: "detached" });
+    assert.deepEqual(legacy.brand.tone, ["专业克制"]);
+    assert.equal(legacy.brand.visualAssets[0].name, "品牌手册");
+    await phone.close();
+  }
+
   // A file becomes a one-screen review: blanks are fine, a name is the only thing it insists on.
   {
     const state = { ...fixtures(), products: [productFixture], documents: [documentFixture()] };
@@ -1085,16 +1157,16 @@ try {
   {
     const { page, close } = await open("/digital-employee/today");
     await page.locator(".de-employee-card").waitFor();
-    assert.equal(await page.locator(".de-employee-nav").getByRole("button", { name: "任务分派" }).count(), 0);
+    assert.equal(await page.locator(".de-employee-nav").getByRole("button", { name: "交给小灵" }).count(), 0);
     await close();
   }
 
   // Tasks: cards by day, open ones carried up, search, and everything an owner can do to one.
   {
     const { page, state, close } = await open("/digital-employee/today", { assignments: true });
-    await page.locator(".de-employee-nav").getByRole("button", { name: "任务分派" }).click();
+    await page.locator(".de-employee-nav").getByRole("button", { name: "交给小灵" }).click();
     await page.waitForURL("**/digital-employee/assignments");
-    await page.getByRole("heading", { name: "任务分派" }).waitFor();
+    await page.getByRole("heading", { name: "交给小灵" }).waitFor();
 
     const days = page.locator(".de-assignment-day");
     await days.first().getByRole("heading", { name: "还没结束" }).waitFor();
@@ -1163,7 +1235,7 @@ try {
   {
     const state = decisionTasks(fixtures());
     const { page, close } = await open("/digital-employee/assignments", { assignments: true, state });
-    await page.locator(".de-employee-nav").getByRole("button", { name: /任务分派/ }).locator("b").getByText("3").waitFor();
+    await page.locator(".de-employee-nav").getByRole("button", { name: /交给小灵/ }).locator("b").getByText("3").waitFor();
     await page.getByRole("radio", { name: "及时响应" }).check();
     await page.getByText("员工停下来问你").waitFor();
     await page.getByText("要回到这里才能看到问题和结果").waitFor();
@@ -1356,6 +1428,86 @@ try {
     await snap(page, `${name}-en-390-dark.png`);
     await page.setViewportSize({ width: 1440, height: 1000 });
     await snap(page, `${name}-en-1440-dark.png`);
+    await close();
+  }
+
+  {
+    const state = { ...fixtures(), limitedReads: 1 };
+    const { page, close } = await open("/digital-employee/schedule", { state });
+    await page.getByRole("heading", { name: "培养小灵" }).waitFor();
+    await page.getByLabel("员工名字").waitFor({ timeout: 8000 });
+    assert.equal(state.limitedReads, 0);
+    assert.equal(await page.getByRole("alert").count(), 0);
+    await close();
+  }
+
+  {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+    const image = (name) => ({ name, mimeType: "image/png", buffer: png });
+    const state = { ...fixtures(), products: [{ ...productFixture, images: [] }] };
+    const { page, close } = await open("/digital-employee/materials", { state });
+    await page.locator(".marketing-product-card").getByRole("button", { name: "编辑", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByText("用于后续营销宣传资料，请上传清晰的高质量图片，最多 3 张").waitFor();
+    await dialog.locator("input[type=file]").setInputFiles(["一", "二", "三", "四"].map((name) => image(`${name}.png`)));
+    await dialog.getByRole("img", { name: "三.png" }).waitFor();
+    await dialog.getByText("最多放 3 张图片").waitFor();
+    assert.equal(await dialog.getByRole("img", { name: "四.png" }).count(), 0);
+    assert.equal(await dialog.getByRole("button", { name: "上传图片" }).count(), 0);
+    await snap(page, "materials-product-images-zh-1440.png");
+    await dialog.getByRole("button", { name: "移除 二.png" }).click();
+    await dialog.getByRole("button", { name: "上传图片" }).waitFor();
+    await dialog.getByRole("button", { name: "保存产品资料" }).click();
+    await dialog.waitFor({ state: "detached" });
+    assert.deepEqual(state.products[0].images.map((item) => item.name), ["一.png", "三.png"]);
+    await page.locator(".marketing-product-card").getByRole("img", { name: "三.png" }).waitFor();
+    await snap(page, "materials-product-card-zh-1440.png");
+    await close();
+
+    const phone = await open("/digital-employee/materials", { state, language: "en", width: 390 });
+    await phone.page.locator(".marketing-product-card").getByRole("button", { name: "Edit", exact: true }).click();
+    await phone.page.getByText("Used in your marketing materials. Upload clear, high-quality images, up to 3.").waitFor();
+    assert(await noHorizontalScroll(phone.page), "product dialog scrolls sideways at 390");
+    await phone.close();
+  }
+
+  // The agent-style names are Chinese only; 获客宝 sits last, and other languages keep their labels.
+  {
+    const navLabels = (page) => page.locator(".de-employee-nav button").allInnerTexts();
+    const chinese = await open("/digital-employee/materials", { assignments: true });
+    await chinese.page.getByRole("heading", { name: "公司与产品资料" }).waitFor();
+    const zh = (await navLabels(chinese.page)).map((item) => item.replace(/\s*\d+$/, ""));
+    assert.deepEqual(zh, ["今天", "客户", "资料", "工作记录", "培养小灵", "交给小灵", "获客宝"]);
+    await chinese.page.locator(".de-employee-nav").getByRole("button", { name: "获客宝" }).click();
+    await chinese.page.waitForURL("**/digital-employee/marketing");
+    await chinese.close();
+    for (const [language, labels] of [["en", ["Schedule", "Assignments", "Marketing"]], ["id", ["Jadwal kerja", "Penugasan", "Pemasaran"]]]) {
+      const other = await open("/digital-employee/materials", { assignments: true, language });
+      await other.page.locator(".marketing-brand-card").waitFor();
+      const shown = (await navLabels(other.page)).slice(-3).map((item) => item.replace(/\s*\d+$/, ""));
+      assert.deepEqual(shown, labels);
+      await other.close();
+    }
+  }
+
+  // A hidden page stops polling and catches up when it comes back.
+  {
+    const { page, close } = await open("/digital-employee/assignments/t1", { assignments: true });
+    await page.getByRole("button", { name: "取消任务" }).waitFor();
+    let reads = 0;
+    page.on("request", (request) => { if (new URL(request.url()).pathname === "/api/digital-employee/assignments/t1") reads += 1; });
+    const setHidden = (hidden) => page.evaluate((value) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (value ? "hidden" : "visible") });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, hidden);
+    await setHidden(true);
+    await page.waitForTimeout(3_500);
+    reads = 0;
+    await page.waitForTimeout(3_500);
+    assert.equal(reads, 0, "hidden page kept polling");
+    await setHidden(false);
+    await page.waitForTimeout(500);
+    assert.ok(reads >= 1, "shown page did not catch up");
     await close();
   }
 

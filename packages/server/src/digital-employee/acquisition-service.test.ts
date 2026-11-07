@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { GenerationFailedError } from "./errors.js";
-import { CustomerAcquisitionService, campaignMediaPrompt, campaignVideoModels, fallbackCopy, fallbackRecommendations } from "./acquisition-service.js";
+import { CustomerAcquisitionService, campaignMediaPrompt, campaignVideoModels, fallbackCopy, selectPosterReferences, fallbackRecommendations } from "./acquisition-service.js";
 import type { CampaignModelAvailability } from "./acquisition-types.js";
 
 function availability(overrides: Partial<CampaignModelAvailability> = {}): CampaignModelAvailability {
@@ -354,6 +354,56 @@ describe("CustomerAcquisitionService", () => {
       expect.objectContaining({ modelId: "flux-pro" }),
       "u1",
     );
+  });
+
+  it("adds the owner's logo and store photo to the poster, skipping files they no longer own", async () => {
+    const logo = "/static/uploads/logo.png";
+    const photo = "/static/uploads/store.jpg";
+    const foreign = "/static/uploads/other.jpg";
+    const dish = "/static/uploads/dish.jpg";
+    const query = vi.fn(async (sql: string, _params?: any[]) => {
+      if (sql.includes("FROM marketing_products WHERE id=")) return { rows: [{
+        id: "00000000-0000-4000-8000-000000000101", name: "产品A", version: 1,
+        positioning: "", core_values: [], verifiable_facts: [], current_benefits: [], common_objections: [], prohibited_expressions: [],
+        images: [{ name: "招牌牛肉面", url: dish }, { name: "别人的", url: foreign }],
+      }] };
+      if (sql.includes("INSERT INTO de_customer_segment_snapshots")) {
+        return { rows: [{ id: "ss1", audience_description: "公开受众", criteria: {}, metrics: {}, sampled_at: new Date(), created_at: new Date() }] };
+      }
+      if (sql.includes("FROM marketing_brand_assets")) return { rows: [{ business_name: "小王面馆", version: 1, visual_assets: [
+        { name: "别人的", url: foreign, type: "store" },
+        { name: "门头", url: photo, type: "store" },
+        { name: "logo", url: logo, type: "Logo" },
+        { name: "品牌手册", url: "https://example.com/guide.pdf" },
+      ] }] };
+      if (sql.includes("FROM assets")) return { rows: [{ url: logo }, { url: photo }, { url: dish }] };
+      if (sql.includes("FROM de_marketing_asset_library asset")) return { rows: [{
+        id: "a1", campaign_id: "c1", asset_type: "poster", title: "海报", content: "", source: "workspace",
+        generation_status: "pending", status: "draft", version: 1, deployments: [], created_at: new Date(), updated_at: new Date(),
+      }] };
+      return { rows: [] };
+    });
+    const enqueue = vi.fn(async () => "task-1");
+    const service = new CustomerAcquisitionService(
+      { pool: { query } } as any,
+      { enqueue, cancel: vi.fn() } as any,
+      undefined,
+      { get: vi.fn(async () => availability({ imageModels: [{ id: "flux-pro" }], videoModels: [{ id: "seedance 2.0" }] })) },
+    );
+    await service.createAsset("u1", {
+      assetType: "poster", prompt: "生成海报", publicAudience: "周边居民",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "到店",
+      channels: ["朋友圈"], callToAction: "到店", modelId: "flux-pro",
+    });
+    const payload = (enqueue.mock.calls[0] as unknown[])[1] as { media: unknown; prompt: string };
+    expect(payload.media).toEqual([
+      { type: "reference_image", url: logo }, { type: "reference_image", url: dish }, { type: "reference_image", url: photo },
+    ]);
+    expect(payload.prompt).toContain("Reference image 2 shows the real product");
+    expect(payload.prompt).toContain("Business name: 小王面馆");
+    expect(payload.prompt).toContain("The first reference image is the business logo");
+    const lookup = query.mock.calls.find((call) => String(call[0]).includes("FROM assets"));
+    expect(lookup?.[1]?.[0]).toBe("u1");
   });
 
   it("forwards image settings and reference images into the generation job", async () => {
@@ -745,6 +795,44 @@ describe("acquisition prompt quality helpers", () => {
     expect(prompt).toContain("print-quality clarity");
     expect(prompt).toContain("多久上线？");
     expect(prompt).toContain("适合华东制造产线改造");
+  });
+
+  it("names the business and its reference images in poster prompts", () => {
+    const prompt = campaignMediaPrompt(
+      { prompt: "开业海报", objective: "到店", callToAction: "到店品尝", channels: ["朋友圈"], assetType: "poster", productId: "p1" } as any,
+      { audienceDescription: "周边居民" },
+      product,
+      { business_name: "小王面馆", business_intro: "开了十年的牛肉面馆", visual_assets: [
+        { name: "IMG_1.png", url: "/static/uploads/a.png", type: "logo" }, { name: "主色蓝" },
+      ] },
+      "poster",
+      { urls: ["/static/uploads/a.png", "/static/uploads/p.png", "/static/uploads/b.png"], hasLogo: true, productImages: 1, storePhotos: 1 },
+    );
+    expect(prompt).toContain("Business name: 小王面馆");
+    expect(prompt).toContain("About the business: 开了十年的牛肉面馆");
+    expect(prompt).toContain("The first reference image is the business logo");
+    expect(prompt).toContain("Reference image 2 shows the real product");
+    expect(prompt).toContain("The last 1 reference image(s) are real photos");
+    expect(prompt).toContain("Visual references: 主色蓝");
+    expect(prompt).not.toContain("IMG_1.png");
+  });
+
+  it("orders poster references as logo, attached, product, store photos within five", () => {
+    expect(selectPosterReferences(["u1"], "logo", ["p1"], ["s1", "s2", "s3"])).toEqual({
+      urls: ["logo", "u1", "p1", "s1", "s2"], hasLogo: true, productImages: 1, storePhotos: 2,
+    });
+    expect(selectPosterReferences([], "logo", ["p1", "p2", "p3"], ["s1", "s2"])).toEqual({
+      urls: ["logo", "p1", "p2", "p3", "s1"], hasLogo: true, productImages: 3, storePhotos: 1,
+    });
+    expect(selectPosterReferences(["1", "2", "3", "4", "5", "6"], "logo", ["p1"], ["s1"])).toEqual({
+      urls: ["logo", "1", "2", "3", "4"], hasLogo: true, productImages: 0, storePhotos: 0,
+    });
+    expect(selectPosterReferences(["1", "2", "3", "4", "5", "6"], null, [], [])).toEqual({
+      urls: ["1", "2", "3", "4", "5"], hasLogo: false, productImages: 0, storePhotos: 0,
+    });
+    expect(selectPosterReferences(["logo", "p1"], "logo", ["p1", "logo"], ["logo"])).toEqual({
+      urls: ["logo", "p1"], hasLogo: true, productImages: 0, storePhotos: 0,
+    });
   });
 
   it("surfaces FAQ hooks in fallback recommendations", () => {

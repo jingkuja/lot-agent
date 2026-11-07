@@ -228,7 +228,97 @@
   .de-overall-cohort > div:last-child { overflow-x: auto; }
 }
 .marketing-brand-card .de-card-heading { align-items: start; }
-.marketing-brand-card .de-eyebrow { margin: 0 0 5px; }
+.marketing-brand-card .de-card-heading p { margin: 4px 0 0; color: var(--text-secondary); font-size: 13px; }
+.marketing-business-empty { margin: 14px 0 0; color: var(--text-muted); font-size: 13px; }
+.marketing-business { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 14px 16px; margin-top: 16px; }
+.marketing-business-logo {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--overlay-raise);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.marketing-business-logo img { width: 100%; height: 100%; object-fit: contain; }
+.marketing-business-text { min-width: 0; }
+.marketing-business-text strong { color: var(--text); font-size: 15px; }
+.marketing-business-text p {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+.marketing-business-photos { display: flex; grid-column: 1 / -1; gap: 8px; overflow-x: auto; }
+.marketing-business-photos a { flex: none; }
+.marketing-business-photos img {
+  display: block;
+  width: 132px;
+  height: 92px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  object-fit: cover;
+}
+.marketing-business-others { grid-column: 1 / -1; }
+.marketing-product-images { display: flex; gap: 6px; }
+.marketing-product-images a { flex: 1 1 0; min-width: 0; max-width: 33%; }
+.marketing-product-images img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+.marketing-image-field { display: grid; gap: 7px; }
+.marketing-image-field > span { color: var(--text-muted); font-size: 11px; font-weight: 650; }
+.marketing-image-field > span small { color: var(--text-muted); font-size: 10px; font-weight: 400; }
+.marketing-image-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.marketing-image-tile, .marketing-image-add { position: relative; width: 104px; height: 104px; border-radius: var(--radius-md); }
+.marketing-image-tile { overflow: hidden; border: 1px solid var(--border); background: var(--overlay-raise); }
+.marketing-image-tile img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.marketing-image-tile.is-logo img { object-fit: contain; }
+.marketing-image-tile button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  line-height: 1;
+  cursor: pointer;
+}
+.marketing-image-add {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  border: 1px dashed var(--border);
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.marketing-image-add:hover:not(:disabled), .marketing-image-add:focus-visible { border-color: var(--accent); color: var(--accent); }
+.marketing-image-add:disabled { cursor: progress; opacity: .6; }
+.marketing-image-add span { font-size: 18px; line-height: 1; }
+.marketing-other-assets { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.marketing-other-assets li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.marketing-other-assets a { min-width: 0; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.marketing-other-assets button { border: 0; background: none; color: var(--text-muted); cursor: pointer; }
+.marketing-writing-notes summary { color: var(--text-muted); font-size: 11px; font-weight: 650; cursor: pointer; }
+.marketing-writing-notes > div { display: grid; gap: 14px; margin-top: 12px; }
 .marketing-products-section .de-section-heading { margin-bottom: 14px; }
 
 .de-home {
@@ -620,6 +710,7 @@
 .de-employee-nav button:hover { background: var(--bg-hover); color: var(--text); }
 .de-employee-nav button.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 700; }
 .de-employee-nav b { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--text-on-accent); font-size: 11px; line-height: 20px; text-align: center; }
+.de-employee-nav button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .de-employee-nav hr { margin: 6px 12px; border: 0; border-top: 1px solid var(--border); }
 .de-employee-sidebar .de-new-chat-button { margin-top: auto; }
 

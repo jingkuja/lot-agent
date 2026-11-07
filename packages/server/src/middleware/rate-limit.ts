@@ -57,6 +57,11 @@ export function clientIp(c: Context): string {
  * failure: any store error (Redis down, timeout, ...) fails OPEN — the
  * request is admitted and the error is logged.
  */
+/** Reading and changing draw on separate budgets, so a page that polls cannot use up the budget for saving. */
+export function splitReadsAndChanges(reads: MiddlewareHandler, changes: MiddlewareHandler): MiddlewareHandler {
+  return (c, next) => (c.req.method === "GET" || c.req.method === "HEAD" ? reads : changes)(c, next);
+}
+
 export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
   const { store, prefix, limit, windowMs, keyFn, message = "too many requests" } = opts;
   return async (c, next) => {

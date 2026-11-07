@@ -3,6 +3,7 @@ import type { ImportCommitInput } from "./product-import.js";
 import { parseEntityId } from "./validators.js";
 import type {
   MarketingBrandAssetsInput,
+  MarketingProductImage,
   MarketingCaseMaterial,
   MarketingFact,
   MarketingFaq,
@@ -152,6 +153,15 @@ function visuals(value: unknown): MarketingVisualAsset[] | undefined {
   }));
 }
 
+export const MAX_PRODUCT_IMAGES = 3;
+
+function productImages(value: unknown): MarketingProductImage[] | undefined {
+  return structured(value, "产品图片", MAX_PRODUCT_IMAGES, (item) => ({
+    name: text(item.name, "产品图片名称", 500, true)!,
+    url: requiredAssetUrl(item.url, "产品图片链接"),
+  }));
+}
+
 function productFields(source: Record<string, unknown>, requireName: boolean): MarketingProductInput | Partial<MarketingProductInput> {
   const name = text(source.name, "产品名称", 200, requireName);
   return {
@@ -159,6 +169,7 @@ function productFields(source: Record<string, unknown>, requireName: boolean): M
     ...(text(source.positioning, "产品定位", 4_000) !== undefined ? { positioning: text(source.positioning, "产品定位", 4_000) } : {}),
     ...(strings(source.coreValues, "客户最在意的点", 30, 500) !== undefined ? { coreValues: strings(source.coreValues, "客户最在意的点", 30, 500) } : {}),
     ...(facts(source.verifiableFacts) !== undefined ? { verifiableFacts: facts(source.verifiableFacts) } : {}),
+    ...(productImages(source.images) !== undefined ? { images: productImages(source.images) } : {}),
     ...(objections(source.commonObjections) !== undefined ? { commonObjections: objections(source.commonObjections) } : {}),
     ...(benefits(source.currentBenefits) !== undefined ? { currentBenefits: benefits(source.currentBenefits) } : {}),
     ...(strings(source.prohibitedExpressions, "禁用表达", 50, 500) !== undefined ? { prohibitedExpressions: strings(source.prohibitedExpressions, "禁用表达", 50, 500) } : {}),
@@ -185,13 +196,17 @@ export function parseMarketingBrandAssets(value: unknown): MarketingBrandAssetsI
   const source = object(value);
   const version = source.version === undefined ? undefined : Number(source.version);
   if (version !== undefined && (!Number.isInteger(version) || version < 1)) throw new InputError("version无效");
+  const businessName = text(source.businessName, "公司或店铺名称", 200);
+  const businessIntro = text(source.businessIntro, "基础介绍", 4_000);
   const result: MarketingBrandAssetsInput = {
+    ...(businessName !== undefined ? { businessName } : {}),
+    ...(businessIntro !== undefined ? { businessIntro } : {}),
     ...(strings(source.tone, "品牌语气", 30, 500) !== undefined ? { tone: strings(source.tone, "品牌语气", 30, 500) } : {}),
     ...(visuals(source.visualAssets) !== undefined ? { visualAssets: visuals(source.visualAssets) } : {}),
     ...(strings(source.standardCallsToAction, "标准行动号召", 30, 1_000) !== undefined ? { standardCallsToAction: strings(source.standardCallsToAction, "标准行动号召", 30, 1_000) } : {}),
     ...(version !== undefined ? { version } : {}),
   };
-  if (Object.keys(result).filter((key) => key !== "version").length === 0) throw new InputError("没有可更新的品牌字段");
+  if (Object.keys(result).filter((key) => key !== "version").length === 0) throw new InputError("没有可更新的公司资料");
   return result;
 }
 

@@ -1,4 +1,5 @@
-import { request, type UploadedAttachment } from "../../api/client.js";
+import { request as send, type UploadedAttachment } from "../../api/client.js";
+import { recoverRead } from "./rate-limit-recovery.js";
 import type { EmployeeFocus } from "./focus.js";
 import type {
   Assignment, AssignmentDetail, AssignmentFilter, AssignmentInput, AssignmentPage, BoardEntry, ConversationWork, CustomerWork, DecisionAnswer, EmployeeSchedule,
@@ -45,6 +46,11 @@ import type {
   MarketingCampaignDetail,
   CampaignOpportunity,
 } from "./types.js";
+
+function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const read = (init?.method ?? "GET").toUpperCase() === "GET";
+  return read ? recoverRead(() => send<T>(path, init)) : send<T>(path, init);
+}
 
 /** Every digital employee endpoint. Platform code never calls these. */
 export const employeeApi = {
@@ -351,7 +357,9 @@ export const employeeApi = {
 
   getMarketingBrandAssets: () => request<MarketingBrandAssets | null>("/digital-employee/marketing/brand-assets"),
 
-  saveMarketingBrandAssets: (input: Partial<Pick<MarketingBrandAssets, "tone" | "visualAssets" | "standardCallsToAction">> & { version?: number }) =>
+  saveMarketingBrandAssets: (input: Partial<Pick<
+    MarketingBrandAssets, "businessName" | "businessIntro" | "tone" | "visualAssets" | "standardCallsToAction"
+  >> & { version?: number }) =>
     request<MarketingBrandAssets>("/digital-employee/marketing/brand-assets", {
       method: "PUT",
       body: JSON.stringify(input),

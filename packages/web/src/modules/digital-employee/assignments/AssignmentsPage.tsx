@@ -6,6 +6,8 @@ import type { Assignment, AssignmentFilter, AssignmentStatusFilter } from "../ty
 import { AssignmentCard } from "./AssignmentCard.js";
 import { AssignmentComposer } from "./AssignmentComposer.js";
 import { dayLabel, groupByDay, isOpen, quickRange, startOfDay, toLocalInput, type QuickRange } from "./grouping.js";
+import { usePolling } from "../usePolling.js";
+import { useEmployeeLabels } from "../employee-labels.js";
 
 const POLL_MS = 5_000;
 const QUICK: Array<{ range: QuickRange; label: string }> = [
@@ -35,8 +37,9 @@ function toFilter(search: Search): AssignmentFilter {
 }
 
 /** Cards by day. Anything still open from an earlier day comes up top, so a paused task cannot sink out of sight. */
-export function AssignmentsPage({ modelCatalog, onOpen }: { modelCatalog: ModelCatalog; onOpen: (id: string) => void }) {
+export function AssignmentsPage({ employeeName, modelCatalog, onOpen }: { employeeName: string; modelCatalog: ModelCatalog; onOpen: (id: string) => void }) {
   const { t, locale } = useI18n();
+  const labels = useEmployeeLabels(employeeName);
   const [form, setForm] = useState<Search>(NO_SEARCH);
   const [search, setSearch] = useState<Search>(NO_SEARCH);
   const [items, setItems] = useState<Assignment[]>([]);
@@ -80,11 +83,7 @@ export function AssignmentsPage({ modelCatalog, onOpen }: { modelCatalog: ModelC
   }, [load]);
 
   const hasOpen = useMemo(() => [...items, ...pinned].some(isOpen), [items, pinned]);
-  useEffect(() => {
-    if (!hasOpen) return;
-    const timer = window.setInterval(() => void load(), POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [hasOpen, load]);
+  usePolling(load, POLL_MS, hasOpen);
 
   const loadMore = useCallback(async () => {
     if (!cursor || loadingMore) return;
@@ -137,7 +136,7 @@ export function AssignmentsPage({ modelCatalog, onOpen }: { modelCatalog: ModelC
   />;
 
   return <div className="de-page de-assignments-page">
-    <header className="de-employee-page-head"><h1>{t("任务分派")}</h1></header>
+    <header className="de-employee-page-head"><h1>{labels.assignments}</h1></header>
     <AssignmentComposer modelCatalog={modelCatalog} onCreated={() => { apply(NO_SEARCH); void load(); }} />
 
     <button type="button" className="de-secondary-button de-assignment-filter-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}>

@@ -26,7 +26,7 @@ const TABS: Array<{ id: string | null; label: string }> = [
 export function MarketingPage({ tab, seed, onNavigate, onOpenCreation, onOpenSegments, onOpenMaterials, onFocus }: MarketingPageProps) {
   const { t } = useI18n();
   return <div className="de-page de-acquisition-page">
-    <nav className="de-employee-tabs" aria-label={t("营销")}>
+    <nav className="de-employee-tabs" aria-label={t("获客宝")}>
       {TABS.map((item) => <button
         key={item.label}
         className={tab === item.id ? "active" : ""}

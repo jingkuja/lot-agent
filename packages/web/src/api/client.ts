@@ -213,6 +213,8 @@ export class ApiClientError extends Error {
     readonly status: number,
     readonly code?: string,
     readonly details: Record<string, unknown> = {},
+    /** How long the server asked to wait, from `Retry-After`. */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = "ApiClientError";
@@ -238,7 +240,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiClientError(typeof err.error === "object" ? err.error?.message ?? res.statusText : err.error ?? res.statusText, res.status, err.error?.code ?? err.code, err);
+    const retryAfter = Number(res.headers.get("Retry-After"));
+    const message = typeof err.error === "object" ? err.error?.message ?? res.statusText : err.error ?? res.statusText;
+    throw new ApiClientError(message, res.status, err.error?.code ?? err.code, err, retryAfter > 0 ? retryAfter * 1000 : undefined);
   }
   return res.json();
 }

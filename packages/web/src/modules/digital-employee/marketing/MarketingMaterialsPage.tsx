@@ -6,13 +6,17 @@ import type {
   MarketingBrandAssets,
   MarketingProduct,
   MarketingProductInput,
-  MarketingVisualAsset,
   ProductImportResult,
   ProductImportStatus,
 } from "../types.js";
+import { MAX_PRODUCT_IMAGES, splitBusinessImages } from "./business-images.js";
+import { BusinessProfileEditor } from "./BusinessProfileEditor.js";
+import { lines, splitLines, TextRows } from "./form-fields.js";
+import { ImagePicker, ImageTile, keepDrop, useImageUpload } from "./ImageUpload.js";
 import { DOCUMENT_ACCEPT, DOCUMENT_ERROR_TEXT, DOCUMENT_NO_RETRY, uploadable } from "./product-files.js";
 import { ProductDocumentsDialog } from "./ProductDocumentsDialog.js";
 import { ProductImportDialog } from "./ProductImportDialog.js";
+import { usePolling } from "../usePolling.js";
 
 const IMPORT_POLL_MS = 3000;
 
@@ -76,11 +80,7 @@ export function MarketingMaterialsPage({ onSelect, importId = null, onImportClos
   useEffect(() => { void loadImports(); }, [loadImports]);
   useEffect(() => { setReviewing(importId); }, [importId]);
   const importing = imports.some((item) => item.status === "working");
-  useEffect(() => {
-    if (!importing) return;
-    const timer = window.setTimeout(() => void loadImports(), IMPORT_POLL_MS);
-    return () => window.clearTimeout(timer);
-  }, [importing, imports, loadImports]);
+  usePolling(loadImports, IMPORT_POLL_MS, importing);
 
   const importFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -161,8 +161,8 @@ export function MarketingMaterialsPage({ onSelect, importId = null, onImportClos
       <header className="de-page-header">
         <div>
           <p className="de-eyebrow">{t("数字员工 / 营销资料")}</p>
-          <h1>{t("产品与品牌事实库")}</h1>
-          <p>{t("统一维护产品能说什么、品牌怎么说；商机雷达的单客跟进与获客宝的客群营销共同引用这份事实。")}</p>
+          <h1>{t("公司与产品资料")}</h1>
+          <p>{t("把公司或店铺、产品的情况放在这里，写文案、做海报和跟进客户时都会用上。")}</p>
         </div>
         <div className="de-header-actions">
           <button className="de-secondary-button" onClick={() => setEditingProduct("new")}>{t("＋ 新建产品")}</button>
@@ -201,39 +201,7 @@ export function MarketingMaterialsPage({ onSelect, importId = null, onImportClos
         </ul>
       )}
 
-      <section className="marketing-brand-card">
-        <div className="de-card-heading">
-          <div>
-            <p className="de-eyebrow">{t("品牌资料")}</p>
-            <h2>{t("品牌口径与视觉资产")}</h2>
-          </div>
-          <button className="de-secondary-button" onClick={() => setEditingBrand(true)}>
-            {brand ? t("编辑品牌资料") : t("建立品牌资料")}
-          </button>
-        </div>
-        <div className="marketing-brand-grid">
-          <FactBlock title={t("品牌语气")} items={brand?.tone ?? []} empty="尚未设置品牌语气" />
-          <FactBlock title={t("标准行动号召")} items={brand?.standardCallsToAction ?? []} empty="尚未设置行动号召" />
-          <div className="marketing-fact-block">
-            <h3>{t("视觉资产")}</h3>
-            {brand?.visualAssets.length ? (
-              <div className="marketing-asset-list">
-                {brand.visualAssets.map((asset, index) => (
-                  <a key={`${asset.url}-${index}`} href={asset.url} target="_blank" rel="noreferrer">
-                    <span aria-hidden>▧</span>
-                    <span>
-                      <strong>{asset.name}</strong>
-                      <small>{asset.type || t("品牌素材")}</small>
-                    </span>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <p>{t("尚未添加视觉资产")}</p>
-            )}
-          </div>
-        </div>
-      </section>
+      <BusinessProfileCard brand={brand} onEdit={() => setEditingBrand(true)} />
 
       <section className="marketing-products-section">
         <div className="de-section-heading">
@@ -297,7 +265,7 @@ export function MarketingMaterialsPage({ onSelect, importId = null, onImportClos
         />
       )}
       {editingBrand && (
-        <BrandEditor
+        <BusinessProfileEditor
           brand={brand}
           onClose={() => setEditingBrand(false)}
           onSave={async (input) => {
@@ -337,6 +305,7 @@ function ProductCard({ product, onEdit, onDocuments, onArchive }: {
   product: MarketingProduct; onEdit: () => void; onDocuments: () => void; onArchive: () => void;
 }) {
   const { t, locale } = useI18n();
+  const images = product.images ?? [];
   const activeBenefits = product.currentBenefits.filter((benefit) => {
     const now = Date.now();
     return (!benefit.validFrom || new Date(benefit.validFrom).getTime() <= now)
@@ -353,6 +322,13 @@ function ProductCard({ product, onEdit, onDocuments, onArchive }: {
         <button className="de-quiet-button" onClick={onArchive}>{t("归档")}</button>
       </div>
     </header>
+    {images.length > 0 && (
+      <div className="marketing-product-images">
+        {images.map((image) => (
+          <a key={image.url} href={image.url} target="_blank" rel="noreferrer"><img src={image.url} alt={image.name} loading="lazy" /></a>
+        ))}
+      </div>
+    )}
     <div className="marketing-product-stats">
       <span><strong>{product.coreValues.length}</strong>{t("客户最在意")}</span>
       <span><strong>{product.verifiableFacts.length}</strong>{t("能说出口的证据")}</span>
@@ -368,9 +344,49 @@ function ProductCard({ product, onEdit, onDocuments, onArchive }: {
   </article>;
 }
 
-function FactBlock({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+function BusinessProfileCard({ brand, onEdit }: { brand: MarketingBrandAssets | null; onEdit: () => void }) {
   const { t } = useI18n();
-  return <div className="marketing-fact-block"><h3>{t(title)}</h3>{items.length ? <div className="de-tag-list">{items.map((item) => <span key={item}>{item}</span>)}</div> : <p>{t(empty)}</p>}</div>;
+  const { logo, photos, others } = splitBusinessImages(brand?.visualAssets);
+  const name = brand?.businessName ?? "";
+  const intro = brand?.businessIntro ?? "";
+  const empty = !name && !intro && !logo && !photos.length && !others.length;
+  return <section className="marketing-brand-card">
+    <div className="de-card-heading">
+      <div>
+        <h2>{t("公司 / 店铺资料")}</h2>
+        <p>{t("写文案、做海报、跟进客户时都会用到。")}</p>
+      </div>
+      <button className="de-secondary-button" onClick={onEdit}>{empty ? t("填写资料") : t("编辑")}</button>
+    </div>
+    {empty ? <p className="marketing-business-empty">{t("还没有填写。写几句公司或店铺的介绍，传上 Logo 和店面图片就行。")}</p> : (
+      <div className="marketing-business">
+        <div className="marketing-business-logo">
+          {logo ? <img src={logo.url} alt={t("Logo 图片")} /> : <span>{t("暂无 Logo")}</span>}
+        </div>
+        <div className="marketing-business-text">
+          <strong>{name || t("未填写名称")}</strong>
+          <p>{intro || t("还没有基础介绍")}</p>
+        </div>
+        {photos.length > 0 && (
+          <div className="marketing-business-photos">
+            {photos.map((photo) => (
+              <a key={photo.url} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.name} loading="lazy" /></a>
+            ))}
+          </div>
+        )}
+        {others.length > 0 && (
+          <div className="marketing-asset-list marketing-business-others">
+            {others.map((asset) => (
+              <a key={asset.url} href={asset.url} target="_blank" rel="noreferrer">
+                <span aria-hidden>▧</span>
+                <span><strong>{asset.name}</strong>{asset.type ? <small>{asset.type}</small> : null}</span>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+  </section>;
 }
 
 interface ProductForm {
@@ -390,8 +406,17 @@ function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduc
     faqs: rows((product?.faqs ?? []).map((item) => [item.question, item.answer])),
     productNotes: product?.productNotes ?? "",
   }));
+  const [images, setImages] = useState(product?.images ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { uploading, upload } = useImageUpload(setError);
+  const addImages = async (files: File[]) => {
+    setError(null);
+    const room = MAX_PRODUCT_IMAGES - images.length - uploading;
+    if (files.length > room) setError(t("最多放 {0} 张图片", [MAX_PRODUCT_IMAGES]));
+    const uploaded = await upload(files.slice(0, Math.max(room, 0)));
+    setImages((current) => [...current, ...uploaded].slice(0, MAX_PRODUCT_IMAGES));
+  };
   const change = (key: keyof ProductForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -407,15 +432,31 @@ function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduc
         caseMaterials: splitRows(form.cases, 4).map(([title, summary, result, assetUrl]) => ({ title, summary, ...(result ? { result } : {}), ...(assetUrl ? { assetUrl } : {}) })),
         faqs: splitRows(form.faqs, 2).map(([question, answer]) => ({ question, answer })),
         productNotes: form.productNotes.trim(),
+        images,
       });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "保存失败"); }
     finally { setSaving(false); }
   };
-  return <div className="de-modal-backdrop" onMouseDown={onClose}><section className="de-modal marketing-editor-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+  return <div className="de-modal-backdrop" onMouseDown={onClose} onDragOver={keepDrop} onDrop={keepDrop}>
+    <section className="de-modal marketing-editor-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
     <div className="de-modal-head"><div><h2>{product ? t("编辑产品资料") : t("新建产品资料")}</h2><p>{t("每行一项；带“｜”的字段按示例分列。")}</p></div><button className="de-icon-button" onClick={onClose}>×</button></div>
     <form className="de-form" onSubmit={submit}><div className="de-form-grid">
       <label><span>{t("产品名称 *")}</span><input autoFocus value={form.name} onChange={(e) => change("name", e.target.value)} maxLength={200} /></label>
       <label className="marketing-form-wide"><span>{t("产品定位")}</span><textarea value={form.positioning} onChange={(e) => change("positioning", e.target.value)} rows={2} /></label>
+      <div className="marketing-form-wide marketing-image-field">
+        <span>{t("产品图片")} <small>{t("用于后续营销宣传资料，请上传清晰的高质量图片，最多 3 张")}</small></span>
+        <div className="marketing-image-row">
+          {images.map((image) => (
+            <ImageTile
+              key={image.url} url={image.url} label={image.name}
+              onRemove={() => setImages((current) => current.filter((item) => item !== image))}
+            />
+          ))}
+          {images.length < MAX_PRODUCT_IMAGES && (
+            <ImagePicker label={t("上传图片")} multiple disabled={uploading > 0} onFiles={(files) => void addImages(files)} />
+          )}
+        </div>
+      </div>
       <TextRows label={t("客户最在意的点")} hint="每行一条，客户真正关心什么" value={form.coreValues} onChange={(value) => change("coreValues", value)} />
       <TextRows label={t("能说出口的证据")} hint="说法｜依据来源" value={form.facts} onChange={(value) => change("facts", value)} />
       <TextRows label={t("常见异议")} hint="异议｜标准回应" value={form.objections} onChange={(value) => change("objections", value)} />
@@ -424,34 +465,15 @@ function ProductEditor({ product, onClose, onSave }: { product?: MarketingProduc
       <TextRows label={t("案例素材")} hint="标题｜摘要｜结果｜素材链接" value={form.cases} onChange={(value) => change("cases", value)} />
       <TextRows label={t("产品 FAQ")} hint="问题｜回答；可粘贴常见问答，获客文案/海报会引用" value={form.faqs} onChange={(value) => change("faqs", value)} />
       <label className="marketing-form-wide"><span>{t("产品补充说明")}</span><textarea value={form.productNotes} onChange={(e) => change("productNotes", e.target.value)} rows={4} placeholder={t("粘贴非 PDF 的产品介绍、话术要点或自定义文本资料")} /></label>
-    </div>{error && <p className="de-form-error">{t(error)}</p>}<footer className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>{t("取消")}</button><button className="de-primary-button" disabled={saving}>{saving ? t("保存中…") : t("保存产品资料")}</button></footer></form>
+    </div>{error && <p className="de-form-error">{t(error)}</p>}<footer className="de-modal-actions">
+      <button type="button" className="de-secondary-button" onClick={onClose}>{t("取消")}</button>
+      <button className="de-primary-button" disabled={saving || uploading > 0}>
+        {saving ? t("保存中…") : uploading > 0 ? t("上传中…") : t("保存产品资料")}
+      </button></footer></form>
   </section></div>;
 }
 
-function BrandEditor({ brand, onClose, onSave }: { brand: MarketingBrandAssets | null; onClose: () => void; onSave: (input: { tone: string[]; visualAssets: MarketingVisualAsset[]; standardCallsToAction: string[] }) => Promise<void> }) {
-  const { t } = useI18n();
-  const [tone, setTone] = useState(lines(brand?.tone));
-  const [ctas, setCtas] = useState(lines(brand?.standardCallsToAction));
-  const [visuals, setVisuals] = useState(rows(brand?.visualAssets.map((item) => [item.name, item.url, item.type ?? ""])));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  return <div className="de-modal-backdrop" onMouseDown={onClose}><section className="de-modal marketing-editor-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-    <div className="de-modal-head"><div><h2>{t("品牌资料")}</h2><p>{t("这些口径会作为营销内容的品牌约束。")}</p></div><button className="de-icon-button" onClick={onClose}>×</button></div>
-    <form className="de-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); setError(null); try { await onSave({ tone: splitLines(tone), standardCallsToAction: splitLines(ctas), visualAssets: splitRows(visuals, 3).map(([name, url, type]) => ({ name, url, ...(type ? { type } : {}) })) }); } catch (reason) { setError(reason instanceof Error ? reason.message : "保存失败"); } finally { setSaving(false); } }}>
-      <div className="de-form-grid"><TextRows label={t("品牌语气")} hint="每行一条，如：专业克制" value={tone} onChange={setTone} /><TextRows label={t("标准行动号召")} hint="每行一条" value={ctas} onChange={setCtas} /><TextRows label={t("视觉资产")} hint="名称｜链接｜类型" value={visuals} onChange={setVisuals} /></div>
-      {error && <p className="de-form-error">{t(error)}</p>}<footer className="de-modal-actions"><button type="button" className="de-secondary-button" onClick={onClose}>{t("取消")}</button><button className="de-primary-button" disabled={saving}>{saving ? t("保存中…") : t("保存品牌资料")}</button></footer>
-    </form>
-  </section></div>;
-}
-
-function TextRows({ label, hint, value, onChange }: { label: string; hint: string; value: string; onChange: (value: string) => void }) {
-  const { t } = useI18n();
-  return <label className="marketing-form-wide"><span>{t(label)} <small>{hint}</small></span><textarea value={value} onChange={(event) => onChange(event.target.value)} rows={3} /></label>;
-}
-
-function splitLines(value: string): string[] { return value.split(/\n/).map((item) => item.trim()).filter(Boolean); }
 function splitRows(value: string, width: number): string[][] { return splitLines(value).map((line) => { const parts = line.split(/[|｜]/).map((item) => item.trim()); return Array.from({ length: width }, (_, index) => parts[index] ?? ""); }).filter((parts) => parts[0]); }
-function lines(value?: string[]): string { return value?.join("\n") ?? ""; }
 function rows(value?: string[][]): string { return value?.map((parts) => parts.join("｜")).join("\n") ?? ""; }
 function dateInput(value?: string | null): string { return value ? value.slice(0, 10) : ""; }
 function shortDate(value: string, locale = "zh-CN"): string { return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric" }).format(new Date(value)); }

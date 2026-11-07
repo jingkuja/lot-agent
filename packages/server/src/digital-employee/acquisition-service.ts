@@ -17,6 +17,7 @@ import {
   type AssetListFilters,
   type CampaignContentGenerator,
   type CampaignFitDraft,
+  type CampaignAssetAttachment,
   type CampaignListFilters,
   type CampaignModelAvailability,
   type CampaignModelOption,
@@ -186,7 +187,9 @@ export class CustomerAcquisitionService {
         `SELECT id,name,positioning,core_values,verifiable_facts,current_benefits,common_objections,prohibited_expressions,faqs,product_notes,version
          FROM marketing_products WHERE user_id=$1 AND status='active' ORDER BY updated_at DESC LIMIT 20`, [userId]
       ),
-      this.db.pool.query(`SELECT tone,standard_calls_to_action,version FROM marketing_brand_assets WHERE user_id=$1`, [userId]),
+      this.db.pool.query(
+        `SELECT business_name,business_intro,tone,standard_calls_to_action,version FROM marketing_brand_assets WHERE user_id=$1`, [userId]
+      ),
     ]);
     if (!productsResult.rows.length) throw new InputError("请先在营销资料中维护至少一个有效产品");
     const safeSegments = insights.segments.map((segment) => ({
@@ -444,7 +447,10 @@ export class CustomerAcquisitionService {
 
     signal?.throwIfAborted();
     const modelId = mediaModelId!;
-    const mediaPrompt = campaignMediaPrompt(resolvedInput, snapshot, product, brand, isPoster ? "poster" : "video");
+    const posterMedia = isPoster
+      ? await this.posterReferences(userId, resolvedInput.attachments ?? [], product, brand)
+      : undefined;
+    const mediaPrompt = campaignMediaPrompt(resolvedInput, snapshot, product, brand, isPoster ? "poster" : "video", posterMedia);
     const assetId = randomUUID();
     const runId = randomUUID();
     await this.db.pool.query(
@@ -463,12 +469,7 @@ export class CustomerAcquisitionService {
     await this.selectAssetIfEmpty(userId, campaignId, isPoster ? "poster" : "video", assetId);
     let taskId: string | undefined;
     try {
-      const media = isPoster
-        ? (resolvedInput.attachments ?? [])
-          .filter((item) => item.kind === "image")
-          .slice(0, 5)
-          .map((item) => ({ type: "reference_image" as const, url: item.url }))
-        : undefined;
+      const media = posterMedia?.urls.map((url) => ({ type: "reference_image" as const, url }));
       const videoSettings = resolvedInput.mediaSettings;
       // Lets a background task count this media against the owner's cost limit.
       const sourceInput = options.sourceConversationId ? { sourceConversationId: options.sourceConversationId } : {};
@@ -752,6 +753,28 @@ export class CustomerAcquisitionService {
       ...input, assetType: "copy", prompt: input.name, title: input.name,
     }, snapshot, product, brand), Number(product.version));
     return this.getCampaign(userId, id);
+  }
+
+  /** Only the owner's own uploads are used: a deleted file or a pasted link must not fail the whole poster. */
+  private async posterReferences(userId: string, attachments: CampaignAssetAttachment[], product: any, brand: any): Promise<PosterReferences> {
+    const attached = attachments.filter((item) => item.kind === "image").map((item) => item.url);
+    const productImages: string[] = (product?.images ?? []).map((item: any) => item.url);
+    const images: Array<{ url: string; type: string }> = (brand?.visual_assets ?? [])
+      .map((item: any) => ({ url: item.url, type: businessImageType(item) }))
+      .filter((item: { type: string }) => item.type === "logo" || item.type === "store");
+    if (!images.length && !productImages.length) return selectPosterReferences(attached, null, [], []);
+    const { rows } = await this.db.pool.query(
+      `SELECT url FROM assets WHERE user_id=$1 AND type='upload' AND url = ANY($2::text[])`,
+      [userId, [...productImages, ...images.map((item) => item.url)]]
+    );
+    const owned = new Set(rows.map((row) => row.url as string));
+    const usable = images.filter((item) => owned.has(item.url));
+    return selectPosterReferences(
+      attached,
+      usable.find((item) => item.type === "logo")?.url ?? null,
+      productImages.filter((url) => owned.has(url)),
+      usable.filter((item) => item.type === "store").map((item) => item.url)
+    );
   }
 
   async listCampaigns(userId: string, filters: CampaignListFilters) {
@@ -1497,7 +1520,11 @@ function buildBrief(input: CreateCampaignAssetInput, snapshot: any, product: any
   return {
     audience: { description: snapshot.audienceDescription, metrics: snapshot.metrics, sampledAt: snapshot.sampledAt },
     product: marketingProductSnapshot(product),
-    brand: brand ? { tone: brand.tone ?? [], standardCallsToAction: brand.standard_calls_to_action ?? [], version: Number(brand.version) } : null,
+    brand: brand ? {
+      ...(brand.business_name ? { businessName: brand.business_name } : {}),
+      ...(brand.business_intro ? { businessIntro: brand.business_intro } : {}),
+      tone: brand.tone ?? [], standardCallsToAction: brand.standard_calls_to_action ?? [], version: Number(brand.version),
+    } : null,
     campaign: { objective: input.objective, channels: input.channels, callToAction: input.callToAction },
     request: input.prompt,
     privacyRule: "Address aggregate audiences only; never include individual customer identities or contact details",
@@ -1559,13 +1586,54 @@ export function fallbackCopy(input: CreateCampaignAssetInput, snapshot: any, pro
   return lines.join("\n");
 }
 
-export function campaignMediaPrompt(input: CreateCampaignAssetInput, snapshot: any, product: any, brand: any, kind: "poster" | "video") {
+const MAX_POSTER_REFERENCES = 5;
+const MAX_POSTER_STORE_PHOTOS = 2;
+
+export interface PosterReferences {
+  urls: string[];
+  hasLogo: boolean;
+  productImages: number;
+  storePhotos: number;
+}
+
+/** Logo, then what the user attached for this poster, then the product, then store photos, so the prompt can name them by position. */
+export function selectPosterReferences(attached: string[], logo: string | null, productImages: string[], storePhotos: string[]): PosterReferences {
+  const room = MAX_POSTER_REFERENCES - (logo ? 1 : 0);
+  const chosen = attached.filter((url) => url !== logo).slice(0, room);
+  const fresh = (urls: string[], taken: string[]) => urls.filter((url) => url !== logo && !taken.includes(url));
+  const product = fresh(productImages, chosen).slice(0, room - chosen.length);
+  const photos = fresh(storePhotos, [...chosen, ...product]).slice(0, Math.min(MAX_POSTER_STORE_PHOTOS, room - chosen.length - product.length));
+  return {
+    urls: [...(logo ? [logo] : []), ...chosen, ...product, ...photos],
+    hasLogo: Boolean(logo), productImages: product.length, storePhotos: photos.length,
+  };
+}
+
+function productReferenceLine(references?: PosterReferences): string {
+  if (!references?.productImages) return "";
+  const first = references.urls.length - references.storePhotos - references.productImages + 1;
+  const last = first + references.productImages - 1;
+  const which = first === last ? `Reference image ${first} shows` : `Reference images ${first} to ${last} show`;
+  return `${which} the real product. Keep its shape, colours and details; do not invent a different product.`;
+}
+
+function businessImageType(item: any): string {
+  return typeof item?.type === "string" ? item.type.toLowerCase() : "";
+}
+
+export function campaignMediaPrompt(
+  input: CreateCampaignAssetInput, snapshot: any, product: any, brand: any, kind: "poster" | "video", references?: PosterReferences
+) {
   const facts = (product.verifiable_facts ?? []).map((item: any) => item.statement).filter(Boolean).slice(0, 4);
   const forbidden = product.prohibited_expressions ?? [];
   const faqs = (product.faqs ?? []).slice(0, 3).map((item: any) => `${item.question} → ${item.answer}`);
   const notes = typeof product.product_notes === "string" ? product.product_notes.trim().slice(0, 240) : "";
   const benefit = (product.current_benefits ?? []).map((item: any) => item.title).filter(Boolean).slice(0, 2);
   const size = input.mediaSettings?.size ?? (kind === "poster" ? "1536x1024" : undefined);
+  const businessIntro = typeof brand?.business_intro === "string" ? brand.business_intro.trim().slice(0, 400) : "";
+  const namedVisuals = (brand?.visual_assets ?? [])
+    .filter((item: any) => !["logo", "store"].includes(businessImageType(item)))
+    .map((item: any) => item.name).filter(Boolean).slice(0, 3);
   return [
     "Follow the language explicitly requested in the creative request; otherwise use its language for visible text and narration. Do not default to Chinese because reference facts contain Chinese. Preserve proper names and verified facts.",
     kind === "poster"
@@ -1575,6 +1643,8 @@ export function campaignMediaPrompt(input: CreateCampaignAssetInput, snapshot: a
       ? `Layout: ${size || "1536x1024"}; headline, subtitle, one core benefit and clear CTA. Restrained whitespace, sharp legible text without typos or gibberish. Center the subject slightly above the midpoint and place a CTA bar at the bottom.`
       : "Shot sequence: problem scenario → evidence of value → call to action. Use short, accurate subtitles.",
     `Target audience: ${snapshot.audienceDescription || "confirmed cohort snapshot"} (aggregate audience description only)`,
+    brand?.business_name ? `Business name: ${brand.business_name}` : "",
+    businessIntro ? `About the business: ${businessIntro}` : "",
     `Product: ${product.name}`, `Positioning: ${product.positioning || "not supplied"}`,
     `Confirmed benefits: ${(product.core_values ?? []).join("; ") || "none"}`,
     `Verified facts: ${facts.join("; ") || "none; do not invent figures or cases"}`,
@@ -1583,7 +1653,14 @@ export function campaignMediaPrompt(input: CreateCampaignAssetInput, snapshot: a
     notes ? `Additional product notes: ${notes}` : "",
     `Campaign objective: ${input.objective}`, `Call to action: ${input.callToAction}`,
     `Brand tone: ${(brand?.tone ?? []).join(", ") || "professional and restrained"}`,
-    `Visual references: ${(brand?.visual_assets ?? []).map((item: any) => item.name).filter(Boolean).slice(0, 3).join(", ") || "none; use a clean professional style"}`,
+    `Visual references: ${namedVisuals.join(", ") || "none; use a clean professional style"}`,
+    references?.hasLogo
+      ? "The first reference image is the business logo. Reproduce it faithfully as a small mark; do not redraw it or invent another logo."
+      : "",
+    productReferenceLine(references),
+    references?.storePhotos
+      ? `The last ${references.storePhotos} reference image(s) are real photos of the business. Keep the look of the place; do not invent a different one.`
+      : "",
     `Prohibited expressions: ${forbidden.join(", ") || "none specified; exaggerated promises remain prohibited"}`,
     `Creative request: ${input.prompt}`,
     kind === "poster"

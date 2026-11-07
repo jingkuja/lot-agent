@@ -69,15 +69,15 @@ export class MarketingMaterialsRepository {
     const result = await client.query(
       `INSERT INTO marketing_products (
          id, user_id, name, positioning, core_values, verifiable_facts, common_objections,
-         current_benefits, prohibited_expressions, case_materials, faqs, product_notes
-       ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11::jsonb,$12)
+         current_benefits, prohibited_expressions, case_materials, faqs, product_notes, images
+       ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11::jsonb,$12,$13::jsonb)
        RETURNING *`,
       [
         id, userId, input.name, input.positioning ?? "", input.coreValues ?? [],
         JSON.stringify(input.verifiableFacts ?? []), JSON.stringify(input.commonObjections ?? []),
         JSON.stringify(input.currentBenefits ?? []), input.prohibitedExpressions ?? [],
         JSON.stringify(input.caseMaterials ?? []),
-        JSON.stringify(input.faqs ?? []), input.productNotes ?? "",
+        JSON.stringify(input.faqs ?? []), input.productNotes ?? "", JSON.stringify(input.images ?? []),
       ]
     );
     return toProduct(result.rows[0]);
@@ -91,7 +91,7 @@ export class MarketingMaterialsRepository {
          common_objections = COALESCE($8::jsonb, common_objections), current_benefits = COALESCE($9::jsonb, current_benefits),
          prohibited_expressions = COALESCE($10, prohibited_expressions), case_materials = COALESCE($11::jsonb, case_materials),
          faqs = COALESCE($12::jsonb, faqs), product_notes = COALESCE($13, product_notes),
-         version = version + 1
+         images = COALESCE($14::jsonb, images), version = version + 1
        WHERE user_id = $1 AND id = $2 AND version = $3 AND status = 'active'
        RETURNING *`,
       [
@@ -103,6 +103,7 @@ export class MarketingMaterialsRepository {
         input.caseMaterials === undefined ? null : JSON.stringify(input.caseMaterials),
         input.faqs === undefined ? null : JSON.stringify(input.faqs),
         input.productNotes ?? null,
+        input.images === undefined ? null : JSON.stringify(input.images),
       ]
     );
     return result.rows[0] ? toProduct(result.rows[0]) : null;
@@ -124,9 +125,12 @@ export class MarketingMaterialsRepository {
 
   async createBrandAssets(userId: string, id: string, input: MarketingBrandAssetsInput): Promise<MarketingBrandAssets> {
     const result = await this.pool.query(
-      `INSERT INTO marketing_brand_assets (id, user_id, tone, visual_assets, standard_calls_to_action)
-       VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING *`,
-      [id, userId, input.tone ?? [], JSON.stringify(input.visualAssets ?? []), input.standardCallsToAction ?? []]
+      `INSERT INTO marketing_brand_assets (id, user_id, tone, visual_assets, standard_calls_to_action, business_name, business_intro)
+       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7) RETURNING *`,
+      [
+        id, userId, input.tone ?? [], JSON.stringify(input.visualAssets ?? []), input.standardCallsToAction ?? [],
+        input.businessName ?? "", input.businessIntro ?? "",
+      ]
     );
     return toBrandAssets(result.rows[0]);
   }
@@ -135,12 +139,13 @@ export class MarketingMaterialsRepository {
     const result = await this.pool.query(
       `UPDATE marketing_brand_assets SET
          tone = COALESCE($3, tone), visual_assets = COALESCE($4::jsonb, visual_assets),
-         standard_calls_to_action = COALESCE($5, standard_calls_to_action), version = version + 1
+         standard_calls_to_action = COALESCE($5, standard_calls_to_action),
+         business_name = COALESCE($6, business_name), business_intro = COALESCE($7, business_intro), version = version + 1
        WHERE user_id = $1 AND version = $2 RETURNING *`,
       [
         userId, input.version, input.tone ?? null,
         input.visualAssets === undefined ? null : JSON.stringify(input.visualAssets),
-        input.standardCallsToAction ?? null,
+        input.standardCallsToAction ?? null, input.businessName ?? null, input.businessIntro ?? null,
       ]
     );
     return result.rows[0] ? toBrandAssets(result.rows[0]) : null;
@@ -161,6 +166,7 @@ function toProduct(row: any): MarketingProduct {
     caseMaterials: row.case_materials ?? [],
     faqs: row.faqs ?? [],
     productNotes: row.product_notes ?? "",
+    images: row.images ?? [],
     documentCount: Number(row.document_count ?? 0),
     status: row.status,
     version: Number(row.version),
@@ -174,6 +180,8 @@ function toBrandAssets(row: any): MarketingBrandAssets {
   return {
     id: row.id,
     userId: row.user_id,
+    businessName: row.business_name ?? "",
+    businessIntro: row.business_intro ?? "",
     tone: row.tone ?? [],
     visualAssets: row.visual_assets ?? [],
     standardCallsToAction: row.standard_calls_to_action ?? [],

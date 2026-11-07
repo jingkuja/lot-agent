@@ -4,6 +4,7 @@ import { useI18n } from "../../../i18n/index.js";
 import { employeeApi } from "../api.js";
 import type { MarketingProduct, ProductDocument, ProductDocumentList } from "../types.js";
 import { DOCUMENT_ACCEPT, DOCUMENT_ERROR_TEXT, DOCUMENT_NO_RETRY, uploadable } from "./product-files.js";
+import { usePolling } from "../usePolling.js";
 
 const POLL_MS = 3000;
 
@@ -48,11 +49,7 @@ export function ProductDocumentsDialog({ product, onClose, onChanged, onImportin
   }, []);
 
   const pending = list?.items.some(working) ?? false;
-  useEffect(() => {
-    if (!pending) return;
-    const timer = window.setTimeout(() => void load(), POLL_MS);
-    return () => window.clearTimeout(timer);
-  }, [pending, list, load]);
+  usePolling(load, POLL_MS, pending);
 
   const send = async (upload: Upload) => {
     setUploads((current) => current.map((item) => item.key === upload.key ? { ...item, error: undefined } : item));

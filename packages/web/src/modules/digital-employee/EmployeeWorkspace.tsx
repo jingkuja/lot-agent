@@ -23,6 +23,7 @@ import { ScheduledRunPage } from "./schedule/ScheduledRunPage.js";
 import { WorkDetailPage } from "./work-log/WorkDetailPage.js";
 import { WorkLogPage } from "./WorkLogPage.js";
 import "./employee.css";
+import { usePolling } from "./usePolling.js";
 
 const DEFAULT_NAME = "小灵";
 const RUNNING_POLL_MS = 5_000;
@@ -78,11 +79,7 @@ export function EmployeeWorkspace({
 
   useEffect(() => { if (active) void reloadToday(); }, [active, view, reloadToday]);
   const hasRunning = (today?.running.length ?? 0) > 0;
-  useEffect(() => {
-    if (!active || !hasRunning) return;
-    const timer = window.setInterval(() => void reloadToday(), RUNNING_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [active, hasRunning, reloadToday]);
+  usePolling(reloadToday, RUNNING_POLL_MS, active && hasRunning);
 
   // The object on the open page reaches the conversation when the owner sends. A ref keeps
   // that send, which can start in the same tick as the choice, from reading stale state.
@@ -220,11 +217,11 @@ export function EmployeeWorkspace({
         onDraftOutreach={(item) => draftOutreach(context, item)}
       />;
     }
-    if (view === "schedule") return <SchedulePage dailyScan={dailyScan} schedules={schedules} onNameChange={setName} />;
+    if (view === "schedule") return <SchedulePage employeeName={name} dailyScan={dailyScan} schedules={schedules} onNameChange={setName} />;
     if (view === "assignments") {
       return location.assignmentId
-        ? <AssignmentDetailPage id={location.assignmentId} onBack={() => openView("assignments")} onOpenLink={navigate} />
-        : <AssignmentsPage modelCatalog={modelCatalog} onOpen={(id) => openView("assignments", id)} />;
+        ? <AssignmentDetailPage id={location.assignmentId} employeeName={name} onBack={() => openView("assignments")} onOpenLink={navigate} />
+        : <AssignmentsPage employeeName={name} modelCatalog={modelCatalog} onOpen={(id) => openView("assignments", id)} />;
     }
     return <TodayPage
       data={today}

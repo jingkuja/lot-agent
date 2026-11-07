@@ -143,14 +143,24 @@ export function createMarketingMaterialTools(
 
   const brand: Tool = {
     name: "update_marketing_brand_assets",
-    description: "Create or update the account's single brand record, including tone, visual assets and standard calls to action. Arrays are replaced in full.",
+    description: "Create or update the account's single company or store record: name, plain introduction, logo and store images, "
+      + "plus optional tone and standard calls to action. Arrays are replaced in full.",
     parameters: {
       type: "object",
       properties: {
+        businessName: { type: "string", description: "Company or store name" },
+        businessIntro: { type: "string", description: "Plain introduction: what the business does, where it is, opening hours, contact details" },
         tone: { type: "array", items: { type: "string" }, maxItems: 30 },
         visualAssets: {
           type: "array", maxItems: 50,
-          items: { type: "object", properties: { name: { type: "string" }, url: { type: "string" }, type: { type: "string" } }, required: ["name", "url"] },
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" }, url: { type: "string" },
+              type: { type: "string", description: "\"logo\" for the logo, \"store\" for a company or storefront photo" },
+            },
+            required: ["name", "url"],
+          },
         },
         standardCallsToAction: { type: "array", items: { type: "string" }, maxItems: 30 },
       },
@@ -160,9 +170,9 @@ export function createMarketingMaterialTools(
         const userId = context.userId ?? "default";
         const current = await service.getBrandAssets(userId);
         const saved = await service.saveBrandAssets(userId, parseMarketingBrandAssets({ ...object(input), ...(current ? { version: current.version } : {}) }));
-        return { content: `已更新品牌资料（版本 ${saved.version}）。\n[打开营销资料管理](/digital-employee/materials)` };
+        return { content: `已更新公司资料（版本 ${saved.version}）。\n[打开营销资料管理](/digital-employee/materials)` };
       } catch (error) {
-        return toolError("更新品牌资料失败", error);
+        return toolError("更新公司资料失败", error);
       }
     },
   };

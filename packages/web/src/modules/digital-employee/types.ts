@@ -233,6 +233,11 @@ export interface MarketingVisualAsset {
   type?: string;
 }
 
+export interface MarketingProductImage {
+  name: string;
+  url: string;
+}
+
 export interface MarketingProduct {
   id: string;
   userId: string;
@@ -246,6 +251,7 @@ export interface MarketingProduct {
   caseMaterials: MarketingCaseMaterial[];
   faqs: MarketingFaq[];
   productNotes: string;
+  images?: MarketingProductImage[];
   documentCount?: number;
   status: "active" | "archived";
   version: number;
@@ -343,6 +349,8 @@ export interface ProductImportResult {
 export interface MarketingBrandAssets {
   id: string;
   userId: string;
+  businessName: string;
+  businessIntro: string;
   tone: string[];
   visualAssets: MarketingVisualAsset[];
   standardCallsToAction: string[];
@@ -352,7 +360,8 @@ export interface MarketingBrandAssets {
 }
 
 export type MarketingProductInput = Pick<MarketingProduct, "name"> & Partial<Pick<MarketingProduct,
-  "positioning" | "coreValues" | "verifiableFacts" | "commonObjections" | "currentBenefits" | "prohibitedExpressions" | "caseMaterials" | "faqs" | "productNotes"
+  "positioning" | "coreValues" | "verifiableFacts" | "commonObjections" | "currentBenefits" | "prohibitedExpressions" | "caseMaterials" | "faqs"
+  | "productNotes" | "images"
 >>;
 
 export interface MarketingProductListResponse {

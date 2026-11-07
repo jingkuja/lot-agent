@@ -6,6 +6,7 @@ import type { MarketingAsset, MarketingAssetType } from "../types.js";
 import { AssetReviewNotice, MarketingAssetCard } from "./MarketingAssetCard.js";
 import { DeploymentManager } from "./DeploymentManager.js";
 import { assetTextFileName, generationStateLabel } from "./asset-delivery.js";
+import { usePolling } from "../usePolling.js";
 
 const TYPE_LABEL = { text: "营销文案", poster: "营销海报", image: "营销图片", video: "营销视频" } as const;
 
@@ -39,11 +40,7 @@ export function MarketingAssetLibraryPage({ onReuse, onCreate, onSelect }: {
   }, [range, assetType, page]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    if (!items.some((item) => item.generationStatus === "pending" || item.generationStatus === "running")) return;
-    const timer = window.setInterval(() => void load(true), 2_000);
-    return () => window.clearInterval(timer);
-  }, [items, load]);
+  usePolling(() => load(true), 2_000, items.some((item) => item.generationStatus === "pending" || item.generationStatus === "running"));
 
   const archive = async (item: MarketingAsset) => {
     if (!window.confirm(t(`归档“${item.title}”？投放记录会保留。`))) return;

@@ -164,6 +164,8 @@ export interface TalkTrackContext {
   customerProductStates: unknown[];
   recentFacts: Array<{ text: string; occurredAt: string | null }>;
   productMaterial: Record<string, unknown> | null;
+  /** The owner's own company or store, for introducing the sender. */
+  business?: { name: string; intro: string };
   /** Further products the request named or that tied with the first one. */
   otherProductMaterials?: Array<Record<string, unknown>>;
   /** The product was inferred loosely and may not be the one meant. */

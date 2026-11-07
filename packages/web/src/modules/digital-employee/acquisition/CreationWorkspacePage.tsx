@@ -11,6 +11,7 @@ import type {
 import { listedAcquisitionModels, pickAcquisitionModel, readStoredAcquisitionModels, writeStoredAcquisitionModels } from "./acquisition-models.js";
 import { AssetReviewNotice } from "./MarketingAssetCard.js";
 import { ModelConfigurationGuard } from "./ModelConfigurationGuard.js";
+import { usePolling } from "../usePolling.js";
 
 export interface CreationSeed {
   nonce?: number;
@@ -116,18 +117,12 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
     else { setCampaignId(""); setCampaign(null); }
   }, [seed?.nonce]);
 
-  useEffect(() => {
-    if (!campaignId) return;
-    const pending = campaign && Object.values(campaign.assets).flat().some((item) => ["pending", "running"].includes(item.generationStatus));
-    const generating = result && ["pending", "running"].includes(result.generationStatus);
-    if (!pending && !generating) return;
-    const timer = window.setInterval(() => {
-      void loadCampaign(campaignId).then((next) => {
-        if (result) setResult(Object.values(next.assets).flat().find((item) => item.id === result.id) ?? result);
-      });
-    }, 2_000);
-    return () => window.clearInterval(timer);
-  }, [campaignId, campaign, result?.id, result?.generationStatus]);
+  const campaignPending = campaign && Object.values(campaign.assets).flat().some((item) => ["pending", "running"].includes(item.generationStatus));
+  const generating = result && ["pending", "running"].includes(result.generationStatus);
+  usePolling(async () => {
+    const next = await loadCampaign(campaignId);
+    if (result) setResult(Object.values(next.assets).flat().find((item) => item.id === result.id) ?? result);
+  }, 2_000, Boolean(campaignId && (campaignPending || generating)));
 
   const selectedSegment = segments.find((item) => item.id === segmentId);
   const selectedProduct = products.find((item) => item.id === productId);

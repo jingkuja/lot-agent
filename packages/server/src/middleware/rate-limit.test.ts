@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
-import { rateLimit, clientIp, type RateLimitStore } from "./rate-limit.js";
+import { rateLimit, clientIp, splitReadsAndChanges, type RateLimitStore } from "./rate-limit.js";
 
 /**
  * In-memory fake mimicking the Redis fixed-window semantics the real store
@@ -95,6 +95,21 @@ describe("rateLimit", () => {
     const retryAfter = res3.headers.get("Retry-After");
     expect(retryAfter).toBeTruthy();
     expect(Number(retryAfter)).toBeGreaterThan(0);
+  });
+
+  it("gives reads and changes separate budgets", async () => {
+    const store = new FakeStore();
+    const limiter = (prefix: string, limit: number) => rateLimit({ store, prefix, limit, windowMs: 60_000, keyFn: () => "u1" });
+    const app = new Hono();
+    app.use("*", splitReadsAndChanges(limiter("reads", 3), limiter("changes", 1)));
+    app.all("/test", (c) => c.json({ ok: true }));
+
+    const reads = [];
+    for (let i = 0; i < 4; i++) reads.push((await app.request("/test")).status);
+    expect(reads).toEqual([200, 200, 200, 429]);
+    expect((await app.request("/test", { method: "POST" })).status).toBe(200);
+    expect((await app.request("/test", { method: "PUT" })).status).toBe(429);
+    expect((await app.request("/test")).status).toBe(429);
   });
 
   it("only sets the window expiry on the first hit", async () => {

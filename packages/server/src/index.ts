@@ -65,7 +65,7 @@ import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
-import { rateLimit, clientIp } from "./middleware/rate-limit.js";
+import { rateLimit, clientIp, splitReadsAndChanges } from "./middleware/rate-limit.js";
 import { RedisRateLimitStore } from "./middleware/redis-rate-limit-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -166,6 +166,8 @@ async function main() {
     // Customer-profile CRUD is bounded separately from chat. Natural-language
     // capture still runs through the existing message limit above.
     digitalEmployee: { prefix: "rl:digital-employee", limit: 90, windowMs: 60 * 1000 },
+    // Open pages poll while work runs, so reads get their own, larger bucket.
+    digitalEmployeeReads: { prefix: "rl:digital-employee-read", limit: 300, windowMs: 60 * 1000 },
     // Fixed-key operations API, keyed by IP: bounds key guessing and heavy metric queries.
     admin: { prefix: "rl:admin", limit: 30, windowMs: 60 * 1000 },
   } as const;
@@ -192,11 +194,20 @@ async function main() {
     ...RATE_LIMITS.generation,
     message: "生成请求过于频繁，请 1 分钟后再试。",
   });
-  const digitalEmployeeRateLimit = rateLimit({
-    store: rateLimitStore,
-    keyFn: (c) => c.get("userId"),
-    ...RATE_LIMITS.digitalEmployee,
-  });
+  const digitalEmployeeRateLimit = splitReadsAndChanges(
+    rateLimit({
+      store: rateLimitStore,
+      keyFn: (c) => c.get("userId"),
+      ...RATE_LIMITS.digitalEmployeeReads,
+      message: "操作太频繁，请稍后再试。",
+    }),
+    rateLimit({
+      store: rateLimitStore,
+      keyFn: (c) => c.get("userId"),
+      ...RATE_LIMITS.digitalEmployee,
+      message: "操作太频繁，请稍后再试。",
+    })
+  );
 
   const requestLogger = logger();
   // These paths can carry capabilities in the query string.

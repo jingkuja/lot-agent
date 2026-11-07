@@ -80,7 +80,7 @@ export class MarketingMaterialsService {
         throw new ConflictError();
       }
     }
-    if (input.version === undefined) throw new ConflictError("品牌资料已存在，请刷新后再保存");
+    if (input.version === undefined) throw new ConflictError("公司资料已存在，请刷新后再保存");
     const updated = await this.repository.updateBrandAssets(userId, { ...input, version: input.version });
     if (!updated) throw new ConflictError();
     return updated;

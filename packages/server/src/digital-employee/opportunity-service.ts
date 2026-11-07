@@ -902,8 +902,14 @@ export class OpportunityService {
 
   /** The prompt cuts its context at its limit, so the long free-text columns stay last. */
   private async withProducts(
-    userId: string, context: TalkTrackContext, request: TalkTrackRequest, named: Array<string | null | undefined>
+    userId: string, base: TalkTrackContext, request: TalkTrackRequest, named: Array<string | null | undefined>
   ): Promise<TalkTrackContext> {
+    const { rows: [profile] } = await this.pool.query(
+      "SELECT business_name, business_intro FROM marketing_brand_assets WHERE user_id = $1", [userId]
+    );
+    const context: TalkTrackContext = profile?.business_name || profile?.business_intro
+      ? { ...base, business: { name: profile.business_name, intro: profile.business_intro } }
+      : base;
     const { rows: catalog } = await this.pool.query(
       `SELECT id, name FROM marketing_products WHERE user_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 200`,
       [userId]

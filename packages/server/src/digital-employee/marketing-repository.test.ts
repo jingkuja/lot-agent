@@ -134,7 +134,16 @@ describe("MarketingMaterialsRepository brand assets", () => {
     });
     const [sql, params] = query.mock.calls[0];
     expect(sql).toContain("WHERE user_id = $1 AND version = $2");
-    expect(params).toEqual(["u1", 2, ["专业克制"], '[{"name":"logo","url":"/static/assets/logo.png"}]', ["预约咨询"]]);
+    expect(params).toEqual(["u1", 2, ["专业克制"], '[{"name":"logo","url":"/static/assets/logo.png"}]', ["预约咨询"], null, null]);
     expect(brand!.version).toBe(3);
+  });
+
+  it("公司名称和介绍可以单独保存，也可以清空", async () => {
+    const now = new Date();
+    const row = { id: "b1", user_id: "u1", business_name: "小王面馆", business_intro: "", version: 2, created_at: now, updated_at: now };
+    const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [row] }));
+    const saved = await repositoryWith(query).updateBrandAssets("u1", { businessName: "小王面馆", businessIntro: "", version: 1 });
+    expect(query.mock.calls[0][1].slice(-2)).toEqual(["小王面馆", ""]);
+    expect(saved).toMatchObject({ businessName: "小王面馆", businessIntro: "" });
   });
 });

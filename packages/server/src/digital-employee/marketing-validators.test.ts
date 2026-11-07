@@ -138,9 +138,23 @@ describe("parseMarketingBrandAssets", () => {
     expect(() => parseMarketingBrandAssets({ tone: ["专业"], version: 0 })).toThrow("version无效");
   });
 
+  it("产品图片最多 3 张，空数组表示清空", () => {
+    const image = (index: number) => ({ name: `图${index}.png`, url: `/static/uploads/${index}.png`, extra: "去掉" });
+    const input = parseMarketingProduct({ name: "牛肉面", images: [image(1), image(2), image(3)] });
+    expect(input.images).toEqual([1, 2, 3].map((index) => ({ name: `图${index}.png`, url: `/static/uploads/${index}.png` })));
+    expect(parseMarketingProductUpdate({ images: [], version: 1 }).images).toEqual([]);
+    expect(() => parseMarketingProduct({ name: "牛肉面", images: [1, 2, 3, 4].map(image) })).toThrow("产品图片");
+    expect(() => parseMarketingProduct({ name: "牛肉面", images: [{ name: "x", url: "file:///etc/passwd" }] })).toThrow("产品图片链接");
+  });
+
+  it("接受公司名称和介绍，空字符串表示清空", () => {
+    expect(parseMarketingBrandAssets({ businessName: " 小王面馆 ", businessIntro: "" })).toEqual({ businessName: "小王面馆", businessIntro: "" });
+    expect(() => parseMarketingBrandAssets({ businessName: "店".repeat(201) })).toThrow("公司或店铺名称格式无效");
+  });
+
   it("拒绝没有任何品牌字段的请求", () => {
-    expect(() => parseMarketingBrandAssets({})).toThrow("没有可更新的品牌字段");
-    expect(() => parseMarketingBrandAssets({ version: 2 })).toThrow("没有可更新的品牌字段");
+    expect(() => parseMarketingBrandAssets({})).toThrow("没有可更新的公司资料");
+    expect(() => parseMarketingBrandAssets({ version: 2 })).toThrow("没有可更新的公司资料");
   });
 });
 

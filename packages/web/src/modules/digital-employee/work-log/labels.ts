@@ -9,7 +9,7 @@ export const TOOL_LABELS: Record<string, string> = {
   search_marketing_materials: "查找营销资料",
   create_marketing_product: "新建产品资料",
   update_marketing_product: "修改产品资料",
-  update_marketing_brand_assets: "修改品牌资料",
+  update_marketing_brand_assets: "修改公司资料",
   search_customer_work_queue: "查看待跟进客户",
   get_customer_business_context: "了解客户背景",
   search_customer_opportunities: "查找商机",

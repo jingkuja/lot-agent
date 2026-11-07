@@ -337,6 +337,7 @@ describe("OpportunityService personal work queue", () => {
       if (sql.includes("FROM de_customer_profiles WHERE id=$1")) return { rows: [{
         id: "p1", display_name: "周工", organization: null, relationship_stage: "prospect",
       }] };
+      if (sql.includes("FROM marketing_brand_assets")) return { rows: [{ business_name: "小王面馆", business_intro: "开了十年的牛肉面馆" }] };
       if (sql.includes("FROM marketing_products")) {
         const columns = /SELECT([\s\S]+?)FROM/.exec(sql)![1].split(",").map((column) => column.trim());
         return { rows: [Object.fromEntries(columns.map((column) => [column, column === "id" ? "m1" : stored[column]]))] };
@@ -347,7 +348,7 @@ describe("OpportunityService personal work queue", () => {
       }] };
       return { rows: [] };
     });
-    const generate = vi.fn(async (_input: { context: { productMaterial: Record<string, unknown> | null } }) => (
+    const generate = vi.fn(async (_input: { context: { productMaterial: Record<string, unknown> | null; business?: unknown } }) => (
       { modelId: "m1", reply: "周工好" }
     ));
     const service = new OpportunityService({ pool: { query } } as any, undefined, undefined, { generate } as any);
@@ -358,6 +359,7 @@ describe("OpportunityService personal work queue", () => {
     expect(generate).toHaveBeenCalledTimes(2);
     for (const [input] of generate.mock.calls) {
       expect(input.context.productMaterial).toEqual(stored);
+      expect(input.context.business).toEqual({ name: "小王面馆", intro: "开了十年的牛肉面馆" });
       expect(Object.keys(input.context.productMaterial!).slice(-2)).toEqual(["faqs", "product_notes"]);
     }
   });

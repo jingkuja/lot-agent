@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n/index.js";
 import { employeeApi } from "./api.js";
 import { ScheduledWorkSection } from "./schedule/ScheduledWorkSection.js";
 import type { DigitalEmployeeOverview, EmployeeSettings, OpportunitySettings, WorkChannel, WorkTone } from "./types.js";
+import { useEmployeeLabels } from "./employee-labels.js";
 
 const MAX_NAME = 20;
 const TONES: Array<{ value: WorkTone | ""; label: string }> = [
@@ -26,8 +27,14 @@ const CHANNELS: Array<{ value: WorkChannel; label: string }> = [
 ];
 
 /** The employee's name and everything it does on its own. Only the rule scan is free of model costs. */
-export function SchedulePage({ dailyScan, schedules, onNameChange }: { dailyScan: boolean; schedules: boolean; onNameChange: (name: string) => void }) {
+export function SchedulePage({ employeeName, dailyScan, schedules, onNameChange }: {
+  employeeName: string;
+  dailyScan: boolean;
+  schedules: boolean;
+  onNameChange: (name: string) => void;
+}) {
   const { t } = useI18n();
+  const labels = useEmployeeLabels(employeeName);
   const [settings, setSettings] = useState<EmployeeSettings | null>(null);
   const [name, setName] = useState("");
   const [discovery, setDiscovery] = useState<OpportunitySettings | null>(null);
@@ -73,7 +80,7 @@ export function SchedulePage({ dailyScan, schedules, onNameChange }: { dailyScan
   const nameValid = [...trimmed].length >= 1 && [...trimmed].length <= MAX_NAME;
 
   return <div className="de-page de-schedule-page">
-    <header className="de-employee-page-head"><h1>{t("工作安排")}</h1></header>
+    <header className="de-employee-page-head"><h1>{labels.schedule}</h1></header>
     {error && <div className="de-inline-error" role="alert"><span>{t(error)}</span><button onClick={() => setError(null)}>{t("关闭")}</button></div>}
     {!settings ? !error && <div className="de-state">{t("加载中…")}</div> : <>
       <section className="de-schedule-section">

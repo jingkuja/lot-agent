@@ -14,11 +14,14 @@ import { FAILURE_LABELS, MODE_LABELS, PAUSE_LABELS, statusLabel, statusTone } fr
 import { DecisionCard } from "./DecisionCard.js";
 import { SubtaskList } from "./SubtaskList.js";
 import { isOpen } from "./grouping.js";
+import { usePolling } from "../usePolling.js";
+import { useEmployeeLabels } from "../employee-labels.js";
 
 const POLL_MS = 3_000;
 
 interface DetailProps {
   id: string;
+  employeeName: string;
   onBack: () => void;
   onOpenLink: (url: string) => void;
 }
@@ -35,8 +38,9 @@ function Artifact({ artifact, onOpenLink }: { artifact: AssignmentDetail["artifa
 }
 
 /** The result first, then the decisions the employee took for the owner, then how it got there. */
-export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
+export function AssignmentDetailPage({ id, employeeName, onBack, onOpenLink }: DetailProps) {
   const { t, locale } = useI18n();
+  const labels = useEmployeeLabels(employeeName);
   const [item, setItem] = useState<AssignmentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,11 +60,7 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
 
   useEffect(() => { void load(); }, [load]);
   const open = item ? isOpen(item) : false;
-  useEffect(() => {
-    if (!open) return;
-    const timer = window.setInterval(() => void load(), POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [open, load]);
+  usePolling(load, POLL_MS, open);
 
   const run = async (work: () => Promise<unknown>) => {
     setBusy(true); setError(null);
@@ -74,8 +74,8 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
 
   return <div className="de-page de-assignment-detail">
     <header className="de-employee-page-head">
-      <nav aria-label={t("任务分派")}><button type="button" className="de-text-button" onClick={onBack}>{t("返回")}</button></nav>
-      <h1>{item?.title ?? t("任务分派")}</h1>
+      <nav aria-label={labels.assignments}><button type="button" className="de-text-button" onClick={onBack}>{t("返回")}</button></nav>
+      <h1>{item?.title ?? labels.assignments}</h1>
     </header>
     {error && <div className="de-inline-error" role="alert"><span>{t(error)}</span></div>}
     {!item && !error && <div className="de-state">{t("加载中…")}</div>}

@@ -125,9 +125,9 @@ describe("MarketingMaterialsService brand assets", () => {
     await expect(serviceWith(query).saveBrandAssets("u1", { tone: ["专业克制"] })).rejects.toThrow(ConflictError);
   });
 
-  it("品牌资料已存在时不带version的保存被拒绝", async () => {
+  it("公司资料已存在时不带version的保存被拒绝", async () => {
     const query = vi.fn(async (_sql: string, _params: any[]) => ({ rows: [brandRow()] }));
-    await expect(serviceWith(query).saveBrandAssets("u1", { tone: ["热情"] })).rejects.toThrow("品牌资料已存在，请刷新后再保存");
+    await expect(serviceWith(query).saveBrandAssets("u1", { tone: ["热情"] })).rejects.toThrow("公司资料已存在，请刷新后再保存");
     expect(query).toHaveBeenCalledTimes(1);
   });
 
