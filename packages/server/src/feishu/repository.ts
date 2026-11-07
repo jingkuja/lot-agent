@@ -121,6 +121,17 @@ export class PgFeishuRepository implements FeishuRepository {
     });
   }
 
+  /** Marks a message another port handled. It holds the delivery's place, so a redelivery cannot reach the assistant. */
+  async recordRouted(job: FeishuInboxJob) {
+    await this.transaction(job.user_id, client => client.query(
+      `INSERT INTO feishu_inbox(message_id,user_id,revision,text,chat_id,status) VALUES($1,$2,$3,$4,$5,'routed') ON CONFLICT DO NOTHING`,
+      [job.message_id,job.user_id,job.revision,job.text,job.chat_id]));
+  }
+
+  async seen(messageId: string, userId: string) {
+    return this.transaction(userId, async client => Boolean((await client.query("SELECT 1 FROM feishu_inbox WHERE message_id=$1", [messageId])).rowCount));
+  }
+
   async claim(): Promise<FeishuInboxJob | null> {
     // A crashed worker is never replayed. Its transcript explains the unknown outcome.
     await this.pool.query(`WITH expired AS (

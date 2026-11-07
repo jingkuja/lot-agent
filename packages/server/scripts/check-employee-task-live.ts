@@ -72,8 +72,20 @@ async function createOwner(name: string, key = apiKey!): Promise<string> {
 
 const setKey = (userId: string, key: string) => pool.query(`UPDATE users SET api_key=$2 WHERE id=$1`, [userId, createSecretBox().seal(key)]);
 
-const assign = (userId: string, goal: string, attachments: unknown[] = []) =>
-  repository.create({ userId, title: goal.slice(0, 30), goal, modelId, attachments: attachments as never, costLimit: null });
+const assign = (userId: string, goal: string, attachments: unknown[] = [], mode: "autonomous" | "responsive" = "autonomous") =>
+  repository.create({ userId, title: goal.slice(0, 30), goal, mode, modelId, attachments: attachments as never, costLimit: null });
+
+const assignResponsive = (userId: string, goal: string) => assign(userId, goal, [], "responsive");
+
+/** The node's next stop: a decision for the owner, or the end of the task. */
+async function nextStop(userId: string, id: string) {
+  return until(async () => {
+    const [decision] = await repository.openDecisions(userId, id);
+    if (decision) return { decision, node: null };
+    const { rows } = await pool.query(`SELECT * FROM de_assignments WHERE id=$1`, [id]);
+    return STOPPED.includes(rows[0].status) ? { decision: null, node: rows[0] } : null;
+  });
+}
 
 async function finished(id: string) {
   return until(async () => {
@@ -144,6 +156,56 @@ async function main() {
     const ambiguous = (wanted("namesake-not-guessed") || wanted("failure-is-reported")) && await assign(namesake, "给王总记一条跟进：他今天已经付款了。");
     const limited = wanted("search-limit-respected") && await assign(await createOwner("search limit check"),
       "分别联网查出下面 6 件事，每件单独搜索：Node.js 22 的发布月份、Python 3.13 的发布月份、Go 1.23 的发布月份、Rust 1.80 的发布月份、Ruby 3.3 的发布月份、Java 22 的发布月份。把查到的列出来。");
+
+    await check("responsive-asks-then-carries-on", async () => {
+      const userId = await createOwner("responsive check");
+      const [east, south] = [randomUUID(), randomUUID()];
+      for (const [id, organization] of [[east, "华东云启"], [south, "华南云启"]]) {
+        await pool.query(
+          `INSERT INTO de_customer_profiles (id, user_id, owner_user_id, display_name, organization) VALUES ($1,$2,$2,'王总',$3)`, [id, userId, organization]
+        );
+      }
+      const task = await assignResponsive(userId, "给王总记一条跟进：他今天已经付款了。");
+      const asked: Array<{ question: string; options: string[] }> = [];
+      let writtenBeforeAnswer = 0;
+      let stop = await nextStop(userId, task.id);
+      for (let round = 0; stop.decision && stop.decision.kind === "question" && round < 4; round += 1) {
+        const { id, question, options } = stop.decision;
+        asked.push({ question, options });
+        if (round === 0) writtenBeforeAnswer = await toolsUsed(task.conversationId, "commit_customer_capture");
+        await wait(2_000);
+        if (await isRunning(task.conversationId)) throw new Error("a waiting task is still running");
+        const pick = options.find((option) => option.includes("华东")) ?? options.find((option) => /确认|是|保存/.test(option));
+        await repository.answerDecision(userId, id, { text: pick ?? "华东云启那位王总，确认记录。" }, "web");
+        stop = await nextStop(userId, task.id);
+      }
+      const node = stop.node;
+      const written = await toolsUsed(task.conversationId, "commit_customer_capture");
+      const { rows: [row] } = await pool.query(`SELECT status, result, tokens_used FROM de_assignments WHERE id=$1`, [task.id]);
+      const tools = (await steps(task.conversationId)).map((step) => step.tool_name);
+      return {
+        ok: asked.length >= 1 && writtenBeforeAnswer === 0 && node?.status === "succeeded" && written === 1,
+        detail: { asked, written, writtenBeforeAnswer, status: row.status, result: row.result, tools, tokens: row.tokens_used },
+      };
+    });
+
+    await check("responsive-failure-is-the-owners-call", async () => {
+      const userId = await createOwner("responsive failure check");
+      const task = await assignResponsive(userId,
+        "把产品资料里名叫「绝对不存在的产品甲乙丙」的价格改成 99 元。这个产品如果不存在，不要新建，也不要问我，直接调用 finish_task，outcome 写 blocked。");
+      const stopped = await nextStop(userId, task.id);
+      const decision = stopped.decision;
+      if (!decision) return { ok: false, detail: { status: stopped.node?.status, result: stopped.node?.result } };
+      const { rows: [waiting] } = await pool.query(`SELECT status, failure_reason, finished_at FROM de_assignments WHERE id=$1`, [task.id]);
+      await repository.answerDecision(userId, decision.id, { choice: "change", text: "不用改了。直接调用 finish_task，outcome 写 done，摘要写「已取消修改」。" }, "web");
+      const end = await nextStop(userId, task.id);
+      const { rows: products } = await pool.query(`SELECT 1 FROM marketing_products WHERE user_id=$1`, [userId]);
+      return {
+        ok: decision.kind === "failure" && decision.failureReason === "blocked" && waiting.status === "waiting_user" && waiting.finished_at === null
+          && end.node?.status === "succeeded" && products.length === 0,
+        detail: { decision: { kind: decision.kind, reason: decision.failureReason }, waiting, status: end.node?.status, result: end.node?.result },
+      };
+    });
 
     await check("research-write-document", async () => {
       const node = await finished(research ? research.id : "");

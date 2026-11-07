@@ -2,7 +2,7 @@ import { useI18n } from "../../../i18n/index.js";
 import { formatPoints } from "../../../lib/points.js";
 import type { Assignment } from "../types.js";
 import { TOOL_LABELS } from "../work-log/labels.js";
-import { FAILURE_LABELS, PAUSE_LABELS, statusLabel, statusTone } from "./copy.js";
+import { FAILURE_LABELS, MODE_LABELS, PAUSE_LABELS, statusLabel, statusTone } from "./copy.js";
 import { isOpen } from "./grouping.js";
 
 interface AssignmentCardProps {
@@ -35,7 +35,7 @@ export function AssignmentCard({ item, showDate, busy, onOpen, onAction }: Assig
       <span className="de-assignment-line">{oneLine(item, t)}</span>
       <small>
         <span>{time}</span>
-        <span>{t("完全自主")}</span>
+        <span>{t(MODE_LABELS[item.mode])}</span>
         {item.subtasks.total > 0 && <span>{t("子任务 {0}/{1}", [item.subtasks.done, item.subtasks.total])}</span>}
         <span>{t("约 {0} 积分", [formatPoints(item.creditsUsed)])}</span>
         <span>{item.modelId}</span>
@@ -44,7 +44,11 @@ export function AssignmentCard({ item, showDate, busy, onOpen, onAction }: Assig
     {(paused || item.status === "failed" || isOpen(item)) && <footer>
       {paused && item.pausedReason === "quota" && <button type="button" className="de-primary-button" disabled={busy} onClick={() => onAction("resume")}>{t("继续")}</button>}
       {paused && item.pausedReason === "cost_limit" && <button type="button" className="de-primary-button" onClick={onOpen}>{t("调高上限")}</button>}
-      {item.status === "failed" && <button type="button" className="de-primary-button" disabled={busy} onClick={() => onAction("retry")}>{t("重试")}</button>}
+      {item.waitingDecisions > 0 && <button type="button" className="de-primary-button" onClick={onOpen}>{t("回答")}</button>}
+      {item.status === "failed" && item.failureReason !== "unknown_outcome" && <button
+        type="button" className="de-primary-button" disabled={busy} onClick={() => onAction("retry")}
+      >{t("重试")}</button>}
+      {item.status === "failed" && item.failureReason === "unknown_outcome" && <button type="button" className="de-primary-button" onClick={onOpen}>{t("去核实")}</button>}
       {isOpen(item) && <button type="button" className="de-secondary-button" disabled={busy} onClick={() => onAction("cancel")}>{t("取消")}</button>}
     </footer>}
   </article>;

@@ -156,12 +156,14 @@ export class DigitalEmployeeService {
     this.briefs = new BriefService(db.pool);
     this.workLog = new WorkLogService(db.pool);
     this.schedules = new ScheduleService(db.pool, opportunityQueue);
-    this.today = new TodayService(db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals, this.briefs, this.schedules);
     this.assignments = new AssignmentService(db.pool, {
       llmModels: async (userId) => (await acquisitionDeps?.modelResolver?.get(userId))?.llmModels.map((model) => model.id) ?? [],
       imports: this.productImports,
       workLog: this.workLog,
     });
+    this.today = new TodayService(
+      db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals, this.briefs, this.schedules, this.assignments,
+    );
     this.secretBox = secretBox;
   }
 

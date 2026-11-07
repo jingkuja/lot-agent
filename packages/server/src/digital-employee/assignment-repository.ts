@@ -2,15 +2,20 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { AttachmentRef } from "../services/attachment-extractor.js";
 import {
+  FAILURE_CHOICES,
   OPEN_STATUSES,
+  resumeMessage,
   transitionAssignment,
   type AssignmentMode,
   type AssignmentStatus,
+  type DecisionAnswer,
   type EndIntent,
+  type FailureChoice,
   type FailureReason,
+  type OwnerQuestion,
   type PausedReason,
 } from "./assignment-state.js";
-import { ConflictError, NotFoundError } from "./errors.js";
+import { ConflictError, InputError, NotFoundError, UnverifiedOperationsError } from "./errors.js";
 import { DIGITAL_EMPLOYEE_UNIFIED_SCOPE } from "./feature-scope.js";
 
 const AGENT_ID = "digital_employee";
@@ -43,6 +48,8 @@ export interface AssignmentNode {
   failureReason: FailureReason | null;
   endIntent: EndIntent | null;
   autoResumed: boolean;
+  /** The owner's answer, kept until the turn it starts has ended. */
+  nextMessage: string | null;
   webSearches: number;
   tokensUsed: number;
   /** In yuan, like usage_logs. */
@@ -63,6 +70,34 @@ export interface AssignmentCard extends AssignmentNode {
   subtasksDone: number;
   subtasksTotal: number;
   currentTool: string | null;
+  waitingDecisions: number;
+}
+
+export type DecisionKind = "question" | "failure";
+
+/** One per node at most, and several across a tree: nothing here assumes a single open decision. */
+export interface AssignmentDecision {
+  id: string;
+  assignmentId: string;
+  rootId: string;
+  conversationId: string;
+  /** The node's title, which is what the owner recognises. */
+  title: string;
+  kind: DecisionKind;
+  question: string;
+  options: string[];
+  multiSelect: boolean;
+  failureReason: FailureReason | null;
+  unverified: number;
+  answered: boolean;
+  createdAt: string;
+}
+
+export interface NewDecision extends Partial<OwnerQuestion> {
+  kind: DecisionKind;
+  title: string;
+  failureReason?: FailureReason;
+  summary?: string;
 }
 
 export interface AssignmentFilters {
@@ -80,14 +115,24 @@ export interface AssignmentEvent {
   id: string;
   userId: string;
   rootId: string;
-  kind: "finished" | "paused";
+  kind: "finished" | "paused" | "decision" | "reminder";
   payload: Record<string, unknown>;
+}
+
+/** A desktop's view of an event: names and codes, no model text. */
+export interface AssignmentActivity {
+  id: string;
+  rootId: string;
+  kind: AssignmentEvent["kind"];
+  title: string;
+  status: string | null;
 }
 
 export interface NewAssignment {
   userId: string;
   title: string;
   goal: string;
+  mode: AssignmentMode;
   modelId: string;
   attachments: AttachmentRef[];
   costLimit: number | null;
@@ -103,7 +148,8 @@ function toNode(row: Row): AssignmentNode {
     id: String(row.id), userId: String(row.user_id), rootId: String(row.root_id), title: String(row.title), goal: String(row.goal),
     mode: row.mode, status: row.status, conversationId: String(row.conversation_id), modelId: String(row.model_id),
     result: row.result ?? null, failureReason: row.failure_reason ?? null, endIntent: row.end_intent ?? null, autoResumed: row.auto_resumed === true,
-    webSearches: Number(row.web_searches), tokensUsed: Number(row.tokens_used), costUsed: Number(row.cost_used), version: Number(row.version),
+    nextMessage: row.next_message ?? null, webSearches: Number(row.web_searches), tokensUsed: Number(row.tokens_used), costUsed: Number(row.cost_used),
+    version: Number(row.version),
     attachments: row.attachments ?? [], pausedReason: row.paused_reason ?? null, pausedAt: optionalIso(row.paused_at),
     costLimit: row.cost_limit === null || row.cost_limit === undefined ? null : Number(row.cost_limit),
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), finishedAt: optionalIso(row.finished_at),
@@ -113,7 +159,16 @@ function toNode(row: Row): AssignmentNode {
 function toCard(row: Row): AssignmentCard {
   return {
     ...toNode(row), totalCost: Number(row.total_cost), subtasksDone: Number(row.subtasks_done), subtasksTotal: Number(row.subtasks_total),
-    currentTool: row.current_tool ?? null,
+    currentTool: row.current_tool ?? null, waitingDecisions: Number(row.waiting_decisions),
+  };
+}
+
+function toDecision(row: Row): AssignmentDecision {
+  return {
+    id: String(row.decision_id), assignmentId: String(row.id), rootId: String(row.root_id), conversationId: String(row.conversation_id),
+    title: String(row.title), kind: row.decision_kind, question: String(row.question), options: row.options ?? [], multiSelect: row.multi_select === true,
+    failureReason: row.failure_reason ?? null, unverified: Number(row.unverified), answered: row.decision_answered_at !== null,
+    createdAt: iso(row.decision_created_at),
   };
 }
 
@@ -133,6 +188,18 @@ function likePattern(text: string): string {
   return `%${text.replace(/[\\%_]/g, "\\$&")}%`;
 }
 
+/** Writes whose result nobody has confirmed. Only the owner can clear them, through the existing verify route. */
+const UNVERIFIED = `(
+  SELECT count(*) FROM agent_steps step JOIN agent_runs run ON run.id = step.run_id
+  WHERE run.conversation_id = node.conversation_id AND run.user_id = node.user_id AND step.status = 'unknown_outcome'
+)`;
+
+const DECISION_COLUMNS = `decision.id AS decision_id, decision.kind AS decision_kind, decision.question, decision.options, decision.multi_select,
+  decision.answered_at AS decision_answered_at, decision.created_at AS decision_created_at,
+  node.id, node.root_id, node.conversation_id, node.title, node.failure_reason, ${UNVERIFIED} AS unverified`;
+
+const DECISION_FROM = `de_assignment_decisions decision JOIN de_assignments node ON node.id = decision.assignment_id`;
+
 const OPEN_LIST = `ARRAY[${OPEN_STATUSES.map((status) => `'${status}'`).join(",")}]`;
 
 /** Everything the tree spent. Media tasks carry the conversation that ordered them. */
@@ -148,6 +215,8 @@ const CARD_COLUMNS = `r.*, r.created_at::text AS cursor_at, ${TOTAL_COST} AS tot
   (SELECT count(*) FROM de_assignments child WHERE child.root_id = r.id AND child.id <> r.id) AS subtasks_total,
   (SELECT count(*) FROM de_assignments child WHERE child.root_id = r.id AND child.id <> r.id
      AND child.status IN ('succeeded', 'skipped')) AS subtasks_done,
+  (SELECT count(*) FROM de_assignment_decisions decision JOIN de_assignments node ON node.id = decision.assignment_id
+     WHERE node.root_id = r.id AND decision.answered_at IS NULL) AS waiting_decisions,
   CASE WHEN r.status = 'running' THEN (
     SELECT step.tool_name FROM agent_steps step JOIN agent_runs run ON run.id = step.run_id
     WHERE run.conversation_id = r.conversation_id AND run.user_id = r.user_id
@@ -186,8 +255,8 @@ export class AssignmentRepository {
       );
       const { rows } = await client.query(
         `INSERT INTO de_assignments (id, user_id, root_id, title, goal, mode, conversation_id, model_id, attachments, cost_limit)
-         VALUES ($1,$2,$1,$3,$4,'autonomous',$5,$6,$7::jsonb,$8) RETURNING *`,
-        [id, input.userId, input.title, input.goal, conversationId, input.modelId, JSON.stringify(input.attachments), input.costLimit]
+         VALUES ($1,$2,$1,$3,$4,$5,$6,$7,$8::jsonb,$9) RETURNING *`,
+        [id, input.userId, input.title, input.goal, input.mode, conversationId, input.modelId, JSON.stringify(input.attachments), input.costLimit]
       );
       return toNode(rows[0]);
     });
@@ -212,6 +281,7 @@ export class AssignmentRepository {
     }
     if (filters.status === "active") where.push(`r.status = ANY(${OPEN_LIST}) AND r.paused_at IS NULL`);
     else if (filters.status === "paused") where.push(`r.status = ANY(${OPEN_LIST}) AND r.paused_at IS NOT NULL`);
+    else if (filters.status === "cancelled") where.push(`r.status IN ('cancelled', 'skipped')`);
     else if (filters.status) where.push(`r.status = ${bind(filters.status)}`);
     if (filters.openBefore) where.push(`NOT (r.status = ANY(${OPEN_LIST}) AND r.created_at < ${bind(filters.openBefore)}::timestamptz)`);
     const cursor = filters.cursor ? decodeCursor(filters.cursor) : null;
@@ -236,12 +306,23 @@ export class AssignmentRepository {
 
   /** The root and whatever is still open under it. Finished subtasks keep their result. */
   async cancel(userId: string, id: string): Promise<boolean> {
-    const { rows } = await this.pool.query(
-      `UPDATE de_assignments SET status='cancelled', version=version+1, lease_until=NULL, not_before=NULL, finished_at=now(), updated_at=now()
+    return this.transaction((client) => this.cancelTree(client, userId, id));
+  }
+
+  /** Decisions close first, in the order answering takes its locks. They need no answer: there is nothing left to decide. */
+  private async cancelTree(client: PoolClient, userId: string, rootId: string): Promise<boolean> {
+    await client.query(
+      `UPDATE de_assignment_decisions SET answered_at=now(), answered_via='cancelled'
+       WHERE answered_at IS NULL AND user_id=$1 AND assignment_id IN (SELECT id FROM de_assignments WHERE root_id=$2 AND user_id=$1)
+         AND EXISTS (SELECT 1 FROM de_assignments root WHERE root.id=$2 AND root.id=root.root_id AND root.user_id=$1)`,
+      [userId, rootId]
+    );
+    const { rows } = await client.query(
+      `UPDATE de_assignments SET status='cancelled', version=version+1, lease_until=NULL, not_before=NULL, next_message=NULL, finished_at=now(), updated_at=now()
        WHERE user_id=$1 AND root_id=$2 AND status = ANY(${OPEN_LIST})
          AND EXISTS (SELECT 1 FROM de_assignments root WHERE root.id=$2 AND root.id=root.root_id AND root.user_id=$1)
        RETURNING id`,
-      [userId, id]
+      [userId, rootId]
     );
     return rows.length > 0;
   }
@@ -273,8 +354,188 @@ export class AssignmentRepository {
     if (!rowCount) throw new ConflictError("任务状态已变化，请刷新后重试");
   }
 
+  /** All of an account's tasks that a quota stopped: a "continue" from a channel names no task. */
+  async resumeQuotaPaused(userId: string): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE de_assignments SET paused_at=NULL, paused_reason=NULL, updated_at=now()
+       WHERE user_id=$1 AND id=root_id AND paused_reason='quota' AND status = ANY(${OPEN_LIST})`,
+      [userId]
+    );
+    return rowCount ?? 0;
+  }
+
+  /** Writes with no confirmed result. Running the node again before the owner clears them could repeat one. */
+  async unverifiedOperations(node: Pick<AssignmentNode, "conversationId" | "userId">): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT ${UNVERIFIED} AS total FROM (SELECT $1::uuid AS conversation_id, $2::varchar AS user_id) node`, [node.conversationId, node.userId]
+    );
+    return Number(rows[0].total);
+  }
+
   async updateTitle(id: string, title: string): Promise<void> {
     await this.pool.query(`UPDATE de_assignments SET title=$2, updated_at=now() WHERE id=$1`, [id, title]);
+  }
+
+  // ── Decisions ──
+
+  async openDecisions(userId: string, rootId?: string): Promise<AssignmentDecision[]> {
+    const { rows } = await this.pool.query(
+      `SELECT ${DECISION_COLUMNS} FROM ${DECISION_FROM}
+       WHERE decision.user_id=$1 AND decision.answered_at IS NULL AND ($2::uuid IS NULL OR node.root_id=$2)
+       ORDER BY decision.created_at`,
+      [userId, rootId ?? null]
+    );
+    return rows.map(toDecision);
+  }
+
+  /** Quoting a reminder counts the same as quoting the first notice. */
+  async decisionByFeishuMessage(userId: string, messageId: string): Promise<AssignmentDecision | null> {
+    const { rows } = await this.pool.query(
+      `SELECT ${DECISION_COLUMNS} FROM ${DECISION_FROM}
+       WHERE decision.user_id=$1 AND (decision.feishu_message_id=$2 OR decision.feishu_reminder_id=$2) LIMIT 1`,
+      [userId, messageId]
+    );
+    return rows[0] ? toDecision(rows[0]) : null;
+  }
+
+  /**
+   * The one place a decision is answered, whichever channel it comes from. The row lock and the answered
+   * check make a second answer lose, and it changes nothing. Nothing is recorded if the answer is refused.
+   */
+  async answerDecision(userId: string, decisionId: string, answer: DecisionAnswer, via: "web" | "feishu"): Promise<{ rootId: string; applied: "continue" | "skip" | "end" }> {
+    return this.transaction(async (client) => {
+      const { rows: [decision] } = await client.query(
+        `SELECT assignment_id, kind, answered_at FROM de_assignment_decisions WHERE id=$1 AND user_id=$2 FOR UPDATE`, [decisionId, userId]
+      );
+      if (!decision) throw new NotFoundError("决定不存在");
+      if (decision.answered_at) throw new ConflictError("这件事已经决定过了");
+      const { rows: [row] } = await client.query(`SELECT * FROM de_assignments WHERE id=$1 AND user_id=$2 FOR UPDATE`, [decision.assignment_id, userId]);
+      const node = toNode(row);
+      if (node.status !== "waiting_user") throw new ConflictError("任务状态已变化，请刷新后重试");
+      const clean = cleanAnswer(decision.kind, answer);
+      const applied = clean.choice === "skip" ? "skip" : clean.choice === "end" ? "end" : "continue";
+      if (applied === "continue") {
+        const { rows: [{ total }] } = await client.query(
+          `SELECT ${UNVERIFIED} AS total FROM de_assignments node WHERE node.id=$1`, [node.id]
+        );
+        if (Number(total) > 0) throw new UnverifiedOperationsError(Number(total));
+      }
+      await client.query(
+        `UPDATE de_assignment_decisions SET answer=$2, answered_via=$3, answered_at=now() WHERE id=$1`,
+        [decisionId, [clean.choice, clean.text].filter(Boolean).join(": "), via]
+      );
+      if (applied === "end") await this.cancelTree(client, userId, node.rootId);
+      else if (applied === "skip") {
+        await client.query(
+          `UPDATE de_assignments SET status=$2, version=version+1, finished_at=now(), updated_at=now() WHERE id=$1`,
+          [node.id, transitionAssignment(node.status, "skipped")]
+        );
+      } else {
+        await client.query(
+          `UPDATE de_assignments SET status=$2, version=version+1, next_message=$3, failure_reason=NULL, result=NULL, updated_at=now() WHERE id=$1`,
+          [node.id, transitionAssignment(node.status, "queued"), resumeMessage(decision.kind, clean)]
+        );
+      }
+      return { rootId: node.rootId, applied };
+    });
+  }
+
+  /** Saving needs the owner's own reply. The runner's continuation is also a user message, so messages cannot prove it. */
+  async ownerAnsweredSince(userId: string, conversationId: string, draftId: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM de_conversation_action_drafts draft
+       JOIN de_assignments node ON node.conversation_id=$2 AND node.user_id=draft.user_id
+       JOIN de_assignment_decisions decision ON decision.assignment_id=node.id AND decision.kind='question'
+         AND decision.answer IS NOT NULL AND decision.answered_at > draft.created_at
+       WHERE draft.id=$3 AND draft.user_id=$1 LIMIT 1`,
+      [userId, conversationId, draftId]
+    );
+    return rows.length > 0;
+  }
+
+  /** Runs once per decision: the row lock lets one worker in, and the next sees reminded_at. */
+  async queueReminders(afterHours: number): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `WITH due AS (
+         UPDATE de_assignment_decisions decision SET reminded_at=now() FROM de_assignments node
+         WHERE node.id=decision.assignment_id AND decision.answered_at IS NULL AND decision.reminded_at IS NULL
+           AND decision.created_at < now() - make_interval(hours => $1)
+         RETURNING decision.id, decision.user_id, decision.kind, decision.question, decision.options, decision.multi_select,
+           node.root_id, node.title, node.failure_reason
+       )
+       INSERT INTO de_assignment_events (user_id, root_id, kind, payload)
+       SELECT user_id, root_id, 'reminder', jsonb_build_object('decisionId', id, 'decisionKind', kind, 'title', title, 'question', question,
+         'options', options, 'multiSelect', multi_select, 'failureReason', failure_reason) FROM due`,
+      [afterHours]
+    );
+    return rowCount ?? 0;
+  }
+
+  /** A notice that lost the race with an answer is not sent. */
+  async decisionIsOpen(id: string): Promise<boolean> {
+    const { rows } = await this.pool.query(`SELECT 1 FROM de_assignment_decisions WHERE id=$1 AND answered_at IS NULL`, [id]);
+    return rows.length > 0;
+  }
+
+  async saveDecisionMessage(id: string, kind: "decision" | "reminder", messageId: string): Promise<void> {
+    const column = kind === "decision" ? "feishu_message_id" : "feishu_reminder_id";
+    await this.pool.query(`UPDATE de_assignment_decisions SET ${column}=$2 WHERE id=$1`, [id, messageId]);
+  }
+
+  private async insertDecision(client: PoolClient, node: Pick<AssignmentNode, "id" | "userId" | "rootId">, draft: NewDecision): Promise<void> {
+    const { kind, title, question = "", multiSelect = false, failureReason, summary } = draft;
+    const options = kind === "failure" ? [...FAILURE_CHOICES] as FailureChoice[] : draft.options ?? [];
+    const { rows: [{ id }] } = await client.query(
+      `INSERT INTO de_assignment_decisions (assignment_id, user_id, kind, question, options, multi_select) VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
+      [node.id, node.userId, kind, question, JSON.stringify(options), multiSelect]
+    );
+    await client.query(
+      `INSERT INTO de_assignment_events (user_id, root_id, kind, payload) VALUES ($1,$2,'decision',$3::jsonb)`,
+      [node.userId, node.rootId, JSON.stringify({
+        decisionId: id, decisionKind: kind, title, question, options, multiSelect, failureReason: failureReason ?? null, summary: summary ?? "",
+      })]
+    );
+  }
+
+  /** Quota and cost stops, which the owner also has to act on. */
+  async pausedRoots(userId: string): Promise<AssignmentCard[]> {
+    const { rows } = await this.pool.query(
+      `SELECT ${CARD_COLUMNS} FROM de_assignments r
+       WHERE r.user_id=$1 AND r.id=r.root_id AND r.paused_at IS NOT NULL AND r.status = ANY(${OPEN_LIST})
+       ORDER BY r.paused_at DESC LIMIT ${PINNED_LIMIT}`,
+      [userId]
+    );
+    return rows.map(toCard);
+  }
+
+  /** Set the polling pace, and the number on the sidebar. */
+  async activityCounts(userId: string): Promise<{ open: number; waiting: number }> {
+    const { rows: [row] } = await this.pool.query(
+      `SELECT
+         (SELECT count(*) FROM de_assignments r WHERE r.user_id=$1 AND r.id=r.root_id AND r.status = ANY(${OPEN_LIST})) AS open,
+         (SELECT count(*) FROM de_assignment_decisions decision WHERE decision.user_id=$1 AND decision.answered_at IS NULL) +
+         (SELECT count(*) FROM de_assignments r WHERE r.user_id=$1 AND r.id=r.root_id AND r.paused_at IS NOT NULL AND r.status = ANY(${OPEN_LIST})) AS waiting`,
+      [userId]
+    );
+    return { open: Number(row.open), waiting: Number(row.waiting) };
+  }
+
+  /** Without a cursor nothing comes back: a new device starts from now instead of replaying history. */
+  async eventsAfter(userId: string, after: string | undefined, limit: number): Promise<{ events: AssignmentActivity[]; cursor: string | null }> {
+    if (after === undefined) {
+      const { rows } = await this.pool.query(`SELECT max(id) AS last FROM de_assignment_events WHERE user_id=$1`, [userId]);
+      return { events: [], cursor: rows[0].last === null ? "0" : String(rows[0].last) };
+    }
+    const { rows } = await this.pool.query(
+      `SELECT id, root_id, kind, payload FROM de_assignment_events WHERE user_id=$1 AND id > $2::bigint ORDER BY id LIMIT $3`, [userId, after, limit]
+    );
+    return {
+      events: rows.map((row) => ({
+        id: String(row.id), rootId: String(row.root_id), kind: row.kind, title: String(row.payload.title ?? ""),
+        status: typeof row.payload.status === "string" ? row.payload.status : null,
+      })),
+      cursor: rows.length ? String(rows[rows.length - 1].id) : after,
+    };
   }
 
   // ── Runner ──
@@ -426,13 +687,13 @@ export class AssignmentRepository {
 
   /** Ends a turn. Only one writer wins, so a node the owner cancelled meanwhile stays cancelled. */
   async settle(node: AssignmentNode, to: AssignmentStatus, outcome: {
-    result?: AssignmentResult; failureReason?: FailureReason; autoResumed?: boolean; event?: Record<string, unknown>;
+    result?: AssignmentResult; failureReason?: FailureReason; autoResumed?: boolean; event?: Record<string, unknown>; decision?: NewDecision;
   } = {}): Promise<boolean> {
     const status = transitionAssignment(node.status, to);
     const final = to === "succeeded" || to === "failed";
     return this.transaction(async (client) => {
       const { rowCount } = await client.query(
-        `UPDATE de_assignments SET status=$3, version=version+1, lease_until=NULL, end_intent=NULL, updated_at=now(),
+        `UPDATE de_assignments SET status=$3, version=version+1, lease_until=NULL, end_intent=NULL, next_message=NULL, updated_at=now(),
            result=COALESCE($4::jsonb, result), failure_reason=COALESCE($5, failure_reason), auto_resumed=auto_resumed OR $6,
            finished_at=CASE WHEN $7 THEN now() ELSE finished_at END
          WHERE id=$1 AND version=$2 AND status='running'`,
@@ -442,6 +703,7 @@ export class AssignmentRepository {
         ]
       );
       if (!rowCount) return false;
+      if (outcome.decision) await this.insertDecision(client, node, outcome.decision);
       if (outcome.event) {
         await client.query(
           `INSERT INTO de_assignment_events (user_id, root_id, kind, payload) VALUES ($1,$2,'finished',$3::jsonb)`,
@@ -484,6 +746,13 @@ export class AssignmentRepository {
           await client.query(
             `UPDATE de_assignments SET status='queued', auto_resumed=true, version=version+1, lease_until=NULL, updated_at=now() WHERE id=$1`, [node.id]
           );
+        } else if (node.mode === "responsive") {
+          const reason: FailureReason = unverified.length ? "unknown_outcome" : "interrupted";
+          await client.query(
+            `UPDATE de_assignments SET status='waiting_user', failure_reason=$2, version=version+1, lease_until=NULL, updated_at=now() WHERE id=$1`,
+            [node.id, reason]
+          );
+          await this.insertDecision(client, node, { kind: "failure", title: node.title, failureReason: reason });
         } else {
           const reason: FailureReason = unverified.length ? "unknown_outcome" : "interrupted";
           await client.query(
@@ -533,4 +802,16 @@ export class AssignmentRepository {
     );
     return Number(rows[0].total);
   }
+}
+
+/** Turns whatever a channel sent into what the decision needs. A failure answered in words means "do it this way". */
+function cleanAnswer(kind: DecisionKind, answer: DecisionAnswer): DecisionAnswer {
+  const text = answer.text?.trim() || undefined;
+  if (kind === "question") {
+    if (!text) throw new InputError("写下你的回答");
+    return { text };
+  }
+  const choice = answer.choice ?? (text ? "change" : undefined);
+  if (!choice) throw new InputError("选一个做法");
+  return choice === "change" ? { choice, text } : { choice };
 }

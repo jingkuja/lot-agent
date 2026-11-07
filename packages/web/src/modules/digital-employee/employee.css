@@ -657,6 +657,7 @@
 .de-today-section-links { display: flex; gap: 12px; margin-left: auto; }
 .de-today-section-links button { padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 12px; font-weight: 400; cursor: pointer; }
 .de-today-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
+.de-today-card.is-decision { flex-direction: column; align-items: stretch; }
 .de-today-card.is-overdue { border-color: color-mix(in srgb, var(--de-warning) 55%, var(--border)); }
 .de-today-card > div:first-child { display: grid; flex: 1; gap: 3px; min-width: 0; }
 .de-today-card h3 { color: var(--text); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
@@ -746,6 +747,16 @@
 .de-assignment-options { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
 .de-assignment-options label, .de-assignment-limit label { display: grid; flex: 1 1 200px; gap: 4px; min-width: 0; color: var(--text-secondary); font-size: 12px; }
 .de-assignment-options select, .de-assignment-options input, .de-assignment-limit input, .de-assignment-filters input, .de-assignment-filters select { width: 100%; min-width: 0; min-height: 36px; padding: 0 10px; border: 1px solid var(--border-input); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 13px; }
+.de-assignment-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; padding: 0; border: 0; }
+.de-assignment-mode legend { float: left; margin-right: 4px; padding: 0; color: var(--text-secondary); font-size: 12px; }
+.de-assignment-mode label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 13px; cursor: pointer; }
+.de-decision-card { display: grid; gap: 10px; min-width: 0; }
+.de-decision-card + .de-decision-card { padding-top: 12px; border-top: 1px solid var(--border); }
+.de-decision-question { margin: 0; color: var(--text); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.de-decision-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.de-decision-options label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; cursor: pointer; }
+.de-decision-card form { display: grid; justify-items: end; gap: 8px; }
+.de-decision-card textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border-input); border-radius: var(--radius-md); background: var(--bg-input); color: var(--text); font: inherit; font-size: 13px; line-height: 1.6; resize: vertical; }
 .de-assignment-files { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .de-assignment-files li { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 8px; border-radius: 999px; background: var(--bg-hover); color: var(--text-secondary); font-size: 12px; }
 .de-assignment-files span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -37,6 +37,8 @@ interface EmployeeWorkspaceProps {
   schedules: boolean;
   assignments: boolean;
   pendingCount: number;
+  /** Tasks stopped until the owner acts. */
+  waitingTasks: number;
   onPendingChange: (count: number) => void;
   onLogout: () => void;
   navigate: (path: string) => void;
@@ -50,7 +52,8 @@ const keepConversation = (conversation: Conversation | undefined) =>
 
 /** One employee: its card, five entries and a conversation that stays mounted under every page. */
 export function EmployeeWorkspace({
-  user, modelCatalog, pathname, active, dailyScan, schedules, assignments, pendingCount, onPendingChange, onLogout, navigate, replacePath, onNavigateAssistant,
+  user, modelCatalog, pathname, active, dailyScan, schedules, assignments, pendingCount, waitingTasks, onPendingChange, onLogout, navigate, replacePath,
+  onNavigateAssistant,
 }: EmployeeWorkspaceProps) {
   const { t } = useI18n();
   const location = useMemo(() => parseEmployeePath(pathname), [pathname]);
@@ -233,6 +236,7 @@ export function EmployeeWorkspace({
       onDraftOutreach={(item) => draftOutreach(context, item)}
       onAssign={(prompt) => assign(context, prompt)}
       onOpenScheduledRun={(id) => navigate(`${employeePath("work-log", "scheduled")}/${encodeURIComponent(id)}`)}
+      onOpenAssignment={(id) => openView("assignments", id)}
       onRefineRecommendation={(item: CampaignRecommendation) => openCreation(seedFromRecommendation(item))}
     />;
   };
@@ -257,6 +261,7 @@ export function EmployeeWorkspace({
       waiting={pendingCount}
       view={view}
       assignments={assignments}
+      waitingTasks={waitingTasks}
       isStreaming={context.isStreaming}
       onNavigate={openView}
       onNewConversation={() => {

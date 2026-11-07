@@ -126,6 +126,25 @@ export function unattendedCommitImport(imports: Pick<ProductImportService, "comm
   };
 }
 
+/**
+ * The chat rule still applies to a responsive task: the owner has to have replied. The rule's own check counts
+ * any user message, and a task's continuations are user messages too, so here it takes a real answer.
+ */
+export function requireOwnerAnswer(original: Tool, repository: Pick<AssignmentRepository, "ownerAnsweredSince">): Tool {
+  return {
+    ...original,
+    async execute(input, context) {
+      const draftId = (input as { draftId?: unknown } | null)?.draftId;
+      if (typeof draftId !== "string" || !context.conversationId) return original.execute(input, context);
+      if (await repository.ownerAnsweredSince(context.userId ?? "default", context.conversationId, draftId)) return original.execute(input, context);
+      return {
+        content: "Not saved: the owner has not answered since this file was sorted. Call ask_user with what was found, and save after they answer.",
+        isError: true, errorKind: "validation",
+      };
+    },
+  };
+}
+
 /** Wraps the ordinary product tools, so what a task held back for the owner cannot be written around the review. */
 export function guardHeldItems(original: Tool, imports: Pick<ProductImportService, "itemsHeldFor">): Tool {
   return {

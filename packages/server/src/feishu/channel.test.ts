@@ -13,6 +13,46 @@ function setup(jobs: FeishuInboxJob[]) {
   const channel=new FeishuChannel(feishu as unknown as FeishuService,agent as unknown as AgentService);
   return { repo,feishu,agent,channel };
 }
+describe("Feishu reply routing",() => {
+  const event=(text: string,parent_id?: string) => ({ sender:{ sender_type:"user",tenant_key:"t",sender_id:{ open_id:"ou_1" } },
+    message:{ chat_type:"p2p",message_type:"text",message_id:"om_in",chat_id:"chat",content:JSON.stringify({ text }),parent_id } });
+  function routing(route: (input: { userId: string; parentId?: string; text: string }) => Promise<string | null>, seen = false) {
+    const repo={ findSender:vi.fn(async () => ({ user_id:"u1",revision:"rev" })),enqueue:vi.fn(async () => true),
+      seen:vi.fn(async () => seen),recordRouted:vi.fn(async () => {}) };
+    const feishu={ repository:repo,botReply:vi.fn(async () => "om_reply") };
+    const router=vi.fn(route);
+    return { repo,feishu,router,channel:new FeishuChannel(feishu as unknown as FeishuService,{} as AgentService,8,{ route:router }) };
+  }
+  it("stops a handled reply reaching the assistant, and answers it",async () => {
+    const s=routing(async () => "收到，继续执行。");
+    await s.channel.receive(event("1","om_notice"),"app");
+    expect(s.router).toHaveBeenCalledWith({ userId:"u1",parentId:"om_notice",text:"1" });
+    expect(s.repo.enqueue).not.toHaveBeenCalled();
+    expect(s.repo.recordRouted).toHaveBeenCalledWith(expect.objectContaining({ message_id:"om_in",user_id:"u1" }));
+    expect(s.feishu.botReply).toHaveBeenCalledWith(expect.objectContaining({ message_id:"om_in" }),"收到，继续执行。");
+  });
+  it("leaves everything else to the assistant, including when the port fails",async () => {
+    const declined=routing(async () => null);
+    await declined.channel.receive(event("写个周报"),"app");
+    expect(declined.repo.enqueue).toHaveBeenCalledOnce();
+    expect(declined.repo.recordRouted).not.toHaveBeenCalled();
+    const broken=routing(async () => { throw new Error("db"); });
+    await broken.channel.receive(event("写个周报"),"app");
+    expect(broken.repo.enqueue).toHaveBeenCalledOnce();
+  });
+  it("does not route a redelivered message again",async () => {
+    const s=routing(async () => "收到",true);
+    await s.channel.receive(event("1"),"app");
+    expect(s.router).not.toHaveBeenCalled();
+    expect(s.feishu.botReply).not.toHaveBeenCalled();
+  });
+  it("keeps the routed reply even when the acknowledgement cannot be sent",async () => {
+    const s=routing(async () => "收到");
+    s.feishu.botReply.mockRejectedValueOnce(new Error("offline"));
+    await s.channel.receive(event("1"),"app");
+    expect(s.repo.enqueue).not.toHaveBeenCalled();
+  });
+});
 describe("Feishu task delivery and transcript",() => {
   it("retains the controlled bot activation link and error code without accepting injected text", async () => {
     const s = setup([]);

@@ -9,12 +9,19 @@ export function statusLabel(item: Pick<Assignment, "status" | "pausedReason">): 
 }
 
 export function statusTone(item: Pick<Assignment, "status" | "pausedReason">): string {
-  if (item.pausedReason) return "paused";
+  if (item.pausedReason || item.status === "waiting_user") return "paused";
   if (item.status === "succeeded") return "done";
   if (item.status === "failed") return "failed";
   if (item.status === "cancelled" || item.status === "skipped") return "muted";
   return "active";
 }
+
+export const MODE_LABELS: Record<Assignment["mode"], string> = { autonomous: "完全自主", responsive: "及时响应" };
+
+export const MODE_HINTS: Record<Assignment["mode"], string> = {
+  autonomous: "完全自主：员工自己做决定，不中途问你，写入和生成都会直接做。",
+  responsive: "及时响应：遇到要你拿主意的事或做不下去时，员工停下来问你，你回答后接着做。",
+};
 
 export const FAILURE_LABELS: Record<AssignmentFailure, string> = {
   blocked: "员工判断这件事做不下去",

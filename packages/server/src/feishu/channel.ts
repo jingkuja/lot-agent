@@ -30,6 +30,11 @@ function feishuFailure(output: string): string | undefined {
     if (output === message) return message;
   }
 }
+/** Lets a module answer a reply itself. Returns what the bot says back, or null to leave it to the assistant. */
+export interface FeishuReplyRouter {
+  route(input: { userId: string; parentId?: string; text: string }): Promise<string | null>;
+}
+
 export class FeishuChannel {
   private sockets = new Map<string, { client: WSClient; fingerprint: string }>();
   private timer?: ReturnType<typeof setInterval>;
@@ -40,7 +45,10 @@ export class FeishuChannel {
   private controllers = new Map<string, AbortController>();
   private stopping = false;
   private longConnectionEnabled = false;
-  constructor(private readonly feishu: FeishuService, private readonly agent: AgentService, private readonly concurrency = 8) {}
+  constructor(
+    private readonly feishu: FeishuService, private readonly agent: AgentService, private readonly concurrency = 8,
+    private readonly replies?: FeishuReplyRouter,
+  ) {}
 
   async receive(data: any, appId: string) {
     if (!appId) return;
@@ -53,9 +61,25 @@ export class FeishuChannel {
     let text: string;
     try { text = JSON.parse(m.content).text; } catch { return; }
     if (typeof text !== "string" || !text.trim() || Buffer.byteLength(text) > 12_000) return;
-    const accepted = await this.feishu.repository.enqueue({ message_id:m.message_id,chat_id:m.chat_id,
-      user_id:connection.user_id,revision:connection.revision,text });
+    const inbound = { message_id:m.message_id,chat_id:m.chat_id,user_id:connection.user_id,revision:connection.revision,text };
+    if (await this.routed(inbound,typeof m.parent_id === "string" && m.parent_id ? m.parent_id : undefined)) return;
+    const accepted = await this.feishu.repository.enqueue(inbound);
     if (accepted && ["/cancel","取消任务"].includes(text.trim())) this.abortUser(connection.user_id);
+  }
+
+  /** True when a port took the message. A failing port never costs the owner their message: the assistant gets it. */
+  private async routed(job: FeishuInboxJob, parentId?: string) {
+    if (!this.replies || await this.feishu.repository.seen(job.message_id,job.user_id)) return false;
+    let reply: string | null;
+    try { reply = await this.replies.route({ userId:job.user_id,parentId,text:job.text }); }
+    catch {
+      console.warn("[feishu] Reply routing unavailable");
+      return false;
+    }
+    if (reply === null) return false;
+    await this.feishu.repository.recordRouted(job);
+    await this.feishu.botReply(job,reply).catch(() => console.warn("[feishu] Reply acknowledgement not delivered"));
+    return true;
   }
 
   start(longConnection = true) {

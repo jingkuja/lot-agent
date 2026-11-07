@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { AgentEvent, RunStatus } from "@lot-agent/core";
 import type { AttachmentRef } from "../services/attachment-extractor.js";
 import { assignmentConfig } from "./assignment-config.js";
-import { assignmentLink, costLimitNotice, finishedNotice, quotaNotice } from "./assignment-notices.js";
+import { assignmentLink, costLimitNotice, decisionNotice, finishedNotice, quotaNotice } from "./assignment-notices.js";
 import type { AssignmentEvent, AssignmentNode, AssignmentRepository } from "./assignment-repository.js";
-import { decideTurn, type FailureReason, type TurnDecision } from "./assignment-state.js";
+import { decideTurn, type FailureReason, type OwnerQuestion, type TurnDecision } from "./assignment-state.js";
 import { DIGITAL_EMPLOYEE_LLM_UNAVAILABLE, MANAGED_CREDENTIAL_UNAVAILABLE } from "./llm.js";
 
 const CLAIM_INTERVAL_MS = 1_000;
@@ -21,6 +21,8 @@ const SOFT_TURN_MS = 25 * 60_000;
 const DELIVERY_BATCH = 20;
 const QUOTA_NOTICE_HOURS = 24;
 const PAUSE_NOTICE_DELAY_MS = 30_000;
+const REMINDER_HOURS = 24;
+const MAX_OPTIONS = 6;
 
 /** A new segment reads its own history, so this only has to say what is happening. */
 const CONTINUE_MESSAGE = "[Task continuation] Carry on from where you stopped. Check the execution records before repeating any write. " +
@@ -46,15 +48,25 @@ export interface AssignmentRunnerPorts {
   generateTitle(node: AssignmentNode): Promise<string | null>;
   employeeName(userId: string): Promise<string>;
   /** Has no recipient: a notice can only ever reach the account's owner. */
-  sendToOwner?: (userId: string, message: { text: string; requestId: string }) => Promise<unknown>;
+  sendToOwner?: (userId: string, message: { text: string; requestId: string }) => Promise<{ messageId?: string } | void>;
   english: boolean;
 }
 
 interface TurnRecord {
   status: RunStatus | undefined;
+  question: OwnerQuestion | null;
   quota: boolean;
   text: string;
   madeProgress: boolean;
+}
+
+function ownerQuestion(input: unknown): OwnerQuestion {
+  const { question, options, multiSelect } = (input ?? {}) as { question?: unknown; options?: unknown; multiSelect?: unknown };
+  return {
+    question: typeof question === "string" ? question.trim() : "",
+    options: Array.isArray(options) ? options.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).slice(0, MAX_OPTIONS) : [],
+    multiSelect: multiSelect === true,
+  };
 }
 
 /** Polls PostgreSQL rather than a queue: a task may wait for days, and a queue's stalled retry could repeat a write. */
@@ -110,6 +122,7 @@ export class AssignmentRunner {
     for (const { node, resumed } of await this.repository.sweepOrphans()) {
       console.warn(`[assignments] node ${node.id} lost its worker: ${resumed ? "resumed" : "failed"}`);
     }
+    await this.repository.queueReminders(REMINDER_HOURS);
   }
 
   /** Test seam: resolves when every turn started so far has ended. */
@@ -160,7 +173,8 @@ export class AssignmentRunner {
   }
 
   private async run(node: AssignmentNode, runId: string, first: boolean, signal: AbortSignal, onPaused: () => void): Promise<TurnRecord> {
-    const turn: TurnRecord = { status: undefined, quota: false, text: "", madeProgress: false };
+    const turn: TurnRecord = { status: undefined, question: null, quota: false, text: "", madeProgress: false };
+    const asked = new Map<string, unknown>();
     const startedAt = Date.now();
     const beforeIteration = async (usage: { tokens: number; cost: number }) => {
       try {
@@ -174,7 +188,7 @@ export class AssignmentRunner {
     };
     try {
       for await (const event of this.ports.stream({
-        conversationId: node.conversationId, message: first ? node.goal : CONTINUE_MESSAGE, userId: node.userId,
+        conversationId: node.conversationId, message: first ? node.goal : node.nextMessage ?? CONTINUE_MESSAGE, userId: node.userId,
         attachments: first ? node.attachments : [], signal, runId, modelId: node.modelId, beforeIteration,
       })) {
         if (event.type === "text") {
@@ -182,8 +196,11 @@ export class AssignmentRunner {
           if (event.content.trim()) turn.madeProgress = true;
         } else if (event.type === "tool_call") {
           turn.text = "";
+          if (event.name === "ask_user") asked.set(event.id, event.input);
         } else if (event.type === "tool_result") {
           turn.madeProgress = true;
+          // Taken from a call that was accepted, so a rejected one cannot pause the task with no question.
+          if (event.name === "ask_user" && !event.isError) turn.question = ownerQuestion(asked.get(event.toolCallId));
           if (event.errorKind === "quota") {
             turn.quota = true;
             await this.repository.pause(node.rootId, "quota");
@@ -207,7 +224,8 @@ export class AssignmentRunner {
   private async conclude(node: AssignmentNode, runId: string, turn: TurnRecord, paused: boolean): Promise<void> {
     const current = await this.repository.readNode(node.id);
     const decision: TurnDecision = decideTurn({
-      status: turn.status, endIntent: current?.endIntent ?? null, quota: turn.quota, paused, shuttingDown: this.stopping,
+      mode: node.mode, status: turn.status, endIntent: current?.endIntent ?? null, question: turn.question, quota: turn.quota, paused,
+      shuttingDown: this.stopping,
       text: turn.text.trim(), madeProgress: turn.madeProgress, previousMadeProgress: await this.repository.previousProgress(node, runId),
     });
     const title = current?.title ?? node.title;
@@ -224,6 +242,16 @@ export class AssignmentRunner {
           ...(decision.summary ? { result: { summary: decision.summary, assumptions: decision.assumptions ?? [], skipped: decision.skipped ?? [] } } : {}),
           event: { status: "failed", title, failureReason: decision.reason, summary: decision.summary ?? "" },
         });
+        return;
+      case "ask_failure":
+        await this.repository.settle(node, "waiting_user", {
+          failureReason: decision.reason,
+          ...(decision.summary ? { result: { summary: decision.summary, assumptions: decision.assumptions ?? [], skipped: decision.skipped ?? [] } } : {}),
+          decision: { kind: "failure", title, failureReason: decision.reason, summary: decision.summary },
+        });
+        return;
+      case "ask":
+        await this.repository.settle(node, "waiting_user", { decision: { kind: "question", title, ...decision.question } });
         return;
       case "pause":
         if (turn.quota) await this.repository.pause(node.rootId, "quota");
@@ -251,6 +279,8 @@ export class AssignmentRunner {
     for (const event of events) {
       if (event.kind === "paused" && event.payload.reason === "quota") {
         quotaByUser.set(event.userId, [...(quotaByUser.get(event.userId) ?? []), event]);
+      } else if (event.kind === "decision" || event.kind === "reminder") {
+        await this.sendDecision(event);
       } else {
         await this.send(event.userId, `assignment-event:${event.id}`, async (name) => this.eventText(event, name));
       }
@@ -263,6 +293,18 @@ export class AssignmentRunner {
     }
   }
 
+  /** The sent message's id is kept so a quoted reply can find its decision. */
+  private async sendDecision(event: AssignmentEvent): Promise<void> {
+    const id = String(event.payload.decisionId);
+    if (!await this.repository.decisionIsOpen(id)) return;
+    const { decisionKind, question, options, title, failureReason, summary } = event.payload;
+    const sent = await this.send(event.userId, `assignment-event:${event.id}`, async (name) => decisionNotice({
+      name, title: String(title ?? ""), kind: decisionKind, question, options, failureReason: failureReason as FailureReason | null, summary,
+      link: assignmentLink(event.rootId), reminder: event.kind === "reminder",
+    }, this.ports.english));
+    if (sent?.messageId) await this.repository.saveDecisionMessage(id, event.kind as "decision" | "reminder", sent.messageId);
+  }
+
   private eventText(event: AssignmentEvent, name: string): string {
     const title = String(event.payload.title ?? "");
     const link = assignmentLink(event.rootId);
@@ -272,9 +314,9 @@ export class AssignmentRunner {
     }, this.ports.english);
   }
 
-  private async send(userId: string, requestId: string, text: (name: string) => Promise<string>): Promise<void> {
+  private async send(userId: string, requestId: string, text: (name: string) => Promise<string>): Promise<{ messageId?: string } | void> {
     try {
-      await this.ports.sendToOwner!(userId, { text: await text(await this.ports.employeeName(userId)), requestId });
+      return await this.ports.sendToOwner!(userId, { text: await text(await this.ports.employeeName(userId)), requestId });
     } catch {
       // Not resent: the outcome of a failed send can be unknown, and the result is on the task page.
       console.warn("[assignments] Feishu notice not delivered");

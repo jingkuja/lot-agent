@@ -6,6 +6,8 @@ import { employeeApi } from "../api.js";
 import { formatTime, type OpportunityDialog } from "../opportunities/OpportunityCard.js";
 import { CreateActionDialog, OpportunityDialogs } from "../opportunities/OpportunityDialogs.js";
 import { TODAY_PATH } from "../routes.js";
+import { DecisionCard } from "../assignments/DecisionCard.js";
+import { PAUSE_LABELS } from "../assignments/copy.js";
 import { TEMPLATE_LABELS } from "../schedule/labels.js";
 import type { CampaignRecommendation, MarketingAsset, OpportunityItem, TodayItem, TodayResponse } from "../types.js";
 import { proposalCopy, runningLabel } from "./copy.js";
@@ -31,6 +33,7 @@ interface TodayPageProps {
   onAssign: (prompt: string) => void;
   onRefineRecommendation: (item: CampaignRecommendation) => void;
   onOpenScheduledRun: (id: string) => void;
+  onOpenAssignment: (id: string) => void;
 }
 
 interface Notice {
@@ -41,7 +44,7 @@ interface Notice {
 /** The landing page: what the employee prepared, in the order the owner has to act on it. */
 export function TodayPage({
   data, error, busy, onReload, onOpenConversation, onOpenProfile, onOpenCustomers, onOpenSnoozed, onOpenLink,
-  onDraftOutreach, onAssign, onRefineRecommendation, onOpenScheduledRun,
+  onDraftOutreach, onAssign, onRefineRecommendation, onOpenScheduledRun, onOpenAssignment,
 }: TodayPageProps) {
   const { t, locale } = useI18n();
   const [pending, setPending] = useState<string | null>(null);
@@ -103,6 +106,7 @@ export function TodayPage({
   const followUps = data.items.filter((item) => item.kind === "follow_up");
   const results = data.items.filter((item) => item.kind === "result");
   const reports = data.items.filter((item) => item.kind === "report");
+  const assignments = data.items.filter((item) => item.kind === "assignment");
   const toConfirm = proposals.length + opportunities.length + recommendations.length;
 
   return (
@@ -112,7 +116,7 @@ export function TodayPage({
           <h1>{t("今日简报")}</h1>
           <p>
             {data.hasProfiles
-              ? t("待确认 {0} 件，要跟进 {1} 位客户，等结果 {2} 个。", [toConfirm, followUps.length, results.length])
+              ? t("待确认 {0} 件，要跟进 {1} 位客户，等结果 {2} 个。", [toConfirm + assignments.length, followUps.length, results.length])
               : t("我还不认识你的客户。告诉我第一位客户，我就开始准备工作。")}
           </p>
           {data.brief && <p>{t("今天看了 {0} 位客户，新发现 {1} 条商机。", [data.brief.counts.scanned, data.brief.counts.created])}</p>}
@@ -150,6 +154,28 @@ export function TodayPage({
           <span>{t(notice.text)}</span>
           {notice.link && <button onClick={() => onOpenLink(notice.link!)}>{t("查看")}</button>}
         </div>
+      )}
+
+      {assignments.length > 0 && (
+        <section className="de-today-section" aria-label={t("任务等你决定")}>
+          <h2>
+            {t("任务等你决定")}
+            <b>{assignments.length}</b>
+          </h2>
+          {assignments.map((item) => {
+            const { rootId, title, decision, pausedReason } = item.assignment!;
+            return <article key={item.id} className="de-today-card is-decision">
+              <div>
+                <h3><button type="button" className="de-text-button" onClick={() => onOpenAssignment(rootId)}>{title}</button></h3>
+                {pausedReason && <p>{t(PAUSE_LABELS[pausedReason])}</p>}
+              </div>
+              {decision && <DecisionCard decision={decision} onAnswered={onReload} onOpenTask={() => onOpenAssignment(rootId)} />}
+              {pausedReason && <div className="de-today-actions">
+                <button type="button" className="de-primary-button" onClick={() => onOpenAssignment(rootId)}>{t("去处理")}</button>
+              </div>}
+            </article>;
+          })}
+        </section>
       )}
 
       {toConfirm > 0 && (

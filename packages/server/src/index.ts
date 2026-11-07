@@ -89,7 +89,9 @@ async function main() {
   await service.init();
   const feishu = isFeishuEnabled() ? new FeishuService(new PgFeishuRepository(service.db.pool), new SecretBox(process.env.SECRET_MASTER_KEY)) : null;
   service.feishuService = feishu;
-  const feishuChannel = feishu ? new FeishuChannel(feishu,service) : null;
+  const feishuChannel = feishu ? new FeishuChannel(feishu,service,undefined,{
+    route: reply => service.digitalEmployee.assignments.routeReply(reply,internationalModelsEnabled()),
+  }) : null;
   feishuChannel?.start(process.env.FEISHU_LONG_CONNECTION !== "0");
 
   // Sessions hard-expire after 7 days (session-store.ts) but expired rows are

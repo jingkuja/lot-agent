@@ -181,8 +181,30 @@ const TWO_DAYS_AGO = new Date(new Date().setHours(10, 0, 0, 0) - 2 * 86_400_000)
 const task = (over) => ({
   id: "t1", title: "写开业优惠方案", goal: "查同行开业活动，写优惠方案", mode: "autonomous", status: "running", pausedReason: null, modelId: "kimi-k3.1-pro",
   result: null, failureReason: null, createdAt: TODAY, finishedAt: null, creditsUsed: 120, creditLimit: null, subtasks: { done: 0, total: 0 },
-  currentTool: "web_search", attachments: [], ...over,
+  currentTool: "web_search", waitingDecisions: 0, attachments: [], conversationId: "c-task", unverified: 0, decisions: [], ...over,
 });
+const decisionFixture = (over) => ({
+  id: "q1", assignmentId: "t5", rootId: "t5", conversationId: "c-task", title: "给王总记跟进", kind: "question", question: "哪位王总？",
+  options: ["华东的王总", "华南的王总"], multiSelect: false, failureReason: null, unverified: 0, createdAt: NOW, ...over,
+});
+/** A question, a failure with an unconfirmed write, and a task stopped by quota. */
+const decisionTasks = (state) => {
+  const question = decisionFixture({});
+  const failure = decisionFixture({ id: "f1", assignmentId: "t6", rootId: "t6", title: "同步价格", kind: "failure", question: "", options: ["retry", "skip", "change", "end"],
+    failureReason: "unknown_outcome", unverified: 1 });
+  state.assignments.unshift(
+    task({ id: "t5", title: "给王总记跟进", goal: "给王总记一条跟进", mode: "responsive", status: "waiting_user", currentTool: null, waitingDecisions: 1, decisions: [question] }),
+    task({ id: "t6", title: "同步价格", goal: "把价格改成 99", mode: "responsive", status: "waiting_user", failureReason: "unknown_outcome", currentTool: null,
+      waitingDecisions: 1, unverified: 1, decisions: [failure] }),
+  );
+  state.attention = [
+    { rootId: "t5", title: "给王总记跟进", createdAt: NOW, decision: question, pausedReason: null },
+    { rootId: "t6", title: "同步价格", createdAt: NOW, decision: failure, pausedReason: null },
+    { rootId: "t3", title: "写活动海报", createdAt: NOW, decision: null, pausedReason: "quota" },
+  ];
+  state.taskActivity = { open: 3, waiting: 3, events: [], cursor: "5" };
+  return state;
+};
 
 function api(state, unexpected, dailyScan = false, schedules = false, assignments = false) {
   return async (route) => {
@@ -216,6 +238,16 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
       const created = task({ id: `t${state.assignments.length + 1}`, title: body.goal, goal: body.goal, status: "queued", currentTool: null, creditsUsed: 0 });
       state.assignments.unshift(created);
       return json(created, 201);
+    }
+    const answered = de.match(/^\/assignments\/decisions\/([^/]+)\/answer$/);
+    if (answered) {
+      const body = request.postDataJSON();
+      const item = state.assignments.find((entry) => entry.decisions?.some((decision) => decision.id === answered[1]));
+      if (!item) return json({ error: "决定不存在" }, 404);
+      state.attention = (state.attention ?? []).filter((entry) => entry.decision?.id !== answered[1]);
+      const status = { skip: "skipped", end: "cancelled" }[body.choice] ?? "queued";
+      Object.assign(item, { waitingDecisions: 0, decisions: [], failureReason: null, status });
+      return json(item);
     }
     const assignment = de.match(/^\/assignments\/([^/]+)(?:\/(\w+))?$/);
     if (assignment) {
@@ -298,6 +330,12 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
           state.feedback.length,
         brief: state.brief,
         desktopReminder: state.settings.desktopReminder,
+        assignments: (() => {
+          state.summaryCursors = [...(state.summaryCursors ?? []), url.searchParams.get("after")];
+          const activity = state.taskActivity ?? { open: 0, waiting: 0, events: [], cursor: "0" };
+          if (state.taskActivity) state.taskActivity = { ...activity, events: [] };
+          return activity;
+        })(),
       });
     }
     if (de.match(/^\/today\/brief\/[^/]+\/read$/)) { state.briefReads.push(de); return json({ ok: true }); }
@@ -315,6 +353,10 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
         ...state.followUps.map((item) => work("follow_up", item)),
         ...state.results.map((item) => work("result", item)),
         ...state.reports,
+        ...(state.attention ?? []).map((assignment) => ({
+          id: `assignment:${assignment.decision?.id ?? assignment.rootId}`, kind: "assignment", subject: null, title: assignment.title, reason: "", evidence: [],
+          priority: "high", dueAt: NOW, source: { type: "assignment", id: assignment.rootId }, assignment,
+        })),
         ...state.feedback.map((item) => ({
           id: `result:${item.id}`, kind: "result", subject: { type: "asset", id: item.assetId, label: item.title }, title: item.title, reason: "", evidence: [],
           priority: "normal", dueAt: item.deployedAt, source: { type: "deployment", id: item.id }, deployment: item,
@@ -1014,7 +1056,7 @@ try {
     await page.getByRole("button", { name: "开始", exact: true }).click();
     await days.nth(1).getByText("查查附近的开业活动", { exact: true }).first().waitFor();
     const created = JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/assignments")).body);
-    assert.deepEqual(created, { goal: "查查附近的开业活动", attachments: [{ assetId: "asset1", filename: "手册.pdf" }], creditLimit: 500 });
+    assert.deepEqual(created, { goal: "查查附近的开业活动", mode: "autonomous", attachments: [{ assetId: "asset1", filename: "手册.pdf" }], creditLimit: 500 });
 
     await days.first().getByRole("button", { name: "继续", exact: true }).click();
     await page.waitForFunction(() => document.querySelector(".de-assignment-card em")?.textContent !== "已暂停");
@@ -1054,6 +1096,88 @@ try {
     await phone.page.locator(".de-assignment-filters").waitFor();
     assert.equal(await phone.page.evaluate(() => getComputedStyle(document.querySelector(".de-assignment-list")).gridTemplateColumns.split(" ").length), 1);
     await phone.close();
+  }
+
+  // Responsive tasks: choosing the mode, answering a question, a failure that needs checking first, and where an owner finds them.
+  {
+    const state = decisionTasks(fixtures());
+    const { page, close } = await open("/digital-employee/assignments", { assignments: true, state });
+    await page.locator(".de-employee-nav").getByRole("button", { name: /任务分派/ }).locator("b").getByText("3").waitFor();
+    await page.getByRole("radio", { name: "及时响应" }).check();
+    await page.getByText("员工停下来问你").waitFor();
+    await page.getByText("要回到这里才能看到问题和结果").waitFor();
+    await page.getByRole("textbox", { name: "交代一件事" }).fill("给张姐记跟进");
+    await page.getByRole("button", { name: "开始", exact: true }).click();
+    await page.getByRole("textbox", { name: "交代一件事" }).and(page.locator(":not(:disabled)")).waitFor();
+    await page.waitForFunction(() => document.querySelector(".de-assignment-composer textarea")?.value === "");
+    assert.equal(JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/assignments")).body).mode, "responsive");
+
+    const card = page.locator(".de-assignment-card").filter({ hasText: "给王总记跟进" });
+    await card.getByText("等你决定").waitFor();
+    await card.getByText("及时响应").waitFor();
+    await page.locator(".de-assignment-card").filter({ hasText: "同步价格" }).getByRole("button", { name: "回答" }).waitFor();
+    await card.getByRole("button", { name: "回答" }).click();
+    await page.waitForURL("**/digital-employee/assignments/t5");
+    await page.getByText("哪位王总？").waitFor();
+    await page.getByRole("button", { name: "华南的王总" }).click();
+    await page.waitForFunction(() => !document.querySelector(".de-decision-card"));
+    assert.deepEqual(JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/decisions/q1/answer")).body), { text: "华南的王总" });
+
+    await page.goto(`${origin}/digital-employee/assignments/t6`);
+    await page.getByText("有 1 项操作的结果没有确认").waitFor();
+    assert.equal(await page.getByRole("button", { name: "重试" }).isDisabled(), true);
+    assert.equal(await page.getByRole("button", { name: "换个做法" }).isDisabled(), true);
+    await page.getByText("核实操作结果").waitFor();
+    Object.assign(state.assignments.find((item) => item.id === "t6"), {
+      unverified: 0,
+      decisions: [decisionFixture({
+        id: "f1", assignmentId: "t6", rootId: "t6", kind: "failure", question: "", options: ["retry", "skip", "change", "end"], failureReason: "unknown_outcome",
+      })],
+    });
+    await page.waitForFunction(() => [...document.querySelectorAll(".de-decision-card button")].find((item) => item.textContent === "重试")?.disabled === false);
+    await page.getByRole("button", { name: "换个做法" }).click();
+    await page.getByRole("textbox", { name: "换个做法" }).fill("先查现价再改");
+    await page.getByRole("button", { name: "就这样做" }).click();
+    await page.waitForFunction(() => !document.querySelector(".de-decision-card"));
+    assert.deepEqual(JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/decisions/f1/answer")).body), { choice: "change", text: "先查现价再改" });
+    await close();
+
+    const today = decisionTasks(fixtures());
+    const todayPage = await open("/digital-employee/today", { assignments: true, state: today });
+    const section = todayPage.page.getByRole("region", { name: "任务等你决定" });
+    await section.getByText("哪位王总？").waitFor();
+    await section.getByText("额度不足或 Key 不可用").waitFor();
+    await section.getByRole("button", { name: "华东的王总" }).click();
+    await todayPage.page.waitForFunction(() => !document.body.textContent.includes("哪位王总？"));
+    await section.getByRole("button", { name: "去核实" }).click();
+    await todayPage.page.waitForURL("**/digital-employee/assignments/t6");
+    await todayPage.close();
+
+    const english = decisionTasks(fixtures());
+    const phone = await open("/digital-employee/assignments/t6", { assignments: true, state: english, language: "en", width: 390 });
+    await phone.page.locator(".de-decision-card").waitFor();
+    assert.equal(/[\u4e00-\u9fa5]/.test(await phone.page.locator(".de-decision-card").innerText()), false, "untranslated decision card");
+    assert.ok(await noHorizontalScroll(phone.page), "decision card overflows at phone width");
+    await snap(phone.page, "assignment-decision-en-390-light.png");
+    await phone.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    await snap(phone.page, "assignment-decision-en-390-dark.png");
+    await phone.close();
+
+    const notified = decisionTasks(fixtures());
+    notified.taskActivity = { open: 1, waiting: 1, cursor: "9", events: [
+      { id: "8", rootId: "t5", kind: "decision", title: "给王总记跟进", status: null },
+      { id: "9", rootId: "t2", kind: "finished", title: "整理客户清单", status: "succeeded" },
+    ] };
+    const desktop = await open("/assistant", { assignments: true, state: notified, desktop: true });
+    await desktop.page.waitForFunction(() => window.notified?.length === 2);
+    assert.deepEqual(await desktop.page.evaluate(() => window.notified), [["任务等你决定", "给王总记跟进"], ["任务做完了", "整理客户清单"]]);
+    assert.equal(await desktop.page.evaluate(() => localStorage.getItem("lot:employee-task-events")), "9");
+    await desktop.page.reload();
+    await desktop.page.waitForFunction(() => document.readyState === "complete");
+    await desktop.page.waitForTimeout(300);
+    assert.deepEqual(await desktop.page.evaluate(() => window.notified), []);
+    assert.equal(notified.summaryCursors.at(-1), "9");
+    await desktop.close();
   }
 
   // Two languages, two themes, phone width.

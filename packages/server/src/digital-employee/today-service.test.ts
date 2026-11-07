@@ -24,6 +24,7 @@ function build(views: Record<string, unknown[]> = {}, extra: {
   return {
     service: new TodayService(
       { query } as any, settings, opportunities as any, acquisition as any, proposals as any, briefs as any, { pendingReports: vi.fn(async () => []) },
+      { attention: vi.fn(async () => []) },
     ),
     opportunities, acquisition, proposals, query,
   };

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assignmentLink, costLimitNotice, finishedNotice, quotaNotice } from "./assignment-notices.js";
+import { assignmentLink, costLimitNotice, finishedNotice, quotaNotice, decisionNotice, replyAck } from "./assignment-notices.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -36,5 +36,38 @@ describe("notices to the owner", () => {
     vi.stubEnv("PUBLIC_BASE_URL", "https://a.test/");
     expect(assignmentLink("t1")).toBe("https://a.test/digital-employee/assignments/t1");
     expect(assignmentLink()).toBe("https://a.test/digital-employee/assignments");
+  });
+});
+
+describe("decision notices", () => {
+  const base = { name: "小灵", title: "开业活动", link: "https://app/x", reminder: false };
+
+  it("names the task, numbers the choices and says how to answer", () => {
+    const text = decisionNotice({ ...base, kind: "question", question: "哪位王总？", options: ["华东的", "华南的"] }, false);
+    expect(text).toContain("「开业活动」");
+    expect(text).toContain("2. 华南的");
+    expect(text).toContain("引用这条消息");
+    expect(text).toContain("https://app/x");
+  });
+
+  it("offers the four choices on a failure, in the order replies are read", () => {
+    const text = decisionNotice({ ...base, kind: "failure", failureReason: "stalled" }, false);
+    expect(text).toContain("连续几轮没有进展");
+    expect(text.indexOf("1. 重试")).toBeLessThan(text.indexOf("2. 跳过"));
+    expect(text.indexOf("3. 换个做法")).toBeLessThan(text.indexOf("4. 结束任务"));
+    expect(text).not.toContain("核实");
+  });
+
+  it("warns before an unconfirmed write is retried, and marks a reminder", () => {
+    const text = decisionNotice({ ...base, kind: "failure", failureReason: "unknown_outcome", reminder: true }, false);
+    expect(text).toContain("核实");
+    expect(text).toContain("已经等了一天");
+  });
+
+  it("has English copy for every outcome", () => {
+    expect(decisionNotice({ ...base, kind: "failure", failureReason: "blocked" }, true)).toContain("3. Try another way");
+    for (const outcome of ["continue", "skip", "end", "answered_already", "unverified", "quote_needed"] as const) {
+      expect(replyAck(outcome, "https://app/x", true)).not.toMatch(/[一-龥]/);
+    }
   });
 });

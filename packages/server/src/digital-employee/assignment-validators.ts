@@ -1,3 +1,4 @@
+import { FAILURE_CHOICES, type AssignmentMode, type DecisionAnswer, type FailureChoice } from "./assignment-state.js";
 import { InputError } from "./errors.js";
 
 const MAX_GOAL = 8_000;
@@ -6,6 +7,8 @@ const MAX_CREDITS = 100_000_000;
 const MAX_SEARCH = 200;
 export const ASSIGNMENT_PAGE = 30;
 const MAX_PAGE = 100;
+const MAX_ANSWER = 2_000;
+const MODES: readonly AssignmentMode[] = ["autonomous", "responsive"];
 const STATUS_FILTERS = ["active", "paused", "succeeded", "failed", "cancelled"] as const;
 
 export interface AssignmentAttachmentInput {
@@ -35,8 +38,10 @@ export function parseCreateAssignment(payload: Record<string, unknown>) {
   const files = attachments(payload.attachments);
   if (!goal && !files.length) throw new InputError("告诉员工要做什么");
   if ([...goal].length > MAX_GOAL) throw new InputError(`任务内容最多 ${MAX_GOAL} 字`);
+  if (payload.mode !== undefined && !MODES.includes(payload.mode as AssignmentMode)) throw new InputError("任务模式无效");
   return {
     goal,
+    mode: (payload.mode ?? "autonomous") as AssignmentMode,
     attachments: files,
     modelId: typeof payload.modelId === "string" && payload.modelId.trim() ? payload.modelId.trim() : null,
     creditLimit: credits(payload.creditLimit),
@@ -45,6 +50,20 @@ export function parseCreateAssignment(payload: Record<string, unknown>) {
 
 export function parseCreditLimit(payload: Record<string, unknown>): number | null {
   return credits(payload.creditLimit);
+}
+
+export function parseDecisionAnswer(payload: Record<string, unknown>): DecisionAnswer {
+  const text = typeof payload.text === "string" ? payload.text.trim() : "";
+  if ([...text].length > MAX_ANSWER) throw new InputError(`回答最多 ${MAX_ANSWER} 字`);
+  if (payload.choice !== undefined && !FAILURE_CHOICES.includes(payload.choice as FailureChoice)) throw new InputError("选项无效");
+  return { ...(payload.choice ? { choice: payload.choice as FailureChoice } : {}), ...(text ? { text } : {}) };
+}
+
+/** The id of the last event this device saw. */
+export function parseEventCursor(value: string | undefined): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (!/^\d{1,18}$/.test(value)) throw new InputError("事件游标无效");
+  return value;
 }
 
 /** Times arrive already in UTC: the browser works out what "today" means in its own timezone. */

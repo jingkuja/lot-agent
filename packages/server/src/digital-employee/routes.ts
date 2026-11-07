@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import { parseAssignmentList, parseCreateAssignment, parseCreditLimit } from "./assignment-validators.js";
+import {
+  parseAssignmentList, parseCreateAssignment, parseCreditLimit, parseDecisionAnswer, parseEventCursor,
+} from "./assignment-validators.js";
 import { parseEmployeeName } from "./employee-name.js";
 import { apiError, InputError } from "./errors.js";
 import { parseFocusInput } from "./focus.js";
@@ -81,6 +83,13 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     catch (error) { return respondError(c, error); }
   });
 
+  app.post("/assignments/decisions/:id/answer", async (c) => {
+    try {
+      const answer = parseDecisionAnswer(await body(c));
+      return c.json(await service.assignments.answer(c.get("userId"), parseEntityId(c.req.param("id"), "决定 ID"), answer));
+    } catch (error) { return respondError(c, error); }
+  });
+
   app.get("/assignments/:id", async (c) => {
     try { return c.json(await service.assignments.get(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"))); }
     catch (error) { return respondError(c, error); }
@@ -117,7 +126,13 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   });
 
   app.get("/today/summary", async (c) => {
-    try { return c.json(await service.today.summary(c.get("userId"))); }
+    try {
+      const userId = c.get("userId");
+      const [summary, assignments] = await Promise.all([
+        service.today.summary(userId), service.assignments.activity(userId, parseEventCursor(c.req.query("after"))),
+      ]);
+      return c.json({ ...summary, assignments });
+    }
     catch (error) { return respondError(c, error); }
   });
 

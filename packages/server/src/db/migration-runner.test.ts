@@ -154,7 +154,7 @@ describe("runMigrations", () => {
         [68, "employee-settings"], [69, "draft-dismissed"], [70, "discovery-mode"], [71, "employee-briefs"],
         [72, "employee-work-preferences"], [73, "employee-schedules"],
         [74, "marketing-product-documents"], [75, "product-document-imports"], [76, "product-document-ocr-pages"],
-        [77, "employee-assignments"]]);
+        [77, "employee-assignments"], [78, "assignment-decisions"]]);
     expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 

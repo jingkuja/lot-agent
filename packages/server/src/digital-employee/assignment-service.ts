@@ -2,11 +2,15 @@ import type { Pool } from "pg";
 import { pickBackgroundTaskLlmModel } from "../models/catalog.js";
 import type { AgentTurnContext } from "../services/agent-extensions.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
-import { AssignmentRepository, NODE_METADATA_KEY, type AssignmentCard, type AssignmentFilters } from "./assignment-repository.js";
-import { isOpenStatus } from "./assignment-state.js";
+import { assignmentLink, replyAck, type ReplyOutcome } from "./assignment-notices.js";
+import { isContinueReply, matchDecisionReply, quotedReply } from "./assignment-replies.js";
+import {
+  AssignmentRepository, NODE_METADATA_KEY, type AssignmentCard, type AssignmentDecision, type AssignmentFilters,
+} from "./assignment-repository.js";
+import { isOpenStatus, type AssignmentMode, type DecisionAnswer } from "./assignment-state.js";
 import { assignmentTurn } from "./assignment-turn.js";
 import type { AssignmentAttachmentInput } from "./assignment-validators.js";
-import { ConflictError, InputError, NotFoundError } from "./errors.js";
+import { ConflictError, InputError, NotFoundError, UnverifiedOperationsError } from "./errors.js";
 import { digitalEmployeeAssignmentsEnabled } from "./feature-scope.js";
 import { DIGITAL_EMPLOYEE_LLM_UNAVAILABLE } from "./llm.js";
 import type { ProductImportService } from "./product-import-service.js";
@@ -15,6 +19,7 @@ import type { WorkLogService } from "./work-log-service.js";
 /** The product's published rate. Spending is stored in yuan, like usage_logs; owners see credits. */
 const CREDITS_PER_YUAN = 100;
 const INITIAL_TITLE_CHARS = 30;
+const EVENT_PAGE = 20;
 
 export interface AssignmentDeps {
   llmModels(userId: string): Promise<string[]>;
@@ -24,6 +29,7 @@ export interface AssignmentDeps {
 
 export interface CreateAssignmentInput {
   goal: string;
+  mode: AssignmentMode;
   attachments: AssignmentAttachmentInput[];
   modelId: string | null;
   creditLimit: number | null;
@@ -48,9 +54,14 @@ function view(card: AssignmentCard) {
     creditsUsed: Math.round(card.totalCost * CREDITS_PER_YUAN),
     creditLimit: card.costLimit === null ? null : Math.round(card.costLimit * CREDITS_PER_YUAN),
     subtasks: { done: card.subtasksDone, total: card.subtasksTotal },
-    currentTool: card.currentTool,
+    currentTool: card.currentTool, waitingDecisions: card.waitingDecisions,
     attachments: card.attachments.map((item) => item.filename),
   };
+}
+
+function decisionView(decision: AssignmentDecision) {
+  const { id, assignmentId, rootId, conversationId, title, kind, question, options, multiSelect, failureReason, unverified, createdAt } = decision;
+  return { id, assignmentId, rootId, conversationId, title, kind, question, options, multiSelect, failureReason, unverified, createdAt };
 }
 
 /** What the API and the agent turn need. The worker's runner shares the repository. */
@@ -96,7 +107,7 @@ export class AssignmentService {
     const attachments = await this.ownedAttachments(userId, input.attachments);
     const modelId = await this.chooseModel(userId, input.modelId);
     const node = await this.repository.create({
-      userId, modelId, attachments, costLimit: toYuan(input.creditLimit),
+      userId, modelId, attachments, costLimit: toYuan(input.creditLimit), mode: input.mode,
       title: initialTitle(input.goal, attachments), goal: input.goal || attachments.map((item) => item.filename).join("、"),
     });
     return view(await this.repository.get(userId, node.id));
@@ -113,7 +124,66 @@ export class AssignmentService {
     const card = await this.repository.get(userId, id);
     const work = await this.deps.workLog.conversation(userId, card.conversationId);
     const runs = work.runs.map(({ id: runId, status, startedAt, finishedAt, steps }) => ({ id: runId, status, startedAt, finishedAt, steps }));
-    return { ...view(card), runs };
+    const [decisions, unverified] = await Promise.all([this.repository.openDecisions(userId, id), this.repository.unverifiedOperations(card)]);
+    return { ...view(card), runs, conversationId: card.conversationId, unverified, decisions: decisions.map(decisionView) };
+  }
+
+  async answer(userId: string, decisionId: string, answer: DecisionAnswer) {
+    this.assertEnabled();
+    const { rootId } = await this.repository.answerDecision(userId, decisionId, answer, "web");
+    return view(await this.repository.get(userId, rootId));
+  }
+
+  /** Answers a decision or restarts a stopped task from a chat reply. Null leaves the message to the general assistant. */
+  async routeReply(input: { userId: string; parentId?: string; text: string }, english: boolean): Promise<string | null> {
+    if (!digitalEmployeeAssignmentsEnabled()) return null;
+    const { userId, parentId, text } = input;
+    const quoted = parentId ? await this.repository.decisionByFeishuMessage(userId, parentId) : null;
+    if (quoted) return this.applyReply(userId, quoted, quotedReply(text, quoted), english);
+    if (!parentId) {
+      const open = await this.repository.openDecisions(userId);
+      const matches = open.filter((decision) => matchDecisionReply(text, decision));
+      if (open.length === 1 && matches[0]) return this.applyReply(userId, matches[0], matchDecisionReply(text, matches[0])!, english);
+      // Which one it answers cannot be told, and guessing could approve the wrong thing.
+      if (matches.length) return replyAck("quote_needed", "", english);
+    }
+    if (isContinueReply(text) && await this.repository.resumeQuotaPaused(userId)) return replyAck("continue", "", english);
+    return null;
+  }
+
+  private async applyReply(userId: string, decision: AssignmentDecision, answer: DecisionAnswer, english: boolean): Promise<string> {
+    const link = assignmentLink(decision.rootId);
+    if (decision.answered) return replyAck("answered_already", link, english);
+    let outcome: ReplyOutcome;
+    try {
+      outcome = (await this.repository.answerDecision(userId, decision.id, answer, "feishu")).applied;
+    } catch (error) {
+      if (error instanceof UnverifiedOperationsError) outcome = "unverified";
+      else if (error instanceof ConflictError) outcome = "answered_already";
+      else throw error;
+    }
+    return replyAck(outcome, link, english);
+  }
+
+  /** What is stopped until the owner acts: questions and failures, then tasks stopped by quota or a cost limit. */
+  async attention(userId: string) {
+    if (!digitalEmployeeAssignmentsEnabled()) return [];
+    const [decisions, paused] = await Promise.all([this.repository.openDecisions(userId), this.repository.pausedRoots(userId)]);
+    return [
+      ...decisions.map((decision) => ({
+        rootId: decision.rootId, title: decision.title, createdAt: decision.createdAt, decision: decisionView(decision), pausedReason: null,
+      })),
+      ...paused.map((card) => ({
+        rootId: card.id, title: card.title, createdAt: card.pausedAt ?? card.createdAt, decision: null, pausedReason: card.pausedReason,
+      })),
+    ];
+  }
+
+  /** Polled by the shell: open tasks set its pace, and the cursor gives each device its own desktop notifications. */
+  async activity(userId: string, after?: string) {
+    if (!digitalEmployeeAssignmentsEnabled()) return { open: 0, waiting: 0, events: [], cursor: null };
+    const [counts, page] = await Promise.all([this.repository.activityCounts(userId), this.repository.eventsAfter(userId, after, EVENT_PAGE)]);
+    return { ...counts, ...page };
   }
 
   async cancel(userId: string, id: string) {
@@ -140,6 +210,8 @@ export class AssignmentService {
     this.assertEnabled();
     const card = await this.repository.get(userId, id);
     if (card.status !== "failed") throw new ConflictError("只有失败的任务可以重试");
+    const unverified = await this.repository.unverifiedOperations(card);
+    if (unverified) throw new UnverifiedOperationsError(unverified);
     await this.repository.retry(card);
     return view(await this.repository.get(userId, id));
   }

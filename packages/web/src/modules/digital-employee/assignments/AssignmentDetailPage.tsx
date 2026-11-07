@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FileLink } from "../../../components/FileLink.js";
+import { RechargeModal } from "../../../components/RechargeModal.js";
+import { RunRecoveryCard } from "../../../components/RunRecoveryCard.js";
 import { useI18n } from "../../../i18n/index.js";
 import { formatPoints } from "../../../lib/points.js";
 import { employeeApi } from "../api.js";
 import type { AssignmentDetail, WorkStep } from "../types.js";
 import { RUN_STATUS_LABELS, STEP_STATUS_LABELS, TOOL_LABELS } from "../work-log/labels.js";
-import { FAILURE_LABELS, PAUSE_LABELS, statusLabel, statusTone } from "./copy.js";
+import { FAILURE_LABELS, MODE_LABELS, PAUSE_LABELS, statusLabel, statusTone } from "./copy.js";
+import { DecisionCard } from "./DecisionCard.js";
 import { isOpen } from "./grouping.js";
 
 const POLL_MS = 3_000;
@@ -37,6 +40,7 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [limit, setLimit] = useState("");
+  const [recharging, setRecharging] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -78,7 +82,7 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
         <div className="de-assignment-summary-row">
           <em className={`de-assignment-status is-${statusTone(item)}`}>{t(statusLabel(item))}</em>
           <small>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt))}</small>
-          <small>{t("完全自主")}</small>
+          <small>{t(MODE_LABELS[item.mode])}</small>
           <small>{item.modelId}</small>
           <small>{t("约 {0} 积分", [formatPoints(item.creditsUsed)])}</small>
           {item.creditLimit !== null && <small>{t("上限 {0} 积分", [formatPoints(item.creditLimit)])}</small>}
@@ -86,14 +90,16 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
         <p className="de-assignment-goal">{item.goal}</p>
         {item.attachments.length > 0 && <small>{t("附件：{0}", [item.attachments.join("、")])}</small>}
         {item.pausedReason && <p className="de-assignment-note" role="status">{t(PAUSE_LABELS[item.pausedReason])}</p>}
-        {item.failureReason && <p className="de-assignment-note is-error" role="status">{t(FAILURE_LABELS[item.failureReason])}</p>}
+        {item.failureReason && item.status !== "waiting_user" && <p className="de-assignment-note is-error" role="status">{t(FAILURE_LABELS[item.failureReason])}</p>}
+        {item.status === "failed" && item.unverified > 0 && <RunRecoveryCard conversationId={item.conversationId} />}
         <footer>
           {item.pausedReason === "quota" && <button
             type="button" className="de-primary-button" disabled={busy}
             onClick={() => void run(() => employeeApi.resumeAssignment(id))}
           >{t("继续")}</button>}
+          {item.pausedReason === "quota" && <button type="button" className="de-secondary-button" onClick={() => setRecharging(true)}>{t("充值")}</button>}
           {item.status === "failed" && <button
-            type="button" className="de-primary-button" disabled={busy}
+            type="button" className="de-primary-button" disabled={busy || item.unverified > 0}
             onClick={() => void run(() => employeeApi.retryAssignment(id))}
           >{t("重试")}</button>}
           {open && <button type="button" className="de-secondary-button" disabled={busy} onClick={() => void run(() => employeeApi.cancelAssignment(id))}>{t("取消任务")}</button>}
@@ -116,6 +122,11 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
           <button className="de-secondary-button" disabled={busy}>{t(item.pausedReason === "cost_limit" ? "保存并继续" : "保存上限")}</button>
         </form>}
       </section>
+
+      {item.decisions.length > 0 && <section className="de-assignment-panel de-assignment-decisions">
+        <h2>{t("等你决定")}</h2>
+        {item.decisions.map((decision) => <DecisionCard key={decision.id} decision={decision} onAnswered={load} />)}
+      </section>}
 
       {item.result && <section className="de-assignment-panel">
         <h2>{t("结果")}</h2>
@@ -155,5 +166,6 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
         </article>)}
       </section>
     </>}
+    {recharging && <RechargeModal onClose={() => setRecharging(false)} />}
   </div>;
 }

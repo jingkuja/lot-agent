@@ -40,6 +40,30 @@ export function isOpenStatus(status: AssignmentStatus): boolean {
   return OPEN_STATUSES.includes(status);
 }
 
+/** What the owner can do about a failure in a responsive task, in the order it is offered. */
+export const FAILURE_CHOICES = ["retry", "skip", "change", "end"] as const;
+export type FailureChoice = typeof FAILURE_CHOICES[number];
+
+export interface DecisionAnswer {
+  /** Failures only. */
+  choice?: FailureChoice;
+  /** The reply to a question, or how to go about it differently. */
+  text?: string;
+}
+
+export interface OwnerQuestion {
+  question: string;
+  options: string[];
+  multiSelect: boolean;
+}
+
+/** The first thing the node reads when it wakes. The owner's own words stay as they are. */
+export function resumeMessage(kind: "question" | "failure", answer: DecisionAnswer): string {
+  if (kind === "question") return `[Owner reply]\n${answer.text ?? ""}`;
+  if (answer.choice === "retry") return "[Owner decision] Try again. Check the execution records first and do not repeat anything that already took effect.";
+  return `[Owner decision] Try a different approach. Check the execution records first.${answer.text ? `\nThe owner says:\n${answer.text}` : ""}`;
+}
+
 export interface EndIntent {
   outcome: "done" | "blocked";
   summary: string;
@@ -48,9 +72,12 @@ export interface EndIntent {
 }
 
 export interface TurnResult {
+  mode: AssignmentMode;
   /** Undefined when the run threw before the agent reported a status. */
   status: RunStatus | undefined;
   endIntent: EndIntent | null;
+  /** What ask_user put to the owner this turn. */
+  question: OwnerQuestion | null;
   /** The gateway refused for lack of balance, on the model call or in a tool. */
   quota: boolean;
   /** Set before the turn ended: the root is paused, or the owner's cost limit was hit. */
@@ -65,21 +92,26 @@ export interface TurnResult {
 export type TurnDecision =
   | { next: "succeed"; summary: string; assumptions: string[]; skipped: string[] }
   | { next: "fail"; reason: FailureReason; summary?: string; assumptions?: string[]; skipped?: string[] }
+  | { next: "ask_failure"; reason: FailureReason; summary?: string; assumptions?: string[]; skipped?: string[] }
+  | { next: "ask"; question: OwnerQuestion }
   | { next: "pause" }
   | { next: "segment" }
   | { next: "interrupted" }
   | { next: "cancel" };
 
-/**
- * Where a node goes after a turn, for a full-autonomy task with no subtasks yet. finish_task, wait_for_team and
- * ask_user all report awaiting_input, so what the tool recorded on the node is read first.
- */
+/** Where a node goes after a turn with no subtasks yet. In a responsive task, a failure becomes the owner's decision. */
 export function decideTurn(turn: TurnResult): TurnDecision {
+  const decision = routeTurn(turn);
+  return decision.next === "fail" && turn.mode === "responsive" ? { ...decision, next: "ask_failure" } : decision;
+}
+
+/** finish_task, wait_for_team and ask_user all report awaiting_input, so what the tool recorded on the node is read first. */
+function routeTurn(turn: TurnResult): TurnDecision {
   if (turn.status === "unknown_outcome") return { next: "fail", reason: "unknown_outcome" };
   if (turn.shuttingDown && (turn.status === "cancelled" || turn.status === undefined)) return { next: "interrupted" };
   if (turn.status === "cancelled") return { next: "cancel" };
   if (turn.status === "awaiting_input") {
-    if (!turn.endIntent) return { next: "fail", reason: "model_failed" };
+    if (!turn.endIntent) return turn.question && turn.mode === "responsive" ? { next: "ask", question: turn.question } : { next: "fail", reason: "model_failed" };
     const { outcome, summary, assumptions, skipped } = turn.endIntent;
     return outcome === "done"
       ? { next: "succeed", summary, assumptions, skipped }

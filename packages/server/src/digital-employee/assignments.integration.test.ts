@@ -8,7 +8,7 @@ import { migrations } from "../db/migrations/index.js";
 import { RunRepository } from "../services/run-repository.js";
 import { createFinishTaskTool, countedWebSearch } from "./assignment-tools.js";
 import { AssignmentRunner, type AssignmentRunnerPorts, type AssignmentTurnInput } from "./assignment-runner.js";
-import { InputError, ConflictError, NotFoundError } from "./errors.js";
+import { InputError, ConflictError, NotFoundError, UnverifiedOperationsError } from "./errors.js";
 import { DIGITAL_EMPLOYEE_LLM_UNAVAILABLE } from "./llm.js";
 import type { ImportModelProduct } from "./product-import.js";
 import { ProposalService } from "./proposal-service.js";
@@ -29,7 +29,7 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
   const assignments = () => service.assignments;
   const repository = () => assignments().repository;
   const create = (userId: string, goal = "写开业活动", creditLimit: number | null = null) =>
-    assignments().create(userId, { goal, attachments: [], modelId: null, creditLimit });
+    assignments().create(userId, { goal, mode: "autonomous", attachments: [], modelId: null, creditLimit });
   const raw = async (id: string) => (await db.pool.query(`SELECT * FROM de_assignments WHERE id=$1`, [id])).rows[0];
   /** Claimed ones are drained, so one test's queue cannot run another's task. */
   const clearQueue = () => db.pool.query(`UPDATE de_assignments SET status='cancelled' WHERE status IN ('queued', 'running')`);
@@ -61,7 +61,10 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
     },
     generateTitle: async () => "开业活动方案",
     employeeName: async () => "小灵",
-    sendToOwner: async (userId, message) => { sent.push({ userId, text: message.text }); },
+    sendToOwner: async (userId, message) => {
+      sent.push({ userId, text: message.text });
+      return { messageId: `om_${sent.length}` };
+    },
     english: false,
   };
   const runner = () => new AssignmentRunner(repository(), ports);
@@ -115,8 +118,8 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
       const userId = owner();
       models.mockResolvedValueOnce(["deepseek-v4.1-flash", "claude-opus-5-5"]);
       expect((await create(userId)).modelId).toBe("deepseek-v4.1-flash");
-      expect((await assignments().create(userId, { goal: "x", attachments: [], modelId: "deepseek-v4.1-flash", creditLimit: null })).modelId).toBe("deepseek-v4.1-flash");
-      expect((await assignments().create(userId, { goal: "x", attachments: [], modelId: "not-a-model", creditLimit: null })).modelId).toBe("kimi-k3.1-pro");
+      expect((await assignments().create(userId, { goal: "x", mode: "autonomous", attachments: [], modelId: "deepseek-v4.1-flash", creditLimit: null })).modelId).toBe("deepseek-v4.1-flash");
+      expect((await assignments().create(userId, { goal: "x", mode: "autonomous", attachments: [], modelId: "not-a-model", creditLimit: null })).modelId).toBe("kimi-k3.1-pro");
     });
 
     it("says so when the account has no model", async () => {
@@ -128,9 +131,9 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
       const userId = owner();
       const id = randomUUID();
       await db.createAsset({ id, taskId: null, userId, type: "upload", storageKey: `${id}.pdf`, url: `/static/uploads/${id}.pdf`, mime: "application/pdf", sizeBytes: 10, originalName: "手册.pdf" });
-      const task = await assignments().create(userId, { goal: "", attachments: [{ assetId: id, filename: "手册.pdf" }], modelId: null, creditLimit: null });
+      const task = await assignments().create(userId, { goal: "", mode: "autonomous", attachments: [{ assetId: id, filename: "手册.pdf" }], modelId: null, creditLimit: null });
       expect(task).toMatchObject({ title: "手册.pdf", goal: "手册.pdf", attachments: ["手册.pdf"] });
-      await expect(assignments().create(owner(), { goal: "x", attachments: [{ assetId: id, filename: "手册.pdf" }], modelId: null, creditLimit: null }))
+      await expect(assignments().create(owner(), { goal: "x", mode: "autonomous", attachments: [{ assetId: id, filename: "手册.pdf" }], modelId: null, creditLimit: null }))
         .rejects.toBeInstanceOf(NotFoundError);
       script.push(finish());
       await turn();
@@ -639,5 +642,349 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
     } finally {
       process.env.DIGITAL_EMPLOYEE_ASSIGNMENTS = "1";
     }
+  });
+
+  describe("responsive tasks", () => {
+    const responsive = (userId: string, goal = "给王总记跟进") =>
+      assignments().create(userId, { goal, mode: "responsive", attachments: [], modelId: null, creditLimit: null });
+    /** Runs the first turn to a stop, so each test starts with the owner's decision open. */
+    const asking = (question = "哪位王总？", options = ["华东的", "华南的"], multiSelect = false) => async function* (): AsyncIterable<AgentEvent> {
+      yield { type: "tool_call", id: "ask1", name: "ask_user", input: { question, options, multiSelect } };
+      yield { type: "tool_result", toolCallId: "ask1", name: "ask_user", output: "waiting", isError: false };
+      yield done("awaiting_input");
+    };
+    const stopAt = async (userId: string, step: (input: AssignmentTurnInput) => AsyncIterable<AgentEvent> = asking()) => {
+      const task = await responsive(userId);
+      script.push(step);
+      await turn();
+      const [decision] = await repository().openDecisions(userId, task.id);
+      return { task, decision: decision! };
+    };
+    const decisionRow = async (id: string) => (await db.pool.query(`SELECT * FROM de_assignment_decisions WHERE id=$1`, [id])).rows[0];
+    const unconfirmedStep = async (conversationId: string) => {
+      const { rows: [run] } = await db.pool.query(`SELECT id FROM agent_runs WHERE conversation_id=$1 ORDER BY started_at DESC LIMIT 1`, [conversationId]);
+      const id = randomUUID();
+      await db.pool.query(
+        `INSERT INTO agent_steps (id, run_id, iteration, tool_call_id, tool_name, effect, input, input_hash, status)
+         VALUES ($1,$2,1,$3,'update_marketing_product','write','{}'::jsonb,'h','unknown_outcome')`,
+        [id, run.id, randomUUID()]
+      );
+      return id;
+    };
+
+    it("stops at a question, costs nothing while waiting, and carries the answer into the next turn", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId);
+      expect(await raw(task.id)).toMatchObject({ status: "waiting_user", mode: "responsive" });
+      expect(decision).toMatchObject({ kind: "question", question: "哪位王总？", options: ["华东的", "华南的"], rootId: task.id });
+      await turn();
+      expect(inputs).toHaveLength(1);
+
+      await assignments().answer(userId, decision.id, { text: "华东的" });
+      expect(await raw(task.id)).toMatchObject({ status: "queued" });
+      script.push(finish());
+      await turn();
+      expect(inputs[1]!.message).toBe("[Owner reply]\n华东的");
+      expect(await raw(task.id)).toMatchObject({ status: "succeeded", next_message: null });
+      expect(await decisionRow(decision.id)).toMatchObject({ answer: "华东的", answered_via: "web" });
+    });
+
+    it("keeps the answer if the worker dies before the turn ends", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId);
+      await assignments().answer(userId, decision.id, { text: "华东的" });
+      await repository().claim(8);
+      await db.pool.query(`UPDATE de_assignments SET lease_until=now() - interval '1 minute' WHERE id=$1`, [task.id]);
+      await repository().sweepOrphans();
+      expect(await raw(task.id)).toMatchObject({ status: "queued", next_message: "[Owner reply]\n华东的" });
+      script.push(finish());
+      await turn();
+      expect(inputs.at(-1)!.message).toBe("[Owner reply]\n华东的");
+    });
+
+    it("only lets one answer through when the web and Feishu reply together", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId);
+      await db.pool.query(`UPDATE de_assignment_decisions SET feishu_message_id='om_q' WHERE id=$1`, [decision.id]);
+      const results = await Promise.allSettled([
+        assignments().answer(userId, decision.id, { text: "华东的" }),
+        assignments().routeReply({ userId, parentId: "om_q", text: "2" }, false),
+        assignments().answer(userId, decision.id, { text: "第三种" }),
+        assignments().routeReply({ userId, parentId: "om_q", text: "1" }, false),
+      ]);
+      const row = await decisionRow(decision.id);
+      expect(["华东的", "华南的", "第三种"]).toContain(row.answer);
+      const node = await raw(task.id);
+      expect(node).toMatchObject({ status: "queued", next_message: `[Owner reply]\n${row.answer}` });
+      expect(node.version).toBe(4);
+      const refused = results.filter((item) => item.status === "rejected"
+        || (typeof item.value === "string" && item.value.includes("已经决定过了")));
+      expect(refused).toHaveLength(3);
+      script.push(finish());
+      await turn();
+      expect(script).toEqual([]);
+    });
+
+    it("hands a failure to the owner instead of ending the task, and offers all four choices", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId, ending("failed"));
+      expect(await raw(task.id)).toMatchObject({ status: "waiting_user", failure_reason: "model_failed", finished_at: null });
+      expect(decision).toMatchObject({ kind: "failure", options: ["retry", "skip", "change", "end"], failureReason: "model_failed" });
+
+      await assignments().answer(userId, decision.id, { choice: "retry" });
+      expect(await raw(task.id)).toMatchObject({ status: "queued", failure_reason: null });
+      script.push(finish());
+      await turn();
+      expect(inputs.at(-1)!.message).toContain("[Owner decision] Try again");
+    });
+
+    it("passes the owner's words on when the approach changes, and takes plain words as that choice", async () => {
+      const userId = owner();
+      const { decision } = await stopAt(userId, finish("查不到", "blocked"));
+      expect(decision.kind).toBe("failure");
+      await assignments().answer(userId, decision.id, { text: "换一组关键词" });
+      expect(await decisionRow(decision.id)).toMatchObject({ answer: "change: 换一组关键词" });
+      script.push(finish());
+      await turn();
+      expect(inputs.at(-1)!.message).toContain("换一组关键词");
+    });
+
+    it("skips one node, and ending closes the whole task", async () => {
+      const skipper = owner();
+      const skipped = await stopAt(skipper, ending("failed"));
+      await assignments().answer(skipper, skipped.decision.id, { choice: "skip" });
+      expect((await raw(skipped.task.id)).status).toBe("skipped");
+      expect((await raw(skipped.task.id)).finished_at).not.toBeNull();
+      const { items } = await assignments().list(skipper, { status: "cancelled", limit: 10 });
+      expect(items.map((item) => item.id)).toEqual([skipped.task.id]);
+
+      const ender = owner();
+      const ended = await stopAt(ender, ending("failed"));
+      await assignments().answer(ender, ended.decision.id, { choice: "end" });
+      expect((await raw(ended.task.id)).status).toBe("cancelled");
+      expect(await repository().openDecisions(ender)).toEqual([]);
+      await turn();
+    });
+
+    it("refuses to run again until the owner confirms an unverified write, on every channel", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId, ending("unknown_outcome"));
+      const conversationId = (await raw(task.id)).conversation_id;
+      const operation = await unconfirmedStep(conversationId);
+      await db.pool.query(`UPDATE de_assignment_decisions SET feishu_message_id='om_u' WHERE id=$1`, [decision.id]);
+
+      await expect(assignments().answer(userId, decision.id, { choice: "retry" })).rejects.toBeInstanceOf(UnverifiedOperationsError);
+      await expect(assignments().answer(userId, decision.id, { choice: "change", text: "换个写法" })).rejects.toBeInstanceOf(UnverifiedOperationsError);
+      expect(await assignments().routeReply({ userId, parentId: "om_u", text: "重试" }, false)).toContain("核实");
+      expect((await decisionRow(decision.id)).answered_at).toBeNull();
+      expect((await raw(task.id)).status).toBe("waiting_user");
+      expect((await assignments().get(userId, task.id)).decisions[0]).toMatchObject({ unverified: 1 });
+
+      expect(await new RunRepository(db.pool).resolve(conversationId, userId, operation, "failed")).toBe(true);
+      await assignments().answer(userId, decision.id, { choice: "retry" });
+      expect((await raw(task.id)).status).toBe("queued");
+      script.push(finish());
+      await turn();
+    });
+
+    it("lets the owner walk away from an unverified write without confirming it", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId, ending("unknown_outcome"));
+      await unconfirmedStep((await raw(task.id)).conversation_id);
+      await assignments().answer(userId, decision.id, { choice: "end" });
+      expect((await raw(task.id)).status).toBe("cancelled");
+    });
+
+    it("applies the same check to a full-autonomy retry", async () => {
+      const userId = owner();
+      const task = await create(userId);
+      script.push(ending("unknown_outcome"));
+      await turn();
+      await unconfirmedStep((await raw(task.id)).conversation_id);
+      await expect(assignments().retry(userId, task.id)).rejects.toBeInstanceOf(UnverifiedOperationsError);
+    });
+
+    it("puts a lost worker's task in front of the owner by the same rule", async () => {
+      const clean = owner();
+      const task = await responsive(clean);
+      await repository().claim(8);
+      await db.pool.query(`UPDATE de_assignments SET auto_resumed=true, lease_until=now() - interval '1 minute' WHERE id=$1`, [task.id]);
+      await repository().sweepOrphans();
+      expect(await raw(task.id)).toMatchObject({ status: "waiting_user", failure_reason: "interrupted" });
+      const [decision] = await repository().openDecisions(clean);
+      expect(decision).toMatchObject({ kind: "failure", failureReason: "interrupted" });
+    });
+
+    it("does not let a stranger see or answer a decision", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId);
+      await expect(assignments().answer(owner(), decision.id, { text: "华南的" })).rejects.toBeInstanceOf(NotFoundError);
+      expect(await repository().openDecisions(owner(), task.id)).toEqual([]);
+      expect(await assignments().attention(owner())).toEqual([]);
+      expect((await raw(task.id)).status).toBe("waiting_user");
+    });
+
+    it("rejects an answer with nothing in it, and leaves the decision open", async () => {
+      const userId = owner();
+      const { decision } = await stopAt(userId);
+      await expect(assignments().answer(userId, decision.id, { text: "  " })).rejects.toBeInstanceOf(InputError);
+      await expect(assignments().answer(userId, decision.id, { choice: "retry" })).rejects.toBeInstanceOf(InputError);
+      expect((await decisionRow(decision.id)).answered_at).toBeNull();
+    });
+
+    it("cancelling closes the decision, so nothing keeps asking", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId);
+      await assignments().cancel(userId, task.id);
+      expect((await decisionRow(decision.id)).answered_via).toBe("cancelled");
+      expect(await assignments().attention(userId)).toEqual([]);
+      await expect(assignments().answer(userId, decision.id, { text: "华东的" })).rejects.toBeInstanceOf(ConflictError);
+    });
+
+    it("counts a real answer as the owner's reply, but not a continuation", async () => {
+      const userId = owner();
+      const { task, decision } = await stopAt(userId);
+      const conversationId = (await raw(task.id)).conversation_id;
+      const draftId = randomUUID();
+      await db.pool.query(
+        `INSERT INTO de_conversation_action_drafts (id, user_id, conversation_id, feature_scope, kind, expires_at, created_at)
+         VALUES ($1,$2,$3,'employee','product_import',now() + interval '1 day',now() - interval '1 minute')`,
+        [draftId, userId, conversationId]
+      );
+      await db.addMessage(randomUUID(), conversationId, "user", "[Task continuation] Carry on");
+      expect(await repository().ownerAnsweredSince(userId, conversationId, draftId)).toBe(false);
+      await assignments().answer(userId, decision.id, { text: "保存" });
+      expect(await repository().ownerAnsweredSince(userId, conversationId, draftId)).toBe(true);
+      expect(await repository().ownerAnsweredSince(owner(), conversationId, draftId)).toBe(false);
+      script.push(finish());
+      await turn();
+    });
+
+    describe("replying on Feishu", () => {
+      const reply = (userId: string, text: string, parentId?: string) => assignments().routeReply({ userId, text, parentId }, false);
+
+      it("sends the question with its choices and keeps the message id for quoted replies", async () => {
+        const userId = owner();
+        const { decision } = await stopAt(userId);
+        await runner().deliver();
+        const notice = sent.find((item) => item.userId === userId)!;
+        expect(notice.text).toContain("哪位王总？");
+        expect(notice.text).toContain("1. 华东的");
+        expect(notice.text).toContain("引用这条消息");
+        const { feishu_message_id: messageId } = await decisionRow(decision.id);
+        expect(await reply(userId, "就华东那位吧", messageId)).toBe("收到，继续执行。");
+        expect((await decisionRow(decision.id)).answer).toBe("就华东那位吧");
+        expect(await reply(userId, "2", messageId)).toContain("已经决定过了");
+        script.push(finish());
+        await turn();
+      });
+
+      it("takes an unquoted clear answer when only one decision is open", async () => {
+        const userId = owner();
+        const { decision } = await stopAt(userId);
+        expect(await reply(userId, "今天天气不错")).toBeNull();
+        expect((await decisionRow(decision.id)).answered_at).toBeNull();
+        expect(await reply(userId, "第二个")).toBe("收到，继续执行。");
+        expect((await decisionRow(decision.id)).answer).toBe("华南的");
+        script.push(finish());
+        await turn();
+      });
+
+      it("asks for a quote when several decisions could match", async () => {
+        const userId = owner();
+        const first = await stopAt(userId);
+        const second = await stopAt(userId);
+        expect(await reply(userId, "1")).toContain("引用");
+        expect((await decisionRow(first.decision.id)).answered_at).toBeNull();
+        expect((await decisionRow(second.decision.id)).answered_at).toBeNull();
+      });
+
+      it("does not touch the assistant's messages or another account's decisions", async () => {
+        const userId = owner();
+        const { decision } = await stopAt(userId);
+        await db.pool.query(`UPDATE de_assignment_decisions SET feishu_message_id='om_private' WHERE id=$1`, [decision.id]);
+        expect(await reply(owner(), "1", "om_private")).toBeNull();
+        expect(await reply(userId, "1", "om_something_else")).toBeNull();
+        expect((await decisionRow(decision.id)).answered_at).toBeNull();
+      });
+
+      it("resumes every task a quota stopped when the owner says continue", async () => {
+        const userId = owner();
+        const tasks = [await create(userId), await create(userId)];
+        for (const task of tasks) await repository().pause(task.id, "quota");
+        expect(await reply(userId, "继续")).toBe("收到，继续执行。");
+        for (const task of tasks) expect((await raw(task.id)).paused_at).toBeNull();
+        expect(await reply(userId, "继续")).toBeNull();
+        script.push(finish(), finish());
+        await turn();
+        await turn();
+      });
+    });
+
+    describe("telling the owner", () => {
+      it("reminds once after a day, and the reminder can be quoted", async () => {
+        const userId = owner();
+        const { decision } = await stopAt(userId);
+        await runner().deliver();
+        await db.pool.query(`UPDATE de_assignment_decisions SET created_at=now() - interval '25 hours' WHERE id=$1`, [decision.id]);
+        await runner().sweep();
+        await runner().sweep();
+        await runner().deliver();
+        const mine = sent.filter((item) => item.userId === userId);
+        expect(mine).toHaveLength(2);
+        expect(mine[1]!.text).toContain("已经等了一天");
+        const row = await decisionRow(decision.id);
+        expect(row.feishu_reminder_id).toBeTruthy();
+        expect(row.feishu_reminder_id).not.toBe(row.feishu_message_id);
+        expect(await assignments().routeReply({ userId, parentId: row.feishu_reminder_id, text: "1" }, false)).toBe("收到，继续执行。");
+        script.push(finish());
+        await turn();
+      });
+
+      it("does not send a notice for a decision already answered", async () => {
+        const userId = owner();
+        const { decision } = await stopAt(userId);
+        await assignments().answer(userId, decision.id, { text: "华东的" });
+        await runner().deliver();
+        expect(sent.filter((item) => item.userId === userId)).toEqual([]);
+        script.push(finish());
+        await turn();
+      });
+
+      it("says how to go on when a failure has an unconfirmed write", async () => {
+        const userId = owner();
+        await stopAt(userId, ending("unknown_outcome"));
+        await runner().deliver();
+        expect(sent.find((item) => item.userId === userId)!.text).toContain("核实");
+      });
+
+      it("gives each device the events after its cursor, and a new device none", async () => {
+        const userId = owner();
+        const first = await assignments().activity(userId);
+        expect(first).toMatchObject({ open: 0, waiting: 0, events: [], cursor: "0" });
+        const { task } = await stopAt(userId);
+        const other = await create(userId);
+        await repository().pause(other.id, "quota");
+        const activity = await assignments().activity(userId, first.cursor!);
+        expect(activity).toMatchObject({ open: 2, waiting: 2 });
+        expect(activity.events.map((event) => event.kind)).toEqual(["decision", "paused"]);
+        expect(activity.events[0]).toMatchObject({ rootId: task.id });
+        expect(await assignments().activity(userId, activity.cursor!)).toMatchObject({ events: [] });
+        expect((await assignments().activity(userId)).events).toEqual([]);
+        expect((await assignments().activity(owner(), first.cursor!)).events).toEqual([]);
+      });
+
+      it("shows decisions and stopped tasks on the today page", async () => {
+        const userId = owner();
+        const { task, decision } = await stopAt(userId);
+        const stopped = await create(userId);
+        await repository().pause(stopped.id, "quota");
+        const today = await service.today.get(userId);
+        const items = today.items.filter((item) => item.kind === "assignment");
+        expect(items.map((item) => item.assignment?.rootId).sort()).toEqual([task.id, stopped.id].sort());
+        expect(items.find((item) => item.assignment?.rootId === task.id)!.assignment!.decision!.id).toBe(decision.id);
+        expect((await repository().get(userId, task.id)).waitingDecisions).toBe(1);
+      });
+    });
   });
 });

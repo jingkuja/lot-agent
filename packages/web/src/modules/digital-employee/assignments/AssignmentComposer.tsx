@@ -3,13 +3,17 @@ import { api, request, type UploadedAttachment } from "../../../api/client.js";
 import type { ModelCatalog } from "../../../hooks/useModels.js";
 import { useI18n } from "../../../i18n/index.js";
 import { employeeApi } from "../api.js";
+import type { Assignment } from "../types.js";
+import { MODE_HINTS, MODE_LABELS } from "./copy.js";
 
 const MAX_FILES = 10;
+const MODES: Array<Assignment["mode"]> = ["autonomous", "responsive"];
 
 /** One sentence is enough. Everything else stays folded away and has a default. */
 export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: ModelCatalog; onCreated: () => void }) {
   const { t } = useI18n();
   const [goal, setGoal] = useState("");
+  const [mode, setMode] = useState<Assignment["mode"]>("autonomous");
   const [files, setFiles] = useState<UploadedAttachment[]>([]);
   const [modelId, setModelId] = useState("");
   const [creditLimit, setCreditLimit] = useState("");
@@ -45,7 +49,7 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
     setSaving(true); setError(null);
     try {
       await employeeApi.createAssignment({
-        goal: goal.trim(), modelId: modelId || undefined,
+        goal: goal.trim(), mode, modelId: modelId || undefined,
         attachments: files.map((file) => ({ assetId: file.assetId, filename: file.filename })),
         creditLimit: creditLimit.trim() ? Number(creditLimit) : null,
       });
@@ -78,6 +82,13 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
         >×</button>
       </li>)}
     </ul>}
+    <fieldset className="de-assignment-mode">
+      <legend>{t("模式")}</legend>
+      {MODES.map((value) => <label key={value}>
+        <input type="radio" name="assignment-mode" value={value} checked={mode === value} onChange={() => setMode(value)} />
+        <span>{t(MODE_LABELS[value])}</span>
+      </label>)}
+    </fieldset>
     <details>
       <summary>{t("更多设置")}</summary>
       <div className="de-assignment-options">
@@ -100,9 +111,9 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
       <button type="button" className="de-secondary-button" disabled={uploading || files.length >= MAX_FILES} onClick={() => input.current?.click()}>
         {t(uploading ? "上传中…" : "附文件")}
       </button>
-      <small>{t("完全自主：员工自己做决定，不中途问你，写入和生成都会直接做。")}</small>
+      <small>{t(MODE_HINTS[mode])}</small>
       <button type="button" className="de-primary-button" disabled={empty || saving || uploading} onClick={() => void submit()}>{t("开始")}</button>
     </footer>
-    {unreachable && <p className="de-assignment-hint">{t("还没接入飞书，结果只能回到这里查看。")}</p>}
+    {unreachable && <p className="de-assignment-hint">{t(mode === "responsive" ? "还没接入飞书，要回到这里才能看到问题和结果。" : "还没接入飞书，结果只能回到这里查看。")}</p>}
   </section>;
 }

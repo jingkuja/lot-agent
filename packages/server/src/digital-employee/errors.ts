@@ -28,6 +28,13 @@ export class ConflictError extends DigitalEmployeeError {
   }
 }
 
+/** A write's result is unconfirmed, so running the task again could repeat it. Only the owner can clear this. */
+export class UnverifiedOperationsError extends ConflictError {
+  constructor(readonly count: number) {
+    super("有操作的结果没有确认，请先核实");
+  }
+}
+
 export class OpenTasksError extends DigitalEmployeeError {
   constructor(readonly openTaskCount: number) {
     super("该客户还有未完成的跟进任务，请选择取消或保留后再归档", 409, "open_tasks");

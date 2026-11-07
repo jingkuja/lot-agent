@@ -66,6 +66,8 @@ export interface FeishuRepository {
   saveContact(userId: string, alias: string, openId: string): Promise<void>;
   deleteContact(userId: string, alias: string): Promise<void>;
   enqueue(job: FeishuInboxJob): Promise<boolean>;
+  seen(messageId: string, userId: string): Promise<boolean>;
+  recordRouted(job: FeishuInboxJob): Promise<void>;
   claim(): Promise<FeishuInboxJob | null>;
   finish(messageId: string, status: string): Promise<void>;
   active(job: FeishuInboxJob): Promise<boolean>;

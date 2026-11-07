@@ -802,7 +802,7 @@ export interface ProposalResult {
 
 export interface TodayItem {
   id: string;
-  kind: "proposal" | "opportunity" | "recommendation" | "follow_up" | "result" | "report";
+  kind: "proposal" | "opportunity" | "recommendation" | "follow_up" | "result" | "report" | "assignment";
   subject: { type: "customer" | "segment" | "campaign" | "asset"; id: string; label: string } | null;
   title: string;
   reason: string;
@@ -815,6 +815,7 @@ export interface TodayItem {
   recommendation?: CampaignRecommendation;
   deployment?: { id: string; assetId: string; title: string; platform: string; customPlatform: string | null; deployedAt: string | null };
   scheduleRun?: ScheduleRun;
+  assignment?: { rootId: string; title: string; createdAt: string; decision: AssignmentDecision | null; pausedReason: Assignment["pausedReason"] };
 }
 
 export interface EmployeeBrief {
@@ -828,6 +829,7 @@ export interface TodaySummary {
   pending: number;
   brief: EmployeeBrief | null;
   desktopReminder: boolean;
+  assignments: AssignmentActivity;
 }
 
 export interface RunningWork {
@@ -876,11 +878,44 @@ export interface Assignment {
   creditLimit: number | null;
   subtasks: { done: number; total: number };
   currentTool: string | null;
+  waitingDecisions: number;
   attachments: string[];
+}
+
+export type FailureChoice = "retry" | "skip" | "change" | "end";
+
+export interface DecisionAnswer {
+  choice?: FailureChoice;
+  text?: string;
+}
+
+export interface AssignmentDecision {
+  id: string;
+  assignmentId: string;
+  rootId: string;
+  conversationId: string;
+  title: string;
+  kind: "question" | "failure";
+  question: string;
+  options: string[];
+  multiSelect: boolean;
+  failureReason: AssignmentFailure | null;
+  unverified: number;
+  createdAt: string;
 }
 
 export interface AssignmentDetail extends Assignment {
   runs: Array<Pick<WorkRun, "id" | "status" | "startedAt" | "finishedAt" | "steps">>;
+  conversationId: string;
+  unverified: number;
+  decisions: AssignmentDecision[];
+}
+
+export interface AssignmentActivity {
+  open: number;
+  waiting: number;
+  events: Array<{ id: string; rootId: string; kind: "finished" | "paused" | "decision" | "reminder"; title: string; status: string | null }>;
+  cursor: string | null;
 }
 
 export interface AssignmentPage {
@@ -900,6 +935,7 @@ export interface AssignmentFilter {
 
 export interface AssignmentInput {
   goal: string;
+  mode: Assignment["mode"];
   modelId?: string;
   attachments: Array<{ assetId: string; filename: string }>;
   creditLimit: number | null;

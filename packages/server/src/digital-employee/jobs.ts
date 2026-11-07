@@ -98,7 +98,9 @@ export function createDailyScanFollowUp(db: Pick<DB, "pool">, opportunities: Opp
   const settings = new EmployeeSettingsService(db.pool);
   const briefs = new BriefService(db.pool);
   const proposals = new ProposalService(db.pool, opportunities, acquisition);
-  const today = new TodayService(db.pool, settings, opportunities, acquisition, proposals, briefs, new ScheduleService(db.pool));
+  // The brief counts customer work. A task that stopped has told the owner already, and it is on the today page.
+  const noTasks = { attention: async () => [] };
+  const today = new TodayService(db.pool, settings, opportunities, acquisition, proposals, briefs, new ScheduleService(db.pool), noTasks);
   return async (userId: string, scan: { scanned: number; created: number }) => {
     await acquisition.seedRuleRecommendations(userId);
     const { items } = await today.get(userId);

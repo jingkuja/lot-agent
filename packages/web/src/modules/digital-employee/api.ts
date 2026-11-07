@@ -1,7 +1,7 @@
 import { request, type UploadedAttachment } from "../../api/client.js";
 import type { EmployeeFocus } from "./focus.js";
 import type {
-  Assignment, AssignmentDetail, AssignmentFilter, AssignmentInput, AssignmentPage, ConversationWork, CustomerWork, EmployeeSchedule,
+  Assignment, AssignmentDetail, AssignmentFilter, AssignmentInput, AssignmentPage, ConversationWork, CustomerWork, DecisionAnswer, EmployeeSchedule,
   EmployeeSettings, ProposalResult, ScheduleInput, ScheduleRun, TodayResponse, TodaySummary,
 } from "./types.js";
 import type {
@@ -96,7 +96,12 @@ export const employeeApi = {
     method: "PUT", body: JSON.stringify({ creditLimit }),
   }),
 
-  getTodaySummary: () => request<TodaySummary>("/digital-employee/today/summary"),
+  answerDecision: (id: string, answer: DecisionAnswer) => request<Assignment>(`/digital-employee/assignments/decisions/${encodeURIComponent(id)}/answer`, {
+    method: "POST", body: JSON.stringify(answer),
+  }),
+
+  /** `after` is the last task event this device saw. Without it the answer only gives a cursor to start from. */
+  getTodaySummary: (after?: string) => request<TodaySummary>(`/digital-employee/today/summary${after ? `?after=${encodeURIComponent(after)}` : ""}`),
 
   markBriefRead: (id: string) =>
     request<{ ok: boolean }>(`/digital-employee/today/brief/${encodeURIComponent(id)}/read`, { method: "POST" }),

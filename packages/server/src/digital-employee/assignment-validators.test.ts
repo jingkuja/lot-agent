@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { InputError } from "./errors.js";
-import { parseAssignmentList, parseCreateAssignment, parseCreditLimit } from "./assignment-validators.js";
+import { parseAssignmentList, parseCreateAssignment, parseCreditLimit, parseDecisionAnswer, parseEventCursor } from "./assignment-validators.js";
 
 describe("creating a task", () => {
   it("needs only a sentence or a file", () => {
-    expect(parseCreateAssignment({ goal: "  写方案 " })).toEqual({ goal: "写方案", attachments: [], modelId: null, creditLimit: null });
+    expect(parseCreateAssignment({ goal: "  写方案 " })).toEqual({ goal: "写方案", mode: "autonomous", attachments: [], modelId: null, creditLimit: null });
     expect(parseCreateAssignment({ attachments: [{ assetId: "a1" }] }).attachments).toEqual([{ assetId: "a1", filename: "附件" }]);
     expect(() => parseCreateAssignment({ goal: " " })).toThrow(InputError);
   });
@@ -34,5 +34,26 @@ describe("the task list query", () => {
     expect(() => parseAssignmentList({ from: "2026-11-02T00:00:00Z", to: "2026-11-01T00:00:00Z" })).toThrow(InputError);
     expect(() => parseAssignmentList({ status: "waiting_team" })).toThrow(InputError);
     expect(() => parseAssignmentList({ limit: "0" })).toThrow(InputError);
+  });
+});
+
+describe("decision input", () => {
+  it("takes a mode, and defaults to full autonomy", () => {
+    expect(parseCreateAssignment({ goal: "x" }).mode).toBe("autonomous");
+    expect(parseCreateAssignment({ goal: "x", mode: "responsive" }).mode).toBe("responsive");
+    expect(() => parseCreateAssignment({ goal: "x", mode: "fast" })).toThrow(InputError);
+  });
+
+  it("reads an answer, and refuses an unknown choice", () => {
+    expect(parseDecisionAnswer({ text: " 华东 " })).toEqual({ text: "华东" });
+    expect(parseDecisionAnswer({ choice: "retry" })).toEqual({ choice: "retry" });
+    expect(() => parseDecisionAnswer({ choice: "delete" })).toThrow(InputError);
+    expect(() => parseDecisionAnswer({ text: "长".repeat(2001) })).toThrow(InputError);
+  });
+
+  it("only takes a numeric event cursor", () => {
+    expect(parseEventCursor(undefined)).toBeUndefined();
+    expect(parseEventCursor("42")).toBe("42");
+    expect(() => parseEventCursor("1;drop")).toThrow(InputError);
   });
 });

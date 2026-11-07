@@ -13,6 +13,8 @@ import { SecretBox } from "../auth/secret-box.js";
 import type { AgentService } from "../services/agent-service.js";
 
 class MemoryRepository implements FeishuRepository {
+  async seen() { return false; }
+  async recordRouted() {}
   bindings = new Map<string,FeishuConnection>();
   setups = new Map<string,FeishuSetup>();
   conversationIds = new Map<string,string>();

@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { AssignmentService } from "./assignment-service.js";
 import type { CustomerAcquisitionService, DeploymentAwaitingFeedback } from "./acquisition-service.js";
 import type { BriefService } from "./brief-service.js";
 import type { OpportunityListItem } from "./opportunity-types.js";
@@ -7,8 +8,9 @@ import type { PendingProposal, ProposalService } from "./proposal-service.js";
 import type { ScheduleRun, ScheduleService } from "./schedule-service.js";
 import type { EmployeeSettingsService } from "./settings-service.js";
 
-export type TodayItemKind = "proposal" | "opportunity" | "recommendation" | "follow_up" | "result" | "report";
+export type TodayItemKind = "proposal" | "opportunity" | "recommendation" | "follow_up" | "result" | "report" | "assignment";
 type Recommendation = Awaited<ReturnType<CustomerAcquisitionService["listRecommendations"]>>["items"][number];
+type AssignmentAttention = Awaited<ReturnType<AssignmentService["attention"]>>[number];
 
 /** One unit of work, whichever table it comes from. Interface copy is built from these fields. */
 export interface TodayItem {
@@ -26,6 +28,7 @@ export interface TodayItem {
   recommendation?: Recommendation;
   deployment?: DeploymentAwaitingFeedback;
   scheduleRun?: ScheduleRun;
+  assignment?: AssignmentAttention;
 }
 
 export interface RunningWork {
@@ -51,6 +54,7 @@ export class TodayService {
     private readonly proposals: Pick<ProposalService, "listPending">,
     private readonly briefs: Pick<BriefService, "latest">,
     private readonly schedules: Pick<ScheduleService, "pendingReports">,
+    private readonly assignments: Pick<AssignmentService, "attention">,
   ) {}
 
   async get(userId: string) {
@@ -58,7 +62,7 @@ export class TodayService {
     const today = await this.opportunities.list(userId, { view: "today" });
     const pending = await this.opportunities.list(userId, { view: "pending" });
     const snoozed = await this.opportunities.list(userId, { view: "snoozed" });
-    const [settings, recommendations, deployments, proposals, running, brief, reports] = await Promise.all([
+    const [settings, recommendations, deployments, proposals, running, brief, reports, assignments] = await Promise.all([
       this.settings.get(userId),
       this.acquisition.listRecommendations(userId, "pending"),
       this.acquisition.listDeploymentsAwaitingFeedback(userId),
@@ -66,6 +70,7 @@ export class TodayService {
       this.runningWork(userId),
       this.briefs.latest(userId),
       this.schedules.pendingReports(userId),
+      this.assignments.attention(userId),
     ]);
     const items = [
       ...proposals.map(proposalItem),
@@ -74,6 +79,7 @@ export class TodayService {
       ...today.items.map((item) => workItem(item.status === "awaiting_result" ? "result" : "follow_up", item)),
       ...deployments.map(deploymentItem),
       ...reports.map(reportItem),
+      ...assignments.map(assignmentItem),
     ].sort(byPriority);
     return {
       employee: { name: settings.employeeName },
@@ -109,7 +115,7 @@ export class TodayService {
 
 export function countToday(items: TodayItem[]) {
   return {
-    confirm: items.filter((item) => ["proposal", "opportunity", "recommendation"].includes(item.kind)).length,
+    confirm: items.filter((item) => ["proposal", "opportunity", "recommendation", "assignment"].includes(item.kind)).length,
     followUps: items.filter((item) => item.kind === "follow_up").length,
     results: items.filter((item) => item.kind === "result").length,
   };
@@ -196,6 +202,22 @@ function reportItem(run: ScheduleRun): TodayItem {
     dueAt: run.finishedAt,
     source: { type: "schedule_run", id: run.id },
     scheduleRun: run,
+  };
+}
+
+/** Work has stopped until the owner acts, so it outranks anything that can wait. */
+function assignmentItem(assignment: AssignmentAttention): TodayItem {
+  return {
+    id: assignment.decision ? `assignment:${assignment.decision.id}` : `assignment:${assignment.rootId}`,
+    kind: "assignment",
+    subject: null,
+    title: assignment.title,
+    reason: assignment.decision?.question ?? "",
+    evidence: [],
+    priority: "high",
+    dueAt: assignment.createdAt,
+    source: { type: "assignment", id: assignment.rootId },
+    assignment,
   };
 }
 
