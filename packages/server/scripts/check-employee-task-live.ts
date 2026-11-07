@@ -167,8 +167,6 @@ async function main() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32)`);
   await mkdir(resolve(root, "data/uploads"), { recursive: true });
   const jobs = start("src/workers/index.ts");
-  // A moment apart: on a brand-new database two workers creating the same table at once can lose the race.
-  await wait(4_000);
   let worker = start("src/workers/employee-task.ts");
   const owner = await createOwner("employee task live check");
 

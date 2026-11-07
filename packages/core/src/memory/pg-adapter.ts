@@ -1,5 +1,8 @@
 import type { PersistentMemoryAdapter, MemoryEntry } from "./store.js";
 
+/** What PostgreSQL raises when two processes create the same object at once: IF NOT EXISTS does not cover that race. */
+const LOST_CREATE_RACE = new Set(["23505", "42P07"]);
+
 /**
  * PostgreSQL adapter for user-level persistent memory.
  * Requires a `user_memory` table (auto-created by init()).
@@ -11,8 +14,17 @@ export class PgMemoryAdapter implements PersistentMemoryAdapter {
     this.pool = pool;
   }
 
+  /** The loser of the race has what it came for, because the winner committed. The API and the task worker both start here. */
+  private async create(sql: string): Promise<void> {
+    try {
+      await this.pool.query(sql);
+    } catch (error) {
+      if (!LOST_CREATE_RACE.has((error as { code?: string }).code ?? "")) throw error;
+    }
+  }
+
   async init(): Promise<void> {
-    await this.pool.query(`
+    await this.create(`
       CREATE TABLE IF NOT EXISTS user_memory (
         id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id     VARCHAR(200) NOT NULL DEFAULT 'default',
@@ -25,7 +37,7 @@ export class PgMemoryAdapter implements PersistentMemoryAdapter {
       );
     `);
 
-    await this.pool.query(`
+    await this.create(`
       CREATE INDEX IF NOT EXISTS idx_user_memory_user
         ON user_memory (user_id);
     `);
