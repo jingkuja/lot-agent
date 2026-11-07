@@ -35,6 +35,12 @@ export class UnverifiedOperationsError extends ConflictError {
   }
 }
 
+export class SubtaskLimitError extends ConflictError {
+  constructor(readonly limit: number) {
+    super("已到你设的子任务数量上限");
+  }
+}
+
 export class OpenTasksError extends DigitalEmployeeError {
   constructor(readonly openTaskCount: number) {
     super("该客户还有未完成的跟进任务，请选择取消或保留后再归档", 409, "open_tasks");

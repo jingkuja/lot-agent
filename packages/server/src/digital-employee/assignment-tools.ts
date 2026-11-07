@@ -15,7 +15,10 @@ function notes(value: unknown): string[] {
     .slice(0, MAX_NOTES).map((item) => item.trim().slice(0, MAX_NOTE));
 }
 
-export function createFinishTaskTool(repository: Pick<AssignmentRepository, "recordEndIntent">): Tool {
+/** `guard` returns why the task cannot end yet, which the model sees as the tool's result. */
+export function createFinishTaskTool(
+  repository: Pick<AssignmentRepository, "recordEndIntent">, guard?: () => Promise<string | null>,
+): Tool {
   return {
     name: "finish_task",
     effect: "interaction",
@@ -38,6 +41,8 @@ export function createFinishTaskTool(repository: Pick<AssignmentRepository, "rec
       if (!summary || (value.outcome !== "done" && value.outcome !== "blocked")) {
         return { content: "finish_task needs an outcome and a summary.", isError: true, errorKind: "validation" };
       }
+      const objection = await guard?.();
+      if (objection) return { content: objection, isError: true, errorKind: "validation" };
       const intent: EndIntent = {
         outcome: value.outcome, summary: summary.slice(0, MAX_SUMMARY), assumptions: notes(value.assumptions), skipped: notes(value.skipped),
       };
@@ -145,16 +150,21 @@ export function requireOwnerAnswer(original: Tool, repository: Pick<AssignmentRe
   };
 }
 
-/** Wraps the ordinary product tools, so what a task held back for the owner cannot be written around the review. */
-export function guardHeldItems(original: Tool, imports: Pick<ProductImportService, "itemsHeldFor">): Tool {
+/**
+ * Wraps the ordinary product tools, so what a task held back for the owner cannot be written around the review.
+ * `scope` is every conversation in the task: a held item is just as off limits to the subtask that did not hold it.
+ */
+export function guardHeldItems(
+  original: Tool, imports: Pick<ProductImportService, "itemsHeldFor">, scope?: () => Promise<string[]>,
+): Tool {
   return {
     ...original,
     async execute(input, context) {
       const productId = (input as { productId?: unknown } | null)?.productId;
-      const held = context.conversationId && await imports.itemsHeldFor(
-        context.userId ?? "default", context.conversationId, typeof productId === "string" ? productId : undefined,
-      );
-      if (!held) return original.execute(input, context);
+      const userId = context.userId ?? "default";
+      const conversations = scope ? await scope() : context.conversationId ? [context.conversationId] : [];
+      const checks = await Promise.all(conversations.map((id) => imports.itemsHeldFor(userId, id, typeof productId === "string" ? productId : undefined)));
+      if (!checks.some(Boolean)) return original.execute(input, context);
       return {
         content: "Not saved: a file in this task has items waiting for the owner's review, and this write could bypass it. " +
           "Do not try again. Report what you wanted to change in skipped.",

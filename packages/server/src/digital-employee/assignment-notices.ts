@@ -38,12 +38,16 @@ export function assignmentLink(id?: string): string {
 }
 
 export function finishedNotice(input: {
-  name: string; title: string; status: unknown; failureReason?: FailureReason | null; summary?: unknown; link: string;
+  name: string; title: string; status: unknown; failureReason?: FailureReason | null; summary?: unknown; link: string; missed?: unknown;
 }, english: boolean): string {
   const { name, title, failureReason, link } = input;
   const summary = typeof input.summary === "string" ? clip(input.summary) : "";
+  const missed = Array.isArray(input.missed) ? input.missed.filter((item): item is string => typeof item === "string") : [];
+  const done = missed.length
+    ? (english ? `${name} partly finished "${title}". Not done: ${missed.join(", ")}.` : `${name}做完了「${title}」的一部分，没完成的有：${missed.join("、")}。`)
+    : (english ? `${name} finished "${title}".` : `${name}做完了「${title}」。`);
   const lines = input.status === "succeeded"
-    ? [english ? `${name} finished "${title}".` : `${name}做完了「${title}」。`, summary]
+    ? [done, summary]
     : [
       english
         ? `${name} could not finish "${title}": ${FAILURE_EN[failureReason ?? "model_failed"]}.`

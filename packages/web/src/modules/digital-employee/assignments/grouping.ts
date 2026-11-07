@@ -57,6 +57,10 @@ export function toLocalInput(value: Date): string {
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
 }
 
+export function isOpenStatus(status: Assignment["status"]): boolean {
+  return status === "queued" || status === "running" || status.startsWith("waiting_");
+}
+
 export function isOpen(item: Assignment): boolean {
-  return item.status === "queued" || item.status === "running" || item.status.startsWith("waiting_");
+  return isOpenStatus(item.status);
 }

@@ -91,7 +91,9 @@ import { meterLLM } from "../billing/metered-llm.js";
 import { agentExtension, registerAgentExtension } from "./agent-extensions.js";
 import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
 import { createEmployeeMarketingDrafts } from "../marketing-video/employee-draft.js";
-import { createDigitalEmployeeRuntime, createOwnerLlmResolver, type DigitalEmployeeRuntime } from "../digital-employee/runtime.js";
+import {
+  createAssignmentSummarizer, createDigitalEmployeeRuntime, createOwnerLlmResolver, type DigitalEmployeeRuntime,
+} from "../digital-employee/runtime.js";
 import { MessageRepository } from "./message-repository.js";
 import { TraceRecorder } from "./trace-recorder.js";
 import { RagClient, type KnowledgeBase, type KnowledgeBaseRef, type RagIdentity, type RagRecord } from "./rag-client.js";
@@ -271,6 +273,8 @@ export class AgentService {
   uploadStorage!: LocalStorage;
   /** Customer profiles are a separate business module, not an AgentDefinition. */
   digitalEmployee!: DigitalEmployeeRuntime["service"];
+  /** For the task worker. The API process never runs a task. */
+  summarizeAssignment!: ReturnType<typeof createAssignmentSummarizer>;
   /** Mini program image slots ("1"/"2") and LLM; change mapping in config. */
   readonly miniprogram: MiniprogramConfig;
   private llmConfig: LLMConfig;
@@ -427,6 +431,7 @@ export class AgentService {
     );
     this.toolRegistry.register(proposeOutlineTool);
     for (const tool of digitalEmployee.tools) this.toolRegistry.register(tool);
+    this.summarizeAssignment = createAssignmentSummarizer({ resolveLlm: digitalEmployee.resolveLlm, english: internationalModelsEnabled() });
     registerAgentExtension(createDigitalEmployeeExtension({
       resolveModel: digitalEmployee.resolveLlm,
       settings: digitalEmployee.service.settings,

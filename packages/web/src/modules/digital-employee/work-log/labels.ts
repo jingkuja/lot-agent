@@ -60,6 +60,12 @@ export const TOOL_LABELS: Record<string, string> = {
   commit_product_import: "保存产品资料",
   read_product_documents: "读取产品补充资料",
   finish_task: "收尾任务",
+  create_subtasks: "拆分子任务",
+  read_team_board: "查看工作板",
+  read_team_detail: "查看其他子任务的内容",
+  post_team_update: "发布到工作板",
+  retry_subtask: "重试子任务",
+  wait_for_team: "等待其他子任务",
 };
 
 export const RUN_STATUS_LABELS: Record<string, string> = {

@@ -180,13 +180,38 @@ const TODAY = new Date(new Date().setHours(10, 0, 0, 0)).toISOString();
 const TWO_DAYS_AGO = new Date(new Date().setHours(10, 0, 0, 0) - 2 * 86_400_000).toISOString();
 const task = (over) => ({
   id: "t1", title: "写开业优惠方案", goal: "查同行开业活动，写优惠方案", mode: "autonomous", status: "running", pausedReason: null, modelId: "kimi-k3.1-pro",
-  result: null, failureReason: null, createdAt: TODAY, finishedAt: null, creditsUsed: 120, creditLimit: null, subtasks: { done: 0, total: 0 },
-  currentTool: "web_search", waitingDecisions: 0, attachments: [], conversationId: "c-task", unverified: 0, decisions: [], ...over,
+  result: null, failureReason: null, createdAt: TODAY, finishedAt: null, creditsUsed: 120, creditLimit: null,
+  subtasks: { done: 0, total: 0, missed: 0 }, subtaskLimit: null,
+  currentTool: "web_search", waitingDecisions: 0, attachments: [], conversationId: "c-task", unverified: 0, decisions: [], subtaskList: [], board: [], ...over,
 });
 const decisionFixture = (over) => ({
   id: "q1", assignmentId: "t5", rootId: "t5", conversationId: "c-task", title: "给王总记跟进", kind: "question", question: "哪位王总？",
   options: ["华东的王总", "华南的王总"], multiSelect: false, failureReason: null, unverified: 0, createdAt: NOW, ...over,
 });
+const subtaskFixture = (over) => ({
+  id: "s1", position: 1, title: "搜同行", goal: "搜同类店铺", status: "running", failureReason: null, result: null, summary: "搜到 3 家店", createdBy: "employee",
+  retriesUsed: 0, unverified: 0, conversationId: "c-sub", finishedAt: null, ...over,
+});
+const boardFixture = (over) => ({
+  id: "1", kind: "finding", title: "同行都送体验券", body: "折扣集中在七到八折", artifacts: [], event: null, author: 1, authorTitle: "搜同行", createdAt: NOW, ...over,
+});
+/** Three subtasks in different states, and a finished task that only partly got there. */
+const teamTasks = (state) => {
+  state.assignments.unshift(task({
+    id: "team1", title: "开业活动", goal: "明天开业的优惠活动", status: "waiting_children", currentTool: null, subtasks: { done: 1, total: 3, missed: 1 }, subtaskLimit: 5,
+    subtaskList: [
+      subtaskFixture({}),
+      subtaskFixture({ id: "s2", position: 2, title: "写方案", status: "failed", failureReason: "model_failed", summary: null }),
+      subtaskFixture({ id: "s3", position: 3, title: "做海报", status: "succeeded", summary: null, result: { summary: "海报做好了", assumptions: [], skipped: [] } }),
+    ],
+    board: [
+      boardFixture({}),
+      boardFixture({ id: "2", kind: "status", event: "failed", title: "subtask 2 failed: 写方案", body: "", author: 2, authorTitle: "写方案" }),
+      boardFixture({ id: "3", kind: "status", event: "added", title: "new subtask 3: 做海报", body: "做海报", author: 0, authorTitle: "开业活动" }),
+    ],
+  }), task({ id: "team2", title: "整理名单", goal: "整理名单", status: "succeeded", currentTool: null, subtasks: { done: 1, total: 2, missed: 1 } }));
+  return state;
+};
 /** A question, a failure with an unconfirmed write, and a task stopped by quota. */
 const decisionTasks = (state) => {
   const question = decisionFixture({});
@@ -239,6 +264,30 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
       state.assignments.unshift(created);
       return json(created, 201);
     }
+    const subtask = de.match(/^\/assignments\/([^/]+)\/subtasks(?:\/([^/]+))?(?:\/(\w+))?$/);
+    if (subtask) {
+      const item = state.assignments.find((entry) => entry.id === subtask[1]);
+      if (!subtask[2]) {
+        const position = item.subtaskList.length + 1;
+        item.subtaskList.push(subtaskFixture({ id: `s${position}`, position, title: request.postDataJSON().goal, status: "queued", summary: null }));
+        return json(item, 201);
+      }
+      if (!subtask[3]) {
+        return json({ runs: [{ id: "sr1", status: "completed", startedAt: NOW, finishedAt: NOW, steps: [
+          { id: "ss1", tool: "post_team_update", status: "succeeded", startedAt: NOW, finishedAt: NOW, artifact: null },
+        ] }] });
+      }
+      const child = item.subtaskList.find((entry) => entry.id === subtask[2]);
+      Object.assign(child, subtask[3] === "cancel" ? { status: "cancelled" } : { status: "queued", failureReason: null });
+      return json(item);
+    }
+    const subtaskLimit = de.match(/^\/assignments\/([^/]+)\/subtask-limit$/);
+    if (subtaskLimit) {
+      const item = state.assignments.find((entry) => entry.id === subtaskLimit[1]);
+      Object.assign(item, { subtaskLimit: request.postDataJSON().subtaskLimit });
+      return json(item);
+    }
+    if (de.match(/^\/assignments\/[^/]+\/board$/)) return json({ entries: [] });
     const answered = de.match(/^\/assignments\/decisions\/([^/]+)\/answer$/);
     if (answered) {
       const body = request.postDataJSON();
@@ -257,7 +306,11 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
       if (assignment[2] === "retry") Object.assign(item, { status: "queued", failureReason: null });
       if (assignment[2] === "resume") Object.assign(item, { pausedReason: null });
       if (assignment[2] === "limit") Object.assign(item, { creditLimit: request.postDataJSON().creditLimit });
-      return json(assignment[2] ? item : { ...item, runs: [{ id: "run1", status: "completed", startedAt: NOW, finishedAt: NOW, steps: [
+      const artifacts = [
+        { id: "as2", tool: "generate_document", artifact: { label: "方案.docx", url: "/static/documents/abc.docx", download: true } },
+        { id: "as3", tool: "commit_product_import", artifact: { label: "焕颜美学", url: "/digital-employee/materials/import/d1", needsReview: true } },
+      ];
+      return json(assignment[2] ? item : { ...item, artifacts, runs: [{ id: "run1", status: "completed", startedAt: NOW, finishedAt: NOW, steps: [
         { id: "as1", tool: "web_search", status: "succeeded", startedAt: NOW, finishedAt: NOW, artifact: null },
         { id: "as2", tool: "generate_document", status: "succeeded", startedAt: NOW, finishedAt: NOW,
           artifact: { label: "方案.docx", url: "/static/documents/abc.docx", download: true } },
@@ -1056,7 +1109,9 @@ try {
     await page.getByRole("button", { name: "开始", exact: true }).click();
     await days.nth(1).getByText("查查附近的开业活动", { exact: true }).first().waitFor();
     const created = JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/assignments")).body);
-    assert.deepEqual(created, { goal: "查查附近的开业活动", mode: "autonomous", attachments: [{ assetId: "asset1", filename: "手册.pdf" }], creditLimit: 500 });
+    assert.deepEqual(created, {
+      goal: "查查附近的开业活动", mode: "autonomous", attachments: [{ assetId: "asset1", filename: "手册.pdf" }], creditLimit: 500, subtasks: [], subtaskLimit: null,
+    });
 
     await days.first().getByRole("button", { name: "继续", exact: true }).click();
     await page.waitForFunction(() => document.querySelector(".de-assignment-card em")?.textContent !== "已暂停");
@@ -1178,6 +1233,61 @@ try {
     assert.deepEqual(await desktop.page.evaluate(() => window.notified), []);
     assert.equal(notified.summaryCursors.at(-1), "9");
     await desktop.close();
+  }
+
+  // Subtasks: splitting at creation, watching them work, and acting on one without touching the rest.
+  {
+    const state = teamTasks(fixtures());
+    const { page, close } = await open("/digital-employee/assignments", { assignments: true, state });
+    await page.locator(".de-assignment-card").filter({ hasText: "整理名单" }).getByText("部分完成").waitFor();
+    await page.getByText("更多设置").click();
+    await page.getByLabel("子任务（一行一个").fill("搜同行\n\n写方案");
+    await page.getByLabel("子任务数量上限").fill("5");
+    await page.getByRole("textbox", { name: "交代一件事" }).fill("开业活动");
+    await page.getByRole("button", { name: "开始", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector(".de-assignment-composer textarea")?.value === "");
+    const created = JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/assignments")).body);
+    assert.deepEqual(created.subtasks, ["搜同行", "写方案"]);
+    assert.equal(created.subtaskLimit, 5);
+
+    await page.goto(`${origin}/digital-employee/assignments/team1`);
+    const list = page.locator(".de-subtasks");
+    await list.getByText("子任务 1：搜同行").waitFor();
+    await list.getByText("搜到 3 家店").waitFor();
+    assert.equal(await list.getByText("海报做好了").isVisible(), false, "finished subtasks start folded");
+    await list.getByText("已结束 1 个").click();
+    await list.getByText("海报做好了").waitFor();
+
+    await list.locator(".de-subtask-card").first().getByRole("button", { name: "执行步骤" }).click();
+    await list.getByText("发布到工作板").waitFor();
+    await list.locator(".de-subtask-card").filter({ hasText: "写方案" }).getByRole("button", { name: "重试" }).click();
+    await page.waitForFunction(() => !document.querySelector(".de-subtasks")?.textContent.includes("模型调用失败"));
+    assert.ok(state.writes.some((entry) => entry.path.endsWith("/subtasks/s2/retry")));
+    await list.locator(".de-subtask-card").first().getByRole("button", { name: "取消" }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll(".de-subtask-card")].some((card) => card.textContent.includes("搜同行") && card.textContent.includes("已取消")));
+    assert.ok(state.writes.some((entry) => entry.path.endsWith("/subtasks/s1/cancel")));
+
+    await list.getByLabel("加一个子任务").fill("查价格");
+    await list.getByRole("button", { name: "添加" }).click();
+    await list.getByText("子任务 4：查价格").waitFor();
+
+    const board = page.locator(".de-board");
+    await board.getByText("同行都送体验券").click();
+    await board.getByText("折扣集中在七到八折").waitFor();
+    await board.getByText("没有完成：写方案").waitFor();
+    await board.getByText("新增子任务：做海报").waitFor();
+    await close();
+
+    const english = teamTasks(fixtures());
+    const phone = await open("/digital-employee/assignments/team1", { assignments: true, state: english, language: "en", width: 390 });
+    await phone.page.locator(".de-subtasks").waitFor();
+    const ownText = (await phone.page.locator(".de-subtasks, .de-board").allInnerTexts()).join("\n").replace(/搜同行|写方案|做海报|搜到 3 家店|开业活动|同行都送体验券/g, "");
+    assert.equal(/[\u4e00-\u9fa5]/.test(ownText), false, `untranslated team copy: ${ownText}`);
+    assert.ok(await noHorizontalScroll(phone.page), "team view overflows at phone width");
+    await snap(phone.page, "assignment-team-en-390-light.png");
+    await phone.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    await snap(phone.page, "assignment-team-en-390-dark.png");
+    await phone.close();
   }
 
   // Two languages, two themes, phone width.

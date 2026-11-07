@@ -17,6 +17,8 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
   const [files, setFiles] = useState<UploadedAttachment[]>([]);
   const [modelId, setModelId] = useState("");
   const [creditLimit, setCreditLimit] = useState("");
+  const [subtasks, setSubtasks] = useState("");
+  const [subtaskLimit, setSubtaskLimit] = useState("");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,8 +54,10 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
         goal: goal.trim(), mode, modelId: modelId || undefined,
         attachments: files.map((file) => ({ assetId: file.assetId, filename: file.filename })),
         creditLimit: creditLimit.trim() ? Number(creditLimit) : null,
+        subtasks: subtasks.split("\n").map((line) => line.trim()).filter(Boolean),
+        subtaskLimit: subtaskLimit.trim() ? Number(subtaskLimit) : null,
       });
-      setGoal(""); setFiles([]); setCreditLimit(""); setModelId("");
+      setGoal(""); setFiles([]); setCreditLimit(""); setModelId(""); setSubtasks(""); setSubtaskLimit("");
       onCreated();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "没有交代成功，请再试一次");
@@ -102,6 +106,14 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
         <label>
           <span>{t("费用上限（积分）")}</span>
           <input type="number" min="1" step="1" inputMode="numeric" placeholder={t("不设上限")} value={creditLimit} onChange={(event) => setCreditLimit(event.target.value)} />
+        </label>
+        <label>
+          <span>{t("子任务数量上限")}</span>
+          <input type="number" min="1" step="1" inputMode="numeric" placeholder={t("不设上限")} value={subtaskLimit} onChange={(event) => setSubtaskLimit(event.target.value)} />
+        </label>
+        <label className="is-wide">
+          <span>{t("子任务（一行一个，可以不填，员工会自己拆）")}</span>
+          <textarea rows={3} value={subtasks} onChange={(event) => setSubtasks(event.target.value)} />
         </label>
       </div>
     </details>

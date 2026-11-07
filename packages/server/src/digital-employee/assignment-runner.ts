@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, RunStatus } from "@lot-agent/core";
 import type { AttachmentRef } from "../services/attachment-extractor.js";
+import { boardNotice, ProgressDigest, subtaskBrief, withOverview, type BoardEvent } from "./assignment-board.js";
 import { assignmentConfig } from "./assignment-config.js";
 import { assignmentLink, costLimitNotice, decisionNotice, finishedNotice, quotaNotice } from "./assignment-notices.js";
 import type { AssignmentEvent, AssignmentNode, AssignmentRepository } from "./assignment-repository.js";
@@ -22,6 +23,9 @@ const DELIVERY_BATCH = 20;
 const QUOTA_NOTICE_HOURS = 24;
 const PAUSE_NOTICE_DELAY_MS = 30_000;
 const REMINDER_HOURS = 24;
+const NOTICE_ENTRIES = 5;
+const WAKE_BATCH = 200;
+const RESULT_ON_BOARD_CHARS = 1_000;
 const MAX_OPTIONS = 6;
 
 /** A new segment reads its own history, so this only has to say what is happening. */
@@ -46,6 +50,8 @@ export interface AssignmentRunnerPorts {
   releaseConversation(conversationId: string, runId: string): Promise<void>;
   stream(input: AssignmentTurnInput): AsyncIterable<AgentEvent>;
   generateTitle(node: AssignmentNode): Promise<string | null>;
+  /** Uses the cheap background model, not the task's. Left out, subtasks share only what they publish. */
+  summarize?: (input: { userId: string; title: string; previous: string | null; delta: string }) => Promise<{ title: string; summary: string }>;
   employeeName(userId: string): Promise<string>;
   /** Has no recipient: a notice can only ever reach the account's owner. */
   sendToOwner?: (userId: string, message: { text: string; requestId: string }) => Promise<{ messageId?: string } | void>;
@@ -58,6 +64,7 @@ interface TurnRecord {
   quota: boolean;
   text: string;
   madeProgress: boolean;
+  digest: ProgressDigest;
 }
 
 function ownerQuestion(input: unknown): OwnerQuestion {
@@ -122,6 +129,7 @@ export class AssignmentRunner {
     for (const { node, resumed } of await this.repository.sweepOrphans()) {
       console.warn(`[assignments] node ${node.id} lost its worker: ${resumed ? "resumed" : "failed"}`);
     }
+    await this.repository.wakeWaiting(WAKE_BATCH);
     await this.repository.queueReminders(REMINDER_HOURS);
   }
 
@@ -142,15 +150,50 @@ export class AssignmentRunner {
     try {
       await this.repository.recordRun(node, runId);
       const first = await this.repository.isFirstTurn(node);
-      if (first) void this.title(node);
-      turn = await this.run(node, runId, first, controller.signal, () => { paused = true; });
+      if (first && node.id === node.rootId) void this.title(node);
+      const message = await this.opening(node, first);
+      turn = await this.run(node, runId, first, message, controller.signal, () => { paused = true; });
     } finally {
       clearInterval(monitor);
       await this.ports.releaseConversation(node.conversationId, runId);
     }
     await this.repository.syncUsage(node);
     await this.repository.finishRun(runId, turn.madeProgress);
+    // Before the node settles, so whoever it wakes reads the latest.
+    if (!this.stopping && turn.status !== "cancelled") await this.summarize(node, turn.digest);
     await this.conclude(node, runId, turn, paused);
+    await this.repository.wakeTree(node.rootId);
+  }
+
+  /** Every segment opens with the board, so runtime notices never have to be stored: nothing is lost between segments. */
+  private async opening(node: AssignmentNode, first: boolean): Promise<string> {
+    const overview = await this.repository.overview(node);
+    const team = overview.members.length > 1;
+    if (team) await this.repository.markBoardRead(node);
+    if (first && node.id !== node.rootId) {
+      const root = await this.repository.readNode(node.rootId);
+      return subtaskBrief({ rootGoal: root?.goal ?? "", position: node.position, goal: node.goal, overview });
+    }
+    const message = node.nextMessage ?? (first ? node.goal : CONTINUE_MESSAGE);
+    return team ? withOverview(message, overview) : message;
+  }
+
+  /** Best effort: a failed summary costs teammates some freshness and nothing else, and the text waits for the next try. */
+  private async summarize(node: AssignmentNode, digest: ProgressDigest): Promise<void> {
+    if (!this.ports.summarize || node.id === node.rootId || digest.busy || !digest.pending) return;
+    digest.busy = true;
+    const delta = digest.take();
+    try {
+      const others = await this.repository.openChildren(node.rootId) - (await this.repository.isOpen(node.id) ? 1 : 0);
+      if (others <= 0) return digest.restore(delta);
+      const previous = await this.repository.latestSummary(node);
+      const { title, summary } = await this.ports.summarize({ userId: node.userId, title: node.title, previous, delta });
+      await this.repository.post({ rootId: node.rootId, userId: node.userId, authorId: node.id, kind: "summary", title, body: summary });
+    } catch {
+      digest.restore(delta);
+    } finally {
+      digest.busy = false;
+    }
   }
 
   private watch(node: AssignmentNode, runId: string, controller: AbortController) {
@@ -172,8 +215,10 @@ export class AssignmentRunner {
     return monitor;
   }
 
-  private async run(node: AssignmentNode, runId: string, first: boolean, signal: AbortSignal, onPaused: () => void): Promise<TurnRecord> {
-    const turn: TurnRecord = { status: undefined, question: null, quota: false, text: "", madeProgress: false };
+  private async run(
+    node: AssignmentNode, runId: string, first: boolean, message: string, signal: AbortSignal, onPaused: () => void,
+  ): Promise<TurnRecord> {
+    const turn: TurnRecord = { status: undefined, question: null, quota: false, text: "", madeProgress: false, digest: new ProgressDigest() };
     const asked = new Map<string, unknown>();
     const startedAt = Date.now();
     const beforeIteration = async (usage: { tokens: number; cost: number }) => {
@@ -184,21 +229,27 @@ export class AssignmentRunner {
       } catch {
         // Failing to read the limit must not fail the task; the next iteration checks again.
       }
-      return Date.now() - startedAt > SOFT_TURN_MS ? { stop: true } : undefined;
+      const notice = await this.repository.takeUnread(node, NOTICE_ENTRIES).then(boardNotice).catch(() => null);
+      const stop = Date.now() - startedAt > SOFT_TURN_MS;
+      return notice || stop ? { ...(notice ? { notices: [notice] } : {}), ...(stop ? { stop } : {}) } : undefined;
     };
+    const summaries = setInterval(() => void this.summarize(node, turn.digest), assignmentConfig().summaryIntervalMs);
+    summaries.unref();
     try {
       for await (const event of this.ports.stream({
-        conversationId: node.conversationId, message: first ? node.goal : node.nextMessage ?? CONTINUE_MESSAGE, userId: node.userId,
+        conversationId: node.conversationId, message, userId: node.userId,
         attachments: first ? node.attachments : [], signal, runId, modelId: node.modelId, beforeIteration,
       })) {
         if (event.type === "text") {
           turn.text += event.content;
+          turn.digest.text(event.content);
           if (event.content.trim()) turn.madeProgress = true;
         } else if (event.type === "tool_call") {
           turn.text = "";
           if (event.name === "ask_user") asked.set(event.id, event.input);
         } else if (event.type === "tool_result") {
           turn.madeProgress = true;
+          turn.digest.tool(event.name, event.output, event.isError === true);
           // Taken from a call that was accepted, so a rejected one cannot pause the task with no question.
           if (event.name === "ask_user" && !event.isError) turn.question = ownerQuestion(asked.get(event.toolCallId));
           if (event.errorKind === "quota") {
@@ -216,6 +267,8 @@ export class AssignmentRunner {
       // An exhausted key can fail the model lookup before any model call. Pausing costs nothing; the owner tops up and continues.
       if (message === DIGITAL_EMPLOYEE_LLM_UNAVAILABLE || message === MANAGED_CREDENTIAL_UNAVAILABLE) turn.quota = true;
       if (signal.aborted) turn.status = "cancelled";
+    } finally {
+      clearInterval(summaries);
     }
     if (signal.aborted && !turn.status) turn.status = "cancelled";
     return turn;
@@ -223,35 +276,57 @@ export class AssignmentRunner {
 
   private async conclude(node: AssignmentNode, runId: string, turn: TurnRecord, paused: boolean): Promise<void> {
     const current = await this.repository.readNode(node.id);
+    const isRoot = node.id === node.rootId;
+    const openChildren = isRoot ? await this.repository.openChildren(node.rootId) : 0;
     const decision: TurnDecision = decideTurn({
-      mode: node.mode, status: turn.status, endIntent: current?.endIntent ?? null, question: turn.question, quota: turn.quota, paused,
+      openChildren, mode: node.mode, status: turn.status, endIntent: current?.endIntent ?? null, question: turn.question, quota: turn.quota, paused,
       shuttingDown: this.stopping,
       text: turn.text.trim(), madeProgress: turn.madeProgress, previousMadeProgress: await this.repository.previousProgress(node, runId),
     });
     const title = current?.title ?? node.title;
+    // Subtasks tell the team through the board. The owner hears about the task as a whole, once.
+    const board = (event: BoardEvent, what: string, body = "") => isRoot ? {} : {
+      board: { event, title: `subtask ${node.position} ${what}: ${title}`, body: body.slice(0, RESULT_ON_BOARD_CHARS) },
+    };
+    const label = isRoot ? title : `${(await this.repository.readNode(node.rootId))?.title ?? ""} · ${title}`;
     switch (decision.next) {
-      case "succeed":
+      case "succeed": {
+        const missed = isRoot ? await this.repository.missedSubtasks(node.rootId) : [];
         await this.repository.settle(node, "succeeded", {
           result: { summary: decision.summary, assumptions: decision.assumptions, skipped: decision.skipped },
-          event: { status: "succeeded", title, summary: decision.summary },
+          ...(isRoot ? { event: { status: "succeeded", title, summary: decision.summary, ...(missed.length ? { missed } : {}) } } : {}),
+          ...board("succeeded", "finished", decision.summary),
         });
         return;
+      }
       case "fail":
         await this.repository.settle(node, "failed", {
           failureReason: decision.reason,
           ...(decision.summary ? { result: { summary: decision.summary, assumptions: decision.assumptions ?? [], skipped: decision.skipped ?? [] } } : {}),
-          event: { status: "failed", title, failureReason: decision.reason, summary: decision.summary ?? "" },
+          ...(isRoot ? { event: { status: "failed", title, failureReason: decision.reason, summary: decision.summary ?? "" } } : {}),
+          ...board("failed", `failed (${decision.reason})`, decision.summary),
         });
         return;
       case "ask_failure":
         await this.repository.settle(node, "waiting_user", {
           failureReason: decision.reason,
           ...(decision.summary ? { result: { summary: decision.summary, assumptions: decision.assumptions ?? [], skipped: decision.skipped ?? [] } } : {}),
-          decision: { kind: "failure", title, failureReason: decision.reason, summary: decision.summary },
+          decision: { kind: "failure", title: label, failureReason: decision.reason, summary: decision.summary },
+          ...board("waiting_user", "stopped and is waiting for the owner", decision.summary),
         });
         return;
       case "ask":
-        await this.repository.settle(node, "waiting_user", { decision: { kind: "question", title, ...decision.question } });
+        await this.repository.settle(node, "waiting_user", {
+          decision: { kind: "question", title: label, ...decision.question },
+          ...board("waiting_user", "is waiting for the owner", decision.question.question),
+        });
+        return;
+      case "wait_team":
+        await this.repository.settle(node, "waiting_team");
+        return;
+      case "wait_children":
+        if (turn.quota) await this.repository.pause(node.rootId, "quota");
+        await this.repository.settle(node, "waiting_children");
         return;
       case "pause":
         if (turn.quota) await this.repository.pause(node.rootId, "quota");
@@ -311,6 +386,7 @@ export class AssignmentRunner {
     if (event.kind === "paused") return costLimitNotice({ name, title, link }, this.ports.english);
     return finishedNotice({
       name, title, status: event.payload.status, failureReason: event.payload.failureReason as FailureReason | undefined, summary: event.payload.summary, link,
+      missed: event.payload.missed,
     }, this.ports.english);
   }
 

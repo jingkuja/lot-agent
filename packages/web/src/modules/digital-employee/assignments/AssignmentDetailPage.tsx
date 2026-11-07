@@ -7,10 +7,12 @@ import { RunRecoveryCard } from "../../../components/RunRecoveryCard.js";
 import { useI18n } from "../../../i18n/index.js";
 import { formatPoints } from "../../../lib/points.js";
 import { employeeApi } from "../api.js";
-import type { AssignmentDetail, WorkStep } from "../types.js";
+import type { AssignmentDetail } from "../types.js";
 import { RUN_STATUS_LABELS, STEP_STATUS_LABELS, TOOL_LABELS } from "../work-log/labels.js";
+import { BoardTimeline } from "./BoardTimeline.js";
 import { FAILURE_LABELS, MODE_LABELS, PAUSE_LABELS, statusLabel, statusTone } from "./copy.js";
 import { DecisionCard } from "./DecisionCard.js";
+import { SubtaskList } from "./SubtaskList.js";
 import { isOpen } from "./grouping.js";
 
 const POLL_MS = 3_000;
@@ -21,10 +23,9 @@ interface DetailProps {
   onOpenLink: (url: string) => void;
 }
 
-function Artifact({ step, onOpenLink }: { step: WorkStep; onOpenLink: (url: string) => void }) {
+function Artifact({ artifact, onOpenLink }: { artifact: AssignmentDetail["artifacts"][number]["artifact"]; onOpenLink: (url: string) => void }) {
   const { t } = useI18n();
-  const artifact = step.artifact;
-  if (!artifact?.url) return null;
+  if (!artifact.url) return null;
   if (artifact.download) {
     return <FileLink url={artifact.url} download={artifact.label ?? undefined} target="_blank" rel="noreferrer">{t("下载")}</FileLink>;
   }
@@ -40,6 +41,7 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [limit, setLimit] = useState("");
+  const [subtaskLimit, setSubtaskLimit] = useState("");
   const [recharging, setRecharging] = useState(false);
 
   const load = useCallback(async () => {
@@ -67,7 +69,6 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
   };
 
   const newLimit = limit.trim() ? Number(limit) : null;
-  const artifacts = item?.runs.flatMap((entry) => entry.steps).filter((step) => step.artifact?.url) ?? [];
   const steps = item ? [...item.runs].reverse() : [];
 
   return <div className="de-page de-assignment-detail">
@@ -86,6 +87,7 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
           <small>{item.modelId}</small>
           <small>{t("约 {0} 积分", [formatPoints(item.creditsUsed)])}</small>
           {item.creditLimit !== null && <small>{t("上限 {0} 积分", [formatPoints(item.creditLimit)])}</small>}
+          {item.subtaskLimit !== null && <small>{t("最多 {0} 个子任务", [item.subtaskLimit])}</small>}
         </div>
         <p className="de-assignment-goal">{item.goal}</p>
         {item.attachments.length > 0 && <small>{t("附件：{0}", [item.attachments.join("、")])}</small>}
@@ -121,12 +123,33 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
           </label>
           <button className="de-secondary-button" disabled={busy}>{t(item.pausedReason === "cost_limit" ? "保存并继续" : "保存上限")}</button>
         </form>}
+        {open && <form
+          className="de-assignment-limit"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(async () => {
+              await employeeApi.setSubtaskLimit(id, subtaskLimit.trim() ? Number(subtaskLimit) : null);
+              setSubtaskLimit("");
+            });
+          }}
+        >
+          <label>
+            <span>{t("子任务数量上限")}</span>
+            <input type="number" min="1" step="1" inputMode="numeric" placeholder={t("不设上限")} value={subtaskLimit} onChange={(event) => setSubtaskLimit(event.target.value)} />
+          </label>
+          <button className="de-secondary-button" disabled={busy}>{t("保存上限")}</button>
+        </form>}
       </section>
 
       {item.decisions.length > 0 && <section className="de-assignment-panel de-assignment-decisions">
         <h2>{t("等你决定")}</h2>
-        {item.decisions.map((decision) => <DecisionCard key={decision.id} decision={decision} onAnswered={load} />)}
+        {item.decisions.map((decision) => <div key={decision.id} className="de-decision-group">
+          {decision.assignmentId !== item.id && <h3>{decision.title}</h3>}
+          <DecisionCard decision={decision} onAnswered={load} />
+        </div>)}
       </section>}
+
+      <SubtaskList item={item} busy={busy} onChange={(work) => void run(work)} />
 
       {item.result && <section className="de-assignment-panel">
         <h2>{t("结果")}</h2>
@@ -141,15 +164,17 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
         </>}
       </section>}
 
-      {artifacts.length > 0 && <section className="de-assignment-panel">
+      {item.artifacts.length > 0 && <section className="de-assignment-panel">
         <h2>{t("产物")}</h2>
         <ul className="de-assignment-artifacts">
-          {artifacts.map((step) => <li key={step.id}>
-            <span>{step.artifact?.label ?? t(TOOL_LABELS[step.tool] ?? "处理工作")}</span>
-            <Artifact step={step} onOpenLink={onOpenLink} />
+          {item.artifacts.map(({ id: key, tool, artifact }) => <li key={key}>
+            <span>{artifact.label ?? t(TOOL_LABELS[tool] ?? "处理工作")}</span>
+            <Artifact artifact={artifact} onOpenLink={onOpenLink} />
           </li>)}
         </ul>
       </section>}
+
+      <BoardTimeline taskId={id} entries={item.board} />
 
       <section className="de-assignment-panel">
         <h2>{t("执行步骤")}</h2>

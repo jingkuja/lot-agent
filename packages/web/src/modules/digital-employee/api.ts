@@ -1,7 +1,7 @@
 import { request, type UploadedAttachment } from "../../api/client.js";
 import type { EmployeeFocus } from "./focus.js";
 import type {
-  Assignment, AssignmentDetail, AssignmentFilter, AssignmentInput, AssignmentPage, ConversationWork, CustomerWork, DecisionAnswer, EmployeeSchedule,
+  Assignment, AssignmentDetail, AssignmentFilter, AssignmentInput, AssignmentPage, BoardEntry, ConversationWork, CustomerWork, DecisionAnswer, EmployeeSchedule,
   EmployeeSettings, ProposalResult, ScheduleInput, ScheduleRun, TodayResponse, TodaySummary,
 } from "./types.js";
 import type {
@@ -95,6 +95,30 @@ export const employeeApi = {
   setAssignmentLimit: (id: string, creditLimit: number | null) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/limit`, {
     method: "PUT", body: JSON.stringify({ creditLimit }),
   }),
+
+  addSubtask: (id: string, goal: string) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/subtasks`, {
+    method: "POST", body: JSON.stringify({ goal }),
+  }),
+
+  getSubtaskSteps: (id: string, subtaskId: string) => request<Pick<AssignmentDetail, "runs">>(
+    `/digital-employee/assignments/${encodeURIComponent(id)}/subtasks/${encodeURIComponent(subtaskId)}`,
+  ),
+
+  cancelSubtask: (id: string, subtaskId: string) => request<Assignment>(
+    `/digital-employee/assignments/${encodeURIComponent(id)}/subtasks/${encodeURIComponent(subtaskId)}/cancel`, { method: "POST" },
+  ),
+
+  retrySubtask: (id: string, subtaskId: string) => request<Assignment>(
+    `/digital-employee/assignments/${encodeURIComponent(id)}/subtasks/${encodeURIComponent(subtaskId)}/retry`, { method: "POST" },
+  ),
+
+  setSubtaskLimit: (id: string, subtaskLimit: number | null) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/subtask-limit`, {
+    method: "PUT", body: JSON.stringify({ subtaskLimit }),
+  }),
+
+  getAssignmentBoard: (id: string, before: string) => request<{ entries: BoardEntry[] }>(
+    `/digital-employee/assignments/${encodeURIComponent(id)}/board?before=${encodeURIComponent(before)}`,
+  ),
 
   answerDecision: (id: string, answer: DecisionAnswer) => request<Assignment>(`/digital-employee/assignments/decisions/${encodeURIComponent(id)}/answer`, {
     method: "POST", body: JSON.stringify(answer),

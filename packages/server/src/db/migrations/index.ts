@@ -120,6 +120,7 @@ export const migrations: Migration[] = [
   productDocumentOcrPages,
   employeeAssignments,
   assignmentDecisions,
+  assignmentTeam,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -160,3 +161,4 @@ import { productDocumentImports } from "./0075-product-document-imports.js";
 import { productDocumentOcrPages } from "./0076-product-document-ocr-pages.js";
 import { employeeAssignments } from "./0077-employee-assignments.js";
 import { assignmentDecisions } from "./0078-assignment-decisions.js";
+import { assignmentTeam } from "./0079-assignment-team.js";

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import {
-  parseAssignmentList, parseCreateAssignment, parseCreditLimit, parseDecisionAnswer, parseEventCursor,
+  parseAssignmentList, parseCreateAssignment, parseCreditLimit, parseDecisionAnswer, parseEventCursor, parseSubtask, parseSubtaskLimit,
 } from "./assignment-validators.js";
 import { parseEmployeeName } from "./employee-name.js";
 import { apiError, InputError } from "./errors.js";
@@ -93,6 +93,48 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.get("/assignments/:id", async (c) => {
     try { return c.json(await service.assignments.get(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"))); }
     catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/assignments/:id/board", async (c) => {
+    try {
+      const before = parseEventCursor(c.req.query("before"));
+      return c.json(await service.assignments.board(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"), before));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignments/:id/subtasks", async (c) => {
+    try {
+      const goal = parseSubtask(await body(c));
+      return c.json(await service.assignments.addSubtask(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"), goal), 201);
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/assignments/:id/subtasks/:subtaskId", async (c) => {
+    try {
+      const [id, subtaskId] = [parseEntityId(c.req.param("id"), "任务 ID"), parseEntityId(c.req.param("subtaskId"), "子任务 ID")];
+      return c.json(await service.assignments.subtaskSteps(c.get("userId"), id, subtaskId));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignments/:id/subtasks/:subtaskId/cancel", async (c) => {
+    try {
+      const [id, subtaskId] = [parseEntityId(c.req.param("id"), "任务 ID"), parseEntityId(c.req.param("subtaskId"), "子任务 ID")];
+      return c.json(await service.assignments.cancelSubtask(c.get("userId"), id, subtaskId));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignments/:id/subtasks/:subtaskId/retry", async (c) => {
+    try {
+      const [id, subtaskId] = [parseEntityId(c.req.param("id"), "任务 ID"), parseEntityId(c.req.param("subtaskId"), "子任务 ID")];
+      return c.json(await service.assignments.retrySubtask(c.get("userId"), id, subtaskId));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.put("/assignments/:id/subtask-limit", async (c) => {
+    try {
+      const limit = parseSubtaskLimit(await body(c));
+      return c.json(await service.assignments.setSubtaskLimit(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"), limit));
+    } catch (error) { return respondError(c, error); }
   });
 
   app.post("/assignments/:id/cancel", async (c) => {

@@ -876,7 +876,8 @@ export interface Assignment {
   finishedAt: string | null;
   creditsUsed: number;
   creditLimit: number | null;
-  subtasks: { done: number; total: number };
+  subtasks: { done: number; total: number; missed: number };
+  subtaskLimit: number | null;
   currentTool: string | null;
   waitingDecisions: number;
   attachments: string[];
@@ -904,11 +905,45 @@ export interface AssignmentDecision {
   createdAt: string;
 }
 
+export interface AssignmentSubtask {
+  id: string;
+  position: number;
+  title: string;
+  goal: string;
+  status: AssignmentStatus;
+  failureReason: AssignmentFailure | null;
+  result: Assignment["result"];
+  summary: string | null;
+  createdBy: "owner" | "employee";
+  retriesUsed: number;
+  unverified: number;
+  conversationId: string;
+  finishedAt: string | null;
+}
+
+export type BoardKind = "summary" | "finding" | "output" | "alert" | "status";
+export type BoardEvent = "added" | "succeeded" | "failed" | "waiting_user" | "skipped" | "cancelled";
+
+export interface BoardEntry {
+  id: string;
+  kind: BoardKind;
+  title: string;
+  body: string;
+  artifacts: string[];
+  event: BoardEvent | null;
+  author: number | null;
+  authorTitle: string | null;
+  createdAt: string;
+}
+
 export interface AssignmentDetail extends Assignment {
   runs: Array<Pick<WorkRun, "id" | "status" | "startedAt" | "finishedAt" | "steps">>;
   conversationId: string;
   unverified: number;
   decisions: AssignmentDecision[];
+  subtaskList: AssignmentSubtask[];
+  board: BoardEntry[];
+  artifacts: Array<{ id: string; tool: string; artifact: NonNullable<WorkStep["artifact"]> }>;
 }
 
 export interface AssignmentActivity {
@@ -939,4 +974,6 @@ export interface AssignmentInput {
   modelId?: string;
   attachments: Array<{ assetId: string; filename: string }>;
   creditLimit: number | null;
+  subtasks?: string[];
+  subtaskLimit?: number | null;
 }

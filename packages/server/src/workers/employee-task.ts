@@ -49,6 +49,7 @@ async function main() {
       service.streamAgentResponse(conversationId, message, DIGITAL_EMPLOYEE_AGENT_ID, userId, attachments, signal, { runId, modelId, beforeIteration }),
     generateTitle: ({ conversationId, goal, attachments, userId }) =>
       service.generateTitle(conversationId, goal, attachments, { userId, agentId: DIGITAL_EMPLOYEE_AGENT_ID }),
+    summarize: (input) => service.summarizeAssignment(input),
     employeeName: async (userId) => (await service.digitalEmployee.settings.get(userId)).employeeName,
     sendToOwner: feishu ? (userId, message) => feishu.send(userId, { recipient: "self", ...message }) : undefined,
     english: internationalModelsEnabled(),

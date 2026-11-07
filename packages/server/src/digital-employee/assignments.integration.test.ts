@@ -7,6 +7,7 @@ import { runMigrations } from "../db/migration-runner.js";
 import { migrations } from "../db/migrations/index.js";
 import { RunRepository } from "../services/run-repository.js";
 import { createFinishTaskTool, countedWebSearch } from "./assignment-tools.js";
+import { createTeamTools } from "./assignment-team-tools.js";
 import { AssignmentRunner, type AssignmentRunnerPorts, type AssignmentTurnInput } from "./assignment-runner.js";
 import { InputError, ConflictError, NotFoundError, UnverifiedOperationsError } from "./errors.js";
 import { DIGITAL_EMPLOYEE_LLM_UNAVAILABLE } from "./llm.js";
@@ -35,10 +36,13 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
   const clearQueue = () => db.pool.query(`UPDATE de_assignments SET status='cancelled' WHERE status IN ('queued', 'running')`);
 
   let script: Array<(input: AssignmentTurnInput) => AsyncIterable<AgentEvent>>;
+  /** For turns running together, whose order is not fixed: keyed by the node's goal, each step used once. */
+  const roles = new Map<string, Array<(input: AssignmentTurnInput) => AsyncIterable<AgentEvent>>>();
   const inputs: AssignmentTurnInput[] = [];
   const sent: Array<{ userId: string; text: string }> = [];
   const held = new Set<string>();
 
+  let summaryFails = false;
   const ports: AssignmentRunnerPorts = {
     claimConversation: async (conversationId, runId) => db.claimConversationRun(conversationId, runId, 55_000),
     renewConversation: async (conversationId, runId) => db.renewConversationRun(conversationId, runId),
@@ -51,7 +55,9 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
       await runs.begin(input.runId, input.conversationId, input.userId, message, input.message);
       let status: RunStatus = "failed";
       try {
-        for await (const event of script.shift()!(input)) {
+        const { rows: [node] } = await db.pool.query(`SELECT goal FROM de_assignments WHERE conversation_id=$1`, [input.conversationId]);
+        const steps = roles.get(node?.goal);
+        for await (const event of (steps?.length ? steps.shift()! : script.shift()!)(input)) {
           if (event.type === "done") status = event.status ?? "completed";
           yield event;
         }
@@ -60,6 +66,10 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
       }
     },
     generateTitle: async () => "开业活动方案",
+    summarize: async ({ title }) => {
+      if (summaryFails) throw new Error("no quota");
+      return { title: `${title} 进展`, summary: "搜到 3 家店" };
+    },
     employeeName: async () => "小灵",
     sendToOwner: async (userId, message) => {
       sent.push({ userId, text: message.text });
@@ -97,7 +107,7 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
     });
   });
   beforeEach(async () => {
-    script = []; inputs.length = 0; sent.length = 0; held.clear();
+    script = []; inputs.length = 0; sent.length = 0; held.clear(); roles.clear();
     await clearQueue();
     await db.pool.query(`UPDATE de_assignment_events SET feishu_claimed_at=now() WHERE feishu_claimed_at IS NULL`);
   });
@@ -625,7 +635,7 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
       );
       const page = await assignments().list(userId, { limit: 30, q: "同行" });
       expect(page.items.map((item) => item.id)).toEqual([root.id]);
-      expect(page.items[0]!.subtasks).toEqual({ done: 1, total: 1 });
+      expect(page.items[0]!.subtasks).toMatchObject({ done: 1, total: 1 });
     });
 
     it("shows an account only its own tasks", async () => {
@@ -985,6 +995,573 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
         expect(items.find((item) => item.assignment?.rootId === task.id)!.assignment!.decision!.id).toBe(decision.id);
         expect((await repository().get(userId, task.id)).waitingDecisions).toBe(1);
       });
+    });
+  });
+
+  describe("subtasks", () => {
+    const team = (id: string) => db.pool.query(`SELECT * FROM de_assignments WHERE root_id=$1 ORDER BY position`, [id]).then((result) => result.rows);
+    const withSubtasks = (userId: string, subtasks: string[], mode: "autonomous" | "responsive" = "autonomous", subtaskLimit: number | null = null) =>
+      assignments().create(userId, { goal: "开业活动", mode, attachments: [], modelId: null, creditLimit: null, subtasks, subtaskLimit });
+    /** Turns until nothing is queued, so a wake followed by a turn plays out like the real loop. */
+    const drain = async (userId: string) => {
+      for (let round = 0; round < 12; round += 1) {
+        const { rows: [{ total }] } = await db.pool.query(
+          `SELECT count(*) AS total FROM de_assignments WHERE user_id=$1 AND status='queued' AND (not_before IS NULL OR not_before <= now())`, [userId]
+        );
+        if (Number(total) === 0) return;
+        await turn();
+      }
+      throw new Error("the task did not settle");
+    };
+    const tools = async (id: string) => createTeamTools((await repository().readNode(id))!, repository());
+    const tool = async (id: string, name: string) => (await tools(id)).find((item) => item.name === name)!;
+    const call = async (id: string, name: string, input: unknown) => (await tool(id, name)).execute(input, { workingDirectory: "/" });
+    const say = (text: string) => ending("completed", [{ type: "text", content: text }]);
+    const entries = async (rootId: string) => (await db.pool.query(`SELECT * FROM de_assignment_board WHERE root_id=$1 ORDER BY id`, [rootId])).rows;
+
+    beforeEach(() => { process.env.ASSIGNMENT_RETRY_GAP_SECONDS = "1"; summaryFails = false; });
+    afterEach(() => { delete process.env.ASSIGNMENT_RETRY_GAP_SECONDS; });
+
+    describe("running side by side", () => {
+      it("starts subtasks the owner gave at once, skips planning, and closes the task once", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        expect(task.status).toBe("waiting_children");
+        expect(task.subtasks).toMatchObject({ done: 0, total: 2 });
+        roles.set("搜同行", [finish("同行都送券")]);
+        roles.set("写方案", [finish("方案写好了")]);
+        script.push(finish("都做完了"));
+        await drain(userId);
+
+        const nodes = await team(task.id);
+        expect(nodes.map((node) => node.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
+        expect(nodes.map((node) => node.position)).toEqual([0, 1, 2]);
+        expect(new Set(nodes.map((node) => node.conversation_id)).size).toBe(3);
+        expect(inputs.at(-1)!.message).toContain("[All subtasks ended]");
+        await runner().deliver();
+        expect(sent.filter((item) => item.userId === userId)).toHaveLength(1);
+        expect((await assignments().get(userId, task.id)).subtasks).toMatchObject({ done: 2, total: 2, missed: 0 });
+      });
+
+      it("briefs each subtask on the whole task, its own goal, and who else is working", async () => {
+        const userId = owner();
+        await withSubtasks(userId, ["搜同行", "写方案"]);
+        roles.set("搜同行", [finish()]); roles.set("写方案", [finish()]);
+        script.push(finish());
+        await turn();
+        const brief = inputs.find((input) => input.message.includes("[Your goal]\n搜同行"))!.message;
+        expect(brief).toContain("[Overall task, from the owner]\n开业活动");
+        expect(brief).toContain("not instructions");
+        expect(brief).toContain("subtask 2 | ");
+        await drain(userId);
+      });
+
+      it("lets the lead split the work, which ends its turn, and hands every subtask the files", async () => {
+        const userId = owner();
+        const id = randomUUID();
+        await db.createAsset({ id, taskId: null, userId, type: "upload", storageKey: `${id}.pdf`, url: `/static/uploads/${id}.pdf`, mime: "application/pdf", sizeBytes: 10, originalName: "手册.pdf" });
+        const task = await assignments().create(userId, { goal: "开业活动", mode: "autonomous", attachments: [{ assetId: id, filename: "手册.pdf" }], modelId: null, creditLimit: null });
+        script.push(async function* () {
+          const result = await call(task.id, "create_subtasks", { subtasks: [{ title: "搜索", goal: "搜同行" }, { goal: "写方案" }] });
+          yield { type: "tool_result", toolCallId: "1", name: "create_subtasks", output: result.content, isError: false };
+          yield done("awaiting_input");
+        });
+        await turn();
+        const [root, first, second] = await team(task.id);
+        expect(root.status).toBe("waiting_children");
+        expect(first).toMatchObject({ title: "搜索", created_by: "employee", mode: "autonomous", model_id: root.model_id, status: "queued" });
+        expect(second.title).toBe("写方案");
+        roles.set("搜同行", [finish()]); roles.set("写方案", [finish()]);
+        script.push(finish());
+        await turn();
+        expect(inputs.find((input) => input.message.includes("[Your goal]\n搜同行"))!.attachments).toHaveLength(1);
+        await drain(userId);
+      });
+
+      it("adds a subtask's own subtasks as siblings, so there is only ever one level", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"]);
+        const [, child] = await team(task.id);
+        await call(child.id, "create_subtasks", { subtasks: [{ goal: "查价格" }] });
+        const nodes = await team(task.id);
+        expect(nodes.map((node) => node.position)).toEqual([0, 1, 2]);
+        expect(new Set(nodes.map((node) => node.root_id))).toEqual(new Set([task.id]));
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("refuses subtasks past the owner's limit without adding any, and the owner can raise it mid-run", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"], "autonomous", 2);
+        const [, child] = await team(task.id);
+        const refused = await call(child.id, "create_subtasks", { subtasks: [{ goal: "甲" }, { goal: "乙" }] });
+        expect(refused.isError).toBe(true);
+        expect(refused.content).toContain("at most 2");
+        expect(await team(task.id)).toHaveLength(2);
+        await assignments().setSubtaskLimit(userId, task.id, 3);
+        expect((await call(child.id, "create_subtasks", { subtasks: [{ goal: "甲" }, { goal: "乙" }] })).isError).toBeFalsy();
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("keeps parallel callers from passing the limit or sharing a number", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"], "autonomous", 4);
+        const added = await Promise.allSettled([1, 2, 3, 4, 5].map((index) => assignments().addSubtask(userId, task.id, `子任务 ${index}`)));
+        expect(added.filter((item) => item.status === "fulfilled")).toHaveLength(3);
+        const positions = (await team(task.id)).map((node) => node.position);
+        expect(positions).toEqual([0, 1, 2, 3, 4]);
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("lets the owner add one while it runs, but not after the task ends", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"]);
+        await assignments().addSubtask(userId, task.id, "写方案");
+        expect(await team(task.id)).toHaveLength(3);
+        await assignments().cancel(userId, task.id);
+        await expect(assignments().addSubtask(userId, task.id, "再来一个")).rejects.toBeInstanceOf(ConflictError);
+      });
+
+      it("will not let the lead finish while a subtask is open", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"]);
+        const finishTool = createFinishTaskTool(repository(), async () => (await repository().openChildren(task.id)) ? "still open" : null);
+        const result = await finishTool.execute({ outcome: "done", summary: "x" }, { workingDirectory: "/", conversationId: task.id, userId });
+        expect(result).toMatchObject({ content: "still open", isError: true });
+        await assignments().cancel(userId, task.id);
+      });
+    });
+
+    describe("failing", () => {
+      it("keeps the others going, tells nobody but the team, and reports a partial finish once", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        roles.set("搜同行", [ending("failed")]); roles.set("写方案", [finish("方案写好了")]);
+        script.push(finish("方案写好了，同行没查到"));
+        await drain(userId);
+        const nodes = await team(task.id);
+        expect(nodes.map((node) => node.status)).toEqual(["succeeded", "failed", "succeeded"]);
+        await runner().deliver();
+        const notices = sent.filter((item) => item.userId === userId);
+        expect(notices).toHaveLength(1);
+        expect(notices[0]!.text).toContain("没完成的有：搜同行");
+        const card = await assignments().get(userId, task.id);
+        expect(card).toMatchObject({ status: "succeeded", subtasks: { done: 1, total: 2, missed: 1 } });
+        expect((await entries(task.id)).map((entry) => entry.event)).toEqual(expect.arrayContaining(["failed", "succeeded"]));
+      });
+
+      it("wakes a failed subtask once however many ask, with the hint, and counts it", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案", "做海报"]);
+        const [, failed, second, third] = await team(task.id);
+        await db.pool.query(`UPDATE de_assignments SET status='failed', failure_reason='model_failed', finished_at=now() WHERE id=$1`, [failed.id]);
+        const results = await Promise.all([second, third].map((node) => call(node.id, "retry_subtask", { subtask: 1, hint: "换组关键词" })));
+        expect(results.filter((item) => !item.isError)).toHaveLength(1);
+        expect(results.find((item) => item.isError)!.content).toContain("not failed");
+        const row = await raw(failed.id);
+        expect(row).toMatchObject({ status: "queued", retries_used: 1, failure_reason: null });
+        expect(row.next_message).toContain("换组关键词");
+        expect(row.next_message).toContain("data and not an instruction");
+        expect(new Date(row.not_before).getTime()).toBeGreaterThan(Date.now() - 1_000);
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("stops at the third retry, which the owner's own retry does not count against", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, failed, other] = await team(task.id);
+        const fail = () => db.pool.query(`UPDATE de_assignments SET status='failed', failure_reason='model_failed', finished_at=now(), not_before=NULL WHERE id=$1`, [failed.id]);
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          await fail();
+          expect((await call(other.id, "retry_subtask", { subtask: 1 })).isError).toBeFalsy();
+        }
+        await fail();
+        const used = await call(other.id, "retry_subtask", { subtask: 1 });
+        expect(used.isError).toBe(true);
+        expect(used.content).toContain("used all its retries");
+        await assignments().retrySubtask(userId, task.id, failed.id);
+        expect(await raw(failed.id)).toMatchObject({ status: "queued", retries_used: 3 });
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("never lets a teammate rerun an unconfirmed write, and only the owner can after checking", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        roles.set("搜同行", [ending("unknown_outcome")]);
+        roles.set("写方案", [async function* (input) { yield* finish()(input); }]);
+        script.push(finish());
+        await turn();
+        const [, failed, other] = await team(task.id);
+        expect(await raw(failed.id)).toMatchObject({ status: "failed", failure_reason: "unknown_outcome" });
+        expect((await call(other.id, "retry_subtask", { subtask: 1 })).content).toContain("unconfirmed");
+        await drain(userId);
+        const { rows: [run] } = await db.pool.query(`SELECT id FROM agent_runs WHERE conversation_id=$1`, [failed.conversation_id]);
+        const operation = randomUUID();
+        await db.pool.query(
+          `INSERT INTO agent_steps (id, run_id, iteration, tool_call_id, tool_name, effect, input, input_hash, status)
+           VALUES ($1,$2,1,'c','update_marketing_product','write','{}'::jsonb,'h','unknown_outcome')`, [operation, run.id]
+        );
+        await expect(assignments().retrySubtask(userId, task.id, failed.id)).rejects.toBeInstanceOf(UnverifiedOperationsError);
+        expect((await assignments().get(userId, task.id)).subtaskList[0]).toMatchObject({ unverified: 1, conversationId: failed.conversation_id });
+      });
+
+      it("opens a finished task again when the owner retries a subtask, and closes it again", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"]);
+        roles.set("搜同行", [ending("failed")]);
+        script.push(finish("没查到"));
+        await drain(userId);
+        expect((await raw(task.id)).status).toBe("succeeded");
+        const [, failed] = await team(task.id);
+        await assignments().retrySubtask(userId, task.id, failed.id);
+        expect(await raw(task.id)).toMatchObject({ status: "waiting_children", finished_at: null, result: null });
+        script.push(finish(), finish("这次查到了"));
+        await drain(userId);
+        expect(await raw(task.id)).toMatchObject({ status: "succeeded" });
+        expect((await raw(task.id)).result.summary).toBe("这次查到了");
+        expect((await raw(failed.id)).status).toBe("succeeded");
+      });
+
+      it("gives a responsive failure to the owner while the others go on, and names the subtask", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"], "responsive");
+        roles.set("搜同行", [ending("failed")]); roles.set("写方案", [finish()]);
+        await turn();
+        const nodes = await team(task.id);
+        expect(nodes.map((node) => node.status)).toEqual(["waiting_children", "waiting_user", "succeeded"]);
+        const [decision] = await repository().openDecisions(userId, task.id);
+        expect(decision).toMatchObject({ kind: "failure", assignmentId: nodes[1].id });
+        await runner().deliver();
+        expect(sent.find((item) => item.userId === userId)!.text).toContain("搜同行");
+        await assignments().answer(userId, decision!.id, { choice: "skip" });
+        script.push(finish("跳过了搜索"));
+        await drain(userId);
+        expect((await raw(task.id)).status).toBe("succeeded");
+        expect((await assignments().get(userId, task.id)).subtasks.missed).toBe(1);
+      });
+
+      it("keeps a lost subtask's failure inside the team", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"]);
+        const [, child] = await team(task.id);
+        await repository().claim(8);
+        await db.pool.query(`UPDATE de_assignments SET auto_resumed=true, lease_until=now() - interval '1 minute' WHERE id=$1`, [child.id]);
+        await runner().sweep();
+        expect(await raw(child.id)).toMatchObject({ status: "failed", failure_reason: "interrupted" });
+        expect(await raw(task.id)).toMatchObject({ status: "queued" });
+        expect((await db.pool.query(`SELECT 1 FROM de_assignment_events WHERE root_id=$1`, [task.id])).rows).toEqual([]);
+        await assignments().cancel(userId, task.id);
+      });
+    });
+
+    describe("cancelling", () => {
+      it("takes everything open with the task, keeping what finished", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, first] = await team(task.id);
+        await db.pool.query(`UPDATE de_assignments SET status='succeeded' WHERE id=$1`, [first.id]);
+        await assignments().cancel(userId, task.id);
+        expect((await team(task.id)).map((node) => node.status)).toEqual(["cancelled", "succeeded", "cancelled"]);
+      });
+
+      it("cancels one subtask alone, stops its turn, and closes the task if it was the last", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"]);
+        const [, child] = await team(task.id);
+        await assignments().cancelSubtask(userId, task.id, child.id);
+        expect((await raw(child.id)).status).toBe("cancelled");
+        expect((await raw(task.id)).status).toBe("queued");
+        expect((await raw(task.id)).next_message).toContain("[All subtasks ended]");
+        await expect(assignments().cancelSubtask(userId, task.id, child.id)).rejects.toBeInstanceOf(ConflictError);
+        await expect(assignments().cancelSubtask(owner(), task.id, child.id)).rejects.toBeInstanceOf(NotFoundError);
+        await assignments().cancel(userId, task.id);
+      });
+    });
+
+    describe("the board", () => {
+      it("publishes to the team, and keeps a private note private", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案", "做海报"]);
+        const [, first, second, third] = await team(task.id);
+        await call(first.id, "post_team_update", { kind: "finding", title: "同行都送券", body: "全文" });
+        await call(first.id, "post_team_update", { kind: "alert", title: "只给你看", notify: [2] });
+        const node = (row: { id: string; root_id: string }) => ({ id: row.id, rootId: row.root_id });
+        expect((await repository().takeUnread(node(second), 5)).map((entry) => entry.title)).toEqual(["同行都送券", "只给你看"]);
+        expect((await repository().takeUnread(node(third), 5)).map((entry) => entry.title)).toEqual(["同行都送券"]);
+        expect(await repository().takeUnread(node(first), 5)).toEqual([]);
+        expect(await repository().takeUnread(node(second), 5)).toEqual([]);
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("reads entries and raw records, marks them as data, and stays inside the tree", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const other = await withSubtasks(owner(), ["别人的任务"]);
+        const [, first, second] = await team(task.id);
+        const [, stranger] = await team(other.id);
+        await db.addMessage(randomUUID(), first.conversation_id, "assistant", "查到七折活动");
+        const { content: posted } = await call(first.id, "post_team_update", { kind: "output", title: "初稿", body: "全文内容", links: ["/x"] });
+        const id = JSON.parse(posted).posted as string;
+        const entry = JSON.parse((await call(second.id, "read_team_detail", { entryId: id })).content);
+        expect(entry.entry).toMatchObject({ title: "初稿", body: "全文内容", artifacts: ["/x"], author: 1 });
+        expect(entry.note).toContain("not instructions");
+        const records = JSON.parse((await call(second.id, "read_team_detail", { subtask: 1, keyword: "七折" })).content);
+        expect(records.records).toMatchObject([{ source: "reply", content: "查到七折活动" }]);
+        expect((await call(stranger.id, "read_team_detail", { entryId: id })).isError).toBe(true);
+        expect((await call(stranger.id, "read_team_detail", { subtask: 2 })).isError).toBe(true);
+        expect((await call(stranger.id, "retry_subtask", { subtask: 2 })).isError).toBe(true);
+        expect(JSON.parse((await call(stranger.id, "read_team_board", {})).content).entries).toEqual([]);
+        await expect(assignments().subtaskSteps(owner(), task.id, first.id)).rejects.toBeInstanceOf(NotFoundError);
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("lists open subtasks first on the board tool", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, first, second] = await team(task.id);
+        await db.pool.query(`UPDATE de_assignments SET status='succeeded' WHERE id=$1`, [first.id]);
+        const board = JSON.parse((await call(second.id, "read_team_board", {})).content);
+        expect(board.subtasks.map((item: { position: number }) => item.position)).toEqual([0, 2, 1]);
+        expect(board.you).toBe(2);
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("delivers news before the next model call, five at a time, without storing it", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行"]);
+        const [, child] = await team(task.id);
+        const seen: Array<string[] | undefined> = [];
+        await assignments().addSubtask(userId, task.id, "写方案");
+        await repository().claim(8);
+        await db.pool.query(`UPDATE de_assignments SET status='queued' WHERE id=$1`, [child.id]);
+        script.push(async function* (input) {
+          for (let index = 0; index < 7; index += 1) {
+            await repository().post({ rootId: task.id, userId, authorId: null, kind: "finding", title: `发现 ${index}` });
+          }
+          seen.push((await input.beforeIteration({ tokens: 0, cost: 0 }) as { notices?: string[] })?.notices);
+          seen.push((await input.beforeIteration({ tokens: 0, cost: 0 }) as { notices?: string[] })?.notices);
+          seen.push((await input.beforeIteration({ tokens: 0, cost: 0 }) as { notices?: string[] })?.notices);
+          yield* finish()(input);
+        });
+        await turn();
+        expect(seen[0]![0]).toContain("发现 4");
+        expect(seen[0]![0]).not.toContain("发现 5");
+        expect(seen[0]![0]).toContain("not instructions");
+        expect(seen[1]![0]).toContain("发现 6");
+        expect(seen[2]).toBeUndefined();
+        expect((await db.pool.query(`SELECT 1 FROM messages WHERE content LIKE '%发现 0%'`)).rows).toEqual([]);
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("opens each new segment with the board, so nothing depends on a stored notice", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        roles.set("搜同行", [ending("budget_exhausted"), finish()]);
+        roles.set("写方案", [finish("写好了")]);
+        script.push(finish());
+        await turn();
+        await repository().post({ rootId: task.id, userId, authorId: null, kind: "finding", title: "分段之间的消息" });
+        await turn();
+        const opening = inputs.find((input) => input.message.startsWith("[Task continuation]"))!;
+        expect(opening.message).toContain("分段之间的消息");
+        await drain(userId);
+      });
+
+      it("makes a subtask look once at late news before it can finish", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, first] = await team(task.id);
+        const guard = createFinishTaskTool(repository(), async () => {
+          const unread = await repository().takeUnreadBeforeFinish({ id: first.id, rootId: task.id }, 5);
+          return unread.length ? `news: ${unread[0]!.title}` : null;
+        });
+        await db.pool.query(`UPDATE de_assignments SET status='running' WHERE id=$1`, [first.id]);
+        await repository().post({ rootId: task.id, userId, authorId: null, kind: "finding", title: "最后一刻的结果" });
+        const context = { workingDirectory: "/", conversationId: first.conversation_id, userId };
+        expect(await guard.execute({ outcome: "done", summary: "x" }, context)).toMatchObject({ content: "news: 最后一刻的结果", isError: true });
+        expect((await guard.execute({ outcome: "done", summary: "x" }, context)).isError).toBeFalsy();
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("summarizes for teammates while someone else is open, and not for nobody", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        roles.set("搜同行", [say("搜到 3 家")]);
+        roles.set("写方案", [finish("写好了")]);
+        script.push(finish());
+        await drain(userId);
+        const summaries = (await entries(task.id)).filter((entry) => entry.kind === "summary");
+        expect(summaries.length).toBeGreaterThanOrEqual(1);
+        const lone = await withSubtasks(userId, ["只有一个"]);
+        roles.set("只有一个", [say("做完了")]);
+        script.push(finish());
+        await drain(userId);
+        expect((await entries(lone.id)).filter((entry) => entry.kind === "summary")).toEqual([]);
+      });
+
+      it("carries on when a summary fails", async () => {
+        const userId = owner();
+        summaryFails = true;
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        roles.set("搜同行", [say("搜到 3 家")]); roles.set("写方案", [finish()]);
+        script.push(finish());
+        await drain(userId);
+        expect((await raw(task.id)).status).toBe("succeeded");
+      });
+    });
+
+    describe("waiting", () => {
+      const wait = (id: string, input: unknown) => async function* (): AsyncIterable<AgentEvent> {
+        const result = await call(id, "wait_for_team", input);
+        yield { type: "tool_result", toolCallId: "w", name: "wait_for_team", output: result.content, isError: result.isError ?? false };
+        yield done("awaiting_input");
+      };
+
+      it("pauses at no cost and gives up its place, then wakes on the news it asked for", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, first, second] = await team(task.id);
+        roles.set("写方案", [wait(second.id, { until: "progress", subtasks: [1] })]);
+        roles.set("搜同行", [ending("budget_exhausted")]);
+        await turn();
+        expect(await raw(second.id)).toMatchObject({ status: "waiting_team", end_intent: null });
+        await db.pool.query(`UPDATE de_assignments SET status='running' WHERE id=$1`, [first.id]);
+        await call(first.id, "post_team_update", { kind: "finding", title: "同行都送券" });
+        const woken = await raw(second.id);
+        expect(woken).toMatchObject({ status: "queued", wait_for: null });
+        expect(woken.next_message).toContain("published something new");
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("does not count something published before the wait began", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, first, second] = await team(task.id);
+        await call(first.id, "post_team_update", { kind: "finding", title: "早就有的" });
+        await db.pool.query(`UPDATE de_assignments SET status='running' WHERE id=$1`, [second.id]);
+        await call(second.id, "wait_for_team", { until: "progress" });
+        await repository().settle(await repository().readNode(second.id) as never, "waiting_team");
+        await repository().wakeTree(task.id);
+        expect((await raw(second.id)).status).toBe("waiting_team");
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("refuses to wait for nobody", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, first, second] = await team(task.id);
+        await db.pool.query(`UPDATE de_assignments SET status='succeeded' WHERE id=$1`, [first.id]);
+        expect((await call(second.id, "wait_for_team", { until: "finished" })).content).toContain("Nobody");
+        expect((await call(second.id, "wait_for_team", { until: "finished", subtasks: [1] })).isError).toBe(true);
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("wakes a waiter when its target fails, and says so", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, , second] = await team(task.id);
+        await db.pool.query(`UPDATE de_assignments SET status='running' WHERE id=$1`, [second.id]);
+        await call(second.id, "wait_for_team", { until: "finished" });
+        await repository().settle(await repository().readNode(second.id) as never, "waiting_team");
+        roles.set("搜同行", [ending("failed")]);
+        await repository().wakeTree(task.id);
+        await turn();
+        expect(await raw(second.id)).toMatchObject({ status: "queued" });
+        expect((await raw(second.id)).next_message).toContain("A teammate you were waiting for failed");
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("untangles subtasks waiting for each other", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, first, second] = await team(task.id);
+        roles.set("搜同行", [wait(first.id, { until: "finished", subtasks: [2] }), finish("用现有信息完成")]);
+        roles.set("写方案", [wait(second.id, { until: "finished", subtasks: [1] }), finish("用现有信息完成")]);
+        script.push(finish("都完成了"));
+        await drain(userId);
+        expect((await team(task.id)).map((node) => node.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
+        expect(inputs.filter((input) => input.message.includes("Do not wait for each other again"))).toHaveLength(2);
+      });
+
+      it("keeps waiting with a target that is waiting for the owner", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"], "responsive");
+        const [, first, second] = await team(task.id);
+        roles.set("写方案", [wait(second.id, { until: "finished", subtasks: [1] })]);
+        roles.set("搜同行", [ending("failed")]);
+        await turn();
+        expect(await raw(first.id)).toMatchObject({ status: "waiting_user" });
+        await repository().wakeTree(task.id);
+        expect((await raw(second.id)).status).toBe("waiting_team");
+        await assignments().cancel(userId, task.id);
+      });
+
+      it("wakes at the time the subtask set, on the timer", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const [, first, second] = await team(task.id);
+        await db.pool.query(`UPDATE de_assignments SET status='running' WHERE id=ANY($1::uuid[])`, [[first.id, second.id]]);
+        await call(second.id, "wait_for_team", { until: "finished", minutes: 5 });
+        await repository().settle(await repository().readNode(second.id) as never, "waiting_team");
+        await db.pool.query(`UPDATE de_assignments SET wait_until=now() - interval '1 second' WHERE id=$1`, [second.id]);
+        await repository().wakeWaiting(50);
+        expect((await raw(second.id)).next_message).toContain("time you set");
+        await assignments().cancel(userId, task.id);
+      });
+    });
+
+    describe("pausing", () => {
+      it("stops every subtask at its next boundary, and picks them all up on continuing", async () => {
+        const userId = owner();
+        const task = await withSubtasks(userId, ["搜同行", "写方案"]);
+        const stopper = async function* (input: AssignmentTurnInput): AsyncIterable<AgentEvent> {
+          await repository().pause(task.id, "quota");
+          const state = await input.beforeIteration({ tokens: 0, cost: 0 }) as { stop?: boolean };
+          expect(state.stop).toBe(true);
+          yield done("budget_exhausted");
+        };
+        roles.set("搜同行", [stopper, finish()]); roles.set("写方案", [stopper, finish()]);
+        await turn();
+        expect((await team(task.id)).slice(1).map((node) => node.status)).toEqual(["queued", "queued"]);
+        const r = runner();
+        await r.pump();
+        expect(await r.settled()).toBeUndefined();
+        expect((await team(task.id)).slice(1).map((node) => node.status)).toEqual(["queued", "queued"]);
+        await assignments().resume(userId, task.id);
+        script.push(finish());
+        await drain(userId);
+        expect((await raw(task.id)).status).toBe("succeeded");
+        const events = (await db.pool.query(`SELECT kind FROM de_assignment_events WHERE root_id=$1 AND kind='paused'`, [task.id])).rows;
+        expect(events).toHaveLength(1);
+      });
+    });
+
+    it("counts spending across the tree against one limit", async () => {
+      const userId = owner();
+      const task = await assignments().create(userId, { goal: "开业活动", mode: "autonomous", attachments: [], modelId: null, creditLimit: 1, subtasks: ["搜同行", "写方案"] });
+      const [, first, second] = await team(task.id);
+      await db.pool.query(`UPDATE de_assignments SET cost_used=0.006 WHERE id=$1`, [first.id]);
+      expect((await repository().checkpoint(await repository().readNode(second.id) as never, { tokens: 0, cost: 0.006 })).overLimit).toBe(true);
+      await assignments().cancel(userId, task.id);
+    });
+
+    it("shows the outputs of the whole tree and each subtask's own steps", async () => {
+      const userId = owner();
+      const task = await withSubtasks(userId, ["搜同行"]);
+      const [, child] = await team(task.id);
+      roles.set("搜同行", [finish()]);
+      script.push(finish());
+      await turn();
+      const { rows: [run] } = await db.pool.query(`SELECT id FROM agent_runs WHERE conversation_id=$1`, [child.conversation_id]);
+      await db.pool.query(
+        `INSERT INTO agent_steps (id, run_id, iteration, tool_call_id, tool_name, effect, input, input_hash, status, result)
+         VALUES ($1,$2,1,'c','generate_document','write','{}'::jsonb,'h','succeeded',$3::jsonb)`,
+        [randomUUID(), run.id, JSON.stringify({ content: "下载链接：https://x.test/static/documents/a.docx" })]
+      );
+      await drain(userId);
+      const detail = await assignments().get(userId, task.id);
+      expect(detail.artifacts).toMatchObject([{ tool: "generate_document", artifact: { download: true } }]);
+      expect((await assignments().subtaskSteps(userId, task.id, child.id)).runs[0]!.steps).toHaveLength(1);
+      expect(detail.board.length).toBeGreaterThan(0);
     });
   });
 });

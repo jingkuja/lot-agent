@@ -4,7 +4,9 @@ import { parseAssignmentList, parseCreateAssignment, parseCreditLimit, parseDeci
 
 describe("creating a task", () => {
   it("needs only a sentence or a file", () => {
-    expect(parseCreateAssignment({ goal: "  写方案 " })).toEqual({ goal: "写方案", mode: "autonomous", attachments: [], modelId: null, creditLimit: null });
+    expect(parseCreateAssignment({ goal: "  写方案 " })).toEqual({
+      goal: "写方案", mode: "autonomous", attachments: [], modelId: null, creditLimit: null, subtasks: [], subtaskLimit: null,
+    });
     expect(parseCreateAssignment({ attachments: [{ assetId: "a1" }] }).attachments).toEqual([{ assetId: "a1", filename: "附件" }]);
     expect(() => parseCreateAssignment({ goal: " " })).toThrow(InputError);
   });

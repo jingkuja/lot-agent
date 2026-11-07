@@ -5,7 +5,7 @@ import { attachmentKind, type AttachmentRef } from "../services/attachment-extra
 import { assignmentLink, replyAck, type ReplyOutcome } from "./assignment-notices.js";
 import { isContinueReply, matchDecisionReply, quotedReply } from "./assignment-replies.js";
 import {
-  AssignmentRepository, NODE_METADATA_KEY, type AssignmentCard, type AssignmentDecision, type AssignmentFilters,
+  AssignmentRepository, NODE_METADATA_KEY, type AssignmentCard, type AssignmentDecision, type AssignmentFilters, type NewSubtask, type SubtaskCard,
 } from "./assignment-repository.js";
 import { isOpenStatus, type AssignmentMode, type DecisionAnswer } from "./assignment-state.js";
 import { assignmentTurn } from "./assignment-turn.js";
@@ -20,11 +20,12 @@ import type { WorkLogService } from "./work-log-service.js";
 const CREDITS_PER_YUAN = 100;
 const INITIAL_TITLE_CHARS = 30;
 const EVENT_PAGE = 20;
+const BOARD_PAGE = 50;
 
 export interface AssignmentDeps {
   llmModels(userId: string): Promise<string[]>;
   imports: Pick<ProductImportService, "commitUnattended" | "itemsHeldFor">;
-  workLog: Pick<WorkLogService, "conversation">;
+  workLog: Pick<WorkLogService, "conversation" | "artifacts">;
 }
 
 export interface CreateAssignmentInput {
@@ -33,6 +34,9 @@ export interface CreateAssignmentInput {
   attachments: AssignmentAttachmentInput[];
   modelId: string | null;
   creditLimit: number | null;
+  /** Each one is a goal. Given here, they start at once and the employee does not plan. */
+  subtasks?: string[];
+  subtaskLimit?: number | null;
 }
 
 export function isAssignmentConversation(metadata: unknown): boolean {
@@ -44,6 +48,10 @@ function initialTitle(goal: string, attachments: AttachmentRef[]): string {
   return [...line].slice(0, INITIAL_TITLE_CHARS).join("");
 }
 
+function subtaskFromGoal(goal: string): NewSubtask {
+  return { goal, title: initialTitle(goal, []) };
+}
+
 const toYuan = (credits: number | null) => credits === null ? null : credits / CREDITS_PER_YUAN;
 
 function view(card: AssignmentCard) {
@@ -53,7 +61,8 @@ function view(card: AssignmentCard) {
     createdAt: card.createdAt, finishedAt: card.finishedAt,
     creditsUsed: Math.round(card.totalCost * CREDITS_PER_YUAN),
     creditLimit: card.costLimit === null ? null : Math.round(card.costLimit * CREDITS_PER_YUAN),
-    subtasks: { done: card.subtasksDone, total: card.subtasksTotal },
+    subtasks: { done: card.subtasksDone, total: card.subtasksTotal, missed: card.subtasksMissed },
+    subtaskLimit: card.subtaskLimit,
     currentTool: card.currentTool, waitingDecisions: card.waitingDecisions,
     attachments: card.attachments.map((item) => item.filename),
   };
@@ -62,6 +71,14 @@ function view(card: AssignmentCard) {
 function decisionView(decision: AssignmentDecision) {
   const { id, assignmentId, rootId, conversationId, title, kind, question, options, multiSelect, failureReason, unverified, createdAt } = decision;
   return { id, assignmentId, rootId, conversationId, title, kind, question, options, multiSelect, failureReason, unverified, createdAt };
+}
+
+function subtaskView(item: SubtaskCard) {
+  return {
+    id: item.id, position: item.position, title: item.title, goal: item.goal, status: item.status, failureReason: item.failureReason,
+    result: item.result, summary: item.summary, createdBy: item.createdBy, retriesUsed: item.retriesUsed, unverified: item.unverified,
+    conversationId: item.conversationId, finishedAt: item.finishedAt,
+  };
 }
 
 /** What the API and the agent turn need. The worker's runner shares the repository. */
@@ -107,7 +124,8 @@ export class AssignmentService {
     const attachments = await this.ownedAttachments(userId, input.attachments);
     const modelId = await this.chooseModel(userId, input.modelId);
     const node = await this.repository.create({
-      userId, modelId, attachments, costLimit: toYuan(input.creditLimit), mode: input.mode,
+      userId, modelId, attachments, costLimit: toYuan(input.creditLimit), mode: input.mode, subtaskLimit: input.subtaskLimit ?? null,
+      subtasks: (input.subtasks ?? []).map(subtaskFromGoal),
       title: initialTitle(input.goal, attachments), goal: input.goal || attachments.map((item) => item.filename).join("、"),
     });
     return view(await this.repository.get(userId, node.id));
@@ -124,13 +142,63 @@ export class AssignmentService {
     const card = await this.repository.get(userId, id);
     const work = await this.deps.workLog.conversation(userId, card.conversationId);
     const runs = work.runs.map(({ id: runId, status, startedAt, finishedAt, steps }) => ({ id: runId, status, startedAt, finishedAt, steps }));
-    const [decisions, unverified] = await Promise.all([this.repository.openDecisions(userId, id), this.repository.unverifiedOperations(card)]);
-    return { ...view(card), runs, conversationId: card.conversationId, unverified, decisions: decisions.map(decisionView) };
+    const [decisions, unverified, subtasks, board, conversations] = await Promise.all([
+      this.repository.openDecisions(userId, id), this.repository.unverifiedOperations(card), this.repository.subtasks(userId, id),
+      this.repository.boardPage(id, userId, { limit: BOARD_PAGE, includeSummaries: true }), this.repository.treeConversations(userId, id),
+    ]);
+    return {
+      ...view(card), runs, conversationId: card.conversationId, unverified, decisions: decisions.map(decisionView),
+      subtaskList: subtasks.map(subtaskView), board, artifacts: await this.deps.workLog.artifacts(userId, conversations),
+    };
+  }
+
+  async board(userId: string, id: string, before?: string) {
+    this.assertEnabled();
+    await this.repository.get(userId, id);
+    return { entries: await this.repository.boardPage(id, userId, { before, limit: BOARD_PAGE, includeSummaries: true }) };
+  }
+
+  /** How one subtask got where it is. Loaded when the owner opens it, since a task can have many. */
+  async subtaskSteps(userId: string, id: string, subtaskId: string) {
+    this.assertEnabled();
+    const node = await this.repository.subtask(userId, id, subtaskId);
+    const work = await this.deps.workLog.conversation(userId, node.conversationId);
+    return { runs: work.runs.map(({ id: runId, status, startedAt, finishedAt, steps }) => ({ id: runId, status, startedAt, finishedAt, steps })) };
+  }
+
+  async addSubtask(userId: string, id: string, goal: string) {
+    this.assertEnabled();
+    await this.repository.addSubtasks(userId, id, [subtaskFromGoal(goal)], "owner", null);
+    return view(await this.repository.get(userId, id));
+  }
+
+  async cancelSubtask(userId: string, id: string, subtaskId: string) {
+    this.assertEnabled();
+    await this.repository.subtask(userId, id, subtaskId);
+    if (!await this.repository.cancelSubtask(userId, id, subtaskId)) throw new ConflictError("子任务已经结束");
+    await this.repository.wakeTree(id);
+    return view(await this.repository.get(userId, id));
+  }
+
+  /** The owner's own retry: it does not use up the team's. */
+  async retrySubtask(userId: string, id: string, subtaskId: string) {
+    this.assertEnabled();
+    await this.repository.retrySubtask(userId, id, subtaskId);
+    return view(await this.repository.get(userId, id));
+  }
+
+  async setSubtaskLimit(userId: string, id: string, limit: number | null) {
+    this.assertEnabled();
+    const card = await this.repository.get(userId, id);
+    if (!isOpenStatus(card.status)) throw new ConflictError("任务已经结束");
+    await this.repository.setSubtaskLimit(userId, id, limit);
+    return view(await this.repository.get(userId, id));
   }
 
   async answer(userId: string, decisionId: string, answer: DecisionAnswer) {
     this.assertEnabled();
     const { rootId } = await this.repository.answerDecision(userId, decisionId, answer, "web");
+    await this.repository.wakeTree(rootId);
     return view(await this.repository.get(userId, rootId));
   }
 
@@ -157,6 +225,7 @@ export class AssignmentService {
     let outcome: ReplyOutcome;
     try {
       outcome = (await this.repository.answerDecision(userId, decision.id, answer, "feishu")).applied;
+      await this.repository.wakeTree(decision.rootId);
     } catch (error) {
       if (error instanceof UnverifiedOperationsError) outcome = "unverified";
       else if (error instanceof ConflictError) outcome = "answered_already";
@@ -231,6 +300,7 @@ export class AssignmentService {
   }): Promise<AgentTurnContext> {
     const node = input.userId ? await this.repository.findByConversation(input.conversationId, input.userId) : null;
     if (!node) throw new Error("Assignment conversation has no node");
-    return assignmentTurn(node, input.base, input.toolNames, { repository: this.repository, imports: this.deps.imports });
+    const root = node.id === node.rootId ? node : await this.repository.readNode(node.rootId);
+    return assignmentTurn(node, root?.goal ?? "", input.base, input.toolNames, { repository: this.repository, imports: this.deps.imports });
   }
 }

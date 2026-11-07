@@ -8,6 +8,8 @@ const MAX_SEARCH = 200;
 export const ASSIGNMENT_PAGE = 30;
 const MAX_PAGE = 100;
 const MAX_ANSWER = 2_000;
+const MAX_SUBTASKS_AT_ONCE = 50;
+const MAX_SUBTASK_LIMIT = 10_000;
 const MODES: readonly AssignmentMode[] = ["autonomous", "responsive"];
 const STATUS_FILTERS = ["active", "paused", "succeeded", "failed", "cancelled"] as const;
 
@@ -38,6 +40,9 @@ export function parseCreateAssignment(payload: Record<string, unknown>) {
   const files = attachments(payload.attachments);
   if (!goal && !files.length) throw new InputError("告诉员工要做什么");
   if ([...goal].length > MAX_GOAL) throw new InputError(`任务内容最多 ${MAX_GOAL} 字`);
+  const subtasks = subtaskGoals(payload.subtasks);
+  const subtaskLimit = parseSubtaskLimit(payload);
+  if (subtaskLimit !== null && subtasks.length > subtaskLimit) throw new InputError("子任务数量超过了你设的上限");
   if (payload.mode !== undefined && !MODES.includes(payload.mode as AssignmentMode)) throw new InputError("任务模式无效");
   return {
     goal,
@@ -45,7 +50,36 @@ export function parseCreateAssignment(payload: Record<string, unknown>) {
     attachments: files,
     modelId: typeof payload.modelId === "string" && payload.modelId.trim() ? payload.modelId.trim() : null,
     creditLimit: credits(payload.creditLimit),
+    subtasks,
+    subtaskLimit,
   };
+}
+
+function subtaskGoals(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new InputError("子任务格式不对");
+  const goals = value.map((item) => typeof item === "string" ? item.trim() : "").filter(Boolean);
+  if (goals.length > MAX_SUBTASKS_AT_ONCE) throw new InputError(`一次最多加 ${MAX_SUBTASKS_AT_ONCE} 个子任务`);
+  return goals.map(subtaskGoal);
+}
+
+function subtaskGoal(goal: string): string {
+  if ([...goal].length > MAX_GOAL) throw new InputError(`子任务内容最多 ${MAX_GOAL} 字`);
+  return goal;
+}
+
+export function parseSubtask(payload: Record<string, unknown>): string {
+  const goal = typeof payload.goal === "string" ? payload.goal.trim() : "";
+  if (!goal) throw new InputError("写下这个子任务要做什么");
+  return subtaskGoal(goal);
+}
+
+export function parseSubtaskLimit(payload: Record<string, unknown>): number | null {
+  const value = payload.subtaskLimit;
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > MAX_SUBTASK_LIMIT) throw new InputError("子任务数量上限必须是大于 0 的整数");
+  return parsed;
 }
 
 export function parseCreditLimit(payload: Record<string, unknown>): number | null {

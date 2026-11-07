@@ -11,5 +11,9 @@ export function assignmentConfig() {
     /** One gateway key can take this many streams at once. */
     runningPerUser: positive("ASSIGNMENT_USER_CONCURRENCY", 8),
     workerConcurrency: positive("ASSIGNMENT_WORKER_CONCURRENCY", 12),
+    /** How often a teammate can wake a failed subtask, and how far apart, so a gateway blip cannot use them all up at once. */
+    subtaskRetries: positive("ASSIGNMENT_SUBTASK_RETRIES", 3),
+    retryGapSeconds: positive("ASSIGNMENT_RETRY_GAP_SECONDS", 120),
+    summaryIntervalMs: positive("ASSIGNMENT_SUMMARY_INTERVAL_SECONDS", 180) * 1_000,
   };
 }

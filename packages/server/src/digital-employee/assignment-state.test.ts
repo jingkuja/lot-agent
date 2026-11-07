@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { decideTurn, InvalidTransitionError, resumeMessage, transitionAssignment, type TurnResult } from "./assignment-state.js";
+import { decideTurn, InvalidTransitionError, planWakes, resumeMessage, transitionAssignment, type TreeNode, type TurnResult } from "./assignment-state.js";
 
 const turn = (patch: Partial<TurnResult>): TurnResult => ({
-  mode: "autonomous", status: "completed", endIntent: null, question: null, quota: false, paused: false, shuttingDown: false,
+  mode: "autonomous", status: "completed", endIntent: null, openChildren: 0, question: null, quota: false, paused: false, shuttingDown: false,
   text: "做完了", madeProgress: true, previousMadeProgress: null, ...patch,
 });
 const finish = { outcome: "done" as const, summary: "写好了", assumptions: ["按七折算"], skipped: [] };
@@ -106,5 +106,78 @@ describe("resumeMessage", () => {
     expect(resumeMessage("question", { text: "华东的" })).toBe("[Owner reply]\n华东的");
     expect(resumeMessage("failure", { choice: "retry" })).toContain("[Owner decision] Try again");
     expect(resumeMessage("failure", { choice: "change", text: "换组关键词" })).toContain("换组关键词");
+  });
+});
+
+describe("decideTurn with subtasks", () => {
+  it("sends a lead with open subtasks to wait, however its turn ended", () => {
+    for (const patch of [{ status: "completed" }, { status: "failed" }, { status: "awaiting_input" }, { status: "budget_exhausted" }] as const) {
+      expect(decideTurn(turn({ ...patch, openChildren: 2 }))).toEqual({ next: "wait_children" });
+    }
+  });
+
+  it("lets a cancellation and an unconfirmed write through first", () => {
+    expect(decideTurn(turn({ status: "cancelled", openChildren: 2 })).next).toBe("cancel");
+    expect(decideTurn(turn({ status: "unknown_outcome", openChildren: 2 })).next).toBe("fail");
+  });
+
+  it("reads a wait from what the tool recorded", () => {
+    expect(decideTurn(turn({ status: "awaiting_input", endIntent: { outcome: "wait" } }))).toEqual({ next: "wait_team" });
+  });
+});
+
+describe("planWakes", () => {
+  const ROOT = "root";
+  const lead: TreeNode = { id: ROOT, status: "waiting_children", waitFor: null, waitUntil: null };
+  const node = (id: string, status: TreeNode["status"], waitFor: TreeNode["waitFor"] = null, waitUntil: number | null = null): TreeNode =>
+    ({ id, status, waitFor, waitUntil });
+  const waiting = (id: string, targets: string[], until: "progress" | "finished" = "finished", since = 10) => node(id, "waiting_team", { until, targets, since });
+  const plan = (nodes: TreeNode[], posts: Array<[string, number]> = [], now = 1_000) =>
+    planWakes({ rootId: ROOT, nodes: [lead, ...nodes], posts: new Map(posts), now });
+
+  it("closes the task once nothing is open, whichever way the subtasks ended", () => {
+    expect(plan([node("a", "succeeded"), node("b", "failed"), node("c", "cancelled"), node("d", "skipped")])).toEqual([{ id: ROOT, reason: "closing" }]);
+    expect(planWakes({ rootId: ROOT, nodes: [{ ...lead, status: "running" }, node("a", "succeeded")], posts: new Map(), now: 0 })).toEqual([]);
+  });
+
+  it("keeps the lead waiting while anything is open, a question to the owner included", () => {
+    expect(plan([node("a", "succeeded"), node("b", "waiting_user")])).toEqual([]);
+  });
+
+  it("wakes on news only for a wait that asked for it, and only on news since it began", () => {
+    const others = node("b", "running");
+    expect(plan([waiting("a", ["b"], "progress"), others], [["b", 11]])).toEqual([{ id: "a", reason: "progress" }]);
+    expect(plan([waiting("a", ["b"], "progress"), others], [["b", 10]])).toEqual([]);
+    expect(plan([waiting("a", ["b"], "finished"), others], [["b", 11]])).toEqual([]);
+  });
+
+  it("wakes when targets end, and straight away on a failure", () => {
+    const wait = waiting("a", ["b", "c"]);
+    expect(plan([wait, node("b", "succeeded"), node("c", "running")])).toEqual([]);
+    expect(plan([wait, node("b", "succeeded"), node("c", "succeeded")])).toEqual([{ id: "a", reason: "finished" }]);
+    expect(plan([wait, node("b", "failed"), node("c", "running")])).toEqual([{ id: "a", reason: "failed" }]);
+  });
+
+  it("waits along with a target that is waiting for the owner", () => {
+    expect(plan([waiting("a", ["b"]), node("b", "waiting_user")])).toEqual([]);
+  });
+
+  it("wakes everyone when all that is open is waiting", () => {
+    const wakes = plan([waiting("a", ["b"]), waiting("b", ["a"]), node("c", "succeeded")]);
+    expect(wakes).toEqual([{ id: "a", reason: "deadlock" }, { id: "b", reason: "deadlock" }]);
+  });
+
+  it("honours a deadline without letting one wake anyone early", () => {
+    const wait = (at: number) => node("a", "waiting_team", { until: "finished", targets: ["b"], since: 0 }, at);
+    expect(plan([wait(2_000), node("b", "running")])).toEqual([]);
+    expect(plan([wait(500), node("b", "running")])).toEqual([{ id: "a", reason: "timeout" }]);
+  });
+});
+
+describe("transitions for a reopened task", () => {
+  it("lets a finished root wait again, and nothing else leave a final state", () => {
+    expect(transitionAssignment("succeeded", "waiting_children")).toBe("waiting_children");
+    expect(transitionAssignment("failed", "waiting_children")).toBe("waiting_children");
+    expect(() => transitionAssignment("cancelled", "waiting_children")).toThrow(InvalidTransitionError);
   });
 });

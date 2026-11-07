@@ -71,3 +71,11 @@ describe("decision notices", () => {
     }
   });
 });
+
+describe("a partly finished task", () => {
+  it("names what was not done", () => {
+    const text = finishedNotice({ name: "小灵", title: "开业活动", status: "succeeded", link: "", missed: ["搜同行", "做海报"] }, false);
+    expect(text).toContain("没完成的有：搜同行、做海报");
+    expect(finishedNotice({ name: "L", title: "T", status: "succeeded", link: "", missed: ["A"] }, true)).toContain("Not done: A");
+  });
+});

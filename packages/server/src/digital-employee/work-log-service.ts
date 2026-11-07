@@ -59,6 +59,12 @@ function field(source: unknown, key: string): unknown {
 }
 
 /** Only a name and a link leave this function: raw tool input and output stay on the server. */
+export interface TaskArtifact {
+  id: string;
+  tool: string;
+  artifact: WorkArtifact;
+}
+
 export function stepArtifact(tool: string, status: string, result: unknown): WorkArtifact | null {
   if (status !== "succeeded" || !PRODUCING_TOOL.test(tool)) return null;
   const content = field(result, "content");
@@ -95,6 +101,19 @@ function optionalIso(value: unknown): string | null {
 /** What one conversation's runs did, read from the execution journal the runtime already keeps. */
 export class WorkLogService {
   constructor(private readonly pool: Pool) {}
+
+  /** Everything a set of conversations produced, in one query: a task can have many subtasks. */
+  async artifacts(userId: string, conversationIds: string[]): Promise<TaskArtifact[]> {
+    const { rows } = await this.pool.query(
+      `SELECT step.id, step.tool_name, step.status, step.result FROM agent_steps step JOIN agent_runs run ON run.id = step.run_id
+       WHERE run.conversation_id = ANY($1::uuid[]) AND run.user_id=$2 AND step.status='succeeded' ORDER BY step.started_at`,
+      [conversationIds, userId]
+    );
+    return rows.flatMap((row) => {
+      const artifact = stepArtifact(String(row.tool_name), String(row.status), row.result);
+      return artifact?.url ? [{ id: String(row.id), tool: String(row.tool_name), artifact }] : [];
+    });
+  }
 
   async conversation(userId: string, conversationId: string) {
     const { rows: [conversation] } = await this.pool.query(
