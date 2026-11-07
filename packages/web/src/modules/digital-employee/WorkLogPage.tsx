@@ -9,12 +9,14 @@ import {
 import { OpportunityDialogs } from "./opportunities/OpportunityDialogs.js";
 import { TEMPLATE_LABELS } from "./schedule/labels.js";
 import { runSummary } from "./schedule/ScheduledRunPage.js";
-import type { OpportunityItem, OpportunityListResponse, OpportunityView, ScheduleRun } from "./types.js";
+import { statusLabel, statusTone } from "./assignments/copy.js";
+import type { Assignment, OpportunityItem, OpportunityListResponse, OpportunityView, ScheduleRun } from "./types.js";
 
-type WorkTab = "conversations" | "scheduled" | Extract<OpportunityView, "in_progress" | "completed" | "snoozed">;
+type WorkTab = "conversations" | "tasks" | "scheduled" | Extract<OpportunityView, "in_progress" | "completed" | "snoozed">;
 
 const TABS: Array<{ id: WorkTab; label: string }> = [
   { id: "conversations", label: "对话" },
+  { id: "tasks", label: "任务" },
   { id: "in_progress", label: "跟进中" },
   { id: "completed", label: "已完成" },
   { id: "snoozed", label: "稍后处理" },
@@ -25,6 +27,9 @@ interface WorkLogPageProps {
   /** The tab a link asked for. */
   initialTab: string | null;
   schedules: boolean;
+  /** The deployment has task dispatch on. */
+  assignments: boolean;
+  onOpenAssignment: (id: string) => void;
   onOpenScheduledRun: (id: string) => void;
   conversations: Conversation[];
   activeConversationId: string | null;
@@ -41,7 +46,7 @@ interface WorkLogPageProps {
 /** Everything the employee and the owner did together, not split by module. */
 export function WorkLogPage(props: WorkLogPageProps) {
   const { t } = useI18n();
-  const tabs = TABS.filter((item) => item.id !== "scheduled" || props.schedules);
+  const tabs = TABS.filter((item) => (item.id !== "scheduled" || props.schedules) && (item.id !== "tasks" || props.assignments));
   const [tab, setTab] = useState<WorkTab>(tabs.find((item) => item.id === props.initialTab)?.id ?? "conversations");
   return <div className="de-page de-work-log">
     <header className="de-employee-page-head"><h1>{t("工作记录")}</h1></header>
@@ -49,9 +54,49 @@ export function WorkLogPage(props: WorkLogPageProps) {
       {tabs.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{t(item.label)}</button>)}
     </nav>
     {tab === "conversations" && <ConversationList {...props} />}
+    {tab === "tasks" && <TaskRecords onOpen={props.onOpenAssignment} />}
     {tab === "scheduled" && <ScheduledRuns onOpen={props.onOpenScheduledRun} />}
-    {tab !== "conversations" && tab !== "scheduled" && <FollowUpList view={tab} onOpenProfile={props.onOpenProfile} onDraftOutreach={props.onDraftOutreach} />}
+    {tab !== "conversations" && tab !== "tasks" && tab !== "scheduled" && <FollowUpList view={tab} onOpenProfile={props.onOpenProfile} onDraftOutreach={props.onDraftOutreach} />}
   </div>;
+}
+
+/** The record of every task, newest first. Finding and acting on them stays on the task page. */
+function TaskRecords({ onOpen }: { onOpen: (id: string) => void }) {
+  const { t, locale } = useI18n();
+  const [items, setItems] = useState<Assignment[] | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async (from?: string) => {
+    setLoading(true);
+    try {
+      const page = await employeeApi.listAssignments(from ? { cursor: from } : {});
+      setItems((current) => from ? [...(current ?? []), ...page.items] : page.items);
+      setCursor(page.nextCursor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "读取失败");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  if (error) return <div className="de-inline-error" role="alert"><span>{t(error)}</span></div>;
+  if (!items) return <div className="de-state">{t("加载中…")}</div>;
+  if (items.length === 0) return <div className="de-state de-empty-state"><strong>{t("还没有任务记录")}</strong></div>;
+  return <section className="de-work-log-list">
+    {items.map((item) => <article key={item.id}>
+      <button type="button" onClick={() => onOpen(item.id)}>
+        <strong>{item.title}</strong>
+        <small>
+          <em className={`de-assignment-status is-${statusTone(item)}`}>{t(statusLabel(item))}</em>
+          {" "}{formatTime(item.createdAt, locale)}
+        </small>
+      </button>
+    </article>)}
+    {cursor && <button className="de-secondary-button" disabled={loading} onClick={() => void load(cursor)}>{t("加载更多")}</button>}
+  </section>;
 }
 
 /** Skipped and missed runs stay listed: they answer why a report did not appear. */

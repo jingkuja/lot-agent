@@ -96,6 +96,10 @@ export const employeeApi = {
     method: "PUT", body: JSON.stringify({ creditLimit }),
   }),
 
+  followUpAssignment: (id: string, text: string) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/follow-up`, {
+    method: "POST", body: JSON.stringify({ text }),
+  }),
+
   addSubtask: (id: string, goal: string) => request<Assignment>(`/digital-employee/assignments/${encodeURIComponent(id)}/subtasks`, {
     method: "POST", body: JSON.stringify({ goal }),
   }),

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import {
-  parseAssignmentList, parseCreateAssignment, parseCreditLimit, parseDecisionAnswer, parseEventCursor, parseSubtask, parseSubtaskLimit,
+  parseAssignmentList, parseCreateAssignment, parseCreditLimit, parseDecisionAnswer, parseEventCursor, parseFollowUp, parseSubtask, parseSubtaskLimit,
 } from "./assignment-validators.js";
 import { parseEmployeeName } from "./employee-name.js";
 import { apiError, InputError } from "./errors.js";
@@ -99,6 +99,13 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
     try {
       const before = parseEventCursor(c.req.query("before"));
       return c.json(await service.assignments.board(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"), before));
+    } catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignments/:id/follow-up", async (c) => {
+    try {
+      const text = parseFollowUp(await body(c));
+      return c.json(await service.assignments.followUp(c.get("userId"), parseEntityId(c.req.param("id"), "任务 ID"), text));
     } catch (error) { return respondError(c, error); }
   });
 

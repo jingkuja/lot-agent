@@ -86,6 +86,13 @@ export function parseCreditLimit(payload: Record<string, unknown>): number | nul
   return credits(payload.creditLimit);
 }
 
+export function parseFollowUp(payload: Record<string, unknown>): string {
+  const text = typeof payload.text === "string" ? payload.text.trim() : "";
+  if (!text) throw new InputError("写下要追问的内容");
+  if ([...text].length > MAX_GOAL) throw new InputError(`追问最多 ${MAX_GOAL} 字`);
+  return text;
+}
+
 export function parseDecisionAnswer(payload: Record<string, unknown>): DecisionAnswer {
   const text = typeof payload.text === "string" ? payload.text.trim() : "";
   if ([...text].length > MAX_ANSWER) throw new InputError(`回答最多 ${MAX_ANSWER} 字`);

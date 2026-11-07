@@ -1,11 +1,11 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "kimi-k3.1-pro",
-  "ranAt": "2026-11-06T06:49:16.173Z",
-  "toolDefinitionChars": 33470,
-  "passed": 37,
-  "total": 39,
-  "rate": 0.9487179487179487,
+  "ranAt": "2026-11-07T03:55:56.842Z",
+  "toolDefinitionChars": 34198,
+  "passed": 43,
+  "total": 44,
+  "rate": 0.9772727272727273,
   "threshold": 0.9,
   "results": [
     {
@@ -37,6 +37,52 @@
       "pass": true
     },
     {
+      "id": "background-after-chat",
+      "object": "task",
+      "actual": "start_background_task",
+      "expected": [
+        "start_background_task"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-away",
+      "object": "task",
+      "actual": "start_background_task",
+      "expected": [
+        "start_background_task"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-english",
+      "object": "task",
+      "actual": "start_background_task",
+      "expected": [
+        "start_background_task"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-explicit",
+      "object": "task",
+      "actual": "start_background_task",
+      "expected": [
+        "start_background_task"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-not-for-a-normal-long-request",
+      "object": "task",
+      "actual": "search_customer_work_queue",
+      "expected": [
+        "search_customer_work_queue",
+        "search_customer_profiles"
+      ],
+      "pass": true
+    },
+    {
       "id": "boundary-mass-send",
       "object": "boundary",
       "actual": "NO_TOOL",
@@ -49,7 +95,7 @@
     {
       "id": "campaign-create",
       "object": "campaign",
-      "actual": "search_marketing_materials",
+      "actual": "search_customer_segments",
       "expected": [
         "search_customer_segments",
         "search_marketing_materials",
@@ -97,7 +143,7 @@
     {
       "id": "customer-capture-purchase",
       "object": "customer",
-      "actual": "search_marketing_materials",
+      "actual": "prepare_customer_capture",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -269,12 +315,12 @@
     {
       "id": "outreach-create",
       "object": "follow-up",
-      "actual": "get_customer_business_context",
+      "actual": "generate_individual_outreach",
       "expected": [
         "generate_individual_outreach",
         "search_customer_profiles"
       ],
-      "pass": false
+      "pass": true
     },
     {
       "id": "outreach-rewrite",

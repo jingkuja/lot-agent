@@ -8,6 +8,7 @@ import {
 } from "@lot-agent/core";
 import { MARKETING_COPY_REASONING_EFFORT } from "@lot-agent/core/marketing-video";
 import { DIGITAL_EMPLOYEE_AGENT_ID, digitalEmployeeAllowedToolNames, digitalEmployeeTurnParts } from "../src/digital-employee/agent.js";
+import { BACKGROUND_TASK_RULES, BACKGROUND_TASK_TOOL, createBackgroundTaskTool } from "../src/digital-employee/assignment-chat.js";
 import { DIGITAL_EMPLOYEE_UNIFIED_SCOPE } from "../src/digital-employee/feature-scope.js";
 import { createCustomerAcquisitionTools } from "../src/digital-employee/tools/customer-acquisition-tools.js";
 import { createCustomerCaptureTools } from "../src/digital-employee/tools/customer-capture-tools.js";
@@ -61,23 +62,24 @@ const registry = new ToolRegistry();
 const tools: Tool[] = [
   ...createCustomerCaptureTools(stub), ...createCustomerProfileTools(stub), ...createMarketingMaterialTools(stub),
   ...createMarketingVideoTools(stub, stub),
-  ...createCustomerAcquisitionTools(stub), ...createOpportunityAdvisorTools(stub), createLoadSkillTool(skills),
+  ...createCustomerAcquisitionTools(stub), ...createOpportunityAdvisorTools(stub), createLoadSkillTool(skills), createBackgroundTaskTool(stub),
   { name: "ask_user", description: "Ask the user a question and end the turn.", parameters: {
     type: "object", properties: { question: { type: "string" }, options: { type: "array", items: { type: "string" } } }, required: ["question"],
   }, async execute() { return { content: "" }; } },
 ];
 for (const tool of tools) registry.register(tool);
-const definitionChars = JSON.stringify(registry.toLLMTools(digitalEmployeeDefinition.toolNames)).length;
+const definitionChars = JSON.stringify(registry.toLLMTools([...digitalEmployeeDefinition.toolNames, BACKGROUND_TASK_TOOL])).length;
 
 async function firstTool(item: EvalCase): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 240_000);
   const agent = new Agent({
     systemPrompt: `${digitalEmployeeDefinition.systemPrompt}\n\n${RESPONSE_LANGUAGE_POLICY}`,
-    allowedToolNames: digitalEmployeeAllowedToolNames(DIGITAL_EMPLOYEE_UNIFIED_SCOPE, digitalEmployeeDefinition.toolNames),
+    allowedToolNames: [...digitalEmployeeAllowedToolNames(DIGITAL_EMPLOYEE_UNIFIED_SCOPE, digitalEmployeeDefinition.toolNames), BACKGROUND_TASK_TOOL],
     dynamicPromptParts: [
       ...buildSkillPromptParts(skills, item.input, DIGITAL_EMPLOYEE_AGENT_ID, digitalEmployeeDefinition.toolNames),
       ...digitalEmployeeTurnParts(DIGITAL_EMPLOYEE_UNIFIED_SCOPE),
+      BACKGROUND_TASK_RULES,
     ],
     // Same fixed depth as the chat path, which this must match to measure the real turn.
     modelParams: MARKETING_COPY_REASONING_EFFORT[modelId]

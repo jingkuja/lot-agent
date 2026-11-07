@@ -1564,4 +1564,117 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
       expect(detail.board.length).toBeGreaterThan(0);
     });
   });
+
+  describe("following up", () => {
+    const finished = async (userId: string, goal = "写开业活动") => {
+      const task = await create(userId, goal);
+      script.push(finish("写好了"));
+      await turn();
+      return task;
+    };
+
+    it("carries on in the same conversation, keeps the old result until there is a new one, and reports again", async () => {
+      const userId = owner();
+      const task = await finished(userId);
+      const conversationId = (await raw(task.id)).conversation_id;
+      expect(await assignments().followUp(userId, task.id, "再写一版更便宜的")).toMatchObject({ status: "queued", result: { summary: "写好了" } });
+      expect((await raw(task.id)).finished_at).toBeNull();
+      script.push(finish("便宜版写好了"));
+      await turn();
+      expect(inputs.at(-1)).toMatchObject({ conversationId });
+      expect(inputs.at(-1)!.message).toContain("[Owner follow-up]");
+      expect(inputs.at(-1)!.message).toContain("再写一版更便宜的");
+      expect(inputs.at(-1)!.attachments).toEqual([]);
+      expect((await raw(task.id)).result.summary).toBe("便宜版写好了");
+      await runner().deliver();
+      expect(sent.filter((item) => item.userId === userId)).toHaveLength(2);
+      const { rows } = await db.pool.query(`SELECT event, body FROM de_assignment_board WHERE root_id=$1`, [task.id]);
+      expect(rows).toEqual([{ event: "followed_up", body: "再写一版更便宜的" }]);
+    });
+
+    it("works on a task that failed, and clears the failure", async () => {
+      const userId = owner();
+      const task = await create(userId);
+      script.push(ending("failed"));
+      await turn();
+      await assignments().followUp(userId, task.id, "换个方向试试");
+      expect(await raw(task.id)).toMatchObject({ status: "queued", failure_reason: null });
+      script.push(finish());
+      await turn();
+    });
+
+    it("lets the follow-up split the work, and the numbers carry on", async () => {
+      const userId = owner();
+      const task = await assignments().create(userId, { goal: "开业活动", mode: "autonomous", attachments: [], modelId: null, creditLimit: null, subtasks: ["搜同行"] });
+      script.push(finish(), finish("写好了"));
+      await turn(); await turn();
+      await assignments().followUp(userId, task.id, "再加一张海报");
+      script.push(async function* () {
+        await createTeamTools((await repository().readNode(task.id))!, repository())[0]!.execute({ subtasks: [{ goal: "做海报" }] }, { workingDirectory: "/" });
+        yield done("awaiting_input");
+      });
+      await turn();
+      const { rows } = await db.pool.query(`SELECT position, status FROM de_assignments WHERE root_id=$1 ORDER BY position`, [task.id]);
+      expect(rows).toEqual([{ position: 0, status: "waiting_children" }, { position: 1, status: "succeeded" }, { position: 2, status: "queued" }]);
+      await assignments().cancel(userId, task.id);
+    });
+
+    it("refuses a running or cancelled task, a stranger, and an unconfirmed write", async () => {
+      const userId = owner();
+      const open = await create(userId);
+      await expect(assignments().followUp(userId, open.id, "x")).rejects.toBeInstanceOf(ConflictError);
+      await assignments().cancel(userId, open.id);
+      await expect(assignments().followUp(userId, open.id, "x")).rejects.toBeInstanceOf(ConflictError);
+
+      const task = await create(userId);
+      script.push(ending("unknown_outcome"));
+      await turn();
+      await expect(assignments().followUp(owner(), task.id, "x")).rejects.toBeInstanceOf(NotFoundError);
+      const { rows: [run] } = await db.pool.query(`SELECT id FROM agent_runs WHERE conversation_id=$1`, [(await raw(task.id)).conversation_id]);
+      await db.pool.query(
+        `INSERT INTO agent_steps (id, run_id, iteration, tool_call_id, tool_name, effect, input, input_hash, status)
+         VALUES ($1,$2,1,'c','update_marketing_product','write','{}'::jsonb,'h','unknown_outcome')`, [randomUUID(), run.id]
+      );
+      await expect(assignments().followUp(userId, task.id, "x")).rejects.toBeInstanceOf(UnverifiedOperationsError);
+    });
+  });
+
+  describe("starting from a chat", () => {
+    const chat = async (userId: string) => {
+      const conversationId = randomUUID();
+      await db.createConversation(conversationId, "聊天", undefined, undefined, "digital_employee", userId);
+      return conversationId;
+    };
+
+    it("creates a queued task with the owner's latest files and the task's default model", async () => {
+      const userId = owner();
+      const conversationId = await chat(userId);
+      const id = randomUUID();
+      await db.createAsset({ id, taskId: null, userId, type: "upload", storageKey: `${id}.pdf`, url: `/static/uploads/${id}.pdf`, mime: "application/pdf", sizeBytes: 10, originalName: "手册.pdf" });
+      await db.addMessage(randomUUID(), conversationId, "user", "放后台做", { metadata: { attachments: [{ assetId: id, filename: "手册.pdf" }] } });
+      const task = await assignments().startFromChat(userId, conversationId, { goal: "整理手册", mode: "responsive", subtasks: ["读手册"] });
+      expect(task).toMatchObject({ mode: "responsive", modelId: "kimi-k3.1-pro", attachments: ["手册.pdf"], status: "waiting_children" });
+      await assignments().cancel(userId, task.id);
+    });
+
+    it("cannot take someone else's files through their conversation", async () => {
+      const victim = owner();
+      const conversationId = await chat(victim);
+      const id = randomUUID();
+      await db.createAsset({ id, taskId: null, userId: victim, type: "upload", storageKey: `${id}.pdf`, url: `/static/uploads/${id}.pdf`, mime: "application/pdf", sizeBytes: 10, originalName: "手册.pdf" });
+      await db.addMessage(randomUUID(), conversationId, "user", "x", { metadata: { attachments: [{ assetId: id, filename: "手册.pdf" }] } });
+      const task = await assignments().startFromChat(owner(), conversationId, { goal: "x", mode: "responsive", subtasks: [] });
+      expect(task.attachments).toEqual([]);
+      await db.pool.query(`UPDATE de_assignments SET status='cancelled' WHERE id=$1`, [task.id]);
+    });
+
+    it("adds the tool to a chat turn only when tasks are on", () => {
+      const turn = { allowedToolNames: ["ask_user"], dynamicParts: [] };
+      expect(assignments().chatTurn(turn).allowedToolNames).toContain("start_background_task");
+      expect(assignments().chatTurn(turn).toolOverrides!(() => undefined).map((item) => item.name)).toEqual(["start_background_task"]);
+      process.env.DIGITAL_EMPLOYEE_ASSIGNMENTS = "0";
+      expect(assignments().chatTurn(turn)).toBe(turn);
+      process.env.DIGITAL_EMPLOYEE_ASSIGNMENTS = "1";
+    });
+  });
 });

@@ -56,7 +56,7 @@ describe("digital employee extension", () => {
 
   it("hands a task conversation to the task service", async () => {
     const beginTurn = vi.fn(async () => ({ allowedToolNames: ["finish_task"], dynamicParts: [] }));
-    const tasks = createDigitalEmployeeExtension({ assignments: { beginTurn } });
+    const tasks = createDigitalEmployeeExtension({ assignments: { beginTurn, chatTurn: (turn) => turn } });
     await expect(tasks.beginTurn!({ agentId: "digital_employee", userId: "u1", conversationId: "c1", metadata: taskMetadata, toolNames: tools }))
       .resolves.toMatchObject({ allowedToolNames: ["finish_task"] });
     expect(beginTurn).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1", conversationId: "c1", toolNames: tools }));

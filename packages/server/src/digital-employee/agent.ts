@@ -92,7 +92,7 @@ export function digitalEmployeeTurnParts(featureScope: string | undefined, emplo
 export function createDigitalEmployeeExtension(deps: {
   resolveModel?: (userId: string | undefined, requested?: string | null) => Promise<ResolvedLlm>;
   settings?: Pick<EmployeeSettingsService, "get">;
-  assignments?: Pick<AssignmentService, "beginTurn">;
+  assignments?: Pick<AssignmentService, "beginTurn" | "chatTurn">;
 } = {}): AgentExtension {
   return {
     agentId: DIGITAL_EMPLOYEE_AGENT_ID,
@@ -125,7 +125,8 @@ export function createDigitalEmployeeExtension(deps: {
         if (!deps.assignments) throw new Error("Background tasks are not available in this process");
         return deps.assignments.beginTurn({ userId, conversationId, toolNames, base });
       }
-      return { ...base, allowedToolNames: digitalEmployeeAllowedToolNames(featureScope, toolNames) };
+      const turn = { ...base, allowedToolNames: digitalEmployeeAllowedToolNames(featureScope, toolNames) };
+      return featureScope === DIGITAL_EMPLOYEE_UNIFIED_SCOPE && deps.assignments ? deps.assignments.chatTurn(turn) : turn;
     },
   };
 }

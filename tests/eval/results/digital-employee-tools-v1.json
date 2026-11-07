@@ -1,11 +1,11 @@
 {
   "version": "digital-employee-tools/v1",
   "modelId": "deepseek-v4.1-flash",
-  "ranAt": "2026-11-06T06:48:20.298Z",
-  "toolDefinitionChars": 33470,
-  "passed": 38,
-  "total": 39,
-  "rate": 0.9743589743589743,
+  "ranAt": "2026-11-07T03:53:09.868Z",
+  "toolDefinitionChars": 34198,
+  "passed": 43,
+  "total": 44,
+  "rate": 0.9772727272727273,
   "threshold": 0.9,
   "results": [
     {
@@ -33,6 +33,52 @@
       "actual": "search_marketing_assets",
       "expected": [
         "search_marketing_assets"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-after-chat",
+      "object": "task",
+      "actual": "start_background_task",
+      "expected": [
+        "start_background_task"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-away",
+      "object": "task",
+      "actual": "start_background_task",
+      "expected": [
+        "start_background_task"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-english",
+      "object": "task",
+      "actual": "start_background_task",
+      "expected": [
+        "start_background_task"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-explicit",
+      "object": "task",
+      "actual": "start_background_task",
+      "expected": [
+        "start_background_task"
+      ],
+      "pass": true
+    },
+    {
+      "id": "background-not-for-a-normal-long-request",
+      "object": "task",
+      "actual": "search_customer_work_queue",
+      "expected": [
+        "search_customer_work_queue",
+        "search_customer_profiles"
       ],
       "pass": true
     },
@@ -97,7 +143,7 @@
     {
       "id": "customer-capture-purchase",
       "object": "customer",
-      "actual": "search_marketing_materials",
+      "actual": "search_customer_profiles",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",
@@ -129,7 +175,7 @@
     {
       "id": "customer-create",
       "object": "customer",
-      "actual": "prepare_customer_profile_change",
+      "actual": "search_customer_profiles",
       "expected": [
         "prepare_customer_profile_change",
         "search_customer_profiles"
@@ -258,7 +304,7 @@
     {
       "id": "mixed-owner-sentence",
       "object": "mixed",
-      "actual": "search_customer_profiles",
+      "actual": "search_marketing_materials",
       "expected": [
         "search_marketing_materials",
         "prepare_customer_capture",

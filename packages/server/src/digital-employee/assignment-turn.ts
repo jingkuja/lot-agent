@@ -42,7 +42,7 @@ function responsiveRules(searchLimit: number, searchesUsed: number): string {
 The owner gave you this task and left. Nobody reads this conversation. ask_user is the only thing that reaches them: it stops this task and notifies them, and the answer may take hours or days.
 - Call ask_user whenever the rules above or a tool result require confirmation, or when the target of a write is not unique, such as two customers with the same name. Never guess. Decide everything else yourself and report it in assumptions.
 - The owner has not seen this conversation or any tool output. Put what they need to decide inside the question itself, and offer the choices in options.
-- A message starting with [Owner reply] or [Owner decision] is the owner speaking. A message starting with [Task continuation] is the system resuming your work: it answers nothing and confirms nothing.
+- A message starting with [Owner reply], [Owner decision] or [Owner follow-up] is the owner speaking. A message starting with [Task continuation] is the system resuming your work: it answers nothing and confirms nothing.
 ${sharedRules(searchLimit, searchesUsed)}`;
 }
 

@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import { pickBackgroundTaskLlmModel } from "../models/catalog.js";
 import type { AgentTurnContext } from "../services/agent-extensions.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
+import { BACKGROUND_TASK_RULES, BACKGROUND_TASK_TOOL, createBackgroundTaskTool } from "./assignment-chat.js";
 import { assignmentLink, replyAck, type ReplyOutcome } from "./assignment-notices.js";
 import { isContinueReply, matchDecisionReply, quotedReply } from "./assignment-replies.js";
 import {
@@ -24,7 +25,7 @@ const BOARD_PAGE = 50;
 
 export interface AssignmentDeps {
   llmModels(userId: string): Promise<string[]>;
-  imports: Pick<ProductImportService, "commitUnattended" | "itemsHeldFor">;
+  imports: Pick<ProductImportService, "commitUnattended" | "itemsHeldFor" | "latestAttachments">;
   workLog: Pick<WorkLogService, "conversation" | "artifacts">;
 }
 
@@ -150,6 +151,30 @@ export class AssignmentService {
       ...view(card), runs, conversationId: card.conversationId, unverified, decisions: decisions.map(decisionView),
       subtaskList: subtasks.map(subtaskView), board, artifacts: await this.deps.workLog.artifacts(userId, conversations),
     };
+  }
+
+  /** Asked for in a chat, so the goal is the employee's write-up. The model is the task default, not the chat's. */
+  async startFromChat(userId: string, conversationId: string, input: { goal: string; mode: AssignmentMode; subtasks: string[] }) {
+    const attachments = (await this.deps.imports.latestAttachments(userId, conversationId))
+      .map(({ assetId, filename }) => ({ assetId, filename }));
+    return this.create(userId, { ...input, attachments, modelId: null, creditLimit: null });
+  }
+
+  /** Adds the tool to a chat turn. A deployment with tasks off sees no change at all. */
+  chatTurn(turn: AgentTurnContext): AgentTurnContext {
+    if (!digitalEmployeeAssignmentsEnabled()) return turn;
+    return {
+      ...turn,
+      allowedToolNames: [...turn.allowedToolNames, BACKGROUND_TASK_TOOL],
+      dynamicParts: [...turn.dynamicParts, BACKGROUND_TASK_RULES],
+      toolOverrides: () => [createBackgroundTaskTool(this)],
+    };
+  }
+
+  async followUp(userId: string, id: string, text: string) {
+    this.assertEnabled();
+    await this.repository.followUp(userId, id, text);
+    return view(await this.repository.get(userId, id));
   }
 
   async board(userId: string, id: string, before?: string) {

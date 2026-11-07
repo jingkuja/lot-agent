@@ -15,8 +15,9 @@ describe("transitionAssignment", () => {
   });
 
   it("never leaves a final state", () => {
-    expect(() => transitionAssignment("succeeded", "queued")).toThrow(InvalidTransitionError);
+    expect(() => transitionAssignment("succeeded", "running")).toThrow(InvalidTransitionError);
     expect(() => transitionAssignment("cancelled", "running")).toThrow(InvalidTransitionError);
+    expect(() => transitionAssignment("cancelled", "queued")).toThrow(InvalidTransitionError);
     expect(() => transitionAssignment("failed", "cancelled")).toThrow(InvalidTransitionError);
   });
 });

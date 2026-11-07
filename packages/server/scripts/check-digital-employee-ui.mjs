@@ -264,6 +264,12 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
       state.assignments.unshift(created);
       return json(created, 201);
     }
+    const followUp = de.match(/^\/assignments\/([^/]+)\/follow-up$/);
+    if (followUp) {
+      const item = state.assignments.find((entry) => entry.id === followUp[1]);
+      Object.assign(item, { status: "queued", failureReason: null });
+      return json(item);
+    }
     const subtask = de.match(/^\/assignments\/([^/]+)\/subtasks(?:\/([^/]+))?(?:\/(\w+))?$/);
     if (subtask) {
       const item = state.assignments.find((entry) => entry.id === subtask[1]);
@@ -1288,6 +1294,36 @@ try {
     await phone.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
     await snap(phone.page, "assignment-team-en-390-dark.png");
     await phone.close();
+  }
+
+  // Coming back to a finished task, and finding tasks in the work record.
+  {
+    const state = fixtures();
+    const { page, close } = await open("/digital-employee/assignments/t2", { assignments: true, state });
+    const form = page.locator(".de-assignment-follow-up");
+    await form.getByRole("heading", { name: "继续追问" }).waitFor();
+    assert.equal(await form.getByRole("button", { name: "继续做" }).isDisabled(), true);
+    await form.getByRole("textbox").fill("再写一版更便宜的");
+    await form.getByRole("button", { name: "继续做" }).click();
+    await page.waitForFunction(() => !document.querySelector(".de-assignment-follow-up"));
+    assert.deepEqual(JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/follow-up")).body), { text: "再写一版更便宜的" });
+    await page.getByText("整理好了 12 位客户").waitFor();
+
+    await page.goto(`${origin}/digital-employee/assignments/t1`);
+    await page.getByRole("heading", { name: "写开业优惠方案" }).waitFor();
+    assert.equal(await page.locator(".de-assignment-follow-up").count(), 0, "an open task has no follow-up");
+
+    await page.goto(`${origin}/digital-employee/work-log/tasks`);
+    const row = page.locator(".de-work-log-list article").filter({ hasText: "写活动海报" });
+    await row.getByText("已暂停").waitFor();
+    await row.getByRole("button").click();
+    await page.waitForURL("**/digital-employee/assignments/t3");
+    await close();
+
+    const off = await open("/digital-employee/work-log", { assignments: false });
+    await off.page.locator(".de-employee-tabs").waitFor();
+    assert.equal(await off.page.locator(".de-employee-tabs").getByRole("button", { name: "任务", exact: true }).count(), 0);
+    await off.close();
   }
 
   // Two languages, two themes, phone width.

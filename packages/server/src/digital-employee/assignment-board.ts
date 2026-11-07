@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg";
 
 export type BoardKind = "summary" | "finding" | "output" | "alert" | "status";
-export type BoardEvent = "added" | "succeeded" | "failed" | "waiting_user" | "skipped" | "cancelled";
+export type BoardEvent = "added" | "succeeded" | "failed" | "waiting_user" | "skipped" | "cancelled" | "followed_up";
 
 export interface NewBoardEntry {
   rootId: string;

@@ -22,7 +22,7 @@ export interface EmployeeLocation {
 }
 
 const CUSTOMER_TABS = new Set(["segments"]);
-const WORK_TABS = new Set(["conversations", "in_progress", "completed", "snoozed", "scheduled"]);
+const WORK_TABS = new Set(["conversations", "tasks", "in_progress", "completed", "snoozed", "scheduled"]);
 
 export function employeePath(view: EmployeeView, tail?: string): string {
   return `${EMPLOYEE_ROOT}/${view}${tail ? `/${encodeURIComponent(tail)}` : ""}`;

@@ -24,7 +24,7 @@ export function statusTone(item: Stateful): string {
 export const BOARD_KIND_LABELS: Record<BoardKind, string> = { summary: "进展", finding: "发现", output: "产出", alert: "提醒", status: "状态" };
 
 export const BOARD_EVENT_LABELS: Record<BoardEvent, string> = {
-  added: "新增子任务", succeeded: "完成了", failed: "没有完成", waiting_user: "等你决定", skipped: "已跳过", cancelled: "已取消",
+  added: "新增子任务", succeeded: "完成了", failed: "没有完成", waiting_user: "等你决定", skipped: "已跳过", cancelled: "已取消", followed_up: "你追问",
 };
 
 export const MODE_LABELS: Record<Assignment["mode"], string> = { autonomous: "完全自主", responsive: "及时响应" };

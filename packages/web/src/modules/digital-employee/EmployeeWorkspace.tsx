@@ -202,9 +202,12 @@ export function EmployeeWorkspace({
       }
       if (location.scheduledRunId) return <ScheduledRunPage runId={location.scheduledRunId} onBack={() => openView("work-log", "scheduled")} />;
       return <WorkLogPage
-        key={tab}
+        // Flags load after the first render, and a link can name a tab that only exists once they do.
+        key={`${tab}-${schedules}-${assignments}`}
         initialTab={tab}
         schedules={schedules}
+        assignments={assignments}
+        onOpenAssignment={(id) => openView("assignments", id)}
         onOpenScheduledRun={(id) => navigate(`${employeePath("work-log", "scheduled")}/${encodeURIComponent(id)}`)}
         conversations={digitalEmployeeConversations(context.conversations)}
         activeConversationId={context.activeConversationId}

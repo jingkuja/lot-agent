@@ -18,8 +18,8 @@ const TRANSITIONS: Record<AssignmentStatus, readonly AssignmentStatus[]> = {
   waiting_user: ["queued", "skipped", "cancelled"],
   waiting_team: ["queued", "cancelled"],
   waiting_children: ["queued", "cancelled"],
-  // Only a root, and only when the owner retries a subtask after the task ended.
-  succeeded: ["waiting_children"],
+  // Only a root, and only when the owner asks: a follow-up, or a retry of one subtask.
+  succeeded: ["queued", "waiting_children"],
   cancelled: [],
   skipped: [],
 };
@@ -63,6 +63,10 @@ export function resumeMessage(kind: "question" | "failure", answer: DecisionAnsw
   if (kind === "question") return `[Owner reply]\n${answer.text ?? ""}`;
   if (answer.choice === "retry") return "[Owner decision] Try again. Check the execution records first and do not repeat anything that already took effect.";
   return `[Owner decision] Try a different approach. Check the execution records first.${answer.text ? `\nThe owner says:\n${answer.text}` : ""}`;
+}
+
+export function followUpMessage(text: string): string {
+  return `[Owner follow-up] This task had ended, and the owner came back to it. Carry on from what you already did.\n${text}`;
 }
 
 export interface FinishIntent {

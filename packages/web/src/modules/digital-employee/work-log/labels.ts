@@ -60,6 +60,7 @@ export const TOOL_LABELS: Record<string, string> = {
   commit_product_import: "保存产品资料",
   read_product_documents: "读取产品补充资料",
   finish_task: "收尾任务",
+  start_background_task: "交给后台做",
   create_subtasks: "拆分子任务",
   read_team_board: "查看工作板",
   read_team_detail: "查看其他子任务的内容",

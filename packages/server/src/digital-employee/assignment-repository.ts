@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import type { AttachmentRef } from "../services/attachment-extractor.js";
 import {
   FAILURE_CHOICES,
+  followUpMessage,
   OPEN_STATUSES,
   planWakes,
   resumeMessage,
@@ -549,6 +550,25 @@ export class AssignmentRepository {
           [rootId, transitionAssignment(root.status, "waiting_children")]
         );
       }
+    });
+  }
+
+  /**
+   * The same conversation carries on, so the model has everything it did. The old result stays on show until a
+   * new one replaces it. Searches and retries are not reset, and a write nobody confirmed still has to be checked.
+   */
+  async followUp(userId: string, id: string, text: string): Promise<void> {
+    await this.transaction(async (client) => {
+      const { rows: [row] } = await client.query(`SELECT * FROM de_assignments WHERE id=$1 AND user_id=$2 AND id=root_id FOR UPDATE`, [id, userId]);
+      if (!row) throw new NotFoundError("任务不存在");
+      if (row.status !== "succeeded" && row.status !== "failed") throw new ConflictError("任务结束后才能追问");
+      const { rows: [{ total }] } = await client.query(`SELECT ${UNVERIFIED} AS total FROM de_assignments node WHERE node.id=$1`, [id]);
+      if (Number(total) > 0) throw new UnverifiedOperationsError(Number(total));
+      await client.query(
+        `UPDATE de_assignments SET status=$2, version=version+1, next_message=$3, failure_reason=NULL, end_intent=NULL, finished_at=NULL, updated_at=now() WHERE id=$1`,
+        [id, transitionAssignment(row.status, "queued"), followUpMessage(text)]
+      );
+      await insertBoardEntry(client, { rootId: id, userId, authorId: null, kind: "status", event: "followed_up", title: "the owner followed up", body: text });
     });
   }
 

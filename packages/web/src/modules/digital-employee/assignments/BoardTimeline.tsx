@@ -13,7 +13,7 @@ function author(entry: BoardEntry, t: (text: string, args?: unknown[]) => string
 
 function headline(entry: BoardEntry, t: (text: string, args?: unknown[]) => string): string {
   if (!entry.event) return entry.title;
-  const subject = entry.event === "added" ? entry.body : entry.authorTitle ?? "";
+  const subject = entry.event === "added" || entry.event === "followed_up" ? entry.body : entry.authorTitle ?? "";
   return `${t(BOARD_EVENT_LABELS[entry.event])}${subject ? `：${subject}` : ""}`;
 }
 
@@ -42,7 +42,7 @@ export function BoardTimeline({ taskId, entries }: { taskId: string; entries: Bo
     <h2>{t("工作板")}</h2>
     <ol className="de-board">
       {shown.map((entry) => {
-        const body = entry.event === "added" ? "" : entry.body;
+        const body = entry.event === "added" || entry.event === "followed_up" ? "" : entry.body;
         return <li key={entry.id} className={`is-${entry.kind}`}>
           <small>
             <time>{new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(new Date(entry.createdAt))}</time>

@@ -284,6 +284,22 @@ async function main() {
       };
     });
 
+    await check("follow-up-remembers-the-task", async () => {
+      const userId = await createOwner("follow-up check");
+      const word = String(1000 + Math.floor(Math.random() * 9000));
+      const task = await assign(userId, `这家店的暗号是 ${word}。用一句话写一条咖啡店开业口号，然后结束任务。`);
+      const first = await finished(task.id);
+      await repository.followUp(userId, task.id, "再写一条更短的口号，并告诉我这家店的暗号。");
+      await until(async () => (await pool.query(`SELECT status FROM de_assignments WHERE id=$1`, [task.id])).rows[0].status !== "succeeded", 30_000);
+      const node = await finished(task.id);
+      const { rows: events } = await pool.query(`SELECT 1 FROM de_assignment_events WHERE root_id=$1 AND kind='finished'`, [task.id]);
+      const { rows: conversations } = await pool.query(`SELECT count(DISTINCT conversation_id) AS total FROM agent_runs WHERE conversation_id=$1`, [task.conversationId]);
+      return {
+        ok: first.status === "succeeded" && node.status === "succeeded" && String(node.result?.summary ?? "").includes(word) && events.length === 2,
+        detail: { before: first.result?.summary, after: node.result?.summary, notices: events.length, conversations: conversations[0].total },
+      };
+    });
+
     await check("team-retries-stop-at-the-limit", async () => {
       const userId = await createOwner("team retry check");
       const task = await assignTeam(userId, "测试子任务失败和重试", [

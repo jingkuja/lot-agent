@@ -43,6 +43,7 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
   const [limit, setLimit] = useState("");
   const [subtaskLimit, setSubtaskLimit] = useState("");
   const [recharging, setRecharging] = useState(false);
+  const [followUp, setFollowUp] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -163,6 +164,25 @@ export function AssignmentDetailPage({ id, onBack, onOpenLink }: DetailProps) {
           <ul>{item.result.skipped.map((note) => <li key={note}>{note}</li>)}</ul>
         </>}
       </section>}
+
+      {(item.status === "succeeded" || item.status === "failed") && <form
+        className="de-assignment-panel de-assignment-follow-up"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void run(async () => { await employeeApi.followUpAssignment(id, followUp.trim()); setFollowUp(""); });
+        }}
+      >
+        <h2>{t("继续追问")}</h2>
+        <textarea
+          aria-label={t("继续追问")}
+          placeholder={t("员工记得做过的事，比如：再写一版更便宜的")}
+          rows={2}
+          maxLength={8000}
+          value={followUp}
+          onChange={(event) => setFollowUp(event.target.value)}
+        />
+        <button className="de-primary-button" disabled={busy || !followUp.trim() || item.unverified > 0}>{t("继续做")}</button>
+      </form>}
 
       {item.artifacts.length > 0 && <section className="de-assignment-panel">
         <h2>{t("产物")}</h2>
