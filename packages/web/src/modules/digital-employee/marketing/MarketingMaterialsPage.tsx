@@ -13,7 +13,9 @@ import { MAX_PRODUCT_IMAGES, splitBusinessImages } from "./business-images.js";
 import { BusinessProfileEditor } from "./BusinessProfileEditor.js";
 import { lines, splitLines, TextRows } from "./form-fields.js";
 import { ImagePicker, ImageTile, keepDrop, useImageUpload } from "./ImageUpload.js";
-import { DOCUMENT_ACCEPT, DOCUMENT_ERROR_TEXT, DOCUMENT_NO_RETRY, uploadable } from "./product-files.js";
+import {
+  DOCUMENT_ACCEPT, DOCUMENT_ERROR_TEXT, DOCUMENT_NO_RETRY, UNSUPPORTED_FILE_TEXT, supportedFile, uploadable, uploadErrorText,
+} from "./product-files.js";
 import { ProductDocumentsDialog } from "./ProductDocumentsDialog.js";
 import { ProductImportDialog } from "./ProductImportDialog.js";
 import { usePolling } from "../usePolling.js";
@@ -86,13 +88,17 @@ export function MarketingMaterialsPage({ onSelect, importId = null, onImportClos
     if (!files?.length) return;
     setNotice(null);
     for (const file of Array.from(files)) {
+      if (!supportedFile(file)) {
+        setError(UNSUPPORTED_FILE_TEXT);
+        continue;
+      }
       setUploading((current) => [...current, file.name]);
       try {
         const asset = await api.uploadFile(uploadable(file));
         await employeeApi.startProductImport(asset.assetId);
         await loadImports();
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "上传失败");
+        setError(uploadErrorText(reason, "上传失败"));
       } finally {
         setUploading((current) => current.filter((name) => name !== file.name));
       }

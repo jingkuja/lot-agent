@@ -26,6 +26,21 @@ export const DOCUMENT_NO_RETRY = new Set([
   "OCR_REQUIRED", "EMPTY_TEXT", "OCR_EMPTY_TEXT", "PASSWORD_REQUIRED", "TEXT_LIMIT_EXCEEDED", "DOCUMENT_TOO_LARGE", "TOO_MANY_PAGES", "SOURCE_MISSING",
 ]);
 
+export const UNSUPPORTED_FILE_TEXT = "不支持这种文件，请上传 PDF、Word、PPT、Excel、图片或文本文件";
+
+const ACCEPTED_EXTENSIONS = new Set(DOCUMENT_ACCEPT.split(",").map((extension) => extension.slice(1)));
+
+/** Checked before uploading, so a zip or HEIC photo gets a plain reason instead of the server's MIME error. */
+export function supportedFile(file: File): boolean {
+  return ACCEPTED_EXTENSIONS.has(file.name.split(".").pop()?.toLowerCase() ?? "");
+}
+
+/** The upload route answers `unsupported type: <mime>` for types it never stores. */
+export function uploadErrorText(reason: unknown, fallback: string): string {
+  const message = reason instanceof Error ? reason.message : fallback;
+  return message.startsWith("unsupported type") ? UNSUPPORTED_FILE_TEXT : message;
+}
+
 export function uploadable(file: File): File {
   if (file.type) return file;
   const type = MIME_BY_EXTENSION[file.name.split(".").pop()?.toLowerCase() ?? ""];

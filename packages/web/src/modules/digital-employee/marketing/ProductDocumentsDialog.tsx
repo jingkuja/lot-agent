@@ -3,12 +3,14 @@ import { api } from "../../../api/client.js";
 import { useI18n } from "../../../i18n/index.js";
 import { employeeApi } from "../api.js";
 import type { MarketingProduct, ProductDocument, ProductDocumentList } from "../types.js";
-import { DOCUMENT_ACCEPT, DOCUMENT_ERROR_TEXT, DOCUMENT_NO_RETRY, uploadable } from "./product-files.js";
+import {
+  DOCUMENT_ACCEPT, DOCUMENT_ERROR_TEXT, DOCUMENT_NO_RETRY, UNSUPPORTED_FILE_TEXT, supportedFile, uploadable, uploadErrorText,
+} from "./product-files.js";
 import { usePolling } from "../usePolling.js";
 
 const POLL_MS = 3000;
 
-interface Upload { key: string; file: File; error?: string }
+interface Upload { key: string; file: File; error?: string; noRetry?: boolean }
 
 function working(document: ProductDocument): boolean {
   return document.status === "pending" || document.status === "processing";
@@ -61,16 +63,20 @@ export function ProductDocumentsDialog({ product, onClose, onChanged, onImportin
       onChanged();
     } catch (reason) {
       if (uploadAbort.current.signal.aborted) return;
-      const message = reason instanceof Error ? reason.message : "上传失败";
-      setUploads((current) => current.map((item) => item.key === upload.key ? { ...item, error: message } : item));
+      const message = uploadErrorText(reason, "上传失败");
+      const noRetry = message === UNSUPPORTED_FILE_TEXT;
+      setUploads((current) => current.map((item) => item.key === upload.key ? { ...item, error: message, noRetry } : item));
     }
   };
 
   const addFiles = (files: FileList | null) => {
     if (!files?.length) return;
-    const added = Array.from(files).map((file, index) => ({ key: `${Date.now()}-${index}-${file.name}`, file }));
+    const added: Upload[] = Array.from(files).map((file, index) => ({
+      key: `${Date.now()}-${index}-${file.name}`, file,
+      ...(supportedFile(file) ? {} : { error: UNSUPPORTED_FILE_TEXT, noRetry: true }),
+    }));
     setUploads((current) => [...current, ...added]);
-    added.forEach((upload) => void send(upload));
+    added.filter((upload) => !upload.error).forEach((upload) => void send(upload));
   };
 
   const act = async (document: ProductDocument, action: () => Promise<unknown>) => {
@@ -124,7 +130,7 @@ export function ProductDocumentsDialog({ product, onClose, onChanged, onImportin
               <small className={upload.error ? "is-error" : undefined}>{upload.error ? t(upload.error) : t("上传中…")}</small>
             </div>
             {upload.error && <div className="product-documents-actions">
-              <button className="de-row-action" onClick={() => void send(upload)}>{t("重试")}</button>
+              {!upload.noRetry && <button className="de-row-action" onClick={() => void send(upload)}>{t("重试")}</button>}
               <button className="de-row-action" onClick={() => setUploads((current) => current.filter((item) => item.key !== upload.key))}>{t("移除")}</button>
             </div>}
           </li>)}

@@ -3368,6 +3368,7 @@ export const messages: Record<string, { en: string; id: string }> = {
   "还没有补充资料": {"en": "No files yet", "id": "Belum ada file"},
   "这份文件是扫描件或图片，暂时读不了文字": {"en": "This file is a scan or image, so its text can't be read yet", "id": "File ini berupa pindaian atau gambar, jadi teksnya belum dapat dibaca"},
   "文件里没有读到文字": {"en": "No text was found in this file", "id": "Tidak ada teks dalam file ini"},
+  "不支持这种文件，请上传 PDF、Word、PPT、Excel、图片或文本文件": {"en": "This file type isn't supported. Upload a PDF, Word, PowerPoint, Excel, image or text file.", "id": "Jenis file ini tidak didukung. Unggah file PDF, Word, PowerPoint, Excel, gambar, atau teks."},
   "文件设置了密码，去掉密码后再上传": {"en": "This file is password protected. Remove the password and upload it again.", "id": "File ini dilindungi kata sandi. Hapus kata sandi lalu unggah lagi."},
   "文件太大，暂时读不完": {"en": "This file is too large to read", "id": "File ini terlalu besar untuk dibaca"},
   "原文件已不在，请重新上传": {"en": "The original file is gone. Upload it again.", "id": "File asli sudah tidak ada. Unggah lagi."},

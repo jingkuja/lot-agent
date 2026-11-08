@@ -98,7 +98,8 @@ export const IMPORT_SYSTEM_PROMPT = [
   "existing is the matching name from the supplied catalog when the file is about a product already in it, otherwise \"\".",
   "Say each thing once, in one field: never repeat a fact in coreValues or notes. Every item must make sense alone, so name what a price or limit belongs to.",
   "positioning: one sentence on who it is for and what it does, only if the file supports it. " +
-  "coreValues: short reasons to buy, never prices or specifications. " +
+  "coreValues: short reasons to buy, each one a point the file itself makes, never prices or specifications. " +
+  "Never derive a benefit from what kind of product it is: \"online\" does not mean \"no installation\". Leave coreValues empty when the file makes no such point. " +
   "facts: statements about what is sold that can be checked, such as prices, specifications, limits, policies, opening hours and contact details; put each contact detail in its own fact. " +
   "benefits: only time-limited or conditional promotions, gifts and discounts. An ordinary price, a feature or a standard service is never a benefit. Use YYYY-MM-DD for validFrom and validUntil when the file gives a full date, otherwise null. " +
   "objections: only customer worries the file itself answers. prohibited: only wording the file itself forbids, one phrase per entry. faqs: questions and answers the file states. " +
